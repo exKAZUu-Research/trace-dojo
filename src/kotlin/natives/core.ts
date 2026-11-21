@@ -320,7 +320,7 @@ function defineAnyAndString(): void {
     return text;
   });
   defineNative('kotlin.String.equals(Any?)', (_frame, receiver, [other]) => receiver === other);
-  defineNative('kotlin.String.hashCode()', (_frame, receiver) => stringHash(receiver as string));
+  defineNative('kotlin.String.hashCode()', (frame, receiver) => stringHash(receiver as string, frame));
   defineNative('kotlin.String.toString()', (_frame, receiver) => receiver);
   defineNativeProperty('kotlin.Array.size', (_frame, receiver) => (receiver as KObject).items?.length ?? 0);
   defineNative('kotlin.Array.get(Int)', (frame, receiver, [index]) =>

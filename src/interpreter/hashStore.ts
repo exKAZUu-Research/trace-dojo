@@ -1,9 +1,3 @@
-/**
- * Hash tables that iterate as Java's `HashMap` does, shared by the interpreters of JVM languages.
- *
- * @typeParam V The language's values.
- * @typeParam F The language's frames, which a sorted store's comparator runs in.
- */
 export interface HashEntry<V> {
   key: V;
   value: V;

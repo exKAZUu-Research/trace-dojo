@@ -98,13 +98,8 @@ class Snapshotter {
 function addVariable(variables: TraceVariables, name: string, value: Value, type: KType): void {
   if (resolved(type).kind === 'function') return;
   if (value instanceof KObject && value.function) return;
-  // A variable of a primitive type holds its value unboxed, whose type tells what it is.
-  const kind = primitiveKindOf(type);
-  const scalar =
-    kind && (typeof value === 'number' || typeof value === 'bigint') ? primitiveScalar(kind, value) : scalarOf(value);
-  // An array shows as a value only when its type holds values learners write, as a Java `int[]` does and a
-  // `Turtle[]` of nulls does not.
-  if (scalar !== NOT_SCALAR && (!isArray(value) || holdsScalars(type))) variables.vars[name] = scalar;
+  const scalar = typedScalar(value, type);
+  if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
   // Arrays also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !isArray(value)) return;
   const node = displayNodeOf(value, new Set());
@@ -115,9 +110,7 @@ function addVariable(variables: TraceVariables, name: string, value: Value, type
 function addThis(variables: TraceVariables, self: KObject): void {
   for (const property of fieldsOf(self.cls)) {
     const value = self.fields[property.slot as number];
-    const kind = primitiveKindOf(property.type as KType);
-    const scalar =
-      kind && (typeof value === 'number' || typeof value === 'bigint') ? primitiveScalar(kind, value) : scalarOf(value);
+    const scalar = typedScalar(value, property.type as KType);
     if (scalar !== NOT_SCALAR) variables.vars[`this.${property.name}`] = scalar;
   }
   const node = displayNodeOf(self, new Set());
@@ -211,21 +204,40 @@ function primitiveScalar(kind: PrimitiveKind, value: number | bigint): Scalar {
   }
 }
 
+function typedScalar(value: Value, type: KType): Scalar | typeof NOT_SCALAR {
+  const kind = primitiveKindOf(type);
+  if (kind && (typeof value === 'number' || typeof value === 'bigint')) return primitiveScalar(kind, value);
+  if (isArray(value) && !holdsScalars(type)) return NOT_SCALAR;
+  return scalarOf(value);
+}
+
 /** The value a learner writes for a variable: a number, a character, a string, a boolean, or an array of those. */
-function scalarOf(value: Value): Scalar | typeof NOT_SCALAR {
+function scalarOf(value: Value, path?: Set<KObject>): Scalar | typeof NOT_SCALAR {
   if (typeof value === 'number' || typeof value === 'bigint') return NOT_SCALAR;
   if (typeof value === 'string' || typeof value === 'boolean') return value;
   if (value instanceof Boxed) return primitiveScalar(value.kind, value.value);
-  if (!isArray(value)) return NOT_SCALAR;
+  if (!isArray(value) || path?.has(value)) return NOT_SCALAR;
+  const active = path ?? new Set<KObject>();
+  active.add(value);
   const kind = arrayElementKind(value);
-  const items = value.items as Value[];
-  const scalars = items.map((item) => {
-    if (kind && (typeof item === 'number' || typeof item === 'bigint')) return primitiveScalar(kind, item);
+  const scalars: Scalar[] = [];
+  for (const item of value.items as Value[]) {
     // oxlint-disable-next-line unicorn/no-null -- The trace format shows Kotlin's null as null.
-    return item === undefined ? null : scalarOf(item);
-  });
-  if (scalars.some((scalar) => scalar === NOT_SCALAR)) return NOT_SCALAR;
+    const scalar = item === undefined ? null : arrayItemScalar(item, kind, active);
+    if (scalar === NOT_SCALAR) {
+      active.delete(value);
+      return NOT_SCALAR;
+    }
+    scalars.push(scalar);
+  }
+  active.delete(value);
   return scalars as Scalar;
+}
+
+function arrayItemScalar(item: Value, kind: PrimitiveKind | undefined, path: Set<KObject>): Scalar | typeof NOT_SCALAR {
+  return kind && (typeof item === 'number' || typeof item === 'bigint')
+    ? primitiveScalar(kind, item)
+    : scalarOf(item, path);
 }
 
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows Kotlin's null as null.

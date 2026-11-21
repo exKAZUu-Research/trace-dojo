@@ -338,3 +338,21 @@ fun main() {
     javaSteps.map(({ callLines }) => callLines.length)
   );
 });
+
+test('cyclic reference arrays remain inspectable and do not interrupt execution', () => {
+  const program = `fun main() {
+    val first = arrayOfNulls<Any>(1)
+    val second = arrayOfNulls<Any>(1)
+    first[0] = second
+    second[0] = first
+    println("done")
+}`;
+  const trace = traceProgram('kotlin', program, program);
+  expect(trace.uncaughtException).toBeUndefined();
+  expect(trace.stdout).toBe('done\n');
+  expect(trace.traceItems.at(-1)?.referenceVars.first).toEqual({
+    kind: 'array',
+    // oxlint-disable-next-line unicorn/no-null -- The trace format represents absent references with null.
+    entries: { 0: { kind: 'array', entries: { 0: { kind: 'value', value: null } } } },
+  });
+});

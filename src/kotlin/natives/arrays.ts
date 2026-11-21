@@ -14,7 +14,7 @@ import {
 } from '../../interpreter/fdlibm';
 import { fdlibmPow } from '../../interpreter/fdlibmPow';
 import { callFunction } from '../dispatch';
-import { formatPrimitive, stringOf, valueEquals } from '../format';
+import { hashOf, stringOf, valueEquals } from '../format';
 import { compareDoubles, compareNumbers, toInt32 } from '../operators';
 import { arrayFactoryName, UNSIGNED_ARRAYS } from '../prelude/arrays';
 import type { Frame } from '../runtime';
@@ -23,6 +23,7 @@ import { box, KObject, NULL, type PrimitiveKind, UNIT, type Value } from '../val
 import { elementsOf, joinRendered, newList, newPrimitiveArrayList, touch } from './collections';
 import { arrayIterator, checkArrayIndex } from './core';
 import { defineNative, defineNativeProperty, libraryClass } from './registry';
+import { stableSort } from './timSort';
 
 /** The primitive arrays, with the default value of their elements. */
 const PRIMITIVE_ARRAYS: [name: string, kind: PrimitiveKind | 'Boolean', zero: Value][] = [
@@ -118,113 +119,6 @@ function writeBack(frame: Frame, list: KObject, values: Value[]): void {
 export function comparatorFunction(frame: Frame, comparator: Value): (a: Value, b: Value) => number {
   const compare = libraryClass('kotlin.Comparator').members.get('compare')?.[0] as FunctionSymbol;
   return (a, b) => callFunction(compare, frame, comparator, [a, b], undefined) as number;
-}
-
-/**
- * Sorts stably as Java's `TimSort` does for the short lists of learners' programs: binary insertion sort after the
- * leading run, which also calls the comparator in Java's order; longer lists merge sorted runs of that size.
- */
-// code-gauge-allow functionNcss 33 -- registers the natives of one class together, in the order the prelude declares them.
-// code-gauge-allow functionCognitiveComplexity 18 -- registers the natives of one class together, in the order the prelude declares them.
-export function stableSort(frame: Frame, values: Value[], compare: (a: Value, b: Value) => number): Value[] {
-  const array = [...values];
-  if (array.length < 2) return array;
-  if (array.length < 32) {
-    binaryInsertionSort(
-      frame,
-      array,
-      0,
-      array.length,
-      countRunAndMakeAscending(frame, array, 0, array.length, compare),
-      compare
-    );
-    return array;
-  }
-  let runs: Value[][] = [];
-  for (let start = 0; start < array.length; start += 32) {
-    const run = array.slice(start, start + 32);
-    binaryInsertionSort(
-      frame,
-      run,
-      0,
-      run.length,
-      countRunAndMakeAscending(frame, run, 0, run.length, compare),
-      compare
-    );
-    runs.push(run);
-  }
-  while (runs.length > 1) {
-    const merged: Value[][] = [];
-    for (let index = 0; index < runs.length; index += 2) {
-      const left = runs[index];
-      const right = runs[index + 1];
-      merged.push(right ? mergeSortedRuns(frame, left, right, compare) : left);
-    }
-    runs = merged;
-  }
-  return runs[0];
-}
-
-function mergeSortedRuns(
-  frame: Frame,
-  left: Value[],
-  right: Value[],
-  compare: (a: Value, b: Value) => number
-): Value[] {
-  const merged: Value[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < left.length && j < right.length) {
-    frame.runtime.spend();
-    if (compare(right[j], left[i]) < 0) merged.push(right[j++]);
-    else merged.push(left[i++]);
-  }
-  for (; i < left.length; i++) merged.push(left[i]);
-  for (; j < right.length; j++) merged.push(right[j]);
-  return merged;
-}
-
-function countRunAndMakeAscending(
-  frame: Frame,
-  array: Value[],
-  low: number,
-  high: number,
-  compare: (a: Value, b: Value) => number
-): number {
-  let runHigh = low + 1;
-  if (runHigh === high) return 1;
-  frame.runtime.spend();
-  if (compare(array[runHigh++], array[low]) < 0) {
-    while (runHigh < high && compare(array[runHigh], array[runHigh - 1]) < 0) runHigh++;
-    for (let start = low, end = runHigh - 1; start < end; start++, end--)
-      [array[start], array[end]] = [array[end], array[start]];
-  } else {
-    while (runHigh < high && compare(array[runHigh], array[runHigh - 1]) >= 0) runHigh++;
-  }
-  return runHigh - low;
-}
-
-function binaryInsertionSort(
-  frame: Frame,
-  array: Value[],
-  low: number,
-  high: number,
-  sortedCount: number,
-  compare: (a: Value, b: Value) => number
-): void {
-  for (let start = low + sortedCount; start < high; start++) {
-    const pivot = array[start];
-    let left = low;
-    let right = start;
-    while (left < right) {
-      frame.runtime.spend();
-      const middle = (left + right) >>> 1;
-      if (compare(pivot, array[middle]) < 0) right = middle;
-      else left = middle + 1;
-    }
-    array.splice(start, 1);
-    array.splice(left, 0, pivot);
-  }
 }
 
 const LN2 = fdlibmLog(2);
@@ -351,10 +245,53 @@ const ARRAY_RECEIVERS: [receiver: string, kind: PrimitiveKind | 'Boolean' | unde
   ...PRIMITIVE_ARRAYS,
 ];
 
+export function arrayContentString(frame: Frame, array: Value, kind?: PrimitiveKind | 'Boolean'): string {
+  if (array === NULL) return 'null';
+  return joinRendered(frame, boxedItems(array, kind), '[', ']', (value) => stringOf(frame, value));
+}
+
+export function arrayContentHash(frame: Frame, array: Value, kind?: PrimitiveKind | 'Boolean'): number {
+  if (array === NULL) return 0;
+  let hash = 1;
+  for (const item of boxedItems(array, kind)) {
+    frame.runtime.spend();
+    hash = toInt32(Math.imul(hash, 31) + hashOf(frame, item));
+  }
+  return hash;
+}
+
+export function dataArrayKind(name: string): PrimitiveKind | 'Boolean' | undefined {
+  return PRIMITIVE_ARRAYS.find(([array]) => array === name)?.[1];
+}
+
 function boxedItems(array: Value, kind: PrimitiveKind | 'Boolean' | undefined): Value[] {
   const items = (array as KObject).items as Value[];
-  return kind === undefined || kind === 'Boolean' ? items : items.map((value) => box(kind, value as number));
+  return kind === undefined || kind === 'Boolean'
+    ? items
+    : items.map((value) => box(kind, arrayStorageValue(kind, value as number | bigint)));
 }
+
+function arrayStorageValue(kind: PrimitiveKind, value: number | bigint): number | bigint {
+  switch (kind) {
+    case 'Byte': {
+      return ((value as number) << 24) >> 24;
+    }
+    case 'Short': {
+      return ((value as number) << 16) >> 16;
+    }
+    case 'Int': {
+      return toInt32(value as number);
+    }
+    case 'Long': {
+      return BigInt.asIntN(64, value as bigint);
+    }
+    default: {
+      return value;
+    }
+  }
+}
+
+const SIGNED_STORAGE = { UByte: 'Byte', UShort: 'Short', UInt: 'Int', ULong: 'Long' } as const;
 
 function copyArray(frame: Frame, array: Value, size: number, makeItems: () => Value[]): KObject {
   checkSize(frame, size);
@@ -376,8 +313,8 @@ const fromVararg =
 function defineUnsignedArrayStrings(): void {
   for (const [name, kind] of UNSIGNED_ARRAYS) {
     defineNative(`kotlin.${name}.toString()`, (frame, receiver) => {
-      const values = (receiver as KObject).items as (number | bigint)[];
-      return joinRendered(frame, values, `${name}(storage=[`, '])', (value) => formatPrimitive(kind, value));
+      const values = boxedItems(receiver, SIGNED_STORAGE[kind]);
+      return joinRendered(frame, values, `${name}(storage=[`, '])', (value) => stringOf(frame, value));
     });
   }
 }
@@ -412,9 +349,7 @@ function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | 
     list.items = source.items;
     return list;
   });
-  defineNative(`${prefix}?.contentToString()`, (frame, array) =>
-    array === NULL ? 'null' : joinRendered(frame, boxedItems(array, kind), '[', ']', (value) => stringOf(frame, value))
-  );
+  defineNative(`${prefix}?.contentToString()`, (frame, array) => arrayContentString(frame, array, kind));
   defineNative(`${prefix}.copyOf()`, (frame, array) => {
     const items = (array as KObject).items as Value[];
     return copyArray(frame, array, items.length, () => [...items]);

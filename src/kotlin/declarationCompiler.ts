@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 819 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 852 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDecl,
@@ -17,9 +17,10 @@ import type {
 import { type Compiled, convertRepr, FunctionContext, type PackageScope, type Repr, Scope } from './compilerBase';
 import type { FileContext } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
-import { callFunction, isVirtual, propertyRepr } from './dispatch';
+import { callFunction, getPropertyValue, isVirtual, propertyRepr, setPropertyValue } from './dispatch';
 import { hashOf, stringHash, stringOf, valueEquals } from './format';
 import { isKnownLibraryPackage } from './libraryApi';
+import { arrayContentHash, arrayContentString, dataArrayKind } from './natives/arrays';
 import { type NativeFunction, type NativeProperty, typeRefText } from './nativeTypes';
 import { toInt32 } from './operators';
 import { type Frame, MISSING } from './runtime';
@@ -36,7 +37,44 @@ import {
 } from './symbols';
 import { anyType, isSameType, isSubtype } from './typeRelations';
 import { type ClassType, type KType, NOTHING, resolved, substitute, type Substitution, typeToString } from './types';
-import { Boxed, KObject, type Value } from './values';
+import { Boxed, KObject, type PrimitiveKind, type Value } from './values';
+
+interface DataArrayField {
+  storage?: PrimitiveKind | 'Boolean';
+  wrapper?: string;
+}
+
+function dataArrayField(type: KType | undefined): DataArrayField | undefined {
+  const actual = type && resolved(type);
+  if (actual?.kind !== 'class' || !actual.cls.isLibrary) return undefined;
+  const name = actual.cls.name;
+  if (name === 'Array') return {};
+  const kind = dataArrayKind(name);
+  switch (kind) {
+    case 'UByte': {
+      return { storage: 'Byte', wrapper: name };
+    }
+    case 'UShort': {
+      return { storage: 'Short', wrapper: name };
+    }
+    case 'UInt': {
+      return { storage: 'Int', wrapper: name };
+    }
+    case 'ULong': {
+      return { storage: 'Long', wrapper: name };
+    }
+    case undefined: {
+      return undefined;
+    }
+    default: {
+      return { storage: kind };
+    }
+  }
+}
+
+function dataFieldString(frame: Frame, value: Value, array: DataArrayField | undefined): string {
+  return array && !array.wrapper ? arrayContentString(frame, value, array.storage) : stringOf(frame, value);
+}
 
 export interface ClassEntry {
   decl: ClassDecl;
@@ -792,24 +830,15 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     this.declareCopy(entry);
   }
 
-  /** `toString`, `hashCode`, and `equals` of a data class, a value class, or a data object, unless it declares its own. */
-  // code-gauge-allow functionCognitiveComplexity 23 -- one generated member after another, each as Kotlin defines it for data classes.
   private declareDataAnyMembers(symbol: ClassSymbol, properties: PropertySymbol[]): void {
-    const isDataObject = symbol.isObject;
+    const arrayFields = properties.map((property) => dataArrayField(property.type));
     if (!declaresFunction(symbol, 'toString', 0)) {
       addGenerated(
         symbol,
         'toString',
         [],
         this.core.string.type,
-        (frame, receiver) => {
-          if (isDataObject) return symbol.name;
-          const object = receiver as KObject;
-          const parts = properties.map(
-            (property) => `${property.name}=${stringOf(frame, this.boxedField(object, property))}`
-          );
-          return `${symbol.name}(${parts.join(', ')})`;
-        },
+        (frame, receiver) => this.dataObjectString(frame, receiver as KObject, symbol, properties, arrayFields),
         true
       );
     }
@@ -819,15 +848,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         'hashCode',
         [],
         this.primitiveType('Int'),
-        (frame, receiver) => {
-          if (isDataObject) return stringHash(symbol.name);
-          let hash = 0;
-          for (const [index, property] of properties.entries()) {
-            const value = hashOf(frame, this.boxedField(receiver as KObject, property));
-            hash = index === 0 ? value : toInt32(Math.imul(hash, 31) + value);
-          }
-          return hash;
-        },
+        (frame, receiver) => this.dataObjectHash(frame, receiver as KObject, symbol, properties, arrayFields),
         true
       );
     }
@@ -837,17 +858,51 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         'equals',
         [{ name: 'other', type: anyType(true), hasDefault: false, isVararg: false }],
         this.booleanType,
-        (frame, receiver, args) => {
-          const other = args[0];
-          if (receiver === other) return true;
-          if (!(other instanceof KObject) || other.cls !== symbol) return false;
-          return properties.every((property) =>
-            valueEquals(frame, this.boxedField(receiver as KObject, property), this.boxedField(other, property))
-          );
-        },
+        (frame, receiver, [other]) => this.dataObjectEquals(frame, receiver as KObject, other, properties),
         true
       );
     }
+  }
+
+  private dataObjectString(
+    frame: Frame,
+    receiver: KObject,
+    symbol: ClassSymbol,
+    properties: PropertySymbol[],
+    arrays: (DataArrayField | undefined)[]
+  ): string {
+    if (symbol.isObject) return symbol.name;
+    const fields = properties.map((property, index) => {
+      const text = dataFieldString(frame, this.boxedField(receiver, property), arrays[index]);
+      return `${property.name}=${text}`;
+    });
+    return `${symbol.name}(${fields.join(', ')})`;
+  }
+
+  private dataObjectHash(
+    frame: Frame,
+    receiver: KObject,
+    symbol: ClassSymbol,
+    properties: PropertySymbol[],
+    arrays: (DataArrayField | undefined)[]
+  ): number {
+    if (symbol.isObject) return stringHash(symbol.kotlinName, frame);
+    let hash = 0;
+    for (const [index, property] of properties.entries()) {
+      const value = this.boxedField(receiver, property);
+      const array = arrays[index];
+      const elementHash = array ? arrayContentHash(frame, value, array.storage) : hashOf(frame, value);
+      hash = toInt32(Math.imul(hash, 31) + elementHash);
+    }
+    return hash;
+  }
+
+  private dataObjectEquals(frame: Frame, receiver: KObject, other: Value, properties: PropertySymbol[]): boolean {
+    if (receiver === other) return true;
+    if (!(other instanceof KObject) || other.cls !== receiver.cls) return false;
+    return properties.every((property) =>
+      valueEquals(frame, this.boxedField(receiver, property), this.boxedField(other, property))
+    );
   }
 
   /** `copy` of a data class, whose omitted arguments are the receiver's properties. */
@@ -1164,16 +1219,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
     const forward = new PropertySymbol(member.name);
     Object.assign(forward, member, { owner, isAbstract: false, root: member.root });
-    forward.get = (frame, receiver) => {
-      const delegate = (receiver as KObject).fields[slot];
-      const target = (delegate as KObject).cls.dispatch(member);
-      return (target.get as NonNullable<PropertySymbol['get']>)(frame, delegate);
-    };
-    forward.set = (frame, receiver, value) => {
-      const delegate = (receiver as KObject).fields[slot];
-      const target = (delegate as KObject).cls.dispatch(member);
-      (target.set as NonNullable<PropertySymbol['set']>)(frame, delegate, value);
-    };
+    forward.get = (frame, receiver) => getPropertyValue(member, frame, (receiver as KObject).fields[slot]);
+    if (member.isVar) {
+      forward.set = (frame, receiver, value) =>
+        setPropertyValue(member, frame, (receiver as KObject).fields[slot], value);
+    }
     return forward;
   }
 

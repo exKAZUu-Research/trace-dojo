@@ -1302,6 +1302,29 @@ fun <T> MutableIterable<T>.removeAll(predicate: (T) -> Boolean): Boolean = filte
 
 fun <T> MutableIterable<T>.retainAll(predicate: (T) -> Boolean): Boolean = filterInPlace(predicate, false)
 
+fun <T> MutableList<T>.removeAll(predicate: (T) -> Boolean): Boolean = compactBy(predicate, true)
+
+fun <T> MutableList<T>.retainAll(predicate: (T) -> Boolean): Boolean = compactBy(predicate, false)
+
+private fun <T> MutableList<T>.compactBy(predicate: (T) -> Boolean, removeWhen: Boolean): Boolean {
+    val list = this
+    return if (list is RandomAccess) this.compactRandomAccess(predicate, removeWhen) else this.filterInPlace(predicate, removeWhen)
+}
+
+private fun <T> MutableList<T>.compactRandomAccess(predicate: (T) -> Boolean, removeWhen: Boolean): Boolean {
+    var next = 0
+    for (index in 0 until size) {
+        val item = this[index]
+        if (predicate(item) != removeWhen) {
+            if (next != index) this[next] = item
+            next++
+        }
+    }
+    if (next >= size) return false
+    for (index in lastIndex downTo next) removeAt(index)
+    return true
+}
+
 fun <T> MutableCollection<T>.removeIf(predicate: (T) -> Boolean): Boolean = filterInPlace(predicate, true)
 
 private fun <T> MutableIterable<T>.filterInPlace(predicate: (T) -> Boolean, predicateResultToRemove: Boolean): Boolean {

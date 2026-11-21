@@ -451,10 +451,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
           eval: this.receiverAccess(context, receiver),
           stableKey: keyOf(receiver),
         };
-        return this.readProperty(property, receiverCompiled, row);
+        return this.readProperty(scope, property, receiverCompiled, row);
       }
     }
-    const staticMember = this.findStaticMember(scope, name);
+    const staticMember = this.findStaticMember(scope, name, row);
     if (staticMember) return staticMember;
     const levels = this.topLevelProperties(name);
     for (const level of levels) {
@@ -471,7 +471,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return this.error(row, `${name} が見つかりません。`);
   }
 
-  /** The members of the companion objects and enum entries that a class's body reaches by their simple names. */
   /** The companion object whose property a simple name in a class's body means, with the property. */
   protected findCompanionProperty(
     scope: Scope,
@@ -496,7 +495,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  private findStaticMember(scope: Scope, name: string): Compiled | undefined {
+  private findStaticMember(scope: Scope, name: string, row: number): Compiled | undefined {
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       for (let cls = current.staticClass; cls; cls = cls.outer) {
         if (cls.kind === 'enum' && cls.enumEntries.some((entry) => entry.name === name)) {
@@ -509,9 +508,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
         if (property) {
           const instance = this.objectInstance(companion);
           return this.readProperty(
+            scope,
             property,
             { type: companion.type, repr: 'ref', eval: instance, stableKey: keyOf(companion) },
-            -1
+            row
           );
         }
       }
@@ -630,8 +630,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** Reads a property on a compiled receiver, with smart casts for stable ones. */
-  protected readProperty(member: MemberRef<PropertySymbol>, receiver: Compiled, row: number): Compiled {
+  protected readProperty(scope: Scope, member: MemberRef<PropertySymbol>, receiver: Compiled, row: number): Compiled {
     const { symbol, substitution } = member;
+    this.checkAccessible(scope, symbol, row, receiver.type);
     const declaredType = this.ensurePropertyType(symbol, row);
     const type = resolved(substitute(declaredType, substitution));
     const receiverEval = convertRepr(receiver.eval, receiver.repr, receiverRepr(symbol));
@@ -691,10 +692,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
         row,
         extensionReceiver !== undefined && isNullable(resolved(extensionReceiver))
       );
-      this.checkAccessible(scope, property.symbol, row, target.type);
       if (expression.receiver.kind === 'this' && !expression.receiver.label)
         this.checkInitialized(context, property.symbol, name, row);
-      return this.readProperty(property, target, row);
+      return this.readProperty(scope, property, target, row);
     });
   }
 
@@ -709,6 +709,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const property = holder && this.findProperty(scope, holder.type, name);
     if (holder && property) {
       return this.readProperty(
+        scope,
         property,
         { type: holder.type, repr: 'ref', eval: this.objectInstance(holder), stableKey: keyOf(holder) },
         row
@@ -785,7 +786,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   /** What a qualifier such as `Color` in `Color.RED` or `kotlin.math` in `kotlin.math.PI` names, if not a value. */
   protected compileQualifier(scope: Scope, expression: Expression): Qualifier | undefined {
-    if (expression.kind === 'name') return this.nameQualifier(scope, expression.name);
+    if (expression.kind === 'name') return this.nameQualifier(scope, expression.name, expression.row);
     if (expression.kind !== 'member' || expression.isSafe) return undefined;
     const outer = this.compileQualifier(scope, expression.receiver);
     if (!outer) return undefined;
@@ -804,12 +805,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** What a simple name names as a qualifier: a class or a package, unless a value of that name hides it. */
-  private nameQualifier(scope: Scope, name: string): Qualifier | undefined {
+  private nameQualifier(scope: Scope, name: string, row: number): Qualifier | undefined {
     if (this.findVariable(scope, name)) return undefined;
     for (const receiver of this.receiversOf(scope)) {
       if (this.findProperty(scope, this.receiverTypeOf(receiver), name)) return undefined;
     }
-    if (this.findStaticMember(scope, name)) return undefined;
+    if (this.findStaticMember(scope, name, row)) return undefined;
     if (this.topLevelProperties(name).length > 0) return undefined;
     const cls = this.findClass(scope, name);
     if (cls) return { kind: 'class', cls };
@@ -1065,7 +1066,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       const property = this.findProperty(scope, receiverCompiled.type, name);
       const isFunctionValue = property && resolved(property.symbol.type ?? NOTHING).kind === 'function';
       if (isFunctionValue && members.length === 0 && extensions.length === 0)
-        return this.readProperty(property, receiverCompiled, row);
+        return this.readProperty(scope, property, receiverCompiled, row);
     }
     return levels;
   }
@@ -1374,7 +1375,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       return this.compileInvoke(
         scope,
         context,
-        this.readProperty(property, receiver, row),
+        this.readProperty(scope, property, receiver, row),
         args,
         hasTrailingLambda,
         row

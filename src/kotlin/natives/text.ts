@@ -140,14 +140,15 @@ function doubleFormatError(frame: Frame, value: string): never {
 /** `String.toDouble()`, which accepts Java's floating-point syntax, such as `1e3`, `1.5f`, and surrounding blanks. */
 function parseDouble(value: string): number | undefined {
   const trimmed = trimControls(value);
-  if (/^[+-]?(NaN|Infinity)$/.test(trimmed)) return Number(trimmed.replace('NaN', 'NaN'));
-  const hex = /^([+-]?)0[xX]([\dA-Fa-f]*)\.?([\dA-Fa-f]*)[pP]([+-]?\d+)[fFdD]?$/.exec(trimmed);
+  if (/^[+-]?(NaN|Infinity)$/.test(trimmed)) return Number(trimmed);
+  const hex = /^([+-]?)0[xX]([\dA-Fa-f]*)(?:\.([\dA-Fa-f]*))?[pP]([+-]?\d+)[fFdD]?$/.exec(trimmed);
   if (hex && (hex[2] || hex[3])) {
     const [, sign, whole, fraction, exponent] = hex;
-    const magnitude = Number.parseInt(`${whole}${fraction}` || '0', 16) * 2 ** (Number(exponent) - 4 * fraction.length);
+    const magnitude =
+      Number.parseInt(`${whole}${fraction ?? ''}` || '0', 16) * 2 ** (Number(exponent) - 4 * (fraction?.length ?? 0));
     return sign === '-' ? -magnitude : magnitude;
   }
-  if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?[fFdD]?$/.test(trimmed)) return undefined;
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)([eE][+-]?\d+)?[fFdD]?$/.test(trimmed)) return undefined;
   return Number(trimmed.replace(/[fFdD]$/, ''));
 }
 

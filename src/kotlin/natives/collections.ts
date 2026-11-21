@@ -1,5 +1,5 @@
-// code-gauge-allow-file fileNcss 774 -- the natives of the collections, which share the helpers of their items.
-import { runtimeClassOf } from '../dispatch';
+// code-gauge-allow-file fileNcss 780 -- the natives of the collections, which share the helpers of their items.
+import { getPropertyValue, runtimeClassOf } from '../dispatch';
 import { hashOf, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
 import type { Frame } from '../runtime';
@@ -712,11 +712,23 @@ function putMapEntry(frame: Frame, map: KObject, key: Value, value: Value): Valu
 }
 
 /** The entries of any map, as key–value pairs in its iteration order. */
-export function mapEntriesOf(frame: Frame, map: Value): [Value, Value][] {
+function mapEntriesOf(frame: Frame, map: Value): [Value, Value][] {
   const object = map as KObject;
   if (object.store) return object.store.ordered().map((entry) => [entry.key, entry.value]);
-  void frame;
-  return [];
+  const entries = elementsOf(frame, readMapProperty(frame, map, 'kotlin.collections.Map', 'entries'));
+  const owner = 'kotlin.collections.Map.Entry';
+  return entries.map((entry) => [
+    readMapProperty(frame, entry, owner, 'key'),
+    readMapProperty(frame, entry, owner, 'value'),
+  ]);
+}
+
+function readMapProperty(frame: Frame, receiver: Value, owner: string, name: string): Value {
+  const property = libraryClass(owner)
+    .members.get(name)
+    ?.find((member) => member.kind === 'property');
+  if (!property) throw new Error(`No property ${owner}.${name}`);
+  return getPropertyValue(property, frame, receiver);
 }
 
 function mapEquals(frame: Frame, map: KObject, other: Value): boolean {

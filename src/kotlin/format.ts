@@ -79,7 +79,7 @@ function boxedEquals(a: Boxed, b: Boxed): boolean {
 /** `hashCode()` of a value, as the JVM computes it for the standard library's types. */
 export function hashOf(frame: Frame, value: Value): number {
   if (value === undefined) return 0;
-  if (typeof value === 'string') return stringHash(value);
+  if (typeof value === 'string') return stringHash(value, frame);
   if (typeof value === 'boolean') return value ? 1231 : 1237;
   if (value instanceof Boxed) return boxedHash(value);
   if (value === UNIT) return identityHash(value);
@@ -87,10 +87,13 @@ export function hashOf(frame: Frame, value: Value): number {
   return 0;
 }
 
-export function stringHash(text: string): number {
+export function stringHash(text: string, frame?: Frame): number {
   let hash = 0;
-  // oxlint-disable-next-line unicorn/prefer-code-point -- Java hashes UTF-16 code units.
-  for (let index = 0; index < text.length; index++) hash = toInt32(Math.imul(31, hash) + text.charCodeAt(index));
+  for (let index = 0; index < text.length; index++) {
+    if (index % 64 === 0) frame?.runtime.spend();
+    // oxlint-disable-next-line unicorn/prefer-code-point -- Java hashes UTF-16 code units.
+    hash = toInt32(Math.imul(31, hash) + text.charCodeAt(index));
+  }
   return hash;
 }
 

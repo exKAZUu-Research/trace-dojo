@@ -5,6 +5,95 @@ import { executeProgram } from '../../src/interpreter/program';
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'primitive interface properties are boxed across delegated accessors',
+    source: `class IntLazy(override val value: Int) : Lazy<Int> {
+    override fun isInitialized(): Boolean = true
+}
+class Wrapper(private val holder: Lazy<Int>) : Lazy<Int> by holder
+fun main() {
+    val wildcard: Lazy<*> = Wrapper(IntLazy(7))
+    val number = wildcard.value
+    println(number is Int)
+    println(number == 7)
+    println(number.hashCode())
+}`,
+    stdout: 'true\ntrue\n7\n',
+  },
+  {
+    name: 'random-access list predicates compact survivors before shrinking the list',
+    source: `fun main() {
+    val numbers = mutableListOf(1, 2, 3)
+    numbers.removeAll { println(numbers.size); it % 2 == 1 }
+    println(numbers)
+    val text = mutableListOf("1", "bad", "2")
+    try { text.retainAll { it.toInt() > 1 } } catch (e: NumberFormatException) { println(text) }
+}`,
+    stdout: '3\n3\n3\n[2]\n[1, bad, 2]\n',
+  },
+
+  {
+    name: 'map copying dispatches the entries of a delegated map',
+    source: `class Scores(private val backing: Map<String, Int>) : Map<String, Int> by backing
+fun main() {
+    val original = Scores(mapOf("a" to 1, "b" to 2))
+    println(HashMap(original))
+    println(LinkedHashMap(original))
+    val copy = mutableMapOf<String, Int>()
+    copy.putAll(original)
+    println(copy)
+}`,
+    stdout: '{a=1, b=2}\n{a=1, b=2}\n{a=1, b=2}\n',
+  },
+  {
+    name: 'data classes display and hash arrays by content while keeping reference equality',
+    source: `data class Vector(val coords: IntArray?, val names: Array<String?>, val mask: UIntArray)
+fun main() {
+    val vector = Vector(intArrayOf(1, 2), arrayOf("foo", null), uintArrayOf(0xffffffffu))
+    val withoutCoords = vector.copy(coords = null)
+    println(vector)
+    println(vector.hashCode())
+    println(withoutCoords)
+    println(withoutCoords.hashCode())
+    println(vector == vector.copy(coords = intArrayOf(1, 2)))
+}`,
+    stdout:
+      'Vector(coords=[1, 2], names=[foo, null], mask=UIntArray(storage=[-1]))\n98597669\nVector(coords=null, names=[foo, null], mask=UIntArray(storage=[-1]))\n97642435\nfalse\n',
+  },
+  {
+    name: 'data objects hash their package and enclosing names',
+    source: `package lesson
+sealed class Status { data object Pending : Status(); data object Done : Status() }
+fun main() {
+    println(Status.Pending.hashCode())
+    println(Status.Done.hashCode())
+}`,
+    stdout: '1169886993\n1804410952\n',
+  },
+  {
+    name: 'object sorting detects natural runs across the entire input',
+    source: `fun main() {
+    var comparisons = 0
+    val sorted = (128 downTo 1).toMutableList()
+    sorted.sortWith(Comparator { a, b -> comparisons++; a.compareTo(b) })
+    println(comparisons)
+    println(sorted.first())
+    println(sorted.last())
+    val mixed = (0 until 128).map { if (it < 42) it + 128 else it }.toMutableList()
+    comparisons = 0
+    var digest = 0
+    mixed.sortWith(Comparator { a, b ->
+        comparisons++
+        digest = digest * 31 + a * 313 + b
+        a.compareTo(b)
+    })
+    println(comparisons)
+    println(digest)
+    println(mixed.hashCode())
+}`,
+    stdout: '127\n1\n128\n147\n1754895719\n-618020799\n',
+  },
+
+  {
     name: 'Kotlin collection types remain visible with a java.util wildcard import',
     source: `import java.util.*
 fun main() {
@@ -1414,6 +1503,21 @@ fun main() {
     }
     println(n)
 }`,
+  ],
+  [
+    'a private object member through its qualifier',
+    false,
+    'object Vault { private val secret = 7 }; fun main() { println(Vault.secret) }',
+  ],
+  [
+    'a private companion member through its qualifier',
+    false,
+    'class Vault { companion object { private val secret = 7 } }; fun main() { println(Vault.secret) }',
+  ],
+  [
+    'a private companion property from its enclosing class',
+    true,
+    'class Vault { companion object { private val secret = 7 }; fun reveal() = Vault.secret }; fun main() { println(Vault().reveal()) }',
   ],
   ['a private member from outside', false, 'class A {\n    private val x = 1\n}\nfun main() {\n    println(A().x)\n}'],
   [

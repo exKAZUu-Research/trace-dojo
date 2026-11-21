@@ -1,4 +1,3 @@
-/** Java's `java.util.Formatter`, as `String.format` uses it, shared by the interpreters of JVM languages. */
 /** What the formatter needs to know about a language's values, and how it raises the formatter's exceptions. */
 export interface FormatValues<V> {
   isNull(value: V): boolean;
@@ -16,81 +15,123 @@ export interface FormatValues<V> {
   scan(length: number): void;
 }
 
-const SPECIFIER = /%(\d+\$|<)?([-#+ 0,(]*)(\d+)?(\.\d+)?([a-zA-Z%])/g;
+interface Specifier {
+  start: number;
+  end: number;
+  source: string;
+  index: string | undefined;
+  flags: string;
+  width: string | undefined;
+  precision: string | undefined;
+  conversion: string;
+}
 
-/** Formats as `String.format` does for the conversions learners use: d, s, f, e, g, x, o, c, b, h, n, and %. */
+/** Formats as `String.format` does for the conversions learners use. */
+// code-gauge-allow functionCognitiveComplexity 18 -- argument position and conversion rules share one left-to-right traversal.
 export function formatJava<V>(pattern: string, args: V[], values: FormatValues<V>): string {
+  const { specifiers, malformed } = scanPattern(values, pattern);
+  const result: string[] = [];
+  let end = 0;
   let nextArg = 0;
-  // `%<s` takes the argument the previous specifier took.
   let previous: number | undefined;
-  values.scan(pattern.length);
-  checkSpecifiers(values, pattern);
-  const result = pattern.replaceAll(
-    SPECIFIER,
-    (
-      specifier,
-      index: string | undefined,
-      flags: string,
-      width: string | undefined,
-      precision: string | undefined,
-      conversion: string
-    ) => {
-      if (conversion === 'n') return '\n';
-      if (conversion === '%') return pad('%', flags, width);
-      const position = index === '<' ? previous : index ? Number(index.slice(0, -1)) - 1 : nextArg++;
-      if (position === undefined || position >= args.length)
-        return values.fail('MissingFormatArgumentException', `Format specifier '${specifier}'`);
-      previous = position;
-      const formatted = formatArgument(
-        values,
-        args[position] as V,
-        flags,
-        precision ? Number(precision.slice(1)) : undefined,
-        conversion
-      );
-      return pad(formatted, flags, width);
+  for (const specifier of specifiers) {
+    result.push(pattern.slice(end, specifier.start));
+    end = specifier.end;
+    const { index, flags, width, precision, conversion, source } = specifier;
+    if (conversion === 'n' || conversion === '%') {
+      result.push(conversion === 'n' ? '\n' : pad('%', flags, width));
+      continue;
     }
-  );
-  // A lone % that starts no specifier is an error in Java.
-  if (pattern.replaceAll(SPECIFIER, '').includes('%')) {
-    values.fail('UnknownFormatConversionException', "Conversion = '%'");
+    const position = index === '<' ? previous : index ? Number(index) - 1 : nextArg++;
+    if (position === undefined || position >= args.length) {
+      return values.fail('MissingFormatArgumentException', `Format specifier '${source}'`);
+    }
+    previous = position;
+    const formatted = formatArgument(
+      values,
+      args[position] as V,
+      flags,
+      precision ? Number(precision) : undefined,
+      conversion
+    );
+    result.push(pad(formatted, flags, width));
   }
-  return result;
+  if (malformed) values.fail('UnknownFormatConversionException', "Conversion = '%'");
+  result.push(pattern.slice(end));
+  return result.join('');
 }
 
-/** Parses every specifier, rejecting a malformed one, before any argument is formatted, as Java's Formatter does. */
-function checkSpecifiers<V>(values: FormatValues<V>, pattern: string): void {
-  for (const match of pattern.matchAll(SPECIFIER)) checkSpecifier(values, match);
+function scanPattern<V>(values: FormatValues<V>, pattern: string): { specifiers: Specifier[]; malformed: boolean } {
+  values.scan(pattern.length);
+  const specifiers: Specifier[] = [];
+  let malformed = false;
+  for (let start = pattern.indexOf('%'); start >= 0; start = pattern.indexOf('%', start + 1)) {
+    const specifier = readSpecifier(pattern, start);
+    if (!specifier) {
+      malformed = true;
+      continue;
+    }
+    checkSpecifier(values, specifier);
+    specifiers.push(specifier);
+    start = specifier.end - 1;
+  }
+  return { specifiers, malformed };
 }
 
-/**
- * Rejects what Formatter's parser rejects: a precision for an integer or character conversion, a `-` flag, or a `0`
- * flag of a numeric conversion, without a width, and a `0` flag of a general or character conversion.
- */
-function checkSpecifier<V>(
-  values: FormatValues<V>,
-  [specifier, , flags = '', width, precision, conversion = '']: RegExpExecArray
-): void {
+function readSpecifier(pattern: string, start: number): Specifier | undefined {
+  let cursor = start + 1;
+  const afterIndex = skipDigits(pattern, cursor);
+  let index: string | undefined;
+  if (pattern[cursor] === '<') {
+    index = '<';
+    cursor++;
+  } else if (afterIndex > cursor && pattern[afterIndex] === '$') {
+    index = pattern.slice(cursor, afterIndex);
+    cursor = afterIndex + 1;
+  }
+  const flagStart = cursor;
+  while (cursor < pattern.length && '-#+ 0,('.includes(pattern[cursor])) cursor++;
+  const flags = pattern.slice(flagStart, cursor);
+  const afterWidth = skipDigits(pattern, cursor);
+  const width = pattern.slice(cursor, afterWidth) || undefined;
+  cursor = afterWidth;
+  let precision: string | undefined;
+  if (pattern[cursor] === '.') {
+    const precisionStart = cursor + 1;
+    cursor = skipDigits(pattern, precisionStart);
+    if (cursor === precisionStart) return undefined;
+    precision = pattern.slice(precisionStart, cursor);
+  }
+  const conversion = pattern[cursor] ?? '';
+  if (!/^[a-zA-Z%]$/.test(conversion)) return undefined;
+  const end = cursor + 1;
+  return { start, end, source: pattern.slice(start, end), index, flags, width, precision, conversion };
+}
+
+function skipDigits(pattern: string, start: number): number {
+  let end = start;
+  while (pattern[end] >= '0' && pattern[end] <= '9') end++;
+  return end;
+}
+
+function checkSpecifier<V>(values: FormatValues<V>, { source, flags, width, precision, conversion }: Specifier): void {
   const lower = conversion.toLowerCase();
   if (lower === 'n') return;
   // A width or precision makes text of its length, which is charged before anything is built.
-  values.scan(Number(width ?? 0) + Number(precision?.slice(1) ?? 0));
+  values.scan(Number(width ?? 0) + Number(precision ?? 0));
   if (precision && 'dxoc'.includes(lower)) {
-    values.fail('IllegalFormatPrecisionException', precision.slice(1));
+    values.fail('IllegalFormatPrecisionException', precision);
   }
   const isNumeric = 'dxoefg'.includes(lower);
   if (!width && (flags.includes('-') || (isNumeric && flags.includes('0')))) {
-    values.fail('MissingFormatWidthException', specifier);
+    values.fail('MissingFormatWidthException', source);
   }
   const bad = BAD_FLAGS[lower]?.find((flag) => flags.includes(flag));
   if (bad) values.fail('FormatFlagsConversionMismatchException', `Conversion = ${lower}, Flags = ${bad}`);
 }
 
-/**
- * The flags each conversion rejects, in the order Formatter checks them, which decides the flag its exception names.
- * `#` of the general, character, and decimal conversions is checked as the argument is formatted.
- */
 const GENERAL_BAD_FLAGS = ['+', ' ', '0', ',', '('];
+// The first prohibited flag in this order is the one named by the JVM exception.
 const BAD_FLAGS: Record<string, string[]> = {
   s: GENERAL_BAD_FLAGS,
   b: GENERAL_BAD_FLAGS,
@@ -269,7 +310,6 @@ function formatDecimal(value: number, precision: number, conversion: string, fla
   return withSign(hasPoint ? `${integerText}.${fractionPart}` : integerText, isNegative, flags);
 }
 
-/** The digits of `%e`, rounded half up to `precision`, with the point that `#` keeps even with no digits after it. */
 /**
  * The digits Java's Formatter starts from: the shortest that read back as the value, but at least two, the closest
  * two-digit decimal, as Java's FloatingDecimal gives `4.9E-324` for Double.MIN_VALUE where the shortest is `5e-324`.
@@ -279,6 +319,7 @@ function javaDigits(magnitude: number): string {
   return shortest.includes('.') ? shortest : magnitude.toExponential(1);
 }
 
+/** The digits of `%e`, rounded half up to `precision`, with the point that `#` keeps even with no digits after it. */
 function scientificDigits(digits: string, exponent: number, precision: number, flags: string): string {
   const { digits: rounded, carried } = roundDigits(digits, precision + 1);
   const finalExponent = exponent + carried;
