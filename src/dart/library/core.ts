@@ -1540,13 +1540,9 @@ class FollowedByIterator<E> implements Iterator<E> {
   E get current => _currentIterator.current;
 }
 
-class CastIterable<S, T> extends Iterable<T> {
+abstract class CastIterableBase<S, T> extends Iterable<T> {
   final Iterable<S> _source;
-  factory CastIterable(Iterable<S> source) => _hasEfficientLength(source)
-      ? _EfficientLengthCastIterable<S, T>(source)
-      : CastIterable<S, T>._(source);
-  CastIterable._(this._source);
-  Iterable<R> cast<R>() => CastIterable<S, R>(_source);
+  CastIterableBase(this._source);
   Iterator<T> get iterator => CastIterator<S, T>(_source.iterator);
   int get length => _source.length;
   bool get isEmpty => _source.isEmpty;
@@ -1561,6 +1557,14 @@ class CastIterable<S, T> extends Iterable<T> {
   T lastWhere(bool Function(T element) test, {T Function()? orElse}) => _source.lastWhere(
       (element) => test(element as T), orElse: orElse == null ? null : () => orElse() as S) as T;
   String toString() => _source.toString();
+}
+
+class CastIterable<S, T> extends CastIterableBase<S, T> {
+  factory CastIterable(Iterable<S> source) => _hasEfficientLength(source)
+      ? _EfficientLengthCastIterable<S, T>(source)
+      : CastIterable<S, T>._(source);
+  CastIterable._(Iterable<S> source) : super(source);
+  Iterable<R> cast<R>() => CastIterable<S, R>(_source);
 }
 
 class _EfficientLengthCastIterable<S, T> extends CastIterable<S, T> implements EfficientLengthIterable<T> {

@@ -126,6 +126,7 @@ function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
     'SkipWhileIterable',
     'FollowedByIterable',
     'CastIterable',
+    'CastIterableBase',
     'IndexedIterable',
     'EfficientLengthIndexedIterable',
     'IndexedIterator',
@@ -164,7 +165,7 @@ function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
     (core.declarations.get(name) as { cls: { vmName: string | undefined } }).cls.vmName = vmName;
   }
   // The VM's view of List.asMap is internal to the SDK, not part of dart:collection's API.
-  for (const name of ['ListMapView', 'CastList', 'CastSet', 'CastMap', 'CodeUnits'])
+  for (const name of ['ListMapView', 'CastList', 'CastSet', 'CastMap', 'CastQueue', 'CodeUnits'])
     (envs.get('dart:collection') as LibraryEnv).hiddenNames.add(name);
   const collection = envs.get('dart:collection') as LibraryEnv;
   for (const name of ['LinkedHashMap', 'LinkedHashSet']) core.hiddenNames.add(name);

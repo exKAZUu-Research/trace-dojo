@@ -2034,6 +2034,8 @@ abstract interface class Queue<E> implements EfficientLengthIterable<E> {
   factory Queue() => ListQueue<E>();
   factory Queue.from(Iterable elements) => ListQueue<E>.from(elements);
   factory Queue.of(Iterable<E> elements) => ListQueue<E>.of(elements);
+  static Queue<T> castFrom<S, T>(Queue<S> source) => CastQueue<S, T>(source);
+  Queue<R> cast<R>();
   void add(E value);
   void addFirst(E value);
   void addLast(E value);
@@ -2044,6 +2046,22 @@ abstract interface class Queue<E> implements EfficientLengthIterable<E> {
   void removeWhere(bool Function(E element) test);
   void retainWhere(bool Function(E element) test);
   void clear();
+}
+
+class CastQueue<S, T> extends CastIterableBase<S, T> implements Queue<T> {
+  final Queue<S> _queue;
+  CastQueue(Queue<S> source) : _queue = source, super(source);
+  Queue<R> cast<R>() => CastQueue<S, R>(_queue);
+  T removeFirst() => _queue.removeFirst() as T;
+  T removeLast() => _queue.removeLast() as T;
+  void add(T value) => _queue.add(value as S);
+  void addFirst(T value) => _queue.addFirst(value as S);
+  void addLast(T value) => _queue.addLast(value as S);
+  bool remove(Object? value) => _queue.remove(value);
+  void addAll(Iterable<T> elements) => _queue.addAll(CastIterable<T, S>(elements));
+  void removeWhere(bool Function(T element) test) => _queue.removeWhere((S element) => test(element as T));
+  void retainWhere(bool Function(T element) test) => _queue.retainWhere((S element) => test(element as T));
+  void clear() => _queue.clear();
 }
 
 final class ListQueue<E> extends ListIterable<E> implements Queue<E> {
@@ -2069,6 +2087,7 @@ final class ListQueue<E> extends ListIterable<E> implements Queue<E> {
   }
   factory ListQueue.of(Iterable<E> elements) => ListQueue<E>()..addAll(elements);
 
+  Queue<R> cast<R>() => Queue.castFrom<E, R>(this);
   Iterator<E> get iterator => _QueueIterator<E>(this);
   int get length => (_tail - _head) & (_table.length - 1);
   bool get isEmpty => _head == _tail;
@@ -2253,13 +2272,10 @@ final class ListQueue<E> extends ListIterable<E> implements Queue<E> {
 }
 
 final class DoubleLinkedQueue<E> extends Iterable<E> implements Queue<E> {
-  final _LinkedQueueEntry<E> _anchor = _LinkedQueueEntry<E>(null);
+  final _DoubleLinkedQueueSentinel<E> _anchor = _DoubleLinkedQueueSentinel<E>();
   int _count = 0;
 
-  DoubleLinkedQueue() {
-    _anchor._next = _anchor;
-    _anchor._previous = _anchor;
-  }
+  DoubleLinkedQueue();
 
   factory DoubleLinkedQueue.from(Iterable<dynamic> elements) {
     var queue = DoubleLinkedQueue<E>();
@@ -2268,112 +2284,163 @@ final class DoubleLinkedQueue<E> extends Iterable<E> implements Queue<E> {
   }
   factory DoubleLinkedQueue.of(Iterable<E> elements) => DoubleLinkedQueue<E>()..addAll(elements);
 
+  Queue<R> cast<R>() => Queue.castFrom<E, R>(this);
   int get length => _count;
   bool get isEmpty => _count == 0;
-  Iterator<E> get iterator => _LinkedQueueIterator<E>(this);
+  Iterator<E> get iterator => _DoubleLinkedQueueIterator<E>(this);
+  DoubleLinkedQueueEntry<E>? firstEntry() => _anchor._next!._entry;
+  DoubleLinkedQueueEntry<E>? lastEntry() => _anchor._previous!._entry;
 
-  E get first => _value(_anchor._next!);
-  E get last => _value(_anchor._previous!);
+  E get first => _firstEntry().element;
+  E get last => _lastEntry().element;
   E get single {
     if (_count > 1) throw StateError("Too many elements");
     return first;
   }
 
-  E _value(_LinkedQueueEntry<E> entry) {
-    if (identical(entry, _anchor)) throw StateError("No element");
-    return entry._value as E;
+  DoubleLinkedQueueEntry<E> _firstEntry() {
+    final entry = firstEntry();
+    if (entry == null) throw StateError("No element");
+    return entry;
+  }
+  DoubleLinkedQueueEntry<E> _lastEntry() {
+    final entry = lastEntry();
+    if (entry == null) throw StateError("No element");
+    return entry;
   }
 
   void add(E value) => addLast(value);
   void addFirst(E value) => _insert(_anchor._next!, value);
   void addLast(E value) => _insert(_anchor, value);
   void addAll(Iterable<E> iterable) {
-    for (var value in iterable) addLast(value);
+    for (final value in iterable) addLast(value);
   }
-  void _insert(_LinkedQueueEntry<E> next, E value) {
-    final previous = next._previous!;
-    final entry = _LinkedQueueEntry<E>(value);
-    entry._previous = previous;
-    entry._next = next;
-    previous._next = entry;
-    next._previous = entry;
+  void _insert(_DoubleLinkedQueueLink<E> next, E value) {
+    _DoubleLinkedQueueElement<E>(value, this)._link(next._previous, next);
     _count++;
   }
 
-  E removeFirst() => _unlink(_anchor._next!);
-  E removeLast() => _unlink(_anchor._previous!);
-  E _unlink(_LinkedQueueEntry<E> entry) {
-    final value = _value(entry);
-    entry._previous!._next = entry._next;
-    entry._next!._previous = entry._previous;
-    entry._next = null;
-    entry._previous = null;
-    _count--;
-    return value;
-  }
+  E removeFirst() => _firstEntry().remove();
+  E removeLast() => _lastEntry().remove();
 
   bool remove(Object? value) {
-    var entry = _anchor._next!;
-    while (!identical(entry, _anchor)) {
-      final equal = entry._value == value;
-      final next = _nextOf(entry);
+    var cursor = _anchor._next!;
+    while (true) {
+      final entry = cursor._entry;
+      if (entry == null) return false;
+      final equal = entry.element == value;
+      cursor = _nextOf(entry);
       if (equal) {
-        _unlink(entry);
+        entry.remove();
         return true;
       }
-      entry = next;
     }
-    return false;
   }
 
   void removeWhere(bool Function(E element) test) => _filter(test, true);
   void retainWhere(bool Function(E element) test) => _filter(test, false);
   void _filter(bool Function(E) test, bool removeMatching) {
-    var entry = _anchor._next!;
-    while (!identical(entry, _anchor)) {
-      final matches = test(entry._value as E);
-      final next = _nextOf(entry);
-      if (matches == removeMatching) _unlink(entry);
-      entry = next;
+    var cursor = _anchor._next!;
+    while (true) {
+      final entry = cursor._entry;
+      if (entry == null) return;
+      final matches = test(entry.element);
+      cursor = _nextOf(entry);
+      if (matches == removeMatching) entry.remove();
     }
   }
 
-  _LinkedQueueEntry<E> _nextOf(_LinkedQueueEntry<E> entry) {
-    final next = entry._next;
-    if (next == null) throw ConcurrentModificationError(this);
-    return next;
+  _DoubleLinkedQueueLink<E> _nextOf(DoubleLinkedQueueEntry<E> entry) {
+    if (!identical(entry._queue, this)) throw ConcurrentModificationError(this);
+    return entry._next!;
   }
 
+  void forEachEntry(void Function(DoubleLinkedQueueEntry<E> entry) action) {
+    var cursor = _anchor._next!;
+    while (true) {
+      final entry = cursor._entry;
+      if (entry == null) return;
+      cursor = _nextOf(entry);
+      action(entry);
+      if (identical(entry._queue, this)) cursor = entry._next!;
+    }
+  }
   void clear() {
     while (!isEmpty) removeFirst();
   }
   String toString() => Iterable.iterableToFullString(this, "{", "}");
 }
 
-class _LinkedQueueEntry<E> {
-  final E? _value;
-  _LinkedQueueEntry<E>? _previous;
-  _LinkedQueueEntry<E>? _next;
-  _LinkedQueueEntry(this._value);
+abstract class _DoubleLinkedQueueLink<E> {
+  _DoubleLinkedQueueLink<E>? _previous;
+  _DoubleLinkedQueueLink<E>? _next;
+  DoubleLinkedQueueEntry<E>? get _entry;
+  void _link(_DoubleLinkedQueueLink<E>? previous, _DoubleLinkedQueueLink<E>? next) {
+    _previous = previous;
+    _next = next;
+    if (previous != null) previous._next = this;
+    if (next != null) next._previous = this;
+  }
+  void _unlink() {
+    final previous = _previous;
+    final next = _next;
+    if (previous != null) previous._next = next;
+    if (next != null) next._previous = previous;
+    _previous = null;
+    _next = null;
+  }
 }
 
-class _LinkedQueueIterator<E> implements Iterator<E> {
+class _DoubleLinkedQueueSentinel<E> extends _DoubleLinkedQueueLink<E> {
+  _DoubleLinkedQueueSentinel() { _link(this, this); }
+  DoubleLinkedQueueEntry<E>? get _entry => null;
+}
+
+class DoubleLinkedQueueEntry<E> extends _DoubleLinkedQueueLink<E> {
+  E element;
   DoubleLinkedQueue<E>? _queue;
-  _LinkedQueueEntry<E>? _next;
+  DoubleLinkedQueueEntry(this.element);
+  DoubleLinkedQueueEntry<E> get _entry => this;
+  DoubleLinkedQueueEntry<E>? previousEntry() => _previous?._entry;
+  DoubleLinkedQueueEntry<E>? nextEntry() => _next?._entry;
+  void append(E element) => _insert(element, this, _next);
+  void prepend(E element) => _insert(element, _previous, this);
+  void _insert(E element, _DoubleLinkedQueueLink<E>? previous, _DoubleLinkedQueueLink<E>? next) {
+    _newEntry(element)._link(previous, next);
+    final queue = _queue;
+    if (queue != null) queue._count++;
+  }
+  DoubleLinkedQueueEntry<E> _newEntry(E element) => DoubleLinkedQueueEntry<E>(element);
+  E remove() {
+    final queue = _queue;
+    if (queue != null) queue._count--;
+    _queue = null;
+    _unlink();
+    return element;
+  }
+}
+
+class _DoubleLinkedQueueElement<E> extends DoubleLinkedQueueEntry<E> {
+  _DoubleLinkedQueueElement(E element, DoubleLinkedQueue<E>? queue) : super(element) { _queue = queue; }
+  DoubleLinkedQueueEntry<E> _newEntry(E element) => _DoubleLinkedQueueElement<E>(element, _queue);
+}
+
+class _DoubleLinkedQueueIterator<E> implements Iterator<E> {
+  DoubleLinkedQueue<E>? _queue;
+  _DoubleLinkedQueueLink<E>? _next;
   E? _current;
-  _LinkedQueueIterator(DoubleLinkedQueue<E> queue) : _queue = queue, _next = queue._anchor._next;
+  _DoubleLinkedQueueIterator(DoubleLinkedQueue<E> queue) : _queue = queue, _next = queue._anchor._next;
   E get current => _current as E;
   bool moveNext() {
-    final queue = _queue;
-    final next = _next;
-    if (queue == null || next == null || identical(next, queue._anchor)) {
+    final next = _next?._entry;
+    if (next == null) {
       _queue = null;
       _next = null;
       _current = null;
       return false;
     }
-    _next = queue._nextOf(next);
-    _current = next._value;
+    _next = _queue!._nextOf(next);
+    _current = next.element;
     return true;
   }
 }

@@ -6336,6 +6336,60 @@ void main() {
   });
 });
 
+test('queue casts remain live and enforce both directions of type checking', () => {
+  const source = `import 'dart:collection';
+void main() {
+  final source = ListQueue<num>()..addAll([1, 2.5]);
+  final Queue<int> view = source.cast<int>();
+  view.addFirst(0);
+  view.addLast(3);
+  try { print(view.elementAt(2)); } catch (e) { print(e.runtimeType); }
+  print(view.remove(2.5));
+  print([view, view.removeFirst(), source]);
+  final ints = ListQueue<int>()..add(1);
+  final wide = Queue.castFrom<int, num>(ints);
+  try { wide.addAll([2, 3.5, 4]); } catch (e) { print(e.runtimeType); }
+  print(ints);
+  print(wide.cast<int>().removeLast());
+  print(ints);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '_TypeError\ntrue\n[{1, 3}, 0, {1, 3}]\n_TypeError\n{1, 2}\n2\n{1}\n',
+  });
+});
+
+test('linked queue entries expose live links and retain detached element behavior', () => {
+  const source = `import 'dart:collection';
+void main() {
+  final q = DoubleLinkedQueue<int>()..addAll([1, 2, 3]);
+  final DoubleLinkedQueueEntry<int> first = q.firstEntry()!;
+  final last = q.lastEntry()!;
+  first.element = 4;
+  first.append(5);
+  last.prepend(6);
+  print([first.previousEntry(), last.nextEntry(), first.nextEntry()!.element, last.previousEntry()!.element]);
+  print(q);
+  q.forEachEntry((entry) {
+    if (entry.element == 4) { entry.append(7); entry.remove(); }
+    print(entry.element);
+  });
+  print([q, q.length, first.nextEntry()]);
+  first.append(8);
+  print([q, first.nextEntry()!.element]);
+  q.clear();
+  print([q.firstEntry(), q.lastEntry(), last.nextEntry(), last.remove()]);
+  final standalone = DoubleLinkedQueueEntry<int>(9)..append(10);
+  print(standalone.nextEntry()!.element);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[null, null, 5, 6]\n{4, 5, 2, 6, 3}\n4\n5\n2\n6\n3\n' +
+      '[{7, 5, 2, 6, 3}, 5, null]\n[{7, 5, 2, 6, 3}, 8]\n[null, null, null, 3]\n10\n',
+  });
+});
+
 test('regex group names use a fresh ordered set or the canonical empty list', () => {
   const source = `void main() {
   final match = RegExp(r'(?<first>a)(?<second>b)').firstMatch('ab')!;
