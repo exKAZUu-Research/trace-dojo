@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 586 -- The operations of Dart's types belong together; each is a short case analysis.
+// code-gauge-allow-file fileNcss 599 -- The operations of Dart's types belong together; each is a short case analysis.
 import type { ClassInfo } from './classes';
 
 /** A type parameter of a class, a function type, or a generic function. */
@@ -675,6 +675,19 @@ export function closeTypeVariables(type: DartType, params: ReadonlySet<TypeParam
   );
 }
 
+export function overapproximateType(type: DartType): DartType {
+  const expanding = new Set<TypeParam>();
+  const replace = (variable: TypeParamType, covariant: boolean): DartType => {
+    if (!covariant) return NEVER;
+    if (expanding.has(variable.param)) return DYNAMIC;
+    expanding.add(variable.param);
+    const bound = replaceTypeVariables(variable.promoted ?? boundOf(variable.param), replace);
+    expanding.delete(variable.param);
+    return variable.nullable ? makeNullable(bound) : bound;
+  };
+  return replaceTypeVariables(type, replace);
+}
+
 function replaceTypeVariables(
   type: DartType,
   replace: (variable: TypeParamType, covariant: boolean) => DartType,
@@ -696,10 +709,12 @@ function replaceTypeVariables(
       };
     }
     case 'function': {
-      const parameter = (part: DartType): DartType => replaceTypeVariables(part, replace, !covariant);
+      const replaceFree = (variable: TypeParamType, positive: boolean): DartType =>
+        type.typeParams.includes(variable.param) ? variable : replace(variable, positive);
+      const parameter = (part: DartType): DartType => replaceTypeVariables(part, replaceFree, !covariant);
       return {
         ...type,
-        returnType: close(type.returnType),
+        returnType: replaceTypeVariables(type.returnType, replaceFree, covariant),
         positional: type.positional.map(parameter),
         named: type.named.map((field) => ({ ...field, type: parameter(field.type) })),
       };

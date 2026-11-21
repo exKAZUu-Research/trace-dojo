@@ -1160,14 +1160,16 @@ export class Compiler extends MemberCompiler {
         cls,
         constant.row
       );
-      const field: FieldMember & { isEnumValue: boolean } = {
+      const field: FieldMember = {
         kind: 'field',
         name: constant.name,
         owner: cls,
         isStatic: true,
         isAbstract: false,
         row: constant.row,
-        type: enumType,
+        get type() {
+          return global.type;
+        },
         isFinal: true,
         isLate: false,
         isConst: true,
@@ -1178,10 +1180,7 @@ export class Compiler extends MemberCompiler {
       };
       cls.staticMembers.set(constant.name, field);
       values.push(global);
-      this.inferTypeOnFirstUse(global, constant, () => {
-        field.type = this.compileEnumConstant(cls, constant, index, global);
-        return field.type;
-      });
+      this.inferTypeOnFirstUse(global, constant, () => this.compileEnumConstant(cls, constant, index, global));
       this.deferredBodies.push(() => {
         void global.type;
       });
@@ -1237,7 +1236,7 @@ export class Compiler extends MemberCompiler {
       const bound = this.withConstContext(true, () =>
         this.bindArguments(signature, args, constant.typeArguments, constant, undefined)
       );
-      if (!this.argumentsAreConst) this.error(constant, '列挙値の引数には定数を渡してください。');
+      if (!bound.argumentsAreConst) this.error(constant, '列挙値の引数には定数を渡してください。');
       const fn = this.fn;
       const { name } = constant;
       global.initialize = (runtime) => {

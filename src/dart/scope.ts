@@ -121,7 +121,8 @@ export class Flow {
     /** Variables definitely assigned. */
     readonly assigned: ReadonlySet<LocalVar>,
     /** Variables possibly assigned, for `final` and `late final` checks. */
-    readonly maybeAssigned: ReadonlySet<LocalVar>
+    readonly maybeAssigned: ReadonlySet<LocalVar>,
+    readonly writes?: ReadonlySet<LocalVar>
   ) {}
 
   static start(): Flow {
@@ -129,7 +130,22 @@ export class Flow {
   }
 
   get unreachable(): Flow {
-    return new Flow(false, this.promotions, this.assigned, this.maybeAssigned);
+    return new Flow(false, this.promotions, this.assigned, this.maybeAssigned, this.writes);
+  }
+
+  withWrites(writes: ReadonlySet<LocalVar> | undefined): Flow {
+    return new Flow(this.reachable, this.promotions, this.assigned, this.maybeAssigned, writes);
+  }
+
+  restoreWrites(outer: ReadonlySet<LocalVar> | undefined): Flow {
+    return this.withWrites(outer ? combineWrites(outer, this.writes) : undefined);
+  }
+
+  wrotePath(variable: LocalVar): boolean {
+    for (let part: LocalVar | undefined = variable; part; part = part.fieldReceiver) {
+      if (this.writes?.has(part)) return true;
+    }
+    return false;
   }
 
   promote(variable: LocalVar, type: DartType): Flow {
@@ -142,7 +158,8 @@ export class Flow {
       this.reachable,
       new Map([...this.promotions, [variable, chain]]),
       this.assigned,
-      this.maybeAssigned
+      this.maybeAssigned,
+      this.writes
     );
   }
 
@@ -150,7 +167,7 @@ export class Flow {
     const promotions = new Map(this.promotions);
     forgetPromotions(promotions, new Set([variable]));
     if (promotions.size === this.promotions.size) return this;
-    return new Flow(this.reachable, promotions, this.assigned, this.maybeAssigned);
+    return new Flow(this.reachable, promotions, this.assigned, this.maybeAssigned, this.writes);
   }
 
   assign(variable: LocalVar): Flow {
@@ -158,7 +175,8 @@ export class Flow {
       this.reachable,
       this.promotions,
       new Set([...this.assigned, variable]),
-      new Set([...this.maybeAssigned, variable])
+      new Set([...this.maybeAssigned, variable]),
+      this.writes ? new Set([...this.writes, variable]) : undefined
     );
   }
 
@@ -168,7 +186,7 @@ export class Flow {
     const names = new Set(variables);
     forgetPromotions(promotions, names);
     const maybeAssigned = new Set([...this.maybeAssigned, ...names]);
-    return new Flow(this.reachable, promotions, this.assigned, maybeAssigned);
+    return new Flow(this.reachable, promotions, this.assigned, maybeAssigned, this.writes && union(this.writes, names));
   }
 
   /** What is known after two paths meet. */
@@ -176,7 +194,13 @@ export class Flow {
     if (!a.reachable)
       return b.reachable
         ? b
-        : new Flow(false, b.promotions, intersect(a.assigned, b.assigned), union(a.maybeAssigned, b.maybeAssigned));
+        : new Flow(
+            false,
+            b.promotions,
+            intersect(a.assigned, b.assigned),
+            union(a.maybeAssigned, b.maybeAssigned),
+            combineWrites(a.writes, b.writes)
+          );
     if (!b.reachable) return a;
     const promotions = new Map<LocalVar, readonly DartType[]>();
     for (const [variable, chain] of a.promotions) {
@@ -185,8 +209,21 @@ export class Flow {
       const shared = chain.filter((type) => other.some((candidate) => sameType(type, candidate)));
       if (shared.length > 0) promotions.set(variable, shared);
     }
-    return new Flow(true, promotions, intersect(a.assigned, b.assigned), union(a.maybeAssigned, b.maybeAssigned));
+    return new Flow(
+      true,
+      promotions,
+      intersect(a.assigned, b.assigned),
+      union(a.maybeAssigned, b.maybeAssigned),
+      combineWrites(a.writes, b.writes)
+    );
   }
+}
+
+function combineWrites(
+  left: ReadonlySet<LocalVar> | undefined,
+  right: ReadonlySet<LocalVar> | undefined
+): ReadonlySet<LocalVar> | undefined {
+  return left && right ? union(left, right) : (left ?? right);
 }
 
 function intersect<T>(a: ReadonlySet<T>, b: ReadonlySet<T>): Set<T> {

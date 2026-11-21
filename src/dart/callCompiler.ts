@@ -48,6 +48,7 @@ import { type Arguments, type Callable, type Cell, DartClosure, type Value } fro
 /** A call whose arguments are checked against a function type: how to evaluate them and what the call gives. */
 export interface BoundCall {
   returnType: DartType;
+  argumentsAreConst: boolean;
   /** Evaluates the arguments in source order. */
   args: (frame: Frame) => Arguments;
   typeArgs: (frame: Frame) => DartType[];
@@ -572,14 +573,9 @@ export abstract class CallCompiler extends OperatorCompiler {
     return {
       type: bound.returnType,
       run: (frame) => (fn.impl as Callable)(frame.runtime, undefined, bound.args(frame), bound.typeArgs(frame), row),
-      isConst: identical && args.positional.every((argument) => this.isConstantSyntax(argument)),
+      isConst: identical && bound.argumentsAreConst,
       completes: !isNeverType(bound.returnType),
     };
-  }
-
-  /** Whether an expression would compile to a constant, used where only the syntax is at hand. */
-  protected isConstantSyntax(expression: Expression): boolean {
-    return ['int', 'double', 'string', 'bool', 'null'].includes(expression.kind);
   }
 
   /** The row a call shows in a trace, or undefined in library code, whose calls traces leave out. */
@@ -674,7 +670,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     }
     const signature = constructorSignature(cls, constructor, typeArgs);
     const bound = this.withConstContext(isConst, () => this.bindArguments(signature, args, undefined, span, context));
-    if (isConst && !this.argumentsAreConst)
+    if (isConst && !bound.argumentsAreConst)
       this.error(span, 'const のコンストラクタ呼び出しの引数は、定数でなければなりません。');
     const resolvedArgs = constructorArguments(typeArgs, bound.staticTypeArgs);
     const nullable = typeArgs !== undefined && !Array.isArray(typeArgs) && typeArgs.nullableResult;
@@ -684,7 +680,6 @@ export abstract class CallCompiler extends OperatorCompiler {
     return { type, run, isConst, creates: true };
   }
 
-  /** Whether every argument of the call just bound was a constant expression. */
   private aliasConstructor(
     alias: TypeAlias,
     written: TypeSyntax[] | undefined,
@@ -706,8 +701,6 @@ export abstract class CallCompiler extends OperatorCompiler {
       : [];
     return { cls: template.cls, types: constructorArguments(types, args) };
   }
-
-  protected argumentsAreConst = true;
 
   // Arguments
 
@@ -732,9 +725,10 @@ export abstract class CallCompiler extends OperatorCompiler {
       if (!typeArguments) staticTypeArgs = this.inferTypeArguments(type, args, context, compiled);
       signature = instantiateFunction(type, staticTypeArgs);
     }
-    const { positionalRuns, namedRuns } = this.compileArgumentRuns(signature, args, compiled);
+    const { positionalRuns, namedRuns, argumentsAreConst } = this.compileArgumentRuns(signature, args, compiled);
     return {
       returnType: signature.returnType,
+      argumentsAreConst,
       args: this.argumentEvaluator(args, positionalRuns, namedRuns, false),
       typeArgs: this.runtimeTypes(staticTypeArgs),
       staticTypeArgs,
@@ -799,8 +793,8 @@ export abstract class CallCompiler extends OperatorCompiler {
     signature: FunctionType | undefined,
     args: ArgumentsSyntax,
     compiled?: ReadonlyMap<Expression, Compiled>
-  ): { positionalRuns: Eval[]; namedRuns: { name: string; run: Eval }[] } {
-    let allConst = true;
+  ): { positionalRuns: Eval[]; namedRuns: { name: string; run: Eval }[]; argumentsAreConst: boolean } {
+    let argumentsAreConst = true;
     const positionalRuns: Eval[] = [];
     const namedRuns: { name: string; run: Eval }[] = [];
     visitCallArguments(args, signature, ({ argument, index, name, parameterType }) => {
@@ -809,7 +803,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       if (value.type.kind === 'void' && parameterType?.kind !== 'void' && parameterType?.kind !== 'dynamic') {
         this.error(argument, 'void の値は引数に渡せません。');
       }
-      allConst &&= value.isConst;
+      argumentsAreConst &&= value.isConst;
       const run = parameterType
         ? this.coerce(
             value,
@@ -821,8 +815,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       if (name === undefined) positionalRuns[index] = run;
       else namedRuns[index] = { name, run };
     });
-    this.argumentsAreConst = allConst;
-    return { positionalRuns, namedRuns };
+    return { positionalRuns, namedRuns, argumentsAreConst };
   }
 
   private checkArity(type: FunctionType, args: ArgumentsSyntax, span: Span): void {

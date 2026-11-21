@@ -1,7 +1,7 @@
-// code-gauge-allow-file fileNcss 474 -- Switch coverage shares type partitions and pattern coverage rules.
+// code-gauge-allow-file fileNcss 477 -- Switch coverage shares type partitions and pattern coverage rules.
 import type { Expression, Pattern, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
-import type { ClassInfo, Member } from './classes';
+import type { ClassInfo, FieldMember } from './classes';
 import type { PatternCompiler } from './patternCompiler';
 import type { Frame } from './runtime';
 import {
@@ -14,6 +14,7 @@ import {
   isSubtype,
   nonNullable,
   NULL,
+  overapproximateType,
   resolveBound,
   substitute,
   typeToString,
@@ -32,7 +33,7 @@ interface ListSpace {
 
 type Space =
   | ListSpace
-  | { kind: 'constant'; key: boolean | Member; type: DartType; text: string }
+  | { kind: 'constant'; key: boolean | FieldMember; type: DartType; text: string; subject?: DartType }
   | { kind: 'null' }
   | { kind: 'type'; type: DartType; properties?: ReadonlyMap<string, Space> }
   | { kind: 'record'; fields: Space[]; names: (string | undefined)[]; type: DartType };
@@ -287,13 +288,15 @@ function expandInterface(base: DartType & { kind: 'interface' }, listCutoff: num
     ];
   }
   if (cls.kind === 'enum') {
-    const constants = enumConstants(cls);
+    const upper = overapproximateType(base);
+    const constants = enumConstants(cls).filter((member) => isSubtype(member.type, upper));
     if (constants.length > MAX_SPACES) return [{ kind: 'type', type: base }];
     return constants.map((member) => ({
       kind: 'constant',
       key: member,
-      type: base,
+      type: member.type,
       text: `${cls.name}.${member.name}`,
+      subject: base,
     }));
   }
   if (cls.modifiers.isSealed) return expandSealed(base, listCutoff, listDepth);
@@ -398,9 +401,9 @@ function visitNestedPatterns(pattern: Pattern, visit: (pattern: Pattern) => void
   }
 }
 
-function enumConstants(cls: ClassInfo): Member[] {
+function enumConstants(cls: ClassInfo): FieldMember[] {
   return [...cls.staticMembers.values()].filter(
-    (member) => member.kind === 'field' && (member as { isEnumValue?: boolean }).isEnumValue === true
+    (member): member is FieldMember => member.kind === 'field' && member.isEnumValue === true
   );
 }
 
@@ -554,7 +557,7 @@ function covers(compiler: PatternCompiler, pattern: Pattern, space: Space): Cove
       if (!pattern.type) return true;
       const tested = compiler.resolveType(pattern.type);
       if (space.kind === 'null') return isNullable(tested);
-      return isSubtype(space.type, tested);
+      return spaceSubtype(space, tested);
     }
     case 'constant': {
       return constantCovers(compiler, pattern.value, space);
@@ -635,7 +638,7 @@ function objectCovers(
 ): Coverage {
   if (space.kind === 'null') return false;
   const target = withDynamicArgs(compiler.resolveType(pattern.type, { allowRaw: true }));
-  if (!isSubtype(space.type, target)) return false;
+  if (!spaceSubtype(space, target)) return false;
   if (space.kind === 'constant' && pattern.fields.length > 0) return false;
   return combineCoverage(
     pattern.fields,
@@ -647,6 +650,13 @@ function objectCovers(
       return member ? coversAll(compiler, field.pattern, member.type) : false;
     },
     true
+  );
+}
+
+function spaceSubtype(space: Exclude<Space, { kind: 'null' }>, type: DartType): boolean {
+  return (
+    isSubtype(space.type, type) ||
+    (space.kind === 'constant' && space.subject !== undefined && isSubtype(space.subject, type))
   );
 }
 

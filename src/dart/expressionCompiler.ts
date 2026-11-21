@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 990 -- Expression kinds share the same scope and evaluation rules.
+// code-gauge-allow-file fileNcss 996 -- Expression kinds share the same scope and evaluation rules.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import type {
@@ -352,6 +352,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   /** `super == other`, which calls the superclass's `==`. */
   protected abstract compileSuperEquality(expression: Extract<Expression, { kind: 'binary' }>): Compiled;
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Equality evaluates both operands in order and promotes only stable paths.
   protected compileEquality(expression: Extract<Expression, { kind: 'binary' }>): {
     compiled: Compiled;
     flow: ConditionFlow;
@@ -360,11 +361,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return { compiled: this.compileSuperEquality(expression), flow: { whenTrue: this.flow, whenFalse: this.flow } };
     }
     const left = this.compileExpression(expression.left);
+    const outerWrites = this.flow.writes;
+    if (left.variable) this.flow = this.flow.withWrites(new Set());
     // The right operand of == takes the left's type as its context, which `c == .red` needs.
     const right = this.compileExpression(
       expression.right,
       expression.right.kind === 'dotShorthand' ? nonNullable(left.type) : undefined
     );
+    const leftVariable = left.variable && !this.flow.wrotePath(left.variable) ? left.variable : undefined;
+    if (left.variable) this.flow = this.flow.restoreWrites(outerWrites);
     for (const [operand, syntax] of [
       [left, expression.left],
       [right, expression.right],
@@ -373,8 +378,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const negated = expression.operator === '!=';
     const nullVariable =
-      right.type.kind === 'null' && left.variable
-        ? left.variable
+      right.type.kind === 'null' && leftVariable
+        ? leftVariable
         : left.type.kind === 'null' && right.variable
           ? right.variable
           : undefined;

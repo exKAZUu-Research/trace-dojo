@@ -268,7 +268,8 @@ export abstract class ControlCompiler extends StatementCompiler {
       afterTry.reachable && afterFinally.reachable,
       promotions,
       new Set([...afterTry.assigned, ...afterFinally.assigned]),
-      new Set([...afterTry.maybeAssigned, ...afterFinally.maybeAssigned])
+      new Set([...afterTry.maybeAssigned, ...afterFinally.maybeAssigned]),
+      afterFinally.writes
     );
     return run;
   }

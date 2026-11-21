@@ -300,6 +300,65 @@ test('String.fromCharCodes batches large conversions and preserves supplementary
   ).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout: '[65538, A😀😀A]\n' });
 });
 
+test('equality flow promotes only the value the comparison tested', () => {
+  for (const source of [
+    'void main() { int? x = 1; if (x != (x = null)) print(x.isEven); }',
+    "void main() { String? x = 'a'; if (x != (x = null)) print(x.length); }",
+    `class Box { final int? _x; Box(this._x); }
+     void main() {
+       Box b = Box(2);
+       if (b._x != ((b = Box(null))._x as Null)) print(b._x.isEven);
+     }`,
+  ]) {
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = `void main() {
+    int? x = 2;
+    if (x != (false ? (x = null) : null)) print(x.isEven);
+    int? y = 3;
+    if ((x = null) != y) print(y.isOdd);
+    if (y != null) print(y.isOdd);
+  }`;
+  expect(executeProgram('dart', valid)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: 'true\ntrue\ntrue\n',
+  });
+});
+
+test('special type annotations reject written type arguments', () => {
+  for (const source of [
+    'void main() { dynamic<int> x = 1; print(x); }',
+    'void main() { Null<int> x = null; print(x); }',
+    'Never<int> fail() => throw 1; void main() { print(1); }',
+  ]) {
+    const result = executeProgram('dart', source);
+    expect(result.kind).toBe('compileError');
+    if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toContain('型引数は 0 個');
+  }
+});
+
+test('constant identical calls use the constness of the compiled arguments', () => {
+  const program = `const a = 1;
+const alias = identical(a, a);
+const sum = identical(1 + 1, 2);
+const interpolated = identical('$a', '1');
+const list = identical([a], [1]);
+const nested = identical(identical(a, 1), true);
+void main() { print([alias, sum, interpolated, list, nested]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '[true, true, true, true, true]\n',
+  });
+  for (const source of [
+    "var x = 1; const answer = identical('$x', '1'); void main() {}",
+    'int value() => 1; const answer = identical(value(), 1); void main() {}',
+  ]) {
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('String.fromCharCodes stops at the end of the requested slice', () => {
   const program = `import 'dart:collection';
 Iterable<int> streamed() sync* { print('start'); yield 65; }
@@ -1688,6 +1747,38 @@ void main() {
     uncaughtException: undefined,
     stdout:
       '_TypeError\n_TypeError\n_TypeError\nConcurrentModificationError\n[1, 2, 1]\n_TypeError\n{2: 3}\n{1: 2}\n_TypeError\n{1: 2, 2: 4}\n',
+  });
+});
+
+test('set spreads detect list length changes from hashing and equality callbacks', () => {
+  const program = `var source = <Key>[];
+class Key {
+  final bool append;
+  Key(this.append);
+  int get hashCode {
+    if (append && source.length == 1) source.add(Key(append));
+    return 0;
+  }
+  bool operator ==(Object other) {
+    if (!append && source.length == 2) source.removeLast();
+    return false;
+  }
+}
+void main() {
+  source = [Key(true)];
+  try { print({...source}.length); } catch (e) { print(e.runtimeType); }
+  print(source.length);
+  source = [Key(false), Key(false)];
+  try { print({...source}.length); } catch (e) { print(e.runtimeType); }
+  print(source.length);
+  source = [Key(false), Key(false)];
+  try { print((<Key>{}..addAll(source)).length); } catch (e) { print(e.runtimeType); }
+  print(source.length);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: 'ConcurrentModificationError\n2\nConcurrentModificationError\n1\nConcurrentModificationError\n1\n',
   });
 });
 
@@ -4135,6 +4226,61 @@ void main() {
   });
   const bad = "enum E<T extends num> { x<String>('text'); const E(T value); } void main() {}";
   expect(executeProgram('dart', bad)).toMatchObject({ kind: 'compileError' });
+});
+
+test('overrides infer argument and result types in their own method parameter scope', () => {
+  const program = `class A<T> {
+  X f<X extends T>(X x) => x;
+  X g<X extends T>({required X x}) => x;
+  T Function(T) get callback => (x) => x;
+  set sink(T Function(T) callback) { print(callback(value)); }
+  final T value;
+  A(this.value);
+}
+class B extends A<num> {
+  B(): super(0);
+  S f<S extends num>(x) => x;
+  g<S extends num>({required x}) => x;
+  get callback => (num x) => x + 1;
+  set sink(callback) { print(callback(3)); }
+}
+void main() {
+  final b = B();
+  print([b.f<int>(1), b.g<double>(x: 2.5), b.callback(4)]);
+  b.sink = (num x) => x * 2;
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '[1, 2.5, 5]\n6\n',
+  });
+});
+
+test('specialized enum switches cover only constants that can inhabit the subject type', () => {
+  const program = `enum E<T> {
+  a(1), b<String>('text'), c(2.5);
+  const E(this.value);
+  final T value;
+}
+int exact(E<int> x) => switch (x) { E.a => 1 };
+int statement(E<String> x) { switch (x) { case E.b: return 2; } }
+int bounded<T extends num>(E<T> x) => switch (x) { E.a => 1, E.c => 3 };
+int any<T>(E<T> x) => switch (x) { E.a => 1, E.b => 2, E.c => 3 };
+int nested((E<int>?, bool) x) => switch (x) { (E.a, _) => 1, (null, _) => 0 };
+int typed<T extends num>(E<T> x) => switch (x) { E<int>() || E<double>() => 4 };
+void main() {
+  print([exact(E.a), statement(E.b), bounded(E.c), any(E.a), any(E.b),
+    nested((E.a, true)), nested((null, false)), typed(E.c)]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '[1, 2, 3, 1, 2, 1, 0, 4]\n',
+  });
+  const incomplete = program.replace('E.a => 1, E.c => 3', 'E.a => 1');
+  const result = executeProgram('dart', incomplete);
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toContain('E.c');
 });
 
 test('Function values accept implicit callable tear-offs and expose call', () => {

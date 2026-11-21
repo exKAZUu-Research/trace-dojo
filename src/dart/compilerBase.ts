@@ -122,6 +122,11 @@ const UNAVAILABLE_SINK_MEMBERS = new Set([
   'supportsAnsiEscapes',
 ]);
 const UNAVAILABLE_STATIC_MEMBERS = new Set(['dart:math.Random.secure', 'dart:core.StackTrace.current']);
+const SPECIAL_TYPES = new Map<string, DartType>([
+  ['dynamic', DYNAMIC],
+  ['Never', NEVER],
+  ['Null', NULL],
+]);
 
 export function typeName(type: DartType): string {
   return `'${typeToString(type)}'`;
@@ -367,19 +372,10 @@ export abstract class CompilerBase {
         if (syntax.args.length > 0) this.error(syntax, `型引数 ${name} には、型引数を付けられません。`);
         return typeParamType(param);
       }
-      switch (name) {
-        case 'dynamic': {
-          return DYNAMIC;
-        }
-        case 'Never': {
-          return NEVER;
-        }
-        case 'Null': {
-          return NULL;
-        }
-        default: {
-          break;
-        }
+      const special = SPECIAL_TYPES.get(name);
+      if (special) {
+        this.typeArgumentsFor([], syntax, name);
+        return special;
       }
     }
     if (prefix !== undefined && !this.library.hasPrefix(prefix)) {

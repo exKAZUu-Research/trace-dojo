@@ -7,6 +7,7 @@ import type { GlobalVariable } from './environment';
 import { checkExhaustive } from './exhaustiveness';
 import { ExpressionCompiler, SHORTED } from './expressionCompiler';
 import type { HashStore } from './hashStore';
+import { forEachValue, implicitCast } from './library/nativeSupport';
 import { wrap } from './operators';
 import { PatternCache } from './patternCompiler';
 import type { Frame } from './runtime';
@@ -31,7 +32,7 @@ import {
   sameType,
   upperBound,
 } from './types';
-import { type Callable, Cell, DartList, type DartObject, UNINITIALIZED, type Value } from './values';
+import { type Callable, Cell, type DartObject, NO_ARGUMENTS, UNINITIALIZED, type Value } from './values';
 
 /** How to read and write the target of an assignment once its receiver and index are evaluated. */
 interface AssignableTarget {
@@ -827,16 +828,16 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       this.error(element, `${typeName(elementType)} 型の要素は、${typeName(elementContext)} 型の要素にできません。`);
     }
     if (!spreadsNull) types.push({ key: elementType });
-    const castElements =
+    const resolveElement =
       elementType.kind === 'dynamic' && elementContext && elementContext.kind !== 'dynamic'
-        ? this.runtimeCast((frame) => frame.temporaries.at(-1), elementContext, false)
+        ? this.runtimeType(elementContext)
         : undefined;
     const { run } = compiled;
     const { nullAware } = element;
     return (frame, add) => {
       const iterable = run(frame);
       if (nullAware && iterable === undefined) return;
-      addIterableElements(frame, iterable, castElements, add);
+      addIterableElements(frame, iterable, resolveElement?.(frame), add);
     };
   }
 
@@ -1186,32 +1187,13 @@ function nullableContext(context: DartType | undefined): DartType | undefined {
   return context ? makeNullable(context) : undefined;
 }
 
-function addIterableElements(frame: Frame, iterable: Value, castElements: Eval | undefined, add: AddElement): void {
+function addIterableElements(frame: Frame, iterable: Value, elementType: DartType | undefined, add: AddElement): void {
   const { runtime } = frame;
-  if (!castElements) {
-    // A set literal adds a spread set by `addAll`, which copies a plain set's table into an empty literal.
-    if (add.target && runtime.links.quickCopySet(runtime, add.target, iterable)) return;
-    if (iterable instanceof DartList) {
-      for (const value of iterable.elements) add(value);
-      return;
-    }
-  }
-  const iterator = runtime.getProperty(iterable, 'iterator', undefined);
-  frame.temporaries.push(iterator);
-  try {
-    while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
-      const value = runtime.getProperty(iterator, 'current', undefined);
-      if (castElements) {
-        frame.temporaries.push(value);
-        try {
-          castElements(frame);
-        } finally {
-          frame.temporaries.pop();
-        }
-      }
+  if (elementType === undefined && add.target && runtime.links.quickCopySet(runtime, add.target, iterable)) return;
+  runtime.withCallRoots(iterable, NO_ARGUMENTS, () =>
+    forEachValue(runtime, iterable, (value) => {
+      if (elementType) implicitCast(runtime, value, elementType);
       add(value);
-    }
-  } finally {
-    frame.temporaries.pop();
-  }
+    })
+  );
 }

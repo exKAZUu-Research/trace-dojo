@@ -20,8 +20,10 @@ import {
   DYNAMIC,
   type FunctionType,
   functionType,
+  instantiateFunction,
   mentionsCovariantly,
   type TypeParam,
+  typeParamType,
   VOID,
 } from './types';
 import type { Callable, Value } from './values';
@@ -73,11 +75,11 @@ export abstract class MemberCompiler extends MetadataCompiler {
   ): { type: FunctionType; positionalTypes: DartType[]; namedTypes: Map<string, DartType> } {
     const { cls, declaration, local } = options;
     const overridden =
-      cls && declaration && !declaration.isStatic ? this.overriddenSignature(cls, declaration) : undefined;
+      cls && declaration && !declaration.isStatic ? this.overriddenSignature(cls, declaration, typeParams) : undefined;
     const positionalTypes = parameters.positional.map((parameter, index) => {
       if (parameter.type) return this.resolveType(parameter.type);
-      if (overridden?.kind === 'function') return overridden.positional[index] ?? DYNAMIC;
       if (overridden && declaration?.methodKind === 'setter') return overridden;
+      if (overridden?.kind === 'function') return overridden.positional[index] ?? DYNAMIC;
       return DYNAMIC;
     });
     const namedTypes = new Map(
@@ -112,16 +114,27 @@ export abstract class MemberCompiler extends MetadataCompiler {
   ): DartType {
     if (syntax) return local ? this.resolveType(syntax) : this.resolveTypeWithoutAnnotations(syntax);
     if (declaration?.methodKind === 'setter') return VOID;
-    if (overridden?.kind === 'function') return overridden.returnType;
     if (overridden && declaration?.methodKind === 'getter') return overridden;
+    if (overridden?.kind === 'function') return overridden.returnType;
     if (declaration?.methodKind === 'operator' && declaration.name === '[]=') return VOID;
     return DYNAMIC;
   }
 
-  private overriddenSignature(cls: ClassInfo, declaration: MethodDeclaration): DartType | undefined {
+  private overriddenSignature(
+    cls: ClassInfo,
+    declaration: MethodDeclaration,
+    typeParams: readonly TypeParam[]
+  ): DartType | undefined {
     for (const supertype of cls.directSupertypes) {
       const resolved = this.interfaceMember(supertype, declaration.name, declaration.methodKind === 'setter');
-      if (resolved) return resolved.type;
+      if (!resolved) continue;
+      const { member, type } = resolved;
+      if (member.kind === 'method' && type.kind === 'function' && type.typeParams.length === typeParams.length)
+        return instantiateFunction(
+          type,
+          typeParams.map((parameter) => typeParamType(parameter))
+        );
+      return type;
     }
     return undefined;
   }

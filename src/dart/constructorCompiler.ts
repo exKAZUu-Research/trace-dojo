@@ -764,7 +764,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       ],
     };
     const bound = this.bindArguments(signature, passed, undefined, span, undefined);
-    if (this.potentialConstInitializer && !this.argumentsAreConst)
+    if (this.potentialConstInitializer && !bound.argumentsAreConst)
       this.error(span, `const のコンストラクタの ${kind} に渡す値は、定数として評価できなければなりません。`);
     const typeArgs = this.runtimeTypes(targetType.args);
     const row = isImplicit || this.isLibraryCode ? undefined : span.row;
