@@ -303,7 +303,26 @@ external fun sign(x: Double): Double
 external fun max(a: Double, b: Double): Double
 external fun min(a: Double, b: Double): Double
 external fun sqrt(x: Float): Float
+inline fun cbrt(x: Float): Float = cbrt(x.toDouble()).toFloat()
+inline fun sin(x: Float): Float = sin(x.toDouble()).toFloat()
+inline fun cos(x: Float): Float = cos(x.toDouble()).toFloat()
+inline fun tan(x: Float): Float = tan(x.toDouble()).toFloat()
+inline fun asin(x: Float): Float = asin(x.toDouble()).toFloat()
+inline fun acos(x: Float): Float = acos(x.toDouble()).toFloat()
+inline fun atan(x: Float): Float = atan(x.toDouble()).toFloat()
+inline fun atan2(y: Float, x: Float): Float = atan2(y.toDouble(), x.toDouble()).toFloat()
+inline fun exp(x: Float): Float = exp(x.toDouble()).toFloat()
+inline fun ln(x: Float): Float = ln(x.toDouble()).toFloat()
+inline fun log10(x: Float): Float = log10(x.toDouble()).toFloat()
+fun log2(x: Float): Float = log2(x.toDouble()).toFloat()
+fun log(x: Float, base: Float): Float = log(x.toDouble(), base.toDouble()).toFloat()
+inline fun hypot(x: Float, y: Float): Float = hypot(x.toDouble(), y.toDouble()).toFloat()
+inline fun floor(x: Float): Float = floor(x.toDouble()).toFloat()
+inline fun ceil(x: Float): Float = ceil(x.toDouble()).toFloat()
+inline fun round(x: Float): Float = round(x.toDouble()).toFloat()
+fun truncate(x: Float): Float = truncate(x.toDouble()).toFloat()
 external fun abs(x: Float): Float
+inline fun sign(x: Float): Float = sign(x.toDouble()).toFloat()
 external fun max(a: Float, b: Float): Float
 external fun min(a: Float, b: Float): Float
 
@@ -327,6 +346,7 @@ val Float.absoluteValue: Float get() = abs(this)
 val Int.absoluteValue: Int get() = abs(this)
 val Long.absoluteValue: Long get() = abs(this)
 val Double.sign: Double get() = sign(this)
+val Float.sign: Float get() = sign(this)
 val Int.sign: Int get() = when {
     this < 0 -> -1
     this > 0 -> 1

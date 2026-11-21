@@ -1,6 +1,6 @@
 import type { Core } from './compilerBase';
 import type { FunctionSymbol, MemberSymbol, ParameterSymbol, PropertySymbol } from './symbols';
-import { type ClassType, type KType, resolved } from './types';
+import { type ClassType, isNonNullClass, type KType, resolved } from './types';
 
 interface PropertyAccessors {
   constant: boolean;
@@ -74,8 +74,7 @@ function functionSignature(core: Core, member: FunctionSymbol, name = member.nam
     ...member.params.map((parameter) => parameter.type),
   ];
   const result = member.returnType && resolved(member.returnType);
-  const descriptor =
-    result?.kind === 'class' && result.cls === core.unit && !result.nullable ? 'V' : typeDescriptor(core, result);
+  const descriptor = isNonNullClass(result, core.unit) ? 'V' : typeDescriptor(core, result);
   const parameters = [
     ...(member.extensionReceiver ? [typeDescriptor(core, member.extensionReceiver)] : []),
     ...member.params.map((param) => jvmParameterDescriptor(core, param)),

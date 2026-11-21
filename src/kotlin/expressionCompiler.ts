@@ -42,6 +42,7 @@ import {
   type ClassType,
   classType,
   type FunctionType,
+  isNonNullClass,
   isNullable,
   type KType,
   nonNull,
@@ -1189,7 +1190,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const bodyType = (resolved(compiled.type) as FunctionType).returnType;
     if (
       !isSubtype(bodyType, sam.functionType.returnType) &&
-      !this.isClass(sam.functionType.returnType, this.core.unit)
+      !isNonNullClass(sam.functionType.returnType, this.core.unit)
     ) {
       this.error(lambda.row, typeMismatchMessage(sam.functionType.returnType, bodyType));
     }
@@ -1739,7 +1740,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (expression.value) {
       const value = this.compileExpression(scope, context, expression.value, returnType);
       if (returnType) {
-        if (this.isClass(returnType, this.core.unit) && !this.isClass(value.type, this.core.unit)) {
+        if (isNonNullClass(returnType, this.core.unit) && !isSubtype(value.type, returnType)) {
           this.error(expression.row, '戻り値の型が Unit の関数は、値を返せません。');
         }
         evaluate = convertRepr(
@@ -1751,7 +1752,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
         target.returnedTypes.push(value.type);
         evaluate = value.eval;
       }
-    } else if (returnType && !this.isClass(returnType, this.core.unit)) {
+    } else if (returnType && !isNonNullClass(returnType, this.core.unit)) {
       this.error(expression.row, 'return に値が必要です。');
     } else if (!returnType) {
       target.returnedTypes.push(this.unitType);
@@ -1815,7 +1816,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       return variable;
     });
     const expectedReturn = expected ? resolved(expected.returnType) : undefined;
-    const returnsUnit = expectedReturn?.kind === 'class' && expectedReturn.cls === this.core.unit;
+    const returnsUnit = isNonNullClass(expectedReturn, this.core.unit);
     const bodyBlock: Block = { row: lambda.row, endRow: lambda.endRow, statements: lambda.statements, isBraced: true };
     const body = this.compileBlockValue(
       lambdaScope,

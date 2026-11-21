@@ -20,7 +20,7 @@ import { type Frame, MISSING } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol } from './symbols';
 import { VariableSymbol } from './symbols';
 import { anyType, isSubtype, substitutionOf } from './typeRelations';
-import { type ClassType, type KType, resolved } from './types';
+import { type ClassType, isNonNullClass, type KType, resolved } from './types';
 import { KObject, UNIT, type Value } from './values';
 
 /** Compiles the bodies of functions, the accessors and initializers of properties, and the initializers of classes and objects. */
@@ -140,7 +140,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           true,
           false
         );
-        const isUnit = this.isClass(returnType, this.core.unit);
+        const isUnit = isNonNullClass(returnType, this.core.unit);
         if (!isUnit && !this.flow.isDead) {
           this.error(decl.body.block.endRow, `関数 ${symbol.name} の最後に return を書いてください。`);
         }

@@ -29,7 +29,7 @@ import { defineNative, defineNativeProperty, libraryClass, throwError } from './
 const LIST = 'kotlin.collections.NativeList';
 const PRIMITIVE_ARRAY_LIST = 'kotlin.collections.PrimitiveArrayList';
 
-function items(list: Value): Value[] {
+function listStorage(list: Value): Value[] {
   return (list as KObject).items as Value[];
 }
 
@@ -181,8 +181,8 @@ export function newPrimitiveArrayList(frame: Frame, arrayView: PrimitiveArrayVie
 export function elementsOf(frame: Frame, collection: Value): Value[] {
   const object = collection as KObject;
   checkListView(frame, object);
-  if (primitiveArrayView(object) || listView(object)) return readableItems(object);
-  if (object.items) return [...object.items];
+  const indexed = indexedItems(object);
+  if (indexed) return [...indexed];
   if (object.store) return storeElements(object);
   if (object.native?.view) return viewElements(frame, object);
   return iterateElements(frame, object);
@@ -302,7 +302,7 @@ const LIST_CHANGING_NATIVES: Record<string, ListNative> = {
     requireMutable(frame, list);
     checkIndex(frame, list, index as number);
     const view = listView(list as KObject);
-    const values = items(view?.source ?? list);
+    const values = listStorage(view?.source ?? list);
     const position = (index as number) + (view?.from ?? 0);
     const old = values[position];
     values[position] = element;
@@ -371,7 +371,7 @@ function replaceListItems(frame: Frame, list: KObject, index: number, removed: n
 }
 
 function listStorageForSize(frame: Frame, list: KObject, required: number): Value[] {
-  const current = items(list);
+  const current = listStorage(list);
   const array = list.arrayList;
   if (!array || required <= (array.capacity ?? 0)) return current;
   // Java replaces elementData on growth, so operations already holding it keep using the old array.
@@ -444,7 +444,7 @@ function finishListAllocation(
   defaultSize: boolean,
   initialCapacity: number | undefined
 ): void {
-  const size = items(list).length;
+  const size = indexedSize(list);
   if (kind === 'ArrayList') list.arrayList = { size, capacity: defaultSize ? undefined : (initialCapacity ?? size) };
   const allocated = kind === 'ArrayDeque' ? (initialCapacity ?? size) : size;
   frame.runtime.allocate(frame, allocated + 1);
@@ -472,7 +472,7 @@ function removeIfArrayList(frame: Frame, list: KObject, predicate: KObject): boo
   if (source.cls !== libraryClass('kotlin.collections.ArrayList')) return undefined;
   checkListView(frame, list);
   const modCount = source.modCount;
-  const values = items(source);
+  const values = listStorage(source);
   const from = view?.from ?? 0;
   const size = view?.size ?? indexedSize(source);
   const removed = new Uint8Array(size);

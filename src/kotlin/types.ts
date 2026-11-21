@@ -82,6 +82,11 @@ export function isNothing(type: KType): boolean {
   return type.kind === 'nothing' && !type.nullable;
 }
 
+export function isNonNullClass(type: KType | undefined, cls: ClassSymbol): boolean {
+  const actual = type && resolved(type);
+  return actual?.kind === 'class' && actual.cls === cls && !actual.nullable;
+}
+
 /** The argument types of a class type, with a star projection read as its bound. */
 export function argumentTypes(type: ClassType, starBound: () => KType): KType[] {
   return type.args.map((argument) => (argument.variance === 'star' ? starBound() : argument.type));

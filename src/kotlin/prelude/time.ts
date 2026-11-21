@@ -18,7 +18,9 @@ class Duration internal constructor(internal val raw: Long) : Comparable<Duratio
     operator fun plus(other: Duration): Duration = Duration(durationPlus(raw, other.raw))
     operator fun minus(other: Duration): Duration = this + (-other)
     operator fun times(scale: Int): Duration = Duration(durationTimes(raw, scale))
+    operator fun times(scale: Double): Duration = Duration(durationTimes(raw, scale))
     operator fun div(scale: Int): Duration = Duration(durationDiv(raw, scale))
+    operator fun div(scale: Double): Duration = Duration(durationDiv(raw, scale))
     operator fun div(other: Duration): Double = durationRatio(raw, other.raw)
     operator fun unaryMinus(): Duration = Duration(-(raw shr 1) * 2L + (raw and 1L))
     override fun compareTo(other: Duration): Int = durationCompare(raw, other.raw)
@@ -126,6 +128,8 @@ class Duration internal constructor(internal val raw: Long) : Comparable<Duratio
 fun Int.toDuration(unit: DurationUnit): Duration = toLong().toDuration(unit)
 fun Long.toDuration(unit: DurationUnit): Duration = Duration(durationFromLong(this, unit.nanos))
 fun Double.toDuration(unit: DurationUnit): Duration = Duration(durationFromDouble(this, unit.nanos))
+inline operator fun Int.times(duration: Duration): Duration = duration * this
+inline operator fun Double.times(duration: Duration): Duration = duration * this
 
 inline fun measureTime(block: () -> Unit): Duration {
     val start = monotonicNanos()
@@ -137,7 +141,9 @@ internal external fun durationFromLong(value: Long, unit: Long): Long
 internal external fun durationFromDouble(value: Double, unit: Long): Long
 internal external fun durationPlus(left: Long, right: Long): Long
 internal external fun durationTimes(raw: Long, scale: Int): Long
+internal external fun durationTimes(raw: Long, scale: Double): Long
 internal external fun durationDiv(raw: Long, scale: Int): Long
+internal external fun durationDiv(raw: Long, scale: Double): Long
 internal external fun durationRatio(left: Long, right: Long): Double
 internal external fun durationCompare(left: Long, right: Long): Int
 internal external fun durationToDouble(raw: Long, unit: Long): Double

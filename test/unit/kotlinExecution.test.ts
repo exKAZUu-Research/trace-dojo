@@ -485,6 +485,79 @@ fun main() {
       '1ns\n3ns\n-1ns\nInfinity\n-Infinity\n9223372036854775807\n-9223372036854775808\ntrue\nfalse\n365000d\nDividing zero duration by zero yields an undefined result.\nMultiplying infinite duration by zero yields an undefined result.\nSumming infinite durations of different signs yields an undefined result.\n',
   },
   {
+    name: 'Duration scaling with fractional, integral, and non-finite Doubles',
+    source: `import kotlin.time.*
+import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.nanoseconds
+import kotlin.time.Duration.Companion.seconds
+fun main() {
+    println(2.seconds * 2.5)
+    println(2.seconds / 2.5)
+    println(2.5 * 2.seconds)
+    println(3 * 2.seconds)
+    println(1.nanoseconds * 0.5)
+    println((-1).nanoseconds * 0.5)
+    println(3.nanoseconds / 2.0)
+    println(365000L.days * 0.5)
+    println(365000L.days * Double.MAX_VALUE)
+    println(1.seconds / -0.0)
+    println(Duration.INFINITE / -2.5)
+    try { println(Duration.ZERO * Double.POSITIVE_INFINITY) } catch (error: IllegalArgumentException) { println(error.message) }
+    try { println(Duration.INFINITE / Double.POSITIVE_INFINITY) } catch (error: IllegalArgumentException) { println(error.message) }
+    try { println(1.seconds * Double.NaN) } catch (error: IllegalArgumentException) { println(error.message) }
+}`,
+    stdout:
+      '5s\n800ms\n5s\n6s\n1ns\n0s\n1ns\n182500d\nInfinity\n-Infinity\n-Infinity\nDuration value cannot be NaN.\nDuration value cannot be NaN.\nCannot round NaN value.\n',
+  },
+  {
+    name: 'Float mathematical overloads retain Float precision and signed zero',
+    source: `import kotlin.math.*
+fun main() {
+    val logarithm: Float = ln(2f)
+    println(listOf(logarithm, log10(2f), log2(2f), log(27f, 3f), exp(0.5f)))
+    println(listOf(sqrt(2f), cbrt(2f), hypot(3f, 4f), log(2f, 1f)))
+    println(listOf(sin(1f), cos(1f), tan(1f), asin(0.5f), acos(0.5f), atan(1f), atan2(1f, -1f)))
+    println(listOf(floor(-0.1f), ceil(-0.1f), round(-0.5f), truncate(-0.1f), (-0.0f).sign))
+}`,
+    stdout:
+      '[0.6931472, 0.30103, 1.0, 3.0, 1.6487212]\n[1.4142135, 1.2599211, 5.0, NaN]\n[0.84147096, 0.5403023, 1.5574077, 0.5235988, 1.0471976, 0.7853982, 2.3561945]\n[-1.0, -0.0, -0.0, -0.0, -0.0]\n',
+  },
+  {
+    name: 'ArrayList copies use the logical size after removing elements',
+    source: `import kotlin.random.Random
+fun main() {
+    val list = mutableListOf<Int>()
+    for (value in 10 downTo 1) list.add(value)
+    repeat(7) { list.removeAt(list.lastIndex) }
+    println(list.toList())
+    println(list.toMutableList())
+    println(list.toTypedArray().contentToString())
+    println(list.reversed())
+    println(list.sorted())
+    println(list.distinct())
+    println(list.shuffled(Random(7)))
+    println(ArrayList(list))
+}`,
+    stdout: '[10, 9, 8]\n[10, 9, 8]\n[10, 9, 8]\n[8, 9, 10]\n[8, 9, 10]\n[10, 9, 8]\n[9, 10, 8]\n[10, 9, 8]\n',
+  },
+  {
+    name: 'nullable Unit returns preserve null in functions and callbacks',
+    source: `fun maybeUnit(take: Boolean): Unit? { if (!take) return null; return Unit }
+fun receive(block: () -> Unit?): Unit? = block()
+fun fail(): Unit { return error("unit") }
+fun main() {
+    val callback: () -> Unit? = { null }
+    val nonNull: () -> Unit = { "discarded" }
+    println(maybeUnit(false))
+    println(maybeUnit(true))
+    println(callback())
+    println(receive { null })
+    println(nonNull())
+    try { fail() } catch (e: IllegalStateException) { println(e.message) }
+}`,
+    stdout: 'null\nkotlin.Unit\nnull\nnull\nkotlin.Unit\nunit\n',
+  },
+  {
     name: 'zip transforms combine arrays, iterables, and character sequences',
     source: `fun main() {
     println("abc".zip("xy") { a, b -> "$a$b" })
@@ -2481,6 +2554,13 @@ fun main() {
   ],
   ['a zero-argument main returning Unit?', false, 'fun main(): Unit? = println("executed")'],
   ['an array-argument main returning Unit?', false, 'fun main(args: Array<String>): Unit? = println(args.size)'],
+  ['fallthrough in a Unit? function', false, 'fun f(): Unit? {}; fun main() { println(f()) }'],
+  ['a bare return from a Unit? function', false, 'fun f(): Unit? { return }; fun main() { println(f()) }'],
+  [
+    'a callback with an incompatible Unit? result',
+    false,
+    'fun f(block: () -> Unit?) = block(); fun main() { f { 1 } }',
+  ],
   [
     'a missing return after a safe assignment with a terminal RHS',
     false,

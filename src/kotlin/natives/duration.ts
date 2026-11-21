@@ -23,8 +23,14 @@ function defineDurations(): void {
   defineNative(`${scope}.durationTimes(Long, Int)`, (frame, _receiver, [raw, scale]) =>
     multiplyDuration(frame, raw as bigint, BigInt(scale as number))
   );
+  defineNative(`${scope}.durationTimes(Long, Double)`, (frame, _receiver, [raw, scale]) =>
+    scaleDuration(frame, raw as bigint, scale as number, 'multiply')
+  );
   defineNative(`${scope}.durationDiv(Long, Int)`, (frame, _receiver, [raw, scale]) =>
     divideDuration(frame, raw as bigint, BigInt(scale as number))
+  );
+  defineNative(`${scope}.durationDiv(Long, Double)`, (frame, _receiver, [raw, scale]) =>
+    scaleDuration(frame, raw as bigint, scale as number, 'divide')
   );
   defineNative(`${scope}.durationRatio(Long, Long)`, (_frame, _receiver, [left, right]) => {
     const a = left as bigint;
@@ -46,6 +52,17 @@ function defineDurations(): void {
   defineNative(`${scope}.durationSubsecondNanos(Long)`, (_frame, _receiver, [raw]) =>
     Number(nanosOf(raw as bigint) % 1_000_000_000n)
   );
+}
+
+function scaleDuration(frame: Frame, raw: bigint, scale: number, operation: 'multiply' | 'divide'): bigint {
+  if (Number.isNaN(scale)) throwError(frame, 'java.lang.IllegalArgumentException', 'Cannot round NaN value.');
+  if (Number.isInteger(scale) && scale >= -2_147_483_648 && scale <= 2_147_483_647) {
+    if (operation === 'multiply') return multiplyDuration(frame, raw, BigInt(scale));
+    if (scale !== 0) return divideDuration(frame, raw, BigInt(scale));
+  }
+  const unit = storageUnit(raw);
+  const value = toDouble(raw, unit);
+  return fromDouble(frame, operation === 'multiply' ? value * scale : value / scale, unit);
 }
 
 function fromDouble(frame: Frame, value: number, unit: bigint): bigint {

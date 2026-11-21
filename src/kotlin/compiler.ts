@@ -20,7 +20,7 @@ import type { NativeFunction, NativeProperty } from './nativeTypes';
 import { Frame, type FunctionInfo, MISSING } from './runtime';
 import { ClassSymbol, FunctionSymbol, type MemberSymbol, VariableSymbol } from './symbols';
 import { isSubtype } from './typeRelations';
-import { type ClassType, type KType, resolved } from './types';
+import { type ClassType, isNonNullClass, type KType, resolved } from './types';
 import { KObject, type Value } from './values';
 
 /** Adds a symbol to the imports of a name, once, since a file's imports are resolved before and after its headers. */
@@ -255,12 +255,7 @@ export class Compiler extends BodyCompiler {
   findMain(context: FileContext): FunctionSymbol | undefined {
     const candidates = this.packages.get(context.packageName)?.functions.get('main') ?? [];
     const entryPoints = candidates.filter(
-      (symbol) =>
-        !symbol.isLibrary &&
-        !symbol.extensionReceiver &&
-        symbol.returnType !== undefined &&
-        !resolved(symbol.returnType).nullable &&
-        this.isClass(symbol.returnType, this.core.unit)
+      (symbol) => !symbol.isLibrary && !symbol.extensionReceiver && isNonNullClass(symbol.returnType, this.core.unit)
     );
     return (
       entryPoints.find((symbol) => symbol.visibility !== 'private' && this.isArgsParameter(symbol)) ??

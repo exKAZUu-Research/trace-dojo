@@ -39,6 +39,7 @@ import {
   type FunctionType,
   hasOpenVariables,
   type InferenceVariable,
+  isNonNullClass,
   isNullable,
   type KType,
   mentionsVariable,
@@ -800,11 +801,7 @@ export abstract class CallCompiler extends CompilerCore {
     );
     if (lambdaType) {
       const bodyType = (resolved(compiled.type) as FunctionType).returnType;
-      const expectedReturn = resolved(lambdaType.returnType);
-      if (
-        !(expectedReturn.kind === 'class' && expectedReturn.cls === this.core.unit) &&
-        !isSubtype(bodyType, lambdaType.returnType)
-      ) {
+      if (!isNonNullClass(lambdaType.returnType, this.core.unit) && !isSubtype(bodyType, lambdaType.returnType)) {
         this.error(argument.row, typeMismatchMessage(lambdaType.returnType, bodyType));
       }
     }
