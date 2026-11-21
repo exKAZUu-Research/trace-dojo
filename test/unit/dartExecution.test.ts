@@ -3032,6 +3032,26 @@ void main() {
   }
 });
 
+test('consuming a stored Dart condition contributes its tested types', () => {
+  for (const use of [
+    'if (stored) {}',
+    'if (!stored) {}',
+    'if (stored && true) {}',
+    'assert(stored);',
+    'final selected = stored ? 1 : 2;',
+    'while (stored) { break; }',
+    'bool copied = stored; if (copied) {}',
+    'n = 2; if (stored) {}',
+  ]) {
+    const program = `void main() { num n = 1; bool stored = n is int; ${use} n = 3; print(n.isEven); }`;
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'false\n' });
+  }
+  for (const use of ['print(stored);', 'stored = true; if (stored) {}']) {
+    const invalid = `void main() { num n = 1; bool stored = n is int; ${use} n = 3; print(n.isEven); }`;
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('writes preserve or recover Dart promotions supported by the value type', () => {
   const valid = `void probe(num n, Object value) {
   if (n is int) {

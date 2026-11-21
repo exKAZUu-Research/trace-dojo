@@ -20,7 +20,7 @@ import type { Declaration, ExtensionInfo, GlobalVariable, TopLevelFunction, Type
 import { formatDouble, stringOf } from './format';
 import { BoundedStringParts } from './library/boundedStringParts';
 import type { Frame } from './runtime';
-import { type ConditionFlow, Flow, LocalVar, type StoredFlow } from './scope';
+import { type ConditionFlow, Flow, LocalVar } from './scope';
 import { isInferenceHole } from './typeInference';
 import {
   closeTypeVariables,
@@ -236,19 +236,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return compiled;
   }
 
-  private applyStoredFlow(stored: StoredFlow, dependencies: ReadonlySet<LocalVar>): Flow {
-    if (!stored.reachable) return this.flow.unreachable;
-    let flow = this.flow;
-    for (const [local, chain] of stored.promotions) {
-      if (!dependencies.has(local) || !this.isPromotable(local)) continue;
-      for (const type of chain) {
-        const current = flow.promotions.get(local)?.at(-1) ?? local.type;
-        if (isSubtype(type, current)) flow = flow.promote(local, type);
-      }
-    }
-    return flow;
-  }
-
   // code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of condition that tells flow analysis something.
   // code-gauge-allow functionNcss 37 -- One case per kind of condition that tells flow analysis something.
   protected compileConditionInner(expression: Expression): { compiled: Compiled; flow: ConditionFlow } {
@@ -259,17 +246,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
       case 'identifier': {
         const resolution = this.resolveName(expression.name);
         if (resolution?.kind !== 'local') break;
-        const { variable } = resolution;
-        const dependencies = this.flow.facts.conditions.get(variable);
-        const { condition } = variable;
-        if (!condition || !dependencies) break;
         const compiled = this.compileExpression(expression);
+        const stored = this.flow.conditionFlowFor(resolution.variable, (local) => this.isPromotable(local));
         return {
           compiled,
-          flow: {
-            whenTrue: this.applyStoredFlow(condition.whenTrue, dependencies),
-            whenFalse: this.applyStoredFlow(condition.whenFalse, dependencies),
-          },
+          flow: stored ?? { whenTrue: this.flow, whenFalse: this.flow },
         };
       }
       case 'bool': {

@@ -15,10 +15,12 @@ import type { Value } from './values';
 
 let nextLocalId = 0;
 
-/** What a condition told flow analysis: whether its branch is reachable and the variables it promoted. */
-export interface StoredFlow {
+type TypeTests = ReadonlyMap<LocalVar, readonly DartType[]>;
+
+interface StoredFlow {
   reachable: boolean;
   promotions: readonly (readonly [LocalVar, readonly DartType[]])[];
+  testedTypes: TypeTests;
 }
 
 export class LocalVar {
@@ -132,7 +134,7 @@ const NO_LOCALS: ReadonlySet<LocalVar> = new Set();
 interface FlowFacts {
   writeCaptured: ReadonlySet<LocalVar>;
   conditions: ReadonlyMap<LocalVar, ReadonlySet<LocalVar>>;
-  testedTypes: ReadonlyMap<LocalVar, readonly DartType[]>;
+  testedTypes: TypeTests;
 }
 
 const NO_FACTS: FlowFacts = { writeCaptured: NO_LOCALS, conditions: new Map(), testedTypes: new Map() };
@@ -176,12 +178,58 @@ export class Flow {
     if (!variable.condition) return this;
     const { whenTrue, whenFalse } = variable.condition;
     const dependencies = new Set([...whenTrue.promotions, ...whenFalse.promotions].map(([local]) => local));
-    if (dependencies.size === 0 && whenTrue.reachable && whenFalse.reachable) return this;
+    if (
+      dependencies.size === 0 &&
+      whenTrue.reachable &&
+      whenFalse.reachable &&
+      whenTrue.testedTypes.size === 0 &&
+      whenFalse.testedTypes.size === 0
+    )
+      return this;
     const conditions = new Map([...this.facts.conditions, [variable, dependencies]]);
     return new Flow(this.reachable, this.promotions, this.assigned, this.maybeAssigned, this.writes, {
       ...this.facts,
       conditions,
     });
+  }
+
+  captureConditionBranch(before: Flow): StoredFlow {
+    const promotions = [...this.promotions].filter(([variable, chain]) => before.promotions.get(variable) !== chain);
+    const testedTypes = new Map<LocalVar, readonly DartType[]>();
+    for (const [variable, types] of this.facts.testedTypes) {
+      const prior = before.facts.testedTypes.get(variable) ?? [];
+      if (prior === types) continue;
+      const introduced = types.filter((type) => !prior.some((previous) => sameType(type, previous)));
+      if (introduced.length > 0) testedTypes.set(variable, introduced);
+    }
+    return { reachable: this.reachable, promotions, testedTypes };
+  }
+
+  conditionFlowFor(variable: LocalVar, isPromotable: (local: LocalVar) => boolean): ConditionFlow | undefined {
+    const dependencies = this.facts.conditions.get(variable);
+    const { condition } = variable;
+    if (!condition || !dependencies) return undefined;
+    return {
+      whenTrue: this.applyConditionBranch(condition.whenTrue, dependencies, isPromotable),
+      whenFalse: this.applyConditionBranch(condition.whenFalse, dependencies, isPromotable),
+    };
+  }
+
+  private applyConditionBranch(
+    stored: StoredFlow,
+    dependencies: ReadonlySet<LocalVar>,
+    isPromotable: (local: LocalVar) => boolean
+  ): Flow {
+    let flow = this.withAddedTypeTests(stored.testedTypes);
+    if (!stored.reachable) return flow.unreachable;
+    for (const [local, chain] of stored.promotions) {
+      if (!dependencies.has(local) || !isPromotable(local)) continue;
+      for (const type of chain) {
+        const current = flow.promotions.get(local)?.at(-1) ?? local.type;
+        if (isSubtype(type, current)) flow = flow.promote(local, type);
+      }
+    }
+    return flow;
   }
 
   withWrites(writes: ReadonlySet<LocalVar> | undefined): Flow {
@@ -315,7 +363,11 @@ export class Flow {
   }
 
   inheritTypeTests(other: Flow): Flow {
-    const testedTypes = mergeTypeTests(this.facts.testedTypes, other.facts.testedTypes);
+    return this.withAddedTypeTests(other.facts.testedTypes);
+  }
+
+  private withAddedTypeTests(types: TypeTests): Flow {
+    const testedTypes = mergeTypeTests(this.facts.testedTypes, types);
     return testedTypes === this.facts.testedTypes ? this : this.withFacts({ ...this.facts, testedTypes });
   }
 }
@@ -347,7 +399,7 @@ function joinFacts(a: Flow, b: Flow): FlowFacts {
   };
 }
 
-function mergeTypeTests(first: FlowFacts['testedTypes'], second: FlowFacts['testedTypes']): FlowFacts['testedTypes'] {
+function mergeTypeTests(first: TypeTests, second: TypeTests): TypeTests {
   if (first.size === 0 || first === second) return second;
   if (second.size === 0) return first;
   const merged = new Map(first);

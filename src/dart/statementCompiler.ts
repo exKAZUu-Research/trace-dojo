@@ -19,7 +19,7 @@ import type { ClassInfo } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import { type CompiledPattern, isRefutableSyntax, PatternCompiler } from './patternCompiler';
 import type { Frame } from './runtime';
-import { Flow, FunctionContext, type JumpTarget, type LocalVar, type StoredFlow } from './scope';
+import { Flow, FunctionContext, type JumpTarget, type LocalVar } from './scope';
 import {
   coreTypes,
   type DartType,
@@ -524,8 +524,8 @@ export abstract class StatementCompiler extends PatternCompiler {
       const result = this.compileConditionInner(initializer);
       compiled = result.compiled;
       this.pendingCondition = {
-        whenTrue: storeFlow(result.flow.whenTrue, savedFlow),
-        whenFalse: storeFlow(result.flow.whenFalse, savedFlow),
+        whenTrue: result.flow.whenTrue.captureConditionBranch(savedFlow),
+        whenFalse: result.flow.whenFalse.captureConditionBranch(savedFlow),
       };
     } else {
       compiled = this.withConstContext(declaration.isConst, () => this.compileExpression(initializer, declaredType));
@@ -1315,13 +1315,13 @@ function isBoolType(type: DartType): boolean {
   return type.kind === 'interface' && type.cls === coreTypes.bool && !type.nullable;
 }
 
-/** Expressions whose truth tells flow analysis something: comparisons, type tests, negations, and literals. */
 function isConditionShaped(expression: Expression): boolean {
   switch (expression.kind) {
     case 'binary': {
       return ['==', '!=', '&&', '||'].includes(expression.operator);
     }
     case 'is':
+    case 'identifier':
     case 'bool': {
       return true;
     }
@@ -1335,10 +1335,4 @@ function isConditionShaped(expression: Expression): boolean {
       return false;
     }
   }
-}
-
-/** What a branch's flow adds to the flow before the condition. */
-function storeFlow(flow: Flow, before: Flow): StoredFlow {
-  const promotions = [...flow.promotions].filter(([variable, type]) => before.promotions.get(variable) !== type);
-  return { reachable: flow.reachable, promotions };
 }
