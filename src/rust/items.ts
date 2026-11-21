@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 966 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss 969 -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
@@ -583,23 +583,7 @@ export class ItemCollector {
   private checkStdTraitImpl(item: ImplItem, impl: ImplDef, trait: TraitDef): void {
     const traitModule = trait.module as Module;
     if (traitModule.isStd && !(impl.module as Module).isStd && !STD_TRAITS_LEARNERS_IMPLEMENT.has(trait.name)) {
-      const operators = [
-        'Add',
-        'Sub',
-        'Mul',
-        'Div',
-        'Rem',
-        'Neg',
-        'Not',
-        'AddAssign',
-        'SubAssign',
-        'MulAssign',
-        'DivAssign',
-        'RemAssign',
-        'Index',
-        'IndexMut',
-      ];
-      const what = operators.includes(trait.name)
+      const what = OPERATOR_TRAITS.has(trait.name)
         ? `演算子の多重定義（impl ${trait.name}）`
         : `標準ライブラリのトレイト ${trait.name} の実装`;
       compileError(item.span, `${what}は、この採点環境では使えません。`);
@@ -1648,6 +1632,24 @@ function lowerAdtPath(path: PathAst, def: AdtDef, args: Type[], scope: TypeScope
   return last.lifetimes?.length ? { kind: 'adt', def, args, lifetimes: last.lifetimes } : adt(def, args);
 }
 
+/** The standard library's operator traits, which learning programs neither implement nor use as bounds here. */
+const OPERATOR_TRAITS = new Set([
+  'Add',
+  'Sub',
+  'Mul',
+  'Div',
+  'Rem',
+  'Neg',
+  'Not',
+  'AddAssign',
+  'SubAssign',
+  'MulAssign',
+  'DivAssign',
+  'RemAssign',
+  'Index',
+  'IndexMut',
+]);
+
 /** Lowers a bound on `self`, which closure traits complete with their signature. */
 export function lowerBound(bound: BoundAst, scope: TypeScope, self: Type | undefined): TraitRef {
   if (bound.kind === 'static') return { trait: scope.module.program.staticBound, args: [] };
@@ -1663,7 +1665,12 @@ export function lowerBound(bound: BoundAst, scope: TypeScope, self: Type | undef
     };
   }
   const ref = resolveTraitPath(bound.path, scope, self);
-  if (['Fn', 'FnMut', 'FnOnce'].includes(ref.trait.name) && (ref.trait.module as Module | undefined)?.isStd) {
+  const isStd = (ref.trait.module as Module | undefined)?.isStd;
+  // Generic arithmetic needs the operators' `Output`, which the interpreter does not model, like their impls.
+  if (isStd && OPERATOR_TRAITS.has(ref.trait.name)) {
+    compileError(bound.path.span, `演算子のトレイト ${ref.trait.name} を使う境界は、この採点環境では使えません。`);
+  }
+  if (['Fn', 'FnMut', 'FnOnce'].includes(ref.trait.name) && isStd) {
     compileError(
       bound.span,
       `${ref.trait.name} の境界には、引数と戻り値の型を書いてください（${ref.trait.name}(i32) -> i32）。`

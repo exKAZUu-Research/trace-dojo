@@ -8779,3 +8779,11 @@ test('the items a reborrowed iterator yields do not keep the iterator borrowed',
     stdout: '[1] [3, 2] Some("c") None\n',
   });
 });
+
+test('an operator trait used as a bound is reported as unavailable', () => {
+  const program = rustMain('    println!("{}", same(1));', 'fn same<T: std::ops::Add>(a: T) -> T { a }');
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: '演算子のトレイト Add を使う境界は、この採点環境では使えません。' }],
+  });
+});
