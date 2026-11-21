@@ -123,13 +123,14 @@ function search(
   receiver: Value,
   target: string,
   ignoreCase: boolean,
-  charTarget = false
-): { indexOf: (start: number) => number; lastIndexOf: (start: number) => number } {
+  codeUnitsOnly = false
+): { includes: () => boolean; indexOf: (start: number) => number; lastIndexOf: (start: number) => number } {
   const value = sequenceText(frame, receiver);
-  const supplementary = typeof receiver === 'string' && !charTarget;
+  const supplementary = typeof receiver === 'string' && !codeUnitsOnly;
   const haystack = ignoreCase ? foldedText(frame, value, supplementary) : value;
   const needle = ignoreCase ? foldedText(frame, target, supplementary) : target;
   return {
+    includes: () => haystack.includes(needle),
     indexOf: (start) => haystack.indexOf(needle, start),
     lastIndexOf: (start) => (start < 0 ? -1 : haystack.lastIndexOf(needle, start)),
   };
@@ -202,6 +203,8 @@ const TEXT_CASE_AND_TRIM_NATIVES: Record<string, TextNative> = {
 const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
   'CharSequence.contains(CharSequence)': (frame, receiver, [other]) =>
     sequenceText(frame, receiver).includes(sequenceText(frame, other)),
+  'CharSequence.contains(CharSequence, Boolean)': (frame, receiver, [other, ignoreCase]) =>
+    search(frame, receiver, sequenceText(frame, other), ignoreCase === true, typeof other !== 'string').includes(),
   'CharSequence.indexOf(String, Int, Boolean)': (frame, receiver, [other, start, ignoreCase]) =>
     search(frame, receiver, text(other), ignoreCase === true).indexOf(Math.max(0, start as number)),
   'CharSequence.indexOf(Char, Int, Boolean)': (frame, receiver, [char, start, ignoreCase]) =>

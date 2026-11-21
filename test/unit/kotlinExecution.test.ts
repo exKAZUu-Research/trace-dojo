@@ -153,6 +153,10 @@ fun main() {
     source: `fun main() {
     println("İabc".indexOf("ABC", ignoreCase = true))
     println("İ".equals("i", ignoreCase = true))
+    println("i".contains("İ", ignoreCase = true))
+    println("hello".contains('E', ignoreCase = true))
+    println("İ".startsWith('i', ignoreCase = true))
+    println(StringBuilder("hello").endsWith('O', ignoreCase = true))
     println("İaİ".lastIndexOf("i", ignoreCase = true))
     println("sſ".endsWith("SS", ignoreCase = true))
     println("Σσς".replace("σ", "x", ignoreCase = true))
@@ -165,7 +169,7 @@ fun main() {
     println("abc".replace("", "-", ignoreCase = true))
     println('İ'.equals('i', ignoreCase = true))
 }`,
-    stdout: '1\ntrue\n2\ntrue\nxxx\n[, -a-, ]\ntrue\n-1\n55200\n-55200\n43217\n-a-b-c-\ntrue\n',
+    stdout: '1\ntrue\ntrue\ntrue\ntrue\ntrue\n2\ntrue\nxxx\n[, -a-, ]\ntrue\n-1\n55200\n-55200\n43217\n-a-b-c-\ntrue\n',
   },
   {
     name: 'indentation trimming normalizes Windows and classic Mac line endings',

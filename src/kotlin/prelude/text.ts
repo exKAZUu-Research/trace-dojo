@@ -175,12 +175,14 @@ external fun String.startsWith(prefix: String, ignoreCase: Boolean = false): Boo
 fun String.startsWith(prefix: String, startIndex: Int, ignoreCase: Boolean = false): Boolean =
     startIndex >= 0 && startIndex <= length - prefix.length && substring(startIndex, startIndex + prefix.length).equals(prefix, ignoreCase)
 external fun String.endsWith(suffix: String, ignoreCase: Boolean = false): Boolean
-fun String.startsWith(char: Char): Boolean = this.length > 0 && this[0] == char
-fun String.endsWith(char: Char): Boolean = this.length > 0 && this[length - 1] == char
+fun CharSequence.startsWith(char: Char, ignoreCase: Boolean = false): Boolean =
+    length > 0 && this[0].equals(char, ignoreCase)
+fun CharSequence.endsWith(char: Char, ignoreCase: Boolean = false): Boolean =
+    length > 0 && this[length - 1].equals(char, ignoreCase)
 external operator fun CharSequence.contains(other: CharSequence): Boolean
-fun CharSequence.contains(other: CharSequence, ignoreCase: Boolean): Boolean =
-    if (ignoreCase) toString().lowercase().contains(other.toString().lowercase()) else contains(other)
-operator fun CharSequence.contains(char: Char): Boolean = indexOf(char) >= 0
+external fun CharSequence.contains(other: CharSequence, ignoreCase: Boolean): Boolean
+operator fun CharSequence.contains(char: Char, ignoreCase: Boolean = false): Boolean =
+    indexOf(char, ignoreCase = ignoreCase) >= 0
 
 operator fun Char.plus(other: String): String = toString() + other
 external fun CharSequence.indexOf(string: String, startIndex: Int = 0, ignoreCase: Boolean = false): Int
