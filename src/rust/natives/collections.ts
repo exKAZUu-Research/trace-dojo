@@ -490,6 +490,7 @@ function removeOccupied(self: Value): [Value, Value] {
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
 function treeRange<V extends Value>(
   ctx: NativeContext,
+  owner: MapValue | SetValue,
   collection: CollectionEntries<V>,
   range: Value,
   name: 'BTreeMap' | 'BTreeSet'
@@ -514,13 +515,17 @@ function treeRange<V extends Value>(
     }
   }
   const entry: Type = name === 'BTreeMap' ? { kind: 'tuple', elems: ctx.typeArgs.slice(0, 2) } : type;
-  // The iterator borrows the collection, which cannot change while it runs, so it reads entries as it goes.
+  // The iterator borrows the collection, which cannot change while it runs, so it reads entries as it goes, and it
+  // keeps the collection alive, which may be a temporary only the iterator holds.
   const [from, to] = collection.rangeRanks(type, start, end);
-  return arrayIter([], from, Math.max(from, to), (rank) => collection.entryAt(rank), entry);
+  const iter = arrayIter([], from, Math.max(from, to), (rank) => collection.entryAt(rank), entry);
+  iter.borrowedRoots.push(owner);
+  return iter;
 }
 
-natives['BTreeMap<_, _>::range'] = ([self, range], ctx) => treeRange(ctx, map(self).entries, range, 'BTreeMap');
-natives['BTreeSet<_>::range'] = ([self, range], ctx) => treeRange(ctx, set(self).entries, range, 'BTreeSet');
+natives['BTreeMap<_, _>::range'] = ([self, range], ctx) =>
+  treeRange(ctx, map(self), map(self).entries, range, 'BTreeMap');
+natives['BTreeSet<_>::range'] = ([self, range], ctx) => treeRange(ctx, set(self), set(self).entries, range, 'BTreeSet');
 for (const [name, native] of Object.entries(mapNatives(false))) natives[`HashMap<_, _>::${name}`] = native;
 for (const [name, native] of Object.entries(mapNatives(true))) natives[`BTreeMap<_, _>::${name}`] = native;
 for (const [name, native] of Object.entries(setNatives(false))) natives[`HashSet<_>::${name}`] = native;
