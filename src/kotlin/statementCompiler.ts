@@ -13,20 +13,22 @@ import type {
 } from './ast';
 import { isNullLiteral } from './ast';
 import type { ArgumentSyntax } from './callCompiler';
-import { type FunctionContext,
+import {
   type Compiled,
   convertRepr,
   type Eval,
   excludingCases,
   type ExpressionUse,
   Flow,
+  type FunctionContext,
   Handoff,
   isBareCall,
   type LoopContext,
   type Repr,
   reprOf,
   Scope,
-  typeMismatchMessage } from './compilerBase';
+  typeMismatchMessage,
+} from './compilerBase';
 import { getPropertyValue, setPropertyValue } from './dispatch';
 import { type BoundPlace, type Place } from './expressionCompiler';
 import { caseOf, keyOf } from './flowKeys';
