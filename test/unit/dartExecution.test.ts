@@ -2175,6 +2175,41 @@ void main() {
   });
 });
 
+test('write captures invalidate promotions from the point the closure can exist', () => {
+  const program = `void expression(Object? value, bool change) {
+  if (value is String) {
+    print(value.length);
+    if (change) {
+      var assign = () { value = 1; };
+      assign();
+    } else {
+      print(value.length);
+    }
+  }
+}
+void declaration(Object? value) {
+  if (value is String) {
+    print(value.length);
+    void assign() { value = 1; }
+    assign();
+  }
+}
+void main() {
+  expression('hello', false);
+  declaration('Dart');
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '5\n5\n4\n' });
+  const invalid = `void use(Object? value, bool change) {
+  if (change) {
+    void assign() { value = 1; }
+    assign();
+  }
+  if (value is String) print(value.length);
+}
+void main() { use('hello', false); }`;
+  expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+});
+
 test('a closure inherits promotions when assignments target shadowed locals', () => {
   const program = `void main() {
   int? total = 5;

@@ -81,7 +81,7 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   // Functions
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Parameters, the body, and return-type inference.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Parameters, the body, and return-type inference share the closure's flow.
   // code-gauge-allow functionNcss 47 -- Parameters, the body, and return-type inference share the function context.
   compileFunction(spec: FunctionSpec & { isClosure?: boolean }): CompiledFunction {
     const isClosure = spec.isClosure ?? spec.name === '<anonymous closure>';
@@ -108,7 +108,9 @@ export abstract class StatementCompiler extends PatternCompiler {
             [...savedFlow.promotions].filter(([variable]) => !variable.hasAssignment && !variable.isWriteCaptured)
           ),
           savedFlow.assigned,
-          savedFlow.maybeAssigned
+          savedFlow.maybeAssigned,
+          undefined,
+          savedFlow.writeCaptured
         )
       : Flow.start();
     this.recordsSteps = this.isTracing;
@@ -144,7 +146,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       return { fn, returnType, run, bind: binders, usesTypeEnv: true };
     } finally {
       this.fn = savedFn;
-      this.flow = savedFlow;
+      this.flow = isClosure ? savedFlow.forget([], this.localsNamed(assignments.free)) : savedFlow;
       this.recordsSteps = savedRecords;
     }
   }
@@ -761,16 +763,29 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   /** Forgets what a loop's body may change before compiling it, as flow analysis does at a loop's start. */
   protected enterLoop(statement: object): void {
-    this.flow = this.flow.forget(this.writtenLocals(statement));
+    this.flow = this.forgetWrites(this.flow, statement);
   }
 
   protected writtenLocals(statement: object): LocalVar[] {
-    const { locals, free } = assignmentTargets(statement);
+    return this.localWrites(assignmentTargets(statement));
+  }
+
+  protected forgetWrites(flow: Flow, statement: object): Flow {
+    const targets = assignmentTargets(statement);
+    return flow.forget(this.localWrites(targets), this.localsNamed(targets.freeCaptured));
+  }
+
+  private localsNamed(names: ReadonlySet<string>): LocalVar[] {
     const variables: LocalVar[] = [];
-    for (const name of free) {
+    for (const name of names) {
       const variable = this.findLocal(name);
       if (variable) variables.push(variable);
     }
+    return variables;
+  }
+
+  private localWrites({ locals, free }: ReturnType<typeof assignmentTargets>): LocalVar[] {
+    const variables = this.localsNamed(free);
     for (const [syntax, names] of locals) {
       for (const name of names) {
         const variable = this.findLocal(name);

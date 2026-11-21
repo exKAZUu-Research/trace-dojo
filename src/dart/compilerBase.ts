@@ -748,9 +748,8 @@ export abstract class CompilerBase {
     return this.flow.promotions.get(variable)?.at(-1) ?? variable.type;
   }
 
-  /** Whether a local can be promoted: not write-captured and not a late variable read in a closure. */
   isPromotable(variable: LocalVar): boolean {
-    if (variable.isWriteCaptured) return false;
+    if (this.flow.writeCaptured.has(variable)) return false;
     if (variable.owner !== this.fn && variable.hasAssignment) return false;
     return true;
   }

@@ -19,7 +19,7 @@ export class LocalVar {
   inPatternGuard = false;
   fieldReceiver?: LocalVar;
   hasAssignment = false;
-  /** Assigned inside a closure, which stops Dart from promoting it. */
+  /** A nested function might assign this local somewhere in its enclosing function. */
   isWriteCaptured = false;
   /** Read inside a closure. */
   isCaptured = false;
@@ -119,6 +119,8 @@ export class FunctionContext {
   }
 }
 
+const NO_LOCALS: ReadonlySet<LocalVar> = new Set();
+
 /** What flow analysis knows at a point of a function: reachability, promotions, and definite assignment. */
 export class Flow {
   constructor(
@@ -128,7 +130,8 @@ export class Flow {
     readonly assigned: ReadonlySet<LocalVar>,
     /** Variables possibly assigned, for `final` and `late final` checks. */
     readonly maybeAssigned: ReadonlySet<LocalVar>,
-    readonly writes?: ReadonlySet<LocalVar>
+    readonly writes?: ReadonlySet<LocalVar>,
+    readonly writeCaptured: ReadonlySet<LocalVar> = NO_LOCALS
   ) {}
 
   static start(): Flow {
@@ -136,11 +139,11 @@ export class Flow {
   }
 
   get unreachable(): Flow {
-    return new Flow(false, this.promotions, this.assigned, this.maybeAssigned, this.writes);
+    return new Flow(false, this.promotions, this.assigned, this.maybeAssigned, this.writes, this.writeCaptured);
   }
 
   withWrites(writes: ReadonlySet<LocalVar> | undefined): Flow {
-    return new Flow(this.reachable, this.promotions, this.assigned, this.maybeAssigned, writes);
+    return new Flow(this.reachable, this.promotions, this.assigned, this.maybeAssigned, writes, this.writeCaptured);
   }
 
   restoreWrites(outer: ReadonlySet<LocalVar> | undefined): Flow {
@@ -165,7 +168,8 @@ export class Flow {
       new Map([...this.promotions, [variable, chain]]),
       this.assigned,
       this.maybeAssigned,
-      this.writes
+      this.writes,
+      this.writeCaptured
     );
   }
 
@@ -173,7 +177,7 @@ export class Flow {
     const promotions = new Map(this.promotions);
     forgetPromotions(promotions, new Set([variable]));
     if (promotions.size === this.promotions.size) return this;
-    return new Flow(this.reachable, promotions, this.assigned, this.maybeAssigned, this.writes);
+    return new Flow(this.reachable, promotions, this.assigned, this.maybeAssigned, this.writes, this.writeCaptured);
   }
 
   assign(variable: LocalVar): Flow {
@@ -182,17 +186,26 @@ export class Flow {
       this.promotions,
       new Set([...this.assigned, variable]),
       new Set([...this.maybeAssigned, variable]),
-      this.writes ? new Set([...this.writes, variable]) : undefined
+      this.writes ? new Set([...this.writes, variable]) : undefined,
+      this.writeCaptured
     );
   }
 
   /** Forgets what `variables` held, as a loop that may assign them does at its start. */
-  forget(variables: Iterable<LocalVar>): Flow {
+  forget(variables: Iterable<LocalVar>, captured: readonly LocalVar[] = []): Flow {
+    const names = new Set([...variables, ...captured]);
+    if (names.size === 0) return this;
     const promotions = new Map(this.promotions);
-    const names = new Set(variables);
     forgetPromotions(promotions, names);
     const maybeAssigned = new Set([...this.maybeAssigned, ...names]);
-    return new Flow(this.reachable, promotions, this.assigned, maybeAssigned, this.writes && union(this.writes, names));
+    return new Flow(
+      this.reachable,
+      promotions,
+      this.assigned,
+      maybeAssigned,
+      this.writes && union(this.writes, names),
+      captured.length > 0 ? new Set([...this.writeCaptured, ...captured]) : this.writeCaptured
+    );
   }
 
   /** What is known after two paths meet. */
@@ -205,7 +218,8 @@ export class Flow {
             b.promotions,
             intersect(a.assigned, b.assigned),
             union(a.maybeAssigned, b.maybeAssigned),
-            combineWrites(a.writes, b.writes)
+            combineWrites(a.writes, b.writes),
+            union(a.writeCaptured, b.writeCaptured)
           );
     if (!b.reachable) return a;
     const promotions = new Map<LocalVar, readonly DartType[]>();
@@ -220,7 +234,8 @@ export class Flow {
       promotions,
       intersect(a.assigned, b.assigned),
       union(a.maybeAssigned, b.maybeAssigned),
-      combineWrites(a.writes, b.writes)
+      combineWrites(a.writes, b.writes),
+      union(a.writeCaptured, b.writeCaptured)
     );
   }
 }

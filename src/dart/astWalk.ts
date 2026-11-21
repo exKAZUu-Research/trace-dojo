@@ -20,6 +20,7 @@ interface AssignmentTargets {
   locals: Writes;
   captured: Writes;
   free: Set<string>;
+  freeCaptured: Set<string>;
 }
 
 export function assignmentTargets(root: object, parameters?: FormalParameters): AssignmentTargets {
@@ -56,7 +57,12 @@ export function nullPatternComparison(pattern: Pattern): '==' | '!=' | undefined
 }
 
 class AssignmentWalker {
-  readonly targets: AssignmentTargets = { locals: new Map(), captured: new Map(), free: new Set() };
+  readonly targets: AssignmentTargets = {
+    locals: new Map(),
+    captured: new Map(),
+    free: new Set(),
+    freeCaptured: new Set(),
+  };
   private readonly scopes: Map<string, Binding>[] = [new Map()];
   private depth = 0;
 
@@ -79,7 +85,7 @@ class AssignmentWalker {
     for (const child of Object.values(node)) this.visit(child);
   }
 
-  // code-gauge-allow functionNcss 52 -- One case per scope introduced by the syntax.
+  // code-gauge-allow functionNcss 56 -- One case per scope introduced by the syntax.
   private visitScopedNode(node: Node): boolean {
     switch (node.kind) {
       case 'block': {
@@ -87,8 +93,10 @@ class AssignmentWalker {
         return true;
       }
       case 'variables': {
-        for (const syntax of (node as unknown as VariableDeclaration).variables) {
-          this.visit(syntax.initializer);
+        const declaration = node as unknown as VariableDeclaration;
+        for (const syntax of declaration.variables) {
+          if (declaration.isLate) this.inFunction(() => this.visit(syntax.initializer));
+          else this.visit(syntax.initializer);
           this.bind(syntax.name, syntax);
         }
         return true;
@@ -147,12 +155,16 @@ class AssignmentWalker {
   }
 
   private visitFunction(declaration: Node): void {
+    this.inFunction(() => {
+      this.bindParameters(declaration.parameters as FormalParameters);
+      this.visit(declaration.body);
+    });
+  }
+
+  private inFunction(visit: () => void): void {
     this.depth++;
     try {
-      this.inScope(() => {
-        this.bindParameters(declaration.parameters as FormalParameters);
-        this.visit(declaration.body);
-      });
+      this.inScope(visit);
     } finally {
       this.depth--;
     }
@@ -238,6 +250,7 @@ class AssignmentWalker {
       return;
     }
     this.targets.free.add(name);
+    if (this.depth > 0) this.targets.freeCaptured.add(name);
   }
 
   private inScope(visit: () => void): void {

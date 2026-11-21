@@ -197,7 +197,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     const before = this.flow;
     const body = this.compileBlock(statement.body);
     let after = this.flow;
-    const exceptionalFlow = before.forget(this.writtenLocals(statement.body));
+    const exceptionalFlow = this.forgetWrites(before, statement.body);
     const catches = statement.catches.map((clause) => {
       this.flow = exceptionalFlow;
       const compiled = this.compileCatch(clause);
@@ -254,10 +254,10 @@ export abstract class ControlCompiler extends StatementCompiler {
     if (!block) return undefined;
 
     const tryBlocks = [statement.body, ...statement.catches.map((clause) => clause.body)];
-    this.flow = Flow.join(afterTry, before.forget(this.writtenLocals(tryBlocks)));
+    this.flow = Flow.join(afterTry, this.forgetWrites(before, tryBlocks));
     const run = compile(block);
     const afterFinally = this.flow;
-    const promotions = new Map(afterTry.forget(this.writtenLocals(block)).promotions);
+    const promotions = new Map(this.forgetWrites(afterTry, block).promotions);
     for (const [variable, chain] of afterFinally.promotions) {
       const existing = promotions.get(variable) ?? [];
       const current = existing.at(-1);
@@ -269,7 +269,8 @@ export abstract class ControlCompiler extends StatementCompiler {
       promotions,
       new Set([...afterTry.assigned, ...afterFinally.assigned]),
       new Set([...afterTry.maybeAssigned, ...afterFinally.maybeAssigned]),
-      afterFinally.writes
+      afterFinally.writes,
+      afterFinally.writeCaptured
     );
     return run;
   }
@@ -466,7 +467,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     const before = this.flow;
     const body = this.compileGenBlock(statement.body);
     let after = this.flow;
-    const exceptionalFlow = before.forget(this.writtenLocals(statement.body));
+    const exceptionalFlow = this.forgetWrites(before, statement.body);
     const catches = statement.catches.map((clause) => {
       this.flow = exceptionalFlow;
       const compiled = this.compileCatchClause(clause, (block) => this.compileGenBlock(block));
