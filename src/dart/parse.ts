@@ -52,10 +52,23 @@ function semicolonRow(node: Node, tokens: readonly Node[]): number | undefined {
   if (previous.type === '}' && isRecoveredBodyLiteral(previous.parent)) {
     return tokens[recoveredBodyEnd(tokens, index - 1)].endPosition.row;
   }
-  if (node.isError && previous.endPosition.row < node.startPosition.row && !STATEMENT_ENDS.has(previous.type)) {
-    return previous.endPosition.row;
+  if (!node.isError || previous.endPosition.row >= node.startPosition.row || STATEMENT_ENDS.has(previous.type)) {
+    return undefined;
   }
-  return undefined;
+  // After a token that opens a statement body, the unread text is itself the statement lacking its `;`.
+  return startsStatementBody(tokens, index) ? node.endPosition.row : previous.endPosition.row;
+}
+
+function startsStatementBody(tokens: readonly Node[], index: number): boolean {
+  const token = tokens[index];
+  if (token.type === ':' || token.type === 'else' || token.type === 'do') return true;
+  if (token.type !== ')') return false;
+  let depth = 0;
+  for (let opener = index; opener > 0; opener--) {
+    if (tokens[opener].type === ')') depth++;
+    else if (tokens[opener].type === '(' && --depth === 0) return LOOP_OR_IF_KEYWORDS.has(tokens[opener - 1].type);
+  }
+  return false;
 }
 
 function recoveredBodyEnd(tokens: readonly Node[], end: number): number {
@@ -87,6 +100,8 @@ function isRecoveredBodyLiteral(literal: Node | null): boolean {
 
 const CLOSERS: Record<string, string> = { '{': '}', '${': '}', '(': ')', '[': ']', '?[': ']' };
 const STATEMENT_ENDS = new Set([';', '{', '}']);
+const LOOP_OR_IF_KEYWORDS = new Set(['if', 'for', 'while']);
+const BLOCK_HEADER_KEYWORDS = new Set([...LOOP_OR_IF_KEYWORDS, 'switch', 'catch']);
 
 /** The tokens of a tree in source order, without the zero-width ones error recovery inserts. */
 function leafTokens(root: Node): Node[] {
@@ -116,48 +131,82 @@ function errorNodes(root: Node, limit: number): Node[] {
   return found;
 }
 
-/**
- * The brackets without a closing one, innermost first, paired as the SDK's scanner pairs them. When one `{` is left
- * open and the file's last `}` begins a line indented unlike the line of the `{` it closes, the SDK takes that `}` to
- * close the outer one and reports the inner `{` instead.
- */
+/** The brackets without a closing one, innermost first, paired as the SDK's scanner pairs them. */
 function unclosedBrackets(tokens: readonly Node[], source: string): Node[] {
-  const stack: Node[] = [];
-  const unclosed: Node[] = [];
-  let lastCurly: { opener: Node; closer: Node } | undefined;
-  for (const token of tokens) {
+  const stack: number[] = [];
+  const unclosed: number[] = [];
+  const pairs = new Map<number, number>();
+  for (const [index, token] of tokens.entries()) {
     if (token.type in CLOSERS) {
-      stack.push(token);
+      stack.push(index);
       continue;
     }
     if (token.type !== '}' && token.type !== ')' && token.type !== ']') continue;
-    const index = stack.findLastIndex((opener) => CLOSERS[opener.type] === token.type);
-    if (index === -1) continue;
-    unclosed.push(...stack.splice(index + 1).toReversed());
-    const opener = stack.pop() as Node;
-    if (token.type === '}') lastCurly = { opener, closer: token };
+    const position = stack.findLastIndex((opener) => CLOSERS[tokens[opener].type] === token.type);
+    if (position === -1) continue;
+    unclosed.push(...stack.splice(position + 1).toReversed());
+    const opener = stack.pop() as number;
+    pairs.set(opener, index);
+    pairs.set(index, opener);
   }
   unclosed.unshift(...stack.toReversed());
-  if (
-    unclosed.length === 1 &&
-    unclosed[0].type === '{' &&
-    lastCurly &&
-    lastCurly.opener.startIndex > unclosed[0].startIndex
-  ) {
-    const { opener, closer } = lastCurly;
-    if (startsLine(closer, source) && closer.startPosition.column !== indentationOf(opener, source)) return [opener];
+  if (unclosed.length === 1 && tokens[unclosed[0]].type === '{') {
+    const blamed = misalignedOpener(tokens, pairs, unclosed[0], source);
+    if (blamed !== undefined) return [tokens[blamed]];
   }
-  return unclosed;
+  return unclosed.map((index) => tokens[index]);
 }
 
-function startsLine(token: Node, source: string): boolean {
-  const lineStart = source.lastIndexOf('\n', token.startIndex - 1) + 1;
-  return source.slice(lineStart, token.startIndex).trim() === '';
+/**
+ * The SDK scanner's `getOffsetForCurlyBracketRecoveryStart`: when a single `{` lacks its `}`, the last later `{` whose
+ * `}` is indented unlike the `{`'s logical line is the one missing its `}`.
+ */
+function misalignedOpener(
+  tokens: readonly Node[],
+  pairs: ReadonlyMap<number, number>,
+  unclosed: number,
+  source: string
+): number | undefined {
+  let blamed: number | undefined;
+  for (let index = unclosed + 1; index < tokens.length; index++) {
+    if (tokens[index].type !== '{' && tokens[index].type !== '${') continue;
+    const closer = pairs.get(index);
+    if (closer === undefined || tokens[closer].startPosition.row === tokens[index].startPosition.row) continue;
+    const indentation = logicalIndentation(tokens, pairs, index, source);
+    if (indentation >= 0 && indentation !== logicalIndentation(tokens, pairs, closer, source)) blamed = index;
+  }
+  return blamed;
 }
 
-function indentationOf(token: Node, source: string): number {
-  const lineStart = source.lastIndexOf('\n', token.startIndex - 1) + 1;
-  return /^[ \t]*/.exec(source.slice(lineStart))?.[0].length ?? 0;
+/**
+ * The SDK scanner's `_spacesAtStartOfLogicalLineOf`: the column of the first token on the line of `tokens[index]`, or
+ * for a block's `{` on the line of the statement that opens the block; -1 for a `{` of any other kind.
+ */
+function logicalIndentation(
+  tokens: readonly Node[],
+  pairs: ReadonlyMap<number, number>,
+  index: number,
+  source: string
+): number {
+  let anchor = index;
+  if (tokens[index].type === '{') {
+    const previous = tokens[index - 1]?.type;
+    const opener = previous === ')' ? pairs.get(index - 1) : undefined;
+    if (opener !== undefined && opener > 0) anchor = opener - 1;
+    const isBlock =
+      opener !== undefined
+        ? BLOCK_HEADER_KEYWORDS.has(tokens[anchor].type)
+        : previous === 'else' ||
+          previous === 'try' ||
+          previous === 'finally' ||
+          (previous === '=' && tokens[index - 2]?.type === 'identifier') ||
+          (previous === 'const' && tokens[index - 2]?.type === '=' && tokens[index - 3]?.type === 'identifier');
+    if (!isBlock) return -1;
+  }
+  const lineStart = source.lastIndexOf('\n', tokens[anchor].startIndex - 1) + 1;
+  let first = anchor;
+  while (first > 0 && tokens[first - 1].startIndex >= lineStart) first--;
+  return tokens[first].startIndex - lineStart;
 }
 
 /** The `// atomic` annotations of a program, read from its line comments. */

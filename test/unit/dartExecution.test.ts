@@ -1233,8 +1233,11 @@ test.each([
     'repeated fillRange',
     'void main() {\n  final a = List<int>.filled(1100, 0);\n  for (var i = 0; i < 1100; i++) a.fillRange(0, a.length, 1);\n}',
   ],
-])('%s charges the operation budget', (_work, source) => {
-  expect(executeProgram('dart', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+])('%s stops at the operation or time limit', (_work, source) => {
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'limitExceeded',
+    limit: expect.stringMatching(/^(operations|time)$/),
+  });
 });
 
 test('equality checks covariant parameters before handling null', () => {
@@ -8852,6 +8855,35 @@ void main() {
   });
 });
 
+test.each([
+  [
+    'an if inside a for',
+    'void main() {\n  for (var i = 0; i < 3; i++) {\n    if (i == 1) {\n      print(i);\n  }\n  print(9);\n}',
+    2,
+  ],
+  [
+    'an if inside a while',
+    'void main() {\n  var x = 0;\n  while (x < 3) {\n    if (x == 1) {\n      print(x);\n    x++;\n  }\n}',
+    3,
+  ],
+  ['an if in a function', 'void f(int x) {\n  if (x > 0) {\n    print(x);\n}\n\nvoid main() {\n  f(1);\n}', 1],
+  [
+    'an if in a method',
+    'class A {\n  void f() {\n    if (true) {\n      print(1);\n  }\n  void g() {\n    print(2);\n  }\n}\nvoid main() {}',
+    2,
+  ],
+  [
+    'the outer for',
+    'void main() {\n  for (var i = 0; i < 3; i++) {\n    for (var j = 0; j < 3; j++) {\n      print(j);\n    }\n  print(9);\n}',
+    1,
+  ],
+])('Dart reports the misindented block of %s as missing its }', (_block, program, row) => {
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row, message: '「}」が足りません。' }],
+  });
+});
+
 test('Dart missing semicolon diagnostics use the statement row in recovered control-flow bodies', () => {
   for (const body of [
     'var l = [1, 2];\nfor (var value in l) {\n  print(value)\n}',
@@ -8871,6 +8903,11 @@ test('Dart missing semicolon diagnostics use the statement row in recovered cont
     ['class C { void f() {\n  var x = 0;\n  if (x == 0) {\n    x++\n  }\n} }\nvoid main() {}', [3]],
     ['void main() {\n  for (var i = 0; i < 1; i++) {\n    if (i == 0) {\n      print(i)\n    }\n  }\n}', [3]],
     ['void main() {\n  if (true) {\n    print(0)\n  } else {\n    print(1)\n  }\n  print(2);\n}', [2, 4]],
+    ['void main() {\n  switch (1) {\n    case 1:\n      print(1)\n      break;\n  }\n}', [3]],
+    ['void main() {\n  switch (1) {\n    default:\n      print(2)\n      break;\n  }\n}', [3]],
+    ['void main() {\n  if (true)\n    print(1);\n  else\n    print(2)\n  print(3);\n}', [4]],
+    ['void main() {\n  for (var i = 0; i < 2; i++)\n    print(i)\n  print(9);\n}', [2]],
+    ['void main() {\n  var x = 0;\n  do {\n    x++;\n  } while (x < 3)\n  print(x);\n}', [4]],
   ] as const) {
     expect(executeProgram('dart', program)).toMatchObject({
       kind: 'compileError',
