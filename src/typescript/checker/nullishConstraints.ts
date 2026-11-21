@@ -27,7 +27,15 @@ export function nonUndefinedBindingSource(c: Checker, type: Type): Type {
   const hasUndefinedBound = bounds.some(
     (bound, index) => bound !== members[index] && typeMembers(bound).includes(undefinedType)
   );
-  return c.relations.removeUndefined(hasUndefinedBound ? unionOf(bounds, true) : type);
+  if (hasUndefinedBound) return filterType(unionOf(bounds, true), hasDefinedValue);
+  return unionOf(
+    members.filter((_member, index) => typeMembers(bounds[index]).some(hasDefinedValue)),
+    true
+  );
+}
+
+function hasDefinedValue(member: Type): boolean {
+  return !isNullishLike(member, undefinedType) && member !== neverType;
 }
 
 /**

@@ -34,3 +34,15 @@ function absentProperty({value = 1}: {}) { return value; }
 function absentTuple([value = 1]: []) { return value; }
 function optionalTuple([value = 1]: [value?: undefined]) { return value; }
 function optionalGeneric<T extends undefined>([value = 1]: [value?: T]) { return value; }
+function genericVoid<T extends number | void>([value = 3]: [T]) {
+  return value.toFixed();
+}
+function voidOnly([value = 5]: [void]) {
+  return value;
+}
+function pureVoid<T extends void>([value = 6]: [T]) {
+  return value;
+}
+function fallbackVoid(fn: () => void, [value = fn()]: [number | void]) {
+  return value.toFixed();
+}

@@ -40,3 +40,17 @@ function neverDefault([value = fail()]: [never]) {
 }
 const {value: emptyDefault = 1} = {};
 console.log(emptyDefault, concreteUndefined([undefined]));
+function fromVoidRecord<K extends 'x' | 'y'>(key: K, obj: Partial<Record<K, number | void>>) {
+  const {[key]: value = 1} = obj;
+  return value.toFixed();
+}
+function fromVoidTuple<T extends number | void | undefined>([value = 2]: [T]) {
+  return value.toFixed();
+}
+function concreteVoid([value = 4]: [number | void]) {
+  return value.toFixed();
+}
+function mixedVoid<T extends number | void | undefined, U extends string | void>([value = 7]: [T | U]): number | string {
+  return value;
+}
+console.log(fromVoidRecord('x', {}), fromVoidTuple([undefined]), concreteVoid([undefined]), mixedVoid([undefined]));
