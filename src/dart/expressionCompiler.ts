@@ -402,12 +402,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected equalityOf(left: Compiled, right: Compiled, negated: boolean, span: Span): Compiled {
     const equals = this.lookupMember(nonNullable(left.type), '==', false);
     const parameter = equals?.member.kind === 'method' ? (equals.type as FunctionType).positional[0] : undefined;
-    if (parameter && right.type.kind !== 'dynamic') {
-      const target = makeNullable(parameter);
-      if (!isSubtype(right.type, target)) {
-        this.error(span, `${typeName(right.type)} 型の値は、== の右辺 ${typeName(target)} に合いません。`);
-      }
-    }
+    if (parameter)
+      right = this.coerce(
+        right,
+        makeNullable(parameter),
+        span,
+        (from, to) => `${from} 型の値は、== の右辺 ${to} に合いません。`
+      );
     const leftRun = left.run;
     const rightRun = right.run;
     const constValue =

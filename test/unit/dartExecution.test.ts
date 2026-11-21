@@ -999,7 +999,7 @@ test.each([
   ).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
 
-test('nullable receivers still check covariant equality parameters', () => {
+test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
 void compare(C? value, C? other) {
@@ -1014,6 +1014,27 @@ void main() {
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     stdout: '[true, false]\n[false, true]\n[false, true]\n[true, false]\n',
+  });
+  const dynamicProgram = `${declaration}
+void compare(C? left, dynamic right) {
+  try { print(left == right); } catch (e) { print(e); }
+  try { print(left != right); } catch (e) { print(e); }
+}
+void main() {
+  compare(null, 1);
+  compare(C(), 'wrong');
+  compare(C(), null);
+  compare(C(), C());
+  dynamic left = null;
+  dynamic right = 1;
+  print(left == right);
+}`;
+  expect(executeProgram('dart', dynamicProgram)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "type 'int' is not a subtype of type 'C?'\n".repeat(2) +
+      "type 'String' is not a subtype of type 'C?'\n".repeat(2) +
+      'false\ntrue\ntrue\nfalse\nfalse\n',
   });
   for (const comparison of ['value == 1', "value != 'wrong'"]) {
     expect(
