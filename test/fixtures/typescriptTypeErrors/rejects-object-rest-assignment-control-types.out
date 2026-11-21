@@ -1,0 +1,5 @@
+(1,98): error TS2536: Type 'K' cannot be used to index type 'Omit<T, K>'.
+(2,44): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(3,35): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(4,44): error TS2339: Property 'nope' does not exist on type 'number[]'.
+(5,60): error TS2339: Property 'nope' does not exist on type '{ a: number; }'.

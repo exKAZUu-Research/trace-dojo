@@ -1,0 +1,17 @@
+function call(count: number, ...items: [...string[], boolean]) {}
+call('mismatch',
+  missingName);
+function convert(value: string | symbol) {
+  console.log('value: ' + value);
+  console.log(`${value}`);
+}
+function remove(value: { a: string | null; b: number | null; c: void }) {
+  delete value.a;
+  delete value.b;
+  delete value.c;
+}
+class Example {}
+function testInstance(x: string | number, y: boolean | number) {
+  console.log(x instanceof Example);
+  console.log(y instanceof Example);
+}

@@ -1,0 +1,15 @@
+class Animal {
+  constructor(public home: object) {}
+}
+class Fish extends Animal {
+  declare home: { water: boolean };
+}
+console.log(new Fish({ water: true }).home.water);
+
+class Base {
+  x?: number;
+}
+class Narrowed extends Base {
+  declare x: number;
+}
+console.log(new Narrowed());

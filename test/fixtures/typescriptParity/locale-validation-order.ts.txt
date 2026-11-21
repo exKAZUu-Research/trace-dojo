@@ -1,0 +1,13 @@
+for (const operation of [
+  (locales: any) => "a".localeCompare("b", locales),
+  (locales: any) => "a".toLocaleUpperCase(locales),
+  (locales: any) => "a".toLocaleLowerCase(locales),
+  (locales: any) => (1).toLocaleString(locales),
+]) {
+  const locales = {length: 2, 0: "bad_tag", get 1() {console.log("later"); return "en";}};
+  try { operation(locales); } catch (e) { console.log((e as Error).name); }
+  try { operation(["bad_tag", {toString() {console.log("converted"); return "en";}}]); }
+  catch (e) { console.log((e as Error).name); }
+  const valid = {length: 3, get 0() {console.log("first"); return {toString() {console.log("tag"); return "en-US";}};}, get 2() {console.log("last"); return "en-US";}};
+  console.log(operation(valid));
+}

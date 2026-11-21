@@ -1,0 +1,4 @@
+(2,12): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+(6,14): error TS2551: Property 'toFixed' does not exist on type 'string'. Did you mean 'fixed'?
+(12,32): error TS2339: Property 'b' does not exist on type '{ kind: "a"; a: number; }'.
+(16,7): error TS2367: This comparison appears to be unintentional because the types '"a" | "b"' and '"c"' have no overlap.

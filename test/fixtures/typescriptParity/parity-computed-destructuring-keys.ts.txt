@@ -1,0 +1,30 @@
+const selectedKey = "value";
+const {[selectedKey]: selectedValue, ...remaining} = {value: 2, label: "kept"};
+const checkedValue: number = selectedValue;
+console.log(checkedValue, remaining.label, Object.keys(remaining));
+const selectedIndex = 0;
+const {[selectedIndex]: first} = [3,4];
+console.log(first.toFixed());
+const unionKey = "left" as "left" | "right";
+const {[unionKey]: unionValue, ...unionRest} = {left: 1, right: "r", kept: true};
+const unionCheck: string | number = unionValue;
+const unionRestCheck: {kept: boolean} = unionRest;
+console.log(unionCheck, unionRestCheck.kept, Object.keys(unionRest));
+const dictionary: {[key: string]: number} = {value: 4, other: 5};
+const dynamicKey: string = "value";
+const {[dynamicKey]: dynamicValue, ...dictionaryRest} = dictionary;
+const dynamicCheck: number = dynamicValue;
+console.log(dynamicCheck, dictionaryRest.other);
+let assignedValue = 0; let assignedRest = {label: ""};
+({[selectedKey]: assignedValue = 9, ...assignedRest} = {value: undefined, label: "assigned"});
+console.log(assignedValue, assignedRest.label);
+function genericSelection<K extends "value">(key: K) { const {[key]: result} = {value: 6}; const checked: number = result; return checked; }
+console.log(genericSelection("value"));
+type ComputedShape = {kind:"text";value:string}|{kind:"count";value:number};
+const discriminantKey = "kind";
+function computedCorrelation(source: ComputedShape) { const {[discriminantKey]: tag, value} = source; if(tag === "text") console.log(value.toUpperCase()); }
+function parameterCorrelation({[discriminantKey]: tag, value}: ComputedShape) { if(tag === "count") console.log(value.toFixed(1)); }
+computedCorrelation({kind:"text",value:"correlated"}); parameterCorrelation({kind:"count",value:7});
+type SnapshotShape = {kind:"text";value:string;other:"ignored"}|{kind:"count";value:number;other:"ignored"};
+function changedComputedKey(shape: SnapshotShape) { let key:"kind"|"other"="kind"; const {[key]:tag,value}=shape; key="other"; if(tag==="text") console.log(value.toUpperCase(), key); }
+changedComputedKey({kind:"text",value:"snapshot",other:"ignored"});

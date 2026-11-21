@@ -1,0 +1,7 @@
+'use strict';
+function typedStrict(value:number){'use strict';return value;}
+const optionalStrict=(value?:number)=>{'use strict';return value??2;};
+class StrictParameterProperty { constructor(public value:number){'use strict';} }
+function typedThisStrict(this:{value:number},other:number){'use strict';return this.value+other;}
+function inheritedStrict(value=5){return value;}
+console.log(typedStrict(1),optionalStrict(),new StrictParameterProperty(3).value,typedThisStrict.call({value:2},2),inheritedStrict());

@@ -1,0 +1,7 @@
+Name2 {}
+2
+Name5 {}
+5
+Name9 { [hidden]: [Getter: 7] }
+9
+name read

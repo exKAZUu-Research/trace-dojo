@@ -1,0 +1,13 @@
+const o: { x?: number } = {};
+const { x = 'none' } = o;
+const { x: y = 'none' } = o;
+const list: (number | undefined)[] = [];
+const [z = 'none'] = list;
+const { w = 'none' } = { w: 1 };
+console.log(x, y, z, w);
+const handlers: ((p: { x?: number }) => void)[] = [({ x = 'none' }) => console.log(x)];
+handlers[0]({});
+for (const { x = 'none' } of [{ x: 1 }, {}] as { x?: number }[]) console.log(x);
+const { x: u = undefined }: { x?: number } = o;
+const kept: number | undefined = u;
+console.log(kept);

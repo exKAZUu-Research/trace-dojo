@@ -1,0 +1,13 @@
+const a: `${string}-${number}` = "a-b-1";
+const b: `${string}${string}x` = "abx";
+const c: `${number}` = "  ";
+const d: `${number}px` = "1px2px";
+const e: `${string}-${string}` = "a-b-c";
+const f: `${number}-${number}` = "1-2-3";
+const g: `a${string}b${string}c` = "abbc";
+const h: `${string}${number}` = "ab1";
+const i: `${number}${string}` = "12a";
+type T = `${string}${string}${string}${string}${string}${string}z`;
+const x: T = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+type U = `${string}${string}${string}${string}${string}${string}a`;
+const y: U = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

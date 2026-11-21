@@ -1,0 +1,3 @@
+(2,13): error TS2590: Expression produces a union type that is too complex to represent.
+(8,13): error TS2590: Expression produces a union type that is too complex to represent.
+(11,13): error TS2590: Expression produces a union type that is too complex to represent.

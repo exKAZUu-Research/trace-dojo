@@ -1,0 +1,9 @@
+(1,48): error TS2536: Type 'Uppercase<K>' cannot be used to index type 'T'.
+(2,33): error TS2536: Type 'K extends true ? "missing" : "a"' cannot be used to index type 'T'.
+(3,31): error TS2536: Type '`x${string}`' cannot be used to index type 'T'.
+(5,45): error TS2536: Type 'Uppercase<K>' cannot be used to index type 'T'.
+(14,50): error TS2536: Type 'K extends "a" ? K : K' cannot be used to index type 'T'.
+(17,50): error TS2536: Type '[K] extends ["a"] ? "a" : "missing"' cannot be used to index type 'T'.
+(18,40): error TS2536: Type 'true' cannot be used to index type 'T'.
+(19,40): error TS2536: Type '1n' cannot be used to index type 'T'.
+(23,52): error TS2536: Type '`a${K}`' cannot be used to index type 'T'.

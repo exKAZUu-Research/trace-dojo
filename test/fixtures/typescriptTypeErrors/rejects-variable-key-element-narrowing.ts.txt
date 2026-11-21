@@ -1,0 +1,35 @@
+function param(r: (string | null)[], i: number) { if (r[i] === null) return; const s: string = r[i]; return s; }
+function record(r: Record<string, string | null>, k: string) { if (r[k] !== null) { const s: string = r[k]; } }
+function property(r: { a?: number[] }[], i: number) { if (r[i].a) { r[i].a.push(1); } }
+function generic<K extends string>(k: K, r: Partial<Record<K, number>>) { if (r[k] !== undefined) { const n: number = r[k]; } }
+function keyAssigned(r: (string | null)[], i: number) { if (r[i] !== null) { i = 0; const s: string = r[i]; } }
+function keyIncremented(r: (string | null)[], i: number) { if (r[i] !== null) { i++; const s: string = r[i]; } }
+function unchangedLet(r: (string | null)[]) { let i = 0; if (r[i] !== null) { const s: string = r[i]; } }
+function changedLet(r: (string | null)[]) { let i = 0; i = 1; if (r[i] !== null) { const s: string = r[i]; } }
+function objectAssigned(r: (string | null)[], i: number) { if (r[i] !== null) { r = []; const s: string = r[i]; } }
+function elementAssigned(r: (string | null)[], i: number) { if (r[i] !== null) { r[i] = null; const s: string = r[i]; } }
+function otherElementAssigned(r: (string | null)[], i: number) { if (r[i] !== null) { r[0] = null; const s: string = r[i]; } }
+function nested(o: { r: (string | null)[][] }, i: number, j: number) { if (o.r[i][j] !== null) { const s: string = o.r[i][j]; } }
+function propertyKey(r: (string | null)[], o: { i: number }) { if (r[o.i] !== null) { const s: string = r[o.i]; } }
+function expressionKey(r: (string | null)[], i: number) { if (r[i + 1] !== null) { const s: string = r[i + 1]; } }
+function parenthesizedKey(r: (string | null)[], i: number) { if (r[i] !== null) { const s: string = r[(i)]; } }
+function otherKey(r: (string | null)[], i: number, j: number) { if (r[i] !== null) { const s: string = r[j]; } }
+function closure(r: (string | null)[], i: number) { if (r[i] !== null) { const f = () => { const s: string = r[i]; }; } }
+function forLoop(r: (string | null)[]) { for (let i = 0; i < r.length; i++) { if (r[i] === null) continue; const s: string = r[i]; } }
+function forOf(r: (string | null)[]) { for (const i of [0, 1]) { if (r[i] === null) continue; const s: string = r[i]; } }
+function forIn(r: { [k: string]: string | null }) { for (const k in r) { if (r[k] === null) continue; const s: string = r[k]; } }
+var globalKey = 0;
+function globalVar(r: (string | null)[]) { if (r[globalKey] !== null) { const s: string = r[globalKey]; } }
+function assignedInClosure(r: (string | null)[], i: number) { const f = () => { i = 3; }; if (r[i] !== null) { const s: string = r[i]; } }
+function ternary(r: (string | null)[], i: number) { const s: string = r[i] !== null ? r[i] : ""; }
+function truthy(r: (string | null)[], i: number) { if (r[i]) { const s: string = r[i]; } }
+function initialized(r: Record<string, number[] | undefined>, k: string) { r[k] ??= []; r[k].push(1); }
+function notInitialized(r: Record<string, number[] | undefined>, k: string) { if (!(k in r)) r[k] = []; r[k].push(1); }
+class Box { items: (string | null)[] = []; get(i: number) { if (this.items[i] === null) return ""; const s: string = this.items[i]; return s; } }
+function compoundLiteral(counts: Record<string, number | undefined>) { if (counts["a"] === undefined) counts["a"] = 0; counts["a"] += 1; }
+function compoundProperty(counts: Record<string, number | undefined>) { if (counts.a === undefined) counts.a = 0; counts.a += 1; }
+function compoundVariable(counts: Record<string, number | undefined>, w: string) { if (counts[w] === undefined) counts[w] = 0; counts[w] += 1; }
+function incremented(counts: Record<string, number | undefined>, w: string) { if (counts[w] !== undefined) counts[w]++; }
+function multipliedThenRead(counts: (number | null)[], i: number) { if (counts[i] !== null) { counts[i] *= 2; const n: number = counts[i]; } }
+function compoundChangedKey(counts: (number | null)[], i: number) { if (counts[i] !== null) { i = 0; counts[i] *= 2; } }
+console.log(1);

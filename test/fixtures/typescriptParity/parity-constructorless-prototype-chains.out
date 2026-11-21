@@ -1,0 +1,18 @@
+Box <[Object: null prototype] {}> { value: 1 }
+Box <Object <[Object: null prototype] {}>> { value: 1 }
+Box <[Object: null prototype]> { value: 1 }
+Box <[Object: null prototype]> { value: 1 }
+Box <[Object: null prototype]> { value: 1 }
+Renamed <Object <[Object: null prototype] {}>> { value: 1 }
+Box <[Object: null prototype] {}> {}
+Renamed <Object <Complex prototype>> { value: 1 }
+[Renamed <Complex prototype>]
+{
+  a: {
+    b: { c: [Renamed <Complex prototype>], d: [Renamed: null prototype] }
+  }
+}
+[Renamed: null prototype]
+[Renamed: null prototype]
+{ shortened: [Renamed: null prototype] }
+{ shortened: [Renamed: null prototype] }

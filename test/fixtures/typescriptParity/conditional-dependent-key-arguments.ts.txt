@@ -1,0 +1,24 @@
+type At<O, P extends keyof O> = O[P];
+type Keys<O, P extends keyof O | 'fallback'> = P;
+type StrictKeys<O, P extends keyof O & string> = P;
+type TemplateKeys<O, P extends `pre-${keyof O & string}`> = P;
+type Simple<T,K extends keyof T> = T[K] extends {key:'x'} ? At<T[K],'key'> : never;
+type Nested<T,K extends keyof T> = T[K] extends {inner:{value:string}} ? At<T[K]['inner'],'value'> : never;
+type ByPick<T,K extends keyof T> = T[K] extends {key:'x'} ? Pick<T[K],'key'>['key'] : never;
+type ByRequiredPick<T,K extends keyof T> =
+  T[K] extends {key:'x'} ? Required<Pick<T[K],'key'>>['key'] : never;
+type Remap<T,K extends keyof T> =
+  T[K] extends {key:'x'} ? {[P in 'a' as Pick<T[K],'key'>['key']]:number}['x'] : never;
+type RequiredRemap<T,K extends keyof T> =
+  T[K] extends {key:'x'} ? {[P in 'a' as Required<Pick<T[K],'key'>>['key']]:number}['x'] : never;
+type ValidUnion<T,K extends keyof T> = T[K] extends {key:'x'} ? Keys<T[K],'key' | 'fallback'> : never;
+type ValidIntersection<T,K extends keyof T> = T[K] extends {key:'x'} ? StrictKeys<T[K],'key'> : never;
+type TestTemplate<T,K extends keyof T> = T[K] extends {key:'x'} ? TemplateKeys<T[K],'pre-key'> : never;
+type Template<T extends string, X extends `pre-${T}`> = X;
+type Mapping<T extends string, X extends Uppercase<T>> = X;
+type Literal<T,K extends keyof T> = T[K] extends {key:'x'} ? Template<T[K]['key'],'pre-x'> : never;
+type Wrong<T,K extends keyof T> = T[K] extends {key:'x'|'y'} ? Template<T[K]['key'],'pre-x'> : never;
+const direct: Simple<{value: {key: 'x'}}, 'value'> = 'x';
+const value: Nested<{value: {inner: {value: string}}}, 'value'> = 'nested';
+const remapped: RequiredRemap<{value: {key: 'x'}}, 'value'> = 42;
+console.log(direct, value, remapped);

@@ -1,0 +1,14 @@
+class Animal { name = 'animal'; }
+class Dog extends Animal { bark() { return 'woof'; } }
+
+const handlers = {
+  method(dog: Dog) { return dog.bark(); },
+  arrow: (animal: Animal) => animal.name,
+  functionProperty: function (animal: Animal) { return animal.name; },
+  get accessor() { return (animal: Animal) => animal.name; },
+};
+
+const extracted: (animal: Animal) => string = handlers.method;
+const arrow: typeof handlers.arrow = (dog: Dog) => dog.bark();
+const functionProperty: typeof handlers.functionProperty = (dog: Dog) => dog.bark();
+const accessor: typeof handlers.accessor = (dog: Dog) => dog.bark();

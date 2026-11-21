@@ -1,0 +1,11 @@
+class Finder { found: string | null = null; run(items: string[]) { this.found = null; items.forEach((i) => { if (i === "b") this.found = i; }); return this.found!.length; } }
+const state: { best: number | null } = { best: null };
+state.best = null;
+[1, 2].forEach((v) => { if (state.best === null || v > state.best) state.best = v; });
+console.log(state.best!.toFixed(), new Finder().run(["a", "b"]));
+const o: { s: string | null } = { s: null };
+o.s = null;
+const t: 1 = o.s!;
+const m: { [k: string]: number | null } = {};
+m["k"] = null;
+console.log(m["k"]!.toFixed);

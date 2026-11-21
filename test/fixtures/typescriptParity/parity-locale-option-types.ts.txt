@@ -1,0 +1,12 @@
+console.log((1234.567).toLocaleString('en-US',{
+  localeMatcher:'lookup',style:'currency',currency:'USD',currencyDisplay:'narrowSymbol',currencySign:'accounting',
+  useGrouping:'auto',minimumIntegerDigits:2,minimumFractionDigits:2,maximumFractionDigits:3,
+  minimumSignificantDigits:2,maximumSignificantDigits:6,numberingSystem:'latn',compactDisplay:'short',notation:'standard',
+  signDisplay:'negative',unit:'meter',unitDisplay:'long',roundingPriority:'auto',roundingIncrement:1,
+  roundingMode:'halfEven',trailingZeroDisplay:'auto'
+}));
+console.log('a'.localeCompare('A','en-US',{
+  usage:'sort',localeMatcher:'best fit',numeric:true,caseFirst:'false',sensitivity:'base',collation:'default',ignorePunctuation:true
+}));
+console.log([1,2].toLocaleString('en-US',{dateStyle:'long',hour12:true,timeZone:'UTC'}));
+console.log('abc'.toLocaleUpperCase(['en-US']),(1234n).toLocaleString('en-US'));

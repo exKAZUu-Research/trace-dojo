@@ -1,0 +1,14 @@
+class Point {}
+const key = 'missing';
+const cases = [
+  () => (new Point() as any).missing(),
+  () => (((x: number) => x) as any)[key](),
+  () => (function () {} as any)?.missing(),
+  () => (class {} as any)?.['missing'](),
+  () => (/a/ig as any).missing(),
+  () => (/\d+/mig as any)?.[key](),
+  () => (123n as any).missing(),
+  () => (123n as any)[123n as any](),
+  () => (new Point() as any).missing?.(),
+];
+for (const run of cases) { try { run(); } catch (e: any) { console.log(e.message); } }

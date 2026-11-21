@@ -1,0 +1,9 @@
+obj.method is not a function
+obj.inner.go is not a function
+obj.g is not a function
+obj?.inner.h is not a function
+obj.inner.k is not a function
+obj.spaced is not a function
+obj.inner.tmpl is not a function
+obj[0] is not a function
+obj.inner.C is not a constructor

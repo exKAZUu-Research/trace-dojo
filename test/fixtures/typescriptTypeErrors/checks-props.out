@@ -1,0 +1,5 @@
+(2,15): error TS2339: Property 'z' does not exist on type '{ x: number; y: number; }'.
+(4,15): error TS2551: Property 'lenght' does not exist on type '"abc"'. Did you mean 'length'?
+(5,15): error TS2551: Property 'toUppercase' does not exist on type '"abc"'. Did you mean 'toUpperCase'?
+(7,5): error TS2339: Property 'foo' does not exist on type 'number[]'.
+(9,22): error TS2353: Object literal may only specify known properties, and 'b' does not exist in type 'P'.

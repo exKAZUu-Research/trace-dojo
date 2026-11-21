@@ -1,0 +1,27 @@
+function asPartial<T>(o: T): Partial<T> { return o; }
+function freeze<T>(o: T): Readonly<T> { return o; }
+function thaw<T>(o: Readonly<T>): T { return o; }
+function a1<T extends { a: number }>(o: T): Partial<T> { const r: Partial<T> = o; return r; }
+function a2<T extends Record<string, unknown>>(o: T): Partial<T> { return o; }
+function a3<T>(o: T): Readonly<Partial<T>> { return o; }
+function ok<T extends object>(o: T): Partial<T> { return o; }
+function bad<T>(o: T): Required<T> { return o; }
+function bad2<T>(o: Partial<T>): T { return o; }
+console.log(asPartial(1), freeze(2), thaw(3), a1({ a: 1 }), a2({}), a3(1), ok({}));
+function p1<T, K extends keyof T>(o: T): Pick<T, K> { return o; }
+function p2<T, U extends T>(o: U): Partial<T> { return o; }
+function p3<T>(o: Readonly<Partial<T>>): T { return o; }
+function p4<T>(o: Readonly<T>): Partial<T> { return o; }
+function p5<T>(o: Partial<T>): Readonly<T> { return o; }
+function p6<T>(o: T & { a: number }): Partial<T> { return o; }
+function p7<T, K extends string>(o: T): { [P in K]: T[P & keyof T] } { return o; }
+function p8<T>(o: Required<T>): Partial<T> { return o; }
+function p9<T>(o: T): { -readonly [P in keyof T]: T[P] } { return o; }
+function p10<T>(o: { -readonly [P in keyof T]: T[P] }): T { return o; }
+function p11<T>(o: Partial<T>): T | undefined { return o; }
+function p12<T>(o: Readonly<T>): Readonly<T> { const x: T = o; return x; }
+function p13<A, B>(o: A & B): Partial<A & B> { return o; }
+function p14<T>(o: Readonly<Readonly<T>>): T { return o; }
+function p15<T>(o: T[]): Partial<T[]> { return o; }
+function p16<T>(o: { [P in keyof T]: string }): T { return o; }
+function p17<T>(o: T): { [P in keyof T]: string } { return o; }

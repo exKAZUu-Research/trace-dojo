@@ -1,0 +1,8 @@
+(1,6): error TS2300: Duplicate identifier 'Body'.
+(2,7): error TS2300: Duplicate identifier 'AbortController'.
+(3,6): error TS2300: Duplicate identifier 'AlgorithmIdentifier'.
+(4,11): error TS2300: Duplicate identifier 'XPathNSResolver'.
+(5,7): error TS2300: Duplicate identifier 'NodeFilter'.
+(6,7): error TS2300: Duplicate identifier 'Storage'.
+(7,5): error TS2451: Cannot redeclare block-scoped variable 'localStorage'.
+(8,7): error TS2451: Cannot redeclare block-scoped variable 'URLSearchParams'.

@@ -1,0 +1,6 @@
+(1,5): error TS2872: This kind of expression is always truthy.
+(2,5): error TS2872: This kind of expression is always truthy.
+(3,11): error TS2872: This kind of expression is always truthy.
+(4,5): error TS2873: This kind of expression is always falsy.
+(6,5): error TS1345: An expression of type 'void' cannot be tested for truthiness.
+(13,5): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?

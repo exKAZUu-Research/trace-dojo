@@ -1,0 +1,2 @@
+function restAssignBack<T extends object,K extends keyof T>(o:T,k:K){let selected:T[K];let rest:T=o;({[k]:selected,...rest}=o);return rest;}
+function restAssignedIndex<T extends object,K extends keyof T>(o:T,k:K){let selected:T[K];let rest:Omit<T,K>;({[k]:selected,...rest}=o);return rest[k];}

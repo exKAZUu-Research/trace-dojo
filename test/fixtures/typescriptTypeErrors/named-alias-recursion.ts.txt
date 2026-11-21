@@ -1,0 +1,10 @@
+interface Box<T> { next: T }
+interface Loop { next: Loop }
+type Short = Box<Short1>;
+type Short1 = Box<Short2>;
+type Short2 = Box<string>;
+type Inline = Box<Box<Box<Box<Box<Box<string>>>>>>;
+const short: Short = { next: { next: { next: 'short' } } };
+const inline: Inline = { next: { next: { next: { next: { next: { next: 'inline' } } } } } };
+const shortLoop: Loop = short;
+const inlineLoop: Loop = inline;

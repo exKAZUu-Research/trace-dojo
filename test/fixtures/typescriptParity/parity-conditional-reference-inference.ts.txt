@@ -1,0 +1,17 @@
+interface Ref<A> { value: A; }
+type Alias<A> = { value: A };
+function array<T>(value:T extends string ? T[] : never):T { return value[0]; }
+function arrayForm<T>(value:T extends string ? Array<T> : never):T { return value[0]; }
+function ro<T>(value:T extends string ? readonly T[] : never):T { return value[0]; }
+function tuple<T>(value:T extends string ? [T] : never):T { return value[0]; }
+function ref<T>(value:T extends string ? Ref<T> : never):T { return value.value; }
+function alias<T>(value:T extends string ? Alias<T> : never):T { return value.value; }
+function field<T>(value:T extends string ? { value:T } : never):T { return value.value; }
+function cb<T>(value:T extends string ? (()=>T) : never):T { return value(); }
+function fromField<U>(value:U extends string ? { value:U } : never):string { return field(value); }
+function fromCb<U>(value:U extends string ? (()=>U) : never):string { return cb(value); }
+function ordinary<U>(value:U extends string ? U[] : never): U {
+  const result = array(value);
+  return result;
+}
+console.log(ordinary(['array']), fromField({value:'field'}), fromCb(()=>'callback'));

@@ -1,5 +1,6 @@
 import type { Expression, FunctionNode, MemberExpression, Pattern, PropertyName, ScopeDeclarations } from './ast';
 import { DONE } from './iteration';
+import { defineFunctionName } from './memberProperties';
 import type { Runtime } from './runtime';
 import {
   type FunctionFrame,
@@ -108,6 +109,11 @@ export abstract class EvaluatorBase {
     return this.runtime.frame.scope.nearestFunctionFrame();
   }
 
+  /** Whether the running code is strict mode code. */
+  isStrict(): boolean {
+    return this.runtime.frame.scope.isStrict() ?? true;
+  }
+
   thisValue(): Value {
     const thisValue = this.functionFrame()?.thisValue;
     if (thisValue === UNINITIALIZED) {
@@ -121,19 +127,29 @@ export abstract class EvaluatorBase {
 
   // Variables ---------------------------------------------------------------------------------------------------------
 
-  readVariable(name: string): Value {
-    const binding = this.runtime.frame.scope.lookup(name);
-    if (!binding) return this.runtime.throwError('ReferenceError', `${name} is not defined`);
-    if (binding.value === UNINITIALIZED) {
-      return this.runtime.throwError('ReferenceError', `Cannot access '${name}' before initialization`);
+  readVariable(name: string, allowMissing = false): Value {
+    const { runtime } = this;
+    const binding = runtime.frame.scope.lookup(name);
+    if (!binding) {
+      const receiver = runtime.evaluator.globalReceiverFor(name);
+      if (receiver) return runtime.get(receiver, name);
+      if (allowMissing) return undefined;
+      return runtime.throwError('ReferenceError', `${name} is not defined`);
     }
-    return binding.value;
+    const value = binding.value;
+    if (value === UNINITIALIZED)
+      return runtime.throwError('ReferenceError', `Cannot access '${name}' before initialization`);
+    return value;
   }
 
   writeVariable(name: string, value: Value, mode: BindingMode): void {
     const { runtime } = this;
     const binding = runtime.frame.scope.lookup(name);
-    if (!binding) return runtime.throwError('ReferenceError', `${name} is not defined`);
+    if (!binding) {
+      const receiver = runtime.evaluator.globalReceiverFor(name);
+      if (receiver) return runtime.set(receiver, name, value, undefined, this.isStrict());
+      return runtime.throwError('ReferenceError', `${name} is not defined`);
+    }
     if (mode === 'initialize') {
       binding.value = value;
       binding.isHoisted = false;
@@ -194,7 +210,6 @@ export abstract class EvaluatorBase {
     return this.runtime.toPropertyKey(this.evaluate(name.expression));
   }
 
-  // code-gauge-allow duplicateLines 17 -- Reading and writing a reference switch over the same kinds of reference.
   getReference(reference: Reference): Value {
     const { runtime } = this;
     switch (reference.kind) {
@@ -214,7 +229,6 @@ export abstract class EvaluatorBase {
     }
   }
 
-  // code-gauge-allow duplicateLines 17 -- Reading and writing a reference switch over the same kinds of reference.
   putReference(reference: Reference, value: Value): void {
     const { runtime } = this;
     switch (reference.kind) {
@@ -223,7 +237,7 @@ export abstract class EvaluatorBase {
         return;
       }
       case 'property': {
-        runtime.set(reference.base, reference.key, value);
+        runtime.set(reference.base, reference.key, value, undefined, this.isStrict());
         return;
       }
       case 'private': {
@@ -233,7 +247,7 @@ export abstract class EvaluatorBase {
       case 'super': {
         // The property is looked up from the parent's prototype, while a setter or a data write acts on `this`.
         const home = this.functionFrame()?.homeObject;
-        runtime.set(reference.thisValue, reference.key, value, home?.proto ?? undefined);
+        runtime.set(reference.thisValue, reference.key, value, home?.proto ?? undefined, this.isStrict());
         return;
       }
     }
@@ -277,9 +291,8 @@ export abstract class EvaluatorBase {
         return;
       }
       case 'objectPattern': {
-        if (value === undefined || value === null) {
-          runtime.throwError('TypeError', `Cannot destructure '${String(value)}' as it is ${String(value)}.`);
-        }
+        if (value === undefined || value === null)
+          runtime.throwError('TypeError', destructuringMessage(pattern, value));
         runtime.hold(value, () => this.bindObjectPattern(pattern, value, mode));
         return;
       }
@@ -289,7 +302,7 @@ export abstract class EvaluatorBase {
   private bindArrayPattern(pattern: Extract<Pattern, { kind: 'arrayPattern' }>, value: Value, mode: BindingMode): void {
     const { runtime } = this;
     // Each binding reads the next value just before it runs, since an earlier default or target may change the array.
-    const iterator = runtime.iterator(value);
+    const iterator = runtime.iterator(value, undefined, pattern.source, pattern.iterationContext);
     try {
       for (const element of pattern.elements) {
         const next = iterator.next();
@@ -339,7 +352,7 @@ export function nameFunction(runtime: Runtime, fn: JsFunction, name: Key): void 
   if (runtime.functionName(fn) !== '' || fn.behavior.kind === 'native') return;
   // A function named by a symbol key takes the symbol's description in brackets.
   const text = typeof name === 'string' ? name : name.description === undefined ? '' : `[${name.description}]`;
-  fn.properties.set('name', { value: text, writable: false, enumerable: false, configurable: true });
+  defineFunctionName(fn, text);
 }
 
 /** The variables a pattern declares, in order. */
@@ -370,4 +383,20 @@ export function referenceBase(reference: Reference): Value {
   if (reference.kind === 'property' || reference.kind === 'private') return reference.base;
   if (reference.kind === 'super') return reference.thisValue;
   return undefined;
+}
+
+/** V8's TypeError for taking apart `null` or `undefined`, which names the first property and the source. */
+function destructuringMessage(pattern: Extract<Pattern, { kind: 'objectPattern' }>, value: null | undefined): string {
+  const first = pattern.properties[0];
+  const name = first?.key.kind === 'key' ? first.key.key : undefined;
+  const binding = first?.value;
+  const defaultSource = name !== undefined && binding?.kind === 'default' ? binding.initializerSource : undefined;
+  const defaultRead = name !== undefined && binding?.kind === 'default' && !defaultSource;
+  if (!defaultSource && (pattern.isNested || defaultRead))
+    return `Cannot read properties of ${String(value)}${name === undefined ? '' : ` (reading '${name}')`}`;
+  const source =
+    (defaultSource ?? pattern.source)?.text ?? (pattern.namesType && value === null ? 'object null' : String(value));
+  return name === undefined
+    ? `Cannot destructure '${source}' as it is ${String(value)}.`
+    : `Cannot destructure property '${name}' of '${source}' as it is ${String(value)}.`;
 }

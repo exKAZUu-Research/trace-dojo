@@ -1,0 +1,4 @@
+(2,21): error TS2493: Tuple type 'Pair' of length '2' has no element at index '3'.
+(3,7): error TS2322: Type '1' is not assignable to type 'undefined'.
+(4,61): error TS2514: A tuple type cannot be indexed with a negative value.
+(4,71): error TS2493: Tuple type '[number, string]' of length '2' has no element at index '0.5'.

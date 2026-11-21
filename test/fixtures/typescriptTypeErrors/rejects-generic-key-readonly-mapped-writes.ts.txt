@@ -1,0 +1,13 @@
+function setRecord<K extends string>(r: Readonly<Record<K, number>>, k: K) { r[k] = 1; }
+function setMapped<K extends string>(r: { readonly [P in K]: number }, k: K) { r[k] = 1; }
+function setKeyOf<T>(r: Readonly<T>, k: keyof T, v: T[keyof T]) { r[k] = v; }
+function increment<K extends string>(r: Readonly<Record<K, number>>, k: K) { r[k]++; }
+function compound<K extends string>(r: Readonly<Record<K, number>>, k: K) { r[k] ??= 1; }
+function destructure<K extends string>(r: Readonly<Record<K, number>>, k: K) { [r[k]] = [1]; }
+type Frozen<T> = { readonly [P in keyof T]: T[P] };
+function setAlias<T>(r: Frozen<T>, k: keyof T, v: T[keyof T]) { r[k] = v; }
+function writable<K extends string>(r: { -readonly [P in K]: number }, k: K) { r[k] = 1; }
+function plain<K extends string>(r: Record<K, number>, k: K) { r[k] = 1; }
+function reread<T>(r: Readonly<T>, k: keyof T) { return r[k]; }
+function removeKey<T>(r: Readonly<T>, k: keyof T) { delete r[k]; }
+console.log(1);

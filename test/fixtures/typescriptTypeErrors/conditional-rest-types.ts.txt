@@ -1,0 +1,4 @@
+type Tail<T> = T extends [unknown, ...infer Rest] ? Rest : never;
+type Changed<T> = T extends [unknown, ...infer Rest] ? [...Rest, string] : never;
+function distinctArguments<A, B>(value: Tail<A>): Tail<B> { return value; }
+function distinctBranches<T>(value: Tail<T>): Changed<T> { return value; }

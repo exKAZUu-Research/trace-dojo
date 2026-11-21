@@ -1,0 +1,6 @@
+InitializedScope { x: 2 }
+AssignedScope { x: 3 }
+40
+BlockScope { x: 4 }
+1 6
+ParameterClosureScope { x: 6 }

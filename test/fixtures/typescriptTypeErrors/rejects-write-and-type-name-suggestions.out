@@ -1,0 +1,9 @@
+(2,1): error TS2552: Cannot find name 'foobar'. Did you mean 'fooBar'?
+(3,1): error TS2552: Cannot find name 'foobar'. Did you mean 'fooBar'?
+(4,1): error TS2552: Cannot find name 'foobar'. Did you mean 'fooBar'?
+(5,2): error TS2552: Cannot find name 'foobar'. Did you mean 'fooBar'?
+(7,10): error TS2552: Cannot find name 'Pont'. Did you mean 'Point'?
+(8,15): error TS2552: Cannot find name 'Strng'. Did you mean 'String'?
+(9,8): error TS2552: Cannot find name 'Arry'. Did you mean 'Array'?
+(11,10): error TS2552: Cannot find name 'Shpe'. Did you mean 'Shape'?
+(11,21): error TS2552: Cannot find name 'Shpe'. Did you mean 'Shape'?

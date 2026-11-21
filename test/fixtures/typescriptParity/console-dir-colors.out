@@ -1,0 +1,17 @@
+{ count: [33m1[39m }
+[ [33mtrue[39m, [32m'hi'[39m ]
+{
+  boxed: [33m[Number: 2][39m,
+  re: [32m/[39m[31m([39m[36ma[39m[32m|[39m[36mb[39m[31m)[39m[33m\d[39m[32m/[39m[31mg[39m,
+  absent: [90mundefined[39m,
+  nil: [1mnull[22m,
+  [32m'quoted key'[39m: [32m'value'[39m
+}
+{ p: [36m[Getter:[39m [33m1[39m[36m][39m, a: [36m[Getter][39m {}, b: [36m[Getter:[39m <Inspection threw ([33m2[39m)>[36m][39m }
+[
+   [33m1[39m,     [33m2[39m,  [33m3[39m, [33m100[39m,
+  [33m33[39m,     [33m4[39m,  [33m4[39m,   [33m4[39m,
+   [33m5[39m, [33m10000[39m, [33m30[39m,  [33m45[39m
+]
+[36m<ref *1>[39m { self: [36m[Circular *1][39m }
+{ count: 1 }

@@ -1,0 +1,16 @@
+(2,19): error TS2678: Type 'string' is not comparable to type 'number'.
+(4,19): error TS2678: Type 'number' is not comparable to type 'boolean'.
+(6,19): error TS2678: Type '"c"' is not comparable to type '"a" | "b"'.
+(7,5): error TS2322: Type 'string' is not assignable to type 'boolean'.
+(9,3): error TS2345: Argument of type 'number' is not assignable to parameter of type 'boolean'.
+(10,5): error TS2322: Type '0' is not assignable to type 'boolean | undefined'.
+(12,7): error TS2322: Type 'string' is not assignable to type 'number'.
+(13,7): error TS2322: Type 'string' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+(14,47): error TS2322: Type '"z"' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to '"z"'.
+(15,44): error TS2322: Type 'string' is not assignable to type 'T'.
+  'string' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'string'.
+(16,7): error TS2322: Type '1' is not assignable to type '`a${string}`'.
+(17,7): error TS2322: Type '5' is not assignable to type 'null'.
+(18,5): error TS2322: Type 'number' is not assignable to type 'void'.

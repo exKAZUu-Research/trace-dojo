@@ -1,0 +1,8 @@
+const e = new Error('bad');
+Object.defineProperty(e, 'name', { get() { return 'Custom'; } });
+Object.defineProperty(e, 'message', { get() { return 'new'; } });
+console.log(String(e));
+const n = new Error('bad');
+(n as any).name = 42;
+console.log(`${n}`);
+throw e;

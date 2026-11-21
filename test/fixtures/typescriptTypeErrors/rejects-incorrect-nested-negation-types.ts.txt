@@ -1,0 +1,6 @@
+const zero: true = !!0;
+const text: true = !!'text';
+const missing: false = !!null;
+const empty: false = !(!'');
+function uncertain(value: boolean) { const yes: true = !!value; }
+function impossible(value: never) { const no: false = !value; }

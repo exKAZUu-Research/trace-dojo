@@ -1,0 +1,12 @@
+const { objectDefault = { mode: 'x' } } = { objectDefault: { other: 2 } };
+console.log(objectDefault);
+const { arrayDefault = [1] } = { arrayDefault: { other: 3 } };
+console.log(arrayDefault);
+const [{ value = { mode: 'nested' } }] = [{ value: { supplied: true } }];
+console.log(value);
+const [entry = { mode: 'tuple' }] = [{ supplied: true }];
+console.log(entry);
+const { nested: { item = { mode: 'inside' } } = {} } = { nested: { item: { other: 4 } } };
+console.log(item);
+const { handler = (item: number) => item * 2 } = { handler: item => item + 1 };
+console.log(handler(6));

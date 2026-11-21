@@ -1,0 +1,9 @@
+(2,15): error TS2681: A constructor cannot have a 'this' parameter.
+(3,16): error TS2680: A 'this' parameter must be the first parameter.
+(4,9): error TS2784: 'get' and 'set' accessors cannot declare 'this' parameters.
+(6,23): error TS2680: A 'this' parameter must be the first parameter.
+(7,12): error TS2730: An arrow function cannot have a 'this' parameter.
+(8,22): error TS2680: A 'this' parameter must be the first parameter.
+(9,15): error TS2681: A constructor cannot have a 'this' parameter.
+(10,28): error TS2680: A 'this' parameter must be the first parameter.
+(11,26): error TS2680: A 'this' parameter must be the first parameter.

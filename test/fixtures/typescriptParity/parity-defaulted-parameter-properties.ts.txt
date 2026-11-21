@@ -1,0 +1,9 @@
+class Count { constructor(public value = 1, label: string) {} }
+class Label { constructor(public label: string = 'ok', count: number) {} }
+class Derived extends Count { constructor(public step = 2, label: string) { super(undefined, label); } }
+class Depends { constructor(count: number, public value = count + 1, label: string) {} }
+const a = new Count(undefined, 'a');
+const b = new Label(undefined, 1);
+const c = new Derived(undefined, 'key');
+const d = new Depends(4, undefined, 'label');
+console.log(a.value.toFixed(), b.label.toUpperCase(), c.step.toFixed(), d.value.toFixed());

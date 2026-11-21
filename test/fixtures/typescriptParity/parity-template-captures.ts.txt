@@ -1,0 +1,17 @@
+type Bool<T> = T extends `${infer B extends boolean}` ? B : 'no';
+type Lit<T> = T extends `${infer B extends true | 2}` ? B : 'no';
+type NumberSet<T> = T extends `n:${infer N extends 1 | 3}` ? N : 'no';
+type BigNumber<T> = T extends `${infer N extends 2n | 4n}` ? N : 'no';
+type Nullish<T> = T extends `${infer V extends boolean | null | undefined}` ? V : 'no';
+type StringWins<T> = T extends `${infer R extends boolean | 'true'}` ? R : never;
+const a: Bool<'true'> = true;
+const b: Bool<'false'> = false;
+const c: Bool<'False'> = 'no';
+const d: Lit<'true'> = true;
+const e: Lit<'2'> = 2;
+const f: NumberSet<'n:3'> = 3;
+const g: BigNumber<'4'> = 4n;
+const h: Nullish<'null'> = null;
+const i: Nullish<'undefined'> = undefined;
+const j: StringWins<'true'> = 'true';
+console.log(a, b, c, d, e, f, g, h, i, j);

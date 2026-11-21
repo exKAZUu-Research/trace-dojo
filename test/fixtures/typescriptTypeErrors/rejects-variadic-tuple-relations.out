@@ -1,0 +1,36 @@
+(2,9): error TS2322: Type '[...number[], string]' is not assignable to type '[...number[], boolean]'.
+  Type at position 1 in source is not compatible with type at position 1 in target.
+    Type 'string' is not assignable to type 'boolean'.
+(4,9): error TS2322: Type '[...number[], string]' is not assignable to type '[...number[], number]'.
+  Type at position 1 in source is not compatible with type at position 1 in target.
+    Type 'string' is not assignable to type 'number'.
+(8,9): error TS2322: Type '[number, ...string[]]' is not assignable to type '[number, string, ...string[]]'.
+  Source provides no match for required element at position 1 in target.
+(11,9): error TS2322: Type '[number, ...string[]]' is not assignable to type '[number, (string | undefined)?]'.
+  Target allows only 2 element(s) but source may have more.
+(17,9): error TS2322: Type '[number, string, boolean]' is not assignable to type '[number, ...number[], boolean]'.
+  Type at position 1 in source is not compatible with type at position 1 in target.
+    Type 'string' is not assignable to type 'number'.
+(19,9): error TS2322: Type '[number, string, boolean]' is not assignable to type '[number]'.
+  Source has 3 element(s) but target allows only 1.
+(22,9): error TS2322: Type '[number, (string | undefined)?]' is not assignable to type '[number, string]'.
+  Source provides no match for required element at position 1 in target.
+(23,9): error TS2322: Type '[number, (string | undefined)?]' is not assignable to type '[number, ...string[]]'.
+  Type at position 1 in source is not compatible with type at position 1 in target.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+(24,9): error TS2322: Type '[number, (string | undefined)?]' is not assignable to type '[number, string | undefined]'.
+  Source provides no match for required element at position 1 in target.
+(30,9): error TS2322: Type '[string, ...number[], boolean]' is not assignable to type '[string, number, ...number[], boolean]'.
+  Source provides no match for required element at position 1 in target.
+(31,9): error TS2322: Type '[string, ...number[], boolean]' is not assignable to type '[string, ...number[]]'.
+  Type at positions 1 through 2 in source is not compatible with type at position 1 in target.
+    Type 'boolean' is not assignable to type 'number'.
+(34,9): error TS4104: The type 'readonly [number]' is 'readonly' and cannot be assigned to the mutable type '[number]'.
+(39,9): error TS2322: Type '[number, (string | undefined)?]' is not assignable to type '(string | number)[]'.
+  Type 'string | number | undefined' is not assignable to type 'string | number'.
+    Type 'undefined' is not assignable to type 'string | number'.
+(40,30): error TS2322: Type 'string | number | undefined' is not assignable to type 'string | number'.
+  Type 'undefined' is not assignable to type 'string | number'.
+(42,9): error TS2322: Type 'string | undefined' is not assignable to type 'string | number'.
+  Type 'undefined' is not assignable to type 'string | number'.

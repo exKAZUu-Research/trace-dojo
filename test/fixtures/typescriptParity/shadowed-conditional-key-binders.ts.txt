@@ -1,0 +1,12 @@
+type ByFunction<O, Z, Y, P extends (Z extends true ? (Y extends <Z>(x: Z) => Z ? keyof O : keyof O) : keyof O)> = P;
+type ByMapped<O, Z, Y, P extends (Z extends true ? (Y extends {[Z in 'a']: Z} ? keyof O : keyof O) : keyof O)> = P;
+type ByMethod<O, Z, Y, P extends (Z extends true ? (Y extends {method<Z>(x: Z): Z} ? keyof O : keyof O) : keyof O)> = P;
+type Renamed<O, Z, Y, P extends (Z extends true ? (Y extends <Local>(x: Local) => Local ? keyof O : keyof O) : keyof O)> = P;
+type Fn<T, K extends keyof T, Z, Y> = T[K] extends {key: 'x'} ? ByFunction<T[K], Z, Y, 'key'> : never;
+type MapKey<T, K extends keyof T, Z, Y> = T[K] extends {key: 'x'} ? ByMapped<T[K], Z, Y, 'key'> : never;
+type Method<T, K extends keyof T, Z, Y> = T[K] extends {key: 'x'} ? ByMethod<T[K], Z, Y, 'key'> : never;
+type Control<T, K extends keyof T, Z, Y> = T[K] extends {key: 'x'} ? Renamed<T[K], Z, Y, 'key'> : never;
+const shape = { n: 1 };
+type ByQuery<O, Z, Y, P extends (Z extends true ? (Y extends typeof shape ? keyof O : keyof O) : keyof O)> = P;
+type FromQuery<T, K extends keyof T, Z, Y> = T[K] extends {key: 'x'} ? ByQuery<T[K], Z, Y, 'key'> : never;
+console.log('ok');

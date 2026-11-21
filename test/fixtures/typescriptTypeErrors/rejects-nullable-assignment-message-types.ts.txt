@@ -1,0 +1,55 @@
+const text: string | undefined = 3;
+const number: number | undefined = 's';
+const nullable: string | null = 3;
+const literal: 'a' = 3;
+const literalUnion: 'a' | 'b' = 3;
+const nullableLiteral: 'a' | undefined = 3;
+const boolean: boolean | undefined = 3;
+const mixed: string | number | undefined = false;
+const nullableLiteralText: 'a' | null = 's';
+const notNull: string | undefined = null;
+const notUndefined: string | null = undefined;
+const notVoid: string | undefined = undefined as void;
+function argument(value: string | undefined) {}
+argument(3);
+function result(): string | undefined {return 3;}
+class Item {value: string | undefined = 3;}
+function defaulted<T extends string | undefined = 3>() {}
+const tuple: [string | undefined] = [3];
+const array: (string | undefined)[] = [3];
+function compound(value: number | null) {const target: string | undefined = value;}
+function booleanSource(value: boolean) {const target: number | undefined = value;}
+const objectTarget: string | undefined = { x: 1 };
+const arrayTarget: string | null = [1];
+const functionTarget: string | undefined = (x: number) => x;
+class Instance {}
+const classTarget: string | undefined = new Instance();
+interface Shape { x: number }
+function useShape(shape: Shape) { const target: string | undefined = shape; }
+argument({ x: 1 });
+function objectResult(): string | undefined { return { x: 1 }; }
+class ObjectField { value: string | undefined = { x: 1 }; }
+function objectDefault<T extends string | undefined = { x: 1 }>() {}
+function opaque(value: unknown) { const target: string | undefined = value; }
+function anyObject(value: object) { const target: string | undefined = value; }
+function unionSource(value: string | number) { const target: symbol | undefined = value; }
+const either: string | number | null | undefined = true;
+const voidOrString: void | null | undefined | string = true;
+const onlyNullish: undefined | null = true;
+const intersection: { a: number } & { b: string } = { a: 1, b: 's' };
+const intersectionTarget1: string | undefined = intersection;
+const intersectionTarget2: number | undefined = intersection;
+const intersectionTarget3: string | null = intersection;
+function branded(value: string & { __brand: 'b' }) { const target: number | undefined = value; }
+function objectUnion(value: { a: number } | { b: string }) { const target: string | undefined = value; }
+function laterFailure(value: string | number) { const target: string | boolean = value; }
+function unionArgument(value: string | number) {
+  function accepts(value: symbol | undefined) {}
+  accepts(value);
+}
+function defaultedUnion<T extends string | undefined = string | number>() {}
+class DefaultedUnion<T extends string | undefined = string | number> {}
+interface FullPoint { x: number; y: number }
+function defaultedPoint<T extends FullPoint | undefined = { x: 1 } | { y: 2 }>() {}
+type Constrained<T extends string | undefined> = { item: T };
+function instantiatedUnion(value: Constrained<string | number>) {}

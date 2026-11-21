@@ -1,0 +1,7 @@
+function single(x: { a: number }) { console.log(x); }
+function double(x: { a: number }, two: number) { console.log(x, two); }
+function tuple(...items: [{ a: number }, number]) { console.log(items); }
+single(...[{ a: 1, b: 2 }] as const);
+single(...[{ a: 1, b: 2 }]);
+double(...[{ a: 1, b: 2 }, 3] as const);
+tuple(...[{ a: 1, b: 2 }, 3] as const);

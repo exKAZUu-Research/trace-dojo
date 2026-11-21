@@ -1,0 +1,18 @@
+function echo<T>(input: T | {value:T; kind:'a'}): T | { value:T; kind:'a' } { return input; }
+function echoO<T>(input: T | {value?:T; kind:'a'}): T | { value?:T; kind:'a' } { return input; }
+const elem:{value:number; kind?:'a'; extra:boolean}={value:1,extra:true};
+console.log(echo(elem),echoO(elem));
+function record<T>(input:{first:T; next?:T}):T[] { return []; }
+const recordValues:number[]=record({first: 1, next:undefined});
+function list<T>(input: T | [T,T?]): T[] { return []; }
+function ro<T>(input: T | readonly [T,T?]): T[] { return []; }
+function direct<T>(input: [T,T?]): T[] { return []; }
+function withRest<T>(input: [T,T?,...T[]]): T[] { return []; }
+const input:[number,undefined]=[1,undefined];
+const mutable:number[]=list(input);
+const readonly:number[]=ro(input);
+const fixed:number[]=direct(input);
+const rest:number[]=withRest([1,undefined,2]);
+const firstMayBeUndefined:[number|undefined,number]=[undefined,1];
+const required:(number|undefined)[]=list(firstMayBeUndefined);
+console.log(recordValues,mutable,readonly,fixed,rest,required);

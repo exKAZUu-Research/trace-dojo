@@ -1,0 +1,23 @@
+interface Animal {
+  name: string;
+}
+interface Dog extends Animal {
+  bark(): void;
+}
+function combine<T>(a: (x: T) => void, b: (x: T) => void) {
+  return (x: T) => {
+    a(x);
+    b(x);
+  };
+}
+const f = combine(
+  (x: Animal) => {},
+  (x: Dog) => {}
+);
+f({ name: "a" });
+const unrelated = combine(
+  (x: { a: number }) => {},
+  (x: { b: string }) => {}
+);
+type Arg<T> = T extends { a: (x: infer U) => void; b: (x: infer U) => void } ? U : never;
+const arg: Arg<{ a: (x: Animal) => void; b: (x: Dog) => void }> = { name: "d" };

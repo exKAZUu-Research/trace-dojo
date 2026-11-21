@@ -1,0 +1,11 @@
+const tries: (() => unknown)[] = [
+  () => (Object.getOwnPropertyDescriptor(Map.prototype, 'size') as any).get.call({}),
+  () => (Object.getOwnPropertyDescriptor(Set.prototype, 'size') as any).get.call(new Map()),
+  () => (Object.getOwnPropertyDescriptor(RegExp.prototype, 'source') as any).get.call({}),
+  () => (Object.getOwnPropertyDescriptor(RegExp.prototype, 'flags') as any).get.call(5),
+  () => Symbol.prototype.toString.call('x' as any),
+  () => (Object.getOwnPropertyDescriptor(Symbol.prototype, 'description') as any).get.call(1),
+  () => [].values().next.call({}),
+  () => new Map().entries().next.call([].values()),
+];
+for (const t of tries) { try { console.log(t()); } catch (e: any) { console.log(e.constructor.name, e.message); } }

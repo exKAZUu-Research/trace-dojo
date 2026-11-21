@@ -1,0 +1,32 @@
+type ReturnsAny = (...args: any[]) => any;
+function properties<T extends ReturnsAny>(value: ReturnType<T>) {
+  value.count += 1;
+  value.label = 'updated';
+  value['extra'] = 2;
+  console.log(value.count, value.label, value.extra);
+}
+function returnedObject() { return { count: 3, label: 'old' }; }
+properties<typeof returnedObject>(returnedObject());
+function values<T extends ReturnsAny>(items: ReturnType<T>) {
+  const copy = [...items];
+  return copy;
+}
+function returnedList() { return [1, 2]; }
+console.log(values<typeof returnedList>(returnedList()));
+class Item { number = 7; }
+function build<T extends ReturnsAny>(ctor: ReturnType<T>) { return new ctor(); }
+function call<T extends ReturnsAny>(fn: ReturnType<T>) { return fn(); }
+function itemFactory() { return Item; }
+function fnFactory() { return () => 'done'; }
+console.log(build<typeof itemFactory>(itemFactory()).number, call<typeof fnFactory>(fnFactory()));
+function allAny<T>(x: T extends string ? any : any) { x.check = 'any'; console.log(x.check); }
+allAny<number>({});
+function instanceAny<T extends new (...args: any[]) => any>(ctor: InstanceType<T>) { return new ctor(); }
+console.log(instanceAny<new () => typeof Item>(Item).number);
+function upper<T extends (...args: any[]) => string[]>(items: ReturnType<T>) {
+  const result: string[] = [];
+  for (const item of items) result.push(item.toUpperCase());
+  return result;
+}
+function words() { return ['left', 'right']; }
+console.log(upper<typeof words>(words()));

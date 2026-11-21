@@ -1,0 +1,23 @@
+const key = "__@computed";
+const token = Symbol("token");
+
+type Dict = { [key: `__@${string}`]: number };
+const dict: Dict = { "__@hello": 1, [key]: 2, get "__@accessor"() { return 3; } };
+const either: Dict | { spare?: boolean } = { "__@hello": 4 };
+const eitherGetter: Dict | { spare?: boolean } = { get [key]() { return 5; } };
+
+interface Mixed {
+  [key: `__@${string}`]: (value: string) => number;
+  [key: symbol]: (value: number) => string;
+}
+const mixed: Mixed = {
+  ["__@length"](value) { return value.length; },
+  [token](value) { return value.toFixed(); },
+};
+
+const arbitrary: string = "extra";
+const spread = { [arbitrary]: 6, "__@member": 7, [token]: "symbol" };
+const numeric: Record<string, number> = { ...spread };
+
+console.log(dict["__@hello"], dict[key], dict["__@accessor"], "__@hello" in either, key in eitherGetter);
+console.log(mixed["__@length"]("abc"), mixed[token](42), numeric["__@member"]);

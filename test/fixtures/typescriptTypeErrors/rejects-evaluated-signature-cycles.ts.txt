@@ -1,0 +1,6 @@
+type DirectParam<U extends Parameters<(x: U & string) => void>[0]> = U;
+type WrappedParam<U extends Array<Parameters<(x: U & string) => void>[0]>> = U;
+type WrappedKey<U extends Array<Parameters<(x: keyof (U & string)) => void>[0]>> = U;
+type WrappedReturn<U extends Array<ReturnType<() => keyof (U & string)>>> = U;
+type ParameterKey<U extends Parameters<(x: keyof (U & string)) => void>[0]> = U;
+type Signature<U extends (x: Uppercase<U>) => void> = U;

@@ -1,0 +1,3 @@
+for (const limit of [-1, -1.5, -20, 0, 1, 6]) console.dir('abcdef', { maxStringLength: limit });
+console.dir({ empty: '', text: 'abc' }, { maxStringLength: -1 });
+console.dir('abcdef', { maxStringLength: null });

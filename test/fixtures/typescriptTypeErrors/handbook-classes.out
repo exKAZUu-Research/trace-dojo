@@ -1,0 +1,13 @@
+(2,3): error TS2564: Property 'x' has no initializer and is not definitely assigned in the constructor.
+(3,3): error TS2564: Property 'y' has no initializer and is not definitely assigned in the constructor.
+(6,3): error TS2564: Property 'name' has no initializer and is not definitely assigned in the constructor.
+(11,10): error TS2540: Cannot assign to 'name' because it is a read-only property.
+(18,3): error TS2416: Property 'greet' in type 'Derived' is not assignable to the same property in base type 'Base'.
+(24,3): error TS2416: Property 'x' in type 'Derived2' is not assignable to the same property in base type 'Base2'.
+(30,9): error TS7006: Parameter 's' implicitly has an 'any' type.
+(40,3): error TS2445: Property 'getName' is protected and only accessible within class 'Greeter2' and its subclasses.
+(44,21): error TS2341: Property 'x' is private and only accessible within class 'MyClass'.
+(48,11): error TS2511: Cannot create an instance of an abstract class.
+(50,3): error TS2416: Property 'getName' in type 'Derived3' is not assignable to the same property in base type 'Base3'.
+(55,20): error TS2511: Cannot create an instance of an abstract class.
+(68,16): error TS2741: Property 'otherContent' is missing in type 'Box' but required in type 'DerivedBox'.

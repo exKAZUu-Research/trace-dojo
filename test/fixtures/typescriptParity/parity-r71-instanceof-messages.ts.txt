@@ -1,0 +1,6 @@
+const tries: (() => unknown)[] = [
+  () => ({} as any) instanceof (5 as any), () => ({} as any) instanceof ({} as any), () => (1 as any) instanceof Number,
+  () => { function F() {} (F as any).prototype = 1; return ({} as any) instanceof F; },
+  () => [] instanceof Object, () => Object.create(null) instanceof Object,
+];
+for (const t of tries) { try { console.log(t()); } catch (e: any) { console.log(e.constructor.name, e.message); } }

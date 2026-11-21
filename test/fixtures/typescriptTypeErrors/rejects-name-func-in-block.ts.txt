@@ -1,0 +1,2 @@
+if (true) { function g() { return 1; } }
+console.log(typeof g);

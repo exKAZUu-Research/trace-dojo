@@ -1,0 +1,14 @@
+function test(value: unknown): absent is number { return true; }
+function test2({ value }: { value: unknown }): value is number { return true; }
+function test3(...values: unknown[]): values is number[] { return true; }
+function test4([first]: unknown[]): first is number { return true; }
+type F = (value: unknown) => other is string;
+const g = (value: unknown): missing is string => true;
+class C {
+  isNum(x: unknown): y is number { return true; }
+  isThis(): this is C { return true; }
+}
+function test5(value: unknown, { inner }: { inner: unknown }): inner is string { return true; }
+function test6(this: unknown, value: unknown): this is string { return true; }
+interface I { check(v: unknown): w is string; }
+console.log(test("x"), test2({ value: 1 }));

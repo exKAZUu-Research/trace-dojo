@@ -1,0 +1,20 @@
+function named<T extends { name: string }, K extends keyof T>(record: T, key: K): number {
+  return record[key].length;
+}
+
+function numbered<T extends { [index: number]: string }>(record: T, key: keyof T): number {
+  return record[key].length;
+}
+
+function bySymbol(record: Record<string, string>, key: symbol): string {
+  return record[key];
+}
+
+function asNumber<T extends Record<string, string>>(record: T, key: keyof T): number {
+  const value: number = record[key];
+  return value;
+}
+
+function accepted<T extends Record<string, string>>(record: T, key: keyof T): number {
+  return record[key].length;
+}

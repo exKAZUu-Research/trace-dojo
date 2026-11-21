@@ -1,0 +1,13 @@
+function printId(element: HTMLElement) { console.log(element.id); }
+printId({ id: 'demo' });
+const page: Document = 'text';
+console.log(page);
+function misuse(element: HTMLElement, node: Node, document: Document, nested: NodeListOf<HTMLDivElement>) {
+  element.id = 42;
+  element.addEventListener('click', event => console.log(event.clientX, event.noSuchProperty));
+  const wrongChild: Node = node.appendChild('text');
+  const wrongSelector: number = document.querySelector('div');
+  const wrongItem: number = nested.item(0);
+  const valid: HTMLDivElement = nested.item(0);
+  console.log(wrongChild, wrongSelector, wrongItem, valid);
+}

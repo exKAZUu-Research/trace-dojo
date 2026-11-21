@@ -1,0 +1,14 @@
+const suffixNumber=(...args:[...string[],number])=>console.log(args);
+const sameTail:(...args:[...string[],number])=>void=suffixNumber;
+const fixedTail:(text:string,n:number)=>void=suffixNumber;
+sameTail('a','b',1);
+fixedTail('c',2);
+const allArguments=(...args:(string|number)[])=>console.log(args);
+const variadicTarget:(...args:[...string[],number])=>void=allArguments;
+variadicTarget('d',3);
+const suffixWithPrefix=(start:boolean,...args:[...string[],number])=>console.log(start,args);
+const samePrefix:(start:boolean,...args:[...string[],number])=>void=suffixWithPrefix;
+samePrefix(true,'e',4);
+const ignoreArguments=()=>console.log('ignored');
+const ignoresTail:(...args:[...string[],number])=>void=ignoreArguments;
+ignoresTail('f',5);

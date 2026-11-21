@@ -1,0 +1,24 @@
+class Bag {
+  [key: symbol]: number;
+  label = "bag";
+}
+const key = Symbol("key");
+const bag = new Bag();
+bag[key] = 3;
+console.log(bag.label, bag[key]);
+
+class Mixed {
+  [key: string | symbol]: number;
+}
+const mixed = new Mixed();
+mixed[key] = 4;
+mixed.count = 5;
+console.log(mixed[key], mixed.count);
+
+class Tagged extends Bag {
+  name = "tagged";
+}
+const tagged = new Tagged();
+tagged[key] = 6;
+const read: number = tagged[key];
+console.log(read, tagged.name);

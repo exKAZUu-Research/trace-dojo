@@ -1,0 +1,6 @@
+(3,9): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+(8,9): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+(12,9): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+(16,11): error TS2322: Type 'T' is not assignable to type 'number'.
+(20,11): error TS2322: Type 'unknown' is not assignable to type 'number'.
+(24,11): error TS2322: Type 'void' is not assignable to type 'number'.

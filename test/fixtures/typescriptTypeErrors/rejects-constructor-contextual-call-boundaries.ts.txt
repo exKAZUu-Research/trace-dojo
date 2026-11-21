@@ -1,0 +1,20 @@
+function wrap(x:number):[number];
+function wrap<T>(x:T):[T];
+function wrap(x:any):[any]{return [x];}
+class GenericSelected{x;constructor(){[this.x]=wrap('text')}}
+class Arrow {
+  x;
+  constructor(){[this.x]=
+    (()=>[1])();
+  }
+}
+class FunctionExpression {
+  x;
+  constructor(){[this.x]=
+    (function(){return [1]})();
+  }
+}
+class ObjectReturn{x;constructor(){({x:this.x}=(()=>({x:1}))())}}
+function fixedGeneric<T>(input:T):[number]{return [1];}
+class FixedGeneric{x;constructor(){[this.x]=fixedGeneric(1)}}
+class ConditionalReturn{x;constructor(flag:boolean){[this.x]=(()=>flag?[1]:[2])()}}

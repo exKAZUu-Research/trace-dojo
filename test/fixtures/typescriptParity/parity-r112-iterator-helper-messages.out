@@ -1,0 +1,14 @@
+TypeError number 5 is not a function
+TypeError object is not a function
+RangeError x must be positive
+RangeError -2 must be positive
+6
+TypeError Reduce of a done iterator with no initial value
+Object [Iterator Helper] {}
+[ 1, 2, 3 ]
+TypeError object null is not a function
+TypeError number 5 is not a function
+TypeError 5 is not a function
+TypeError null is not a function
+TypeError undefined is not a function
+[ 2, 4, 6 ]

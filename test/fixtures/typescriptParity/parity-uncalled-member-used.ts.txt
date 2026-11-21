@@ -1,0 +1,7 @@
+interface ExercisePlugin { name: string; run(): void; }
+const p: ExercisePlugin = { name: "p", run() { console.log("run"); } };
+const queue: (() => void)[] = [];
+if (p.run) {
+  queue.push(p.run);
+}
+console.log(queue.length);

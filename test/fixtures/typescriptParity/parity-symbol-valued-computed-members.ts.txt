@@ -1,0 +1,30 @@
+function make(): symbol {return Symbol('made');}
+const key = make();
+const alias = Symbol;
+const aliased = alias('alias');
+const parenthesized = (Symbol)('parenthesized');
+const fromKey: typeof key = Symbol('other');
+const item: {[key]: number} = {[key]: 3};
+const empty: typeof item = {};
+interface Named {[aliased]: string;}
+const named: Named = {[aliased]: 'alias'};
+const wrapped: {[parenthesized]: boolean} = {[parenthesized]: true};
+const methods: {[key](value: number): string} = {[key](value) {return value.toFixed(1);}};
+class Keys {static readonly key = make();}
+class Holder {[Keys.key] = 4;}
+const text: string = 'text';
+const count: number = 0;
+interface TextIndex {[text]: number;}
+interface NumberIndex {[count]: string;}
+const byText: TextIndex = {[text]: 5};
+const byNumber: NumberIndex = {[count]: 'number'};
+console.log(typeof fromKey, item[key], empty[key], named[aliased], wrapped[parenthesized], methods[key](6), new Holder()[Keys.key], byText[text], byNumber[count]);
+interface Both {[key]: string; [aliased]: number;}
+const both: Both = {[key]: 'one', [aliased]: 2};
+class Accessor {
+  get [key]() {return 7;}
+  set [key](value: number) {}
+}
+const accessor = new Accessor();
+accessor[key] = 8;
+console.log(both[key], both[aliased], accessor[key]);

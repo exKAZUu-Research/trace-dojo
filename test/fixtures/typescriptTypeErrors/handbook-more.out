@@ -1,0 +1,13 @@
+(2,32): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ a: number; b: number; }'.
+(3,43): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ a: number; b: number; }'.
+(4,11): error TS2352: Conversion of type 'string' to type 'number' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+(10,1): error TS2722: Cannot invoke an object which is possibly 'undefined'.
+(12,7): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+(14,13): error TS2454: Variable 'later' is used before being assigned.
+(15,12): error TS2322: Type 'string' is not assignable to type 'number'.
+(19,10): error TS2576: Property 'count' does not exist on type 'C'. Did you mean to access the static member 'C.count' instead?
+(23,10): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+(25,7): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+(27,1): error TS2454: Variable 'u' is used before being assigned.
+(28,35): error TS1016: A required parameter cannot follow an optional parameter.
+(30,14): error TS2493: Tuple type '[number, number]' of length '2' has no element at index '2'.

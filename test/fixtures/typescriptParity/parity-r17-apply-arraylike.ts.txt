@@ -1,0 +1,5 @@
+function sum(...xs: number[]) { return xs.reduce((a, b) => a + b, 0); }
+function wrap(a: number, b: number) { return sum.apply(null, arguments as any); }
+console.log(wrap(1, 2));
+console.log(sum.apply(null, { length: 2, 0: 5, 1: 6 } as any));
+try { sum.apply(null, 5 as any); } catch (e: any) { console.log(e.message); }

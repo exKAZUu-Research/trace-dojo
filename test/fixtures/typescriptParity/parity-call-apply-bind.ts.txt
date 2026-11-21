@@ -1,0 +1,33 @@
+const f = (x: number): number => x * 2;
+console.log(f.call(null, 5), f.apply(null, [6]), f.bind(null, 7)(), f.bind(null)(8));
+const g = (x: number, y: string): string => `${x}${y}`;
+const bound = g.bind(null, 1);
+console.log(bound("a"), g.call(undefined, 2, "b"), g.apply(undefined, [3, "c"]));
+class Counter {
+  count = 0;
+  add(step: number): number {
+    this.count += step;
+    return this.count;
+  }
+}
+const counter = new Counter();
+console.log(counter.add.call(counter, 2), counter.add.apply(counter, [3]), counter.add.bind(counter)(4));
+function greet(this: { name: string }, greeting: string): string {
+  return `${greeting}, ${this.name}`;
+}
+console.log(greet.call({ name: "Ann" }, "Hi"), greet.bind({ name: "Bo" })("Yo"));
+class Point {
+  constructor(public x: number, public y: number) {}
+}
+const AtOrigin = Point.bind(null, 0);
+console.log(new AtOrigin(5));
+const noArgs = (): string => "none";
+console.log(noArgs.call(null), noArgs.apply(null));
+function sum(...values: number[]): number {
+  return values.reduce((a, b) => a + b, 0);
+}
+console.log(sum.call(null, 1, 2, 3), sum.apply(null, [4, 5]), sum.bind(null, 1)(2, 3));
+const generic = <T,>(value: T): T => value;
+console.log(generic.call(null, "g"));
+const anyFn: Function = f;
+console.log(anyFn.call(null, 9));

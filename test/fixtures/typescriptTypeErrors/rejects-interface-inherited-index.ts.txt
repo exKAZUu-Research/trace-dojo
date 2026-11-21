@@ -1,0 +1,4 @@
+interface Base { name: string }
+interface Dict extends Base { [k: string]: number }
+const d: Dict = { name: 1 as never };
+console.log(d);

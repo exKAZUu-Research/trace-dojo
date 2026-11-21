@@ -1,0 +1,4 @@
+500
+OutOfStockError pen pen is out of stock
+true Cannot read properties of null (reading 'b')
+[uncaught] OutOfStockError: pen is out of stock

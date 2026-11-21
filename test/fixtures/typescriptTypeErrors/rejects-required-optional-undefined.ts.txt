@@ -1,0 +1,4 @@
+const optionalString: Required<{x?: string|undefined}> = {x:undefined};
+const optionalUndefined: Required<{x?: undefined}> = {x:undefined};
+type RemoveOptional<T> = {[K in keyof T]-?: T[K]};
+const genericOptional: RemoveOptional<{x?: number|undefined}> = {x:undefined};

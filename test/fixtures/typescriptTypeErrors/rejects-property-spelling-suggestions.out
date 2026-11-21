@@ -1,0 +1,12 @@
+(2,15): error TS2551: Property 'lenght' does not exist on type '"abc"'. Did you mean 'length'?
+(4,4): error TS2551: Property 'lenght' does not exist on type 'number[]'. Did you mean 'length'?
+(5,16): error TS2339: Property 'psuh' does not exist on type 'number[]'.
+(7,21): error TS2339: Property 'nmae' does not exist on type 'P'.
+(7,35): error TS2551: Property 'descrption' does not exist on type 'P'. Did you mean 'description'?
+(7,55): error TS2551: Property 'Name' does not exist on type 'P'. Did you mean 'name'?
+(9,15): error TS2551: Property 'cuont' does not exist on type '{ count: number; value: number; }'. Did you mean 'count'?
+(9,24): error TS2551: Property 'vlaue' does not exist on type '{ count: number; value: number; }'. Did you mean 'value'?
+(9,33): error TS2551: Property 'valeu' does not exist on type '{ count: number; value: number; }'. Did you mean 'value'?
+(9,42): error TS2551: Property 'COUNT' does not exist on type '{ count: number; value: number; }'. Did you mean 'count'?
+(10,18): error TS2551: Property 'florr' does not exist on type 'Math'. Did you mean 'floor'?
+(10,32): error TS2551: Property 'toUppercase' does not exist on type '"x"'. Did you mean 'toUpperCase'?

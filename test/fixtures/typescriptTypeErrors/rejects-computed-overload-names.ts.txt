@@ -1,0 +1,18 @@
+const overloadA="a", overloadB="b";
+class WrongComputed {
+  [overloadA](value:string):string;
+  [overloadB](value:string) {return value;}
+}
+class WrongStaticComputed {
+  static [overloadA](value:string):string;
+  static [overloadB](value:string) {return value;}
+}
+class LateBoundImplementation {
+  [overloadA](value:string):string;
+  a(value:string){return value;}
+}
+const duplicateMethodName = "duplicate";
+class DuplicateComputedImplementation {
+  [duplicateMethodName]() {return 1;}
+  duplicate() {return 2;}
+}

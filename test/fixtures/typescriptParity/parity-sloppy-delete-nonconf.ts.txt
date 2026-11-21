@@ -1,0 +1,2 @@
+const o: any = Object.freeze({ a: 1 });
+console.log(delete o.a, o);

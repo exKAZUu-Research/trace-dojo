@@ -1,0 +1,10 @@
+const parsed = { ...JSON.parse('{"count": 2}') };
+console.log(parsed.count);
+const source: any = { count: 3 };
+const withFixed = { fixed: 1, ...source };
+console.log(withFixed.count, withFixed.fixed);
+const after = { ...source, extra: true, ...{ more: "m" } };
+console.log(after.count, after.extra, after.more, after.missing);
+const maybe: any = undefined;
+const fromUndefined = { ...maybe, kept: 1 };
+console.log(fromUndefined, fromUndefined.anything);

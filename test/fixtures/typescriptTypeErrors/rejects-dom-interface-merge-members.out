@@ -1,0 +1,6 @@
+(2,7): error TS2740: Type '{ name: string; date: string; }' is missing the following properties from type 'Event': bubbles, cancelBubble, cancelable, composed, and 18 more.
+(4,7): error TS2740: Type '{ x: number; y: number; }' is missing the following properties from type 'Location': ancestorOrigins, hash, host, hostname, and 9 more.
+(7,5): error TS2741: Property 'name' is missing in type '{ x: number; }' but required in type 'Algorithm'.
+(9,7): error TS2740: Type '{ n: number; }' is missing the following properties from type 'Body': body, bodyUsed, arrayBuffer, blob, and 4 more.
+(12,7): error TS2740: Type '{ body: string; }' is missing the following properties from type 'Text': wholeText, splitText, data, length, and 62 more.
+(14,7): error TS2740: Type '{ author: string; }' is missing the following properties from type 'Comment': data, length, ownerDocument, appendData, and 59 more.

@@ -1,0 +1,11 @@
+(1,74): error TS2322: Type 'A' is not assignable to type '[...A]'.
+  The type 'readonly unknown[]' is 'readonly' and cannot be assigned to the mutable type '[...A]'.
+(2,67): error TS2322: Type 'readonly [...A]' is not assignable to type 'A'.
+  'A' could be instantiated with an arbitrary type which could be unrelated to 'readonly [...A]'.
+(4,7): error TS2322: Type '<T>(x: T) => T' is not assignable to type '(x: number) => string'.
+  Type 'number' is not assignable to type 'string'.
+(6,7): error TS2322: Type '<T extends string>() => T[]' is not assignable to type '() => number[]'.
+  Type 'string[]' is not assignable to type 'number[]'.
+    Type 'string' is not assignable to type 'number'.
+(7,81): error TS2322: Type '[...A]' is not assignable to type 'B'.
+  '[...A]' is assignable to the constraint of type 'B', but 'B' could be instantiated with a different subtype of constraint 'unknown[]'.

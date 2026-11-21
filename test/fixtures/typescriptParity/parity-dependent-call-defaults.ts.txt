@@ -1,0 +1,6 @@
+function pair<T, U = T>(first: T, second: U): U { return second; }
+function fallback<T, U = T[]>(value: T, other?: U): T | U { return other ?? value; }
+class DefaultPair<T, U = T> { constructor(public first: T, public second: U) {} }
+console.log(pair<number>(1, 2), pair(1, "other"));
+console.log(fallback(1), fallback<number>(1, [2]));
+console.log(new DefaultPair<number>(1, 2));

@@ -1,0 +1,9 @@
+type T = void & undefined;
+const x: T = undefined;
+type U = (void | number) & undefined;
+const y: U = undefined;
+type V = void & (undefined | string);
+const z: V = undefined;
+function f(): void {}
+const w: ReturnType<typeof f> & undefined = undefined;
+console.log(x, y, z, w);

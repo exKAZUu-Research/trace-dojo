@@ -1,0 +1,22 @@
+const c = Math.abs(1) > 0;
+const f = () => 1;
+try { f.tag = "a"; } catch (e) { throw e; }
+console.log(f.tag);
+const g = () => 2;
+while (true) { g.tag = "a"; break; }
+console.log(g.tag);
+const h = () => 3;
+for (;;) { h.tag = "a"; break; }
+console.log(h.tag);
+const k = () => 4;
+do { if (c) { break; } k.tag = "a"; } while (false);
+console.log(k.tag);
+const m = () => 5;
+(() => { m.tag = "a"; })();
+console.log(m.tag);
+const n = () => 6;
+if (c) n.tag = "a";
+console.log(n.tag);
+const p = () => 7;
+console.log(p.tag);
+p.tag = "z";

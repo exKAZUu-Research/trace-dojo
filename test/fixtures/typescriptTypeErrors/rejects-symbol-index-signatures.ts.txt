@@ -1,0 +1,23 @@
+interface I {
+  [k: symbol]: number;
+}
+const s: symbol = Symbol("s");
+const u = Symbol("u");
+const i: I = { [s]: 1 };
+console.log(i[s], i[u]);
+const bad = i["x"];
+const o = { [s]: "a", b: 1 };
+const n: number = o[s];
+const w: { [k: symbol]: number } = { [s]: "x" };
+const ro = { [s]: 1 } as const;
+ro[s] = 2;
+const k: keyof I = "a";
+const ia: I[symbol] = "a";
+const unknownName: { [k: symbol]: number } = { a: 1 };
+const noContext: { [k: string]: (x: number) => number } = { [u]: (x) => x };
+const withContext: { [k: symbol]: (x: number) => number } = { [u]: (x) => x };
+const symbolsOnly: { [k: string]: number } = { [u]: 1 };
+function f(key: symbol) {
+  const both = { [key]: 1, [key.toString()]: "x", a: true };
+  const v: string = both[key];
+}

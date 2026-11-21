@@ -1,0 +1,12 @@
+interface Base { name?: string; }
+interface Derived extends Base { name: string | undefined; }
+const item: Derived = { name: undefined };
+interface First { value?: number; }
+class First { value?: number; }
+class Second { data?: number; }
+interface Second { data?: number; }
+interface HasMethod { method(value: number): string; }
+class HasMethod { method(value: string | number): string { return String(value); } }
+interface OnlyDeclared { method(): void; }
+class OnlyDeclared {}
+console.log(item.name, new First().value, new Second().data, new HasMethod().method(1), typeof new OnlyDeclared().method);

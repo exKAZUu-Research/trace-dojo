@@ -1,0 +1,4 @@
+(2,3): error TS2300: Duplicate identifier 'x'.
+(3,3): error TS2300: Duplicate identifier 'x'.
+(4,3): error TS2393: Duplicate function implementation.
+(5,3): error TS2393: Duplicate function implementation.

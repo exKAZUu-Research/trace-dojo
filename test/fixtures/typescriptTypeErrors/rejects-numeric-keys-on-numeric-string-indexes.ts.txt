@@ -1,0 +1,22 @@
+type I = { [k: `${number}`]: string };
+type T = I[0];
+function write(x: I) {
+  x[1] = "a";
+}
+function read(x: I, n: number) {
+  console.log(x[1].toUpperCase(), x[n]);
+}
+type A = { [k: `a${number}`]: string };
+function readA(x: A) {
+  const a: string = x["a1"];
+  return x[1];
+}
+type IN = I[number];
+const fromStringNames: I = { "0": 1 };
+interface Y { [k: `${number}`]: string; "0": number }
+const src = { "1": 2 };
+const fromVariable: I = src;
+function inferValue<T>(value: { [k: `${number}`]: T }): T {
+  return value["1"];
+}
+const inferred: string = inferValue({ 0: 1, "1": true });

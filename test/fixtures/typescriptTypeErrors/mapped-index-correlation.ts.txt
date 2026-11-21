@@ -1,0 +1,8 @@
+type Selected<T> = { [K in keyof T]: T[K] extends string ? K : never }[keyof T];
+type RequiredValues<T> = { [K in keyof T]-?: T[K] }[keyof T];
+type OptionalValues<T> = { [K in keyof T]?: T[K] }[keyof T];
+const key: Selected<{ name: string; age: number }> = 'age';
+const missing: RequiredValues<{ age?: number; name: string }> = undefined;
+const wrong: OptionalValues<{ age: number; name: string }> = false;
+const badPartial: Partial<unknown> = null;
+const badReadonly: Readonly<unknown> = undefined;

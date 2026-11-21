@@ -1,0 +1,2 @@
+(1,7): error TS2300: Duplicate identifier 'C'.
+(2,7): error TS2300: Duplicate identifier 'C'.

@@ -1,0 +1,16 @@
+function asValue<T>(value: T): {} | null | undefined {
+  return value;
+}
+type NonNullish = {};
+type BroadValue = NonNullish | null | undefined | 'example';
+function copy(value: unknown): BroadValue {
+  return value;
+}
+const unknownValue: unknown = 42;
+console.log(asValue(42), asValue(null), asValue(undefined));
+console.log(copy(unknownValue), copy({ name: 'item' }));
+const blank = {};
+function makeBlank() { return {}; }
+function blankValue(value: unknown): typeof blank | null | undefined { return value; }
+function returnValue(value: unknown): ReturnType<typeof makeBlank> | null | undefined { return value; }
+console.log(blankValue('blank'), returnValue(true));

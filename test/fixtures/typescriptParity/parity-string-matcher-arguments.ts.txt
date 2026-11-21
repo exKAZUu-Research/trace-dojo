@@ -1,0 +1,6 @@
+const re = /b/;
+console.log("a,b".split(",", 1), "abc".match(re), "abc".replace("b", "x"), "abc".search("c"), "abc".replace(/b/g, (s) => s + s));
+console.log([..."abab".matchAll(/a/g)].length, "abab".replaceAll("a", "c"), "a-b".split(/-/));
+const m = new Map([[1, "a"]]);
+const copy = { ...m };
+console.log(copy, Object.keys(m));

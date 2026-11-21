@@ -1,0 +1,25 @@
+type ElementOf<T> = T[][number];
+interface List<T> {
+  [n: number]: T;
+}
+function viaArray<T extends T[][number]>() {}
+function viaGeneric<T extends Array<T>[number]>() {}
+function viaReadonly<T extends ReadonlyArray<T>[number]>() {}
+function viaTuple<T extends [T][number]>() {}
+function viaPair<T extends [T, string][number]>() {}
+function viaLiteral<T extends T[][0]>() {}
+function viaRest<T extends [string, ...T[]][3]>() {}
+function viaOptional<T extends [T?][number]>() {}
+function viaInterface<T extends List<T>[number]>() {}
+function viaRecord<T extends Record<string, T>['x']>() {}
+function viaUnionObject<T extends (T[] | string)[number]>() {}
+function viaUnionKey<T extends [T][number | 0]>() {}
+function viaNested<T extends T[][][number][number]>() {}
+function viaAlias<T extends ElementOf<T>>(x: T) {
+  return x;
+}
+function viaArrayElement<T extends T[][][number]>() {}
+function viaFixedRest<T extends [T, ...string[]][3]>() {}
+function viaLength<T extends T[]['length']>() {}
+function viaSecond<T extends [T, string][1]>() {}
+console.log(viaAlias(2));

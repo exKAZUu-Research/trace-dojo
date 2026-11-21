@@ -1,0 +1,8 @@
+type RawUnicode=`\u{110000}`;
+type RawHex=`\xGG`;
+type RawNumeric=`\1`;
+type RawZero=`\09`;
+const unicode:RawUnicode='wrong';
+const hex:RawHex='wrong';
+const numeric:RawNumeric='wrong';
+const zero:RawZero='wrong';

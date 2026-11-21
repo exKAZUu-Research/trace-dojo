@@ -1,0 +1,4 @@
+class Value {
+  count?: number = "bad";
+  static ready?: boolean = 1;
+}

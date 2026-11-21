@@ -1,0 +1,16 @@
+class Pattern extends RegExp {}
+const pattern = new Pattern('a', 'g');
+pattern.lastIndex = 1;
+const copy = RegExp(pattern);
+console.log(copy.exec('aa')?.index, pattern.lastIndex, copy instanceof Pattern);
+const standard = /a/g;
+console.log(RegExp(standard) === standard);
+let reads = 0;
+Object.defineProperty(standard, 'constructor', { configurable: true, get() {
+  reads++;
+  return Pattern;
+} });
+console.log(RegExp(standard) === standard, reads);
+console.log(new RegExp(standard) === standard, RegExp(standard, 'i').flags, reads);
+Object.defineProperty(standard, 'constructor', { get() { throw new Error('constructor read'); } });
+try { RegExp(standard); } catch (error) { if (error instanceof Error) console.log(error.message); }

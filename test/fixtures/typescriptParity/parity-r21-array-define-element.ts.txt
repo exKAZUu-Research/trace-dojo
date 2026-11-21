@@ -1,0 +1,6 @@
+const a: any[] = [1, 2, 3];
+Object.defineProperty(a, 0, { value: 9, writable: false });
+a[0] = 5;
+console.log(a, Object.getOwnPropertyDescriptor(a, 0));
+Object.defineProperty(a, 1, { value: 7, enumerable: false });
+console.log(Object.keys(a), a);

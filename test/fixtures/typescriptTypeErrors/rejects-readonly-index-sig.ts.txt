@@ -1,0 +1,4 @@
+const r: { readonly [k: string]: number } = { a: 1 };
+r.a = 2;
+r["b"] = 3;
+console.log(r);

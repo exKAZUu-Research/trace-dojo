@@ -1,0 +1,12 @@
+const numbers: number[] = [];
+if (numbers === []) console.log("empty");
+const objectValue = {a: 1};
+if (objectValue == {a: 1}) console.log("same");
+if (numbers !== []) console.log("different");
+const numeric = Number("a");
+if (numeric === NaN) console.log("NaN");
+if (Number.NaN != numeric) console.log("NaN");
+let numericValue = 5;
+let textValue = "5";
+if (numericValue == textValue) console.log("equal");
+if (textValue != numericValue) console.log("different");

@@ -1,0 +1,19 @@
+function pad(width = 4, text: string) {
+  const size: number = width;
+  return text.padStart(size, ".");
+}
+const explicit: (width: number | undefined, text: string) => string = pad;
+console.log(explicit(undefined, "ab"));
+console.log(pad(6, "ab"));
+console.log(pad.length);
+function range(start = 0, end: number, step = 1) {
+  const values: number[] = [];
+  for (let value = start; value < end; value += step) values.push(value);
+  return values;
+}
+const twoArgs: (start: number | undefined, end: number) => number[] = range;
+console.log(twoArgs(undefined, 3).join(","));
+console.log(range(1, 9, 3).join(","));
+type RangeParameters = Parameters<typeof range>;
+const parameters: RangeParameters = [undefined, 5];
+console.log(range(...parameters).length);

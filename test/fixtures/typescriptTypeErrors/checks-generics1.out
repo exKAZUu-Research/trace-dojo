@@ -1,0 +1,6 @@
+(4,7): error TS2322: Type 'number' is not assignable to type 'string'.
+(8,5): error TS2345: Argument of type 'number' is not assignable to parameter of type '{ length: number; }'.
+(10,7): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+(11,31): error TS2769: No overload matches this call.
+(13,12): error TS2344: Type 'number' does not satisfy the constraint 'string'.
+(14,10): error TS2314: Generic type 'Array<T>' requires 1 type argument(s).

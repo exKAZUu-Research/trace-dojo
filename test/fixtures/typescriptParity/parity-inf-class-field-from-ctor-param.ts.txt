@@ -1,0 +1,2 @@
+class A { x; constructor() { this.x = 1; } }
+console.log(new A().x);

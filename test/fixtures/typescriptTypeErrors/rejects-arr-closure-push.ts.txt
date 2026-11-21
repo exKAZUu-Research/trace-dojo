@@ -1,0 +1,4 @@
+const a = [];
+const g = () => a.push(1);
+g();
+console.log(a);

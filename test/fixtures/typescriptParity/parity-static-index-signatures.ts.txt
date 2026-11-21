@@ -1,0 +1,16 @@
+class Separate {
+  static [key: string]: number;
+  [key: string]: string;
+  static one = 1;
+  one = "instance";
+}
+const fixed: number = Separate["one"];
+const own: string = new Separate()["one"];
+class Parent { static inherited = 2; }
+class Child extends Parent { static [key: string]: number; static own = 3; }
+class ParentIndex { static [key: string]: number; }
+class OwnIndex extends ParentIndex { static [key: number]: string; static 0 = "zero"; }
+class ReadonlyIndex { static readonly [key: string]: number; static one = 4; }
+console.log(fixed, own, Child.inherited, Child.own, OwnIndex[0], ReadonlyIndex.one);
+
+class Duplicate { static [key: string]: number; static [other: string]: number; }

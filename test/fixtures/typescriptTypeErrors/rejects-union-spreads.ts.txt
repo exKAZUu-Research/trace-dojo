@@ -1,0 +1,17 @@
+function f(x: { a: number } | { b: string }, w: { a: string } | { a: number }, n: { a: number } | undefined, u: { k: 1 } | { k: 2 }) {
+  const y = { ...x };
+  console.log(y.a);
+  const z = { ...w, c: 1 };
+  const za: string | number = z.a;
+  const zn: number = z.a;
+  const v = { c: 1, ...x, d: 2 };
+  console.log(v.c, v.d);
+  if ("a" in v) console.log(v.a.toFixed());
+  const m = { ...n };
+  console.log(m.a);
+  const q = { ...x, ...u };
+  const qk: 1 | 2 = q.k;
+  const r: { a: number; c: number } | { b: string; c: number } = { ...x, c: 1 };
+  const s2: { a: number } = { ...w };
+}
+f({ a: 1 }, { a: 2 }, undefined, { k: 1 });

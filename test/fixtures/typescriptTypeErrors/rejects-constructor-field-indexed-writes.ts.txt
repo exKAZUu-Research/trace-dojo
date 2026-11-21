@@ -1,0 +1,8 @@
+const k = "x";
+class C { x; constructor() { this["x"] = 1; } }
+const n: number = new C().x;
+class D { x; constructor() { this[k] = "s"; } }
+const s: string = new D().x;
+class E { x; y = 0; constructor(b: boolean) { if (b) this["x"] = 1; } }
+const e: number = new E(true).x;
+console.log(n, s, e);

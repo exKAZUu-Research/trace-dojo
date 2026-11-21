@@ -1,0 +1,47 @@
+{
+  let top: number;
+  const read = () => top;
+  read();
+}
+function outer() {
+  let deep: string;
+  return () => () => deep.length;
+}
+function fields() {
+  let seed: number;
+  class Holder {
+    value = seed;
+    get doubled() { return seed * 2; }
+  }
+  return Holder;
+}
+function auto() {
+  let x;
+  x ??= 1;
+  const f = () => x;
+  return f;
+}
+function known() {
+  let y: number;
+  const f = () => {
+    if (typeof y === "number") return y;
+    if (y !== undefined) return y;
+    return 0;
+  };
+  return f;
+}
+function counter() {
+  let n: number;
+  const bump = () => n++;
+  return bump;
+}
+function pair() {
+  let a: number, b = 1;
+  return () => a + b;
+}
+outer(); fields(); auto(); known(); counter(); pair();
+function run() { let message: string; function show() { console.log(message); } show(); }
+function a() { let x: number; const f = () => x; return f; }
+function d() { let x: number; [1].forEach(() => console.log(x)); }
+let g: number; function h() { return g; }
+run(); a(); d(); h();

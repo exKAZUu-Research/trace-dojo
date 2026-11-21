@@ -1,0 +1,8 @@
+const ordinary="\u{110000}";
+const template=`\u{110000}`;
+type Bad="\u{110000}";
+const object={"\u{110000}":1};
+interface BadProperty{"\u{110000}":number;}
+class BadMethod{"\u{110000}"(){}}
+const huge="\u{FFFFFFFFFFFFFFFFFFFFFFFF}";
+const nested=String.raw`valid\u{110000}${"\u{110000}"}`;

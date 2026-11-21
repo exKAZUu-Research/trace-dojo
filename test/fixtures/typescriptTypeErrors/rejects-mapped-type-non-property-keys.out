@@ -1,0 +1,9 @@
+(1,18): error TS2322: Type 'boolean' is not assignable to type 'string | number | symbol'.
+(2,21): error TS2322: Type 'K' is not assignable to type 'string | number | symbol'.
+(3,25): error TS2322: Type 'boolean' is not assignable to type 'string | number | symbol'.
+(7,18): error TS2322: Type '{}' is not assignable to type 'string | number | symbol'.
+(10,26): error TS2322: Type '{ a: 1; }' is not assignable to type 'string | number | symbol'.
+(11,19): error TS2322: Type 'string | boolean' is not assignable to type 'string | number | symbol'.
+  Type 'boolean' is not assignable to type 'string | number | symbol'.
+(13,19): error TS2322: Type 'unknown' is not assignable to type 'string | number | symbol'.
+(16,30): error TS2322: Type 'K' is not assignable to type 'string | number | symbol'.

@@ -1,0 +1,8 @@
+const a: any = [1, 2];
+Object.defineProperty(a, "length", { writable: false });
+a[2] = 3; a.length = 0; a[0] = 7;
+console.log(a, Object.getOwnPropertyDescriptor(a, "length"));
+for (const f of [() => a.pop(), () => a.unshift(0), () => a.splice(0, 1)]) {
+  try { f(); } catch (e) { console.log((e as Error).message); }
+}
+console.log(a);

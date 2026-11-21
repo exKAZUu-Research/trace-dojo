@@ -1,0 +1,6 @@
+function list<T>(input: T | [T,T?]): T[] { return []; }
+const firstMayBeUndefined:[number|undefined,number]=[undefined,1];
+const narrow:number[]=list(firstMayBeUndefined);
+function echo<T>(input: T | {value:T; kind:string}): T | {value:T; kind:string} { return input; }
+const elem:{value:number; kind?:string; extra:boolean}={value:1,extra:true};
+console.log(echo(elem));

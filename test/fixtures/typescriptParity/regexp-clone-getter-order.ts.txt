@@ -1,0 +1,24 @@
+function pattern(flags: string, constructor: unknown): RegExp {
+  const expression = /a/g;
+  Object.defineProperty(expression, "flags", { get() { console.log("flags"); return flags; } });
+  Object.defineProperty(expression, "constructor", { get() { console.log("constructor"); return constructor; } });
+  return expression;
+}
+
+console.log("matchAll", Array.from("aba".matchAll(pattern("g", RegExp))).length);
+console.log("split", "aba".split(pattern("g", RegExp)));
+try {
+  "a".matchAll(pattern("", RegExp));
+} catch (error) {
+  console.log(String(error));
+}
+try {
+  "a".matchAll(pattern("g", 7));
+} catch (error) {
+  console.log(String(error));
+}
+try {
+  "a".split(pattern("g", 7));
+} catch (error) {
+  console.log(String(error));
+}

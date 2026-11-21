@@ -1,0 +1,5 @@
+const capture = (Error as any).captureStackTrace;
+for (const args of [[], [5], [null], [true], ["text"], [{}], [{}, 1], [{}, () => {}]]) {
+  try { capture(...args); console.log("ok"); }
+  catch (error) { if (error instanceof Error) console.log(error.name, error.message); }
+}

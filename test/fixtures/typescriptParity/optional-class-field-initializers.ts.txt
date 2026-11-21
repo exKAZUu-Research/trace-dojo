@@ -1,0 +1,13 @@
+function maybe(): string | undefined {
+  return undefined;
+}
+
+class Value {
+  count?: number = undefined;
+  text?: string = maybe();
+  emit?: (value: number) => string = (value) => value.toFixed();
+  static state?: boolean = undefined;
+}
+
+const item = new Value();
+console.log(item.count, item.text, item.emit?.(4), Value.state);

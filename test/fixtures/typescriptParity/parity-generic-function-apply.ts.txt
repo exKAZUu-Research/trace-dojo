@@ -1,0 +1,37 @@
+function pair<T>(first: T, second: T) {
+  return [first, second];
+}
+function choose<T>(first: T, second: T) {
+  return first;
+}
+function numeric<T extends number>(first: T, second: T) {
+  return [first, second];
+}
+const mixed: unknown[] = pair.apply(null, [1, 'a']);
+console.log(mixed, choose.apply(null, [1, true]));
+const bothNumbers: number[] = numeric.apply(null, [2, 3]);
+console.log(bothNumbers);
+const ordinary = (first: number, second: string) => second.repeat(first);
+console.log(ordinary.apply(undefined, [2, 'yes']));
+const receiver = { name: 'box' };
+function named(this: { name: string }, n: number) {
+  return this.name.repeat(n);
+}
+console.log(named.apply(receiver, [2]));
+
+const itemReceiver = { n: 2 };
+function identity<Item>(this: Item, value: Item) {
+  return this;
+}
+function list<Item>(this: Item, values: Item[]) {
+  return values;
+}
+function structured<Item>(this: { value: Item }, value: Item) {
+  return value;
+}
+function dependent<Item, Value extends Item>(this: Item, value: Value) {
+  return value;
+}
+console.log(identity.apply(itemReceiver, [{ n: 3 }]), identity.call(itemReceiver, { n: 3 }));
+console.log(list.apply(itemReceiver, [[{ n: 4 }]]), structured.apply({ value: 2 }, [3]));
+console.log(dependent.call(itemReceiver, { n: 4, detail: 'extra' }), identity.apply(itemReceiver, [{ n: 'ok' }]));

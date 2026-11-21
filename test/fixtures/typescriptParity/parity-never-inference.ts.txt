@@ -1,0 +1,9 @@
+const values: never[] = [];
+const filtered: string[] = [1, 2].filter((value) => typeof value === 'string');
+const explicit: string[] = [1, 2].filter((value): value is never => false);
+const mapped: number[] = values.map((value) => value);
+function merge<T>(first: T[], second: T[]): T[] { return [...first, ...second]; }
+const combined: number[] = merge(values, [42]);
+function constrained<T extends string = 'default'>(input: T[]): T[] { return input; }
+const constrainedResult: number[] = constrained(values);
+console.log(filtered, explicit, mapped, combined, constrainedResult);

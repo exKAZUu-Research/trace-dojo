@@ -1,0 +1,22 @@
+function f1(): unknown {}
+function f2(): number | undefined {}
+function f3(b: boolean): number | undefined { if (b) return 1; }
+function f4(b: boolean): unknown { if (b) return 1; }
+function f5(): undefined {}
+function f6(): void | number {}
+function f7(): any {}
+function f8(): null | undefined {}
+function f9<T>(): T {}
+function f10<T>(b: boolean): T | undefined { if (b) return undefined; }
+function f11(b: boolean): unknown { if (b) return; }
+function f12(): {} | undefined {}
+const f13 = (): unknown => {};
+const o = { m(): number | undefined {} };
+class C { get g(): unknown {} m(): string | undefined {} }
+function f14<T>(): T | undefined {}
+function f15(): never {}
+function f16(): number { while (true) {} }
+type U = undefined;
+function f17(): U {}
+function f18(): undefined | (() => void) {}
+console.log(f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, o, C, f14, f15, f16, f17, f18);

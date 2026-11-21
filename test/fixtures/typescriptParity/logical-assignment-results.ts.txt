@@ -1,0 +1,77 @@
+let value: number | string = 1;
+const result = (value ??= 'fallback');
+value += 'x';
+console.log(value, result);
+let explicit: number | string | undefined = 1;
+if (explicit !== undefined) explicit ??= 'a';
+explicit += 'b';
+console.log(explicit);
+let changing: number | string = 1;
+changing ??= 'a';
+changing ??= 'b';
+changing += 'c';
+console.log(changing);
+class CoalescingAccessor {
+  private stored = 1;
+  get value(): number { return this.stored; }
+  set value(value: number | string) { this.stored = typeof value === 'number' ? value : value.length; }
+}
+function useAccessor(obj: CoalescingAccessor) {
+  obj.value ??= 'a';
+  obj.value += 'b';
+  return obj.value;
+}
+console.log(useAccessor(new CoalescingAccessor()));
+function accessorResults(obj: CoalescingAccessor) {
+  const first: number = (obj.value ??= 'a');
+  const second: number = (obj.value ??= 'b');
+  const or: number = (obj.value ||= 1);
+  const and: number = (obj.value &&= 2);
+  const bracket: number | string = (obj['value'] ??= 'c');
+  const wrapped: number = ((obj.value) ??= 1);
+  const asserted: number = (obj.value!! ??= 1);
+  console.log(first, second, or, and, bracket, wrapped, asserted);
+}
+accessorResults(new CoalescingAccessor());
+class AssertedAccessor {
+  private stored = 1;
+  get value(): number { return this.stored; }
+  set value(value: number | string) { this.stored = typeof value === 'number' ? value : value.length; }
+}
+function coalesceAsserted(a: AssertedAccessor) {
+  a.value! ??= 1;
+  a.value += 'x';
+  return a.value;
+}
+function orAsserted(a: AssertedAccessor) {
+  (a.value!!)! ||= 1;
+  a.value += 'x';
+  return a.value;
+}
+function andAsserted(a: AssertedAccessor) {
+  a.value! &&= 1;
+  a.value += 'x';
+  return a.value;
+}
+function bracketAsserted(a: AssertedAccessor) {
+  a['value']! ??= 1;
+  a['value'] += 'x';
+  return a.value;
+}
+function mixedAsserted(a: AssertedAccessor) {
+  (a.value!) ??= 1;
+  a['value'] += 'x';
+  return a.value;
+}
+class AssertedNullableAccessor {
+  private stored: number | null = null;
+  get value(): number | null { return this.stored; }
+  set value(value: number | string | null) { this.stored = typeof value === 'string' ? value.length : value; }
+}
+function nullableAsserted(a: AssertedNullableAccessor) {
+  a.value! ??= 1;
+  a.value += 'x';
+  return a.value;
+}
+console.log(coalesceAsserted(new AssertedAccessor()), orAsserted(new AssertedAccessor()), andAsserted(new AssertedAccessor()));
+console.log(bracketAsserted(new AssertedAccessor()), mixedAsserted(new AssertedAccessor()), nullableAsserted(new AssertedNullableAccessor()));

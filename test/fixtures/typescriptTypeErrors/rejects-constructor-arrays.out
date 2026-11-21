@@ -1,0 +1,4 @@
+(10,1): error TS2673: Constructor of class 'PrivateConstructor' is private and only accessible within the class declaration.
+(11,1): error TS2673: Constructor of class 'PrivateConstructor' is private and only accessible within the class declaration.
+(12,1): error TS2674: Constructor of class 'ProtectedConstructor' is protected and only accessible within the class declaration.
+(13,1): error TS2674: Constructor of class 'ProtectedConstructor' is protected and only accessible within the class declaration.

@@ -1,0 +1,11 @@
+(7,15): error TS2514: A tuple type cannot be indexed with a negative value.
+(8,15): error TS2493: Tuple type 'Pair' of length '2' has no element at index '3'.
+(12,18): error TS2493: Tuple type 'Pair' of length '2' has no element at index '3'.
+(15,7): error TS2322: Type 'string | number' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+(16,1): error TS2322: Type '1' is not assignable to type 'undefined'.
+(16,6): error TS2493: Tuple type 'Pair' of length '2' has no element at index '2'.
+(18,17): error TS2493: Tuple type '[number, (string | undefined)?]' of length '2' has no element at index '2'.
+(19,15): error TS2493: Tuple type 'Pair' of length '2' has no element at index '0.5'.
+(20,10): error TS1354: 'readonly' type modifier is only permitted on array and tuple literal types.
+(20,28): error TS2493: Tuple type '[number]' of length '1' has no element at index '1'.

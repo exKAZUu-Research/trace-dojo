@@ -1,0 +1,4 @@
+(4,61): error TS7053: Element implicitly has an 'any' type because expression of type '"b" | 0' can't be used to index type '{ 0: number; a: string; }'.
+  Property 'b' does not exist on type '{ 0: number; a: string; }'.
+(5,59): error TS2538: Type 'false' cannot be used as an index type.
+(5,59): error TS2538: Type 'true' cannot be used as an index type.

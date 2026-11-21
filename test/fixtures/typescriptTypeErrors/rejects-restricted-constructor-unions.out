@@ -1,0 +1,11 @@
+(26,88): error TS2674: Constructor of class 'Protected' is protected and only accessible within the class declaration.
+(27,88): error TS2674: Constructor of class 'Protected' is protected and only accessible within the class declaration.
+(39,68): error TS2673: Constructor of class 'WidthHidden' is private and only accessible within the class declaration.
+(42,80): error TS2673: Constructor of class 'EmptyB' is private and only accessible within the class declaration.
+(43,80): error TS2673: Constructor of class 'EmptyB' is private and only accessible within the class declaration.
+(48,5): error TS2322: Type 'typeof EmptyB' is not assignable to type 'typeof EmptyA'.
+(49,5): error TS2322: Type 'typeof Hidden' is not assignable to type 'typeof Protected'.
+(50,7): error TS2322: Type 'typeof Hidden' is not assignable to type 'new () => Hidden'.
+(51,7): error TS2322: Type 'typeof Protected' is not assignable to type 'new () => Protected'.
+(53,6): error TS2345: Argument of type 'typeof Hidden' is not assignable to parameter of type 'new () => Hidden'.
+(54,6): error TS2345: Argument of type 'typeof Protected' is not assignable to parameter of type 'new () => Protected'.

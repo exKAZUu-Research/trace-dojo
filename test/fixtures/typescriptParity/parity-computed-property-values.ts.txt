@@ -1,0 +1,6 @@
+const k = "x";
+const o = { [k]: "hello" } as const;
+const x: "hello" = o.x;
+const h: { [k]: (n: number) => string } = { [k]: (n) => n.toFixed() };
+const p = { [k]: "hello" };
+console.log(x, h.x(1));

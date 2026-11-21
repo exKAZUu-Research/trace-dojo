@@ -1,0 +1,45 @@
+const scores = [10, 20, 30];
+let total = 0;
+for (const i in scores) {
+  total += scores[i];
+}
+console.log(total);
+for (let i in scores) {
+  scores[i] = scores[(i)] * 2;
+  scores[i]++;
+  scores[i] += 1;
+}
+console.log(scores);
+let key: string;
+for (key in scores) {
+  console.log(key, typeof key, scores[key]);
+}
+const grid = [
+  [1, 2],
+  [3, 4],
+];
+for (const row in grid) {
+  for (const column in grid[row]) {
+    grid[row][column] *= 10;
+  }
+}
+console.log(grid);
+const pair: [number, string] = [1, "one"];
+for (const i in pair) {
+  console.log(pair[i]);
+}
+function show<T>(items: readonly T[]) {
+  for (const i in items) {
+    const read = () => items[i];
+    console.log(i, read());
+  }
+}
+show(["a", "b"]);
+const labels: { [index: number]: string } = { 0: "zero", 1: "one" };
+for (const i in scores) {
+  console.log(labels[i], "xyz"[i]);
+}
+const holder = { values: [5, 6] };
+for (const i in holder.values) {
+  console.log(holder.values[i]);
+}

@@ -1,0 +1,25 @@
+function debounce<F extends (...a: any[]) => void>(f: F) {
+  return (...a: Parameters<F>) => f(...a);
+}
+debounce((n: number) => console.log(n))(1);
+
+function describe<F extends (...a: any[]) => void>(args: Parameters<F>): string {
+  const parts: string[] = [];
+  for (const arg of args) parts.push(String(arg));
+  return `${args.length}: ${args.map(String).join(",")} ${[...args][0]} ${parts.join("/")}`;
+}
+console.log(describe<(a: number, b: string) => void>([1, "x"]));
+
+class Box {
+  constructor(public value: number, public label: string) {}
+}
+function make<T extends new (...a: any[]) => Box>(c: T, args: ConstructorParameters<T>): Box {
+  return new c(...args);
+}
+console.log(make(Box, [2, "two"]).label);
+
+type Tail<T> = T extends [unknown, ...rest: infer R] ? R : never;
+function tailLength<T extends unknown[]>(rest: Tail<T>): number {
+  return rest.length;
+}
+console.log(tailLength<[number, string, boolean]>(["a", true]));

@@ -1,0 +1,9 @@
+const tries: (() => unknown)[] = [
+  () => (5 as any).toFixed(101), () => (5).toString(1), () => (5).toPrecision(0), () => (5).toExponential(-1),
+  () => new Array(-1), () => new Array(1.5), () => { const a: any = []; a.length = -1; }, () => ([] as any).reduce((a: any, b: any) => a),
+  () => [1].with(5, 1), () => ([1] as any).toSpliced(), () => Array.prototype.map.call(null as any, (x: any) => x),
+  () => ([1].values() as any).take(-1), () => ([1].values() as any).drop(NaN), () => [1].flatMap(5 as any), () => Array.from({ length: -1 }),
+  () => new Map([[1, 2]]).set, () => (new Map() as any).get.call({}, 1), () => Map.prototype.get.call(new Set() as any, 1),
+  () => Set.prototype.add.call({} as any, 1), () => Object.prototype.toString.call(new (class Q {})()),
+];
+for (const t of tries) { try { console.log(t()); } catch (e: any) { console.log(e.constructor.name, e.message); } }

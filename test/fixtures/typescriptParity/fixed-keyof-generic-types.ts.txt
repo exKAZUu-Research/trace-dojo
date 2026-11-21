@@ -1,0 +1,12 @@
+interface Box<T> { value: T }
+function known<T>(array: T[], readonlyArray: readonly T[], box: Box<T>, tuple: [T]): unknown[] {
+  const length: keyof T[] = 'length';
+  const readLength: keyof readonly T[] = 'length';
+  const property: keyof Box<T> = 'value';
+  const first: keyof [T] = '0';
+  const arrow: keyof { apply: (value: T) => T } = 'apply';
+  return [array[length], readonlyArray[readLength], box[property], tuple[first], arrow];
+}
+function keyed<T, K extends keyof T>(value: T, key: K): T[K] { return value[key]; }
+console.log(known([1, 2], [3], { value: 4 }, [5]));
+console.log(keyed({ active: true }, 'active'));

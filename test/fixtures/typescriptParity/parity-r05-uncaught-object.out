@@ -1,0 +1,2 @@
+start
+[uncaught] { a: 1, b: 'x' }

@@ -1,0 +1,12 @@
+let state: "idle" | "busy" = "idle";
+function work() {
+  state = "busy";
+  try {
+    console.log("work");
+  } finally {
+    state = "idle";
+  }
+  const s: "idle" = state;
+  console.log(s);
+}
+work();

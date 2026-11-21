@@ -1,0 +1,37 @@
+function asserted<K extends number>(index: K, items: (string | undefined)[]): number {
+  const item: number = items[index]!;
+  return item;
+}
+
+function compared<K extends number>(index: K, items: (string | undefined)[]): number {
+  const item = items[index];
+  if (item !== undefined) {
+    const length: number = item;
+    return length;
+  }
+  return 0;
+}
+
+function unnarrowed<K extends number>(index: K, items: (string | undefined)[]): string {
+  const item = items[index];
+  const text: string = item;
+  return text;
+}
+
+function filled<K extends number>(index: K, items: (string | undefined)[]): number {
+  const item: number = (items[index] ??= "filled");
+  return item;
+}
+
+function parameterAsserted<T extends string | undefined>(value: T): number {
+  const length: number = value!;
+  return length;
+}
+
+function parameterUnnarrowed<T extends string | undefined>(value: T): string {
+  if (value === undefined) {
+    const text: string = value;
+    return text;
+  }
+  return value;
+}

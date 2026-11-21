@@ -1,0 +1,7 @@
+(2,10): error TS2365: Operator '>' cannot be applied to types 'never' and 'string'.
+(6,10): error TS2365: Operator '>>>' cannot be applied to types 'never' and '1n'.
+(10,10): error TS2365: Operator '*' cannot be applied to types 'never' and 'number | bigint'.
+(14,18): error TS2469: The '+' operator cannot be applied to type 'symbol'.
+(18,16): error TS2339: Property 'size' does not exist on type 'never'.
+(22,22): error TS2488: Type 'never' must have a '[Symbol.iterator]()' method that returns an iterator.
+(26,10): error TS2365: Operator '>>>' cannot be applied to types 'any' and '1n'.

@@ -1,0 +1,10 @@
+(2,25): error TS7053: Element implicitly has an 'any' type because expression of type '1' can't be used to index type '{ [key: `${number}`]: string; }'.
+  Property '1' does not exist on type '{ [key: `${number}`]: string; }'.
+(6,3): error TS7053: Element implicitly has an 'any' type because expression of type '1' can't be used to index type '{ [key: `${number}`]: string; }'.
+  Property '1' does not exist on type '{ [key: `${number}`]: string; }'.
+(9,9): error TS2322: Type 'string' is not assignable to type 'number'.
+(13,3): error TS2862: Type 'T' is generic and can only be indexed for reading.
+(14,3): error TS2862: Type 'T' is generic and can only be indexed for reading.
+(15,10): error TS2339: Property 'average' does not exist on type 'T'.
+(21,10): error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type 'unknown'.
+  Property '0' does not exist on type 'unknown'.

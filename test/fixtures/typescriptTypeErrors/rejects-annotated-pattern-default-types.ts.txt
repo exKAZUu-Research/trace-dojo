@@ -1,0 +1,8 @@
+const o: { x?: number } = {};
+const { x = 'none' }: { x?: number } = o;
+function f({ x = 'none' }: { x?: number }) {}
+function g([y = 'none']: (number | undefined)[]) {}
+let z: number | undefined;
+({ x: z = 'none' } = o);
+const { p: { q = 'none' } }: { p: { q?: number } } = { p: {} };
+function h({ x = 'none' }: { x?: number } = {}) {}

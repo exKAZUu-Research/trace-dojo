@@ -1,0 +1,16 @@
+class QuotedFields {
+  "a.b": number;
+  "a%b": string;
+  "": boolean;
+  "c\u002ed": number;
+  1: number;
+  constructor() {
+    this["a.b"] = 1;
+    this["a%b"] = "ok";
+    this[""] = true;
+    this["c\u002ed"] = 2;
+    this[0x1] = 3;
+  }
+}
+const fields = new QuotedFields();
+console.log(fields["a.b"], fields["a%b"], fields[""], fields["c.d"], fields[1]);

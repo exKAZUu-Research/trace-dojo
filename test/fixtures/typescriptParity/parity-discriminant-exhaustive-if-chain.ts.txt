@@ -1,0 +1,72 @@
+type Shape = { kind: "square"; size: number } | { kind: "circle"; radius: number };
+
+function assertNever(value: never): never {
+  throw new Error(`unexpected: ${JSON.stringify(value)}`);
+}
+
+function area(shape: Shape): number {
+  if (shape.kind === "square") return shape.size * shape.size;
+  else if (shape.kind === "circle") return 3 * shape.radius * shape.radius;
+  const unreachable: never = shape;
+  return unreachable;
+}
+
+function shapeName(shape: Shape | undefined): string {
+  if (!shape) return "none";
+  if (shape.kind === "square") return "square";
+  if (shape.kind === "circle") return "circle";
+  return assertNever(shape);
+}
+
+function notCircle(shape: Shape): string {
+  if (shape.kind === "square") return "square";
+  if (shape.kind !== "circle") {
+    const unreachable: never = shape;
+    return unreachable;
+  }
+  return `circle of ${shape.radius}`;
+}
+
+type Result = { ok: true; value: number } | { ok: false; error: string };
+
+function unwrap(result: Result): string {
+  if (result.ok) return `value ${result.value}`;
+  if (!result.ok) return `error ${result.error}`;
+  const unreachable: never = result;
+  return unreachable;
+}
+
+interface Drawing {
+  shape: Shape;
+}
+
+function drawingName(drawing: Drawing): string {
+  if (drawing.shape.kind === "square") return "square drawing";
+  if (drawing.shape.kind === "circle") return "circle drawing";
+  return assertNever(drawing.shape);
+}
+
+class Holder {
+  constructor(public shape: Shape) {}
+  describe(): string {
+    if (this.shape.kind === "square") return "holds a square";
+    if (this.shape.kind === "circle") return "holds a circle";
+    const unreachable: never = this.shape;
+    return unreachable;
+  }
+}
+
+function destructured(shape: Shape): string {
+  const { kind } = shape;
+  if (kind === "square") return `side ${shape.size}`;
+  if (kind === "circle") return `radius ${shape.radius}`;
+  return assertNever(shape);
+}
+
+console.log(area({ kind: "square", size: 2 }), area({ kind: "circle", radius: 1 }));
+console.log(shapeName(undefined), shapeName({ kind: "circle", radius: 2 }));
+console.log(notCircle({ kind: "circle", radius: 4 }));
+console.log(unwrap({ ok: true, value: 1 }), unwrap({ ok: false, error: "bad" }));
+console.log(drawingName({ shape: { kind: "circle", radius: 1 } }));
+console.log(new Holder({ kind: "square", size: 1 }).describe());
+console.log(destructured({ kind: "circle", radius: 5 }));

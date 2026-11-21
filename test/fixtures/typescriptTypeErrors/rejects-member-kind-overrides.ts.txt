@@ -1,0 +1,17 @@
+class Field { value = 1; }
+class FieldToGetter extends Field { get value() { return 2; } }
+class Getter { get value() { return 1; } }
+class GetterToField extends Getter { value = 2; }
+class FieldToSetter extends Field { set value(next: number) {} }
+class Param { constructor(public value: number) {} }
+class ParamToAccessors extends Param { get value() { return 1; } set value(next: number) {} }
+class AccessorToParam extends Getter { constructor(public value: number) { super(); } }
+abstract class AbstractField { abstract value: number; }
+class AbstractToGetter extends AbstractField { get value() { return 1; } }
+class Method { run() { return 1; } }
+class MethodToGetter extends Method { get run() { return () => 2; } }
+class MethodToField extends Method { run = () => 3; }
+class Redeclared extends Field { value!: number; }
+class Assigned extends Field { value: number; constructor() { super(); this.value = 4; } }
+class Overridden extends Getter { get value() { return 5; } }
+console.log(new Overridden().value, new Assigned().value, new MethodToField().run());

@@ -1,0 +1,2 @@
+console.log('start');
+throw { a: 1, b: 'x' };

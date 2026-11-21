@@ -1,0 +1,4 @@
+const arr: (string | undefined)[] = ["a"];
+if (arr[0] !== undefined) console.log(arr[0].length);
+const i = 0;
+if (arr[i] !== undefined) console.log(arr[i].length);

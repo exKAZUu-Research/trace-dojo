@@ -1,0 +1,36 @@
+type Branch = {kind:'a'; a: string} | {kind:'b'; b: number};
+function declared(x: Branch) {
+  const {kind, ...rest} = x;
+  console.log(rest.a, rest.b);
+  const {a = 'a'} = rest;
+  const copy = {...rest};
+  console.log(copy.a);
+  const array = [rest];
+  console.log(array[0].b);
+  if (kind === 'a') console.log(rest.a);
+}
+function conditional(flag: boolean) {
+  const {drop, ...rest} = flag ? {drop: 1, a: 'x'} : {drop: 2, b: 1};
+  console.log(rest.a, rest.b);
+  const item = flag ? {drop: 1, a: 'x'} : {drop: 2, b: 1};
+  const {drop: other, ...fromVariable} = item;
+  console.log(fromVariable.a, fromVariable.b);
+  const spread = flag ? {...rest} : {a: 'a'};
+  console.log(spread.b);
+}
+function assigned(x: Branch) {
+  let rest: {a: string} | {b: number};
+  let tag: Branch['kind'];
+  ({kind: tag, ...rest} = x);
+  console.log(rest.b);
+}
+function indexObject(x: {ignored: string; val: number}) {
+  const {ignored, ...rest} = x;
+  const index: Record<string, number> = rest;
+  console.log(index.val);
+}
+function f(x: { kind: 'a'; value: 'yes'; other: 4 } | { kind: 'b'; value: 'no'; other: 4 }) {
+  const { kind, ...rest } = x;
+  const literal: 'yes' | 'no' = rest.value;
+  const num: 4 = rest.other;
+}

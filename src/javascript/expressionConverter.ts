@@ -1,6 +1,4 @@
-import type { Node } from '@willbooster/web-tree-sitter';
-
-import type { Argument, Expression, ObjectMember, Pattern, PropertyName } from './ast';
+import type { Argument, DestructuringSource, Expression, ObjectMember, Pattern, PropertyName } from './ast';
 import { ConverterBase } from './converterBase';
 import {
   accessorOf,
@@ -9,10 +7,12 @@ import {
   fail,
   field,
   hasChild,
+  iterationSource,
   keyName,
   nameAnonymous,
   namedChildren,
   nameOf,
+  type Node,
   optionalNameOf,
   rowOf,
   unsupported,
@@ -42,7 +42,7 @@ export abstract class ExpressionConverter extends ConverterBase {
     false: (node) => ({ kind: 'literal', value: false, row: rowOf(node) }),
     // oxlint-disable-next-line unicorn/no-null -- JavaScript null is a value of the interpreted language.
     null: (node) => ({ kind: 'literal', value: null, row: rowOf(node) }),
-    undefined: (node) => ({ kind: 'identifier', name: nameOf(node), row: rowOf(node) }),
+    undefined: (node) => ({ kind: 'identifier', name: 'undefined', row: rowOf(node) }),
     identifier: (node) => this.identifierRead(node),
     this: (node) => ({ kind: 'this', row: rowOf(node) }),
     super: (node) => fail(node, 'super は super(...) か super.メソッド名 の形でしか書けません。'),
@@ -207,6 +207,7 @@ export abstract class ExpressionConverter extends ConverterBase {
       args: [strings, ...expressions],
       optional: false,
       calleeText: calleeText(functionNode),
+      isTaggedTemplate: true,
       row,
     };
   }
@@ -216,11 +217,13 @@ export abstract class ExpressionConverter extends ConverterBase {
     if (operator !== '=' && !assignableTypes.has(unwrapParentheses(left).type))
       fail(left, 'この式には代入できません。');
     const target = this.assignmentTarget(left);
+    const right = field(node, 'right');
+    if (target.kind === 'objectPattern') nameDestructuring(target, { source: iterationSource(right) });
     return {
       kind: 'assign',
       operator,
       target,
-      value: this.namedValue(field(node, 'right'), target),
+      value: this.namedValue(right, target),
       row: rowOf(node),
     };
   }
@@ -263,6 +266,8 @@ export abstract class ExpressionConverter extends ConverterBase {
         row: rowOf(node),
       };
     }
+    if (operator === '**' && (leftNode.type === 'unary_expression' || leftNode.type === 'await_expression'))
+      fail(leftNode, `** の左辺に ${leftNode.children[0]?.type} 演算子を使った式を書くときは、括弧で囲んでください。`);
     const left = this.expression(leftNode);
     const right = this.expression(field(node, 'right'));
     if (operator === '&&' || operator === '||' || operator === '??') {
@@ -386,7 +391,10 @@ export abstract class ExpressionConverter extends ConverterBase {
   }
 
   private argument(node: Node): Argument {
-    if (node.type === 'spread_element') return { kind: 'spread', argument: this.expression(namedChildren(node)[0]) };
+    if (node.type === 'spread_element') {
+      const operand = namedChildren(node)[0];
+      return { kind: 'spread', argument: this.expression(operand), source: iterationSource(operand) };
+    }
     return this.expression(node);
   }
 
@@ -452,12 +460,14 @@ export abstract class ExpressionConverter extends ConverterBase {
       // An object or array literal used as a pattern spells defaults as assignments.
       case 'assignment_expression': {
         const target = this.pattern(field(node, 'left'), leaf);
-        const value = this.expression(field(node, 'right'));
+        const initializer = field(node, 'right');
+        const value = this.expression(initializer);
         if (value.suspends) unsupported(node, '分割代入の初期値の yield や await ');
         return {
           kind: 'default',
           target,
           value,
+          initializerSource: target.kind === 'objectPattern' ? iterationSource(initializer) : undefined,
           row: rowOf(node),
         };
       }
@@ -483,7 +493,12 @@ export abstract class ExpressionConverter extends ConverterBase {
       rest = this.pattern(namedChildren(child)[0], leaf);
       return 'rest';
     }).filter((element): element is Pattern | undefined => element !== 'rest');
-    return { kind: 'arrayPattern', elements, rest, row: rowOf(node) };
+    return {
+      kind: 'arrayPattern',
+      elements: elements.map((element) => element && nested(element)),
+      rest,
+      row: rowOf(node),
+    };
   }
 
   private objectPattern(node: Node, leaf: (node: Node) => Pattern): Pattern {
@@ -522,7 +537,12 @@ export abstract class ExpressionConverter extends ConverterBase {
         }
       }
     }
-    return { kind: 'objectPattern', properties, rest, row: rowOf(node) };
+    return {
+      kind: 'objectPattern',
+      properties: properties.map((property) => ({ ...property, value: nested(property.value) })),
+      rest,
+      row: rowOf(node),
+    };
   }
 }
 
@@ -630,4 +650,31 @@ function elementsOf<T>(node: Node, convert: (child: Node) => T): (T | undefined)
     expectsElement = false;
   }
   return elements;
+}
+
+/**
+ * Records how V8 names what a pattern takes apart, which an array pattern that is the value of one of an object
+ * pattern's properties names too, while the patterns deeper inside are named by the values they take apart.
+ */
+export function nameDestructuring(pattern: Pattern, source: DestructuringSource): void {
+  if (pattern.kind !== 'arrayPattern' && pattern.kind !== 'objectPattern') return;
+  Object.assign(pattern, source);
+  if (pattern.kind !== 'objectPattern') return;
+  for (const { value } of pattern.properties) {
+    if (value.kind === 'arrayPattern')
+      Object.assign(value, { source: source.source, iterationContext: 'propertyPattern' });
+  }
+}
+
+/** Marks a pattern inside another, through its default value. */
+function nested(pattern: Pattern): Pattern {
+  if (pattern.kind === 'default') {
+    const target =
+      pattern.target.kind === 'objectPattern'
+        ? { ...pattern.target, source: pattern.initializerSource }
+        : nested(pattern.target);
+    return { ...pattern, target };
+  }
+  if (pattern.kind === 'arrayPattern' || pattern.kind === 'objectPattern') return { ...pattern, isNested: true };
+  return pattern;
 }

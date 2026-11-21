@@ -1,0 +1,4 @@
+(4,1): error TS2542: Index signature in type 'Optional' only permits reading.
+(5,30): error TS2322: Type '{ key: "a"; data: string; }' is not assignable to type '{ key: "a"; data: number; } | { key: "b"; data: string; }'.
+  Types of property 'data' are incompatible.
+    Type 'string' is not assignable to type 'number'.

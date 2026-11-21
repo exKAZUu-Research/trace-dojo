@@ -1,0 +1,8 @@
+function f(n: number): string {
+  if (!n) {
+    if (n === 5) return "five";
+    return "zero";
+  }
+  return "other";
+}
+console.log(f(0));

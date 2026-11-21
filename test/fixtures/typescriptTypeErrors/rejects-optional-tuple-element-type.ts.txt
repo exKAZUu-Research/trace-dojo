@@ -1,0 +1,10 @@
+const a: [number?] = ["s"];
+const b: [number] = [undefined];
+const c: [number?] = [undefined, 1];
+const s: [string | undefined] = [undefined];
+const d: [number?] = s;
+const e: [number, string?] = [1, 2];
+function f(p: [number?]): void {}
+f([null]);
+const g: [number?, ...boolean[]] = [undefined, undefined];
+console.log(a, b, c, d, e, g);

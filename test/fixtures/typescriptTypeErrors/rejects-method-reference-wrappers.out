@@ -1,0 +1,6 @@
+(4,1): error TS2684: The 'this' context of type 'void' is not assignable to method's 'this' of type '{ value: number; }'.
+(6,3): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+(9,2): error TS2741: Property 'extra' is missing in type 'Counter' but required in type '{ value: number; extra: string; }'.
+(15,24): error TS2684: The 'this' context of type 'Base' is not assignable to method's 'this' of type 'Base & { extra: number; }'.
+  Property 'extra' is missing in type 'Base' but required in type '{ extra: number; }'.

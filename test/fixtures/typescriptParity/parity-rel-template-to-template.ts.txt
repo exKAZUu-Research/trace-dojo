@@ -1,0 +1,4 @@
+type Id = `id-${number}`;
+function show(s: `id-${string}`): void { console.log(s); }
+const x: Id = "id-1";
+show(x);

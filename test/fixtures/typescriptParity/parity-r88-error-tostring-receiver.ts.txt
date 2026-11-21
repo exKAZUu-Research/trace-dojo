@@ -1,0 +1,3 @@
+try { Error.prototype.toString.call(1 as any); } catch (e: any) { console.log(e.message); }
+try { Error.prototype.toString.call('s' as any); } catch (e: any) { console.log(e.message); }
+try { Error.prototype.toString.call(undefined as any); } catch (e: any) { console.log(e.message); }

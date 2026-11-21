@@ -1,0 +1,11 @@
+type Missing<T, K extends keyof T> = T[K] extends {a: {n: number}} ? Readonly<T[K]['a']>['no'] : never;
+type MissingParent<T, K extends keyof T> = T[K] extends {a: {n: number}} ? Required<T[K]>['no'] : never;
+type Unselected<T, K extends keyof T> = T[K] extends {a: {n: number}} ? never : Readonly<T[K]>['a'];
+type Remap<T, K extends keyof T> =
+  T[K] extends {a: {n: number}} ? {[P in keyof T[K]['a'] as 'value']: T[K]['a'][P]}['other'] : never;
+type OptionalKey<V, K extends keyof V, T, P extends keyof T> =
+  T[P] extends {selected: keyof V[K]} ? V[K][Partial<T[P]>['selected']] : never;
+type D<T, K extends keyof T, U, P extends keyof U> =
+  T[K] extends {value: keyof U[P]} ? {[R in keyof U[P] as R]: R}[Readonly<T[K]>['value']] : never;
+type InvalidVariadicKey<T,K extends keyof T,U extends unknown[]> =
+ T[K] extends { selected: 'no' } ? [string, ...U][Readonly<T[K]>['selected']] : never;

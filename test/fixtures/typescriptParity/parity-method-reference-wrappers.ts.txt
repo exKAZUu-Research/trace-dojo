@@ -1,0 +1,22 @@
+type Counter = { value: number; read(this: { value: number }): number };
+const counter: Counter = { value: 3, read() { return this.value; } };
+let evaluations = 0;
+function getCounter() {
+  evaluations++;
+  return counter;
+}
+function getKey(): 'read' {
+  evaluations++;
+  return 'read';
+}
+console.log((counter.read as Counter['read'])(), counter.read!());
+console.log((<Counter['read']>getCounter()[getKey()])(), evaluations);
+function read(value?: Counter): number | undefined {
+  return value?.read!();
+}
+function optionallyCall(value?: Counter): number | undefined {
+  return (value?.read!)?.();
+}
+console.log(read(counter), read(), optionallyCall(counter), optionallyCall());
+const identity = { x: 4, self<T>(this: T): T { return this; } };
+console.log(identity.self!().x);

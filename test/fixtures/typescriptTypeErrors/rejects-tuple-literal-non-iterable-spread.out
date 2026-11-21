@@ -1,0 +1,5 @@
+(1,20): error TS2488: Type '123' must have a '[Symbol.iterator]()' method that returns an iterator.
+(2,21): error TS2488: Type '{ readonly length: 2; }' must have a '[Symbol.iterator]()' method that returns an iterator.
+(3,44): error TS2488: Type '5' must have a '[Symbol.iterator]()' method that returns an iterator.
+(5,26): error TS2488: Type '5' must have a '[Symbol.iterator]()' method that returns an iterator.
+(9,54): error TS2488: Type 'true' must have a '[Symbol.iterator]()' method that returns an iterator.

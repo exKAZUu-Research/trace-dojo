@@ -1,0 +1,2 @@
+const t: [{ a: number }, string] = [{ a: 1, b: 2 }, "x"];
+console.log(t);

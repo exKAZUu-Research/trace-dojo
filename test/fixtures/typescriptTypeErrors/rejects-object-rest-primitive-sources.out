@@ -1,0 +1,18 @@
+(1,12): error TS2700: Rest types may only be created from object types.
+(2,12): error TS2700: Rest types may only be created from object types.
+(4,59): error TS2700: Rest types may only be created from object types.
+(6,67): error TS2700: Rest types may only be created from object types.
+(7,61): error TS2700: Rest types may only be created from object types.
+(8,56): error TS2700: Rest types may only be created from object types.
+(10,48): error TS2700: Rest types may only be created from object types.
+(11,9): error TS2339: Property 'a' does not exist on type 'number[]'.
+(12,40): error TS2700: Rest types may only be created from object types.
+(13,42): error TS2700: Rest types may only be created from object types.
+(16,25): error TS2700: Rest types may only be created from object types.
+(17,38): error TS2700: Rest types may only be created from object types.
+(18,38): error TS2700: Rest types may only be created from object types.
+(19,37): error TS2700: Rest types may only be created from object types.
+(25,57): error TS2700: Rest types may only be created from object types.
+(26,33): error TS2700: Rest types may only be created from object types.
+(27,25): error TS2700: Rest types may only be created from object types.
+(28,17): error TS2700: Rest types may only be created from object types.

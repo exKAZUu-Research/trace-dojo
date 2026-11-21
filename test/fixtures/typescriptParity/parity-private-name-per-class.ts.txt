@@ -1,0 +1,22 @@
+class A {
+  #value = 1;
+  static #count = 0;
+  getValue() {
+    return this.#value;
+  }
+  count() {
+    return ++A.#count;
+  }
+}
+class B extends A {
+  #value = "child";
+  static #count = "static child";
+  getChildValue() {
+    return this.#value;
+  }
+  static label() {
+    return B.#count;
+  }
+}
+const b: A = new B();
+console.log(b.getValue(), new B().getChildValue(), b.count(), B.label());

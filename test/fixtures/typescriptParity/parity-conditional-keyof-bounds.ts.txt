@@ -1,0 +1,25 @@
+type ReturnsAny = (...args: any[]) => any;
+const secret = Symbol('secret');
+function select<T extends ReturnsAny>(object: ReturnType<T>) {
+  const name: keyof ReturnType<T> = 'name';
+  const index: keyof ReturnType<T> = 0;
+  const token: keyof ReturnType<T> = secret;
+  console.log(object[name], object[index], object[token]);
+}
+function make() {
+  return { name: 'name', 0: 'index', [secret]: 'symbol' };
+}
+select<typeof make>(make());
+function conditional<T>(object: T extends string ? any : any) {
+  const key: keyof typeof object = 'name';
+  return object[key];
+}
+function indexed<T extends { object: any }>(source: T) {
+  const key: keyof T['object'] = 'name';
+  return source.object[key];
+}
+function typed<T extends () => { name: string }>(object: ReturnType<T>) {
+  const key: keyof ReturnType<T> = 'name';
+  return object[key];
+}
+console.log(conditional<number>(make()), indexed({ object: make() }), typed<typeof make>(make()));

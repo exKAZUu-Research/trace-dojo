@@ -1,0 +1,14 @@
+type RequiredFields<T> = T extends string ? { first: T; second: T } : never;
+function first<T>(value: RequiredFields<T>): T {
+  return value.first;
+}
+function firstKnown<T extends string>(value: RequiredFields<T>): string {
+  return value.first;
+}
+function select<T>(value: T extends number ? readonly [T, T] : never): T {
+  return value[0];
+}
+const text: 'one' = first({ first: 'one', second: 'one' });
+const numberValue: 1 = select([1, 1]);
+console.log(text, numberValue, firstKnown({ first: 'left', second: 'right' }));
+console.log(first<string>({ first: 'left', second: 'right' }));

@@ -1,0 +1,14 @@
+for (const protectedIndex of [0, 1, 2]) {
+  const a = [1, 2, 3, 4];
+  Object.defineProperty(a, String(protectedIndex), { configurable: false });
+  a.length = 0;
+  console.log(a.length, a, Object.keys(a));
+}
+function strictShrink() {
+  "use strict";
+  const a = [1, 2, 3, 4];
+  Object.defineProperty(a, "1", { get() { return 2; }, configurable: false });
+  try { a.length = 0; } catch (e) { console.log(String(e)); }
+  console.log(a.length, a, Object.keys(a));
+}
+strictShrink();

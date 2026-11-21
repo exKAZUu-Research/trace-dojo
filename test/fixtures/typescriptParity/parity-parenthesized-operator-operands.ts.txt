@@ -1,0 +1,30 @@
+const x = 3;
+let n = 2;
+console.log((-x) ** 2, -(x ** 2), x ** -2, 2 ** -x, (<number>x) ** 2);
+console.log(++n ** 2, n++ ** 2, n);
+let a = 5;
+let b = 0;
+if (a > 3 && (b = 1)) console.log('assigned', b);
+const r = a > 1 ? (a = 2) : 0;
+console.log(r, a);
+a > 0 ? (b = 7) : b = 8;
+console.log(b);
+a = b = 4;
+console.log(a, b, -(b = 6), b);
+
+function greet(name?: string, greeting = 'Hello') {
+  return `${greeting}, ${name ?? 'guest'}`;
+}
+console.log(greet(), greet('Ann', 'Hi'));
+
+type Flags = { [K in 'bold' | 'italic']?: boolean };
+const flags: Flags = { bold: true };
+console.log(flags.bold, flags.italic);
+
+type Scores = { [name: string]: number | undefined };
+const scores: Scores = { ann: 3 };
+console.log(scores.ann, scores.bob);
+
+type Prefixed = { [key: `id-${number}`]: string };
+const ids: Prefixed = { 'id-1': 'one' };
+console.log(ids['id-1']);

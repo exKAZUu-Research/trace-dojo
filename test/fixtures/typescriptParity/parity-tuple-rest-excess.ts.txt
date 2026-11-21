@@ -1,0 +1,23 @@
+function choose(...args: [{ x: number }] | [{ y: string }]): void { console.log(args); }
+function padded(...args: [...number[], { info: { x: number } }]): void { console.log(args); }
+function overload(...args: ['x', { x: number }] | ['y', { y: string }]): 1;
+function overload(kind: string, options: { x: number; z: number }): 2;
+function overload(...args: unknown[]): 1 | 2 { return args.length === 2 ? 2 : 1; }
+choose({ x: 1 });
+choose({ y: 'two' });
+const storedObject = { x: 1, z: 2 };
+choose(storedObject);
+padded(...[0, 1] as const, { info: { x: 1 } });
+const storedTuple = [0, { info: { x: 1, z: 3 } }] as const;
+padded(...storedTuple);
+const selected: 2 = overload('x', { x: 1, z: 2 });
+console.log(selected);
+function alternate(...args: [{ x: number }] | { y: string }[]): void { console.log(args); }
+alternate({ y: 'a' }, { y: 'b' });
+function fixed(options: { x: number }): 1;
+function fixed(options: { x: number; z: number }): 2;
+function fixed(options: { x: number; z?: number }): 1 | 2 { return options.z === undefined ? 1 : 2; }
+const ordinary: 2 = fixed({ x: 1, z: 2 } as const);
+const saved = { x: 1, z: 2 } as const;
+const stored: 1 = fixed(saved);
+console.log(ordinary, stored);

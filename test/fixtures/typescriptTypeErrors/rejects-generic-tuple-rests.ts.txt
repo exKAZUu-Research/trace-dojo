@@ -1,0 +1,12 @@
+type F<T> = T extends unknown[] ? T : [];
+type G<T> = [1, ...F<T>];
+const g: G<[2]> = [1, 2];
+type Rev<T extends unknown[]> = T extends [infer H, ...infer R] ? [...Rev<R>, H] : [];
+const r: Rev<[1, 2, 3]> = [3, 2, 1];
+type LL<T> = T extends [infer H, ...infer R] ? [H, ...LL<R>] : [];
+const ll: LL<[1, 2]> = [1, 2];
+type Bad<T> = T extends string ? T : number;
+type B2<T> = [1, ...Bad<T>];
+type Tail<T> = T extends [unknown, ...infer R] ? R : never;
+const t: Tail<[1, 2, 3]> = [2, 3];
+console.log(g, r, ll, t);

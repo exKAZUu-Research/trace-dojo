@@ -1,0 +1,14 @@
+function unbox<T>(source: { [K in keyof T]: { value: T[K] } }): T {
+  return source as unknown as T;
+}
+class PrivateBoxes { x = { value: 1 }; private y = { value: 'a' }; }
+class ProtectedBoxes { x = { value: 1 }; protected y = { value: 'a' }; }
+class SecretBoxes { x = { value: 1 }; #y = { value: 'a' }; }
+class PublicBoxes { x = { value: 1 }; readonly y = { value: 'a' }; }
+const p = unbox(new PrivateBoxes());
+const q = unbox(new ProtectedBoxes());
+const secret = unbox(new SecretBoxes());
+const visibleKey: keyof typeof secret = 'x';
+const wrongKey: keyof typeof secret = '#y';
+const result = unbox(new PublicBoxes());
+result.y = 'b';

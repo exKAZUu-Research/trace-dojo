@@ -1,0 +1,20 @@
+const source = { get value() { return 1; } };
+const copy = { ...source };
+copy.value = 2;
+console.log(copy.value);
+let stored = 0;
+const both = {
+  get size(): number { return stored; },
+  set size(v: string | number) { stored = Number(v); },
+};
+const copied = { ...both, extra: true };
+copied.size = 5;
+console.log(copied.size, both.size);
+class Box { get width() { return 3; } }
+const fromClass = { ...{ get height() { return 4; } }, w: new Box().width };
+fromClass.height = 9;
+console.log(fromClass);
+const maybe = stored > 2 ? source : { value: 7 };
+const unionCopy = { ...maybe };
+unionCopy.value = 8;
+console.log(unionCopy.value);

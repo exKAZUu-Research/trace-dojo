@@ -1,0 +1,7 @@
+(2,22): error TS2339: Property 'length' does not exist on type 'T[K]'.
+(6,22): error TS2339: Property 'length' does not exist on type 'T[keyof T]'.
+(10,17): error TS2538: Type 'symbol' cannot be used as an index type.
+(14,9): error TS2322: Type 'T[keyof T]' is not assignable to type 'number'.
+  Type 'T[string] | T[number] | T[symbol]' is not assignable to type 'number'.
+    Type 'T[string]' is not assignable to type 'number'.
+      Type 'string' is not assignable to type 'number'.

@@ -1,0 +1,5 @@
+const { value: { known = 'left' } = {} } = { value: { unknownName: 2 } };
+const [{ key = 'left' }] = [{ typo: 'right' }];
+const { value: { expected = 'left' } = { typo: 2 } } = {};
+const { annotated = { mode: 'left' } }: { annotated?: { mode: string } } = { annotated: { added: 2 } };
+function wrong({ item }: { item: { mode: string } } = { item: { unknownName: 'left' } }) { return item; }

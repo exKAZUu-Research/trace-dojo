@@ -1,0 +1,5 @@
+interface Co { addr?: { city: { name: string } } }
+function city(c: Co): number | undefined {
+  return c.addr?.city.name.length;
+}
+console.log(city({}));

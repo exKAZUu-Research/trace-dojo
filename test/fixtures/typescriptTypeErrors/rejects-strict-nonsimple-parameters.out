@@ -1,0 +1,16 @@
+(2,3): error TS1346: This parameter is not allowed with 'use strict' directive.
+(4,3): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+(8,3): error TS1346: This parameter is not allowed with 'use strict' directive.
+(10,3): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+(14,3): error TS1346: This parameter is not allowed with 'use strict' directive.
+(16,3): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+(20,3): error TS1346: This parameter is not allowed with 'use strict' directive.
+(22,3): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+(26,3): error TS1346: This parameter is not allowed with 'use strict' directive.
+(28,3): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+(33,5): error TS1346: This parameter is not allowed with 'use strict' directive.
+(35,5): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+(38,5): error TS1346: This parameter is not allowed with 'use strict' directive.
+(40,5): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+(46,5): error TS1346: This parameter is not allowed with 'use strict' directive.
+(49,5): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.

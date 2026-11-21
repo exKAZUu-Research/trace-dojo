@@ -1,0 +1,9 @@
+function wrap<W extends {}, T extends W & {}>(value: T, witness: W): {value: T} { return {value}; }
+function wrapIndexed<W extends {name: {}}, T extends W['name']>(
+  value: T, witness: W
+): {value: T} { return {value}; }
+const witness: {} = 'broad';
+const direct = wrap('actual', witness);
+const indexed = wrapIndexed('other', {name: witness});
+const first: 'actual' = direct.value;
+const second: 'other' = indexed.value;

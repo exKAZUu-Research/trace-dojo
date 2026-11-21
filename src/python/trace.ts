@@ -2,6 +2,7 @@ import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
+import { NOT_SCALAR, type Scalar, scalarItems } from '../interpreter/traceScalars';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { bytesText, PyBytes, PyMemoryView } from './bytesValues';
 import { complexRepr } from './complexNumbers';
@@ -189,10 +190,6 @@ function addClassVariables(variables: TraceVariables, globals: Map<string, PyVal
   }
 }
 
-const NOT_SCALAR = Symbol('notScalar');
-type Scalar = TraceItemVariable[string];
-
-// code-gauge-allow duplicateLines 16 -- Each language converts its own values for the trace.
 function scalarOf(item: PyValue, seen: Set<PyObject>): Scalar | typeof NOT_SCALAR {
   if (item instanceof PyInstance && item.enumValue !== undefined) return NOT_SCALAR;
   const value = unbox(item);
@@ -206,21 +203,11 @@ function scalarOf(item: PyValue, seen: Set<PyObject>): Scalar | typeof NOT_SCALA
       return value;
     }
   }
-  if (!(value instanceof PyList || value instanceof PyTuple) || seen.has(value)) return NOT_SCALAR;
-  seen.add(value);
-  const items: Scalar[] = [];
-  for (const item of value.items) {
-    if (item === None) {
-      // oxlint-disable-next-line unicorn/no-null -- The trace format shows None as null.
-      items.push(null);
-      continue;
-    }
-    const scalar = scalarOf(item, seen);
-    if (scalar === NOT_SCALAR) return NOT_SCALAR;
-    items.push(scalar);
-  }
-  seen.delete(value);
-  return items as Scalar;
+  if (!(value instanceof PyList || value instanceof PyTuple)) return NOT_SCALAR;
+  return scalarItems<PyObject, PyValue>(value, value.items, seen, (item) =>
+    // oxlint-disable-next-line unicorn/no-null -- The trace format shows None as null.
+    item === None ? null : scalarOf(item, seen)
+  );
 }
 
 function traceIntOf(value: bigint): number | bigint {

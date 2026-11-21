@@ -1,0 +1,9 @@
+for (const [object, key] of [[Math, "random"], [RegExp.prototype, "compile"], [console, "time"], [console, "timeEnd"], [console, "timeLog"], [console, "timeStamp"]] as const) {
+  console.log(Object.getOwnPropertyNames(object).includes(key), Object.hasOwn(object, key), key in object);
+  const descriptor = Object.getOwnPropertyDescriptor(object, key)!;
+  console.log(descriptor.value.name, descriptor.value.length, descriptor.writable, descriptor.enumerable, descriptor.configurable);
+}
+console.log(Object.keys(Math).length, Object.keys(RegExp.prototype).length);
+console.log(Object.keys(console).filter(key => ["time", "timeEnd", "timeLog", "timeStamp"].includes(key)));
+const descriptors = Object.getOwnPropertyDescriptors(Math);
+console.log(descriptors.random.value!.name, descriptors.abs.value!.name);

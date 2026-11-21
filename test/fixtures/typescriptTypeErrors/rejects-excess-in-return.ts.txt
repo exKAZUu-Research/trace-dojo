@@ -1,0 +1,4 @@
+interface P { x: number }
+function mk(): P { return { x: 1, y: 2 }; }
+function mk2(): P[] { return [{ x: 1, y: 2 }]; }
+console.log(mk(), mk2());

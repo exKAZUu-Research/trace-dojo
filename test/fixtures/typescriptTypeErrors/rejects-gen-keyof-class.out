@@ -1,0 +1,1 @@
+(3,7): error TS2322: Type '"b"' is not assignable to type 'keyof P'.

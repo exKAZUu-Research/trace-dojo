@@ -1,0 +1,4 @@
+(2,3): error TS1539: A 'bigint' literal cannot be used as a property name.
+(7,3): error TS1539: A 'bigint' literal cannot be used as a property name.
+(11,3): error TS1539: A 'bigint' literal cannot be used as a property name.
+(14,16): error TS1539: A 'bigint' literal cannot be used as a property name.

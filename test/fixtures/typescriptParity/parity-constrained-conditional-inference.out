@@ -1,0 +1,2 @@
+not str other word fallback
+[ 'a', 'b' ] fallback [ 1, 2 ] [ 'a', 'b' ] fallback 1

@@ -1,0 +1,19 @@
+const x: Record<string, number> = 1;
+const y: Partial<{ a: number }> = 2;
+const z: Readonly<{ a: number }> = 3;
+const w: Pick<{ a: number; b: string }, "a"> = 4;
+const v: Omit<{ a: number; b: string }, "a"> = 5;
+const u: Partial<number[]> = 6;
+type Rec<K extends string, T> = { [P in K]: T };
+const t: Rec<"a" | "b", number> = 7;
+type Obj<T> = { value: T };
+const s: Obj<string> = 8;
+function f<T>(p: Partial<T>, q: Record<"k", T>) { const r1: number = p; const r2: number = q; }
+type Alias2<T> = Partial<T>;
+const s2: Alias2<{ a: 1 }> = 9;
+const s3: Required<{ a?: number }> = 10;
+type Nul<T> = T | null;
+const s4: Nul<string> = 11;
+type IsStr<T> = T extends string ? "y" : "n";
+function g<T>() { const r: IsStr<T> = "n"; }
+const s5: Record<"a", Partial<{ b: number }>> = { a: 1 };

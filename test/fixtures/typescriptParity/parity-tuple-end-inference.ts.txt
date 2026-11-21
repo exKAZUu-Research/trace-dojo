@@ -1,0 +1,9 @@
+type Last<T> = T extends [...infer I, infer L] ? L : never;
+type Init<T> = T extends [...infer I, infer L] ? I : never;
+type Mid<T> = T extends [infer F, ...infer M, infer L] ? [F, M, L] : never;
+const l: Last<[1, 2, 3]> = 3;
+const i: Init<[1, 2, 3]> = [1, 2];
+const m: Mid<[1, 2, 3, 4]> = [1, [2, 3], 4];
+function last<T extends unknown[], L>(xs: [...T, L]): L { return xs[xs.length - 1] as L; }
+const z: string = last([1, 2, "s"]);
+console.log(l, i, m, z);

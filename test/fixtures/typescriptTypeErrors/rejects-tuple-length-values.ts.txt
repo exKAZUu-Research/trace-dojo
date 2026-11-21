@@ -1,0 +1,12 @@
+const pair: [number, number?] = [1, 2];
+pair.length = 3;
+const frozen: readonly [number] = [1];
+frozen.length = 1;
+const fixed: [number, string] = [1, "a"];
+const n: 2 = fixed.length;
+const rest: [number, ...string[]] = [1];
+const r: 1 = rest.length;
+const opt: [number, number?, number?] = [1];
+const o: 1 | 2 = opt.length;
+function lengthOf(p: [number, number?]): 1 | 2 { return p.length; }
+console.log(lengthOf([1]));

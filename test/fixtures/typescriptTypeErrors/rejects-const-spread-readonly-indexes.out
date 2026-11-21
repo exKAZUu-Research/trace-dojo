@@ -1,0 +1,4 @@
+(3,3): error TS2542: Index signature in type '{ readonly [x: string]: number; }' only permits reading.
+(9,3): error TS2542: Index signature in type '{ readonly [x: number]: number; }' only permits reading.
+(15,3): error TS2542: Index signature in type '{ readonly [x: string]: string | number; } | { readonly [x: string]: number; }' only permits reading.
+(23,3): error TS2542: Index signature in type '{ readonly [x: string]: number; }' only permits reading.

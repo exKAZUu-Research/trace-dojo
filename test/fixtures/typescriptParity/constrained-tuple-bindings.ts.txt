@@ -1,0 +1,20 @@
+function read<T extends [string, number]>(tuple: T): [string, number] {
+  const [head, tail] = tuple;
+  return [head.toUpperCase(), tail + 1];
+}
+function split<T extends readonly [string, number]>(tuple: T): [string, [number]] {
+  const [head, ...tail] = tuple;
+  let assigned: string;
+  [assigned] = tuple;
+  tail[0]++;
+  return [assigned + head, tail];
+}
+function maybe<T extends readonly [string, number?]>(tuple: T): [string, [number?]] {
+  const [head, ...tail] = tuple;
+  return [head, tail];
+}
+function union<T extends [string] | readonly [number, boolean]>(tuple: T): string | number {
+  const [head] = tuple;
+  return head;
+}
+console.log(read(["start", 1]), split(["next", 2] as const), maybe(["optional"]), union([3, true]));

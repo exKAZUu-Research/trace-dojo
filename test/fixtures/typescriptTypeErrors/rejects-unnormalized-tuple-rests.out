@@ -1,0 +1,5 @@
+(2,7): error TS2322: Type '[string]' is not assignable to type '[string | undefined, number]'.
+  Source has 1 element(s) but target requires 2.
+(3,7): error TS2322: Type '1' is not assignable to type '2'.
+(7,3): error TS2542: Index signature in type 'readonly number[]' only permits reading.
+(11,3): error TS18048: 'first' is possibly 'undefined'.

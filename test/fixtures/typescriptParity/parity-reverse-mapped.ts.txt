@@ -1,0 +1,29 @@
+type Boxes<T> = { [K in keyof T]: { value: T[K] } };
+function unwrap<T>(boxes: Boxes<T>): T {
+  const result: any = Array.isArray(boxes) ? [] : {};
+  for (const key in boxes) result[key] = boxes[key].value;
+  return result;
+}
+function firsts<T>(boxes: { [K in keyof T]: T[K][] }): T {
+  const result: any = {};
+  for (const key in boxes) result[key] = boxes[key][0];
+  return result;
+}
+function restricted<T extends { name: string }>(boxes: Boxes<T>): T {
+  return unwrap(boxes);
+}
+function masked<T>(boxes: { readonly [K in keyof T]?: { value: T[K] } }): T {
+  const result: any = {};
+  for (const key in boxes) result[key] = boxes[key]?.value;
+  return result;
+}
+const result = unwrap({ name: { value: 'alice' }, age: { value: 12 } });
+const arrays = firsts({ name: ['list'], age: [20] });
+const tuple: readonly [{ value: number }, { value: string }] = [{ value: 3 }, { value: 'tuple' }];
+const reversed: readonly [number, string] = unwrap(tuple);
+const extended = restricted({ name: { value: 'bound' }, extra: { value: 7 } });
+const mutable = masked({ first: { value: 9 } } as const);
+mutable.first = 9;
+const dictionary: Record<string, { value: number }> = { direct: { value: 5 } };
+const unwrappedIndex: Record<string, number> = unwrap(dictionary);
+console.log(result.name.toUpperCase(), result.age + 1, arrays.name, arrays.age, reversed[0], reversed[1], extended.name, extended.extra, mutable.first, unwrappedIndex.direct);

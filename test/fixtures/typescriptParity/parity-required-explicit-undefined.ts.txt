@@ -1,0 +1,7 @@
+const explicitUndefined: Required<{x:string|undefined}> = {x:undefined};
+const plainMapped: {[K in 'x']-?:string|undefined} = {x:undefined};
+type RequiredFields<T> = {[K in keyof T]-?: T[K]};
+const genericRequired: RequiredFields<{x:number|undefined}> = {x:undefined};
+const mixed: Required<{x:string|undefined; y?:number|undefined}> = {x:undefined, y:1};
+const optional: Required<{x?:string|undefined}> = {x:'present'};
+console.log(explicitUndefined, plainMapped, genericRequired, mixed, optional);

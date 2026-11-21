@@ -1,0 +1,8 @@
+(1,20): error TS1198: An extended Unicode escape value must be between 0x0 and 0x10FFFF inclusive.
+(2,20): error TS1198: An extended Unicode escape value must be between 0x0 and 0x10FFFF inclusive.
+(3,14): error TS1198: An extended Unicode escape value must be between 0x0 and 0x10FFFF inclusive.
+(4,19): error TS1198: An extended Unicode escape value must be between 0x0 and 0x10FFFF inclusive.
+(5,27): error TS1198: An extended Unicode escape value must be between 0x0 and 0x10FFFF inclusive.
+(6,21): error TS1198: An extended Unicode escape value must be between 0x0 and 0x10FFFF inclusive.
+(7,16): error TS1198: An extended Unicode escape value must be between 0x0 and 0x10FFFF inclusive.
+(8,46): error TS1198: An extended Unicode escape value must be between 0x0 and 0x10FFFF inclusive.

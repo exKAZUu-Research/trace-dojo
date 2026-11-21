@@ -1,0 +1,44 @@
+const values: (string | number | null)[] = [1, "a", null, "b", 2];
+
+const named = values.filter((x) => {
+  const isText = typeof x === "string";
+  return isText;
+});
+console.log(named.map((text) => text.toUpperCase()).join(","));
+
+const logged = values.filter((x) => {
+  console.log("check", x);
+  return typeof x === "number";
+});
+console.log(logged.map((n) => n.toFixed(1)).join(","));
+
+const present = values.filter(function (x) {
+  const label = String(x);
+  console.log(label.length);
+  return x !== null;
+});
+console.log(present.map((value) => value.toString()).join(","));
+
+const filled: (string | number | null)[] = ["c", 4];
+const guarded = filled.filter((x) => {
+  if (x !== null) {
+    return typeof x === "string";
+  }
+  throw new Error("null value");
+});
+console.log(guarded.map((text) => text.toUpperCase()).join(","));
+
+const narrowed = filled.filter((x) => {
+  if (x === null) throw new Error("null value");
+  return typeof x === "number";
+});
+console.log(narrowed.map((n) => n * 2).join(","));
+
+const finished = [1, "z", 3].filter((x) => {
+  try {
+    return typeof x === "number";
+  } finally {
+    console.log("done", x);
+  }
+});
+console.log(finished.reduce((sum, n) => sum + n, 0));

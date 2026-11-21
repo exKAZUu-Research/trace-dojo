@@ -1,0 +1,4 @@
+function isReady(): boolean { return true; }
+if (isReady) {
+  console.log("isReady was checked");
+}

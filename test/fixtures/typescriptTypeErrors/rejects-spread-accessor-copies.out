@@ -1,0 +1,1 @@
+(10,8): error TS2540: Cannot assign to 'size' because it is a read-only property.

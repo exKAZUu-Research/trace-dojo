@@ -1,0 +1,2 @@
+(2,29): error TS18048: 'globalMaybe' is possibly 'undefined'.
+(4,47): error TS18048: 'globalVarMaybe' is possibly 'undefined'.

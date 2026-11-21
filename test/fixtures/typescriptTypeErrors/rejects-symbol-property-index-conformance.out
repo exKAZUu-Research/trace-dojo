@@ -1,0 +1,5 @@
+(4,51): error TS2411: Property '[other]' of type 'number | undefined' is not assignable to 'symbol' index type 'number'.
+(5,36): error TS2411: Property '[other]' of type 'number | undefined' is not assignable to 'symbol' index type 'number'.
+(9,25): error TS2411: Property '[other]' of type 'string' is not assignable to 'symbol' index type 'number'.
+(10,33): error TS2411: Property '[key]' of type 'string' is not assignable to 'symbol' index type 'number'.
+(11,35): error TS2411: Property '[key]' of type 'string' is not assignable to 'symbol' index type 'number'.

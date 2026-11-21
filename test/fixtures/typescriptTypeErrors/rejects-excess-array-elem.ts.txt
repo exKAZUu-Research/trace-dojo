@@ -1,0 +1,3 @@
+interface P { x: number; }
+const ps: P[] = [{ x: 1 }, { x: 2, y: 3 }];
+console.log(ps.length);

@@ -1,0 +1,9 @@
+function format(value: string | number) {
+  if (typeof value === `str\u0069ng`) return value.toUpperCase();
+  return value.toFixed(1);
+}
+function maybe(value?: number) {
+  if (`undefined` !== typeof value) return value.toFixed(1);
+  return "missing";
+}
+console.log(format("example"), format(3), maybe(4), maybe());

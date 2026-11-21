@@ -1,0 +1,14 @@
+const parsed: any = JSON.parse('{"name":"x","size":3}');
+function firstOr<T>(xs: T[], fallback: T): T {
+  return xs[0] ?? fallback;
+}
+const first = firstOr(["a"], parsed.name);
+console.log(first.length, first.anything);
+const second = firstOr([parsed.size], 1);
+console.log(second.toFixed(1), second.anything);
+function pick<T>(a: T, b: T): T {
+  return b;
+}
+const known: unknown = 1;
+const picked: string = pick(known, parsed.name);
+console.log(picked);

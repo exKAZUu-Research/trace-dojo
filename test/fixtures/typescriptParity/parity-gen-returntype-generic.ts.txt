@@ -1,0 +1,4 @@
+function f<T>(x: T) { return [x]; }
+type R = ReturnType<typeof f>;
+const r: R = [1];
+console.log(r);

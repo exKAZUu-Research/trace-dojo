@@ -1,0 +1,5 @@
+(1,58): error TS2536: Type 'K' cannot be used to index type 'T'.
+(2,41): error TS2536: Type 'unknown' cannot be used to index type 'T'.
+(3,50): error TS2536: Type 'K' cannot be used to index type 'T'.
+(4,62): error TS2536: Type 'K' cannot be used to index type 'T'.
+(5,39): error TS2536: Type 'K' cannot be used to index type 'T'.

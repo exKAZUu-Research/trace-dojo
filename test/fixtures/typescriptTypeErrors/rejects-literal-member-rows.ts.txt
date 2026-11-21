@@ -1,0 +1,99 @@
+const o: { a: number; b: string } = {
+  a: 1,
+  b: 2,
+};
+const xs: number[] = [
+  1,
+  "a",
+  3,
+];
+function f(): { a: number } {
+  return {
+    a: "s",
+  };
+}
+const n: { inner: { v: number } } = {
+  inner: {
+    v: "s",
+  },
+};
+const g = (): { a: number } => ({
+  a: "s",
+});
+let p: { a: number } = { a: 1 };
+p = {
+  a: "s",
+};
+class A { constructor(o: { n: number }) {} }
+new A({
+  n: "s",
+});
+const fs: (() => number)[] = [
+  () => 1,
+  () => "s",
+];
+const missing: { a: number; b: string } = {
+  a: 1,
+};
+const t: [number, string] = [
+  1,
+  2,
+];
+const opt: { a?: number; b: number } = {
+  a: undefined,
+  b: "x",
+};
+const two: { a: number; b: number } = {
+  a: "x",
+  b: "y",
+};
+const typed: (x: number) => number = (x: number) =>
+  "s";
+const sh = "s";
+const shorthand: { sh: number } = {
+  sh,
+};
+console.log(o, xs, f, n, g, p, fs, missing, t, opt, two, typed, shorthand);
+type S2 = { kind: "a"; v: number } | { kind: "b"; w: string };
+const s: S2 = {
+  kind: "a",
+  v: "x",
+};
+const u: { a: number } | { b: string } = {
+  a: "x",
+};
+class K {
+  x: { a: number } = {
+    a: "s",
+  };
+}
+function d(p: { a: number } = {
+  a: "s",
+}) { return p; }
+function id<T extends { a: number }>(t: T) { return t; }
+id({
+  a: "s",
+});
+const r: Record<string, number> = {
+  a: 1,
+  b: "x",
+};
+const nested: { xs: number[] } = {
+  xs: [
+    1,
+    "s",
+  ],
+};
+const fn: { f: () => number } = {
+  f: () =>
+    "s",
+};
+const meth: { m(): number } = {
+  m() { return "s"; },
+};
+const big: number[] = [1, ...["a"]];
+const tup: [number, number] = [
+  1,
+  2,
+  3,
+];

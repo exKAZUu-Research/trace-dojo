@@ -1,0 +1,42 @@
+type Cell = { label: string; hits?: number[] } | null;
+
+function describe(grid: Cell[][], row: number): string[] {
+  const lines: string[] = [];
+  if (grid[row] === undefined) return lines;
+  for (let col = 0; col < grid[row].length; col++) lines.push(`(${row},${col}) ${label(grid[row], col)}`);
+  return lines;
+}
+
+function label(cells: Cell[], col: number): string {
+  if (cells[col] === null) return "empty";
+  return cells[col].label;
+}
+
+function record(cells: Cell[], index: number, hit: number): void {
+  if (cells[index] === null) return;
+  if (!cells[index].hits) cells[index].hits = [];
+  cells[index].hits.push(hit);
+}
+
+function countWords(words: string[]): Record<string, number> {
+  const counts: Record<string, number | undefined> = {};
+  const result: Record<string, number> = {};
+  for (const word of words) {
+    if (counts[word] === undefined) counts[word] = 0;
+    counts[word] += 1;
+    result[word] = counts[word];
+  }
+  return result;
+}
+
+const grid: Cell[][] = [
+  [{ label: "a" }, null, { label: "c" }],
+  [null, { label: "e" }],
+];
+for (const line of describe(grid, 0)) console.log(line);
+console.log(describe(grid, 5).length);
+record(grid[1], 1, 7);
+record(grid[1], 1, 9);
+record(grid[1], 0, 1);
+console.log(JSON.stringify(grid[1]));
+console.log(JSON.stringify(countWords(["x", "y", "x"])));

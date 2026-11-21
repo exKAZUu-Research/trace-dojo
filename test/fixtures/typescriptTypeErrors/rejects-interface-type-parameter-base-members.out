@@ -1,0 +1,4 @@
+(4,11): error TS2430: Interface 'Combined<T>' incorrectly extends interface 'T'.
+  'Combined<T>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint '{ value: number; }'.
+(9,11): error TS2430: Interface 'Empty<T>' incorrectly extends interface 'T'.
+  'Empty<T>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint '{ value: number; }'.

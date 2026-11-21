@@ -1,0 +1,2 @@
+const o: { [i: number]: string } = { 1: "a", 1.5: "b", "-1": "c" };
+console.log(o);

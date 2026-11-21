@@ -1,0 +1,14 @@
+function f(a: number, b: string) {
+  console.log(arguments.length, [...arguments], Array.from(arguments), Array.prototype.slice.call(arguments));
+  console.log(Object.prototype.toString.call(arguments), JSON.stringify(arguments), Object.keys(arguments));
+  console.log(typeof arguments.callee, arguments.callee === f);
+  for (const x of arguments) console.log(x);
+  return Array.prototype.join.call(arguments, "-");
+}
+console.log(f(1, "s"));
+function g() { return arguments; }
+console.log(g(), g(1, [2]));
+class C { m(a: number) { try { return arguments.callee; } catch (e) { return (e as Error).message; } } }
+console.log(new C().m(1));
+function h(a: number) { arguments.length = 5; a = 3; return [arguments[0], arguments.length]; }
+console.log(h(1));

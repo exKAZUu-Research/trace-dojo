@@ -1,0 +1,6 @@
+(4,7): error TS2417: Class static side 'typeof B' incorrectly extends base class static side 'typeof A'.
+  Property 'x' is private in type 'typeof A' but not in type 'typeof B'.
+(10,7): error TS2417: Class static side 'typeof D' incorrectly extends base class static side 'typeof C'.
+  Property 'y' is protected in type 'typeof D' but public in type 'typeof C'.
+(16,7): error TS2417: Class static side 'typeof F' incorrectly extends base class static side 'typeof E'.
+  Types have separate declarations of a private property 'z'.

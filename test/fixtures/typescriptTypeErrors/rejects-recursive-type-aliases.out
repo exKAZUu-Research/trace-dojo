@@ -1,0 +1,12 @@
+(2,28): error TS2322: Type 'undefined' is not assignable to type 'Json'.
+(3,7): error TS2322: Type '{ k: { m: () => number; }; }' is not assignable to type 'Json'.
+  The types of 'k.m' are incompatible between these types.
+    Type '() => number' is not assignable to type 'Json | undefined'.
+(5,32): error TS2322: Type 'string' is not assignable to type 'Nested<number>'.
+(6,61): error TS2322: Type 'string' is not assignable to type 'number'.
+(8,25): error TS2322: Type 'string' is not assignable to type 'L'.
+(9,37): error TS2322: Type 'number' is not assignable to type 'string'.
+(10,16): error TS2322: Type 'undefined' is not assignable to type 'L'.
+(12,21): error TS2322: Type 'string' is not assignable to type 'number | O'.
+(14,41): error TS2322: Type 'boolean' is not assignable to type 'P<string, number>'.
+(17,24): error TS2322: Type 'string' is not assignable to type 'G<number[]>'.

@@ -1,0 +1,6 @@
+class Box<T> { constructor(public v: T) {} }
+function un(x: Box<number> | number): number {
+  if (x instanceof Box) return x.v + 1;
+  return x;
+}
+console.log(un(new Box(1)));

@@ -1,0 +1,18 @@
+{ only: [Getter], both: [Getter/Setter] }
+0
+{ only: [Getter], both: [Getter/Setter] }
+0
+{ only: [Getter], both: [Getter/Setter] }
+0
+{ only: [Getter], both: [Getter/Setter] }
+0
+{ only: [Getter: 1], both: [Getter/Setter] }
+1
+{ only: [Getter], both: [Getter/Setter: 2] }
+2
+{ only: [Getter: 1], both: [Getter/Setter: 2] }
+4
+Object.prototype.toLocaleString called on null or undefined
+Object.prototype.toLocaleString called on null or undefined
+read toString
+custom 12 42

@@ -1,0 +1,6 @@
+const values: never[] = [];
+function merge<T>(first: T[], second: T[]): T[] { return [...first, ...second]; }
+const inferred = merge(values, ['present']);
+const wrong: number[] = inferred;
+const passthrough = values.map((value) => value);
+passthrough.push('unexpected');

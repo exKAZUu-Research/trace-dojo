@@ -1,0 +1,7 @@
+(2,7): error TS2322: Type 'string' is not assignable to type 'Uppercase<string>'.
+(3,7): error TS2322: Type '"other"' is not assignable to type '`id-${string}`'.
+(4,7): error TS2322: Type '"ref-bad"' is not assignable to type '`ref-${number}`'.
+(5,7): error TS2322: Type 'string' is not assignable to type 'Capitalize<Lowercase<string>>'.
+(6,7): error TS2322: Type 'string' is not assignable to type 'Uppercase<Lowercase<string>>'.
+(7,7): error TS2322: Type 'string' is not assignable to type 'Uncapitalize<Uppercase<string>>'.
+(8,7): error TS2322: Type '"id-WORLD"' is not assignable to type '`id-${Capitalize<Lowercase<string>>}`'.

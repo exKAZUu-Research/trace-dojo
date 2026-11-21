@@ -1,0 +1,4 @@
+interface Handler<T> { handle: (x: T) => void; }
+const hs: Handler<string> = { handle: (x) => console.log(x.toUpperCase()) };
+const hu: Handler<string | number> = hs;
+hu.handle(1);

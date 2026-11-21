@@ -1,0 +1,3 @@
+class A { protected n = 1; }
+class B extends A { public n = 2; }
+console.log(new B().n);

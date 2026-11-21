@@ -1,0 +1,1 @@
+(1,59): error TS2754: 'super' may not use type arguments.

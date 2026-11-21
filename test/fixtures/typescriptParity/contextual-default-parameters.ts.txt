@@ -1,0 +1,8 @@
+const answer: number = ((value = 1) => value)();
+const dependent: number = ((left, right = left) => right)(2);
+const fromPattern: number = (({ value } = { value: 3 }) => value)();
+const withEarlierDefault: number = ((left = 4, right = left) => right)(...([] as const));
+const fromRest: number = ((...values) => values[1])(...([4, 5] as const));
+const missing: undefined = ((value) => value)();
+const callback: (value: number | string) => string = (value = 6) => String(value);
+console.log(answer, dependent, fromPattern, withEarlierDefault, fromRest, missing, callback("six"));

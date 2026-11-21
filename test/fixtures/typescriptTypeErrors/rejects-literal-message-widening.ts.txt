@@ -1,0 +1,18 @@
+const n: number = Number("3");
+switch (n) { case "1": break; }
+const b: boolean = n > 1;
+switch (b) { case 1: break; }
+const u: "a" | "b" = n > 1 ? "a" : "b";
+switch (u) { case "c": break; }
+let done: boolean = "yes";
+function f(x: boolean) {}
+f(1);
+let m: boolean | undefined = 0;
+const s: "a" = "a";
+const n1: number = s;
+const n2: number = u;
+function g<T extends "x" | "y">(t: T) { const q: T = "z"; }
+function h<T extends string>(t: T) { const q: T = "z"; }
+const n3: `a${string}` = 1;
+const n4: null = 5;
+let v: void = 6;

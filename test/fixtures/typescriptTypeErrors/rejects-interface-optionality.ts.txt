@@ -1,0 +1,3 @@
+interface RequiredMember { x: number; method(): number; }
+interface OptionalField extends RequiredMember { x?: number; }
+interface OptionalMethod extends RequiredMember { method?(): number; }

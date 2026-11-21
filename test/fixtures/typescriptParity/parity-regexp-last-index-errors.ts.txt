@@ -1,0 +1,14 @@
+function show(operation:(r:RegExp)=>unknown,flags:string){
+ const r=new RegExp("(y)",flags);Object.freeze(r);
+ try{operation(r);}catch{console.log("caught",flags);}
+}
+show(r=>r.exec("y"),"g");
+show(r=>r.test("y"),"g");
+show(r=>r.exec("y"),"y");
+show(r=>r.test("y"),"y");
+show(r=>r.exec("no"),"g");
+show(r=>"y".match(r),"g");
+show(r=>"y".replace(r,"z"),"g");
+show(r=>"y".replace(r,"z"),"y");
+show(r=>"y".replaceAll(r,"z"),"g");
+const plain=/(y)/;Object.freeze(plain);console.log(plain.exec("y")![1]);

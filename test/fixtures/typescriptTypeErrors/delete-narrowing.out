@@ -1,0 +1,5 @@
+(4,17): error TS18048: 'item.value' is possibly 'undefined'.
+(10,24): error TS2339: Property 'name' does not exist on type 'never'.
+(16,11): error TS2322: Type 'string' is not assignable to type 'undefined'.
+(22,11): error TS2322: Type 'string' is not assignable to type 'undefined'.
+(29,30): error TS2339: Property 'toUpperCase' does not exist on type 'never'.

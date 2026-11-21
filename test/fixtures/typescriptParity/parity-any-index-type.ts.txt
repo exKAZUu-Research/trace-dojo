@@ -1,0 +1,18 @@
+type G<T> = any[T];
+type H<T extends null> = any[T];
+type K<T> = any[T | null];
+const a: G<{}> = 1;
+const b: H<null> = 2;
+const c: K<{}> = 3;
+const d: any[never] = 's';
+const e: any[keyof any] = true;
+const f: any[`before-${number}`] = {};
+const sym = Symbol();
+const g: any[typeof sym] = 1;
+console.log(a, b, c, d, e, f, g);
+function property<K>(object: any, key: K) { return object[key]; }
+const dictionary: any = { key: 'old' };
+dictionary['key'] = 'new';
+const symbol = Symbol('label');
+dictionary[symbol] = 'symbol';
+console.log(property(dictionary, 'key'), dictionary?.[symbol]);

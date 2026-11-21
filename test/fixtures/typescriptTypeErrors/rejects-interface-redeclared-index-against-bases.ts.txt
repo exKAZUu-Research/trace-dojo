@@ -1,0 +1,22 @@
+interface Prefixed {
+  [key: `a${string}`]: number;
+}
+interface LongerPrefixed {
+  [key: `ab${string}`]: string;
+}
+interface NarrowsLonger extends Prefixed, LongerPrefixed {
+  [key: `ab${string}`]: 1;
+}
+interface RedeclaresShorter extends Prefixed, LongerPrefixed {
+  [key: `a${string}`]: string;
+}
+interface Scores {
+  [name: string]: number;
+}
+interface Labels extends Scores {
+  [name: string]: string;
+}
+interface FirstBaseWins extends Scores, Record<string, string> {}
+interface ClashesWithInherited extends Prefixed, LongerPrefixed {
+  [key: `a${string}`]: 1;
+}

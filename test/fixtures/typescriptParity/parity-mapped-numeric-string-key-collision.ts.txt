@@ -1,0 +1,20 @@
+type M = { [K in 0 | "0"]: number };
+type ByString<T extends M> = T["0"];
+type ByNumber<T extends M> = T[0];
+const x: ByString<M> = 1;
+const y: ByNumber<M> = 2;
+console.log(x, y);
+
+type Named = { [K in "a" | "b" as K extends "a" ? 1 | "1" : K]: string };
+type First<T extends Named> = T["1"];
+type Second<T extends Named> = T[1];
+const s: First<Named> = "one";
+const t: Second<Named> = "uno";
+console.log(s, t);
+
+const u = Symbol("u");
+type WithSymbol<T extends { [u]: number }> = T[typeof u];
+type ByIndex<T extends { [k: symbol]: number }> = T[symbol];
+const v: WithSymbol<{ [u]: number }> = 3;
+const w: ByIndex<{ [k: symbol]: number }> = 4;
+console.log(v + w);

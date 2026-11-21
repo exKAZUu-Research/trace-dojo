@@ -1,0 +1,13 @@
+interface I { m(x?: number, y: number): void; }
+type G = (x = 1) => void;
+type C = new (x?: number, y: number) => void;
+interface J { (a?: number, b: number): void; new (c = 1): J; }
+function over(x = 1): void;
+function over(x = 1) {}
+type O = { m(x = 1): void };
+class K { constructor(a = 1); constructor(a = 1) {} m(a = 1): void; m() {} }
+let v: { (a?: number, b: number): void } | undefined;
+function g(cb: (a?: string, b: string) => void) {}
+const h = function (a?: number, b: number) {};
+const k = (a?: number, b: number = 1, c: number) => {};
+console.log('runs');

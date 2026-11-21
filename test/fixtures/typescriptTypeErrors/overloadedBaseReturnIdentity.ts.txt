@@ -1,0 +1,15 @@
+const implementation = class { x = 1; y = 2; constructor(input: number | string) {} };
+const mismatched: { new(value: number): { x: number }; new(value: string): { y: number } } = implementation;
+class First extends mismatched {}
+
+type NumericBase = { new(value: number): { x: number } };
+type TextualBase = { new(value: string): { x: number; y?: number } };
+const intersected: NumericBase & TextualBase = implementation;
+class Second extends intersected {}
+
+const reordered: { new(value: number): { nested: { value: number } }; new(value: string): { nested: { value: any } } } =
+  class { nested = { value: 1 }; constructor(input: number | string) {} };
+class Third extends reordered {}
+
+const readonlyBase: { new(value: number): { x: number }; new(value: string): { readonly x: number } } = implementation;
+class Fourth extends readonlyBase {}

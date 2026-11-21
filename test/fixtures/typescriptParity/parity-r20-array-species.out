@@ -1,0 +1,4 @@
+true MyArr(3) [ 2, 4, 6 ]
+true
+true true
+MyArr(2) [ 2, 3 ]

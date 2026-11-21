@@ -1,0 +1,13 @@
+(4,7): error TS2322: Type '{ a: (number | (() => number))[]; }' is not assignable to type 'Json'.
+  Types of property 'a' are incompatible.
+    Type '(number | (() => number))[]' is not assignable to type 'Json | undefined'.
+      Type '(number | (() => number))[]' is not assignable to type 'JsonArray'.
+        Type 'number | (() => number)' is not assignable to type 'Json'.
+          Type '() => number' is not assignable to type 'Json'.
+(6,23): error TS2322: Type 'string' is not assignable to type 'number'.
+(8,7): error TS2322: Type 'string[]' is not assignable to type 'NumArr'.
+  Type 'string' is not assignable to type 'number'.
+(13,22): error TS2322: Type 'string' is not assignable to type 'number | RTree'.
+(17,26): error TS2322: Type 'undefined' is not assignable to type 'Json'.
+(20,7): error TS2322: Type '<U>(x: U) => U' is not assignable to type '<T>(x: T) => T[]'.
+  Type 'T' is not assignable to type 'T[]'.

@@ -1,0 +1,10 @@
+interface A<T> { x: T }
+interface A<T = number> { y: T }
+const a: A = { x: 1, y: 2 };
+interface B<T> { x: T }
+interface B<T, U = string> { y: U }
+const b: B<number> = { x: 1, y: "ok" };
+interface C<T extends number> { x: T }
+interface C<T> { y: T }
+const c: C<1> = { x: 1, y: 1 };
+console.log(a, b, c);

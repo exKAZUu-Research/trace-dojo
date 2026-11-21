@@ -1,0 +1,6 @@
+class L<T> extends Array<T> { sum() { return (this as any).reduce((a: number, b: number) => a + b, 0); } }
+const l = new L<number>(); l.push(1, 2, 3);
+console.log(l.concat([4]) instanceof L, l.splice(0, 1) instanceof L, l.flat() instanceof L, l.flatMap((x) => [x]) instanceof L);
+console.log(l.toSorted() instanceof L, l.toReversed() instanceof L, l.with(0, 9) instanceof L, Array.from(l) instanceof L);
+try { console.log((l.map((x) => x * 2) as any).sum()); } catch (e: any) { console.log(e.message); }
+console.log(l.length, l, Array.isArray(l));

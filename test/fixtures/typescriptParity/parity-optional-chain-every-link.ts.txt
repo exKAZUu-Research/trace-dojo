@@ -1,0 +1,36 @@
+type A = { b?: { c?: string; f?: () => string; d?: Box } } | undefined;
+class Box {
+  v = 7;
+}
+function isText(value: unknown): value is string {
+  return typeof value === "string";
+}
+function truthy(a: A): void {
+  if (a?.b?.c) console.log(a.b.c.toUpperCase());
+  if (!a?.b?.c) return;
+  console.log(a.b.c.length);
+}
+function equality(a: A): void {
+  if (a?.b?.c !== undefined) console.log(a.b.c.toUpperCase());
+  if (a?.b?.c === "x") console.log(a.b.c.toUpperCase());
+  if (a?.b?.c != null) console.log(a.b.c.toUpperCase());
+  if (a?.b?.c === undefined) return;
+  console.log(a.b.c.length);
+}
+function others(a: A): void {
+  if (typeof a?.b?.c === "string") console.log(a.b.c.toUpperCase());
+  if (typeof a?.b?.c !== "undefined") console.log(a.b.c.toUpperCase());
+  if (a?.b?.f?.()) console.log(a.b.f());
+  if (a?.b?.d instanceof Box) console.log(a.b.d.v);
+  if (isText(a?.b?.c)) console.log(a.b.c.toUpperCase());
+}
+function links(p: { b: { c?: string } | undefined } | undefined, q: { b?: { c: { d?: string } } } | undefined, r: { b?: { c?: string[] } } | undefined): void {
+  if (p?.b!.c) console.log(p.b.c.toUpperCase());
+  if (q?.b?.c.d) console.log(q.b.c.d.toUpperCase());
+  if (r?.b?.c?.[0]) console.log(r.b.c[0].toUpperCase());
+}
+truthy({ b: { c: "x" } });
+truthy(undefined);
+equality({ b: { c: "x" } });
+others({ b: { c: "y", f: () => "f", d: new Box() } });
+links({ b: { c: "p" } }, { b: { c: { d: "q" } } }, { b: { c: ["r"] } });

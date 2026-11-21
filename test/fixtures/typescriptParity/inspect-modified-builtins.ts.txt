@@ -1,0 +1,25 @@
+class Pattern extends RegExp {}
+const plain = /abc/g;
+Object.setPrototypeOf(plain, {});
+const boxed = new Number(5);
+Object.setPrototypeOf(boxed, {});
+const string = new String('ab');
+Object.setPrototypeOf(string, {});
+const pattern = new Pattern('abc', 'g');
+const bare = /abc/g;
+Object.setPrototypeOf(bare, null);
+const emptyPrototype = /abc/g;
+Object.setPrototypeOf(emptyPrototype, Object.create(null));
+const boxedWithoutPrototype = new Number(5);
+Object.setPrototypeOf(boxedWithoutPrototype, null);
+const stringsWithoutPrototype = new String('z');
+Object.setPrototypeOf(stringsWithoutPrototype, null);
+const formatted = /abc/g;
+Object.defineProperty(formatted, 'source', {value: 'changed'});
+Object.defineProperty(formatted, 'flags', {value: 'y'});
+console.log(plain, boxed, string, pattern, bare, emptyPrototype, boxedWithoutPrototype, stringsWithoutPrototype, formatted);
+console.log('%o', plain);
+console.log('%o', string);
+console.log('%o', bare);
+Object.defineProperty(pattern, 'extra', {value: 1, enumerable: true});
+console.dir({nested: {pattern}}, {depth: 0});

@@ -1,0 +1,6 @@
+(6,11): error TS2339: Property 'toFixed' does not exist on type 'string | number'.
+  Property 'toFixed' does not exist on type 'string'.
+(10,20): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'null'.
+  Type 'string' is not assignable to type 'null'.
+(14,11): error TS2339: Property 'length' does not exist on type 'string | true'.
+  Property 'length' does not exist on type 'true'.

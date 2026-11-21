@@ -1,0 +1,10 @@
+interface Pair<T, U = T> { first: T; second: U; }
+const pair: Pair<number> = { first: 1, second: 2 };
+type Box<T, U = T[]> = { values: U };
+const box: Box<string> = { values: ["hello"] };
+class Container<T = string, U = T[], V = U> {
+  constructor(public value: V) {}
+}
+const container: Container = new Container(["world"]);
+const explicit: Pair<number, string> = { first: 3, second: "explicit" };
+console.log(pair.second, box.values, container.value, explicit.second);

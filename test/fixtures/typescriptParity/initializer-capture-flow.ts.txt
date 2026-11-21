@@ -1,0 +1,33 @@
+let state: string | number = "initial";
+class CaptureFields {
+  static field = state;
+  readonly field = state;
+}
+state = 1;
+const item = new CaptureFields();
+if (typeof item.field === "number") console.log(item.field.toFixed(1));
+if (typeof CaptureFields.field === "string") console.log(CaptureFields.field.toUpperCase());
+
+function declared(value = state) { console.log(value); }
+const arrow = (value = state) => console.log(value);
+const object = { method(value = state) { console.log(value); } };
+declared("declared");
+arrow("arrow");
+object.method("method");
+
+function nested(flag: boolean) {
+  let local: string | number = flag ? "local" : 0;
+  if (typeof local !== "string") return;
+  const read = (value = local) => value.toUpperCase();
+  const test = { read(value = local) { return value.toUpperCase(); } };
+  console.log(read(), test.read());
+}
+nested(true);
+
+let immediateValue: string | number = "before";
+console.log(((ignored, value = immediateValue) => value.toFixed(1))((immediateValue = 3)));
+
+function ordered(first: number = 4, second = first, { third = second } = {}) {
+  return third.toFixed(1);
+}
+console.log(ordered());

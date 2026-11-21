@@ -1,0 +1,8 @@
+function invoke<T extends number[]>(fn: (...args: T) => void): void { fn(3); }
+function invalid<T extends number[]>(fn: (...args: T) => void): void { fn('bad'); }
+function empty<T extends number[]>(fn: (...args: T) => void): void { fn(); }
+function prefix<T extends number[]>(fn: (label: string, ...args: T) => void): void { fn('value', 3); }
+function array<T extends number[]>(fn: (...args: T) => void, args: number[]): void { fn(...args); }
+invoke((n: 1) => console.log(n));
+function spreadPrefix<T extends number[]>(fn: (label: string, ...args: T) => void): void { const head: [string] = ['prefix']; fn(...head, 3); }
+function suffix<T extends number[]>(fn: (...args: [...T, string]) => void): void { fn(3, 'end'); }

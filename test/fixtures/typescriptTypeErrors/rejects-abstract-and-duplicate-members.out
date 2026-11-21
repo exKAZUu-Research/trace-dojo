@@ -1,0 +1,8 @@
+(1,11): error TS1244: Abstract methods can only appear within an abstract class.
+(2,11): error TS1253: Abstract properties can only appear within an abstract class.
+(3,11): error TS2300: Duplicate identifier 'x'.
+(3,22): error TS2300: Duplicate identifier 'x'.
+(4,11): error TS2300: Duplicate identifier 'x'.
+(4,33): error TS2300: Duplicate identifier 'x'.
+(5,15): error TS2300: Duplicate identifier 'x'.
+(5,37): error TS2300: Duplicate identifier 'x'.

@@ -1,0 +1,1 @@
+(2,7): error TS2415: Class 'B' incorrectly extends base class 'A'.

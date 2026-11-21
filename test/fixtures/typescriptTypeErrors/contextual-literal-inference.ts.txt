@@ -1,0 +1,12 @@
+function id<T>(value:T):T { return value; }
+function constId<const T>(value:T):T { return value; }
+const a:{x:1}=id({x:2});
+const b:{x:'a'|'b'}=id({x:'c'});
+const c:{readonly x:{readonly y:1}}=constId({x:{y:2}});
+const d: [1, 'hello'] = id([2, 'hello']);
+const e = constId({x: { y: 1 }});
+e.x.y = 2;
+const f: { value: { tag: 'a' } } = { value: { tag: 'a', unknown: 2 } };
+function constrained<T extends { flag: boolean }>(value: T): T { return value; }
+const result = constrained({ flag: true });
+result.flag = false;

@@ -1,0 +1,5 @@
+(3,15): error TS2339: Property 'length' does not exist on type 'void'.
+(4,5): error TS2451: Cannot redeclare block-scoped variable 'name'.
+(5,18): error TS2339: Property 'length' does not exist on type 'void'.
+(6,41): error TS2339: Property 'length' does not exist on type 'void | string'.
+(7,32): error TS2339: Property 'toString' does not exist on type 'void'.

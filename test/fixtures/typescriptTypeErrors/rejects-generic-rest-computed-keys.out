@@ -1,0 +1,11 @@
+(1,101): error TS2536: Type 'K' cannot be used to index type 'Omit<T, K>'.
+(2,112): error TS2536: Type 'K' cannot be used to index type 'Omit<T, K>'.
+(3,84): error TS2536: Type 'keyof T' cannot be used to index type 'Omit<T, keyof T>'.
+(4,92): error TS2322: Type 'Omit<T, K>' is not assignable to type 'T'.
+  'Omit<T, K>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'object'.
+(5,116): error TS2339: Property 'a' does not exist on type 'Omit<T, K>'.
+(6,114): error TS2339: Property 'a' does not exist on type 'Omit<T, K>'.
+(7,77): error TS7053: Element implicitly has an 'any' type because expression of type '1' can't be used to index type 'Omit<T, 1>'.
+  Property '1' does not exist on type 'Omit<T, 1>'.
+(8,84): error TS2339: Property 'a' does not exist on type '{ c: number; }'.
+(9,61): error TS2536: Type 'K' cannot be used to index type 'Omit<T, K>'.

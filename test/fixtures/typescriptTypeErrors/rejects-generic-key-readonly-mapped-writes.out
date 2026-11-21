@@ -1,0 +1,7 @@
+(1,78): error TS2542: Index signature in type 'Readonly<Record<K, number>>' only permits reading.
+(2,80): error TS2542: Index signature in type '{ readonly [P in K]: number; }' only permits reading.
+(3,67): error TS2542: Index signature in type 'Readonly<T>' only permits reading.
+(4,78): error TS2542: Index signature in type 'Readonly<Record<K, number>>' only permits reading.
+(5,77): error TS2542: Index signature in type 'Readonly<Record<K, number>>' only permits reading.
+(6,81): error TS2542: Index signature in type 'Readonly<Record<K, number>>' only permits reading.
+(8,65): error TS2542: Index signature in type 'Frozen<T>' only permits reading.

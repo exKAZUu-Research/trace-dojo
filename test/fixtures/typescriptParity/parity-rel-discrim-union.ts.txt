@@ -1,0 +1,6 @@
+type Result = { ok: true; value: number } | { ok: false; value: number };
+function make(flag: boolean, n: number): Result {
+  const r = { ok: flag, value: n };
+  return r;
+}
+console.log(make(true, 1).ok);

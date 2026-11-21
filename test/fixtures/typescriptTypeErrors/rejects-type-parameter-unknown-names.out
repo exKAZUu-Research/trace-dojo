@@ -1,0 +1,8 @@
+(1,23): error TS2304: Cannot find name 'Missing1'.
+(2,19): error TS2304: Cannot find name 'Missing2'.
+(3,18): error TS2304: Cannot find name 'Missing3'.
+(4,20): error TS2304: Cannot find name 'Missing4'.
+(5,22): error TS2304: Cannot find name 'Missing5'.
+(6,22): error TS2304: Cannot find name 'Missing6'.
+(7,18): error TS2304: Cannot find name 'Missing7'.
+(8,24): error TS2304: Cannot find name 'Missing8'.

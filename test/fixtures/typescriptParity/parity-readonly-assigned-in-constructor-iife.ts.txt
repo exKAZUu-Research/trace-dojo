@@ -1,0 +1,10 @@
+class Counter {
+  readonly count: number;
+  constructor(start: number) {
+    (() => {
+      this.count = start;
+    })();
+    this.count += 1;
+  }
+}
+console.log(new Counter(4).count);

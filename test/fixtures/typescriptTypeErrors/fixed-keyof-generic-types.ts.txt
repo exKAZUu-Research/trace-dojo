@@ -1,0 +1,6 @@
+interface Box<T> { value: T }
+function absent<T>(array: readonly T[], box: Box<T>) {
+  const mutating: keyof readonly T[] = 'push';
+  const missing: keyof Box<T> = 'missing';
+  const valid: keyof Box<T> = 'value';
+}

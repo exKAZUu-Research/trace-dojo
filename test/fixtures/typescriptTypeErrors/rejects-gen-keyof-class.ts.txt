@@ -1,0 +1,3 @@
+class P { a = 1; private b = 2; m() {} }
+type K = keyof P;
+const k: K = "b";

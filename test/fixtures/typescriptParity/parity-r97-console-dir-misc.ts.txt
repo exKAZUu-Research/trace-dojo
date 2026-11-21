@@ -1,0 +1,10 @@
+console.dir('str');
+console.dir([1, 'a'], { depth: 0 });
+console.dir({ a: { b: { c: 1 } } }, { depth: 0 });
+console.dir({ arr: Array.from({ length: 10 }, (_, i) => i) }, { maxArrayLength: 2 });
+console.dir({ s: 'x'.repeat(30) }, { breakLength: 10 });
+console.dir({ a: 1, b: { c: 2 } }, { compact: false });
+console.dir([1, 2], { showHidden: true });
+console.dir(new Map([[1, { a: [1, 2] }]]), { compact: true });
+console.dir({ s: 'abcdefghijklmnopqrstuvwxyz'.repeat(1), long: 'abc'.repeat(10) }, { maxStringLength: 5 } as any);
+console.dir({ a: [1, 2, 3, 4, 5, 6, 7] }, { colors: false, depth: 5 });

@@ -1,0 +1,39 @@
+type Nested<T> = T extends {
+  a: (cb: (value: infer U) => void) => void;
+  b: (cb: (value: infer U) => void) => void;
+} ? U : never;
+type NestedObject = Nested<{
+  a: (cb: (value: { name: string }) => void) => void;
+  b: (cb: (value: { size: number }) => void) => void;
+}>;
+const value: Nested<{
+  a: (cb: (value: string) => void) => void;
+  b: (cb: (value: number) => void) => void;
+}> = 'ok';
+const named: NestedObject = { name: 'chapter' };
+
+type NestedRest<T> = T extends {
+  a: (cb: (...args: infer P) => void) => void;
+  b: (cb: (...args: infer P) => void) => void;
+} ? P : never;
+const rest: NestedRest<{
+  a: (cb: (value: string) => void) => void;
+  b: (cb: (value: number, count: number) => void) => void;
+}> = [12, 4];
+type NestedThis<T> = T extends {
+  a: (cb: (this: infer U) => void) => void;
+  b: (cb: (this: infer U) => void) => void;
+} ? U : never;
+const receiver: NestedThis<{
+  a: (cb: (this: { a: string }) => void) => void;
+  b: (cb: (this: { b: number }) => void) => void;
+}> = { b: 7 };
+
+type Method<T> = T extends { a(x: infer U): void; b(x: infer U): void } ? U : never;
+const method: Method<{ a(value: string): void; b(value: number): void }> = 'method';
+type MethodCallback<T> = T extends {
+  a(cb: () => infer U): void;
+  b(cb: () => infer U): void;
+} ? U : never;
+const methodCallback: MethodCallback<{ a(cb: () => string): void; b(cb: () => number): void }> = 'method callback';
+console.log(value, named.name, rest, receiver.b, method, methodCallback);

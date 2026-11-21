@@ -1,0 +1,7 @@
+type ReadonlyStringUnion={x:number}|{readonly [key:string]:number};
+function readonlyDot(value:ReadonlyStringUnion) { value.x=2; }
+function readonlyBracket(value:ReadonlyStringUnion) { value["x"]=2; }
+type ReadonlyNumericUnion={0:number}|{readonly [key:number]:number};
+function readonlyNumber(value:ReadonlyNumericUnion) { value[0]=2; }
+function readonlyNumericString(value:ReadonlyNumericUnion) { value["0"]=2; }
+function readonlyDynamic(value:{[key:string]:number}|{readonly [key:string]:number},key:string) { value[key]=2; }

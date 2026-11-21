@@ -1,0 +1,14 @@
+function callMixed(fn:Function|((x:number)=>number)){const result:string=fn(2);return result;}
+function callGenericMixed<T extends Function|((x:number)=>number)>(fn:T){const result:boolean=fn(2);return result;}
+function callIntersectedMixed<T extends Function|((x:number)=>number)>(fn:T&Function){const result:string=fn(2);return result;}
+function callOpaque(fn:Function){const result:string=fn('x',2,true);return result;}
+function callGenericOpaque<T extends Function>(fn:T){const result:string=fn(3,4);return result;}
+function concreteIntersection(fn:Function&((x:number)=>number)){return fn(2).toFixed(1);}
+console.log(callMixed((n:number)=>n+1),callGenericMixed((n:number)=>n*2),callIntersectedMixed((n:number)=>n+3));
+console.log(callOpaque((a:string,b:number,c:boolean)=>`${a}:${b}:${c}`),callGenericOpaque((a:number,b:number)=>a+b),concreteIntersection((n:number)=>n+4));
+interface CallableOverloads {(x:number):number;(x:string):string;}
+function overloadedValue(x:number):number;
+function overloadedValue(x:string):string;
+function overloadedValue(x:number|string):number|string {return typeof x==='number'?x+1:x.toUpperCase();}
+function mixedOverloads(fn:Function|CallableOverloads){const first:boolean=fn(3);const second:number=fn('x');console.log(first,second);}
+mixedOverloads(overloadedValue);

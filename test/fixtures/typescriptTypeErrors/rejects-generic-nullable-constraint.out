@@ -1,0 +1,8 @@
+(2,9): error TS2322: Type 'string' is not assignable to type 'number'.
+(9,11): error TS2322: Type 'string' is not assignable to type 'number'.
+(17,9): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+(22,9): error TS2322: Type '"filled" | NonNullable<(string | undefined)[][K]>' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+(27,9): error TS2322: Type 'string' is not assignable to type 'number'.
+(33,11): error TS2322: Type 'undefined' is not assignable to type 'string'.

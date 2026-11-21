@@ -1,0 +1,10 @@
+const key = "__@computed";
+const token = Symbol("token");
+interface Mixed {
+  [key: `__@${string}`]: number;
+  [key: symbol]: string;
+  "__@written": boolean;
+  [key]: boolean;
+  [token]: boolean;
+}
+const wrong: { [key: `__@${string}`]: number } | { other?: boolean } = { [key]: false };

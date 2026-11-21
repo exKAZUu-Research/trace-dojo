@@ -1,0 +1,8 @@
+run 1 verbose=false depth=1
+run 2 verbose=false depth=3
+origin 0
+named
+2
+only label
+4
+{ x: 1, y: 5, tag: 'moved' }

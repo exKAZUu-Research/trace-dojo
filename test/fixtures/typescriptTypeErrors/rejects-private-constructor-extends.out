@@ -1,0 +1,6 @@
+(2,23): error TS2675: Cannot extend a class 'Singleton'. Class constructor is marked as private.
+(3,26): error TS2675: Cannot extend a class 'Derived'. Class constructor is marked as private.
+(5,25): error TS2675: Cannot extend a class 'Singleton'. Class constructor is marked as private.
+(6,31): error TS2675: Cannot extend a class 'Singleton'. Class constructor is marked as private.
+(8,27): error TS2675: Cannot extend a class 'Generic'. Class constructor is marked as private.
+(9,33): error TS2675: Cannot extend a class 'Singleton'. Class constructor is marked as private.

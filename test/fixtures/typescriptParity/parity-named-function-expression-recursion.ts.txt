@@ -1,0 +1,8 @@
+const fact = function f(n: number): number { return n <= 1 ? 1 : n * f(n - 1); };
+const walk = function w(n: number): void { if (n > 0) w(n - 1); };
+walk(3);
+console.log(fact(5), (function g(n: number): number { return n <= 1 ? 1 : n * g(n - 1); })(4));
+const o = { fib: function f(n: number): number { return n < 2 ? n : f(n - 1) + f(n - 2); } };
+let inner = function i(n: number): number { if (n === 0) return 0; return i(n - 1); };
+const typed: (n: number) => number = function t(n) { return n; };
+console.log(o.fib(10), inner(3), typed(2), (function named() { return named.name; })());

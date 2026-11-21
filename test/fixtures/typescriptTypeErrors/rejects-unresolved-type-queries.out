@@ -1,0 +1,2 @@
+(1,27): error TS2304: Cannot find name 'missingName'.
+(3,41): error TS2339: Property 'missingMember' does not exist on type '{ value: number; }'.

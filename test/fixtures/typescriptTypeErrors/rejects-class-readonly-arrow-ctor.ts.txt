@@ -1,0 +1,8 @@
+class Counter {
+  readonly count: number = 0;
+  constructor() {
+    const reset = () => { this.count = 0; };
+    reset();
+  }
+}
+console.log(new Counter().count);

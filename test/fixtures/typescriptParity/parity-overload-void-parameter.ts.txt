@@ -1,0 +1,15 @@
+function greet(): string;
+function greet(name: string): string;
+function greet(name: string | void): string {
+  return name ? `Hello, ${name}!` : "Hello!";
+}
+console.log(greet());
+console.log(greet("Ada"));
+
+function area(): number;
+function area(width: number, height: number): number;
+function area(width: number | void, height: number | void): number {
+  return (width ?? 1) * (height ?? 1);
+}
+console.log(area());
+console.log(area(3, 4));

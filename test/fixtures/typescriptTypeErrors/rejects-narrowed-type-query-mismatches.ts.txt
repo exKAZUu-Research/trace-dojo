@@ -1,0 +1,46 @@
+let value: string | number = 'a';
+type Alias = typeof value;
+const alias: Alias = 1;
+const variable: typeof value = 1;
+interface Data { property: typeof value }
+const data: Data = {property: 1};
+class DeclaredField { uninitialized!: typeof value; }
+new DeclaredField().uninitialized = 1;
+function local() {
+  let narrow: string | number = 'local';
+  const arrow = (argument: typeof narrow) => argument;
+  const expression = function(argument: typeof narrow) { return argument; };
+  const object = {method(argument: typeof narrow) { return argument; }};
+  const klass = class {method(argument: typeof narrow) { return argument; }};
+  arrow(1);
+  expression(1);
+  object.method(1);
+  new klass().method(1);
+}
+const record: {member: string | number} = {member: 'text'};
+if (typeof record.member === 'string') {
+  type Narrow = typeof record.member;
+  const property: Narrow = 1;
+}
+{
+  let blockValue: string | number = 'module';
+  var scriptVar: string | number = 'module';
+  const blockArrow = (argument: typeof blockValue, vari: typeof scriptVar) => [argument, vari];
+  const blockExpression = function(argument: typeof blockValue = 'module') { return argument; };
+  const blockObject = {nested: {method(argument: typeof blockValue) { return argument; }}};
+  const BlockClass = class {method(argument: typeof blockValue) { return argument; }};
+  const blockResult = (): typeof blockValue => 1;
+  blockArrow(1, 1);
+  blockExpression(1);
+  blockObject.nested.method(1);
+  new BlockClass().method(1);
+  const outer = () => {
+    const inner = (argument: typeof blockValue) => argument;
+    inner(1);
+  };
+}
+const scopedRecord: {member: string | number} = {member: 'text'};
+if (typeof scopedRecord.member === 'string') {
+  const object = { method(argument: typeof scopedRecord.member) { return argument; } };
+  object.method(1);
+}

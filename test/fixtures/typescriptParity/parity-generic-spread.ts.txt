@@ -1,0 +1,35 @@
+function copy<T>(value: T & { a: number }): T & { a: number } {
+  return { ...value };
+}
+function inferCopy<T>(value: T & { a: number }) {
+  return { ...value };
+}
+function make<D, M>(value: { data: D; methods: M & ThisType<D & M> }): D & M {
+  return { ...value.data, ...value.methods };
+}
+function replace<T>(value: T & { a: string }) {
+  return { ...value, a: 12 };
+}
+function copyBare<T>(value: T): T {
+  return { ...value };
+}
+function union<T, U>(value: (T & { side: 'left' }) | (U & { side: 'right' })) {
+  return { ...value, copied: true };
+}
+class Box<T> {
+  constructor(public value: T) {}
+  read() { return this.value; }
+}
+function spreadBox<T>(box: Box<T>) {
+  return { ...box };
+}
+const direct: { a: number; b: string } = copy({ a: 1, b: 'direct' });
+const inferred: { a: number; b: string } = inferCopy({ a: 2, b: 'inferred' });
+const counter = make({ data: { count: 5 }, methods: { add(delta: number) { this.count += delta; } } });
+counter.add(2);
+const replaced: { a: number } = replace({ a: 'old' });
+const bare: { b: string } = copyBare({ b: 'bare' });
+const either = union<{ label: string }, { count: number }>({ side: 'left', label: 'alternate' });
+const label = either.side === 'left' ? either.label : either.count;
+const box = spreadBox(new Box('box'));
+console.log(direct.b, inferred.b, counter.count, replaced.a, bare.b, label, box.value, 'read' in box);
