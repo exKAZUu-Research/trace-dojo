@@ -8250,6 +8250,16 @@ test.each([
   ['a type parameter', 'struct Point<T> { x: i32, y: i32 }', '型引数 T を、どのフィールドの型でも使っていません。'],
   ['an enum type parameter', 'enum Answer<T> { Yes, No }', '型引数 T を、どのフィールドの型でも使っていません。'],
   ['a lifetime', "struct Holder<'a> { x: i32 }", "ライフタイム 'a を、どのフィールドの型でも使っていません。"],
+  [
+    'a type parameter only its recursion passes on',
+    'struct Node<T> { next: Option<Box<Node<T>>> }',
+    '型引数 T を、ほかの型に型引数として渡しているだけで、値を持つフィールドの型では使っていません。',
+  ],
+  [
+    'a lifetime only its recursion passes on',
+    "struct Node<'a> { next: Option<Box<Node<'a>>> }",
+    "ライフタイム 'a を、どのフィールドの型でも使っていません。",
+  ],
 ])('a struct or enum leaving %s unused is rejected', (_name, items, message) => {
   expect(executeProgram('rust', rustMain('', items))).toMatchObject({
     kind: 'compileError',
