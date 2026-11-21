@@ -430,26 +430,36 @@ function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | 
       Array.from({ length: size }, (_, index) => (index < items.length ? items[index] : zero))
     );
   });
-  defineNative(`${prefix}.copyOfRange(Int, Int)`, (frame, array, [from, to]) => {
-    const items = (array as KObject).items as Value[];
-    const start = from as number;
-    const end = to as number;
-    if (end > items.length)
-      frame.runtime.throwError(
-        frame,
-        'java.lang.IndexOutOfBoundsException',
-        `toIndex (${end}) is greater than size (${items.length}).`
-      );
-    if (start > end) frame.runtime.throwError(frame, 'java.lang.IllegalArgumentException', `${start} > ${end}`);
-    const copied = items.slice(start, end);
-    return copyArray(frame, array, copied.length, () => copied);
-  });
+  defineNative(`${prefix}.copyOfRange(Int, Int)`, (frame, array, [from, to]) =>
+    copyArrayRange(frame, kind, array, from as number, to as number)
+  );
   defineNative(`${prefix}.contentEquals(${receiver})`, (frame, array, [other]) => {
     if (other === undefined) return false;
     const a = boxedItems(array, kind);
     const b = boxedItems(other, kind);
     return a.length === b.length && a.every((value, index) => valueEquals(frame, value, b[index]));
   });
+}
+
+function copyArrayRange(
+  frame: Frame,
+  kind: PrimitiveKind | 'Boolean' | undefined,
+  array: Value,
+  start: number,
+  end: number
+): Value {
+  const items = (array as KObject).items as Value[];
+  if (end > items.length)
+    frame.runtime.throwError(
+      frame,
+      'java.lang.IndexOutOfBoundsException',
+      `toIndex (${end}) is greater than size (${items.length}).`
+    );
+  if (start > end) frame.runtime.throwError(frame, 'java.lang.IllegalArgumentException', `${start} > ${end}`);
+  if (start < 0)
+    rejectArrayCopy(frame, `source index ${start} out of bounds for ${arrayStorageName(kind)}[${items.length}]`);
+  const copied = items.slice(start, end);
+  return copyArray(frame, array, copied.length, () => copied);
 }
 
 /** What changes an array in place. */
@@ -500,20 +510,26 @@ function copyArrayInto(frame: Frame, kind: PrimitiveKind | 'Boolean' | undefined
   const start = startIndex as number;
   const offset = destinationOffset as number;
   const length = toInt32((endIndex as number) - start);
-  const name = kind?.replace(/^U/, '').toLowerCase() ?? 'object array';
-  const reject = (message: string): never =>
-    frame.runtime.throwError(frame, 'java.lang.ArrayIndexOutOfBoundsException', `arraycopy: ${message}`);
-  if (start < 0) reject(`source index ${start} out of bounds for ${name}[${from.length}]`);
-  if (offset < 0) reject(`destination index ${offset} out of bounds for ${name}[${to.length}]`);
-  if (length < 0) reject(`length ${length} is negative`);
+  const name = arrayStorageName(kind);
+  if (start < 0) rejectArrayCopy(frame, `source index ${start} out of bounds for ${name}[${from.length}]`);
+  if (offset < 0) rejectArrayCopy(frame, `destination index ${offset} out of bounds for ${name}[${to.length}]`);
+  if (length < 0) rejectArrayCopy(frame, `length ${length} is negative`);
   if (start + length > from.length)
-    reject(`last source index ${start + length} out of bounds for ${name}[${from.length}]`);
+    rejectArrayCopy(frame, `last source index ${start + length} out of bounds for ${name}[${from.length}]`);
   if (offset + length > to.length)
-    reject(`last destination index ${offset + length} out of bounds for ${name}[${to.length}]`);
+    rejectArrayCopy(frame, `last destination index ${offset + length} out of bounds for ${name}[${to.length}]`);
   frame.runtime.spend(Math.ceil(length / 64));
   if (from === to) to.copyWithin(offset, start, start + length);
   else for (let index = 0; index < length; index++) to[offset + index] = from[start + index];
   return destination;
+}
+
+function arrayStorageName(kind: PrimitiveKind | 'Boolean' | undefined): string {
+  return kind?.replace(/^U/, '').toLowerCase() ?? 'object array';
+}
+
+function rejectArrayCopy(frame: Frame, message: string): never {
+  return frame.runtime.throwError(frame, 'java.lang.ArrayIndexOutOfBoundsException', `arraycopy: ${message}`);
 }
 
 defineArrays();

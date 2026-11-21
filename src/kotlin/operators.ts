@@ -54,12 +54,25 @@ export function widen(value: number | bigint, from: PrimitiveKind, to: Primitive
       return Number(value);
     }
     case 'Float': {
-      return Math.fround(Number(value));
+      return toFloat(value);
     }
     default: {
       return Number(value);
     }
   }
+}
+
+export function toFloat(value: number | bigint): number {
+  if (typeof value === 'number' || (value >= -9_007_199_254_740_992n && value <= 9_007_199_254_740_992n))
+    return Math.fround(Number(value));
+  // Converting a large Long through Double can round it to the midpoint between two floats.
+  const magnitude = value < 0n ? -value : value;
+  const shift = BigInt(magnitude.toString(2).length - 24);
+  const significand = magnitude >> shift;
+  const remainder = magnitude - (significand << shift);
+  const midpoint = 1n << (shift - 1n);
+  const rounded = remainder > midpoint || (remainder === midpoint && (significand & 1n) !== 0n);
+  return (value < 0n ? -1 : 1) * Number((significand + BigInt(rounded)) << shift);
 }
 
 function divideByZero(frame: Frame): never {

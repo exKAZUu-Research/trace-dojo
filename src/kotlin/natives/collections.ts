@@ -607,11 +607,7 @@ function defineMaps(): void {
     },
     'put(K, V)': (frame, map, [key, value]) => {
       requireMutableMap(frame, map);
-      const store = storeOf(map);
-      const sizeBefore = store.entries.length;
-      const old = putEntry(frame, store, key, value);
-      if (store.entries.length !== sizeBefore) touch(map as KObject);
-      return old;
+      return putMapEntry(frame, map as KObject, key, value);
     },
     'remove(K)': (frame, map, [key]) => {
       requireMutableMap(frame, map);
@@ -626,8 +622,7 @@ function defineMaps(): void {
       requireMutableMap(frame, map);
       const entries = mapEntriesOf(frame, source);
       reserveForCopy(storeOf(map), entries.length);
-      for (const [key, value] of entries) putEntry(frame, storeOf(map), key, value);
-      touch(map as KObject);
+      for (const [key, value] of entries) putMapEntry(frame, map as KObject, key, value);
       return UNIT;
     },
     'clear()': (frame, map) => {
@@ -645,6 +640,14 @@ function defineMaps(): void {
   for (const view of ['keys', 'values', 'entries'] as const) {
     defineNativeProperty(`${MAP}.${view}`, (frame, map) => newView(frame, map as KObject, view));
   }
+}
+
+function putMapEntry(frame: Frame, map: KObject, key: Value, value: Value): Value {
+  const store = storeOf(map);
+  const sizeBefore = store.entries.length;
+  const previous = putEntry(frame, store, key, value);
+  if (store.entries.length !== sizeBefore) touch(map);
+  return previous;
 }
 
 /** The entries of any map, as key–value pairs in its iteration order. */

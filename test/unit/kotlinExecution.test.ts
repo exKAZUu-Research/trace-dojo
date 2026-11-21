@@ -5,6 +5,51 @@ import { executeProgram } from '../../src/interpreter/program';
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'negative source indices in array copies',
+    source: `fun main() {
+    try {
+        intArrayOf(1, 2, 3).copyOfRange(-1, 2)
+    } catch (error: IndexOutOfBoundsException) {
+        println(error.message)
+    }
+    try {
+        arrayOf("x").copyOfRange(-1, 0)
+    } catch (error: IndexOutOfBoundsException) {
+        println(error.message)
+    }
+}`,
+    stdout:
+      'arraycopy: source index -1 out of bounds for int[3]\narraycopy: source index -1 out of bounds for object array[1]\n',
+  },
+  {
+    name: 'map putAll keeps iterators valid until it inserts a key',
+    source: `fun main() {
+    val map = linkedMapOf("a" to 1, "b" to 2)
+    val iterator = map.entries.iterator()
+    map.putAll(mapOf("a" to 3))
+    map.putAll(emptyMap())
+    println(iterator.next())
+    map.putAll(mapOf("c" to 4))
+    try {
+        println(iterator.next())
+    } catch (error: ConcurrentModificationException) {
+        println("invalidated")
+    }
+}`,
+    stdout: 'a=3\ninvalidated\n',
+  },
+  {
+    name: 'mixed Float comparisons round integer operands to Float',
+    source: `fun main() {
+    val x = 16_777_216f
+    val i = 16_777_217
+    val high = 18014399583223809L
+    val low = 18014398509481984f
+    println(listOf((x < i), (i > x), (x >= i), (i.toLong() <= x), (high > low), (low < high), (high.toFloat() > low)))
+}`,
+    stdout: '[false, false, true, true, true, true, true]\n',
+  },
+  {
     name: 'the iteration order of hash maps and sets',
     source: `fun main() {
     val m = hashMapOf("banana" to 1, "apple" to 2, "cherry" to 3, "date" to 4, "elderberry" to 5)

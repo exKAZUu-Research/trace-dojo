@@ -518,14 +518,18 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       }
       const leftEval = this.convertTo(left, left.type, row);
       const rightEval = this.convertTo(right, right.type, row);
-      const isFloating = ['Double', 'Float'].includes(leftKind) || ['Double', 'Float'].includes(rightKind);
-      if (isFloating) {
+      const kind = arithmeticResult(leftKind, rightKind, '+');
+      if (kind === 'Float' || kind === 'Double') {
         // Comparison operators on floating-point numbers follow IEEE 754, where NaN compares false.
         const compare = COMPARISON_IEEE[operator as '<' | '<=' | '>' | '>='];
         return {
           type: this.booleanType,
           repr: 'ref',
-          eval: (frame) => compare(Number(leftEval(frame)), Number(rightEval(frame))),
+          eval: (frame) =>
+            compare(
+              Number(widen(leftEval(frame) as number | bigint, leftKind, kind)),
+              Number(widen(rightEval(frame) as number | bigint, rightKind, kind))
+            ),
         };
       }
       return {

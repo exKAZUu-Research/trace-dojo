@@ -12,6 +12,7 @@ import {
   type NumericKind,
   SIGNED_NUMBER_KINDS,
   step,
+  toFloat,
   toInt32,
   widen,
 } from '../operators';
@@ -43,7 +44,7 @@ export function convertNumber(value: number | bigint, from: PrimitiveKind, to: P
       return asNumber;
     }
     case 'Float': {
-      return Math.fround(asNumber);
+      return toFloat(value);
     }
     case 'Int': {
       if (typeof value === 'bigint') return Number(BigInt.asIntN(32, value));
