@@ -16,6 +16,7 @@ import {
   needsCopy,
   testPartialOrder,
   valuesEqual,
+  valuesUnequal,
   withCloneResults,
   wrap,
 } from '../ops';
@@ -1807,7 +1808,8 @@ function addLastOfEqualKeys<T extends Value>(
   ctx.runtime.withRoots(items, () => {
     for (let index = 0; index < items.length; index++) {
       const item = items[index];
-      if (index + 1 === items.length || !valuesEqual(keyType, keyOf(item), keyOf(items[index + 1]))) add(item);
+      // std's dedup of sorted keys asks whether they differ, which may run a user `ne`.
+      if (index + 1 === items.length || valuesUnequal(keyType, keyOf(item), keyOf(items[index + 1]))) add(item);
     }
   });
 }
