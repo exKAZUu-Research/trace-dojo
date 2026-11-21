@@ -80,7 +80,8 @@ export class DartRecord extends DartObject {
     cls: ClassInfo,
     readonly positional: Value[],
     /** Sorted by name, as the record's shape is. */
-    readonly named: [string, Value][]
+    readonly named: [string, Value][],
+    readonly shape: bigint
   ) {
     super(cls, [], []);
   }
@@ -98,6 +99,8 @@ export function recordPositionalIndex(name: string): number | undefined {
 }
 
 export class DartClosure extends DartObject {
+  dynamicTypeArgumentDefaults?: readonly DartType[];
+
   // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
   constructor(
     cls: ClassInfo,

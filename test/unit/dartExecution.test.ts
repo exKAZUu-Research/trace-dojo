@@ -238,6 +238,43 @@ void main() {
   });
 });
 
+test('record hashes combine the Dart VM shape and each field hash', () => {
+  const program = `class Zero { int get hashCode => 0; }
+(int, {int declared})? unusedType;
+void unusedFunction() { print((cold: Zero())); }
+void main() {
+  final zero = Zero();
+  print([(zero,).hashCode, (zero, zero).hashCode]);
+  Object unmatched = 0;
+  if (unmatched case (pattern: _)) print('matched');
+  print([(a: zero).hashCode, (b: zero).hashCode, (zero, a: zero).hashCode]);
+  print([(a: zero, b: zero).hashCode, (b: zero, a: zero).hashCode]);
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '[307143837, 30638438]\n[113439216, 242120719, 325956720]\n[369347531, 369347531]\n',
+  });
+});
+
+test('repeatedly hashing a long string key completes within the execution budget', () => {
+  const program = `void main() {
+    final key = 'x' * 900000;
+    final keys = {key};
+    final hash = key.hashCode;
+    for (var i = 0; i < 2000; i++) {
+      if (key.hashCode != hash || !keys.contains(key)) throw StateError('key changed');
+    }
+    print('done');
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: 'done\n',
+  });
+});
+
 test('String.fromCharCodes stops at the end of the requested slice', () => {
   const program = `import 'dart:collection';
 Iterable<int> streamed() sync* { print('start'); yield 65; }
@@ -1111,6 +1148,66 @@ test("regular expressions match as the VM's Irregexp does", () => {
   });
 });
 
+test('regular expression captures use the storage budget only when materialized', () => {
+  const limit = { kind: 'limitExceeded', limit: 'storage' };
+  expect(
+    executeProgram(
+      'dart',
+      `void main() {
+        final regex = RegExp('(a)' * 2048);
+        final input = 'a' * 2048;
+        final matches = <RegExpMatch>[];
+        for (var i = 0; i < 600; i++) matches.add(regex.firstMatch(input)!);
+        print(matches.length);
+      }`
+    )
+  ).toEqual(limit);
+  expect(
+    executeProgram(
+      'dart',
+      `void main() {
+        final regex = RegExp('(a)' * 1024);
+        final matches = regex.allMatches('a' * (1024 * 520)).toList();
+        print(matches.length);
+      }`
+    )
+  ).toEqual(limit);
+  expect(
+    executeProgram(
+      'dart',
+      `void main() {
+        final regex = RegExp('(a)' * 2048);
+        final input = 'a' * 2048;
+        for (var i = 0; i < 600; i++) {
+          if (!regex.hasMatch(input)) throw StateError('missing match');
+        }
+        print('done');
+      }`
+    )
+  ).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout: 'done\n' });
+});
+
+test('regular expression choices and undo entries share a bounded working buffer', () => {
+  for (const pattern of ['(a)*', '(?=(a)*)(?:(a)(a))*']) {
+    expect(executeProgram('dart', regexScratchSource(pattern, 200_000))).toEqual({
+      kind: 'limitExceeded',
+      limit: 'storage',
+    });
+    expect(executeProgram('dart', regexScratchSource(pattern, 10_000))).toMatchObject({
+      kind: 'executed',
+      stdout: 'true\n',
+    });
+  }
+  expect(executeProgram('dart', regexScratchSource('(a)(?=b)|a', 200_000))).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\n',
+  });
+});
+
+function regexScratchSource(pattern: string, size: number): string {
+  return `void main() { print(RegExp('${pattern}').hasMatch('a' * ${size})); }`;
+}
+
 // Neither a host RegExp nor a host BigInt operation can be interrupted, so they must stop at the limits before they
 // hold the server's process.
 test.each([
@@ -1566,6 +1663,84 @@ void main() {
     uncaughtException: undefined,
     stdout:
       '_TypeError\n_TypeError\n_TypeError\nConcurrentModificationError\n[1, 2, 1]\n_TypeError\n{2: 3}\n{1: 2}\n_TypeError\n{1: 2, 2: 4}\n',
+  });
+});
+
+test('list append exposes the reserved slot to iterator getters and keeps partial writes', () => {
+  const program = `import 'dart:collection';
+late List<int?> target;
+class Source extends Iterable<int?> {
+  final String mode;
+  Source(this.mode);
+  Iterator<int?> get iterator => Cursor(mode);
+}
+class Cursor implements Iterator<int?> {
+  final String mode;
+  Cursor(this.mode);
+  int step = 0;
+  bool moveNext() {
+    if (step++ == 0) return true;
+    print(target.length);
+    if (mode == 'next') target.add(2);
+    return mode == 'next';
+  }
+  int? get current {
+    print(target.length);
+    if (mode == 'throw') throw StateError('current');
+    if (mode == 'remove') target.clear();
+    if (mode == 'last') target.add(3);
+    return 1;
+  }
+}
+class View extends ListBase<int?> {
+  int get length { print('length'); return 1; }
+  set length(int n) {}
+  int? operator [](int i) { print(target.length); return i + 2; }
+  void operator []=(int i, int? value) {}
+}
+void main() {
+  for (final mode in ['plain', 'throw', 'remove', 'last', 'next']) {
+    target = [0];
+    try { target.addAll(Source(mode)); } catch (e) { print(e.runtimeType); }
+    print(target);
+  }
+  target = [0];
+  target.addAll(View());
+  target.addAll(List<int?>.unmodifiable([7, 8]));
+  try { target.addAll(target); } catch (e) { print(e.runtimeType); }
+  print(target);
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: [
+      '2\n2\n[0, 1]',
+      '2\nStateError\n[0, null]',
+      '2\nRangeError\n[]',
+      '2\n3\n[0, 1, 3]',
+      '2\n2\nConcurrentModificationError\n[0, 1, 2]',
+      'length\nlength\nlength\n1\nlength\nConcurrentModificationError\n[0, 2, 7, 8]',
+      '',
+    ].join('\n'),
+  });
+});
+
+test('modifiable lists cast fillRange values before checking the range', () => {
+  const program = `void main() {
+  for (final values in <List<int>>[<int>[1], List<int>.filled(1, 1), const <int>[1]]) {
+    try { values.fillRange(-1, 2); } catch (e) { print(e.runtimeType); }
+    try { values.fillRange(-1, 2, 5); } catch (e) { print(e.runtimeType); }
+  }
+  final nullable = <int?>[1];
+  nullable.fillRange(0, 1);
+  print(nullable);
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '_TypeError\nRangeError\n_TypeError\nRangeError\nUnsupportedError\nUnsupportedError\n[null]\n',
   });
 });
 
@@ -3622,6 +3797,35 @@ test('explicit generic tear-offs validate and reify their written arguments', ()
     }`;
     expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
   }
+});
+
+test('dynamic extension-type tear-offs check declaration defaults against specialized bounds', () => {
+  const program = `extension type Box<T>(T value) {
+    R f<R extends T>(R x) { print('body'); return x; }
+  }
+  extension type Pair<T>((T, T) value) {
+    R f<R extends T>(R x) { print('body'); return x; }
+  }
+  extension type Reader<T>(T Function() read) {
+    R f<R extends T>(R x) { print('body'); return x; }
+  }
+  extension type Bounded<T extends num>(T value) {
+    R f<R extends List<T>>(R x) => x;
+  }
+  void main() {
+    for (dynamic f in [Box<num>(1).f, Pair<num>((1, 2)).f, Reader<num>(() => 1).f]) {
+      try { print(f(2)); } catch (e) { print(e.runtimeType); }
+      print(f<int>(3));
+    }
+    dynamic generic = Bounded<int>(1).f;
+    try { print(generic(<int>[2])); } catch (e) { print(e); }
+    print(generic<List<int>>(<int>[2]));
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '_TypeError\nbody\n3\n'.repeat(3) + "type 'List<num>' is not a subtype of type 'List<int>' of 'R'\n[2]\n",
+  });
 });
 
 test('extension-type method tear-offs keep the static signature on erased receivers', () => {

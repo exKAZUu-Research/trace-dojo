@@ -151,7 +151,8 @@ export function* iteratorValues(
   runtime: Runtime,
   iterable: Value,
   from: bigint,
-  to: bigint | undefined
+  to: bigint | undefined,
+  beforeCurrent?: () => void
 ): IterableIterator<Value> {
   const frame = runtime.frames.at(-1);
   const mark = frame?.temporaries.length ?? 0;
@@ -163,6 +164,7 @@ export function* iteratorValues(
       if (runtime.invoke(iterator, 'moveNext', NO_ARGUMENTS, [], undefined) !== true) return;
       runtime.spend();
       if (position < from) continue;
+      beforeCurrent?.();
       const value = runtime.getProperty(iterator, 'current', undefined);
       frame?.temporaries.push(value);
       yield value;

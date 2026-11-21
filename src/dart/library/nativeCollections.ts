@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 972 -- The native lists, sets, maps, and their iterators share collection helpers.
+// code-gauge-allow-file fileNcss 985 -- The native lists, sets, maps, and their iterators share collection helpers.
 import type { TopLevelFunction } from '../environment';
 import { stringOf } from '../format';
 import { type HashPolicy, HashStore } from '../hashStore';
@@ -213,10 +213,8 @@ define('List.length=', (runtime, receiver, [length]) => {
     const elementType = elementTypeOf(target);
     castTo(runtime, undefined, elementType);
     runtime.allocate(index(count) - elements.length);
-    while (elements.length < count) elements.push(undefined);
-  } else {
-    elements.length = index(count);
   }
+  resizeListSlots(elements, index(count));
   return;
 });
 function first(runtime: Runtime, target: DartList): Value {
@@ -383,18 +381,55 @@ define('List.addAll', (runtime, receiver, [iterable]) => {
   const elementType = elementTypeOf(target);
   checkElement(runtime, iterable, interfaceType(coreTypes.iterable, [elementType]), 'iterable');
   checkGrowable(runtime, target, 'add');
-  if (iterable === target && target.elements.length > 0)
-    runtime.throwError('ConcurrentModificationError', '', [target]);
-  let length = target.elements.length;
-  forEachValue(runtime, iterable, (value) => {
-    if (target.elements.length !== length) runtime.throwError('ConcurrentModificationError', '', [target]);
-    checkElement(runtime, value, elementType, 'value');
-    runtime.allocate(1);
-    target.elements.push(value);
-    length++;
-  });
+  if (iterable instanceof DartList) appendList(runtime, target, iterable);
+  else appendIterable(runtime, target, iterable, elementType);
   return;
 });
+
+function appendList(runtime: Runtime, target: DartList, source: DartList): void {
+  const count = source.elements.length;
+  if (count === 0) return;
+  if (target === source) runtime.throwError('ConcurrentModificationError', '', [target]);
+  const start = target.elements.length;
+  runtime.allocate(count);
+  resizeListSlots(target.elements, start + count);
+  for (let index = 0; index < count; index++) {
+    runtime.spend();
+    target.elements[start + index] = source.elements[index];
+  }
+}
+
+function appendIterable(runtime: Runtime, target: DartList, iterable: Value, elementType: DartType): void {
+  const elements = target.elements;
+  let length = elements.length;
+  const efficient = interfaceType(runtime.links.classNamed('EfficientLengthIterable'), [DYNAMIC]);
+  const hint = runtime.links.isValueOf(runtime, iterable, efficient) ? listLength(runtime, iterable) : undefined;
+  if (hint === 0n) return;
+  let reserved = length + Math.max(0, Number(hint ?? 0n));
+  runtime.allocate(reserved - length);
+  let advanced = false;
+  const growBeforeCurrent = (): void => {
+    if (advanced && elements.length !== length) runtime.throwError('ConcurrentModificationError', '', [target]);
+    length++;
+    if (length > reserved) {
+      runtime.allocate(length - reserved);
+      reserved = length;
+    }
+    resizeListSlots(elements, length);
+    advanced = true;
+  };
+  for (const value of iteratorValues(runtime, iterable, 0n, undefined, growBeforeCurrent)) {
+    implicitCast(runtime, value, elementType);
+    elements[checkListIndex(runtime, target, BigInt(length - 1), 'index')] = value;
+  }
+}
+
+function resizeListSlots(elements: Value[], length: number): void {
+  const previousLength = elements.length;
+  elements.length = length;
+  elements.fill(undefined, previousLength);
+}
+
 define('List.insert', (runtime, receiver, [at, value]) => {
   const target = list(receiver);
   checkElement(runtime, value, elementTypeOf(target), 'element');
@@ -427,8 +462,7 @@ define('List.insertAll', (runtime, receiver, [at, iterable]) => {
     runtime.allocate(size);
     const start = index(position);
     const oldLength = target.elements.length;
-    target.elements.length += size;
-    target.elements.fill(undefined, oldLength);
+    resizeListSlots(target.elements, oldLength + size);
     target.elements.copyWithin(start + size, start, oldLength);
     return runtime.invoke(target, 'setAll', args, [], undefined);
   });
@@ -629,8 +663,8 @@ define('List.fillRange', (runtime, receiver, [start, end, fill]) => {
   const elementType = elementTypeOf(target);
   checkElement(runtime, fill, makeNullable(elementType), 'fill');
   checkModifiable(runtime, target);
-  const [from, to] = checkRange(runtime, start, end, target.elements.length);
   castTo(runtime, fill, elementType);
+  const [from, to] = checkRange(runtime, start, end, target.elements.length);
   for (let position = from; position < to; position++) target.elements[position] = fill;
   return;
 });

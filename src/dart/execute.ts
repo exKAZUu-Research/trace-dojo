@@ -36,6 +36,7 @@ export function runProgram(
   program: CompiledProgram,
   onMainExit?: (frame: Frame) => void
 ): ProgramRun {
+  runtime.recordShapes.registerDeclarations(program.recordFieldNames);
   runtime.globals = initialGlobals(program.globals);
   let finalTurtles: ProgramRun['finalTurtles'] = [];
   const recordEnd = (): void => {

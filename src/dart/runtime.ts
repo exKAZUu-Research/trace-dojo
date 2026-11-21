@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 537 -- Keep runtime dispatch alongside reified types, call frames, and roots.
+// code-gauge-allow-file fileNcss 541 -- Keep runtime dispatch alongside reified types, call frames, and roots.
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -14,6 +14,7 @@ import {
   sourceMemberName,
 } from './classes';
 import { BoundedStringParts } from './library/boundedStringParts';
+import { RecordShapes } from './recordShapes';
 import {
   asInstanceOf,
   boundOf,
@@ -58,6 +59,7 @@ export interface FunctionInfo {
   captures: LocalInfo[];
   /** Whether `this` is an object of the program whose fields the trace shows as `this.x`. */
   showsThis: boolean;
+  recordFieldNames?: Set<string>;
 }
 
 export interface LocalInfo {
@@ -170,6 +172,7 @@ export class Runtime implements TracedRuntime<Frame> {
   private readonly checkedMethods = new WeakMap<ClassInfo, Map<MethodMember, MethodMember>>();
   private readonly covariantFields = new WeakMap<FieldMember, boolean>();
   private readonly errorTraces = new WeakMap<DartObject, Value>();
+  readonly recordShapes = new RecordShapes(this);
   /** The value of each constant expression evaluated so far, by the code that builds it. */
   readonly constantSites = new Map<unknown, Value>();
   allocatedSlots = 0;
@@ -212,6 +215,7 @@ export class Runtime implements TracedRuntime<Frame> {
         this.overflowing = false;
       }
     }
+    this.recordShapes.registerFunction(frame.info);
     this.frames.push(frame);
   }
 
@@ -602,17 +606,23 @@ export class Runtime implements TracedRuntime<Frame> {
     if (target instanceof DartClosure) {
       if (args.isDynamic && !argumentsFit(target.type, args, typeArgs))
         this.throwClosureMismatch(target, args, typeArgs);
-      const supplied = args.isDynamic ? this.dynamicTypeArguments(target.type, typeArgs) : typeArgs;
+      const supplied = args.isDynamic
+        ? this.dynamicTypeArguments(target.type, typeArgs, target.dynamicTypeArgumentDefaults)
+        : typeArgs;
       return target.call(this, target.receiver, args, supplied, callRow);
     }
     if (target === undefined) return this.noSuchMethod(target, 'call', 'method', args);
     return this.invoke(target, 'call', args, typeArgs, callRow);
   }
 
-  private dynamicTypeArguments(type: FunctionType, written: readonly DartType[]): readonly DartType[] {
+  private dynamicTypeArguments(
+    type: FunctionType,
+    written: readonly DartType[],
+    defaults?: readonly DartType[]
+  ): readonly DartType[] {
     const params = type.typeParams;
     if (params.length === 0) return written;
-    const args = written.length > 0 ? written : instantiateToBounds(params);
+    const args = written.length > 0 ? written : (defaults ?? instantiateToBounds(params));
     const env = new Map(params.map((param, index) => [param, args[index]]));
     for (const [index, param] of params.entries()) {
       const bound = substitute(boundOf(param), env);

@@ -77,6 +77,7 @@ export interface CompiledLibraries {
 export interface CompiledProgram {
   main: TopLevelFunction;
   globals: GlobalVariable[];
+  recordFieldNames: ReadonlySet<string>;
   /** The globals the program itself declares, which traces show. */
   programGlobals: GlobalVariable[];
   mainTakesArguments: boolean;

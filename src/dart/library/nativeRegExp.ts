@@ -16,14 +16,16 @@ import {
   newList,
   stringArg,
 } from './nativeSupport';
-import { type CompiledRegExp, compileRegExp, execRegExp, isSurrogatePairAt } from './regExpEngine';
+import {
+  type CompiledRegExp,
+  compileRegExp,
+  execRegExp,
+  isSurrogatePairAt,
+  type RegExpMatchResult,
+} from './regExpEngine';
 
 /** A match of a pattern: where it is and the texts of its groups. */
-export interface MatchState {
-  start: number;
-  end: number;
-  groups: (string | undefined)[];
-  names: Record<string, string | undefined> | undefined;
+export interface MatchState extends RegExpMatchResult {
   input: string;
   pattern: Value;
 }
@@ -100,21 +102,20 @@ function execAt(
   state: RegExpState,
   input: string,
   start: number,
-  sticky: boolean
+  sticky: boolean,
+  capture = false
 ): MatchState | undefined {
   let steps = 0;
-  const found = execRegExp(state.compiled, input, start, sticky, () => {
+  const charge = (): void => {
     if (++steps % STEPS_PER_OPERATION === 0) runtime.spend();
+  };
+  const reserve = (slots: number): void => runtime.allocate(slots);
+  const found = execRegExp(state.compiled, input, start, sticky, {
+    charge,
+    scratchSlots: LIMITS.maxSlots - runtime.allocatedSlots,
+    reserveCaptures: capture ? reserve : undefined,
   });
-  if (!found) return undefined;
-  let names: Record<string, string | undefined> | undefined;
-  if (state.compiled.names.size > 0) {
-    names = Object.create(null) as Record<string, string | undefined>;
-    for (const [name, numbers] of state.compiled.names) {
-      names[name] = numbers.map((number) => found.groups[number]).find((text) => text !== undefined);
-    }
-  }
-  return { start: found.start, end: found.end, groups: found.groups, names, input, pattern: undefined };
+  return found ? { ...found, input, pattern: undefined } : undefined;
 }
 
 /** Matcher steps that cost one operation, a rate at which ordinary patterns stay well within the budget. */
@@ -130,7 +131,7 @@ export function* allMatchesOf(
   const state = stateOf(pattern);
   let position = start;
   while (position <= input.length) {
-    const match = execAt(runtime, state, input, position, false);
+    const match = execAt(runtime, state, input, position, false, true);
     if (!match) break;
     match.pattern = pattern;
     runtime.spend();
@@ -171,9 +172,19 @@ export function hasPrefixMatch(runtime: Runtime, pattern: Value, input: string, 
 }
 
 export function newMatch(runtime: Runtime, state: MatchState): DartObject {
+  runtime.allocate(1);
   const object = new DartObject(runtime.links.classNamed('_RegExpMatch'), [], []);
-  object.native = { ...state, values: () => [] } as unknown as DartObject['native'];
+  object.native = { ...state, values: () => [state.pattern] } as unknown as DartObject['native'];
   return object;
+}
+
+export function matchText(runtime: Runtime, state: MatchState, group = 0): string | undefined {
+  const capture = 2 * (group - 1);
+  const start = group === 0 ? state.start : state.captures?.[capture];
+  const end = group === 0 ? state.end : state.captures?.[capture + 1];
+  if (start === undefined || end === undefined || start < 0 || end < 0) return undefined;
+  runtime.spend(Math.ceil((end - start) / 1024));
+  return state.input.slice(start, end);
 }
 
 function matchState(value: Value): MatchState {
@@ -186,7 +197,7 @@ define('RegExp.escape', (runtime, _receiver, [text]) => {
   return result.text();
 });
 define('RegExp.firstMatch', (runtime, receiver, [input]) => {
-  const match = execAt(runtime, stateOf(receiver), stringArg(runtime, input, 'input'), 0, false);
+  const match = execAt(runtime, stateOf(receiver), stringArg(runtime, input, 'input'), 0, false, true);
   if (!match) return;
   match.pattern = receiver;
   return newMatch(runtime, match);
@@ -240,7 +251,7 @@ define('RegExp.matchAsPrefix', (runtime, receiver, [input, start = 0n]) => {
   const at = intArg(runtime, start, 'start');
   if (at < 0n || at > BigInt(text.length))
     runtime.throwError('RangeError', 'range', [at, 0n, BigInt(text.length), 'start']);
-  const match = execAt(runtime, stateOf(receiver), text, index(at), true);
+  const match = execAt(runtime, stateOf(receiver), text, index(at), true, true);
   if (!match) return;
   match.pattern = receiver;
   return newMatch(runtime, match);
@@ -250,11 +261,10 @@ define(
   (runtime, receiver, [input]) =>
     execAt(runtime, stateOf(receiver), stringArg(runtime, input, 'input'), 0, false) !== undefined
 );
-define(
-  'RegExp.stringMatch',
-  (runtime, receiver, [input]) =>
-    execAt(runtime, stateOf(receiver), stringArg(runtime, input, 'input'), 0, false)?.groups[0]
-);
+define('RegExp.stringMatch', (runtime, receiver, [input]) => {
+  const match = execAt(runtime, stateOf(receiver), stringArg(runtime, input, 'input'), 0, false);
+  return match ? matchText(runtime, match) : undefined;
+});
 define('RegExp.pattern', (_runtime, receiver) => stateOf(receiver).source);
 define('RegExp.isMultiLine', (_runtime, receiver) => stateOf(receiver).multiLine);
 define('RegExp.isCaseSensitive', (_runtime, receiver) => stateOf(receiver).caseSensitive);
@@ -341,8 +351,9 @@ define(
 function group(runtime: Runtime, receiver: Value, which: Value): Value {
   const state = matchState(receiver);
   const at = intArg(runtime, which, 'group');
-  if (at < 0n || at >= BigInt(state.groups.length)) runtime.throwError('RangeError', 'value', [at]);
-  return state.groups[index(at)];
+  if (at < 0n || at > BigInt(stateOf(state.pattern).compiled.groupCount))
+    runtime.throwError('RangeError', 'value', [at]);
+  return matchText(runtime, state, index(at));
 }
 
 define('RegExpMatch.start', (_runtime, receiver) => BigInt(matchState(receiver).start));
@@ -368,16 +379,28 @@ define('RegExpMatch.groups', (runtime, receiver, [indices]) => {
     frame?.temporaries.pop();
   }
 });
-define('RegExpMatch.groupCount', (_runtime, receiver) => BigInt(matchState(receiver).groups.length - 1));
+define('RegExpMatch.groupCount', (_runtime, receiver) =>
+  BigInt(stateOf(matchState(receiver).pattern).compiled.groupCount)
+);
 define('RegExpMatch.input', (_runtime, receiver) => matchState(receiver).input);
 define('RegExpMatch.pattern', (_runtime, receiver) => matchState(receiver).pattern);
 define('RegExpMatch.namedGroup', (runtime, receiver, [name]) => {
   const state = matchState(receiver);
   const key = stringArg(runtime, name, 'name');
-  const { names } = state;
-  if (!names || !(key in names)) return runtime.throwError('ArgumentError', '', [`Not a capture group name: ${key}`]);
-  return names[key];
+  const numbers = stateOf(state.pattern).compiled.names.get(key);
+  if (!numbers) return runtime.throwError('ArgumentError', '', [`Not a capture group name: ${key}`]);
+  for (const number of numbers) {
+    runtime.spend();
+    const value = matchText(runtime, state, number);
+    if (value !== undefined) return value;
+  }
+  return;
 });
 define('RegExpMatch.groupNames', (runtime, receiver) =>
-  newList(runtime, interfaceType(coreTypes.string), Object.keys(matchState(receiver).names ?? {}), false)
+  newList(
+    runtime,
+    interfaceType(coreTypes.string),
+    [...stateOf(matchState(receiver).pattern).compiled.names.keys()],
+    false
+  )
 );

@@ -19,6 +19,7 @@ import {
   isSubtype,
   NEVER,
   nonNullable,
+  type RecordType,
   resolveBound,
   sameType,
   upperBound,
@@ -738,6 +739,7 @@ export abstract class PatternCompiler extends CallCompiler {
         variables
       ),
     }));
+    this.registerRecordFieldNames(shape.named);
     const sortedNames = [...names].toSorted();
     return this.typeTest(
       shape,
@@ -850,7 +852,7 @@ export abstract class PatternCompiler extends CallCompiler {
   }
 }
 
-function recordShape(fields: readonly RecordPatternField[]): DartType {
+function recordShape(fields: readonly RecordPatternField[]): RecordType {
   const positional = fields.filter((field) => field.name === undefined).map(() => DYNAMIC);
   const named = fields.flatMap((field) => (field.name === undefined ? [] : [{ name: field.name, type: DYNAMIC }]));
   named.sort((a, b) => (a.name < b.name ? -1 : 1));

@@ -35,17 +35,24 @@ define('Object._hashValues', (runtime, _receiver, [values]) => {
   return BigInt(hash & 0x3f_ff_ff_ff);
 });
 define('_systemHash', (runtime, _receiver, values) => {
-  const mask = 0x1f_ff_ff_ffn;
   let hash = 0n;
-  for (const value of values) {
-    hash = (hash + intArg(runtime, value, 'value')) & mask;
-    hash = (hash + ((hash & 0x7_ff_ffn) << 10n)) & mask;
-    hash ^= hash >> 6n;
-  }
-  hash = (hash + ((hash & 0x3_ff_ff_ffn) << 3n)) & mask;
-  hash ^= hash >> 11n;
-  return (hash + ((hash & 0x3f_ffn) << 15n)) & mask;
+  for (const value of values) hash = combineSystemHash(hash, intArg(runtime, value, 'value'));
+  return finishSystemHash(hash);
 });
+
+const SYSTEM_HASH_MASK = 0x1f_ff_ff_ffn;
+
+function combineSystemHash(hash: bigint, value: bigint): bigint {
+  hash = (hash + value) & SYSTEM_HASH_MASK;
+  hash = (hash + ((hash & 0x7_ff_ffn) << 10n)) & SYSTEM_HASH_MASK;
+  return hash ^ (hash >> 6n);
+}
+
+function finishSystemHash(hash: bigint): bigint {
+  hash = (hash + ((hash & 0x3_ff_ff_ffn) << 3n)) & SYSTEM_HASH_MASK;
+  hash ^= hash >> 11n;
+  return (hash + ((hash & 0x3f_ffn) << 15n)) & SYSTEM_HASH_MASK;
+}
 
 export function objectToString(runtime: Runtime, receiver: Value): string {
   if (receiver instanceof DartClosure) return closureToString(receiver);
@@ -185,12 +192,12 @@ define('Record.==', (runtime, receiver, [other]) => {
 });
 define('Record.hashCode', (runtime, receiver) => {
   const record = receiver as DartRecord;
-  let hash = record.positional.length * 7 + record.named.length;
-  for (const value of [...record.positional, ...record.named.map(([, field]) => field)]) {
-    const code = Number(BigInt.asIntN(32, runtime.getProperty(value, 'hashCode', undefined) as bigint));
-    hash = Math.trunc(Math.imul(hash, 31) + code) % 0x1_00_00_00_00;
-  }
-  return BigInt(hash & 0x3f_ff_ff_ff);
+  let hash = record.shape;
+  for (const value of record.positional)
+    hash = combineSystemHash(hash, runtime.getProperty(value, 'hashCode', undefined) as bigint);
+  for (const [, value] of record.named)
+    hash = combineSystemHash(hash, runtime.getProperty(value, 'hashCode', undefined) as bigint);
+  return finishSystemHash(hash);
 });
 define('Record.toString', (runtime, receiver) => recordToString(runtime, receiver as DartRecord));
 

@@ -234,6 +234,7 @@ export function compileProgram(syntax: Library, options: { atomicRows?: Readonly
   return {
     main,
     globals,
+    recordFieldNames: compiler.recordFieldNames,
     programGlobals: globals.slice(libraryGlobals.length),
     mainTakesArguments: main.type.positional.length > 0,
   };
@@ -243,6 +244,7 @@ function validateConstants(compiler: Compiler, globals: GlobalVariable[]): void 
   if (compiler.constantChecks.length === 0) return;
   const runtime = new Runtime();
   runtime.links = LINKS;
+  runtime.recordShapes.registerDeclarations(compiler.recordFieldNames);
   runtime.globals = initialGlobals(globals);
   runtime.checkingConstants = true;
   const info: FunctionInfo = {

@@ -888,7 +888,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(expression, 'const のレコードのフィールドは、定数でなければなりません。');
     }
     const isConst = expression.isConst || (allConstant && this.inConstContext);
-    const build = recordLiteralBuilder(fields, type.named);
+    const namesKey = this.registerRecordFieldNames(type.named);
+    const build = recordLiteralBuilder(fields, type.named, namesKey);
     return {
       type,
       run: isConst ? this.canonicalized(build) : build,
@@ -1304,8 +1305,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** Reads a member found statically: a field or getter through dynamic dispatch, a method as a tear-off. */
-  // code-gauge-allow functionCognitiveComplexity 27 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 33 -- Member reads distinguish extensions, record fields and ordinary members.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Ordinary reads keep record getters and null-shorting dispatch.
   protected readMember(
     receiver: Compiled,
     resolved: ResolvedMember,
@@ -1317,40 +1317,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const { member } = resolved;
     const type = resolved.type;
     // Inside a null-shorting chain the value is not null; the end of the chain (compileExpression) makes it nullable.
-    if (resolved.extension) {
-      const resolveTypes = this.runtimeTypes(resolved.extension.typeArgs);
-      const signature = this.runtimeType(type);
-      return {
-        type,
-        run: (frame) => {
-          const value = receiverRun(frame);
-          if (value === SHORTED || (nullAware && value === undefined)) return SHORTED;
-          const typeArgs = resolveTypes(frame);
-          if (member.kind === 'method') {
-            const impl = member.impl as NonNullable<typeof member.impl>;
-            const reified = signature(frame) as FunctionType;
-            return frame.runtime.tearOff(
-              value,
-              {
-                ...member,
-                type: reified,
-                impl: (runtime, _receiver, args, methodTypeArgs, callRow) =>
-                  impl(runtime, value, args, [...typeArgs, ...methodTypeArgs], callRow),
-              },
-              reified
-            );
-          }
-          return (member.impl as unknown as Callable)(
-            frame.runtime,
-            value,
-            { positional: [], named: undefined },
-            typeArgs,
-            span?.row
-          );
-        },
-        isConst: false,
-      };
-    }
+    if (resolved.extension)
+      return this.readExtensionMember(receiverRun, resolved, resolved.extension.typeArgs, span, nullAware);
     if (member.owner === coreTypes.record && member.kind === 'getter') {
       const impl = member.impl as NonNullable<typeof member.impl>;
       return {
@@ -1379,6 +1347,50 @@ export abstract class ExpressionCompiler extends CompilerBase {
         isStringLength && receiver.constValue && typeof receiver.constValue.value === 'string'
           ? { value: BigInt(receiver.constValue.value.length) }
           : undefined,
+    };
+  }
+
+  private readExtensionMember(
+    receiver: Eval,
+    { member, type }: ResolvedMember,
+    ownerTypeArgs: readonly DartType[],
+    span: Span | undefined,
+    nullAware: boolean
+  ): Compiled {
+    const resolveTypes = this.runtimeTypes(ownerTypeArgs);
+    const signature = this.runtimeType(type);
+    const defaults = member.kind === 'method' ? extensionTearOffDefaults(member) : undefined;
+    return {
+      type,
+      run: (frame) => {
+        const value = receiver(frame);
+        if (value === SHORTED || (nullAware && value === undefined)) return SHORTED;
+        const typeArgs = resolveTypes(frame);
+        if (member.kind === 'method') {
+          const impl = member.impl as NonNullable<typeof member.impl>;
+          const reified = signature(frame) as FunctionType;
+          const closure = frame.runtime.tearOff(
+            value,
+            {
+              ...member,
+              type: reified,
+              impl: (runtime, _receiver, args, methodTypeArgs, callRow) =>
+                impl(runtime, value, args, [...typeArgs, ...methodTypeArgs], callRow),
+            },
+            reified
+          );
+          closure.dynamicTypeArgumentDefaults = defaults;
+          return closure;
+        }
+        return (member.impl as unknown as Callable)(
+          frame.runtime,
+          value,
+          { positional: [], named: undefined },
+          typeArgs,
+          span?.row
+        );
+      },
+      isConst: false,
     };
   }
 
@@ -1678,7 +1690,8 @@ function mapTypesOfContext(context: DartType | undefined): [DartType, DartType] 
 
 function recordLiteralBuilder(
   fields: { name: string | undefined; compiled: Compiled }[],
-  namedTypes: readonly { name: string }[]
+  namedTypes: readonly { name: string }[],
+  fieldNames: string | undefined
 ): Eval {
   return (frame) => {
     const positional: Value[] = [];
@@ -1697,9 +1710,18 @@ function recordLiteralBuilder(
     return new DartRecord(
       coreTypes.record,
       positional,
-      namedTypes.map(({ name }) => [name, named.get(name)])
+      namedTypes.map(({ name }) => [name, named.get(name)]),
+      frame.runtime.recordShapes.shape(fields.length, fieldNames)
     );
   };
+}
+
+function extensionTearOffDefaults(member: Member & { kind: 'method' }): readonly DartType[] | undefined {
+  if (member.type.typeParams.length === 0 || member.owner.typeParams.length === 0) return undefined;
+  const ownerDefaults = instantiateToBounds(member.owner.typeParams);
+  const substitutions = new Map(member.owner.typeParams.map((param, index) => [param, ownerDefaults[index]]));
+  const signature = substitute(member.type, substitutions) as FunctionType;
+  return instantiateToBounds(signature.typeParams);
 }
 
 /** Whether a local keeps its value from its declaration on: final, or assigned nowhere else, closures included. */

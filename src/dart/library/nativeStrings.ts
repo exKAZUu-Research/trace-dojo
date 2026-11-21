@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 402 -- String methods share bounds, matching, and formatting helpers.
 import { LIMITS } from '../../interpreter/limits';
 import { stringOf } from '../format';
 import { concatenate } from '../operators';
@@ -5,7 +6,15 @@ import type { Runtime } from '../runtime';
 import { asInstanceOf, coreTypes, interfaceType } from '../types';
 import { DartList, DartObject, type Value } from '../values';
 import { BoundedStringParts } from './boundedStringParts';
-import { allMatchesOf, hasPrefixMatch, isRegExp, type MatchState, newMatch, patternIndex } from './nativeRegExp';
+import {
+  allMatchesOf,
+  hasPrefixMatch,
+  isRegExp,
+  type MatchState,
+  matchText,
+  newMatch,
+  patternIndex,
+} from './nativeRegExp';
 import {
   define,
   defineConstructor,
@@ -47,9 +56,35 @@ define('String.codeUnitAt', (runtime, receiver, [position]) => {
   return BigInt(text.charCodeAt(index(at)));
 });
 define('String.length', (_runtime, receiver) => BigInt(self(receiver).length));
-define('String.hashCode', (_runtime, receiver) => {
-  // The VM hashes the UTF-16 code units with Jenkins' one-at-a-time hash, kept to 30 bits and never 0.
+define('String.hashCode', (runtime, receiver) => {
   const text = self(receiver);
+  let cache = stringHashes.get(runtime);
+  if (!cache) {
+    cache = { hashes: new Map(), size: 0 };
+    stringHashes.set(runtime, cache);
+  }
+  const cached = cache.hashes.get(text);
+  if (cached !== undefined) return cached;
+  const size = Math.max(1, text.length);
+  runtime.spend(Math.ceil(size / 32));
+  const hash = hashCodeUnits(text);
+  if (cache.size + size > LIMITS.maxStringLength || cache.hashes.size === 1024) {
+    cache.hashes.clear();
+    cache.size = 0;
+  }
+  if (size <= LIMITS.maxStringLength) {
+    runtime.allocate(1);
+    // A substring key may otherwise keep its much larger source string alive.
+    cache.hashes.set(Buffer.from(text, 'utf16le').toString('utf16le'), hash);
+    cache.size += size;
+  }
+  return hash;
+});
+
+const stringHashes = new WeakMap<Runtime, { hashes: Map<string, bigint>; size: number }>();
+
+function hashCodeUnits(text: string): bigint {
+  // The VM hashes the UTF-16 code units with Jenkins' one-at-a-time hash, kept to 30 bits and never 0.
   let hash = 0;
   for (let position = 0; position < text.length; position++) {
     // oxlint-disable-next-line unicorn/prefer-code-point -- The VM hashes UTF-16 code units.
@@ -61,7 +96,7 @@ define('String.hashCode', (_runtime, receiver) => {
   hash = (hash ^ (hash >>> 11)) >>> 0;
   hash = (hash + (hash << 15)) >>> 0;
   return BigInt(hash & 0x3f_ff_ff_ff || 1);
-});
+}
 define('String.==', (_runtime, receiver, [other]) => receiver === other);
 define('String.compareTo', (runtime, receiver, [other]) => {
   const a = self(receiver);
@@ -150,7 +185,7 @@ function* matchesOf(runtime: Runtime, pattern: Value, text: string, start = 0): 
     while (position >= 0 && position <= text.length) {
       const end = position + pattern.length;
       runtime.spend();
-      yield { start: position, end, groups: [pattern], names: undefined, input: text, pattern };
+      yield { start: position, end, input: text, pattern };
       const next = position + Math.max(1, pattern.length);
       if (next > text.length) break;
       position = text.indexOf(pattern, next);
@@ -349,7 +384,7 @@ function firstMatchGroup(runtime: Runtime, match: StringMatch): string {
   const group =
     match instanceof DartObject
       ? runtime.invoke(match, '[]', { positional: [0n], named: undefined }, [], runtime.userCallRow)
-      : match.groups[0];
+      : matchText(runtime, match);
   if (group === undefined) runtime.throwTypeError('Null check operator used on a null value');
   return group as string;
 }
@@ -357,7 +392,7 @@ function firstMatchGroup(runtime: Runtime, match: StringMatch): string {
 function* emptyPatternMatches(input: string, runtime: Runtime): IterableIterator<MatchState> {
   for (let position = 0; position <= input.length; position += isSurrogatePairAt(input, position) ? 2 : 1) {
     runtime.spend();
-    yield { start: position, end: position, groups: [''], names: undefined, input, pattern: '' };
+    yield { start: position, end: position, input, pattern: '' };
   }
 }
 

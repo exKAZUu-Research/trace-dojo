@@ -1,5 +1,7 @@
 import { type AST, RegExpParser } from '@eslint-community/regexpp';
 
+import { ExecutionLimitError } from '../../interpreter/limits';
+
 /**
  * A backtracking matcher of ECMAScript regular expressions, the syntax and semantics of the VM's Irregexp, which
  * charges every step to the run's budget: the host's RegExp cannot be interrupted, so a pattern that backtracks
@@ -29,8 +31,14 @@ export interface CompiledRegExp {
 export interface RegExpMatchResult {
   start: number;
   end: number;
-  /** The text of each group, from group 0. */
-  groups: (string | undefined)[];
+  /** Start and end offsets of capture groups, from group 1. */
+  captures?: Int32Array;
+}
+
+interface RegExpBudget {
+  charge: () => void;
+  scratchSlots: number;
+  reserveCaptures?: (slots: number) => void;
 }
 
 export function compileRegExp(source: string, flags: RegExpFlags, charge: () => void): CompiledRegExp {
@@ -57,19 +65,23 @@ export function compileRegExp(source: string, flags: RegExpFlags, charge: () => 
   };
 }
 
-/** The first match at `start` (`sticky`) or after it, charging `charge` once per step. */
+/** The first match at `start` (`sticky`) or after it. */
 export function execRegExp(
   compiled: CompiledRegExp,
   input: string,
   start: number,
   sticky: boolean,
-  charge: () => void
+  { charge, scratchSlots, reserveCaptures }: RegExpBudget
 ): RegExpMatchResult | undefined {
-  const machine = new Machine(compiled, input, charge);
+  const machine = new Machine(compiled, input, charge, scratchSlots);
   const first = compiled.unicode && isSurrogatePairAt(input, start - 1) ? start - 1 : start;
   for (let position = first; position <= input.length;) {
     const end = machine.attempt(position);
-    if (end >= 0) return { start: position, end, groups: [input.slice(position, end), ...machine.groupTexts()] };
+    if (end >= 0) {
+      if (!reserveCaptures) return { start: position, end };
+      reserveCaptures(2 * compiled.groupCount);
+      return { start: position, end, captures: machine.registers.slice(2, 2 + 2 * compiled.groupCount) };
+    }
     if (sticky) return undefined;
     position += compiled.unicode && isSurrogatePairAt(input, position) ? 2 : 1;
   }
@@ -424,63 +436,60 @@ export function isSurrogatePairAt(input: string, position: number): boolean {
 }
 
 class Machine {
-  registers: number[];
-  private readonly trail: number[] = [];
+  readonly registers: Int32Array;
+  private scratch = new Int32Array(0);
+  private undoLength = 0;
+  private choiceLength = 0;
   private position = 0;
 
   constructor(
     private readonly compiled: CompiledRegExp,
     private readonly input: string,
-    private readonly charge: () => void
+    private readonly charge: () => void,
+    private readonly scratchSlots: number
   ) {
-    this.registers = Array.from({ length: compiled.registerCount }, () => -1);
-  }
-
-  /** The texts of groups 1 and on after a match. */
-  groupTexts(): (string | undefined)[] {
-    const texts: (string | undefined)[] = [];
-    for (let group = 1; group <= this.compiled.groupCount; group++) {
-      const from = this.registers[2 * group];
-      const to = this.registers[2 * group + 1];
-      texts.push(from >= 0 && to >= 0 ? this.input.slice(from, to) : undefined);
-    }
-    return texts;
+    if (compiled.registerCount > scratchSlots) throw new ExecutionLimitError('storage');
+    this.registers = new Int32Array(compiled.registerCount);
   }
 
   /** Matches from one start position, giving the end or -1. */
   attempt(start: number): number {
     this.registers.fill(-1);
-    this.trail.length = 0;
+    this.undoLength = 0;
     return this.run(0, start);
   }
 
   private run(startPc: number, startPosition: number): number {
     const { program } = this.compiled;
-    const base = this.trail.length;
-    /** Triples of the pc, the position, and the trail's length to resume from. */
-    const choices: number[] = [];
+    const undoBase = this.undoLength;
+    const choiceBase = this.choiceLength;
     let pc = startPc;
     this.position = startPosition;
-    for (;;) {
-      this.charge();
-      const instruction = program[pc];
-      if (instruction.op === 'succeed') return this.position;
-      pc = this.step(instruction, pc, choices);
-      if (pc >= 0) continue;
-      if (choices.length === 0) {
-        this.undo(base);
-        return -1;
+    try {
+      for (;;) {
+        this.charge();
+        const instruction = program[pc];
+        if (instruction.op === 'succeed') return this.position;
+        pc = this.step(instruction, pc);
+        if (pc >= 0) continue;
+        if (this.choiceLength === choiceBase) {
+          this.undo(undoBase);
+          return -1;
+        }
+        const choice = this.scratch.length - this.choiceLength;
+        this.choiceLength -= 3;
+        pc = this.scratch[choice];
+        this.position = this.scratch[choice + 1];
+        this.undo(this.scratch[choice + 2]);
       }
-      const mark = choices.pop() as number;
-      this.position = choices.pop() as number;
-      pc = choices.pop() as number;
-      this.undo(mark);
+    } finally {
+      this.choiceLength = choiceBase;
     }
   }
 
   /** Runs one instruction, giving the next pc or -1 to backtrack. */
   // code-gauge-allow functionNcss 45 -- The machine's dispatch, one case per instruction.
-  private step(instruction: Exclude<Instruction, { op: 'succeed' }>, pc: number, choices: number[]): number {
+  private step(instruction: Exclude<Instruction, { op: 'succeed' }>, pc: number): number {
     const { registers, position } = this;
     switch (instruction.op) {
       case 'char': {
@@ -490,7 +499,7 @@ class Machine {
         return this.advanceTo(this.backreference(instruction, position), pc);
       }
       case 'split': {
-        choices.push(instruction.second, position, this.trail.length);
+        this.pushChoice(instruction.second);
         return instruction.first;
       }
       case 'jump': {
@@ -504,7 +513,7 @@ class Machine {
         return instruction.test(this.input, position) ? pc + 1 : -1;
       }
       case 'look': {
-        const mark = this.trail.length;
+        const mark = this.undoLength;
         const matched = this.run(pc + 1, position) >= 0;
         this.position = position;
         if (matched !== instruction.negative) return instruction.next;
@@ -516,7 +525,7 @@ class Machine {
         return pc + 1;
       }
       case 'loop': {
-        return this.decide(instruction, choices);
+        return this.decide(instruction);
       }
       case 'loopEnter': {
         for (let register = instruction.firstRegister; register < instruction.endRegister; register++) {
@@ -542,14 +551,14 @@ class Machine {
   }
 
   /** Whether a loop runs another iteration: required below its minimum, a choice between its minimum and maximum. */
-  private decide(instruction: Extract<Instruction, { op: 'loop' }>, choices: number[]): number {
+  private decide(instruction: Extract<Instruction, { op: 'loop' }>): number {
     const count = this.registers[instruction.count];
     if (count < instruction.min) return instruction.enter;
     if (count >= instruction.max) return instruction.exit;
     const [first, second] = instruction.greedy
       ? [instruction.enter, instruction.exit]
       : [instruction.exit, instruction.enter];
-    choices.push(second, this.position, this.trail.length);
+    this.pushChoice(second);
     return first;
   }
 
@@ -566,15 +575,38 @@ class Machine {
   }
 
   private set(register: number, value: number): void {
-    this.trail.push(register, this.registers[register]);
+    this.reserve(2);
+    this.scratch[this.undoLength++] = register;
+    this.scratch[this.undoLength++] = this.registers[register];
     this.registers[register] = value;
   }
 
   private undo(length: number): void {
-    const { trail, registers } = this;
-    while (trail.length > length) {
-      const value = trail.pop() as number;
-      registers[trail.pop() as number] = value;
+    while (this.undoLength > length) {
+      const value = this.scratch[--this.undoLength];
+      this.registers[this.scratch[--this.undoLength]] = value;
     }
+  }
+
+  private pushChoice(pc: number): void {
+    this.reserve(3);
+    this.choiceLength += 3;
+    const start = this.scratch.length - this.choiceLength;
+    this.scratch[start] = pc;
+    this.scratch[start + 1] = this.position;
+    this.scratch[start + 2] = this.undoLength;
+  }
+
+  private reserve(slots: number): void {
+    const needed = this.undoLength + this.choiceLength + slots;
+    if (needed <= this.scratch.length) return;
+    const maximum = this.scratchSlots - this.registers.length;
+    if (needed > maximum) throw new ExecutionLimitError('storage');
+    const capacity = Math.min(maximum, Math.max(64, needed, 2 * this.scratch.length));
+    const next = new Int32Array(capacity);
+    // The undo trail grows from the start and choices from the end so they share the same limit.
+    next.set(this.scratch.subarray(0, this.undoLength));
+    next.set(this.scratch.subarray(this.scratch.length - this.choiceLength), capacity - this.choiceLength);
+    this.scratch = next;
   }
 }

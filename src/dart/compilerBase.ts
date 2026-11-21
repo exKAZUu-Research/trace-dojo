@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 530 -- Type and diagnostic resolution share the compiler environment.
+// code-gauge-allow-file fileNcss 539 -- Types and record shape metadata are resolved in the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
@@ -142,6 +142,7 @@ export abstract class CompilerBase {
   protected readonly aliasWork = new Map<TypeAlias, TypeAliasDeclaration>();
   protected readonly pendingClassBounds = new Map<ClassInfo, ClassDeclaration>();
   protected pendingBoundChecks: (() => void)[] | undefined;
+  readonly recordFieldNames = new Set<string>();
 
   constructor(
     readonly library: LibraryEnv,
@@ -306,6 +307,7 @@ export abstract class CompilerBase {
             .toSorted((a, b) => (a.name < b.name ? -1 : 1)),
           nullable: false,
         };
+        this.registerRecordFieldNames(type.named);
         return syntax.nullable ? makeNullable(type) : type;
       }
       case 'named': {
@@ -325,6 +327,14 @@ export abstract class CompilerBase {
     )
       this.error(span, `レコードのフィールドに ${name} という名前は付けられません。`);
     names.add(name);
+  }
+
+  protected registerRecordFieldNames(fields: readonly { name: string }[]): string | undefined {
+    if (fields.length === 0) return undefined;
+    const key = JSON.stringify(fields.map(({ name }) => name));
+    const names = this.fn ? (this.fn.info.recordFieldNames ??= new Set()) : this.recordFieldNames;
+    names.add(key);
+    return key;
   }
 
   private resolveFunctionType(syntax: Extract<TypeSyntax, { kind: 'function' }>): DartType {
