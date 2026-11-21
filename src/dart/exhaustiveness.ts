@@ -11,6 +11,7 @@ import {
   DYNAMIC,
   interfaceType,
   isNullable,
+  isPotentiallyNullable,
   isSubtype,
   nonNullable,
   NULL,
@@ -155,7 +156,7 @@ class ObjectSpaces {
     const properties = new Map<string, { type: DartType; patterns: Pattern[] }>();
     for (const part of parts) {
       if (part.kind !== 'object') continue;
-      const target = withDynamicArgs(this.compiler.resolveType(part.type, { allowRaw: true }));
+      const target = objectPatternType(this.compiler, part);
       if (!isSubtype(type, target)) continue;
       for (const field of part.fields) {
         if (!field.name) continue;
@@ -238,8 +239,8 @@ function spaceText(space: Space): string {
 
 /** Whether Dart requires a switch statement on the type to be exhaustive. */
 function isAlwaysExhaustive(type: DartType): boolean {
-  if (type.kind === 'null') return true;
   const base = resolveBound(type);
+  if (base.kind === 'null') return true;
   if (base.kind === 'record')
     return base.positional.every(isAlwaysExhaustive) && base.named.every((field) => isAlwaysExhaustive(field.type));
   if (base.kind !== 'interface') return false;
@@ -249,16 +250,16 @@ function isAlwaysExhaustive(type: DartType): boolean {
 
 /** Splits a type into the spaces a switch must cover one by one. */
 function expand(type: DartType, listCutoff: number, listDepth: number): Space[] {
-  if (type.kind === 'null') return [{ kind: 'null' }];
-  if (type.kind === 'never' && !type.nullable) return [];
-  if (type.kind === 'dynamic') {
+  const base = resolveBound(type);
+  if (base.kind === 'null') return [{ kind: 'null' }];
+  if (base.kind === 'never' && !base.nullable) return [];
+  if (base.kind === 'dynamic') {
     return [{ kind: 'type', type: interfaceType(coreTypes.object) }, { kind: 'null' }];
   }
-  if (isNullable(type) && type.kind !== 'void') {
-    const nonNullSpaces = expand(nonNullable(type), listCutoff, listDepth);
+  if (isNullable(base) && base.kind !== 'void') {
+    const nonNullSpaces = expand(nonNullable(base), listCutoff, listDepth);
     return nonNullSpaces.length >= MAX_SPACES ? [{ kind: 'type', type }] : [...nonNullSpaces, { kind: 'null' }];
   }
-  const base = resolveBound(type);
   if (base.kind === 'record') return expandRecord(base, listCutoff, listDepth);
   if (base.kind === 'interface') return expandInterface(base, listCutoff, listDepth);
   return [{ kind: 'type', type }];
@@ -425,7 +426,7 @@ function subclassType(supertype: DartType & { kind: 'interface' }, subclass: Cla
 // code-gauge-allow functionNcss 47 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 function coversAll(compiler: PatternCompiler, pattern: Pattern, type: DartType): boolean {
   const comparison = nullPatternComparison(pattern);
-  if (comparison) return comparison === '==' ? isSubtype(type, NULL) : !isNullable(type);
+  if (comparison) return comparison === '==' ? isSubtype(type, NULL) : !isPotentiallyNullable(type);
   switch (pattern.kind) {
     case 'wildcard':
     case 'variable': {
@@ -449,11 +450,11 @@ function coversAll(compiler: PatternCompiler, pattern: Pattern, type: DartType):
       return coversAll(compiler, pattern.pattern, nonNullable(type));
     }
     case 'nullCheck': {
-      return !isNullable(type) && coversAll(compiler, pattern.pattern, type);
+      return !isPotentiallyNullable(type) && coversAll(compiler, pattern.pattern, type);
     }
     case 'object': {
-      const target = compiler.resolveType(pattern.type, { allowRaw: true });
-      if (!isSubtype(nonNullable(type), withDynamicArgs(target)) || isNullable(type)) return false;
+      const target = objectPatternType(compiler, pattern);
+      if (!isSubtype(type, target) || isPotentiallyNullable(type)) return false;
       return pattern.fields.every((field) => {
         const member = field.name ? compiler.lookupMember(type, field.name, false) : undefined;
         return member ? coversAll(compiler, field.pattern, member.type) : false;
@@ -461,14 +462,14 @@ function coversAll(compiler: PatternCompiler, pattern: Pattern, type: DartType):
     }
     case 'record': {
       const base = resolveBound(type);
-      if (base.kind !== 'record' || isNullable(type)) return false;
+      if (base.kind !== 'record' || isPotentiallyNullable(type)) return false;
       return recordFieldsCover(pattern, base, (fieldPattern, fieldType) =>
         coversAll(compiler, fieldPattern, fieldType)
       );
     }
     case 'list': {
       const base = resolveBound(type);
-      if (base.kind !== 'interface' || isNullable(type)) return false;
+      if (base.kind !== 'interface' || isPotentiallyNullable(type)) return false;
       const list = asInstanceOf(base, coreTypes.list);
       return (
         !!list &&
@@ -485,7 +486,7 @@ function coversAll(compiler: PatternCompiler, pattern: Pattern, type: DartType):
       const base = resolveBound(type);
       return (
         base.kind === 'interface' &&
-        !isNullable(type) &&
+        !isPotentiallyNullable(type) &&
         asInstanceOf(base, coreTypes.map) !== undefined &&
         pattern.entries.length === 0
       );
@@ -496,14 +497,8 @@ function coversAll(compiler: PatternCompiler, pattern: Pattern, type: DartType):
   }
 }
 
-function withDynamicArgs(type: DartType): DartType {
-  if (type.kind === 'interface' && type.args.length === 0 && type.cls.typeParams.length > 0) {
-    return interfaceType(
-      type.cls,
-      type.cls.typeParams.map(() => DYNAMIC)
-    );
-  }
-  return type;
+function objectPatternType(compiler: PatternCompiler, pattern: Extract<Pattern, { kind: 'object' }>): DartType {
+  return compiler.objectPatternTypes.get(pattern) ?? compiler.resolveType(pattern.type);
 }
 
 function recordFieldsCover(
@@ -527,7 +522,8 @@ function recordFieldsCover(
 // code-gauge-allow functionNcss 39 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 function covers(compiler: PatternCompiler, pattern: Pattern, space: Space): Coverage {
   const comparison = nullPatternComparison(pattern);
-  if (comparison) return comparison === '==' ? space.kind === 'null' : space.kind !== 'null' && !isNullable(space.type);
+  if (comparison)
+    return comparison === '==' ? space.kind === 'null' : space.kind !== 'null' && !isPotentiallyNullable(space.type);
   switch (pattern.kind) {
     case 'parenthesized': {
       return covers(compiler, pattern.pattern, space);
@@ -556,7 +552,7 @@ function covers(compiler: PatternCompiler, pattern: Pattern, space: Space): Cove
     case 'variable': {
       if (!pattern.type) return true;
       const tested = compiler.resolveType(pattern.type);
-      if (space.kind === 'null') return isNullable(tested);
+      if (space.kind === 'null') return isSubtype(NULL, tested);
       return spaceSubtype(space, tested);
     }
     case 'constant': {
@@ -637,7 +633,7 @@ function objectCovers(
   space: Space
 ): Coverage {
   if (space.kind === 'null') return false;
-  const target = withDynamicArgs(compiler.resolveType(pattern.type, { allowRaw: true }));
+  const target = objectPatternType(compiler, pattern);
   if (!spaceSubtype(space, target)) return false;
   if (space.kind === 'constant' && pattern.fields.length > 0) return false;
   return combineCoverage(

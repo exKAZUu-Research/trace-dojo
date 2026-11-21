@@ -145,6 +145,7 @@ function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
     'CastIterator',
     'LateError',
     'EmptyIterable',
+    'EmptyIterator',
     'replaceListRange',
     'EfficientLengthMappedIterable',
     'EfficientLengthTakeIterable',

@@ -328,7 +328,11 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       if (narrowed) flow = flow.promote(variable, narrowed);
     }
     this.flow = flow;
-    return { type, run: this.runtimeCast(value.run, type, true), isConst: value.isConst };
+    return {
+      type,
+      run: this.runtimeCast(value.run, type, true),
+      isConst: value.isConst && !this.usesLexicalTypeVariables(type),
+    };
   }
 
   protected compileThrow(expression: Extract<Expression, { kind: 'throw' }>): Compiled {

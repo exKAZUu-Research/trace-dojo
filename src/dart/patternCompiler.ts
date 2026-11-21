@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 565 -- Pattern kinds share their type, rooting, and binding helpers.
+// code-gauge-allow-file fileNcss 566 -- Pattern kinds share their type, rooting, and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import { CallCompiler } from './callCompiler';
@@ -13,6 +13,7 @@ import {
   type DartType,
   DYNAMIC,
   type FunctionType,
+  instantiateToBounds,
   interfaceType,
   isNullable,
   isPotentiallyNullable,
@@ -112,6 +113,7 @@ interface PatternWrite {
 }
 
 export abstract class PatternCompiler extends CallCompiler {
+  readonly objectPatternTypes = new WeakMap<Pattern, DartType>();
   readonly patternConstants = new WeakMap<Expression, Compiled>();
 
   protected compileCasePattern(
@@ -466,7 +468,7 @@ export abstract class PatternCompiler extends CallCompiler {
       case 'object':
       case 'cast': {
         if (!pattern.type) return matchedType;
-        const type = this.resolveType(pattern.type, { allowRaw: true });
+        const type = this.objectPatternTypes.get(pattern) ?? this.resolveType(pattern.type);
         return isSubtype(matchedType, type) ? matchedType : type;
       }
       case 'nullCheck':
@@ -775,13 +777,9 @@ export abstract class PatternCompiler extends CallCompiler {
       // `List()` infers its type arguments from the matched type, or else instantiates to bounds.
       const base = resolveBound(matchedType);
       const instance = base.kind === 'interface' ? asInstanceOf({ ...base, nullable: false }, type.cls) : undefined;
-      type =
-        instance ??
-        interfaceType(
-          type.cls,
-          type.cls.typeParams.map(() => DYNAMIC)
-        );
+      type = instance ?? interfaceType(type.cls, instantiateToBounds(type.cls.typeParams));
     }
+    this.objectPatternTypes.set(pattern, type);
     const receiver: Compiled = { type, run: (frame) => frame.temporaries.at(-1), isConst: false };
     const fields = pattern.fields.map((field) => {
       if (field.name === undefined)

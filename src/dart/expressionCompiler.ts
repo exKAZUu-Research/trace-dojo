@@ -465,7 +465,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
           const result = this.valueIsAt(frame, run(frame), resolve(frame));
           return result !== negated;
         },
-        isConst: value.isConst,
+        isConst: value.isConst && !this.usesLexicalTypeVariables(type),
       },
       flow: negated ? { whenTrue: this.flow, whenFalse: promoted } : { whenTrue: promoted, whenFalse: this.flow },
     };

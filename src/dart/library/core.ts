@@ -952,7 +952,7 @@ abstract mixin class Iterable<E> {
     }
     return _GeneratorIterable<E>(count, generator);
   }
-  factory Iterable.empty() => EmptyIterable<E>();
+  const factory Iterable.empty() = EmptyIterable<E>;
   static Iterable<T> castFrom<S, T>(Iterable<S> source) => CastIterable<S, T>(source);
   Iterator<E> get iterator;
   Iterable<R> cast<R>() => CastIterable<E, R>(this);
@@ -1224,12 +1224,33 @@ void _iterablePartsToStrings(Iterable<Object?> iterable, List<Object> parts) {
 
 class EmptyIterable<E> extends EfficientLengthIterable<E> {
   const EmptyIterable();
-  Iterator<E> get iterator => _EmptyIterator<E>();
+  Iterator<E> get iterator => const EmptyIterator<Never>();
   int get length => 0;
+  bool get isEmpty => true;
+  E elementAt(int index) => throw RangeError.range(index, 0, 0, "index");
+  void forEach(void Function(E) action) {}
+  bool contains(Object? element) => false;
+  bool every(bool Function(E) test) => true;
+  bool any(bool Function(E) test) => false;
+  String join([String separator = ""]) => "";
+  Iterable<E> where(bool Function(E) test) => this;
+  Iterable<T> map<T>(T Function(E) convert) => EmptyIterable<T>();
+  Iterable<E> skip(int count) {
+    RangeError.checkNotNegative(count, "count");
+    return this;
+  }
+  Iterable<E> take(int count) {
+    RangeError.checkNotNegative(count, "count");
+    return this;
+  }
+  Iterable<E> skipWhile(bool Function(E) test) => this;
+  Iterable<E> takeWhile(bool Function(E) test) => this;
+  List<E> toList({bool growable = true}) => List<E>.empty(growable: growable);
+  Set<E> toSet() => Set<E>();
 }
 
-class _EmptyIterator<E> implements Iterator<E> {
-  const _EmptyIterator();
+class EmptyIterator<E> implements Iterator<E> {
+  const EmptyIterator();
   bool moveNext() => false;
   E get current => throw StateError("No element");
 }
@@ -1324,7 +1345,7 @@ class ExpandIterable<S, T> extends Iterable<T> {
 class ExpandIterator<S, T> implements Iterator<T> {
   final Iterator<S> _iterator;
   final Iterable<T> Function(S) _f;
-  Iterator<T> _currentExpansion = _EmptyIterator<T>();
+  Iterator<T> _currentExpansion = EmptyIterator<T>();
   T? _current;
   ExpandIterator(this._iterator, this._f);
   T get current => _current as T;

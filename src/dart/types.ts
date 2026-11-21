@@ -744,6 +744,7 @@ export function mentionsTypeParams(type: DartType, params?: ReadonlySet<TypePara
     }
     case 'function': {
       return (
+        type.typeParams.some(({ bound }) => bound && mentionsTypeParams(bound, params)) ||
         mentionsTypeParams(type.returnType, params) ||
         type.positional.some((parameter) => mentionsTypeParams(parameter, params)) ||
         type.named.some((parameter) => mentionsTypeParams(parameter.type, params))

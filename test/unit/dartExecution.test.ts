@@ -6324,6 +6324,67 @@ test('StringBuffer meters appends and preserves snapshots across writes and clea
   });
 });
 
+test('raw object patterns use a matched instance or instantiate to bounds', () => {
+  const source = `class Box<T extends num> { final T value; Box(this.value); }
+class TextBox<T extends String> { final T value; TextBox(this.value); }
+void main() {
+  Object box = Box<int>(1);
+  if (box case Box(value: var value)) print([value].runtimeType);
+  Box<int> typed = Box<int>(1);
+  if (typed case Box(value: var value)) print([value].runtimeType);
+  Object text = TextBox<String>('text');
+  print(switch (text) { TextBox(value: var value) => [value].runtimeType, _ => Null });
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'List<num>\nList<int>\nList<String>\n',
+  });
+});
+
+test('switches over generic nullable bounds cover the null case', () => {
+  for (const source of [
+    'int f<T extends bool?>(T input) => switch (input) { true => 1, false => 0 }; void main() {}',
+    'enum E { x } int f<T extends E?>(T input) => switch (input) { E.x => 1 }; void main() {}',
+  ]) {
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+  const source = `enum E { x }
+int f<T extends U, U extends E?>(T input) => switch (input) { E.x => 1, null => 0 };
+void main() { print([f<E?, E?>(null), f<E, E?>(E.x)]); }`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[0, 1]\n' });
+});
+
+test('empty iterables preserve SDK wrapper identities and index errors', () => {
+  const source = `void main() {
+  for (final empty in [const Iterable<int>.empty(), Iterable<int>.generate(0)]) {
+    try { empty.elementAt(0); } catch (error) { print(error); }
+    print([identical(empty, empty.where((_) => true)), identical(empty, empty.skip(1)),
+      identical(empty, empty.take(1)), empty.map<String>((_) => 'never').runtimeType, empty.iterator.runtimeType]);
+  }
+}`;
+  const output =
+    'RangeError (index): Invalid value: Only valid value is 0: 0\n' +
+    '[true, true, true, EmptyIterable<String>, EmptyIterator<Never>]\n';
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: output.repeat(2) });
+});
+
+test('constant type tests and casts exclude lexically bound type variables', () => {
+  for (const expression of ['1 is T', '1 is! T', 'const [] is List<T>', '(null as T?) == null']) {
+    const source = `void inspect<T>() { const value = ${expression}; print(value); } void main() { inspect<int>(); }`;
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+  const source = `void inspect<T>() {
+  const known = 1 is num;
+  const localSignature = 1 is U Function<U>();
+  print([known, localSignature, 1 is T]);
+}
+void main() { inspect<int>(); inspect<String>(); }`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[true, false, true]\n[true, false, false]\n',
+  });
+});
+
 test('error representations escape isolated surrogates without splitting pairs', () => {
   const source = `void main() {
   var isolated = String.fromCharCodes([0xd800, 0xdc00, 0xdc00]);

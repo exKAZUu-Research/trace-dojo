@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 545 -- Types and record shape metadata are resolved in the compiler environment.
+// code-gauge-allow-file fileNcss 548 -- Types and record shape metadata are resolved in the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
@@ -589,6 +589,13 @@ export abstract class CompilerBase {
       type: substitute(member.type, map),
       extension: { ext: override.ext, typeArgs: override.typeArgs, onType: substitute(override.ext.onType, map) },
     };
+  }
+
+  protected usesLexicalTypeVariables(type: DartType): boolean {
+    const params = new Set(
+      this.typeScopes.flatMap(({ names, staticOwner }) => (staticOwner ? [] : [...names.values()]))
+    );
+    return mentionsTypeParams(type, params);
   }
 
   protected dynamicDispatchType(receiver: Compiled): DartType | undefined {
