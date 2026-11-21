@@ -1244,20 +1244,23 @@ function visitCallArguments(
   signature: FunctionType | undefined,
   visit: (argument: CallArgument, closurePass: boolean) => void
 ): void {
-  const closures: CallArgument[] = [];
+  const annotated: CallArgument[] = [];
+  const contextual: CallArgument[] = [];
   for (const entry of args.order) {
     const argument = callArgument(args, entry, signature);
-    if (isClosureArgument(argument.argument)) closures.push(argument);
-    else visit(argument, false);
+    const literal = functionLiteral(argument.argument);
+    if (!literal) visit(argument, false);
+    else if (takesTypesFromContext(literal)) contextual.push(argument);
+    else annotated.push(argument);
   }
-  // Dart checks a function literal's body with the flow and type constraints from the other arguments.
-  for (const closure of closures) visit(closure, true);
+  // Dart analyzes function literals after the other arguments, so their bodies see those arguments' flow; literals that
+  // take parameter types from the context come last, after the others have constrained the type parameters.
+  for (const literal of annotated) visit(literal, false);
+  for (const literal of contextual) visit(literal, true);
 }
 
-/** Whether an argument is a function literal that takes a parameter's type from its context, which Dart types last. */
-function isClosureArgument(expression: Expression): boolean {
-  const literal = functionLiteral(expression);
-  return literal !== undefined && [...literal.parameters.positional, ...literal.parameters.named].some((p) => !p.type);
+function takesTypesFromContext(literal: Extract<Expression, { kind: 'function' }>): boolean {
+  return [...literal.parameters.positional, ...literal.parameters.named].some((parameter) => !parameter.type);
 }
 
 function functionLiteral(expression: Expression): Extract<Expression, { kind: 'function' }> | undefined {

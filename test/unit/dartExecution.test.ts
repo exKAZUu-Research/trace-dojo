@@ -1686,6 +1686,19 @@ test('Dart chooses a call context type argument over a closure argument bound', 
   expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[6, 2, 1]\n' });
 });
 
+test('Dart function literal arguments see assignments in later arguments', () => {
+  const program = `void f({required int seed, required int Function(int) g}) { print(g(seed)); }
+T h<T>({required T seed, required T Function(T) g}) => g(seed);
+void main() {
+  int x;
+  f(g: (int n) => n + x, seed: x = 4);
+  int y;
+  var r = h(g: (int n) => n + y, seed: y = 5);
+  print(r);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '8\n10\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
