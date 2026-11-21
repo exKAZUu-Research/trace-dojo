@@ -51,6 +51,23 @@ fun main() {
     stdout: '1\n2\n0\n',
   },
   {
+    name: 'finally sees assignments before a pending jump',
+    source: `fun main() {
+    var count: Int
+    do {
+        try {
+            count = 7
+            break
+        } finally {
+            println(count)
+            if (true) continue
+        }
+    } while (count < 0)
+    println(count)
+}`,
+    stdout: '7\n7\n',
+  },
+  {
     name: 'finally assignments on normal, break, and continue paths',
     source: `fun breakExit() {
     var value: Int
@@ -829,6 +846,24 @@ fun main() { println(A().n) }`,
     }
 }
 fun main() { println(A().n) }`,
+  ],
+  [
+    'a read after finally continues on an exceptional path before assignment',
+    false,
+    `fun mayThrow() {}
+fun main() {
+    var count: Int
+    do {
+        try {
+            mayThrow()
+            count = 7
+            break
+        } finally {
+            if (true) continue
+        }
+    } while (count < 0)
+    println(count)
+}`,
   ],
   [
     'a read after a finally that only conditionally assigns',

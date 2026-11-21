@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 900 -- One method per kind of Kotlin statement and control structure.
+// code-gauge-allow-file fileNcss 913 -- One method per kind of Kotlin statement and control structure.
 import type {
   AssignmentStatement,
   Block,
@@ -108,6 +108,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     for (const [index, statement] of statements.entries()) {
       const isLast = index === statements.length - 1;
       if (isLast && !asStatement && statement.kind === 'expressionStatement') {
+        this.recordExceptionEntry(scope, context, statement);
         last = this.compileExpression(scope, context, statement.expression, expected);
       } else {
         execs.push(this.compileStatement(scope, context, statement));
@@ -137,6 +138,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   protected compileStatement(scope: Scope, context: FunctionContext, statement: Statement): Exec {
+    this.recordExceptionEntry(scope, context, statement);
     const exec = this.compileStatementBody(scope, context, statement);
     return (frame) => {
       frame.runtime.spend();
@@ -1338,6 +1340,64 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return coversClass(actual.cls);
   }
 
+  private readonly exceptionEntries = new WeakMap<FunctionContext, Flow[]>();
+
+  private recordExceptionEntry(scope: Scope, context: FunctionContext, statement: Statement): void {
+    const entries = this.exceptionEntries.get(context);
+    if (!entries || this.flow.isDead) return;
+    if (statement.kind === 'expressionStatement' && this.isNonThrowingExpression(scope, statement.expression)) return;
+    if (statement.kind === 'assignment' && statement.operator === '=' && statement.target.kind === 'name') {
+      const variable = this.findVariable(scope, statement.target.name);
+      if (variable && !variable.delegateRead && this.isNonThrowingExpression(scope, statement.value)) return;
+    }
+    entries.push(this.flow.copy());
+  }
+
+  private isNonThrowingExpression(scope: Scope, expression: Expression): boolean {
+    switch (expression.kind) {
+      case 'break':
+      case 'continue':
+      case 'integer':
+      case 'real':
+      case 'boolean':
+      case 'char':
+      case 'null': {
+        return true;
+      }
+      case 'string': {
+        return expression.parts.every((part) => typeof part === 'string');
+      }
+      case 'name': {
+        const variable = this.findVariable(scope, expression.name);
+        return Boolean(variable && !variable.delegateRead && this.flow.assigned.has(variable));
+      }
+      case 'parenthesized': {
+        return this.isNonThrowingExpression(scope, expression.expression);
+      }
+      default: {
+        return false;
+      }
+    }
+  }
+
+  private compileTryBlock(
+    scope: Scope,
+    context: FunctionContext,
+    block: Block,
+    expected: KType | undefined,
+    asStatement: boolean,
+    thrown: Flow[]
+  ): Compiled {
+    const previous = this.exceptionEntries.get(context);
+    this.exceptionEntries.set(context, thrown);
+    try {
+      return this.compileBlockValue(scope, context, block, expected, asStatement);
+    } finally {
+      if (previous) this.exceptionEntries.set(context, previous);
+      else this.exceptionEntries.delete(context);
+    }
+  }
+
   // code-gauge-allow functionNcss 50 -- try, catch clauses, and finally, as an expression.
   // code-gauge-allow functionCognitiveComplexity 25 -- the same try and catch branches decide the flow and runtime result.
   protected compileTry(
@@ -1350,11 +1410,14 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const loopExits = expression.finally ? context.loops.flatMap(({ breaks, continues }) => [breaks, continues]) : [];
     const exitStarts = loopExits.map((exits) => exits.length);
     const before = this.flow.copy();
-    const body = this.compileBlockValue(scope, context, expression.body, expected, asStatement);
+    const bodyThrows: Flow[] = [];
+    const catchThrows: Flow[] = [];
+    const body = this.compileTryBlock(scope, context, expression.body, expected, asStatement, bodyThrows);
     const flows = [this.flow];
+    const assignmentsBeforeThrow = Flow.merge([before, ...bodyThrows]).maybeAssigned;
     const catches = expression.catches.map((clause) => {
       this.flow = before.copy();
-      for (const variable of flows[0].maybeAssigned) this.flow.maybeAssigned.add(variable);
+      for (const variable of assignmentsBeforeThrow) this.flow.maybeAssigned.add(variable);
       const catchScope = new Scope(scope, context);
       const type = this.resolveType(scope, clause.type);
       if (!isSubtype(type, this.core.throwable.type))
@@ -1362,7 +1425,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       const variable = this.newVariable(catchScope, context, clause.name, type, false, clause.row);
       this.flow.assigned.add(variable);
       const { write } = this.variableAccess(context, variable);
-      const value = this.compileBlockValue(catchScope, context, clause.body, expected, asStatement);
+      const value = this.compileTryBlock(catchScope, context, clause.body, expected, asStatement, catchThrows);
       flows.push(this.flow);
       return { test: instanceTest(this.core, type), write, value, slot: variable.slot };
     });
@@ -1372,7 +1435,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
           scope,
           context,
           expression.finally,
-          before,
+          [...bodyThrows, ...catchThrows],
           loopExits.map((exits, index) => ({
             exits,
             pending: exits.splice(exitStarts[index]),
@@ -1416,11 +1479,11 @@ export abstract class StatementCompiler extends OperatorCompiler {
     scope: Scope,
     context: FunctionContext,
     block: Block,
-    beforeTry: Flow,
+    throws: Flow[],
     loopExits: { exits: Flow[]; pending: Flow[] }[]
   ): Eval {
     const afterTry = this.flow;
-    this.flow = Flow.merge([beforeTry, afterTry, ...loopExits.flatMap(({ pending }) => pending)]);
+    this.flow = Flow.merge([afterTry, ...throws, ...loopExits.flatMap(({ pending }) => pending)]);
     const evaluate = this.compileBlockValue(scope, context, block, undefined, true).eval;
     const afterFinally = this.flow;
     const assignedKeys = [...assignedNames(block.statements)].flatMap((name) => {
