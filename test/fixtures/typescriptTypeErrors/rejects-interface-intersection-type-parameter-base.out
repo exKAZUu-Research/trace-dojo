@@ -1,0 +1,12 @@
+(3,11): error TS2430: Interface 'Empty<T>' incorrectly extends interface 'Base<T>'.
+  Type 'Empty<T>' is not assignable to type 'T'.
+    'Empty<T>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint '{ value: number; }'.
+(4,11): error TS2430: Interface 'Labeled<T>' incorrectly extends interface 'Base<T>'.
+  Type 'Labeled<T>' is not assignable to type 'T'.
+    'Labeled<T>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint '{ value: number; }'.
+(7,11): error TS2430: Interface 'Plain<T>' incorrectly extends interface 'T & object'.
+  Type 'Plain<T>' is not assignable to type 'T'.
+    'Plain<T>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint '{ value: number; }'.
+(8,11): error TS2430: Interface 'Pair<T, U>' incorrectly extends interface 'Base<T & U>'.
+  Type 'Pair<T, U>' is not assignable to type 'T'.
+    'Pair<T, U>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'object'.

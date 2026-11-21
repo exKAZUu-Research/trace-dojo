@@ -1,0 +1,8 @@
+class PropertyMismatch { static [key: string]: number; static bad = "bad"; }
+class IndexMismatch { static [key: string]: number; static [key: number]: string; }
+class Duplicate { static [key: string]: number; static [other: string]: number; }
+class Base { static inherited = "bad"; }
+class Derived extends Base { static [key: string]: number; }
+class ReadonlyIndex { static readonly [key: string]: number; static one = 1; }
+ReadonlyIndex["new"] = 2;
+class WrongThis { static [key: string]: this; }

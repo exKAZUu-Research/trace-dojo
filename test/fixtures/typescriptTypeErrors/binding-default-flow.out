@@ -1,0 +1,6 @@
+(4,15): error TS2454: Variable 'saved' is used before being assigned.
+(9,15): error TS2454: Variable 'saved' is used before being assigned.
+(14,15): error TS2454: Variable 'saved' is used before being assigned.
+(19,21): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+  Property 'toUpperCase' does not exist on type 'number'.
+(24,15): error TS2454: Variable 'saved' is used before being assigned.

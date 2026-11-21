@@ -1,0 +1,40 @@
+class Animal {
+  name = "animal";
+  static kind = "mammal";
+  constructor(public legs: number) {}
+  speak(): string {
+    return `${this.name} makes a sound`;
+  }
+  get label(): string {
+    return `[${this.name}]`;
+  }
+  set label(value: string) {
+    this.name = value;
+  }
+  static describe(): string {
+    return `kind: ${this.kind}`;
+  }
+}
+
+class Dog extends Animal {
+  static kind = "dog";
+  speak(): string {
+    return `${super.speak()} (woof)`;
+  }
+  rename(value: string): string {
+    super.label = value;
+    return super.label;
+  }
+  static describe(): string {
+    return `${super.describe()} / base ${super.kind}`;
+  }
+  legCount(): number {
+    return super.legs;
+  }
+}
+
+const dog = new Dog(4);
+console.log(dog.speak());
+console.log(dog.rename("rex"));
+console.log(Dog.describe());
+console.log(dog.legCount());

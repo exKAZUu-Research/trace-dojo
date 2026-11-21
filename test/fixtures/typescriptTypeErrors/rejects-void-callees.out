@@ -1,0 +1,5 @@
+(1,10): error TS2451: Cannot redeclare block-scoped variable 'name'.
+(2,1): error TS2349: This expression is not callable.
+(5,1): error TS2349: This expression is not callable.
+(6,38): error TS2349: This expression is not callable.
+(7,43): error TS2722: Cannot invoke an object which is possibly 'undefined'.

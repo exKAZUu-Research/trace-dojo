@@ -1,0 +1,51 @@
+class ThrowsAfterAssignment {
+  value;
+  constructor() { this.value = 1; throw 0; }
+}
+class ThrowsInFinally {
+  value;
+  constructor() {
+    try { throw 0; }
+    finally { this.value = 'set'; throw 1; }
+  }
+}
+class ReplacesReturn {
+  value;
+  constructor() {
+    try { this.value = 1; return; }
+    finally { throw 2; }
+  }
+}
+class NestedFinalizers {
+  value;
+  constructor() {
+    try { throw 0; }
+    finally {
+      try { this.value = 1; return; }
+      finally { throw 2; }
+    }
+  }
+}
+class ThrowsBeforeAnyAssignment {
+  value;
+  constructor() { throw 0; }
+}
+class LoopsForever {
+  value;
+  constructor() { for (;;) {} }
+}
+function reads(
+  first: ThrowsAfterAssignment, second: ThrowsInFinally, third: ReplacesReturn,
+  nested: NestedFinalizers, missing: ThrowsBeforeAnyAssignment, loop: LoopsForever,
+): number {
+  return first.value.anything() + second.value.anything() + third.value.anything()
+    + nested.value.anything() + missing.value.anything() + loop.value.anything();
+}
+class NormalExit {
+  value;
+  constructor(flag: boolean) {
+    if (flag) { this.value = 'assigned before throwing'; throw 0; }
+    this.value = 'returned';
+  }
+}
+console.log(new NormalExit(false).value.toUpperCase());

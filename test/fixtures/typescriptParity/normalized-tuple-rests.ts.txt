@@ -1,0 +1,16 @@
+type Mutable<T extends readonly unknown[]> = [...T];
+const copy: Mutable<readonly number[]> = [1];
+copy.push(2);
+
+type TextCopy = [...readonly string[]];
+const text: TextCopy = ["old"];
+text[0] = "new";
+
+type Prefix<T extends unknown[]> = [string?, ...T];
+const fixed: Prefix<[number]> = [undefined, 3];
+const fixedLength: 2 = fixed.length;
+const optional: Prefix<number[]> = [];
+
+const rest: [string, ...number[]] = ["head", 4, 5, 6];
+const [head, first, second, third = 0] = rest;
+console.log(copy, text, fixed, fixedLength, optional.length, head, first, second.toFixed(), third);

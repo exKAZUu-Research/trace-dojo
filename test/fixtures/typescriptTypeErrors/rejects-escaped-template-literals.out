@@ -1,0 +1,1 @@
+(6,7): error TS2322: Type '"a\nb"' is not assignable to type '"ab"'.

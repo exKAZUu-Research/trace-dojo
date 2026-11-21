@@ -1,0 +1,25 @@
+'use strict';
+function assign(lock: (array: number[]) => void, next: number, startLocked: boolean) {
+  const values = [1, 2];
+  let calls = 0;
+  if (startLocked) lock(values);
+  const size = {
+    valueOf() {
+      calls++;
+      if (calls === 2) lock(values);
+      return next;
+    },
+  };
+  try {
+    values.length = size as any;
+    console.log('assigned');
+  } catch (error) {
+    console.log((error as Error).message);
+  }
+  console.log(values.length, Object.getOwnPropertyDescriptor(values, 'length')?.writable, calls);
+}
+function readonlyLength(values: number[]) { Object.defineProperty(values, 'length', { writable: false }); }
+assign(Object.freeze, 4, false);
+assign(readonlyLength, 1, false);
+assign(readonlyLength, 2, false);
+assign(readonlyLength, 2, true);

@@ -1,0 +1,8 @@
+1 arrow fn nested fn #private
+Fields {
+  x: 1,
+  arrow: [Function: arrow],
+  fn: [Function: fn],
+  nested: [class nested]
+}
+field 7

@@ -1,0 +1,12 @@
+const numberAsString: string = ((value = 1) => value)();
+const stringAsNumber: number = (function (value = "hi") { return value; })();
+const dependent: string = ((left, right = left) => right)(1);
+const explicitUndefined = ((value = 1) => value)(
+  undefined
+);
+const wrong: (value: number) => string = (value = "x") => String(value);
+const methods: { run(value: number): void } = {
+  run(value = "x") { console.log(value); }
+};
+const wrongUnion: (value: number | string) => string = (value = true) => String(value);
+const rest: string = ((...values) => values[0])(...([1, 2] as const));

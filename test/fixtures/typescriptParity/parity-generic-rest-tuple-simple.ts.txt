@@ -1,0 +1,4 @@
+function args<T extends any[]>(...a: T): T { return a; }
+const r = args(1, "x");
+const t: [number, string] = r;
+console.log(t);

@@ -1,0 +1,43 @@
+class Rejecting extends RegExp {
+  exec(text: string): RegExpExecArray | null {
+    console.log('exec', text, this.lastIndex);
+    return null;
+  }
+}
+const rejecting = new Rejecting('a', 'g');
+rejecting.lastIndex = 4;
+console.log(rejecting.test('a'));
+console.log('a'.match(rejecting));
+rejecting.lastIndex = 3;
+console.log('a'.search(rejecting), rejecting.lastIndex);
+console.log('a'.replaceAll(rejecting, 'b'));
+console.log('a'.matchAll(rejecting).next().done, rejecting.lastIndex);
+console.log('a-a'.split(rejecting).join(','));
+const replaced = /a/g;
+replaced.exec = () => null;
+console.log(replaced.test('a'), 'a'.match(replaced), 'a'.replace(replaced, 'b'));
+console.log('a'.matchAll(replaced).next().value?.[0]);
+const invalid = /a/;
+(invalid as any).exec = () => 5;
+try { invalid.test('a'); } catch (error) {
+  console.log(error instanceof TypeError, (error as Error).message);
+}
+const custom = /a/;
+(custom as any).exec = () => ({ 0: 'c', 1: 'first', length: 2, index: 1, groups: { extra: 'second' } });
+console.log('abc'.search(custom), 'abc'.replace(custom, '$1-$<extra>'));
+const dynamic = /a/g;
+dynamic.exec = function (this: RegExp, text) {
+  const result = RegExp.prototype.exec.call(this, text);
+  this.exec = () => null;
+  return result;
+};
+console.log('aaa'.match(dynamic)?.join(','), dynamic.lastIndex);
+class Observed extends RegExp {
+  static latest: Observed;
+  constructor(pattern: string | RegExp, flags?: string) {
+    super(pattern, flags);
+    Observed.latest = this;
+  }
+}
+const observed = new Observed('x');
+console.log('x-x'.split(observed).join(','), Observed.latest === observed, Observed.latest.lastIndex);

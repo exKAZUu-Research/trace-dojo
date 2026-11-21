@@ -1,0 +1,27 @@
+function onlyOne<T extends { a: number; b: 1 } | { a: string }>(x: T) {
+  return x.b;
+}
+function numberOnly<T extends string | number>(x: T) {
+  return x.toFixed();
+}
+function misspelled<T extends string | number>(x: T) {
+  return x.lenght;
+}
+function readonlyOne<T extends { readonly a: number } | { a: string }>(x: T) {
+  x.a = 1;
+}
+function optionalOne<T extends { a?: number } | { a: string }>(x: T) {
+  const v: string | number = x.a;
+  return v;
+}
+function indexed<T extends Record<string, number> | { a: string }>(x: T) {
+  const v: string = x.a;
+  return v;
+}
+function arity<T extends { f(): void } | { f(n: number): void }>(x: T) {
+  x.f();
+}
+function callable<T extends (() => number) | ((n: number) => string)>(f: T) {
+  return f();
+}
+console.log(onlyOne, numberOnly, misspelled, readonlyOne, optionalOne, indexed, arity, callable);

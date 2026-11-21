@@ -1,0 +1,5 @@
+type Greeting = `hello ${string}`;
+const label = "bob";
+const g: Greeting = `hello ${label}`;
+const h: Greeting = `bye ${label}`;
+console.log(g, h);

@@ -1,0 +1,2 @@
+(3,80): error TS2339: Property 'value' does not exist on type 'PrivateFirst | PrivateSecond'.
+(5,54): error TS2540: Cannot assign to 'value' because it is a read-only property.

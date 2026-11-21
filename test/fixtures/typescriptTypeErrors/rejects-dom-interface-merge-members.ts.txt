@@ -1,0 +1,21 @@
+interface Event { name: string; date: string }
+const e: Event = { name: "a", date: "b" };
+interface Location { x: number; y: number }
+const l: Location = { x: 1, y: 2 };
+interface Algorithm { x: number }
+function run(a: Algorithm): number { return a.x; }
+run({ x: 1 });
+class Body { n = 1 }
+const b: Body = { n: 2 };
+console.log(new Body().n);
+interface Text { body: string }
+const t: Text = { body: "x" };
+interface Comment { author: string }
+const cm: Comment = { author: "a" };
+interface Notification { message: string }
+function notify(n: Notification): string { return n.message; }
+interface Position { x: number; y: number }
+const p: Position = { x: 1, y: 2 };
+interface KeyAlgorithm { name: string; size: number }
+const k: KeyAlgorithm = { name: "k", size: 1 };
+console.log(e, l, b, t, cm, notify, p, k);

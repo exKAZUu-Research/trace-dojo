@@ -1,0 +1,2 @@
+(3,21): error TS2565: Property 'label' is used before being assigned.
+(9,7): error TS4104: The type 'readonly ["a"]' is 'readonly' and cannot be assigned to the mutable type '["a"]'.

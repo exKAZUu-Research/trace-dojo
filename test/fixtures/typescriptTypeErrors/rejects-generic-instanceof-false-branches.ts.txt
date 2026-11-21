@@ -1,0 +1,3 @@
+class A{p=1;}
+function invalid<T extends A>(x:T&{q:number}){if(!(x instanceof A))return x.q;return 0;}
+function indexed<T extends {a:A},K extends 'a'>(x:T[K]){if(!(x instanceof A))return x.p;return 0;}

@@ -1,0 +1,5 @@
+(1,18): error TS2339: Property 'known' does not exist on type '{} | { unknownName: number; }'.
+(2,31): error TS2353: Object literal may only specify known properties, and 'typo' does not exist in type '{ key?: "left" | undefined; }'.
+(3,42): error TS2353: Object literal may only specify known properties, and 'typo' does not exist in type '{ expected?: "left" | undefined; }'.
+(4,91): error TS2353: Object literal may only specify known properties, and 'added' does not exist in type '{ mode: string; }'.
+(5,65): error TS2353: Object literal may only specify known properties, and 'unknownName' does not exist in type '{ mode: string; }'.

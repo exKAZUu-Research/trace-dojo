@@ -1,0 +1,18 @@
+type Payload = {kind: 'number'; value: number} | {kind: 'text'; value: string};
+
+function locals(payload: Payload) {
+  const {kind, value} = payload;
+  if (kind === 'number') return value.toUpperCase();
+  return value.toFixed();
+}
+
+function parameters({kind, value}: Payload) {
+  if (kind === 'text') return value.toFixed();
+  return value.toUpperCase();
+}
+
+function renamed(payload: Payload) {
+  const {kind: tag, value: item} = payload;
+  if (tag === 'number') return item.toUpperCase();
+  return item.toFixed();
+}

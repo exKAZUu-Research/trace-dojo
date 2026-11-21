@@ -1,0 +1,52 @@
+function defaultStrict(
+  value=1
+){
+  'use strict';
+  return value;
+}
+function restStrict(
+  ...values:number[]
+){
+  'use strict';
+  return values.length;
+}
+function objectStrict(
+  {value}:{value:number}
+){
+  'use strict';
+  return value;
+}
+function arrayStrict(
+  [value]:number[]
+){
+  'use strict';
+  return value;
+}
+const arrowStrict=(
+  value=1
+)=>{
+  'use strict';
+  return value;
+};
+class StrictMethods {
+  constructor(
+    public value=1
+  ){
+    'use strict';
+  }
+  method(
+    value=1
+  ){
+    'use strict';
+    return value;
+  }
+}
+const objectMethods={
+  method(
+    value=1
+  ){
+    'other directive';
+    'use strict';
+    return value;
+  }
+};

@@ -1,0 +1,13 @@
+const key = "foo";
+const index = 1;
+interface Named {
+  [key]: number;
+  readonly [index]: string;
+}
+const wrong: Named = { foo: "no", 1: "a" };
+const missing: Named = { 1: "a" };
+const named: Named = { foo: 1, 1: "a" };
+named[1] = "b";
+type Literal = { [key](): number };
+const literal: Literal = { foo: () => "x" };
+console.log(wrong, missing, literal);

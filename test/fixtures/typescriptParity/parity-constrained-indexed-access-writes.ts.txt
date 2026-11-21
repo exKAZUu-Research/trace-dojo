@@ -1,0 +1,9 @@
+function reset<T extends { n: number; s: string }>(o: T, v: T["n"]) {
+  const w: T["n"] = 10;
+  return v + w;
+}
+function setFirst<T extends { a: string }>(o: T): T["a"] {
+  let x: T["a"] = "z";
+  return x;
+}
+console.log(reset({ n: 1, s: "" }, 3), setFirst({ a: "q", b: 1 }));

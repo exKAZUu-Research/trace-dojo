@@ -1,0 +1,9 @@
+function verifyDomains(
+  structural: void & { member: number },
+  branded: string & { marker: true },
+  overlap: { age: number } & { name: string },
+) {
+  const a: never = structural;
+  const b: never = branded;
+  const c: never = overlap;
+}

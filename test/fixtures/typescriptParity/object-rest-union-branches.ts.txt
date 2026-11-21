@@ -1,0 +1,24 @@
+type Branch = {kind: 'a'; a: string; common: 'keep'} | {kind: 'b'; b: number; common: 'keep'};
+function separate(x: Branch) {
+  const {kind, ...rest} = x;
+  const common: 'keep' = rest.common;
+  const copy = {...rest};
+  console.log(kind, common, 'a' in copy ? copy.a.toUpperCase() : copy.b.toFixed());
+}
+separate({kind: 'a', a: 'text', common: 'keep'});
+separate({kind: 'b', b: 1, common: 'keep'});
+function literals(flag: boolean) {
+  const source = flag ? {drop: 1, a: 'text'} : {drop: 2, b: 1};
+  const {drop, ...rest} = source;
+  console.log(drop, rest.a, rest.b);
+  const {drop: ignored, ...direct} = flag ? {drop: 1, a: 'text'} : {drop: 2, b: 1};
+  console.log('a' in direct ? direct.a : direct.b);
+}
+literals(true);
+literals(false);
+function indexes(x: {ignored: string; val: number}) {
+  const {ignored, ...rest} = x;
+  const indexed: Record<string, number> = rest;
+  console.log(indexed.val);
+}
+indexes({ignored: 'discarded', val: 2});

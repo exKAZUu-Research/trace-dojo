@@ -1,0 +1,4 @@
+true v
+false true
+true true
+[ true, false, true ]

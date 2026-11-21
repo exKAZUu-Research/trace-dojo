@@ -1,0 +1,29 @@
+(9,7): error TS2322: Type 'number[]' is not assignable to type 'number[][]'.
+  Type 'number' is not assignable to type 'number[]'.
+(9,30): error TS2345: Argument of type 'number[]' is not assignable to parameter of type 'number | [number]'.
+  Type 'number[]' is not assignable to type '[number]'.
+    Target requires 1 element(s) but source may have fewer.
+(10,7): error TS2322: Type 'number[]' is not assignable to type 'number[][]'.
+  Type 'number' is not assignable to type 'number[]'.
+(10,30): error TS2345: Argument of type 'number[]' is not assignable to parameter of type 'number | [number, (number | undefined)?]'.
+  Type 'number[]' is not assignable to type '[number, (number | undefined)?]'.
+    Target requires 1 element(s) but source may have fewer.
+(11,7): error TS2322: Type 'number[]' is not assignable to type '(readonly number[])[]'.
+  Type 'number' is not assignable to type 'readonly number[]'.
+(11,40): error TS2345: Argument of type 'readonly number[]' is not assignable to parameter of type 'number | readonly [number]'.
+  Type 'readonly number[]' is not assignable to type 'readonly [number]'.
+    Target requires 1 element(s) but source may have fewer.
+(12,7): error TS2322: Type 'number[]' is not assignable to type '(readonly number[])[]'.
+  Type 'number' is not assignable to type 'readonly number[]'.
+(12,41): error TS2345: Argument of type 'readonly number[]' is not assignable to parameter of type 'number | [number]'.
+  The type 'readonly number[]' is 'readonly' and cannot be assigned to the mutable type '[number]'.
+(13,7): error TS2322: Type 'number[]' is not assignable to type 'number[][]'.
+  Type 'number' is not assignable to type 'number[]'.
+(13,30): error TS2345: Argument of type 'number[]' is not assignable to parameter of type 'number | [number, ...number[]]'.
+  Type 'number[]' is not assignable to type '[number, ...number[]]'.
+    Source provides no match for required element at position 0 in target.
+(14,7): error TS2322: Type 'number[]' is not assignable to type 'number[][]'.
+  Type 'number' is not assignable to type 'number[]'.
+(14,28): error TS2345: Argument of type 'number[]' is not assignable to parameter of type 'number | [...number[], number]'.
+  Type 'number[]' is not assignable to type '[...number[], number]'.
+    Source provides no match for required element at position 1 in target.

@@ -1,0 +1,7 @@
+function f(o: { a(): number; b: (() => number)[] } | undefined) { console.log(o?.["a"](), o?.b[0](), o?.["b"][0]()); }
+f({ a() { return 2; }, b: [() => 3] }); f(undefined);
+const a = [1]; const n: number = a?.[0];
+const o = { a: 1 }; const m: number = o?.["a"];
+function g(x: { c?: () => number }) { return x?.["c"](); }
+function h(x: { d: number } | undefined) { const v: number = x?.["d"]; return v; }
+console.log(n, m);

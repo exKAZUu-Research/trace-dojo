@@ -1,0 +1,38 @@
+interface Options {
+  verbose?: boolean;
+  depth?: number;
+}
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+function run(options: Options & { id: number }): string {
+  return `run ${options.id} verbose=${options.verbose ?? false} depth=${options.depth ?? 1}`;
+}
+
+console.log(run({ id: 1 }));
+console.log(run({ id: 2, depth: 3 }));
+
+const partial: Partial<Point> & { name: string } = { name: "origin" };
+console.log(partial.name, partial.x ?? 0);
+
+const extra = { name: "named", other: true };
+const named: { x?: number } & { name: string } = extra;
+console.log(named.name);
+
+const bothWeak: { x?: number } & { y?: number } = { y: 2 };
+console.log(bothWeak.y);
+
+const labelled: Options & { label?: string } = { label: "only label" };
+console.log(labelled.label);
+
+const either: (Options & { id: number }) | string = { id: 4 };
+console.log(typeof either === "string" ? either : either.id);
+
+function withDefaults<T extends object>(value: T, overrides: Partial<T> & { tag: string }): T & { tag: string } {
+  return { ...value, ...overrides };
+}
+
+console.log(withDefaults({ x: 1, y: 2 }, { tag: "moved", y: 5 }));

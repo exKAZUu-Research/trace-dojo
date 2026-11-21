@@ -1,0 +1,5 @@
+class A { protected v = 1; }
+class B extends A {
+  show(other: A) { return this.v + other.v; }
+}
+console.log(new B().show(new A()));

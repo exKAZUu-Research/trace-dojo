@@ -1,0 +1,2 @@
+(1,12): error TS2300: Duplicate identifier 'a'.
+(1,23): error TS2300: Duplicate identifier 'a'.

@@ -1,0 +1,10 @@
+type MapKeys<T> = { [K in keyof (T & string)]: number };
+type OptionalKeys<T> = { [K in keyof (T & string)]?: number };
+type Unselected<V extends {a: MapKeys<U>; b: {length: number}}, U extends V['b']['length']> = U;
+type TupleOther<V extends [MapKeys<U>, {length: number}], U extends V[1]['length']> = U;
+type Lazy<V extends {a: MapKeys<U>}, U extends {a: V['a']['length']}> = U;
+type ArrayBound<V extends {a: MapKeys<U>}, U extends Array<V['a']['length']>> = U;
+type Optional<V extends {a: OptionalKeys<U>}, U extends V['a']['length']> = U;
+type KnownFalse<V extends false, U extends (V extends true ? {a: MapKeys<U>} : {a: {length: number}})['a']['length']> = U;
+
+console.log('done');

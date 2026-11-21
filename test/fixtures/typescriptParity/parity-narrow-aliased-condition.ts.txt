@@ -1,0 +1,6 @@
+function f(x: string | number): string {
+  const isStr = typeof x === "string";
+  if (isStr) return x.toUpperCase();
+  return x.toFixed(1);
+}
+console.log(f("a"));

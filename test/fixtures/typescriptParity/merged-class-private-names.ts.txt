@@ -1,0 +1,21 @@
+interface Field {
+  "#value": string;
+}
+class Field {
+  #value = 1;
+  ["#value"] = "public";
+  read() { return this.#value; }
+}
+
+interface Method {
+  "#value"(): string;
+}
+class Method {
+  #value = 2;
+  ["#value"]() { return "call"; }
+  read() { return this.#value; }
+}
+
+const field = new Field();
+const method = new Method();
+console.log(field.read(), field["#value"], method.read(), method["#value"]());

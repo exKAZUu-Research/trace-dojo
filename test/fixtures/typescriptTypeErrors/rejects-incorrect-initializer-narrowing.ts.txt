@@ -1,0 +1,38 @@
+let first = true;
+const yes: true = first;
+const array: true[] = [first];
+function check(value: false) { console.log(value); }
+first = false;
+check(first);
+var second = false;
+const no: false = second;
+let third = true as boolean;
+const wide: true = third;
+let fourth = 'text';
+const text: 'text' = fourth;
+let fifth = 1;
+const one: 1 = fifth;
+let {b} = {b: true};
+const bound: true = b;
+let [p] = [true];
+const pair: true = p;
+let [q] = [true] as const;
+const readonlyPair: true = q;
+let [r = true] = [];
+const defaulted: true = r;
+let nothing = null;
+const nil: null = nothing;
+var shared = true;
+function get() { const check: true = shared; }
+const narrowCopy = () => {const test: false = second;};
+const shallow: true = (() => { let value = true; return value; })();
+let choice = Math.floor(0) > 0 ? true : false;
+const union: true = choice;
+let { missing = true } = {};
+const missingLiteral: true = missing;
+let annotated: boolean = true;
+let copy = annotated;
+copy = false;
+let asserted: boolean = true as true;
+let assertedCopy = asserted;
+assertedCopy = false;

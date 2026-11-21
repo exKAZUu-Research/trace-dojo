@@ -1,0 +1,4 @@
+function f<T extends number | undefined, U extends number | undefined>(fallback: T & U, x: (T & U) | undefined = fallback) { const y: T & U = x; return y; }
+function g<T extends number | undefined, U extends number | undefined>(fallback: T & U) { const { x = fallback }: { x?: T & U } = {}; const y: T & U = x; return y; }
+function h<T extends number, U extends number>(fallback: T & U) { const { x = fallback }: { x?: T & U } = {}; const y: T & U = x; return y; }
+console.log(f(undefined as never), g(undefined as never));

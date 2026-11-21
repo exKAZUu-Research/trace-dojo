@@ -1,0 +1,6 @@
+(2,9): error TS1212: Identifier expected. 'implements' is a reserved word in strict mode.
+(3,15): error TS1212: Identifier expected. 'implements' is a reserved word in strict mode.
+(4,9): error TS1212: Identifier expected. 'p\u0061ckage' is a reserved word in strict mode.
+(5,15): error TS1212: Identifier expected. 'package' is a reserved word in strict mode.
+(6,9): error TS1212: Identifier expected. 'public' is a reserved word in strict mode.
+(7,15): error TS1212: Identifier expected. 'public' is a reserved word in strict mode.

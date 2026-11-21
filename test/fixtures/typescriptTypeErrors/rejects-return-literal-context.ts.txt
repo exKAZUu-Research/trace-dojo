@@ -1,0 +1,25 @@
+const greet = () => "hello";
+const hello: "hello" = greet();
+
+function twice(flag: boolean) {
+  if (flag) return "same";
+  return "same";
+}
+const same: "same" = twice(true);
+
+const yes = () => true;
+const truth: true = yes();
+
+const numberOrA: () => "a" | number = () => "a";
+const onlyA: "a" = numberOrA();
+
+const wrongKind: () => "a" | 2 = () => 3;
+
+function choose(flag: boolean) {
+  if (flag) return "left";
+  return "right";
+}
+let side = choose(true);
+side = "up";
+const fixed: "left" | "right" = choose(false);
+console.log(hello, same, truth, onlyA, wrongKind, side, fixed);

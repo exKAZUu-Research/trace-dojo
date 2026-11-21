@@ -1,0 +1,16 @@
+(1,39): error TS2838: All declarations of 'U' must have identical constraints.
+(1,68): error TS2838: All declarations of 'U' must have identical constraints.
+(2,46): error TS2838: All declarations of 'U' must have identical constraints.
+(2,70): error TS2838: All declarations of 'U' must have identical constraints.
+(3,39): error TS2838: All declarations of 'U' must have identical constraints.
+(3,68): error TS2838: All declarations of 'U' must have identical constraints.
+(4,39): error TS2838: All declarations of 'U' must have identical constraints.
+(4,68): error TS2838: All declarations of 'U' must have identical constraints.
+(20,9): error TS2838: All declarations of 'U' must have identical constraints.
+(21,9): error TS2838: All declarations of 'U' must have identical constraints.
+(24,9): error TS2838: All declarations of 'U' must have identical constraints.
+(25,9): error TS2838: All declarations of 'U' must have identical constraints.
+(29,9): error TS2838: All declarations of 'U' must have identical constraints.
+(30,9): error TS2838: All declarations of 'U' must have identical constraints.
+(33,7): error TS2322: Type '"yes"' is not assignable to type '"no"'.
+(34,7): error TS2322: Type '1' is not assignable to type '"no"'.

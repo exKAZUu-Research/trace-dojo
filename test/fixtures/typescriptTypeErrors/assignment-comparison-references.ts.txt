@@ -1,0 +1,12 @@
+function numbers(left: string | number, right: string | number) {
+  if ((left = right) !== (right = 3)) console.log("different");
+  else console.log(left.toFixed());
+}
+function strings(left: string | number, right: string | number) {
+  if ((left = right) != (right = "done")) console.log("different");
+  else console.log(left.toUpperCase());
+}
+function supported(text: string) {
+  let match: RegExpExecArray | null;
+  if ((match = /a/.exec(text)) !== null) console.log(match[0]);
+}

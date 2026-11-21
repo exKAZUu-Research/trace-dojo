@@ -1,0 +1,4 @@
+(25,24): error TS2551: Property 'toFixed' does not exist on type 'string'. Did you mean 'fixed'?
+(26,24): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(27,1): error TS2532: Object is possibly 'undefined'.
+(28,1): error TS2532: Object is possibly 'undefined'.

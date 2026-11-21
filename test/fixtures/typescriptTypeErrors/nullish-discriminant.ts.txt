@@ -1,0 +1,31 @@
+function optional(value: { kind: 'a'; entry: string | null } | { kind: 'b'; entry: number }) {
+  if (value.entry === null) {
+    const incorrectlyNarrowed: 'a' = value.kind;
+  }
+}
+function mixed(value: { kind: 'a'; entry: string | null } | { kind: 'b'; entry: number | undefined }) {
+  if (value.entry === undefined) {
+    const incorrectlyNarrowed: 'b' = value.kind;
+  }
+}
+function shared(value: { tag: 'same'; left: number } | { tag: 'same'; right: number }) {
+  if (value.tag === undefined) {
+    const impossibleParent: never = value;
+  }
+}
+
+function impossibleNumber(value: number) {
+  if (value === undefined) {
+    const invalid: string = undefined;
+  }
+}
+function impossibleBoolean(value: boolean) {
+  if (undefined == value) {
+    const invalid: typeof value = undefined;
+  }
+}
+function impossibleTypeof() {
+  if (typeof undefined === 'string') {
+    const invalid: string = undefined;
+  }
+}

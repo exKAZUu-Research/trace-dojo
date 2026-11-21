@@ -1,0 +1,9 @@
+const o = { x: 1 }; Object.freeze(o);
+const f = () => { "use strict"; o.x = 2; };
+try { f(); console.log("no throw", o.x); } catch (e) { console.log("threw", (e as Error).constructor.name); }
+const a = [1]; Object.freeze(a);
+try { (() => { "use strict"; a[0] = 2; })(); console.log("no throw"); } catch (e) { console.log("threw"); }
+function loose() { const g = () => { o.x = 3; }; g(); return o.x; }
+console.log(loose());
+function strictOuter() { "use strict"; const g = () => { o.x = 4; }; try { g(); return "no throw"; } catch { return "threw"; } }
+console.log(strictOuter());

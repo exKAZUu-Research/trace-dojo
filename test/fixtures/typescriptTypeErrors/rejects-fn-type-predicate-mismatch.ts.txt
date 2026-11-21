@@ -1,0 +1,2 @@
+function isNum(x: string | number): x is boolean { return typeof x === "number"; }
+console.log(isNum(1));

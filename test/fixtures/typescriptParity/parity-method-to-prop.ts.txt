@@ -1,0 +1,3 @@
+class A { greet() { return "a"; } }
+class B extends A { greet = () => "b"; }
+console.log(new B().greet());

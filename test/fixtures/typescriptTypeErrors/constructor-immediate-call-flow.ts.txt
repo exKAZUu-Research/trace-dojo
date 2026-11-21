@@ -1,0 +1,28 @@
+class StringExit {
+  value;
+  constructor() {
+    ((argument: any) => { this.value = "text"; })(this.value = 1 as any);
+  }
+}
+class NumberExit {
+  value;
+  constructor() {
+    ((argument: any) => { this.value = 1; })(this.value = "text" as any);
+  }
+}
+class SkipsDefault {
+  value;
+  constructor() {
+    ((value = (this.value = 1)) => {})();
+  }
+}
+class OptionalCall {
+  value;
+  constructor(receiver?: { call(value: number): void }) {
+    receiver?.call(this.value = 1);
+  }
+}
+new StringExit().value.toFixed();
+new NumberExit().value.toUpperCase();
+new SkipsDefault().value.toFixed();
+new OptionalCall().value.toFixed();

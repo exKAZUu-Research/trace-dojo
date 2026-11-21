@@ -1,0 +1,8 @@
+(1,23): error TS1354: 'readonly' type modifier is only permitted on array and tuple literal types.
+(2,24): error TS1354: 'readonly' type modifier is only permitted on array and tuple literal types.
+(3,40): error TS1257: A required element cannot follow an optional element.
+(4,35): error TS1265: A rest element cannot follow another rest element.
+(5,40): error TS1266: An optional element cannot follow a rest element.
+(6,104): error TS1265: A rest element cannot follow another rest element.
+(7,54): error TS1265: A rest element cannot follow another rest element.
+(8,30): error TS2574: A rest element type must be an array type.

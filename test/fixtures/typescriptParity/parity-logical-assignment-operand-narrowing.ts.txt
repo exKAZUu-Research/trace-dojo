@@ -1,0 +1,25 @@
+function onlyNull(x: null) {
+  return 'none';
+}
+
+function upper(x: string | undefined) {
+  x &&= x.toUpperCase();
+  return x;
+}
+function trimmed(x: string | null) {
+  x &&= x.trim();
+  return x;
+}
+function orNull(x: string | null) {
+  x ??= onlyNull(x);
+  return x;
+}
+function onProperty(o: { p: string | null }) {
+  o.p &&= o.p.trim();
+  return o.p;
+}
+
+console.log(upper('hi'), upper(undefined));
+console.log(trimmed(' a '), trimmed(null));
+console.log(orNull('set'), orNull(null));
+console.log(onProperty({ p: ' b ' }), onProperty({ p: null }));

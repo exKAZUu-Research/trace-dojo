@@ -1,0 +1,17 @@
+type F = ((...x: number[]) => number) | (<T extends number>(x: T) => T);
+function use(f: F) { return f(); }
+type G = ((...x: number[]) => number) | (<T>(x: T) => T);
+function use2(g: G) { return g(); }
+type H = ((...x: number[]) => number) | ((x: number, y: number) => number);
+function use3(h: H) { return h(1); }
+type I = ((a: number, ...x: number[]) => number) | ((x: number, y: number) => number);
+function use4(i: I) { return i(1); }
+type J = ((a?: number, ...x: number[]) => number) | ((x: number) => number);
+function use5(j: J) { return j(); }
+type K = ((...x: number[]) => number) | ((x: number) => number);
+function use6(k: K) { return k(1) + k(1, 2) + k(); }
+type L = ((a: number, ...x: number[]) => number) | ((x: number, y?: number) => number);
+function use7(l: L) { return l(1) + l(1, 2) + l(1, 2, 3) + l(); }
+type M = ((x: number, y?: number) => number) | ((a: number, ...x: number[]) => number);
+function use8(m: M) { return m(); }
+console.log(use((x) => x));

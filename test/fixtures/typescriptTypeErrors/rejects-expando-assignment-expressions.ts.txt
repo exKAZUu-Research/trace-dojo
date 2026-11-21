@@ -1,0 +1,15 @@
+function f() {}
+const label = (f.label = 'text');
+const number: number = f.label;
+function g() {}
+console.log(g.label);
+const assigned = (g.label = 'later');
+function h() {}
+function deferred() {h.hidden = 'hidden';}
+console.log(h.hidden);
+function i() {}
+(() => {i.hidden = 'hidden';})();
+console.log(i.hidden);
+function j() {}
+const C = class {value = (j.hidden = 'hidden');};
+console.log(j.hidden);

@@ -1,0 +1,5 @@
+(2,1): error TS2322: Type '3' is not assignable to type '1 | 2'.
+(4,8): error TS2540: Cannot assign to 'length' because it is a read-only property.
+(8,7): error TS2322: Type 'number' is not assignable to type '1'.
+(10,7): error TS2322: Type '1 | 2 | 3' is not assignable to type '1 | 2'.
+  Type '3' is not assignable to type '1 | 2'.

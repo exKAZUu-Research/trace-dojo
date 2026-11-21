@@ -1,0 +1,31 @@
+interface A extends B { a: number; }
+interface B extends A { b: string; }
+interface Recursive extends Recursive { value: number; }
+interface C extends D {}
+interface D extends E {}
+interface E extends C {}
+interface F extends C { f: number }
+interface Node1 { next?: Node1; children: Node1[] }
+interface G<T> extends G<T> {}
+interface H extends Array<H> {}
+type AliasI = I;
+interface I extends AliasI {}
+interface J extends Partial<J> {}
+interface K extends L<K> {}
+interface L<T> { t: T }
+interface M extends Pick<M, 'x'> { x: number }
+interface M extends Omit<M, 'x'> { x: number }
+interface N extends Pick<N, 'x'> { x: number; y: string }
+interface P { a: number }
+interface P extends Q {}
+interface Q extends P {}
+class Cls { c = 1 }
+interface FromClass extends Cls { d: number }
+interface R extends Record<keyof S, number> {}
+interface S { s: string; r: R }
+interface T1 extends Readonly<{ t: T1 }> {}
+interface Wrap<T> { value: T }
+interface U extends Wrap<U> { extra: number }
+interface V extends Pick<W, 'w'> {}
+interface W extends V { w: number }
+console.log('runs');

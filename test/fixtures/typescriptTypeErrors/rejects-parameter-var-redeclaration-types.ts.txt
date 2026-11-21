@@ -1,0 +1,4 @@
+function a(x: number) { var x: string; }
+function b(x: number) { var x: number; return x; }
+function c({ p }: { p: number }) { var p: number; return p; }
+console.log(b(1), c({ p: 2 }));

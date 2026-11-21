@@ -1,0 +1,11 @@
+class ArrayLiteral{x;constructor(){[this.x]=[1]}}
+class ObjectLiteral{x;constructor(){({x:this.x}={x:1})}}
+class Branch{x;constructor(flag:boolean){if(flag)[this.x]=[1];else [this.x]=['x'];}}
+class Conditional{x;constructor(flag:boolean){[this.x]=flag?[1]:[2]}}
+function identity<T>(value:T){return value;}
+class GenericCall{x;constructor(){[this.x]=identity([1])}}
+class Nullish{x;constructor(input:[number]|undefined){[this.x]=input??[1]}}
+class ConstAsserted{x;constructor(){[this.x]=[1] as const}}
+class AssertedElements{x;constructor(){[this.x]=[1 as number]}}
+class Nested{x;constructor(){({nested:{x:this.x}}={nested:{x:1}})}}
+class AngleConst{x;constructor(){[this.x]=<const>[1]}}

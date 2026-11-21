@@ -1,0 +1,7 @@
+type Missing<X> = X extends { a: number } ? X["missing"] : never;
+const value: Missing<{ a: number }> = 42;
+type FalseBranch<X> = X extends { a: number } ? never : X["a"];
+type Inner<X> = X extends { a: number } ? (X extends { b: string } ? X["c"] : never) : never;
+type AnyCheck<X> = X extends any ? X["a"] : never;
+type Wrapped<X> = [X] extends [{ a: number }] ? X["b"] : never;
+console.log(value);

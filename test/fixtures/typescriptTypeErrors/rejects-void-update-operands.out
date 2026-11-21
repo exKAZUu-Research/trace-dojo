@@ -1,0 +1,12 @@
+(3,1): error TS2356: An arithmetic operand must be of type 'any', 'number', 'bigint' or an enum type.
+(4,3): error TS2356: An arithmetic operand must be of type 'any', 'number', 'bigint' or an enum type.
+(6,1): error TS2356: An arithmetic operand must be of type 'any', 'number', 'bigint' or an enum type.
+(8,1): error TS2356: An arithmetic operand must be of type 'any', 'number', 'bigint' or an enum type.
+(10,1): error TS2356: An arithmetic operand must be of type 'any', 'number', 'bigint' or an enum type.
+(12,1): error TS2356: An arithmetic operand must be of type 'any', 'number', 'bigint' or an enum type.
+(17,1): error TS2365: Operator '+=' cannot be applied to types 'void' and 'number'.
+(18,1): error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+(19,1): error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+(21,1): error TS18048: 'un' is possibly 'undefined'.
+(23,1): error TS18048: 'nu' is possibly 'undefined'.
+(29,2): error TS18047: 'un2' is possibly 'null'.

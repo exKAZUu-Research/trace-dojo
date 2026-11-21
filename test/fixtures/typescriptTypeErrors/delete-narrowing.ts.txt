@@ -1,0 +1,31 @@
+function direct(item: { value?: string }) {
+  if (item.value) {
+    delete item.value;
+    console.log(item.value.toUpperCase());
+  }
+}
+function descendant(item: { value?: { name?: string } }) {
+  if (item.value?.name) {
+    delete item.value;
+    return item.value?.name;
+  }
+}
+function computed(item: { value?: string }) {
+  if (item.value) {
+    delete item["value"];
+    const erased: undefined = item.value;
+  }
+}
+function parenthesized(item: { value?: string }) {
+  if (item.value) {
+    delete (item.value);
+    const erased: undefined = item.value;
+  }
+}
+function chain(item: { child?: { value?: string } }) {
+  delete item.child?.value;
+  if (item.child) {
+    const erased: undefined = item.child.value;
+    return item.child.value?.toUpperCase();
+  }
+}

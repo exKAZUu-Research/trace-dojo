@@ -1,0 +1,12 @@
+function deleteStringIndex(value: {readonly [key:string]:number}, key:string) { delete value[key]; }
+function deleteNumberIndex(value: {readonly [key:number]:number}, key:number) { delete value[key]; }
+function deleteNumericStringIndex(value: {readonly [key:string]:number}, key:number) { delete value[key]; }
+const emptyRequired: {"":number} = {"":1};
+delete emptyRequired[""];
+const emptyReadonly: {readonly ""?:number} = {};
+delete emptyReadonly[""];
+function deleteUnionIndex(value: {readonly [key:string]:number}|{[key:string]:number}, key:string) { delete value[key]; }
+function deleteReadonlyArray(value: readonly number[], key:number) { delete value[key]; }
+function deleteReadonlyUnionProperty(value:{readonly x?:number}|{x?:number}) { delete value.x; }
+function deleteNumericLiteral(value: {readonly [key:number]:number}) { delete value["0"]; }
+function deleteMixedIndex(value: {readonly [key:number]:number;[key:string]:number}, key:string|number) { delete value[key]; }

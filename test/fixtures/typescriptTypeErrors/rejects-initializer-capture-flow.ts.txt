@@ -1,0 +1,32 @@
+let captured: string | number = "before";
+class Fields {
+  readonly instance = captured;
+  static field = captured;
+}
+captured = 1;
+new Fields().instance.toUpperCase();
+Fields.field.toUpperCase();
+
+let fallback: string | number = "before";
+function declared(value = fallback) { return value.toUpperCase(); }
+const arrow = (value = fallback) => value.toUpperCase();
+const object = { read(value = fallback) { return value.toUpperCase(); } };
+fallback = 1;
+declared();
+arrow();
+object.read();
+
+function conditional(first: number | undefined, fallback = (first ??= 1), last = first) {
+  return last;
+}
+const result: number = conditional(undefined);
+
+const untypedThis = {
+  x: 1,
+  inferred(value = this.x) { return value; },
+  annotated(value: number = this.x) { return value; },
+};
+
+class CircularDefault {
+  read(value = this.read()) { return String(value); }
+}

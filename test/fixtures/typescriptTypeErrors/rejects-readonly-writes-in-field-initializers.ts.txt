@@ -1,0 +1,11 @@
+class Counter {
+  readonly count: number = 0;
+  doubled = (this.count = 1);
+  static readonly limit: number = 0;
+  static raised = (this.limit = 1);
+  later = (() => (this.count = 2))();
+  static {
+    this.limit = 3;
+  }
+}
+console.log(new Counter().count, Counter.limit);

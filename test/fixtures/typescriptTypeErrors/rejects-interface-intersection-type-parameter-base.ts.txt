@@ -1,0 +1,17 @@
+type Base<T> = T & { other: number };
+type Id<T> = T;
+interface Empty<T extends { value: number }> extends Base<T> {}
+interface Labeled<T extends { value: number }> extends Base<T> {
+  label: string;
+}
+interface Plain<T extends { value: number }> extends Id<T & object> {}
+interface Pair<T extends object, U extends object> extends Base<T & U> {}
+interface Nested<T extends { value: number }> extends Base<{ value: T }> {}
+interface Concrete extends Base<{ value: number }> {
+  label: string;
+}
+function use<T extends { value: number }>(e: Empty<T>): number {
+  return e.value + e.other;
+}
+const concrete: Concrete = { value: 1, other: 2, label: 'x' };
+console.log(concrete.value + concrete.other);

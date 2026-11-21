@@ -1,0 +1,13 @@
+(2,25): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(3,29): error TS2551: Property 'toFixed' does not exist on type 'string'. Did you mean 'fixed'?
+(6,14): error TS2345: Argument of type '<T extends { length: number; }>(value: T) => T' is not assignable to parameter of type '(value: number) => { length: number; }'.
+  Types of parameters 'value' and 'value' are incompatible.
+    Type 'number' is not assignable to type '{ length: number; }'.
+(7,7): error TS2322: Type 'number' is not assignable to type 'string'.
+(8,7): error TS2322: Type 'number' is not assignable to type '3'.
+(9,7): error TS2322: Type 'string' is not assignable to type '"a"'.
+(11,7): error TS2322: Type 'string' is not assignable to type '"a"'.
+(14,1): error TS18046: 'unknownValue' is of type 'unknown'.
+(18,33): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(19,35): error TS2551: Property 'toFixed' does not exist on type 'string'. Did you mean 'fixed'?
+(20,7): error TS2322: Type 'number' is not assignable to type '3'.

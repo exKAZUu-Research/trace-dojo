@@ -1,0 +1,11 @@
+class Box<T> { constructor(public value: T) {} }
+class Missing extends Box {}
+new Missing(1);
+class Extra extends Box<number, string> {}
+new Extra(1);
+class Plain { constructor(public value: number) {} }
+class NotGeneric extends Plain<number> {}
+new NotGeneric(1);
+class Label<T extends string> { constructor(public value: T) {} }
+class Mismatch extends Label<number> {}
+class Calls extends Box { constructor() { super(1); } }

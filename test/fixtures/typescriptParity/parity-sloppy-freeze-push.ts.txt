@@ -1,0 +1,3 @@
+const a = Object.freeze([1]) as number[];
+try { a.push(2); } catch (e) { console.log((e as Error).message); }
+console.log(a);

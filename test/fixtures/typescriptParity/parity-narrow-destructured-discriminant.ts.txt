@@ -1,0 +1,7 @@
+type R = { ok: true; value: number } | { ok: false; error: string };
+function show(r: R): string {
+  const { ok } = r;
+  if (ok) return String(r.value);
+  return r.error;
+}
+console.log(show({ ok: true, value: 1 }));

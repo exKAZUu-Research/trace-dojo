@@ -1,0 +1,17 @@
+(15,30): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+  Property 'toUpperCase' does not exist on type 'number'.
+(19,7): error TS2367: This comparison appears to be unintentional because the types '"count"' and '"text"' have no overlap.
+(19,30): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+  Property 'toUpperCase' does not exist on type 'number'.
+(23,30): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+  Property 'toUpperCase' does not exist on type 'number'.
+(32,42): error TS2322: Type '"count" | "text"' is not assignable to type '"text"'.
+  Type '"count"' is not assignable to type '"text"'.
+(36,32): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+  Property 'toUpperCase' does not exist on type 'number'.
+(40,30): error TS2322: Type '"count" | "text"' is not assignable to type '"text"'.
+  Type '"count"' is not assignable to type '"text"'.
+(46,7): error TS2322: Type 'true | undefined' is not assignable to type 'true'.
+  Type 'undefined' is not assignable to type 'true'.
+(47,17): error TS2339: Property '3' does not exist on type '[1, "a"] | [2, "b", true]'.
+(51,11): error TS2339: Property '1' does not exist on type '[1] | [2]'.

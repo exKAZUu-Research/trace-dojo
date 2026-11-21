@@ -1,0 +1,8 @@
+interface ExtendsObject extends Object {}
+const derived: ExtendsObject = {};
+const badSettings: { verbose?: boolean } = derived;
+const mutable: [number, number] = [1, 2];
+const badIndex: { [key: string]: number } = mutable;
+const readonlyTuple: readonly [number] = [1];
+function read(items: { [key: string]: number }) { console.log(items.length); }
+read(readonlyTuple);

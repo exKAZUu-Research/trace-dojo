@@ -1,0 +1,7 @@
+interface Box<T> { value: T; optional?: T; }
+type Unexpected<T> = Box<T>["missing"];
+type TooFar<T> = [T, T][2];
+function get<T>(value: Box<T>["optional"]): T { return value; }
+function first<T>(value: T[][0]): string { return value; }
+function pick<T extends { name: string }>(value: T["name"]): string { return value; }
+function narrow<T extends { name: string }>(value: string): T["name"] { return value; }

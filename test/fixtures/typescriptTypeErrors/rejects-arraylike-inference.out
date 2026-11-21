@@ -1,0 +1,8 @@
+(2,26): error TS2551: Property 'toFixed' does not exist on type 'string'. Did you mean 'fixed'?
+(3,40): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(4,1): error TS2571: Object is of type 'unknown'.
+(6,10): error TS2339: Property 'toFixed' does not exist on type 'string | number'.
+  Property 'toFixed' does not exist on type 'string'.
+(7,7): error TS2345: Argument of type 'number' is not assignable to parameter of type 'ArrayLike<unknown>'.
+(10,7): error TS2345: Argument of type 'MissingIndex' is not assignable to parameter of type 'ArrayLike<unknown>'.
+  Index signature for type 'number' is missing in type 'MissingIndex'.

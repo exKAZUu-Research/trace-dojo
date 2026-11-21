@@ -1,0 +1,14 @@
+type F1<V extends {a: {length: number}}, K extends keyof V> = NonNullable<V[K]>['length'];
+type F2<V extends {a: {length: number}}, K extends keyof V> = (V[K] & {})['length'];
+type F3<V extends {a: {length: number}}, K extends keyof V> = (V[K] | {length: number})['length'];
+type F4<Z, V extends {a: {length: number}}, K extends keyof V> =
+  (Z extends true ? V[K] : {length: number})['length'];
+type F5<V extends {a: {length: number}}, K extends keyof V> = [V[K], {length: number}][number]['length'];
+type F6<V extends {a: {length: number}}, K extends keyof V> = (V[K] & {size: number})['length'];
+
+type UnknownBranch<T, K extends keyof T> =
+  T[K] extends {a: {text: string}} ? T[K]['other']['text'] : never;
+type WrongSelected<T, K extends keyof T> =
+  T[K] extends {a: {text: string}} ? T[K]['a']['missing'] : never;
+type WrongProjectedKey<V extends {a: {name: string}}, T, P extends keyof T> =
+  T[P] extends {selected: 'bad'} ? V['a'][T[P]['selected']] : never;

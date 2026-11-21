@@ -1,0 +1,28 @@
+type Id<T> = T;
+type Union<T> = T | string;
+type Box<T> = { v: T };
+type Cond<T> = T extends string ? T : never;
+type Both<A, B> = A & B;
+type Second<A, B> = B;
+type Nested<T> = Id<Id<T>>;
+type List<T> = T[];
+type Indexed<T> = T[keyof T];
+type Defaulted<T, U = T> = U;
+type Mapped<T> = { [K in keyof T]?: T[K] };
+function viaId<T extends Id<T>>() {}
+function viaUnion<T extends Union<T>>() {}
+function viaBox<T extends Box<T>>() {}
+function viaCond<T extends Cond<T>>() {}
+function viaBoth<T extends Both<T, {}>>() {}
+function viaFirst<T extends Second<T, string>>() {}
+function viaSecond<T extends Second<string, T>>() {}
+function viaNested<T extends Nested<T>>() {}
+function viaList<T extends List<T>>() {}
+function viaMutual<T extends U, U extends Id<T>>() {}
+function viaOther<T extends Id<U>, U extends string>() {}
+function viaIndexed<T extends Indexed<T>>() {}
+function viaDefault<T extends Defaulted<T>>() {}
+function viaMapped<T extends Mapped<T>>() {}
+function viaDistributive<T extends (T extends string ? number : boolean)>() {}
+type Self<T extends Self<T>> = T;
+console.log('ready');

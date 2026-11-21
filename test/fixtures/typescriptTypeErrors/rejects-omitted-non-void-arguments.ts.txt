@@ -1,0 +1,13 @@
+function m(x: number, y: number | void) { console.log(x, y); }
+m();
+function n(x: number | void, y: number) { console.log(x, y); }
+n(undefined);
+function u(x: unknown) { console.log(x); }
+u();
+function an(x: any) { console.log(x); }
+an();
+function gen<T>(x: T) { console.log(x); }
+gen<void>();
+gen<number | void>();
+function ud(x: undefined) {} ud();
+function un(x: string | undefined) {} un();

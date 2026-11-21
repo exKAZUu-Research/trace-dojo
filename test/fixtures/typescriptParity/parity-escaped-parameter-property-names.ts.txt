@@ -1,0 +1,8 @@
+class Box { constructor(public \u0078: number) {} }
+console.log(new Box(3).x);
+class Base { constructor(public y: number) {} }
+class D extends Base {
+  constructor(private \u{7a}: number, readonly w\u0061: string, public \u0062c = 5) { super(1); }
+  show() { return this.z + this.wa + this.bc + this.y; }
+}
+console.log(new D(4, "q").show());

@@ -1,0 +1,14 @@
+type WritableUnion = {x: string} | {x: number};
+function writeDot(value: WritableUnion) { value.x = "hello"; console.log(value.x); value.x = 2; console.log(value.x); }
+function writeBracket(value: WritableUnion) { value["x"] = "bye"; console.log(value["x"]); value["x"] = 3; console.log(value["x"]); }
+writeDot({x:1}); writeBracket({x:"initial"});
+class StringWrite { get value(): string { return "old"; } set value(input: string | boolean) { console.log(input); } }
+class NumberWrite { get value(): number { return 1; } set value(input: number | boolean) { console.log(input); } }
+function writeAccessor(value: StringWrite | NumberWrite) { value.value = "new"; value["value"] = 4; value.value = true; }
+writeAccessor(new StringWrite());
+function deleteOptionalUnion(value:{x:number}|{x?:number}) { delete value.x; console.log(value.x); }
+function deleteWritableOwn(value:{readonly [key:string]:number|undefined;x?:number}) { delete value.x; console.log(value.x); }
+deleteOptionalUnion({x:1}); deleteWritableOwn({x:2});
+function indexedUnionWrite(value:{x:number}|{[key:string]:string}) { value.x="indexed"; console.log(value.x); }
+function writableOwnOverridesIndex(value:{readonly [key:string]:number;x:number}) { value.x=4; value["x"]=5; console.log(value.x); }
+indexedUnionWrite({x:1}); writableOwnOverridesIndex({x:2});

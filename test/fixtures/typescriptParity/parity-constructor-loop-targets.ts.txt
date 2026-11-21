@@ -1,0 +1,11 @@
+class Values{x;constructor(values:number[]){for(this.x of values){}}}
+class Keys{x;constructor(values:{a:number}){for(this.x in values){}}}
+class Literal{x;constructor(){for(this.x of [1,2]){}}}
+class Pattern{x;y;constructor(values:[number,string][]){for([this.x,this.y] of values){}}}
+class ObjectPattern{x;constructor(values:{value?:number}[]){for({value:this.x=9} of values){}}}
+const a:number|undefined=new Values([3]).x;
+const b:string|undefined=new Keys({a:1}).x;
+const c:number|undefined=new Literal().x;
+const d=new Pattern([[4,'text']]);const dx:number|undefined=d.x;const dy:string|undefined=d.y;
+const e:number|undefined=new ObjectPattern([{}]).x;
+console.log(a,b,c,dx,dy,e,new Values([]).x);

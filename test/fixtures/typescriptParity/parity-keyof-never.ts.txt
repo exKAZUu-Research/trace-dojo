@@ -1,0 +1,4 @@
+type Keys = keyof never;
+const text: Keys = "x";
+const index: Keys = 1;
+console.log(text, index);

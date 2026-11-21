@@ -1,0 +1,21 @@
+class Brand {
+  static #tag = 1;
+  static property(value: typeof Brand | { other: string }): string {
+    if (#tag in value) return "own";
+    return value.other.toUpperCase();
+  }
+  static negated(value: typeof Brand | { other: number }): string {
+    if (!(#tag in value)) return value.other.toFixed();
+    return "own";
+  }
+  static inherited(value: typeof Child): number {
+    if (#tag in value) return value.#tag;
+    return value.other;
+  }
+}
+class Child extends Brand {
+  static other = 2;
+}
+Brand.property(Child);
+Brand.negated(Child);
+Brand.inherited(Child);

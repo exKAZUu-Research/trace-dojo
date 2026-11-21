@@ -1,0 +1,2 @@
+(9,13): error TS2741: Property 'x' is missing in type '{ y: number; f: (this: { x: number; }) => number; }' but required in type '{ x: number; }'.
+(11,13): error TS2684: The 'this' context of type 'void' is not assignable to method's 'this' of type '{ x: number; }'.

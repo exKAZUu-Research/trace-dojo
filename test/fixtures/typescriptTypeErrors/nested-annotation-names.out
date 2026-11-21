@@ -1,0 +1,9 @@
+(2,18): error TS2552: Cannot find name 'Strng'. Did you mean 'String'?
+(3,18): error TS2304: Cannot find name 'DoesNotExist'.
+(5,16): error TS2304: Cannot find name 'MissingField'.
+(6,32): error TS2304: Cannot find name 'MissingArg'.
+(7,25): error TS2304: Cannot find name 'MissingResult'.
+(9,29): error TS2314: Generic type 'Array<T>' requires 1 type argument(s).
+(11,34): error TS2749: 'ghost' refers to a value, but is being used as a type here. Did you mean 'typeof ghost'?
+(17,42): error TS2344: Type 'boolean' does not satisfy the constraint 'string | number | symbol'.
+(17,66): error TS1354: 'readonly' type modifier is only permitted on array and tuple literal types.

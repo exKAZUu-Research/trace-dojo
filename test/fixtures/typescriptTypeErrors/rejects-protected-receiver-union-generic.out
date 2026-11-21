@@ -1,0 +1,3 @@
+(6,18): error TS2446: Property 'x' is protected and only accessible through an instance of class 'B'. This is an instance of class 'A | B'.
+(9,18): error TS2446: Property 'x' is protected and only accessible through an instance of class 'B'. This is an instance of class 'A'.
+(12,18): error TS2446: Property 'x' is protected and only accessible through an instance of class 'B'. This is an instance of class 'B | C'.

@@ -1,0 +1,6 @@
+class Box<T> { v!: T; copy = this.make(); make(): T[] { return [this.v]; } }
+const a = new Box<number>(); const b = new Box<string>();
+const n: number[] = a.copy; const s: string[] = b.copy;
+console.log(n.length, s.length);
+class Counter { count = 0; next = this.count + 1; static zero = 0; static one = Counter.zero + 1; }
+console.log(new Counter().next, Counter.one);

@@ -1,0 +1,18 @@
+type Dict = { [key:string]: number };
+type Other = { value: string };
+function uStruct<T extends {a:1}>(x:(T | Dict)[never]): never { return x; }
+function uObject<T extends object>(x:(T | Dict)[never]): never { return x; }
+function uUnknown<T extends unknown>(x:(T | Dict)[never]): never { return x; }
+function uAny<T extends any>(x:(T | Dict)[never]): never { return x; }
+function uEmpty<T extends {}>(x:(T | Dict)[never]): never { return x; }
+function uChain<T extends U,U extends object>(x:(T | Dict)[never]): never { return x; }
+function uUnbounded<T>(x:(T | Dict)[never]): never { return x; }
+function uIndexed<T extends Dict>(x:(T | Other)[never]): never { return x; }
+function iUnbounded<T>(x:(T & Dict)[never]): never { return x; }
+function each<T extends { a: 1 }>(x:(T & { b: 2 })['a']): 'bad' { return x; }
+function other<T extends { a: 1 }>(x:(T & { b: 2 })['b']): 'bad' { return x; }
+function twoWrong<T extends { a: 1 }>(x:(T & { b: 2 })['a'|'b']): 1 { return x; }
+function intersectionBoth<T extends { a: 1 }>(x:(T & { a: number })['a']): 2 { return x; }
+function unionBoth<T extends { a: 1 }>(x:(T | { a: number })['a']): 2 { return x; }
+function unionMissing<T extends { a: 1 }>(x:(T | { b: 2 })['a']): 1 { return x; }
+function neverUnion<T extends { a: 1 },K extends never>(x:(T|Record<string,number>)[K]): never { return x; }

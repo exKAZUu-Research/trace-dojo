@@ -1,0 +1,17 @@
+type T0 = {[K in boolean]: number};
+type T<K> = { [P in K]: string };
+type U = { [K in "x" as boolean]: number };
+type V<K extends string> = { [P in K]: string };
+type W = { [P in never]: 1 };
+type X = { [P in "a" | 1 | symbol]: 1 };
+type Y = { [P in {}]: 1 };
+type Z<K extends string> = { [P in K as `x${P}`]: 1 };
+type Z2<K> = { [P in keyof K as P]: 1 };
+type Z3 = { [P in "a" as {a:1}]: 1 };
+type Z4 = { [P in "a" | boolean]: 1 };
+type Z5 = { [P in any]: 1 };
+type Z6 = { [P in unknown]: 1 };
+type Z8<K> = { [P in keyof K]: 1 };
+type Z9<K extends PropertyKey> = { [P in K as P]: 1 };
+type Z10<K> = { [P in "a" as K]: 1 };
+console.log(1);

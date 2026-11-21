@@ -1,0 +1,12 @@
+type V<T extends {a:number},K extends string> = T[K extends "b" ? K : "a"];
+type V2<T extends {0:number},K extends number> = T[K extends 1 ? K : 0];
+type V3<T extends {a:number},K extends string> = T[K extends "a" ? K : "a"];
+type V4<T extends {a:number},K extends "a"|"b"> = T[K extends "a" ? K : "a"];
+type V5<T extends {a:number},K extends "a"> = T[K extends "a" ? K : "b"];
+type A<T extends {a:number},K extends "a"|"b"> = T[K extends "b" ? K : "a"];
+type B<T extends {a:number; b:number},K extends string> = T[K extends "b" ? K : "a"];
+type C<T extends {a:number},K extends string> = T[K extends `x${string}` ? "a" : "a"];
+type E<T extends {a:number},K extends string> = T[K extends "b" | "c" ? K : "a"];
+type F<T extends {a:number; b:number},K extends string> = T[K extends "b" | "c" ? K : "a"];
+type G<T extends {a:number},K extends unknown> = T[K extends "b" ? "a" : "a"];
+type H<T extends {a:number; [k:string]:number},K extends string> = T[K extends "b" ? K : "a"];

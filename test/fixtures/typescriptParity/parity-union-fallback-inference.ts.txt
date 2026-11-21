@@ -1,0 +1,28 @@
+function first<T>(input: [T?]): T { return input[0]!; }
+function firstRest<T>(input: [T?, ...T[]]): T { return input[0]!; }
+function firstObject<T>(input: {value?:T}): T { return input.value!; }
+function list<T = string>(input: [T?]): T[] { return []; }
+function head<A extends unknown[], T = string>(input: [...A,T?]): T[] { return []; }
+function union<T>(input: string | T): T[] { return []; }
+function literalUnion<T>(input: 'first' | T): T[] { return []; }
+function broadFixed<T>(input: T | { fixed: string }): T[] { return []; }
+const actual: undefined = first([undefined]);
+const objectActual: undefined = firstObject({value:undefined});
+const noSource: string[] = list([]);
+const noField: string = firstObject({});
+const optionalArgument: string | undefined = 'x';
+const concrete: string[] = union(optionalArgument);
+const wrapped = { fixed: 'x', extra: true };
+const broadResult = broadFixed(wrapped);
+const broadActual: (typeof wrapped)[] = broadResult;
+console.log(actual, objectActual, noSource, noField, concrete, broadActual);
+function single<T>(input: string | T): T { return input as T; }
+function exact<T>(input:'a' | T): T[] { return []; }
+function hint<T>(x: { value: T }, other?: T): T[] { return [x.value]; }
+const s=single('a');
+const e=exact('a');
+const h=hint({value:'a' as const},'a');
+const goodDirect:'a'=s;
+const goodLiteral:'a'[]=e;
+const goodNested:'a'[]=h;
+console.log(goodDirect,goodLiteral,goodNested);

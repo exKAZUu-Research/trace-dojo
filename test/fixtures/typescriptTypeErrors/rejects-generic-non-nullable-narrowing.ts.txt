@@ -1,0 +1,15 @@
+function asserted<T>(x: T): NonNullable<T> { return x!; }
+function looseCheck<T>(x: T) { if (x != null) { const y: NonNullable<T> = x; return y; } }
+function strictChecks<T>(x: T) { if (x !== undefined && x !== null) { const y: NonNullable<T> = x; return y; } }
+function truthy<T>(x: T) { if (x) { const y: NonNullable<T> = x; return y; } }
+function earlyReturn<T>(x: T) { if (x == null) return; const y: T & {} = x; return y; }
+function onlyUndefined<T>(x: T) { if (x !== undefined) { const y: NonNullable<T> = x; } }
+function onlyNull<T>(x: T) { if (x !== null) { const y: number = x; } }
+function declaredUndefined<T>(x: T | undefined) { if (x !== undefined) { const y: NonNullable<T> = x; } }
+function declaredNull<T>(x: T | null) { if (x !== undefined) { const y: number = x; } }
+function notString<T>(x: T) { const y: string = x!; }
+function nullPart<T>(x: T & null) { const y: {} = x; }
+function orElse<T>(x: T, fallback: string) { const y: number = x || fallback; }
+function bounded<T extends {}>(x: T) { const y: T = x!; }
+function nullableBound<T extends string | null>(x: T) { if (x != null) { const y: string = x; } }
+console.log(1);

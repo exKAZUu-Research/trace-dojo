@@ -1,0 +1,27 @@
+function printHidden(value: object): void { console.dir(value, { showHidden: true }); }
+const p = { constructor: Number, x: 1 };
+const custom = Object.create(p);
+printHidden(custom);
+console.log('%o', custom);
+printHidden(Object.create({ constructor: Math.max, value: 1 }));
+const builtinName = { constructor: Number, hidden: 2 };
+const mathName = { constructor: Math.max, shown: 3 };
+printHidden(Object.create(Object.assign(Object.create(builtinName), { near: 4 })));
+printHidden(Object.create(Object.assign(Object.create(mathName), { near: 5 })));
+const PretendBuiltin = function Number() {};
+(PretendBuiltin.prototype as { ignored?: number }).ignored = 6;
+printHidden(Object.create(PretendBuiltin.prototype));
+printHidden(Object.create(Object.assign(Object.create(PretendBuiltin.prototype), { near: 7 })));
+const PretendNamed = function Custom() {};
+(PretendNamed.prototype as { visible?: number }).visible = 8;
+printHidden(Object.create(PretendNamed.prototype));
+const renamed = Math.min;
+Object.defineProperty(renamed, 'name', { value: 'Number' });
+printHidden(Object.create(Object.assign(Object.create({ constructor: renamed, hidden: 9 }), { near: 10 })));
+printHidden(Object.create({ constructor: renamed, shown: 11 }));
+printHidden(Object.create(Object.assign(Object.create(Object.create({ tooDeep: 12 })), { near: 13 })));
+Object.defineProperty(Array.prototype, 'listMarker', { value: 14, configurable: true });
+printHidden([1]);
+printHidden(Object.create(Array.prototype));
+Object.defineProperty(Array.prototype, 'constructor', { value: Math.max, configurable: true });
+printHidden([1]);

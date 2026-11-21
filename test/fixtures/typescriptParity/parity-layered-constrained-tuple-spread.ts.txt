@@ -1,0 +1,16 @@
+function copy<
+  T0 extends [number], T1 extends [...T0, number],
+  T2 extends [...T1, number], T3 extends [...T2, number],
+  T4 extends [...T3, number], T5 extends [...T4, number],
+  T6 extends [...T5, number], T7 extends [...T6, number],
+  T8 extends [...T7, number], T9 extends [...T8, number],
+  T10 extends [...T9, number], T11 extends [...T10, number],
+  T12 extends [...T11, number], T13 extends [...T12, number],
+  T14 extends [...T13, number], T15 extends [...T14, number],
+  T16 extends [...T15, number], T17 extends [...T16, number],
+  T18 extends [...T17, number], T19 extends [...T18, number],
+  T20 extends [...T19, number]
+>(source: T20): [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number] {
+  return [...source];
+}
+console.log(copy([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]));

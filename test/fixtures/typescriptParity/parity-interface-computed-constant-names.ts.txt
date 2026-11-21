@@ -1,0 +1,20 @@
+const index = 1;
+const key = "foo";
+const keys = { a: "ea", b: 2 } as const;
+const total = "total";
+interface Computed {
+  [index]: string;
+  [key]?: number;
+  readonly [keys.a]: boolean;
+  [keys.b](x: number): number;
+  get [total](): number;
+}
+const numericKey: keyof Computed = 1;
+const computed: Computed = { 1: "one", ea: true, 2: (x) => x * 2, total: 5 };
+console.log(computed[1], computed.foo, computed.ea, computed[2](21), computed.total, numericKey);
+type PickKeys<T, K extends keyof T> = { [P in K]: T[P] };
+const picked: PickKeys<Computed, typeof index> = { 1: "x" };
+console.log(picked);
+type Literal = { [key]: number; [total](): string };
+const literal: Literal = { foo: 1, total: () => "t" };
+console.log(literal.foo, literal.total());

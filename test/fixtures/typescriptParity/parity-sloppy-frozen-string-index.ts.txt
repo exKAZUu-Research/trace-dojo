@@ -1,0 +1,3 @@
+const s: any = "abc";
+s[0] = "z";
+console.log(s);

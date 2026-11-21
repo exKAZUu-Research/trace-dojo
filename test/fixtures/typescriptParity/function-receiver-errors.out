@@ -1,0 +1,6 @@
+before
+TypeError function named() { } is not extensible
+TypeError Cannot delete property 'fixed' of function named() { }
+TypeError Cannot assign to read only property 'fixed' of function 'function named() { }'
+TypeError Cannot set property accessor of function named() { } which has only a getter
+1 2

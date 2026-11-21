@@ -1,0 +1,23 @@
+const id = Symbol("id");
+const tag = Symbol.for("tag");
+let loose = Symbol("loose");
+const user = { [id]: 7, [tag]: "t", name: "a" };
+const n: string = user[id];
+const t: number = user[tag];
+console.log(user[loose]);
+const other = Symbol("other");
+console.log(user[other]);
+let widened = id;
+const kept: typeof id = widened;
+const same: typeof id = id;
+const notSame: typeof other = id;
+class Keys {
+  static readonly key = Symbol("key");
+  static plain = Symbol("plain");
+}
+const byKey = { [Keys.key]: 1 };
+const k: string = byKey[Keys.key];
+interface Shape { [id]: number }
+const shape: Shape = { [id]: "x" };
+const missing: Shape = {};
+user[id] = "seven";

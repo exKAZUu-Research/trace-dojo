@@ -1,0 +1,8 @@
+function memo(n: number): number { return n; }
+memo.cache = [] as number[];
+memo.size = memo.cache.length;
+console.log(memo.size);
+const h = () => 1;
+h.a = 1;
+h.b = h.a + 1;
+console.log(h.b);

@@ -1,0 +1,18 @@
+class Point {
+  constructor(public { x, y }: { x: number; y: number }) {}
+}
+class Pair {
+  constructor(public first: number, private [second]: number[]) {}
+}
+class Box {
+  constructor(public value: number);
+  constructor(public value: number) {}
+}
+function describe(readonly label: string): string {
+  return label;
+}
+const shape = { scale(protected factor: number) {} };
+class Circle {
+  constructor(readonly radius: number) {}
+}
+console.log(new Circle(2).radius);

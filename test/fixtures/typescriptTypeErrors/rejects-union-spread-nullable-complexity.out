@@ -1,0 +1,2 @@
+(1,56): error TS2590: Expression produces a union type that is too complex to represent.
+(2,61): error TS2590: Expression produces a union type that is too complex to represent.

@@ -1,0 +1,11 @@
+(3,51): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type '{ v: number; }'.
+(5,28): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type '{ v: number; }'.
+(6,65): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type '{ v: number; }'.
+(9,59): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type '{ v: number; }'.
+(10,54): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type '{ v: number; }'.
+(13,29): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type 'V'.
+(14,22): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type 'V'.
+(16,23): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type 'V'.
+(17,34): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type 'V'.
+(18,31): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type 'V'.
+(20,11): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type 'V'.

@@ -1,0 +1,4 @@
+(3,21): error TS18047: 'strs' is possibly 'null'.
+(10,28): error TS2339: Property 'sideLength' does not exist on type '{ kind: "circle"; radius: number; }'.
+(21,13): error TS2322: Type '{ kind: "triangle"; sideLength: number; }' is not assignable to type 'never'.
+(26,1): error TS2322: Type 'boolean' is not assignable to type 'string | number'.

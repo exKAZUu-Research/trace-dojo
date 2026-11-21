@@ -1,0 +1,20 @@
+class BranchBase { constructor(public n: number = 0) {} }
+class BranchChild extends BranchBase {
+  constructor(flag: boolean, public value: number) {
+    if (flag) super(1); else super(2);
+    console.log(this.n, this.value);
+  }
+}
+new BranchChild(true, 9);
+new BranchChild(false, 8);
+class BlockChild extends BranchBase {
+  constructor(public value: number) {
+    { const value = 90; super(value); console.log(this.value); }
+    console.log(this.n, this.value);
+  }
+}
+new BlockChild(7);
+class ReturningChild extends BranchBase {
+  constructor(public value: number) { return super(4) as unknown as ReturningChild; }
+}
+console.log(new ReturningChild(5));

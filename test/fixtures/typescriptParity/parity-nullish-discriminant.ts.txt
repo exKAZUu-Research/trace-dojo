@@ -1,0 +1,32 @@
+type NullableValue = { kind: 'a'; value: string | null } | { kind: 'b'; value: number };
+function inspect(value: NullableValue) {
+  if (value.value === undefined) console.log(value.kind);
+  if (value.value === null) {
+    const kind: 'a' | 'b' = value.kind;
+    console.log(kind);
+  } else {
+    const defined: string | number = value.value;
+    console.log(defined);
+  }
+}
+function same(value: { tag: 'same'; left: number } | { tag: 'same'; right: number }) {
+  if (value.tag === undefined) console.log(value.tag);
+  console.log(value.tag);
+}
+function literal(value: { code?: 'a' | 'b'; tag: 'left' } | { code: 'c'; tag: 'right' }) {
+  if (value.code === 'c') { const result: 'right' = value.tag; console.log(result); }
+  if (value.code === undefined) { const result: 'left' = value.tag; console.log(result); }
+}
+function patterned(value: { tag: `a-${number}`; left: string } | { tag: `b-${number}`; right: string }) {
+  if (value.tag === 'a-1') console.log(value.left);
+}
+function unit(value: { kind: 'a'; part: string | null } | { kind: 'b'; part: null }) {
+  if (value.part !== null) { const result: 'a' = value.kind; console.log(result); }
+}
+inspect({ kind: 'a', value: null });
+inspect({ kind: 'b', value: 3 });
+same({ tag: 'same', left: 4 });
+literal({ code: 'c', tag: 'right' });
+literal({ tag: 'left' });
+patterned({ tag: 'a-1', left: 'pattern' });
+unit({ kind: 'a', part: 'narrow' });

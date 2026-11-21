@@ -1,0 +1,14 @@
+(1,11): error TS2310: Type 'A' recursively references itself as a base type.
+(2,11): error TS2310: Type 'B' recursively references itself as a base type.
+(3,11): error TS2310: Type 'Recursive' recursively references itself as a base type.
+(4,11): error TS2310: Type 'C' recursively references itself as a base type.
+(5,11): error TS2310: Type 'D' recursively references itself as a base type.
+(6,11): error TS2310: Type 'E' recursively references itself as a base type.
+(9,11): error TS2310: Type 'G<T>' recursively references itself as a base type.
+(12,11): error TS2310: Type 'I' recursively references itself as a base type.
+(13,11): error TS2310: Type 'J' recursively references itself as a base type.
+(16,11): error TS2310: Type 'M' recursively references itself as a base type.
+(17,11): error TS2310: Type 'M' recursively references itself as a base type.
+(19,11): error TS2310: Type 'P' recursively references itself as a base type.
+(20,11): error TS2310: Type 'P' recursively references itself as a base type.
+(21,11): error TS2310: Type 'Q' recursively references itself as a base type.

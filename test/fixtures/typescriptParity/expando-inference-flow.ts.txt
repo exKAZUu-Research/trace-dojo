@@ -1,0 +1,12 @@
+let num: string | number = "text";
+function count() {}
+count.property = 1;
+console.log(num.toUpperCase());
+count.property = (num = 3);
+console.log(num.toFixed(1), count.property.toFixed(1));
+const label = () => "";
+let text: string | number = 1;
+label.property = "initial";
+console.log(text.toFixed(1));
+label.property = (text = "changed");
+console.log(text.toUpperCase(), label.property.toUpperCase());

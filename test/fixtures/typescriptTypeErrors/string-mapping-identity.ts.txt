@@ -1,0 +1,10 @@
+type Numeric = Uppercase<`${number}`>;
+const first: Numeric = "12";
+const rejected: Numeric = "AB";
+const next: Numeric = "34";
+
+type WithPrefix = Lowercase<`id-${number}`>;
+const wrongPrefix: WithPrefix = "id-unknown";
+const validPrefix: WithPrefix = "id-56";
+const wrongCase: WithPrefix = "ID-78";
+const validAgain: WithPrefix = "id-90";

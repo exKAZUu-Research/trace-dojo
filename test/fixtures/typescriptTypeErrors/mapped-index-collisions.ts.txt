@@ -1,0 +1,5 @@
+type Optional = { readonly [K in 'a' | 'b' as string]?: K };
+type Values = { [K in 'a' | 'b' as string]: { key: K; data: K extends 'a' ? number : string } };
+const frozen: Optional = { value: 'a' };
+frozen.value = 'b';
+const mismatched: Values = { key: { key: 'a', data: 'wrong' } };

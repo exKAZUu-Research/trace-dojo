@@ -1,0 +1,14 @@
+type Len<T> = (T & string)['length'];
+type MappedLen<U extends Len<U>> = U;
+type ArrayLen<U extends [Len<U>]> = U;
+type PlainCallback<T> = (x: T & string) => void;
+type CallbackPlain<U extends Parameters<PlainCallback<U>>[0]> = U;
+type CallbackPlainArray<U extends Array<Parameters<PlainCallback<U>>[0]>> = U;
+type TextPattern<T> = `key-${T & string}`;
+type TextArray<U extends [TextPattern<U>]> = U;
+type Mapping<T> = Uppercase<T & string>;
+type MappedArray<U extends [Mapping<U>]> = U;
+type Plain<T> = T & string;
+type PlainArray<U extends [Plain<U>]> = U;
+type Identity<T> = T;
+type DirectArgument<U extends keyof Identity<U & string>> = U;

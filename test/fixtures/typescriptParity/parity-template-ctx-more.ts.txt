@@ -1,0 +1,8 @@
+type Id = `user-${number}`;
+const n = 5;
+const id: Id = `user-${n}`;
+let m: number = 3;
+const id2: Id = `user-${m}`;
+const greet: "hi bob" = `hi ${"bob"}`;
+const s: string = `x${1}`;
+console.log(id, id2, greet, s);

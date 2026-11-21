@@ -1,0 +1,25 @@
+type HasSymbol<T> = Extract<keyof T, symbol> extends never ? false : true;
+const arrayHasSymbol: HasSymbol<number[]> = true;
+const objectHasSymbol: HasSymbol<{ x: number }> = false;
+const mapHasSymbol: HasSymbol<Map<string, number>> = true;
+type IteratorKey = typeof Symbol.iterator;
+type UnscopablesKey = typeof Symbol.unscopables;
+type SymbolKeys = Extract<keyof number[], symbol>;
+type ExtractedIterator = Extract<SymbolKeys, IteratorKey>;
+type SameKey = [IteratorKey] extends [ExtractedIterator] ? true : false;
+const sameKey: SameKey = true;
+type Values = number[][keyof number[]];
+type SymbolValues = number[][SymbolKeys];
+const value: Values = {};
+const flags: number[][UnscopablesKey] = {};
+const symbolValue: SymbolValues = flags;
+type ArrayIteration = number[][IteratorKey];
+function checkIterator(next: ArrayIteration) {
+  const item = next().next();
+  if (!item.done) return item.value.toFixed(1);
+}
+const userKey = Symbol('user');
+const custom = { [userKey]: 9 };
+type UserKeys = Extract<keyof typeof custom, symbol>;
+const sameUser: UserKeys = userKey;
+console.log(arrayHasSymbol, objectHasSymbol, mapHasSymbol, sameKey, value, flags, typeof sameUser);

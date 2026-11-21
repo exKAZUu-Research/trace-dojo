@@ -1,0 +1,1 @@
+(2,40): error TS2513: Abstract method 'f' in class 'A' cannot be accessed via super expression.

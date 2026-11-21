@@ -1,0 +1,19 @@
+for (const remove of [false, true]) {
+  const value = JSON.parse("[1,2]", function(this: any, key, item) {
+    if (key === "0") Object.defineProperty(this, "1", {value: 5, writable: false, configurable: false});
+    return key === "1" && remove ? undefined : item;
+  });
+  console.log(value);
+}
+console.log(JSON.parse('{"a":1,"b":2}', function(this: any, key, item) {
+  if (key === "a") Object.freeze(this);
+  return key === "b" ? undefined : item;
+}));
+console.log(JSON.parse("[1,2]", function(this: any, key, item) {
+  if (key === "0") {this.length = 1; Object.defineProperty(this, "length", {writable: false});}
+  return key === "1" ? 7 : item;
+}));
+console.log(JSON.parse("[1,2]", function(this: any, key, item) {
+  if (key === "0") {delete this[1]; Object.preventExtensions(this);}
+  return key === "1" ? 7 : item;
+}));

@@ -1,0 +1,28 @@
+function optional<T extends (() => number) | undefined>(fn: T): number | undefined {
+  return fn?.();
+}
+function nullable<T extends (() => number) | null>(fn: T): number | undefined {
+  return fn?.();
+}
+function exact<T extends () => () => number>(fn: T): number {
+  return fn?.()();
+}
+function exactMember<T extends { method(): { value: number } }>(item: T): number {
+  return item?.method().value;
+}
+function voidReceiver<T extends (() => number) | void>(fn: T): number | undefined {
+  return fn?.();
+}
+function suffix<T extends (() => { value: number }) | null>(fn: T): number | undefined {
+  return fn?.().value;
+}
+function multiple<T extends (() => () => number) | undefined>(fn: T): number | undefined {
+  return fn?.()();
+}
+function args<T extends ((text: string) => number) | null>(fn: T) {
+  return fn?.("hello");
+}
+console.log(optional(undefined), optional(() => 1), nullable(null), nullable(() => 2));
+console.log(exact(() => () => 3), exactMember({ method() { return { value: 4 }; } }), voidReceiver(undefined));
+console.log(suffix(null), suffix(() => ({ value: 5 })), multiple(undefined), multiple(() => () => 6));
+console.log(args(null), args((text) => text.length));

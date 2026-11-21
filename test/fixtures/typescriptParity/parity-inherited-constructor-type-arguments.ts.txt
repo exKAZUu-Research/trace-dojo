@@ -1,0 +1,51 @@
+class Box<T> {
+  constructor(public value: T) {}
+}
+
+class NumberBox extends Box<number> {}
+
+class ListBox<U> extends Box<U[]> {}
+
+class ForwardBox<U> extends Box<U> {
+  constructor(value: U) {
+    super(value);
+  }
+}
+
+class Tagged<U> extends NumberBox {
+  tag?: U;
+}
+
+class Counter {
+  constructor(public count: number) {}
+}
+
+class Child extends Counter {}
+
+class GrandChild extends Child {
+  constructor() {
+    super(2);
+  }
+}
+
+function withLabel<T>() {
+  return class {
+    label?: T;
+  };
+}
+
+class Labeled extends withLabel<number>() {}
+
+const Anonymous = class extends Box<string> {};
+
+const numbers = new NumberBox(1);
+console.log(numbers.value + 1);
+const list = new ListBox([1, 2]);
+console.log(list.value.length);
+const forwarded: ForwardBox<number> = new ForwardBox(3);
+console.log(forwarded.value, forwarded instanceof Box);
+const tagged = new Tagged<string>(4);
+console.log(tagged.value, tagged.tag);
+console.log(new GrandChild().count, new Child(5).count);
+console.log(new Labeled().label);
+console.log(new Anonymous("a").value);

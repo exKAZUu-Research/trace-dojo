@@ -1,0 +1,28 @@
+class A {
+  private static x = 1;
+}
+class B extends A {
+  static x = 2;
+}
+class C {
+  static y = 1;
+}
+class D extends C {
+  protected static y = 2;
+}
+class E {
+  private static z = 1;
+}
+class F extends E {
+  private static z = 2;
+}
+class G {
+  protected static w = 1;
+}
+class H extends G {
+  static w = 2;
+}
+class I extends G {
+  protected static w = 3;
+}
+console.log(B.x, new D(), new F(), H.w, new I());

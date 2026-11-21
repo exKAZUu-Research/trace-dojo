@@ -1,0 +1,12 @@
+function use<T extends { value: number }>(c: Combined<T>): number {
+  return c.value + c.label;
+}
+interface Combined<T extends { value: number }> extends T {
+  label: number;
+}
+const combined: Combined<{ value: number; label: number }> = { value: 1, label: 2 };
+console.log(combined.value);
+interface Empty<T extends { value: number }> extends T {}
+function useEmpty<T extends { value: number }>(e: Empty<T>): number {
+  return e.value;
+}

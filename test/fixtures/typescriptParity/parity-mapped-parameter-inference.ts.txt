@@ -1,0 +1,11 @@
+function update<T>(obj: T, patch: Partial<T>): T {
+  return { ...obj, ...patch };
+}
+console.log(update({ age: 1, name: "a" }, { age: 2 }));
+console.log(update({ age: 1 }, {}));
+function only<T>(p: Partial<T>): Partial<T> { return p; }
+console.log(only({ a: 1 }));
+const r: { n: number } = update({ n: 1 }, { n: 3 });
+console.log(r);
+function pick<T>(items: T[], fallback: Partial<T>) { return items.map((item) => ({ ...item, ...fallback })); }
+console.log(pick([{ x: 1, y: 2 }], { y: 5 }));

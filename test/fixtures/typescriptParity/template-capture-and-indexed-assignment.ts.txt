@@ -1,0 +1,32 @@
+function parseNumber<T extends number>(text: `id-${T}`): T {
+  return Number(text.slice(3)) as T;
+}
+function parseBigint<T extends bigint>(text: `id-${T}`): T {
+  return BigInt(text.slice(3)) as T;
+}
+const one: 1 = parseNumber('id-1');
+const decimal = parseNumber('id-01');
+const big: -12n = parseBigint('id--12');
+const hex = parseBigint('id-0xf');
+function use<T extends { name?: string; size?: number }>(text: string, size: number) {
+  let value: T['name'] = text;
+  const length: T['size'] = size;
+  console.log(value.toUpperCase(), length.toFixed(1));
+  value = undefined;
+  console.log(value);
+}
+use('hello', 4);
+console.log(one, decimal, String(big), String(hex));
+const options = { implements: 1, package: 2, public: 3, static: 4 };
+console.log(options.implements, options.package, options.public, options.static);
+function format(value: string | symbol) {
+  return typeof value === 'string' ? 'value: ' + value + ` ${value}` : String(value);
+}
+console.log(format('text'), format(Symbol('tag')));
+class Entry {}
+function allowed(value: Entry | number, object: { key: number | undefined; optional?: number }) {
+  delete object.key;
+  delete object.optional;
+  return value instanceof Entry;
+}
+console.log(allowed(0, { key: 1, optional: 2 }));

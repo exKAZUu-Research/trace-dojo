@@ -1,0 +1,13 @@
+const fail = () => { throw new Error("x"); };
+function f(): number { return fail(); }
+const fail2 = function () { throw new Error("x"); };
+function g(): string { return fail2(); }
+function decl() { throw new Error("x"); }
+function h(): number { return decl(); }
+const o = { m() { throw new Error("x"); } };
+function k(): number { return o.m(); }
+class C { m() { throw new Error("x"); } }
+function p(): number { return new C().m(); }
+const loop = () => { while (true) {} };
+const n: never = loop();
+console.log(typeof f, typeof g, typeof k);

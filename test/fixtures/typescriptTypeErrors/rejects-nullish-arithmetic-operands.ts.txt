@@ -1,0 +1,17 @@
+let un: undefined = undefined;
+un - 1;
+undefined - 1;
+null * 2;
+let nn: null = null;
+-nn;
+nn++;
+-null;
++undefined;
+let uk: unknown = 1;
+uk++;
+-uk;
+uk *= 2;
+let big = 1n;
+big++;
+let bv: bigint | void = 1n as any;
+bv++;

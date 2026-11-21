@@ -1,0 +1,2 @@
+(6,1): error TS7022: 'n' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+(9,12): error TS2565: Property 'prop2' is used before being assigned.

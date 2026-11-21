@@ -1,0 +1,26 @@
+function a(): void;
+function a(x: number): void;
+function a(x: number | void) { console.log(x); }
+
+function b(): void;
+function b(x: number): void;
+function b(x: number) { console.log(x); }
+
+function c(): void;
+function c(x: number, y: string): void;
+function c(x: number | void, y: string | void) { console.log(x, y); }
+
+function d(): void;
+function d(x: number, y: string): void;
+function d(x: number | void, y: string) { console.log(x, y); }
+
+function f(): void;
+function f(x: unknown) { console.log(x); }
+
+function g(): void;
+function g(x: any) { console.log(x); }
+
+function h(): void;
+function h(x: undefined) { console.log(x); }
+
+a(); b(1); c(); d(1, "s"); f(); g(); h();

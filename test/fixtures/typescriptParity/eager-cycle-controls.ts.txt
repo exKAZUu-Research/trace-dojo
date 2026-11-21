@@ -1,0 +1,18 @@
+type PlainArray<U extends U[]> = U;
+type PlainTuple<U extends [U]> = U;
+type ObjectTemplate<U extends {name: `${U & string}`}> = U;
+type ObjectMapping<U extends {name: Uppercase<U & string>}> = U;
+type FunctionMapping<U extends () => Uppercase<U & string>> = U;
+type ArrayBranded<U extends Array<U & {tag: 1}>> = U;
+type ArrayUnion<U extends Array<U | string>> = U;
+type ArrayNoInfer<U extends Array<NoInfer<U> & string>> = U;
+type GenericPattern<T extends string, U extends [U & `key-${T}`]> = U;
+type Narrow<T> = T & string;
+type AliasedAny<T> = Narrow<T> | any;
+type ErasedAlias<U extends AliasedAny<U>> = U;
+type SkippedBranch<U extends (true extends false ? Array<U & string> : {})> = U;
+type InferredObject<T> = T extends [infer U extends {name: `${U & string}`}, infer U] ? U : never;
+
+const skipped: SkippedBranch<{}> = {};
+const erased: ErasedAlias<string> = 'done';
+console.log(erased, skipped);

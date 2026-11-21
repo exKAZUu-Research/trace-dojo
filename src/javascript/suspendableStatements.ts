@@ -1,5 +1,6 @@
 import type {
   Block,
+  ClassNode,
   DeclarationKind,
   Expression,
   Pattern,
@@ -9,7 +10,7 @@ import type {
 } from './ast';
 import { AwaitingIterator, type LoopIterator } from './asyncGenerators';
 import { Awaiting, GeneratorReturn, resumedValue, runToEnd, type Steps } from './generators';
-import { DONE, ValueIterator } from './iteration';
+import { DONE, type HostIterator, ValueIterator } from './iteration';
 import { asyncIteratorOf } from './iteratorProtocol';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
@@ -47,8 +48,8 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
   }
 
   /** Evaluates an expression, step by step when it contains a `yield`. */
-  protected *valueSteps(expression: Expression): Steps<Value> {
-    return expression.suspends ? yield* this.evaluateSteps(expression) : this.evaluate(expression);
+  protected *valueSteps(expression: Expression, classBinding?: Binding): Steps<Value> {
+    return expression.suspends ? yield* this.evaluateSteps(expression) : this.evaluate(expression, classBinding);
   }
 
   /** Records the step of binding a loop's target, whose destructuring stores the values it reads out of an object. */
@@ -88,7 +89,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         return undefined;
       }
       case 'class': {
-        this.writeVariable(statement.cls.name, this.evaluateClass(statement.cls), 'initialize');
+        this.declareClass(statement.cls);
         return undefined;
       }
       case 'return': {
@@ -279,8 +280,17 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         else if (target.kind === 'identifier') this.revealVar(target.name);
         continue;
       }
-      this.bindDeclared(target, yield* this.valueSteps(init), declaration.declarationKind);
+      this.bindDeclared(target, yield* this.valueSteps(init, this.classBinding(target)), declaration.declarationKind);
     }
+  }
+
+  protected declareClass(cls: ClassNode): void {
+    const binding = this.runtime.frame.scope.lookup(cls.name);
+    this.writeVariable(cls.name, this.evaluateClass(cls, undefined, binding), 'initialize');
+  }
+
+  protected classBinding(target: Pattern): Binding | undefined {
+    return target.kind === 'identifier' ? this.runtime.frame.scope.lookup(target.name) : undefined;
   }
 
   /** Initializes the variables a declaration declares, recording the value of a `using` one for disposal. */
@@ -376,10 +386,10 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         : yield* this.valueSteps(statement.iterable);
     const iterator: LoopIterator =
       statement.kind === 'forIn'
-        ? syncLoopIterator(new ValueIterator(this.enumerableKeys(iterable)))
+        ? syncLoopIterator(new ValueIterator(this.forInKeys(iterable)))
         : statement.isAwait
           ? new AwaitingIterator(runtime, asyncIteratorOf(runtime, iterable))
-          : syncLoopIterator(runtime.iterator(iterable));
+          : syncLoopIterator(runtime.iterator(iterable, undefined, statement.iterableSource, 'forOf'));
     // The iterable and the iterator it gave stay reachable while the loop runs.
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
@@ -447,15 +457,31 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     }
   }
 
-  /** The keys `for...in` visits: enumerable string keys of the object and its prototypes, each once. */
-  protected enumerableKeys(value: Value): string[] {
+  /** The keys `for...in` visits, skipping one deleted before its turn, as JavaScript does. */
+  protected forInKeys(value: Value): HostIterator {
+    if (value === undefined || value === null) return { next: () => DONE };
     const { runtime } = this;
-    if (value === undefined || value === null) return [];
-    if (typeof value === 'string') return Array.from({ length: value.length }, (_, index) => String(index));
-    if (!isObject(value)) return [];
+    const object = runtime.toObject(value);
+    const keys = this.enumerableKeys(object);
+    let index = 0;
+    return {
+      next: () => {
+        while (index < keys.length) {
+          const key = keys[index++];
+          if (runtime.hasProperty(object, key)) return key;
+        }
+        return DONE;
+      },
+      source: object,
+    };
+  }
+
+  /** The enumerable string keys of an object and its prototypes, each once. */
+  private enumerableKeys(object: JsObject): string[] {
+    const { runtime } = this;
     const keys: string[] = [];
     const seen = new Set<string>();
-    for (let current: JsObject | null = value; current; current = current.proto) {
+    for (let current: JsObject | null = object; current; current = current.proto) {
       // Every own name, enumerable or not, hides the same name further up the chain.
       for (const key of runtime.ownPropertyNames(current)) {
         if (seen.has(key)) continue;

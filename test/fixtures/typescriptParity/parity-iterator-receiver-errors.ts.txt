@@ -1,0 +1,22 @@
+'use strict';
+function errors(iterator: object) {
+  const value = iterator as { locked?: number; read?: number };
+  Object.defineProperty(value, 'locked', { value: 1 });
+  Object.defineProperty(value, 'read', { get() { return 1; } });
+  for (const operation of [
+    () => { value.locked = 2; },
+    () => { delete value.locked; },
+    () => { value.read = 2; },
+  ]) {
+    try {
+      operation();
+    } catch (error) {
+      if (error instanceof Error) console.log(error.message);
+    }
+  }
+}
+errors([1].values());
+errors(Object.setPrototypeOf([1].values(), null));
+errors(Object.setPrototypeOf(new Map<string, number>().keys(), {}));
+errors(Object.setPrototypeOf(new Set<number>().values(), null));
+errors(Iterator.from({ next() { return { done: true, value: undefined }; } }));

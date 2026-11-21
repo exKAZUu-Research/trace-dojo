@@ -1,0 +1,5 @@
+function a(y: string[] | string) { return y.lenght; }
+function b(u: "a" | "b") { return u.lenght; }
+function c(w: number[] | string[]) { w.psh(1); }
+function d(x: number | string) { return x.toFixed(1); }
+function e(z: { width: number } | { height: number }) { return z.widht; }

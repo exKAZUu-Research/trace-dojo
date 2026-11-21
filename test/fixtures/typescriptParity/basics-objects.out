@@ -1,0 +1,15 @@
+{ x: 1, y: 5 } { x: 1, y: 2, z: 3, label: 'q' } undefined Q
+{ a: 1, b: 2 } [ 'a', 'b' ] [ 1, 2 ] [ [ 'a', 1 ], [ 'b', 2 ] ]
+1 2 { z: 3, label: 'q' }
+1 9 [ 4, 5 ]
+{
+  a: { b: { c: [Array] } },
+  list: [ [ 1, 2 ], [ 3 ] ],
+  fn: [Function: fn]
+} {"a":{"b":{"c":[1,{"d":"deep"}]}},"list":[[1,2],[3]]}
+{ x: 1, y: 5, extra: true }
+{ dyn: 1, dyn2: 2 }
+3.141592653589793 4
+[ 1, 2, 3 ] [ 3, 1, 2 ]
+[ 'a', 1 ] 2
+1 2 { count: 1, increment: [Function: increment], double: [Getter] }

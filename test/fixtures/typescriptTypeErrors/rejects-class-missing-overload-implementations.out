@@ -1,0 +1,4 @@
+(2,3): error TS2391: Function implementation is missing or not immediately following the declaration.
+(5,3): error TS2390: Constructor implementation is missing.
+(8,3): error TS2391: Function implementation is missing or not immediately following the declaration.
+(14,3): error TS2387: Function overload must be static.

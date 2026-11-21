@@ -1,0 +1,12 @@
+const values = [...123] as const;
+const lengths = [...{ length: 2 }] as const;
+const head: [number, ...number[]] = [1, ...5];
+function count(...xs: number[]) { return xs.length; }
+console.log(count(...[...5]));
+console.log(count(...[1, ...[2, 3]]));
+const mixed: [string, ...number[]] = ["a", ...new Set([1, 2])];
+const chars = [..."ab", ...([1, 2] as const)] as const;
+const flags: readonly [number, ...string[]] = [1, ...true];
+const loose: any = [1];
+const copied = [...loose] as const;
+console.log(values, lengths, head, mixed, chars, flags, copied);

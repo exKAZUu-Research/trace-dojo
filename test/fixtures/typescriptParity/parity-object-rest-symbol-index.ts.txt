@@ -1,0 +1,4 @@
+const key: symbol = Symbol("key");
+const original: { [key: symbol]: number; label: string } = { [key]: 3, label: "x" };
+const { label, ...rest } = original;
+console.log(rest[key], label);

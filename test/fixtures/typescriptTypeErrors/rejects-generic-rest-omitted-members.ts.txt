@@ -1,0 +1,4 @@
+function omittedCannotReturnT<T extends {x:number,y:number}>(value:T):T{const {x,...copy}=value;return copy;}
+class RestRequiredMethod {x=1;method(){return this.x;}}
+function missingMethod<T extends RestRequiredMethod>(value:T):T{const {...copy}=value;return copy;}
+function readonlyGeneric<T extends {readonly x:number}>(value:T){const {...copy}=value;copy.x=2;return copy;}

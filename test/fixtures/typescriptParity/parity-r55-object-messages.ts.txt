@@ -1,0 +1,19 @@
+class A {}
+const tries: (() => unknown)[] = [
+  () => Object.setPrototypeOf(Object.preventExtensions(new A()), {}),
+  () => Object.defineProperty(Object.freeze({ a: 1 }), 'a', { value: 2 }),
+  () => Object.defineProperty(Object.preventExtensions(new A()), 'q', { value: 2 }),
+  () => Object.defineProperty({}, 'a', { get() { return 1; }, value: 2 } as any),
+  () => Object.defineProperty({}, 'a', 5 as any),
+  () => Object.defineProperty({}, 'a', { get: 5 } as any),
+  () => Object.create(5 as any),
+  () => Object.setPrototypeOf({}, 5 as any),
+  () => Object.keys(null as any),
+  () => Object.entries(undefined as any),
+  () => Object.fromEntries([1] as any),
+  () => Object.fromEntries(5 as any),
+  () => Object.assign(null as any, {}),
+  () => { const o: any = {}; o.__proto__ = o; return Object.setPrototypeOf(Object.prototype, {}); },
+  () => { const a: any = {}; const b = Object.create(a); return Object.setPrototypeOf(a, b); },
+];
+for (const t of tries) { try { console.log(t()); } catch (e: any) { console.log(e.constructor.name, e.message); } }

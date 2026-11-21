@@ -1,0 +1,4 @@
+(2,22): error TS2345: Argument of type '1' is not assignable to parameter of type 'never'.
+(4,26): error TS2322: Type 'string | number' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+(12,33): error TS2554: Expected 2 arguments, but got 1.

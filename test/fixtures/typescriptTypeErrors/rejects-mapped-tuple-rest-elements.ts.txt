@@ -1,0 +1,18 @@
+type Labels = Readonly<[string, ...number[]]>;
+const labels: Labels = ["total", 1, 2];
+const badLabels: Labels = ["total", "two"];
+
+type Draft = Partial<[number, ...string[]]>;
+const draft: Draft = [1, "a", undefined];
+const badDraft: Draft = [1, false];
+
+type Filled = Required<[number?, ...string[]]>;
+const filled: Filled = [1, "a"];
+const emptyFilled: Filled = [];
+
+type Boxed<T> = { [K in keyof T]: { value: T[K] } };
+type Row = Boxed<[string, ...number[], boolean]>;
+const row: Row = [{ value: "id" }, { value: 1 }, { value: true }];
+const badRow: Row = [{ value: "id" }, { value: "x" }, { value: true }];
+
+console.log(labels, draft, filled, row);

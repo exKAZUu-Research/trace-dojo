@@ -1,0 +1,12 @@
+type ReadonlyDict = { readonly [key: string]: number };
+type MutableDict = { [key: string]: number };
+function stringKey<K extends string>(a: ReadonlyDict, k: K) { a[k] = 1; }
+function numberKey<K extends number>(a: ReadonlyDict, k: K) { a[k]++; }
+function removeKey<K extends string>(a: ReadonlyDict, k: K) { delete a[k]; }
+function literalKey<K extends 'chosen'>(a: ReadonlyDict, k: K) { a[k] += 1; }
+function patternKey<K extends `named-${string}`>(a: ReadonlyDict, k: K) { a[k] = 1; }
+function mixedKey<K extends string | number>(a: ReadonlyDict, k: K) { a[k] = a[k]; }
+function withProperty<K extends 'known'>(a: ReadonlyDict & { known: number }, k: K) { a[k] = a[k]; }
+function union<K extends string>(a: ReadonlyDict | { [key: string]: 0 }, k: K) { a[k] = 0; }
+function intersection<K extends string>(a: ReadonlyDict & MutableDict, k: K) { a[k] = 0; }
+function numeric<K extends number>(a: { readonly [key: number]: number }, k: K) { a[k] = a[k]; }

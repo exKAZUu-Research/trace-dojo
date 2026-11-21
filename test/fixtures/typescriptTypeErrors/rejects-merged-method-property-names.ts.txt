@@ -1,0 +1,48 @@
+interface FieldAfterMethod {
+  foo(): number;
+}
+class FieldAfterMethod {
+  foo = 'wrong';
+}
+interface MethodAfterField {
+  foo: string;
+}
+class MethodAfterField {
+  foo() {return 3;}
+}
+interface CallableField {
+  foo: () => number;
+}
+class CallableField {
+  foo() {return 3;}
+}
+interface GetterAfterMethod {
+  foo(): number;
+}
+class GetterAfterMethod {
+  get foo() {return () => 3;}
+}
+interface RepeatedGetter {
+  get foo(): number;
+}
+class RepeatedGetter {
+  get foo() {return 3;}
+}
+interface ParameterAfterMethod {
+  foo(): number;
+}
+class ParameterAfterMethod {
+  constructor(public foo: string) {}
+}
+interface ChangedGetter {
+  get foo(): number;
+}
+class ChangedGetter {
+  foo = 'wrong';
+}
+interface ReadonlyAfterGetter {
+  get value(): number;
+}
+class ReadonlyAfterGetter {
+  readonly value = 3;
+}

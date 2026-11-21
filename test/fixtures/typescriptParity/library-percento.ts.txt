@@ -1,0 +1,19 @@
+function f(a: number, b: number) {}
+const g = (x: number) => x;
+class A {
+  static s = 1;
+  m() {}
+}
+const obj = { k: 1, m() {}, arrow: () => 1 };
+console.log("%o", f);
+console.log("%o", g);
+console.log("%o", A);
+console.log("%o", obj);
+console.log("%o", [f]);
+console.log("%o", new A());
+console.log("%o", { nested: { deep: { deeper: { deepest: [1] } } } });
+console.log("%o", "str", "%o", 1);
+console.log("%o", new Map([["a", [1]]]), new Set([1]));
+console.log("%o", null, undefined);
+console.dir([1, { a: [2] }], { showHidden: true });
+console.dir({ f() {} }, { showHidden: true, depth: 0 });

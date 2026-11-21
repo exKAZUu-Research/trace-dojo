@@ -140,13 +140,15 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
 
   private *argumentSteps(args: Argument[]): Steps<Value[]> {
     // Arguments have no elisions, which are the only source of holes.
-    return (yield* this.elementSteps(args)) as Value[];
+    return (yield* this.elementSteps(args, true)) as Value[];
   }
 
   /** Evaluates elements or arguments in order, holding the values so far; an elision leaves a hole. */
-  // code-gauge-allow duplicateLines 25 -- Mirrors the synchronous version in expressionEvaluator.ts, as a generator that suspends at yield and await.
-  private *elementSteps(elements: (Argument | undefined)[]): Steps<Element[]> {
+  // code-gauge-allow duplicateLines 28 -- Mirrors the synchronous version in expressionEvaluator.ts, as a generator that suspends at yield and await.
+  private *elementSteps(elements: (Argument | undefined)[], callArguments = false): Steps<Element[]> {
     const { runtime } = this;
+    const callSpread =
+      callArguments && elements.every((element, index) => element?.kind !== 'spread' || index === elements.length - 1);
     const values: Element[] = [];
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
@@ -155,7 +157,8 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
         if (element === undefined) {
           values.push(HOLE);
         } else if (element.kind === 'spread') {
-          const spread = runtime.iterate(yield* this.evaluateSteps(element.argument));
+          const context = callArguments ? (callSpread ? 'finalCallSpread' : 'loweredCallSpread') : 'syntax';
+          const spread = runtime.iterate(yield* this.evaluateSteps(element.argument), element.source, context);
           runtime.allocate(spread.length);
           appendAll(values, spread);
           appendAll(temporaries, spread);
@@ -249,7 +252,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
         this.copyDataProperties(object, yield* this.evaluateSteps(member.argument));
       } else if (member.kind === 'prototype') {
         const prototype = yield* this.evaluateSteps(member.value);
-        if (prototype === null || isObject(prototype)) object.proto = prototype;
+        if (prototype === null || isObject(prototype)) object.setPrototype(prototype);
       } else {
         yield* this.keyedMemberSteps(object, member);
       }
@@ -343,6 +346,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     if (resolved === SHORT_CIRCUIT) return SHORT_CIRCUIT;
     const { fn, thisValue } = resolved;
     if (expression.optional && (fn === undefined || fn === null)) return SHORT_CIRCUIT;
+    if (expression.isTaggedTemplate) runtime.checkTag(fn);
     const args = yield* this.holdingSteps([fn, thisValue], () => this.argumentSteps(expression.args));
     if (!isCallable(fn)) return runtime.throwError('TypeError', `${expression.calleeText} is not a function`);
     return this.holdWhile([fn, thisValue, ...args], () => runtime.call(fn, thisValue, args, expression.row));

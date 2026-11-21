@@ -1,0 +1,5 @@
+(1,63): error TS7006: Parameter 'x' implicitly has an 'any' type.
+(2,65): error TS7006: Parameter 'x' implicitly has an 'any' type.
+(3,94): error TS7006: Parameter 'x' implicitly has an 'any' type.
+(4,88): error TS7006: Parameter 'x' implicitly has an 'any' type.
+(5,94): error TS7006: Parameter 'x' implicitly has an 'any' type.

@@ -1,10 +1,35 @@
-import type { Node } from '@willbooster/web-tree-sitter';
+import { CompileError, sourceDiagnostic } from '../interpreter/diagnostics';
+import type { Expression, IterationSource, PropertyName } from './ast';
+import { printedOperation, stringLiteralValue } from './operatorPrinter';
 
-import { CompileError } from '../interpreter/diagnostics';
-import type { Expression, PropertyName } from './ast';
+/**
+ * The parts of a tree-sitter node that converting reads, which a view of another grammar's tree can also provide.
+ */
+export interface Node {
+  readonly type: string;
+  readonly text: string;
+  readonly isNamed: boolean;
+  readonly startIndex: number;
+  readonly endIndex: number;
+  readonly startPosition: { row: number; column: number };
+  readonly children: Node[];
+  readonly namedChildren: Node[];
+  childForFieldName(fieldName: string): Node | null;
+  childrenForFieldName(fieldName: string): Node[];
+}
 
 export function namedChildren(node: Node): Node[] {
   return node.namedChildren.filter((child) => child.type !== 'comment');
+}
+
+/** Whether a function body or a program starts with a `"use strict"` directive. */
+export function hasUseStrictDirective(statements: Node[]): boolean {
+  for (const statement of statements) {
+    const expression = statement.type === 'expression_statement' ? namedChildren(statement)[0] : undefined;
+    if (expression?.type !== 'string') return false;
+    if (expression.text.slice(1, -1) === 'use strict') return true;
+  }
+  return false;
 }
 
 /** The first named child in a field, skipping the `;` and empty statements that the `for` header puts there. */
@@ -32,10 +57,95 @@ export function unwrapParentheses(node: Node): Node {
   return current;
 }
 
-/** The text of a callee for error messages, shortened as long expressions are. */
+/**
+ * How V8's CallPrinter names a callee in an error message: names, `this`, and property accesses as written without
+ * spaces or type syntax, a string key as `.key`, and an unnamed receiver as `(intermediate value)`.
+ */
 export function calleeText(node: Node): string {
-  const text = node.text.replaceAll(/\s+/g, ' ');
-  return text.length > 40 ? `${text.slice(0, 40)}...` : text;
+  return printedCallee(node) ?? '(intermediate value)';
+}
+
+export function iterationSource(node: Node): IterationSource {
+  const operand = unwrapParentheses(node);
+  const callee =
+    operand.type === 'call_expression'
+      ? calleeText(field(operand, 'function'))
+      : operand.type === 'new_expression'
+        ? calleeText(field(operand, 'constructor'))
+        : undefined;
+  if (isOptionalChain(operand)) return { text: '(intermediate value)', callee, isOptionalChain: true };
+  return { text: calleeText(operand), callee };
+}
+
+/** Whether a `?.` short-circuits the expression, which V8 then evaluates as one optional chain. */
+export function isOptionalChain(node: Node): boolean {
+  let current: Node | null = node;
+  while (current) {
+    if (current.childForFieldName('optional_chain')) return true;
+    if (current.type === 'call_expression') current = current.childForFieldName('function');
+    else if (current.type === 'member_expression' || current.type === 'subscript_expression')
+      current = current.childForFieldName('object');
+    else return false;
+  }
+  return false;
+}
+
+// code-gauge-allow functionNcss 40 -- One case per kind of expression V8's CallPrinter names.
+function printedCallee(node: Node): string | undefined {
+  switch (node.type) {
+    case 'identifier': {
+      return nameOf(node);
+    }
+    case 'this':
+    case 'super': {
+      return node.text;
+    }
+    case 'parenthesized_expression': {
+      return printedCallee(namedChildren(node)[0]);
+    }
+    case 'object': {
+      // V8 prints a part for each member.
+      const members = namedChildren(node).filter((child) => child.type !== 'comment');
+      return `{${'(intermediate value)'.repeat(members.length)}}`;
+    }
+    case 'array': {
+      return `[${namedChildren(node)
+        .map((element) => printedCallee(element) ?? '(intermediate value)')
+        .join(',')}]`;
+    }
+    case 'null':
+    case 'true':
+    case 'false': {
+      return node.type;
+    }
+    case 'undefined': {
+      // As written, or as a compiler emitted it.
+      return node.text;
+    }
+    case 'call_expression': {
+      return `${calleeText(field(node, 'function'))}(...)`;
+    }
+    case 'regex': {
+      const flags = node.childForFieldName('flags')?.text ?? '';
+      return `/${field(node, 'pattern').text}/${flags.split('').toSorted().join('')}`;
+    }
+    case 'member_expression': {
+      const object = calleeText(field(node, 'object'));
+      const dot = node.childForFieldName('optional_chain') ? '?.' : '.';
+      return `${object}${dot}${nameOf(field(node, 'property'))}`;
+    }
+    case 'subscript_expression': {
+      const object = calleeText(field(node, 'object'));
+      const index = unwrapParentheses(field(node, 'index'));
+      const dot = node.childForFieldName('optional_chain') ? '?.' : '';
+      const key = stringLiteralValue(index);
+      if (key !== undefined) return `${object}${dot || '.'}${key}`;
+      return `${object}${dot}[${printedCallee(index) ?? '(intermediate value)'}]`;
+    }
+    default: {
+      return printedOperation(node, printedCallee);
+    }
+  }
 }
 
 /** Gives an anonymous function or class the name it is assigned to, as `name` shows. */
@@ -98,7 +208,7 @@ export function optionalNameOf(node: Node | null | undefined): string {
 }
 
 export function fail(node: Node, message: string): never {
-  throw new CompileError([{ row: rowOf(node), message }]);
+  throw new CompileError([sourceDiagnostic(rowOf(node), node.startIndex, message)]);
 }
 
 export function unsupported(node: Node, feature: string): never {

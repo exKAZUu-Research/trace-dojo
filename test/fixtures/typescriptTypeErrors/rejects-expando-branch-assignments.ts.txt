@@ -1,0 +1,19 @@
+const f = () => 1;
+if (Math.abs(-1) > 0) {
+  f.tag = "a";
+} else {
+  f.tag = "b";
+}
+console.log(f.tag);
+const g = () => 2;
+try { g.tag = "t"; } finally {}
+console.log(g.tag);
+const h = () => 3;
+if (Math.abs(-1) > 0) { h.tag = "a"; }
+console.log(h.tag);
+const k = () => 4;
+try { k.tag = "t"; } catch { console.log("c"); }
+console.log(k.tag);
+const m = () => 5;
+{ m.tag = "x"; }
+console.log(m.tag);

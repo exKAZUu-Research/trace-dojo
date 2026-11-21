@@ -1,0 +1,15 @@
+let a: number;
+switch (1) { case 1: a = 1; break; }
+console.log(a);
+function union(flag: boolean) {
+  let result: number;
+  switch (flag ? 'first' : 'second') {
+    case 'first': result = 1; break;
+    case 'second': result = 2; break;
+  }
+  return result;
+}
+let c: number;
+switch (typeof 1) { case 'number': c = 1; }
+console.log(c);
+console.log(union(false));

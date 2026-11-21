@@ -1,0 +1,4 @@
+function f(k: 0 | "a") { const o = { 0: 1, a: "x" }; console.log(o[k]); }
+f(0);
+function g(k: 0 | "1") { const o = { 0: 1, 1: true }; const v: number | boolean = o[k]; return v; }
+console.log(g("1"));

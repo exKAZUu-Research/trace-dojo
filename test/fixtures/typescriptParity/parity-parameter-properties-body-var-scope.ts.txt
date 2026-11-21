@@ -1,0 +1,17 @@
+class ScopeBase {}
+class InitializedScope extends ScopeBase {
+  constructor(public x = 1) { var x = 2; super(); }
+}
+class AssignedScope extends ScopeBase {
+  constructor(public x = 1) { var x: number; x = 3; super(); }
+}
+class BlockScope extends ScopeBase {
+  constructor(public x = 1) { var x = 4; { const x = 40; super(); console.log(x); } }
+}
+class ParameterClosureScope extends ScopeBase {
+  constructor(public x = 1, read = () => x) { var x = 6; super(); console.log(read(), x); }
+}
+console.log(new InitializedScope());
+console.log(new AssignedScope());
+console.log(new BlockScope());
+console.log(new ParameterClosureScope());

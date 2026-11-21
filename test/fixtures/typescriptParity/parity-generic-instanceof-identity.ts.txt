@@ -1,0 +1,16 @@
+class IdentityA {p=1;}
+class IdentityDerived extends IdentityA {q=2;}
+class IdentityOther {r=3;}
+function genericInstanceIdentity<T>(value:T){if(value instanceof IdentityA){const same:T=value;console.log(value.p);return same;}}
+function objectInstanceIdentity<T extends object>(value:T){if(value instanceof IdentityA){const same:T=value;return same;}}
+function constrainedInstanceIdentity<T extends IdentityA>(value:T){if(value instanceof IdentityA){const same:T=value;return same;}}
+console.log(genericInstanceIdentity(new IdentityA()), objectInstanceIdentity(new IdentityDerived()), constrainedInstanceIdentity(new IdentityDerived()));
+function concreteIdentity(value:IdentityA|IdentityOther){if(value instanceof IdentityA)return value.p;return value.r;}
+console.log(concreteIdentity(new IdentityA()), concreteIdentity(new IdentityOther()));
+function intersectionInstanceIdentity<T>(value:T&{q:number}){if(value instanceof IdentityA){const same:T=value;return same;}}
+function indexedInstanceIdentity<T,K extends keyof T>(value:T[K]){if(value instanceof IdentityA){const same:T[K]=value;return same;}}
+type MaybeInstance<T> = T extends object ? T : never;
+function conditionalInstanceIdentity<T>(value:MaybeInstance<T>){if(value instanceof IdentityA){const same:MaybeInstance<T>=value;return same;}}
+function mappedInstanceIdentity<T>(value:{[K in keyof T]:T[K]}){if(value instanceof IdentityA){const same:typeof value=value;return same;}}
+console.log(intersectionInstanceIdentity(Object.assign(new IdentityA(),{q:2})),indexedInstanceIdentity<{a:IdentityA},"a">(new IdentityA()));
+console.log(conditionalInstanceIdentity<IdentityA>(new IdentityA()),mappedInstanceIdentity<IdentityA>(new IdentityA()));

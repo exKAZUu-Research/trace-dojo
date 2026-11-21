@@ -1,0 +1,13 @@
+type BeforeStrict = number;
+interface BeforeStrictInterface { x: number }
+'use strict';
+const strictObject:any=Object.freeze({x:1});
+try { strictObject.x=2; } catch { console.log('program strict'); }
+function strictTypes() {
+  type Local=number;
+  interface LocalInterface { x: number }
+  'use strict';
+  const object:any=Object.freeze({x:1});
+  try { object.x=2; } catch { console.log('function strict'); }
+}
+strictTypes();

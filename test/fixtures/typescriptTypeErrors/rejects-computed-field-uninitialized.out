@@ -1,0 +1,5 @@
+(2,11): error TS2564: Property '[key]' has no initializer and is not definitely assigned in the constructor.
+(3,11): error TS2564: Property '["y"]' has no initializer and is not definitely assigned in the constructor.
+(10,11): error TS2564: Property '[0]' has no initializer and is not definitely assigned in the constructor.
+(14,11): error TS2564: Property '[sym]' has no initializer and is not definitely assigned in the constructor.
+(17,11): error TS2564: Property '[lk]' has no initializer and is not definitely assigned in the constructor.

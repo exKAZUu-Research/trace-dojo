@@ -1,0 +1,22 @@
+class Animal { name = 'animal'; }
+class Dog extends Animal { bark() { return 'woof'; } }
+
+const handlers = {
+  handle(animal: Animal) { return animal.name; },
+  ['computed'](animal: Animal) { return animal.name; },
+};
+
+const callback: typeof handlers.handle = (dog: Dog) => dog.bark();
+const computed: typeof handlers.computed = (dog: Dog) => dog.bark();
+const other: typeof handlers = {
+  handle(dog: Dog) { return dog.bark(); },
+  computed(dog: Dog) { return dog.bark(); },
+};
+
+abstract class AbstractHandlers {
+  abstract handle(animal: Animal): string;
+}
+
+const abstractMethod: AbstractHandlers['handle'] = (dog: Dog) => dog.bark();
+const dog = new Dog();
+console.log(callback(dog), computed(dog), other.handle(dog), abstractMethod(dog));

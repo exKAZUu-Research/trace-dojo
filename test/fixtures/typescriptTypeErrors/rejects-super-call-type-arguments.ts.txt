@@ -1,0 +1,3 @@
+class Base{}class Derived extends Base{constructor(){super<number>();}}
+const identity:any=(x:number)=>x;
+identity<Missing>(3);

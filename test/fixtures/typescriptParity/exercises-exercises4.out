@@ -1,0 +1,30 @@
+apple 100
+pear 150
+APPLE
+PEAR
+apple 200
+pear 300
+a 2
+[ 'a' ] [ 'a:1/2' ]
+[ 1, 'two' ]
+6
+4
+100.0C 100.0C false 100.0C!
+init a
+a 0
+b 2
+4 [ '1', 'two', '3' ]
+1 9
+[ 1, 2, 3, 4, 5 ] [ 0, 3, 6, 9 ]
+h [ 'e', 'l', 'l', 'o' ] h o
+[] 13 7 7 1,000,000
+woof
+meow
+6 3.14
+x 1
+y 2
+[ 'a', 'bb', 'ccc' ] true true
+[ 'a', 'b', 'C' ] [ 'a', 'bb', 'ccc' ]
+2
+big 5
+x

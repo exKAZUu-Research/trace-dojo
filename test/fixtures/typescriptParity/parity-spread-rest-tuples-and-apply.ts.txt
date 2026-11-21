@@ -1,0 +1,12 @@
+function g(a: number, ...r: string[]) { return a + r.length; }
+function wrap(...args: [number, ...string[]]) { return g(...args); }
+console.log(wrap(2, "x", "y"));
+function wrap2(...args: Parameters<typeof g>) { return g(...args); }
+console.log(wrap2(1));
+function mk(a: number, b = "x", ...r: boolean[]) { return `${a}${b}${r.length}`; }
+const p: [number, string?, ...boolean[]] = [1, "y", true];
+console.log(mk(...p));
+const nums = [3, 1, 2];
+console.log(Math.min.apply(null, nums));
+function sum(...xs: number[]) { return xs.length; }
+console.log(sum.apply(null, nums), sum.call(null, 1, 2));

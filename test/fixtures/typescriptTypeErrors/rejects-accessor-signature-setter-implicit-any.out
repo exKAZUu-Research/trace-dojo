@@ -1,0 +1,4 @@
+(1,22): error TS7032: Property 'w' implicitly has type 'any', because its set accessor lacks a parameter type annotation.
+(1,24): error TS7006: Parameter 'input' implicitly has an 'any' type.
+(3,88): error TS7032: Property 's' implicitly has type 'any', because its set accessor lacks a parameter type annotation.
+(3,90): error TS7006: Parameter 'y' implicitly has an 'any' type.

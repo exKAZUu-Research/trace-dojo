@@ -1,0 +1,3 @@
+const grid: number[][] | undefined = [[1]];
+const v = grid?.[0][0];
+console.log(v);

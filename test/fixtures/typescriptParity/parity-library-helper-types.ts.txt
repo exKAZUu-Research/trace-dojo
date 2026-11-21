@@ -1,0 +1,19 @@
+const descriptor: TypedPropertyDescriptor<number> = { value: 2, writable: false };
+console.log(descriptor.value, descriptor.writable);
+
+const source = { a: 1, b: 'text' };
+const descriptors = Object.getOwnPropertyDescriptors(source);
+const a: number | undefined = descriptors.a.value;
+const b: string | undefined = descriptors.b.value;
+console.log(a, b, descriptors.a.enumerable);
+
+const target = {};
+Object.defineProperty(target, 'hidden', { value: 42, enumerable: false });
+console.log(Object.keys(target).length);
+
+const marker: ThisType<{ value: number }> = {};
+console.log(marker);
+
+const objectKey: WeakKey = {};
+const symbolKey: WeakKey = Symbol('key');
+console.log(typeof objectKey, typeof symbolKey);

@@ -1,0 +1,6 @@
+(3,63): error TS2542: Index signature in type 'ReadonlyDict' only permits reading.
+(4,63): error TS2542: Index signature in type 'ReadonlyDict' only permits reading.
+(5,70): error TS2542: Index signature in type 'ReadonlyDict' only permits reading.
+(6,66): error TS2542: Index signature in type 'ReadonlyDict' only permits reading.
+(7,75): error TS2542: Index signature in type 'ReadonlyDict' only permits reading.
+(10,82): error TS2542: Index signature in type 'ReadonlyDict | { [key: string]: 0; }' only permits reading.

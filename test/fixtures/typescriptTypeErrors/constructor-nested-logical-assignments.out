@@ -1,0 +1,3 @@
+(14,1): error TS2532: Object is possibly 'undefined'.
+(15,1): error TS2532: Object is possibly 'undefined'.
+(16,1): error TS2532: Object is possibly 'undefined'.

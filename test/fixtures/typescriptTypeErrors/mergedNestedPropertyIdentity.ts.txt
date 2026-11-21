@@ -1,0 +1,9 @@
+interface Nested { config: { readonly count: number }; }
+interface Nested { config: { count: number }; }
+interface Optional { config: { count?: number }; }
+interface Optional { config: {}; }
+interface Callable { callback: (value: { readonly count: number }) => void; }
+interface Callable { callback: (value: { count: number }) => void; }
+
+interface Valid { config: { name: string; count: number }; }
+interface Valid { config: { count: number; name: string }; }

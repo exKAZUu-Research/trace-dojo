@@ -1,0 +1,19 @@
+class ReachesEarly {
+  value: number;
+  constructor(flag: boolean) {
+    if (flag) return;
+    this.value = 1;
+    return;
+    return;
+  }
+}
+class FinalizerCanReturn {
+  value: number;
+  constructor(flag: boolean) {
+    try { return; }
+    finally {
+      if (flag) return;
+      this.value = 2;
+    }
+  }
+}

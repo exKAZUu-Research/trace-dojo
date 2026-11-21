@@ -1,0 +1,2 @@
+(1,20): error TS2591: Cannot find name 'module'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+(1,35): error TS2304: Cannot find name 'exports'.

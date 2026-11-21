@@ -1,0 +1,23 @@
+const text = 'hello';
+console.log(text.padStart(1000001, ''), text.padEnd(Infinity, ''));
+console.log(text.padEnd(8, 'xy'));
+
+console.log('😀'[0], '😀'.charAt(1), '😀');
+console.dirxml('😀'[0]);
+
+console.log(typeof Math.random, console.time.name, typeof RegExp.prototype.compile);
+function readNumber(value: unknown) {
+  console.log(Number(value));
+}
+function sample() {}
+readNumber(sample);
+console.log('%d', sample);
+Object.defineProperty(sample, 'toString', { value: () => '5' });
+readNumber(sample);
+
+function printValues(items: (string | number)[], visible: boolean) {
+  const allText = items.every((item) => typeof item === 'string') && visible;
+  if (allText) console.log(items[0].toUpperCase());
+}
+printValues(['hello'], true);
+printValues([1], true);

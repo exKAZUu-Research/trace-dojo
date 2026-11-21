@@ -1,0 +1,19 @@
+function wrapIntersection<W extends string, T extends W & {}>(value: T, broad: W): T[] { return [value]; }
+function wrapConditional<V, W extends string, T extends (V extends boolean ? W : W) & {}>(
+  value: T, marker: V, broad: W
+): {value: T} { return {value}; }
+function wrapChain<A extends string, B extends A, T extends B>(value: T, a: A, b: B): T[] { return [value]; }
+function wrapIndexed<W extends {name: string}, T extends W['name']>(value: T, witness: W): {value: T} {
+  return {value};
+}
+
+let broad: string = 'broad';
+const array = wrapIntersection('array', broad);
+const object = wrapConditional('object', true, broad);
+const chained = wrapChain('chain', broad, broad);
+const indexed = wrapIndexed('indexed', {name: broad});
+const first: 'array' = array[0];
+const second: 'object' = object.value;
+const third: 'chain' = chained[0];
+const fourth: 'indexed' = indexed.value;
+console.log(first, second, third, fourth);

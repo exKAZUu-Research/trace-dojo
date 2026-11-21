@@ -1,0 +1,8 @@
+try { throw new Error("bad"); } catch ({ message }) { console.log(message); }
+try { throw [1]; } catch ([code]) { console.log(code); }
+try { throw 1; } catch ({ message }: any) { console.log(message); }
+try { throw 1; } catch ({}) {}
+try { throw 1; } catch ([]) {}
+try { throw 1; } catch ({ ...r }) {}
+try { throw 1; } catch ({ a }: unknown) {}
+try { throw 1; } catch ({ a = 1 }) {}

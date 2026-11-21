@@ -1,0 +1,11 @@
+function update<T>(obj: T, patch: Partial<T>): T {
+  return { ...obj, ...patch };
+}
+console.log(update({ age: 1 }, { age: "x" }));
+console.log(update({ age: 1 }, { agee: 2 }));
+function f<T>(o: T, p: Readonly<T>) { return [o, p]; }
+console.log(f({ a: 1 }, { a: 2, b: 2 }));
+function g<T>(o: T, p: { [K in keyof T]?: T[K] }) { return [o, p]; }
+console.log(g({ a: 1 }, { b: 2 }));
+function h<T>(p: Partial<T>, o: T) { return [o, p]; }
+console.log(h({ a: "s" }, { a: 1 }));

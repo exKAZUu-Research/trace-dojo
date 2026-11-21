@@ -1,0 +1,11 @@
+type Keys<T> = { [K in keyof (T & string)]: unknown };
+type Direct<U extends Keys<U>[keyof Keys<U>]> = U;
+type Inferred<T> = T extends infer U extends Keys<U>[keyof Keys<U>] ? U : never;
+type ExplicitKey<U extends Keys<U>[keyof (U & string)]> = U;
+type LiteralKey<U extends Keys<U>['length']> = U;
+type RequiredKeys<T> = { [K in keyof (T & string)]-?: unknown };
+type RequiredProjection<U extends RequiredKeys<U>[keyof RequiredKeys<U>]> = U;
+type Remapped<T> = { [K in keyof (T & string) as K]: unknown };
+type RemappedProjection<U extends Remapped<U>[keyof Remapped<U>]> = U;
+type Project<T> = Keys<T>[keyof Keys<T>];
+type Aliased<U extends Project<U>> = U;

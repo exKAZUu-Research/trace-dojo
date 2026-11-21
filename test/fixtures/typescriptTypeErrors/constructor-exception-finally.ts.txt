@@ -1,0 +1,18 @@
+class MayThrowBeforeAssignment {
+  value;
+  constructor() {
+    try { this.value = 1; throw 0; }
+    finally { return; }
+  }
+}
+new MayThrowBeforeAssignment().value.toFixed();
+class NestedMayThrowBeforeAssignment {
+  value;
+  constructor() {
+    try {
+      try { throw 0; }
+      finally { this.value = 1; }
+    } finally { return; }
+  }
+}
+new NestedMayThrowBeforeAssignment().value.toFixed();

@@ -1,0 +1,4 @@
+(1,15): error TS1198: An extended Unicode escape value must be between 0x0 and 0x10FFFF inclusive.
+(2,24): error TS1198: An extended Unicode escape value must be between 0x0 and 0x10FFFF inclusive.
+(3,25): error TS1125: Hexadecimal digit expected.
+(4,15): error TS1487: Octal escape sequences are not allowed. Use the syntax '\x01'.

@@ -3,6 +3,8 @@ import type { CollectionState } from './realmCollections';
 import { isAccessor, JsArray, JsFunction, JsObject, type Property, Scope, UNINITIALIZED } from './values';
 
 /** Finds the turtles that `roots` reach, with the number of items scanned to find them. */
+// code-gauge-allow functionCognitiveComplexity 25 -- One worklist loop over every kind of reference, with WeakMap entries waiting for their keys.
+// code-gauge-allow functionNcss 37 -- One worklist loop over every kind of reference, with WeakMap entries waiting for their keys.
 export function findReachableTurtles(roots: unknown[]): { reached: Set<TurtleState>; scanned: number } {
   const reached = new Set<TurtleState>();
   const visited = new Set<JsObject | Scope>();
@@ -54,7 +56,7 @@ function pushScopeReferences(pending: unknown[], scope: Scope): void {
 }
 
 /** Pushes what an object refers to, returning the number of array elements among them. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Lists what each kind of builtin state refers to, one branch per kind.
+// code-gauge-allow functionCognitiveComplexity 20 -- Lists what each kind of builtin state refers to, one branch per kind.
 function pushObjectReferences(
   pending: unknown[],
   ephemeron: (key: unknown, value: unknown) => void,
@@ -80,10 +82,16 @@ function pushObjectReferences(
     if (object.behavior.kind !== 'native') pending.push(object.behavior.scope, object.behavior.homeObject);
     for (const value of object.captured) pending.push(value);
   }
-  if (!(object instanceof JsArray)) return 0;
+  return object instanceof JsArray ? pushArrayReferences(pending, object) : 0;
+}
+
+/** Pushes an array's elements, returning how many there are. */
+function pushArrayReferences(pending: unknown[], array: JsArray): number {
+  // An element defined as an accessor keeps its getter and setter apart from the elements.
+  for (const property of array.definedElements?.values() ?? []) pushProperty(pending, property);
   // Pushed one by one: spreading a large array into push() exceeds the engine's argument limit.
-  for (const element of object.elements) pending.push(element);
-  return object.elements.length;
+  for (const element of array.elements) pending.push(element);
+  return array.elements.length;
 }
 
 /** Pushes the keys and values of a Map or Set, leaving out the keys of a WeakMap or WeakSet, which hold them weakly. */

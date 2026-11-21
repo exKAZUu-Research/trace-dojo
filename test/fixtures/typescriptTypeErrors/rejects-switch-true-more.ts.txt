@@ -1,0 +1,11 @@
+function grade(n: number | string): string {
+  switch (true) {
+    case typeof n === "string":
+      return n;
+    case n >= 90:
+      return "A";
+    default:
+      return "B";
+  }
+}
+console.log(grade(95));

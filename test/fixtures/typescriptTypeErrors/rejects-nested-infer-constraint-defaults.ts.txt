@@ -1,0 +1,24 @@
+function nestedInferNumberConsumer(value: number): void {}
+type NestedObjectInfer<T> = T extends infer U extends { a: infer V } ? V : 'no';
+const nestedObject: NestedObjectInfer<{ a: number }> = 1;
+nestedInferNumberConsumer(nestedObject);
+const wrongNestedObject: NestedObjectInfer<{ b: number }> = 1;
+type NestedArrayInfer<T> = T extends infer U extends Array<infer V> ? V : 'no';
+const nestedArray: NestedArrayInfer<number[]> = 1;
+nestedInferNumberConsumer(nestedArray);
+type NestedTupleInfer<T> = T extends infer U extends [infer V] ? V : 'no';
+const nestedTuple: NestedTupleInfer<[number]> = 1;
+nestedInferNumberConsumer(nestedTuple);
+type NestedMethodInfer<T> = T extends infer U extends { f(): infer V } ? V : 'no';
+const nestedMethod: NestedMethodInfer<{ f(): number }> = 1;
+nestedInferNumberConsumer(nestedMethod);
+type NestedUnionInfer<T> = T extends infer U extends { a: number } | { b: infer V } ? V : 'no';
+const nestedUnion: NestedUnionInfer<{ b: number }> = 1;
+nestedInferNumberConsumer(nestedUnion);
+const wrongUnion: NestedUnionInfer<{ a: string }> = 1;
+type NestedBoundInfer<T> = T extends infer U extends { a: infer V extends string } ? V : 'no';
+const wrongBound: NestedBoundInfer<{ a: string }> = 1;
+type DeepNestedInfer<T> = T extends infer U extends { a: infer V extends Array<infer W extends string> } ? [V, W] : 'no';
+const wrongDeep: DeepNestedInfer<{ a: number[] }> = [[1], 'a'];
+type NestedParameterInfer<T> = T extends infer U extends ((x: infer V) => void) ? V : 'no';
+const wrongParameter: NestedParameterInfer<(x: number) => void> = 1;

@@ -1,0 +1,20 @@
+function outOfBounds<T extends [string, number]>(tuple: T) {
+  const [, , item] = tuple;
+}
+function readonly<T extends readonly [string, number]>(tuple: T) {
+  const [a, b] = tuple;
+  a.toFixed();
+  b.toUpperCase();
+}
+function badRest<T extends readonly [string, number]>(tuple: T) {
+  const [, ...tail] = tuple;
+  tail[0] = "wrong";
+}
+function optional<T extends [string, number?]>(tuple: T) {
+  const [, value] = tuple;
+  value.toFixed();
+}
+function badAssignment<T extends [string, number]>(tuple: T) {
+  let tail: [number];
+  [, ...tail] = tuple;
+}

@@ -1,0 +1,6 @@
+interface Reading { get value(): number; set value(input); }
+const reading: Reading = { value: 3 }; console.log(reading.value);
+type R2 = { get value(): number; set value(input); };
+const r2: R2 = { value: 3 }; console.log(r2.value);
+type R3 = { set value(input); get value(): string };
+const r3: R3 = { value: 'a' }; console.log(r3.value);

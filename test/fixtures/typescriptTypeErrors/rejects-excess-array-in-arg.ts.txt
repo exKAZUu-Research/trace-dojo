@@ -1,0 +1,3 @@
+interface P { x: number }
+function sum(ps: P[]) { return ps.length; }
+console.log(sum([{ x: 1, z: 2 }]));

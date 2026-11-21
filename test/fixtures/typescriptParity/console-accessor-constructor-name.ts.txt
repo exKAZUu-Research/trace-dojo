@@ -1,0 +1,19 @@
+let reads = 0;
+class Changed {}
+Object.defineProperty(Changed, 'name', {
+  get() { reads++; return 'Name' + reads; },
+});
+const item = new Changed();
+console.log(item);
+console.log(reads);
+console.dir(item, { showHidden: true });
+console.log(reads);
+const p = Object.create(Changed.prototype, {
+  hidden: { get() { reads++; return reads; }, configurable: true },
+});
+console.dir(Object.create(p), { showHidden: true, getters: true });
+console.log(reads);
+class NamedError extends Error {}
+Object.defineProperty(NamedError, 'name', { get() { throw new Error('name read'); } });
+try { console.log(Object.create(NamedError.prototype)); }
+catch (error) { if (error instanceof Error) console.log(error.message); }

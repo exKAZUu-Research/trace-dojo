@@ -1,0 +1,2 @@
+console.log(escape('a b+c/ü@*_-.'), unescape('a%20b%u00FC%zz'));
+console.log(escape.name, escape.length, typeof unescape, escape(String(12)));

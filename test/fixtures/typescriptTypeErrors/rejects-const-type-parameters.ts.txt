@@ -1,0 +1,13 @@
+function identity<const T>(value: T): T { return value; }
+const object = identity({ kind: 'a', nested: { count: 1 } });
+object.kind = 'a';
+object.nested.count = 1;
+const tuple = identity(['a', 'b']);
+tuple.push('a');
+const wrong: 'b' = object.kind;
+const input = { kind: 'a' };
+const widened: 'a' = identity(input).kind;
+function mutable<const T extends string[]>(value: T): T { return value; }
+mutable(['a', 'b']).push('c');
+function ordinary<T>(value: T): T { return value; }
+const ordinaryLiteral: 'a' = ordinary({ kind: 'a' }).kind;

@@ -1,0 +1,2 @@
+(4,35): error TS2574: A rest element type must be an array type.
+(5,47): error TS2574: A rest element type must be an array type.

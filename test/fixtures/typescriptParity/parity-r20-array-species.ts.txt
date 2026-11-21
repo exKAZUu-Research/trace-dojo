@@ -1,0 +1,8 @@
+class MyArr<T> extends Array<T> {}
+const a = new MyArr<number>();
+a.push(1, 2, 3);
+const m = a.map((x) => x * 2);
+console.log(m instanceof MyArr, m);
+console.log(a.filter((x) => x > 1) instanceof MyArr);
+console.log(MyArr.from([1, 2]) instanceof MyArr, MyArr.of(1) instanceof MyArr);
+console.log(a.slice(1));

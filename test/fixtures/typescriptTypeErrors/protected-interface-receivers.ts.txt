@@ -1,0 +1,11 @@
+class Base {
+  protected count = 1;
+}
+interface BaseView extends Base {}
+interface IndirectBase extends BaseView {}
+class Derived extends Base {
+  read(other: BaseView): number { return other.count; }
+  indirect(other: IndirectBase): number { return other.count; }
+  readGeneric<T extends BaseView>(other: T): number { return other.count; }
+  readIntersection(other: { extra: boolean } & BaseView): number { return other.count; }
+}

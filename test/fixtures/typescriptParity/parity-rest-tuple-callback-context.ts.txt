@@ -1,0 +1,4 @@
+function g(...args: [...((x: number) => number)[], (s: string) => void]) { return args.length; }
+console.log(g((x) => x + 1, (s) => console.log(s.length)));
+function h(...args: [...string[], (n: number) => string]) { return args.length; }
+console.log(h("a", (n) => n.toFixed(1)));

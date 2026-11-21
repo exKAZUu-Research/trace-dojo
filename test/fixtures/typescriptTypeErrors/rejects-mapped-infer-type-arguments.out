@@ -1,0 +1,4 @@
+(1,27): error TS2315: Type 'P' is not generic.
+(2,38): error TS2315: Type 'U' is not generic.
+(3,31): error TS2315: Type 'P' is not generic.
+(4,55): error TS2304: Cannot find name 'U'.

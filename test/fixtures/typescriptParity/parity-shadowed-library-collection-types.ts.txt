@@ -1,0 +1,55 @@
+function localArrays() {
+  interface Array<T> { consume: (value: T) => void; }
+  interface ReadonlyArray<T> { consumeReadonly: (value: T) => void; }
+  const wide: Array<string | number> = {consume: value => console.log('array', value)};
+  const narrow: Array<string> = wide;
+  const wideReadonly: ReadonlyArray<string | number> = {consumeReadonly: value => console.log('readonly', value)};
+  const narrowReadonly: ReadonlyArray<string> = wideReadonly;
+  narrow.consume('hi');
+  narrowReadonly.consumeReadonly('there');
+}
+function localContainers() {
+  interface ReadonlyMap<K, V> { consume: (key: K, value: V) => void; }
+  interface ReadonlySet<T> { consume: (value: T) => void; }
+  interface ArrayIterator<T> { consume: (value: T) => void; }
+  const map: ReadonlyMap<string | number, string | number> = {consume: (key, value) => console.log(key, value)};
+  const narrowMap: ReadonlyMap<string, number> = map;
+  const set: ReadonlySet<string | number> = {consume: value => console.log('set', value)};
+  const narrowSet: ReadonlySet<string> = set;
+  const iterator: ArrayIterator<string | number> = {consume: value => console.log('iterator', value)};
+  const narrowIterator: ArrayIterator<string> = iterator;
+  narrowMap.consume('key', 3);
+  narrowSet.consume('item');
+  narrowIterator.consume('step');
+}
+function localInference() {
+  interface Iterable<T> { value: T; }
+  interface ArrayLike<T> { value: T; }
+  interface IterableIterator<T> { value: T; }
+  function iterableValue<T>(input: Iterable<T>): T { return input.value; }
+  function arrayLikeValue<T>(input: ArrayLike<T>): T { return input.value; }
+  function iteratorValue<T>(input: IterableIterator<T>): T { return input.value; }
+  const first = iterableValue({value: 'one'});
+  const second = arrayLikeValue({value: 2});
+  const third = iteratorValue({value: true});
+  const one: string = first;
+  const two: number = second;
+  const three: boolean = third;
+  console.log(one, two, three);
+}
+function localFunction() {
+  interface Function { value: number; }
+  const value: Function = {value: 1};
+  console.log(String(value));
+}
+class Numbers extends Array<number> {}
+const numbers: Array<string | number> = new Numbers(1, 2);
+const readonlyNumbers: ReadonlyArray<string | number> = [3, 4];
+const readonlyMap: ReadonlyMap<string | number, string | number> = new Map<string, number>([['x', 5]]);
+const readonlySet: ReadonlySet<string | number> = new Set<string>(['y']);
+const iterator: ArrayIterator<string | number> = [6].values();
+localArrays();
+localContainers();
+localInference();
+localFunction();
+console.log(numbers, readonlyNumbers, readonlyMap.get('x'), readonlySet.has('y'), iterator.next());

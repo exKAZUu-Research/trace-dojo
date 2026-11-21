@@ -1,0 +1,20 @@
+type Tree<T> = [T, Tree<T>[]];
+const tree: Tree<number> = [1, [[2, []], [3, [[4, []]]]]];
+const badLeaf: Tree<number> = [1, [[2, [[3, [["x", []]]]]]]];
+type Nest<T> = Nest<T>[];
+const badNest: Nest<number> = [[], [1]];
+type Grow<T> = [T, Grow<T[]>[]];
+const badGrow: Grow<number> = [1, [[2, []]]];
+type Pair<A, B> = [A, Pair<B, A>?];
+const badPair: Pair<number, string> = [1, [2]];
+const strings: Tree<string> = tree;
+type Spread<T> = [T, ...Spread<T[]>];
+type Length<T> = Length<T>[]["length"];
+type Record2<T> = Record<string, Record2<T>>;
+function nest<T>(value: T) {
+  type Local = [T, Local[]];
+  const local: Local = [value, [[value, []]]];
+  return local;
+}
+const wrongLeaf: string = nest(1)[1][0][0];
+console.log(tree, strings, wrongLeaf);

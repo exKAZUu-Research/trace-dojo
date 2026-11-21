@@ -1,0 +1,21 @@
+function explicit<T extends unknown>(value: T) {
+  if (typeof value === "object") return value.toString();
+}
+function implicit<T>(value: T) {
+  if (typeof value === "object") return value.valueOf();
+}
+function computed<T>(value: T) {
+  if (typeof value === "object") return value["toString"]();
+}
+function intersect<T extends { id: number } | null, U extends { id: number } | null>(value: T & U) {
+  return value.id;
+}
+function nullableUnion<T extends { id: number } | null | undefined>(value: T & ({ id: number } | null | undefined)) {
+  return value.id;
+}
+function indexed<T extends { entry?: { id: number } }>(value: T["entry"]) {
+  return value.id;
+}
+function voidOrNull<T extends void | null>(value: T) {
+  return value.toString();
+}

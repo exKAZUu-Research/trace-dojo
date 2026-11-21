@@ -1,0 +1,30 @@
+const k = "x";
+interface I {
+  [k]: number;
+  x: number;
+}
+type T = {
+  [k]: number;
+  x: number;
+};
+const m = "m";
+interface M {
+  [m](): void;
+  m(a: number): void;
+}
+const g = "g";
+interface G {
+  get [g](): number;
+  set g(v: number);
+}
+const n = 1;
+type N = {
+  [n]: string;
+  1: string;
+};
+interface Merged {
+  [k]: number;
+}
+interface Merged {
+  x: string;
+}

@@ -1,0 +1,2 @@
+class A { run() { const o: any = Object.freeze({ a: 1 }); o.a = 2; } }
+try { new A().run(); } catch (e) { console.log((e as Error).message); }

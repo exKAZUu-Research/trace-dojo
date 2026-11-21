@@ -1,0 +1,13 @@
+const key = Symbol("key");
+const other = Symbol("other");
+interface A { [k: string]: number; [key]: string; }
+interface B { [k: symbol]: number; [key]: number; [other]?: number; }
+interface C { [k: symbol]: number; [other]?: number | undefined; }
+class E { [k: symbol]: number; static [key] = "x"; [other] = 1; }
+interface F extends B { [key]: number; }
+interface G { [k: symbol]: number; }
+interface H extends G { [other]: string; }
+type T = { [k: symbol]: number; [key]: string };
+class Dict { [k: symbol]: number; [key] = "x"; }
+const o: { [k: symbol]: number } = { [key]: 1 };
+console.log(o[key], new Dict()[key]);

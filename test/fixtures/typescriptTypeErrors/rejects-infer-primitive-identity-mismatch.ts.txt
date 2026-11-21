@@ -1,0 +1,34 @@
+type StringPair<T> = T extends [infer U extends string & {}, infer U extends string] ? U : 'no';
+type ReverseStringPair<T> = T extends [infer U extends string, infer U extends {} & string] ? U : 'no';
+type NumberPair<T> = T extends [infer U extends number & {}, infer U extends number] ? U : 'no';
+type BigintPair<T> = T extends [infer U extends bigint & {}, infer U extends bigint] ? U : 'no';
+
+type Empty = {};
+type Completion<T extends string> = `item-${T}`;
+type TemplatePair<T> = T extends [
+  infer U extends Completion<string> & Empty,
+  infer U extends Completion<string>,
+] ? U : 'no';
+
+const a: StringPair<[1, 'yes']> = 'no';
+const b: ReverseStringPair<[1, 'yes']> = 'no';
+const c: NumberPair<[true, 1]> = 'no';
+const d: BigintPair<[true, 1n]> = 'no';
+const e: TemplatePair<[1, 'item-yes']> = 'no';
+
+type DirectPattern<T> = T extends [
+  infer U extends `item-${string}` & {},
+  infer U extends `item-${string}`,
+] ? U : 'no';
+type NumericPattern<T> = T extends [
+  infer U extends `${number}` & {},
+  infer U extends `${number}`,
+] ? U : 'no';
+type PrimitiveAlias = string;
+type NestedEmpty<T> = T extends [
+  infer U extends PrimitiveAlias & ({} & unknown),
+  infer U extends string,
+] ? U : 'no';
+
+const wrongString: StringPair<[1, 'yes']> = 'yes';
+const wrongNumber: NumberPair<[true, 1]> = 1;

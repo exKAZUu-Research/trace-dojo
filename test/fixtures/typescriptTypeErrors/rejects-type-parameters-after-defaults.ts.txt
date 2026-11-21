@@ -1,0 +1,10 @@
+function identity<T = string, U>(value: U): U { return value; }
+class Pair<A = string, B> { constructor(public a: A, public b: B) {} }
+type P<T = 1, U> = [T, U];
+const g = <A = 1, B>(b: B) => b;
+class M { m<T = 1, U>(u: U) { return u; } }
+interface I<T, U = 2> { a: T }
+interface I<T = 1, U> { c: U }
+interface J<T = 1, U = 2> { a: T }
+interface J<T, U> { b: U }
+console.log(identity(3), new Pair(1, 2), g(2), new M().m(1));

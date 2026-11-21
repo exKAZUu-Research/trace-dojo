@@ -1,0 +1,21 @@
+class Counter { get value() { return 2; } }
+const counted = { ...new Counter() };
+console.log(counted.value);
+class Pair { v = 1; get value() { return 2; } set value(x: number) {} }
+const paired = { ...new Pair() };
+console.log(paired.value);
+class Base { v = 1; #secret = 2; get doubled() { return this.v * 2; } method() { return this.#secret; } }
+class Derived extends Base { w = 3; }
+const derived = { ...new Derived() };
+console.log(derived.v, derived.w);
+console.log(derived.doubled);
+interface WithGetter { get size(): number; }
+const sized: WithGetter = { get size() { return 4; } };
+const sizedCopy = { ...sized };
+console.log(sizedCopy.size);
+const literal = { get n() { return 5; } };
+const literalCopy = { ...literal };
+console.log(literalCopy.n);
+const both = { ...new Derived(), ...literal };
+const notNumber: number = both;
+console.log(notNumber);

@@ -1,0 +1,34 @@
+interface BaseShape {
+  value: number;
+  read(this: Derived): number;
+}
+class Implementation {
+  value = 1;
+  constructor(input: string | number) { this.value = Number(input); }
+  read(this: Derived) { return this.value + this.offset; }
+}
+type Numeric = { new(value: number): BaseShape };
+type Textual = { new(value: string): { value: number; read(this: Derived): number } };
+const Base: Numeric & Textual = Implementation;
+class Derived extends (() => Base)() {
+  offset = 2;
+  run() { return super["read"](); }
+}
+class StaticBase {
+  static get value() { return 3; }
+  static asText(this: typeof StaticDerived) { return String(this.offset + this.value); }
+}
+class StaticDerived extends StaticBase {
+  static offset = 5;
+  static run() { return super["asText"](); }
+}
+class SetterBase {
+  get count() { return this.current; }
+  set count(value: number) { this.current = value; }
+  current = 0;
+}
+class SetterDerived extends SetterBase {
+  run() { super["count"] = 9; return super["count"]; }
+}
+
+console.log(new Derived(4).run(), new Derived("7").run(), StaticDerived.run(), new SetterDerived().run());

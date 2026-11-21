@@ -1,0 +1,59 @@
+class Base {
+  protected value = 2;
+}
+class Derived extends Base {
+  field: number;
+  optional?: number;
+  asserted!: number;
+  constructor() {
+    super();
+    ({ value: this.field } = { value: 3 });
+    this.field++;
+    console.log(this.field, this.optional, this.asserted, this.value);
+  }
+  read(other: Derived) {
+    const { nested: { ["value"]: value } } = { nested: other };
+    return value;
+  }
+}
+const instance = new Derived();
+console.log(instance.read(instance));
+
+class Names {
+  "static title" = "instance";
+  static title = "class";
+  ["static show"]() { return 1; }
+  static show() { return 2; }
+}
+console.log(new Names()["static title"], Names.title, new Names()["static show"](), Names.show());
+
+function mix<T extends new (...args: any[]) => object>(Base: T) {
+  return class extends Base {
+    protected rank = 1;
+    protected method() { return 2; }
+  };
+}
+class A {}
+class C extends mix(A) {
+  read(value = this.rank) { return value + this.method(); }
+}
+console.log(new C().read());
+
+class Defaults {
+  constructor(public amount = this.forward) {}
+  forward = 1;
+  read(value: number = this.later()) { return value; }
+  later() { return this.forward; }
+  static field = 2;
+  static read(value = Defaults.field) { return value; }
+}
+console.log(new Defaults().read(), Defaults.read(), new Defaults().amount);
+
+const annotated = { x: 1, read(this: {x: number}, value = this.x) { return value; } };
+console.log(annotated.read());
+
+class RecursiveDefaults {
+  constant(value = this.constant()) { return 1; }
+  annotated(value = this.annotated()): number { return value; }
+}
+console.log(new RecursiveDefaults().constant(4), new RecursiveDefaults().annotated(5));

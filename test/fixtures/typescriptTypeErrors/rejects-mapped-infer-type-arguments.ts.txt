@@ -1,0 +1,7 @@
+type Keys = { [P in "x"]: P<number> };
+type Unwrap<T> = T extends infer U ? U<string> : never;
+type Renamed = { [P in "x" as P<1>]: 1 };
+type Checked<T> = T extends [infer U, infer V extends U<1>] ? V : never;
+type Fine<T> = { [K in keyof T]: K };
+const fine: Fine<{ a: 1 }> = { a: "a" };
+console.log(fine.a);

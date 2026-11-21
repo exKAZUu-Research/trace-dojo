@@ -19,6 +19,7 @@ export interface DataProperty {
   writable: boolean;
   enumerable: boolean;
   configurable: boolean;
+  hiddenTraceConstant?: true;
 }
 
 export interface AccessorProperty {
@@ -26,6 +27,7 @@ export interface AccessorProperty {
   set: JsFunction | undefined;
   enumerable: boolean;
   configurable: boolean;
+  readonlyAssignment?: true;
 }
 
 export type Property = DataProperty | AccessorProperty;
@@ -36,7 +38,10 @@ export function isAccessor(property: Property): property is AccessorProperty {
 
 /** Makes an object's properties read-only and stops it from gaining new ones, as `Object.freeze` does. */
 export function freeze(object: JsObject): void {
-  if (object instanceof JsArray) object.frozen = object.sealed = true;
+  if (object instanceof JsArray) {
+    object.frozen = object.sealed = true;
+    object.isLengthWritable = false;
+  }
   object.extensible = false;
   for (const property of object.properties.values()) {
     property.configurable = false;
@@ -53,10 +58,13 @@ export class JsObject {
   turtle?: TurtleState;
   /** Set by the builtin Error constructors, which `Error.prototype.toString` and stack traces rely on. */
   isError = false;
+  /** An error's first stack line, which V8 formats when the error is first printed and keeps through later changes. */
+  stackHeadline?: string;
   /** Set by the RegExp constructor and regular expression literals; never run itself, since it keeps no lastIndex. */
   regexp?: RegExp;
   /** Set on a builtin iterator, such as a generator, which loops and spreads step through and close early. */
   hostIterator?: HostIterator;
+  hostIteratorKind?: JsObject;
   /** Set on a generator object. */
   generator?: GeneratorState;
   /** Set on an async generator object. */
@@ -65,10 +73,30 @@ export class JsObject {
   promise?: PromiseState;
   /** Set on a Map, Set, WeakMap, or WeakSet. */
   collection?: CollectionState;
+  /** Constructor used by inspection after an instance loses its prototype. */
+  instanceConstructor?: JsFunction;
+  /** Set on what `JSON.rawJSON` returns, whose text `JSON.stringify` writes as it is. */
+  isRawJson = false;
+  /** Set on a function's `arguments` object, which shows and is tagged as `Arguments`. */
+  isArguments = false;
   /** Set on a primitive boxed by `Object(value)`, whose prototype methods read it; a string's are its own indices. */
   primitive?: string | number | boolean | bigint | symbol;
 
-  constructor(public proto: JsObject | null) {}
+  proto: JsObject | null;
+
+  constructor(proto: JsObject | null) {
+    this.proto = asPrototype(proto);
+  }
+
+  setPrototype(proto: JsObject | null): void {
+    this.proto = asPrototype(proto);
+  }
+}
+
+function asPrototype(proto: JsObject | null): JsObject | null {
+  // V8 drops the allocation constructor when it uses an object as a prototype.
+  if (proto) proto.instanceConstructor = undefined;
+  return proto;
 }
 
 /** The primitive a boxed primitive holds, or the value itself otherwise. */
@@ -89,6 +117,13 @@ export class JsArray extends JsObject {
   sealed = false;
   /** Set by Object.freeze, which also leaves the elements and the length read-only. */
   frozen = false;
+  /** Cleared by Object.freeze or by defining `length` as read-only, after which nothing changes the length. */
+  isLengthWritable = true;
+  /**
+   * The elements `Object.defineProperty` gave other attributes than a plain element's, or made accessors; a data
+   * element's value stays in `elements`, and an accessor's place there holds `undefined`.
+   */
+  definedElements?: Map<number, Property>;
 
   constructor(
     proto: JsObject | null,
@@ -129,6 +164,7 @@ export type FunctionBehavior =
       isDerived: boolean;
       /** Instance fields, initialized when the constructor starts (or `super()` returns). */
       fields: ClassField[];
+      traceBinding?: Binding;
     };
 
 export interface ClassField {
@@ -145,6 +181,9 @@ export interface ClassField {
 export class JsFunction extends JsObject {
   /** Values a native function's closure keeps, such as what `bind` bound, which garbage collection must see. */
   captured: Value[] = [];
+  boundTarget?: JsFunction;
+  forwardsLegacyCaller?: true;
+  initialName = '';
 
   constructor(
     proto: JsObject | null,
@@ -166,6 +205,8 @@ export const UNINITIALIZED = Symbol('uninitialized');
 
 export interface Binding {
   value: Value | typeof UNINITIALIZED;
+  /** The class object visible to trace snapshots before the declaration finishes initializing its binding. */
+  initializingClass?: JsFunction;
   isMutable: boolean;
   /** What the TypeError of an assignment to an immutable binding calls it, `constant` unless set. */
   immutableKind?: 'using' | 'await using';
@@ -181,6 +222,10 @@ export interface FunctionFrame {
   /** The class whose constructor is running, for `super()` and field initialization. */
   constructing: JsFunction | undefined;
   newTarget: JsFunction | undefined;
+  /** Whether the running code is strict mode code, outside which refused assignments and deletions do nothing. */
+  isStrict: boolean;
+  /** Set where `this` is the module's or the global object, which code that is not strict mode code gets for none. */
+  hasImplicitThis?: boolean;
 }
 
 /** A value a `using` declaration declared, with the method that disposes of it when its scope ends. */
@@ -197,6 +242,8 @@ export class Scope {
   readonly bindings = new Map<string, Binding>();
   /** The values `using` declarations in this scope declared, in order. */
   disposables?: Disposable[];
+  /** Set on the scope of an arrow function call, whose body is strict or not on its own, unlike its `this`. */
+  arrowIsStrict?: boolean;
 
   constructor(
     readonly parent: Scope | undefined,
@@ -212,6 +259,11 @@ export class Scope {
 
   nearestFunctionFrame(): FunctionFrame | undefined {
     return this.functionFrame ?? this.parent?.nearestFunctionFrame();
+  }
+
+  /** Whether the code this scope runs is strict mode code, as its nearest function or arrow function says. */
+  isStrict(): boolean | undefined {
+    return this.arrowIsStrict ?? this.functionFrame?.isStrict ?? this.parent?.isStrict();
   }
 }
 

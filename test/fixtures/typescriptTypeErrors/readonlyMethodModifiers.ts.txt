@@ -1,0 +1,6 @@
+class Counter {
+  readonly next() { return 1; }
+}
+interface Method { readonly next(): number; }
+type ObjectMethod = { readonly next(): number };
+abstract class AbstractMethod { abstract readonly next(): number; }

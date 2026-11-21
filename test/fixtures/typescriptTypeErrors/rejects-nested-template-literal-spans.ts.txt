@@ -1,0 +1,11 @@
+type Id = `id-${number}`;
+const id: Id = "id-1";
+const ok: `user:id-${number}` = `user:${id}`;
+const bad: `user:id-${number}` = `user-${id}`;
+type N = `${`n${number}`}`;
+const n: N = "n5";
+const badN: N = "m5";
+type B = `x${`${"p" | "q"}-${number}`}y`;
+const badB: B = "xr-1y";
+const lower: Lowercase<string> = "ab" as Uppercase<string>;
+console.log(ok, bad, n, badN, badB, lower);

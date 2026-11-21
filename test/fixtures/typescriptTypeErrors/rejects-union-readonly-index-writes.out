@@ -1,0 +1,5 @@
+(2,57): error TS2540: Cannot assign to 'x' because it is a read-only property.
+(3,61): error TS2540: Cannot assign to 'x' because it is a read-only property.
+(5,61): error TS2540: Cannot assign to '0' because it is a read-only property.
+(6,68): error TS2540: Cannot assign to '0' because it is a read-only property.
+(7,99): error TS2542: Index signature in type '{ [key: string]: number; } | { readonly [key: string]: number; }' only permits reading.

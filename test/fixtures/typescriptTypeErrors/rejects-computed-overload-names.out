@@ -1,0 +1,6 @@
+(4,3): error TS2389: Function implementation name must be '[overloadA]'.
+(8,10): error TS2389: Function implementation name must be '[overloadA]'.
+(12,3): error TS2389: Function implementation name must be '[overloadA]'.
+(12,3): error TS2391: Function implementation is missing or not immediately following the declaration.
+(16,3): error TS2393: Duplicate function implementation.
+(17,3): error TS2393: Duplicate function implementation.

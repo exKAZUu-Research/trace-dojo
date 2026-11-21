@@ -1,0 +1,11 @@
+const undefinedValues: undefined[] = [1, 2].flatMap(() => [undefined]);
+const nullValues: null[] = [1, 2].flatMap(() => [null]);
+const emptyValues: number[] = [1, 2].flatMap(() => []);
+const someValues: (number | undefined)[] = [1, 2].flatMap((value) => value === 1 ? value : [undefined]);
+function single<T>(input: T | ReadonlyArray<T>): T[] {
+  return Array.isArray(input) ? [...input] : [input as T];
+}
+const special: undefined[] = single([undefined]);
+const mixed: (number | undefined)[] = single([1, undefined]);
+const named: number[] = single([1, 2]);
+console.log(undefinedValues, nullValues, emptyValues, someValues, special, mixed, named);

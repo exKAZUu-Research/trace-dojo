@@ -1,0 +1,16 @@
+class Holder<Out = string> { constructor(public value: Out) {} }
+class DefaultHolder extends Holder {}
+const notNumber: number = new DefaultHolder("x").value;
+class LiteralHolder extends Holder<"lit"> {}
+new LiteralHolder(1);
+class Cell<T = number> { item!: T; read(): T { return this.item; } }
+class DefaultCell extends Cell {}
+const notString: string = new DefaultCell().read();
+class TextCell extends Cell<string> {}
+const notCount: number = new TextCell().item;
+class ListCell<U> extends Cell<U[]> {}
+new ListCell<number>().read().push("a");
+const wrongBase: Cell<number> = new TextCell();
+type IsNumberCell = DefaultCell extends Cell<string> ? true : false;
+const isNumberCell: IsNumberCell = true;
+class Reader extends Cell<boolean> { flag(): number { return this.item; } }

@@ -1,0 +1,4 @@
+class FunctionField { x=1; f = function() { return this.x; }; }
+class NamedFunctionField { x=1; f = function read() { return this.x; }; }
+class StaticFunctionField { static x=1; static f = function() { return this.x; }; }
+class NestedFunctionField { x=1; f = () => { function read() { return this.x; } return read(); }; }

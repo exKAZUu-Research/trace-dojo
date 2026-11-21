@@ -1,0 +1,29 @@
+function add(a: number, b: number) {
+  console.log(a + b);
+}
+function maybe(flag: boolean): void | number {
+  if (flag) return 1;
+}
+class Counter {
+  value = 0;
+  increment() {
+    this.value++;
+  }
+}
+let total = 1;
+const sum = add(1, 2) + 1;
+const difference = 10 - add(1, 2);
+const power = add(1, 2) ** 2;
+const bits = add(1, 2) | 0;
+const less = add(1, 2) < 3;
+const atLeast = 3 >= add(1, 2);
+total += add(1, 2);
+total -= add(1, 2);
+const doubled = new Counter().increment() * 2;
+const lengths = [1, 2].forEach((x) => x) + 1;
+const partial = maybe(true) + 1;
+const compared = maybe(true) < 2;
+const voids = add(1, 2) > add(3, 4);
+const text = "result: " + add(1, 2);
+const negated = -add(1, 2);
+console.log(sum, difference, power, bits, less, atLeast, total, doubled, lengths, partial, compared, voids, text, negated);

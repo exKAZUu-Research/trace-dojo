@@ -1,0 +1,13 @@
+const a = { ...null };
+const b = { ...undefined };
+const c = { ...(Math.PI > 1 ? 0 : { x: 1 }) };
+function f<T>(t: T) { return { ...t }; }
+function g<T extends string>(t: T) { return { ...t }; }
+function h<T extends object>(t: T) { return { ...t }; }
+function k<T>(t: keyof T) { return { ...t }; }
+const d = { ...(1 as const) };
+const e = { ...("s" as string) };
+function m<T extends { a: 1 } | undefined>(t: T) { return { ...t }; }
+const n = { ...(Symbol() as symbol) };
+const o = { ...([1] as number[]) };
+console.log(a, b, c, d, e, n, o, f(1), h({}), m(undefined));

@@ -1,0 +1,6 @@
+(1,10): error TS2391: Function implementation is missing or not immediately following the declaration.
+(3,10): error TS2391: Function implementation is missing or not immediately following the declaration.
+(9,10): error TS2389: Function implementation name must be 'expectedImplementation'.
+(12,10): error TS2391: Function implementation is missing or not immediately following the declaration.
+(14,10): error TS2389: Function implementation name must be 'expectedGenericImplementation'.
+(18,3): error TS2389: Function implementation name must be 'method'.

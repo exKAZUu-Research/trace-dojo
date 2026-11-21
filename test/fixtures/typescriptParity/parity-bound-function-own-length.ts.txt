@@ -1,0 +1,14 @@
+function f(a:number,b:number){}
+delete (f as any).length;
+Object.defineProperty(Function.prototype,"length",{value:5,configurable:true});
+console.log(f.bind(undefined).length);
+let inheritedReads=0;
+Object.defineProperty(Function.prototype,"length",{get(){inheritedReads++;return 5;},configurable:true});
+console.log(f.bind(undefined,1).length,inheritedReads);
+let ownReads=0;
+Object.defineProperty(f,"length",{get(){ownReads++;return 2;},configurable:true});
+console.log(f.bind(undefined,1).length,ownReads,inheritedReads);
+Object.defineProperty(f,"length",{value:"5",configurable:true});
+console.log(f.bind(undefined).length);
+Object.defineProperty(f,"length",{value:Infinity,configurable:true});
+console.log(f.bind(undefined,1).length,Math.abs.bind(undefined).length);
