@@ -1,10 +1,6 @@
 import { kotlin } from './source';
 
-/** The native classes of `kotlin.collections` and the functions that create them. */
-export const COLLECTION_CLASSES_SOURCE = kotlin`
-package kotlin.collections
-
-abstract external class NativeList<E> : MutableList<E>, RandomAccess {
+const LIST_READERS = kotlin`
     external override val size: Int
     external override fun isEmpty(): Boolean
     external override fun contains(element: E): Boolean
@@ -12,9 +8,20 @@ abstract external class NativeList<E> : MutableList<E>, RandomAccess {
     external override fun get(index: Int): E
     external override fun indexOf(element: E): Int
     external override fun lastIndexOf(element: E): Int
-    external override fun iterator(): MutableIterator<E>
     external override fun listIterator(): ListIterator<E>
     external override fun listIterator(index: Int): ListIterator<E>
+    external override fun equals(other: Any?): Boolean
+    external override fun hashCode(): Int
+    external override fun toString(): String
+`;
+
+/** The native classes of `kotlin.collections` and the functions that create them. */
+export const COLLECTION_CLASSES_SOURCE = kotlin`
+package kotlin.collections
+
+abstract external class NativeList<E> : MutableList<E>, RandomAccess {
+    ${LIST_READERS}
+    external override fun iterator(): MutableIterator<E>
     external override fun subList(fromIndex: Int, toIndex: Int): MutableList<E>
     external override fun add(element: E): Boolean
     external override fun add(index: Int, element: E)
@@ -26,15 +33,19 @@ abstract external class NativeList<E> : MutableList<E>, RandomAccess {
     external override fun removeAll(elements: Collection<E>): Boolean
     external override fun retainAll(elements: Collection<E>): Boolean
     external override fun clear()
-    external override fun equals(other: Any?): Boolean
-    external override fun hashCode(): Int
-    external override fun toString(): String
+
 }
 
 external class ArrayList<E> : NativeList<E> {
     external constructor()
     external constructor(initialCapacity: Int)
     external constructor(elements: Collection<E>)
+}
+
+external class PrimitiveArrayList<E> : List<E>, RandomAccess {
+    ${LIST_READERS}
+    external override fun iterator(): Iterator<E>
+    external override fun subList(fromIndex: Int, toIndex: Int): List<E>
 }
 
 external class ArraysList<E> : NativeList<E>

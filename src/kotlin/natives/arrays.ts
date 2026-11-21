@@ -20,8 +20,8 @@ import { arrayFactoryName, UNSIGNED_ARRAYS } from '../prelude/arrays';
 import type { Frame } from '../runtime';
 import type { FunctionSymbol } from '../symbols';
 import { box, KObject, NULL, type PrimitiveKind, UNIT, type Value } from '../values';
-import { elementsOf, newList, touch } from './collections';
-import { checkArrayIndex } from './core';
+import { elementsOf, newList, newPrimitiveArrayList, touch } from './collections';
+import { arrayIterator, checkArrayIndex } from './core';
 import { defineNative, defineNativeProperty, libraryClass } from './registry';
 
 /** The primitive arrays, with the default value of their elements. */
@@ -40,19 +40,6 @@ const PRIMITIVE_ARRAYS: [name: string, kind: PrimitiveKind | 'Boolean', zero: Va
 function checkSize(frame: Frame, size: number): void {
   if (size < 0) frame.runtime.throwError(frame, 'java.lang.NegativeArraySizeException', String(size));
   frame.runtime.allocate(frame, size + 1);
-}
-
-/** An iterator over an array's elements, boxing those of a primitive array, which its `Iterator<Int>` returns. */
-function boxingIterator(array: KObject, kind: PrimitiveKind | 'Boolean'): KObject {
-  const iterator = new KObject(libraryClass('kotlin.collections.ItemIterator'), 0);
-  const source =
-    kind === 'Boolean'
-      ? array
-      : Object.assign(new KObject(array.cls, 0), {
-          items: (array.items as Value[]).map((value) => box(kind, value as number)),
-        });
-  iterator.native = { source, index: 0, expectedModCount: undefined };
-  return iterator;
 }
 
 // code-gauge-allow functionNcss 43 -- registers the natives of one class together, in the order the prelude declares them.
@@ -76,7 +63,7 @@ function defineArrays(): void {
       items[index as number] = value;
       return UNIT;
     });
-    defineNative(`${prefix}.iterator()`, (_frame, receiver) => boxingIterator(receiver as KObject, kind));
+    defineNative(`${prefix}.iterator()`, (frame, receiver) => arrayIterator(frame, receiver as KObject, kind));
   }
   defineNative('kotlin.collections.NativeLists.of(Collection<T>)', (frame, _receiver, [elements]) =>
     newList(frame, 'ArraysList', elementsOf(frame, elements))
@@ -401,13 +388,11 @@ function defineArrayFunctions(): void {
 function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | undefined): void {
   const prefix = `kotlin.collections.${receiver}`;
   defineNative(`${prefix}.asList()`, (frame, array) => {
-    // Arrays.asList shares the array of objects; a primitive array's list holds boxed copies of its elements.
-    if (kind === undefined) {
-      const list = newList(frame, 'ArraysList', []);
-      list.items = (array as KObject).items;
-      return list;
-    }
-    return newList(frame, 'ArraysList', boxedItems(array, kind));
+    const source = array as KObject;
+    if (kind !== undefined) return newPrimitiveArrayList(frame, { source, kind });
+    const list = newList(frame, 'ArraysList', []);
+    list.items = source.items;
+    return list;
   });
   defineNative(`${prefix}.contentToString()`, (frame, array) => {
     const text = `[${boxedItems(array, kind)

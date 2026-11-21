@@ -1,9 +1,21 @@
-// code-gauge-allow-file fileNcss 685 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 703 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
 import type { Frame } from '../runtime';
-import { type HashEntry, KObject, type KStore, UNIT, type Value } from '../values';
+import {
+  type HashEntry,
+  indexedItem,
+  indexedItems,
+  indexedSize,
+  KObject,
+  type KStore,
+  type PrimitiveArrayView,
+  primitiveArrayView,
+  type PrimitiveKind,
+  UNIT,
+  type Value,
+} from '../values';
 import { arrayIterator } from './core';
 import { mapCapacity, newStore, reserveForCopy } from './hashTables';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
@@ -14,9 +26,14 @@ import { defineNative, defineNativeProperty, libraryClass, throwError } from './
  * and Kotlin's `EmptyList`.
  */
 const LIST = 'kotlin.collections.NativeList';
+const PRIMITIVE_ARRAY_LIST = 'kotlin.collections.PrimitiveArrayList';
 
 function items(list: Value): Value[] {
   return (list as KObject).items as Value[];
+}
+
+function readableItems(list: Value): Value[] {
+  return indexedItems(list as KObject) as Value[];
 }
 
 function className(value: Value): string {
@@ -49,11 +66,18 @@ function isBuilt(list: Value): boolean {
 
 /** Checks an index of `get`, `set`, and `removeAt`, with the message each list class gives. */
 function checkIndex(frame: Frame, list: Value, index: number): void {
-  const size = items(list).length;
+  const size = indexedSize(list as KObject);
   if (index >= 0 && index < size) return;
   // A sublist of any list is AbstractList's SubList on the JVM, which checks indexes with Objects.checkIndex.
   const isSublist = (list as KObject).native?.parent !== undefined;
   switch (isSublist ? 'SubList' : className(list)) {
+    case 'PrimitiveArrayList': {
+      if (primitiveArrayView(list as KObject)?.range) {
+        throwError(frame, 'java.lang.IndexOutOfBoundsException', `index: ${index}, size: ${size}`);
+      }
+      throwError(frame, 'java.lang.ArrayIndexOutOfBoundsException', `Index ${index} out of bounds for length ${size}`);
+      break;
+    }
     case 'ArraysList': {
       throwError(frame, 'java.lang.ArrayIndexOutOfBoundsException', `Index ${index} out of bounds for length ${size}`);
       break;
@@ -111,9 +135,17 @@ export function newList(
   return list;
 }
 
+export function newPrimitiveArrayList(frame: Frame, arrayView: PrimitiveArrayView): KObject {
+  frame.runtime.allocate(frame, 1);
+  const list = new KObject(libraryClass(PRIMITIVE_ARRAY_LIST), 0);
+  list.native = { arrayView };
+  return list;
+}
+
 /** The elements of any collection or iterable, read natively when it is one of the library's. */
 export function elementsOf(frame: Frame, collection: Value): Value[] {
   const object = collection as KObject;
+  if (primitiveArrayView(object)) return readableItems(object);
   if (object.items) return [...object.items];
   if (object.store) return storeElements(object);
   if (object.native?.view) return viewElements(frame, object);
@@ -150,17 +182,20 @@ type ListNative = (frame: Frame, list: Value, args: Value[]) => Value;
 
 /** What reads a list of the library. */
 const LIST_READING_NATIVES: Record<string, ListNative> = {
-  'isEmpty()': (_frame, list) => items(list).length === 0,
-  'contains(E)': (frame, list, [element]) => indexOfValue(frame, items(list), element) !== -1,
-  'containsAll(Collection<E>)': (frame, list, [elements]) =>
-    elementsOf(frame, elements).every((element) => indexOfValue(frame, items(list), element) !== -1),
+  'isEmpty()': (_frame, list) => indexedSize(list as KObject) === 0,
+  'contains(E)': (frame, list, [element]) => indexOfValue(frame, readableItems(list), element) !== -1,
+  'containsAll(Collection<E>)': (frame, list, [elements]) => {
+    const others = elementsOf(frame, elements);
+    const values = readableItems(list);
+    return others.every((element) => indexOfValue(frame, values, element) !== -1);
+  },
   'get(Int)': (frame, list, [index]) => {
     checkIndex(frame, list, index as number);
-    return items(list)[index as number];
+    return indexedItem(list as KObject, index as number);
   },
-  'indexOf(E)': (frame, list, [element]) => indexOfValue(frame, items(list), element),
+  'indexOf(E)': (frame, list, [element]) => indexOfValue(frame, readableItems(list), element),
   'lastIndexOf(E)': (frame, list, [element]) => {
-    const values = items(list);
+    const values = readableItems(list);
     for (let index = values.length - 1; index >= 0; index--)
       if (valueEquals(frame, element, values[index])) return index;
     return -1;
@@ -168,7 +203,7 @@ const LIST_READING_NATIVES: Record<string, ListNative> = {
   'iterator()': (frame, list) => arrayIterator(frame, list as KObject),
   'listIterator()': (frame, list) => arrayIterator(frame, list as KObject),
   'listIterator(Int)': (frame, list, [index]) => {
-    const size = items(list).length;
+    const size = indexedSize(list as KObject);
     const position = index as number;
     if (position < 0 || position > size) {
       const name = className(list);
@@ -186,8 +221,8 @@ const LIST_READING_NATIVES: Record<string, ListNative> = {
   },
   'subList(Int, Int)': (frame, list, [from, to]) => subList(frame, list as KObject, from as number, to as number),
   'equals(Any?)': (frame, list, [other]) => listEquals(frame, list as KObject, other),
-  'hashCode()': (frame, list) => listHash(frame, items(list)),
-  'toString()': (frame, list) => collectionToString(frame, list, items(list)),
+  'hashCode()': (frame, list) => listHash(frame, readableItems(list)),
+  'toString()': (frame, list) => collectionToString(frame, list, readableItems(list)),
 };
 
 /** What changes a list of the library, which only its resizable and mutable kinds allow. */
@@ -317,10 +352,12 @@ function defineLists(): void {
       return UNIT;
     });
   }
-  defineNativeProperty(`${LIST}.size`, (_frame, list) => items(list).length);
-  for (const natives of [LIST_READING_NATIVES, LIST_CHANGING_NATIVES]) {
-    for (const [signature, native] of Object.entries(natives)) defineNative(`${LIST}.${signature}`, native);
+  for (const type of [LIST, PRIMITIVE_ARRAY_LIST]) {
+    defineNativeProperty(`${type}.size`, (_frame, list) => indexedSize(list as KObject));
+    for (const [signature, native] of Object.entries(LIST_READING_NATIVES))
+      defineNative(`${type}.${signature}`, native);
   }
+  for (const [signature, native] of Object.entries(LIST_CHANGING_NATIVES)) defineNative(`${LIST}.${signature}`, native);
 }
 
 /** Removes the elements `keeps` rejects, telling whether any went. */
@@ -340,7 +377,7 @@ export function listEquals(frame: Frame, list: KObject, other: Value): boolean {
   if (list === other) return true;
   if (!(other instanceof KObject) || !runtimeClassOf(other).isSubclassOf(libraryClass('kotlin.collections.List')))
     return false;
-  const a = list.items as Value[];
+  const a = readableItems(list);
   const b = elementsOf(frame, other);
   return a.length === b.length && a.every((value, index) => valueEquals(frame, value, b[index]));
 }
@@ -356,14 +393,21 @@ export function listHash(frame: Frame, values: Value[]): number {
  * view consistent for the changes a program makes through one of them at a time.
  */
 function subList(frame: Frame, list: KObject, from: number, to: number): KObject {
-  const values = list.items as Value[];
+  const size = indexedSize(list);
   if (from < 0) throwError(frame, 'java.lang.IndexOutOfBoundsException', `fromIndex = ${from}`);
-  if (to > values.length) throwError(frame, 'java.lang.IndexOutOfBoundsException', `toIndex = ${to}`);
+  if (to > size) throwError(frame, 'java.lang.IndexOutOfBoundsException', `toIndex = ${to}`);
   if (from > to) throwError(frame, 'java.lang.IllegalArgumentException', `fromIndex(${from}) > toIndex(${to})`);
+  const arrayView = primitiveArrayView(list);
+  if (arrayView) {
+    return newPrimitiveArrayList(frame, {
+      ...arrayView,
+      range: { from: (arrayView.range?.from ?? 0) + from, size: to - from },
+    });
+  }
   const view = newList(
     frame,
     className(list) === 'ArrayList' || className(list) === 'SubList' ? 'ArrayList' : 'ArraysList',
-    values.slice(from, to)
+    items(list).slice(from, to)
   );
   if (className(list) === 'ArrayList' || className(list) === 'SubList')
     view.cls = libraryClass('kotlin.collections.SubList');
@@ -386,6 +430,7 @@ function defineIterators(): void {
   const iterator = 'kotlin.collections.ItemIterator';
   interface State {
     source: KObject;
+    kind?: PrimitiveKind | 'Boolean';
     index: number;
     expectedModCount: number | undefined;
     last?: number;
@@ -397,15 +442,14 @@ function defineIterators(): void {
   };
   defineNative(`${iterator}.hasNext()`, (_frame, receiver) => {
     const current = state(receiver);
-    return current.index < (current.source.items as Value[]).length;
+    return current.index < indexedSize(current.source);
   });
   defineNative(`${iterator}.next()`, (frame, receiver) => {
     const current = state(receiver);
     checkModification(frame, current);
-    const values = current.source.items as Value[];
-    if (current.index >= values.length) throwError(frame, 'java.util.NoSuchElementException');
+    if (current.index >= indexedSize(current.source)) throwError(frame, 'java.util.NoSuchElementException');
     current.last = current.index;
-    return values[current.index++];
+    return indexedItem(current.source, current.index++, current.kind);
   });
   defineNative(`${iterator}.remove()`, (frame, receiver) => {
     const current = state(receiver);
@@ -427,7 +471,7 @@ function defineIterators(): void {
     if (current.index <= 0) throwError(frame, 'java.util.NoSuchElementException');
     current.index--;
     current.last = current.index;
-    return (current.source.items as Value[])[current.index];
+    return indexedItem(current.source, current.index, current.kind);
   });
   defineNative(`${iterator}.nextIndex()`, (_frame, receiver) => state(receiver).index);
   defineNative(`${iterator}.previousIndex()`, (_frame, receiver) => state(receiver).index - 1);

@@ -79,6 +79,34 @@ export function startRunIdentities(): void {
   nextIdentity = firstRunIdentity;
 }
 
+export interface PrimitiveArrayView {
+  source: KObject;
+  kind: PrimitiveKind | 'Boolean';
+  range?: { from: number; size: number };
+}
+
+export function primitiveArrayView(object: KObject): PrimitiveArrayView | undefined {
+  return object.native?.arrayView as PrimitiveArrayView | undefined;
+}
+
+export function indexedSize(object: KObject): number {
+  const view = primitiveArrayView(object);
+  return view?.range?.size ?? ((view?.source.items ?? object.items) as Value[]).length;
+}
+
+export function indexedItem(object: KObject, index: number, kind?: PrimitiveKind | 'Boolean'): Value {
+  const view = primitiveArrayView(object);
+  const value = ((view?.source.items ?? object.items) as Value[])[index + (view?.range?.from ?? 0)];
+  const primitive = view?.kind ?? kind;
+  return primitive && primitive !== 'Boolean' ? box(primitive, value as number | bigint) : value;
+}
+
+export function indexedItems(object: KObject): Value[] | undefined {
+  return primitiveArrayView(object)
+    ? Array.from({ length: indexedSize(object) }, (_, index) => indexedItem(object, index))
+    : object.items;
+}
+
 /** An instance of a class, including the standard library's: its fields, and what a native class holds besides. */
 export class KObject {
   readonly identity = nextIdentity++;

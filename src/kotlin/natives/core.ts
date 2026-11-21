@@ -358,10 +358,9 @@ export function arrayItem(frame: Frame, array: KObject, index: number): Value {
 }
 
 /** An iterator over a list's or an array's items, which reads them as they are when it moves. */
-export function arrayIterator(frame: Frame, source: KObject): KObject {
+export function arrayIterator(_frame: Frame, source: KObject, kind?: PrimitiveKind | 'Boolean'): KObject {
   const iterator = new KObject(libraryClass('kotlin.collections.ItemIterator'), 0);
-  iterator.native = { source, index: 0, expectedModCount: source.modCount };
-  void frame;
+  iterator.native = { source, kind, index: 0, expectedModCount: source.modCount };
   return iterator;
 }
 

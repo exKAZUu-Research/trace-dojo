@@ -15,6 +15,28 @@ test.each([
     stdout: '{banana=1, date=4, apple=2, cherry=3, elderberry=5}\n[zeta, mu, 100, beta, alpha]\n[3, 1, 2, 10, -1]\n',
   },
   {
+    name: 'live primitive array iterators and list views',
+    source: `fun main() {
+    val values = intArrayOf(1, 2, 3)
+    val view = values.asList()
+    val sublist = view.subList(1, 3)
+    val snapshot = view.toList()
+    val iterator = sublist.listIterator()
+    values[0] = 9
+    for (value in values) {
+        print(value)
+        values[1] = 8
+    }
+    println()
+    println(view)
+    println(sublist)
+    println(iterator.next())
+    println(view is MutableList<*>)
+    println(snapshot)
+}`,
+    stdout: '983\n[9, 8, 3]\n[8, 3]\n8\nfalse\n[1, 2, 3]\n',
+  },
+  {
     name: 'seeded random numbers',
     source: `import kotlin.random.Random
 fun main() {

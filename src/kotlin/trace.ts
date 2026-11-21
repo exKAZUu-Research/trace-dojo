@@ -14,7 +14,7 @@ import { UNSIGNED_ARRAYS } from './prelude/arrays';
 import { type Frame, Runtime, UNASSIGNED } from './runtime';
 import type { ClassSymbol, PropertySymbol } from './symbols';
 import { type KType, resolved } from './types';
-import { Boxed, Cell, KObject, type PrimitiveKind, type Value } from './values';
+import { Boxed, Cell, indexedItems, KObject, type PrimitiveKind, type Value } from './values';
 
 // code-gauge-allow duplicateLines 17 -- the same trace setup as the other interpreters, adapted to Kotlin's values.
 export function traceKotlinProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
@@ -254,7 +254,7 @@ function displayNodeOf(value: Value, seen: Set<unknown>): DisplayNode | undefine
 function collectionNodeOf(object: KObject, seen: Set<unknown>): DisplayNode | undefined {
   const kind = isArray(object) ? arrayElementKind(object) : undefined;
   const items =
-    object.items ??
+    indexedItems(object) ??
     (object.store && object.native?.isSet ? object.store.ordered().map((entry) => entry.key) : undefined);
   if (items && !object.cls.name.endsWith('Iterator')) {
     const entries: Record<string, DisplayNode> = {};
