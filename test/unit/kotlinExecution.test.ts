@@ -26,6 +26,18 @@ test.each([
     stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
   },
   {
+    name: 'rounding just below a half and at the double precision boundary',
+    source: `import kotlin.math.roundToInt
+import kotlin.math.roundToLong
+fun main() {
+    println(0.49999999999999994.roundToInt())
+    println(0.5.roundToInt())
+    println((-0.5).roundToInt().toDouble())
+    println(4503599627370497.0.roundToLong())
+}`,
+    stdout: '0\n1\n0.0\n4503599627370497\n',
+  },
+  {
     name: 'JDK hash collection sizing when copying entries',
     source: `fun main() {
     val source = linkedMapOf(4 to "a", 0 to "b", 8 to "c")

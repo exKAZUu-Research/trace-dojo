@@ -269,25 +269,25 @@ function defineMath(): void {
   defineNative('kotlin.math.Float.pow(Float)', (_frame, receiver, [x]) =>
     Math.fround(fdlibmPow(receiver as number, x as number))
   );
-  defineNative('kotlin.math.Double.roundToInt()', (frame, receiver) => {
-    const value = receiver as number;
-    if (Number.isNaN(value))
-      frame.runtime.throwError(frame, 'java.lang.IllegalArgumentException', 'Cannot round NaN value.');
-    return value > 2_147_483_647 ? 2_147_483_647 : value < -2_147_483_648 ? -2_147_483_648 : Math.floor(value + 0.5);
-  });
-  defineNative('kotlin.math.Float.roundToInt()', (frame, receiver) => {
-    const value = receiver as number;
-    if (Number.isNaN(value))
-      frame.runtime.throwError(frame, 'java.lang.IllegalArgumentException', 'Cannot round NaN value.');
-    return value > 2_147_483_647 ? 2_147_483_647 : value < -2_147_483_648 ? -2_147_483_648 : Math.floor(value + 0.5);
-  });
+  for (const type of ['Double', 'Float']) {
+    defineNative(`kotlin.math.${type}.roundToInt()`, (frame, receiver) => {
+      const value = receiver as number;
+      if (Number.isNaN(value))
+        frame.runtime.throwError(frame, 'java.lang.IllegalArgumentException', 'Cannot round NaN value.');
+      return value > 2_147_483_647
+        ? 2_147_483_647
+        : value < -2_147_483_648
+          ? -2_147_483_648
+          : toInt32(Math.round(value));
+    });
+  }
   defineNative('kotlin.math.Double.roundToLong()', (frame, receiver) => {
     const value = receiver as number;
     if (Number.isNaN(value))
       frame.runtime.throwError(frame, 'java.lang.IllegalArgumentException', 'Cannot round NaN value.');
     if (value >= 2 ** 63) return 2n ** 63n - 1n;
     if (value <= -(2 ** 63)) return -(2n ** 63n);
-    return BigInt(Math.floor(value + 0.5));
+    return BigInt(Math.round(value));
   });
   defineNative('kotlin.Double.nextDown()', (_frame, receiver) => nextAfter(receiver as number, -1));
   defineNative('kotlin.Double.nextUp()', (_frame, receiver) => nextAfter(receiver as number, 1));
