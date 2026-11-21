@@ -2202,6 +2202,18 @@ void main() { B().f(); E(0).g(); }`;
   expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '1\nset 2\ny 3\n' });
 });
 
+test('Dart gives clamp and remainder arguments a double context', () => {
+  const program = `double ratio(double x) => x.clamp(0, 1);
+void main() {
+  double? e = 2.5.clamp(1, 2);
+  double h = 7.remainder(2);
+  Object o = 2.5.clamp(0, 1);
+  print([ratio(2.5), e, h, o.runtimeType]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1.0, 2.0, 1.0, int]\n' });
+  expect(executeProgram('dart', 'void main() { double d = 5.clamp(1, 3); }')).toMatchObject({ kind: 'compileError' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

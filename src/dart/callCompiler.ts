@@ -11,7 +11,7 @@ import type {
 import type { ClassInfo, ConstructorInfo, Member, MethodMember, SetterMember } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import type { ExtensionInfo, TopLevelFunction, TypeAlias } from './environment';
-import { SHORTED } from './expressionCompiler';
+import { isDoubleContext, SHORTED } from './expressionCompiler';
 import { OperatorCompiler } from './operatorCompiler';
 import type { Frame, Runtime, TypeEnv } from './runtime';
 import type { FunctionContext } from './scope';
@@ -446,7 +446,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       const value = this.readMember(receiver, resolved, name, span, nullAware);
       return this.compileValueCall(value, args, typeArguments, span, context);
     }
-    const signature = resolved.type as FunctionType;
+    const signature = this.specialNumericSignature(resolved.type as FunctionType, receiverType, name, context);
     const bound = this.bindArguments(signature, args, typeArguments, span, context);
     const receiverRun = receiver.run;
     const row = this.callRow(span);
@@ -506,6 +506,23 @@ export abstract class CallCompiler extends OperatorCompiler {
     if (name === 'remainder' && argumentTypes.every((type) => type === 'double'))
       return interfaceType(coreTypes.double);
     return undefined;
+  }
+
+  /**
+   * The signature `clamp` and `remainder` take in a double context: Dart then gives their arguments a double context (for
+   * `clamp` on a double and `remainder` on any other number), so `x.clamp(0, 1)` passes 0.0 and 1.0.
+   */
+  private specialNumericSignature(
+    signature: FunctionType,
+    receiverType: DartType,
+    name: string,
+    context: DartType | undefined
+  ): FunctionType {
+    const receiver = numericClassOf(receiverType);
+    if (!receiver || !context || !isDoubleContext(nonNullable(context))) return signature;
+    const doubleArguments = name === 'clamp' ? receiver === 'double' : name === 'remainder' && receiver !== 'double';
+    if (!doubleArguments) return signature;
+    return { ...signature, positional: signature.positional.map(() => interfaceType(coreTypes.double)) };
   }
 
   /** The static type of an argument already compiled by the call, read from the types it recorded. */
