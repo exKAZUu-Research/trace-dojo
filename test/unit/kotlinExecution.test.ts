@@ -874,6 +874,28 @@ fun main() { println(A(3).values) }`,
     stdout: '1.0000001\n1.0000001\n1.0000001\n1.0000001\n1.0000001\n3.4028235E38\nInfinity\n-0.0\n1.4E-45\n',
   },
   {
+    name: 'a semicolon before the first property accessor',
+    source: `var age: Int = 0; set(value) { field = value + 1 }
+val answer: Int; get() = 42
+class Counter {
+    var count = 1
+        ; /* after initializer */ get() = field + 1; set(value) { field = value }
+}
+fun get(): Int = 6
+fun main() {
+    age = 2
+    val counter = Counter()
+    println(age)
+    println(answer)
+    println(counter.count)
+    counter.count = 4
+    println(counter.count)
+    val local = 4; println(get())
+    println(local)
+}`,
+    stdout: '3\n42\n2\n5\n6\n4\n',
+  },
+  {
     name: 'JVM entry selection and initialization order',
     source: `val indirect = readInt() + 1
 val flag = readFlag()
