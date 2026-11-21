@@ -1994,7 +1994,7 @@ test('Dart explicit extension applications are only member and operator receiver
     kind: 'executed',
     stdout: '[2, 6]\n2\n',
   });
-  for (const use of ['print(E(1));', 'var x = E(1);', 'print((E(1)).twice);']) {
+  for (const use of ['print(E(1));', 'var x = E(1);', 'print((E(1)).twice);', 'print(E(1)!);', 'print(E(1)!.twice);']) {
     expect(executeProgram('dart', `${header}\nvoid main() { ${use} }`)).toMatchObject({ kind: 'compileError' });
   }
 });

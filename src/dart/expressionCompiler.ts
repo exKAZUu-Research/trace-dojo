@@ -171,11 +171,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   /** Compiles an expression whose value is used, ending a null-aware chain. */
   compileExpression(expression: Expression, context?: DartType): Compiled {
-    const compiled = this.compileOperatorReceiver(expression, context);
-    // `E(x)` only selects an extension for a member or operator on it, whose receivers are compiled without this check.
+    return this.rejectExtensionApplication(this.compileOperatorReceiver(expression, context), expression);
+  }
+
+  /**
+   * Rejects `E(x)` used as a value: it only selects an extension for a member or operator on it, whose receivers are
+   * compiled without this check.
+   */
+  protected rejectExtensionApplication(compiled: Compiled, span: Span): Compiled {
     if (compiled.extensionOverride)
       this.error(
-        expression,
+        span,
         `拡張 ${compiled.extensionOverride.ext.name ?? ''} の適用は、メンバーを使うときにしか書けません。`
       );
     return compiled;
