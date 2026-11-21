@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 970 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 990 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, identityHash, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -760,6 +760,7 @@ function checkIteratorModification(frame: Frame, current: ItemIteratorState): vo
 
 const MAP = 'kotlin.collections.NativeMap';
 const SET = 'kotlin.collections.NativeSet';
+const entryWrappers = new WeakMap<KObject, WeakMap<HashEntry, KObject>>();
 
 function hashCollection(frame: Frame, receiver: Value): number {
   return withCollectionElements(frame, receiver, (elements) => {
@@ -1116,6 +1117,20 @@ function viewElement(frame: Frame, map: KObject, kind: ViewKind, entry: HashEntr
 }
 
 export function newEntry(frame: Frame, map: KObject | undefined, entry: HashEntry): KObject {
+  if (!map || map.native?.isMapBuilder) return createEntry(frame, map, entry);
+  let wrappers = entryWrappers.get(map);
+  if (!wrappers) {
+    wrappers = new WeakMap();
+    entryWrappers.set(map, wrappers);
+  }
+  const present = wrappers.get(entry);
+  if (present) return present;
+  const wrapper = createEntry(frame, map, entry);
+  wrappers.set(entry, wrapper);
+  return wrapper;
+}
+
+function createEntry(frame: Frame, map: KObject | undefined, entry: HashEntry): KObject {
   frame.runtime.allocate(frame, 1);
   const object = new KObject(libraryClass('kotlin.collections.NativeEntry'), 0);
   object.native = { entry, map };
@@ -1218,6 +1233,8 @@ function matchingEntry(frame: Frame, store: KStore, element: Value, removing: bo
 function defineViewChanging(owner: string): void {
   defineNative(`${owner}.remove(E)`, (frame, view, [element]) => {
     const { map, view: kind } = viewOf(view);
+    if (storeOf(map).isSingleton)
+      return removeFirstIterable(frame, view, (value) => valueEquals(frame, element, value));
     requireMutableMap(frame, map);
     if (kind === 'values') return removeFirstIterable(frame, view, (value) => objectsEqual(frame, element, value));
     const store = map.store as KStore;
@@ -1434,5 +1451,10 @@ defineMapConstructors();
 defineMaps();
 defineSets();
 defineNative('kotlin.collections.LinkedHashSet<E>.finishBuild()', finishBuild);
+defineNative('kotlin.collections.LinkedHashMap<K, V>.startBuild()', (_frame, collection) => {
+  const map = collection as KObject;
+  map.native = { ...map.native, isMapBuilder: true };
+  return map;
+});
 defineNative('kotlin.collections.LinkedHashMap<K, V>.finishBuild()', finishBuild);
 defineViews();

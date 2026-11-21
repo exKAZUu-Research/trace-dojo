@@ -52,6 +52,25 @@ fun <T : Comparable<T>> T.coerceIn(range: ClosedFloatingPointRange<T>): T {
     return this
 }
 
+fun <T : Comparable<T>> T.coerceAtLeast(minimumValue: T): T = if (this < minimumValue) minimumValue else this
+fun <T : Comparable<T>> T.coerceAtMost(maximumValue: T): T = if (this > maximumValue) maximumValue else this
+
+fun <T : Comparable<T>> T.coerceIn(minimumValue: T?, maximumValue: T?): T {
+    if (minimumValue !== null && maximumValue !== null && minimumValue > maximumValue)
+        throw IllegalArgumentException("Cannot coerce value to an empty range: maximum $maximumValue is less than minimum $minimumValue.")
+    if (minimumValue !== null && this < minimumValue) return minimumValue
+    if (maximumValue !== null && this > maximumValue) return maximumValue
+    return this
+}
+
+fun <T : Comparable<T>> T.coerceIn(range: ClosedRange<T>): T {
+    if (range is ClosedFloatingPointRange<T>) return this.coerceIn<T>(range)
+    if (range.isEmpty()) throw IllegalArgumentException("Cannot coerce value to an empty range: $range.")
+    if (this < range.start) return range.start
+    if (this > range.endInclusive) return range.endInclusive
+    return this
+}
+
 private fun mod(a: Int, b: Int): Int {
     val mod = a % b
     return if (mod >= 0) mod else mod + b

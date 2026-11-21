@@ -1906,7 +1906,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     scope: Scope,
     context: FunctionContext,
     lambda: LambdaExpression,
-    type: FunctionType
+    type: FunctionType,
+    useExpectedResult = false
   ): KType | undefined {
     const savedFlow = this.flow.copy();
     try {
@@ -1914,14 +1915,16 @@ export abstract class ExpressionCompiler extends CallCompiler {
         scope,
         this.probeContext(context),
         lambda,
-        {
-          ...type,
-          returnType: {
-            kind: 'variable',
-            variable: { param: PROBE_PARAM, lower: [], upper: [], fixed: undefined },
-            nullable: false,
-          },
-        },
+        useExpectedResult
+          ? type
+          : {
+              ...type,
+              returnType: {
+                kind: 'variable',
+                variable: { param: PROBE_PARAM, lower: [], upper: [], fixed: undefined },
+                nullable: false,
+              },
+            },
         false
       );
       return (resolved(compiled.type) as FunctionType).returnType;

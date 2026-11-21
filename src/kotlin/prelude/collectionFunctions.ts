@@ -1369,12 +1369,13 @@ inline fun <K, V> buildMap(@CallsExactlyOnce builderAction: MutableMap<K, V>.() 
     buildMap<K, V>(10, builderAction)
 
 inline fun <K, V> buildMap(capacity: Int, @CallsExactlyOnce builderAction: MutableMap<K, V>.() -> Unit): Map<K, V> {
-    val map = LinkedHashMap<K, V>(NativeLists.builderCapacity(capacity))
+    val map = LinkedHashMap<K, V>(NativeLists.builderCapacity(capacity)).startBuild()
     map.builderAction()
     return map.finishBuild()
 }
 
 internal external fun <E> LinkedHashSet<E>.finishBuild(): Set<E>
+internal external fun <K, V> LinkedHashMap<K, V>.startBuild(): LinkedHashMap<K, V>
 internal external fun <K, V> LinkedHashMap<K, V>.finishBuild(): Map<K, V>
 
 fun <T> Iterable<T>.toTypedArray(): Array<T> = NativeLists.toArray(this)

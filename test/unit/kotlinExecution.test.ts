@@ -1654,6 +1654,93 @@ fun main() {
       'true\ntrue\ntrue\nvalue\nnull\n7\n4\n7\n4\nset modified\nmap modified\nmap modified\n[1, 2]\n4\n[2, 1]\n{2=3, 1=4}\ncapacity must be non-negative.\ncapacity must be non-negative.\ncapacity must be non-negative.\n',
   },
   {
+    name: 'StringBuilder nullable character arrays use JVM member overloads',
+    source: `fun main() {
+    val empty: CharArray? = null
+    try { println(StringBuilder("ab").append(empty)) } catch (e: Exception) { println(e) }
+    try { println(StringBuilder("ab").insert(1, empty)) } catch (e: Exception) { println(e) }
+    println(StringBuilder().appendLine(empty).append('!'))
+}`,
+    stdout:
+      'java.lang.NullPointerException: Cannot read the array length because "str" is null\njava.lang.NullPointerException: Cannot read the array length because "str" is null\nnull\n!\n',
+  },
+  {
+    name: 'Comparable clamps and conditional numeric selector overloads match Kotlin',
+    source: `class Bound(private val n: Int) : Comparable<Bound> {
+    override fun compareTo(other: Bound): Int = n.compareTo(other.n)
+    override fun toString(): String = "Bound($n)"
+}
+fun main() {
+    println("z".coerceIn("a".."m"))
+    println("b".coerceIn("a", null))
+    println("b".coerceAtLeast("c"))
+    println("b".coerceAtMost("a"))
+    println(Bound(5).coerceIn(Bound(1), Bound(3)))
+    println(Bound(5).coerceIn(Bound(1)..Bound(3)))
+    try { println("a".coerceIn("d".."b")) } catch (e: IllegalArgumentException) { println(e.message) }
+    println(listOf(1, 2).sumOf { if (it == 1) 1 else 2L })
+    println(listOf(1, 2).sumOf { when (it) { 1 -> 1; else -> 2L } })
+    println(intArrayOf(1, 2).sumOf { if (it == 1) 1 else 2L })
+    println(listOf(1, 2).sumOf { try { if (it == 1) 1 else 2L } finally { Unit } })
+}`,
+    stdout: 'm\nb\nc\na\nBound(3)\nBound(3)\nCannot coerce value to an empty range: d..b.\n3\n3\n3\n3\n',
+  },
+  {
+    name: 'reversed and moving list views and map entries preserve JVM iteration',
+    source: `class Checks(private val items: List<Int> = listOf(2)) : Collection<Int> by items {
+    override fun contains(element: Int): Boolean { println("contains $element"); return element == 2 }
+}
+class WindowValue(private val label: String, private val change: () -> Unit = {}) {
+    override fun toString(): String { change(); return label }
+    override fun hashCode(): Int { change(); return label.length }
+}
+fun main() {
+    for (indexed in listOf(false, true)) {
+        val backing = mutableListOf(1, 2, 3)
+        val reverse = backing.asReversed()
+        try {
+            if (indexed) reverse.addAll(1, reverse) else reverse.addAll(reverse)
+        } catch (e: ConcurrentModificationException) { println("concurrent") }
+        println(backing)
+    }
+    val origin = mutableListOf(1, 2, 3)
+    val reverse = origin.asReversed()
+    reverse.removeAll(Checks())
+    println(origin)
+    origin.add(2)
+    reverse.retainAll(Checks())
+    println(origin)
+
+    for (hash in listOf(false, true)) {
+        val values = mutableListOf<WindowValue>()
+        values.add(WindowValue("first", { values[1] = WindowValue("longer") }))
+        values.add(WindowValue("old"))
+        values.windowed(2) { window ->
+            if (hash) println(window.hashCode()) else println(window)
+        }
+    }
+    val singleton = mapOf("key" to 4)
+    val keys = singleton.keys as MutableSet<String>
+    val vals = singleton.values as MutableCollection<Int>
+    println(keys.remove("absent"))
+    println(vals.remove(5))
+    try { println(vals.remove(4)) } catch (e: UnsupportedOperationException) { println("immutable") }
+
+    val map = mutableMapOf("key" to 4)
+    val entry = map.entries.iterator().next()
+    println(entry === map.iterator().next())
+    println(entry === map.entries.iterator().next())
+    map.remove("key")
+    map["key"] = 5
+    println(entry === map.entries.iterator().next())
+    println(entry.value)
+    val built = buildMap { put("key", 1); println(entries.first() === entries.first()) }
+    println(built.entries.first() === built.entries.first())
+}`,
+    stdout:
+      'concurrent\n[3, 1, 2, 3]\nconcurrent\n[1, 2, 3, 3]\ncontains 3\ncontains 2\ncontains 1\n[1, 3]\ncontains 2\ncontains 3\ncontains 1\n[2]\n[first, longer]\n1122\nfalse\nfalse\nimmutable\ntrue\ntrue\nfalse\n4\nfalse\nfalse\n',
+  },
+  {
     name: 'exactly-once scope lambdas initialize deferred vals',
     source: `fun main() {
     val first: Int

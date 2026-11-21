@@ -30,10 +30,10 @@ external class StringBuilder : CharSequence, Comparable<StringBuilder> {
     external fun append(value: Long): StringBuilder
     external fun append(value: Double): StringBuilder
     external fun append(value: Boolean): StringBuilder
-    external fun append(value: CharArray): StringBuilder
+    external fun append(value: CharArray?): StringBuilder
     external fun insert(index: Int, value: Any?): StringBuilder
     external fun insert(index: Int, value: String?): StringBuilder
-    external fun insert(index: Int, value: CharArray): StringBuilder
+    external fun insert(index: Int, value: CharArray?): StringBuilder
     external fun insert(index: Int, value: CharSequence?): StringBuilder
     external fun insert(index: Int, value: CharSequence?, startIndex: Int, endIndex: Int): StringBuilder
     external fun reverse(): StringBuilder

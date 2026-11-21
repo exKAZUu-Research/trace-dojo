@@ -51,9 +51,9 @@ internal class MovingWindow<T>(private val backing: List<T>) : List<T>, RandomAc
         window.move(start + fromIndex, start + toIndex)
         return window
     }
-    override fun equals(other: Any?): Boolean = toList() == other
-    override fun hashCode(): Int = toList().hashCode()
-    override fun toString(): String = toList().toString()
+    override fun equals(other: Any?): Boolean = sameListContents(other)
+    override fun hashCode(): Int = listContentHash()
+    override fun toString(): String = renderListContents()
 }
 
 private class MovingWindowIterator<T>(private val window: MovingWindow<T>, private var index: Int) : ListIterator<T> {
@@ -103,21 +103,27 @@ private open class ReversedList<T>(private val backing: List<T>) : List<T> {
         return size - index
     }
 
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is List<*> || size != other.size) return false
-        val iterator = other.iterator()
-        for (item in this) if (item != iterator.next()) return false
-        return true
-    }
-    override fun hashCode(): Int {
-        var hash = 1
-        for (element in this) hash = 31 * hash + (element?.hashCode() ?: 0)
-        return hash
-    }
-    override fun toString(): String =
-        joinToString(prefix = "[", postfix = "]") { if (it === this) "(this Collection)" else it.toString() }
+    override fun equals(other: Any?): Boolean = sameListContents(other)
+    override fun hashCode(): Int = listContentHash()
+    override fun toString(): String = renderListContents()
 }
+
+private fun <T> List<T>.sameListContents(other: Any?): Boolean {
+    if (this === other) return true
+    if (other !is List<*> || size != other.size) return false
+    val right = other.iterator()
+    for (item in this) if (item != right.next()) return false
+    return true
+}
+
+private fun <T> List<T>.listContentHash(): Int {
+    var hash = 1
+    for (element in this) hash = 31 * hash + (element?.hashCode() ?: 0)
+    return hash
+}
+
+private fun <T> List<T>.renderListContents(): String =
+    joinToString(prefix = "[", postfix = "]") { if (it === this) "(this Collection)" else it.toString() }
 
 private open class ReversedListIterator<T>(private val backing: ListIterator<T>, private val source: List<T>) : ListIterator<T> {
     override fun hasNext(): Boolean = backing.hasPrevious()
@@ -149,9 +155,20 @@ private class MutableReversedList<T>(private val backing: MutableList<T>) : Reve
         return true
     }
     override fun add(index: Int, element: T) = backing.add(positionIndex(index), element)
-    override fun addAll(elements: Collection<T>): Boolean = addAll(size, elements)
-    override fun addAll(index: Int, elements: Collection<T>): Boolean =
-        backing.addAll(positionIndex(index), elements.reversed())
+    override fun addAll(elements: Collection<T>): Boolean {
+        var changed = false
+        for (element in elements) {
+            add(element)
+            changed = true
+        }
+        return changed
+    }
+    override fun addAll(index: Int, elements: Collection<T>): Boolean {
+        if (index < 0 || index > size) throw IndexOutOfBoundsException("Index: $index, Size: $size")
+        var next = index
+        for (element in elements) add(next++, element)
+        return next != index
+    }
     override fun remove(element: T): Boolean {
         val index = indexOf(element)
         if (index < 0) return false
@@ -160,8 +177,20 @@ private class MutableReversedList<T>(private val backing: MutableList<T>) : Reve
     }
     override fun removeAt(index: Int): T = backing.removeAt(elementIndex(index))
     override fun set(index: Int, element: T): T = backing.set(elementIndex(index), element)
-    override fun removeAll(elements: Collection<T>): Boolean = backing.removeAll(elements)
-    override fun retainAll(elements: Collection<T>): Boolean = backing.retainAll(elements)
+    override fun removeAll(elements: Collection<T>): Boolean = removeByMembership(elements, true)
+    override fun retainAll(elements: Collection<T>): Boolean = removeByMembership(elements, false)
+
+    private fun removeByMembership(elements: Collection<T>, removeIfPresent: Boolean): Boolean {
+        val cursor = iterator()
+        var changed = false
+        while (cursor.hasNext()) {
+            if ((cursor.next() in elements) == removeIfPresent) {
+                cursor.remove()
+                changed = true
+            }
+        }
+        return changed
+    }
     override fun clear() = backing.clear()
     override fun subList(fromIndex: Int, toIndex: Int): MutableList<T> =
         MutableReversedList(backing.subList(positionIndex(toIndex), positionIndex(fromIndex)))

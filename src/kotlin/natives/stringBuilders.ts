@@ -108,8 +108,8 @@ function defineAppenders(): void {
   defineNative(`${BUILDER}.append(Boolean)`, (frame, receiver, [value]) =>
     appendText(frame, receiver, String(value as boolean))
   );
-  defineNative(`${BUILDER}.append(CharArray)`, (frame, receiver, [value]) =>
-    appendText(frame, receiver, charArrayText(value))
+  defineNative(`${BUILDER}.append(CharArray?)`, (frame, receiver, [value]) =>
+    appendText(frame, receiver, charArrayText(frame, value))
   );
 }
 
@@ -137,9 +137,11 @@ function defineInsertions(): void {
   defineNative(`${BUILDER}.insert(Int, String?)`, (frame, receiver, [index, value]) =>
     insertText(frame, receiver, index as number, (value as string | undefined) ?? 'null')
   );
-  defineNative(`${BUILDER}.insert(Int, CharArray)`, (frame, receiver, [index, value]) =>
-    insertText(frame, receiver, index as number, charArrayText(value))
-  );
+  defineNative(`${BUILDER}.insert(Int, CharArray?)`, (frame, receiver, [index, value]) => {
+    const position = index as number;
+    checkInsertPosition(frame, position, builder(receiver).length);
+    return replaceText(frame, receiver, position, position, charArrayText(frame, value));
+  });
   defineNative(`${BUILDER}.insert(Int, CharSequence?)`, (frame, receiver, [index, value]) => {
     const source = charSequence(frame, value ?? 'null');
     return insertSequenceRange(frame, receiver, index as number, source, 0, source.length());
@@ -209,7 +211,7 @@ function insertSequenceRange(
 ): Value {
   const storage = builder(receiver);
   const count = storage.length;
-  if (position < 0 || position > count) stringRangeError(frame, position, count, count);
+  checkInsertPosition(frame, position, count);
   checkSequenceRange(frame, source, from, to);
   const length = to - from;
   frame.runtime.allocateString(frame, count + length, count - position + length);
@@ -229,8 +231,12 @@ function checkSequenceRange(frame: Frame, source: Sequence, from: number, to: nu
 
 function insertText(frame: Frame, receiver: Value, position: number, value: string): Value {
   const count = builder(receiver).length;
-  if (position < 0 || position > count) stringRangeError(frame, position, count, count);
+  checkInsertPosition(frame, position, count);
   return replaceText(frame, receiver, position, position, value);
+}
+
+function checkInsertPosition(frame: Frame, position: number, count: number): void {
+  if (position < 0 || position > count) stringRangeError(frame, position, count, count);
 }
 
 function replaceRange(frame: Frame, receiver: Value, from: number, end: number, value: string): Value {
@@ -248,7 +254,9 @@ function replaceText(frame: Frame, receiver: Value, from: number, to: number, va
   return receiver;
 }
 
-function charArrayText(value: Value): string {
+function charArrayText(frame: Frame, value: Value): string {
+  if (value === undefined)
+    throwError(frame, 'java.lang.NullPointerException', 'Cannot read the array length because "str" is null');
   return ((value as KObject).items as number[]).map(charToString).join('');
 }
 

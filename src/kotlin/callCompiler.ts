@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 620 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 625 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   type ArgumentEvaluation,
@@ -626,12 +626,26 @@ export abstract class CallCompiler extends CompilerCore {
     const first = lambdaTypes[0];
     if (first.kind !== 'function' || !lambdaTypes.every((type) => hasSameLambdaParameters(first, type)))
       return undefined;
-    const probe = this.compileLambdaProbe(scope, context, args[lambdaIndex].value as LambdaExpression, first);
-    if (!probe) return undefined;
-    const fitting = attempts.filter((_, index) => {
-      const type = lambdaTypes[index];
-      return type.kind === 'function' && !hasOpenVariables(type.returnType) && isExactlyType(probe, type.returnType);
-    });
+    const lambda = args[lambdaIndex].value as LambdaExpression;
+    const probe = this.compileLambdaProbe(scope, context, lambda, first);
+    const matching =
+      probe === undefined || hasOpenVariables(probe)
+        ? []
+        : attempts.filter((_, index) => {
+            const type = lambdaTypes[index];
+            return (
+              type.kind === 'function' && !hasOpenVariables(type.returnType) && isExactlyType(probe, type.returnType)
+            );
+          });
+    const fitting =
+      matching.length > 0
+        ? matching
+        : attempts.filter((_, index) => {
+            const type = lambdaTypes[index];
+            if (type.kind !== 'function' || hasOpenVariables(type.returnType)) return false;
+            const result = this.compileLambdaProbe(scope, context, lambda, type, true);
+            return result !== undefined && isSubtype(result, type.returnType);
+          });
     if (fitting.length === 1) return fitting[0];
     const unannotated = fitting.filter(({ candidate }) => !candidate.symbol.resolvesByLambdaResult);
     return unannotated.length === 1 ? unannotated[0] : undefined;
@@ -642,7 +656,8 @@ export abstract class CallCompiler extends CompilerCore {
     scope: Scope,
     context: FunctionContext,
     lambda: LambdaExpression,
-    type: FunctionType
+    type: FunctionType,
+    useExpectedResult?: boolean
   ): KType | undefined;
 
   /**
