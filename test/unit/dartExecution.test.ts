@@ -8182,3 +8182,36 @@ test('error representations escape isolated surrogates without splitting pairs',
     stdout: '[55296, 56320, 92, 117, 100, 99, 48, 48, 34]\nnull\n[Invalid radix-37 number, 0]\n',
   });
 });
+
+test('Dart MapBase exposes live value views with SDK runtime types and cached iterator values', () => {
+  const program = `import 'dart:collection';
+class Table<K,V> extends MapBase<K,V> {
+  final Map<K,V> data = {};
+  Iterable<K> get keys => data.keys;
+  V? operator [](Object? key) => data[key];
+  void operator []=(K key, V value) { data[key] = value; }
+  V? remove(Object? key) => data.remove(key);
+  void clear() => data.clear();
+}
+void main() {
+  final table = Table<int,int>()..[1] = 2;
+  final values = table.values;
+  final cursor = values.iterator;
+  print([values.runtimeType, values.runtimeType.hashCode, cursor.runtimeType, cursor.runtimeType.hashCode]);
+  print(cursor.moveNext());
+  table[1] = 3;
+  print([cursor.current, values.first, values.single, values.last]);
+  print(cursor.moveNext());
+  final nullable = Table<String,int?>()..['a'] = null;
+  final nullableCursor = nullable.values.iterator;
+  print([nullableCursor.current, nullableCursor.moveNext(), nullableCursor.current, nullableCursor.moveNext(), nullableCursor.current]);
+  print([nullable.values.runtimeType, nullableCursor.runtimeType]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[_MapBaseValueIterable<int, int>, 466365603, _MapBaseValueIterator<int, int>, 902193949]\n' +
+      'true\n[2, 3, 3, 3]\nfalse\n[null, true, null, false, null]\n' +
+      '[_MapBaseValueIterable<String, int?>, _MapBaseValueIterator<String, int?>]\n',
+  });
+});

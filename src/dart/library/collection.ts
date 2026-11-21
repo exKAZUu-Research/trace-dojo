@@ -676,15 +676,36 @@ abstract mixin class MapBase<K, V> implements Map<K, V> {
   int get length => keys.length;
   bool get isEmpty => keys.isEmpty;
   bool get isNotEmpty => keys.isNotEmpty;
-  Iterable<V> get values => _MapMixinValues<K, V>(this);
+  Iterable<V> get values => _MapBaseValueIterable<K, V>(this);
   String toString() => MapBase.mapToString(this);
 }
 
-class _MapMixinValues<K, V> extends EfficientLengthIterable<V> {
+class _MapBaseValueIterable<K, V> extends EfficientLengthIterable<V> {
   final Map<K, V> _source;
-  _MapMixinValues(this._source);
+  _MapBaseValueIterable(this._source);
   int get length => _source.length;
-  Iterator<V> get iterator => MappedIterable<K, V>(_source.keys, (key) => _source[key] as V).iterator;
+  bool get isEmpty => _source.isEmpty;
+  bool get isNotEmpty => _source.isNotEmpty;
+  V get first => _source[_source.keys.first] as V;
+  V get single => _source[_source.keys.single] as V;
+  V get last => _source[_source.keys.last] as V;
+  Iterator<V> get iterator => _MapBaseValueIterator<K, V>(_source);
+}
+
+class _MapBaseValueIterator<K, V> implements Iterator<V> {
+  final Map<K, V> _source;
+  final Iterator<K> _keys;
+  V? _current;
+
+  _MapBaseValueIterator(Map<K, V> source) : _source = source, _keys = source.keys.iterator;
+
+  V get current => _current as V;
+
+  bool moveNext() {
+    final moved = _keys.moveNext();
+    _current = moved ? _source[_keys.current] : null;
+    return moved;
+  }
 }
 
 typedef MapMixin<K, V> = MapBase<K, V>;

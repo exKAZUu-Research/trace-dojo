@@ -178,6 +178,8 @@ export const SDK_CLASS_IDS: ReadonlyMap<string, ReadonlyMap<string, number>> = n
       ['_IdentityHashMap', 508],
       ['_IdentityHashSet', 517],
       ['_ListIndicesIterable', 750],
+      ['_MapBaseValueIterable', 470],
+      ['_MapBaseValueIterator', 471],
       ['_QueueIterator', 484],
       ['_SplayTree', 494],
       ['_SplayTreeIterator', 497],
