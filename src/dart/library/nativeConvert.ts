@@ -5,34 +5,17 @@ import { HashStore } from '../hashStore';
 import { DartThrow, type Runtime } from '../runtime';
 import { coreTypes, DYNAMIC, interfaceType } from '../types';
 import { DartList, DartObject, type Value } from '../values';
+import { StringParts } from './boundedStringParts';
 import { forEachEntry, newMap } from './nativeCollections';
 import { define, intArg, listElement, listLength, newList, stringArg } from './nativeSupport';
 
-/** A string as Dart's JSON encoder writes it: quotes, backslashes, control characters, and lone surrogates escaped. */
-// code-gauge-allow functionCognitiveComplexity 16 -- A transcription of the SDK's algorithm, case by case.
 function quoteJson(text: string, append: (text: string) => void): void {
   append('"');
-  for (let position = 0; position < text.length; position++) {
-    // oxlint-disable-next-line unicorn/prefer-code-point -- JSON escapes UTF-16 code units.
-    const code = text.charCodeAt(position);
-    const char = text[position];
-    if (char === '"') append(String.raw`\"`);
-    else if (char === '\\') append(String.raw`\\`);
-    else if (code < 0x20) {
-      const short: Record<number, string> = { 8: 'b', 9: 't', 10: 'n', 12: 'f', 13: 'r' };
-      append(short[code] ? `\\${short[code]}` : `\\u${code.toString(16).padStart(4, '0')}`);
-    } else if (code >= 0xd8_00 && code <= 0xdf_ff) {
-      // oxlint-disable-next-line unicorn/prefer-code-point -- JSON escapes UTF-16 code units.
-      const next = text.charCodeAt(position + 1);
-      if (code <= 0xdb_ff && next >= 0xdc_00 && next <= 0xdf_ff) {
-        append(char + text[position + 1]);
-        position++;
-      } else {
-        append(`\\u${code.toString(16)}`);
-      }
-    } else {
-      append(char);
-    }
+  for (let start = 0; start < text.length;) {
+    let end = Math.min(start + 1024, text.length);
+    if ((text.codePointAt(end - 1) ?? 0) > 0xff_ff) end++;
+    append(JSON.stringify(text.slice(start, end)).slice(1, -1));
+    start = end;
   }
   append('"');
 }
@@ -50,7 +33,7 @@ const JSON_OUTPUT_LIMIT = Symbol('JSON output limit');
 /** Writes JSON as Dart's _JsonStringifier does: one case per kind of value, and toEncodable or toJson for the rest. */
 class JsonStringifier {
   private readonly visiting: Value[] = [];
-  private readonly output: string[] = [];
+  private readonly output = new StringParts();
   private outputLength = 0;
 
   constructor(
@@ -64,7 +47,7 @@ class JsonStringifier {
     this.runtime.roots.add(roots);
     try {
       this.write(value, 0);
-      return this.output.join('');
+      return this.output.text();
     } catch (error) {
       if (error === JSON_OUTPUT_LIMIT) this.runtime.throwError('OutOfMemoryError', '', []);
       throw error;
@@ -92,7 +75,7 @@ class JsonStringifier {
   private throwUnsupported(current: Value, cause?: Value): never {
     return this.runtime.throwError('JsonUnsupportedObjectError', '', [current], {
       cause,
-      partialResult: this.output.join(''),
+      partialResult: this.output.text(),
     });
   }
 
@@ -125,7 +108,7 @@ class JsonStringifier {
   private append(text: string): true {
     this.checkCapacity(text.length);
     this.outputLength += text.length;
-    this.output.push(text);
+    this.output.append(text);
     return true;
   }
 
@@ -225,7 +208,7 @@ class JsonStringifier {
   private convert(current: Value): Value {
     const { runtime } = this;
     return this.toEncodable === undefined
-      ? runtime.invoke(current, 'toJson', { positional: [], named: undefined, isDynamic: true }, [], undefined)
+      ? runtime.invoke(current, 'toJson', { positional: [], named: undefined, invocation: 'dynamic' }, [], undefined)
       : runtime.callValue(this.toEncodable, { positional: [current], named: undefined }, [], runtime.userCallRow);
   }
 }

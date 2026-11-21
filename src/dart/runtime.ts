@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 541 -- Keep runtime dispatch alongside reified types, call frames, and roots.
+// code-gauge-allow-file fileNcss 542 -- Keep runtime dispatch alongside reified types, call frames, and roots.
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -316,11 +316,11 @@ export class Runtime implements TracedRuntime<Frame> {
     if (name === 'call' && receiver instanceof DartClosure) return this.callValue(receiver, args, typeArgs, callRow);
     const member = this.instanceMember(this.classOf(receiver), name);
     if (member?.kind === 'method') {
-      if (args.isDynamic && !argumentsFit(member.type, args, typeArgs)) {
+      if (args.invocation && !argumentsFit(member.type, args, typeArgs)) {
         return this.noSuchMethod(receiver, name, 'method', args, typeArgs, vmSignature(name, member));
       }
-      const signature = args.isDynamic ? this.memberTypeFor(receiver, member) : undefined;
-      const supplied = signature ? this.dynamicTypeArguments(signature, typeArgs) : typeArgs;
+      const signature = args.invocation ? this.memberTypeFor(receiver, member) : undefined;
+      const supplied = signature ? this.dynamicTypeArguments(signature, typeArgs, args.invocation) : typeArgs;
       if (signature && member.nativeParameterNames) this.checkNativeArguments(member, args, supplied, signature);
       return (member.impl as NonNullable<typeof member.impl>)(this, receiver, args, supplied, callRow);
     }
@@ -407,7 +407,7 @@ export class Runtime implements TracedRuntime<Frame> {
     (member.impl as NonNullable<typeof member.impl>)(
       this,
       receiver,
-      { positional: [value], named: undefined, isDynamic },
+      { positional: [value], named: undefined, invocation: isDynamic ? 'dynamic' : undefined },
       [],
       callRow
     );
@@ -573,7 +573,7 @@ export class Runtime implements TracedRuntime<Frame> {
       coreTypes.function,
       type,
       (runtime, _receiver, args, typeArgs, callRow) => {
-        if (args.isDynamic && member.nativeParameterNames)
+        if (args.invocation && member.nativeParameterNames)
           runtime.checkNativeArguments(member, args, typeArgs, signature);
         return impl(runtime, receiver, args, typeArgs, callRow);
       },
@@ -604,10 +604,10 @@ export class Runtime implements TracedRuntime<Frame> {
   /** Calls a value as a function: a closure, or an object with a `call` method. */
   callValue(target: Value, args: Arguments, typeArgs: readonly DartType[], callRow: number | undefined): Value {
     if (target instanceof DartClosure) {
-      if (args.isDynamic && !argumentsFit(target.type, args, typeArgs))
+      if (args.invocation && !argumentsFit(target.type, args, typeArgs))
         this.throwClosureMismatch(target, args, typeArgs);
-      const supplied = args.isDynamic
-        ? this.dynamicTypeArguments(target.type, typeArgs, target.dynamicTypeArgumentDefaults)
+      const supplied = args.invocation
+        ? this.dynamicTypeArguments(target.type, typeArgs, args.invocation, target.dynamicTypeArgumentDefaults)
         : typeArgs;
       return target.call(this, target.receiver, args, supplied, callRow);
     }
@@ -618,6 +618,7 @@ export class Runtime implements TracedRuntime<Frame> {
   private dynamicTypeArguments(
     type: FunctionType,
     written: readonly DartType[],
+    invocation: Arguments['invocation'],
     defaults?: readonly DartType[]
   ): readonly DartType[] {
     const params = type.typeParams;
@@ -626,10 +627,10 @@ export class Runtime implements TracedRuntime<Frame> {
     const env = new Map(params.map((param, index) => [param, args[index]]));
     for (const [index, param] of params.entries()) {
       const bound = substitute(boundOf(param), env);
-      if (!isSubtype(args[index], bound))
-        this.throwTypeError(
-          `type '${vmTypeString(args[index])}' is not a subtype of type '${vmTypeString(bound)}' of '${param.name}'`
-        );
+      if (!isSubtype(args[index], bound)) {
+        const actual = invocation === 'apply' ? '_Type' : vmTypeString(args[index]);
+        this.throwTypeError(`type '${actual}' is not a subtype of type '${vmTypeString(bound)}' of '${param.name}'`);
+      }
     }
     return args;
   }

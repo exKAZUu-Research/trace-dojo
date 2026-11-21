@@ -567,9 +567,9 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     }
     const extensionCall = this.extensionTargetCall(member, span.row);
     if (extensionCall) return extensionCall;
-    const isDynamic = receiver.type.kind === 'dynamic';
+    const invocation = receiver.type.kind === 'dynamic' ? 'dynamic' : undefined;
     return (frame: Frame, object: Value, positional: Value[]) =>
-      frame.runtime.invoke(object, name, { positional, named: undefined, isDynamic }, [], span.row);
+      frame.runtime.invoke(object, name, { positional, named: undefined, invocation }, [], span.row);
   }
 
   private extensionTargetCall(

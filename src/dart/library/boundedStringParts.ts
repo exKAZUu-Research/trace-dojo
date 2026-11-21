@@ -2,7 +2,7 @@ import { LIMITS } from '../../interpreter/limits';
 import type { Runtime } from '../runtime';
 
 export class BoundedStringParts {
-  private readonly parts: string[] = [];
+  private readonly parts = new StringParts();
   private length = 0;
 
   constructor(private readonly runtime: Runtime) {}
@@ -12,7 +12,7 @@ export class BoundedStringParts {
     this.length += part.length;
     if (this.length > LIMITS.maxStringLength) this.runtime.throwError('OutOfMemoryError', '', []);
     this.runtime.spend(Math.ceil(part.length / 1024));
-    this.parts.push(part);
+    this.parts.append(part);
   }
 
   appendEscaped(text: string, asciiCharacters: RegExp, escape: (character: string) => string): void {
@@ -23,6 +23,24 @@ export class BoundedStringParts {
   }
 
   text(): string {
-    return this.parts.join('');
+    return this.parts.text();
+  }
+}
+
+export class StringParts {
+  private readonly chunks: string[] = [];
+  private readonly fragments: string[] = [];
+
+  append(fragment: string): void {
+    if (fragment.length === 0) return;
+    this.fragments.push(fragment);
+    if (this.fragments.length === 128) {
+      this.chunks.push(this.fragments.join(''));
+      this.fragments.length = 0;
+    }
+  }
+
+  text(): string {
+    return this.chunks.join('') + this.fragments.join('');
   }
 }

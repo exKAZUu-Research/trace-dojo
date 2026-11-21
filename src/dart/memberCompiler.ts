@@ -285,11 +285,11 @@ function bindForwardedArguments(
       typeEnvFor(runtime, receiver, typeArgs),
       undefined
     );
-    compiled.bind(frame, { ...args, isDynamic: true });
+    compiled.bind(frame, { ...args, invocation: 'dynamic' });
     const positional = params.positional.map((_, slot) => frame.locals[slot]?.v);
     const named = new Map(
       params.named.map((parameter, index) => [parameter.name, frame.locals[positional.length + index]?.v])
     );
-    return { positional, named, isDynamic: false };
+    return { positional, named };
   };
 }

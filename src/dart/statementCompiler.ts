@@ -246,7 +246,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     }
     const checkArity = this.arityCheck(spec);
     return (frame, args) => {
-      if (args.isDynamic) checkArity(frame, args);
+      if (args.invocation) checkArity(frame, args);
       for (const bind of binders) bind(frame, args);
     };
   }
@@ -1202,7 +1202,7 @@ function parameterBinder(
     let value: Value;
     if (argument) {
       value = argument.value;
-      if ((args.isDynamic || alwaysChecks) && check) check(frame, value);
+      if ((args.invocation || alwaysChecks) && check) check(frame, value);
     } else {
       value = defaultValue ? defaultValue(frame) : undefined;
     }

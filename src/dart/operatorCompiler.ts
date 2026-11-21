@@ -636,6 +636,12 @@ function prefixEvaluation(run: Eval, operator: '-' | '~', methodName: string, ro
     const operand = run(frame);
     if (typeof operand === 'bigint' || (operator === '-' && typeof operand === 'number'))
       return negate(operand, operator);
-    return frame.runtime.invoke(operand, methodName, { positional: [], named: undefined, isDynamic: true }, [], row);
+    return frame.runtime.invoke(
+      operand,
+      methodName,
+      { positional: [], named: undefined, invocation: 'dynamic' },
+      [],
+      row
+    );
   };
 }

@@ -13,8 +13,8 @@ export type Value = undefined | boolean | bigint | number | string | DartObject;
 export interface Arguments {
   positional: Value[];
   named: ReadonlyMap<string, Value> | undefined;
-  /** Set when the call site did not check the arguments statically, so that the callee checks them. */
-  isDynamic?: boolean;
+  /** The route of a call whose arguments need runtime checks. */
+  invocation?: 'dynamic' | 'apply';
 }
 
 export const NO_ARGUMENTS: Arguments = { positional: [], named: undefined };

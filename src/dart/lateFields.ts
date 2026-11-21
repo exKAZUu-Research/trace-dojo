@@ -45,7 +45,7 @@ export function lateFieldSetter(field: FieldMember): Callable {
   return (runtime, receiver, args) => {
     const object = receiver as DartObject;
     const value = args.positional[0];
-    runtime.checkFieldWrite(object, field, value, args.isDynamic);
+    runtime.checkFieldWrite(object, field, value, args.invocation !== undefined);
     if (field.isFinal && object.fields[slot] !== UNINITIALIZED)
       runtime.throwError('LateError', '', [`Field '${name}' has already been initialized.`]);
     object.fields[slot] = value;

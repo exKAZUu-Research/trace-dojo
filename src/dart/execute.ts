@@ -54,7 +54,7 @@ export function runProgram(
     (program.main.impl as Callable)(
       runtime,
       undefined,
-      { positional: args, named: undefined, isDynamic: true },
+      { positional: args, named: undefined, invocation: 'dynamic' },
       [],
       undefined
     );

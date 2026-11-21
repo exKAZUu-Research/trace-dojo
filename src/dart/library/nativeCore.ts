@@ -140,7 +140,7 @@ define('Function.apply', (runtime, _receiver, [fn, positional, namedArguments]) 
     if (positional !== undefined) readApplyArguments(runtime, positional, args);
     return runtime.callValue(
       fn,
-      { positional: args, named: readApplyNamedArguments(runtime, namedArguments), isDynamic: true },
+      { positional: args, named: readApplyNamedArguments(runtime, namedArguments), invocation: 'apply' },
       [],
       runtime.userCallRow
     );

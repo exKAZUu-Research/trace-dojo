@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 674 -- Type inference, argument binding, and call dispatch share this compiler phase.
+// code-gauge-allow-file fileNcss 675 -- Type inference, argument binding, and call dispatch share this compiler phase.
 import type {
   Arguments as ArgumentsSyntax,
   Expression,
@@ -847,18 +847,19 @@ export abstract class CallCompiler extends OperatorCompiler {
   }
 
   /** Evaluates arguments in source order, keeping those evaluated so far reachable while the rest evaluate. */
-  // code-gauge-allow functionNcss 35 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionNcss 36 -- One case per form of the construct, which reads best together.
   protected argumentEvaluator(
     args: ArgumentsSyntax,
     positional: Eval[],
     named: { name: string; run: Eval }[],
     isDynamic: boolean
   ): (frame: Frame) => Arguments {
-    if (args.order.length === 0) return () => ({ positional: [], named: undefined, isDynamic });
+    const invocation = isDynamic ? 'dynamic' : undefined;
+    if (args.order.length === 0) return () => ({ positional: [], named: undefined, invocation });
     if (named.length === 0) {
       if (positional.length === 1) {
         const [run] = positional;
-        return (frame) => ({ positional: [run(frame)], named: undefined, isDynamic });
+        return (frame) => ({ positional: [run(frame)], named: undefined, invocation });
       }
       return (frame) => {
         const values: Value[] = [];
@@ -872,7 +873,7 @@ export abstract class CallCompiler extends OperatorCompiler {
         } finally {
           frame.temporaries.length = mark;
         }
-        return { positional: values, named: undefined, isDynamic };
+        return { positional: values, named: undefined, invocation };
       };
     }
     const { order } = args;
@@ -896,7 +897,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       } finally {
         frame.temporaries.length = mark;
       }
-      return { positional: values, named: namedValues, isDynamic };
+      return { positional: values, named: namedValues, invocation };
     };
   }
 

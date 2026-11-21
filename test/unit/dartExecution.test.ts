@@ -2300,6 +2300,22 @@ void main() {
   });
 });
 
+test('JSON encodes long escaped values and keys without splitting surrogate pairs', () => {
+  const program = String.raw`import 'dart:convert';
+void main() {
+  final boundary = '\n' + 'x' * 1022 + '😀' + String.fromCharCode(0xd800);
+  final escaped = jsonEncode(boundary);
+  print([escaped.length, escaped.startsWith(r'"\n'), escaped.endsWith(r'😀\ud800"')]);
+  print([jsonEncode('\n' + 'x' * 999995).length, jsonEncode({'\n' + 'x' * 999990: 1}).length]);
+  print(jsonEncode(List<int>.filled(1000, 0)).length);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '[1034, true, true]\n[999999, 999998]\n2001\n',
+  });
+});
+
 test('Function.apply and regexp match groups read any Dart List', () => {
   const program = `import 'dart:collection';
 class View extends ListBase<int> {
@@ -3814,17 +3830,26 @@ test('dynamic extension-type tear-offs check declaration defaults against specia
   }
   void main() {
     for (dynamic f in [Box<num>(1).f, Pair<num>((1, 2)).f, Reader<num>(() => 1).f]) {
-      try { print(f(2)); } catch (e) { print(e.runtimeType); }
+      try { print(f(2)); } catch (e) { print(e); }
+      try { print(Function.apply(f, [2])); } catch (e) { print(e); }
       print(f<int>(3));
     }
     dynamic generic = Bounded<int>(1).f;
     try { print(generic(<int>[2])); } catch (e) { print(e); }
+    try { print(Function.apply(generic, [<int>[2]])); } catch (e) { print(e); }
     print(generic<List<int>>(<int>[2]));
+    print(Function.apply(Bounded<int>(1).f<List<int>>, [<int>[2]]));
   }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     uncaughtException: undefined,
-    stdout: '_TypeError\nbody\n3\n'.repeat(3) + "type 'List<num>' is not a subtype of type 'List<int>' of 'R'\n[2]\n",
+    stdout:
+      (
+        "type 'dynamic' is not a subtype of type 'num' of 'R'\n" +
+        "type '_Type' is not a subtype of type 'num' of 'R'\nbody\n3\n"
+      ).repeat(3) +
+      "type 'List<num>' is not a subtype of type 'List<int>' of 'R'\n" +
+      "type '_Type' is not a subtype of type 'List<int>' of 'R'\n[2]\n[2]\n",
   });
 });
 
