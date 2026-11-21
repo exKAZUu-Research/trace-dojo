@@ -348,7 +348,8 @@ export class StatementChecker {
         this.c.expressions.setVariableType(symbol, declared);
         this.c.flow.set(`s${symbol.id}`, { type: this.c.flow.assignmentReduced(declared, assigned), assigned: true });
       },
-      { annotated: annotation !== undefined, isConst }
+      { annotated: annotation !== undefined, isConst },
+      annotation && value && valueType !== annotation ? valueType : undefined
     );
   }
 

@@ -1,0 +1,34 @@
+let { flag = true }: { flag?: boolean } = {flag: undefined};
+const selected: true = flag;
+let copy = flag;
+copy = false;
+let [first = true]: [boolean?] = [];
+const selectedTuple: true = first;
+let { outer: { nested = true } }: { outer: {nested?: boolean} } = {outer: {nested: undefined}};
+const selectedNested: true = nested;
+let [{ part = true }]: [{part?: boolean}] = [{part: undefined}];
+const selectedInArray: true = part;
+const field = 'active';
+let { [field]: computed = true }: { active?: boolean } = {active: undefined};
+const selectedComputed: true = computed;
+let { ordinary }: { ordinary: string | number } = {ordinary: 'text'};
+const selectedOrdinary: string = ordinary;
+function literals({ bool = true, text = 'a', sub: { count = 1 } }: { bool?: true; text?: 'a'; sub: {count?: 1} }) {
+  const a: true = bool;
+  const b: 'a' = text;
+  const c: 1 = count;
+  console.log(a, b, c);
+}
+function tupleLiteral([count = 1]: [1?]) {
+  const selected: 1 = count;
+  console.log(selected);
+}
+let { exact = 1 } = {} as {exact?: 1};
+const selectedExact: 1 = exact;
+console.log(selected, copy, selectedTuple, selectedNested, selectedInArray, selectedComputed, selectedOrdinary, selectedExact);
+literals({sub: {}});
+tupleLiteral([]);
+const symbol = Symbol();
+let {[symbol]: named = true}: {[symbol]?: boolean} = {[symbol]: undefined};
+const selectedSymbol: true = named;
+console.log(selectedSymbol);

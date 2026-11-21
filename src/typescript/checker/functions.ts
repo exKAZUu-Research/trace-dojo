@@ -240,10 +240,15 @@ export class FunctionChecker {
         if (symbol) this.parameterTypes.set(symbol.id, type);
       } else {
         this.c.silently(() =>
-          this.c.patterns.bindPattern(bound, type, (identifier, identifierType) => {
-            const symbol = scope.values.get(identifier.text);
-            if (symbol) this.parameterTypes.set(symbol.id, identifierType);
-          })
+          this.c.patterns.bindPattern(
+            bound,
+            type,
+            (identifier, identifierType) => {
+              const symbol = scope.values.get(identifier.text);
+              if (symbol) this.parameterTypes.set(symbol.id, identifierType);
+            },
+            { annotated: parameterNode.childForFieldName('type') !== null }
+          )
         );
       }
     }

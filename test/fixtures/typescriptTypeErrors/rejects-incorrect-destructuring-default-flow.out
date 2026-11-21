@@ -1,0 +1,9 @@
+(2,7): error TS2322: Type 'boolean' is not assignable to type 'true'.
+(4,7): error TS2322: Type 'boolean' is not assignable to type 'false'.
+(6,7): error TS2322: Type 'boolean' is not assignable to type 'false'.
+(7,25): error TS2322: Type 'false' is not assignable to type 'true'.
+(8,73): error TS2322: Type 'true | undefined' is not assignable to type 'true'.
+(10,7): error TS2322: Type 'number' is not assignable to type '1 | 2'.
+(12,7): error TS2322: Type 'string' is not assignable to type '"a" | "b"'.
+(15,9): error TS2322: Type 'boolean' is not assignable to type 'true'.
+(19,9): error TS2322: Type 'boolean' is not assignable to type 'true'.
