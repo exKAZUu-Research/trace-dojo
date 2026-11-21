@@ -144,7 +144,9 @@ export abstract class CompilerBase {
   fn!: FunctionContext;
   flow: Flow = Flow.start();
   /** The type parameters in scope, innermost last. */
-  protected typeScopes: { names: Map<string, TypeParam>; staticOwner: boolean }[] = [];
+  protected typeScopes: { names: Map<string, TypeParam>; staticOwner: boolean; enclosingFunction?: FunctionContext }[] =
+    [];
+  private typeLookupBoundary: FunctionContext | undefined;
   /** The class whose body is being compiled. */
   protected currentClass: ClassInfo | undefined;
   protected currentExtension: ExtensionInfo | undefined;
@@ -238,7 +240,11 @@ export abstract class CompilerBase {
   protected abstract checkFunctionTypeAnnotations(parameters: readonly TypeParameter[]): void;
 
   protected withTypeParams<T>(params: TypeParam[], run: () => T, staticOwner = false): T {
-    this.typeScopes.push({ names: new Map(params.map((param) => [param.name, param])), staticOwner });
+    this.typeScopes.push({
+      names: new Map(params.map((param) => [param.name, param])),
+      staticOwner,
+      enclosingFunction: this.fn,
+    });
     try {
       return run();
     } finally {
@@ -294,15 +300,13 @@ export abstract class CompilerBase {
   }
 
   findTypeParam(name: string, span: Span): TypeParam | undefined {
-    for (let index = this.typeScopes.length - 1; index >= 0; index--) {
-      const { names, staticOwner } = this.typeScopes[index];
-      const found = names.get(name);
-      if (found) {
-        if (staticOwner) this.error(span, `static なメンバーは持ち主の型引数 ${name} を使えません。`);
-        return found;
-      }
-    }
-    return undefined;
+    const scope = this.typeScopeFor(name);
+    if (scope?.staticOwner) this.error(span, `static なメンバーは持ち主の型引数 ${name} を使えません。`);
+    return scope?.names.get(name);
+  }
+
+  private typeScopeFor(name: string): (typeof this.typeScopes)[number] | undefined {
+    return this.typeScopes.findLast(({ names }) => names.has(name));
   }
 
   resolveType(syntax: TypeSyntax, options: TypeResolutionOptions = {}): DartType {
@@ -379,6 +383,7 @@ export abstract class CompilerBase {
   // code-gauge-allow functionNcss 33 -- One case per form of the construct, which reads best together.
   private resolveNamedType(syntax: Extract<TypeSyntax, { kind: 'named' }>, options: TypeResolutionOptions): DartType {
     const { name, prefix } = syntax;
+    this.checkTypeNameBinding(prefix ?? name, syntax);
     if (prefix === undefined) {
       const param = this.findTypeParam(name, syntax);
       if (param) {
@@ -400,6 +405,15 @@ export abstract class CompilerBase {
     if (declaration) return this.error(syntax, `${name} は型ではありません。`);
     this.checkUnavailableName(syntax, name, prefix);
     return this.error(syntax, `型 ${name} が見つかりません。`);
+  }
+
+  private checkTypeNameBinding(name: string, syntax: Extract<TypeSyntax, { kind: 'named' }>): void {
+    const scope = this.typeScopeFor(name);
+    const stopBefore = scope?.enclosingFunction ?? this.typeLookupBoundary;
+    const local = this.findLocal(name, syntax, stopBefore);
+    if (syntax.prefix !== undefined && (local || scope))
+      this.error(syntax, `${name} は import の接頭辞ではありません。`);
+    if (local) this.error(syntax, `${name} は型ではありません。`);
   }
 
   private instantiateAlias(
@@ -452,11 +466,14 @@ export abstract class CompilerBase {
 
   protected withIsolatedTypes<T>(run: () => T): T {
     const outer = this.typeScopes;
+    const boundary = this.typeLookupBoundary;
     this.typeScopes = [];
+    this.typeLookupBoundary = this.fn;
     try {
       return run();
     } finally {
       this.typeScopes = outer;
+      this.typeLookupBoundary = boundary;
     }
   }
 
@@ -712,8 +729,12 @@ export abstract class CompilerBase {
   }
 
   /** Finds a local in the function being compiled or an enclosing one. */
-  findLocal(name: string, span?: Span): LocalVar | undefined {
-    for (let context: FunctionContext | undefined = this.fn; context; context = context.parent) {
+  findLocal(name: string, span?: Span, stopBefore?: FunctionContext): LocalVar | undefined {
+    for (
+      let context: FunctionContext | undefined = this.fn;
+      context && context !== stopBefore;
+      context = context.parent
+    ) {
       for (let index = context.scopes.length - 1; index >= 0; index--) {
         const scope = context.scopes[index];
         const found = scope.names.get(name);

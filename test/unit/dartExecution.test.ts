@@ -718,6 +718,31 @@ test('main receives a checked second argument explicitly set to null', () => {
   });
 });
 
+test('local bindings shadow type names and library prefixes', () => {
+  for (const program of [
+    'void main() { var List = 1; List<int> values = []; }',
+    'void main() { List<int> values = []; var List = 1; }',
+    'void main() { int int = 1; }',
+    'void f(int List) { List<int> values = []; } void main() {}',
+    'void f<T>() { var T = 1; T? value; } void main() {}',
+    "import 'dart:core' as c; void main() { var c = 1; c.List<int> values = []; }",
+  ]) {
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = `class Box { Box(List<int> values); }
+typedef Numbers = List<int>;
+void main() {
+  var T = 1;
+  void nested<T>(T value) { print(value); }
+  nested('nested');
+  var List = 2;
+  print(Box([T, List]).runtimeType);
+  Numbers numbers = [T, List];
+  print(numbers);
+}`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: 'nested\nBox\n[1, 2]\n' });
+});
+
 test('dynamic collection contexts constrain generic constructor inference', () => {
   const program = `void main() {
   List<dynamic> cells = List.filled(3, null);
