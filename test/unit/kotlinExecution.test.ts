@@ -80,16 +80,23 @@ class FinallyPath(seed: Int) {
     val n: Int
     init {
         while (true) {
-            try { this.n = seed + 1 }
+            try { this.n = if (seed > 0) seed + 1 else seed - 1 }
             finally { break }
         }
     }
 }
 class SuppressedException {
+    val first: Int
     val n: Int
     init {
         while (true) {
-            try { n = fail() }
+            try {
+                first = fail()
+                n = when (first) {
+                    0 -> fail()
+                    else -> 4
+                }
+            }
             finally { break }
         }
     }
@@ -111,10 +118,12 @@ fun main() {
     println(One().n)
     println(BreakPath().n)
     println(FinallyPath(2).n)
-    println(SuppressedException().n)
+    val suppressed = SuppressedException()
+    println(suppressed.first)
+    println(suppressed.n)
     found(false)
 }`,
-    stdout: '1\n2\n3\n0\n0\n',
+    stdout: '1\n2\n3\n0\n0\n0\n',
   },
   {
     name: 'finally sees assignments before a pending jump',
@@ -962,6 +971,30 @@ fun main() { println(C().f(1)) }`,
     'a field read before its first assignment',
     false,
     'class A { val n: Int; init { n = this.n + 1 } }; fun main() { println(A().n) }',
+  ],
+  [
+    'an outer local val assignment whose RHS already writes the val',
+    false,
+    'fun main() { val x: Int; x = if (true) { x = 1; 2 } else 3; println(x) }',
+  ],
+  [
+    'an outer property assignment whose RHS already writes the val',
+    false,
+    'class A { val n: Int; init { n = if (true) { n = 1; 2 } else 3 } }; fun main() { println(A().n) }',
+  ],
+  [
+    'a finally block reading a field only assigned inside try',
+    false,
+    `class A {
+    val n: Int
+    init {
+        while (true) {
+            try { n = 3 }
+            finally { println(n); break }
+        }
+    }
+}
+fun main() { println(A().n) }`,
   ],
   [
     'a local assignment whose RHS can throw before a finally break',

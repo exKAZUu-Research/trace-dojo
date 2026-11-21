@@ -33,7 +33,7 @@ import { valueEquals } from './format';
 import { isExclusion, OperatorCompiler } from './operatorCompiler';
 import { NUMBER_OPERATOR_NAMES } from './operators';
 import { type Frame, KotlinThrow, LoopSignal, UNASSIGNED } from './runtime';
-import { type ClassSymbol, type PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
+import { type ClassSymbol, PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
 import { instanceTest } from './typeChecks';
 import { branchHint, commonSupertype, isSubtype } from './typeRelations';
 import { type ClassType, type KType, nonNull, NOTHING, resolved, substitute, typeToString } from './types';
@@ -551,7 +551,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     if (isCompound && !isAssigned) this.error(row, `変数 ${variable.name} に値が入っていません。`);
     if (!variable.isVar) {
       // Parameters, loop variables, and the other variables a declaration gives a value are read-only as well.
-      if (!variable.awaitsValue || this.flow.maybeAssigned.has(variable) || isCompound)
+      if (!variable.awaitsValue || isCompound)
         this.error(row, `val で宣言した ${variable.name} には、再び代入できません。`);
       if (variable.owner !== context)
         this.error(row, `val で宣言した ${variable.name} には、ラムダ式の中で代入できません。`);
@@ -570,11 +570,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return {
       type: variable.type,
       repr: reprOf(this.core, variable.type),
-      recordAssignment: () => {
-        if (!variable.isVar) this.recordLoopValWrite(context, variable, row);
-        this.flow.assigned.add(variable);
-        this.flow.maybeAssigned.add(variable);
-      },
+      recordAssignment: () => this.recordAssignment(context, variable, row),
       bind: (frame) => ({ get: () => access.read(frame), set: (value) => access.write(frame, value) }),
     };
   }
@@ -592,8 +588,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const { symbol } = member;
     const type = resolved(substitute(this.ensurePropertyType(symbol, row), member.substitution));
     const initializes = initializer !== undefined && this.mayInitializeVal(initializer, symbol);
-    if (!symbol.isVar && (!initializes || this.flow.maybeAssigned.has(symbol)))
-      this.error(row, `val で宣言した ${symbol.name} には、再び代入できません。`);
+    if (!symbol.isVar && !initializes) this.error(row, `val で宣言した ${symbol.name} には、再び代入できません。`);
     this.checkAccessible(scope, symbol, row, receiver?.type);
     if (symbol.isVar && symbol.setterVisibility === 'private' && !this.isInsideClass(scope, symbol.owner)) {
       this.error(row, `${symbol.name} の set は private なので、クラスの外からは代入できません。`);
@@ -603,13 +598,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return {
       type,
       repr,
-      recordAssignment: initializes
-        ? () => {
-            if (!symbol.isVar) this.recordLoopValWrite(initializer, symbol, row);
-            this.flow.assigned.add(symbol);
-            this.flow.maybeAssigned.add(symbol);
-          }
-        : undefined,
+      recordAssignment: initializes ? () => this.recordAssignment(initializer, symbol, row) : undefined,
       bind: (frame) => {
         const target = receiverEval(frame);
         return {
@@ -708,6 +697,16 @@ export abstract class StatementCompiler extends OperatorCompiler {
       for (const variable of current.variables.values()) if (!variable.isVar) outerVals.add(variable);
     }
     return { identity: {}, outerVals, breaks: [], continues: [], valWrites: new Map() };
+  }
+
+  private recordAssignment(context: FunctionContext, target: VariableSymbol | PropertySymbol, row: number): void {
+    if (!target.isVar) {
+      if (this.flow.maybeAssigned.has(target))
+        this.error(row, `val で宣言した ${target.name} には、再び代入できません。`);
+      this.recordLoopValWrite(context, target, row);
+    }
+    this.flow.assigned.add(target);
+    this.flow.maybeAssigned.add(target);
   }
 
   private recordLoopValWrite(context: FunctionContext, target: VariableSymbol | PropertySymbol, row: number): void {
@@ -1351,47 +1350,11 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const entries = this.exceptionEntries.get(context);
     if (!entries || this.flow.isDead) return;
     if (statement.kind === 'expressionStatement' && this.isNonThrowingExpression(scope, statement.expression)) return;
-    const entry =
-      statement.kind === 'assignment' && statement.operator === '='
-        ? this.assignmentExceptionEntry(scope, context, statement)
-        : this.flow.copy();
-    if (entry) entries.push(entry);
-  }
-
-  private assignmentExceptionEntry(
-    scope: Scope,
-    context: FunctionContext,
-    statement: AssignmentStatement
-  ): Flow | undefined {
-    const { target, value } = statement;
-    const local = target.kind === 'name' ? this.findVariable(scope, target.name) : undefined;
-    const property = local ? undefined : this.deferredValTarget(scope, context, target);
-    if ((property || (local && !local.delegateRead)) && this.isNonThrowingExpression(scope, value)) return undefined;
-    const entry = this.flow.copy();
-    if (property) {
-      // Kotlin's initializer flow counts a field assignment on entry to finally even when the RHS throws.
-      entry.assigned.add(property);
-      entry.maybeAssigned.add(property);
+    if (statement.kind === 'assignment' && statement.operator === '=' && statement.target.kind === 'name') {
+      const local = this.findVariable(scope, statement.target.name);
+      if (local && !local.delegateRead && this.isNonThrowingExpression(scope, statement.value)) return;
     }
-    return entry;
-  }
-
-  private deferredValTarget(scope: Scope, context: FunctionContext, target: Expression): PropertySymbol | undefined {
-    if (
-      target.kind !== 'name' &&
-      (target.kind !== 'member' || target.receiver.kind !== 'this' || target.receiver.label || target.isSafe)
-    )
-      return undefined;
-    const receivers = this.receiversOf(scope);
-    const candidates = target.kind === 'name' ? receivers : receivers.slice(0, 1);
-    for (const receiver of candidates) {
-      const property = this.findProperty(scope, this.receiverTypeOf(receiver), target.name)?.symbol;
-      if (property)
-        return receiver.context === context && !property.isVar && this.mayInitializeVal(context, property)
-          ? property
-          : undefined;
-    }
-    return undefined;
+    entries.push(this.flow.copy());
   }
 
   private isNonThrowingExpression(scope: Scope, expression: Expression): boolean {
@@ -1456,6 +1419,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const body = this.compileTryBlock(scope, context, expression.body, expected, asStatement, bodyThrows);
     const flows = [this.flow];
     const assignmentsBeforeThrow = Flow.merge([before, ...bodyThrows]).maybeAssigned;
+    for (const target of this.flow.maybeAssigned) assignmentsBeforeThrow.add(target);
     const catches = expression.catches.map((clause) => {
       this.flow = before.copy();
       for (const variable of assignmentsBeforeThrow) this.flow.maybeAssigned.add(variable);
@@ -1476,6 +1440,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
           scope,
           context,
           expression.finally,
+          before,
           [...bodyThrows, ...catchThrows],
           loopExits.map((exits, index) => ({
             exits,
@@ -1516,17 +1481,23 @@ export abstract class StatementCompiler extends OperatorCompiler {
     };
   }
 
+  // code-gauge-allow functionNcss 31 -- compiles the body and transfers its result to each kind of incoming path.
   private compileFinally(
     scope: Scope,
     context: FunctionContext,
     block: Block,
+    beforeTry: Flow,
     throws: Flow[],
     loopExits: { exits: Flow[]; pending: Flow[] }[]
   ): Eval {
     const afterTry = this.flow;
     this.flow = Flow.merge([afterTry, ...throws, ...loopExits.flatMap(({ pending }) => pending)]);
+    restrictFieldReads(this.flow, beforeTry);
+    const exitStarts = loopExits.map(({ exits }) => exits.length);
     const evaluate = this.compileBlockValue(scope, context, block, undefined, true).eval;
     const afterFinally = this.flow;
+    const finallyJumps = loopExits.flatMap(({ exits }, index) => exits.slice(exitStarts[index]));
+    applyFinallyJumpFields(finallyJumps, beforeTry, afterTry);
     const assignedKeys = [...assignedNames(block.statements)].flatMap((name) => {
       const variable = this.findVariable(scope, name);
       return variable ? [keyOf(variable)] : [];
@@ -1547,6 +1518,21 @@ export abstract class StatementCompiler extends OperatorCompiler {
     }
     return evaluate;
   }
+}
+
+function applyFinallyJumpFields(jumps: Flow[], beforeTry: Flow, afterTry: Flow): void {
+  // Kotlin checks finally's field reads before try, but uses normal try/catch flow for its own jumps.
+  if (afterTry.isDead) {
+    for (const jump of jumps) restrictFieldReads(jump, beforeTry);
+    return;
+  }
+  const fields = [...afterTry.assigned].filter((target) => target instanceof PropertySymbol);
+  for (const jump of jumps) for (const field of fields) jump.assigned.add(field);
+}
+
+function restrictFieldReads(flow: Flow, beforeTry: Flow): void {
+  for (const target of flow.assigned)
+    if (target instanceof PropertySymbol && !beforeTry.assigned.has(target)) flow.assigned.delete(target);
 }
 
 /** The exception a `catch` sees: a Kotlin exception, or the host's stack overflow as `StackOverflowError`. */
