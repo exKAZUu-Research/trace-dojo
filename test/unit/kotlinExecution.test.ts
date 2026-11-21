@@ -168,6 +168,14 @@ fun main() {
     stdout: '1\ntrue\n2\ntrue\nxxx\n[, -a-, ]\ntrue\n-1\n55200\n-55200\n43217\n-a-b-c-\ntrue\n',
   },
   {
+    name: 'indentation trimming normalizes Windows and classic Mac line endings',
+    source: `fun main() {
+    println("  a\\r\\n  b\\r  c\\n  d".trimIndent())
+    println(" |a\\r\\n |b\\r |c".trimMargin())
+}`,
+    stdout: 'a\nb\nc\nd\na\nb\nc\n',
+  },
+  {
     name: 'integer parsing bounds with long input and leading zeroes',
     source: `fun main() {
     val zeroes = "0".repeat(50000)

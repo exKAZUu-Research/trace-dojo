@@ -10,6 +10,7 @@ import { compareJdkCase, foldJdkCodePoint, foldJdkText } from './jdkCase';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
 
 const TEXT = 'kotlin.text';
+const LINE_ENDINGS = /\r\n|\n|\r/;
 
 /** The UTF-16 code units of a string, which Kotlin's chars are. */
 function codeUnits(value: string): number[] {
@@ -250,7 +251,7 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
       { ignoreCase: ignoreCase === true, supplementary: false, limit: limit as number }
     ),
   'CharSequence.lines()': (frame, receiver) =>
-    newList(frame, 'ArrayList', sequenceText(frame, receiver).split(/\r\n|\n|\r/)),
+    newList(frame, 'ArrayList', sequenceText(frame, receiver).split(LINE_ENDINGS)),
   'String.reversed()': (frame, receiver) => result(frame, reverseKeepingPairs(text(receiver))),
   'String.toCharArray()': (frame, receiver) => {
     const array = new KObject(libraryClass('kotlin.CharArray'), 0);
@@ -549,7 +550,7 @@ function splitText(
 }
 
 function trimIndent(value: string): string {
-  const lines = value.split('\n');
+  const lines = value.split(LINE_ENDINGS);
   const indents = lines.filter((line) => line.trim() !== '').map((line) => /^[ \t]*/.exec(line)?.[0].length ?? 0);
   const minimum = indents.length > 0 ? Math.min(...indents) : 0;
   const trimmed = lines.map((line) => (line.trim() === '' ? '' : line.slice(minimum)));
@@ -559,7 +560,7 @@ function trimIndent(value: string): string {
 }
 
 function trimMargin(value: string, prefix: string): string {
-  const lines = value.split('\n');
+  const lines = value.split(LINE_ENDINGS);
   const trimmed = lines.map((line) => {
     const start = line.search(/\S/);
     return start !== -1 && line.startsWith(prefix, start) ? line.slice(start + prefix.length) : line;
