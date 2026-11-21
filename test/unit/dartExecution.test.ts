@@ -1720,6 +1720,14 @@ test.each([
   );
 });
 
+test('Dart extension types redeclare inherited members with any signature', () => {
+  const program = `extension type E(int value) implements Object { int f(int n) => n; int get g => value; }
+extension type F(E value) implements E { String f(String n) => n; String get g => 'g'; }
+extension type G(int value) implements int { String get isEven => 'x'; }
+void main() { final f = F(E(3)); print([f.value.value, f.f('ok'), f.g, G(3).isEven]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[3, ok, g, x]\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

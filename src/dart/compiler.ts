@@ -1358,7 +1358,8 @@ export class Compiler extends MemberCompiler {
   private checkClass({ cls, declaration }: ClassWork): void {
     if (this.isLibraryCode) return;
     if (cls.kind === 'enum') this.checkEnumMembers(cls, declaration);
-    this.checkMemberOverrides(cls);
+    // An extension type's members are resolved statically, so they redeclare inherited ones instead of overriding them.
+    if (cls.kind !== 'extensionType') this.checkMemberOverrides(cls);
     if (cls.kind !== 'mixin' && cls.kind !== 'extensionType') this.checkImplemented(cls, declaration);
     if (![...cls.constructors.values()].some((constructor) => constructor.kind === 'generative'))
       this.checkFieldsWithoutConstructors(cls, declaration);
