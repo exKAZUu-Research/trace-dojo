@@ -505,9 +505,11 @@ export class Compiler extends MemberCompiler {
     member: FieldDeclaration | MethodDeclaration,
     owner: ClassInfo | ExtensionInfo
   ): void {
-    if (!(owner instanceof ClassInfo) || owner.kind === 'extensionType') {
-      const declarations = member.kind === 'field' ? member.variables : [member];
-      for (const declaration of declarations) this.checkExtensionMemberName(declaration.name, declaration);
+    const declarations = member.kind === 'field' ? member.variables : [member];
+    for (const declaration of declarations) {
+      this.checkEnclosingMemberName(owner, declaration.name, declaration);
+      if (!(owner instanceof ClassInfo) || owner.kind === 'extensionType')
+        this.checkExtensionMemberName(declaration.name, declaration);
     }
     this.withTypeParams(
       owner.typeParams,
@@ -680,6 +682,7 @@ export class Compiler extends MemberCompiler {
   // code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private declareRepresentation(cls: ClassInfo, declaration: ClassDeclaration): void {
     const name = cls.representationName as string;
+    this.checkEnclosingMemberName(cls, name, declaration);
     this.checkExtensionMemberName(name, declaration);
     const type = cls.representationType as DartType;
     const getter: Member = {
@@ -717,20 +720,24 @@ export class Compiler extends MemberCompiler {
     for (const parameter of [...primary.parameters.positional, ...primary.parameters.named]) {
       if (parameter.binding !== 'plain' || (!parameter.isFinal && !parameter.isVar)) continue;
       if (!parameter.type) this.error(parameter, `フィールド ${parameter.name} の型を書いてください。`);
-      this.declareField(cls, {
-        ...parameter,
-        kind: 'field',
-        isStatic: false,
-        isFinal: parameter.isFinal,
-        isConst: false,
-        isLate: false,
-        isCovariant: parameter.isCovariant,
-        isExternal: false,
-        isAbstract: false,
-        type: parameter.type,
-        variables: [{ ...parameter, name: parameter.name, initializer: undefined }],
-        annotations: [],
-      });
+      this.declareAccessibleMember(
+        cls,
+        {
+          ...parameter,
+          kind: 'field',
+          isStatic: false,
+          isFinal: parameter.isFinal,
+          isConst: false,
+          isLate: false,
+          isCovariant: parameter.isCovariant,
+          isExternal: false,
+          isAbstract: false,
+          type: parameter.type,
+          variables: [{ ...parameter, name: parameter.name, initializer: undefined }],
+          annotations: [],
+        },
+        cls
+      );
     }
   }
 
@@ -1170,6 +1177,7 @@ export class Compiler extends MemberCompiler {
 
   // Enums
 
+  // code-gauge-allow functionNcss 31 -- Validate and register enum values in declaration order.
   private declareEnumValues(cls: ClassInfo, declaration: ClassDeclaration): void {
     const valuesMember = cls.staticMembers.get('values') ?? cls.members.get('values') ?? cls.setters.get('values');
     if (valuesMember)
@@ -1178,6 +1186,7 @@ export class Compiler extends MemberCompiler {
     const values: GlobalVariable[] = [];
     const enumType = interfaceType(cls, instantiateToBounds(cls.typeParams));
     for (const [index, constant] of declaration.enumConstants.entries()) {
+      this.checkEnclosingMemberName(cls, constant.name, constant);
       if (names.has(constant.name)) this.error(constant, `列挙型の値 ${constant.name} が重複しています。`);
       if (constant.name === 'values' || constant.name === 'index')
         this.error(constant, `列挙型の値に ${constant.name} という名前は付けられません。`);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 439 -- Constructor types, initializer ordering, and delegation share the same declarations.
+// code-gauge-allow-file fileNcss 443 -- Constructor types, initializer ordering, and delegation share the same declarations.
 import { AssignmentCompiler } from './assignmentCompiler';
 import type {
   Arguments as ArgumentsSyntax,
@@ -66,6 +66,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       this.error(declaration, `コンストラクタの名前は、クラスの名前 ${cls.name} で始めてください。`);
     }
     const name = declaration.name ?? '';
+    this.checkEnclosingMemberName(cls, name, declaration, true);
     if (cls.constructors.has(name))
       this.error(declaration, `コンストラクタ ${cls.name}${name ? `.${name}` : ''} は、既に宣言されています。`);
     if (name && (cls.staticMembers.has(name) || cls.members.has(name)))
@@ -101,6 +102,16 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
         this.compileConstructor(cls, constructor, declaration, positionalTypes, namedTypes);
       });
     }
+  }
+
+  protected checkEnclosingMemberName(
+    owner: { name: string | undefined; typeParams: readonly { name: string }[] },
+    name: string,
+    span: Span,
+    isConstructor = false
+  ): void {
+    if ((!isConstructor && name === owner.name) || owner.typeParams.some((param) => param.name === name))
+      this.error(span, `メンバー名 ${name} は、持ち主の名前または型引数と重複しています。`);
   }
 
   protected memoizeTypeInference<T>(name: string, span: Span, infer: () => T): () => T {

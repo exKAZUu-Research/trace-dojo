@@ -718,6 +718,23 @@ test('main receives a checked second argument explicitly set to null', () => {
   });
 });
 
+test('Dart member names cannot reuse enclosing names or type parameters', () => {
+  for (const declaration of [
+    'class C { int C = 1; }',
+    'class C<T> { static int T() => 1; }',
+    'class C<T> { C.T(); }',
+    'class C<T>(var int T) {}',
+    'extension E on String { int get E => 1; }',
+    'extension E<T> on List<T> { int get T => 1; }',
+    'extension type E<T>(T T) {}',
+    'enum E { E }',
+  ]) {
+    expect(executeProgram('dart', `${declaration} void main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = 'class C { C.C(); } void main() { print(C.C().runtimeType); }';
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: 'C\n' });
+});
+
 test('local bindings shadow type names and library prefixes', () => {
   for (const program of [
     'void main() { var List = 1; List<int> values = []; }',

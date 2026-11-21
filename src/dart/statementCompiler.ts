@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 812 -- Keep statement cases together so their flow and compilation state are visible.
+// code-gauge-allow-file fileNcss 817 -- Keep statement cases together so their flow and compilation state are visible.
 import type {
   Block,
   Expression,
