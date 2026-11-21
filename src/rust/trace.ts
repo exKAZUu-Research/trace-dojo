@@ -37,14 +37,16 @@ export function traceRustProgram(program: string, trace: TraceOptions, input?: P
   const built = buildProgram(program, new Set(trace.atomicAnnotations.keys()));
   const runtime = new Runtime(input);
   let remaining = LIMITS.maxTraceSize;
+  const charge = (cost: number): void => {
+    remaining -= cost;
+    if (remaining < 0) throw new ExecutionLimitError('trace');
+  };
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.info.isAtomic,
     variablesOf: (frame) => variablesOf(frame),
-    // One snapshot is bounded by the slots a run allocates, but not the snapshots of every step together.
     recordItem: (item) => {
-      remaining -= item.board.length + NODE_COST * (item.callLines.length + item.turtles.length * 4 + 1);
-      remaining -= traceCost(item.vars) + traceCost(item.referenceVars);
-      if (remaining < 0) throw new ExecutionLimitError('trace');
+      charge(item.board.length + NODE_COST * (item.callLines.length + item.turtles.length * 4 + 1));
+      charge(traceCost(item.vars) + traceCost(item.referenceVars));
       return item;
     },
   });
@@ -54,13 +56,13 @@ export function traceRustProgram(program: string, trace: TraceOptions, input?: P
   const run = runProgram(runtime, built, true, (frame) => {
     finalVars = variablesOf(frame).vars;
   });
+  charge(traceCost(finalVars));
   return { traceItems: recorder.traceItems, finalVars, ...run };
 }
 
 /** The cost of trace data, in the units of {@link LIMITS.maxTraceSize}: its text, plus a node's cost for each object. */
 function traceCost(data: unknown): number {
-  if (typeof data === 'string') return data.length;
-  if (typeof data !== 'object' || data === null) return 0;
+  if (typeof data !== 'object' || data === null) return String(data).length;
   let cost = NODE_COST;
   for (const [key, child] of Object.entries(data)) cost += key.length + traceCost(child);
   return cost;

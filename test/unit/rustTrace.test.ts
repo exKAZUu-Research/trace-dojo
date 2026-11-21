@@ -465,6 +465,12 @@ test('stops tracing once the snapshots of every step together exceed the trace s
     expect(traceProgram('rust', short, short).traceItems.length).toBeGreaterThan(1);
     expect(() => traceProgram('rust', long, long)).toThrow('Execution limit exceeded: trace');
     expect(executeProgram('rust', long)).toMatchObject({ kind: 'executed', stdout: '200\n' });
+    const atomic = `fn main() { // atomic
+    let values = [0; 50000];
+    println!("{}", values.len());
+}
+`;
+    expect(() => traceProgram('rust', atomic, atomic)).toThrow('Execution limit exceeded: trace');
   } finally {
     LIMITS.maxTraceSize = previousLimit;
   }
