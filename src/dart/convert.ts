@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 577 -- Keep declaration syntax and parameter validation together.
+// code-gauge-allow-file fileNcss 579 -- Keep declaration syntax and parameter validation together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {

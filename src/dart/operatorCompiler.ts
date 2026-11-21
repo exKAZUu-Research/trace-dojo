@@ -138,7 +138,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     if (leftNumeric) {
       const parameterContext = leftNumeric === 'double' ? interfaceType(coreTypes.num) : undefined;
       const promotesRight =
-        context && leftNumeric === 'int' && isDoubleContext(context) && DOUBLE_CONTEXT_OPERATORS.has(operator);
+        context && leftNumeric !== 'double' && isDoubleContext(context) && DOUBLE_CONTEXT_OPERATORS.has(operator);
       const right = this.compileExpression(expression.right, promotesRight ? context : parameterContext);
       return this.numericOperator(operator, left, right, leftNumeric, span);
     }
@@ -244,9 +244,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     if (isComparison) resultType = interfaceType(coreTypes.bool);
     else if (operator === '/') resultType = interfaceType(coreTypes.double);
     else if (operator === '~/' || isBitwise) resultType = interfaceType(coreTypes.int);
-    else if (leftNumeric === 'double') resultType = interfaceType(coreTypes.double);
+    else if (leftNumeric === 'double' || rightNumeric === 'double') resultType = interfaceType(coreTypes.double);
     else if (leftNumeric === 'int' && rightNumeric === 'int') resultType = interfaceType(coreTypes.int);
-    else if (leftNumeric === 'int' && rightNumeric === 'double') resultType = interfaceType(coreTypes.double);
     else resultType = interfaceType(coreTypes.num);
     const leftValue = left.constValue?.value;
     const rightValue = right.constValue?.value;

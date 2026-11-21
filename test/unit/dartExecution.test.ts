@@ -5872,6 +5872,34 @@ void main() {
   }
 });
 
+test('Dart num arithmetic returns double from a double operand or contextual literal', () => {
+  const program = `double twice(num value) => value * 2;
+void examples(num value, double fraction) {
+  double sum = value + 1;
+  double diff = value - 1;
+  double mod = value % 2;
+  double nested = value * 2.0 + 1;
+  final inferred = value + fraction;
+  double typed = inferred;
+  List<double> values = [value * fraction, value - fraction, value % fraction];
+  print([sum, diff, mod, nested, typed, values, twice(value)]);
+}
+void main() {
+  examples(3, 1.5);
+  Object value = 3;
+  if (value is num) {
+    double result = value.abs() * 2;
+    print(result);
+  }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[4.0, 2.0, 1.0, 7.0, 4.5, [4.5, 1.5, 0.0], 6.0]\n6.0\n',
+  });
+  const invalid = 'void f(num value, int other) { double result = value * other; } void main() {}';
+  expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+});
+
 test('unrepresentable integer literals in double contexts produce compile errors', () => {
   const digits = '1' + '0'.repeat(400);
   for (const literal of [digits, '-' + digits]) {
