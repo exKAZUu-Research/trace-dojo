@@ -69,12 +69,6 @@ export interface CompileOptions {
   atomicRows?: ReadonlySet<number>;
 }
 
-/** Libraries compiled together, sharing one table of globals. */
-export interface CompiledLibraries {
-  libraries: Map<string, LibraryEnv>;
-  globals: GlobalVariable[];
-}
-
 export interface CompiledProgram {
   main: TopLevelFunction;
   globals: GlobalVariable[];
