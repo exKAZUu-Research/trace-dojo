@@ -26,6 +26,16 @@ test.each([
     stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
   },
   {
+    name: 'growing a StringBuilder in a loop',
+    source: `fun main() {
+    val builder = StringBuilder()
+    for (index in 0 until 10000) builder.append(index)
+    println(builder.length)
+    println(builder.substring(38880))
+}`,
+    stdout: '38890\n9799989999\n',
+  },
+  {
     name: 'NaN and signed zero in floating-point array extrema',
     source: `fun main() {
     println(doubleArrayOf(1.0, Double.NaN).max())

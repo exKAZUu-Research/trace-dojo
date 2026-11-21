@@ -132,7 +132,7 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   /** Charges for a string the program builds, which may not grow beyond the limit. */
-  allocateString(frame: Frame, length: number): void {
+  allocateString(frame: Frame, length: number, work = length): void {
     // The JVM refuses so long an array of a string's characters before it looks for memory, measured with kotlinc's
     // `"a".repeat(Int.MAX_VALUE - 3)`, `StringBuilder(Int.MAX_VALUE)`, and `padStart(Int.MAX_VALUE)`.
     if (length > JVM_MAX_STRING_LENGTH) {
@@ -143,7 +143,7 @@ export class Runtime implements TracedRuntime<Frame> {
     if (length > LIMITS.maxStringLength) {
       throw new KotlinThrow(this.exceptions.create(frame, 'java.lang.OutOfMemoryError', 'Java heap space'));
     }
-    this.spend(1 + Math.floor(length / 64));
+    this.spend(1 + Math.floor(work / 64));
   }
 
   throwError(frame: Frame, qualifiedName: string, message?: string): never {

@@ -570,14 +570,14 @@ function builder(value: Value): KObject {
   return value as KObject;
 }
 
-function setBuilder(frame: Frame, receiver: Value, value: string): Value {
-  frame.runtime.allocateString(frame, value.length);
+function setBuilder(frame: Frame, receiver: Value, value: string, work = value.length): Value {
+  frame.runtime.allocateString(frame, value.length, work);
   builder(receiver).builder = value;
   return receiver;
 }
 
 function appendText(frame: Frame, receiver: Value, added: string): Value {
-  return setBuilder(frame, receiver, (builder(receiver).builder as string) + added);
+  return setBuilder(frame, receiver, (builder(receiver).builder as string) + added, added.length);
 }
 
 function defineBuilder(): void {
@@ -587,7 +587,7 @@ function defineBuilder(): void {
 }
 
 /** StringBuilder's constructors and what reads it. */
-// code-gauge-allow functionNcss 37 -- registers the natives of one class together, in the order the prelude declares them.
+// code-gauge-allow functionNcss 38 -- registers the natives of one class together, in the order the prelude declares them.
 function defineBuilderReading(): void {
   defineNative(`${BUILDER}.<init>()`, (_frame, instance) => {
     builder(instance).builder = '';
@@ -635,7 +635,13 @@ function defineBuilderReading(): void {
     const from = start as number;
     const to = Math.min(end as number, current.length);
     if (from < 0 || from > current.length || from > to) rangeError(frame, from, to, current.length);
-    return setBuilder(frame, receiver, current.slice(0, from) + text(value) + current.slice(to));
+    const added = text(value);
+    return setBuilder(
+      frame,
+      receiver,
+      current.slice(0, from) + added + current.slice(to),
+      current.length - to + added.length
+    );
   });
   defineNative(`${BUILDER}.compareTo(StringBuilder)`, (_frame, receiver, [other]) =>
     compareStrings(builder(receiver).builder as string, builder(other).builder as string)
@@ -674,13 +680,19 @@ function defineBuilderAppending(): void {
 }
 
 /** What changes a StringBuilder in place. */
-// code-gauge-allow functionNcss 34 -- registers the natives of one class together, in the order the prelude declares them.
+// code-gauge-allow functionNcss 35 -- registers the natives of one class together, in the order the prelude declares them.
 function defineBuilderEditing(): void {
   defineNative(`${BUILDER}.insert(Int, Any?)`, (frame, receiver, [index, value]) => {
     const current = builder(receiver).builder as string;
     const position = index as number;
     if (position < 0 || position > current.length) rangeError(frame, position, current.length, current.length);
-    return setBuilder(frame, receiver, current.slice(0, position) + stringOf(frame, value) + current.slice(position));
+    const added = stringOf(frame, value);
+    return setBuilder(
+      frame,
+      receiver,
+      current.slice(0, position) + added + current.slice(position),
+      current.length - position + added.length
+    );
   });
   defineNative(`${BUILDER}.reverse()`, (frame, receiver) =>
     setBuilder(frame, receiver, reverseKeepingPairs(builder(receiver).builder as string))
@@ -689,21 +701,26 @@ function defineBuilderEditing(): void {
     const current = builder(receiver).builder as string;
     const position = index as number;
     checkIndex(frame, position, current.length);
-    return setBuilder(frame, receiver, current.slice(0, position) + current.slice(position + 1));
+    return setBuilder(
+      frame,
+      receiver,
+      current.slice(0, position) + current.slice(position + 1),
+      current.length - position - 1
+    );
   });
   defineNative(`${BUILDER}.delete(Int, Int)`, (frame, receiver, [start, end]) => {
     const current = builder(receiver).builder as string;
     const from = start as number;
     const to = Math.min(end as number, current.length);
     if (from < 0 || from > to) rangeError(frame, from, to, current.length);
-    return setBuilder(frame, receiver, current.slice(0, from) + current.slice(to));
+    return setBuilder(frame, receiver, current.slice(0, from) + current.slice(to), current.length - to);
   });
   defineNative(`${BUILDER}.setLength(Int)`, (frame, receiver, [length]) => {
     const current = builder(receiver).builder as string;
     const size = length as number;
     if (size < 0) throwError(frame, 'java.lang.StringIndexOutOfBoundsException', `String index out of range: ${size}`);
-    frame.runtime.allocateString(frame, size);
-    setBuilder(frame, receiver, size <= current.length ? current.slice(0, size) : current.padEnd(size, '\0'));
+    frame.runtime.allocateString(frame, size, Math.max(0, size - current.length));
+    builder(receiver).builder = size <= current.length ? current.slice(0, size) : current.padEnd(size, '\0');
     return UNIT;
   });
   defineNative(`${BUILDER}.setCharAt(Int, Char)`, (frame, receiver, [index, char]) => {
@@ -713,7 +730,8 @@ function defineBuilderEditing(): void {
     setBuilder(
       frame,
       receiver,
-      current.slice(0, position) + charToString(char as number) + current.slice(position + 1)
+      current.slice(0, position) + charToString(char as number) + current.slice(position + 1),
+      1
     );
     return UNIT;
   });
