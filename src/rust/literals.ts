@@ -11,7 +11,8 @@ export function parseIntegerLiteral(
   | undefined {
   let body = text;
   let suffix: string | undefined;
-  const radix = /^0[xob]/i.test(body) ? body[1].toLowerCase() : undefined;
+  // Rust writes the prefix in lowercase only (`0XFF` is an error), though hexadecimal digits may be uppercase.
+  const radix = /^0[xob]/.test(body) ? body[1] : undefined;
   for (const candidate of radix === 'x' ? INT_SUFFIXES : [...INT_SUFFIXES, 'f32', 'f64']) {
     if (body.endsWith(candidate)) {
       suffix = candidate;

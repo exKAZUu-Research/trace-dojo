@@ -8574,3 +8574,14 @@ test('a vector of pairs does not extend from the borrowed pairs of a map', () =>
   );
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
 });
+
+test('an integer literal writes its base prefix in lowercase', () => {
+  expect(executeProgram('rust', rustMain('    println!("{}", 0XFF);'))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: '整数の書き方（0XFF）に誤りがあります。' }],
+  });
+  expect(executeProgram('rust', rustMain('    println!("{} {}", 0xFF, 0b101);'))).toMatchObject({
+    kind: 'executed',
+    stdout: '255 5\n',
+  });
+});
