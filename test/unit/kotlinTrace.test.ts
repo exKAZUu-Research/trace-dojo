@@ -248,3 +248,15 @@ test.each([
 ])('reports a misplaced Kotlin atomic annotation in %s', (program) => {
   expect(() => traceProgram('kotlin', program, program)).toThrow(misplacedAtomicMessage);
 });
+
+test('records only the statements inside a value-returning lambda', () => {
+  const source = `fun main() {
+    val result = listOf(1, 2).map {
+        val doubled = it * 2
+        doubled
+    }
+    val grid = Array(2) { IntArray(3) }
+}`;
+  const trace = traceProgram('kotlin', source, source);
+  expect(trace.traceItems.filter(({ callLines }) => callLines.length > 0).map(({ line }) => line)).toEqual([3, 3]);
+});

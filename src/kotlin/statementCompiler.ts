@@ -76,15 +76,14 @@ export abstract class StatementCompiler extends OperatorCompiler {
     context: FunctionContext,
     block: Block,
     expected: KType | undefined,
-    asStatement: boolean,
-    recordsResult = false
+    asStatement: boolean
   ): Compiled {
     return this.compileStatementsValue(
       new Scope(scope, context),
       context,
       block.statements,
       expected,
-      asStatement ? 'statement' : recordsResult ? 'lambda' : 'value',
+      asStatement,
       true
     );
   }
@@ -100,7 +99,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     context: FunctionContext,
     statements: Statement[],
     expected: KType | undefined,
-    mode: 'statement' | 'value' | 'lambda',
+    asStatement: boolean,
     clearsLocals: boolean
   ): Compiled {
     const firstSlot = context.info.slotCount;
@@ -108,8 +107,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
     let last: Compiled | undefined;
     for (const [index, statement] of statements.entries()) {
       const isLast = index === statements.length - 1;
-      if (isLast && mode !== 'statement' && statement.kind === 'expressionStatement') {
-        last = this.compileValueStatement(scope, context, statement, expected, mode === 'lambda');
+      if (isLast && !asStatement && statement.kind === 'expressionStatement') {
+        last = this.compileExpression(scope, context, statement.expression, expected);
       } else {
         execs.push(this.compileStatement(scope, context, statement));
       }
@@ -130,23 +129,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
             }
           };
     return { ...value, eval: run, isCall: false, isCreation: false, stableKey: undefined, constant: undefined };
-  }
-
-  /** Compiles the expression that supplies a lambda result, recording the same step as an expression statement. */
-  private compileValueStatement(
-    scope: Scope,
-    context: FunctionContext,
-    statement: Extract<Statement, { kind: 'expressionStatement' }>,
-    expected: KType | undefined,
-    recordsResult: boolean
-  ): Compiled {
-    const compiled = this.compileExpression(scope, context, statement.expression, expected);
-    if (!recordsResult || !this.recordsStepOf(statement.expression)) return compiled;
-    const { eval: evaluate } = compiled;
-    const onlyCalls = compiled.isCall === true || compiled.isCreation === true;
-    const { row } = statement;
-    if (!this.recordsSteps || this.file.isLibrary) return compiled;
-    return { ...compiled, eval: (frame) => frame.runtime.steps.runStatement(row, onlyCalls, () => evaluate(frame)) };
   }
 
   /** Whether an expression statement records a step: `if`, `when`, `try`, and jumps record none, as Java's do not. */
@@ -745,7 +727,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
         context,
         body.statements,
         undefined,
-        'statement',
+        true,
         true
       );
       const evaluate = compiled.eval;
@@ -797,7 +779,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
         context,
         statement.body.statements,
         undefined,
-        'statement',
+        true,
         false
       ).eval;
     } finally {
