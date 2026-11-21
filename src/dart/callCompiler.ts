@@ -27,7 +27,6 @@ import {
   instantiateToBounds,
   type InterfaceType,
   interfaceType,
-  isNeverType,
   isNullable,
   isPotentiallyNullable,
   isSubtype,
@@ -390,7 +389,6 @@ export abstract class CallCompiler extends OperatorCompiler {
           return frame.runtime.callValue(fn, evaluated, bound.typeArgs(frame), this.callRow(span));
         },
         isConst: false,
-        completes: !isNeverType(bound.returnType),
       };
     }
     return this.compileMethodCall(target, 'call', args, typeArguments, span, context, false);
@@ -443,7 +441,6 @@ export abstract class CallCompiler extends OperatorCompiler {
     const row = this.callRow(span);
     const specialType = this.specialNumericReturn(receiverType, name, args);
     const returnType = specialType ?? bound.returnType;
-    const completes = !isNeverType(bound.returnType);
     if (resolved.extension) {
       const run = extensionMethodCall(
         receiverRun,
@@ -453,18 +450,17 @@ export abstract class CallCompiler extends OperatorCompiler {
         nullAware,
         row
       );
-      return { type: returnType, run, isConst: false, completes };
+      return { type: returnType, run, isConst: false };
     }
     if (receiver.isSuper) {
       const call = this.superMethodTarget(name, span, row);
       const run: Eval = (frame) => call(frame, bound.args(frame), bound.typeArgs(frame));
-      return { type: returnType, run, isConst: false, completes };
+      return { type: returnType, run, isConst: false };
     }
     return {
       type: returnType,
       run: virtualMethodCall(receiverRun, this.runtimeMemberName(name), bound, nullAware, row),
       isConst: false,
-      completes,
     };
   }
 
@@ -563,7 +559,6 @@ export abstract class CallCompiler extends OperatorCompiler {
       run: (frame) =>
         (method.impl as Callable)(frame.runtime, undefined, bound.args(frame), bound.typeArgs(frame), row),
       isConst: false,
-      completes: !isNeverType(bound.returnType),
     };
   }
 
@@ -581,7 +576,6 @@ export abstract class CallCompiler extends OperatorCompiler {
       type: bound.returnType,
       run: (frame) => (fn.impl as Callable)(frame.runtime, undefined, bound.args(frame), bound.typeArgs(frame), row),
       isConst: identical && bound.argumentsAreConst,
-      completes: !isNeverType(bound.returnType),
     };
   }
 

@@ -474,7 +474,7 @@ export class Compiler extends MemberCompiler {
           if (member.kind === 'constructor') this.declareConstructor(cls, member);
         if (declaration.primaryConstructor) this.declarePrimaryConstructor(cls, declaration);
         if (
-          cls.constructors.size === 0 &&
+          needsImplicitConstructor(cls) &&
           declaration.classKind !== 'mixin' &&
           declaration.classKind !== 'extensionType' &&
           !declaration.namedMixinApplication
@@ -1833,6 +1833,15 @@ export {
   objectType,
   type TypeAlias,
 };
+
+function needsImplicitConstructor(cls: ClassInfo): boolean {
+  if (cls.constructors.size === 0) return true;
+  return (
+    cls.kind === 'enum' &&
+    !cls.constructors.has('') &&
+    [...cls.constructors.values()].every((constructor) => constructor.kind !== 'generative')
+  );
+}
 
 /** Records a class among the subclasses of the sealed classes it extends or implements, for exhaustiveness. */
 function registerSealedSubclass(cls: ClassInfo): void {

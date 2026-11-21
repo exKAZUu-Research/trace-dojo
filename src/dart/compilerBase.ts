@@ -53,8 +53,6 @@ export interface Compiled {
   variable?: LocalVar;
   thisReference?: true;
   isSuper?: true;
-  /** Whether evaluating the expression can complete normally (false for `throw` and calls returning `Never`). */
-  completes?: boolean;
   /** Whether the expression creates an object, whose constructor's steps show what it did. */
   creates?: boolean;
   /** An explicit extension application `E(x)`, whose members are the extension's. */

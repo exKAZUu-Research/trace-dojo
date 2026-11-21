@@ -6511,6 +6511,43 @@ void main() { inspect<int>(); inspect<String>(); }`;
   });
 });
 
+test('enhanced enums keep their implicit constructor alongside named factories', () => {
+  const source = `enum Choice {
+  a;
+  factory Choice.fromInt(int value) => a;
+  factory Choice.first() => a;
+}
+void main() { print([Choice.fromInt(1), Choice.first()]); }`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[Choice.a, Choice.a]\n' });
+  expect(executeProgram('dart', source.replace('  a;', '  a;\n  const Choice.named();'))).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('nested Never expressions end only the paths that evaluate them', () => {
+  const source = `Never fail() => throw StateError('bad input');
+int fromInitializer() { final result = fail(); }
+int fromArgument() { print(fail()); }
+int fromChain() { fail().unknown(); }
+int fromCondition(bool choice) { choice ? fail() : fail(); }
+int skipped(String? text) { text?.padLeft(fail()).length; return 5; }
+int deferred() { late final value = fail(); return 7; }
+void main() {
+  for (final f in <int Function()>[fromInitializer, fromArgument, fromChain, () => fromCondition(false)]) {
+    try { print(f()); } catch (e) { print(e); }
+  }
+  print(skipped(null));
+  print(deferred());
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Bad state: bad input\n'.repeat(4) + '5\n7\n',
+  });
+  for (const result of ['return 5;', 'return 7;']) {
+    expect(executeProgram('dart', source.replace(result, ''))).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('error representations escape isolated surrogates without splitting pairs', () => {
   const source = `void main() {
   var isolated = String.fromCharCodes([0xd800, 0xdc00, 0xdc00]);

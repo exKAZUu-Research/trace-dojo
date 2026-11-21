@@ -30,6 +30,7 @@ import {
   instantiateToBounds,
   type InterfaceType,
   interfaceType,
+  isNeverType,
   isNonNullable,
   isNullable,
   isPotentiallyNullable,
@@ -176,7 +177,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
       ...compiled,
       type: makeNullable(compiled.type),
       variable: undefined,
-      completes: skipped.reachable ? undefined : compiled.completes,
       run: (frame) => {
         const value = run(frame);
         return value === SHORTED ? undefined : value;
@@ -484,6 +484,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const closed =
       params?.size && context && mentionsTypeParams(context, params) ? closeTypeVariables(context, params) : context;
     const compiled = this.compileChainNode(expression, closed);
+    if (isNeverType(compiled.type)) this.flow = this.flow.unreachable;
     if (params?.size && compiled.isConst && mentionsTypeParams(compiled.type, params))
       this.error(expression, '定数の型引数には、型変数を使えません。');
     if (!this.inConstContext && explicitlyConst) this.checkConstant(expression, compiled);

@@ -351,7 +351,6 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         throw frame.runtime.newThrow(thrown);
       },
       isConst: false,
-      completes: false,
     };
   }
 

@@ -447,11 +447,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       run(frame);
       return;
     };
-    if (compiled.completes === false || expression.kind === 'throw') {
-      this.flow = this.flow.unreachable;
-      // A `throw` records no step, as Java's throw statement does.
-      if (expression.kind === 'throw') return exec;
-    }
+    if (expression.kind === 'throw') return exec;
     return this.withStep(statement, exec, this.onlyCalls(expression, compiled));
   }
 
