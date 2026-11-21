@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 536 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 537 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { ClassDecl, Expression, PropertyDecl, Statement } from './ast';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
@@ -266,6 +266,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   }
 
   private initializerScopes = new Map<FunctionContext, Scope>();
+  private constructorHeaderScopes = new WeakMap<Scope, Scope>();
 
   protected initializerScope(
     entry: { cls: ClassEntry | undefined; scope: Scope; file: FileContext },
@@ -282,12 +283,21 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         entry.cls.symbol.name
       );
       const ctor = entry.cls.constructorSymbol;
+      const headerScope = new Scope(scope, context);
       for (const [index, param] of (ctor?.params ?? []).entries()) {
-        const row = entry.cls.decl.primaryConstructor?.params[index]?.row ?? entry.cls.decl.row;
-        const variable = this.newParameter(scope, context, param.name, param.type, row);
+        const declaration = entry.cls.decl.primaryConstructor?.params[index];
+        const variable = this.newParameter(
+          headerScope,
+          context,
+          param.name,
+          param.type,
+          declaration?.row ?? entry.cls.decl.row
+        );
+        if (declaration?.binding !== 'var') scope.variables.set(param.name, variable);
         this.flow.assigned.add(variable);
         this.initializerVariables.add(variable);
       }
+      this.constructorHeaderScopes.set(scope, headerScope);
     }
     this.initializerScopes.set(context, scope);
     return scope;
@@ -484,7 +494,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
 
   // Classes' initializers.
 
-  // code-gauge-allow functionNcss 34 -- the parts of a class's initializer, from the defaults to the constructor, which follow one another.
+  // code-gauge-allow functionNcss 35 -- the parts of a class's initializer, from the defaults to the constructor, which follow one another.
   private compileClassInitializer(entry: ClassEntry): void {
     const { symbol } = entry;
     if (symbol.isInterface || symbol.isNative) return;
@@ -493,9 +503,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const scope = this.initializerScope(owner, context);
     this.flow = new Flow();
     for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
-    const defaults = this.compileConstructorDefaults(entry, scope, context);
-    const superCall = this.compileSuperConstructorCall(entry, scope, context);
-    const steps = [...this.compileFieldSteps(entry, scope, context), ...this.compileMemberSteps(entry, scope, context)];
+    const headerScope = this.constructorHeaderScopes.get(scope) ?? scope;
+    const defaults = this.compileConstructorDefaults(entry, headerScope, context);
+    const superCall = this.compileSuperConstructorCall(entry, headerScope, context);
+    const steps = [
+      ...this.compileFieldSteps(entry, headerScope, context),
+      ...this.compileMemberSteps(entry, scope, context),
+    ];
     this.checkValsInitialized(entry);
     if (symbol.kind === 'enum') this.compileEnumArguments(entry);
     const info = { ...context.info, isAtomic: entry.constructorSymbol?.isAtomic ?? false };

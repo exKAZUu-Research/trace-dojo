@@ -152,6 +152,28 @@ fun main() {
     stdout: '[9, 3, 5]\n[3, 2, 9]\n[9, 2, 8, 5]\n[5, 8, 2, 9]\n[9, 2, 8, 5]\n',
   },
   {
+    name: 'mutable primary-constructor properties in initializers and captures',
+    source: `open class Base(val original: Int)
+class Counter(var n: Int = 1, val next: Int = n + 1) : Base(n) {
+    val read = { n }
+    val label: String by lazy { "c" + n.toString() }
+    init {
+        n = next + 1
+        println(n)
+    }
+    val after = n
+}
+fun main() {
+    val counter = Counter()
+    println(counter.original)
+    println(counter.after)
+    counter.n = 10
+    println(counter.read())
+    println(counter.label)
+}`,
+    stdout: '3\n1\n3\n10\nc10\n',
+  },
+  {
     name: 'typed properties infer their generic delegates',
     source: `import kotlin.properties.Delegates
 class Count {
