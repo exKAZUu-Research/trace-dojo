@@ -16,6 +16,7 @@ import { OperatorCompiler } from './operatorCompiler';
 import type { Frame, Runtime, TypeEnv } from './runtime';
 import type { FunctionContext } from './scope';
 import {
+  closeInferenceHoles,
   INFERENCE_HOLE,
   inferExtensionReceiver,
   inferFromContext,
@@ -24,7 +25,6 @@ import {
 } from './typeInference';
 import {
   boundOf,
-  closeTypeVariables,
   coreTypes,
   type DartType,
   DYNAMIC,
@@ -775,16 +775,16 @@ export abstract class CallCompiler extends OperatorCompiler {
     const solution = new Map<TypeParam, DartType>();
     const upper = new Map<TypeParam, DartType>();
     const tearOffs: { result: Compiled; parameterType: DartType }[] = [];
+    // Function literals close what stays unresolved themselves, typing such parameters as Object? (Never where
+    // contravariant), and then constrain the type parameters by their own types.
     const argumentContext = (parameterType: DartType, closurePass: boolean): DartType => {
-      const resolved = new Map<TypeParam, DartType>();
-      const unresolved = new Set<TypeParam>();
-      for (const param of type.typeParams) {
-        const argument = argumentContextFor(param, type, fromContext, solution, upper, closurePass);
-        if (closurePass && isInferenceHole(argument)) unresolved.add(param);
-        else resolved.set(param, argument);
-      }
-      const partial = substitute(parameterType, resolved);
-      return unresolved.size === 0 ? partial : closureContext(partial, unresolved);
+      const map = new Map(
+        type.typeParams.map((param) => [
+          param,
+          argumentContextFor(param, type, fromContext, solution, upper, closurePass),
+        ])
+      );
+      return substitute(parameterType, map);
     };
     visitCallArguments(args, type, ({ argument, parameterType = DYNAMIC }, closurePass) => {
       const result = this.compileExpression(argument, argumentContext(parameterType, closurePass));
@@ -941,13 +941,13 @@ export abstract class CallCompiler extends OperatorCompiler {
       const positionalTypes = parameters.positional.map((parameter, index) => {
         if (parameter.type) return this.resolveType(parameter.type);
         const fromContext = contextFunction?.positional[index];
-        return fromContext && !isInferenceHole(fromContext) ? fromContext : DYNAMIC;
+        return fromContext ? closeInferenceHoles(fromContext) : DYNAMIC;
       });
       const namedTypes = new Map(
         parameters.named.map((parameter) => {
           if (parameter.type) return [parameter.argumentName, this.resolveType(parameter.type)];
           const fromContext = contextFunction?.named.find((named) => named.name === parameter.argumentName)?.type;
-          return [parameter.argumentName, fromContext && !isInferenceHole(fromContext) ? fromContext : DYNAMIC];
+          return [parameter.argumentName, fromContext ? closeInferenceHoles(fromContext) : DYNAMIC];
         })
       );
       const contextReturn = contextFunction?.returnType;
@@ -1312,23 +1312,6 @@ function argumentContextFor(
   if (!closurePass) return INFERENCE_HOLE;
   if (contextual && param.bound && !mentionsTypeParams(param.bound, params)) return param.bound;
   return solution.get(param) ?? upper.get(param) ?? INFERENCE_HOLE;
-}
-
-/**
- * A closure argument's context while type parameters are unresolved, as Dart types it: each of the closure's parameters
- * takes the greatest closure of its type (Object?, or Never where contravariant), and the closure's own type then
- * constrains the type parameters, so `f((a, K b) => 0)` for `f<T>(int Function(T, T) c)` infers K.
- */
-function closureContext(parameterType: DartType, unresolved: ReadonlySet<TypeParam>): DartType {
-  const holes = new Map([...unresolved].map((param) => [param, INFERENCE_HOLE] as const));
-  const formal = resolveBound(parameterType);
-  if (formal.kind !== 'function') return substitute(parameterType, holes);
-  return {
-    ...formal,
-    positional: formal.positional.map((input) => closeTypeVariables(input, unresolved, true)),
-    named: formal.named.map((named) => ({ ...named, type: closeTypeVariables(named.type, unresolved, true) })),
-    returnType: substitute(formal.returnType, holes),
-  };
 }
 
 /** Whether a type argument satisfies its parameter's bound, with the parameter itself in place of F-bounded uses. */

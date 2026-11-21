@@ -13,6 +13,7 @@ import {
   mentionsTypeParams,
   NEVER,
   objectPatternBound,
+  objectType,
   type RecordType,
   resolveBound,
   substitute,
@@ -26,6 +27,42 @@ export const INFERENCE_HOLE: DartType = { kind: 'dynamic' };
 
 export function isInferenceHole(type: DartType): boolean {
   return type === INFERENCE_HOLE;
+}
+
+/**
+ * A context's greatest closure over its holes, as a function literal's parameter types take it: Object? where a hole is
+ * covariant and Never where it is contravariant.
+ */
+export function closeInferenceHoles(type: DartType, covariant = true): DartType {
+  if (isInferenceHole(type)) return covariant ? objectType(true) : NEVER;
+  const close = (part: DartType, flip = false): DartType => closeInferenceHoles(part, flip ? !covariant : covariant);
+  switch (type.kind) {
+    case 'interface': {
+      const args = type.args.map((arg) => close(arg));
+      return args.every((arg, index) => arg === type.args[index]) ? type : { ...type, args };
+    }
+    case 'record': {
+      const positional = type.positional.map((field) => close(field));
+      const named = type.named.map((field) => ({ ...field, type: close(field.type) }));
+      const same =
+        positional.every((field, index) => field === type.positional[index]) &&
+        named.every((field, index) => field.type === type.named[index].type);
+      return same ? type : { ...type, positional, named };
+    }
+    case 'function': {
+      const positional = type.positional.map((parameter) => close(parameter, true));
+      const named = type.named.map((parameter) => ({ ...parameter, type: close(parameter.type, true) }));
+      const returnType = close(type.returnType);
+      const same =
+        returnType === type.returnType &&
+        positional.every((parameter, index) => parameter === type.positional[index]) &&
+        named.every((parameter, index) => parameter.type === type.named[index].type);
+      return same ? type : { ...type, positional, named, returnType };
+    }
+    default: {
+      return type;
+    }
+  }
 }
 
 /**

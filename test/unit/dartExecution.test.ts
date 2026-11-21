@@ -1728,6 +1728,14 @@ void main() { final f = F(E(3)); print([f.value.value, f.f('ok'), f.g, G(3).isEv
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[3, ok, g, x]\n' });
 });
 
+test.each([
+  'void f<T>(List<void Function(T)> a, T t) {}\nvoid main() { f([(x) { String s = x; }], 1); }',
+  'void f<T>(Set<void Function(T)> a) {}\nvoid main() { f({(x) { x.foo(); }}); }',
+  'void f<T>((void Function(T), int) a) {}\nvoid main() { f(((x) { x.foo(); }, 1)); }',
+])('Dart types closures nested in generic call arguments by Object?: %s', (program) => {
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
