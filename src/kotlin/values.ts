@@ -135,6 +135,7 @@ export class KObject {
   /** The elements of a list or an array. */
   items?: Value[];
   arrayList?: { size: number; capacity: number | undefined };
+  listBuilderCapacity?: number;
   /** The entries of a map or a set. */
   store?: KStore;
   /** The text of a `StringBuilder`. */
@@ -163,7 +164,19 @@ export class KObject {
 
 /** A local variable that a lambda captures and may assign, which the lambda and its function share. */
 export class Cell {
-  constructor(public value: Value) {}
+  constructor(
+    private contents: Value,
+    public isAssigned = true
+  ) {}
+
+  get value(): Value {
+    return this.contents;
+  }
+
+  set value(value: Value) {
+    this.contents = value;
+    this.isAssigned = true;
+  }
 }
 
 export interface KFunction {

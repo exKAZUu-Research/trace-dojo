@@ -18,20 +18,20 @@ infix fun <A, B> A.to(that: B): Pair<A, B> = Pair(this, that)
 fun <T> Pair<T, T>.toList(): List<T> = listOf(first, second)
 fun <T> Triple<T, T, T>.toList(): List<T> = listOf(first, second, third)
 
-inline fun <T, R> T.let(block: (T) -> R): R = block(this)
-inline fun <T> T.also(block: (T) -> Unit): T {
+inline fun <T, R> T.let(@CallsExactlyOnce block: (T) -> R): R = block(this)
+inline fun <T> T.also(@CallsExactlyOnce block: (T) -> Unit): T {
     block(this)
     return this
 }
-inline fun <T> T.apply(block: T.() -> Unit): T {
+inline fun <T> T.apply(@CallsExactlyOnce block: T.() -> Unit): T {
     block()
     return this
 }
-inline fun <T, R> T.run(block: T.() -> R): R = block()
-inline fun <R> run(block: () -> R): R = block()
-inline fun <T, R> with(receiver: T, block: T.() -> R): R = receiver.block()
-inline fun <T> T.takeIf(predicate: (T) -> Boolean): T? = if (predicate(this)) this else null
-inline fun <T> T.takeUnless(predicate: (T) -> Boolean): T? = if (!predicate(this)) this else null
+inline fun <T, R> T.run(@CallsExactlyOnce block: T.() -> R): R = block()
+inline fun <R> run(@CallsExactlyOnce block: () -> R): R = block()
+inline fun <T, R> with(receiver: T, @CallsExactlyOnce block: T.() -> R): R = receiver.block()
+inline fun <T> T.takeIf(@CallsExactlyOnce predicate: (T) -> Boolean): T? = if (predicate(this)) this else null
+inline fun <T> T.takeUnless(@CallsExactlyOnce predicate: (T) -> Boolean): T? = if (!predicate(this)) this else null
 
 inline fun repeat(times: Int, action: (Int) -> Unit) {
     for (index in 0 until times) action(index)

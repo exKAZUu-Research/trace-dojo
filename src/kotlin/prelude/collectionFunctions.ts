@@ -73,13 +73,13 @@ inline fun <T, R : Any> Iterable<T>.mapIndexedNotNull(transform: (index: Int, T)
 
 inline fun <T, R> Iterable<T>.flatMap(transform: (T) -> Iterable<R>): List<R> {
     val destination = ArrayList<R>()
-    for (element in this) destination.addAll(transform(element).toList())
+    for (element in this) destination.addAll(transform(element))
     return destination
 }
 
 fun <T> Iterable<Iterable<T>>.flatten(): List<T> {
     val result = ArrayList<T>()
-    for (element in this) result.addAll(element.toList())
+    for (element in this) result.addAll(element)
     return result
 }
 
@@ -380,21 +380,21 @@ fun <@OnlyInputTypes T> Iterable<T>.indexOf(element: T): Int {
 
 ${NUMERIC_AGGREGATE_TYPES.flatMap((kind) => numericAggregates(`Iterable<${kind.element}>`, kind, true)).join('\n')}
 
-inline fun <T> Iterable<T>.sumOf(selector: (T) -> Int): Int {
+@OverloadResolutionByLambdaReturnType inline fun <T> Iterable<T>.sumOf(selector: (T) -> Int): Int {
     var sum = 0
     for (element in this) sum += selector(element)
     return sum
 }
 
 @JvmName("sumOfLong")
-inline fun <T> Iterable<T>.sumOf(selector: (T) -> Long): Long {
+@OverloadResolutionByLambdaReturnType inline fun <T> Iterable<T>.sumOf(selector: (T) -> Long): Long {
     var sum = 0L
     for (element in this) sum += selector(element)
     return sum
 }
 
 @JvmName("sumOfDouble")
-inline fun <T> Iterable<T>.sumOf(selector: (T) -> Double): Double {
+@OverloadResolutionByLambdaReturnType inline fun <T> Iterable<T>.sumOf(selector: (T) -> Double): Double {
     var sum = 0.0
     for (element in this) sum += selector(element)
     return sum
@@ -512,7 +512,7 @@ inline fun <T, R : Comparable<R>> Iterable<T>.minByOrNull(selector: (T) -> R): T
     return minElem
 }
 
-inline fun <T, R : Comparable<R>> Iterable<T>.maxOf(selector: (T) -> R): R {
+@OverloadResolutionByLambdaReturnType inline fun <T, R : Comparable<R>> Iterable<T>.maxOf(selector: (T) -> R): R {
     val iterator = iterator()
     if (!iterator.hasNext()) throw NoSuchElementException()
     var maxValue = selector(iterator.next())
@@ -523,7 +523,7 @@ inline fun <T, R : Comparable<R>> Iterable<T>.maxOf(selector: (T) -> R): R {
     return maxValue
 }
 
-inline fun <T, R : Comparable<R>> Iterable<T>.minOf(selector: (T) -> R): R {
+@OverloadResolutionByLambdaReturnType inline fun <T, R : Comparable<R>> Iterable<T>.minOf(selector: (T) -> R): R {
     val iterator = iterator()
     if (!iterator.hasNext()) throw NoSuchElementException()
     var minValue = selector(iterator.next())
@@ -534,7 +534,7 @@ inline fun <T, R : Comparable<R>> Iterable<T>.minOf(selector: (T) -> R): R {
     return minValue
 }
 
-inline fun <T, R : Comparable<R>> Iterable<T>.maxOfOrNull(selector: (T) -> R): R? {
+@OverloadResolutionByLambdaReturnType inline fun <T, R : Comparable<R>> Iterable<T>.maxOfOrNull(selector: (T) -> R): R? {
     val iterator = iterator()
     if (!iterator.hasNext()) return null
     var maxValue = selector(iterator.next())
@@ -545,7 +545,7 @@ inline fun <T, R : Comparable<R>> Iterable<T>.maxOfOrNull(selector: (T) -> R): R
     return maxValue
 }
 
-inline fun <T, R : Comparable<R>> Iterable<T>.minOfOrNull(selector: (T) -> R): R? {
+@OverloadResolutionByLambdaReturnType inline fun <T, R : Comparable<R>> Iterable<T>.minOfOrNull(selector: (T) -> R): R? {
     val iterator = iterator()
     if (!iterator.hasNext()) return null
     var minValue = selector(iterator.next())
@@ -828,16 +828,6 @@ fun <T> Collection<T>.random(random: kotlin.random.Random): T {
     if (isEmpty()) throw NoSuchElementException("Collection is empty.")
     return elementAt(random.nextInt(size))
 }
-fun <T> Array<out T>.random(): T = random(kotlin.random.Random)
-fun <T> Array<out T>.random(random: kotlin.random.Random): T {
-    if (isEmpty()) throw NoSuchElementException("Array is empty.")
-    return get(random.nextInt(size))
-}
-fun IntArray.random(): Int = random(kotlin.random.Random)
-fun IntArray.random(random: kotlin.random.Random): Int {
-    if (isEmpty()) throw NoSuchElementException("Array is empty.")
-    return get(random.nextInt(size))
-}
 fun <T> Iterable<T>.shuffled(): List<T> = toMutableList().apply { shuffle() }
 fun <T> Iterable<T>.shuffled(random: kotlin.random.Random): List<T> = toMutableList().apply { shuffle(random) }
 
@@ -866,7 +856,13 @@ fun <T> List<T>.takeLast(n: Int): List<T> {
     if (n >= size) return toList()
     if (n == 1) return listOf(last())
     val list = ArrayList<T>(n)
-    for (index in size - n until size) list.add(this[index])
+    val source = this
+    if (this is RandomAccess) {
+        for (index in size - n until size) list.add(source[index])
+    } else {
+        val iterator = listIterator(size - n)
+        while (iterator.hasNext()) list.add(iterator.next())
+    }
     return list
 }
 
@@ -881,10 +877,16 @@ inline fun <T> Iterable<T>.takeWhile(predicate: (T) -> Boolean): List<T> {
 
 inline fun <T> List<T>.takeLastWhile(predicate: (T) -> Boolean): List<T> {
     if (isEmpty()) return emptyList()
-    var index = lastIndex
-    while (index >= 0) {
-        if (!predicate(this[index])) return drop(index + 1)
-        index--
+    val iterator = listIterator(size)
+    while (iterator.hasPrevious()) {
+        if (!predicate(iterator.previous())) {
+            iterator.next()
+            val expectedSize = size - iterator.nextIndex()
+            if (expectedSize == 0) return emptyList()
+            val result = ArrayList<T>(expectedSize)
+            while (iterator.hasNext()) result.add(iterator.next())
+            return result
+        }
     }
     return toList()
 }
@@ -919,10 +921,11 @@ inline fun <T> Iterable<T>.dropWhile(predicate: (T) -> Boolean): List<T> {
 }
 
 inline fun <T> List<T>.dropLastWhile(predicate: (T) -> Boolean): List<T> {
-    var index = lastIndex
-    while (index >= 0) {
-        if (!predicate(this[index])) return take(index + 1)
-        index--
+    if (!isEmpty()) {
+        val iterator = listIterator(size)
+        while (iterator.hasPrevious()) {
+            if (!predicate(iterator.previous())) return take(iterator.nextIndex() + 1)
+        }
     }
     return emptyList()
 }
@@ -1177,7 +1180,7 @@ operator fun <T> Iterable<T>.minus(element: T): List<T> {
 }
 
 operator fun <T> Iterable<T>.minus(elements: Iterable<T>): List<T> {
-    val other = elements.toList()
+    val other = elements.asCollectionForMembership()
     if (other.isEmpty()) return this.toList()
     return this.filterNot { it in other }
 }
@@ -1210,9 +1213,15 @@ operator fun <T> Set<T>.minus(element: T): Set<T> {
 }
 
 operator fun <T> Set<T>.minus(elements: Iterable<T>): Set<T> {
-    val other = elements.toList()
-    val result = LinkedHashSet<T>()
-    for (item in this) if (item !in other) result.add(item)
+    val other = elements.asCollectionForMembership()
+    if (other.isEmpty()) return toSet()
+    if (other is Set<T>) {
+        val result = LinkedHashSet<T>()
+        for (item in this) if (item !in other) result.add(item)
+        return result
+    }
+    val result = LinkedHashSet<T>(this)
+    result.removeAll(other)
     return result
 }
 
@@ -1247,14 +1256,17 @@ fun <T> MutableCollection<in T>.addAll(elements: Array<out T>): Boolean {
 }
 
 fun <T> MutableCollection<in T>.removeAll(elements: Iterable<T>): Boolean =
-    removeAll(if (elements is Collection<T>) elements else elements.toList())
+    removeAll(elements.asCollectionForMembership())
 
 fun <T> MutableCollection<in T>.removeAll(elements: Array<out T>): Boolean = removeAll(elements.asList())
 
 fun <T> MutableCollection<in T>.retainAll(elements: Iterable<T>): Boolean =
-    retainAll(if (elements is Collection<T>) elements else elements.toList())
+    retainAll(elements.asCollectionForMembership())
 
 fun <T> MutableCollection<in T>.retainAll(elements: Array<out T>): Boolean = retainAll(elements.asList())
+
+private fun <T> Iterable<T>.asCollectionForMembership(): Collection<T> =
+    if (this is Collection<T>) this else toList()
 
 operator fun <T> MutableCollection<in T>.plusAssign(element: T) {
     this.add(element)
@@ -1472,7 +1484,7 @@ inline fun <K, V, R : Any> Map<out K, V>.mapNotNull(transform: (Map.Entry<K, V>)
 
 inline fun <K, V, R> Map<out K, V>.flatMap(transform: (Map.Entry<K, V>) -> Iterable<R>): List<R> {
     val destination = ArrayList<R>()
-    for (element in this) destination.addAll(transform(element).toList())
+    for (element in this) destination.addAll(transform(element))
     return destination
 }
 
@@ -1562,14 +1574,14 @@ inline fun <K, V, R : Comparable<R>> Map<out K, V>.maxBy(selector: (Map.Entry<K,
 inline fun <K, V, R : Comparable<R>> Map<out K, V>.minBy(selector: (Map.Entry<K, V>) -> R): Map.Entry<K, V> = entries.minBy(selector)
 ${forwardingSelectorExtrema('Map<out K, V>', 'Map.Entry<K, V>', 'entries', 'K, V, ').join('\n')}
 
-inline fun <K, V> Map<out K, V>.sumOf(selector: (Map.Entry<K, V>) -> Int): Int {
+@OverloadResolutionByLambdaReturnType inline fun <K, V> Map<out K, V>.sumOf(selector: (Map.Entry<K, V>) -> Int): Int {
     var sum = 0
     for (element in this) sum += selector(element)
     return sum
 }
 
 @JvmName("sumOfDouble")
-inline fun <K, V> Map<out K, V>.sumOf(selector: (Map.Entry<K, V>) -> Double): Double {
+@OverloadResolutionByLambdaReturnType inline fun <K, V> Map<out K, V>.sumOf(selector: (Map.Entry<K, V>) -> Double): Double {
     var sum = 0.0
     for (element in this) sum += selector(element)
     return sum

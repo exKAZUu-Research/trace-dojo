@@ -22,17 +22,24 @@ export function copySequenceForBuilder(frame: Frame, value: Value, constructing 
     if (length < 0) throwError(frame, 'java.lang.NegativeArraySizeException', `Negative length: ${length}`);
     frame.runtime.allocateString(frame, length + 16, 0);
   }
-  const length = source.length();
+  return copyBuilderRange(frame, source, 0, source.length());
+}
+
+export function copySequenceRangeForBuilder(frame: Frame, value: Value, from: number, to: number): string {
+  return copyBuilderRange(frame, charSequence(frame, value ?? 'null'), from, to);
+}
+
+function copyBuilderRange(frame: Frame, source: Sequence, from: number, to: number): string {
   const available = source.length();
-  if (length < 0 || length > available)
+  if (from < 0 || to < from || to > available)
     throwError(
       frame,
       'java.lang.IndexOutOfBoundsException',
-      `Range [0, ${length}) out of bounds for length ${available}`
+      `Range [${from}, ${to}) out of bounds for length ${available}`
     );
-  frame.runtime.allocateString(frame, length);
+  frame.runtime.allocateString(frame, to - from);
   const characters: string[] = [];
-  for (let index = 0; index < length; index++) characters.push(charToString(source.at(index)));
+  for (let index = from; index < to; index++) characters.push(charToString(source.at(index)));
   return characters.join('');
 }
 

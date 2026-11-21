@@ -18,11 +18,14 @@ export type Eval = (frame: Frame) => Value;
 /** How a compiled expression's value is held at run time: unboxed as a primitive, or as a reference. */
 export type Repr = 'ref' | PrimitiveKind;
 
+export type ExpressionUse = boolean | 'inferUnit';
+
 export interface Compiled {
   /** The static type, which a smart cast may have narrowed. */
   type: KType;
   repr: Repr;
   eval: Eval;
+  inferredUnit?: true;
   /** Whether the expression only calls a function or creates an object, which the step rules read. */
   isCall?: boolean;
   isCreation?: boolean;
@@ -126,6 +129,7 @@ export class FunctionContext {
   readonly returnedTypes: KType[] = [];
   loops: LoopContext[] = [];
   inlineLambda = false;
+  invokesExactlyOnce = false;
   readonly inlineWrites = new Set<VariableSymbol>();
 
   constructor(
@@ -172,6 +176,11 @@ export class FunctionContext {
 
   directExecutionContext(): FunctionContext {
     return this.inlineLambda && this.parent ? this.parent.directExecutionContext() : this;
+  }
+
+  canInitializeIn(owner: FunctionContext | undefined): boolean {
+    if (this === owner) return true;
+    return this.invokesExactlyOnce && this.parent?.canInitializeIn(owner) === true;
   }
 
   /** Whether `context` is this function or a function around it. */

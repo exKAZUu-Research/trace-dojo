@@ -27,18 +27,24 @@ interface Specifier {
 
 /** Formats as `String.format` does for the conversions learners use. */
 // code-gauge-allow functionCognitiveComplexity 18 -- argument position and conversion rules share one left-to-right traversal.
-export function formatJava<V>(pattern: string, args: V[], values: FormatValues<V>): string {
+export function formatJava<V>(
+  pattern: string,
+  args: V[],
+  values: FormatValues<V>,
+  sink?: (text: string) => void
+): string {
   const specifiers = scanPattern(values, pattern);
   const result: string[] = [];
+  const emit = sink ?? ((text: string) => result.push(text));
   let end = 0;
   let nextArg = 0;
   let previous: number | undefined;
   for (const specifier of specifiers) {
-    result.push(pattern.slice(end, specifier.start));
+    emit(pattern.slice(end, specifier.start));
     end = specifier.end;
     const { index, flags, width, precision, conversion } = specifier;
     if (conversion === 'n' || conversion === '%') {
-      result.push(conversion === 'n' ? '\n' : pad('%', flags, width));
+      emit(conversion === 'n' ? '\n' : pad('%', flags, width));
       continue;
     }
     const position = flags.includes('<') ? previous : index ? Number(index) - 1 : nextArg++;
@@ -53,9 +59,9 @@ export function formatJava<V>(pattern: string, args: V[], values: FormatValues<V
       precision ? Number(precision) : undefined,
       conversion
     );
-    result.push(pad(formatted, flags, width));
+    emit(pad(formatted, flags, width));
   }
-  result.push(pattern.slice(end));
+  emit(pattern.slice(end));
   return result.join('');
 }
 
@@ -249,7 +255,7 @@ function formatLower<V>(
   if (lower === 'h') return general(values.isNull(arg) ? 'null' : (values.hash(arg) >>> 0).toString(16));
   const accepted = ACCEPTED_KINDS[lower] as readonly string[] | undefined;
   if (!accepted) return values.fail('UnknownFormatConversionException', `Conversion = '${conversion}'`);
-  if (values.isNull(arg)) return 'null';
+  if (values.isNull(arg)) return general('null');
   const number = values.numberOf(arg);
   if (!number || !accepted.includes(number.kind)) {
     return values.fail('IllegalFormatConversionException', `${conversion} != ${values.typeName(arg)}`);

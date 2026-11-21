@@ -50,11 +50,11 @@ class PrintStream internal constructor(private val isError: Boolean) {
     }
 
     fun format(pattern: String, vararg args: Any?): PrintStream {
-        print(pattern.format(*args))
+        formatStream(isError, pattern, args)
         return this
     }
     fun format(locale: Locale?, pattern: String, vararg args: Any?): PrintStream {
-        print(pattern.format(locale, *args))
+        formatStream(isError, pattern, args)
         return this
     }
     fun printf(pattern: String, vararg args: Any?): PrintStream = format(pattern, *args)
@@ -67,6 +67,7 @@ object System {
 }
 
 internal external fun writeStream(isError: Boolean, text: String)
+internal external fun formatStream(isError: Boolean, pattern: String, args: Array<out Any?>)
 `;
 
 export const REFLECT_SOURCE = kotlin`

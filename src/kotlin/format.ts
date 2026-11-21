@@ -64,7 +64,7 @@ export function stringOf(frame: Frame, value: Value): string {
 
 /** `==` of two references, which calls `equals`. */
 export function valueEquals(frame: Frame, a: Value, b: Value): boolean {
-  if (a === undefined || b === undefined) return a === b;
+  if (a === undefined) return b === undefined;
   if (a instanceof Boxed) return b instanceof Boxed && a.kind === b.kind && boxedEquals(a, b);
   if (!(a instanceof KObject)) return a === b;
   return callFunction(members().equals, frame, a, [b], undefined) as boolean;

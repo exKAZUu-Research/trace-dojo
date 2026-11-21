@@ -55,14 +55,21 @@ class Snapshotter {
     for (const local of frame.info.locals) {
       const slot = frame.locals[local.slot];
       // `main`'s parameter only receives the launcher's arguments, which these programs never use.
-      if (slot === UNASSIGNED || (hidesArgs && local.slot === 0) || local.name.startsWith('\0')) continue;
+      if (
+        slot === UNASSIGNED ||
+        (slot instanceof Cell && !slot.isAssigned) ||
+        (hidesArgs && local.slot === 0) ||
+        local.name.startsWith('\0')
+      )
+        continue;
       shown.add(local.name);
       addVariable(variables, local.name, slot instanceof Cell ? slot.value : (slot as Value), local.type);
     }
     for (const capture of frame.info.captures) {
       if (shown.has(capture.name)) continue;
-      shown.add(capture.name);
       const captured = frame.captured[capture.slot];
+      if (captured instanceof Cell && !captured.isAssigned) continue;
+      shown.add(capture.name);
       addVariable(
         variables,
         capture.name,

@@ -339,6 +339,18 @@ fun main() {
   );
 });
 
+test('a deferred val appears in the trace after its scope lambda assigns it', () => {
+  const source = `fun main() {
+    val answer: Int
+    println(0)
+    run { answer = 3 }
+    println(answer)
+}`;
+  const trace = traceProgram('kotlin', source, source);
+  expect(trace.traceItems.find(({ line }) => line === 3)?.vars).toEqual({});
+  expect(trace.traceItems.at(-1)?.vars.answer).toBe(3);
+});
+
 test('cyclic reference arrays remain inspectable and do not interrupt execution', () => {
   const program = `fun main() {
     val first = arrayOfNulls<Any>(1)

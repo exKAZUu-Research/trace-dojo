@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 972 -- One method per kind of Kotlin statement and control structure.
+// code-gauge-allow-file fileNcss 987 -- One method per kind of Kotlin statement and control structure.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   AssignmentStatement,
@@ -18,6 +18,7 @@ import {
   convertRepr,
   type Eval,
   excludingCases,
+  type ExpressionUse,
   Flow,
   FunctionContext,
   Handoff,
@@ -40,7 +41,7 @@ import { type ClassSymbol, PropertySymbol, type TypeParameterSymbol, VariableSym
 import { instanceTest } from './typeChecks';
 import { branchHint, commonSupertype, isSubtype } from './typeRelations';
 import { type ClassType, isNonNullClass, type KType, nonNull, resolved, substitute, typeToString } from './types';
-import { Boxed, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
+import { Boxed, Cell, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
 import { WhenCoverage } from './whenCoverage';
 
 type Exec = (frame: Frame) => void;
@@ -80,16 +81,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
     context: FunctionContext,
     block: Block,
     expected: KType | undefined,
-    asStatement: boolean
+    use: ExpressionUse
   ): Compiled {
-    return this.compileStatementsValue(
-      new Scope(scope, context),
-      context,
-      block.statements,
-      expected,
-      asStatement,
-      true
-    );
+    return this.compileStatementsValue(new Scope(scope, context), context, block.statements, expected, use, true);
   }
 
   /**
@@ -103,7 +97,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     context: FunctionContext,
     statements: Statement[],
     expected: KType | undefined,
-    asStatement: boolean,
+    use: ExpressionUse,
     clearsLocals: boolean
   ): Compiled {
     const firstSlot = context.info.slotCount;
@@ -116,9 +110,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
       for (const [index, statement] of statements.entries()) {
         writes?.advance(index);
         const isLast = index === statements.length - 1;
-        if (isLast && !asStatement && statement.kind === 'expressionStatement') {
+        if (isLast && use !== true && statement.kind === 'expressionStatement') {
           this.recordExceptionEntry(scope, context, statement);
-          last = this.compileExpression(scope, context, statement.expression, expected);
+          last = this.compileAny(scope, context, statement.expression, expected, use);
         } else {
           execs.push(this.compileStatement(scope, context, statement));
         }
@@ -216,7 +210,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
       if (!declared) this.error(row, `変数 ${name} の型を書くか、初期値を書いてください。`);
       const variable = this.newVariable(scope, context, name, declared, statement.isVar, row);
       variable.awaitsValue = !statement.isVar;
-      return () => {};
+      return (frame) => {
+        if (variable.isCell) frame.locals[variable.slot] = new Cell(undefined, false);
+      };
     }
     const initializer = this.compileExpression(scope, context, statement.initializer, declared);
     // A `var` that a smart-cast value initializes takes the value's declared type, starting smart-cast, as kotlinc infers
@@ -624,8 +620,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
       // Parameters, loop variables, and the other variables a declaration gives a value are read-only as well.
       if (!variable.awaitsValue || isCompound)
         this.error(row, `val で宣言した ${variable.name} には、再び代入できません。`);
-      if (variable.owner !== context)
+      if (!context.canInitializeIn(variable.owner))
         this.error(row, `val で宣言した ${variable.name} には、ラムダ式の中で代入できません。`);
+      if (variable.owner !== context && !context.isProbe) variable.isCell = true;
     }
     const access = this.variableAccess(context, variable);
     return {
@@ -1152,20 +1149,22 @@ export abstract class StatementCompiler extends OperatorCompiler {
 
   // Control structures as expressions.
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity 23 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected compileIf(
     scope: Scope,
     context: FunctionContext,
     expression: Extract<Expression, { kind: 'if' }>,
     expected: KType | undefined,
-    asStatement: boolean
+    use: ExpressionUse
   ): Compiled {
     const { row } = expression;
-    if (!asStatement && !expression.elseBranch) this.error(row, 'if を式として使うときは、else も書いてください。');
+    const branchUse = use === 'inferUnit' && !expression.elseBranch ? true : use;
+    if (branchUse === false && !expression.elseBranch)
+      this.error(row, 'if を式として使うときは、else も書いてください。');
     const condition = this.compileCondition(scope, context, expression.condition);
     const before = this.flow.copy();
     this.applyNarrowing(condition.whenTrue);
-    const thenCompiled = this.compileBlockValue(scope, context, expression.thenBranch, expected, asStatement);
+    const thenCompiled = this.compileBlockValue(scope, context, expression.thenBranch, expected, branchUse);
     const afterThen = this.flow;
     this.flow = this.withNarrowing(before, condition.whenFalse);
     const { elseBranch } = expression;
@@ -1174,23 +1173,28 @@ export abstract class StatementCompiler extends OperatorCompiler {
           scope,
           context,
           elseBranch,
-          laterBranchExpected(thenCompiled, elseBranch, expected, asStatement),
-          asStatement
+          laterBranchExpected(thenCompiled, elseBranch, expected, branchUse),
+          branchUse
         )
       : undefined;
     const afterElse = this.flow;
     this.flow = Flow.merge([afterThen, afterElse]);
     const branches = elseCompiled ? [thenCompiled, elseCompiled] : [thenCompiled];
+    const inferredUnit = use === 'inferUnit' && (branchUse === true || branches.some((branch) => branch.inferredUnit));
+    const asStatement = branchUse === true || inferredUnit;
     const type = asStatement ? this.unitType : this.branchType(branches, expected);
     const repr = asStatement ? 'ref' : reprOf(this.core, type);
     const [thenEval, elseEval] = branches.map((branch) =>
-      asStatement ? branch.eval : convertRepr(this.convertTo(branch, type, row), reprOf(this.core, type), repr)
+      asStatement
+        ? discardResult(branch.eval)
+        : convertRepr(this.convertTo(branch, type, row), reprOf(this.core, type), repr)
     );
     const test = condition.compiled.eval;
     if (asStatement && this.isConstantTrue(condition.compiled)) this.flow.isDead = afterThen.isDead;
     return {
       type,
       repr,
+      inferredUnit: inferredUnit || undefined,
       eval: elseEval
         ? (frame) => ((test(frame) as boolean) ? thenEval(frame) : elseEval(frame))
         : (frame) => {
@@ -1220,13 +1224,13 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return commonSupertype(types);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity 19 -- exhaustiveness selects the result type and participates in branch flow.
   protected compileWhen(
     scope: Scope,
     context: FunctionContext,
     expression: Extract<Expression, { kind: 'when' }>,
     expected: KType | undefined,
-    asStatement: boolean
+    use: ExpressionUse
   ): Compiled {
     const { row } = expression;
     const subject = expression.subject ? this.compileExpression(scope, context, expression.subject) : undefined;
@@ -1245,11 +1249,11 @@ export abstract class StatementCompiler extends OperatorCompiler {
     for (const entry of expression.entries) {
       if (hasElse) this.error(entry.row, 'else は、when の最後に書いてください。');
       hasElse = entry.conditions.length === 0;
-      entries.push(
-        this.compileWhenEntry(scope, context, subjectValue, entry, covered, expected, asStatement, branchFlows)
-      );
+      entries.push(this.compileWhenEntry(scope, context, subjectValue, entry, covered, expected, use, branchFlows));
     }
     const isExhaustive = hasElse || (subject !== undefined && this.coversSubject(subject, covered.cases, before));
+    const inferredUnit = use === 'inferUnit' && (!isExhaustive || entries.some((entry) => entry.body.inferredUnit));
+    const asStatement = use === true || inferredUnit;
     this.checkWhenExhaustive(subject, isExhaustive, asStatement, row);
     if (!isExhaustive) branchFlows.push(this.flow);
     this.flow = branchFlows.length > 0 ? Flow.merge(branchFlows) : before;
@@ -1259,10 +1263,15 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const compiledEntries = entries.map((entry) => ({
       tests: entry.tests,
       body: asStatement
-        ? entry.body.eval
+        ? discardResult(entry.body.eval)
         : convertRepr(this.convertTo(entry.body, type, row), reprOf(this.core, type), repr),
     }));
-    return { type, repr, eval: whenEval(subject?.eval, subjectSlot, compiledEntries) };
+    return {
+      type,
+      repr,
+      inferredUnit: inferredUnit || undefined,
+      eval: whenEval(subject?.eval, subjectSlot, compiledEntries),
+    };
   }
 
   /**
@@ -1277,11 +1286,11 @@ export abstract class StatementCompiler extends OperatorCompiler {
     entry: Extract<Expression, { kind: 'when' }>['entries'][number],
     covered: WhenCoverage,
     expected: KType | undefined,
-    asStatement: boolean,
+    use: ExpressionUse,
     branchFlows: Flow[]
   ): { tests: ((frame: Frame) => boolean)[]; body: Compiled } {
     if (entry.conditions.length === 0) {
-      const body = this.compileBlockValue(scope, context, entry.body, expected, asStatement);
+      const body = this.compileBlockValue(scope, context, entry.body, expected, use);
       branchFlows.push(this.flow);
       this.flow = this.flow.copy();
       return { tests: [], body };
@@ -1297,7 +1306,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     }
     const atEntry = this.flow.copy();
     this.applyNarrowing(whenTrue);
-    const body = this.compileBlockValue(scope, context, entry.body, expected, asStatement);
+    const body = this.compileBlockValue(scope, context, entry.body, expected, use);
     branchFlows.push(this.flow);
     this.flow = this.withNarrowing(atEntry, entry.conditions.length === 1 ? whenFalse : new Map());
     return { tests, body };
@@ -1515,13 +1524,13 @@ export abstract class StatementCompiler extends OperatorCompiler {
     context: FunctionContext,
     block: Block,
     expected: KType | undefined,
-    asStatement: boolean,
+    use: ExpressionUse,
     thrown: Flow[]
   ): Compiled {
     const previous = this.exceptionEntries.get(context);
     this.exceptionEntries.set(context, thrown);
     try {
-      return this.compileBlockValue(scope, context, block, expected, asStatement);
+      return this.compileBlockValue(scope, context, block, expected, use);
     } finally {
       if (previous) this.exceptionEntries.set(context, previous);
       else this.exceptionEntries.delete(context);
@@ -1529,20 +1538,20 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   // code-gauge-allow functionNcss 50 -- try, catch clauses, and finally, as an expression.
-  // code-gauge-allow functionCognitiveComplexity 25 -- the same try and catch branches decide the flow and runtime result.
+  // code-gauge-allow functionCognitiveComplexity 26 -- the same try and catch branches decide the flow and runtime result.
   protected compileTry(
     scope: Scope,
     context: FunctionContext,
     expression: Extract<Expression, { kind: 'try' }>,
     expected: KType | undefined,
-    asStatement: boolean
+    use: ExpressionUse
   ): Compiled {
     const loopExits = expression.finally ? context.loops.flatMap(({ breaks, continues }) => [breaks, continues]) : [];
     const exitStarts = loopExits.map((exits) => exits.length);
     const before = this.flow.copy();
     const bodyThrows: Flow[] = [];
     const catchThrows: Flow[] = [];
-    const body = this.compileTryBlock(scope, context, expression.body, expected, asStatement, bodyThrows);
+    const body = this.compileTryBlock(scope, context, expression.body, expected, use, bodyThrows);
     const flows = [this.flow];
     const assignmentsBeforeThrow = Flow.merge([before, ...bodyThrows]).maybeAssigned;
     for (const target of this.flow.maybeAssigned) assignmentsBeforeThrow.add(target);
@@ -1556,7 +1565,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       const variable = this.newVariable(catchScope, context, clause.name, type, false, clause.row);
       this.flow.assigned.add(variable);
       const { write } = this.variableAccess(context, variable);
-      const value = this.compileTryBlock(catchScope, context, clause.body, expected, asStatement, catchThrows);
+      const value = this.compileTryBlock(catchScope, context, clause.body, expected, use, catchThrows);
       flows.push(this.flow);
       return { test: instanceTest(this.core, type), write, value, slot: variable.slot };
     });
@@ -1575,17 +1584,20 @@ export abstract class StatementCompiler extends OperatorCompiler {
         )
       : undefined;
     const branches = [body, ...catches.map((clause) => clause.value)];
+    const inferredUnit = use === 'inferUnit' && branches.some((branch) => branch.inferredUnit);
+    const asStatement = use === true || inferredUnit;
     const type = asStatement ? this.unitType : this.branchType(branches, expected);
     const repr = asStatement ? 'ref' : reprOf(this.core, type);
     const convert = (compiled: Compiled): Eval =>
       asStatement
-        ? compiled.eval
+        ? discardResult(compiled.eval)
         : convertRepr(this.convertTo(compiled, type, expression.row), reprOf(this.core, type), repr);
     const bodyEval = convert(body);
     const clauses = catches.map((clause) => ({ ...clause, value: convert(clause.value) }));
     return {
       type,
       repr,
+      inferredUnit: inferredUnit || undefined,
       eval: (frame) => {
         try {
           return bodyEval(frame);
@@ -1700,9 +1712,16 @@ function laterBranchExpected(
   earlier: Compiled,
   later: Block,
   expected: KType | undefined,
-  asStatement: boolean
+  use: ExpressionUse
 ): KType | undefined {
-  return asStatement ? expected : branchHint(earlier.type, expected, isBareCall(later));
+  return use === true ? expected : branchHint(earlier.type, expected, isBareCall(later));
+}
+
+function discardResult(evaluate: Eval): Eval {
+  return (frame) => {
+    evaluate(frame);
+    return UNIT;
+  };
 }
 
 /** How a `for` loop starts and steps through its iterable, and the type and representation of its elements. */

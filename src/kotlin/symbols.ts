@@ -127,6 +127,7 @@ export interface ParameterSymbol {
   defaultOwner?: FunctionSymbol;
   isVararg: boolean;
   blocksNonlocalControl?: boolean;
+  invokesExactlyOnce?: boolean;
   /** Computes the default value in the callee's frame, where the earlier parameters are set. */
   defaultValue?: (frame: Frame) => Value;
 }
@@ -165,6 +166,7 @@ export class FunctionSymbol implements MemberBase {
   isOpen = false;
   isOverride = false;
   isInline = false;
+  resolvesByLambdaResult = false;
   isDeprecatedError = false;
   isInfix = false;
   isOperator = false;

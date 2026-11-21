@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 616 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 620 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   type ArgumentEvaluation,
@@ -157,7 +157,8 @@ export abstract class CallCompiler extends CompilerCore {
     context: FunctionContext,
     lambda: LambdaExpression,
     expected: FunctionType | undefined,
-    isInline: boolean
+    isInline: boolean,
+    invokesExactlyOnce?: boolean
   ): Compiled;
 
   /** Converts a value to a type the checker accepted it for, including integer literals of other widths. */
@@ -612,8 +613,10 @@ export abstract class CallCompiler extends CompilerCore {
     scope: Scope,
     context: FunctionContext
   ): Attempt | undefined {
-    const lambdaIndex = args.findIndex((argument) => isLambdaArgument(argument.value));
-    if (lambdaIndex === -1) return undefined;
+    if (!attempts.some(({ candidate }) => candidate.symbol.resolvesByLambdaResult)) return undefined;
+    const lambdaArgs = args.filter((argument) => isLambdaArgument(argument.value));
+    if (lambdaArgs.length !== 1) return undefined;
+    const lambdaIndex = args.indexOf(lambdaArgs[0]);
     // The lambda's parameter types are fixed before it is compiled to probe its result, which would otherwise add bounds.
     const lambdaTypes = attempts.map((attempt) => {
       const paramIndex = attempt.mapping.findIndex((indexes) => indexes.includes(lambdaIndex));
@@ -621,14 +624,17 @@ export abstract class CallCompiler extends CompilerCore {
       return this.lambdaTypeFor(type, attempt) ?? resolved(type);
     });
     const first = lambdaTypes[0];
-    if (first.kind !== 'function') return undefined;
+    if (first.kind !== 'function' || !lambdaTypes.every((type) => hasSameLambdaParameters(first, type)))
+      return undefined;
     const probe = this.compileLambdaProbe(scope, context, args[lambdaIndex].value as LambdaExpression, first);
     if (!probe) return undefined;
     const fitting = attempts.filter((_, index) => {
       const type = lambdaTypes[index];
       return type.kind === 'function' && !hasOpenVariables(type.returnType) && isExactlyType(probe, type.returnType);
     });
-    return fitting.length > 0 ? fitting[0] : undefined;
+    if (fitting.length === 1) return fitting[0];
+    const unannotated = fitting.filter(({ candidate }) => !candidate.symbol.resolvesByLambdaResult);
+    return unannotated.length === 1 ? unannotated[0] : undefined;
   }
 
   /** The result type a lambda would have with the parameter types of `type`, computed without keeping its code. */
@@ -801,7 +807,8 @@ export abstract class CallCompiler extends CompilerCore {
       context,
       argument.value as LambdaExpression,
       lambdaType,
-      symbol.isInline && !param.blocksNonlocalControl && !sam
+      symbol.isInline && !param.blocksNonlocalControl && !sam,
+      param.invokesExactlyOnce
     );
     if (lambdaType) {
       const bodyType = (resolved(compiled.type) as FunctionType).returnType;
@@ -1014,6 +1021,14 @@ export abstract class CallCompiler extends CompilerCore {
   protected probeContext(context: FunctionContext): FunctionContext {
     return new FunctionContext(context, true, '<probe>', context.info.isLibrary, undefined, true);
   }
+}
+
+function hasSameLambdaParameters(first: FunctionType, second: KType): boolean {
+  if (second.kind !== 'function' || first.params.length !== second.params.length) return false;
+  const { receiver } = first;
+  const sameReceiver =
+    receiver && second.receiver ? isSameType(receiver, second.receiver) : receiver === second.receiver;
+  return sameReceiver && first.params.every((param, index) => isSameType(param, second.params[index]));
 }
 
 function forwardTypeVariable(variable: InferenceVariable, owned: readonly InferenceVariable[]): boolean {

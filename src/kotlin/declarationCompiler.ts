@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 987 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 988 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { VISIBILITY_KEYWORDS } from './ast';
 import type {
@@ -642,6 +642,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       hasDefault: param.defaultValue !== undefined,
       isVararg: keywords.has('vararg'),
       blocksNonlocalControl: keywords.has('crossinline') || keywords.has('noinline'),
+      invokesExactlyOnce:
+        this.file.isLibrary && param.modifiers.annotations.some(({ name }) => name === 'CallsExactlyOnce'),
     };
   }
 
@@ -666,6 +668,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   // code-gauge-allow functionNcss 31 -- builds the function symbol from the declaration and its modifiers.
+  // code-gauge-allow functionNcss 32 -- declaration flags and type constraints describe the same signature.
   private declareFunction(
     decl: FunctionDecl,
     ownerScope: Scope,
@@ -682,6 +685,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const { keywords } = decl.modifiers;
     this.applyMemberModifiers(symbol, decl.modifiers, cls?.symbol);
     symbol.isInline = keywords.has('inline');
+    symbol.resolvesByLambdaResult = decl.modifiers.annotations.some(
+      ({ name }) => name === 'OverloadResolutionByLambdaReturnType'
+    );
     symbol.isDeprecatedError =
       file.isLibrary && decl.modifiers.annotations.some(({ name }) => name === 'DeprecatedError');
     symbol.isInfix = keywords.has('infix');

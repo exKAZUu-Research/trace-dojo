@@ -24,6 +24,23 @@ interface ClosedFloatingPointRange<T : Comparable<T>> : ClosedRange<T> {
     override fun isEmpty(): Boolean = !lessThanOrEquals(start, endInclusive)
 }
 
+private class ComparableRange<T : Comparable<T>>(override val start: T, override val endInclusive: T) : ClosedRange<T> {
+    override fun equals(other: Any?): Boolean =
+        other is ComparableRange<*> && (isEmpty() && other.isEmpty() || start == other.start && endInclusive == other.endInclusive)
+    override fun hashCode(): Int = if (isEmpty()) -1 else 31 * start.hashCode() + endInclusive.hashCode()
+    override fun toString(): String = "$start..$endInclusive"
+}
+
+private class ComparableOpenEndRange<T : Comparable<T>>(override val start: T, override val endExclusive: T) : OpenEndRange<T> {
+    override fun equals(other: Any?): Boolean =
+        other is ComparableOpenEndRange<*> && (isEmpty() && other.isEmpty() || start == other.start && endExclusive == other.endExclusive)
+    override fun hashCode(): Int = if (isEmpty()) -1 else 31 * start.hashCode() + endExclusive.hashCode()
+    override fun toString(): String = "$start..<$endExclusive"
+}
+
+operator fun <T : Comparable<T>> T.rangeTo(that: T): ClosedRange<T> = ComparableRange(this, that)
+operator fun <T : Comparable<T>> T.rangeUntil(that: T): OpenEndRange<T> = ComparableOpenEndRange(this, that)
+
 ${floatingRanges()}
 ${mixedIntegralProgressions()}
 ${mixedRangeMembership()}

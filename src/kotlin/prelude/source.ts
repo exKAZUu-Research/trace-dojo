@@ -32,7 +32,7 @@ export function forwardingSelectorExtrema(
       const params = generic ? `<${generic}> ` : '';
       const label = type === 'R' ? '' : `@JvmName("${name}${type}") `;
       const result = type + (name.endsWith('OrNull') ? '?' : '');
-      return `${label}inline fun ${params}${receiver}.${name}(selector: (${element}) -> ${type}): ${result} = ${iterable}.${name}(selector)`;
+      return `${label}@OverloadResolutionByLambdaReturnType inline fun ${params}${receiver}.${name}(selector: (${element}) -> ${type}): ${result} = ${iterable}.${name}(selector)`;
     })
   );
 }

@@ -9,6 +9,7 @@ import type { Frame } from '../runtime';
 import { Boxed, KObject, UNIT, type Value } from '../values';
 import {
   copySequenceForBuilder,
+  copySequenceRangeForBuilder,
   sequenceAll,
   sequenceContentEquals,
   sequenceFindAnyString,
@@ -697,7 +698,7 @@ const JAVA_KINDS: Record<string, string> = {
 };
 
 /** `String.format`, with Kotlin's values. */
-export function formatText(frame: Frame, pattern: string, args: Value[]): string {
+export function formatText(frame: Frame, pattern: string, args: Value[], sink?: (text: string) => void): string {
   const values: FormatValues<Value> = {
     isNull: (value) => value === undefined,
     stringify: (value) => stringOf(frame, value),
@@ -711,7 +712,7 @@ export function formatText(frame: Frame, pattern: string, args: Value[]): string
     fail: (name, message) => throwError(frame, `java.util.${name}`, message),
     scan: (length) => frame.runtime.spend(1 + Math.floor(length / 64)),
   };
-  return formatJava(pattern, args, values);
+  return formatJava(pattern, args, values, sink);
 }
 
 // StringBuilder.
@@ -730,6 +731,17 @@ function setBuilder(frame: Frame, receiver: Value, value: string, work = value.l
 
 function appendText(frame: Frame, receiver: Value, added: string): Value {
   return setBuilder(frame, receiver, (builder(receiver).builder as string) + added, added.length);
+}
+
+function insertBuilderText(frame: Frame, receiver: Value, position: number, added: string): Value {
+  const current = builder(receiver).builder as string;
+  if (position < 0 || position > current.length) rangeError(frame, position, current.length, current.length);
+  return setBuilder(
+    frame,
+    receiver,
+    current.slice(0, position) + added + current.slice(position),
+    current.length - position + added.length
+  );
 }
 
 function defineBuilder(): void {
@@ -811,6 +823,9 @@ function defineBuilderAppending(): void {
   defineNative(`${BUILDER}.append(CharSequence?)`, (frame, receiver, [value]) =>
     appendText(frame, receiver, value === undefined ? 'null' : copySequenceForBuilder(frame, value))
   );
+  defineNative(`${BUILDER}.append(CharSequence?, Int, Int)`, (frame, receiver, [value, from, to]) =>
+    appendText(frame, receiver, copySequenceRangeForBuilder(frame, value, from as number, to as number))
+  );
   defineNative(`${BUILDER}.append(Char)`, (frame, receiver, [value]) =>
     appendText(frame, receiver, charToString(value as number))
   );
@@ -834,18 +849,28 @@ function defineBuilderAppending(): void {
 /** What changes a StringBuilder in place. */
 // code-gauge-allow functionNcss 35 -- registers the natives of one class together, in the order the prelude declares them.
 function defineBuilderEditing(): void {
-  defineNative(`${BUILDER}.insert(Int, Any?)`, (frame, receiver, [index, value]) => {
-    const current = builder(receiver).builder as string;
-    const position = index as number;
-    if (position < 0 || position > current.length) rangeError(frame, position, current.length, current.length);
-    const added = stringOf(frame, value);
-    return setBuilder(
+  defineNative(`${BUILDER}.insert(Int, Any?)`, (frame, receiver, [index, value]) =>
+    insertBuilderText(frame, receiver, index as number, stringOf(frame, value))
+  );
+  defineNative(`${BUILDER}.insert(Int, String?)`, (frame, receiver, [index, value]) =>
+    insertBuilderText(frame, receiver, index as number, value === undefined ? 'null' : text(value))
+  );
+  defineNative(`${BUILDER}.insert(Int, CharArray)`, (frame, receiver, [index, value]) =>
+    insertBuilderText(
       frame,
       receiver,
-      current.slice(0, position) + added + current.slice(position),
-      current.length - position + added.length
-    );
-  });
+      index as number,
+      ((value as KObject).items as number[]).map(charToString).join('')
+    )
+  );
+  defineNative(`${BUILDER}.insert(Int, CharSequence?)`, (frame, receiver, [index, value]) =>
+    insertBuilderText(
+      frame,
+      receiver,
+      index as number,
+      value === undefined ? 'null' : copySequenceForBuilder(frame, value)
+    )
+  );
   defineNative(`${BUILDER}.reverse()`, (frame, receiver) =>
     setBuilder(frame, receiver, reverseKeepingPairs(builder(receiver).builder as string))
   );
@@ -899,3 +924,12 @@ function rangeError(frame: Frame, start: number, end: number, length: number): n
 
 defineStrings();
 defineBuilder();
+
+defineNative(
+  'java.lang.formatStream(Boolean, String, Array<out Any?>)',
+  (frame, _receiver, [isError, pattern, args]) => {
+    const stream = isError ? frame.runtime.io.stderr : frame.runtime.io.stdout;
+    formatText(frame, text(pattern), (args as KObject).items as Value[], (part) => stream.write(part));
+    return UNIT;
+  }
+);

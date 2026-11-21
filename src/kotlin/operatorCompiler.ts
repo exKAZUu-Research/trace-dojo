@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 427 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 432 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { CallExpression, Expression, TypeRef } from './ast';
 import { type ArgumentSyntax } from './callCompiler';
 import {
@@ -413,6 +413,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const right = this.compileExpression(scope, context, expression.right);
     const negated = operator === '!=' || operator === '!==';
     const isIdentity = operator === '===' || operator === '!==';
+    const comparesNullLiteral = isNullLiteral(expression.left) || isNullLiteral(expression.right);
     this.checkEqualityApplicable(left, right, row, operator);
     const leftKind = this.primitiveOf(nonNull(left.type));
     const rightKind = this.primitiveOf(nonNull(right.type));
@@ -437,13 +438,14 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       const leftEval = convertRepr(left.eval, left.repr, 'ref');
       const rightEval = convertRepr(this.convertTo(right, right.type, row), reprOf(this.core, right.type), 'ref');
       const isPrimitiveIdentity = isIdentity && left.repr !== 'ref' && right.repr !== 'ref';
-      test = isIdentity
-        ? (frame) => {
-            const a = isPrimitiveIdentity ? left.eval(frame) : leftEval(frame);
-            const b = isPrimitiveIdentity ? right.eval(frame) : rightEval(frame);
-            return a === b || isSameCachedBox(a, b);
-          }
-        : (frame) => valueEquals(frame, leftEval(frame), rightEval(frame));
+      test =
+        isIdentity || comparesNullLiteral
+          ? (frame) => {
+              const a = isPrimitiveIdentity ? left.eval(frame) : leftEval(frame);
+              const b = isPrimitiveIdentity ? right.eval(frame) : rightEval(frame);
+              return a === b || isSameCachedBox(a, b);
+            }
+          : (frame) => valueEquals(frame, leftEval(frame), rightEval(frame));
     }
     const narrowing = this.equalityNarrowing(left, right, negated);
     return {
@@ -726,6 +728,11 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         };
     return { type: resultType, repr, eval: convertRepr(cast, 'ref', repr) };
   }
+}
+
+function isNullLiteral(expression: Expression): boolean {
+  while (expression.kind === 'parenthesized') expression = expression.expression;
+  return expression.kind === 'null';
 }
 
 function typeAfterCast(operand: KType, target: KType): KType {

@@ -11,6 +11,7 @@ import {
   type Compiled,
   convertRepr,
   type Eval,
+  type ExpressionUse,
   Flow,
   FunctionContext,
   nullableReceiverMessage,
@@ -39,6 +40,7 @@ import {
   type VariableSymbol,
 } from './symbols';
 import {
+  acceptsInferredUnit,
   anyType,
   approximatedReadType,
   commonSupertype,
@@ -103,7 +105,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     context: FunctionContext,
     block: Block,
     expected: KType | undefined,
-    asStatement: boolean
+    use: ExpressionUse
   ): Compiled;
 
   /** Makes sure a property without a declared type has its type inferred from its initializer. */
@@ -221,9 +223,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
     context: FunctionContext,
     expression: Expression,
     expected: KType | undefined,
-    asStatement: boolean
+    use: ExpressionUse
   ): Compiled {
-    return this.recordExpressionExit(this.compileExpressionKind(scope, context, expression, expected, asStatement));
+    return this.recordExpressionExit(this.compileExpressionKind(scope, context, expression, expected, use));
   }
 
   private recordExpressionExit(compiled: Compiled): Compiled {
@@ -238,7 +240,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     context: FunctionContext,
     expression: Expression,
     expected: KType | undefined,
-    asStatement: boolean
+    use: ExpressionUse
   ): Compiled {
     switch (expression.kind) {
       case 'integer': {
@@ -264,7 +266,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
         return this.compileString(scope, context, expression);
       }
       case 'parenthesized': {
-        const inner = this.compileAny(scope, context, expression.expression, expected, asStatement);
+        const inner = this.compileAny(scope, context, expression.expression, expected, use);
         return { ...inner, isCall: false, isCreation: false };
       }
       case 'name': {
@@ -295,7 +297,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
         return this.compileOperatorExpression(scope, context, expression, expected);
       }
       default: {
-        return this.compileControl(scope, context, expression, expected, asStatement);
+        return this.compileControl(scope, context, expression, expected, use);
       }
     }
   }
@@ -344,17 +346,17 @@ export abstract class ExpressionCompiler extends CallCompiler {
       { kind: 'if' | 'when' | 'try' | 'lambda' | 'throw' | 'return' | 'break' | 'continue' }
     >,
     expected: KType | undefined,
-    asStatement: boolean
+    use: ExpressionUse
   ): Compiled {
     switch (expression.kind) {
       case 'if': {
-        return this.compileIf(scope, context, expression, expected, asStatement);
+        return this.compileIf(scope, context, expression, expected, use);
       }
       case 'when': {
-        return this.compileWhen(scope, context, expression, expected, asStatement);
+        return this.compileWhen(scope, context, expression, expected, use);
       }
       case 'try': {
-        return this.compileTry(scope, context, expression, expected, asStatement);
+        return this.compileTry(scope, context, expression, expected, use);
       }
       case 'lambda': {
         const expectedFunction =
@@ -1799,12 +1801,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
   // Lambdas.
 
   // code-gauge-allow functionNcss 33 -- the parts of a lambda, from its parameters to its function value, which follow one another.
+  // code-gauge-allow functionCognitiveComplexity 16 -- parameter setup, body flow, and representation follow the lambda lifecycle.
   compileLambda(
     scope: Scope,
     context: FunctionContext,
     lambda: LambdaExpression,
     expected: FunctionType | undefined,
-    isInline: boolean
+    isInline: boolean,
+    invokesExactlyOnce = false
   ): Compiled {
     const lambdaContext = new FunctionContext(
       context,
@@ -1814,6 +1818,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       isInline ? (context.returnTarget ?? (context.isLambda ? undefined : context)) : undefined
     );
     lambdaContext.inlineLambda = isInline;
+    lambdaContext.invokesExactlyOnce = invokesExactlyOnce;
     if (isInline) lambdaContext.loops = [...context.loops];
     const lambdaScope = new Scope(scope, lambdaContext);
     const params = this.lambdaParameters(scope, lambda, expected?.params);
@@ -1834,10 +1839,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
       lambdaContext,
       bodyBlock,
       returnsUnit ? undefined : lambdaResultHint(expectedReturn),
-      returnsUnit
+      returnsUnit || (acceptsInferredUnit(this.unitType, expectedReturn) ? 'inferUnit' : false)
     );
-    for (const variable of lambdaContext.inlineWrites) outerFlow.forget(keyOf(variable));
-    this.flow = outerFlow;
+    if (!invokesExactlyOnce) {
+      for (const variable of lambdaContext.inlineWrites) outerFlow.forget(keyOf(variable));
+      this.flow = outerFlow;
+    }
     const resultType = returnsUnit ? this.unitType : body.type;
     const resultEval = returnsUnit
       ? (frame: Frame): Value => {
@@ -1930,21 +1937,21 @@ export abstract class ExpressionCompiler extends CallCompiler {
     context: FunctionContext,
     expression: Extract<Expression, { kind: 'if' }>,
     expected: KType | undefined,
-    asStatement: boolean
+    use: ExpressionUse
   ): Compiled;
   protected abstract compileWhen(
     scope: Scope,
     context: FunctionContext,
     expression: Extract<Expression, { kind: 'when' }>,
     expected: KType | undefined,
-    asStatement: boolean
+    use: ExpressionUse
   ): Compiled;
   protected abstract compileTry(
     scope: Scope,
     context: FunctionContext,
     expression: Extract<Expression, { kind: 'try' }>,
     expected: KType | undefined,
-    asStatement: boolean
+    use: ExpressionUse
   ): Compiled;
 }
 

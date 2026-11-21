@@ -1356,6 +1356,307 @@ fun main() {
     stdout: '1\nfalse\nfalse\n-1\nfalse\n3\nfalse\n4\ntrue\ntrue\nnull\n',
   },
   {
+    name: 'text ranges use the JVM builder callbacks and bounds',
+    source: `class Logged : CharSequence {
+    override val length: Int
+        get() { println("length"); return 3 }
+    override fun get(index: Int): Char {
+        println("get $index")
+        return "abc"[index]
+    }
+    override fun subSequence(startIndex: Int, endIndex: Int): CharSequence {
+        println("subSequence $startIndex $endIndex")
+        return "abc".subSequence(startIndex, endIndex)
+    }
+}
+
+fun main() {
+    println("abc".replaceRange(1..1, "x"))
+    println("abc".removeRange(100, 100))
+    try { println("abc".replaceRange(5, 6, "x")) }
+    catch (e: IndexOutOfBoundsException) { println(e.message) }
+    try { println("abc".removeRange(1, 100)) }
+    catch (e: NegativeArraySizeException) { println(e.message) }
+    val s = Logged()
+    println(s.replaceRange(1, 2, "X"))
+    println(s.removeRange(1, 2))
+    println(s.removeRange(12, 12))
+}`,
+    stdout:
+      'axc\nabc\nRange [0, 5) out of bounds for length 3\n-96\nlength\nget 0\nlength\nlength\nget 2\naXc\nlength\nlength\nget 0\nlength\nlength\nget 2\nac\nlength\nsubSequence 0 3\nabc\n',
+  },
+  {
+    name: 'collection subtraction, reverse traversal, and flattening use JVM callbacks',
+    source: `class Sequential(private val items: List<Int> = listOf(1, 2, 3)) : List<Int> by items {
+    override val size: Int get() = 3
+    override fun get(index: Int): Int {
+        println("get $index")
+        return index + 1
+    }
+    override fun listIterator(index: Int): ListIterator<Int> {
+        println("listIterator $index")
+        return listOf(1, 2, 3).listIterator(index)
+    }
+    override fun iterator(): Iterator<Int> {
+        println("iterator")
+        return listOf(1, 2, 3).iterator()
+    }
+}
+class Single(private val items: List<Int> = listOf(2)) : List<Int> by items {
+    override val size: Int get() = 1
+    override fun get(index: Int): Int { println("get $index"); return 2 }
+    override fun iterator(): Iterator<Int> { println("iterator"); return listOf(2).iterator() }
+}
+class Membership(private val items: Set<Int> = setOf(2)) : Set<Int> by items {
+    override val size: Int get() = 1
+    override fun iterator(): Iterator<Int> { println("iteration"); return listOf(2).iterator() }
+    override fun contains(element: Int): Boolean { println("contains $element"); return element == 2 }
+}
+fun main() {
+    val m = Membership()
+    println(listOf(1, 2, 3) - m)
+    println(linkedSetOf(1, 2, 3) - m)
+    println(Sequential().takeLast(2))
+    println(Sequential().takeLastWhile { it > 1 })
+    println(Sequential().dropLastWhile { it > 2 })
+    for (take in listOf(true, false)) {
+        val list = arrayListOf(1, 2, 3)
+        try {
+            if (take) list.takeLastWhile { list.clear(); true }
+            else list.dropLastWhile { list.clear(); true }
+        } catch (e: ConcurrentModificationException) { println("modified") }
+    }
+    val singleton = Single()
+    println(listOf(1).flatMap { singleton })
+    println(listOf(singleton).flatten())
+    println(mapOf("key" to 1).flatMap { singleton })
+}`,
+    stdout:
+      'contains 1\ncontains 2\ncontains 3\n[1, 3]\ncontains 1\ncontains 2\ncontains 3\n[1, 3]\nlistIterator 1\n[2, 3]\nlistIterator 3\n[2, 3]\nlistIterator 3\niterator\n[1, 2]\nmodified\nmodified\niterator\n[2]\niterator\n[2]\niterator\n[2]\n',
+  },
+  {
+    name: 'array searches and seeded random sampling support primitive overloads',
+    source: `import kotlin.random.Random
+
+fun main() {
+    val seed = Random(71)
+    println(longArrayOf(1, 2, 3).random(seed))
+    println(charArrayOf('a', 'b', 'c').randomOrNull(seed))
+    println(arrayOf("x", "y", "z").random(seed))
+    println(intArrayOf().randomOrNull())
+    try { charArrayOf().random(seed) }
+    catch (e: NoSuchElementException) { println(e.message) }
+    val values = intArrayOf(1, 2, 3)
+    println(values.lastOrNull { v ->
+        println("visit $v")
+        if (v == 2) values[1] = 9
+        v < 3
+    })
+    println(arrayOf("abc", "def").findLast { it.startsWith("a") })
+    println(booleanArrayOf(true, false).lastOrNull { it })
+}`,
+    stdout: '1\nc\ny\nnull\nArray is empty.\nvisit 3\nvisit 2\n2\nabc\ntrue\n',
+  },
+  {
+    name: 'lambda control statements infer Unit and exhaustive branches retain their value',
+    source: `fun main() {
+    val n = 3
+    val p = true
+    println(5.let { if (it > 2) { println(it) } else if (it > 1) { println(-it) } })
+    println(n.let { when (it) { 3 -> println("matched") } })
+    println(listOf(1, 2).map { if (it > 1) println(it) })
+    val fn = { x: Int -> if (x > 1) println(x) }
+    println(fn(4))
+    println(n.let { if (p) 2 else if (!p) 4 })
+    println(n.let { when (it) { 3 -> 9 } })
+    println(n.let { try { if (it > 1) 4 } finally { println("finally") } })
+    println(p.let { when (it) { true -> 1; false -> 2 } })
+}`,
+    stdout:
+      '5\nkotlin.Unit\nmatched\nkotlin.Unit\n2\n[kotlin.Unit, kotlin.Unit]\n4\nkotlin.Unit\nkotlin.Unit\nkotlin.Unit\nfinally\nkotlin.Unit\n1\n',
+  },
+  {
+    name: 'exactly-once scope lambdas initialize deferred vals',
+    source: `fun main() {
+    val first: Int
+    run { first = 3 }
+    println(first)
+    val second: String
+    "hello".let { second = it }
+    println(second)
+    val nested: Int
+    Unit.apply { Unit.also { run { nested = 5 } } }
+    println(nested)
+    val dependent: String
+    val received = with("a") {
+        dependent = this
+        dependent + "b"
+    }
+    println(received + dependent)
+}`,
+    stdout: '3\nhello\n5\naba\n',
+  },
+  {
+    name: 'builder insert and appendLine honor their typed arguments and callbacks',
+    source: `class Change(private val action: () -> Unit, private val label: String) {
+    override fun toString(): String {
+        action()
+        return label
+    }
+}
+class Letters : CharSequence {
+    override val length: Int get() { print("length "); return 3 }
+    override fun get(index: Int): Char = "abc"[index]
+    override fun subSequence(startIndex: Int, endIndex: Int): CharSequence = "abc".substring(startIndex, endIndex)
+    override fun toString(): String = "label"
+}
+fun main() {
+    val append = StringBuilder("a")
+    append.insert(0, Change({ append.append("b") }, "x"))
+    println(append)
+    val clear = StringBuilder("a")
+    clear.insert(0, Change({ clear.clear() }, "y"))
+    println(clear)
+    val chars = charArrayOf('x', 'y')
+    println(StringBuilder("ab").insert(1, chars))
+    println(StringBuilder().appendLine(chars).append('!'))
+    println(StringBuilder().appendLine(Letters()).append('!'))
+    println(StringBuilder("xy").insert(1, Letters()))
+}`,
+    stdout: 'xab\ny\naxyb\nxy\n!\nlength length abc\n!\nlength length xabcy\n',
+  },
+  {
+    name: 'PrintStream formatting publishes each field before formatting the next one',
+    source: `import java.util.*
+
+class Formatting {
+    override fun toString(): String {
+        print("inside ")
+        return "value"
+    }
+}
+fun main() {
+    try { System.out.printf("before: %s; %d", "ok", "bad") }
+    catch (error: IllegalFormatConversionException) { println("caught") }
+    try { System.out.printf("missing %s %d", "argument") }
+    catch (error: MissingFormatArgumentException) { println("caught") }
+    try { System.out.printf("unknown %z", "argument") }
+    catch (error: UnknownFormatConversionException) { println("caught") }
+    System.out.printf("start %s end%n", Formatting())
+    println("start %s end".format(Formatting()))
+    System.err.printf("discarded %d", 1)
+}`,
+    stdout: 'before: ok; caught\nmissing argument caught\ncaught\nstart inside value end\ninside start value end\n',
+  },
+  {
+    name: 'map set and map view rendering detects concurrent changes through iterators',
+    source: `class EntryText(private val change: () -> Unit, private val name: String) {
+    override fun toString(): String { change(); return name }
+}
+fun main() {
+    val map = linkedMapOf<Int, Any>()
+    map[1] = EntryText({ map.remove(2) }, "one")
+    map[2] = "two"
+    try { println(map) } catch (error: ConcurrentModificationException) { println("map modified") }
+
+    val set = linkedSetOf<Any>()
+    set.add(EntryText({ set.clear() }, "one"))
+    set.add("two")
+    try { println(set) } catch (error: ConcurrentModificationException) { println("set modified") }
+
+    val backing = linkedMapOf<Int, Any>()
+    backing[1] = EntryText({ backing.clear() }, "one")
+    backing[2] = "two"
+    try { println(backing.values) } catch (error: ConcurrentModificationException) { println("values modified") }
+
+    val own = linkedMapOf<Int, Any>()
+    own[1] = own
+    println(own)
+}`,
+    stdout: 'map modified\nset modified\nvalues modified\n{1=(this Map)}\n',
+  },
+  {
+    name: 'Comparable values use closed and half-open ranges',
+    source: `class Score(val number: Int) : Comparable<Score> {
+    override fun compareTo(other: Score): Int = number.compareTo(other.number)
+    override fun toString(): String = number.toString()
+}
+fun main() {
+    val letters = "a".."c"
+    println(letters)
+    println("b" in letters)
+    println("c" in "a"..<"c")
+    println(("w".."a") == ("z".."b"))
+    println(("w"..<"a").hashCode())
+    val ranks = Score(1)..Score(3)
+    println(Score(2) in ranks)
+    println(Score(3) in (Score(1)..<Score(3)))
+    val letter = "b"
+    when (letter) {
+        in "a".."d" -> println("inside")
+        else -> println("outside")
+    }
+}`,
+    stdout: 'a..c\ntrue\nfalse\ntrue\n-1\ntrue\nfalse\ninside\n',
+  },
+  {
+    name: 'null equality callbacks and floating point format precision match the JVM',
+    source: `var comparisons = 0
+class Key {
+    override fun equals(other: Any?): Boolean { comparisons++; return false }
+    override fun hashCode(): Int = 0
+}
+fun equal(first: Any?, second: Any?): Boolean = first == second
+fun direct(first: Any?): Boolean = first == (null)
+fun main() {
+    val key = Key()
+    println(listOf<Any?>(null, "x").contains(key))
+    println(comparisons)
+    comparisons = 0
+    val map = hashMapOf<Any?, Int>(null to 1)
+    println(map[key])
+    println(comparisons)
+    comparisons = 0
+    println(equal(key, null))
+    println(direct(key))
+    println(comparisons)
+    println("[%.2f] [%8.1f] [%-6.3E] [%.0g]".format(null as Any?, null, null, null))
+}`,
+    stdout: 'false\n2\nnull\n1\nfalse\nfalse\n1\n[nu] [       n] [NUL   ] []\n',
+  },
+  {
+    name: 'rendering uses the original builder buffer and live fixed-size views',
+    source: `class Element(private val mutate: () -> Unit) {
+    override fun toString(): String { mutate(); return "item" }
+}
+fun main() {
+    buildList<Any> {
+        val list = this
+        add(Element { repeat(20) { list.add(it) }; list[1] = "changed" })
+        add("last")
+        println(this)
+        println(this[1])
+    }
+    buildList<Any> {
+        val list = this
+        add(Element { repeat(20) { list.add(it) }; list.clear() })
+        add("last")
+        println(this)
+        println(size)
+    }
+
+    val array = arrayOf<Any>("before", "old", "after")
+    array[0] = Element { array[1] = "changed" }
+    println(array.asList().subList(0, 2))
+    println(array[1])
+    val fixed = listOf<Any>("before", "old", "after") as MutableList<Any>
+    fixed[0] = Element { fixed[1] = "changed" }
+    println(fixed.subList(0, 2))
+    println(fixed[1])
+}`,
+    stdout: '[item, last]\nchanged\n[item, last]\n0\n[item, changed]\nchanged\n[item, changed]\nchanged\n',
+  },
+  {
     name: 'set insertion follows the source iterator and keeps partial changes',
     source: `class SourceIterator(private val target: Set<Int>) : Iterator<Int> {
     private var count = 0
@@ -3325,6 +3626,27 @@ test.each([
     'writing through a star-projected MutableMap',
     false,
     'fun main() { val items: MutableMap<*, *> = mutableMapOf("key" to 1); items["key"] = "wrong" }',
+  ],
+  [
+    'ambiguous user overloads whose lambda results differ',
+    false,
+    'fun choose(block: () -> Int, number: Int = 0) { println(block()) }\nfun choose(block: () -> String, text: String = "") { println(block()) }\nfun main() { choose({ 42 }) }',
+  ],
+  ['reassigning a val initialized in a scope function', false, 'fun main() { val n: Int; run { n = 3 }; n = 4 }'],
+  [
+    'initializing a val inside an unknown inline invocation',
+    false,
+    'fun main() { val n: Int; repeat(1) { n = 3 }; println(n) }',
+  ],
+  [
+    'reading a val after a safe call can skip initialization',
+    false,
+    'fun main() { val text: String? = null; val n: Int; text?.let { n = 3 }; println(n) }',
+  ],
+  [
+    'initializing a val inside a stored lambda',
+    false,
+    'fun main() { val n: Int; val store = { n = 3 }; store(); println(n) }',
   ],
   ['a cycle between open classes', false, 'open class A : B()\nopen class B : A()\nfun main() {}'],
   ['a cycle between interfaces', false, 'interface A : B\ninterface B : A\nfun main() {}'],

@@ -382,6 +382,11 @@ export function determinedType(type: KType | undefined): KType | undefined {
   return upper;
 }
 
+export function acceptsInferredUnit(unit: KType, type: KType | undefined): boolean {
+  const expected = determinedType(type);
+  return expected === undefined || isSubtype(unit, expected);
+}
+
 export function lambdaResultHint(type: KType | undefined): KType | undefined {
   if (type?.kind === 'variable' && type.variable.lower.length > 0) return type;
   return determinedType(type) ?? type;

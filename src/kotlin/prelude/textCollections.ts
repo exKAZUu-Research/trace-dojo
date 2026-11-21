@@ -294,7 +294,7 @@ function charSelectorExtremum(direction: string, type: string, orNull: boolean):
     type === 'R'
       ? `if (best ${direction === 'min' ? '>' : '<'} next) best = next`
       : `best = kotlin.math.${direction}(best, next)`;
-  return `${label}inline fun ${generic}CharSequence.${method}(selector: (Char) -> ${type}): ${type}${orNull ? '?' : ''} {
+  return `${label}@OverloadResolutionByLambdaReturnType inline fun ${generic}CharSequence.${method}(selector: (Char) -> ${type}): ${type}${orNull ? '?' : ''} {
     if (isEmpty()) ${orNull ? 'return null' : 'throw NoSuchElementException()'}
     var best = selector(this[0])
     for (index in 1..lastIndex) {
@@ -316,7 +316,7 @@ function charSumOfSource(): string {
   return types
     .map(
       ([type, zero]) => `@JvmName("sumOf${type}")
-inline fun CharSequence.sumOf(selector: (Char) -> ${type}): ${type} {
+@OverloadResolutionByLambdaReturnType inline fun CharSequence.sumOf(selector: (Char) -> ${type}): ${type} {
     var result = ${zero}
     for (element in this) result += selector(element)
     return result

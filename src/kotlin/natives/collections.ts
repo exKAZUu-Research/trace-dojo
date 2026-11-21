@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 923 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 935 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, identityHash, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -172,6 +172,7 @@ export function newList(
   const list = new KObject(libraryClass(`kotlin.collections.${className}`), 0);
   list.items = values;
   if (className === 'ArrayList') list.arrayList = { size: values.length, capacity: values.length };
+  if (className === 'ListBuilder') list.listBuilderCapacity = 10;
   list.modCount = 0;
   list.readOnlyCollection = className === 'EmptyList';
   return list;
@@ -247,23 +248,28 @@ const LIST_READING_NATIVES: Record<string, ListNative> = {
 
 function renderList(frame: Frame, receiver: Value): string {
   const list = receiver as KObject;
-  const view = listView(list);
-  const source = view?.source ?? list;
-  if (listKind(source) === 'ListBuilder') {
-    return renderListBuilder(frame, list, source.items as Value[], view?.from ?? 0);
-  }
-  if (!usesJvmListIterator(list)) return collectionToString(frame, list, readableItems(list));
-
   checkListView(frame, list);
-  const iterator = collectionIterator(frame, list);
+  if (usesJvmListIterator(list)) return renderCollection(frame, list);
+  const view = listView(list);
+  const items = (view?.source ?? list).items;
+  return items
+    ? renderIndexedList(frame, list, items, view?.from ?? 0)
+    : collectionToString(frame, list, readableItems(list));
+}
+
+function renderCollection(frame: Frame, receiver: Value): string {
+  return renderIterator(frame, receiver, (elements) => collectionToString(frame, receiver, elements));
+}
+
+function renderIterator(frame: Frame, receiver: Value, render: (elements: Iterable<Value>) => string): string {
+  const iterator = collectionIterator(frame, receiver);
   function* elements(): Iterable<Value> {
     while (iterator.hasNext()) yield iterator.next();
   }
-  return frame.runtime.withNativeRoots([iterator.value], () => collectionToString(frame, list, elements()));
+  return frame.runtime.withNativeRoots([iterator.value], () => render(elements()));
 }
 
-function renderListBuilder(frame: Frame, list: KObject, items: Value[], from: number): string {
-  checkListView(frame, list);
+function renderIndexedList(frame: Frame, list: KObject, items: Value[], from: number): string {
   const end = from + indexedSize(list);
   function* elements(): Iterable<Value> {
     for (let index = from; index < end; index++) yield items[index];
@@ -396,10 +402,11 @@ function updateListViews(list: KObject, source: KObject, growth: number): void {
 function listStorageForSize(frame: Frame, list: KObject, required: number): Value[] {
   const current = listStorage(list);
   const array = list.arrayList;
-  if (!array || required <= (array.capacity ?? 0)) return current;
-  // Java replaces elementData on growth, so operations already holding it keep using the old array.
-  const capacity = array.capacity === undefined ? 10 : array.capacity + Math.floor(array.capacity / 2);
-  array.capacity = Math.max(required, capacity);
+  const capacity = array?.capacity ?? list.listBuilderCapacity;
+  if ((!array && capacity === undefined) || required <= (capacity ?? 0)) return current;
+  const grownCapacity = Math.max(required, capacity === undefined ? 10 : capacity + Math.floor(capacity / 2));
+  if (array) array.capacity = grownCapacity;
+  else list.listBuilderCapacity = grownCapacity;
   frame.runtime.spend(Math.floor(current.length / 64));
   const grown = [...current];
   list.items = grown;
@@ -902,12 +909,20 @@ function mapEquals(frame: Frame, map: KObject, other: Value): boolean {
 }
 
 function mapToString(frame: Frame, map: KObject): string {
-  return joinRendered(frame, storeOf(map).ordered(), '{', '}', (entry) => {
-    const key = entry.key === map ? '(this Map)' : stringOf(frame, entry.key);
-    const value = entry.value === map ? '(this Map)' : stringOf(frame, entry.value);
-    frame.runtime.allocateString(frame, key.length + value.length + 1, 0);
-    return `${key}=${value}`;
-  });
+  const entries = readCollectionProperty(frame, map, 'kotlin.collections.Map', 'entries');
+  const owner = 'kotlin.collections.Map.Entry';
+  return renderIterator(frame, entries, (elements) =>
+    joinRendered(frame, elements, '{', '}', (entry) => {
+      const entryKey = readCollectionProperty(frame, entry, owner, 'key');
+      const entryValue = readCollectionProperty(frame, entry, owner, 'value');
+      return frame.runtime.withNativeRoots([entryKey, entryValue], () => {
+        const key = entryKey === map ? '(this Map)' : stringOf(frame, entryKey);
+        const value = entryValue === map ? '(this Map)' : stringOf(frame, entryValue);
+        frame.runtime.allocateString(frame, key.length + value.length + 1, 0);
+        return `${key}=${value}`;
+      });
+    })
+  );
 }
 
 function initializeSet(instance: Value, store: KStore): Value {
@@ -961,7 +976,7 @@ function defineSets(): void {
     },
     'equals(Any?)': (frame, set, [other]) => setEquals(frame, set, other),
     'hashCode()': (frame, set) => sumHashes(storeOf(set).entries.map((entry) => hashOf(frame, entry.key))),
-    'toString()': (frame, set) => collectionToString(frame, set, storeElements(set as KObject)),
+    'toString()': renderCollection,
   };
   for (const [signature, native] of Object.entries(natives)) defineNative(`${SET}.${signature}`, native);
 }
@@ -1111,9 +1126,7 @@ function defineViewReading(owner: string): void {
     const { view: kind, map } = viewOf(view);
     return storeIterator(frame, view as KObject, kind, map);
   });
-  defineNative(`${owner}.toString()`, (frame, view) =>
-    collectionToString(frame, view, viewElements(frame, view as KObject))
-  );
+  defineNative(`${owner}.toString()`, renderCollection);
   defineNative(`${owner}.hashCode()`, (frame, view) =>
     viewOf(view).view === 'values'
       ? identityHash(view)

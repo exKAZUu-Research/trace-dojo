@@ -105,7 +105,14 @@ function functionsOf(kind: ArrayKind): string {
     `inline fun ${g()}${r}.last(predicate: (${e}) -> Boolean): ${e} { var index = lastIndex; while (index >= 0) { val element = this[index]; if (predicate(element)) return element; index-- }; throw NoSuchElementException("Array contains no element matching the predicate.") }`,
     `fun ${g()}${r}.lastOrNull(): ${e}? = if (isEmpty()) null else this[size - 1]`,
     `inline fun ${g()}${r}.find(predicate: (${e}) -> Boolean): ${e}? = asList().firstOrNull(predicate)`,
-    `inline fun ${g()}${r}.findLast(predicate: (${e}) -> Boolean): ${e}? = asList().lastOrNull(predicate)`,
+    `inline fun ${g()}${r}.lastOrNull(predicate: (${e}) -> Boolean): ${e}? {
+        for (index in lastIndex downTo 0) {
+            val element = this[index]
+            if (predicate(element)) return element
+        }
+        return null
+    }`,
+    `inline fun ${g()}${r}.findLast(predicate: (${e}) -> Boolean): ${e}? = lastOrNull(predicate)`,
     `fun ${g()}${r}.single(): ${e} = when (size) { 0 -> throw NoSuchElementException("Array is empty."); 1 -> this[0]; else -> throw IllegalArgumentException("Array has more than one element.") }`,
     `fun ${g()}${r}.getOrNull(index: Int): ${e}? = if (index >= 0 && index < size) get(index) else null`,
     `inline fun ${g()}${r}.getOrElse(index: Int, defaultValue: (Int) -> ${e}): ${e} = if (index >= 0 && index < size) get(index) else defaultValue(index)`,
@@ -121,9 +128,9 @@ function functionsOf(kind: ArrayKind): string {
     `inline fun ${g()}${r}.indexOfLast(predicate: (${e}) -> Boolean): Int = asList().indexOfLast(predicate)`,
     `inline fun ${g('R')}${r}.fold(initial: R, operation: (acc: R, ${e}) -> R): R = asList().fold(initial, operation)`,
     `inline fun ${g('R')}${r}.foldIndexed(initial: R, operation: (index: Int, acc: R, ${e}) -> R): R = asList().foldIndexed(initial, operation)`,
-    `inline fun ${g()}${r}.sumOf(selector: (${e}) -> Int): Int = asList().sumOf(selector)`,
-    `@JvmName("sumOfDouble") inline fun ${g()}${r}.sumOf(selector: (${e}) -> Double): Double = asList().sumOf(selector)`,
-    `@JvmName("sumOfLong") inline fun ${g()}${r}.sumOf(selector: (${e}) -> Long): Long = asList().sumOf(selector)`,
+    `@OverloadResolutionByLambdaReturnType inline fun ${g()}${r}.sumOf(selector: (${e}) -> Int): Int = asList().sumOf(selector)`,
+    `@JvmName("sumOfDouble") @OverloadResolutionByLambdaReturnType inline fun ${g()}${r}.sumOf(selector: (${e}) -> Double): Double = asList().sumOf(selector)`,
+    `@JvmName("sumOfLong") @OverloadResolutionByLambdaReturnType inline fun ${g()}${r}.sumOf(selector: (${e}) -> Long): Long = asList().sumOf(selector)`,
     `inline fun ${g('R : Comparable<R>')}${r}.maxBy(selector: (${e}) -> R): ${e} { if (isEmpty()) throw NoSuchElementException(); return asList().maxBy(selector) }`,
     `inline fun ${g('R : Comparable<R>')}${r}.minBy(selector: (${e}) -> R): ${e} { if (isEmpty()) throw NoSuchElementException(); return asList().minBy(selector) }`,
     `inline fun ${g('R : Comparable<R>')}${r}.maxByOrNull(selector: (${e}) -> R): ${e}? = asList().maxByOrNull(selector)`,
@@ -156,7 +163,14 @@ function functionsOf(kind: ArrayKind): string {
     `infix fun ${g('R')}${r}.zip(other: Iterable<R>): List<Pair<${e}, R>> = asList().zip(other)`,
     `inline fun ${g('R, V')}${r}.zip(other: Iterable<R>, transform: (a: ${e}, b: R) -> V): List<V> = asList().zip(other, transform)`,
     `fun ${g()}${r}.joinToString(separator: CharSequence = ", ", prefix: CharSequence = "", postfix: CharSequence = "", limit: Int = -1, truncated: CharSequence = "...", transform: ((${e}) -> CharSequence)? = null): String = asList().joinToString(separator, prefix, postfix, limit, truncated, transform)`,
-    `fun ${g()}${r}.random(): ${e} { if (isEmpty()) throw NoSuchElementException("Array is empty."); return get(kotlin.random.Random.nextInt(size)) }`,
+    `fun ${g()}${r}.random(): ${e} = random(kotlin.random.Random)`,
+    `fun ${g()}${r}.random(random: kotlin.random.Random): ${e} {
+        if (isEmpty()) throw NoSuchElementException("Array is empty.")
+        return get(random.nextInt(size))
+    }`,
+    `fun ${g()}${r}.randomOrNull(): ${e}? = randomOrNull(kotlin.random.Random)`,
+    `fun ${g()}${r}.randomOrNull(random: kotlin.random.Random): ${e}? =
+        if (isEmpty()) null else get(random.nextInt(size))`,
     `external fun ${g()}${r}.fill(element: ${e}, fromIndex: Int = 0, toIndex: Int = size)`,
     `external fun ${g()}${r}.reverse()`,
     `inline fun ${g()}${r}.single(predicate: (${e}) -> Boolean): ${e} = asList().single(predicate)`,

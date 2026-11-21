@@ -24,6 +24,7 @@ external class StringBuilder : CharSequence, Comparable<StringBuilder> {
     external fun append(value: Any?): StringBuilder
     external fun append(value: String?): StringBuilder
     external fun append(value: CharSequence?): StringBuilder
+    external fun append(value: CharSequence?, startIndex: Int, endIndex: Int): StringBuilder
     external fun append(value: Char): StringBuilder
     external fun append(value: Int): StringBuilder
     external fun append(value: Long): StringBuilder
@@ -31,6 +32,9 @@ external class StringBuilder : CharSequence, Comparable<StringBuilder> {
     external fun append(value: Boolean): StringBuilder
     external fun append(value: CharArray): StringBuilder
     external fun insert(index: Int, value: Any?): StringBuilder
+    external fun insert(index: Int, value: String?): StringBuilder
+    external fun insert(index: Int, value: CharArray): StringBuilder
+    external fun insert(index: Int, value: CharSequence?): StringBuilder
     external fun reverse(): StringBuilder
     external fun deleteCharAt(index: Int): StringBuilder
     external fun delete(startIndex: Int, endIndex: Int): StringBuilder
@@ -48,6 +52,8 @@ external class StringBuilder : CharSequence, Comparable<StringBuilder> {
 fun StringBuilder.appendLine(): StringBuilder = append('\\n')
 fun StringBuilder.appendLine(value: Any?): StringBuilder = append(value).append('\\n')
 fun StringBuilder.appendLine(value: String?): StringBuilder = append(value).append('\\n')
+fun StringBuilder.appendLine(value: CharArray): StringBuilder = append(value).append('\\n')
+fun StringBuilder.appendLine(value: CharSequence?): StringBuilder = append(value).append('\\n')
 fun StringBuilder.clear(): StringBuilder {
     setLength(0)
     return this
@@ -174,21 +180,23 @@ fun CharSequence.subSequence(range: IntRange): CharSequence = subSequence(range.
 fun String.slice(indices: IntRange): String = if (indices.isEmpty()) "" else substring(indices.first, indices.last + 1)
 fun CharSequence.replaceRange(startIndex: Int, endIndex: Int, replacement: CharSequence): CharSequence {
     if (endIndex < startIndex) throw IndexOutOfBoundsException("End index ($endIndex) is less than start index ($startIndex).")
-    return StringBuilder().append(subSequence(0, startIndex)).append(replacement).append(subSequence(endIndex, length))
+    return StringBuilder().append(this, 0, startIndex).append(replacement).append(this, endIndex, length)
 }
 fun CharSequence.replaceRange(range: IntRange, replacement: CharSequence): CharSequence =
     replaceRange(range.start, range.endInclusive + 1, replacement)
 fun String.replaceRange(range: IntRange, replacement: CharSequence): String =
     replaceRange(range.start, range.endInclusive + 1, replacement)
-fun CharSequence.removeRange(startIndex: Int, endIndex: Int): CharSequence =
-    if (startIndex == endIndex) subSequence(0, length) else replaceRange(startIndex, endIndex, "")
+fun CharSequence.removeRange(startIndex: Int, endIndex: Int): CharSequence {
+    if (endIndex < startIndex) throw IndexOutOfBoundsException("End index ($endIndex) is less than start index ($startIndex).")
+    if (startIndex == endIndex) return subSequence(0, length)
+    return StringBuilder(length - (endIndex - startIndex)).append(this, 0, startIndex).append(this, endIndex, length)
+}
 fun CharSequence.removeRange(range: IntRange): CharSequence = removeRange(range.start, range.endInclusive + 1)
 fun String.removeRange(range: IntRange): String = removeRange(range.start, range.endInclusive + 1)
-fun String.replaceRange(startIndex: Int, endIndex: Int, replacement: CharSequence): String {
-    if (endIndex < startIndex) throw IndexOutOfBoundsException("End index ($endIndex) is less than start index ($startIndex).")
-    return substring(0, startIndex) + replacement + substring(endIndex)
-}
-fun String.removeRange(startIndex: Int, endIndex: Int): String = replaceRange(startIndex, endIndex, "")
+fun String.replaceRange(startIndex: Int, endIndex: Int, replacement: CharSequence): String =
+    (this as CharSequence).replaceRange(startIndex, endIndex, replacement).toString()
+fun String.removeRange(startIndex: Int, endIndex: Int): String =
+    (this as CharSequence).removeRange(startIndex, endIndex).toString()
 fun String.replaceAfter(delimiter: String, replacement: String, missingDelimiterValue: String = this): String {
     val index = indexOf(delimiter)
     return if (index == -1) missingDelimiterValue else replaceRange(index + delimiter.length, length, replacement)
