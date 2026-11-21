@@ -50,6 +50,7 @@ export function compileMethodCall(c: Compiler, expr: ExprOf<'methodCall'>): Eval
   const method = c.annotations.methods.get(expr);
   if (!method) throw new Error(`Unresolved method ${expr.method}`);
   const receiver = compileReceiver(c, expr, method);
+  receiver.valueType = expr.receiver.ty;
   const args = [receiver, ...expr.args.map((arg) => c.value(arg))];
   const typeArgs = method.typeArgs.map((arg) => runtimeType(arg));
   const { fn } = method;

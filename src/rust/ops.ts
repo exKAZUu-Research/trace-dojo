@@ -1,5 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 538 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
+// code-gauge-allow-file fileNcss 547 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
 import { floatNumber } from './floatBits';
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
@@ -26,6 +26,7 @@ export interface UserImpls {
   /** Counts the elements a clone makes against the run's limit. */
   allocate(count: number): void;
   spend(count: number): void;
+  withRoots<T>(values: Value[], use: () => T): T;
   eq?(method: 'eq' | 'ne', type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
   order?(method: OrderMethod, type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
   cmp?(type: Type, a: Value, b: Value, partial: boolean, rhs?: Type): { order: number | undefined } | undefined;
@@ -676,7 +677,7 @@ export function cloneValue(type: Type, value: Value): Value {
         case 'RangeTo':
         case 'RangeToInclusive': {
           const range = value as RangeValue;
-          return new RangeValue(range.start, range.end, range.inclusive, range.exhausted);
+          return copyRange(range, (item) => cloneValue(t.args[0], item));
         }
         case 'Iter': {
           return cloneIterator(value as IterValue);
@@ -728,7 +729,10 @@ export function needsCopy(type: Type): boolean {
   if (t.kind === 'array') return true;
   // A closure that captures by value copies what it captures.
   if (t.kind === 'closure') return t.closure.captures?.some((capture) => capture.mode === 'value') ?? false;
-  if (t.kind === 'adt') return !t.def.builtin || ['Bound', 'Option', 'Result', 'Reverse'].includes(t.def.builtin);
+  if (t.kind === 'adt')
+    return (
+      !t.def.builtin || ['Bound', 'Option', 'RangeTo', 'RangeToInclusive', 'Result', 'Reverse'].includes(t.def.builtin)
+    );
   return false;
 }
 
@@ -736,11 +740,20 @@ export function needsCopy(type: Type): boolean {
 export function copyValue(value: Value): Value {
   if (Array.isArray(value)) return value.length === 0 ? value : copyFields(value);
   if (value instanceof FnValue) return value.duplicate?.(copyValue) ?? value;
+  if (value instanceof RangeValue) return copyRange(value, copyValue);
   if (value instanceof StructValue) return new StructValue(value.def, copyFields(value.fields));
   if (value instanceof EnumValue) {
     return value.fields.length === 0 ? value : new EnumValue(value.def, value.variant, copyFields(value.fields));
   }
   return value;
+}
+
+function copyRange(range: RangeValue, copy: (item: Value) => Value): RangeValue {
+  const { end, inclusive, exhausted } = range;
+  const start = range.start === undefined ? undefined : copy(range.start);
+  const finish = (): RangeValue =>
+    new RangeValue(start, end === undefined ? undefined : copy(end), inclusive, exhausted);
+  return hooks ? hooks.withRoots([start], finish) : finish();
 }
 
 function copyFields(fields: Value[]): Value[] {

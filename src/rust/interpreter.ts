@@ -20,6 +20,7 @@ import {
   StackOverflow,
 } from './runtime';
 import { concreteType, matchConcrete, typeIdentity, typeKey } from './runtimeTypes';
+import { canReachTurtle, nativeArgumentTypes } from './turtleTypes';
 import {
   type AdtDef,
   childTypes,
@@ -87,6 +88,7 @@ export class Interpreter implements CallSupport {
     this.restoreOperations = setUserImpls({
       allocate: (count) => this.runtime.allocate(count),
       spend: (count) => this.runtime.spend(count),
+      withRoots: (values, use) => this.runtime.withRoots(values, use),
       eq: (method, type, a, b, rhs) => {
         const found = this.userTraitMethod('PartialEq', type, method, rhs);
         if (!found) return;
@@ -258,9 +260,12 @@ export class Interpreter implements CallSupport {
     if (!native) throw new RustPanic(`${key} は、この採点環境では使えません。`, span);
     const context: NativeContext = { interp: this, runtime: this.runtime, frame, span, typeArgs };
     const before = receiverText(args[0]);
-    const result = this.runtime.withRoots(args, () =>
-      this.runtime.withActiveBorrows(args, () => native(args, context))
-    );
+    const result = this.runtime.withRoots(args, () => {
+      if (!this.runtime.world.hasTurtles) return native(args, context);
+      const types = nativeArgumentTypes(def, typeArgs);
+      const borrowers = args.filter((_arg, index) => !types[index] || canReachTurtle(types[index]));
+      return this.runtime.withActiveBorrows(borrowers, () => native(args, context));
+    });
     // Library functions build `String`s through these two ways out: a result, and a receiver they write to.
     if ((typeof result === 'string' || result instanceof StringValue) && shallow(def.ret).kind !== 'ref') {
       this.runtime.allocateString(textOf(result).length);

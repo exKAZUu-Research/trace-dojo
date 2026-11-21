@@ -34,7 +34,7 @@ import {
 
 export { sliceRange } from './compilerPlaces';
 
-export type Eval = (frame: Frame) => Value;
+export type Eval = ((frame: Frame) => Value) & { valueType?: Type };
 export type PlaceEval = (frame: Frame) => Place;
 
 export interface CompiledFn {
@@ -465,7 +465,9 @@ export class Compiler {
 
   /** An expression's value as it is: a place's value without copying it, as borrows and reads see it. */
   read(expr: Expr, asStatement = false): Eval {
-    return (READERS[expr.kind] as Reader<Expr['kind']>)(this, expr, asStatement);
+    const evaluate = (READERS[expr.kind] as Reader<Expr['kind']>)(this, expr, asStatement);
+    evaluate.valueType = expr.ty;
+    return evaluate;
   }
 
   // code-gauge-allow functionNcss 39 -- One case per kind of expression, statement, or pattern.

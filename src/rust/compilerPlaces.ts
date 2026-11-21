@@ -3,7 +3,7 @@ import { madeString, stringCapacity } from './capacity';
 import type { Compiler, Eval, PlaceEval } from './compiler';
 import { LocalPlace } from './compilerCommon';
 import { normalize } from './infer';
-import { RustPanic } from './runtime';
+import { type Frame, RustPanic } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { shallow } from './types';
 import { decodeUtf8 } from './utf8';
@@ -75,7 +75,7 @@ function fieldPlace(c: Compiler, expr: ExprOf<'field'>): PlaceEval | undefined {
   if (!field) return undefined;
   const base = placeThrough(c, expr.operand, field.derefs);
   const { index } = field;
-  if (field.range) return rangeFieldPlace(base, index);
+  if (field.range) return rangeFieldPlace(base, rangeEndpoint(expr.name));
   return (frame) => {
     const place = base(frame);
     const value = place.get();
@@ -84,17 +84,21 @@ function fieldPlace(c: Compiler, expr: ExprOf<'field'>): PlaceEval | undefined {
   };
 }
 
-function rangeFieldPlace(base: PlaceEval, index: number): PlaceEval {
+function rangeFieldPlace(base: PlaceEval, endpoint: 'start' | 'end'): PlaceEval {
   return (frame) => {
     const range = base(frame).get() as RangeValue;
     return new AccessorPlace(
-      () => (index === 0 ? range.start : range.end),
+      () => range[endpoint],
       (value) => {
-        if (index === 0) range.start = value;
-        else range.end = value;
+        range[endpoint] = value;
       }
     );
   };
+}
+
+function rangeEndpoint(name: string): 'start' | 'end' {
+  if (name === 'start' || name === 'end') return name;
+  throw new Error(`Unknown range endpoint ${name}`);
 }
 
 function derefPlace(c: Compiler, expr: ExprOf<'unary'>): PlaceEval {
@@ -116,7 +120,11 @@ function indexPlace(c: Compiler, expr: ExprOf<'index'>): PlaceEval {
   if (!res) throw new Error('Unresolved index');
   const base = placeThrough(c, expr.operand, res.derefs);
   const index = c.value(expr.index);
-  const span = res.overloaded ? expr.bracketSpan : expr.span;
+  const span = res.overloaded || res.range ? expr.bracketSpan : expr.span;
+  if (res.container === 'map') {
+    const read = mapEntryAt(c, expr, index, span);
+    return (frame) => new ElementPlace(read(frame), 1);
+  }
   if (res.range) {
     if (res.container === 'str') return strRangePlace(c, base, index, span);
     const read = compileIndex(c, expr);
@@ -199,10 +207,8 @@ export function compileField(c: Compiler, expr: ExprOf<'field'>): Eval {
   const base = valueThrough(c, expr.operand, field.derefs);
   const { index } = field;
   if (field.range) {
-    return (frame) => {
-      const range = base(frame) as RangeValue;
-      return index === 0 ? range.start : range.end;
-    };
+    const endpoint = rangeEndpoint(expr.name);
+    return (frame) => (base(frame) as RangeValue)[endpoint];
   }
   return (frame) => {
     const owner = base(frame);
@@ -219,16 +225,8 @@ export function compileIndex(c: Compiler, expr: ExprOf<'index'>): Eval {
   // A range goes through the `Index` impls, which report their panics at the `[`, as `Vec`'s indexes do.
   const span = res.overloaded || res.range ? expr.bracketSpan : expr.span;
   if (res.container === 'map') {
-    const keyType = runtimeType(expr.index.ty!);
-    return (frame) => {
-      const map = base(frame) as MapValue;
-      return frame.runtime.withRoots([map], () => {
-        const key = index(frame);
-        const entry = map.entries.get(map.entries.key(keyType(frame), key));
-        if (!entry) throw new RustPanic('no entry found for key', span);
-        return entry[1];
-      });
-    };
+    const read = mapEntryAt(c, expr, index, span);
+    return (frame) => read(frame)[1];
   }
   if (res.range) {
     if (res.container === 'str') return strRangeIndex(c, base, index, span);
@@ -241,6 +239,23 @@ export function compileIndex(c: Compiler, expr: ExprOf<'index'>): Eval {
       const length = sliceLength(container);
       if (position >= length) throw new RustPanic(indexPanic(res.container, length, position), span);
       return sliceGet(container, Number(position));
+    });
+  };
+}
+
+function mapEntryAt(c: Compiler, expr: ExprOf<'index'>, index: Eval, span: Span): (frame: Frame) => [Value, Value] {
+  const res = c.annotations.indexes.get(expr)!;
+  const base = valueThrough(c, expr.operand, res.derefs);
+  const keyType = runtimeType(expr.index.ty!);
+  return (frame) => {
+    const map = base(frame) as MapValue;
+    return frame.runtime.withRoots([map], () => {
+      const key = index(frame);
+      return frame.runtime.withRoots([key], () => {
+        const entry = map.entries.get(map.entries.key(keyType(frame), key));
+        if (!entry) throw new RustPanic('no entry found for key', span);
+        return entry;
+      });
     });
   };
 }

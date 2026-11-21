@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss 432 -- Follows std::fmt's formatting rules case by case.
 import type { FormatPiece, FormatSpec } from './ast';
 import { type DebugPart, emit, list, rangeText, structText, tupleText, type WriteChunk } from './debugText';
+import { debugEscapesUnicode } from './debugUnicode';
 import { floatNumber } from './floatBits';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
 import { normalize } from './infer';
@@ -585,19 +586,10 @@ function escapeChar(char: string, isChar: boolean): string {
       return String.raw`\0`;
     }
     default: {
-      return isPrintable(char) && !/\p{Grapheme_Extend}/u.test(char)
-        ? char
-        : `\\u{${char.codePointAt(0)!.toString(16)}}`;
+      const code = char.codePointAt(0)!;
+      return debugEscapesUnicode(code) ? `\\u{${code.toString(16)}}` : char;
     }
   }
-}
-
-/**
- * Whether `{:?}` shows a char as it is, as std's `is_printable` decides from Unicode's categories: not control, format,
- * separator (but the space), private-use, surrogate, or unassigned.
- */
-function isPrintable(char: string): boolean {
-  return char === ' ' || !/[\p{Cc}\p{Cf}\p{Z}\p{Co}\p{Cs}\p{Cn}]/u.test(char);
 }
 
 export function errorDisplay(builtin: string, value: Value): string {

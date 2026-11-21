@@ -304,14 +304,8 @@ define({
   'std::cmp::max': (args, ctx) => callOrd(ctx, 'max', args),
   'std::cmp::min': (args, ctx) => callOrd(ctx, 'min', args),
   'std::cmp::max_by': ([a, b, f], ctx) => ((call(ctx, f, [a, b]) as EnumValue).variant === 2 ? a : b),
-  'std::cmp::max_by_key': ([a, b, f], ctx) => {
-    const order = compareValues(ctx.typeArgs[2], call(ctx, f, [a]), call(ctx, f, [b])) ?? 0;
-    return order > 0 ? a : b;
-  },
-  'std::cmp::min_by_key': ([a, b, f], ctx) => {
-    const order = compareValues(ctx.typeArgs[2], call(ctx, f, [a]), call(ctx, f, [b])) ?? 0;
-    return order <= 0 ? a : b;
-  },
+  'std::cmp::max_by_key': ([a, b, f], ctx) => (secondKeyIsLess(ctx, a, b, f) ? a : b),
+  'std::cmp::min_by_key': ([a, b, f], ctx) => (secondKeyIsLess(ctx, a, b, f) ? b : a),
   'Box<[_]>::into_vec': ([self]) => deref(self),
   'Box<str>::into_string': ([self]) => textOf(self),
   'AsRef::as_ref': ([self], ctx) => {
@@ -400,6 +394,14 @@ define({
     return range.exhausted || !testPartialOrder('le', ctx.typeArgs[0], range.start, range.end);
   },
 });
+
+function secondKeyIsLess(ctx: NativeContext, a: Value, b: Value, f: Value): boolean {
+  const second = call(ctx, f, [b]);
+  return ctx.runtime.withRoots([second], () => {
+    const first = call(ctx, f, [a]);
+    return ctx.runtime.withRoots([first], () => testPartialOrder('lt', ctx.typeArgs[2], second, first));
+  });
+}
 
 function toStringValue(ctx: NativeContext, self: Value): Value {
   const type = normalize(shallow(selfType(ctx)));

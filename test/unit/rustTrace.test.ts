@@ -421,3 +421,17 @@ test('traces the live value of an indexed referent without rerunning the index',
   expect(trace.stdout).toBe('index\n1\n');
   expect(trace.finalVars).toEqual({ items: [9, 2], first: 9, alias: 9, done: true });
 });
+
+test('binds a map-index borrow without reevaluating its key', () => {
+  for (const collection of ['HashMap', 'BTreeMap']) {
+    const program = `use std::collections::${collection};
+fn main() {
+    let m = ${collection}::from([(1, 2)]);
+    let first = &m[{ println!("key"); &1 }];
+    println!("{first}");
+}`;
+    const trace = traceProgram('rust', program, program);
+    expect(trace.stdout).toBe('key\n2\n');
+    expect(trace.finalVars).toMatchObject({ first: 2 });
+  }
+});

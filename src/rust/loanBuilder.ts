@@ -440,7 +440,8 @@ export class LoanBuilder {
    */
   private relateBorrow(place: Place, mutable: boolean, target: Layout, region: RVar): void {
     const layouts = this.placeLayouts(place);
-    relate(this.outlives, layouts.at(-1) as Layout, target, mutable);
+    const referenceObject = target.kind === 'opaque' && target.referenceObject;
+    relate(this.outlives, layouts.at(-1) as Layout, target, mutable && !referenceObject);
     outlivesAll(this.outlives, target, region);
     for (let index = place.proj.length - 1; index >= 0; index--) {
       if (place.proj[index] !== '*') continue;

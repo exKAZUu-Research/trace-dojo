@@ -3,6 +3,7 @@ import type { Expr } from './ast';
 import type { Eval } from './compiler';
 import { normalize } from './infer';
 import { type Frame, UNASSIGNED } from './runtime';
+import { canReachTurtle } from './turtleTypes';
 import { type AdtDef, shallow, type Type } from './types';
 import { EnumValue, isPlace, type Place, StructValue, type Value } from './values';
 
@@ -17,7 +18,9 @@ export function withEvaluatedValues<T>(frame: Frame, reads: Eval[], use: (values
     for (const read of reads) {
       const value = read(frame);
       values.push(value);
-      for (const root of frame.runtime.borrowRoots([value])) borrows.push(root);
+      if (frame.runtime.world.hasTurtles && (!read.valueType || canReachTurtle(read.valueType, frame.typeArgs))) {
+        for (const root of frame.runtime.borrowRoots([value])) borrows.push(root);
+      }
     }
     return use(values);
   });

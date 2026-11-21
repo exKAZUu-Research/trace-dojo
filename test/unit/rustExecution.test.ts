@@ -6288,7 +6288,10 @@ test('reads and reborrows a mutable trait object through shared dispatch', () =>
     println!("{}", twice(&mut square));
     let dynamic: &mut dyn Shape = &mut square;
     let shared: &dyn Shape = dynamic;
-    println!("{}", shared.area());`,
+    println!("{}", shared.area());
+    let m: &mut dyn Shape = &mut square;
+    { let n = &mut *m; n.grow(); }
+    println!("{}", m.area());`,
     `trait Shape { fn area(&self) -> f64; fn grow(&mut self); }
 struct Square(f64);
 impl Shape for Square {
@@ -6302,7 +6305,13 @@ fn twice(shape: &mut dyn Shape) -> f64 {
     show(shape)
 }`
   );
-  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '4\n4 4\n9\n9\n' });
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '4\n4 4\n9\n9\n16\n' });
+  const conflict = program.replace(
+    `{ let n = &mut *m; n.grow(); }
+    println!("{}", m.area());`,
+    'let n = &mut *m; println!("{}", m.area()); n.grow();'
+  );
+  expect(executeProgram('rust', conflict)).toMatchObject({ kind: 'compileError' });
 });
 
 test('checks moves inside an index even under another projection', () => {
@@ -6337,4 +6346,81 @@ impl PartialEq<Right> for Left {
 }`
   );
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true true false\n' });
+});
+
+test('keeps scalar collection loops within budget alongside live turtles', () => {
+  const program = rustMain(
+    `let turtle = Turtle::new();
+    let values = vec![1i32; 20000];
+    let length = count(&values);
+    let mut total = 0;
+    for i in 0..length { total += *values.get(i).unwrap(); }
+    println!("{length} {total}");`,
+    `fn count<T>(values: &Vec<T>) -> usize {
+    let mut i = 0;
+    while i < values.len() { i += 1; }
+    i
+}`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '20000 20000\n',
+    finalTurtles: [expect.objectContaining({ x: 0, y: 0 })],
+  });
+});
+
+test('uses the reference compiler Unicode escapes in learner Debug output', () => {
+  const program = rustMain(String.raw`println!("{:?} {:?} {:?} {:?} {:?} {:?}", "ｶﾞｷﾞ ﾊﾟ",
+    '\u{115f}', '\u{1160}', '\u{3164}', '\u{ffa0}', "か\u{3099}");`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`"ｶﾞｷﾞ ﾊﾟ" '\u{115f}' '\u{1160}' '\u{3164}' '\u{ffa0}' "か\u{3099}"` + '\n',
+  });
+});
+
+test('keeps copied and cloned range endpoints independent', () => {
+  const program = rustMain(`let bound = ..3;
+    let mut copied = bound;
+    copied.end = 1;
+    let inclusive = ..=4;
+    let mut other = inclusive;
+    other.end = 2;
+    let owned = vec![1]..vec![2];
+    let mut cloned = owned.clone();
+    cloned.start.push(3);
+    println!("{bound:?} {copied:?} {} {inclusive:?} {other:?}", copied.end);
+    println!("{owned:?} {cloned:?}");`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '..3 ..1 1 ..=4 ..=2\n[1]..[2] [1, 3]..[2]\n',
+  });
+});
+
+test('derives defaults for empty arrays without default-constructing their elements', () => {
+  const program = rustMain(
+    'println!("{}", Container::default().0.len());',
+    'struct Element; #[derive(Default)] struct Container([Element; 0]);'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '0\n' });
+});
+
+test('evaluates the second extrema key first and compares it with the first', () => {
+  const program = rustMain(
+    `let key = |n: &i32| { println!("{n}"); Key(*n) };
+    println!("{} {}", std::cmp::max_by_key(1, 2, key), std::cmp::min_by_key(3, 4, key));`,
+    `use std::cmp::Ordering;
+#[derive(PartialEq, Eq)]
+struct Key(i32);
+impl PartialOrd for Key {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        println!("compare {} {}", self.0, other.0);
+        self.0.partial_cmp(&other.0)
+    }
+}
+impl Ord for Key { fn cmp(&self, other: &Self) -> Ordering { self.0.cmp(&other.0) } }`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '2\n1\ncompare 2 1\n4\n3\ncompare 4 3\n2 3\n',
+  });
 });

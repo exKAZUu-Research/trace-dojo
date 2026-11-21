@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 543 -- One rule per trait of the standard library.
+// code-gauge-allow-file fileNcss 545 -- One rule per trait of the standard library.
 import { collectionKeyAnswer } from './collectionBounds';
 import { normalize } from './infer';
 import { supportsDebug } from './iterDebug';
@@ -224,11 +224,12 @@ function autoTrait({ solver, t, name, all }: Goal): Answer {
 }
 
 function copy(goal: Goal): Answer {
-  const { t } = goal;
+  const { t, all } = goal;
   const plain = plainCopy(goal);
   if (plain) return plain;
   if (t.kind !== 'adt') return 'no';
-  if (t.def.builtin === 'RangeFull') return 'yes';
+  if (t.def.builtin === 'RangeFull' || t.def.builtin === 'RangeTo' || t.def.builtin === 'RangeToInclusive')
+    return all(t.args);
   return derived(goal) ?? 'no';
 }
 
@@ -441,12 +442,16 @@ function comparisonAdt(goal: Goal, t: AdtType): Answer {
   return 'no';
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Arrays and boxed values have distinct Default bounds.
 function defaultValue(goal: Goal): Answer {
   const { t, all } = goal;
   if (isPrimitive(t)) return 'yes';
   if (t.kind === 'tuple') return all(t.elems);
   // std implements `Default` for arrays of up to 32 elements, and for empty `&str` and slices.
-  if (t.kind === 'array') return t.len <= 32 ? all([t.elem]) : 'no';
+  if (t.kind === 'array') {
+    if (t.len === 0) return 'yes';
+    return t.len <= 32 ? all([t.elem]) : 'no';
+  }
   if (t.kind === 'ref') return ['str', 'slice'].includes(shallow(t.target).kind) ? 'yes' : 'no';
   if (t.kind !== 'adt') return 'no';
   const d = derived(goal);

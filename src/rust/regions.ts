@@ -14,7 +14,7 @@ export type Layout =
   | { kind: 'tuple'; elems: Layout[] }
   | { kind: 'seq'; elem: Layout }
   /** A closure, a trait object, or a type parameter: borrows whose structure the type does not show. */
-  | { kind: 'opaque'; region: RVar; closure?: ClosureType }
+  | { kind: 'opaque'; region: RVar; closure?: ClosureType; referenceObject?: boolean }
   | { kind: 'none' };
 
 export const NONE: Layout = { kind: 'none' };
@@ -47,7 +47,11 @@ export function layoutOf(type: Type | undefined, fresh: () => RVar, staticRegion
       return { kind: 'opaque', region: fresh(), closure: t.closure };
     }
     case 'dyn': {
-      return { kind: 'opaque', region: t.objectLifetime === 'static' ? staticRegion() : fresh() };
+      return {
+        kind: 'opaque',
+        region: t.objectLifetime === 'static' ? staticRegion() : fresh(),
+        referenceObject: t.objectLifetime === 'reference',
+      };
     }
     case 'param': {
       const fixed = t.param.bounds.some(({ trait }) => trait.builtin === 'Static');
@@ -64,7 +68,9 @@ export function layoutOf(type: Type | undefined, fresh: () => RVar, staticRegion
 
 function referencedObject(type: Type, region: RVar): Layout | undefined {
   const target = shallow(type);
-  return target.kind === 'dyn' && target.objectLifetime === 'reference' ? { kind: 'opaque', region } : undefined;
+  return target.kind === 'dyn' && target.objectLifetime === 'reference'
+    ? { kind: 'opaque', region, referenceObject: true }
+    : undefined;
 }
 
 function lifetimeCount(type: Extract<Type, { kind: 'adt' }>): number {
