@@ -152,6 +152,8 @@ export interface ConstructorDeclaration extends Span {
   redirectTarget: { type: TypeSyntax; name: string | undefined } | undefined;
   annotations: Annotation[];
   headerEndRow: number;
+  /** Whether a class's primary constructor declares it, whose parameters field initializers can read. */
+  isPrimary?: boolean;
 }
 
 export type ConstructorInitializer =

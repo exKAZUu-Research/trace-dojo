@@ -1316,6 +1316,17 @@ test.each([
   });
 });
 
+test('Dart field initializers read primary constructor parameters', () => {
+  const program = `class Box<T>(T value) { final List<T> values = [value]; final first = value; }
+class P(final int x, var int y) { final sum = x + y; }
+void main() {
+  final box = Box(7);
+  final p = P(1, 2);
+  print([box.values, box.first.runtimeType, p.x, p.y, p.sum]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[[7], int, 1, 2, 3]\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

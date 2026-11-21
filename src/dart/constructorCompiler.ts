@@ -244,6 +244,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       redirectTarget: undefined,
       annotations: [],
       headerEndRow: primary.row,
+      isPrimary: true,
     };
     this.declareConstructor(cls, constructorDeclaration);
   }
@@ -572,7 +573,13 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
   ): (frame: Frame) => void {
     const steps: ((frame: Frame) => void)[] = [];
     const redirect = declaration.initializers.find((initializer) => initializer.kind === 'this');
-    if (!redirect) steps.push(...this.compileFieldInitializersWithoutParameters(cls, initializedFields));
+    if (!redirect) {
+      steps.push(
+        ...(declaration.isPrimary
+          ? this.compileFieldInitializers(cls, initializedFields)
+          : this.compileFieldInitializersWithoutParameters(cls, initializedFields))
+      );
+    }
     steps.push(...this.compileInitializingFormals(cls, declaration, initializedFields));
     const explicitFields = new Set(
       [...declaration.parameters.positional, ...declaration.parameters.named]

@@ -861,7 +861,21 @@ export class Compiler extends MemberCompiler {
 
   /** The type of a field's or variable's initializer, compiled ahead of the body to infer the declaration's type. */
   private inferInitializerType(initializer: Expression, isStatic: boolean, cls: ClassInfo | undefined): DartType {
-    const compiled = this.inTemporaryFunction(isStatic, cls, () => this.compileExpression(initializer));
+    const primary = isStatic ? undefined : cls?.declaration?.primaryConstructor?.parameters;
+    const compiled = this.inTemporaryFunction(isStatic, cls, () => {
+      // An instance field's initializer reads the primary constructor's parameters, as it runs in that constructor.
+      for (const parameter of primary ? [...primary.positional, ...primary.named] : []) {
+        const type = parameter.type ? this.resolveType(parameter.type) : DYNAMIC;
+        this.declareLocal(parameter, parameter.name, type, {
+          isFinal: true,
+          isLate: false,
+          isConst: false,
+          isParameter: true,
+          hasInitializer: true,
+        });
+      }
+      return this.compileExpression(initializer);
+    });
     if (compiled.type.kind === 'null') return DYNAMIC;
     return compiled.type;
   }
