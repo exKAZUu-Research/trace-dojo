@@ -582,25 +582,35 @@ inline fun <T, R : Comparable<R>> Iterable<T>.minOfOrNull(selector: (T) -> R): R
 ${floatingExtremaSource()}
 
 fun <T> Iterable<T>.maxWith(comparator: Comparator<in T>): T {
-    val iterator = iterator()
-    if (!iterator.hasNext()) throw NoSuchElementException()
-    var max = iterator.next()
-    while (iterator.hasNext()) {
-        val e = iterator.next()
-        if (comparator.compare(max, e) < 0) max = e
-    }
-    return max
+    val values = iterator()
+    if (!values.hasNext()) throw NoSuchElementException()
+    return values.extremumWith(comparator, true)
 }
 
 fun <T> Iterable<T>.minWith(comparator: Comparator<in T>): T {
-    val iterator = iterator()
-    if (!iterator.hasNext()) throw NoSuchElementException()
-    var min = iterator.next()
-    while (iterator.hasNext()) {
-        val e = iterator.next()
-        if (comparator.compare(min, e) > 0) min = e
+    val values = iterator()
+    if (!values.hasNext()) throw NoSuchElementException()
+    return values.extremumWith(comparator, false)
+}
+
+fun <T> Iterable<T>.maxWithOrNull(comparator: Comparator<in T>): T? {
+    val values = iterator()
+    return if (values.hasNext()) values.extremumWith(comparator, true) else null
+}
+
+fun <T> Iterable<T>.minWithOrNull(comparator: Comparator<in T>): T? {
+    val values = iterator()
+    return if (values.hasNext()) values.extremumWith(comparator, false) else null
+}
+
+private fun <T> Iterator<T>.extremumWith(comparator: Comparator<in T>, findMaximum: Boolean): T {
+    var result = next()
+    while (hasNext()) {
+        val element = next()
+        val order = comparator.compare(result, element)
+        if (if (findMaximum) order < 0 else order > 0) result = element
     }
-    return min
+    return result
 }
 
 inline fun <T, R> Iterable<T>.fold(initial: R, operation: (acc: R, T) -> R): R {
@@ -613,6 +623,21 @@ inline fun <T, R> Iterable<T>.foldIndexed(initial: R, operation: (index: Int, ac
     var index = 0
     var accumulator = initial
     for (element in this) accumulator = operation(index++, accumulator, element)
+    return accumulator
+}
+
+inline fun <T, R> List<T>.foldRight(initial: R, operation: (T, acc: R) -> R): R {
+    val items = listIterator(size)
+    var accumulator = initial
+    while (items.hasPrevious()) accumulator = operation(items.previous(), accumulator)
+    return accumulator
+}
+
+inline fun <S, T : S> List<T>.reduceRight(operation: (T, acc: S) -> S): S {
+    val items = listIterator(size)
+    if (!items.hasPrevious()) throw UnsupportedOperationException("Empty list can't be reduced.")
+    var accumulator: S = items.previous()
+    while (items.hasPrevious()) accumulator = operation(items.previous(), accumulator)
     return accumulator
 }
 

@@ -47,6 +47,18 @@ export const DEFAULT_IMPORTS = [
   'kotlin.jvm',
 ];
 
+const IMPLICIT_JAVA_TYPES = new Set([
+  'Character',
+  'Class',
+  'Integer',
+  'Math',
+  'ProcessBuilder',
+  'Runtime',
+  'StrictMath',
+  'Thread',
+  'ThreadLocal',
+]);
+
 /** The names a file sees beyond its own scopes: its package, its imports, and the default imports. */
 export interface FileContext {
   packageName: string;
@@ -88,7 +100,9 @@ export abstract class CompilerCore {
   }
 
   protected rejectUnavailableJavaReference(path: string, row: number): void {
-    const qualified = path === 'Scanner' && this.file.starPackages.includes('java.util') ? 'java.util.Scanner' : path;
+    let qualified = path;
+    if (IMPLICIT_JAVA_TYPES.has(path)) qualified = `java.lang.${path}`;
+    if (path === 'Scanner' && this.file.starPackages.includes('java.util')) qualified = 'java.util.Scanner';
     const unavailable = unavailableJavaFeature(qualified);
     if (unavailable) this.unavailable(row, unavailable);
     if (qualified.startsWith('java.') || qualified.startsWith('javax.')) {

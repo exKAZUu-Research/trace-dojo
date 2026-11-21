@@ -292,6 +292,18 @@ fun main() {
     stdout: 'SECONDS\n[NANOSECONDS, MICROSECONDS, MILLISECONDS, SECONDS, MINUTES, HOURS, DAYS]\n7\n5s\n',
   },
   {
+    name: 'right reductions, comparator extrema, and adjacent characters',
+    source: `fun main() {
+    val numbers = listOf(1, 2, 3)
+    println(numbers.foldRight(0) { element, acc -> element - acc })
+    println(numbers.reduceRight { element, acc -> element - acc })
+    println(numbers.maxWithOrNull(compareBy<Int> { -it }))
+    println(emptyList<Int>().minWithOrNull(compareBy<Int> { it }))
+    println("abc".zipWithNext { a, b -> a.toString() + b.toString() })
+}`,
+    stdout: '2\n2\n1\nnull\n[ab, bc]\n',
+  },
+  {
     name: 'floating-point selectors on arrays, maps, and text',
     source: `fun main() {
     println(intArrayOf(1, 2).minOf { if (it == 1) Double.NaN else 1.0 })
@@ -906,6 +918,16 @@ fun main() {
 });
 
 test.each([
+  [
+    'an implicitly imported Java class',
+    'fun main() { println(Math.abs(-3)) }',
+    'Java のクラスの直接の利用（java.lang.Math）は、この採点環境では使えません。',
+  ],
+  [
+    'filterIsInstance',
+    'fun main() { println(listOf(1, "a").filterIsInstance<Int>()) }',
+    '型で要素を絞り込む filterIsInstanceは、この採点環境では使えません。',
+  ],
   [
     'standard input',
     'fun main() {\n    val s = readln()\n    println(s)\n}',

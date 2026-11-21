@@ -1921,6 +1921,7 @@ function returnUnit(): Value {
 /** Functions of the standard library's classes that this environment does not provide, by what they are for. */
 const UNAVAILABLE_MEMBER_FUNCTIONS: Record<string, string> = {
   asSequence: 'シーケンス（asSequence）',
+  filterIsInstance: '型で要素を絞り込む filterIsInstance',
   toRegex: '正規表現（toRegex）',
   toSortedMap: '並べ替えた Map（toSortedMap）',
   toSortedSet: '並べ替えた Set（toSortedSet）',

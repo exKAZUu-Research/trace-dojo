@@ -123,6 +123,8 @@ inline fun CharSequence.partition(predicate: (Char) -> Boolean): Pair<String, St
     for (char in this) if (predicate(char)) first.append(char) else second.append(char)
     return Pair(first.toString(), second.toString())
 }
+fun CharSequence.zipWithNext(): List<Pair<Char, Char>> = toList().zipWithNext()
+inline fun <R> CharSequence.zipWithNext(transform: (Char, Char) -> R): List<R> = toList().zipWithNext(transform)
 fun CharSequence.asIterable(): Iterable<Char> = toList()
 fun <R> CharSequence.chunked(size: Int, transform: (CharSequence) -> R): List<R> = chunked(size).map(transform)
 fun String.slice(indices: IntRange): String = if (indices.isEmpty()) "" else substring(indices.first, indices.last + 1)
