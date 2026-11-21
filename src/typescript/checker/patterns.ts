@@ -123,7 +123,7 @@ export class BindingPatterns {
       assigned === errorType
         ? errorType
         : unionOf([nonUndefinedBindingSource(this.c, assigned ?? type), initialDefault], true);
-    if (options.annotated && !isIntrinsic(withoutUndefined, 'never')) {
+    if (options.annotated) {
       const declared = this.defaultMayBeUndefined(defaultType) ? type : withoutUndefined;
       this.c.expressions.checkAssignable(right, defaultType, declared);
       this.bindPattern(left, declared, bind, options, initial);

@@ -29,3 +29,14 @@ function mixed<T extends number | undefined, U extends string>([value = 4]: [T |
   return value;
 }
 console.log(tuple([undefined]), object({value: null}), object({value: undefined}), chained([undefined]), mixed([undefined]));
+function concreteUndefined([value = undefined]: [undefined]) {
+  return value;
+}
+function fail(): never {
+  throw new Error('unexpected default');
+}
+function neverDefault([value = fail()]: [never]) {
+  return value;
+}
+const {value: emptyDefault = 1} = {};
+console.log(emptyDefault, concreteUndefined([undefined]));

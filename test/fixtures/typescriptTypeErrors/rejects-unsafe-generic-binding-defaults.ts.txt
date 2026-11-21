@@ -23,3 +23,14 @@ function genericIdentity<T extends number | undefined>([value = 1]: [T]): T {
 function fallbackStillGeneric<T extends number | undefined>(fallback: number | undefined, [value = fallback]: [T]) {
   return value;
 }
+function genericNumber<T extends undefined>([value = 1]: [T]) { return value; }
+function genericNull<T extends undefined>({value = null}: {value: T}) { return value; }
+function genericUndefined<T extends undefined>([value = undefined]: [T]) { return value; }
+function concreteNumber([value = 1]: [undefined]) { return value; }
+function concreteOptional({value = 1}: {value?: undefined}) { return value; }
+function concreteNever([value = 1]: [never]) { return value; }
+function concreteOptionalNever({value = 1}: {value?: never}) { return value; }
+function absentProperty({value = 1}: {}) { return value; }
+function absentTuple([value = 1]: []) { return value; }
+function optionalTuple([value = 1]: [value?: undefined]) { return value; }
+function optionalGeneric<T extends undefined>([value = 1]: [value?: T]) { return value; }

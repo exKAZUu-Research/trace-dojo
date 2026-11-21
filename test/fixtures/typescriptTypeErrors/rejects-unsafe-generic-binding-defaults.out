@@ -11,3 +11,15 @@
   'number | undefined' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'number | undefined'.
     Type 'undefined' is not assignable to type 'T'.
       'undefined' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'number | undefined'.
+(26,46): error TS2322: Type '1' is not assignable to type 'never'.
+(27,44): error TS2322: Type 'null' is not assignable to type 'never'.
+(28,49): error TS2322: Type 'undefined' is not assignable to type 'T'.
+  'undefined' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'undefined'.
+(29,26): error TS2322: Type '1' is not assignable to type 'never'.
+(30,28): error TS2322: Type '1' is not assignable to type 'never'.
+(31,25): error TS2322: Type '1' is not assignable to type 'never'.
+(32,33): error TS2322: Type '1' is not assignable to type 'never'.
+(33,26): error TS2339: Property 'value' does not exist on type '{}'.
+(34,23): error TS2322: Type '1' is not assignable to type 'never'.
+(35,25): error TS2322: Type '1' is not assignable to type 'never'.
+(36,48): error TS2322: Type '1' is not assignable to type 'never'.
