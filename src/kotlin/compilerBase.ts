@@ -216,7 +216,7 @@ export class Flow {
     readonly narrowed = new Map<string, KType>(),
     readonly assigned = new Set<VariableSymbol>(),
     /** The `val`s that may be assigned at this point, which cannot be assigned again. */
-    readonly maybeAssigned = new Set<VariableSymbol>(),
+    readonly maybeAssigned = new Set<VariableSymbol | PropertySymbol>(),
     /** Whether the point cannot be reached, after a `return`, `throw`, `break`, or `continue`. */
     public isDead = false
   ) {}

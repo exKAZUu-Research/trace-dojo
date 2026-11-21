@@ -465,7 +465,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   compilePlace(scope: Scope, context: FunctionContext, target: Expression, row: number, isCompound: boolean): Place {
     if (target.kind === 'parenthesized') return this.compilePlace(scope, context, target.expression, row, isCompound);
     if (target.kind === 'name') return this.namePlace(scope, context, target, row, isCompound);
-    if (target.kind === 'member') return this.memberPlace(scope, context, target, row);
+    if (target.kind === 'member') return this.memberPlace(scope, context, target, row, isCompound);
     if (target.kind === 'index') return this.indexPlace(scope, context, target, row, isCompound);
     return this.error(row, 'ここには代入できません。');
   }
@@ -491,7 +491,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
             eval: this.receiverAccess(context, receiver),
           },
           row,
-          scope
+          scope,
+          !isCompound && receiver.context === context ? context : undefined
         );
     }
     const companion = this.findCompanionProperty(scope, target.name);
@@ -513,7 +514,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
     scope: Scope,
     context: FunctionContext,
     target: Extract<Expression, { kind: 'member' }>,
-    row: number
+    row: number,
+    isCompound: boolean
   ): Place {
     const qualified = this.compileQualifier(scope, target.receiver);
     if (qualified?.kind === 'class') {
@@ -533,7 +535,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
     if (!property)
       return this.error(row, `${typeToString(resolved(receiver.type))} には ${target.name} がありません。`);
     if (target.isSafe) return this.safePlace(receiver, (holder) => this.propertyPlace(property, holder, row, scope));
-    return this.propertyPlace(property, receiver, row, scope);
+    const ownInitializer =
+      target.receiver.kind === 'this' && !target.receiver.label && !isCompound ? context : undefined;
+    return this.propertyPlace(property, receiver, row, scope, ownInitializer);
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
@@ -585,12 +589,16 @@ export abstract class StatementCompiler extends OperatorCompiler {
     },
     receiver: Compiled | undefined,
     row: number,
-    scope: Scope
+    scope: Scope,
+    initializer?: FunctionContext
   ): Place {
     const { symbol } = member;
     const type = resolved(substitute(this.ensurePropertyType(symbol, row), member.substitution));
-    if (!symbol.isVar && !this.mayInitializeVal(scope, symbol))
-      this.error(row, `val で宣言した ${symbol.name} には、再び代入できません。`);
+    if (!symbol.isVar) {
+      if (!initializer || !this.mayInitializeVal(initializer, symbol) || this.flow.maybeAssigned.has(symbol))
+        this.error(row, `val で宣言した ${symbol.name} には、再び代入できません。`);
+      this.flow.maybeAssigned.add(symbol);
+    }
     this.checkAccessible(scope, symbol, row, receiver?.type);
     if (symbol.isVar && symbol.setterVisibility === 'private' && !this.isInsideClass(scope, symbol.owner)) {
       this.error(row, `${symbol.name} の set は private なので、クラスの外からは代入できません。`);
@@ -615,7 +623,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   protected abstract nothing(): KType;
 
   /** Whether a `val` property may be assigned here: in its class's `init` block, once, before it is read. */
-  protected abstract mayInitializeVal(scope: Scope, symbol: PropertySymbol): boolean;
+  protected abstract mayInitializeVal(context: FunctionContext, symbol: PropertySymbol): boolean;
 
   protected isInsideClass(scope: Scope, cls: ClassSymbol | undefined): boolean {
     return this.receiversOf(scope).some((receiver) => receiver.cls !== undefined && receiver.cls === cls);

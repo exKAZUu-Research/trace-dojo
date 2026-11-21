@@ -665,13 +665,11 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     return decl.members.some((member) => member.kind === 'init' && visit(member.block.statements));
   }
 
-  protected mayInitializeVal(scope: Scope, symbol: PropertySymbol): boolean {
-    if (!symbol.owner || symbol.slot === undefined) return false;
+  protected mayInitializeVal(context: FunctionContext, symbol: PropertySymbol): boolean {
+    if (!symbol.owner || symbol.slot === undefined || context.loops.length > 0) return false;
     const entry = this.entryOfProperty.get(symbol);
-    if (!entry || entry.decl.initializer) return false;
-    // Only the class's own initializer, which `init` blocks belong to, may give a val its value.
-    const context = this.initializerContexts.get(this.entryOfClass.get(symbol.owner) as ClassEntry);
-    return context !== undefined && this.receiversOf(scope).some((receiver) => receiver.context === context);
+    if (!entry || entry.decl.initializer || entry.decl.delegate) return false;
+    return this.initializerContexts.get(this.entryOfClass.get(symbol.owner) as ClassEntry) === context;
   }
 
   private compileSuperConstructorCall(

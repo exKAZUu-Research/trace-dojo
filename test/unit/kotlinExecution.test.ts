@@ -398,6 +398,21 @@ test.each([
   ],
   ['println of a Nothing value, which every overload accepts', false, 'fun main() {\n    println(TODO())\n}'],
   [
+    'repeated writes to a class val in separate init blocks',
+    false,
+    'class A { val n: Int; init { n = 1 }; init { this.n = 2 } }\nfun main() { println(A().n) }',
+  ],
+  [
+    'writes to a class val from a repeating loop',
+    false,
+    'class A { val n: Int; init { n = 1; for (i in 1..2) this.n = i } }\nfun main() { println(A().n) }',
+  ],
+  [
+    'distinct branches initializing a class val once',
+    true,
+    'class A(flag: Boolean) { val n: Int; init { if (flag) n = 1 else this.n = 2 } }\nfun main() { println(A(true).n) }',
+  ],
+  [
     'a read after breaking from a do-while before assignment',
     false,
     'fun run(stop: Boolean) { var n: Int; do { if (stop) break; n = 1 } while (false); println(n) }\nfun main() { run(true) }',
