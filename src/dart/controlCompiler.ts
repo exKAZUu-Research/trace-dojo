@@ -576,8 +576,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     const { compiled: condition, flow } = this.compileCondition(statement.condition);
     this.flow = flow.whenTrue;
     const body = this.compileGenLoopBody(statement.body, labels);
-    const breakFlow = this.fn.jumpTargets.pop()?.breakFlow;
-    this.flow = breakFlow ? Flow.join(flow.whenFalse, breakFlow) : flow.whenFalse;
+    this.finishLoop(flow.whenFalse, this.fn.jumpTargets.pop());
     const test = condition.run;
     return function* (frame) {
       while (test(frame)) {
@@ -629,7 +628,7 @@ export abstract class ControlCompiler extends StatementCompiler {
       const target = this.fn.jumpTargets.pop();
       if (target?.continueFlow) this.flow = Flow.join(this.flow, target.continueFlow);
       const updates = statement.updates.map((update) => this.compileExpression(update).run);
-      this.flow = target?.breakFlow ? Flow.join(exit, target.breakFlow) : exit;
+      this.finishLoop(exit, target);
       return genForLoop({
         initExec,
         initRow,
@@ -656,8 +655,7 @@ export abstract class ControlCompiler extends StatementCompiler {
       const before = this.flow;
       const bind = this.compileForInBinding(statement.binding, elementType, statement);
       const body = this.compileGenLoopBody(statement.body, labels);
-      const breakFlow = this.fn.jumpTargets.pop()?.breakFlow;
-      this.flow = breakFlow ? Flow.join(before, breakFlow) : before;
+      this.finishLoop(before, this.fn.jumpTargets.pop());
       const source = this.iterableSource(iterable);
       return function* (frame: Frame): Generator<Value, Completion | undefined, undefined> {
         const { runtime } = frame;

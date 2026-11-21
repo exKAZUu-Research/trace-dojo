@@ -805,7 +805,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     const { compiled: condition, flow } = this.compileCondition(statement.condition);
     this.flow = flow.whenTrue;
     const body = this.compileLoopBody(statement.body, labels);
-    this.flow = Flow.join(flow.whenFalse, this.fn.jumpTargets.pop()?.breakFlow ?? flow.whenFalse.unreachable);
+    this.finishLoop(flow.whenFalse, this.fn.jumpTargets.pop());
     const test = condition.run;
     return (frame) => {
       while (test(frame)) {
@@ -853,6 +853,12 @@ export abstract class StatementCompiler extends PatternCompiler {
     this.fn.jumpTargets.push({ kind, labels });
   }
 
+  protected finishLoop(exit: Flow, target?: JumpTarget): void {
+    const after = target?.breakFlow ? Flow.join(exit, target.breakFlow) : exit;
+    const bodyTests = target?.continueFlow ? this.flow.inheritTypeTests(target.continueFlow) : this.flow;
+    this.flow = after.inheritTypeTests(bodyTests);
+  }
+
   /** The labels written directly before the loop being compiled. */
   protected pendingLabels: string[] = [];
 
@@ -886,11 +892,10 @@ export abstract class StatementCompiler extends PatternCompiler {
       this.flow = flow.whenTrue;
       const body = this.compileLoopBody(statement.body, labels);
       const target = this.fn.jumpTargets.pop();
-      const breakFlow = target?.breakFlow;
       if (target?.continueFlow) this.flow = Flow.join(this.flow, target.continueFlow);
       const updates = statement.updates.map((update) => this.compileExpression(update).run);
       const updateRow = updates.length > 0 ? this.stepRowOf(statement) : undefined;
-      this.flow = breakFlow ? Flow.join(flow.whenFalse, breakFlow) : flow.whenFalse;
+      this.finishLoop(flow.whenFalse, target);
       return forLoop({
         initExec,
         initRow,
@@ -949,8 +954,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       const before = this.flow;
       const bind = this.compileForInBinding(statement.binding, elementType, statement);
       const body = this.compileLoopBody(statement.body, labels);
-      const breakFlow = this.fn.jumpTargets.pop()?.breakFlow;
-      this.flow = breakFlow ? Flow.join(before, breakFlow) : before;
+      this.finishLoop(before, this.fn.jumpTargets.pop());
       return this.forInLoop(this.iterableSource(iterable), bind, body, labels);
     });
     if (slots.length === 0) return result;

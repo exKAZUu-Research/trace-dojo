@@ -8215,3 +8215,34 @@ void main() {
       '[_MapBaseValueIterable<String, int?>, _MapBaseValueIterator<String, int?>]\n',
   });
 });
+
+test('Dart loops retain tested types for later assignment promotion', () => {
+  const program = `void counted(num n) {
+  for (var i = 0; i < 1; i++) { if (n is int) {} }
+  n = 4; print(n.isEven);
+}
+void whileLoop(num n) {
+  var i = 0;
+  while (i++ < 1) { assert(n is int); continue; }
+  n = 4; print(n.isEven);
+}
+void forIn(num n) {
+  for (final _ in [1]) { final value = n is int ? 1 : 2; print(value); }
+  n = 4; print(n.isEven);
+}
+Iterable<bool> generator(num n) sync* {
+  for (final _ in [1]) { if (n is int) continue; }
+  n = 4; yield n.isEven;
+}
+void collection(num n, num m) {
+  print([for (final _ in [1]) if (n is int) 1]);
+  n = 4; print(n.isEven);
+  print([for (var i = 0; i < 1; i++) if (m is int) 1]);
+  m = 4; print(m.isEven);
+}
+void main() { counted(0); whileLoop(0); forIn(0); print(generator(0).toList()); collection(0,0); }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\ntrue\n1\ntrue\n[true]\n[1]\ntrue\n[1]\ntrue\n',
+  });
+});

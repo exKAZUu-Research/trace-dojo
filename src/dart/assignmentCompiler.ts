@@ -937,7 +937,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     this.recordsSteps = savedRecords;
     const body = this.compileCollectionElements([element.body], kind, elementContext, valueContext);
     types.push(...body.types);
-    this.flow = afterSource;
+    this.finishLoop(afterSource);
     const source = this.iterableSource(iterable);
     return (frame, add) => {
       const { runtime } = frame;
@@ -971,7 +971,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     types.push(...body.types);
     const updates = element.updates.map((update) => this.compileExpression(update).run);
     const test = condition?.compiled.run;
-    this.flow = afterLoop;
+    this.finishLoop(afterLoop);
     return (frame, add) => {
       initExec?.(frame);
       while (!test || test(frame)) {
