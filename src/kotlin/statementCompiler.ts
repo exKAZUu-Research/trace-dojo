@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 967 -- One method per kind of Kotlin statement and control structure.
+// code-gauge-allow-file fileNcss 972 -- One method per kind of Kotlin statement and control structure.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   AssignmentStatement,
@@ -554,6 +554,11 @@ export abstract class StatementCompiler extends OperatorCompiler {
     row: number,
     isCompound: boolean
   ): Place {
+    if (target.receiver.kind === 'super') {
+      if (target.isSafe) this.error(row, 'super には ?. を使えません。');
+      const { property, receiver } = this.resolveSuperProperty(scope, context, target.name, row);
+      return this.propertyPlace(property, receiver, row, scope);
+    }
     const qualified = this.compileQualifier(scope, target.receiver);
     if (qualified?.kind === 'class') return this.classPropertyPlace(scope, qualified.cls, target.name, row);
     if (qualified) {
@@ -677,6 +682,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   private propertyPlace(
     member: {
       symbol: PropertySymbol;
+      isSuper?: true;
       substitution: Map<TypeParameterSymbol, KType> | ReadonlyMap<TypeParameterSymbol, KType>;
     },
     receiver: Compiled | undefined,
@@ -688,7 +694,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const type = resolved(substitute(this.ensurePropertyType(symbol, row), member.substitution));
     const initializes = initializer !== undefined && this.mayInitializeVal(initializer, symbol);
     if (!symbol.isVar && !initializes) this.error(row, `val で宣言した ${symbol.name} には、再び代入できません。`);
-    this.checkAccessible(scope, symbol, row, receiver?.type);
+    this.checkAccessible(scope, symbol, row, member.isSuper ? undefined : receiver?.type);
     if (symbol.isVar && symbol.setterVisibility === 'private' && !this.isInsideClass(scope, symbol.owner)) {
       this.error(row, `${symbol.name} の set は private なので、クラスの外からは代入できません。`);
     }
@@ -701,8 +707,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
       bind: (frame) => {
         const target = receiverEval(frame);
         return {
-          get: () => getPropertyValue(symbol, frame, target),
-          set: (value) => setPropertyValue(symbol, frame, target, value),
+          get: () => getPropertyValue(symbol, frame, target, !member.isSuper),
+          set: (value) => setPropertyValue(symbol, frame, target, value, !member.isSuper),
         };
       },
     };

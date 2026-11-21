@@ -181,19 +181,26 @@ function evaluateDefault(symbol: FunctionSymbol, frame: Frame, receiver: Value, 
   return convertValue(resolved, to[index], from[index]);
 }
 
-export function getPropertyValue(symbol: PropertySymbol, frame: Frame, receiver: Value): Value {
+export function getPropertyValue(symbol: PropertySymbol, frame: Frame, receiver: Value, virtual = true): Value {
   requireMemberReceiver(symbol, frame, receiver);
-  const target = isVirtual(symbol) ? runtimeClassOf(receiver).dispatch(symbol) : symbol;
+  const target = virtual && isVirtual(symbol) ? runtimeClassOf(receiver).dispatch(symbol) : symbol;
   const { get } = target;
+  if (!get && !virtual) return frame.runtime.throwError(frame, 'java.lang.AbstractMethodError', symbol.name);
   if (!get) throw new Error(`The property ${symbol.name} has no getter`);
   const value = get(frame, receiver);
   if (target === symbol) return value;
   return convertRepr(() => value, propertyRepr(target), propertyRepr(symbol))(frame);
 }
 
-export function setPropertyValue(symbol: PropertySymbol, frame: Frame, receiver: Value, value: Value): void {
+export function setPropertyValue(
+  symbol: PropertySymbol,
+  frame: Frame,
+  receiver: Value,
+  value: Value,
+  virtual = true
+): void {
   requireMemberReceiver(symbol, frame, receiver);
-  const target = isVirtual(symbol) ? runtimeClassOf(receiver).dispatch(symbol) : symbol;
+  const target = virtual && isVirtual(symbol) ? runtimeClassOf(receiver).dispatch(symbol) : symbol;
   const { set } = target;
   if (!set) throw new Error(`The property ${symbol.name} has no setter`);
   set(

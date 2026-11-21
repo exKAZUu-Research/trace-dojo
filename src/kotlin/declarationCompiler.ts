@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 978 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 987 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { VISIBILITY_KEYWORDS } from './ast';
 import type {
@@ -20,6 +20,14 @@ import type { FileContext, MemberRef } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
 import { callFunction, getPropertyValue, isVirtual, propertyRepr, setPropertyValue } from './dispatch';
 import { hashOf, stringHash, stringOf, valueEquals } from './format';
+import {
+  aliasedOverrides,
+  fitsInheritedContract,
+  type InheritedBridge,
+  linkInheritedMembers,
+  prefersImplementation,
+  resultType,
+} from './inheritedMembers';
 import { jvmSignatures, overriddenMembers } from './jvmSignatures';
 import { isKnownLibraryPackage } from './libraryApi';
 import { arrayContentHash, arrayContentString, dataArrayKind } from './natives/arrays';
@@ -133,6 +141,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   protected readonly entryOfFunction = new Map<FunctionSymbol, FunctionEntry>();
   protected readonly entryOfProperty = new Map<PropertySymbol, PropertyEntry>();
   private readonly delegatedTypes = new WeakMap<MemberSymbol, Substitution>();
+  private readonly inheritedBridges: InheritedBridge[] = [];
   protected globalDefaults: Value[] = [];
   protected natives: ReadonlyMap<string, NativeFunction> = new Map();
   protected nativeProperties: ReadonlyMap<string, NativeProperty> = new Map();
@@ -1060,18 +1069,29 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const { symbol } = entry;
     for (const supertype of symbol.supertypes) {
       for (const [root, implementation] of supertype.cls.vtable) {
-        if (!symbol.vtable.has(root) || !implementation.isAbstract) symbol.vtable.set(root, implementation);
+        const inherited = symbol.vtable.get(root);
+        if (prefersImplementation(implementation, inherited)) symbol.vtable.set(root, implementation);
       }
     }
     for (const members of symbol.members.values()) for (const member of members) this.linkMember(symbol, member);
     this.linkDelegates(entry);
-    if (!symbol.isAbstract && !symbol.isLibrary) this.checkImplemented(symbol);
+    if (!symbol.isLibrary) {
+      this.inheritedBridges.push(
+        ...linkInheritedMembers(
+          symbol,
+          (parent, name, kind) => this.membersOf<MemberSymbol>(parent, name, kind),
+          (name) =>
+            this.error(symbol.row, `${symbol.name} は ${name} の実装を複数継承するので、override を書いてください。`)
+        )
+      );
+      if (!symbol.isAbstract) this.checkImplemented(symbol);
+    }
   }
 
   /** Links a member to the members of the supertypes that it overrides, checking that it may override them. */
   // code-gauge-allow functionCognitiveComplexity 21 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private linkMember(symbol: ClassSymbol, member: MemberSymbol): void {
-    const overridden = this.findOverridden(symbol, member);
+    const overridden = aliasedOverrides(symbol, this.findOverridden(symbol, member));
     if (overridden.length === 0) {
       if (member.isOverride && !(member.kind === 'function' && symbol.isLibrary)) {
         this.error(member.row, `override を付けた ${member.name} は、親のクラスやインターフェースにありません。`);
@@ -1180,6 +1200,20 @@ export abstract class DeclarationCompiler extends StatementCompiler {
           if (member.overridden.length > 0) this.findOverridden(symbol, member);
         }
       }
+    }
+    for (const { cls, implementation, contract } of this.inheritedBridges) {
+      this.validateInheritedBridge(cls, implementation, contract);
+    }
+  }
+
+  private validateInheritedBridge(cls: ClassSymbol, implementation: MemberRef, contract: MemberRef): void {
+    const target = implementation.symbol;
+    const base = contract.symbol;
+    if (
+      VISIBILITY_RANK[target.visibility] < VISIBILITY_RANK[base.visibility] ||
+      !fitsInheritedContract(implementation, contract)
+    ) {
+      this.error(cls.row, `${cls.name} が継承した ${target.name} は、${base.owner?.name ?? ''} の宣言と合いません。`);
     }
   }
 
@@ -1304,7 +1338,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       if (prior === undefined || prior === field.slot) return;
       this.error(field.spec.row, `${member.name} は複数の委譲先にあるため、override を書いてください。`);
     }
-    const bases = this.findOverridden(symbol, member, substitution);
+    const bases = aliasedOverrides(symbol, this.findOverridden(symbol, member, substitution));
     const final = bases.find((base) => !base.owner?.isInterface && !base.isOpen && !base.isAbstract);
     if (final) {
       this.error(field.spec.row, `委譲では ${final.owner?.name ?? ''}.${final.name} を上書きできません。`);
@@ -1406,11 +1440,6 @@ function narrowerDelegate(candidate: MemberRef, previous: MemberRef): boolean {
   const result = resultType(candidate);
   const earlier = resultType(previous);
   return result !== undefined && earlier !== undefined && isSubtype(result, earlier) && !isSubtype(earlier, result);
-}
-
-function resultType({ symbol, substitution }: MemberRef): KType | undefined {
-  const declared = symbol.kind === 'function' ? symbol.returnType : symbol.type;
-  return declared && substitute(declared, substitution);
 }
 
 function sameSourceDeclaration(a: MemberSymbol, b: MemberSymbol): boolean {

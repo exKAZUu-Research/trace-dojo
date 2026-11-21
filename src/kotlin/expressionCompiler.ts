@@ -26,6 +26,7 @@ import { getPropertyValue, propertyRepr, receiverRepr } from './dispatch';
 import { keyOf } from './flowKeys';
 import { localRefinement, refineLocalType } from './flowWrites';
 import { formatPrimitive, stringOf } from './format';
+import { mostSpecificProperties } from './inheritedMembers';
 import { unavailableLibraryMember, unavailableQualifiedLibraryMember } from './libraryApi';
 import { literalFits } from './literals';
 import { floatRangeBounds } from './rangeBounds';
@@ -691,7 +692,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const qualified = this.compileQualifier(scope, expression.receiver);
     if (qualified?.kind === 'class') return consume(this.compileClassMember(scope, qualified.cls, name, row));
     if (qualified) return consume(this.compilePackageMember(context, qualified, name, row));
-    if (expression.receiver.kind === 'super') return consume(this.compileSuperProperty(scope, context, name, row));
+    if (expression.receiver.kind === 'super') {
+      if (expression.isSafe) this.error(row, 'super には ?. を使えません。');
+      return consume(this.compileSuperProperty(scope, context, name, row));
+    }
     const receiver = this.compileExpression(scope, context, expression.receiver);
     return this.withSafeReceiver(receiver, isSafe, row, (target) => {
       const property = this.findProperty(scope, target.type, name);
@@ -916,33 +920,36 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   private compileSuperProperty(scope: Scope, context: FunctionContext, name: string, row: number): Compiled {
-    const { superType, receiver } = this.superOf(scope, context, row);
-    const property = this.membersOf<PropertySymbol>(superType, name, 'property')[0];
-    if (!property) this.error(row, `super には ${name} がありません。`);
-    this.checkAccessible(scope, property.symbol, row, undefined);
-    const type = resolved(substitute(this.ensurePropertyType(property.symbol, row), property.substitution));
+    const { property, receiver } = this.resolveSuperProperty(scope, context, name, row);
     const { symbol } = property;
     return {
-      type,
+      type: resolved(substitute(this.ensurePropertyType(symbol, row), property.substitution)),
       repr: propertyRepr(symbol),
-      eval: (frame) => {
-        const { get } = symbol;
-        if (!get) return frame.runtime.throwError(frame, 'java.lang.AbstractMethodError', name);
-        return get(frame, receiver(frame));
-      },
+      eval: (frame) => getPropertyValue(symbol, frame, receiver.eval(frame), false),
     };
   }
 
-  protected superOf(
+  protected resolveSuperProperty(
     scope: Scope,
     context: FunctionContext,
+    name: string,
     row: number
-  ): { superType: ClassType; receiver: Eval; cls: ClassSymbol } {
+  ): { property: MemberRef<PropertySymbol> & { isSuper: true }; receiver: Compiled } {
+    const { cls, receiver } = this.superOf(scope, context, row);
+    const mostSpecific = mostSpecificProperties(
+      cls.supertypes.flatMap((supertype) => this.membersOf<PropertySymbol>(supertype, name, 'property'))
+    );
+    if (mostSpecific.length > 1) this.error(row, `super の ${name} が、どの親のプロパティか決められません。`);
+    const property = mostSpecific[0];
+    if (!property) this.error(row, `super には ${name} がありません。`);
+    this.checkAccessible(scope, property.symbol, row, undefined);
+    return { property: { ...property, isSuper: true }, receiver: { type: cls.selfType, repr: 'ref', eval: receiver } };
+  }
+
+  protected superOf(scope: Scope, context: FunctionContext, row: number): { receiver: Eval; cls: ClassSymbol } {
     const receiver = this.receiversOf(scope).find((candidate) => candidate.cls !== undefined);
     if (!receiver?.cls) this.error(row, 'ここでは super を使えません。');
-    const { cls } = receiver;
-    const superType = cls.superclass ?? cls.interfaces[0] ?? anyType();
-    return { superType, receiver: this.receiverAccess(context, receiver), cls };
+    return { receiver: this.receiverAccess(context, receiver), cls: receiver.cls };
   }
 
   // Calls.

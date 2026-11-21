@@ -1155,6 +1155,84 @@ fun main() {
       'bc\njava.lang.IndexOutOfBoundsException: startIndex: -1, endIndex: 0, size: 3\njava.lang.IllegalArgumentException: startIndex: 0 > endIndex: -1\njava.lang.IndexOutOfBoundsException: startIndex: 2, endIndex: 4, size: 3\njava.lang.IllegalArgumentException: startIndex: 2 > endIndex: 1\njava.lang.IndexOutOfBoundsException: startIndex: 4, endIndex: 4, size: 3\n',
   },
   {
+    name: 'inherited implementations and later overrides dispatch through interface references',
+    source: `open class Animal { fun speak() = "animal" }
+interface Speaker { fun speak(): String }
+class Dog : Animal(), Speaker
+open class Cat { open fun purr() = "purr"; val lives = 9 }
+interface Purrer { fun purr(): String; val lives: Int }
+open class Tom : Cat(), Purrer
+class Kitten : Tom() { override fun purr() = "kitten" }
+interface NumberSource { val value: Number }
+open class IntSource { val value: Int = 1 }
+class Value : IntSource(), NumberSource
+fun main() {
+    println(Dog().speak())
+    val speaker: Speaker = Dog()
+    println(speaker.speak())
+    val purrer: Purrer = Tom()
+    println(purrer.purr() + purrer.lives)
+    val kitten: Purrer = Kitten()
+    println(kitten.purr())
+    val number: NumberSource = Value()
+    println(number.value)
+}`,
+    stdout: 'animal\nanimal\npurr9\nkitten\n1\n',
+  },
+  {
+    name: 'assignment and increment through super call the parent accessors directly',
+    source: `open class Parent {
+    open var value = 1
+    protected var counter = 2
+}
+class Child : Parent() {
+    override var value: Int
+        get() = super.value + 1
+        set(value) { super.value = value * 2 }
+    fun exercise() {
+        value = 3
+        println(value)
+        super.value += 3
+        println(value)
+        println(super.value++)
+        println(++super.value)
+        super.counter += 2
+        println(super.counter)
+    }
+}
+interface DefaultState {
+    var amount: Int
+        get() = 1
+        set(value) { println("interface " + value) }
+}
+class UsesInterface : DefaultState {
+    override var amount: Int
+        get() = super.amount + 1
+        set(value) { super.amount = value }
+}
+fun main() {
+    Child().exercise()
+    val state = UsesInterface()
+    state.amount = 5
+    println(state.amount)
+}`,
+    stdout: '7\n10\n9\n11\n4\ninterface 5\n2\n',
+  },
+  {
+    name: 'a shared interface root dispatches to the most specific default',
+    source: `interface Base { fun move() = "base" }
+interface First : Base { override fun move() = "first" }
+interface Second : Base
+class Diamond : First, Second
+interface Walker { fun walk() = "walk" }
+interface Swimmer { fun walk() = "swim" }
+class Duck : Walker, Swimmer {
+    override fun walk() = "both"
+}
+fun main() { println(Diamond().move()); println(Duck().walk()) }`,
+    stdout: 'first\nboth\n',
+  },
+  {
     name: 'set insertion follows the source iterator and keeps partial changes',
     source: `class SourceIterator(private val target: Set<Int>) : Iterator<Int> {
     private var count = 0
@@ -3065,6 +3143,41 @@ test('stops an endless loop at the execution limit', () => {
 
 /** Programs with whether kotlinc 2.4.21 compiles them, which decides whether the interpreter may run them. */
 test.each([
+  [
+    'two unrelated interface default functions',
+    false,
+    'interface A { fun f() = 1 }\ninterface B { fun f() = 2 }\nclass C : A, B\nfun main() {}',
+  ],
+  [
+    'two unrelated interface default properties on an abstract class',
+    false,
+    'interface A { val x: Int get() = 1 }\ninterface B { val x: Int get() = 2 }\nabstract class C : A, B\nfun main() {}',
+  ],
+  [
+    'unrelated interface and class defaults',
+    false,
+    'open class A { fun f() = 1 }\ninterface B { fun f() = 2 }\nclass C : A(), B\nfun main() {}',
+  ],
+  [
+    'two concrete overrides of a shared interface root',
+    false,
+    'interface Base { fun f() = 0 }\ninterface A : Base { override fun f() = 1 }\ninterface B : Base { override fun f() = 2 }\nclass C : A, B\nfun main() {}',
+  ],
+  [
+    'an inherited return type incompatible with an interface contract',
+    false,
+    'open class A { fun f() = "text" }\ninterface B { fun f(): Int }\nclass C : A(), B\nfun main() {}',
+  ],
+  [
+    'a val inherited as the implementation of an interface var',
+    false,
+    'open class A { val x = 1 }\ninterface B { var x: Int }\nclass C : A(), B\nfun main() {}',
+  ],
+  [
+    'a write through super to a val',
+    false,
+    'open class A { val x = 1 }\nclass C : A() { fun change() { super.x = 2 } }\nfun main() {}',
+  ],
   ['a cycle between open classes', false, 'open class A : B()\nopen class B : A()\nfun main() {}'],
   ['a cycle between interfaces', false, 'interface A : B\ninterface B : A\nfun main() {}'],
   [
