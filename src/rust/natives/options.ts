@@ -1,7 +1,7 @@
 import { DEFAULT_SPEC } from '../fmt';
 import { described, fieldsPart, optionPart } from '../iterDebug';
 import { cloneValue, copyValue } from '../ops';
-import { writtenText } from '../runtime';
+import { MOVED, writtenText } from '../runtime';
 import type { Type } from '../types';
 import { ElementPlace, type EnumValue, type IterValue, textOf, type Value } from '../values';
 import { defaultValue } from './core';
@@ -35,8 +35,8 @@ function debugText(ctx: NativeContext, value: Value, type: Type): string {
 const optionNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   is_some: ([self]) => isSome(self),
   is_none: ([self]) => !isSome(self),
-  is_some_and: ([self, f], ctx) => isSome(self) && (deref(call(ctx, f, [opt(self).fields[0]])) as boolean),
-  is_none_or: ([self, f], ctx) => !isSome(self) || (deref(call(ctx, f, [opt(self).fields[0]])) as boolean),
+  is_some_and: ([self, f], ctx) => isSome(self) && (deref(call(ctx, f, [taken(ctx, self)])) as boolean),
+  is_none_or: ([self, f], ctx) => !isSome(self) || (deref(call(ctx, f, [taken(ctx, self)])) as boolean),
   unwrap: ([self], ctx) => {
     if (!isSome(self)) panic(ctx, 'called `Option::unwrap()` on a `None` value');
     return opt(self).fields[0];
@@ -48,12 +48,12 @@ const optionNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   unwrap_or: ([self, fallback]) => (isSome(self) ? opt(self).fields[0] : fallback),
   unwrap_or_else: ([self, f], ctx) => (isSome(self) ? opt(self).fields[0] : call(ctx, f, [])),
   unwrap_or_default: ([self], ctx) => (isSome(self) ? opt(self).fields[0] : defaultValue(ctx, ctx.typeArgs[0])),
-  map: ([self, f], ctx) => (isSome(self) ? some(ctx, call(ctx, f, [opt(self).fields[0]])) : none(ctx)),
-  map_or: ([self, fallback, f], ctx) => (isSome(self) ? call(ctx, f, [opt(self).fields[0]]) : fallback),
+  map: ([self, f], ctx) => (isSome(self) ? some(ctx, call(ctx, f, [taken(ctx, self)])) : none(ctx)),
+  map_or: ([self, fallback, f], ctx) => (isSome(self) ? call(ctx, f, [taken(ctx, self)]) : fallback),
   map_or_else: ([self, fallback, f], ctx) =>
-    isSome(self) ? call(ctx, f, [opt(self).fields[0]]) : call(ctx, fallback, []),
+    isSome(self) ? call(ctx, f, [taken(ctx, self)]) : call(ctx, fallback, []),
   inspect: inspectVariant(1),
-  and_then: ([self, f], ctx) => (isSome(self) ? call(ctx, f, [opt(self).fields[0]]) : none(ctx)),
+  and_then: ([self, f], ctx) => (isSome(self) ? call(ctx, f, [taken(ctx, self)]) : none(ctx)),
   and: ([self, other], ctx) => (isSome(self) ? other : none(ctx)),
   or: ([self, other]) => (isSome(self) ? self : other),
   or_else: ([self, f], ctx) => (isSome(self) ? self : call(ctx, f, [])),
@@ -108,11 +108,23 @@ const optionNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     isSome(self) && isSome(other) ? some(ctx, [opt(self).fields[0], opt(other).fields[0]]) : none(ctx),
 };
 
+/**
+ * The payload of an `Option` or `Result` that a method consumes, moved out of it before a callback takes it, so that a
+ * value the callback drops is no longer reachable through the consumed one. A `Copy` payload stays, since the caller's
+ * copy may share it.
+ */
+function taken(ctx: NativeContext, self: Value, payloadType = 0): Value {
+  const { fields } = opt(self);
+  const payload = fields[0];
+  if (!ctx.interp.checker.solver.isCopy(ctx.typeArgs[payloadType])) fields[0] = MOVED;
+  return payload;
+}
+
 const resultNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   is_ok: ([self]) => isOk(self),
   is_err: ([self]) => !isOk(self),
-  is_ok_and: ([self, f], ctx) => isOk(self) && (deref(call(ctx, f, [opt(self).fields[0]])) as boolean),
-  is_err_and: ([self, f], ctx) => !isOk(self) && (deref(call(ctx, f, [opt(self).fields[0]])) as boolean),
+  is_ok_and: ([self, f], ctx) => isOk(self) && (deref(call(ctx, f, [taken(ctx, self)])) as boolean),
+  is_err_and: ([self, f], ctx) => !isOk(self) && (deref(call(ctx, f, [taken(ctx, self, 1)])) as boolean),
   unwrap: ([self], ctx) => {
     if (!isOk(self)) {
       panic(
@@ -140,18 +152,19 @@ const resultNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     return opt(self).fields[0];
   },
   unwrap_or: ([self, fallback]) => (isOk(self) ? opt(self).fields[0] : fallback),
-  unwrap_or_else: ([self, f], ctx) => (isOk(self) ? opt(self).fields[0] : call(ctx, f, [opt(self).fields[0]])),
+  unwrap_or_else: ([self, f], ctx) => (isOk(self) ? opt(self).fields[0] : call(ctx, f, [taken(ctx, self, 1)])),
   unwrap_or_default: ([self], ctx) => (isOk(self) ? opt(self).fields[0] : defaultValue(ctx, ctx.typeArgs[0])),
-  map: ([self, f], ctx) => (isOk(self) ? ok(ctx, call(ctx, f, [opt(self).fields[0]])) : self),
-  map_or: ([self, fallback, f], ctx) => (isOk(self) ? call(ctx, f, [opt(self).fields[0]]) : fallback),
-  map_or_else: ([self, fallback, f], ctx) => call(ctx, isOk(self) ? f : fallback, [opt(self).fields[0]]),
-  map_err: ([self, f], ctx) => (isOk(self) ? self : err(ctx, call(ctx, f, [opt(self).fields[0]]))),
+  map: ([self, f], ctx) => (isOk(self) ? ok(ctx, call(ctx, f, [taken(ctx, self)])) : self),
+  map_or: ([self, fallback, f], ctx) => (isOk(self) ? call(ctx, f, [taken(ctx, self)]) : fallback),
+  map_or_else: ([self, fallback, f], ctx) =>
+    isOk(self) ? call(ctx, f, [taken(ctx, self)]) : call(ctx, fallback, [taken(ctx, self, 1)]),
+  map_err: ([self, f], ctx) => (isOk(self) ? self : err(ctx, call(ctx, f, [taken(ctx, self, 1)]))),
   inspect: inspectVariant(0),
   inspect_err: inspectVariant(1),
-  and_then: ([self, f], ctx) => (isOk(self) ? call(ctx, f, [opt(self).fields[0]]) : self),
+  and_then: ([self, f], ctx) => (isOk(self) ? call(ctx, f, [taken(ctx, self)]) : self),
   and: ([self, other]) => (isOk(self) ? other : self),
   or: ([self, other]) => (isOk(self) ? self : other),
-  or_else: ([self, f], ctx) => (isOk(self) ? self : call(ctx, f, [opt(self).fields[0]])),
+  or_else: ([self, f], ctx) => (isOk(self) ? self : call(ctx, f, [taken(ctx, self, 1)])),
   ok: ([self], ctx) => (isOk(self) ? some(ctx, opt(self).fields[0]) : none(ctx)),
   err: ([self], ctx) => (isOk(self) ? none(ctx) : some(ctx, opt(self).fields[0])),
   as_ref: ([self], ctx) => (isOk(self) ? ok(ctx, opt(self).fields[0]) : err(ctx, opt(self).fields[0])),
