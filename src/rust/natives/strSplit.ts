@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 441 -- Ports std's searchers and splitters of `str` patterns.
+// code-gauge-allow-file fileNcss 442 -- Ports std's searchers and splitters of `str` patterns.
 import type { DebugPart } from '../debugText';
 import { type DebugValue, described, fieldsPart, listPart, numberPart, tuplePart } from '../iterDebug';
 import { CHAR, REF_STR } from '../types';
@@ -180,7 +180,8 @@ class MultiCharEqSearcher implements Searcher {
   }
 
   debug(show: DebugValue): DebugPart {
-    const left = [...this.text.slice(this.front, this.back)];
+    const rest = this.text.slice(this.front, this.back);
+    const left = [...rest];
     const charIndices = fieldsPart('CharIndices', [
       ['front_offset', numberPart(this.frontOffset)],
       ['iter', tuplePart('Chars', [listPart(left, CHAR, show)])],
