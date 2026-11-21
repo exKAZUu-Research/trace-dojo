@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 875 -- Keeps the relation modes and their recursive comparisons together.
+// code-gauge-allow-file fileNcss 877 -- Keeps the relation modes and their recursive comparisons together.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -53,6 +53,7 @@ import {
   type TupleElement,
   type TupleInfo,
   type Type,
+  typeMembers,
   type TypeParameter,
   undefinedType,
   unionOf,
@@ -379,12 +380,12 @@ export class Relations {
 
   private conditionalComparableToParameter(source: ConditionalType, target: TypeParameter): boolean {
     const branches = [this.c.conditionalTrueType(source), source.falseType];
-    const candidates = branches.flatMap((branch) => (branch.kind === 'union' ? branch.types : [branch]));
-    return candidates.some(
-      (candidate) =>
-        !isIntrinsic(candidate, 'never') &&
-        (isIntrinsic(this.c.baseConstraint(candidate), 'unknown') || this.isAssignable(candidate, target))
-    );
+    return branches.flatMap(typeMembers).some((candidate) => {
+      if (candidate.kind === 'conditional') return this.isRelated(candidate, target, 'comparable');
+      if (isIntrinsic(candidate, 'never')) return false;
+      const bound = candidate.kind === 'typeParameter' ? this.c.baseConstraint(candidate) : candidate;
+      return isIntrinsic(bound, 'unknown') || this.isAssignable(candidate, target);
+    });
   }
 
   private relatedToKeyof(source: Type, object: Type, relation: Relation, state: number): boolean {

@@ -1027,7 +1027,8 @@ export class Checker {
     this.conditionalConstraintsInProgress.add(id);
     try {
       const knownBranch = this.conditionalBranchFromBounds(type);
-      if (knownBranch) return this.baseConstraint(knownBranch);
+      // A bound that produces `never` can still have narrower type arguments that take the other branch.
+      if (knownBranch && !isIntrinsic(knownBranch, 'never')) return this.baseConstraint(knownBranch);
       const trueType = type.trueType;
       const yes =
         trueType === type.checkType

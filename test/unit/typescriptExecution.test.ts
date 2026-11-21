@@ -118,6 +118,28 @@ function retain<T extends string>(value: T) {
   ]);
 });
 
+test('checks overlap through nested conditional branches and aliases', () => {
+  const source = `type Inner<T> = T extends \`x\${infer R}\` ? R : never;
+function fromAlias<T extends string>(value: T) {
+  return value as (T extends string ? Inner<T> : never);
+}
+function fromFalseBranch<T extends string>(value: T) {
+  return value as (T extends string ? never : (T extends Uppercase<infer W> ? W : never));
+}
+function fromArray<T extends string[]>(value: T) {
+  return value as (T extends unknown ? (T extends Array<infer U> ? U : never) : never);
+}
+function assign<T extends string>(value: T extends string ? Inner<T> : never) {
+  const result: T = value;
+  return result;
+}`;
+  expect(diagnosticsOf(source)).toEqual([
+    expect.stringMatching(/^3: .*十分に重ならない/),
+    expect.stringMatching(/^6: .*十分に重ならない/),
+    expect.stringMatching(/^12: .*代入することはできません/),
+  ]);
+});
+
 test('infers mapped keys before choosing a conditional branch', () => {
   const source = `type KeysOf<T> = T extends Record<infer K, unknown> ? K : never;
 type EntriesOf<T> = T extends Record<infer K, infer V> ? [K, V] : never;
