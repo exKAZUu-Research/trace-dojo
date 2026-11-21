@@ -1475,11 +1475,12 @@ void main() {
   f(<int>[], (a, b) => 0);
   f(<int>[]);
   W.from(1, (a, b) => 0);
-  print([SplayTreeSet((a, b) => 0).runtimeType, g((a) => a)]);
+  print(SplayTreeSet((a, b) => 0).runtimeType);
+  print(g((a) => a));
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'Object?\ndynamic\nObject?\n[SplayTreeSet<Object?>, 1]\n',
+    stdout: 'Object?\ndynamic\nObject?\nSplayTreeSet<Object?>\n1\n',
   });
   expect(
     executeProgram('dart', "import 'dart:collection';\nvoid main() { SplayTreeSet((a, b) => a.length - b.length); }")
