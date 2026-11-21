@@ -852,12 +852,30 @@ export abstract class CompilerBase {
 
   protected implicitCallTearOff(compiled: Compiled, target: DartType, span: Span): Compiled | undefined {
     if (!isFunctionLike(target)) return undefined;
+    const tearOff = this.callMethodTearOff(compiled, span);
+    if (!tearOff) return undefined;
+    return isSubtype(tearOff.type, target) ? tearOff : this.instantiateGeneric(tearOff, target);
+  }
+
+  /**
+   * Converts a value toward a context that still has holes for a call's type arguments, so that its type constrains
+   * them: a generic function is instantiated to fit and a callable object becomes its `call` method.
+   */
+  protected towardInferenceContext(compiled: Compiled, target: DartType, span: Span): Compiled {
+    const instantiated = this.instantiateGeneric(compiled, target, true);
+    if (instantiated) return instantiated;
+    if (resolveBound(target).kind !== 'function') return compiled;
+    const tearOff = this.callMethodTearOff(compiled, span);
+    return tearOff ? (this.instantiateGeneric(tearOff, target, true) ?? tearOff) : compiled;
+  }
+
+  /** The `call` method of a callable object, torn off as the function Dart converts the object to. */
+  private callMethodTearOff(compiled: Compiled, span: Span): Compiled | undefined {
     const source = resolveBound(compiled.type);
     if (source.kind !== 'interface' || source.nullable) return undefined;
     const call = this.lookupDirect(source, 'call', false);
     if (call?.member.kind !== 'method') return undefined;
-    const tearOff = this.readMember(compiled, call, 'call', span, false);
-    return isSubtype(call.type, target) ? tearOff : this.instantiateGeneric(tearOff, target);
+    return this.readMember(compiled, call, 'call', span, false);
   }
 
   protected abstract readMember(

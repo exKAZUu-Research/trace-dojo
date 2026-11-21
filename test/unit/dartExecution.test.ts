@@ -2143,6 +2143,28 @@ void main() {
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 3]\n' });
 });
 
+test('Dart infers type arguments from the call method of a callable object', () => {
+  const program = `class C { int call(int x) => x + 1; }
+void h<T>(T Function(int) c) => print([T, c(1)]);
+void f<T>(List<T Function(int)> l) => print([T, l[0](1)]);
+void g<T>((T Function(int), int) r) => print([T, r.$1(1)]);
+void main() { h(C()); f([C()]); g((C(), 1)); }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[int, 2]\n[int, 2]\n[int, 2]\n',
+  });
+});
+
+test('Dart comparison operators are not associative', () => {
+  for (const expression of ['1 == 1 == true', '1 != 2 != true', '1 < 2 < 3', '1 is int is bool']) {
+    expect(executeProgram('dart', `void main() { print(${expression}); }`)).toMatchObject({ kind: 'compileError' });
+  }
+  expect(executeProgram('dart', 'void main() { print([1 < 2 == true, (1 == 1) == true]); }')).toMatchObject({
+    kind: 'executed',
+    stdout: '[true, true]\n',
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

@@ -977,9 +977,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
    * assignment of the whole record to report.
    */
   private convertRecordField(written: Compiled, expected: DartType, span: Span): Compiled {
+    if (containsInferenceHole(expected)) return this.towardInferenceContext(written, expected, span);
     const instantiated = this.instantiateInContext(written, expected);
-    if (instantiated !== written || containsInferenceHole(expected) || isSubtype(written.type, expected))
-      return instantiated;
+    if (instantiated !== written || isSubtype(written.type, expected)) return instantiated;
     if (written.type.kind === 'dynamic') return this.coerce(written, expected, span, () => '');
     return this.implicitCallTearOff(written, expected, span) ?? written;
   }

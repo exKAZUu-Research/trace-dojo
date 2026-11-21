@@ -788,9 +788,15 @@ export abstract class CallCompiler extends OperatorCompiler {
       return substitute(parameterType, map);
     };
     visitCallArguments(args, type, ({ argument, parameterType = DYNAMIC }, closurePass) => {
-      const result = this.compileExpression(argument, argumentContext(parameterType, closurePass));
-      compiled.set(argument, result);
+      const context = argumentContext(parameterType, closurePass);
+      const written = this.compileExpression(argument, context);
       const formal = resolveBound(parameterType);
+      // A callable object constrains the type arguments through its `call` method, as Dart converts it to that method.
+      const result =
+        formal.kind === 'function' && resolveBound(written.type).kind === 'interface'
+          ? this.towardInferenceContext(written, context, argument)
+          : written;
+      compiled.set(argument, result);
       const actual = resolveBound(result.type);
       if (
         formal.kind === 'function' &&
