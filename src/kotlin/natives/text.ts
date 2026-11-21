@@ -500,23 +500,16 @@ function splitText(
   let start = 0;
   let index = 0;
   while (index <= value.length && (limit === 0 || parts.length < limit - 1)) {
-    const delimiter = needles.find((candidate) => candidate !== '' && haystack.startsWith(candidate, index));
+    const delimiter = needles.find((candidate) => haystack.startsWith(candidate, index));
     if (delimiter === undefined) {
-      if (delimiters.includes('') && index > start && index < value.length) {
-        parts.push(value.slice(start, index));
-        start = index;
-      }
       index++;
       continue;
     }
     parts.push(value.slice(start, index));
-    index += delimiter.length;
-    start = index;
+    start = index + delimiter.length;
+    index = start + (delimiter.length === 0 ? 1 : 0);
   }
   parts.push(value.slice(start));
-  if (delimiters.includes('')) {
-    return newList(frame, 'ArrayList', ['', ...codeUnits(value).map(charToString), '']);
-  }
   return newList(frame, 'ArrayList', parts);
 }
 

@@ -15,6 +15,17 @@ test.each([
     stdout: '{banana=1, date=4, apple=2, cherry=3, elderberry=5}\n[zeta, mu, 100, beta, alpha]\n[3, 1, 2, 10, -1]\n',
   },
   {
+    name: 'split limits and delimiter order with empty delimiters',
+    source: `fun main() {
+    println("abc".split("", limit = 2))
+    println("abc".split("b", ""))
+    println("abc".split("", "b"))
+    println("".split(""))
+    println("abc".split("", limit = 1))
+}`,
+    stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
+  },
+  {
     name: 'live primitive array iterators and list views',
     source: `fun main() {
     val values = intArrayOf(1, 2, 3)
