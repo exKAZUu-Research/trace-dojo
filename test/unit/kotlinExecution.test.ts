@@ -283,6 +283,35 @@ fun main() {
     stdout: 'string\nany 4\nstring a\naa\nab\nab\nhello\ntop 3\nlocal 2\nlocal true\naa\nmember 5\ntop 3\n',
   },
   {
+    name: 'seeded sampling handles inclusive endpoints and checks custom collections once',
+    source: `import kotlin.random.Random
+import kotlin.random.nextLong
+class Once(private val values: Collection<Int>) : Collection<Int> by values {
+    var checks = 0
+    override fun isEmpty(): Boolean {
+        if (++checks > 1) error("second emptiness check")
+        println("check")
+        return values.isEmpty()
+    }
+}
+fun main() {
+    val seeded = Random(1)
+    println(seeded.nextLong(1L..1L))
+    try { seeded.nextLong(5L..4L) } catch (e: IllegalArgumentException) { println(e.message) }
+    println(seeded.nextLong(Long.MAX_VALUE..Long.MAX_VALUE))
+    println(seeded.nextLong(Long.MIN_VALUE..Long.MAX_VALUE))
+    println(Once(listOf(7)).randomOrNull())
+    println(Once(listOf(8)).randomOrNull(Random(9)))
+    println(Once(emptySet()).randomOrNull(Random(9)))
+    println((1..1).randomOrNull())
+    println((5L..4L).randomOrNull(seeded))
+    println(('a'..'a').randomOrNull(seeded))
+    println((Int.MAX_VALUE..Int.MAX_VALUE).randomOrNull(seeded))
+}`,
+    stdout:
+      '1\nCannot get random in empty range: 5..4\n9223372036854775807\n-2264386607786871955\ncheck\n7\ncheck\n8\ncheck\nnull\n1\nnull\na\n2147483647\n',
+  },
+  {
     name: 'comparable extrema accept any number of operands',
     source: `fun main() {
     println(maxOf("b", "a", "d", "c"))

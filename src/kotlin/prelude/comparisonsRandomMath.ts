@@ -212,11 +212,26 @@ fun Random(seed: Long): Random = xorWowRandom(seed.toInt(), seed.shr(32).toInt()
 internal fun xorWowRandom(seed1: Int, seed2: Int): Random =
     XorWowRandom(seed1, seed2, 0, 0, seed1.inv(), (seed1 shl 10) xor (seed2 ushr 4))
 
-fun Random.nextInt(range: IntRange): Int = when {
-    range.isEmpty() -> throw IllegalArgumentException("Cannot get random in empty range: $range")
-    range.last < Int.MAX_VALUE -> nextInt(range.first, range.last + 1)
-    range.first > Int.MIN_VALUE -> nextInt(range.first - 1, range.last) + 1
+fun Random.nextInt(range: IntRange): Int {
+    if (range.isEmpty()) throw IllegalArgumentException("Cannot get random in empty range: $range")
+    return nextClosedInt(range.first, range.last)
+}
+
+fun Random.nextLong(range: LongRange): Long {
+    if (range.isEmpty()) throw IllegalArgumentException("Cannot get random in empty range: $range")
+    return nextClosedLong(range.first, range.last)
+}
+
+internal fun Random.nextClosedInt(first: Int, last: Int): Int = when {
+    last < Int.MAX_VALUE -> nextInt(first, last + 1)
+    first > Int.MIN_VALUE -> nextInt(first - 1, last) + 1
     else -> nextInt()
+}
+
+internal fun Random.nextClosedLong(first: Long, last: Long): Long = when {
+    last < Long.MAX_VALUE -> nextLong(first, last + 1L)
+    first > Long.MIN_VALUE -> nextLong(first - 1L, last) + 1L
+    else -> nextLong()
 }
 
 internal fun checkRangeBounds(from: Int, until: Int) {

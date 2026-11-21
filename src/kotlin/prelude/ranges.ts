@@ -5,6 +5,8 @@ import { unsignedRanges } from './unsignedRanges';
 export const RANGES_SOURCE = kotlin`
 package kotlin.ranges
 
+import kotlin.random.*
+
 interface ClosedRange<T : Comparable<T>> {
     val start: T
     val endInclusive: T
@@ -345,28 +347,26 @@ fun Float.coerceIn(minimumValue: Float, maximumValue: Float): Float {
 }
 
 fun IntRange.random(): Int = random(kotlin.random.Random)
-fun IntRange.random(random: kotlin.random.Random): Int {
-    if (isEmpty()) throw NoSuchElementException("Cannot get random in empty range: $this")
-    return when {
-        last < Int.MAX_VALUE -> random.nextInt(first, last + 1)
-        first > Int.MIN_VALUE -> random.nextInt(first - 1, last) + 1
-        else -> random.nextInt()
-    }
-}
+fun IntRange.random(random: kotlin.random.Random): Int =
+    randomOrNull(random) ?: throw NoSuchElementException("Cannot get random in empty range: $this")
+fun IntRange.randomOrNull(): Int? = randomOrNull(kotlin.random.Random)
+fun IntRange.randomOrNull(random: kotlin.random.Random): Int? =
+    if (isEmpty()) null else random.nextClosedInt(first, last)
+
 fun LongRange.random(): Long = random(kotlin.random.Random)
-fun LongRange.random(random: kotlin.random.Random): Long {
-    if (isEmpty()) throw NoSuchElementException("Cannot get random in empty range: $this")
-    return when {
-        last < Long.MAX_VALUE -> random.nextLong(first, last + 1L)
-        first > Long.MIN_VALUE -> random.nextLong(first - 1L, last) + 1L
-        else -> random.nextLong()
-    }
-}
+fun LongRange.random(random: kotlin.random.Random): Long =
+    randomOrNull(random) ?: throw NoSuchElementException("Cannot get random in empty range: $this")
+fun LongRange.randomOrNull(): Long? = randomOrNull(kotlin.random.Random)
+fun LongRange.randomOrNull(random: kotlin.random.Random): Long? =
+    if (isEmpty()) null else random.nextClosedLong(first, last)
+
 fun CharRange.random(): Char = random(kotlin.random.Random)
-fun CharRange.random(random: kotlin.random.Random): Char {
-    if (isEmpty()) throw NoSuchElementException("Cannot get random in empty range: $this")
-    return random.nextInt(first.code, last.code + 1).toChar()
-}
+fun CharRange.random(random: kotlin.random.Random): Char =
+    randomOrNull(random) ?: throw NoSuchElementException("Cannot get random in empty range: $this")
+fun CharRange.randomOrNull(): Char? = randomOrNull(kotlin.random.Random)
+fun CharRange.randomOrNull(random: kotlin.random.Random): Char? =
+    if (isEmpty()) null else random.nextInt(first.code, last.code + 1).toChar()
+
 `;
 
 function floatingRanges(): string {

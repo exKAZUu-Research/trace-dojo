@@ -837,7 +837,9 @@ fun <T> Collection<T>.random(random: kotlin.random.Random): T {
 fun <T> Iterable<T>.shuffled(): List<T> = toMutableList().apply { shuffle() }
 fun <T> Iterable<T>.shuffled(random: kotlin.random.Random): List<T> = toMutableList().apply { shuffle(random) }
 
-fun <T> Collection<T>.randomOrNull(): T? = if (isEmpty()) null else random()
+fun <T> Collection<T>.randomOrNull(): T? = randomOrNull(kotlin.random.Random)
+fun <T> Collection<T>.randomOrNull(random: kotlin.random.Random): T? =
+    if (isEmpty()) null else elementAt(random.nextInt(size))
 
 fun <T> Iterable<T>.take(n: Int): List<T> {
     if (n < 0) throw IllegalArgumentException("Requested element count $n is less than zero.")
