@@ -5010,6 +5010,14 @@ test('dynamic operators reject void operands before execution', () => {
   }
 });
 
+test('prefixed Null types reject type arguments', () => {
+  const source = "import 'dart:core' as c; void main() { c.Null value = null; c.print(value); }";
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'null\n' });
+  expect(executeProgram('dart', source.replace('c.Null value', 'c.Null<c.int> value'))).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
 test('type tests reject void operands before execution', () => {
   for (const comparison of ['is Object', 'is! Null']) {
     const program = `void main() { if (print('operand') ${comparison}) print('matched'); }`;

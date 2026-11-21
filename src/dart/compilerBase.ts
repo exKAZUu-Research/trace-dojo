@@ -457,12 +457,12 @@ export abstract class CompilerBase {
     syntax: Extract<TypeSyntax, { kind: 'named' }>,
     options: TypeResolutionOptions
   ): DartType {
-    if (cls === coreTypes.nullClass) return NULL;
     if (syntax.args.length === 0 && options.allowRaw && cls.typeParams.length > 0) return interfaceType(cls, []);
     this.resolveClassBounds(cls);
     if (syntax.args.length === 0 && cls.typeParams.length > 0 && options.inferOmitted)
       return options.inferOmitted(cls.thisType, cls.typeParams);
-    return interfaceType(cls, this.typeArgumentsFor(cls.typeParams, syntax, cls.name));
+    const args = this.typeArgumentsFor(cls.typeParams, syntax, cls.name);
+    return cls === coreTypes.nullClass ? NULL : interfaceType(cls, args);
   }
 
   /** The type arguments of a generic type, or the instantiation to bounds when they are omitted. */
