@@ -13,7 +13,7 @@ import { PatternCache } from './patternCompiler';
 import type { Frame } from './runtime';
 import { Flow, type LocalVar } from './scope';
 import { isAnsweredType } from './statementCompiler';
-import { containsInferenceHole } from './typeInference';
+import { containsInferenceHole, INFERENCE_HOLE } from './typeInference';
 import {
   asInstanceOf,
   coreTypes,
@@ -756,8 +756,14 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     // Without a context of its own, the spread value is inferred alone, as `[...[1], ...[2.0]]` makes List<num>.
     const hasContext =
       kind === 'map' ? elementContext !== undefined || valueContext !== undefined : elementContext !== undefined;
+    // Untyped braces spread there still take the enclosing kind, leaving their element types to their own elements.
+    const bracesOnly = element.value.kind === 'setOrMap' && !element.value.typeArguments;
     const contextType = !hasContext
-      ? undefined
+      ? bracesOnly
+        ? kind === 'map'
+          ? interfaceType(coreTypes.map, [INFERENCE_HOLE, INFERENCE_HOLE])
+          : interfaceType(coreTypes.iterable, [INFERENCE_HOLE])
+        : undefined
       : kind === 'map'
         ? interfaceType(coreTypes.map, [elementContext ?? DYNAMIC, valueContext ?? DYNAMIC])
         : interfaceType(coreTypes.iterable, [elementContext ?? DYNAMIC]);

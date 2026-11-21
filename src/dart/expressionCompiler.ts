@@ -764,30 +764,34 @@ export abstract class ExpressionCompiler extends CompilerBase {
       if (base.cls.isSubclassOf(coreTypes.map)) return 'map';
       if (base.cls.isSubclassOf(coreTypes.set) || base.cls === coreTypes.iterable) return 'set';
     }
-    const kinds = new Set(elements.map((element) => this.elementKind(element)).filter((kind) => kind !== undefined));
+    // Elements other than spreads decide first; only without them do the spreads' types decide.
+    const kindsOf = (spreads: boolean): Set<'set' | 'map'> =>
+      new Set(elements.map((element) => this.elementKind(element, spreads)).filter((kind) => kind !== undefined));
+    let kinds = kindsOf(false);
+    if (kinds.size === 0) kinds = kindsOf(true);
     if (kinds.size === 2)
       this.error(elements[0], 'セットの要素とマップの要素を、1 つのリテラルに混ぜることはできません。');
     const [kind] = kinds;
     return kind;
   }
 
-  private elementKind(element: CollectionElement): 'set' | 'map' | undefined {
+  private elementKind(element: CollectionElement, spreads: boolean): 'set' | 'map' | undefined {
     switch (element.kind) {
       case 'mapEntry': {
         return 'map';
       }
       case 'spread': {
-        return this.spreadKind(element.value);
+        return spreads ? this.spreadKind(element.value) : undefined;
       }
       case 'ifElement': {
         return (
-          this.elementKind(element.consequent) ??
-          (element.alternative ? this.elementKind(element.alternative) : undefined)
+          this.elementKind(element.consequent, spreads) ??
+          (element.alternative ? this.elementKind(element.alternative, spreads) : undefined)
         );
       }
       case 'forElement':
       case 'forInElement': {
-        return this.elementKind(element.body);
+        return this.elementKind(element.body, spreads);
       }
       case 'nullAwareElement': {
         return 'set';
