@@ -116,6 +116,10 @@ export class StringGrowth {
   }
 
   write(text: string, added = utf8Length(text)): void {
+    this.writeBytes(added);
+  }
+
+  writeBytes(added: number): void {
     this.reserve(added);
     this.length += added;
   }

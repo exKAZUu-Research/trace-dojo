@@ -6602,12 +6602,26 @@ impl fmt::Debug for Mark {
 
 test('keeps typed scalar closure captures out of repeated iterator scans', () => {
   for (const capture of ['', 'move ']) {
-    const program = rustMain(`let values = vec![1i32; 20000];
-      let mut cursor = (0..20000).map(${capture}|index| values[index]);
+    const program = rustMain(`let values = vec![1i32; 30000];
       let observer = Turtle::new();
+      let mut cursor = (0..30000).map(${capture}|index| {
+        let _ = observer.can_move_forward();
+        values[index]
+      });
       let mut total = 0;
       while let Some(value) = cursor.next() { total += value; }
       println!("{total}");`);
-    expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '20000\n' });
+    expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '30000\n' });
   }
+});
+
+test('recovers invalid and incomplete UTF-8 with owned lossy capacity growth', () => {
+  const program = rustMain(`for bytes in [vec![97, 255], vec![240, 159], vec![255; 9]] {
+        let output = String::from_utf8(bytes).unwrap_err().into_utf8_lossy();
+        println!("{output:?} {}", output.capacity());
+    }`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '"a�" 8\n"�" 8\n"���������" 36\n',
+  });
 });

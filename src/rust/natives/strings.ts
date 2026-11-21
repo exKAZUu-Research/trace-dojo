@@ -695,6 +695,23 @@ function caseIter(name: 'ToUppercase' | 'ToLowercase', text: string): Value {
   return iter;
 }
 
+function recoverUtf8(ctx: NativeContext, error: StructValue): StringValue {
+  const [values, detail] = error.fields as [bigint[], StructValue];
+  const bytes = Uint8Array.from(values, Number);
+  let offset = Number(detail.fields[0] as bigint);
+  const growth = new StringGrowth(bytes.length, offset);
+  while (offset < bytes.length) {
+    ctx.runtime.spend();
+    const { validUpTo, errorLen } = utf8Error(bytes.subarray(offset));
+    growth.writeBytes(validUpTo);
+    offset += validUpTo;
+    if (offset === bytes.length) break;
+    growth.writeBytes(3);
+    offset = errorLen === undefined ? bytes.length : offset + errorLen;
+  }
+  return growth.finish(decodeUtf8(bytes));
+}
+
 function utf8Failure(ctx: NativeContext, bytes: Uint8Array): StructValue {
   const { validUpTo, errorLen } = utf8Error(bytes);
   const length = errorLen === undefined ? none(ctx) : some(ctx, BigInt(errorLen));
@@ -714,6 +731,7 @@ natives['std::str::from_utf8'] = ([value], ctx) => {
 for (const [name, native] of Object.entries(withStringCapacity(stringNatives))) natives[`String::${name}`] = native;
 natives['FromUtf8Error::as_bytes'] = ([self]) => (deref(self) as StructValue).fields[0];
 natives['FromUtf8Error::into_bytes'] = natives['FromUtf8Error::as_bytes'];
+natives['FromUtf8Error::into_utf8_lossy'] = ([self], ctx) => recoverUtf8(ctx, deref(self) as StructValue);
 natives['FromUtf8Error::utf8_error'] = ([self]) => (deref(self) as StructValue).fields[1];
 natives['Utf8Error::valid_up_to'] = ([self]) => (deref(self) as StructValue).fields[0];
 natives['Utf8Error::error_len'] = ([self]) => (deref(self) as StructValue).fields[1];

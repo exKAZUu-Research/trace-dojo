@@ -1,9 +1,18 @@
 import { normalize } from './infer';
 import { concreteType } from './runtimeTypes';
 import { type AdtDef, childTypes, type FnDef, shallow, substitute, type Type, type TypeParam } from './types';
+import type { Place } from './values';
 
 export function canReachTurtle(type: Type, bindings?: ReadonlyMap<TypeParam, Type>): boolean {
   return visit(bindings ? concreteType(type, bindings) : type, new Set());
+}
+
+export function turtleCaptureRoots(
+  places: readonly Place[],
+  captures: readonly { type: Type }[],
+  bindings: ReadonlyMap<TypeParam, Type>
+): Place[] {
+  return places.filter((_place, index) => !captures[index] || canReachTurtle(captures[index].type, bindings));
 }
 
 export function nativeArgumentTypes(def: FnDef, args: Type[]): Type[] {

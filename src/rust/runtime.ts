@@ -4,7 +4,7 @@ import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { Span } from './ast';
-import { canReachTurtle } from './turtleTypes';
+import { canReachTurtle, turtleCaptureRoots } from './turtleTypes';
 import { shallow, type Type, type TypeParam } from './types';
 import {
   CellPlace,
@@ -49,6 +49,8 @@ export interface FunctionInfo {
 
 export class Frame implements TracedFrame {
   readonly locals: (Value | typeof UNASSIGNED)[];
+  readonly scalarSlots: ReadonlySet<number>;
+  readonly captureRoots: readonly Place[];
   /**
    * The places that variables holding shared references refer to, by slot, which the trace shows the current values
    * of: a shared reference holds a copy of its referent, which a change of the referent after the borrow ends leaves
@@ -81,6 +83,10 @@ export class Frame implements TracedFrame {
     readonly captures: readonly Place[] = []
   ) {
     this.locals = Array.from({ length: info.slotCount }, () => UNASSIGNED);
+    this.scalarSlots = new Set(
+      info.locals.filter(({ type }) => !canReachTurtle(type, typeArgs)).map(({ slot }) => slot)
+    );
+    this.captureRoots = turtleCaptureRoots(captures, info.captures, typeArgs);
   }
 }
 
@@ -227,10 +233,10 @@ export class Runtime implements TracedRuntime<Frame> {
     const stack: unknown[] = [];
     for (const frame of this.frames) {
       for (const [slot, value] of frame.locals.entries()) {
-        if (!frame.referents.has(slot)) stack.push(value);
+        if (!frame.scalarSlots.has(slot) && !frame.referents.has(slot)) stack.push(value);
       }
       pushAll(stack, frame.temporaries);
-      pushAll(stack, frame.captures);
+      pushAll(stack, frame.captureRoots);
     }
     for (const roots of this.nativeRoots) pushAll(stack, roots);
     const turtles = new Set<unknown>();

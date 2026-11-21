@@ -20,7 +20,7 @@ import {
   StackOverflow,
 } from './runtime';
 import { concreteType, matchConcrete, typeIdentity, typeKey } from './runtimeTypes';
-import { canReachTurtle, nativeArgumentTypes } from './turtleTypes';
+import { nativeArgumentTypes, turtleCaptureRoots } from './turtleTypes';
 import {
   type AdtDef,
   childTypes,
@@ -287,10 +287,7 @@ export class Interpreter implements CallSupport {
   makeClosure(compiled: CompiledFn, frame: Frame, captures: ClosureCapture[]): Value {
     const { typeArgs } = frame;
     const places = captures.map(({ place }) => place);
-    const roots = places.filter((_place, index) => {
-      const type = compiled.info.captures[index]?.type;
-      return !type || canReachTurtle(type, typeArgs);
-    });
+    const roots = turtleCaptureRoots(places, compiled.info.captures, typeArgs);
     const fn = new FnValue(
       (args, callRow) => this.invoke(compiled, typeArgs, args, callRow, places),
       '{closure}',

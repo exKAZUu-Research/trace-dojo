@@ -185,6 +185,7 @@ pub mod string {
     impl FromUtf8Error {
         pub fn as_bytes(&self) -> &[u8];
         pub fn into_bytes(self) -> Vec<u8>;
+        pub fn into_utf8_lossy(self) -> String;
         pub fn utf8_error(&self) -> Utf8Error;
     }
     pub trait ToString { fn to_string(&self) -> String; }
