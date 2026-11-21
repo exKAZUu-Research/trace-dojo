@@ -8239,3 +8239,14 @@ fn main() { println!("{}", distance(&"kitten".repeat(17), &"sitting".repeat(15))
 `;
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '55\n' });
 });
+
+test.each([
+  ['a type parameter', 'struct Point<T> { x: i32, y: i32 }', '型引数 T を、どのフィールドの型でも使っていません。'],
+  ['an enum type parameter', 'enum Answer<T> { Yes, No }', '型引数 T を、どのフィールドの型でも使っていません。'],
+  ['a lifetime', "struct Holder<'a> { x: i32 }", "ライフタイム 'a を、どのフィールドの型でも使っていません。"],
+])('a struct or enum leaving %s unused is rejected', (_name, items, message) => {
+  expect(executeProgram('rust', rustMain('', items))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message }],
+  });
+});

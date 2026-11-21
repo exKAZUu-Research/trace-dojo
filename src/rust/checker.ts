@@ -62,6 +62,7 @@ import {
   typeToString,
   UNIT,
 } from './types';
+import { checkParamsUsed } from './unusedParams';
 
 export interface Obligation {
   type: Type;
@@ -195,6 +196,7 @@ export class Checker {
   }
 
   private checkAdtDeclaration(def: AdtDef): void {
+    checkParamsUsed(def);
     this.adtStorage.check(def);
     this.checkParamBounds(def.params, def.span);
     for (const variant of def.variants) {
@@ -729,7 +731,6 @@ export class Checker {
     this.negatedLiterals.clear();
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Follows the type checking rules of rustc case by case.
   private solveObligations(final: boolean): void {
     this.settleTryErrors(final);
     let progress = true;
@@ -744,7 +745,10 @@ export class Checker {
         else progress = true;
       }
     }
-    if (!final) return;
+    if (final) this.solveRemainingObligations();
+  }
+
+  private solveRemainingObligations(): void {
     settleBinaries(this, true);
     // Literal variables take their defaults, which may settle what remains.
     for (const { type, ref: trait } of this.obligations) {
