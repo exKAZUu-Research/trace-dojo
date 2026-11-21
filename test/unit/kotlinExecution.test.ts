@@ -569,6 +569,14 @@ test('stops an endless loop at the execution limit', () => {
 /** Programs with whether kotlinc 2.4.21 compiles them, which decides whether the interpreter may run them. */
 test.each([
   ['a type mismatch', false, 'fun main() {\n    val x: Int = "a"\n    println(x)\n}'],
+  [
+    'a super call that omits an inherited default argument',
+    false,
+    `open class A { open fun f(x: Int, y: Int = 2): Int = x + y }
+open class B : A() { override fun f(x: Int, y: Int): Int = x + y }
+class C : B() { override fun f(x: Int, y: Int): Int = super.f(x) }
+fun main() { println(C().f(1)) }`,
+  ],
   ['a member of a nullable value', false, 'fun main() {\n    val s: String? = null\n    println(s.length)\n}'],
   ['a safe call on a nullable value', true, 'fun main() {\n    val s: String? = null\n    println(s?.length)\n}'],
   ['an assignment to a val', false, 'fun main() {\n    val x = 1\n    x = 2\n    println(x)\n}'],

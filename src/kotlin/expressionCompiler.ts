@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 988 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 990 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { Block, Expression, LambdaExpression } from './ast';
 import {
   type ArgumentSyntax,
@@ -1488,6 +1488,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       row,
       name
     );
+    if (resolvedCall.usesDefaultArguments) this.error(row, 'super の呼び出しで引数を省略できません。');
     // `super.f()` calls the superclass's implementation itself, without dispatching on the instance's class.
     const symbol = resolvedCall.symbol;
     const staticCall = this.nonVirtualCall(resolvedCall);

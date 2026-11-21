@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 502 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 503 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { type ArgumentEvaluation, argumentEvaluator, expectedArgumentType, firstAttempts } from './argumentTypes';
 import type { Expression, LambdaExpression } from './ast';
 import {
@@ -82,6 +82,7 @@ export interface ResolvedCall {
   typeArguments: Map<TypeParameterSymbol, KType>;
   /** Whether every argument creates an object, which makes `arrayOf(A(), B())` a creation, as Java's `{ new A(), new B() }` is. */
   argumentsCreateObjects: boolean;
+  usesDefaultArguments: boolean;
   /** The compiled arguments in the order they are written, whose smart casts the library's contracts carry on. */
   compiledArgs: (Compiled | undefined)[];
 }
@@ -671,6 +672,9 @@ export abstract class CallCompiler extends CompilerCore {
       evaluateArgs,
       callRow,
       argumentsCreateObjects: args.length > 0 && compiledArgs.every((compiled) => compiled?.isCreation === true),
+      usesDefaultArguments: symbol.params.some(
+        (param, index) => param.hasDefault && attempt.mapping[index].length === 0
+      ),
       compiledArgs,
       receiverRepr: receiverRepr(symbol),
       typeArguments,
