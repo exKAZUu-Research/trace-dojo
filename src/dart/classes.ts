@@ -450,3 +450,43 @@ function sameSet<T>(left: ReadonlySet<T> | undefined, right: ReadonlySet<T> | un
   if (!left || !right) return left === right;
   return left.size === right.size && left.isSubsetOf(right);
 }
+
+export function needsImplicitConstructor(cls: ClassInfo): boolean {
+  if (cls.constructors.size === 0) return true;
+  return (
+    cls.kind === 'enum' &&
+    !cls.constructors.has('') &&
+    [...cls.constructors.values()].every((constructor) => constructor.kind !== 'generative')
+  );
+}
+
+/** Records a class among the subclasses of the sealed classes it extends or implements, for exhaustiveness. */
+export function registerSealedSubclass(cls: ClassInfo): void {
+  for (const supertype of cls.directSupertypes) {
+    const supercls = supertype.cls;
+    if (supercls.modifiers.isSealed && supercls.library === cls.library) supercls.subclasses.push(cls);
+  }
+  if (!cls.superclass?.cls.mixinOf) return;
+  let current: ClassInfo | undefined = cls.superclass.cls;
+  while (current?.mixinOf && !current.declaration) current = current.superclass?.cls;
+  if (current?.modifiers.isSealed && current.library === cls.library && !current.subclasses.includes(cls))
+    current.subclasses.push(cls);
+}
+
+/** The instance member names an extension type and its extension-type supertypes declare, by their lookup keys. */
+export function extensionMemberNames(
+  cls: ClassInfo,
+  setter: boolean,
+  names = new Map<string, string>(),
+  visited = new Set<ClassInfo>()
+): Map<string, string> {
+  if (visited.has(cls)) return names;
+  visited.add(cls);
+  for (const [name, member] of setter ? cls.setters : cls.members) {
+    if (!member.isStatic) names.set(scopedMemberName(name, cls.library), name);
+  }
+  for (const type of cls.directSupertypes) {
+    if (type.cls.kind === 'extensionType') extensionMemberNames(type.cls, setter, names, visited);
+  }
+  return names;
+}

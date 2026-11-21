@@ -323,3 +323,22 @@ function visitPattern(value: unknown, bind: (variable: Extract<Pattern, { kind: 
   }
   for (const item of Object.values(node)) visitPattern(item, bind);
 }
+
+/** The innermost receiver of a selector chain (`.m`, `.m()`, `[i]`, `!`), or the expression itself. */
+export function chainHead(expression: Expression): Expression {
+  let head = expression;
+  for (;;) {
+    if (isDotShorthand(head)) return head;
+    if (head.kind === 'member' || head.kind === 'index') head = head.object;
+    else if (head.kind === 'call') head = head.callee;
+    else if (head.kind === 'nullAssert') head = head.operand;
+    else return head;
+  }
+}
+
+/** Whether the expression is a dot shorthand (`.red`), including one with arguments (`.parse('1')`). */
+export function isDotShorthand(expression: Expression): boolean {
+  return (
+    expression.kind === 'dotShorthand' || (expression.kind === 'call' && expression.callee.kind === 'dotShorthand')
+  );
+}

@@ -1,6 +1,7 @@
 import type { Arguments as ArgumentsSyntax, CascadeSection, Expression, Span } from './ast';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
-import { ExpressionCompiler, isDoubleContext, SHORTED, singleArgument } from './expressionCompiler';
+import { isDoubleContext } from './contextTypes';
+import { ExpressionCompiler, SHORTED, singleArgument } from './expressionCompiler';
 import {
   BITWISE_OPERATORS,
   doubleModulo,

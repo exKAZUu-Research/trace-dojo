@@ -709,7 +709,6 @@ function recordFieldsCover(
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Match every supported kind of pattern against a value space.
 // code-gauge-allow functionNcss 40 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 function covers(compiler: PatternCompiler, pattern: Pattern, space: Space): Coverage {
   if (isNullConstantPattern(pattern)) return space.kind === 'null';
@@ -763,7 +762,6 @@ function covers(compiler: PatternCompiler, pattern: Pattern, space: Space): Cove
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Keep the prefix, middle and suffix of each list length space together.
 function listCovers(
   compiler: PatternCompiler,
   pattern: Extract<Pattern, { kind: 'list' }>,

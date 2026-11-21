@@ -321,7 +321,7 @@ export abstract class ExpressionConverter {
   }
 
   /** Assignments, operators, conditionals, casts, and the other expressions that combine expressions. */
-  // code-gauge-allow functionNcss 35 -- One case per kind of node in the grammar.
+  // code-gauge-allow functionNcss 39 -- One case per kind of node in the grammar.
   private convertOperatorExpression(node: Node, span: Span): Expression {
     switch (node.type) {
       case 'assignment_expression': {

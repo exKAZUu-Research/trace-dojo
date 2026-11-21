@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 676 -- Type inference, argument binding, and call dispatch share this compiler phase.
+// code-gauge-allow-file fileNcss 709 -- Type inference, argument binding, and call dispatch share this compiler phase.
 import type {
   Arguments as ArgumentsSyntax,
   Expression,
@@ -10,8 +10,9 @@ import type {
 } from './ast';
 import type { ClassInfo, ConstructorInfo, Member, MethodMember, SetterMember } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
+import { isDoubleContext } from './contextTypes';
 import type { ExtensionInfo, TopLevelFunction, TypeAlias } from './environment';
-import { isDoubleContext, SHORTED } from './expressionCompiler';
+import { SHORTED } from './expressionCompiler';
 import { OperatorCompiler } from './operatorCompiler';
 import type { Frame, Runtime, TypeEnv } from './runtime';
 import type { FunctionContext } from './scope';
@@ -778,8 +779,6 @@ export abstract class CallCompiler extends OperatorCompiler {
    * other than function literals see only what the context gave; function literals, compiled after them, also see
    * what those arguments gave.
    */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Gather ordinary arguments, contextually typed closures, and generic tear-offs.
-  // code-gauge-allow functionNcss 34 -- Gather ordinary arguments, contextually typed closures, and generic tear-offs.
   private inferTypeArguments(
     signature: FunctionType,
     args: ArgumentsSyntax,

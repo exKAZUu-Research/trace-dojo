@@ -103,7 +103,6 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     return this.assignTo(target, operator, value, span);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Simple, compound, and null-aware assignments.
   // code-gauge-allow functionNcss 56 -- Simple, compound, and null-aware assignments.
   private assignTo(target: AssignableTarget, operator: string, valueSyntax: Expression, span: Span): Compiled {
     const { read, write, variable, writeType } = target;

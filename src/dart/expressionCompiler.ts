@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 998 -- Expression kinds share the same scope and evaluation rules.
+// code-gauge-allow-file fileNcss 999 -- Expression kinds share the same scope and evaluation rules.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import type {
@@ -14,6 +14,7 @@ import type {
   TypeParameter,
   TypeSyntax,
 } from './ast';
+import { chainHead, isDotShorthand } from './astWalk';
 import type { ClassInfo, FieldMember, Member } from './classes';
 import {
   at,
@@ -25,12 +26,20 @@ import {
   typeName,
   valueIs,
 } from './compilerBase';
+import {
+  elementTypeOfContext,
+  isDoubleContext,
+  literalTypeArgument,
+  mapTypesOfContext,
+  unresolvedCollectionType,
+} from './contextTypes';
 import type { Declaration, ExtensionInfo, GlobalVariable, TopLevelFunction, TypeAlias } from './environment';
-import { formatDouble, stringOf } from './format';
+import { stringOf } from './format';
 import { BoundedStringParts } from './library/boundedStringParts';
+import { isPrimitive, primitiveEquals, primitiveText } from './primitives';
 import type { Frame } from './runtime';
 import { type ConditionFlow, Flow, LocalVar } from './scope';
-import { closeInferenceHoles, containsInferenceHole, INFERENCE_HOLE, isInferenceHole } from './typeInference';
+import { containsInferenceHole } from './typeInference';
 import {
   closeTypeVariables,
   coreTypes,
@@ -56,7 +65,6 @@ import {
   sameType,
   substitute,
   typeParamType,
-  upperBound,
 } from './types';
 import {
   type Arguments,
@@ -278,7 +286,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return compiled;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of condition that tells flow analysis something.
   // code-gauge-allow functionNcss 37 -- One case per kind of condition that tells flow analysis something.
   protected compileConditionInner(expression: Expression): { compiled: Compiled; flow: ConditionFlow } {
     switch (expression.kind) {
@@ -375,7 +382,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   /** `super == other`, which calls the superclass's `==`. */
   protected abstract compileSuperEquality(expression: Extract<Expression, { kind: 'binary' }>): Compiled;
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Equality evaluates both operands in order and promotes only stable paths.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Equality evaluates both operands in order and promotes only stable paths.
   protected compileEquality(expression: Extract<Expression, { kind: 'binary' }>): {
     compiled: Compiled;
     flow: ConditionFlow;
@@ -640,7 +647,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // Literals
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Apply the distinct literal ranges and exact double conversion.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Apply the distinct literal ranges and exact double conversion.
   protected compileInt(
     expression: Extract<Expression, { kind: 'int' }>,
     context: DartType | undefined,
@@ -740,7 +747,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return { type, run: isConst ? this.canonicalized(build) : build, isConst, creates: elements.creates };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss 38 -- The context, leaf elements, and spreads decide set or map in the order Dart specifies.
   private compileSetOrMapLiteral(
     expression: Extract<Expression, { kind: 'setOrMap' }>,
     context: DartType | undefined
@@ -1037,8 +1045,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
   // Names
 
   /** What a name means: a local, a member of the enclosing class or extension, or a top-level declaration. */
-  // code-gauge-allow functionCognitiveComplexity 29 -- Lookup order depends on lexical scope and the enclosing declaration.
-  // code-gauge-allow functionNcss 40 -- The lookup cases read in scope order.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Lookup order depends on lexical scope and the enclosing declaration.
+  // code-gauge-allow functionNcss 41 -- The lookup cases read in scope order.
   resolveName(name: string, span?: Span): NameResolution | undefined {
     const local = this.findLocal(name, span);
     if (local) return { kind: 'local', variable: local };
@@ -1083,6 +1091,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return undefined;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of name a resolution yields.
+  // code-gauge-allow functionNcss 31 -- One case per kind of name a resolution yields.
   protected compileIdentifier(expression: Extract<Expression, { kind: 'identifier' }>): Compiled {
     const { name } = expression;
     if (name === '_') return this.error(expression, '_ は値として使えません。');
@@ -1222,7 +1232,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return value;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Ordinary and pattern assignments share the local write rules.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Ordinary and pattern assignments share the local write rules.
   protected localWriter(variable: LocalVar, span: Span, readsCurrent = false): (frame: Frame, value: Value) => void {
     const { options, name } = variable;
     if (variable.unavailable) this.error(span, variable.unavailable);
@@ -1766,48 +1776,7 @@ function interpolateString(frame: Frame, pieces: readonly (string | Eval)[], isC
   }
 }
 
-export function isPrimitive(value: Value): value is undefined | boolean | bigint | number | string {
-  return value === undefined || typeof value !== 'object';
-}
-
-function primitiveEquals(a: Value, b: Value): boolean {
-  if (typeof a === 'bigint' && typeof b === 'number') return Number(a) === b;
-  if (typeof a === 'number' && typeof b === 'bigint') return a === Number(b);
-  return a === b;
-}
-
-export function primitiveText(value: undefined | boolean | bigint | number | string): string {
-  if (value === undefined) return 'null';
-  if (typeof value === 'number') return formatDouble(value);
-  return String(value);
-}
-
-export function isDoubleContext(context: DartType): boolean {
-  const base = context.kind === 'interface' ? context : undefined;
-  return base?.cls === coreTypes.double;
-}
-
-/** The element type a context gives a collection literal, as `List<int>` gives `int` to `[...]`. */
-export function elementTypeOfContext(context: DartType | undefined, cls: ClassInfo): DartType | undefined {
-  if (!context) return undefined;
-  const base = resolveBound(context);
-  if (base.kind !== 'interface') return undefined;
-  const target = cls === coreTypes.list && base.cls === coreTypes.iterable ? coreTypes.iterable : cls;
-  if (base.cls === coreTypes.iterable || base.cls === coreTypes.object) {
-    return base.cls === coreTypes.iterable ? base.args[0] : undefined;
-  }
-  if (base.cls !== target && !target.isSubclassOf(base.cls)) return undefined;
-  return base.args[0];
-}
-
-function mapTypesOfContext(context: DartType | undefined): [DartType, DartType] | undefined {
-  if (!context) return undefined;
-  const base = resolveBound(context);
-  if (base.kind !== 'interface' || base.cls !== coreTypes.map) return undefined;
-  return [base.args[0] ?? DYNAMIC, base.args[1] ?? DYNAMIC];
-}
-
-function recordLiteralBuilder(
+export function recordLiteralBuilder(
   fields: { name: string | undefined; compiled: Compiled }[],
   namedTypes: readonly { name: string }[],
   fieldNames: string | undefined
@@ -1844,52 +1813,8 @@ function extensionTearOffDefaults(member: Member & { kind: 'method' }): readonly
   return instantiateToBounds(signature.typeParams);
 }
 
-export function inferElementType(types: DartType[]): DartType {
-  if (types.length === 0) return DYNAMIC;
-  let result = types[0];
-  for (const type of types.slice(1)) result = upperBound(result, type);
-  return result;
-}
-
 export function singleArgument(index: Expression): ArgumentsSyntax {
   return { ...at(index), positional: [index], named: [], order: [{ kind: 'positional', index: 0 }] };
 }
 
 export { isNonNullable, objectType, typeParamType, type Arguments };
-
-/**
- * A collection literal's type argument from its context and its elements' types. A context still waiting for a call's
- * type arguments yields to the elements, and with no elements to its greatest closure (`f<T>(List<List<T>> a)` takes
- * `[]` as List<List<Object?>>), except a bare unknown, which leaves the elements' dynamic.
- */
-function literalTypeArgument(context: DartType | undefined, elementTypes: DartType[]): DartType {
-  if (context && !containsInferenceHole(context)) return context;
-  if (context && !isInferenceHole(context) && elementTypes.length === 0) return closeInferenceHoles(context);
-  return inferElementType(elementTypes);
-}
-
-/** A set or map type whose type arguments are left to the elements. */
-function unresolvedCollectionType(kind: 'set' | 'map'): DartType {
-  return kind === 'set'
-    ? interfaceType(coreTypes.set, [INFERENCE_HOLE])
-    : interfaceType(coreTypes.map, [INFERENCE_HOLE, INFERENCE_HOLE]);
-}
-
-/** The innermost receiver of a selector chain (`.m`, `.m()`, `[i]`, `!`), or the expression itself. */
-function chainHead(expression: Expression): Expression {
-  let head = expression;
-  for (;;) {
-    if (isDotShorthand(head)) return head;
-    if (head.kind === 'member' || head.kind === 'index') head = head.object;
-    else if (head.kind === 'call') head = head.callee;
-    else if (head.kind === 'nullAssert') head = head.operand;
-    else return head;
-  }
-}
-
-/** Whether the expression is a dot shorthand (`.red`), including one with arguments (`.parse('1')`). */
-function isDotShorthand(expression: Expression): boolean {
-  return (
-    expression.kind === 'dotShorthand' || (expression.kind === 'call' && expression.callee.kind === 'dotShorthand')
-  );
-}

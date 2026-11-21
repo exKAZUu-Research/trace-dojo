@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 626 -- The operations of Dart's types belong together; each is a short case analysis.
+// code-gauge-allow-file fileNcss 631 -- The operations of Dart's types belong together; each is a short case analysis.
 import type { ClassInfo } from './classes';
 
 /** A type parameter of a class, a function type, or a generic function. */
@@ -492,7 +492,6 @@ function structuralSubtype(s: DartType, t: DartType): boolean {
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of type, in the order of Dart's rules.
-// code-gauge-allow functionNcss 32 -- One case per kind of type, in the order of Dart's rules.
 function isFunctionSubtype(s: FunctionType, t: FunctionType): boolean {
   const aligned = alignTypeParams(s, t, mutualSubtypes);
   if (!aligned) return false;

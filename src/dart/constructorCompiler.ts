@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 443 -- Constructor types, initializer ordering, and delegation share the same declarations.
+// code-gauge-allow-file fileNcss 457 -- Constructor types, initializer ordering, and delegation share the same declarations.
 import { AssignmentCompiler } from './assignmentCompiler';
 import type {
   Arguments as ArgumentsSyntax,
@@ -558,7 +558,6 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     return super.compileBlock(block, clear);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- The initializer list's entries and the implicit super().
   private compileConstructorPrologue(
     cls: ClassInfo,
     declaration: ConstructorDeclaration,
@@ -580,6 +579,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
   }
 
   // code-gauge-allow functionNcss 45 -- The initializer list's entries and the implicit super().
+  // code-gauge-allow functionCognitiveComplexity 21 -- The initializer list's entries and the implicit super().
   private compileInitializerSteps(
     cls: ClassInfo,
     declaration: ConstructorDeclaration,

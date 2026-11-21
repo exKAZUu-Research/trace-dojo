@@ -155,8 +155,6 @@ export abstract class MemberCompiler extends MetadataCompiler {
     return type;
   }
 
-  // code-gauge-allow duplicateLines 20 -- Method binding shares the function specification but has its own receiver and type environment.
-  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch is one of the cases Dart distinguishes for this construct.
   // code-gauge-allow functionParameterCount 9 -- The parameters are the parts a caller already holds; grouping them would only rename them.
   protected compileMethodBody(
     cls: ClassInfo,

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 579 -- Keep declaration syntax and parameter validation together.
+// code-gauge-allow-file fileNcss 585 -- Keep declaration syntax and parameter validation together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -246,7 +246,6 @@ export class Converter extends ExpressionConverter {
 
   // Classes
 
-  // code-gauge-allow duplicateLines 19 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private convertClass(node: Node): ClassDeclaration {
     const tokens = new Set(
       childrenOf(node)
@@ -332,7 +331,7 @@ export class Converter extends ExpressionConverter {
     };
   }
 
-  // code-gauge-allow duplicateLines 17 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines 18 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private convertEnum(node: Node): ClassDeclaration {
     const named = namedOf(node);
     const typeParameters = named.find((child) => child.type === 'type_parameters');
@@ -893,6 +892,7 @@ export class Converter extends ExpressionConverter {
     return { kind: 'expression', expression: this.soleExpression(node, rest), modifier, ...span };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- One branch per section of a parameter list (positional, optional, named, primary).
   convertFormalParameters(node: Node, context: FormalContext = 'ordinary'): FormalParameters {
     const positional: FormalParameter[] = [];
     const named: FormalParameter[] = [];
@@ -967,6 +967,7 @@ export class Converter extends ExpressionConverter {
     return parameters;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- One check per parameter modifier and form Dart distinguishes.
   private convertFormalParameter(
     node: Node,
     isRequired: boolean,

@@ -18,15 +18,24 @@ import {
   ClassInfo,
   type ConstructorImpl,
   type ConstructorInfo,
+  extensionMemberNames,
   type FieldMember,
   type Member,
   memberTypeIn,
   type MethodMember,
-  scopedMemberName,
+  needsImplicitConstructor,
+  registerSealedSubclass,
   sourceMemberName,
 } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import { EMPTY_ENV } from './constructorCompiler';
+import {
+  instantiateObject,
+  missingExternal,
+  newFields,
+  readGlobalValue,
+  topLevelFunctionClosure,
+} from './declarationRuntime';
 import {
   type Declaration,
   type ExtensionInfo,
@@ -35,9 +44,10 @@ import {
   type TopLevelFunction,
   type TypeAlias,
 } from './environment';
-import { eraseExtensionTypes, eraseFunctionType } from './eraseExtensionTypes';
-import { initializeField, lateFieldGetter, lateFieldSetter } from './lateFields';
+import { eraseExtensionTypes } from './eraseExtensionTypes';
+import { lateFieldGetter, lateFieldSetter } from './lateFields';
 import { markCovariantParameters, MemberCompiler } from './memberCompiler';
+import { isPrimitive } from './primitives';
 import { checkRepresentationCycles } from './representationCycles';
 import { Frame, type FunctionInfo, type Runtime, type TypeEnv } from './runtime';
 import { type FunctionContext, primaryParameterInInitializer } from './scope';
@@ -62,7 +72,7 @@ import {
   typeToString,
   VOID,
 } from './types';
-import { type Arguments, type Callable, Cell, DartClosure, DartObject, UNINITIALIZED, type Value } from './values';
+import { type Arguments, type Callable, DartObject, type Value } from './values';
 
 /** The natives that `external` members of the interpreter's own libraries bind to, by `Class.member` or name. */
 export type NativeTable = ReadonlyMap<string, Callable | ConstructorImpl>;
@@ -197,8 +207,6 @@ export class Compiler extends MemberCompiler {
   }
 
   /** Resolves type aliases, class headers, member signatures, and top-level signatures, in that order. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 35 -- One case per form of the construct, which reads best together.
   resolveAll(syntax: Library): void {
     this.pendingBoundChecks = [];
     for (const { cls, declaration } of this.classWork) {
@@ -1000,7 +1008,6 @@ export class Compiler extends MemberCompiler {
   }
 
   /** Compiles a global's initializer, which runs the first time the global is read. */
-  // code-gauge-allow duplicateLines 16 -- Global and late initializers use different receiver environments.
   private compileGlobalInitializer(
     global: GlobalVariable,
     initializer: Expression,
@@ -1143,7 +1150,6 @@ export class Compiler extends MemberCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Methods, accessors, and operators, static or not.
-  // code-gauge-allow functionNcss 33 -- Methods, accessors, and operators, static or not.
   private declareMethod(cls: ClassInfo, declaration: MethodDeclaration, owner: ClassInfo | ExtensionInfo = cls): void {
     const typeParams = this.withoutFunctionTypeAnnotations(() => this.declareTypeParams(declaration.typeParameters));
     const isExtension = !(owner instanceof ClassInfo);
@@ -1387,6 +1393,7 @@ export class Compiler extends MemberCompiler {
    * An extension type must redeclare a member it would inherit from several supertypes when an extension type declares
    * one of them, even with identical signatures.
    */
+  // code-gauge-allow functionCognitiveComplexity 18 -- Each supertype and each name it brings is checked against the extension types declaring it.
   private checkInheritedExtensionMembers(cls: ClassInfo, declaration: ClassDeclaration): void {
     const parents = cls.directSupertypes.map((type) => type.cls);
     const extensionParents = parents.filter((parent) => parent.kind === 'extensionType');
@@ -1600,7 +1607,6 @@ export class Compiler extends MemberCompiler {
 
   // Extensions
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Each branch is one of the cases Dart distinguishes for this construct.
   private declareExtension(ext: ExtensionInfo, declaration: ExtensionDeclaration): void {
     ext.typeParams.push(
       ...this.withoutFunctionTypeAnnotations(() => this.declareTypeParams(declaration.typeParameters))
@@ -1817,24 +1823,6 @@ export class Compiler extends MemberCompiler {
   }
 }
 
-export function topLevelFunctionClosure(runtime: Runtime, fn: TopLevelFunction): DartClosure {
-  const { tearOffs } = runtime;
-  const existing = tearOffs.get(fn);
-  if (existing) return existing;
-  const closure = new DartClosure(
-    coreTypes.function,
-    eraseFunctionType(fn.type),
-    (callingRuntime, _receiver, args, typeArgs, callRow) =>
-      (fn.impl as Callable)(callingRuntime, undefined, args, typeArgs, callRow),
-    undefined,
-    [],
-    { name: fn.name, origin: `Function '${fn.name}': static.` },
-    fn
-  );
-  tearOffs.set(fn, closure);
-  return closure;
-}
-
 function declarationRow(declaration: Declaration): number | undefined {
   switch (declaration.kind) {
     case 'class': {
@@ -1852,87 +1840,8 @@ function declarationRow(declaration: Declaration): number | undefined {
   }
 }
 
-/**
- * An `external` member of the program, which the SDK compiles but which has no body, so calling it throws the
- * NoSuchMethodError the VM throws.
- */
-function missingExternal(key: string, kind: 'method' | 'getter' | 'setter'): Callable {
-  const dot = key.indexOf('.');
-  const owner = dot === -1 ? undefined : key.slice(0, dot);
-  const name = key.slice(dot + 1);
-  return (runtime, _receiver, args, typeArgs) => runtime.throwMissingExternal(owner, name, kind, args, typeArgs);
-}
-
-/**
- * The fields of a new object: a nullable field without an initializer starts as null, and the others are unset until
- * their initializers run, which traces show by leaving them out.
- */
-function newFields(cls: ClassInfo): Value[] {
-  const fields: Value[] = Array.from({ length: cls.fieldCount }, () => UNINITIALIZED);
-  for (const current of cls.superclassChain()) {
-    for (const field of current.fields) {
-      if (!field.isLate && !field.hasInitializer && isNullable(field.type)) fields[field.slot] = undefined;
-    }
-  }
-  return fields;
-}
-
-/** Creates an object with a constructor: allocates it for a generative one, or lets a factory make it. */
-export function instantiateObject(
-  runtime: Runtime,
-  cls: ClassInfo,
-  constructor: ConstructorInfo,
-  typeArgs: readonly DartType[],
-  args: Arguments,
-  callRow: number | undefined
-): Value {
-  const impl = constructor.impl as ConstructorImpl;
-  if (constructor.kind !== 'generative') return impl(runtime, undefined, args, typeArgs, callRow);
-  runtime.allocate(cls.fieldCount + 1);
-  const object = new DartObject(cls, typeArgs, newFields(cls));
-  impl(runtime, object, args, typeArgs, callRow);
-  // An extension type's value is its representation, which its constructor stores in the object's only field.
-  if (cls.kind === 'extensionType') return object.fields[0];
-  return object;
-}
-
 function isPrimitiveConstant(compiled: Compiled): boolean {
-  const value = compiled.constValue?.value;
-  return compiled.isConst && (value === undefined || typeof value !== 'object');
-}
-
-/** Reads a global, initializing it on first use as Dart does for top-level variables and static fields. */
-export function readGlobalValue(runtime: Runtime, global: GlobalVariable): Value {
-  const cell = runtime.globals[global.slot];
-  if (cell.v !== UNINITIALIZED) return cell.v;
-  const { initialize, name } = global;
-  if (!initialize) runtime.throwError('LateError', '', [`Field '${name}' has not been initialized.`]);
-  return initializeField(
-    runtime,
-    name,
-    global.isFinal,
-    () => initialize(runtime),
-    () => cell.v,
-    (computed) => {
-      cell.v = computed;
-    }
-  );
-}
-
-/** Creates the cells of the globals for a run, with the values known before it starts. */
-export function initialGlobals(globals: GlobalVariable[]): Cell[] {
-  return globals.map(
-    (global) =>
-      new Cell(
-        global.initialValue && (global.isConst || !global.initialize || isPrimitive(global.initialValue.value))
-          ? global.initialValue.value
-          : UNINITIALIZED
-      )
-  );
-}
-
-function isPrimitive(value: Value): boolean {
-  return value === undefined || typeof value !== 'object';
+  return compiled.isConst && compiled.constValue !== undefined && isPrimitive(compiled.constValue.value);
 }
 
 export {
@@ -1945,43 +1854,3 @@ export {
   objectType,
   type TypeAlias,
 };
-
-function needsImplicitConstructor(cls: ClassInfo): boolean {
-  if (cls.constructors.size === 0) return true;
-  return (
-    cls.kind === 'enum' &&
-    !cls.constructors.has('') &&
-    [...cls.constructors.values()].every((constructor) => constructor.kind !== 'generative')
-  );
-}
-
-/** Records a class among the subclasses of the sealed classes it extends or implements, for exhaustiveness. */
-function registerSealedSubclass(cls: ClassInfo): void {
-  for (const supertype of cls.directSupertypes) {
-    const supercls = supertype.cls;
-    if (supercls.modifiers.isSealed && supercls.library === cls.library) supercls.subclasses.push(cls);
-  }
-  if (!cls.superclass?.cls.mixinOf) return;
-  let current: ClassInfo | undefined = cls.superclass.cls;
-  while (current?.mixinOf && !current.declaration) current = current.superclass?.cls;
-  if (current?.modifiers.isSealed && current.library === cls.library && !current.subclasses.includes(cls))
-    current.subclasses.push(cls);
-}
-
-/** The instance member names an extension type and its extension-type supertypes declare, by their lookup keys. */
-function extensionMemberNames(
-  cls: ClassInfo,
-  setter: boolean,
-  names = new Map<string, string>(),
-  visited = new Set<ClassInfo>()
-): Map<string, string> {
-  if (visited.has(cls)) return names;
-  visited.add(cls);
-  for (const [name, member] of setter ? cls.setters : cls.members) {
-    if (!member.isStatic) names.set(scopedMemberName(name, cls.library), name);
-  }
-  for (const type of cls.directSupertypes) {
-    if (type.cls.kind === 'extensionType') extensionMemberNames(type.cls, setter, names, visited);
-  }
-  return names;
-}

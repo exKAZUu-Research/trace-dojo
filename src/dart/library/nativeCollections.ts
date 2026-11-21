@@ -580,7 +580,6 @@ function copyListSlice(runtime: Runtime, source: DartList, start: number, end: n
   return new DartList(coreTypes.list, elementTypeOf(source), source.elements.slice(start, end), true);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Growable and fixed lists differ for iterable and list sources.
 // code-gauge-allow functionNcss 31 -- Each list kind needs a separate range-copy path.
 define('List.setRange', (runtime, receiver, [start, end, iterable, skip = 0n]) => {
   const target = list(receiver);

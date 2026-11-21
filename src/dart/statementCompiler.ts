@@ -456,7 +456,6 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 24 -- Bind a declaration, retain its constant or promotion, and emit its step.
-  // code-gauge-allow functionNcss 31 -- Keep declaration checks adjacent to flow and slot initialization.
   // code-gauge-allow functionNcss 32 -- Keep declarator evaluation order, flow, and trace steps together.
   protected compileLocalDeclaration(declaration: VariableDeclaration, recordStep = true): Exec {
     this.checkAnnotations(declaration.annotations);
@@ -616,7 +615,6 @@ export abstract class StatementCompiler extends PatternCompiler {
       this.checkAnnotations(parameter.annotations);
   }
 
-  // code-gauge-allow duplicateLines 18 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private compileLocalFunction(statement: Extract<Statement, { kind: 'localFunction' }>): Exec {
     const { declaration } = statement;
     this.checkAnnotations(declaration.annotations);
@@ -819,7 +817,6 @@ export abstract class StatementCompiler extends PatternCompiler {
     };
   }
 
-  // code-gauge-allow duplicateLines 15 -- The synchronous and yielding loops share flow analysis and differ in how the body resumes.
   private compileDo(statement: Extract<Statement, { kind: 'do' }>): Exec {
     const { labels, body, test } = this.compileDoPlan(statement, (body, labels) => this.compileLoopBody(body, labels));
     return (frame) => {

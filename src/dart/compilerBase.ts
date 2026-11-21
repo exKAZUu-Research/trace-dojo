@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 576 -- Declaration scopes, types, and record shapes share the compiler environment.
+// code-gauge-allow-file fileNcss 625 -- Declaration scopes, types, and record shapes share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   ClassDeclaration,
@@ -398,7 +398,6 @@ export abstract class CompilerBase {
     return syntax.nullable ? makeNullable(type) : type;
   }
 
-  // code-gauge-allow functionNcss 33 -- One case per form of the construct, which reads best together.
   private resolveNamedType(syntax: Extract<TypeSyntax, { kind: 'named' }>, options: TypeResolutionOptions): DartType {
     const { name, prefix } = syntax;
     this.checkTypeNameBinding(name, prefix, syntax);
