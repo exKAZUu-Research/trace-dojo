@@ -429,8 +429,9 @@ export class StatementChecker {
    */
   private loop(node: TreeNode, iterate: (target: JumpTarget) => State): void {
     const entry = this.c.flow.current;
+    let stateKey = this.stateKey(entry);
     // An enclosing loop's silent passes check this loop once each; the same entry state leaves it the same way.
-    const key = this.c.silent > 0 ? `${node.id}:${this.stateKey(entry)}` : undefined;
+    const key = this.c.silent > 0 ? `${node.id}:${stateKey}` : undefined;
     const known = key === undefined ? undefined : this.silentLoopExits.get(key);
     if (known) {
       this.c.flow.current = this.c.flow.merge(known);
@@ -441,7 +442,8 @@ export class StatementChecker {
     for (let pass = 1; ; pass++) {
       const { exits, backEdge } = this.c.silently(() => this.loopPass(state, iterate));
       const next = this.c.flow.merge([entry, backEdge]);
-      if (this.sameState(next, state)) {
+      const nextKey = this.stateKey(next);
+      if (nextKey === stateKey) {
         settled = exits;
         break;
       }
@@ -450,6 +452,7 @@ export class StatementChecker {
         break;
       }
       state = next;
+      stateKey = nextKey;
     }
     // Checking silently already, the pass that settled the loop is the one that would report errors.
     const exits = settled && this.c.silent > 0 ? settled : this.loopPass(state, iterate).exits;
@@ -470,23 +473,12 @@ export class StatementChecker {
     }
   }
 
-  /** A key that two states share when they hold the same types for the same references. */
   private stateKey(state: State): string {
     if (!state) return '-';
-    const entries = [...state.entries].map(
-      ([reference, entry]) => `${reference}=${entry.type.id}${entry.assigned ? '' : '?'}${entry.constraint?.id ?? ''}`
+    const entries = [...state.entries].map(([reference, { type, assigned, constraint, evolving }]) =>
+      JSON.stringify([reference, type.id, assigned, constraint?.id, evolving === true])
     );
-    return `${entries.toSorted().join(',')}|${[...state.assignedFields].toSorted().join(',')}|${state.superCalled}`;
-  }
-
-  private sameState(a: State, b: State): boolean {
-    if (!a || !b) return a === b;
-    if (a.superCalled !== b.superCalled || a.entries.size !== b.entries.size) return false;
-    for (const [key, entry] of a.entries) {
-      const other = b.entries.get(key);
-      if (!other || other.type.id !== entry.type.id || other.assigned !== entry.assigned) return false;
-    }
-    return true;
+    return JSON.stringify([entries.toSorted(), [...state.assignedFields].toSorted(), state.superCalled, state.dead]);
   }
 
   private whileStatement(node: TreeNode): void {
