@@ -54,8 +54,7 @@ function variablesOf(frame: Frame): TraceVariables {
   const shown = new Set<string>();
   let receiver: { stored: Value; type: Type } | undefined;
   for (const local of frame.info.locals) {
-    const sharedPlace = frame.referents.get(local.slot)?.place;
-    const stored = sharedPlace ? (sharedPlace.get() as Value | typeof UNASSIGNED) : frame.locals[local.slot];
+    const stored = storedValue(frame, local.slot);
     if (stored === UNASSIGNED) continue;
     const type = concreteType(local.type, frame.typeArgs);
     if (local.isSelf) {
@@ -77,6 +76,12 @@ function variablesOf(frame: Frame): TraceVariables {
   }
   if (receiver) addSelf(variables, receiver.stored, receiver.type);
   return variables;
+}
+
+/** What a variable shows: the current value of a shared reference's referent, else the slot's own value. */
+function storedValue(frame: Frame, slot: number): Value | typeof UNASSIGNED {
+  const referent = frame.referents.get(slot);
+  return referent && !referent.coerced ? (referent.place.get() as Value | typeof UNASSIGNED) : frame.locals[slot];
 }
 
 type Scalar = TraceItemVariable[string];

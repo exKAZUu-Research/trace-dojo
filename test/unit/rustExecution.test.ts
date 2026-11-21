@@ -8375,3 +8375,19 @@ fn make() -> Box<dyn Shape> { Box::new(S(Turtle::new(1, 1))) }`
   );
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'false\ntrue\n' });
 });
+
+test('a turtle whose owner a trait-object borrow outlived in scope disappears when the owner is dropped', () => {
+  const program = rustMain(
+    `
+    let observer = Turtle::new(1, 0);
+    let owner = S(Turtle::new(1, 1));
+    let shape: &dyn Shape = &owner;
+    println!("{} {}", observer.can_move_forward(), shape.check());
+    drop(owner);
+    println!("{}", observer.can_move_forward());`,
+    `trait Shape { fn check(&self) -> bool; }
+struct S(Turtle);
+impl Shape for S { fn check(&self) -> bool { self.0.can_move_forward() } }`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'false true\ntrue\n' });
+});

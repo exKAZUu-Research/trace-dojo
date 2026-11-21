@@ -56,9 +56,9 @@ export class Frame implements TracedFrame {
   /**
    * The places that variables holding shared references refer to, by slot, which the trace shows the current values
    * of: a shared reference holds a copy of its referent, which a change of the referent after the borrow ends leaves
-   * behind.
+   * behind. A reference coerced to a trait object (`coerced`) shows its own value, the trait object.
    */
-  readonly referents = new Map<number, { place: Place; root: number }>();
+  readonly referents = new Map<number, { place: Place; root: number; coerced?: boolean }>();
 
   /** Ends the scope of variables, which leave the trace with the references to them. */
   endScope(slots: readonly number[]): void {
