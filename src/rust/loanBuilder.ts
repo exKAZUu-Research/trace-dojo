@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 997 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
+// code-gauge-allow-file fileNcss 999 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
@@ -447,6 +447,8 @@ export class LoanBuilder {
     for (let index = place.proj.length - 1; index >= 0; index--) {
       if (place.proj[index] !== '*') continue;
       const base = layouts[index];
+      // A `Box` owns what it points to, so a borrow through it reborrows the references above it.
+      if (base.kind === 'adt' && base.def.builtin === 'Box') continue;
       if (base.kind !== 'ref' && base.kind !== 'opaque') break;
       this.outlives(base.region, region);
       if (base.kind === 'opaque' || !base.mutable) break;

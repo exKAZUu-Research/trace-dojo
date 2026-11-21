@@ -14,7 +14,7 @@ export type Layout =
   | { kind: 'tuple'; elems: Layout[] }
   | { kind: 'seq'; elem: Layout }
   /** A closure, a trait object, or a type parameter: borrows whose structure the type does not show. */
-  | { kind: 'opaque'; region: RVar; closure?: ClosureType; referenceObject?: boolean }
+  | { kind: 'opaque'; region: RVar; closure?: ClosureType; object?: true; referenceObject?: boolean }
   | { kind: 'none' };
 
 type AdtLayout = Extract<Layout, { kind: 'adt' }>;
@@ -52,6 +52,7 @@ export function layoutOf(type: Type | undefined, fresh: () => RVar, staticRegion
       return {
         kind: 'opaque',
         region: t.objectLifetime === 'static' ? staticRegion() : fresh(),
+        object: true,
         referenceObject: t.objectLifetime === 'reference',
       };
     }
@@ -71,7 +72,7 @@ export function layoutOf(type: Type | undefined, fresh: () => RVar, staticRegion
 function referencedObject(type: Type, region: RVar): Layout | undefined {
   const target = shallow(type);
   return target.kind === 'dyn' && target.objectLifetime === 'reference'
-    ? { kind: 'opaque', region, referenceObject: true }
+    ? { kind: 'opaque', region, object: true, referenceObject: true }
     : undefined;
 }
 
@@ -130,6 +131,10 @@ export function regionsOf(layout: Layout): RVar[] {
   }
 }
 
+function isObject(layout: Layout): layout is Extract<Layout, { kind: 'opaque' }> {
+  return layout.kind === 'opaque' && layout.object === true;
+}
+
 /** Records that `sup` outlives `sub`: the borrows of region `sup` stay valid wherever those of `sub` must. */
 export type Outlives = (sup: RVar, sub: RVar) => void;
 
@@ -146,6 +151,12 @@ export function relate(outlives: Outlives, sup: Layout, sub: Layout, invariant =
   };
   if (sup.kind === 'ref' && sub.kind === 'ref') {
     both(sup.region, sub.region);
+    if (!invariant && sub.mutable && isObject(sup.target) && isObject(sub.target)) {
+      // `&mut (dyn T + 'a)` coerces to `&mut (dyn T + 'b)` where `'a: 'b`, an unsizing that may shorten the object's
+      // lifetime even behind `&mut`; nested deeper, the object stays invariant.
+      outlives(sup.target.region, sub.target.region);
+      return;
+    }
     relate(outlives, sup.target, sub.target, invariant || sub.mutable);
     return;
   }

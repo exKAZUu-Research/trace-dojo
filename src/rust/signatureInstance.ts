@@ -121,7 +121,7 @@ export class SignatureInstance {
     this.bindOutputPart(fn.ret, result, false, elided, inputs.flatMap(regionsOf));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Applies the lifetime elision rules.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Applies the lifetime elision rules.
   private bindOutputPart(
     declared: Type,
     actual: Layout,
@@ -149,11 +149,34 @@ export class SignatureInstance {
       if (name === undefined) for (const a of inputRegions) edge(a, region);
       else edge(this.lifetime(name), region, fixed);
     }
+    if (this.bindReferenceObject(t, actual, invariant, elided, inputRegions)) return;
     const recurse = (type: Type, layout: Layout, inv: boolean): void =>
       this.bindOutputPart(type, layout, inv, elided, inputRegions);
     if ((t.kind === 'dyn' && t.lifetime) || forEachPart(t, actual, invariant, recurse)) return;
     // An `impl Trait` result: it may borrow from any input.
     for (const a of inputRegions) for (const b of regionsOf(actual)) edge(a, b);
+  }
+
+  /** `&'a dyn T` is `&'a (dyn T + 'a)`: the object's lifetime is the reference's. Returns whether `t` is one. */
+  private bindReferenceObject(
+    t: Type,
+    actual: Layout,
+    invariant: boolean,
+    elided: string | undefined,
+    inputRegions: RVar[]
+  ): boolean {
+    if (t.kind !== 'ref' || actual.kind !== 'ref' || !isReferenceObject(t.target) || actual.target.kind !== 'opaque') {
+      return false;
+    }
+    const { region } = actual.target;
+    const bind = (a: RVar): void => {
+      this.outlives(a, region);
+      if (invariant || t.mutable) this.outlives(region, a);
+    };
+    const name = t.lifetime && t.lifetime !== "'_" ? t.lifetime : elided;
+    if (name === undefined) for (const a of inputRegions) bind(a);
+    else bind(this.lifetime(name));
+    return true;
   }
 
   /** Relates what a closure parameter is called with and returns: as its own bound says when it has one. */
@@ -278,6 +301,11 @@ export function relateOpaqueCall(
  * The lifetimes a declared type names at its top level (a reference's, an ADT's) with the matching regions, and
  * whether the type is invariant in each.
  */
+function isReferenceObject(type: Type): boolean {
+  const target = shallow(type);
+  return target.kind === 'dyn' && target.objectLifetime === 'reference';
+}
+
 function ownRegions(t: Type, actual: Layout): [string | undefined, RVar, boolean][] {
   if (t.kind === 'ref' && actual.kind === 'ref') return [[t.lifetime, actual.region, false]];
   if (t.kind === 'dyn' && t.lifetime && actual.kind === 'opaque') return [[t.lifetime, actual.region, false]];

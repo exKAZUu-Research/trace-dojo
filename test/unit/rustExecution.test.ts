@@ -8397,3 +8397,19 @@ impl Shape for S { fn check(&self) -> bool { self.0.can_move_forward() } }`
     expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'false true\ntrue\n' });
   }
 );
+
+test('a boxed trait object reborrowed as a mutable trait object releases its owner after the last use', () => {
+  const program = rustMain(
+    `
+    let mut v: Vec<Box<dyn Shape>> = vec![Box::new(Sq(1.0))];
+    pick(&mut v).grow();
+    let first: &mut dyn Shape = v[0].as_mut();
+    first.grow();
+    println!("{}", v[0].area());`,
+    `trait Shape { fn area(&self) -> f64; fn grow(&mut self); }
+struct Sq(f64);
+impl Shape for Sq { fn area(&self) -> f64 { self.0 * self.0 } fn grow(&mut self) { self.0 += 1.0; } }
+fn pick(v: &mut Vec<Box<dyn Shape>>) -> &mut dyn Shape { &mut *v[0] }`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '9\n' });
+});
