@@ -1136,6 +1136,20 @@ fun main() {
     stdout: '2\n1\n',
   },
   {
+    name: 'upcasting a receiver preserves the original variable type',
+    source: `fun main() {
+    val builder = StringBuilder("abc")
+    val sequence = builder as CharSequence
+    builder.setCharAt(1, 'x')
+    println(sequence)
+    val text: String? = "abc"
+    val general = text as CharSequence
+    println(text.length)
+    println(general)
+}`,
+    stdout: 'axc\n3\nabc\n',
+  },
+  {
     name: 'a Nothing-returning infix call terminates while safe calls can be skipped',
     source: String.raw`infix fun Int.abort(reason: String): Nothing = error(reason)
 fun compute(): Int { 1 abort "stop" }

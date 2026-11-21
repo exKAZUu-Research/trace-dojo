@@ -712,7 +712,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const evaluate = convertRepr(operand.eval, operand.repr, 'ref');
     const resultType = expression.isSafe ? nullable(type) : type;
     const repr = reprOf(this.core, resultType);
-    if (operand.stableKey && !expression.isSafe) this.flow.narrowed.set(operand.stableKey, type);
+    if (operand.stableKey && !expression.isSafe)
+      this.flow.narrowed.set(operand.stableKey, typeAfterCast(operand.type, type));
     const cast: Eval = expression.isSafe
       ? (frame) => {
           const value = evaluate(frame);
@@ -725,6 +726,13 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         };
     return { type: resultType, repr, eval: convertRepr(cast, 'ref', repr) };
   }
+}
+
+function typeAfterCast(operand: KType, target: KType): KType {
+  const nonNullOperand = nonNull(operand);
+  const nonNullTarget = nonNull(target);
+  const narrowest = isSubtype(nonNullOperand, nonNullTarget) ? nonNullOperand : nonNullTarget;
+  return isNullable(operand) && isNullable(target) ? nullable(narrowest) : narrowest;
 }
 
 /**
