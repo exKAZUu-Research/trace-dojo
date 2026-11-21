@@ -22,6 +22,7 @@ import {
   type InterfaceType,
   interfaceType,
   isNullable,
+  isPotentiallyNullable,
   isSubtype,
   iterableElementOf,
   makeNullable,
@@ -158,9 +159,6 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     }
     const binary = ExpressionCompiler.COMPOUND_OPERATORS[operator];
     if (!binary) return this.error(span, `演算子 ${operator} は使えません。`);
-    if (isNullable(readType) && readType.kind !== 'dynamic') {
-      this.error(span, `${typeName(readType)} 型の値は null かもしれないので、${operator} を直接は使えません。`);
-    }
     const combined = this.compileBinaryWithLeft(current, binary, valueSyntax, span, writeType);
     const coerced = this.coerce(
       combined,
@@ -203,12 +201,6 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const target = this.assignableTarget(operand, false);
     const { readType } = target;
     if (!readType) return this.error(span, '増減演算には、値を読み取れる代入先が必要です。');
-    if (isNullable(readType) && readType.kind !== 'dynamic') {
-      this.error(
-        span,
-        `${typeName(readType)} 型の値は null かもしれないので、${operator}${operator} を直接は使えません。`
-      );
-    }
     const one: Expression = { ...at(span), kind: 'int', value: 1n, text: '1' };
     const current: Compiled = { type: readType, run: (frame) => frame.temporaries.at(-1), isConst: false };
     const combined = this.compileBinaryWithLeft(current, operator, one, span, undefined);
@@ -445,11 +437,12 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       if (getter) return this.error(span, `${name} は final か getter だけなので、代入できません。`);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメンバーがありません。`);
     }
-    if (!nullAware && isNullable(receiverType) && !this.acceptsNull(setter)) {
+    if (!this.canAccessTarget(receiverType, nullAware, setter)) {
       this.error(span, `${typeName(receiverType)} 型の値は null かもしれないので、${name} に直接は代入できません。`);
     }
     const getter = this.memberFor(receiver, lookupType, name, undefined);
-    const target = { writeType: setter.type, readType: getter?.type, prepare };
+    const readType = getter && this.canAccessTarget(receiverType, nullAware, getter) ? getter.type : undefined;
+    const target = { writeType: setter.type, readType, prepare };
     if (receiver.isSuper) {
       this.requireSuperImplementation(name, span, true);
       return { ...target, ...superAccessors(this.superclassOf(span).classAt, memberName, span.row) };
@@ -491,13 +484,16 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       setter = this.memberFor(receiver, lookupType, '[]=', span);
       if (!setter || setter.member.kind !== 'method')
         return this.error(span, `${typeName(nonNullable(receiverType))} 型には演算子 []= がありません。`);
-      if (!nullAware && isNullable(receiverType) && !this.acceptsNull(setter))
+      if (!this.canAccessTarget(receiverType, nullAware, setter))
         this.error(span, `${typeName(receiverType)} 型の値は null かもしれないので、[ ] に直接は代入できません。`);
       const signature = setter.type as FunctionType;
       indexContext = signature.positional[0];
       writeType = signature.positional[1] ?? DYNAMIC;
       getter = isPlainAssignment ? undefined : this.memberFor(receiver, lookupType, '[]', undefined);
-      const readSignature = getter?.member.kind === 'method' ? (getter.type as FunctionType) : undefined;
+      const readSignature =
+        getter?.member.kind === 'method' && this.canAccessTarget(receiverType, nullAware, getter)
+          ? (getter.type as FunctionType)
+          : undefined;
       readType = readSignature?.returnType;
       readContext = readSignature?.positional[0];
     }
@@ -523,6 +519,10 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         write(frame, object, [key, value]);
       },
     };
+  }
+
+  private canAccessTarget(receiverType: DartType, nullAware: boolean, member: ResolvedMember): boolean {
+    return nullAware || !isPotentiallyNullable(receiverType) || this.acceptsNull(member);
   }
 
   private prepareIndexKeys(
@@ -763,7 +763,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       element.value,
       contextType && element.nullAware ? makeNullable(contextType) : contextType
     );
-    if (!element.nullAware && isNullable(compiled.type) && compiled.type.kind !== 'dynamic') {
+    if (!element.nullAware && isPotentiallyNullable(compiled.type) && compiled.type.kind !== 'dynamic') {
       this.error(
         element,
         `${typeName(compiled.type)} 型の値は null かもしれないので、... では展開できません。...? を使ってください。`

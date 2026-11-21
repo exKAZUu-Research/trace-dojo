@@ -305,6 +305,10 @@ export class ClassInfo {
     return this.findInterfaceMember(name, setter, new Map());
   }
 
+  inheritedInterfaceMember(name: string, setter: boolean, onConflict?: () => void): Member | undefined {
+    return this.findInheritedInterfaceMember(name, setter, new Map(), onConflict);
+  }
+
   private findInterfaceMember(
     name: string,
     setter: boolean,
@@ -313,6 +317,15 @@ export class ClassInfo {
     if (visited.has(this)) return visited.get(this);
     const own = this.ownInstanceMember(name, setter);
     if (own) return own;
+    return this.findInheritedInterfaceMember(name, setter, visited);
+  }
+
+  private findInheritedInterfaceMember(
+    name: string,
+    setter: boolean,
+    visited: Map<ClassInfo, Member | undefined>,
+    onConflict?: () => void
+  ): Member | undefined {
     visited.set(this, undefined);
     const candidates = new Set<Member>();
     for (const supertype of this.directSupertypes) {
@@ -320,6 +333,7 @@ export class ClassInfo {
       if (found) candidates.add(found);
     }
     const resolved = this.combineInterfaceMembers([...candidates], setter);
+    if (!resolved && candidates.size > 0) onConflict?.();
     visited.set(this, resolved);
     return resolved;
   }

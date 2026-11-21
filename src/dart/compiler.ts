@@ -491,6 +491,10 @@ export class Compiler extends MemberCompiler {
     member: FieldDeclaration | MethodDeclaration,
     owner: ClassInfo | ExtensionInfo
   ): void {
+    if (!(owner instanceof ClassInfo) || owner.kind === 'extensionType') {
+      const declarations = member.kind === 'field' ? member.variables : [member];
+      for (const declaration of declarations) this.checkExtensionMemberName(declaration.name, declaration);
+    }
     this.withTypeParams(
       owner.typeParams,
       () => {
@@ -499,6 +503,11 @@ export class Compiler extends MemberCompiler {
       },
       member.isStatic
     );
+  }
+
+  private checkExtensionMemberName(name: string, span: Span): void {
+    if (coreTypes.object.members.has(name) || coreTypes.object.setters.has(name))
+      this.error(span, `拡張のメンバー ${name} は Object のメンバーと重複しています。`);
   }
 
   /** Copies a mixin's members into the applications that use it, once the mixin's own members are declared. */
@@ -651,6 +660,7 @@ export class Compiler extends MemberCompiler {
   // code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private declareRepresentation(cls: ClassInfo, declaration: ClassDeclaration): void {
     const name = cls.representationName as string;
+    this.checkExtensionMemberName(name, declaration);
     const type = cls.representationType as DartType;
     const getter: Member = {
       kind: 'getter',
@@ -811,11 +821,8 @@ export class Compiler extends MemberCompiler {
 
   /** A field without a type takes the type of the member it overrides, as Dart infers. */
   private inheritedFieldType(cls: ClassInfo, name: string): DartType | undefined {
-    for (const supertype of cls.directSupertypes) {
-      const resolved = this.interfaceMember(supertype, name, false);
-      if (resolved && resolved.member.kind !== 'method') return resolved.type;
-    }
-    return undefined;
+    const member = cls.inheritedInterfaceMember(this.runtimeMemberName(name), false);
+    return member && member.kind !== 'method' ? memberTypeIn(cls.thisType, member) : undefined;
   }
 
   /** The type of a field's or variable's initializer, compiled ahead of the body to infer the declaration's type. */

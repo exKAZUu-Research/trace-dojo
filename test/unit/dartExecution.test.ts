@@ -300,6 +300,55 @@ test('String.fromCharCodes batches large conversions and preserves supplementary
   ).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout: '[65538, A😀😀A]\n' });
 });
 
+test('generic throw operands must exclude null or be dynamic', () => {
+  for (const source of [
+    'Never fail<T>(T x) => throw x; void main() {}',
+    'Never fail<T extends num?>(T x) => throw x; void main() {}',
+    'void fail<T>(T x) { if (x is num?) throw x; } void main() {}',
+  ]) {
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = `void promoted<T>(T x) { if (x != null) throw x; }
+Never bounded<T extends Object>(T x) => throw x;
+Never lateBound(dynamic x) => throw x;
+void main() {
+  try { promoted(1); } catch (value) { print(value); }
+  try { bounded(2); } catch (value) { print(value); }
+  try { lateBound(3); } catch (value) { print(value); }
+}`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '1\n2\n3\n' });
+});
+
+test('member use and operators check the nullability of generic receivers', () => {
+  for (const source of [
+    'void f<T extends int?>(T x) { print(x.isEven); }',
+    'void f<T extends int?>(T x) { print(x.abs()); }',
+    'void f<T extends List<int>?>(T x) { x[0] = 1; }',
+    'class C { int a = 1; } void f<T extends C?>(T x) { x.a = 2; }',
+    'void f<T extends int?>(T x) { print(x + 1); }',
+    'void f<T extends int>(T? x) { print(x + 1); }',
+    'void f<T extends int>(T? x) { print(-x); }',
+  ]) {
+    expect(executeProgram('dart', `${source} void main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = `class Box {}
+extension NullBox on Box? { int operator +(int x) => x + 2; }
+extension NullInt on int? { bool get sign => this == null; }
+extension Generic<T> on T { bool get missing => this == null; }
+void read<T extends int?>(T x) {
+  print([x?.isEven, x.sign, x.runtimeType]);
+  if (x != null) print(x + 1);
+}
+void offset<T extends Box?>(T x) { print(x + 1); }
+void missing<T>(T x) { print(x.missing); }
+void main() { read<int?>(null); read(2); offset<Box?>(null); missing<int?>(null); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '[null, true, Null]\n[true, false, int]\n3\n3\ntrue\n',
+  });
+});
+
 test('equality flow promotes only the value the comparison tested', () => {
   for (const source of [
     'void main() { int? x = 1; if (x != (x = null)) print(x.isEven); }',
@@ -4344,6 +4393,73 @@ void main() {
     uncaughtException: undefined,
     stdout: '[1, 2.5, 5]\n6\n',
   });
+});
+
+test('omitted override types use the combined inherited signature', () => {
+  const program = `abstract class A<T> {
+  void f(T x);
+  num get x;
+  set value(int x);
+}
+abstract class B<T> {
+  void f(T x);
+  int get x;
+  set value(num x);
+}
+class C implements A<int>, B<num> {
+  void f(x) { print(x); }
+  get x => 1;
+  set value(x) { print(x); }
+}
+class D implements B<num>, A<int> {
+  void f(x) { print(x); }
+  var x = 2;
+  set value(x) { print(x); }
+}
+void main() {
+  final c = C();
+  c.f(1.5);
+  c.value = 2.5;
+  int a = c.x;
+  final d = D();
+  int b = d.x;
+  d.f(3.5);
+  print([a, b]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '1.5\n2.5\n3.5\n[1, 2]\n',
+  });
+  const ambiguous = `abstract class A { void f(int x); }
+abstract class B { void f(String x); }
+class C implements A, B { void f(x) { print(x); } }
+void main() { C().f(1); }`;
+  expect(executeProgram('dart', ambiguous)).toMatchObject({ kind: 'compileError' });
+  expect(executeProgram('dart', ambiguous.replace('void f(x)', 'void f(Object x)'))).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+  });
+});
+
+test('extensions reject conflicting Object member names and allow other names', () => {
+  for (const declaration of [
+    "extension E on int { String toString() => 'custom'; }",
+    'extension E on int { int get hashCode => 1; }',
+    'extension E on int { static int hashCode = 1; }',
+    'extension E on int { bool operator ==(Object x) => true; }',
+    'extension type E(int value) { set runtimeType(Type x) {} }',
+    "extension type E(int value) { static String toString() => 'custom'; }",
+    'extension type E(int hashCode) {}',
+  ]) {
+    const result = executeProgram('dart', `${declaration} void main() {}`);
+    expect(result.kind).toBe('compileError');
+    if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toContain('Object のメンバー');
+  }
+  const valid = `extension E on int { static int hash(Object? x) => 1; }
+extension type View(int i) { static int hash(Object? x) => 2; View.toString() : i = 1; }
+void main() { print([E.hash(null), View.hash(null), View.toString().i]); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 1]\n' });
 });
 
 test('unused constructor redirects reject cycles and abstract generative targets', () => {

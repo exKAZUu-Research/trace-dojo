@@ -400,7 +400,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected equalityOf(left: Compiled, right: Compiled, negated: boolean, span: Span): Compiled {
-    if (left.type.kind !== 'dynamic' && left.type.kind !== 'null' && !isNullable(left.type)) {
+    if (!isPotentiallyNullable(left.type)) {
       const equals = this.lookupMember(left.type, '==', false);
       if (equals?.member.kind === 'method') {
         const parameter = (equals.type as FunctionType).positional[0];
@@ -1299,7 +1299,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
         this.error(span, `${name} には getter がないので、値を読めません。`);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメンバーがありません。`);
     }
-    if (!nullAware && isNullable(receiverType) && !this.acceptsNull(resolved) && receiverType.kind !== 'null') {
+    if (
+      !nullAware &&
+      isPotentiallyNullable(receiverType) &&
+      !this.acceptsNull(resolved) &&
+      receiverType.kind !== 'null'
+    ) {
       this.error(
         span,
         `${typeName(receiverType)} 型の値は null かもしれないので、${name} を直接は使えません。?. を使うか、null でないことを確かめてください。`

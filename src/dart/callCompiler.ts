@@ -419,7 +419,12 @@ export abstract class CallCompiler extends OperatorCompiler {
       this.checkUnavailableIoMember(lookupType, name, span);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメソッドがありません。`);
     }
-    if (!nullAware && isNullable(receiverType) && !this.acceptsNull(resolved) && receiverType.kind !== 'null') {
+    if (
+      !nullAware &&
+      isPotentiallyNullable(receiverType) &&
+      !this.acceptsNull(resolved) &&
+      receiverType.kind !== 'null'
+    ) {
       const what = name === '[]' ? '添字 [ ]' : `${name}()`;
       this.error(
         span,

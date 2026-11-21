@@ -5,6 +5,7 @@ import {
   covariantSetter,
   type ForwardedArgumentBinder,
   type Member,
+  memberTypeIn,
   type MethodMember,
   scopedMemberName,
   type SetterMember,
@@ -125,18 +126,29 @@ export abstract class MemberCompiler extends MetadataCompiler {
     declaration: MethodDeclaration,
     typeParams: readonly TypeParam[]
   ): DartType | undefined {
-    for (const supertype of cls.directSupertypes) {
-      const resolved = this.interfaceMember(supertype, declaration.name, declaration.methodKind === 'setter');
-      if (!resolved) continue;
-      const { member, type } = resolved;
-      if (member.kind === 'method' && type.kind === 'function' && type.typeParams.length === typeParams.length)
-        return instantiateFunction(
-          type,
-          typeParams.map((parameter) => typeParamType(parameter))
+    const setter = declaration.methodKind === 'setter';
+    const member = cls.inheritedInterfaceMember(this.runtimeMemberName(declaration.name), setter, () => {
+      const parameters = declaration.parameters;
+      const firstUntyped = [...parameters.positional, ...parameters.named].find((parameter) => !parameter.type);
+      if (firstUntyped)
+        this.error(
+          firstUntyped,
+          `継承したメンバーの型が一致しないため、引数 ${firstUntyped.name} の型を推論できません。`
         );
-      return type;
-    }
-    return undefined;
+      if (!setter && declaration.name !== '[]=' && !declaration.returnType)
+        this.error(
+          declaration,
+          `継承したメンバーの型が一致しないため、${declaration.name} の戻り値の型を推論できません。`
+        );
+    });
+    if (!member) return undefined;
+    const type = memberTypeIn(cls.thisType, member);
+    if (member.kind === 'method' && type.kind === 'function' && type.typeParams.length === typeParams.length)
+      return instantiateFunction(
+        type,
+        typeParams.map((parameter) => typeParamType(parameter))
+      );
+    return type;
   }
 
   // code-gauge-allow duplicateLines 20 -- Method binding shares the function specification but has its own receiver and type environment.

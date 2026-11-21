@@ -20,7 +20,8 @@ import {
   type DartType,
   DYNAMIC,
   interfaceType,
-  isNullable,
+  isNonNullable,
+  isPotentiallyNullable,
   isSubtype,
   makeNullable,
   NEVER,
@@ -183,13 +184,17 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
 
   /** Calls an operator method of the left operand's class, checking the operand against its parameter. */
   protected compileOperatorCall(left: Compiled, operator: string, rightSyntax: Expression[], span: Span): Compiled {
-    if (isNullable(left.type) && left.type.kind !== 'dynamic') {
+    const resolved = this.lookupMember(left.type, operator, false, span);
+    if (
+      isPotentiallyNullable(left.type) &&
+      left.type.kind !== 'dynamic' &&
+      (!resolved || !this.acceptsNull(resolved))
+    ) {
       this.error(
         span,
         `${typeName(left.type)} 型の値は null かもしれないので、演算子 ${operator === 'unary-' ? '-' : operator} を直接は使えません。`
       );
     }
-    const resolved = this.lookupMember(left.type, operator, false, span);
     if (!resolved || resolved.member.kind !== 'method') {
       return this.error(
         span,
@@ -323,10 +328,10 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
 
   protected compileThrow(expression: Extract<Expression, { kind: 'throw' }>): Compiled {
     const value = this.compileExpression(expression.value);
-    if (isNullable(value.type) && value.type.kind !== 'dynamic') {
+    if (value.type.kind === 'void') this.error(expression, 'void の値は throw できません。');
+    if (!isNonNullable(value.type) && value.type.kind !== 'dynamic') {
       this.error(expression, `null かもしれない ${typeName(value.type)} 型の値は throw できません。`);
     }
-    if (value.type.kind === 'void') this.error(expression, 'void の値は throw できません。');
     const { run } = value;
     this.flow = this.flow.unreachable;
     return {

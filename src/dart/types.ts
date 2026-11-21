@@ -140,9 +140,7 @@ export function isNullable(type: DartType): boolean {
  * bound), which Dart calls potentially nullable.
  */
 export function isPotentiallyNullable(type: DartType): boolean {
-  if (isNullable(type)) return true;
-  if (type.kind === 'typeParam') return type.promoted ? false : isPotentiallyNullable(boundOf(type.param));
-  return false;
+  return !isNonNullable(type);
 }
 
 /** Whether the type excludes `null` for every instantiation. */
@@ -437,15 +435,15 @@ function typeParamSubtype(s: DartType, t: DartType): boolean | undefined {
   if (t.kind === 'typeParam' && t.nullable) {
     return isSubtype(s, { ...t, nullable: false }) || isSubtype(s, NULL);
   }
-  if (isNullable(t) && t.kind !== 'typeParam') {
-    return isSubtype(s, nonNullable(t));
-  }
   if (s.kind === 'typeParam') {
     if (t.kind === 'typeParam' && t.promoted && s.param === t.param) {
       return isSubtype(s.promoted ?? boundOf(s.param), t.promoted);
     }
     if (s.promoted) return isSubtype(s.promoted, t) || (t.kind === 'typeParam' && t.param === s.param);
     return isSubtype(boundOf(s.param), t);
+  }
+  if (isNullable(t) && t.kind !== 'typeParam') {
+    return isSubtype(s, nonNullable(t));
   }
   if (t.kind === 'typeParam') {
     if (t.promoted) return isSubtype(s, typeParamType(t.param)) && isSubtype(s, t.promoted);
@@ -858,7 +856,7 @@ export function functionType(
 
 /** Whether the type is `int`, `double`, or `num`, without `?`. */
 export function numericClassOf(type: DartType): 'int' | 'double' | 'num' | undefined {
-  const base = type.kind === 'typeParam' ? (type.promoted ?? boundOf(type.param)) : type;
+  const base = resolveBound(type);
   if (base.kind !== 'interface' || base.nullable) return undefined;
   if (base.cls === coreTypes.int) return 'int';
   if (base.cls === coreTypes.double) return 'double';

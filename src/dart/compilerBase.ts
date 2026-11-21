@@ -20,6 +20,7 @@ import {
   interfaceType,
   isFunctionLike,
   isNullable,
+  isPotentiallyNullable,
   isSubtype,
   isTop,
   makeNullable,
@@ -499,9 +500,12 @@ export abstract class CompilerBase {
     if (isNullable(base)) {
       const objectMember = this.interfaceMember(objectType(), name, setter);
       if (objectMember) return objectMember;
+      const extension = this.lookupExtension(receiverType, name, setter, span);
+      if (extension) return extension;
+      const nonNull = base.kind === 'interface' ? { ...base, nullable: false } : base;
+      return this.lookupDirect(nonNull, name, setter);
     }
-    const nonNull = base.kind === 'interface' && base.nullable ? { ...base, nullable: false } : base;
-    const direct = this.lookupDirect(nonNull, name, setter);
+    const direct = this.lookupDirect(base, name, setter);
     if (direct) return direct;
     return this.lookupExtension(receiverType, name, setter, span);
   }
@@ -590,7 +594,7 @@ export abstract class CompilerBase {
   acceptsNull(resolved: ResolvedMember): boolean {
     if (resolved.member.owner === coreTypes.object) return true;
     const onType = resolved.extension?.onType;
-    return onType !== undefined && isNullable(onType);
+    return onType !== undefined && isPotentiallyNullable(onType);
   }
 
   /** The extension member that applies to a receiver of a type, choosing the most specific extension. */
