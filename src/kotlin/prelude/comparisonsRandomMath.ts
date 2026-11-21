@@ -68,6 +68,16 @@ fun <T : Comparable<T>> maxOf(a: T, b: T): T = if (a >= b) a else b
 fun <T : Comparable<T>> minOf(a: T, b: T): T = if (a <= b) a else b
 fun <T : Comparable<T>> maxOf(a: T, b: T, c: T): T = maxOf(a, maxOf(b, c))
 fun <T : Comparable<T>> minOf(a: T, b: T, c: T): T = minOf(a, minOf(b, c))
+fun <T : Comparable<T>> maxOf(a: T, vararg other: T): T {
+    var result = a
+    for (element in other) result = maxOf(result, element)
+    return result
+}
+fun <T : Comparable<T>> minOf(a: T, vararg other: T): T {
+    var result = a
+    for (element in other) result = minOf(result, element)
+    return result
+}
 fun <T> maxOf(a: T, b: T, comparator: Comparator<in T>): T = if (comparator.compare(a, b) >= 0) a else b
 fun <T> minOf(a: T, b: T, comparator: Comparator<in T>): T = if (comparator.compare(a, b) <= 0) a else b
 fun <T> maxOf(a: T, b: T, c: T, comparator: Comparator<in T>): T = maxOf(a, maxOf(b, c, comparator), comparator)

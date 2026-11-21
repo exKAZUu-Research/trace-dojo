@@ -259,6 +259,15 @@ fun main() {
     stdout: 'string\nany 4\nstring a\naa\nab\nab\nhello\ntop 3\nlocal 2\nlocal true\naa\nmember 5\ntop 3\n',
   },
   {
+    name: 'comparable extrema accept any number of operands',
+    source: `fun main() {
+    println(maxOf("b", "a", "d", "c"))
+    println(minOf("b", "a", "d", "c"))
+    println(maxOf("alone"))
+}`,
+    stdout: 'd\na\nalone\n',
+  },
+  {
     name: 'comparisons invoke user code for identical operands and reject empty selector lists',
     source: `class Score : Comparable<Score> {
     override fun compareTo(other: Score): Int {
