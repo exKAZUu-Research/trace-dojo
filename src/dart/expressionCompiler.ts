@@ -1039,7 +1039,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (cls) {
       const own = cls.members.get(name) ?? cls.setters.get(name);
       if (own && !own.isStatic) {
-        const resolved = this.lookupMember(cls.thisType, name, cls.members.get(name) === undefined);
+        // A setter declared here does not hide a getter the class inherits.
+        const resolved = this.lookupMember(cls.thisType, name, false) ?? this.lookupMember(cls.thisType, name, true);
         if (resolved) return { kind: 'thisMember', resolved, name };
       }
       const staticMember = cls.staticMembers.get(name) ?? cls.staticSetters.get(name);
@@ -1106,6 +1107,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
       case 'thisMember':
       case 'extensionMember': {
         this.requireThis(expression, name);
+        // A name the enclosing class or extension declares only as a setter cannot be read.
+        if (resolution.resolved.member.kind === 'setter')
+          return this.error(expression, `${name} には getter がないので、値を読めません。`);
         const receiver =
           resolution.kind === 'extensionMember' ? resolution.receiver(expression) : this.thisReceiver(expression);
         const compiled = this.readMember(receiver, resolution.resolved, name, expression, false);

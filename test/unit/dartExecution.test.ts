@@ -2184,6 +2184,21 @@ test('Dart comparison operators are not associative', () => {
   ).toMatchObject({ kind: 'executed', stdout: '[true, true, 1, true]\n' });
 });
 
+test('Dart rejects reading a name declared only as a setter', () => {
+  for (const program of [
+    'extension E on int { set x(int n) {} void f() { print(x); } } void main() { E(0).f(); }',
+    'class C { int x = 5; } extension E on C { set x(int n) {} void f() { print(x); } } void main() { E(C()).f(); }',
+    'class C { set x(int n) {} void f() { print(x); } } void main() { C().f(); }',
+  ]) {
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = `class A { int get x => 1; }
+class B extends A { set x(int n) { print('set $n'); } void f() { print(x); x = 2; } }
+extension E on int { set y(int n) { print('y $n'); } void g() { y = 3; } }
+void main() { B().f(); E(0).g(); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '1\nset 2\ny 3\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
