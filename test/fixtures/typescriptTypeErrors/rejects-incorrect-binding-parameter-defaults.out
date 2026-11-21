@@ -1,0 +1,13 @@
+(3,6): error TS2322: Type 'number' is not assignable to type 'boolean | undefined'.
+(7,6): error TS2322: Type 'number' is not assignable to type 'string'.
+(8,5): error TS2345: Argument of type '[string, string]' is not assignable to parameter of type '[(string | undefined)?]'.
+(10,26): error TS7031: Binding element 'missing' implicitly has an 'any' type.
+(12,36): error TS2339: Property 'member' does not exist on type '{}'.
+(15,13): error TS2741: Property 'nested' is missing in type '{}' but required in type '{ nested: { member?: number | undefined; }; }'.
+(16,24): error TS7031: Binding element 'rest' implicitly has an 'any' type.
+(19,30): error TS7031: Binding element 'b' implicitly has an 'any' type.
+(20,43): error TS2322: Type 'undefined' is not assignable to type 'number'.
+(21,65): error TS2322: Type 'number' is not assignable to type 'string'.
+(23,3): error TS7022: 'a' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+(26,23): error TS7022: 'x' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+(26,27): error TS2372: Parameter 'x' cannot reference itself.

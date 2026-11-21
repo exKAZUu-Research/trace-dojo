@@ -1,0 +1,26 @@
+function one({flag = true}) { const b: boolean = flag; console.log(b); }
+one({});
+one({flag: 1});
+function two([key = 'x']) { const b: string = key; console.log(b); }
+two([]);
+two(['y']);
+two([1]);
+two(['y','extra']);
+function mixed([first = 1, second]: any) { console.log(first, second); }
+function missing({a = 1, missing}) { let n: number = a; console.log(n, missing); }
+function nestedOuter({ nested: { member } = { member: 1 } }) {const check: number = member;}
+function nestedMissing({ nested: { member } = {} }) {console.log(member);}
+function nestedInner({ nested: { member = 1 } }) {const check: number = member;}
+nestedInner({nested:{}});
+nestedInner({});
+function rest([a=1, ...rest]) { console.log(a, rest); }
+function objectRest({a=1, ...rest}) { console.log(a, rest); }
+function annotatedAny({a = 1}: any) {const control: string = a; }
+function optionalTuple([a=1, b]) { console.log(a,b); }
+function capture({x = undefined}) { const impossible: number = x; }
+function nestedDefault({nested: {member} = {member:1}}) { const invalid: string = member; }
+function siblingCycle({
+  a = 1,
+  b = a
+}) { console.log(a, b); }
+function directCycle({x = x}) { console.log(x); }

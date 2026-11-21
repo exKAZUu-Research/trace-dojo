@@ -1,0 +1,34 @@
+function object({flag = true, text = 'text'}) {
+  const bool: boolean = flag;
+  const stringValue: string = text;
+  console.log(bool, stringValue);
+}
+object({});
+object({flag: false, text: 'other'});
+function tuple([value = 2]) {
+  const numberValue: number = value;
+  console.log(numberValue);
+}
+tuple([]);
+tuple([5]);
+function nested({outer: {key = 3}, inherited: {numberValue} = {numberValue: 4}}) {
+  const a: number = key;
+  const b: number = numberValue;
+  console.log(a, b);
+}
+nested({outer: {}});
+function extra({x = 1, ...rest}) { console.log(x, rest.other); }
+extra({other: 6});
+function empty([]) { console.log('empty'); }
+empty('iterable');
+function onlyRest([...args]) { console.log(args.length); }
+onlyRest([1, 2]);
+function restTuple(...[value = 7]) { console.log(value); }
+restTuple();
+restTuple(8);
+const computed = Symbol();
+function withComputed({[computed]: value = 9}) { console.log(value); }
+withComputed({});
+withComputed({[computed]: 10});
+const contextual: (p: {a?: number; b?: number}) => number = ({a = 11, b = a}) => b;
+console.log(contextual({}));

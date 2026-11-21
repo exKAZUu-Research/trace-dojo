@@ -21,7 +21,6 @@ import {
   isImmediatelyInvoked,
   named,
   numberValue,
-  patternIdentifiers,
   stringValue,
   templateFragmentText,
 } from './syntax';
@@ -321,21 +320,19 @@ export class ExpressionChecker {
 
   /** The type of a parameter that has neither an annotation nor a contextual type: an implicit `any`. */
   implicitParameterType(parameter: TreeNode, pattern: TreeNode, rest: boolean): Type {
-    if (!this.c.isLibrary(parameter)) {
-      if (pattern.type === 'identifier') {
-        this.c.error(parameter, `引数 ${pattern.text} の型が暗黙に any になります。型を書いてください。`);
-      } else if (rest) {
-        const name = named(pattern)[0]?.text ?? '';
-        this.c.error(parameter, `残余引数 ${name} の型が暗黙に any[] になります。型を書いてください。`);
-      } else {
-        for (const identifier of patternIdentifiers(pattern))
-          this.c.error(
-            identifier,
-            `分割代入の要素 ${identifier.text} の型が暗黙に any になります。型を書いてください。`
-          );
-      }
+    if (pattern.type === 'identifier') {
+      this.c.error(parameter, `引数 ${pattern.text} の型が暗黙に any になります。型を書いてください。`);
+      return anyType;
     }
-    return rest ? this.c.arrayType(anyType) : anyType;
+    const binding = rest ? (named(pattern)[0] ?? pattern) : pattern;
+    if (rest && binding.type === 'identifier') {
+      const name = binding.text;
+      this.c.error(parameter, `残余引数 ${name} の型が暗黙に any[] になります。型を書いてください。`);
+      return this.c.arrayType(anyType);
+    }
+    return this.c.patterns.inferredParameterType(parameter, binding, (identifier) => {
+      this.c.error(identifier, `分割代入の要素 ${identifier.text} の型が暗黙に any になります。型を書いてください。`);
+    });
   }
 
   typeOfQuery(node: TreeNode): Type {
@@ -371,8 +368,10 @@ export class ExpressionChecker {
   }
 
   private variableReferenceType(node: TreeNode, symbol: Sym, contextual?: Type, typeQuery = false): Type {
-    if (symbol.valueKind === 'parameter')
+    if (symbol.valueKind === 'parameter') {
       this.c.signatures.checkReadOfInferringParameter(symbol.valueDeclaration, symbol.name);
+      this.c.patterns.checkParameterDefaultRead(node, symbol);
+    }
     const declared = this.valueTypeOf(symbol);
     const key = `s${symbol.id}`;
     this.c.flow.declaredTypes.set(key, declared);

@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { functionLikeTypes } from './binder';
+import { defaultedTarget, impliedPatternType, inferredPatternParameterType } from './bindingPatternTypes';
 import type { Checker } from './checker';
 import { isDefinitelyFalsy, isSpreadableProperty, spreadCopy } from './literals';
-import { arrayPatternElements, named, numberValue, propertyNameText } from './syntax';
+import type { Sym } from './scopes';
+import { arrayPatternElements, isImmediatelyInvoked, named, numberValue, propertyNameText } from './syntax';
 import { tupleElementReadType, tupleSliceReadType } from './tupleIndexes';
 import {
   anonymousObject,
@@ -21,15 +24,15 @@ import {
   type ObjectType,
   propertyAccessType,
   regularOf,
-  simpleProperty,
   stringType,
-  type TupleElement,
   type Type,
   typeMembers,
   undefinedType,
   unionOf,
   type UnionType,
 } from './types';
+
+export { defaultedTarget } from './bindingPatternTypes';
 
 interface BindingOptions {
   annotated?: boolean;
@@ -43,6 +46,7 @@ type Bind = (identifier: TreeNode, type: Type, assigned?: Type) => void;
 export class BindingPatterns {
   readonly correlatedSources = new Map<number, Type>();
   private readonly selectedKeys = new Map<number, string[] | undefined>();
+  private readonly inferredParameters = new Set<number>();
   constructor(private readonly c: Checker) {}
 
   /** The type a binding pattern gives the name `name` when it destructures a value of `type`. */
@@ -177,18 +181,32 @@ export class BindingPatterns {
    * takes as its contextual type. `leafType` gives the type of an element that is not a pattern, with or without default.
    */
   impliedType(pattern: TreeNode, leafType = (element: TreeNode) => this.bindingLeafType(element)): Type | undefined {
-    switch (pattern.type) {
-      case 'object':
-      case 'object_pattern': {
-        return this.impliedObjectType(pattern, leafType);
-      }
-      case 'array':
-      case 'array_pattern': {
-        return this.impliedTupleType(pattern, leafType);
-      }
-      default: {
-        return undefined;
-      }
+    return impliedPatternType(this.c, pattern, leafType);
+  }
+
+  inferredParameterType(parameter: TreeNode, pattern: TreeNode, implicitAny: (element: TreeNode) => void): Type {
+    if (this.c.silent === 0) this.inferredParameters.add(parameter.id);
+    return inferredPatternParameterType(this.c, pattern, implicitAny);
+  }
+
+  checkParameterDefaultRead(reference: TreeNode, symbol: Sym): void {
+    const parameter = symbol.valueDeclaration;
+    if (!parameter || !this.inferredParameters.has(parameter.id) || reference.startIndex >= parameter.endIndex) return;
+    let child = reference;
+    for (let parent = reference.parent; parent && parent.id !== parameter.id; child = parent, parent = parent.parent) {
+      if (
+        parent.startIndex < parameter.startIndex ||
+        (functionLikeTypes.has(parent.type) && !isImmediatelyInvoked(parent))
+      )
+        return;
+      if (!defaultedTarget(parent) || parent.childForFieldName('right')?.id !== child.id) continue;
+      const declaration = symbol.valueEntries[0]?.name;
+      if (declaration)
+        this.c.error(
+          declaration,
+          `変数 ${symbol.name} は型注釈がなく、初期値で参照されるため、型が暗黙に any になります。`
+        );
+      return;
     }
   }
 
@@ -218,46 +236,6 @@ export class BindingPatterns {
           tuple.readonly
         )
       : value;
-  }
-
-  private impliedObjectType(pattern: TreeNode, leafType: (element: TreeNode) => Type): Type {
-    const structure = emptyStructure();
-    for (const element of named(pattern)) {
-      const isPair = element.type === 'pair' || element.type === 'pair_pattern';
-      const value = isPair ? (element.childForFieldName('value') as TreeNode) : element;
-      const name = isPair
-        ? propertyNameText(element.childForFieldName('key') as TreeNode)
-        : (defaultedTarget(element) ?? element).text;
-      // A rest element or a computed key takes properties the pattern does not name, which an initializer may have.
-      if (name === undefined || element.type === 'spread_element' || element.type === 'rest_pattern') {
-        structure.stringIndex = { type: anyType, readonly: false };
-        continue;
-      }
-      structure.properties.set(
-        name,
-        simpleProperty(name, this.impliedElementType(value, leafType), { optional: !!defaultedTarget(value) })
-      );
-    }
-    return anonymousObject(() => structure);
-  }
-
-  private impliedTupleType(pattern: TreeNode, leafType: (element: TreeNode) => Type): Type {
-    const elements: TupleElement[] = [];
-    for (const { element, index } of arrayPatternElements(pattern)) {
-      while (elements.length < index) elements.push({ type: anyType, optional: false, rest: false });
-      if (element.type === 'spread_element' || element.type === 'rest_pattern') {
-        const rest = this.impliedElementType(named(element)[0], leafType);
-        const isArray = rest.kind === 'object' && this.c.isArrayOrTuple(rest);
-        elements.push({ type: isArray ? rest : this.c.arrayType(anyType), optional: false, rest: true });
-        break;
-      }
-      elements.push({ type: this.impliedElementType(element, leafType), optional: false, rest: false });
-    }
-    return this.c.tupleType(elements);
-  }
-
-  private impliedElementType(element: TreeNode, leafType: (element: TreeNode) => Type): Type {
-    return this.impliedType(defaultedTarget(element) ?? element, leafType) ?? leafType(element);
   }
 
   private bindingLeafType(element: TreeNode, isConst = false): Type {
@@ -614,13 +592,6 @@ export class BindingPatterns {
     const bound = this.c.apparentType(type);
     return bound.kind === 'union' || (bound.kind === 'object' && this.c.isArrayOrTuple(bound)) ? bound : undefined;
   }
-}
-
-/** The target of an element with a default, as `a` in `a = 1`. */
-export function defaultedTarget(element: TreeNode): TreeNode | undefined {
-  return ['assignment_expression', 'assignment_pattern', 'object_assignment_pattern'].includes(element.type)
-    ? (element.childForFieldName('left') ?? undefined)
-    : undefined;
 }
 
 function isTuple(type: Type): type is ObjectType {
