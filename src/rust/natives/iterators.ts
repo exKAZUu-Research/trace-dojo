@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 984 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 989 -- One native per method of the standard library.
 import { inPlaceCapacity, reserveVec, setVecCapacity, sizeTable, type TableMap, vecCapacity } from '../capacity';
 import type { DebugPart } from '../debugText';
 import { floatNumber } from '../floatBits';
@@ -83,7 +83,12 @@ export function arrayIter(
   if (!storageType || canReachTurtle(storageType)) iter.borrowedRoots.push(array);
   iter.rest = () => Array.from({ length: Math.max(back - front, 0) }, (_, offset) => map(front + offset));
   iter.frontIndex = () => front;
-  iter.fork = () => arrayIter(array, front, back, map, storageType);
+  iter.fork = () => {
+    const copy = arrayIter(array, front, back, map, storageType);
+    // A copy keeps alive what the original does, such as the collection a lazy range reads.
+    for (const root of iter.borrowedRoots) if (!copy.borrowedRoots.includes(root)) copy.borrowedRoots.push(root);
+    return copy;
+  };
   return iter;
 }
 

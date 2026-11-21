@@ -8673,22 +8673,25 @@ test('successor queries through BTreeSet ranges read only the entries they take'
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '1999000\n' });
 });
 
-test('a range over a temporary map keeps its turtles on the board through the loop', () => {
-  const program = rustMain(
-    `
+test.each(['', '.clone()'])(
+  'a range%s over a temporary map keeps its turtles on the board through the loop',
+  (adapter) => {
+    const program = rustMain(
+      `
     let mut observer = Turtle::new(0, 0);
     observer.turn_right();
-    for (key, _turtle) in make().range(..) {
+    for (key, _turtle) in make().range(..)${adapter} {
         println!("{} {}", key, observer.can_move_forward());
     }
     println!("{}", observer.can_move_forward());`,
-    `use std::collections::BTreeMap;
+      `use std::collections::BTreeMap;
 fn make() -> BTreeMap<i32, Turtle> {
     let mut m = BTreeMap::new();
     m.insert(1, Turtle::new(1, 0));
     m.insert(2, Turtle::new(5, 5));
     m
 }`
-  );
-  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '1 false\n2 false\ntrue\n' });
-});
+    );
+    expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '1 false\n2 false\ntrue\n' });
+  }
+);
