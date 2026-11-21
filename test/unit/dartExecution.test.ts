@@ -1982,6 +1982,10 @@ test('Dart assignment expressions keep a dynamic value type', () => {
   print([y.isEven, w.isEven, x.runtimeType]);
 }`;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[false, false, int]\n' });
+  const operators = `class A { dynamic operator +(int n) => B(); }
+class B extends A { int get extra => 3; }
+void main() { A a = A(); var y = a += 1; A b = A(); var z = ++b; print([y.extra, z.extra]); }`;
+  expect(executeProgram('dart', operators)).toMatchObject({ kind: 'executed', stdout: '[3, 3]\n' });
   expect(executeProgram('dart', 'void main() { dynamic d = 1; num x = 0; x = d; x.isEven; }')).toMatchObject({
     kind: 'compileError',
   });
@@ -2080,6 +2084,24 @@ test('Dart static members cannot share a name with inherited instance members', 
 class B extends A { void f() { print('B.f'); } static int c = 1; }
 void main() { B().f(); print(B.c); }`;
   expect(executeProgram('dart', allowed)).toMatchObject({ kind: 'executed', stdout: 'B.f\n1\n' });
+});
+
+test('Dart constants stay constant through implicit casts checked before main', () => {
+  const program = `const dynamic value = 1;
+const int top = value;
+void f([int x = value]) { print(x); }
+void main() {
+  const xs = <int>[value];
+  const m = <String, int>{'a': value};
+  f();
+  print([xs, m, top]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '1\n[[1], {a: 1}, 1]\n' });
+  for (const main of ["print('before'); const xs = <int>[value];", "print('before'); const int x = value;"]) {
+    expect(executeProgram('dart', `const dynamic value = 'a';\nvoid main() { ${main} }`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
 });
 
 test('equality checks covariant parameters before handling null', () => {

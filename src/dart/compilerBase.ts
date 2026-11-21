@@ -842,7 +842,8 @@ export abstract class CompilerBase {
     if (instantiated) return instantiated;
     if (compiled.type.kind === 'dynamic') {
       if (isTop(target)) return compiled;
-      return { ...compiled, type: target, run: this.runtimeCast(compiled.run, target, false), isConst: false };
+      // A constant stays constant; the evaluation of constants before main performs its cast.
+      return { ...compiled, type: target, run: this.runtimeCast(compiled.run, target, false), constValue: undefined };
     }
     const tearOff = this.implicitCallTearOff(compiled, target, span);
     if (tearOff) return tearOff;
