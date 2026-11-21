@@ -3050,6 +3050,26 @@ fun main() {
       'empty\nfalse\nempty\ntrue\nempty\nfalse\nempty\ntrue\nempty\ntrue\nempty\n0\nempty\ntrue\nempty\nfalse\nempty\nentries\ntrue\nempty\nentries\nfalse\nempty\nentries\nfalse\nempty\nentries\n1\n',
   },
   {
+    name: 'map toList selects its result from the actual entry iterator',
+    source: `class ConversionMap(private val data: Map<Int, Int>, private val reportedSize: Int) : Map<Int, Int> by data {
+    override val size: Int get() { println("size"); return reportedSize }
+    override val entries: Set<Map.Entry<Int, Int>>
+        get() { println("entries"); return data.entries }
+}
+fun main() {
+    println(ConversionMap(emptyMap(), 0).toList())
+    println(ConversionMap(emptyMap(), 1).toList())
+    val fixed = ConversionMap(mutableMapOf(1 to 2), 2).toList() as MutableList<Pair<Int, Int>>
+    try { fixed.add(3 to 4) } catch (error: UnsupportedOperationException) { println("fixed") }
+    println(fixed)
+    val copied = ConversionMap(mapOf(1 to 2, 3 to 4), 2).toList() as MutableList<Pair<Int, Int>>
+    copied.add(5 to 6)
+    println(copied)
+}`,
+    stdout:
+      'size\n[]\nsize\nentries\n[]\nsize\nentries\nfixed\n[(1, 2)]\nsize\nentries\nsize\n[(1, 2), (3, 4), (5, 6)]\n',
+  },
+  {
     name: 'character sequence conversions use Kotlin length-based paths',
     source: `class CharProbe(private val value: String) : CharSequence by value {
     override val length: Int get() { println("length"); return value.length }

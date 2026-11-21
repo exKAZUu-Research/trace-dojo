@@ -1652,8 +1652,15 @@ ${forwardingSelectorExtrema('Map<out K, V>', 'Map.Entry<K, V>', 'entries', 'K, V
 
 fun <K, V> Map<out K, V>.toList(): List<Pair<K, V>> {
     if (size == 0) return emptyList()
+    val iterator = entries.iterator()
+    if (!iterator.hasNext()) return emptyList()
+    val first = iterator.next()
+    if (!iterator.hasNext()) return listOf(first.toPair())
     val result = ArrayList<Pair<K, V>>(size)
-    for (entry in this) result.add(Pair(entry.key, entry.value))
+    result.add(first.toPair())
+    do {
+        result.add(iterator.next().toPair())
+    } while (iterator.hasNext())
     return result
 }
 
