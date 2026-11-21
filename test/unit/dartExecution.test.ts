@@ -7276,6 +7276,45 @@ void main() {
   });
 });
 
+test('record switch coverage keeps field correlations across arms', () => {
+  for (const { width, nested } of [
+    { width: 9, nested: false },
+    { width: 10, nested: false },
+    { width: 10, nested: true },
+  ]) {
+    const fields = Array.from({ length: width }, (_, index) => index);
+    const record = (values: readonly string[], lastField: string): string => {
+      const tuple = `(${values.join(', ')})`;
+      return nested ? `(${tuple}, ${lastField})` : tuple;
+    };
+    const type = record(
+      fields.map(() => 'bool'),
+      'bool'
+    );
+    const allTrue = fields.map(() => 'true');
+    const allFalse = fields.map(() => 'false');
+    const arms = fields.map((firstFalse) => {
+      const pattern = fields.map((field) => (field < firstFalse ? 'true' : field === firstFalse ? 'false' : '_'));
+      return `${record(pattern, '_')} => ${firstFalse}`;
+    });
+    const fallback = `${record(allTrue, '_')} => ${width}`;
+    const program = (
+      cases: string[]
+    ): string => `int firstFalse(${type} value) => switch (value) { ${cases.join(', ')} };
+void main() {
+  print(firstFalse(${record(allTrue, 'false')}));
+  print(firstFalse(${record(allFalse, 'false')}));
+}`;
+    for (const cases of [
+      [...arms, fallback],
+      [fallback, ...arms.toReversed()],
+    ]) {
+      expect(executeProgram('dart', program(cases))).toMatchObject({ kind: 'executed', stdout: `${width}\n0\n` });
+    }
+    expect(executeProgram('dart', program(arms))).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('constructor formals and tear-offs use inferred field types', () => {
   const declarations = `class Parent {
   var value = Later().value;

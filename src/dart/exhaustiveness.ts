@@ -37,7 +37,14 @@ type Space =
   | { kind: 'constant'; key: boolean | FieldMember; type: DartType; text: string; subject?: DartType }
   | { kind: 'null' }
   | { kind: 'type'; type: DartType; properties?: ReadonlyMap<string, Space> }
-  | { kind: 'record'; fields: Space[]; names: (string | undefined)[]; type: DartType };
+  | RecordSpace;
+
+interface RecordSpace {
+  kind: 'record';
+  fields: Space[];
+  names: (string | undefined)[];
+  type: DartType;
+}
 
 type Coverage = boolean | ((frame: Frame) => boolean);
 
@@ -60,7 +67,7 @@ export function checkExhaustive(
   const cutoff = Math.min(MAX_SPACES - 1, listLengthCutoff(patterns));
   const depth = Math.max(0, ...patterns.map(listNesting));
   const coverage = new ObjectSpaces(compiler, cutoff, depth);
-  const spaces = coverage.refine(expand(type, cutoff, depth), patterns);
+  const spaces = coverage.refineForCoverage(expand(type, cutoff, depth), patterns);
   const pending: { space: Space; test: (frame: Frame) => boolean }[] = [];
   const mustCover = !isStatement || isAlwaysExhaustive(type);
   const reportMissing = (space: Space): never =>
@@ -109,7 +116,70 @@ class ObjectSpaces {
     private readonly listDepth: number
   ) {}
 
-  refine(spaces: Space[], patterns: Pattern[]): Space[] {
+  refineForCoverage(spaces: Space[], patterns: Pattern[]): Space[] {
+    const refined = this.refine(spaces, patterns);
+    const uncovered: Space[] = [];
+    for (const space of refined) {
+      const parts = space.kind === 'record' ? this.uncoveredRecords(space, patterns) : [space];
+      if (uncovered.length + parts.length > MAX_SPACES) return refined;
+      uncovered.push(...parts);
+    }
+    return uncovered;
+  }
+
+  // Subtract whole arms as we partition so one constrained field can leave the other fields symbolic.
+  private uncoveredRecords(root: RecordSpace, patterns: Pattern[]): RecordSpace[] {
+    let remaining = [root];
+    let expansionBudget = MAX_SPACES * 4;
+    for (const pattern of patterns) {
+      const candidates = remaining;
+      const parts = patternAlternatives(pattern);
+      remaining = [];
+      for (let candidate = candidates.pop(); candidate; candidate = candidates.pop()) {
+        if (covers(this.compiler, pattern, candidate) === true) continue;
+        const partitions = this.splitRecord(candidate, parts);
+        if (!partitions) {
+          remaining.push(candidate);
+          continue;
+        }
+        expansionBudget -= partitions.length;
+        if (expansionBudget < 0 || remaining.length + candidates.length + partitions.length > MAX_SPACES) return [root];
+        candidates.push(...partitions);
+      }
+      if (remaining.length === 0) break;
+    }
+    return remaining;
+  }
+
+  private splitRecord(space: RecordSpace, parts: readonly Pattern[]): RecordSpace[] | undefined {
+    for (const part of parts) {
+      if (part.kind !== 'record') continue;
+      const fields = recordFieldPatterns(part, space);
+      if (!fields || fields.some((pattern, index) => this.excludesFixedField(pattern, space.fields[index]))) continue;
+      for (const [index, pattern] of fields.entries()) {
+        const field = space.fields[index];
+        if (covers(this.compiler, pattern, field) === true) continue;
+        if ((field.kind === 'type' && field.properties) || (field.kind === 'list' && field.elements)) continue;
+        const options =
+          field.kind === 'record'
+            ? this.splitRecord(field, patternAlternatives(pattern))
+            : this.fieldOptions(field, [pattern]);
+        if (options && options.length > 1) {
+          return options.map((value) => ({ ...space, fields: space.fields.with(index, value) }));
+        }
+      }
+    }
+    return undefined;
+  }
+
+  private excludesFixedField(pattern: Pattern, field: Space): boolean {
+    if (field.kind === 'constant' || field.kind === 'null') return covers(this.compiler, pattern, field) === false;
+    if (field.kind !== 'record' || pattern.kind !== 'record') return false;
+    const fields = recordFieldPatterns(pattern, field);
+    return !fields || fields.some((child, index) => this.excludesFixedField(child, field.fields[index]));
+  }
+
+  private refine(spaces: Space[], patterns: Pattern[]): Space[] {
     if (patterns.length === 0) return spaces;
     const parts = patterns.flatMap(patternAlternatives);
     const result: Space[] = [];
@@ -145,16 +215,19 @@ class ObjectSpaces {
   private refineFields(fields: readonly Space[], patternsAt: (index: number) => Pattern[]): Space[][] | undefined {
     let products: Space[][] = [[]];
     for (const [index, field] of fields.entries()) {
-      const patterns = patternsAt(index);
-      const spaces =
-        field.kind === 'type' && patterns.some((pattern) => !coversAll(this.compiler, pattern, field.type))
-          ? expand(field.type, this.listCutoff, this.listDepth)
-          : [field];
-      const options = this.refine(spaces, patterns);
+      const options = this.fieldOptions(field, patternsAt(index));
       if (products.length * options.length > MAX_SPACES) return undefined;
       products = products.flatMap((product) => options.map((option) => [...product, option]));
     }
     return products;
+  }
+
+  private fieldOptions(field: Space, patterns: Pattern[]): Space[] {
+    const spaces =
+      field.kind === 'type' && patterns.some((pattern) => !coversAll(this.compiler, pattern, field.type))
+        ? expand(field.type, this.listCutoff, this.listDepth)
+        : [field];
+    return this.refine(spaces, patterns);
   }
 
   private propertyPatterns(type: DartType, parts: Pattern[]): Map<string, { type: DartType; patterns: Pattern[] }> {
@@ -668,19 +741,10 @@ function recordCovers(
   space: Space
 ): Coverage {
   if (space.kind === 'record') {
-    const positional = pattern.fields.filter((field) => field.name === undefined);
-    const named = pattern.fields.filter((field) => field.name !== undefined);
-    const positionalCount = space.names.filter((name) => name === undefined).length;
-    if (positional.length !== positionalCount || named.length !== space.names.length - positionalCount) return false;
-    return combineCoverage(
-      space.fields.entries(),
-      ([index, fieldSpace]) => {
-        const name = space.names[index];
-        const field = name === undefined ? positional[index] : named.find((other) => other.name === name);
-        return field !== undefined && covers(compiler, field.pattern, fieldSpace);
-      },
-      true
-    );
+    const fields = recordFieldPatterns(pattern, space);
+    return fields
+      ? combineCoverage(fields.entries(), ([index, field]) => covers(compiler, field, space.fields[index]), true)
+      : false;
   }
   if (space.kind !== 'type') return false;
   const base = resolveBound(space.type);
@@ -688,4 +752,18 @@ function recordCovers(
     base.kind === 'record' &&
     recordFieldsCover(pattern, base, (fieldPattern, fieldType) => coversAll(compiler, fieldPattern, fieldType))
   );
+}
+
+function recordFieldPatterns(pattern: Extract<Pattern, { kind: 'record' }>, space: RecordSpace): Pattern[] | undefined {
+  const positional = pattern.fields.filter((field) => field.name === undefined);
+  const named = pattern.fields.filter((field) => field.name !== undefined);
+  const positionalCount = space.names.filter((name) => name === undefined).length;
+  if (positional.length !== positionalCount || named.length !== space.names.length - positionalCount) return undefined;
+  const fields: Pattern[] = [];
+  for (const [index, name] of space.names.entries()) {
+    const field = name === undefined ? positional[index] : named.find((other) => other.name === name);
+    if (!field) return undefined;
+    fields.push(field.pattern);
+  }
+  return fields;
 }
