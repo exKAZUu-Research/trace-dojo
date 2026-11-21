@@ -6044,6 +6044,23 @@ void main() { print(const D().inSeconds); }`;
   expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '1\n' });
 });
 
+test('static method calls respect the declaring library through aliases', () => {
+  for (const source of [
+    "void main() { print(Error._safeToString('hello')); }",
+    "typedef Alias = Error; void main() { print(Alias._safeToString('hello')); }",
+    'void main() { print(Object._smear(1)); }',
+  ]) {
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+  const source = `class C { static C _make() => C(); }
+typedef Alias = C;
+void main() {
+  C value = ._make();
+  print([value.runtimeType, Alias._make().runtimeType, Error.safeToString('hello')]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[C, C, "hello"]\n' });
+});
+
 test('generic result contexts combine covariant and contravariant positions', () => {
   const source = `Map<T, T> makeMap<T>() => {};
 (List<T>, Set<T>) makePair<T>() => (<T>[], <T>{});

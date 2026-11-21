@@ -554,6 +554,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       const value = this.readStatic(member, span);
       return this.compileValueCall(value, args, typeArguments, span, context);
     }
+    this.checkUnavailableStaticMember(member.owner, member.name, span);
     const bound = this.bindArguments(member.type, args, typeArguments, span, context);
     const row = this.callRow(span);
     const method = member;
