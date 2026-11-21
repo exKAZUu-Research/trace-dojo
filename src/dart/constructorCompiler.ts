@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 435 -- Constructor types, initializer ordering, and delegation share the same declarations.
+// code-gauge-allow-file fileNcss 439 -- Constructor types, initializer ordering, and delegation share the same declarations.
 import { AssignmentCompiler } from './assignmentCompiler';
 import type {
   Arguments as ArgumentsSyntax,
@@ -59,6 +59,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     this.constructorRedirects.clear();
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Validate declaration names and class modifiers before registering the signature.
   protected declareConstructor(cls: ClassInfo, declaration: ConstructorDeclaration): void {
     if (declaration.name === '\0primaryBody') return;
     if (declaration.className !== undefined && declaration.className !== cls.name) {
@@ -70,6 +71,8 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     if (name && (cls.staticMembers.has(name) || cls.members.has(name)))
       this.error(declaration, `${name} という名前は、既に宣言されています。`);
     if (cls.kind === 'mixin') this.error(declaration, 'mixin にはコンストラクタを書けません。');
+    if (cls.kind === 'mixinClass' && declaration.constructorKind === 'generative' && !isTrivialConstructor(declaration))
+      this.error(declaration, 'mixin class の生成コンストラクタには、引数、初期化子、本体を書けません。');
     // An enum's generative constructors are constant whether or not they say so.
     const isConst = declaration.isConst || (cls.kind === 'enum' && declaration.constructorKind === 'generative');
     const nativeKey = `${cls.name}.${name || 'new'}`;
@@ -877,6 +880,10 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
           member.initializers.some((initializer) => initializer.kind === 'field' && initializer.name === name))
     );
   }
+}
+
+function isTrivialConstructor({ body, initializers, parameters }: ConstructorDeclaration): boolean {
+  return !body && initializers.length === 0 && parameters.positional.length === 0 && parameters.named.length === 0;
 }
 
 function isFieldParameter(parameter: FormalParameter): boolean {

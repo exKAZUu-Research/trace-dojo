@@ -6991,6 +6991,23 @@ void main() { print([C().update(2), C().read()]); }
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[2, 5]\n' });
 });
 
+test('mixin classes allow trivial and factory constructors', () => {
+  const program = `mixin class M {
+  M.named();
+  factory M() => M.named();
+  int get value => 2;
+}
+class C with M {}
+void main() { print([M().value, M.named().value, C().value]); }
+`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[2, 2, 2]\n' });
+  for (const constructor of ['M() {}', 'M([int x = 0]);', 'int x; M(this.x);', 'M() : super();']) {
+    expect(executeProgram('dart', `mixin class M { ${constructor} } void main() {}`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+});
+
 test('mixin class superclasses resolve to Object through aliases', () => {
   const source = `typedef Root = Object;
 mixin class First extends Object {}
