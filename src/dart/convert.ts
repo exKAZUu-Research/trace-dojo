@@ -790,14 +790,18 @@ export class Converter extends ExpressionConverter {
         node
       )
     );
-    return names.flatMap((identifier) => {
+    const annotations = namedOf(node)
+      .filter((child) => child.type === 'annotation')
+      .map((child) => this.convertAnnotation(child));
+    return names.flatMap((identifier, index) => {
       const base = {
         kind: 'function' as const,
         name: identifier.text,
         isExternal: true,
         typeParameters: [],
         body: undefined,
-        annotations: [],
+        // The declaration's metadata is checked once, so only the first name's accessors carry it.
+        annotations: index === 0 ? annotations : [],
         headerEndRow: span.row,
         ...span,
       };

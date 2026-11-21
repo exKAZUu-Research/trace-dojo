@@ -1268,6 +1268,16 @@ test('Dart Unicode regular expressions match assertions inside surrogate pairs a
   });
 });
 
+test.each([
+  ["@missing external int x, y;\nvoid main() { print('hello'); }", 0],
+  ["class A { const A(int v); }\n@A('s') external final int x;\nvoid main() { print('hello'); }", 1],
+])('Dart checks the metadata of external top-level variables: %s', (program, row) => {
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row })],
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
