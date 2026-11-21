@@ -137,6 +137,24 @@ fun main() {
   });
 });
 
+test('reads Kotlin progression endpoints within the execution budget', () => {
+  const source = `fun main() {
+    val ascending = 1L..1000000L
+    val descending = 2000000L downTo 0L step 3L
+    val chars = 'z' downTo 'a' step 4
+    println(ascending.lastOrNull())
+    println(descending.lastOrNull())
+    println(chars.firstOrNull())
+    println(chars.lastOrNull())
+    println((4L..1L).firstOrNull())
+    println(('z'..'a').lastOrNull())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1000000\n2\nz\nb\nnull\nnull\n',
+  });
+});
+
 test.each(['Token.values()', 'enumValues<Token>()'])('charges repeated %s array copies to the Kotlin heap', (call) => {
   const names = Array.from({ length: 200 }, (_, index) => `TOKEN${index}`).join(', ');
   const source = `enum class Token { ${names} }

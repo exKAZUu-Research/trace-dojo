@@ -297,8 +297,12 @@ fun IntProgression.firstOrNull(): Int? = if (isEmpty()) null else first
 fun IntProgression.lastOrNull(): Int? = if (isEmpty()) null else last
 fun LongProgression.first(): Long = if (isEmpty()) throw NoSuchElementException("Progression $this is empty.") else first
 fun LongProgression.last(): Long = if (isEmpty()) throw NoSuchElementException("Progression $this is empty.") else last
+fun LongProgression.firstOrNull(): Long? = if (isEmpty()) null else first
+fun LongProgression.lastOrNull(): Long? = if (isEmpty()) null else last
 fun CharProgression.first(): Char = if (isEmpty()) throw NoSuchElementException("Progression $this is empty.") else first
 fun CharProgression.last(): Char = if (isEmpty()) throw NoSuchElementException("Progression $this is empty.") else last
+fun CharProgression.firstOrNull(): Char? = if (isEmpty()) null else first
+fun CharProgression.lastOrNull(): Char? = if (isEmpty()) null else last
 
 fun IntProgression.reversed(): IntProgression = IntProgression.fromClosedRange(last, first, -step)
 fun LongProgression.reversed(): LongProgression = LongProgression.fromClosedRange(last, first, -step)
