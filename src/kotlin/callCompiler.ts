@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 716 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 732 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   type ArgumentEvaluation,
@@ -6,6 +6,7 @@ import {
   argumentTypeHints,
   expectedArgumentType,
   firstAttempts,
+  laterSiblingArguments,
 } from './argumentTypes';
 import type { Expression, LambdaExpression } from './ast';
 import {
@@ -22,6 +23,7 @@ import { CompilerCore } from './compilerCore';
 import { callFunction, parameterReprs, receiverRepr, returnRepr } from './dispatch';
 import { mostSpecificReceivers, type ReceiverSpecificity } from './extensionResolution';
 import { literalFits } from './literals';
+import { siblingResultType } from './resultInference';
 import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
 import {
@@ -427,17 +429,44 @@ export abstract class CallCompiler extends CompilerCore {
         compiledArgs.push(undefined);
         continue;
       }
-      const expectedType =
-        expectedArgumentType(viable, compiledArgs, index, argument.value, isOverloaded && viable.length > 1) ??
+      const expectedType = expectedArgumentType(
+        viable,
+        compiledArgs,
+        index,
+        argument.value,
+        isOverloaded && viable.length > 1
+      );
+      const sibling =
+        isBareCallExpression(argument.value) && (!expectedType || hasOpenVariables(expectedType))
+          ? this.inferSiblingArgument(scope, context, args, laterSiblingArguments(viable, index))
+          : undefined;
+      const expected =
+        sibling ??
+        expectedType ??
         (containsBareCall(argument.value)
           ? this.checkBareArgumentHints(scope, context, argument.value, argumentTypeHints(viable, index))
           : undefined);
-      const compiled = this.compileExpression(scope, context, argument.value, expectedType);
+      const compiled = this.compileExpression(scope, context, argument.value, expected);
       compiledArgs.push(compiled);
       if (!argument.isSpread && !compiled.integerLiteral)
         viable = viable.filter((attempt) => this.constrainArgumentHint(attempt, index, compiled));
     }
     return compiledArgs;
+  }
+
+  private inferSiblingArgument(
+    scope: Scope,
+    context: FunctionContext,
+    args: ArgumentSyntax[],
+    siblings: number[]
+  ): KType | undefined {
+    const types = siblings.flatMap((index) => {
+      const argument = args[index];
+      if (argument.isSpread || containsBareCall(argument.value) || isLambdaArgument(argument.value)) return [];
+      const type = this.probeResultType(context, (probe) => this.compileExpression(scope, probe, argument.value));
+      return type ? [type] : [];
+    });
+    return siblingResultType(types, undefined);
   }
 
   private constrainFromLambdaParameters(scope: Scope, attempt: Attempt, args: ArgumentSyntax[]): void {
@@ -1192,6 +1221,17 @@ export abstract class CallCompiler extends CompilerCore {
       }
     }
     return this.error(row, `${name} に、この引数で呼び出せるものがありません。`);
+  }
+
+  protected probeResultType(
+    context: FunctionContext,
+    compile: (probe: FunctionContext) => Compiled
+  ): KType | undefined {
+    let inferred: KType | undefined;
+    this.probeApplicability(context, (probe) => {
+      inferred = compile(probe).type;
+    });
+    return inferred;
   }
 
   protected probeApplicability(

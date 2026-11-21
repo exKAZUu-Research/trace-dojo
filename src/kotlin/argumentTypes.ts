@@ -25,8 +25,8 @@ export function firstAttempts<C, A>(levels: C[][], start: (candidate: C) => A | 
 
 /**
  * The type an argument is compiled against: that of the parameter which takes it in every attempt, when they agree on
- * it. A call without arguments, such as `emptyList()`, takes instead the type of an earlier argument of the same
- * vararg, as `listOf(listOf(1), emptyList())` gives it.
+ * it. A call without arguments, such as `emptyList()`, can use an earlier argument of the same vararg when the
+ * parameter does not determine its type.
  */
 export function expectedArgumentType(
   attempts: ArgumentAttempt[],
@@ -45,6 +45,22 @@ export function expectedArgumentType(
     .map((other) => compiledArgs[other])
     .findLast((compiled) => compiled !== undefined);
   return (sibling && branchHint(sibling.type, undefined, true)) ?? agreed;
+}
+
+export function laterSiblingArguments(attempts: ArgumentAttempt[], index: number): number[] {
+  const related = attempts.flatMap(({ candidate, mapping, substitution }) => {
+    const position = mapping.findIndex((indexes) => indexes.includes(index));
+    if (position === -1) return [];
+    const type = resolved(substitute(candidate.symbol.params[position].type, substitution));
+    return mapping.flatMap((indexes, other) => {
+      if (position === other) return indexes;
+      const sibling = resolved(substitute(candidate.symbol.params[other].type, substitution));
+      return type.kind === 'variable' && sibling.kind === 'variable' && type.variable === sibling.variable
+        ? indexes
+        : [];
+    });
+  });
+  return [...new Set(related)].filter((other) => other > index);
 }
 
 /**

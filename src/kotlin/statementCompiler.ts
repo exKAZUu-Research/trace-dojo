@@ -29,6 +29,7 @@ import {
   Scope,
   typeMismatchMessage,
 } from './compilerBase';
+import { discardResult, ifEval, tryEval, whenEval } from './controlEvaluation';
 import { getPropertyValue, receiverRepr, setPropertyValue } from './dispatch';
 import { type BoundPlace, type Place } from './expressionCompiler';
 import { caseOf, keyOf } from './flowKeys';
@@ -36,10 +37,11 @@ import { assignedNames, localRefinement, refineLocalType, remainingWrites } from
 import { valueEquals } from './format';
 import { isExclusion, OperatorCompiler } from './operatorCompiler';
 import { NUMBER_OPERATOR_NAMES } from './operators';
-import { type Frame, KotlinThrow, LoopSignal, UNASSIGNED } from './runtime';
+import { needsSiblingHint, siblingResultType } from './resultInference';
+import { type Frame, LoopSignal, UNASSIGNED } from './runtime';
 import { type ClassSymbol, PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
 import { instanceTest } from './typeChecks';
-import { branchHint, commonSupertype, isSubtype } from './typeRelations';
+import { commonSupertype, isSubtype } from './typeRelations';
 import { type ClassType, isNonNullClass, type KType, nonNull, resolved, substitute, typeToString } from './types';
 import { Boxed, Cell, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
 import { WhenCoverage } from './whenCoverage';
@@ -1129,7 +1131,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
 
   // Control structures as expressions.
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity 26 -- condition, branch flow, and result conversion are read together.
   protected compileIf(
     scope: Scope,
     context: FunctionContext,
@@ -1143,23 +1145,16 @@ export abstract class StatementCompiler extends OperatorCompiler {
       this.error(row, 'if を式として使うときは、else も書いてください。');
     const condition = this.compileCondition(scope, context, expression.condition);
     const before = this.flow.copy();
-    this.applyNarrowing(condition.whenTrue);
-    const thenCompiled = this.compileBlockValue(scope, context, expression.thenBranch, expected, branchUse);
-    const afterThen = this.flow;
-    this.flow = this.withNarrowing(before, condition.whenFalse);
-    const { elseBranch } = expression;
-    const elseCompiled = elseBranch
-      ? this.compileBlockValue(
-          scope,
-          context,
-          elseBranch,
-          laterBranchExpected(thenCompiled, elseBranch, expected, branchUse),
-          branchUse
-        )
-      : undefined;
-    const afterElse = this.flow;
-    this.flow = Flow.merge([afterThen, afterElse]);
-    const branches = elseCompiled ? [thenCompiled, elseCompiled] : [thenCompiled];
+    const { thenBranch, elseBranch } = expression;
+    const thenFlow = this.withNarrowing(before, condition.whenTrue);
+    const elseFlow = this.withNarrowing(before, condition.whenFalse);
+    const entries = [{ body: thenBranch, flow: thenFlow }];
+    if (elseBranch) entries.push({ body: elseBranch, flow: elseFlow });
+    const compiled = this.compileResultBranches(scope, context, entries, expected, branchUse);
+    const branches = compiled.map(({ value }) => value);
+    const flows = compiled.map(({ flow }) => flow);
+    if (!elseBranch) flows.push(elseFlow);
+    this.flow = Flow.merge(flows);
     const inferredUnit = use === 'inferUnit' && (branchUse === true || branches.some((branch) => branch.inferredUnit));
     const asStatement = branchUse === true || inferredUnit;
     const type = asStatement ? this.unitType : this.branchType(branches, expected);
@@ -1169,19 +1164,54 @@ export abstract class StatementCompiler extends OperatorCompiler {
         ? discardResult(branch.eval)
         : convertRepr(this.convertTo(branch, type, row), reprOf(this.core, type), repr)
     );
-    const test = condition.compiled.eval;
-    if (asStatement && this.isConstantTrue(condition.compiled)) this.flow.isDead = afterThen.isDead;
+    if (asStatement && this.isConstantTrue(condition.compiled)) this.flow.isDead = flows[0].isDead;
     return {
       type,
       repr,
       inferredUnit: inferredUnit || undefined,
-      eval: elseEval
-        ? (frame) => ((test(frame) as boolean) ? thenEval(frame) : elseEval(frame))
-        : (frame) => {
-            if (test(frame) as boolean) thenEval(frame);
-            return UNIT;
-          },
+      eval: ifEval(condition.compiled.eval, thenEval, elseEval),
     };
+  }
+
+  private compileResultBranches(
+    scope: Scope,
+    context: FunctionContext,
+    branches: { body: Block; flow: Flow }[],
+    expected: KType | undefined,
+    use: ExpressionUse
+  ): { value: Compiled; flow: Flow }[] {
+    const hint = this.inferBranchType(
+      context,
+      branches.map(({ body }) => body),
+      expected,
+      use,
+      (index, probe) => {
+        const { body, flow } = branches[index];
+        this.flow = flow.copy();
+        return this.compileBlockValue(scope, probe, body, undefined, use);
+      }
+    );
+    return branches.map(({ body, flow }) => {
+      this.flow = flow;
+      const value = this.compileBlockValue(scope, context, body, typeForBranch(body, expected, hint), use);
+      return { value, flow: this.flow };
+    });
+  }
+
+  private inferBranchType(
+    context: FunctionContext,
+    blocks: Block[],
+    expected: KType | undefined,
+    use: ExpressionUse,
+    compile: (index: number, probe: FunctionContext) => Compiled
+  ): KType | undefined {
+    if (use === true || !needsSiblingHint(expected) || !blocks.some(isBareCall)) return undefined;
+    const types = blocks.flatMap((block, index) => {
+      if (isBareCall(block)) return [];
+      const type = this.probeResultType(context, (probe) => compile(index, probe));
+      return type ? [type] : [];
+    });
+    return siblingResultType(types, expected);
   }
 
   private isConstantTrue(compiled: Compiled): boolean {
@@ -1222,20 +1252,28 @@ export abstract class StatementCompiler extends OperatorCompiler {
       stableKey: subject.stableKey,
     };
     const before = this.flow.copy();
-    const branchFlows: Flow[] = [];
-    const entries: { tests: ((frame: Frame) => boolean)[]; body: Compiled }[] = [];
     const covered = new WhenCoverage();
     let hasElse = false;
-    for (const entry of expression.entries) {
+    const heads = expression.entries.map((entry) => {
       if (hasElse) this.error(entry.row, 'else は、when の最後に書いてください。');
       hasElse = entry.conditions.length === 0;
-      entries.push(this.compileWhenEntry(scope, context, subjectValue, entry, covered, expected, use, branchFlows));
-    }
+      return this.compileWhenEntryHead(scope, context, subjectValue, entry, covered);
+    });
+    const afterHeads = this.flow;
+    const branches = this.compileResultBranches(
+      scope,
+      context,
+      expression.entries.map((entry, index) => ({ body: entry.body, flow: heads[index].flow })),
+      expected,
+      use
+    );
+    const entries = heads.map(({ tests }, index) => ({ tests, body: branches[index].value }));
+    const branchFlows = branches.map(({ flow }) => flow);
     const isExhaustive = hasElse || (subject !== undefined && this.coversSubject(subject, covered.cases, before));
     const inferredUnit = use === 'inferUnit' && (!isExhaustive || entries.some((entry) => entry.body.inferredUnit));
     const asStatement = use === true || inferredUnit;
     this.checkWhenExhaustive(subject, isExhaustive, asStatement, row);
-    if (!isExhaustive) branchFlows.push(this.flow);
+    if (!isExhaustive) branchFlows.push(afterHeads);
     this.flow = branchFlows.length > 0 ? Flow.merge(branchFlows) : before;
     const bodies = entries.map((entry) => entry.body);
     const type = asStatement || bodies.length === 0 ? this.unitType : this.branchType(bodies, expected);
@@ -1254,27 +1292,14 @@ export abstract class StatementCompiler extends OperatorCompiler {
     };
   }
 
-  /**
-   * One branch of a `when`: its conditions, with the smart casts that hold in its body and after it, and its body,
-   * whose flow joins `branchFlows`.
-   */
-  // code-gauge-allow functionParameterCount 8 -- the scope, the function context, and the parts of the when are each needed, and bundling them would only rename them.
-  private compileWhenEntry(
+  private compileWhenEntryHead(
     scope: Scope,
     context: FunctionContext,
     subject: Compiled | undefined,
     entry: Extract<Expression, { kind: 'when' }>['entries'][number],
-    covered: WhenCoverage,
-    expected: KType | undefined,
-    use: ExpressionUse,
-    branchFlows: Flow[]
-  ): { tests: ((frame: Frame) => boolean)[]; body: Compiled } {
-    if (entry.conditions.length === 0) {
-      const body = this.compileBlockValue(scope, context, entry.body, expected, use);
-      branchFlows.push(this.flow);
-      this.flow = this.flow.copy();
-      return { tests: [], body };
-    }
+    covered: WhenCoverage
+  ): { tests: ((frame: Frame) => boolean)[]; flow: Flow } {
+    if (entry.conditions.length === 0) return { tests: [], flow: this.flow.copy() };
     const tests: ((frame: Frame) => boolean)[] = [];
     let whenTrue = new Map<string, KType>();
     let whenFalse = new Map<string, KType>();
@@ -1284,12 +1309,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
       whenTrue = entry.conditions.length === 1 ? compiled.whenTrue : new Map();
       whenFalse = new Map([...whenFalse, ...compiled.whenFalse]);
     }
-    const atEntry = this.flow.copy();
-    this.applyNarrowing(whenTrue);
-    const body = this.compileBlockValue(scope, context, entry.body, expected, use);
-    branchFlows.push(this.flow);
-    this.flow = this.withNarrowing(atEntry, entry.conditions.length === 1 ? whenFalse : new Map());
-    return { tests, body };
+    const flow = this.withNarrowing(this.flow, whenTrue);
+    this.flow = this.withNarrowing(this.flow, entry.conditions.length === 1 ? whenFalse : new Map());
+    return { tests, flow };
   }
 
   /** Rejects a `when` that misses cases, where an expression or a statement over a sealed type must cover all. */
@@ -1534,23 +1556,37 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const before = this.flow.copy();
     const bodyThrows: Flow[] = [];
     const catchThrows: Flow[] = [];
-    const body = this.compileTryBlock(scope, context, expression.body, expected, use, bodyThrows);
+    const blocks = [expression.body, ...expression.catches.map((clause) => clause.body)];
+    const hint = this.inferBranchType(context, blocks, expected, use, (index, probe) => {
+      this.flow = before.copy();
+      const clause = expression.catches[index - 1];
+      const branchScope = clause ? this.catchParameter(scope, probe, clause).scope : scope;
+      return this.compileBlockValue(branchScope, probe, blocks[index], undefined, use);
+    });
+    const body = this.compileTryBlock(
+      scope,
+      context,
+      expression.body,
+      typeForBranch(expression.body, expected, hint),
+      use,
+      bodyThrows
+    );
     const flows = [this.flow];
     const assignmentsBeforeThrow = Flow.merge([before, ...bodyThrows]).maybeAssigned;
     for (const target of this.flow.maybeAssigned) assignmentsBeforeThrow.add(target);
     const catches = expression.catches.map((clause) => {
       this.flow = before.copy();
       for (const variable of assignmentsBeforeThrow) this.flow.maybeAssigned.add(variable);
-      const catchScope = new Scope(scope, context);
-      const type = this.resolveType(scope, clause.type);
-      if (!isSubtype(type, this.core.throwable.type))
-        this.error(clause.row, typeMismatchMessage(this.core.throwable.type, type));
-      const variable = this.newVariable(catchScope, context, clause.name, type, false, clause.row);
-      this.flow.assigned.add(variable);
-      const { write } = this.variableAccess(context, variable);
-      const value = this.compileTryBlock(catchScope, context, clause.body, expected, use, catchThrows);
-      flows.push(this.flow);
-      return { test: instanceTest(this.core, type), write, value, slot: variable.slot };
+      const binding = this.catchParameter(scope, context, clause);
+      const value = this.compileTryBlock(
+        binding.scope,
+        context,
+        clause.body,
+        typeForBranch(clause.body, expected, hint),
+        use,
+        catchThrows
+      );
+      return { ...binding, value };
     });
     this.flow = Flow.merge(flows);
     const finallyEval = expression.finally
@@ -1575,31 +1611,23 @@ export abstract class StatementCompiler extends OperatorCompiler {
       asStatement
         ? discardResult(compiled.eval)
         : convertRepr(this.convertTo(compiled, type, expression.row), reprOf(this.core, type), repr);
-    const bodyEval = convert(body);
-    const clauses = catches.map((clause) => ({ ...clause, value: convert(clause.value) }));
-    return {
-      type,
-      repr,
-      inferredUnit: inferredUnit || undefined,
-      eval: (frame) => {
-        try {
-          return bodyEval(frame);
-        } catch (error) {
-          const thrown = throwableOf(frame, error);
-          if (!thrown) throw error;
-          const clause = clauses.find((candidate) => candidate.test(thrown));
-          if (!clause) throw error instanceof KotlinThrow ? error : new KotlinThrow(thrown);
-          clause.write(frame, thrown);
-          try {
-            return clause.value(frame);
-          } finally {
-            frame.locals[clause.slot] = UNASSIGNED;
-          }
-        } finally {
-          finallyEval?.(frame);
-        }
-      },
-    };
+    const clauses = catches.map(({ test, write, slot, value }) => ({ test, write, slot, value: convert(value) }));
+    return { type, repr, inferredUnit: inferredUnit || undefined, eval: tryEval(convert(body), clauses, finallyEval) };
+  }
+
+  private catchParameter(
+    scope: Scope,
+    context: FunctionContext,
+    clause: Extract<Expression, { kind: 'try' }>['catches'][number]
+  ): { scope: Scope; test: (value: Value) => boolean; write: (frame: Frame, value: Value) => void; slot: number } {
+    const catchScope = new Scope(scope, context);
+    const type = this.resolveType(scope, clause.type);
+    if (!isSubtype(type, this.core.throwable.type))
+      this.error(clause.row, typeMismatchMessage(this.core.throwable.type, type));
+    const variable = this.newVariable(catchScope, context, clause.name, type, false, clause.row);
+    this.flow.assigned.add(variable);
+    const { write } = this.variableAccess(context, variable);
+    return { scope: catchScope, test: instanceTest(this.core, type), write, slot: variable.slot };
   }
 
   // code-gauge-allow functionNcss 31 -- compiles the body and transfers its result to each kind of incoming path.
@@ -1656,15 +1684,6 @@ function restrictFieldReads(flow: Flow, beforeTry: Flow): void {
     if (target instanceof PropertySymbol && !beforeTry.assigned.has(target)) flow.assigned.delete(target);
 }
 
-/** The exception a `catch` sees: a Kotlin exception, or the host's stack overflow as `StackOverflowError`. */
-function throwableOf(frame: Frame, error: unknown): KObject | undefined {
-  if (error instanceof KotlinThrow) return error.value;
-  if (error instanceof RangeError && /call stack/i.test(error.message)) {
-    return frame.runtime.exceptions.create(frame, 'java.lang.StackOverflowError', undefined);
-  }
-  return undefined;
-}
-
 interface LoopState {
   current: number | bigint;
   last: number | bigint;
@@ -1690,21 +1709,8 @@ const ASSIGN_OPERATORS = {
 
 export type { ClassType };
 
-/** The expected type of a later branch of an `if` used as an expression, which an earlier branch may guide. */
-function laterBranchExpected(
-  earlier: Compiled,
-  later: Block,
-  expected: KType | undefined,
-  use: ExpressionUse
-): KType | undefined {
-  return use === true ? expected : branchHint(earlier.type, expected, isBareCall(later));
-}
-
-function discardResult(evaluate: Eval): Eval {
-  return (frame) => {
-    evaluate(frame);
-    return UNIT;
-  };
+function typeForBranch(block: Block, expected: KType | undefined, inferred: KType | undefined): KType | undefined {
+  return inferred && isBareCall(block) ? inferred : expected;
 }
 
 /** How a `for` loop starts and steps through its iterable, and the type and representation of its elements. */
@@ -1717,23 +1723,4 @@ interface LoopStepping {
 
 function isEmptyProgression(first: number | bigint, last: number | bigint, step: number | bigint): boolean {
   return step > 0 ? first > last : first < last;
-}
-
-/** Runs the first branch of a `when` whose conditions hold, with the subject held in its slot meanwhile. */
-function whenEval(
-  subjectEval: Eval | undefined,
-  subjectSlot: number,
-  entries: { tests: ((frame: Frame) => boolean)[]; body: Eval }[]
-): Eval {
-  return (frame) => {
-    if (subjectEval) frame.locals[subjectSlot] = subjectEval(frame);
-    try {
-      for (const entry of entries) {
-        if (entry.tests.length === 0 || entry.tests.some((test) => test(frame))) return entry.body(frame);
-      }
-      return UNIT;
-    } finally {
-      if (subjectEval) frame.locals[subjectSlot] = UNASSIGNED;
-    }
-  };
 }

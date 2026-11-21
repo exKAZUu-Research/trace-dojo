@@ -33,6 +33,43 @@ test.each(['contains', 'split'])('charges the execution budget during CharSequen
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'branch and argument result types infer from later or earlier siblings',
+    source: `fun main() {
+    val show = false
+    val items = listOf(1, 2, 3)
+    val fromIf = if (show) emptyList() else items
+    val fromWhen = when (items.size) {
+        1 -> mutableListOf()
+        else -> mutableListOf("a")
+    }
+    val fromTry = try {
+        if (!show) throw IllegalStateException()
+        emptyList()
+    } catch (error: IllegalStateException) {
+        listOf(error.message ?: "caught")
+    }
+    println(fromIf.sum())
+    println(fromWhen.first().length)
+    println(fromTry)
+    println(items.map { if (it == 1) emptyList() else listOf(it) })
+    println(listOf(emptyList(), listOf("a")))
+    val subject: Any = "smart"
+    val fromGuard = when (subject) {
+        is Int -> emptyList()
+        is String -> listOf(subject.length)
+        else -> emptyList()
+    }
+    println(fromGuard)
+    val bothTypes = when (items.size) {
+        1 -> emptyList()
+        2 -> listOf(1)
+        else -> listOf("a")
+    }
+    println(bothTypes)
+}`,
+    stdout: '6\n1\n[caught]\n[[], [2], [3]]\n[[], [a]]\n[5]\n[a]\n',
+  },
+  {
     name: 'extension resolution checks property specificity, arguments, and local function values',
     source: `val Any.label: String get() = "any"
 val String.label: String get() = "string"
