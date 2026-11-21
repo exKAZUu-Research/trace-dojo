@@ -1866,6 +1866,21 @@ void main() { f(g); h((g) {}); }`;
   expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: 'int\ndynamic\n' });
 });
 
+test.each(['var y = {...x};', 'var y = {if (true) ...x};'])(
+  'Dart rejects brace literals whose dynamic spreads leave set or map undecided: %s',
+  (declaration) => {
+    expect(executeProgram('dart', `void main() { dynamic x = {1: 2}; ${declaration} }`)).toMatchObject({
+      kind: 'compileError',
+    });
+    const valid =
+      'void main() { dynamic x = {1: 2}; Map<int, int> y = {...x}; print([y, {}.runtimeType, {...x, 3: 4}]); }';
+    expect(executeProgram('dart', valid)).toMatchObject({
+      kind: 'executed',
+      stdout: '[{1: 2}, _Map<dynamic, dynamic>, {1: 2, 3: 4}]\n',
+    });
+  }
+);
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

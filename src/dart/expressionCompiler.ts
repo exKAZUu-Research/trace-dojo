@@ -762,6 +762,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
         if (base.cls.isSubclassOf(coreTypes.set) || base.cls === coreTypes.iterable) return 'set';
       }
     }
+    // Only empty braces default to a map; elements that do not tell, such as dynamic spreads, need a type.
+    if (elements.length > 0)
+      this.error(elements[0], 'セットかマップかを決められません。型引数か、変数の型を書いてください。');
     return 'map';
   }
 
