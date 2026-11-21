@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 996 -- Expression kinds share the same scope and evaluation rules.
+// code-gauge-allow-file fileNcss 998 -- Expression kinds share the same scope and evaluation rules.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import type {
@@ -896,7 +896,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (expression.isConst && !allConstant) {
       this.error(expression, 'const のレコードのフィールドは、定数でなければなりません。');
     }
-    const isConst = expression.isConst || (allConstant && this.inConstContext);
+    const isConst = expression.isConst || (allConstant && (this.inConstContext || this.inParameterDefault));
     const namesKey = this.registerRecordFieldNames(type.named);
     const build = recordLiteralBuilder(fields, type.named, namesKey);
     return {
@@ -921,6 +921,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected potentialConstInitializer = false;
+  protected inParameterDefault = false;
 
   /** Whether the expression being compiled is in a constant context (`const` literals and constructors). */
   protected inConstContext = false;

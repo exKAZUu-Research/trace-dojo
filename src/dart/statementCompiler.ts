@@ -264,7 +264,7 @@ export abstract class StatementCompiler extends PatternCompiler {
   ): { variable: LocalVar; defaultValue: Eval | undefined } {
     let defaultValue: Eval | undefined;
     const compiled = parameter.defaultValue
-      ? this.withConstContext(true, () => this.compileExpression(parameter.defaultValue as Expression, type))
+      ? this.compileDefaultExpression(parameter.defaultValue, type)
       : defaults?.get(parameter);
     if (compiled) {
       const span = parameter.defaultValue ?? parameter;
@@ -298,6 +298,19 @@ export abstract class StatementCompiler extends PatternCompiler {
       hasInitializer: true,
     });
     return { variable, defaultValue };
+  }
+
+  private compileDefaultExpression(expression: Expression, type: DartType): Compiled {
+    const savedConstContext = this.inConstContext;
+    const savedParameterDefault = this.inParameterDefault;
+    this.inConstContext = false;
+    this.inParameterDefault = true;
+    try {
+      return this.compileExpression(expression, type);
+    } finally {
+      this.inConstContext = savedConstContext;
+      this.inParameterDefault = savedParameterDefault;
+    }
   }
 
   /** The check of an argument a dynamic call passes, which the call site could not check statically. */

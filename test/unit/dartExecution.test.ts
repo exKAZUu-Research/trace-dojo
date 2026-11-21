@@ -5047,6 +5047,23 @@ test('dynamic operators reject void operands before execution', () => {
   }
 });
 
+test('optional parameter defaults require explicit const for collections and constructors', () => {
+  const declaration = 'class A { const A(); }';
+  for (const expression of ['<int>[]', '<int, int>{}', 'A()', '(1, [2])']) {
+    expect(
+      executeProgram('dart', `${declaration} void use([Object value = ${expression}]) {} void main() {}`)
+    ).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+  const program = `${declaration}
+void use([Object list = const <int>[], Object object = const A(), Object record = (1, 2)]) {
+  print([list, object.runtimeType, record, identical(record, const (1, 2))]);
+}
+void main() { use(); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[[], A, (1, 2), true]\n' });
+});
+
 test('prefixed Null types reject type arguments', () => {
   const source = "import 'dart:core' as c; void main() { c.Null value = null; c.print(value); }";
   expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'null\n' });
