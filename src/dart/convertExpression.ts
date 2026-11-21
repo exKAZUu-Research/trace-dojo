@@ -879,7 +879,7 @@ export abstract class ExpressionConverter {
         return { kind: 'variable', name, type, isFinal: hasToken(node, 'final'), keyword, ...span };
       }
       case 'cast_pattern': {
-        const inner = namedOf(node).filter((child) => child.type !== 'type');
+        const inner = childrenOf(node).filter((child) => child.type !== 'as' && child.type !== 'type');
         return {
           kind: 'cast',
           pattern: this.convertPatternSequence(node, inner, context),

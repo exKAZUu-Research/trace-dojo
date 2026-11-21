@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 570 -- Pattern kinds share their type, rooting, and binding helpers.
+// code-gauge-allow-file fileNcss 572 -- Pattern kinds share their type, rooting, and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import { CallCompiler } from './callCompiler';
@@ -114,6 +114,7 @@ interface PatternWrite {
 
 export abstract class PatternCompiler extends CallCompiler {
   readonly objectPatternTypes = new WeakMap<Pattern, DartType>();
+  readonly castPatternContexts = new WeakMap<Pattern, DartType>();
   readonly patternConstants = new WeakMap<Expression, Compiled>();
   readonly listPatternElementTypes = new WeakMap<Pattern, DartType>();
   readonly coverageUnions = new WeakMap<Pattern, readonly Pattern[]>();
@@ -305,7 +306,7 @@ export abstract class PatternCompiler extends CallCompiler {
         };
       }
       case 'cast': {
-        return this.castPattern(pattern, options, variables);
+        return this.castPattern(pattern, matchedType, options, variables);
       }
       case 'nullCheck': {
         const inner = this.compilePatternInner(pattern.pattern, nonNullable(matchedType), options, variables);
@@ -400,9 +401,11 @@ export abstract class PatternCompiler extends CallCompiler {
 
   private castPattern(
     pattern: Extract<Pattern, { kind: 'cast' }>,
+    matchedType: DartType,
     options: PatternOptions,
     variables: Map<string, LocalVar>
   ): PatternMatch {
+    this.castPatternContexts.set(pattern, matchedType);
     const type = this.resolveType(pattern.type);
     const inner = this.compilePatternInner(pattern.pattern, type, options, variables);
     const resolve = this.runtimeType(type);

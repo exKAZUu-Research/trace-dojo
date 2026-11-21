@@ -1,11 +1,13 @@
-import type { Pattern } from './ast';
+import type { Pattern, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
+import { coversAll } from './exhaustiveness';
 import type { PatternCompiler } from './patternCompiler';
 import {
   coreTypes,
   type DartType,
   DYNAMIC,
   interfaceType,
+  isPotentiallyNullable,
   isSubtype,
   makeNullable,
   nonNullable,
@@ -13,6 +15,7 @@ import {
 } from './types';
 
 type ListPattern = Extract<Pattern, { kind: 'list' }>;
+type NullCheck = Extract<Pattern, { kind: 'nullCheck' }>;
 interface ListArm {
   list: ListPattern;
   nullable: boolean;
@@ -46,35 +49,35 @@ function hasCoverageAlternatives(kind: Pattern['kind']): boolean {
 function normalize(
   compiler: PatternCompiler,
   pattern: Pattern,
-  check: Extract<Pattern, { kind: 'nullCheck' }> | undefined
+  check: NullCheck | undefined,
+  inIntersection = false
 ): readonly Pattern[] {
   switch (pattern.kind) {
     case 'parenthesized': {
-      return normalize(compiler, pattern.pattern, check);
+      return normalize(compiler, pattern.pattern, check, inIntersection);
     }
     case 'or': {
-      const left = normalize(compiler, pattern.left, check);
-      const right = normalize(compiler, pattern.right, check);
+      const left = normalize(compiler, pattern.left, check, inIntersection);
+      const right = normalize(compiler, pattern.right, check, inIntersection);
       return union(compiler, [...left, ...right]);
     }
     case 'and': {
-      if (listIntersections.has(pattern)) return [pattern];
       const parts = intersection(compiler, pattern, check);
       if (parts) return parts;
       break;
     }
     case 'nullCheck': {
-      const arms = normalize(compiler, pattern.pattern, pattern);
-      return arms.some(listArm) ? arms : [pattern];
+      const arms = normalize(compiler, pattern.pattern, pattern, inIntersection);
+      return inIntersection || arms.some(listArm) ? arms : [pattern];
     }
     case 'nullAssert': {
-      if (listArm(pattern)) return [pattern];
-      const nonNull = { ...pattern, kind: 'nullCheck' as const };
-      const arms = normalize(compiler, pattern.pattern, nonNull);
-      if (!arms.some(listArm)) break;
-      const { row, column, start, end } = pattern;
-      const span = { row, column, start, end };
-      return union(compiler, [...arms, { ...span, kind: 'constant', value: { ...span, kind: 'null' } }]);
+      const arms = assertionCoverage(compiler, pattern, inIntersection);
+      if (arms) return arms;
+      break;
+    }
+    case 'cast': {
+      if (inIntersection) return castCoverage(compiler, pattern, check);
+      break;
     }
     case 'list':
     case 'object': {
@@ -85,6 +88,32 @@ function normalize(
     }
   }
   return [check ? { ...check, pattern } : pattern];
+}
+
+function assertionCoverage(
+  compiler: PatternCompiler,
+  pattern: Extract<Pattern, { kind: 'nullAssert' }>,
+  inIntersection: boolean
+): readonly Pattern[] | undefined {
+  if (listArm(pattern)) return [pattern];
+  const arms = normalize(compiler, pattern.pattern, { ...pattern, kind: 'nullCheck' }, inIntersection);
+  return inIntersection || arms.some(listArm) ? union(compiler, [...arms, nullCoverage(pattern)]) : undefined;
+}
+
+function nullCoverage({ row, column, start, end }: Span): Pattern {
+  const span = { row, column, start, end };
+  return { ...span, kind: 'constant', value: { ...span, kind: 'null' } };
+}
+
+function castCoverage(
+  compiler: PatternCompiler,
+  pattern: Extract<Pattern, { kind: 'cast' }>,
+  check: NullCheck | undefined
+): readonly Pattern[] {
+  const type = compiler.resolveType(pattern.type);
+  if (coversAll(compiler, pattern.pattern, type)) return [pattern];
+  const arms = normalize(compiler, pattern.pattern, check, true);
+  return isPotentiallyNullable(type) ? arms : union(compiler, [...arms, nullCoverage(pattern)]);
 }
 
 function union(compiler: PatternCompiler, arms: readonly Pattern[]): readonly Pattern[] {
@@ -137,10 +166,11 @@ function addListRestriction(
 function intersection(
   compiler: PatternCompiler,
   pattern: Extract<Pattern, { kind: 'and' }>,
-  check: Extract<Pattern, { kind: 'nullCheck' }> | undefined
+  check: NullCheck | undefined
 ): readonly Pattern[] | undefined {
-  const left = normalize(compiler, pattern.left, check);
-  const right = normalize(compiler, pattern.right, check);
+  if (listIntersections.has(pattern)) return [pattern];
+  const left = normalize(compiler, pattern.left, check, true);
+  const right = normalize(compiler, pattern.right, check, true);
   if ((!left.some(listArm) && !right.some(listArm)) || left.length * right.length > MAX_INTERSECTION_PAIRS)
     return undefined;
   const parts: Pattern[] = [];
@@ -199,6 +229,10 @@ function constraintType(compiler: PatternCompiler, pattern: Pattern): DartType |
     }
     case 'object': {
       return compiler.objectPatternTypes.get(pattern) ?? compiler.resolveType(pattern.type);
+    }
+    case 'cast': {
+      const type = compiler.resolveType(pattern.type);
+      return coversAll(compiler, pattern.pattern, type) ? compiler.castPatternContexts.get(pattern) : undefined;
     }
     case 'nullCheck': {
       const type = constraintType(compiler, pattern.pattern);

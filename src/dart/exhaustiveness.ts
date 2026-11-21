@@ -616,7 +616,7 @@ function subclassType(supertype: DartType & { kind: 'interface' }, subclass: Cla
 /** Whether a pattern matches every value of a type. */
 // code-gauge-allow functionCognitiveComplexity 29 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 // code-gauge-allow functionNcss 48 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
-function coversAll(compiler: PatternCompiler, pattern: Pattern, type: DartType): boolean {
+export function coversAll(compiler: PatternCompiler, pattern: Pattern, type: DartType): boolean {
   const comparison = nullPatternComparison(pattern);
   if (comparison) return comparison === '==' ? isSubtype(type, NULL) : !isPotentiallyNullable(type);
   const arms = coverageDisjuncts(compiler, pattern);

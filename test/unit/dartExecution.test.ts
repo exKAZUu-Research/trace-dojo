@@ -8338,6 +8338,12 @@ ${main}`;
     '((Object() && [true, ...]) || [false, ...])',
     '(([true, ...] && [_, ...]) || [false, ...])',
     '((([true, ...] || [false, ...]) && List<bool>()) || [true, ...])',
+    '(([true, ...] && ([true, ...] as List<bool>)) || [false, ...])',
+    '((([true, ...] as List<bool>) && [true, ...]) || [false, ...]!)',
+    '(([true, ...] && ([true, ...] as List<bool>?)) || [false, ...])',
+    '((([true, ...] as List<bool>)? && [true, ...]) || [false, ...])',
+    '(((([true, ...] || [false, ...]) as List<bool>) && [true, ...]) || [false, ...])',
+    '(([true, ...] && ([...] as List<bool>)) || [false, ...])',
   ]) {
     expect(executeProgram('dart', source(pattern))).toMatchObject({
       kind: 'compileError',
@@ -8351,6 +8357,7 @@ ${main}`;
   for (const pattern of [
     '(([true, ...] && List<bool>(length: _)) || [false, ...])',
     '(([true, ...] && List<bool>(length: _))? || [false, ...]?)',
+    '(([true, ...] as List<bool>) || [false, ...])',
   ]) {
     expect(executeProgram('dart', source(pattern))).toMatchObject({ kind: 'executed', stdout: '[2, 2, -1]\n' });
   }
