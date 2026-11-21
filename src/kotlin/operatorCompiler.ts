@@ -13,6 +13,7 @@ import {
   type Scope,
   typeMismatchMessage,
 } from './compilerBase';
+import { caseOf, ExpressionCompiler, keyOf, type Place } from './expressionCompiler';
 import { valueEquals } from './format';
 import {
   arithmeticOperation,
@@ -31,10 +32,6 @@ import { instanceTest, throwCastFailure } from './typeChecks';
 import { branchHint, commonSupertype, isSubtype } from './typeRelations';
 import { isNullable, type KType, nonNull, nullable, resolved, substitute, typeToString } from './types';
 import { box, Boxed, type PrimitiveKind, type Value } from './values';
-
-const INTEGER_KINDS = new Set<PrimitiveKind>(['Int', 'Long', 'Short', 'Byte']);
-
-import { caseOf, ExpressionCompiler, keyOf, type Place } from './expressionCompiler';
 
 /** Compiles the operators, the conditions, and the `in`, `is`, and `as` tests. */
 export abstract class OperatorCompiler extends ExpressionCompiler {
@@ -537,7 +534,6 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         eval: (frame) => test(compareNumbers(leftEval(frame) as number | bigint, rightEval(frame) as number | bigint)),
       };
     }
-    void INTEGER_KINDS;
     const args: ArgumentSyntax[] = [{ row: expression.right.row, name: undefined, value: expression.right }];
     const compared = this.compileOperatorCall(scope, context, left, 'compareTo', args, row, operator);
     const evaluate = convertRepr(compared.eval, compared.repr, 'Int');

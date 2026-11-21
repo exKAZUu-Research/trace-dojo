@@ -155,15 +155,10 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           this.error(decl.body.block.endRow, `関数 ${symbol.name} の最後に return を書いてください。`);
         }
         const evaluate = compiled.eval;
-        body = isUnit
-          ? (frame) => {
-              evaluate(frame);
-              return UNIT;
-            }
-          : (frame) => {
-              evaluate(frame);
-              return UNIT;
-            };
+        body = (frame) => {
+          evaluate(frame);
+          return UNIT;
+        };
       }
       this.finishFunction(symbol, context, defaults, body);
       entry.state = 'done';
@@ -408,8 +403,6 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const evaluate = compiled.eval;
     const { info } = context;
     const none: unknown[] = [];
-    const repr = propertyRepr(symbol);
-    void repr;
     symbol.set = (frame, receiver, newValue) => {
       frame.runtime.call(info, frame, none, receiver, [newValue], undefined, (inner) => {
         evaluate(inner);

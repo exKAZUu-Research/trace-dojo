@@ -1517,8 +1517,6 @@ operator fun <K, V> MutableMap<K, V>.minusAssign(key: K) {
 fun <K, V> MutableMap<in K, in V>.putAll(pairs: Iterable<Pair<K, V>>) {
     for (pair in pairs) put(pair.first, pair.second)
 }
-
-fun <K, V> Map<out K, V>.containsKeyOf(key: K): Boolean = containsKey(key)
 `;
 
 function floatingExtremaSource(): string {
