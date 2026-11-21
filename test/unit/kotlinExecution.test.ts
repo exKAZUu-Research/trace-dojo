@@ -49,6 +49,19 @@ fun main() {
     stdout: 'compare\n0\ncompare\n0\nFailed requirement.\n',
   },
   {
+    name: 'nullable extension setters receive null on direct and compound writes',
+    source: `var String?.count: Int
+    get() = if (this == null) 0 else length
+    set(value) { println(if (this == null) "null $value" else "$this $value") }
+fun main() {
+    val text: String? = null
+    text.count = 2
+    text.count += 1
+    text?.count = 9
+}`,
+    stdout: 'null 2\nnull 1\n',
+  },
+  {
     name: 'primitive extension property writes share the receiver representation of reads',
     source: `var Int.score: Int
     get() { println("int get $this"); return this }
@@ -4934,6 +4947,26 @@ fun main() {
         get() {
             val field = 3
             return field
+        }
+    fun main() { println(answer) }`,
+  ],
+  [
+    'an initializer where a do-while condition reads a loop local named field',
+    false,
+    `val answer: Int = 0
+        get() {
+            do { val field = 1 } while (field < 0)
+            return 2
+        }
+    fun main() { println(answer) }`,
+  ],
+  [
+    'an initializer where a do-while condition reads the backing field past a nested binding',
+    true,
+    `val answer: Int = 0
+        get() {
+            do { run { val field = 1; println(field) } } while (field < 0)
+            return 2
         }
     fun main() { println(answer) }`,
   ],

@@ -715,16 +715,20 @@ export abstract class ExpressionCompiler extends CallCompiler {
         }
         this.reportMissingMember(target.type, name, row);
       }
-      const { extensionReceiver } = property.symbol;
-      this.requireNonNullReceiver(
-        target,
-        row,
-        extensionReceiver !== undefined && isNullable(resolved(extensionReceiver))
-      );
+      this.requirePropertyReceiver(target, property.symbol, row);
       if (expression.receiver.kind === 'this' && !expression.receiver.label)
         this.checkInitialized(context, property.symbol, name, row);
       return consume(this.readProperty(scope, property, target, row));
     });
+  }
+
+  protected requirePropertyReceiver(receiver: Compiled, property: PropertySymbol | undefined, row: number): void {
+    const extensionReceiver = property?.extensionReceiver;
+    this.requireNonNullReceiver(
+      receiver,
+      row,
+      extensionReceiver !== undefined && isNullable(resolved(extensionReceiver))
+    );
   }
 
   /** `C.name` for a class `C`: an enum entry, a nested class or object, a member of an object or companion, or entries. */

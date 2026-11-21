@@ -522,7 +522,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return this.error(row, `${target.name} が見つかりません。`);
   }
 
-  /** `a.b` as a place, where `a` may be an object or a class with a companion, and `a?.b` binds to nothing for a null `a`. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- qualifiers and safe calls share property legality and assignment flow.
   private memberPlace(
     scope: Scope,
     context: FunctionContext,
@@ -543,8 +543,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
       return this.topLevelPlace(scope, context, property, row, isCompound);
     }
     const receiver = this.compileExpression(scope, context, target.receiver);
-    if (!target.isSafe) this.requireNonNullReceiver(receiver, row, false);
-    const property = this.findProperty(scope, nonNull(receiver.type), target.name);
+    const property = this.findProperty(scope, target.isSafe ? nonNull(receiver.type) : receiver.type, target.name);
+    if (!target.isSafe) this.requirePropertyReceiver(receiver, property?.symbol, row);
     if (!property)
       return this.error(row, `${typeToString(resolved(receiver.type))} には ${target.name} がありません。`);
     if (target.isSafe) return this.safePlace(receiver, (holder) => this.propertyPlace(property, holder, row, scope));

@@ -14,6 +14,14 @@ function usesField(part: unknown): boolean {
     case 'for': {
       return usesField(part.iterable) || (!bindsField(part.variable) && usesField(part.body));
     }
+    case 'doWhile': {
+      const body = part.body;
+      return (
+        usesField(body) ||
+        (!(isNode(body) && Array.isArray(body.statements) && body.statements.some(declaresField)) &&
+          usesField(part.condition))
+      );
+    }
     case 'try': {
       return (
         usesField(part.body) ||
@@ -32,14 +40,13 @@ function usesField(part: unknown): boolean {
 function statementsUseField(statements: unknown[]): boolean {
   for (const statement of statements) {
     if (usesField(statement)) return true;
-    if (
-      isNode(statement) &&
-      (statement.kind === 'property' || statement.kind === 'destructuring') &&
-      bindsField(statement)
-    )
-      return false;
+    if (declaresField(statement)) return false;
   }
   return false;
+}
+
+function declaresField(part: unknown): boolean {
+  return isNode(part) && (part.kind === 'property' || part.kind === 'destructuring') && bindsField(part);
 }
 
 function bindsField(part: unknown): boolean {
