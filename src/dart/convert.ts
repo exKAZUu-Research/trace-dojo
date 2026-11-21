@@ -48,7 +48,8 @@ import {
 import { ExpressionConverter, VAR_WITH_TYPE } from './convertExpression';
 
 /** Converts a tree-sitter tree of a Dart library into the AST, rejecting syntax the interpreter does not run. */
-type FormalContext = 'ordinary' | 'constructor' | 'primary';
+/** Where a parameter list appears; `representation` is an extension type's, whose one parameter may be final. */
+type FormalContext = 'ordinary' | 'constructor' | 'primary' | 'representation';
 
 const PARAMETER_MODIFIERS = ['final', 'const', 'late'] as const;
 
@@ -421,7 +422,7 @@ export class Converter extends ExpressionConverter {
   private convertPrimaryConstructor(node: Node, isConst: boolean, allowInitializingFormals = true): PrimaryConstructor {
     const parameters = this.convertFormalParameters(
       requireNode(fieldOf(node, 'parameters'), node),
-      allowInitializingFormals ? 'primary' : 'ordinary'
+      allowInitializingFormals ? 'primary' : 'representation'
     );
     const invalid = [...parameters.positional, ...parameters.named].find(
       (parameter) => parameter.isCovariant && (!parameter.isVar || !allowInitializingFormals)
@@ -905,14 +906,15 @@ export class Converter extends ExpressionConverter {
         (isNamed ? named : positional).push(...this.convertOptionalParameters(child, isNamed));
       }
     }
-    if (context === 'ordinary') requirePlainParameters(positional, named);
+    if (context === 'ordinary' || context === 'representation') requirePlainParameters(positional, named);
     const invalidVar = [...positional, ...named].find(
       (parameter) => parameter.isVar && (context !== 'primary' || parameter.binding !== 'plain')
     );
     if (invalidVar) syntaxError(invalidVar, 'var は主コンストラクタのフィールド引数にだけ書けます。');
     // Dart 3.13 reserves final on parameters for a primary constructor's field parameters.
     const invalidFinal = [...positional, ...named].find(
-      (parameter) => parameter.binding === 'plain' && parameter.isFinal && context !== 'primary'
+      (parameter) =>
+        parameter.binding === 'plain' && parameter.isFinal && context !== 'primary' && context !== 'representation'
     );
     if (invalidFinal) syntaxError(invalidFinal, 'final は、ここには書けません。');
     const requiredWithDefault = named.find((parameter) => parameter.isRequired && parameter.defaultValue);
