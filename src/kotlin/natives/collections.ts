@@ -1093,7 +1093,7 @@ function liveMapView(frame: Frame, map: KObject, kind: ViewKind): KObject {
 
 function newView(frame: Frame, map: KObject, view: ViewKind): KObject {
   if (map.readOnlyCollection) {
-    return view === 'values' ? newList(frame, 'EmptyList', []) : setInstance(frame, 'EmptySet', newStore('insertion'));
+    return view === 'values' ? emptyCollection(frame, 'EmptyList') : emptyCollection(frame, 'EmptySet');
   }
   frame.runtime.allocate(frame, 1);
   const object = new KObject(
@@ -1374,30 +1374,45 @@ function setOfValues(frame: Frame, name: string, order: KStore['order'], values:
   return setInstance(frame, name, store);
 }
 
+function emptyCollection(frame: Frame, name: 'EmptyList' | 'EmptySet' | 'EmptyMap'): KObject {
+  const cls = libraryClass(`kotlin.collections.${name}`);
+  const existing = frame.runtime.objects.get(cls);
+  if (existing) return existing;
+  let empty: KObject;
+  if (name === 'EmptyList') {
+    empty = newList(frame, name, []);
+  } else {
+    const store = newStore('insertion');
+    empty = name === 'EmptySet' ? setInstance(frame, name, store) : newMap(frame, name, store);
+  }
+  frame.runtime.objects.set(cls, empty);
+  return empty;
+}
+
 /** The functions that create collections, which pick the JVM's classes as Kotlin's standard library does. */
 function defineFactories(): void {
   const natives: Record<string, (frame: Frame, receiver: Value, args: Value[]) => Value> = {
-    'listOf()': (frame) => newList(frame, 'EmptyList', []),
+    'listOf()': (frame) => emptyCollection(frame, 'EmptyList'),
     'listOf(T)': (frame, _receiver, [element]) => newList(frame, 'SingletonList', [element]),
     'listOf(vararg T)': (frame, _receiver, [array]) => {
       const values = varargItems(array);
-      return values.length === 0 ? newList(frame, 'EmptyList', []) : newList(frame, 'ArraysList', values);
+      return values.length === 0 ? emptyCollection(frame, 'EmptyList') : newList(frame, 'ArraysList', values);
     },
-    'emptyList()': (frame) => newList(frame, 'EmptyList', []),
+    'emptyList()': (frame) => emptyCollection(frame, 'EmptyList'),
     'mutableListOf()': (frame) => mutableListOfItems(frame, []),
     'mutableListOf(vararg T)': (frame, _receiver, [array]) => mutableListOfItems(frame, varargItems(array)),
     'arrayListOf()': (frame) => mutableListOfItems(frame, []),
     'arrayListOf(vararg T)': (frame, _receiver, [array]) => mutableListOfItems(frame, varargItems(array)),
-    'setOf()': (frame) => setInstance(frame, 'EmptySet', newStore('insertion')),
+    'setOf()': (frame) => emptyCollection(frame, 'EmptySet'),
     'setOf(T)': (frame, _receiver, [element]) =>
       setInstance(frame, 'SingletonSet', singletonStore(frame, element, undefined)),
     'setOf(vararg T)': (frame, _receiver, [array]) => {
       const values = varargItems(array);
-      if (values.length === 0) return setInstance(frame, 'EmptySet', newStore('insertion'));
+      if (values.length === 0) return emptyCollection(frame, 'EmptySet');
       if (values.length === 1) return setInstance(frame, 'SingletonSet', singletonStore(frame, values[0], undefined));
       return setOfValues(frame, 'LinkedHashSet', 'insertion', values, mapCapacity(values.length));
     },
-    'emptySet()': (frame) => setInstance(frame, 'EmptySet', newStore('insertion')),
+    'emptySet()': (frame) => emptyCollection(frame, 'EmptySet'),
     'mutableSetOf()': (frame) => setOfValues(frame, 'LinkedHashSet', 'insertion', [], 16),
     'mutableSetOf(vararg T)': (frame, _receiver, [array]) => {
       const values = varargItems(array);
@@ -1412,7 +1427,7 @@ function defineFactories(): void {
       const values = varargItems(array);
       return setOfValues(frame, 'LinkedHashSet', 'insertion', values, mapCapacity(values.length));
     },
-    'mapOf()': (frame) => newMap(frame, 'EmptyMap', newStore('insertion')),
+    'mapOf()': (frame) => emptyCollection(frame, 'EmptyMap'),
     'mapOf(Pair<K, V>)': (frame, _receiver, [pair]) => {
       const [key, value] = pairParts(pair);
       return newMap(frame, 'SingletonMap', singletonStore(frame, key, value));
@@ -1420,10 +1435,10 @@ function defineFactories(): void {
     'Map<out K, V>.getOrDefault(K, V)': mapGetOrDefault,
     'mapOf(vararg Pair<K, V>)': (frame, _receiver, [array]) => {
       const pairs = varargItems(array);
-      if (pairs.length === 0) return newMap(frame, 'EmptyMap', newStore('insertion'));
+      if (pairs.length === 0) return emptyCollection(frame, 'EmptyMap');
       return newMap(frame, 'LinkedHashMap', fill(frame, newStore('insertion', mapCapacity(pairs.length)), pairs));
     },
-    'emptyMap()': (frame) => newMap(frame, 'EmptyMap', newStore('insertion')),
+    'emptyMap()': (frame) => emptyCollection(frame, 'EmptyMap'),
     'mutableMapOf()': (frame) => newMap(frame, 'LinkedHashMap', newStore('insertion')),
     'mutableMapOf(vararg Pair<K, V>)': (frame, _receiver, [array]) => {
       const pairs = varargItems(array);

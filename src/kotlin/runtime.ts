@@ -103,7 +103,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly frames: Frame[] = [];
   /** The backing fields of top-level properties. */
   globals: Value[] = [];
-  /** The instances of objects and companion objects, created when first used. */
+  /** Object, companion, and library singleton instances, created when first used. */
   readonly objects = new Map<ClassSymbol, KObject>();
   /** The constants and shared entries list of each enum class, created with its first use. */
   readonly enumEntries = new Map<ClassSymbol, { values: KObject[]; entries?: KObject }>();

@@ -3050,6 +3050,28 @@ fun main() {
       'empty\nfalse\nempty\ntrue\nempty\nfalse\nempty\ntrue\nempty\ntrue\nempty\n0\nempty\ntrue\nempty\nfalse\nempty\nentries\ntrue\nempty\nentries\nfalse\nempty\nentries\nfalse\nempty\nentries\n1\n',
   },
   {
+    name: 'empty collection factories and empty map views share JVM singletons',
+    source: `fun main() {
+    val list = emptyList<Int>()
+    val set = emptySet<Int>()
+    val map = emptyMap<Int, Int>()
+    println(list === emptyList<Int>())
+    println(set === emptySet<Int>())
+    println(map === emptyMap<Int, Int>())
+    println(list === listOf<Int>())
+    println(set === setOf<Int>())
+    println(map === mapOf<Int, Int>())
+    println(set === map.keys)
+    println(map.values === list)
+    println(map.entries === emptySet<Map.Entry<Int, Int>>())
+    println(emptyList<Int>() === listOf(1).drop(1))
+    println(mutableListOf<Int>() === mutableListOf<Int>())
+    println(mutableSetOf<Int>() === mutableSetOf<Int>())
+    println(mutableMapOf<Int, Int>() === mutableMapOf<Int, Int>())
+}`,
+    stdout: 'true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\nfalse\nfalse\n',
+  },
+  {
     name: 'map toList selects its result from the actual entry iterator',
     source: `class ConversionMap(private val data: Map<Int, Int>, private val reportedSize: Int) : Map<Int, Int> by data {
     override val size: Int get() { println("size"); return reportedSize }
