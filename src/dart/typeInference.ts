@@ -57,13 +57,11 @@ export function inferObjectPatternType(
   const parameters = new Set(params);
   const lower = new Map<TypeParam, DartType>();
   const upper = new Map<TypeParam, DartType>();
-  const constraints = new InferenceConstraints(parameters, lower, upper, upperBound, true);
-  const subject = resolveBound(matchedType);
-  if (subject.kind === 'interface') {
-    const inhabited = { ...subject, nullable: false };
-    constraints.infer(inhabited, template);
-    constraints.infer(inhabited, template, true);
-  }
+  new InferenceConstraints(parameters, lower, upper, upperBound, true).infer(
+    nonNullOf(resolveBound(matchedType)),
+    template,
+    true
+  );
   const inferred = new Map(
     params.map((param) => [param, lower.get(param) ?? upper.get(param) ?? objectPatternBound(param, parameters)])
   );

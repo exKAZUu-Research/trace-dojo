@@ -6574,6 +6574,35 @@ void main() {
   });
 });
 
+test('object patterns infer raw alias arguments from the subject type', () => {
+  const source = `class Pair<X, Y> {
+  final X x;
+  final Y y;
+  Pair(this.x, this.y);
+}
+typedef Same<T extends num> = Pair<T, T>;
+typedef Row<T> = (T, {T named});
+typedef Mapper<T> = T Function(T);
+int map(num value) => 1;
+void main() {
+  Pair<num, int> pair = Pair<int, int>(1, 2);
+  if (pair case Same(x: var x, y: var y)) print(([x].runtimeType, [y].runtimeType));
+  Pair<int, double> mixed = Pair(1, 2.0);
+  if (mixed case Same()) print('match'); else print('no match');
+  (int, {int named}) row = (3, named: 4);
+  if (row case Row($1: var x, named: var y)) print(([x].runtimeType, [y].runtimeType));
+  int Function(num) mapper = map;
+  if (mapper case Mapper(call: var f)) {
+    print(f(2.5));
+    print([f].runtimeType == <num Function(num)>[].runtimeType);
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(List<int>, List<int>)\nno match\n(List<int>, List<int>)\n1\ntrue\n',
+  });
+});
+
 test('switches over generic nullable bounds cover the null case', () => {
   for (const source of [
     'int f<T extends bool?>(T input) => switch (input) { true => 1, false => 0 }; void main() {}',
