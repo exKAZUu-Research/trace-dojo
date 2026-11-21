@@ -6603,6 +6603,27 @@ test('BigInt Euclidean operations charge the operands and preserve inverse error
   });
 });
 
+test('BigInt radix formatting and parsing use their SDK error labels', () => {
+  const program = `void show(Object? Function() run) { try { print(run()); } catch (e) { print(e); } }
+void main() {
+  show(() => BigInt.from(1).toRadixString(37));
+  show(() => BigInt.one.toRadixString(1));
+  show(() => BigInt.parse('1', radix: 37));
+  show(() => BigInt.tryParse('1', radix: 37));
+  show(() => 1.toRadixString(37));
+  show(() => BigInt.from(31).toRadixString(16));
+  show(() => BigInt.parse('1f', radix: 16));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'RangeError: Invalid value: Not in inclusive range 2..36: 37\n' +
+      'RangeError: Invalid value: Not in inclusive range 2..36: 1\n' +
+      'RangeError (radix): Invalid value: Not in inclusive range 2..36: 37\n'.repeat(3) +
+      '1f\n31\n',
+  });
+});
+
 test('BigInt parsing checks literal syntax before validating the radix', () => {
   const program = `void main() {
     for (final text in ['', ' ', '+', 'a?', '- 2']) {

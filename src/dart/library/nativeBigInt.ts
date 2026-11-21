@@ -41,7 +41,7 @@ function parseBigInt(runtime: Runtime, text: string, writtenRadix: Value): bigin
   runtime.spend(1 + text.length / 64);
   const input = text.trim();
   if (!/^[+-]?[0-9A-Za-z]+$/.test(input)) return undefined;
-  const [rest, base, negative] = radixSource(input, radixOf(runtime, writtenRadix));
+  const [rest, base, negative] = radixSource(input, radixOf(runtime, writtenRadix, 'radix'));
   if (rest.length === 0) return undefined;
   let start = 0;
   while (rest[start] === '0') start++;
@@ -87,10 +87,10 @@ const HOST_PREFIXES = new Map([
   [16, '0x'],
 ]);
 
-function radixOf(runtime: Runtime, radix: Value): number | undefined {
+function radixOf(runtime: Runtime, radix: Value, rangeName: string | undefined): number | undefined {
   if (radix === undefined) return undefined;
   const value = Number(intArg(runtime, radix, 'radix'));
-  if (value < 2 || value > 36) runtime.throwError('RangeError', 'range', [radix, 2n, 36n, 'radix']);
+  if (value < 2 || value > 36) runtime.throwError('RangeError', 'range', [radix, 2n, 36n, rangeName]);
   return value;
 }
 
@@ -340,7 +340,7 @@ define('BigInt.toInt', (runtime, receiver) => {
 define('BigInt.toDouble', (runtime, receiver) => Number(valueOf(runtime, receiver)));
 define('BigInt.toString', (runtime, receiver) => digitsText(runtime, valueOf(runtime, receiver), 10));
 define('BigInt.toRadixString', (runtime, receiver, [radix]) =>
-  digitsText(runtime, valueOf(runtime, receiver), radixOf(runtime, radix) ?? 10)
+  digitsText(runtime, valueOf(runtime, receiver), radixOf(runtime, radix, undefined) ?? 10)
 );
 
 function digitsText(runtime: Runtime, value: bigint, radix: number): string {

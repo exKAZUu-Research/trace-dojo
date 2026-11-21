@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 985 -- The native lists, sets, maps, and their iterators share collection helpers.
+// code-gauge-allow-file fileNcss 986 -- The native lists, sets, maps, and their iterators share collection helpers.
 import type { TopLevelFunction } from '../environment';
 import { stringOf } from '../format';
 import { type HashPolicy, HashStore } from '../hashStore';
