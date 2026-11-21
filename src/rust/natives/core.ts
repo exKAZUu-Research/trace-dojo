@@ -12,7 +12,7 @@ import {
   valuesUnequal,
 } from '../ops';
 import { FmtFailure, ProcessExit, RustPanic } from '../runtime';
-import { intMax, type IntName, shallow, substitute as substituteType, type Type } from '../types';
+import { intMax, type IntName, resolve, sameType, shallow, substitute as substituteType, type Type } from '../types';
 import { utf8Bytes } from '../utf8';
 import {
   DynValue,
@@ -435,10 +435,12 @@ function rangeContains(ctx: NativeContext, range: RangeValue, item: Value): bool
 }
 
 /** `T::from(value)` for the conversions of the standard library. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Rust conversions select different rules for each destination type.
+// code-gauge-allow functionCognitiveComplexity 17 -- Rust conversions select different rules for each destination type.
 export function convert(ctx: NativeContext, value: Value, from: Type, to: Type): Value {
   const source = normalize(shallow(from));
   const target = normalize(shallow(to));
+  // `impl<T> From<T> for T` returns the value as it is.
+  if (sameType(resolve(source, true), resolve(target, true))) return value;
   if (target.kind === 'float' && source.kind === 'bool') return deref(value) ? 1 : 0;
   if (target.kind === 'int' || target.kind === 'float' || target.kind === 'char')
     return castValue(deref(value), target);

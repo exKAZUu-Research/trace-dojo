@@ -8509,3 +8509,16 @@ test.each([
     println!("{:?}", v);`);
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '["hello"]\n' });
 });
+
+test('converting a value into its own type keeps it', () => {
+  const program = rustMain(
+    `
+    let some: Option<i32> = Some(7).into();
+    let none: Option<i32> = None::<i32>.into();
+    let map: HashMap<i32, i32> = HashMap::from([(1, 2)]).into();
+    let set = BTreeSet::from(BTreeSet::from([2, 1]));
+    println!("{:?} {:?} {:?} {:?}", some, none, map, set);`,
+    'use std::collections::{BTreeSet, HashMap};'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'Some(7) None {1: 2} {1, 2}\n' });
+});
