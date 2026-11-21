@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 440 -- Ports std's searchers and splitters of `str` patterns.
+// code-gauge-allow-file fileNcss 441 -- Ports std's searchers and splitters of `str` patterns.
 import type { DebugPart } from '../debugText';
 import { type DebugValue, described, fieldsPart, listPart, numberPart, tuplePart } from '../iterDebug';
 import { CHAR, REF_STR } from '../types';
-import { decodeUtf8 } from '../utf8';
+import { decodeUtf8, utf8Length } from '../utf8';
 import { DONE, type FnValue, IterValue, type Next } from '../values';
 
 /**
@@ -124,9 +124,11 @@ class CharSearcher implements Searcher {
 /** Searches char by char, through `CharIndices`, for one that `matches` accepts. */
 class MultiCharEqSearcher implements Searcher {
   readonly bytes: Uint8Array;
-  private readonly chars: { offset: number; char: string; size: number }[] = [];
+  /** Where the chars not yet looked at start and end: in the text, and in its UTF-8. */
   private front = 0;
   private back: number;
+  private frontByte = 0;
+  private backByte: number;
   /** `CharIndices`'s `front_offset`, which only taking from the front advances. */
   private frontOffset = 0;
 
@@ -138,13 +140,8 @@ class MultiCharEqSearcher implements Searcher {
     private readonly predicate?: PredicatePattern
   ) {
     this.bytes = encoder.encode(text);
-    let offset = 0;
-    for (const char of text) {
-      const size = encoder.encode(char).length;
-      this.chars.push({ offset, char, size });
-      offset += size;
-    }
-    this.back = this.chars.length;
+    this.back = text.length;
+    this.backByte = this.bytes.length;
   }
 
   fork(): MultiCharEqSearcher {
@@ -159,23 +156,31 @@ class MultiCharEqSearcher implements Searcher {
 
   nextMatch(): [number, number] | undefined {
     while (this.front < this.back) {
-      const { offset, char, size } = this.chars[this.front++];
-      this.frontOffset = offset + size;
-      if (this.matches(char)) return [offset, offset + size];
+      const char = String.fromCodePoint(this.text.codePointAt(this.front) as number);
+      const offset = this.frontByte;
+      this.front += char.length;
+      this.frontByte += utf8Length(char);
+      this.frontOffset = this.frontByte;
+      if (this.matches(char)) return [offset, this.frontByte];
     }
     return undefined;
   }
 
   nextMatchBack(): [number, number] | undefined {
     while (this.front < this.back) {
-      const { offset, char, size } = this.chars[--this.back];
-      if (this.matches(char)) return [offset, offset + size];
+      // A char outside the BMP is a pair of code units, whose second one is a low surrogate.
+      const paired = this.back - this.front >= 2 && /[\uDC00-\uDFFF]/.test(this.text[this.back - 1]);
+      const char = this.text.slice(this.back - (paired ? 2 : 1), this.back);
+      const end = this.backByte;
+      this.back -= char.length;
+      this.backByte -= utf8Length(char);
+      if (this.matches(char)) return [this.backByte, end];
     }
     return undefined;
   }
 
   debug(show: DebugValue): DebugPart {
-    const left = this.chars.slice(this.front, this.back).map(({ char }) => char);
+    const left = [...this.text.slice(this.front, this.back)];
     const charIndices = fieldsPart('CharIndices', [
       ['front_offset', numberPart(this.frontOffset)],
       ['iter', tuplePart('Chars', [listPart(left, CHAR, show)])],

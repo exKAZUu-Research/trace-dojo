@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 994 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
+// code-gauge-allow-file fileNcss 997 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
@@ -31,7 +31,7 @@ import {
   type RVar,
   typeAfter,
 } from './regions';
-import { higherRankedInputsOf, relateOpaqueCall, SignatureInstance } from './signatureInstance';
+import { relateCallThroughBound, relateOpaqueCall, SignatureInstance } from './signatureInstance';
 import { markExtendedTemporaries, promotable } from './temporaryScopes';
 import { arrayTryFrom } from './traitConversions';
 import type { TraitSolver } from './traits';
@@ -1068,7 +1068,7 @@ export class LoanBuilder {
           fieldLayout(results, res.variant, index, () => this.static())
         );
       }
-    } else this.applyClosure(this.layout(callee), inputs, results, higherRankedInputsOf(expr.callee.ty));
+    } else this.applyClosure(this.layout(callee), inputs, results, [], expr.callee.ty);
     if (fn && normalize(shallow(fn.ret)).kind === 'never') this.current = undefined;
     return result;
   }
@@ -1162,7 +1162,17 @@ export class LoanBuilder {
    * Relates the arguments and the result of a call of a closure (or of what a type parameter or a trait object for one
    * stands for): as its summary says for a closure of this function, conservatively otherwise.
    */
-  private applyClosure(callee: Layout, args: Layout[], result: Layout, higherRanked: boolean[] = []): void {
+  // code-gauge-allow functionCognitiveComplexity 16 -- Applies a closure's bound or summary, or relates every region.
+  private applyClosure(
+    callee: Layout,
+    args: Layout[],
+    result: Layout,
+    higherRanked: boolean[] = [],
+    calleeType?: Type
+  ): void {
+    // A callee known only by a closure bound relates them as the bound says.
+    const regions = { fresh: this.fresh, outlives: this.outlives, staticRegion: () => this.static() };
+    if (relateCallThroughBound(calleeType, args, result, regions)) return;
     const closure = callee.kind === 'opaque' ? callee.closure : undefined;
     const summary = closure && this.shared.summaries.get(closure);
     if (!closure || !summary || callee.kind !== 'opaque') {

@@ -13,7 +13,17 @@ import {
   type RVar,
   type Subst,
 } from './regions';
-import { type FnDef, shallow, type Type, type TypeParam } from './types';
+import { childTypes, type FnDef, shallow, type Type, type TypeParam } from './types';
+
+/** How a relation makes regions and relates them. */
+interface Regions {
+  readonly fresh: () => RVar;
+  readonly outlives: Outlives;
+  readonly staticRegion: () => RVar;
+}
+
+/** What a call relates its inputs and its result by: a function's signature, or that of a closure bound. */
+type Signature = Pick<FnDef, 'params' | 'paramTypes' | 'ret' | 'selfMode' | 'trait' | 'impl' | 'ast' | 'extraBounds'>;
 
 /** A callee's signature for one call: fresh regions for its lifetimes, and layouts for its type arguments. */
 export class SignatureInstance {
@@ -26,11 +36,11 @@ export class SignatureInstance {
   private readonly selfLifetime: string;
 
   constructor(
-    private readonly fn: FnDef,
-    typeArgs: readonly Type[],
-    private readonly fresh: () => RVar,
-    private readonly outlives: Outlives,
-    private readonly staticRegion: () => RVar
+    private readonly fn: Signature,
+    private readonly typeArgs: readonly Type[],
+    readonly fresh: () => RVar,
+    readonly outlives: Outlives,
+    readonly staticRegion: () => RVar
   ) {
     for (const [index, param] of fn.params.entries())
       this.params.set(param, layoutOf(typeArgs[index], fresh, staticRegion));
@@ -146,6 +156,20 @@ export class SignatureInstance {
     for (const a of inputRegions) for (const b of regionsOf(actual)) edge(a, b);
   }
 
+  /** Relates what a closure parameter is called with and returns: as its own bound says when it has one. */
+  private relateClosureBound(
+    sig: { params: Type[]; ret: Type },
+    callee: Type | undefined,
+    layout: Layout,
+    applyClosure: (callee: Layout, args: Layout[], result: Layout, higherRanked: boolean[]) => void
+  ): void {
+    const args = sig.params.map((type) => instantiate(type, this.subst, this.fresh));
+    const ret = instantiate(sig.ret, this.subst, this.fresh);
+    const own = boundSignatureOf(callee);
+    if (own) relateBoundCall(own, args, ret, this);
+    else applyClosure(layout, args, ret, higherRankedInputs(sig));
+  }
+
   /**
    * Relates the type parameters as their bounds say: `B: FromIterator<T>` builds a `B` of `T`s, and a closure
    * parameter `F: FnMut(T) -> B` makes `B`s of `T`s as its summary says.
@@ -162,10 +186,7 @@ export class SignatureInstance {
           continue;
         }
         if (bound.fnSig) {
-          const args = bound.fnSig.params.map((type) => instantiate(type, this.subst, this.fresh));
-          const { ret } = bound.fnSig;
-          const higherRanked = higherRankedInputs(bound.fnSig);
-          applyClosure(layout, args, instantiate(ret, this.subst, this.fresh), higherRanked);
+          this.relateClosureBound(bound.fnSig, this.typeArgs[fn.params.indexOf(param)], layout, applyClosure);
           continue;
         }
         for (const arg of bound.args) {
@@ -184,19 +205,59 @@ function higherRankedInputs(sig: { params: Type[]; ret: Type }): boolean[] {
   return sig.params.map((type) => type.kind === 'ref' && type.lifetime === undefined && !namesLifetime(sig.ret));
 }
 
-/** The higher-ranked reference parameters of a callee that is called through a closure bound or a trait object. */
-export function higherRankedInputsOf(type: Type | undefined): boolean[] {
+/** Relates a call of a value of a type by the closure bound the type has, if it has one. */
+export function relateCallThroughBound(
+  callee: Type | undefined,
+  args: Layout[],
+  result: Layout,
+  regions: Regions
+): boolean {
+  const sig = boundSignatureOf(callee);
+  if (sig) relateBoundCall(sig, args, result, regions);
+  return sig !== undefined;
+}
+
+/** The signature of a callee that is called through a closure bound or a trait object (`F: Fn(&T) -> U`). */
+function boundSignatureOf(type: Type | undefined): { params: Type[]; ret: Type } | undefined {
   let t = type && normalize(shallow(type));
   while (t && (t.kind === 'ref' || (t.kind === 'adt' && t.def.builtin === 'Box'))) {
     t = normalize(shallow(t.kind === 'ref' ? t.target : t.args[0]));
   }
-  const sig = t && boundsOf(t)?.find((bound) => bound.fnSig)?.fnSig;
-  return sig ? higherRankedInputs(sig) : [];
+  return t && boundsOf(t)?.find((bound) => bound.fnSig)?.fnSig;
+}
+
+/**
+ * Relates a call through a closure bound as the bound's own signature says, like a call of a function with that
+ * signature: a result can borrow only through the type parameters and the lifetimes the signature names, so neither
+ * from a reference the callee takes for every lifetime nor from the borrow of the callee that the call makes.
+ */
+function relateBoundCall(sig: { params: Type[]; ret: Type }, args: Layout[], result: Layout, regions: Regions): void {
+  const params = [...typeParamsIn([...sig.params, sig.ret])];
+  const signature = { params, paramTypes: sig.params, ret: sig.ret, selfMode: undefined, trait: undefined };
+  const instance = new SignatureInstance(
+    { ...signature, impl: undefined, ast: undefined },
+    params.map((param): Type => ({ kind: 'param', param })),
+    regions.fresh,
+    regions.outlives,
+    regions.staticRegion
+  );
+  instance.bindInputs(args);
+  instance.bindOutput(result, args);
+}
+
+function typeParamsIn(types: Type[], found = new Set<TypeParam>()): Set<TypeParam> {
+  for (const type of types) {
+    const t = shallow(type);
+    if (t.kind === 'param') found.add(t.param);
+    else typeParamsIn(childTypes(t), found);
+  }
+  return found;
 }
 
 /**
  * Relates a call of a callee whose body is not known here: what it captures and its arguments may flow into the
- * result, except the lifetime of a reference it takes for every lifetime, which the result cannot name.
+ * result, except the lifetime of a reference it takes for every lifetime, which the result cannot name, and that of
+ * a reference the callee is called through (`map(&f)`).
  */
 export function relateOpaqueCall(
   outlives: Outlives,
@@ -206,7 +267,9 @@ export function relateOpaqueCall(
   higherRanked: boolean[]
 ): void {
   const inputs = args.flatMap((arg, index) => regionsOf(arg).slice(higherRanked[index] ? 1 : 0));
-  for (const a of [...regionsOf(callee), ...inputs]) {
+  let called = callee;
+  while (called.kind === 'ref') called = called.target;
+  for (const a of [...regionsOf(called), ...inputs]) {
     for (const b of regionsOf(result)) outlives(a, b);
   }
 }

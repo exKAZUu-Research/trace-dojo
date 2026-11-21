@@ -7549,3 +7549,55 @@ fn main() {
     stdout: 'FilterMap { iter: 0..3 } MapWhile { iter: 0..3 }\nScan { iter: 0..3, state: 0 }\n2\n',
   });
 });
+
+test('a result of a callee bounded by Fn(&T) -> U borrows neither its argument nor the callee', () => {
+  const program = `fn each<T, U, F: Fn(&T) -> U>(v: &mut Vec<T>, f: F) -> Vec<U> {
+    let mut out = Vec::new();
+    for x in v.iter() { out.push(f(x)); }
+    v.truncate(0);
+    out
+}
+fn mapped<T, U, F: Fn(&T) -> U>(v: &mut Vec<T>, f: F) -> Vec<U> {
+    let out = v.iter().map(|x| f(x)).collect::<Vec<U>>();
+    v.truncate(0);
+    out
+}
+fn by_ref<T, U, F: Fn(&T) -> U>(v: &mut Vec<T>, f: F) -> Vec<U> {
+    let out = v.iter().map(&f).collect::<Vec<U>>();
+    v.truncate(0);
+    out
+}
+fn head<T, U, F: Fn(Option<&T>) -> U>(v: &mut Vec<T>, f: F) -> U { let y = f(v.first()); v.clear(); y }
+fn main() {
+    println!("{:?} {:?}", each(&mut vec![1, 2], |x| x * 2), mapped(&mut vec![1, 2], |x| x + 1));
+    println!("{:?} {}", by_ref(&mut vec![1, 2], |x| x * 3), head(&mut vec![1], |x| x.map_or(0, |n| *n + 1)));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[2, 4] [2, 3]\n[3, 6] 2\n' });
+  for (const invalid of [
+    'fn first<T, F: Fn(&Vec<T>) -> &T>(v: &mut Vec<T>, f: F) { let y = f(v); v.clear(); let _z = y; }\nfn main() {}',
+    'fn id<T, F: Fn(T) -> T>(x: T, f: F) -> T { f(x) }\nfn main() {\n    let r;\n    { let s = String::from("a"); r = id(&s, |x| x); }\n    println!("{}", r);\n}',
+    'fn run<U, F: Fn() -> U>(f: F) -> U { f() }\nfn main() {\n    let r;\n    { let s = String::from("a"); r = run(|| s.as_str()); }\n    println!("{}", r);\n}',
+  ]) {
+    expect(executeProgram('rust', invalid).kind).toBe('compileError');
+  }
+});
+
+test('constant lints skip what a diverging operand makes unreachable, and char searches stop where they match', () => {
+  const program = `fn early() -> bool { let _ = { return true; false } && true; let x = 1 / 0; false }
+fn skipped() { let _ = { return; false } || false; let y: u8 = 200u8 + 100; }
+fn cond() -> bool { false }
+fn consume(a: i32, b: i32) {}
+fn main() {
+    skipped();
+    if cond() { consume({ std::process::exit(0); 0 }, 1 / 0); }
+    let text = "x ".repeat(50_000);
+    let mut total = 0;
+    for _ in 0..100 { total += text.split(|c: char| c == ' ').next().unwrap().len(); }
+    let mixed = "a😀b é😀z";
+    println!("{} {} {:?} {:?}", early(), total, mixed.rsplit(|c: char| !c.is_ascii()).collect::<Vec<_>>(), mixed.rfind(|c: char| c == '😀'));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true 100 ["z", "", "b ", "a"] Some(9)\n',
+  });
+});

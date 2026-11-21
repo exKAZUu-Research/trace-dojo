@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 632 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+// code-gauge-allow-file fileNcss 641 -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, LocalVar, PathRes } from './annotations';
@@ -183,6 +183,7 @@ export class ConstLint {
    * gave to variables that other code assigns too do not reach what follows.
    */
   private branch(check: () => void): boolean {
+    if (this.diverged) return true;
     check();
     this.endBlock();
     const diverged = this.diverged;
@@ -191,8 +192,13 @@ export class ConstLint {
   }
 
   /** Checks an expression's operations, returning its value when it is a constant. */
-  // code-gauge-allow functionNcss 35 -- Constant propagation follows each expression kind using its checked type.
   private expr(expr: Expr): Known | undefined {
+    // What follows an operand that never finishes (a later argument, the other side of an operator) is unreachable.
+    return this.diverged ? undefined : this.reachable(expr);
+  }
+
+  // code-gauge-allow functionNcss 35 -- Constant propagation follows each expression kind using its checked type.
+  private reachable(expr: Expr): Known | undefined {
     switch (expr.kind) {
       case 'int': {
         return intTypeOf(expr.ty) ? expr.value : undefined;
@@ -438,6 +444,13 @@ export class ConstLint {
     return typeof index === 'bigint' ? knownField(operand, String(index)) : undefined;
   }
 
+  private assertionFailure(message: Expr[]): void {
+    if (message.length === 0) return;
+    this.branch(() => {
+      for (const arg of message) this.expr(arg);
+    });
+  }
+
   /** A call ends a basic block; a tuple struct's or a variant's constructor builds its value. */
   private call(expr: Extract<Expr, { kind: 'call' | 'methodCall' | 'macro' | 'try' }>): Known | undefined {
     const res =
@@ -453,11 +466,7 @@ export class ConstLint {
     });
     // An assertion formats its message only where it fails, so what the message does decides nothing after it, and
     // a condition known to hold never reaches it.
-    if (message.length > 0 && !holds) {
-      this.branch(() => {
-        for (const arg of message) this.expr(arg);
-      });
-    }
+    if (!holds) this.assertionFailure(message);
     this.endBlock();
     // What follows a call that never returns (`panic!`, `std::process::exit`) is not reachable.
     if (checkedType(expr.ty)?.kind === 'never') this.diverged = true;
