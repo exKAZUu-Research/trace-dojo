@@ -372,7 +372,8 @@ class JsonParser {
     if (simple !== undefined) return simple;
     if (escape !== 'u') this.fail('Unrecognized string escape', this.position);
     const hex = this.text.slice(this.position, this.position + 4);
-    if (!/^[\da-fA-F]{4}$/.test(hex)) this.fail('Invalid unicode escape', this.position - 1);
+    if (!/^[\da-fA-F]*$/.test(hex)) this.fail('Invalid unicode escape', this.position - 1);
+    if (hex.length < 4) this.fail('Unterminated string', this.text.length);
     this.position += 4;
     return String.fromCodePoint(Number.parseInt(hex, 16));
   }

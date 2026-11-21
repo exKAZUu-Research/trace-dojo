@@ -3199,6 +3199,21 @@ void main() {
   });
 });
 
+test('JSON decoding distinguishes truncated unicode escapes from invalid digits', () => {
+  const program = String.raw`import 'dart:convert';
+void main() {
+  for (final source in [r'"\u', r'"\u1', r'"\u12', r'"\u123', r'"\u1G', r'"\u12"', r'["\u1', r'"\u1234', r'"\u0061"']) {
+    try { print(jsonDecode(source)); } on FormatException catch (error) { print([error.message, error.offset]); }
+  }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[Unterminated string, 3]\n[Unterminated string, 4]\n[Unterminated string, 5]\n[Unterminated string, 6]\n' +
+      '[Invalid unicode escape, 2]\n[Invalid unicode escape, 2]\n[Unterminated string, 5]\n[Unterminated string, 7]\na\n',
+  });
+});
+
 test('JSON decoding keeps long strings, keys, and error offsets across scan boundaries', () => {
   const program = String.raw`import 'dart:convert';
 void main() {

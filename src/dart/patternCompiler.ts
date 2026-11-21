@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 567 -- Pattern kinds share their type, rooting, and binding helpers.
+// code-gauge-allow-file fileNcss 570 -- Pattern kinds share their type, rooting, and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import { CallCompiler } from './callCompiler';
