@@ -1401,26 +1401,22 @@ inline fun <T> buildList(capacity: Int, @CallsExactlyOnce builderAction: Mutable
 }
 
 inline fun <E> buildSet(@CallsExactlyOnce builderAction: MutableSet<E>.() -> Unit): Set<E> =
-    buildSet<E>(10, builderAction)
+    buildSet<E>(8, builderAction)
 
 inline fun <E> buildSet(capacity: Int, @CallsExactlyOnce builderAction: MutableSet<E>.() -> Unit): Set<E> {
-    val set = LinkedHashSet<E>(NativeLists.builderCapacity(capacity))
+    val set = SetBuilder<E>(capacity)
     set.builderAction()
-    return set.finishBuild()
+    return set.build()
 }
 
 inline fun <K, V> buildMap(@CallsExactlyOnce builderAction: MutableMap<K, V>.() -> Unit): Map<K, V> =
-    buildMap<K, V>(10, builderAction)
+    buildMap<K, V>(8, builderAction)
 
 inline fun <K, V> buildMap(capacity: Int, @CallsExactlyOnce builderAction: MutableMap<K, V>.() -> Unit): Map<K, V> {
-    val map = LinkedHashMap<K, V>(NativeLists.builderCapacity(capacity)).startBuild()
+    val map = MapBuilder<K, V>(capacity)
     map.builderAction()
-    return map.finishBuild()
+    return map.build()
 }
-
-internal external fun <E> LinkedHashSet<E>.finishBuild(): Set<E>
-internal external fun <K, V> LinkedHashMap<K, V>.startBuild(): LinkedHashMap<K, V>
-internal external fun <K, V> LinkedHashMap<K, V>.finishBuild(): Map<K, V>
 
 fun <T> Iterable<T>.toTypedArray(): Array<T> = NativeLists.toArray(this)
 
@@ -1466,7 +1462,6 @@ fun <T> List<T>.binarySearch(fromIndex: Int = 0, toIndex: Int = size, comparison
 object NativeLists {
     external fun <T> of(elements: Collection<T>): MutableList<T>
     external fun <T> builder(capacity: Int): ListBuilder<T>
-    external fun builderCapacity(capacity: Int): Int
     external fun <T> toArray(elements: Iterable<T>): Array<T>
     external fun <T> removeIfArrayList(list: MutableCollection<T>, predicate: (T) -> Boolean): Boolean?
 }

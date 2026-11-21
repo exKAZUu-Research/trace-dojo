@@ -129,6 +129,11 @@ open external class LinkedHashMap<K, V> : HashMap<K, V> {
 external class SingletonMap<K, V> : NativeMap<K, V>
 external class EmptyMap<K, V> : NativeMap<K, V>
 
+internal external class MapBuilder<K, V> : NativeMap<K, V> {
+    external constructor(capacity: Int)
+    external fun build(): Map<K, V>
+}
+
 abstract external class NativeSet<E> : MutableSet<E> {
     external override val size: Int
     external override fun isEmpty(): Boolean
@@ -160,6 +165,11 @@ open external class LinkedHashSet<E> : HashSet<E> {
 
 external class SingletonSet<E> : NativeSet<E>
 external class EmptySet<E> : NativeSet<E>
+
+internal external class SetBuilder<E> : NativeSet<E> {
+    external constructor(capacity: Int)
+    external fun build(): Set<E>
+}
 
 external class MapKeysOrEntries<E> : MutableSet<E> {
     external override val size: Int

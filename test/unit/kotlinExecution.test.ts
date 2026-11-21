@@ -60,6 +60,82 @@ test.each(['contains', 'split'])('charges the execution budget during CharSequen
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'map and set builder growth rehashes in insertion order and invalidates old cursors',
+    source: `class Key(val n: Int, val failAt: Int = 0) {
+    var calls = 0
+    override fun hashCode(): Int {
+        calls++
+        println("hash $n")
+        if (calls == failAt) error("rehash $n")
+        return n
+    }
+    override fun equals(other: Any?): Boolean = other is Key && n == other.n
+    override fun toString(): String = n.toString()
+}
+
+fun main() {
+    println(buildMap<Key, Int>(1) {
+        put(Key(1), 1)
+        val entry = entries.first()
+        put(Key(2), 2)
+        try {
+            println(entry.key)
+        } catch (e: ConcurrentModificationException) {
+            println(e.message)
+        }
+    })
+    println(buildSet<Key>(1) { add(Key(1)); add(Key(2)) })
+
+    println(buildMap<Key, Int>(1) {
+        put(Key(3), 3)
+        val extra = mapOf(Key(4) to 4, Key(5) to 5)
+        putAll(extra)
+    })
+
+    println(buildSet<Key>(1) {
+        add(Key(6, 2))
+        val cursor = iterator()
+        try {
+            add(Key(7))
+        } catch (e: IllegalStateException) {
+            println(e.message)
+        }
+        try {
+            cursor.next()
+        } catch (e: ConcurrentModificationException) {
+            println("iterator invalidated")
+        }
+        println(size)
+    })
+}`,
+    stdout: `hash 1
+hash 2
+hash 1
+hash 2
+The backing map has been modified after this entry was obtained.
+{1=1, 2=2}
+hash 1
+hash 2
+hash 1
+hash 2
+[1, 2]
+hash 3
+hash 4
+hash 5
+hash 3
+hash 4
+hash 5
+{3=3, 4=4, 5=5}
+hash 6
+hash 7
+hash 6
+rehash 6
+iterator invalidated
+1
+[6]
+`,
+  },
+  {
     name: 'two-argument map forEach checks structural changes after live traversal',
     source: `fun main() {
     for (map in listOf(hashMapOf(1 to "a", 2 to "b"), linkedMapOf(1 to "a", 2 to "b"))) {

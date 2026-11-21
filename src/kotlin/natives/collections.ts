@@ -17,6 +17,8 @@ import {
   UNIT,
   type Value,
 } from '../values';
+import { BuilderStore } from './builderStore';
+import { checkedBuilderCapacity, copyBuilderEntries, defineCollectionBuilders } from './collectionBuilders';
 import {
   callCollectionMember,
   COLLECTION,
@@ -38,7 +40,8 @@ import {
 import { arrayIterator } from './core';
 import { jdkHashCapacity, mapCapacity, newStore, reserveForCopy } from './hashTables';
 import { listEquals } from './listEquality';
-import { mapEntryEquals, mapEquals } from './mapEquality';
+import { defineNativeEntry, newEntry } from './mapEntries';
+import { mapEquals } from './mapEquality';
 import { defineMapForEach } from './mapForEach';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
 
@@ -480,9 +483,6 @@ function defineLists(): void {
     list.listBuilderCapacity = size;
     return list;
   });
-  defineNative('kotlin.collections.NativeLists.builderCapacity(Int)', (frame, _receiver, [capacity]) =>
-    checkedBuilderCapacity(frame, capacity as number)
-  );
   defineNative('kotlin.collections.ListBuilder.build()', (_frame, list) => {
     (list as KObject).native = { isBuilt: true };
     return list;
@@ -528,12 +528,6 @@ function finishListAllocation(
     throwError(frame, 'java.lang.OutOfMemoryError', 'Requested array size exceeds VM limit');
   frame.runtime.allocate(frame, capacity + 1);
   if (kind === 'ArrayList') list.arrayList = { size, capacity: defaultSize ? undefined : capacity };
-}
-
-function checkedBuilderCapacity(frame: Frame, capacity: number): number {
-  if (capacity < 0) throwError(frame, 'java.lang.IllegalArgumentException', 'capacity must be non-negative.');
-  frame.runtime.allocate(frame, capacity);
-  return capacity;
 }
 
 function registerListNative(type: string, signature: string, native: ListNative): void {
@@ -788,7 +782,6 @@ function checkIteratorModification(frame: Frame, current: ItemIteratorState): vo
 
 const MAP = 'kotlin.collections.NativeMap';
 const SET = 'kotlin.collections.NativeSet';
-const entryWrappers = new WeakMap<KObject, WeakMap<HashEntry, KObject>>();
 
 function hashCollection(frame: Frame, receiver: Value): number {
   return withCollectionElements(frame, receiver, (elements) => {
@@ -804,6 +797,7 @@ function storeOf(value: Value): KStore {
 
 /** Finds the entry of a key, comparing with `equals` among the entries of its hash, or by order in a sorted store. */
 export function findEntry(frame: Frame, store: KStore, key: Value, removing = false): HashEntry | undefined {
+  if (store instanceof BuilderStore) return store.lookup(frame, key);
   if (!removing && !store.isAllocated && store.entries.length === 0) return undefined;
   if (store.isSingleton) return store.entries.find((entry) => valueEquals(frame, key, entry.key));
   if (store.order === 'sorted') {
@@ -826,6 +820,12 @@ function findHashedEntry(frame: Frame, store: KStore, key: Value, hash: number):
 
 /** `HashMap.hash` keeps the hashes as Java's `hashCode` returns them; the store spreads them into buckets. */
 export function putEntry(frame: Frame, store: KStore, key: Value, value: Value): Value {
+  if (store instanceof BuilderStore) {
+    const { entry } = store.addKey(frame, key);
+    const old = entry.value;
+    entry.value = value;
+    return old;
+  }
   const position = store.order === 'sorted' ? store.positionOf(frame, key) : undefined;
   const hash = position ? 0 : hashOf(frame, key);
   const existing = position
@@ -916,9 +916,9 @@ function defineMaps(): void {
       const store = storeOf(map);
       const entry = findEntry(frame, store, key, true);
       if (!entry) return;
-      store.remove(entry);
-      touch(map as KObject);
-      return entry.value;
+      const previous = entry.value;
+      removeStoreEntry(frame, map as KObject, entry);
+      return previous;
     },
     'putAll(Map<out K, V>)': (frame, map, [source]) => {
       requireMutableMap(frame, map);
@@ -927,8 +927,7 @@ function defineMaps(): void {
     },
     'clear()': (frame, map) => {
       requireMutableMap(frame, map);
-      storeOf(map).entries = [];
-      touch(map as KObject);
+      clearStore(map as KObject);
       return UNIT;
     },
     'equals(Any?)': (frame, map, [other]) => mapEquals(frame, map as KObject, other),
@@ -946,18 +945,41 @@ function putMapEntry(frame: Frame, map: KObject, key: Value, value: Value): Valu
   const store = storeOf(map);
   const sizeBefore = store.entries.length;
   const previous = putEntry(frame, store, key, value);
-  if (store.entries.length !== sizeBefore) touch(map);
+  if (!(store instanceof BuilderStore) && store.entries.length !== sizeBefore) touch(map);
   return previous;
 }
 
 function copyMapEntries(frame: Frame, map: KObject, source: Value): void {
+  const store = storeOf(map);
+  if (store instanceof BuilderStore) {
+    copyBuilderEntries(frame, store, source);
+    return;
+  }
   const count = readCollectionProperty(frame, source, MAP_INTERFACE, 'size') as number;
   if (count <= 0) return;
-  reserveForCopy(storeOf(map), count);
+  reserveForCopy(store, count);
   everyMapEntry(frame, source, (key, value) => {
     putMapEntry(frame, map, key, value);
     return true;
   });
+}
+
+function removeStoreEntry(frame: Frame, collection: KObject, entry: HashEntry): void {
+  const store = storeOf(collection);
+  if (store instanceof BuilderStore) store.removeKeyEntry(frame, entry);
+  else {
+    store.remove(entry);
+    touch(collection);
+  }
+}
+
+function clearStore(collection: KObject): void {
+  const store = storeOf(collection);
+  if (store instanceof BuilderStore) store.clearKeys();
+  else {
+    store.entries = [];
+    touch(collection);
+  }
 }
 
 function mapToString(frame: Frame, map: KObject): string {
@@ -1004,8 +1026,7 @@ function defineSets(): void {
       const entry = findEntry(frame, store, element, true);
       if (!entry) return false;
       requireMutableMap(frame, set);
-      store.remove(entry);
-      touch(set as KObject);
+      removeStoreEntry(frame, set as KObject, entry);
       return true;
     },
     'addAll(Collection<E>)': (frame, set, [elements]) => {
@@ -1022,8 +1043,7 @@ function defineSets(): void {
     },
     'clear()': (frame, set) => {
       requireMutableMap(frame, set);
-      storeOf(set).entries = [];
-      touch(set as KObject);
+      clearStore(set as KObject);
       return UNIT;
     },
     'equals(Any?)': (frame, set, [other]) => setEquals(frame, set, other),
@@ -1043,6 +1063,7 @@ function addSetElements(frame: Frame, set: KObject, elements: Value): boolean {
 
 function addSetEntry(frame: Frame, set: KObject, element: Value): boolean {
   const store = storeOf(set);
+  if (store instanceof BuilderStore) return store.addKey(frame, element).added;
   const size = store.entries.length;
   putEntry(frame, store, element, undefined);
   if (size === store.entries.length) return false;
@@ -1120,27 +1141,6 @@ function viewElement(frame: Frame, map: KObject, kind: ViewKind, entry: HashEntr
   return newEntry(frame, map, entry);
 }
 
-export function newEntry(frame: Frame, map: KObject | undefined, entry: HashEntry): KObject {
-  if (!map || map.native?.isMapBuilder) return createEntry(frame, map, entry);
-  let wrappers = entryWrappers.get(map);
-  if (!wrappers) {
-    wrappers = new WeakMap();
-    entryWrappers.set(map, wrappers);
-  }
-  const present = wrappers.get(entry);
-  if (present) return present;
-  const wrapper = createEntry(frame, map, entry);
-  wrappers.set(entry, wrapper);
-  return wrapper;
-}
-
-function createEntry(frame: Frame, map: KObject | undefined, entry: HashEntry): KObject {
-  frame.runtime.allocate(frame, 1);
-  const object = new KObject(libraryClass('kotlin.collections.NativeEntry'), 0);
-  object.native = { entry, map };
-  return object;
-}
-
 function storeIterator(frame: Frame, collection: KObject, kind: ViewKind, map = collection): KObject {
   const iterator = new KObject(libraryClass('kotlin.collections.StoreIterator'), 0);
   iterator.readOnlyCollection = map.readOnlyCollection;
@@ -1154,11 +1154,6 @@ function storeIterator(frame: Frame, collection: KObject, kind: ViewKind, map = 
   };
   void frame;
   return iterator;
-}
-
-/** The entry a `Map.Entry` object of a native map stands for. */
-function entryOf(value: Value): { entry: HashEntry; map: KObject | undefined } {
-  return (value as KObject).native as { entry: HashEntry; map: KObject | undefined };
 }
 
 function varargItems(array: Value): Value[] {
@@ -1176,7 +1171,7 @@ function defineViews(): void {
     defineViewChanging(owner);
   }
   defineStoreIterator();
-  defineNativeEntry();
+  defineNativeEntry(requireMutableMap);
 }
 
 /** What reads the keys, values, or entries of a map, as views of it. */
@@ -1212,6 +1207,12 @@ function matchingViewEntry(frame: Frame, view: Value, element: Value, removing: 
 
 function findMapValue(frame: Frame, store: KStore, value: Value): HashEntry | undefined {
   if (store.isSingleton) return store.entries.find((entry) => valueEquals(frame, value, entry.value));
+  if (store instanceof BuilderStore) {
+    return store.entries.findLast((entry) => {
+      frame.runtime.spend();
+      return valueEquals(frame, entry.value, value);
+    });
+  }
   return store.findOrdered((entry) => {
     frame.runtime.spend();
     return frame.runtime.withNativeRoots([entry.key, entry.value], () => objectsEqual(frame, value, entry.value));
@@ -1241,11 +1242,9 @@ function defineViewChanging(owner: string): void {
       return removeFirstIterable(frame, view, (value) => valueEquals(frame, element, value));
     requireMutableMap(frame, map);
     if (kind === 'values') return removeFirstIterable(frame, view, (value) => objectsEqual(frame, element, value));
-    const store = map.store as KStore;
     const entry = matchingViewEntry(frame, view, element, true);
     if (!entry) return false;
-    store.remove(entry);
-    touch(map);
+    removeStoreEntry(frame, map, entry);
     return true;
   });
   defineNative(`${owner}.add(E)`, (frame) => throwError(frame, 'java.lang.UnsupportedOperationException'));
@@ -1262,8 +1261,7 @@ function defineViewChanging(owner: string): void {
   defineNative(`${owner}.clear()`, (frame, view) => {
     const { map } = viewOf(view);
     requireMutableMap(frame, map);
-    (map.store as KStore).entries = [];
-    touch(map);
+    clearStore(map);
     return UNIT;
   });
 }
@@ -1297,43 +1295,11 @@ function defineStoreIterator(): void {
     if (current.map.modCount !== current.expectedModCount)
       throwError(frame, 'java.util.ConcurrentModificationException');
     requireMutableMap(frame, current.map);
-    (current.map.store as KStore).remove(current.last);
+    removeStoreEntry(frame, current.map, current.last);
     current.last = undefined;
-    touch(current.map);
     current.expectedModCount = current.map.modCount;
     return UNIT;
   });
-}
-
-function defineNativeEntry(): void {
-  const entry = 'kotlin.collections.NativeEntry';
-  defineNativeProperty(`${entry}.key`, (_frame, receiver) => entryOf(receiver).entry.key);
-  defineNativeProperty(`${entry}.value`, (_frame, receiver) => entryOf(receiver).entry.value);
-  defineNative(`${entry}.setValue(V)`, (frame, receiver, [value]) => {
-    const { entry: stored, map } = entryOf(receiver);
-    if (map) requireMutableMap(frame, map);
-    const old = stored.value;
-    stored.value = value;
-    return old;
-  });
-  defineNative(`${entry}.toString()`, (frame, receiver) => {
-    const { entry: stored } = entryOf(receiver);
-    return `${stringOf(frame, stored.key)}=${stringOf(frame, stored.value)}`;
-  });
-  defineNative(`${entry}.hashCode()`, (frame, receiver) => {
-    const { entry: stored } = entryOf(receiver);
-    return hashOf(frame, stored.key) ^ hashOf(frame, stored.value);
-  });
-  defineNative(
-    `${entry}.equals(Any?)`,
-    (frame, receiver, [other]) => receiver === other || mapEntryEquals(frame, entryOf(receiver).entry, other)
-  );
-}
-
-function finishBuild(_frame: Frame, collection: Value): Value {
-  const object = collection as KObject;
-  object.native = { ...object.native, isBuilt: true };
-  return object;
 }
 
 function setInstance(frame: Frame, name: string, store: KStore): KObject {
@@ -1357,7 +1323,7 @@ function singletonStore(frame: Frame, key: Value, value: Value): KStore {
 
 function mapGetOrDefault(frame: Frame, map: Value, [key, fallback]: Value[]): Value {
   const store = (map as KObject).store;
-  if (store && store.order !== 'sorted' && !isBuilt(map)) {
+  if (store && store.order !== 'sorted' && !(store instanceof BuilderStore)) {
     const entry = findEntry(frame, store, key);
     return entry ? entry.value : fallback;
   }
@@ -1464,11 +1430,5 @@ defineMapConstructors();
 defineMaps();
 defineMapForEach();
 defineSets();
-defineNative('kotlin.collections.LinkedHashSet<E>.finishBuild()', finishBuild);
-defineNative('kotlin.collections.LinkedHashMap<K, V>.startBuild()', (_frame, collection) => {
-  const map = collection as KObject;
-  map.native = { ...map.native, isMapBuilder: true };
-  return map;
-});
-defineNative('kotlin.collections.LinkedHashMap<K, V>.finishBuild()', finishBuild);
+defineCollectionBuilders(touch);
 defineViews();
