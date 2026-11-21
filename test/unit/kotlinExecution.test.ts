@@ -3092,6 +3092,30 @@ fun main() {
       'size\n[]\nsize\nentries\n[]\nsize\nentries\nfixed\n[(1, 2)]\nsize\nentries\nsize\n[(1, 2), (3, 4), (5, 6)]\n',
   },
   {
+    name: 'sibling inference fills nested generic arguments while preserving concrete components and evaluation order',
+    source: `fun key(name: String): String {
+    println(name)
+    return name
+}
+fun main() {
+    val plain = listOf("c")
+    val names = mutableListOf("a", "b")
+    println(mapOf("x" to emptyList(), "y" to plain))
+    println(mapOf("y" to names, "x" to emptyList()))
+    val mutable = mutableMapOf("x" to mutableListOf(), "y" to names)
+    mutable["x"]?.add("z")
+    println(mutable)
+    println(listOf(Pair(1, emptyList()), Pair("y", plain)))
+    println(listOf(Pair("y", plain), Pair(1, emptyList())))
+    println(mapOf(1 to emptyList(), "y" to plain))
+    println(mapOf("y" to plain, 1 to emptyList()))
+    println(mapOf("k" to emptySet(), "j" to setOf(1)))
+    println(mapOf(key("first") to emptyList(), key("second") to plain))
+}`,
+    stdout:
+      '{x=[], y=[c]}\n{y=[a, b], x=[]}\n{x=[z], y=[a, b]}\n[(1, []), (y, [c])]\n[(y, [c]), (1, [])]\n{1=[], y=[c]}\n{y=[c], 1=[]}\n{k=[], j=[1]}\nfirst\nsecond\n{first=[], second=[c]}\n',
+  },
+  {
     name: 'floating sign copies handle Int, signed zero, infinity, and NaN',
     source: `import kotlin.math.withSign
 

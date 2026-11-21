@@ -401,6 +401,30 @@ export function commonGenericHint(result: KType, known: KType): KType | undefine
   }
 }
 
+export function fillOpenTypeArguments(shape: KType, evidence: KType): KType | undefined {
+  const partial = resolved(shape);
+  if (!hasOpenVariables(partial)) return withDeterminedVariables(partial);
+  if (partial.kind === 'variable') return evidence;
+  const known = resolved(evidence);
+  if (partial.kind !== 'class' || known.kind !== 'class') return undefined;
+  for (const projection of [partial, ...supertypesInOrder(partial)]) {
+    if (projection.kind !== 'class' || !hasOpenVariables(projection)) continue;
+    const target = asSuper(known, projection.cls);
+    if (!target) continue;
+    return {
+      ...projection,
+      args: projection.args.map((argument, index) => fillOpenTypeArgument(argument, target.args[index])),
+    };
+  }
+}
+
+function fillOpenTypeArgument(argument: TypeArgument, hint: TypeArgument | undefined): TypeArgument {
+  if (argument.variance === 'star' || !hasOpenVariables(argument.type)) return argument;
+  if (!hint || hint.variance === 'star') return { variance: 'star' };
+  const type = fillOpenTypeArguments(argument.type, hint.type);
+  return type ? { ...argument, type } : { variance: 'star' };
+}
+
 /**
  * The expected type of a later branch of an `if`, `when`, or `?:` whose value is a call without arguments, such as
  * `emptyList()`: an earlier branch's generic type, which gives the call its type arguments, where it fits the expected

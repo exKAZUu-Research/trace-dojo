@@ -33,9 +33,10 @@ export function expectedArgumentType(
   compiledArgs: (Compiled | undefined)[],
   index: number,
   argument: Expression,
-  isOverloaded: boolean
+  isOverloaded: boolean,
+  useLowerHints: boolean
 ): KType | undefined {
-  const hints = argument.kind === 'call' ? argumentTypeHints(attempts, index) : undefined;
+  const hints = useLowerHints && argument.kind === 'call' ? argumentTypeHints(attempts, index) : undefined;
   const agreed = agreedParameterType(attempts, index, isOverloaded, hints);
   if (!isBareCallExpression(argument) || (agreed && !hasOpenVariables(agreed))) return agreed;
   const sibling = attempts
@@ -47,7 +48,7 @@ export function expectedArgumentType(
   return (sibling && branchHint(sibling.type, undefined, true)) ?? agreed;
 }
 
-export function laterSiblingArguments(attempts: ArgumentAttempt[], index: number): number[] {
+export function siblingArguments(attempts: ArgumentAttempt[], index: number): number[] {
   const related = attempts.flatMap(({ candidate, mapping, substitution }) => {
     const position = mapping.findIndex((indexes) => indexes.includes(index));
     if (position === -1) return [];
@@ -60,7 +61,7 @@ export function laterSiblingArguments(attempts: ArgumentAttempt[], index: number
         : [];
     });
   });
-  return [...new Set(related)].filter((other) => other > index);
+  return [...new Set(related)].filter((other) => other !== index);
 }
 
 /**

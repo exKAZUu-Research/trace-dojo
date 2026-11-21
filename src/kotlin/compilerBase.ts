@@ -129,6 +129,8 @@ export class FunctionContext {
   readonly returnedTypes: KType[] = [];
   loops: LoopContext[] = [];
   inlineLambda = false;
+  /** A discarded probe may retain open types until the enclosing argument reveals their positions. */
+  allowOpenCallTypes: boolean;
   invokesExactlyOnce = false;
   readonly inlineWrites = new Set<VariableSymbol>();
 
@@ -141,6 +143,7 @@ export class FunctionContext {
     readonly returnTarget: FunctionContext | undefined,
     readonly isProbe: boolean = parent?.isProbe ?? false
   ) {
+    this.allowOpenCallTypes = parent?.allowOpenCallTypes ?? false;
     this.info = {
       name,
       locals: [],

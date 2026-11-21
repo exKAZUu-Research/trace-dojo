@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 734 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 747 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   type ArgumentEvaluation,
@@ -6,7 +6,7 @@ import {
   argumentTypeHints,
   expectedArgumentType,
   firstAttempts,
-  laterSiblingArguments,
+  siblingArguments,
 } from './argumentTypes';
 import type { Expression, LambdaExpression } from './ast';
 import {
@@ -33,6 +33,7 @@ import {
   commonGenericHint,
   constrainThroughBounds,
   determinedType,
+  fillOpenTypeArguments,
   fixVariable,
   hasIntersectionSupertype,
   isSameType,
@@ -429,17 +430,16 @@ export abstract class CallCompiler extends CompilerCore {
         compiledArgs.push(undefined);
         continue;
       }
+      const siblings = siblingArguments(viable, index);
       const expectedType = expectedArgumentType(
         viable,
         compiledArgs,
         index,
         argument.value,
-        isOverloaded && viable.length > 1
+        isOverloaded && viable.length > 1,
+        siblings.length === 0 || isBareCallExpression(argument.value)
       );
-      const sibling =
-        isBareCallExpression(argument.value) && (!expectedType || hasOpenVariables(expectedType))
-          ? this.inferSiblingArgument(scope, context, args, laterSiblingArguments(viable, index))
-          : undefined;
+      const sibling = this.siblingArgumentHint(scope, context, argument, expectedType, args, compiledArgs, siblings);
       const expected =
         sibling ??
         expectedType ??
@@ -454,19 +454,34 @@ export abstract class CallCompiler extends CompilerCore {
     return compiledArgs;
   }
 
-  private inferSiblingArgument(
+  // code-gauge-allow functionParameterCount 7 -- argument evidence depends on the original scope, flow, and sibling positions.
+  private siblingArgumentHint(
     scope: Scope,
     context: FunctionContext,
+    argument: ArgumentSyntax,
+    expected: KType | undefined,
     args: ArgumentSyntax[],
+    compiledArgs: (Compiled | undefined)[],
     siblings: number[]
   ): KType | undefined {
+    if (context.allowOpenCallTypes || siblings.length === 0 || (expected && !hasOpenVariables(expected)))
+      return undefined;
+    if (!containsBareCall(argument.value)) return undefined;
     const types = siblings.flatMap((index) => {
-      const argument = args[index];
-      if (argument.isSpread || containsBareCall(argument.value) || isLambdaArgument(argument.value)) return [];
-      const type = this.probeResultType(context, (probe) => this.compileExpression(scope, probe, argument.value));
+      const other = args[index];
+      if (other.isSpread || isLambdaArgument(other.value)) return [];
+      const type =
+        compiledArgs[index]?.type ??
+        this.probeResultType(context, (probe) => this.compileExpression(scope, probe, other.value));
       return type ? [type] : [];
     });
-    return siblingResultType(types, undefined);
+    const witness = siblingResultType(types, undefined);
+    if (!witness || isBareCallExpression(argument.value)) return witness;
+    const shape = this.probeResultType(context, (probe) => {
+      probe.allowOpenCallTypes = true;
+      return this.compileExpression(scope, probe, argument.value);
+    });
+    return shape && hasOpenVariables(shape) ? fillOpenTypeArguments(shape, witness) : undefined;
   }
 
   private constrainFromLambdaParameters(scope: Scope, attempt: Attempt, args: ArgumentSyntax[]): void {
@@ -952,7 +967,7 @@ export abstract class CallCompiler extends CompilerCore {
         compiledArgs[index] ??= this.compileLambdaArgument(scope, context, attempt, paramIndex, args[index]);
       }
     }
-    this.fixVariables(attempt, row);
+    this.fixVariables(attempt, row, context.allowOpenCallTypes);
     const evaluateArgs = argumentEvaluator(
       symbol,
       this.argumentEvaluations(attempt, args, compiledArgs as Compiled[]),
@@ -1034,8 +1049,8 @@ export abstract class CallCompiler extends CompilerCore {
    * they mention, as `C : Iterable<T>` in `onEach` gives `T` its type from `C`, so a variable nothing constrains yet
    * waits for the others.
    */
-  // code-gauge-allow functionCognitiveComplexity 24 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  private fixVariables({ candidate, substitution, variables }: Attempt, row: number): void {
+  // code-gauge-allow functionCognitiveComplexity 26 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  private fixVariables({ candidate, substitution, variables }: Attempt, row: number, allowOpen: boolean): void {
     const { symbol } = candidate;
     let pending = variables;
     while (pending.length > 0) {
@@ -1049,6 +1064,7 @@ export abstract class CallCompiler extends CompilerCore {
           for (const bound of variable.param.bounds) isSubtype(variable.fixed, substitute(bound, substitution));
       }
       if (waiting.length === pending.length) {
+        if (allowOpen) break;
         this.error(row, `型引数 ${waiting[0].param.name} を推論できません。型を書いてください。`);
       }
       pending = waiting;
