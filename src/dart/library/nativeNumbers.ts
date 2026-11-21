@@ -2,6 +2,7 @@ import { formatDouble } from '../format';
 import { doubleModulo, intModulo, intRemainder, numericBinary, shiftLeft, truncateToInt, wrap } from '../operators';
 import type { Runtime } from '../runtime';
 import type { Value } from '../values';
+import { magnitudeBitLength, modInverse } from './bigIntArithmetic';
 import { callFunction, define, defineAll, intArg, named, numArg, stringArg } from './nativeSupport';
 import { trimDartEnd, trimDartStart, trimDartWhitespace } from './stringWhitespace';
 
@@ -205,28 +206,8 @@ function modPow(base: bigint, exponent: bigint, modulus: bigint): bigint {
   return result;
 }
 
-export function modInverse(runtime: Runtime, value: bigint, modulus: bigint): bigint {
-  if (modulus <= 0n) runtime.throwError('RangeError', 'range', [modulus, 1n, undefined, 'modulus']);
-  if (modulus === 1n) return 0n;
-  let [oldR, r] = [((value % modulus) + modulus) % modulus, modulus];
-  let [oldS, s] = [1n, 0n];
-  while (r !== 0n) {
-    const quotient = oldR / r;
-    [oldR, r] = [r, oldR - quotient * r];
-    [oldS, s] = [s, oldS - quotient * s];
-  }
-  if (oldR !== 1n) runtime.throwError('Exception', '', ['Not coprime']);
-  return ((oldS % modulus) + modulus) % modulus;
-}
-
 export function bitLength(value: bigint): number {
   return magnitudeBitLength(value < 0n ? ~value : value);
-}
-
-export function magnitudeBitLength(value: bigint): number {
-  if (value === 0n) return 0;
-  const hex = (value < 0n ? -value : value).toString(16);
-  return (hex.length - 1) * 4 + 32 - Math.clz32(Number.parseInt(hex[0], 16));
 }
 
 function sign(value: bigint | number): Value {
@@ -375,9 +356,11 @@ define('int.modPow', (runtime, self, [exponent, modulus]) => {
   if (m <= 0n) runtime.throwError('RangeError', 'range', [modulus, 1n, undefined, 'modulus']);
   return e === 0n ? 1n : modPow(self as bigint, e, m);
 });
-define('int.modInverse', (runtime, self, [modulus]) =>
-  modInverse(runtime, self as bigint, intArg(runtime, modulus, 'modulus'))
-);
+define('int.modInverse', (runtime, self, [modulus]) => {
+  const bound = intArg(runtime, modulus, 'modulus');
+  if (bound <= 0n) runtime.throwError('RangeError', 'range', [bound, 1n, undefined, 'modulus']);
+  return modInverse(runtime, self as bigint, bound);
+});
 define('int.fromEnvironment', (_runtime, _self, _args, namedArgs) => named(namedArgs, 'defaultValue', 0n));
 
 function throwFormat(runtime: Runtime, message: string, source: string, offset?: bigint): never {

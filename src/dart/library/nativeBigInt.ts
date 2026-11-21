@@ -3,7 +3,8 @@ import { formatDouble } from '../format';
 import { wrap } from '../operators';
 import type { Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
-import { bitLength, magnitudeBitLength as bitsOf, modInverse, radixDigit, radixSource } from './nativeNumbers';
+import { bigintWords, magnitudeBitLength as bitsOf, modInverse, modularRemainder, multiply } from './bigIntArithmetic';
+import { bitLength, radixDigit, radixSource } from './nativeNumbers';
 import { define, defineConstructor, intArg, named, numArg, stringArg } from './nativeSupport';
 
 interface BigIntState {
@@ -154,9 +155,6 @@ const product = (a: number, b: number): BinaryCost => ({
   work: (a + b) / 512,
 });
 const quotient = (a: number, b: number): BinaryCost => ({ work: (a + b) / 512 });
-/** Euclid's algorithm takes up to a step per bit, each a division through the digits. */
-const euclid = (a: number, b: number): BinaryCost => ({ work: Math.max(a, b) ** 2 / 131_072 });
-
 function checkDivisor(runtime: Runtime, b: bigint): void {
   if (b === 0n) runtime.throwError('IntegerDivisionByZeroException', '', []);
 }
@@ -181,13 +179,17 @@ binary('remainder', quotient, (runtime, a, b) => {
 binary('&', linear, (_runtime, a, b) => a & b);
 binary('|', linear, (_runtime, a, b) => a | b);
 binary('^', linear, (_runtime, a, b) => a ^ b);
-binary('gcd', euclid, (_runtime, a, b) => {
+binary('gcd', linear, (runtime, a, b) => {
   let x = a < 0n ? -a : a;
   let y = b < 0n ? -b : b;
-  while (y !== 0n) [x, y] = [y, x % y];
-  return x;
+  if (x < y) [x, y] = [y, x];
+  while (y > 1n) [x, y] = [y, modularRemainder(runtime, x, y, bigintWords(y))];
+  return y === 0n ? x : 1n;
 });
-binary('modInverse', euclid, (runtime, a, b) => modInverse(runtime, a, b));
+binary('modInverse', linear, (runtime, a, modulus) => {
+  if (modulus <= 0n) runtime.throwError('ArgumentError', '', [`Modulus must be strictly positive: ${modulus}`]);
+  return modInverse(runtime, a, modulus);
+});
 define(
   'BigInt./',
   (runtime, receiver, [other]) => Number(valueOf(runtime, receiver)) / Number(valueOf(runtime, other))
@@ -321,24 +323,7 @@ function modularPower(runtime: Runtime, base: bigint, exponent: bigint, modulus:
 }
 
 function multiplyMod(runtime: Runtime, left: bigint, right: bigint, modulus: bigint, modulusWords: number): bigint {
-  runtime.spend(1 + (bigintWords(left) * bigintWords(right)) / 128);
-  const product = left * right;
-  runtime.budget.checkClock();
-  return modularRemainder(runtime, product, modulus, modulusWords);
-}
-
-function modularRemainder(runtime: Runtime, value: bigint, modulus: bigint, modulusWords: number): bigint {
-  if (value >= modulus || value <= -modulus) {
-    runtime.spend(1 + ((bigintWords(value) - modulusWords + 1) * modulusWords) / 128);
-    const remainder = value % modulus;
-    runtime.budget.checkClock();
-    return remainder;
-  }
-  return value;
-}
-
-function bigintWords(value: bigint): number {
-  return Math.max(1, Math.ceil(bitsOf(value) / 32));
+  return modularRemainder(runtime, multiply(runtime, left, right), modulus, modulusWords);
 }
 
 define(

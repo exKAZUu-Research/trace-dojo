@@ -1398,7 +1398,9 @@ test.each([
   },
   {
     name: 'a gcd of BigInts with millions of bits',
-    body: '  var a = (BigInt.one << 2000000) - BigInt.one;\n  print(a.gcd(a - BigInt.two));',
+    body: `  final a = (BigInt.one << 2000000) - BigInt.one;
+  final b = (BigInt.one << 1000000) - BigInt.from(3);
+  print(a.gcd(b));`,
   },
 ])('$name stops at the operation limit', ({ body }) => {
   expect(executeProgram('dart', `void main() {\n${body}\n}\n`)).toMatchObject({
@@ -5829,6 +5831,24 @@ test('BigInt modPow meters wide multiplies and preserves small powers', () => {
     print(base.modPow(exponent, modulus));
   }`;
   expect(executeProgram('dart', wide)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('BigInt Euclidean operations charge the operands and preserve inverse errors', () => {
+  const source = `void main() {
+  final n = BigInt.one << 400000;
+  print([n.gcd(BigInt.zero).bitLength, n.gcd(BigInt.one), n.modInverse(BigInt.one)]);
+  print([n.gcd(BigInt.from(12)), n.modInverse(BigInt.from(7)), BigInt.from(-5).modInverse(BigInt.from(11))]);
+  for (final m in [BigInt.zero, BigInt.from(-3), BigInt.two]) {
+    try { print(BigInt.zero.modInverse(m)); } catch (e) { print(e); print(e.runtimeType); }
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[400001, 1, 0]\n[4, 4, 2]\n' +
+      'Invalid argument(s): Modulus must be strictly positive: 0\nArgumentError\n' +
+      'Invalid argument(s): Modulus must be strictly positive: -3\nArgumentError\nException: Not coprime\n_Exception\n',
+  });
 });
 
 test('BigInt parsing checks literal syntax before validating the radix', () => {
