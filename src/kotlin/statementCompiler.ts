@@ -698,7 +698,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       for (const variable of current.variables.values()) if (!variable.isVar) outerVals.add(variable);
     }
-    return { identity: {}, outerVals, hasBreak: false };
+    return { identity: {}, outerVals, breaks: [] };
   }
 
   /** Forgets the smart casts of the variables a loop assigns, since another iteration may have changed them. */
@@ -756,7 +756,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const body = this.compileLoopBody(scope, context, loop, statement.body);
     const isInfinite = condition.compiled.constant === true;
     this.flow = this.withNarrowing(afterCondition, condition.whenFalse);
-    this.flow.isDead = isInfinite && !loop.hasBreak;
+    this.flow.isDead = isInfinite && loop.breaks.length === 0;
     this.flow.assigned.clear();
     for (const variable of before.assigned) this.flow.assigned.add(variable);
     const test = condition.compiled.eval;
@@ -772,8 +772,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
     this.forgetAssignedIn(scope, [...statement.body.statements]);
     this.forgetAssignedIn(scope, statement.condition);
     const loop = this.newLoop(context, scope);
-    const exits: NonNullable<LoopContext['doWhileExits']> = { breaks: [], continues: [] };
-    loop.doWhileExits = exits;
+    const continues: Flow[] = [];
+    loop.continues = continues;
     // The condition sees the body's variables, as Kotlin's scoping of do-while does.
     const bodyScope = new Scope(scope, context);
     context.loops.push(loop);
@@ -791,13 +791,13 @@ export abstract class StatementCompiler extends OperatorCompiler {
     } finally {
       context.loops.pop();
     }
-    this.flow = Flow.merge([this.flow, ...exits.continues]);
+    this.flow = Flow.merge([this.flow, ...continues]);
     const condition = this.compileCondition(bodyScope, context, statement.condition);
     const test = condition.compiled.eval;
     const lastSlot = context.info.slotCount;
     const conditionExit = this.withNarrowing(this.flow, condition.whenFalse);
     conditionExit.isDead ||= condition.compiled.constant === true;
-    this.flow = Flow.merge([conditionExit, ...exits.breaks]);
+    this.flow = Flow.merge([conditionExit, ...loop.breaks]);
     const body: Exec = (frame) => {
       bodyEval(frame);
     };
@@ -1320,7 +1320,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   // code-gauge-allow functionNcss 50 -- try, catch clauses, and finally, as an expression.
-  // code-gauge-allow functionCognitiveComplexity 22 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity 25 -- the same try and catch branches decide the flow and runtime result.
   protected compileTry(
     scope: Scope,
     context: FunctionContext,
@@ -1328,6 +1328,10 @@ export abstract class StatementCompiler extends OperatorCompiler {
     expected: KType | undefined,
     asStatement: boolean
   ): Compiled {
+    const loopExits = expression.finally
+      ? context.loops.flatMap(({ breaks, continues }) => (continues ? [breaks, continues] : [breaks]))
+      : [];
+    const exitStarts = loopExits.map((exits) => exits.length);
     const before = this.flow.copy();
     const body = this.compileBlockValue(scope, context, expression.body, expected, asStatement);
     const flows = [this.flow];
@@ -1346,15 +1350,18 @@ export abstract class StatementCompiler extends OperatorCompiler {
       return { test: instanceTest(this.core, type), write, value, slot: variable.slot };
     });
     this.flow = Flow.merge(flows);
-    let finallyEval: Eval | undefined;
-    if (expression.finally) {
-      const afterTry = this.flow;
-      this.flow = Flow.merge([before, afterTry]);
-      finallyEval = this.compileBlockValue(scope, context, expression.finally, undefined, true).eval;
-      const afterFinally = this.flow;
-      this.flow = afterTry;
-      this.flow.isDead = afterTry.isDead || afterFinally.isDead;
-    }
+    const finallyEval = expression.finally
+      ? this.compileFinally(
+          scope,
+          context,
+          expression.finally,
+          before,
+          loopExits.map((exits, index) => ({
+            exits,
+            pending: exits.splice(exitStarts[index]),
+          }))
+        )
+      : undefined;
     const branches = [body, ...catches.map((clause) => clause.value)];
     const type = asStatement ? this.unitType : this.branchType(branches, expected);
     const repr = asStatement ? 'ref' : reprOf(this.core, type);
@@ -1386,6 +1393,38 @@ export abstract class StatementCompiler extends OperatorCompiler {
         }
       },
     };
+  }
+
+  private compileFinally(
+    scope: Scope,
+    context: FunctionContext,
+    block: Block,
+    beforeTry: Flow,
+    loopExits: { exits: Flow[]; pending: Flow[] }[]
+  ): Eval {
+    const afterTry = this.flow;
+    this.flow = Flow.merge([beforeTry, afterTry, ...loopExits.flatMap(({ pending }) => pending)]);
+    const evaluate = this.compileBlockValue(scope, context, block, undefined, true).eval;
+    const afterFinally = this.flow;
+    const assignedKeys = [...assignedNames(block.statements)].flatMap((name) => {
+      const variable = this.findVariable(scope, name);
+      return variable ? [keyOf(variable)] : [];
+    });
+    const transfer = (flow: Flow): Flow => {
+      const completed = flow.copy();
+      completed.isDead ||= afterFinally.isDead;
+      for (const key of assignedKeys) completed.forget(key);
+      for (const [key, type] of afterFinally.narrowed) completed.narrowed.set(key, type);
+      for (const variable of afterFinally.assigned) completed.assigned.add(variable);
+      for (const variable of afterFinally.maybeAssigned) completed.maybeAssigned.add(variable);
+      return completed;
+    };
+    this.flow = transfer(afterTry);
+    if (afterFinally.isDead) return evaluate;
+    for (const { exits, pending } of loopExits) {
+      for (const flow of pending) exits.push(transfer(flow));
+    }
+    return evaluate;
   }
 }
 

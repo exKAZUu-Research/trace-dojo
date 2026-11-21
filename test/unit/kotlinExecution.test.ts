@@ -15,6 +15,60 @@ test.each([
     stdout: '{banana=1, date=4, apple=2, cherry=3, elderberry=5}\n[zeta, mu, 100, beta, alpha]\n[3, 1, 2, 10, -1]\n',
   },
   {
+    name: 'finally assignments on normal, break, and continue paths',
+    source: `fun breakExit() {
+    var value: Int
+    do {
+        try { break }
+        finally { value = 2 }
+    } while (false)
+    println(value)
+}
+fun continueExit(fail: Boolean) {
+    var value: Int
+    do {
+        try {
+            try {
+                if (fail) throw IllegalArgumentException()
+                continue
+            } catch (error: IllegalArgumentException) {
+                continue
+            } finally {
+                value = 3
+            }
+        } finally {
+            value = 4
+        }
+    } while (value < 0)
+    println(value)
+}
+fun normalExit() {
+    var value: Int
+    try { println("try") }
+    finally { value = 5 }
+    println(value)
+}
+fun overridingExit() {
+    var value: Int
+    do {
+        try { break }
+        finally {
+            value = 6
+            continue
+        }
+    } while (value < 0)
+    println(value)
+}
+fun main() {
+    breakExit()
+    continueExit(false)
+    continueExit(true)
+    normalExit()
+    overridingExit()
+}`,
+    stdout: '2\n4\n4\ntry\n5\n6\n',
+  },
+  {
     name: 'string content that resembles property accessors',
     source: 'fun main() { println(" get()=1; set(x)") }',
     stdout: ' get()=1; set(x)\n',
@@ -621,6 +675,11 @@ test.each([
     'distinct branches initializing a class val once',
     true,
     'class A(flag: Boolean) { val n: Int; init { if (flag) n = 1 else this.n = 2 } }\nfun main() { println(A(true).n) }',
+  ],
+  [
+    'a read after a finally that only conditionally assigns',
+    false,
+    'fun run(set: Boolean) { var n: Int; do { try { break } finally { if (set) n = 1 } } while (false); println(n) }\nfun main() { run(false) }',
   ],
   [
     'a read after breaking from a do-while before assignment',
