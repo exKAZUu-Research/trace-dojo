@@ -775,7 +775,8 @@ function isStringPart(type: Type): boolean {
   if (t.kind === 'char') return true;
   if (t.kind === 'adt')
     return t.def.builtin === 'String' || (t.def.builtin === 'Box' && shallow(t.args[0]).kind === 'str');
-  if (t.kind !== 'ref') return false;
+  // std builds strings from `&str` and `&char`, not from mutable references.
+  if (t.kind !== 'ref' || t.mutable) return false;
   const target = normalize(shallow(t.target));
   return target.kind === 'str' || target.kind === 'char';
 }

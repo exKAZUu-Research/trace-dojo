@@ -8611,3 +8611,14 @@ test('numbers do not sum mutable references to them', () => {
     diagnostics: [{ message: 'i32 にトレイト Sum<&mut {integer}> が実装されていません。' }],
   });
 });
+
+test('a String is not built from mutable references to characters', () => {
+  const program = rustMain(`
+    let mut letters = vec!['a', 'b'];
+    let text: String = letters.iter_mut().collect();
+    println!("{text}");`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: 'String にトレイト FromIterator<&mut char> が実装されていません。' }],
+  });
+});
