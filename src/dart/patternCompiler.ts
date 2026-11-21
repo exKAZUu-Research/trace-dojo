@@ -15,6 +15,7 @@ import {
   DYNAMIC,
   type FunctionType,
   interfaceType,
+  isNonNullable,
   isNullable,
   isPotentiallyNullable,
   isSubtype,
@@ -140,6 +141,8 @@ export abstract class PatternCompiler extends CallCompiler {
       if (matched) this.flow = this.flow.promote(variable, matched);
       if (unmatched) whenFalse = whenFalse.promote(variable, unmatched);
     }
+    // A pattern the matched type always satisfies never fails.
+    if (this.alwaysMatches(syntax, current)) whenFalse = whenFalse.unreachable;
     if (!guardSyntax) return { pattern, guard: undefined, whenFalse };
     for (const binding of pattern.variables.values()) binding.inPatternGuard = true;
     try {
@@ -449,6 +452,37 @@ export abstract class PatternCompiler extends CallCompiler {
     });
     variables.set(name, variable);
     return variable;
+  }
+
+  /** Whether a pattern matches every value of the type, so that matching it cannot fail. */
+  private alwaysMatches(pattern: Pattern, input: DartType): boolean {
+    switch (pattern.kind) {
+      case 'parenthesized': {
+        return this.alwaysMatches(pattern.pattern, input);
+      }
+      case 'variable':
+      case 'wildcard': {
+        return !pattern.type || isSubtype(input, this.resolveType(pattern.type));
+      }
+      case 'nullCheck': {
+        return isNonNullable(input) && this.alwaysMatches(pattern.pattern, input);
+      }
+      case 'nullAssert': {
+        return this.alwaysMatches(pattern.pattern, nonNullable(input));
+      }
+      case 'cast': {
+        return this.alwaysMatches(pattern.pattern, this.resolveType(pattern.type));
+      }
+      case 'and': {
+        return this.alwaysMatches(pattern.left, input) && this.alwaysMatches(pattern.right, input);
+      }
+      case 'or': {
+        return this.alwaysMatches(pattern.left, input) || this.alwaysMatches(pattern.right, input);
+      }
+      default: {
+        return false;
+      }
+    }
   }
 
   private patternTypes(

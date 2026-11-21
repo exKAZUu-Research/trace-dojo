@@ -2214,6 +2214,27 @@ void main() {
   expect(executeProgram('dart', 'void main() { double d = 5.clamp(1, 3); }')).toMatchObject({ kind: 'compileError' });
 });
 
+test('Dart flow analysis treats checks decided by static types as constant', () => {
+  const program = `int f(String s) { while (s != null) { return 1; } }
+void main() {
+  var x = 0;
+  String a;
+  if (x != null) a = 'a';
+  int b;
+  if (x is Null) {} else { b = 2; }
+  int c;
+  if (x case int _) c = 3;
+  Null n = null;
+  int d;
+  if (n == null) d = 4;
+  print([a, b, c, d, f('s')]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[a, 2, 3, 4, 1]\n' });
+  expect(executeProgram('dart', 'void main() { int? x; int y; if (x != null) y = 1; print(y); }')).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

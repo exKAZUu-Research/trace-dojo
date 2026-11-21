@@ -406,12 +406,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
         : left.type.kind === 'null' && right.variable
           ? right.variable
           : undefined;
-    let whenEqual = this.flow;
-    let whenNotEqual = this.flow;
+    // Comparing null with a non-nullable value is never equal, and with another null always is.
+    const neverEqual =
+      (left.type.kind === 'null' && isNonNullable(right.type)) ||
+      (right.type.kind === 'null' && isNonNullable(left.type));
+    const alwaysEqual = left.type.kind === 'null' && right.type.kind === 'null';
+    let whenEqual = neverEqual ? this.flow.unreachable : this.flow;
+    let whenNotEqual = alwaysEqual ? this.flow.unreachable : this.flow;
     if (nullVariable && this.isPromotable(nullVariable)) {
       const current = this.promotedType(nullVariable);
       const nonNull = nonNullable(current);
-      if (!sameType(nonNull, current)) whenNotEqual = this.flow.promote(nullVariable, nonNull);
+      if (!sameType(nonNull, current)) whenNotEqual = whenNotEqual.promote(nullVariable, nonNull);
     }
     const compiled = this.equalityOf(left, right, negated, expression);
     return {
@@ -463,13 +468,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const resolve = this.runtimeType(type);
     const { run } = value;
     const { variable } = value;
-    const tested = variable ? this.flow.rememberTypeTest(variable, type) : this.flow;
+    let tested = variable ? this.flow.rememberTypeTest(variable, type) : this.flow;
     let promoted = tested;
     if (variable && this.isPromotable(variable)) {
       const current = this.promotedType(variable);
       const narrowed = promotionTarget(current, type);
       if (narrowed) promoted = tested.promote(variable, narrowed);
     }
+    // A test the static type already decides leaves its other branch unreachable.
+    if (isSubtype(value.type, type)) tested = tested.unreachable;
+    else if (isNeverType(type) || (type.kind === 'null' && isNonNullable(value.type))) promoted = promoted.unreachable;
     const { negated } = expression;
     return {
       compiled: {
