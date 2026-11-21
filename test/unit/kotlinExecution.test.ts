@@ -97,6 +97,20 @@ fun main() {
     stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
   },
   {
+    name: 'bulk mutations through a reversed view',
+    source: `fun main() {
+    val source = mutableListOf(1, 3, 2)
+    val view = source.asReversed()
+    view.sort()
+    println(view)
+    println(source)
+    view.reverse()
+    println(view)
+    println(source)
+}`,
+    stdout: '[1, 2, 3]\n[3, 2, 1]\n[3, 2, 1]\n[1, 2, 3]\n',
+  },
+  {
     name: 'indexed and reversed collection views stay backed by their source',
     source: `fun main() {
     val values = mutableListOf(1, 2, 3)

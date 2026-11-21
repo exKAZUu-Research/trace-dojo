@@ -103,7 +103,15 @@ function writeBack(frame: Frame, list: KObject, values: Value[]): void {
     if (parent) touch(list);
     return;
   }
-  void frame;
+  const set = libraryClass('kotlin.collections.MutableList').members.get('set')?.[0] as FunctionSymbol;
+  const { nativeRoots } = frame.runtime;
+  const mark = nativeRoots.length;
+  for (const value of values) nativeRoots.push(value);
+  try {
+    for (const [index, value] of values.entries()) callFunction(set, frame, list, [index, value], undefined);
+  } finally {
+    nativeRoots.length = mark;
+  }
 }
 
 /** Calls a `Comparator`'s `compare`, dispatched on its class. */
