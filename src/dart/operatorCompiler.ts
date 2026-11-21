@@ -52,7 +52,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     if (operator === '!') return this.compileConditionInner(expression).compiled;
     if (operator === '-' && operand.kind === 'int') return this.compileInt(operand, context, true);
     const methodName = operator === '-' ? 'unary-' : '~';
-    const value = operand.kind === 'super' ? this.superReceiver(operand) : this.compileExpression(operand);
+    const value = operand.kind === 'super' ? this.superReceiver(operand) : this.compileOperatorReceiver(operand);
+    if (value.extensionOverride) return this.compileOperatorCall(value, methodName, [], expression);
     const numeric = numericClassOf(value.type);
     if (numeric) {
       const { run } = value;
@@ -136,8 +137,9 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   ): Compiled {
     const expression = { ...at(span), right: rightSyntax };
     if (left.type.kind === 'void') this.error(expression, 'void の値には演算子を使えません。');
-    // An explicit extension application calls the extension's operator, never the number's own.
-    const leftNumeric = left.extensionOverride ? undefined : numericClassOf(left.type);
+    // An explicit extension application calls the extension's operator, never the receiver type's own.
+    if (left.extensionOverride) return this.compileOperatorCall(left, operator, [rightSyntax], span);
+    const leftNumeric = numericClassOf(left.type);
     if (leftNumeric) {
       const parameterContext = leftNumeric === 'double' ? interfaceType(coreTypes.num) : undefined;
       const promotesRight =
@@ -199,7 +201,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       ...at(span),
     };
     if (isNeverType(left.type)) return this.compileMethodCall(left, operator, args, undefined, span, undefined, false);
-    const resolved = this.lookupMember(left.type, operator, false, span);
+    const resolved = this.memberFor(left, left.type, operator, span);
     if (
       isPotentiallyNullable(left.type) &&
       left.type.kind !== 'dynamic' &&

@@ -1999,6 +1999,14 @@ test('Dart explicit extension applications are only member and operator receiver
   }
 });
 
+test('Dart explicit extension applications call the selected extension operators', () => {
+  const program = `extension S on String { String operator +(String v) => 'extension'; }
+extension E on int { int operator -() => 50; int operator +(int o) => 7; }
+extension F on int { int operator +(int o) => 8; }
+void main() { print([S('a') + 'b', 'a' + 'b', -E(1), E(1) + 2, F(1) + 2, 1 + 2]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[extension, ab, 50, 7, 8, 3]\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
