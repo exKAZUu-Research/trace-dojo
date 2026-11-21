@@ -1887,6 +1887,25 @@ test.each(['var y = {...x};', 'var y = {if (true) ...x};'])(
   }
 );
 
+test('Dart call contexts choose type arguments over arguments that only constrain them', () => {
+  const program = `class Tree<T> { T? val; Tree(this.val); }
+class Node<T> { T? value; Node<T>? next; Node({this.value, this.next}); }
+void main() {
+  Tree<int> u = Tree(null);
+  Node<int> n = Node(value: null);
+  List<Tree<int>> l = [Tree(null)];
+  print([u.runtimeType, n.runtimeType, l.runtimeType, Tree(null).runtimeType]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[Tree<int>, Node<int>, List<Tree<int>>, Tree<Null>]\n',
+  });
+  expect(executeProgram('dart', 'T id<T>(T x) => x;\nvoid main() { int y = id(null); }')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('引数') })],
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
