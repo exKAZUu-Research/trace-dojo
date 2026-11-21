@@ -21,7 +21,14 @@ import type { Frame } from '../runtime';
 import type { FunctionSymbol } from '../symbols';
 import { box, type Boxed, indexedSize, KObject, listView, NULL, type PrimitiveKind, UNIT, type Value } from '../values';
 import { checkListView, elementsOf, joinRendered, newList, newPrimitiveArrayList, touch } from './collections';
-import { collectionSize, forEachIterable, objectsEqual } from './collectionTraversal';
+import {
+  callCollectionMember,
+  collectionIterator,
+  collectionSize,
+  copyCollectionToArray,
+  forEachIterable,
+  objectsEqual,
+} from './collectionTraversal';
 import { arrayIterator, checkArrayIndex } from './core';
 import { defineNative, defineNativeProperty, libraryClass } from './registry';
 import { stableSort } from './timSort';
@@ -108,10 +115,10 @@ function sortList(frame: Frame, list: Value, [comparator]: Value[]): Value {
     const values = source.items as Value[];
     sortValues(frame, list, comparator, values, 0, values.length);
   } else {
-    const values = elementsOf(frame, list);
-    if (values.length <= 1) return UNIT;
+    if (collectionSize(frame, list) <= 1) return UNIT;
+    const values = copyCollectionToArray(frame, object);
     sortValues(frame, list, comparator, values, 0, values.length);
-    writeBack(frame, object, values);
+    writeSortedList(frame, object, values);
   }
   return UNIT;
 }
@@ -124,10 +131,15 @@ function sortValues(frame: Frame, owner: Value, comparator: Value, values: Value
   });
 }
 
-function writeBack(frame: Frame, list: KObject, values: Value[]): void {
-  const set = libraryClass('kotlin.collections.MutableList').members.get('set')?.[0] as FunctionSymbol;
+function writeSortedList(frame: Frame, list: KObject, values: Value[]): void {
   frame.runtime.withNativeRoots([values], () => {
-    for (const [index, value] of values.entries()) callFunction(set, frame, list, [index, value], undefined);
+    const iterator = collectionIterator(frame, list, 'listIterator');
+    frame.runtime.withNativeRoots([iterator.value], () => {
+      for (const value of values) {
+        iterator.next();
+        callCollectionMember(frame, iterator.value, 'kotlin.collections.MutableListIterator', 'set', [value]);
+      }
+    });
   });
 }
 

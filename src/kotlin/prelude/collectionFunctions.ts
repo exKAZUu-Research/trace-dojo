@@ -779,13 +779,8 @@ inline fun <T, R : Comparable<R>> Iterable<T>.sortedBy(crossinline selector: (T)
 
 inline fun <T, R : Comparable<R>> Iterable<T>.sortedByDescending(crossinline selector: (T) -> R?): List<T> = sortedWith(compareByDescending(selector))
 
-fun <T : Comparable<T>> MutableList<T>.sort() {
-    if (size > 1) sortWith(naturalOrder())
-}
-
-fun <T : Comparable<T>> MutableList<T>.sortDescending() {
-    if (size > 1) sortWith(reverseOrder())
-}
+fun <T : Comparable<T>> MutableList<T>.sort() = sortWith(naturalOrder())
+fun <T : Comparable<T>> MutableList<T>.sortDescending() = sortWith(reverseOrder())
 
 inline fun <T, R : Comparable<R>> MutableList<T>.sortBy(crossinline selector: (T) -> R?) {
     if (size > 1) sortWith(compareBy(selector))

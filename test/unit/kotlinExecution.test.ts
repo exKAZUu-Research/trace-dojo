@@ -3215,6 +3215,44 @@ fun main() {
     stdout: 'okhi\nCannot read the array length because "cbuf" is null\n',
   },
   {
+    name: 'custom list sorting checks size and writes through its list iterator',
+    source: `class LoggedListIterator(private val cursor: MutableListIterator<Int>) : MutableListIterator<Int> by cursor {
+    override fun next(): Int {
+        val value = cursor.next()
+        println("advance $value")
+        return value
+    }
+    override fun set(element: Int) {
+        println("write $element")
+        cursor.set(element)
+    }
+}
+class SortProbe(private val items: MutableList<Int>) : MutableList<Int> by items {
+    override val size: Int get() { println("size"); return items.size }
+    override fun iterator(): MutableIterator<Int> { println("iterator"); return items.iterator() }
+    override fun listIterator(): MutableListIterator<Int> {
+        println("listIterator")
+        return LoggedListIterator(items.listIterator())
+    }
+    override fun set(index: Int, element: Int): Int {
+        println("indexed set")
+        return items.set(index, element)
+    }
+}
+fun main() {
+    SortProbe(mutableListOf()).sort()
+    SortProbe(mutableListOf(1)).sortWith(compareBy { it })
+    val ascending = mutableListOf(3, 1, 2)
+    SortProbe(ascending).sort()
+    println(ascending)
+    val descending = mutableListOf(1, 3, 2)
+    SortProbe(descending).sortWith(compareByDescending { it })
+    println(descending)
+}`,
+    stdout:
+      'size\nsize\nsize\nsize\niterator\nlistIterator\nadvance 3\nwrite 1\nadvance 1\nwrite 2\nadvance 2\nwrite 3\n[1, 2, 3]\nsize\nsize\niterator\nlistIterator\nadvance 1\nwrite 3\nadvance 3\nwrite 2\nadvance 2\nwrite 1\n[3, 2, 1]\n',
+  },
+  {
     name: 'sorting and reversing respect finalized list mutability',
     source: `fun main() {
     val list = buildList { add(2); add(1) } as MutableList<Int>
