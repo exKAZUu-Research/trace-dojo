@@ -38,9 +38,9 @@ import { type Frame, KotlinThrow, LoopSignal, UNASSIGNED } from './runtime';
 import { type ClassSymbol, PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
 import { instanceTest } from './typeChecks';
 import { branchHint, commonSupertype, isSubtype } from './typeRelations';
-import { type ClassType, type KType, nonNull, NOTHING, resolved, substitute, typeToString } from './types';
+import { type ClassType, type KType, nonNull, resolved, substitute, typeToString } from './types';
 import { Boxed, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
-import { coverTypeCases } from './whenCoverage';
+import { WhenCoverage } from './whenCoverage';
 
 type Exec = (frame: Frame) => void;
 
@@ -595,16 +595,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
       if (variable.owner !== context)
         this.error(row, `val で宣言した ${variable.name} には、ラムダ式の中で代入できません。`);
     }
-    if (variable.owner !== context) {
-      for (
-        let current: FunctionContext | undefined = context;
-        current && current !== variable.owner;
-        current = current.parent
-      ) {
-        current.assignedCaptures.add(variable);
-      }
-      variable.isCapturedAndModified = true;
-    }
     const access = this.variableAccess(context, variable);
     return {
       type: variable.type,
@@ -613,11 +603,22 @@ export abstract class StatementCompiler extends OperatorCompiler {
         : undefined,
       repr: reprOf(this.core, variable.type),
       recordAssignment: (type) => {
-        if (variable.owner !== context) variable.capturedWriteTypes.add(type);
+        this.recordLocalWrite(context, variable, type);
         this.recordAssignment(context, variable, row);
       },
       bind: (frame) => ({ get: () => access.read(frame), set: (value) => access.write(frame, value) }),
     };
+  }
+
+  private recordLocalWrite(context: FunctionContext, variable: VariableSymbol, type: KType): void {
+    for (
+      let current = context;
+      current !== variable.owner && current.inlineLambda && current.parent;
+      current = current.parent
+    )
+      current.inlineWrites.add(variable);
+    if (context.directExecutionContext() !== variable.owner?.directExecutionContext())
+      variable.capturedWriteTypes.add(type);
   }
 
   private localDelegatePlace(
@@ -1202,7 +1203,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const before = this.flow.copy();
     const branchFlows: Flow[] = [];
     const entries: { tests: ((frame: Frame) => boolean)[]; body: Compiled }[] = [];
-    const covered = new Set<string>();
+    const covered = new WhenCoverage();
     let hasElse = false;
     for (const entry of expression.entries) {
       if (hasElse) this.error(entry.row, 'else は、when の最後に書いてください。');
@@ -1211,12 +1212,12 @@ export abstract class StatementCompiler extends OperatorCompiler {
         this.compileWhenEntry(scope, context, subjectValue, entry, covered, expected, asStatement, branchFlows)
       );
     }
-    const isExhaustive = hasElse || (subject !== undefined && this.coversSubject(subject, covered, before));
+    const isExhaustive = hasElse || (subject !== undefined && this.coversSubject(subject, covered.cases, before));
     this.checkWhenExhaustive(subject, isExhaustive, asStatement, row);
     if (!isExhaustive) branchFlows.push(this.flow);
     this.flow = branchFlows.length > 0 ? Flow.merge(branchFlows) : before;
     const bodies = entries.map((entry) => entry.body);
-    const type = asStatement ? this.unitType : bodies.length === 0 ? NOTHING : this.branchType(bodies, expected);
+    const type = asStatement || bodies.length === 0 ? this.unitType : this.branchType(bodies, expected);
     const repr = asStatement ? 'ref' : reprOf(this.core, type);
     const compiledEntries = entries.map((entry) => ({
       tests: entry.tests,
@@ -1237,7 +1238,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     context: FunctionContext,
     subject: Compiled | undefined,
     entry: Extract<Expression, { kind: 'when' }>['entries'][number],
-    covered: Set<string>,
+    covered: WhenCoverage,
     expected: KType | undefined,
     asStatement: boolean,
     branchFlows: Flow[]
@@ -1287,7 +1288,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     context: FunctionContext,
     subject: Compiled | undefined,
     condition: WhenCondition,
-    covered: Set<string>
+    covered: WhenCoverage
   ): { test: (frame: Frame) => boolean; whenTrue: Map<string, KType>; whenFalse: Map<string, KType> } {
     if (!subject) {
       if (condition.kind !== 'expression')
@@ -1306,14 +1307,14 @@ export abstract class StatementCompiler extends OperatorCompiler {
       const evaluate = convertRepr(subject.eval, subject.repr, 'ref');
       const narrowing = new Map<string, KType>();
       if (subject.stableKey) narrowing.set(subject.stableKey, this.narrowedType(subject.type, type));
-      coverTypeCases(covered, subject.type, type, condition.negated, this.core.boolean);
+      covered.coverTypeCases(subject.type, type, condition.negated, this.core.boolean);
       const exclusion = isExclusion(subject.stableKey, type);
       return condition.negated
         ? { test: (frame) => !test(evaluate(frame)), whenTrue: exclusion, whenFalse: narrowing }
         : { test: (frame) => test(evaluate(frame)), whenTrue: narrowing, whenFalse: exclusion };
     }
     if (condition.kind === 'in') return this.compileWhenIn(scope, context, subject, condition);
-    return this.compileWhenValue(scope, context, subject, condition.expression, condition.row, covered);
+    return this.compileWhenValue(scope, context, subject, condition.expression, condition.row, covered.cases);
   }
 
   /** A `when` branch's `in` or `!in` condition, which tests the subject. */
@@ -1419,6 +1420,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   private isExhaustive(type: KType, covered: Set<string>): boolean {
     const actual = resolved(type);
     if (actual.nullable && !covered.has('null')) return false;
+    if (actual.kind === 'nothing') return true;
     if (actual.kind !== 'class') return false;
     const coversClass = (cls: ClassSymbol): boolean => {
       if (covered.has(`class:${keyOf(cls)}`)) return true;

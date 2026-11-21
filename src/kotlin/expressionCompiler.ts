@@ -11,7 +11,7 @@ import {
   type Compiled,
   convertRepr,
   type Eval,
-  type Flow,
+  Flow,
   FunctionContext,
   nullableReceiverMessage,
   type PackageScope,
@@ -35,7 +35,7 @@ import {
   type FunctionSymbol,
   type PropertySymbol,
   type TypeParameterSymbol,
-  VariableSymbol,
+  type VariableSymbol,
 } from './symbols';
 import { anyType, commonSupertype, fixVariable, isSubtype, lambdaResultHint } from './typeRelations';
 import {
@@ -83,7 +83,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     let delegate = expression;
     while (delegate.kind === 'parenthesized') delegate = delegate.expression;
     if (!type || delegate.kind !== 'call') return this.compileExpression(scope, context, expression);
-    const compiled = this.compileCall(scope, context, delegate, undefined, { type, isVar });
+    const compiled = this.recordExpressionExit(this.compileCall(scope, context, delegate, undefined, { type, isVar }));
     return delegate === expression ? compiled : { ...compiled, isCall: false, isCreation: false };
   }
 
@@ -107,9 +107,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   protected checkInitialized(context: FunctionContext, property: PropertySymbol, name: string, row: number): void {
     const pending = this.uninitializedProperties;
-    if (pending?.context !== context) return;
+    if (pending?.context !== context.directExecutionContext()) return;
     const awaitsAssignment =
-      !property.isLateinit && this.mayInitializeVal(context, property) && !this.flow.assigned.has(property);
+      !property.isLateinit && this.mayInitializeVal(pending.context, property) && !this.flow.assigned.has(property);
     if (awaitsAssignment || pending.properties.has(property))
       this.error(row, `プロパティ ${name} には、まだ値が入っていません。`);
   }
@@ -206,8 +206,24 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return this.compileAny(scope, context, expression, undefined, true);
   }
 
-  // code-gauge-allow functionNcss 42 -- one case per kind of expression.
   protected compileAny(
+    scope: Scope,
+    context: FunctionContext,
+    expression: Expression,
+    expected: KType | undefined,
+    asStatement: boolean
+  ): Compiled {
+    return this.recordExpressionExit(this.compileExpressionKind(scope, context, expression, expected, asStatement));
+  }
+
+  private recordExpressionExit(compiled: Compiled): Compiled {
+    const type = resolved(compiled.type);
+    if (type.kind === 'nothing' && !type.nullable) this.flow.isDead = true;
+    return compiled;
+  }
+
+  // code-gauge-allow functionNcss 42 -- one case per kind of expression.
+  private compileExpressionKind(
     scope: Scope,
     context: FunctionContext,
     expression: Expression,
@@ -856,14 +872,13 @@ export abstract class ExpressionCompiler extends CallCompiler {
       eval: () => held,
       stableKey: receiver.stableKey,
     };
-    const narrowed = new Map(this.flow.narrowed);
+    const skipped = this.flow.copy();
     if (receiver.stableKey) this.flow.narrowed.set(receiver.stableKey, nonNull(receiver.type));
     let result: Compiled;
     try {
       result = build(target);
     } finally {
-      this.flow.narrowed.clear();
-      for (const [key, type] of narrowed) this.flow.narrowed.set(key, type);
+      this.flow = Flow.merge([skipped, this.flow]);
     }
     void row;
     const resultEval = convertRepr(result.eval, result.repr, 'ref');
@@ -934,19 +949,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
     expression: Extract<Expression, { kind: 'call' }>,
     expected: KType | undefined,
     delegate?: DelegateContext
-  ): Compiled {
-    const compiled = this.compileCallTarget(scope, context, expression, expected, delegate);
-    const result = resolved(compiled.type);
-    if (result.kind === 'nothing' && !result.nullable) this.flow.isDead = true;
-    return compiled;
-  }
-
-  private compileCallTarget(
-    scope: Scope,
-    context: FunctionContext,
-    expression: Extract<Expression, { kind: 'call' }>,
-    expected: KType | undefined,
-    delegate: DelegateContext | undefined
   ): Compiled {
     const { callee, row } = expression;
     const args: ArgumentSyntax[] = expression.args.map((argument) => ({
@@ -1781,7 +1783,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   // Lambdas.
 
-  // code-gauge-allow functionNcss 32 -- the parts of a lambda, from its parameters to its function value, which follow one another.
+  // code-gauge-allow functionNcss 33 -- the parts of a lambda, from its parameters to its function value, which follow one another.
   compileLambda(
     scope: Scope,
     context: FunctionContext,
@@ -1820,7 +1822,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       returnsUnit ? undefined : lambdaResultHint(expectedReturn),
       returnsUnit
     );
-    this.markCapturedAssignments(lambdaContext, outerFlow);
+    for (const variable of lambdaContext.inlineWrites) outerFlow.forget(keyOf(variable));
     this.flow = outerFlow;
     const resultType = returnsUnit ? this.unitType : body.type;
     const resultEval = returnsUnit
@@ -1873,15 +1875,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
         this.error(param.row, typeMismatchMessage(declared, expectedType));
       return { name: param.name, type: declared ?? (expectedType as KType), row: param.row };
     });
-  }
-
-  /** Marks the variables a lambda assigns, whose smart casts then no longer hold. */
-  protected markCapturedAssignments(lambda: FunctionContext, outerFlow: Flow): void {
-    void outerFlow;
-    for (const source of lambda.captures) {
-      if (source instanceof VariableSymbol && source.isVar && lambda.assignedCaptures.has(source))
-        source.isCapturedAndModified = true;
-    }
   }
 
   protected compileLambdaProbe(

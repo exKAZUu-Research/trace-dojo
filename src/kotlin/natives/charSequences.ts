@@ -96,6 +96,57 @@ export function sequenceIndexOfChar(
   );
 }
 
+export function sequenceIndexOfAnyChar(
+  frame: Frame,
+  value: Value,
+  chars: number[],
+  start: number,
+  ignoreCase: boolean,
+  backwards: boolean
+): number {
+  if (chars.length === 1) return sequenceIndexOfChar(frame, value, chars[0], start, ignoreCase, backwards);
+  return findAnyChar(charSequence(frame, value), chars, start, ignoreCase, backwards);
+}
+
+export function sequenceIndexOfAnyString(
+  frame: Frame,
+  value: Value,
+  strings: string[],
+  start: number,
+  ignoreCase: boolean,
+  backwards: boolean
+): number {
+  if (!ignoreCase && strings.length === 1) return sequenceIndexOf(frame, value, strings[0], start, false, backwards);
+  const source = charSequence(frame, value);
+  if (typeof value === 'string') {
+    const matchers = strings.map((text) => textSearch(frame, value, text, ignoreCase));
+    return findIndex(
+      (index) => matchers.some((matcher) => matcher.matchesAt(index)),
+      backwards ? Math.min(start, value.length - 1) : Math.max(0, start),
+      backwards ? 0 : value.length,
+      backwards
+    );
+  }
+  const targets = strings.map((text) => charSequence(frame, text));
+  return findAnyString(source, targets, start, ignoreCase, backwards)?.index ?? -1;
+}
+
+export function sequenceContentEquals(frame: Frame, left: Value, right: Value, ignoreCase: boolean): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  if (typeof left === 'string' && typeof right === 'string') {
+    return ignoreCase && left.length === right.length && textSearch(frame, left, right, true).matchesAt(0);
+  }
+  const first = charSequence(frame, left);
+  const second = charSequence(frame, right);
+  if (first.length() !== second.length()) return false;
+  const length = first.length();
+  for (let index = 0; index < length; index++) {
+    if (!charactersEqual(first.at(index), second.at(index), ignoreCase)) return false;
+  }
+  return true;
+}
+
 export function sequenceSplit(
   frame: Frame,
   value: Value,
@@ -196,17 +247,28 @@ type DelimiterSearch = (start: number) => { index: number; length: number } | un
 
 function charDelimiterSearch(source: Sequence, delimiters: number[], ignoreCase: boolean): DelimiterSearch {
   return (start) => {
-    const index = findIndex(
-      (index) => {
-        const char = source.at(index);
-        return delimiters.some((delimiter) => charactersEqual(char, delimiter, ignoreCase));
-      },
-      start,
-      source.length() - 1,
-      false
-    );
+    const index = findAnyChar(source, delimiters, start, ignoreCase, false);
     return index === -1 ? undefined : { index, length: 1 };
   };
+}
+
+function findAnyChar(
+  source: Sequence,
+  chars: number[],
+  start: number,
+  ignoreCase: boolean,
+  backwards: boolean
+): number {
+  const last = source.length() - 1;
+  return findIndex(
+    (index) => {
+      const char = source.at(index);
+      return chars.some((other) => charactersEqual(char, other, ignoreCase));
+    },
+    backwards ? Math.min(start, last) : Math.max(0, start),
+    backwards ? 0 : last,
+    backwards
+  );
 }
 
 function stringDelimiterSearch(
@@ -216,14 +278,24 @@ function stringDelimiterSearch(
   ignoreCase: boolean
 ): DelimiterSearch {
   const targets = delimiters.map((value) => charSequence(frame, value));
-  return (start) => {
-    const last = source.length();
-    for (let index = start; index <= last; index++) {
-      const matching = targets.find((target) => regionMatches(target, 0, source, index, target.length(), ignoreCase));
-      if (matching) return { index, length: matching.length() };
-    }
-    return;
-  };
+  return (start) => findAnyString(source, targets, start, ignoreCase, false);
+}
+
+function findAnyString(
+  source: Sequence,
+  targets: Sequence[],
+  start: number,
+  ignoreCase: boolean,
+  backwards: boolean
+): { index: number; length: number } | undefined {
+  const last = source.length();
+  const step = backwards ? -1 : 1;
+  const from = backwards ? Math.min(start, last - 1) : Math.max(0, start);
+  const to = backwards ? 0 : last;
+  for (let index = from; (to - index) * step >= 0; index += step) {
+    const matching = targets.find((target) => regionMatches(target, 0, source, index, target.length(), ignoreCase));
+    if (matching) return { index, length: matching.length() };
+  }
 }
 
 function splitByDelimiters(frame: Frame, source: Sequence, limit: number, find: DelimiterSearch): string[] {

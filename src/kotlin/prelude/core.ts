@@ -84,8 +84,7 @@ ${numberOperators('Byte')}
     external override fun toInt(): Int
     external override fun toShort(): Short
     external override fun toByte(): Byte
-    external fun toUByte(): UByte
-    external fun toUInt(): UInt
+${unsignedConversions()}
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String
@@ -107,8 +106,7 @@ ${numberOperators('Short')}
     external override fun toInt(): Int
     external override fun toShort(): Short
     external override fun toByte(): Byte
-    external fun toUShort(): UShort
-    external fun toUInt(): UInt
+${unsignedConversions()}
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String
@@ -131,8 +129,6 @@ ${numberOperators('Int')}
     external override fun toShort(): Short
     external override fun toByte(): Byte
     external fun toChar(): Char
-    external fun toUInt(): UInt
-    external fun toULong(): ULong
     external infix fun and(other: Int): Int
     external infix fun or(other: Int): Int
     external infix fun xor(other: Int): Int
@@ -143,6 +139,7 @@ ${numberOperators('Int')}
     external operator fun rangeTo(other: Int): IntRange
     external operator fun rangeTo(other: Long): LongRange
     external operator fun rangeUntil(other: Int): IntRange
+${unsignedConversions()}
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String
@@ -166,8 +163,6 @@ ${numberOperators('Long')}
     external override fun toInt(): Int
     external override fun toShort(): Short
     external override fun toByte(): Byte
-    external fun toULong(): ULong
-    external fun toUInt(): UInt
     external infix fun and(other: Long): Long
     external infix fun or(other: Long): Long
     external infix fun xor(other: Long): Long
@@ -178,6 +173,7 @@ ${numberOperators('Long')}
     external operator fun rangeTo(other: Long): LongRange
     external operator fun rangeTo(other: Int): LongRange
     external operator fun rangeUntil(other: Long): LongRange
+${unsignedConversions()}
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String
@@ -199,6 +195,7 @@ ${numberOperators('Float')}
     external override fun toInt(): Int
     @DeprecatedError external override fun toShort(): Short
     @DeprecatedError external override fun toByte(): Byte
+${unsignedConversions(true)}
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String
@@ -223,6 +220,7 @@ ${numberOperators('Double')}
     external override fun toInt(): Int
     @DeprecatedError external override fun toShort(): Short
     @DeprecatedError external override fun toByte(): Byte
+${unsignedConversions(true)}
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String
@@ -330,6 +328,11 @@ open external class Throwable {
 `;
 
 /** Kotlin declares the arithmetic and `compareTo` of each signed number type for every signed number type as the argument. */
+function unsignedConversions(floating = false): string {
+  const targets = floating ? ['UInt', 'ULong'] : ['UByte', 'UShort', 'UInt', 'ULong'];
+  return targets.map((target) => `    external fun to${target}(): ${target}`).join('\n');
+}
+
 function numberOperators(kind: NumericKind): string {
   return SIGNED_NUMBER_KINDS.flatMap((other) => [
     ...Object.entries(NUMBER_OPERATOR_NAMES).map(

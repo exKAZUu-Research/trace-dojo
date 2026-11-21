@@ -1,4 +1,4 @@
-import { forwardingSelectorExtrema, kotlin } from './source';
+import { forwardingSelectorExtrema, kotlin, NUMERIC_AGGREGATE_TYPES, numericAggregates } from './source';
 
 /** The extension functions of `kotlin.collections`, transcribed from Kotlin's standard library. */
 export const COLLECTION_FUNCTIONS_SOURCE = kotlin`
@@ -378,32 +378,7 @@ fun <@OnlyInputTypes T> Iterable<T>.indexOf(element: T): Int {
     return -1
 }
 
-fun Iterable<Int>.sum(): Int {
-    var sum = 0
-    for (element in this) sum += element
-    return sum
-}
-
-@JvmName("sumOfLong")
-fun Iterable<Long>.sum(): Long {
-    var sum = 0L
-    for (element in this) sum += element
-    return sum
-}
-
-@JvmName("sumOfDouble")
-fun Iterable<Double>.sum(): Double {
-    var sum = 0.0
-    for (element in this) sum += element
-    return sum
-}
-
-@JvmName("sumOfFloat")
-fun Iterable<Float>.sum(): Float {
-    var sum = 0.0f
-    for (element in this) sum += element
-    return sum
-}
+${NUMERIC_AGGREGATE_TYPES.flatMap((kind) => numericAggregates(`Iterable<${kind.element}>`, kind, true)).join('\n')}
 
 inline fun <T> Iterable<T>.sumOf(selector: (T) -> Int): Int {
     var sum = 0
@@ -423,38 +398,6 @@ inline fun <T> Iterable<T>.sumOf(selector: (T) -> Double): Double {
     var sum = 0.0
     for (element in this) sum += selector(element)
     return sum
-}
-
-fun Iterable<Int>.average(): Double {
-    var sum = 0.0
-    var count = 0
-    for (element in this) {
-        sum += element
-        count++
-    }
-    return if (count == 0) Double.NaN else sum / count
-}
-
-@JvmName("averageOfDouble")
-fun Iterable<Double>.average(): Double {
-    var sum = 0.0
-    var count = 0
-    for (element in this) {
-        sum += element
-        count++
-    }
-    return if (count == 0) Double.NaN else sum / count
-}
-
-@JvmName("averageOfLong")
-fun Iterable<Long>.average(): Double {
-    var sum = 0.0
-    var count = 0
-    for (element in this) {
-        sum += element.toDouble()
-        count++
-    }
-    return if (count == 0) Double.NaN else sum / count
 }
 
 fun <T : Comparable<T>> Iterable<T>.max(): T {

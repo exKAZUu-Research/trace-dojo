@@ -1,25 +1,31 @@
 import { keyOf } from './flowKeys';
 import type { ClassSymbol } from './symbols';
-import { isNullable, type KType, resolved } from './types';
+import { isSameType } from './typeRelations';
+import { isNullable, type KType, nonNull, resolved } from './types';
 
-export function coverTypeCases(
-  covered: Set<string>,
-  subject: KType,
-  checked: KType,
-  negated: boolean,
-  booleanClass: ClassSymbol
-): void {
-  const target = resolved(checked);
-  if (isNullable(subject) && isNullable(target) !== negated) covered.add('null');
-  const actual = resolved(subject);
-  if (actual.kind !== 'class') return;
-  for (const cls of caseClasses(actual.cls)) {
-    if (!coversClass(cls, target, negated)) continue;
-    if (cls === booleanClass) {
-      covered.add('true');
-      covered.add('false');
-    } else {
-      covered.add(`class:${keyOf(cls)}`);
+export class WhenCoverage {
+  readonly cases = new Set<string>();
+  private readonly positiveTypes: KType[] = [];
+  private readonly negativeTypes: KType[] = [];
+
+  coverTypeCases(subject: KType, checked: KType, negated: boolean, booleanClass: ClassSymbol): void {
+    const target = resolved(checked);
+    if (isNullable(subject) && isNullable(target) !== negated) this.cases.add('null');
+    const actual = resolved(subject);
+    if (actual.kind !== 'class') return;
+    const sameSign = negated ? this.negativeTypes : this.positiveTypes;
+    const otherSign = negated ? this.positiveTypes : this.negativeTypes;
+    const nonNullTarget = nonNull(target);
+    const hasComplement = otherSign.some((type) => isSameType(type, nonNullTarget));
+    sameSign.push(nonNullTarget);
+    for (const cls of caseClasses(actual.cls)) {
+      if (!hasComplement && !coversClass(cls, target, negated)) continue;
+      if (cls === booleanClass) {
+        this.cases.add('true');
+        this.cases.add('false');
+      } else {
+        this.cases.add(`class:${keyOf(cls)}`);
+      }
     }
   }
 }

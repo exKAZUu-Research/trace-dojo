@@ -1,4 +1,4 @@
-import { forwardingSelectorExtrema, kotlin } from './source';
+import { kotlin } from './source';
 
 /** `java.util.Locale`, which the prelude declares only for the overloads of `format` that take one. */
 export const UTIL_SOURCE = kotlin`
@@ -120,18 +120,40 @@ inline fun CharSequence.reduce(operation: (acc: Char, Char) -> Char): Char {
     for (index in 1 until length) accumulator = operation(accumulator, this[index])
     return accumulator
 }
-inline fun <R> CharSequence.fold(initial: R, operation: (acc: R, Char) -> R): R = toList().fold(initial, operation)
-inline fun <R> CharSequence.flatMap(transform: (Char) -> Iterable<R>): List<R> = toList().flatMap(transform)
-inline fun <V> CharSequence.associateWith(valueSelector: (Char) -> V): Map<Char, V> = toList().associateWith(valueSelector)
-${forwardingSelectorExtrema('CharSequence', 'Char', 'toList()', '').join('\n')}
+inline fun <R> CharSequence.fold(initial: R, operation: (acc: R, Char) -> R): R {
+    var result = initial
+    for (element in this) result = operation(result, element)
+    return result
+}
+inline fun <R> CharSequence.flatMap(transform: (Char) -> Iterable<R>): List<R> =
+    flatMapTo(ArrayList<R>(), transform)
+inline fun <R, C : MutableCollection<in R>> CharSequence.flatMapTo(destination: C, transform: (Char) -> Iterable<R>): C {
+    for (element in this) destination.addAll(transform(element))
+    return destination
+}
+inline fun <R> CharSequence.flatMapIndexed(transform: (Int, Char) -> Iterable<R>): List<R> =
+    flatMapIndexedTo(ArrayList<R>(), transform)
+inline fun <R, C : MutableCollection<in R>> CharSequence.flatMapIndexedTo(destination: C, transform: (Int, Char) -> Iterable<R>): C {
+    var index = 0
+    for (element in this) destination.addAll(transform(index++, element))
+    return destination
+}
+inline fun <V> CharSequence.associateWith(valueSelector: (Char) -> V): Map<Char, V> =
+    associateWithTo(LinkedHashMap<Char, V>(), valueSelector)
 inline fun CharSequence.partition(predicate: (Char) -> Boolean): Pair<String, String> {
     val first = StringBuilder()
     val second = StringBuilder()
     for (char in this) if (predicate(char)) first.append(char) else second.append(char)
     return Pair(first.toString(), second.toString())
 }
-fun CharSequence.zipWithNext(): List<Pair<Char, Char>> = toList().zipWithNext()
-inline fun <R> CharSequence.zipWithNext(transform: (Char, Char) -> R): List<R> = toList().zipWithNext(transform)
+fun CharSequence.zipWithNext(): List<Pair<Char, Char>> = zipWithNext { a, b -> a to b }
+inline fun <R> CharSequence.zipWithNext(transform: (Char, Char) -> R): List<R> {
+    val pairs = length - 1
+    if (pairs < 1) return emptyList()
+    val result = ArrayList<R>(pairs)
+    for (index in 0 until pairs) result.add(transform(this[index], this[index + 1]))
+    return result
+}
 fun CharSequence.asIterable(): Iterable<Char> =
     if (this is String && isEmpty()) emptyList() else CharSequenceIterable(this)
 
@@ -179,10 +201,23 @@ fun CharSequence.commonPrefixWith(other: CharSequence, ignoreCase: Boolean = fal
     val shorter = minOf(length, other.length)
     var index = 0
     while (index < shorter && this[index].equals(other[index], ignoreCase)) index++
+    if (hasSurrogatePairAt(index - 1) || other.hasSurrogatePairAt(index - 1)) index--
     return subSequence(0, index).toString()
 }
+fun CharSequence.commonSuffixWith(other: CharSequence, ignoreCase: Boolean = false): String {
+    val left = length
+    val right = other.length
+    val shorter = minOf(left, right)
+    var count = 0
+    while (count < shorter && this[left - count - 1].equals(other[right - count - 1], ignoreCase)) count++
+    if (hasSurrogatePairAt(left - count - 1) || other.hasSurrogatePairAt(right - count - 1)) count--
+    return subSequence(left - count, left).toString()
+}
+private fun CharSequence.hasSurrogatePairAt(index: Int): Boolean =
+    index >= 0 && index < length - 1 && this[index].code in 0xd800..0xdbff && this[index + 1].code in 0xdc00..0xdfff
+
 fun String.removeSurrounding(prefix: CharSequence, suffix: CharSequence): String =
-    if (length >= prefix.length + suffix.length && startsWith(prefix.toString()) && endsWith(suffix.toString()))
+    if (length >= prefix.length + suffix.length && hasTextAt(prefix, 0, false) && hasTextAt(suffix, length - suffix.length, false))
         substring(prefix.length, length - suffix.length)
     else this
 
@@ -204,6 +239,7 @@ external fun String.trimMargin(marginPrefix: String = "|"): String
 external fun String.substring(startIndex: Int): String
 external fun String.substring(startIndex: Int, endIndex: Int): String
 fun String.substring(range: IntRange): String = substring(range.start, range.endInclusive + 1)
+fun CharSequence.substring(range: IntRange): String = subSequence(range.start, range.endInclusive + 1).toString()
 fun CharSequence.substring(startIndex: Int, endIndex: Int = length): String = subSequence(startIndex, endIndex).toString()
 fun CharSequence.startsWith(prefix: CharSequence, ignoreCase: Boolean = false): Boolean =
     hasTextAt(prefix, 0, ignoreCase)
@@ -232,10 +268,31 @@ external fun CharSequence.indexOf(string: String, startIndex: Int = 0, ignoreCas
 external fun CharSequence.indexOf(char: Char, startIndex: Int = 0, ignoreCase: Boolean = false): Int
 external fun CharSequence.lastIndexOf(string: String, startIndex: Int = lastIndex, ignoreCase: Boolean = false): Int
 external fun CharSequence.lastIndexOf(char: Char, startIndex: Int = lastIndex, ignoreCase: Boolean = false): Int
+external fun CharSequence.indexOfAny(chars: CharArray, startIndex: Int = 0, ignoreCase: Boolean = false): Int
+external fun CharSequence.indexOfAny(strings: Collection<String>, startIndex: Int = 0, ignoreCase: Boolean = false): Int
+external fun CharSequence.lastIndexOfAny(chars: CharArray, startIndex: Int = lastIndex, ignoreCase: Boolean = false): Int
+external fun CharSequence.lastIndexOfAny(strings: Collection<String>, startIndex: Int = lastIndex, ignoreCase: Boolean = false): Int
+external infix fun CharSequence?.contentEquals(other: CharSequence?): Boolean
+external fun CharSequence?.contentEquals(other: CharSequence?, ignoreCase: Boolean): Boolean
 external fun String.replace(oldValue: String, newValue: String, ignoreCase: Boolean = false): String
 external fun String.replace(oldChar: Char, newChar: Char): String
 external fun String.replaceFirst(oldValue: String, newValue: String): String
 external fun String.repeat(n: Int): String
+fun CharSequence.repeat(n: Int): String {
+    if (n < 0) throw IllegalArgumentException("Count 'n' must be non-negative, but was $n.")
+    if (n == 0) return ""
+    if (n == 1) return toString()
+    when (length) {
+        0 -> return ""
+        1 -> {
+            val char = this[0]
+            return String(CharArray(n) { char })
+        }
+    }
+    val result = StringBuilder(n * length)
+    for (index in 1..n) result.append(this)
+    return result.toString()
+}
 external fun CharSequence.split(vararg delimiters: String, ignoreCase: Boolean = false, limit: Int = 0): List<String>
 external fun CharSequence.split(vararg delimiters: Char, ignoreCase: Boolean = false, limit: Int = 0): List<String>
 external fun CharSequence.lines(): List<String>

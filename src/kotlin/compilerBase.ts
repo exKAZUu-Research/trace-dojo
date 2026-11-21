@@ -126,8 +126,7 @@ export class FunctionContext {
   readonly returnedTypes: KType[] = [];
   loops: LoopContext[] = [];
   inlineLambda = false;
-  /** The captured variables a lambda assigns. */
-  readonly assignedCaptures = new Set<VariableSymbol>();
+  readonly inlineWrites = new Set<VariableSymbol>();
 
   constructor(
     readonly parent: FunctionContext | undefined,
@@ -168,6 +167,10 @@ export class FunctionContext {
       this.info.captures.push(info);
     }
     return index;
+  }
+
+  directExecutionContext(): FunctionContext {
+    return this.inlineLambda && this.parent ? this.parent.directExecutionContext() : this;
   }
 
   /** Whether `context` is this function or a function around it. */

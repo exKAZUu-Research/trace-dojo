@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 887 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 936 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDecl,
@@ -191,15 +191,12 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     this.entryOfClass.set(symbol, entry);
     for (const member of decl.members) {
       if (member.kind !== 'class') continue;
-      if (member.classKind === 'companion') {
-        if (symbol.companion) this.error(member.row, 'companion object は1つしか書けません。');
-        const companion = this.declareClass(member, file, entry);
-        symbol.companion = companion.symbol;
-        symbol.nested.set(member.name, companion.symbol);
-        continue;
-      }
+      if (symbol.nested.has(member.name)) this.error(member.row, `クラス ${member.name} が2回宣言されています。`);
+      if (member.classKind === 'companion' && symbol.companion)
+        this.error(member.row, 'companion object は1つしか書けません。');
       const nested = this.declareClass(member, file, entry);
       symbol.nested.set(member.name, nested.symbol);
+      if (member.classKind === 'companion') symbol.companion = nested.symbol;
     }
     return entry;
   }
@@ -1168,27 +1165,64 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   protected validateJvmSignatures(): void {
     const byFile = Map.groupBy(
-      [...this.functionEntries, ...this.propertyEntries].filter((entry) => !entry.cls),
+      [...this.functionEntries, ...this.propertyEntries].filter(({ cls, file }) => !cls && !file.isLibrary),
       (entry) => entry.file
     );
     for (const entries of byFile.values()) this.checkJvmSignatures(entries.map((entry) => entry.symbol));
-    for (const { symbol } of this.classEntries) this.checkJvmSignatures([...symbol.members.values()].flat());
+    for (const { symbol } of this.classEntries) {
+      if (symbol.isLibrary) continue;
+      const inherited = this.inheritedJvmSignatures(symbol);
+      for (const [signature, bases] of inherited) {
+        if (bases.slice(1).some((base) => !sameSourceDeclaration(base, bases[0])))
+          this.error(symbol.row, `JVM では継承した ${signature} が重複しています。`);
+      }
+      this.checkJvmSignatures([...symbol.members.values()].flat(), inherited);
+    }
   }
 
-  private checkJvmSignatures(members: MemberSymbol[]): void {
-    const signatures = new Set<string>();
+  private checkJvmSignatures(members: MemberSymbol[], inherited = new Map<string, MemberSymbol[]>()): void {
+    const declared = new Set<string>();
     for (const member of members) {
-      if (member.isLibrary) continue;
-      const property = member.kind === 'property' ? this.entryOfProperty.get(member)?.decl : undefined;
-      const accessors = property && {
-        constant: property.modifiers.keywords.has('const'),
-        customSetter: property.setter?.body !== undefined,
-      };
-      for (const signature of jvmSignatures(this.core, member, accessors)) {
-        if (signatures.has(signature)) this.error(member.row, `JVM では ${signature} が重複しています。`);
-        signatures.add(signature);
+      const overridden = overriddenMembers(member);
+      const signatures = new Set([
+        ...this.jvmSignaturesOf(member),
+        ...[...overridden].filter((base) => !base.isLibrary).flatMap((base) => this.jvmSignaturesOf(base)),
+      ]);
+      for (const signature of signatures) {
+        if (declared.has(signature) || inherited.get(signature)?.some((base) => !overridden.has(base)))
+          this.error(member.row, `JVM では ${signature} が重複しています。`);
+        declared.add(signature);
       }
     }
+  }
+
+  private inheritedJvmSignatures(symbol: ClassSymbol): Map<string, MemberSymbol[]> {
+    const signatures = new Map<string, MemberSymbol[]>();
+    const seen = new Set<ClassSymbol>();
+    const visit = (parent: ClassSymbol): void => {
+      if (seen.has(parent) || parent.isLibrary) return;
+      seen.add(parent);
+      for (const member of [...parent.members.values()].flat()) {
+        if (member.visibility === 'private') continue;
+        for (const signature of this.jvmSignaturesOf(member)) {
+          const declarations = signatures.get(signature) ?? [];
+          declarations.push(member);
+          signatures.set(signature, declarations);
+        }
+      }
+      for (const { cls } of parent.supertypes) visit(cls);
+    };
+    for (const { cls } of symbol.supertypes) visit(cls);
+    return signatures;
+  }
+
+  private jvmSignaturesOf(member: MemberSymbol): string[] {
+    const property = member.kind === 'property' ? this.entryOfProperty.get(member)?.decl : undefined;
+    const accessors = property && {
+      constant: property.modifiers.keywords.has('const'),
+      customSetter: property.setter?.body !== undefined,
+    };
+    return jvmSignatures(this.core, member, accessors);
   }
 
   private checkOverrideType(
@@ -1315,6 +1349,33 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 }
 
 /** A parameter as the key of a native names it, such as `vararg T`. */
+function sameSourceDeclaration(a: MemberSymbol, b: MemberSymbol): boolean {
+  if (a.kind !== b.kind || a.name !== b.name) return false;
+  const leftReceiver = a.extensionReceiver;
+  const rightReceiver = b.extensionReceiver;
+  const sameReceiver =
+    leftReceiver && rightReceiver ? isSameType(leftReceiver, rightReceiver) : leftReceiver === rightReceiver;
+  if (!sameReceiver) return false;
+  if (a.kind === 'function' && b.kind === 'function') {
+    if (a.params.length !== b.params.length) return false;
+    if (!a.params.every((parameter, index) => isSameType(parameter.type, b.params[index].type))) return false;
+  }
+  const first = a.kind === 'property' ? a.type : a.returnType;
+  const second = b.kind === 'property' ? b.type : b.returnType;
+  return !first || !second || isSubtype(first, second) || isSubtype(second, first);
+}
+
+function overriddenMembers(member: MemberSymbol): Set<MemberSymbol> {
+  const overridden = new Set<MemberSymbol>();
+  const visit = (base: MemberSymbol): void => {
+    if (overridden.has(base)) return;
+    overridden.add(base);
+    for (const parent of base.overridden) visit(parent);
+  };
+  for (const base of member.overridden) visit(base);
+  return overridden;
+}
+
 function nativeParameterText(param: ParameterDecl): string {
   const type = param.type ? typeRefText(param.type) : '';
   return param.modifiers.keywords.has('vararg') ? `vararg ${type}` : type;

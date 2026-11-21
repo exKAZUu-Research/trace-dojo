@@ -1,4 +1,4 @@
-import { forwardingSelectorExtrema } from './source';
+import { forwardingSelectorExtrema, NUMERIC_AGGREGATE_TYPES, numericAggregates } from './source';
 
 /**
  * The functions of arrays, generated for `Array<T>` and each primitive array as Kotlin's standard library generates
@@ -28,12 +28,12 @@ interface ArrayKind {
 
 const KINDS: ArrayKind[] = [
   { receiver: 'Array<out T>', typeParameters: 'T, ', element: 'T', sum: undefined, isComparable: false, zero: 'null' },
-  { receiver: 'IntArray', typeParameters: '', element: 'Int', sum: 'Int', isComparable: true, zero: '0' },
-  { receiver: 'LongArray', typeParameters: '', element: 'Long', sum: 'Long', isComparable: true, zero: '0L' },
-  { receiver: 'DoubleArray', typeParameters: '', element: 'Double', sum: 'Double', isComparable: true, zero: '0.0' },
-  { receiver: 'FloatArray', typeParameters: '', element: 'Float', sum: 'Float', isComparable: true, zero: '0.0f' },
-  { receiver: 'ShortArray', typeParameters: '', element: 'Short', sum: 'Int', isComparable: true, zero: '0' },
-  { receiver: 'ByteArray', typeParameters: '', element: 'Byte', sum: 'Int', isComparable: true, zero: '0' },
+  ...NUMERIC_AGGREGATE_TYPES.map((kind): ArrayKind => ({
+    ...kind,
+    receiver: `${kind.element}Array`,
+    typeParameters: '',
+    isComparable: true,
+  })),
   {
     receiver: 'CharArray',
     typeParameters: '',
@@ -159,7 +159,6 @@ function functionsOf(kind: ArrayKind): string {
     `fun ${g()}${r}.random(): ${e} { if (isEmpty()) throw NoSuchElementException("Array is empty."); return get(kotlin.random.Random.nextInt(size)) }`,
     `external fun ${g()}${r}.fill(element: ${e}, fromIndex: Int = 0, toIndex: Int = size)`,
     `external fun ${g()}${r}.reverse()`,
-    `fun ${g()}${r}.toTypedArray(): Array<${e}> = asList().toTypedArray()`,
     `inline fun ${g()}${r}.single(predicate: (${e}) -> Boolean): ${e} = asList().single(predicate)`,
     `inline fun ${g()}${r}.singleOrNull(predicate: (${e}) -> Boolean): ${e}? = asList().singleOrNull(predicate)`,
     `fun ${g()}${r}.singleOrNull(): ${e}? = if (size == 1) this[0] else null`,
@@ -182,17 +181,8 @@ function functionsOf(kind: ArrayKind): string {
     `fun ${g()}${r}.sliceArray(indices: IntRange): ${r.replace('out ', '')} = if (indices.isEmpty()) copyOfRange(0, 0) else copyOfRange(indices.first, indices.last + 1)`,
     ...[1, 2, 3, 4, 5].map((n) => `operator fun ${g()}${r}.component${n}(): ${e} = get(${n - 1})`),
   ];
-  if (kind.sum) {
-    lines.push(
-      `fun ${r}.sum(): ${kind.sum} { var sum: ${kind.sum} = ${kind.zero}; for (element in this) sum += element; return sum }`
-    );
-  }
-  // Arrays of unsigned numbers have no average in Kotlin.
-  if (kind.sum && !kind.element.startsWith('U')) {
-    lines.push(
-      `fun ${r}.average(): Double { var sum = 0.0; var count = 0; for (element in this) { sum += element; ++count }; return if (count == 0) Double.NaN else sum / count }`
-    );
-  }
+  if (!kind.typeParameters) lines.push(`fun ${r}.toTypedArray(): Array<${e}> = asList().toTypedArray()`);
+  if (kind.sum) lines.push(...numericAggregates(r, { ...kind, sum: kind.sum }, false));
   if (kind.isComparable) {
     const floating = e === 'Double' || e === 'Float';
     const keepMax = floating ? 'max = kotlin.math.max(max, e)' : 'if (max < e) max = e';
@@ -273,10 +263,7 @@ fun <T : Comparable<T>> Array<out T>.sortedDescending(): List<T> = asList().sort
 fun <T : Comparable<T>> Array<out T>.sort() = sortWith(naturalOrder())
 external fun <T> Array<out T>.sortWith(comparator: Comparator<in T>)
 inline fun <T, R : Comparable<R>> Array<out T>.sortBy(crossinline selector: (T) -> R?) = sortWith(compareBy(selector))
-fun Array<out Int>.sum(): Int = asList().sum()
-fun Array<out Double>.sum(): Double = asList().sum()
-@JvmName("averageOfInt") fun Array<out Int>.average(): Double = asList().average()
-fun Array<out Double>.average(): Double = asList().average()
+${NUMERIC_AGGREGATE_TYPES.flatMap((kind) => numericAggregates(`Array<out ${kind.element}>`, kind, true)).join('\n')}
 fun <T : Comparable<T>> Array<out T>.sortDescending() = sortWith(reverseOrder())
 fun <T : Comparable<T>> Array<T>.sortedArray(): Array<T> = copyOf().also { it.sort() }
 fun <T : Comparable<T>> Array<T>.sortedArrayDescending(): Array<T> = copyOf().also { it.sortDescending() }
@@ -337,51 +324,15 @@ inline fun <T> Array(size: Int, init: (Int) -> T): Array<T> {
     for (index in 0 until size) array[index] = init(index)
     return array as Array<T>
 }
-inline fun IntArray(size: Int, init: (Int) -> Int): IntArray {
-    val array = IntArray(size)
+${KINDS.filter(({ typeParameters }) => typeParameters.length === 0)
+  .map(
+    ({ receiver, element }) => `inline fun ${receiver}(size: Int, init: (Int) -> ${element}): ${receiver} {
+    val array = ${receiver}(size)
     for (index in 0 until size) array[index] = init(index)
     return array
-}
-inline fun LongArray(size: Int, init: (Int) -> Long): LongArray {
-    val array = LongArray(size)
-    for (index in 0 until size) array[index] = init(index)
-    return array
-}
-inline fun DoubleArray(size: Int, init: (Int) -> Double): DoubleArray {
-    val array = DoubleArray(size)
-    for (index in 0 until size) array[index] = init(index)
-    return array
-}
-inline fun FloatArray(size: Int, init: (Int) -> Float): FloatArray {
-    val array = FloatArray(size)
-    for (index in 0 until size) array[index] = init(index)
-    return array
-}
-inline fun ShortArray(size: Int, init: (Int) -> Short): ShortArray {
-    val array = ShortArray(size)
-    for (index in 0 until size) array[index] = init(index)
-    return array
-}
-inline fun ByteArray(size: Int, init: (Int) -> Byte): ByteArray {
-    val array = ByteArray(size)
-    for (index in 0 until size) array[index] = init(index)
-    return array
-}
-inline fun CharArray(size: Int, init: (Int) -> Char): CharArray {
-    val array = CharArray(size)
-    for (index in 0 until size) array[index] = init(index)
-    return array
-}
-inline fun BooleanArray(size: Int, init: (Int) -> Boolean): BooleanArray {
-    val array = BooleanArray(size)
-    for (index in 0 until size) array[index] = init(index)
-    return array
-}
-inline fun UIntArray(size: Int, init: (Int) -> UInt): UIntArray {
-    val array = UIntArray(size)
-    for (index in 0 until size) array[index] = init(index)
-    return array
-}
+}`
+  )
+  .join('\n')}
 external fun <T> emptyArray(): Array<T>
 external fun intArrayOf(vararg elements: Int): IntArray
 external fun longArrayOf(vararg elements: Long): LongArray

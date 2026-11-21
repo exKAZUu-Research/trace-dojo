@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 545 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 557 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { Expression, ParameterDecl, PropertyDecl } from './ast';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
@@ -253,9 +253,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   }
 
   protected checkGlobalInitialized(context: FunctionContext, property: PropertySymbol, row: number): void {
-    let enclosing = context;
-    while (enclosing.inlineLambda && enclosing.parent) enclosing = enclosing.parent;
-    const initializer = this.activeFileInitializers.get(enclosing);
+    const initializer = this.activeFileInitializers.get(context.directExecutionContext());
     const entry = this.entryOfProperty.get(property);
     if (!initializer || !entry || initializer.file !== entry.file) return;
     const { decl } = entry;
@@ -599,7 +597,9 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const { symbol, decl } = entry;
     const uninitialized = new Set(
       decl.members.flatMap((member) =>
-        member.kind === 'property' && member.initializer ? [this.findOwnProperty(symbol, member.name)] : []
+        member.kind === 'property' && (member.initializer || member.delegate)
+          ? [this.findOwnProperty(symbol, member.name)]
+          : []
       )
     );
     this.uninitializedProperties = { context, properties: uninitialized };
@@ -631,7 +631,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   ): ((frame: Frame) => void) | undefined {
     const propertyEntry = this.entryOfProperty.get(property) as PropertyEntry;
     if (member.delegate) {
-      const delegate = propertyEntry.initializer as Compiled;
+      const delegate = this.compileDelegateExpression(
+        scope,
+        context,
+        member.delegate,
+        member.type ? property.type : undefined,
+        member.isVar
+      );
       const slot = propertyEntry.delegateSlot as number;
       const evaluate = delegate.eval;
       const store = (frame: Frame): void => {
@@ -783,11 +789,31 @@ export abstract class BodyCompiler extends DeclarationCompiler {
 
   protected ensureClassInitialized(frame: Frame, cls: ClassSymbol): void {
     frame.runtime.initializeClass(frame, cls, () => {
-      if (cls.superclass) this.ensureClassInitialized(frame, cls.superclass.cls);
+      if (!cls.isInterface) this.initializeClassParents(frame, cls);
       cls.initializeEnumEntries?.(frame);
       if (cls.isObject) this.createObject(frame, cls);
       if (cls.companion) this.createObject(frame, cls.companion);
     });
+  }
+
+  private initializeClassParents(frame: Frame, cls: ClassSymbol): void {
+    if (cls.superclass) this.ensureClassInitialized(frame, cls.superclass.cls);
+    const seen = new Set<ClassSymbol>();
+    const visit = (parent: ClassSymbol): void => {
+      if (seen.has(parent) || parent.isLibrary) return;
+      seen.add(parent);
+      for (const { cls } of parent.interfaces) visit(cls);
+      const hasDefaultMethod = [...parent.members.values()]
+        .flat()
+        .some(
+          (member) =>
+            member.visibility !== 'private' &&
+            !member.isAbstract &&
+            (member.kind === 'function' || member.hasCustomGetter)
+        );
+      if (hasDefaultMethod) this.ensureClassInitialized(frame, parent);
+    };
+    for (const { cls: parent } of cls.interfaces) visit(parent);
   }
 
   private createObject(frame: Frame, cls: ClassSymbol): void {

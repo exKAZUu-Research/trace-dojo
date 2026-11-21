@@ -9,13 +9,16 @@ import { Boxed, KObject, UNIT, type Value } from '../values';
 import {
   copySequenceForBuilder,
   sequenceAll,
+  sequenceContentEquals,
   sequenceIndexOf,
+  sequenceIndexOfAnyChar,
+  sequenceIndexOfAnyString,
   sequenceIndexOfChar,
   sequenceLines,
   sequenceMatchesAt,
   sequenceSplit,
 } from './charSequences';
-import { newList } from './collections';
+import { elementsOf, newList } from './collections';
 import { checkStringIndex, compareStrings, substring } from './core';
 import {
   compareJdkCase,
@@ -189,6 +192,46 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
     sequenceIndexOf(frame, receiver, other, start as number, ignoreCase === true, true),
   'CharSequence.lastIndexOf(Char, Int, Boolean)': (frame, receiver, [char, start, ignoreCase]) =>
     sequenceIndexOfChar(frame, receiver, char as number, start as number, ignoreCase === true, true),
+  'CharSequence.indexOfAny(CharArray, Int, Boolean)': (frame, receiver, [chars, start, ignoreCase]) =>
+    sequenceIndexOfAnyChar(
+      frame,
+      receiver,
+      (chars as KObject).items as number[],
+      start as number,
+      ignoreCase === true,
+      false
+    ),
+  'CharSequence.lastIndexOfAny(CharArray, Int, Boolean)': (frame, receiver, [chars, start, ignoreCase]) =>
+    sequenceIndexOfAnyChar(
+      frame,
+      receiver,
+      (chars as KObject).items as number[],
+      start as number,
+      ignoreCase === true,
+      true
+    ),
+  'CharSequence.indexOfAny(Collection<String>, Int, Boolean)': (frame, receiver, [strings, start, ignoreCase]) =>
+    sequenceIndexOfAnyString(
+      frame,
+      receiver,
+      elementsOf(frame, strings).map(text),
+      start as number,
+      ignoreCase === true,
+      false
+    ),
+  'CharSequence.lastIndexOfAny(Collection<String>, Int, Boolean)': (frame, receiver, [strings, start, ignoreCase]) =>
+    sequenceIndexOfAnyString(
+      frame,
+      receiver,
+      elementsOf(frame, strings).map(text),
+      start as number,
+      ignoreCase === true,
+      true
+    ),
+  'CharSequence?.contentEquals(CharSequence?)': (frame, receiver, [other]) =>
+    sequenceContentEquals(frame, receiver, other, false),
+  'CharSequence?.contentEquals(CharSequence?, Boolean)': (frame, receiver, [other, ignoreCase]) =>
+    sequenceContentEquals(frame, receiver, other, ignoreCase === true),
   'String.replace(String, String, Boolean)': (frame, receiver, [oldValue, newValue, ignoreCase]) =>
     replaceAll(frame, text(receiver), text(oldValue), text(newValue), ignoreCase === true),
   'String.replace(Char, Char)': (frame, receiver, [oldChar, newChar]) =>

@@ -12,8 +12,7 @@ export function localRefinement(
   variable: VariableSymbol
 ): LocalRefinement | undefined {
   if (!variable.isVar) return 'full';
-  const capturedWrite = variable.isCapturedAndModified && !context.assignedCaptures.has(variable);
-  if (capturedWrite && variable.capturedWriteTypes.size === 0) return undefined;
+  const capturedWrite = variable.capturedWriteTypes.size > 0;
   if (escapesOwner(context, variable.owner)) {
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       if (current.pendingWrites?.has(variable.name)) return undefined;

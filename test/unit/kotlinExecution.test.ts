@@ -1006,6 +1006,169 @@ fun main() {
     stdout: '1\n1\n',
   },
   {
+    name: 'CharSequence collection overloads use the Kotlin signatures',
+    source: String.raw`import kotlin.random.Random
+fun main() {
+    val chars: CharSequence = StringBuilder("aba")
+    println(listOf(chars.none(), chars.any(), "".none(), "".any()))
+    println(listOf(chars.lastOrNull { it.isLetter() }, chars.single { it == 'b' }, chars.findLast { it == 'a' }))
+    println(listOf(chars.substring(1..2), chars.elementAtOrNull(9), chars.elementAtOrElse(9) { 'z' }))
+    println(chars.associate { it to it.code })
+    println(chars.associateBy({ it.code }, { it.toString() }))
+    println(listOf(chars.maxByOrNull { it.code }, chars.minBy { it.code }))
+    println(listOf(chars.reduceOrNull { acc, c -> if (c > acc) c else acc }, "".reduceOrNull { acc, _ -> acc }))
+    println(chars.foldIndexed("") { index, acc, c -> "$acc$index$c" })
+    println(chars.runningFold("") { acc, c -> acc + c })
+    println(chars.scan(0) { acc, c -> acc + c.code })
+    val builder: StringBuilder = StringBuilder("ab").onEach { print(it) }
+    println(builder)
+    println(listOf(chars.indexOfAny(charArrayOf('z', 'b')), chars.lastIndexOfAny(listOf("ab", "ba"))))
+    println(listOf(chars.commonSuffixWith("xxA", true), chars.repeat(2), chars.contentEquals("ABA", true), chars.random(Random(42))))
+}`,
+    stdout:
+      '[false, true, true, false]\n[a, b, a]\n[ba, null, z]\n{a=97, b=98}\n{97=a, 98=b}\n[b, a]\n[b, null]\n0a1b2a\n[, a, ab, aba]\n[0, 97, 195, 292]\nabab\n[1, 1]\n[a, abaaba, true, a]\n',
+  },
+  {
+    name: 'CharSequence callbacks observe mutations before the next character read',
+    source: String.raw`fun main() {
+    val b = StringBuilder("ab")
+    val chars: CharSequence = b
+    println(chars.fold("") { result, c ->
+        if (c == 'a') b.setCharAt(1, 'x')
+        result + c
+    })
+    b.setCharAt(1, 'b')
+    println(chars.flatMap { c ->
+        if (c == 'a') b.setCharAt(1, 'x')
+        listOf(c)
+    })
+    b.setCharAt(1, 'b')
+    println(chars.associateWith { c ->
+        if (c == 'a') b.setCharAt(1, 'x')
+        c.code
+    })
+    b.setCharAt(1, 'b')
+    println(chars.maxOf { c ->
+        if (c == 'a') b.setCharAt(1, 'x')
+        c.code
+    })
+    val long = StringBuilder("abc")
+    val mutableChars: CharSequence = long
+    println(mutableChars.zipWithNext { lhs, rhs ->
+        long.setCharAt(1, 'x')
+        "$lhs$rhs"
+    })
+}`,
+    stdout: 'ax\n[a, x]\n{a=97, x=120}\n120\n[ab, xc]\n',
+  },
+  {
+    name: 'unsigned array initializer overloads and boxed numeric accumulators',
+    source: String.raw`@OptIn(ExperimentalUnsignedTypes::class)
+fun main() {
+    println(UByteArray(3) { (it + 255).toUByte() }.contentToString())
+    println(UShortArray(3) { (it + 65535).toUShort() }.contentToString())
+    println(UIntArray(3) { it.toUInt() }.contentToString())
+    println(ULongArray(3) { it.toULong() + ULong.MAX_VALUE }.contentToString())
+    val long = arrayOf(Long.MAX_VALUE, 2L)
+    val float = arrayOf(100000000f, 1f, -100000000f)
+    val short = arrayOf(32767.toShort(), 2.toShort())
+    val byte = arrayOf(127.toByte(), 2.toByte())
+    println(listOf(long.sum(), float.sum(), short.sum(), byte.sum()))
+    println(listOf(long.average(), float.average(), short.average(), byte.average()))
+    println(arrayOf<Long>().average())
+}`,
+    stdout:
+      '[255, 0, 1]\n[65535, 0, 1]\n[0, 1, 2]\n[18446744073709551615, 0, 1]\n[-9223372036854775807, 0.0, 32769, 129]\n[4.611686018427388E18, 0.3333333333333333, 16384.5, 64.5]\nNaN\n',
+  },
+  {
+    name: 'inline writes remain local to the enclosing function',
+    source: String.raw`fun main() {
+    var value: Any = "text"
+    listOf(1).forEach { value = it }
+    if (value is String) println(value.length) else println("not string")
+    val check = { if (value is String) value.length else 0 }
+    println(check())
+}`,
+    stdout: 'not string\n0\n',
+  },
+  {
+    name: 'default-method interfaces initialize before the class and complementary tests cover open sealed branches',
+    source: String.raw`interface Default {
+    val number: Int get() = 1
+    companion object { init { println("default") } }
+}
+interface Abstract : Default {
+    fun name(): String
+    companion object { init { println("abstract") } }
+}
+interface Also {
+    fun also(): Int = 2
+    companion object { init { println("also") } }
+}
+class Impl : Abstract, Also {
+    override fun name(): String = "impl"
+    companion object { init { println("impl") } }
+}
+sealed interface Shape
+interface Tagged
+open class Group : Shape
+class Marked : Shape, Tagged
+fun choose(s: Shape): Int = when (s) {
+    is Tagged -> 1
+    !is Tagged -> 2
+}
+fun main() {
+    println("start")
+    Impl()
+    println(choose(Group()))
+    println(choose(Marked()))
+}`,
+    stdout: 'start\ndefault\nalso\nimpl\n2\n1\n',
+  },
+  {
+    name: 'a when over a nullable Nothing subject exhausts its null case',
+    source: `fun isNull(value: Nothing?): Int = when (value) { is Nothing? -> 1 }
+fun main() {
+    val v = null
+    println(when (v) { null -> 2 })
+    println(isNull(v))
+}`,
+    stdout: '2\n1\n',
+  },
+  {
+    name: 'a Nothing-returning infix call terminates while safe calls can be skipped',
+    source: String.raw`infix fun Int.abort(reason: String): Nothing = error(reason)
+fun compute(): Int { 1 abort "stop" }
+class Sink {
+    fun drop(message: String) { println(message) }
+}
+fun check(sink: Sink?): Int {
+    sink?.drop(error("must be skipped"))
+    return 3
+}
+fun main() {
+    try { println(compute()) } catch (e: IllegalStateException) { println(e.message) }
+    println(check(null))
+}`,
+    stdout: 'stop\n3\n',
+  },
+  {
+    name: 'covariant overrides coexist with inherited JVM bridges',
+    source: String.raw`open class Base(open val value: Any) {
+    open fun get(): Any = value
+}
+open class Parent : Base("parent") {
+    override val value: String get() = "ok"
+    override fun get(): String = "from " + value
+}
+class Child : Parent() {
+    override val value: String = "child"
+    override fun get(): String = super.get()
+}
+fun main() { println(Child().get()) }`,
+    stdout: 'from child\n',
+  },
+  {
     name: 'a delegated local var shares its delegate across lambda calls',
     source: `import kotlin.properties.Delegates
 fun main() {
@@ -2102,6 +2265,33 @@ fun main() {
   ],
   ['an unnamed loop variable', false, 'fun main() { for (_ in 1..3) println("x") }'],
   ['an escaped underscore loop variable', true, 'fun main() { for (`_` in 1..3) println(`_`) }'],
+  [
+    'an uninitialized delegate read from a class initializer',
+    false,
+    'class A {\n    val first = second\n    val second by lazy { 4 }\n}\nfun main() { println(A().first) }',
+  ],
+  [
+    'a smart cast invalidated by an inline write in a capturing lambda',
+    false,
+    'fun main() { var x: Any = "s"; val f = { run { x = 1 }; if (x is String) x.length else 0 }; println(f()) }',
+  ],
+  [
+    'a declaration with the signature of an inherited getter',
+    false,
+    'open class Base(val value: Int)\nclass Child : Base(3) {\n    fun getValue(): Int = 7\n}\nfun main() { println(Child().getValue()) }',
+  ],
+  [
+    'inherited methods with conflicting erased signatures',
+    false,
+    'interface X { fun get(values: List<Int>): Int }; interface Y { fun get(values: List<String>): Int }; abstract class Mixed : X, Y; fun main() {}',
+  ],
+  ['calling toTypedArray on an object array', false, 'fun main() { println(arrayOf(1, 2).toTypedArray()) }'],
+  ['duplicate nested classes', false, 'class A { class B; class B }; fun main() { println(A.B()) }'],
+  [
+    'a nested class with the name of the companion',
+    false,
+    'class A { companion object; class Companion }; fun main() {}',
+  ],
   ['a Nothing-returning function that falls through', false, 'fun bad(): Nothing { println("bad") }; fun main() {}'],
   ['a Nothing-returning function that always throws', true, 'fun abort(): Nothing { error("done") }; fun main() {}'],
   [

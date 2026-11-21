@@ -22,3 +22,35 @@ export function forwardingSelectorExtrema(
     })
   );
 }
+
+export const NUMERIC_AGGREGATE_TYPES = [
+  { element: 'Int', sum: 'Int', zero: '0' },
+  { element: 'Long', sum: 'Long', zero: '0L' },
+  { element: 'Double', sum: 'Double', zero: '0.0' },
+  { element: 'Float', sum: 'Float', zero: '0.0f' },
+  { element: 'Short', sum: 'Int', zero: '0' },
+  { element: 'Byte', sum: 'Int', zero: '0' },
+] as const;
+
+export function numericAggregates(
+  receiver: string,
+  kind: { element: string; sum: string; zero: string },
+  boxed: boolean
+): string[] {
+  const jvmName = (method: string): string => (boxed ? `@JvmName("${method}Of${kind.element}") ` : '');
+  const sum = `${jvmName('sum')}fun ${receiver}.sum(): ${kind.sum} {
+    var result: ${kind.sum} = ${kind.zero}
+    for (element in this) result += element
+    return result
+}`;
+  const average = `${jvmName('average')}fun ${receiver}.average(): Double {
+    var result = 0.0
+    var count = 0
+    for (element in this) {
+        result += element.toDouble()
+        count++
+    }
+    return if (count == 0) Double.NaN else result / count
+}`;
+  return kind.element.startsWith('U') ? [sum] : [sum, average];
+}

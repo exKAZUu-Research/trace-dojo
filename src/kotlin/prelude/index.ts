@@ -10,6 +10,7 @@ import { RANGES_SOURCE } from './ranges';
 import { exceptionSources, IO_SOURCE, REFLECT_SOURCE, SYSTEM_SOURCE, TURTLE_SOURCE } from './runtimeTypes';
 import { STANDARD_SOURCE } from './standard';
 import { TEXT_SOURCE, UTIL_SOURCE } from './text';
+import { TEXT_COLLECTIONS_SOURCE } from './textCollections';
 import { TIME_SOURCE } from './time';
 
 /** The prelude of the standard library, in the order its files are compiled together. */
@@ -28,6 +29,7 @@ export const PRELUDE_SOURCES = [
   MATH_SOURCE,
   UTIL_SOURCE,
   TEXT_SOURCE,
+  TEXT_COLLECTIONS_SOURCE,
   PROPERTIES_SOURCE,
   TIME_SOURCE,
   IO_SOURCE,
