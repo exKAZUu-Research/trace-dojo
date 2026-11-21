@@ -1,7 +1,7 @@
 import type { ReceiverAdjust } from './annotations';
 import { normalize } from './infer';
 import type { Program } from './items';
-import { intoIterItem, intoIterShape, iterationBound } from './iterTypes';
+import { dynIteratorTarget, intoIterItem, intoIterShape, iterationBound } from './iterTypes';
 import type { TraitSolver } from './traits';
 import {
   allSupertraits,
@@ -80,7 +80,7 @@ const RANGE_ITERATORS = new Set(['Range', 'RangeInclusive', 'RangeFrom']);
  * then by shared reference, then by mutable reference; inherent methods before trait methods, of the standard
  * library's traits those that `inScope` accepts.
  */
-// code-gauge-allow functionCognitiveComplexity 23 -- Follows rustc's method probe step by step.
+// code-gauge-allow functionCognitiveComplexity 28 -- Follows rustc's method probe step by step.
 export function lookupMethod(
   program: Program,
   solver: TraitSolver,
@@ -97,6 +97,8 @@ export function lookupMethod(
     for (const autoref of ['none', 'ref', 'mut'] as const) {
       const found = probe(program, solver, stepType, autoref, name, inScope);
       if (found) return { ...found, adjust: { derefs: step.derefs, autoref, asIter: false } };
+      const dynamic = probeDynamicIterator(program, solver, step, name, autoref);
+      if (dynamic) return dynamic;
       const iterFound = asIter && probe(program, solver, asIter, autoref, name);
       if (iterFound) return { ...iterFound, adjust: { derefs: step.derefs, autoref, asIter: true } };
     }
@@ -104,7 +106,10 @@ export function lookupMethod(
   }
   // A type parameter or an opaque type bounded by `Iterator` has the methods of `Iter`, and by `IntoIterator`,
   // `into_iter`.
-  const bounded = steps.find((step) => iterationBound(normalize(shallow(step.type))));
+  const bounded = steps.find((step) => {
+    const type = normalize(shallow(step.type));
+    return (type.kind === 'param' || type.kind === 'opaque') && iterationBound(type);
+  });
   if (bounded) {
     const bound = iterationBound(normalize(shallow(bounded.type))) as TraitRef;
     if (bound.trait.builtin === 'Iterator' || name === 'into_iter') {
@@ -116,6 +121,32 @@ export function lookupMethod(
     return isBuiltin(type, 'CaseIter') || isBuiltin(type, 'EscapeDefault');
   });
   return characterIter && probeAsIter(program, solver, characterIter, name, false);
+}
+
+const DYN_ITERATOR_METHODS = new Set(['next', 'next_back', 'nth', 'nth_back', 'len']);
+
+function probeDynamicIterator(
+  program: Program,
+  solver: TraitSolver,
+  step: DerefStep,
+  name: string,
+  autoref: ReceiverAdjust['autoref']
+): MethodMatch | undefined {
+  const type = normalize(shallow(step.type));
+  const target = dynIteratorTarget(type);
+  const item = target && intoIterItem(target);
+  if (!target || !item) return;
+  if (type.kind === 'dyn' && !DYN_ITERATOR_METHODS.has(name)) return;
+  if (type.kind === 'ref' && type.target.kind === 'dyn' && autoref !== 'none') return;
+  const shape = program.shapeType('DynIteratorShape', [target]);
+  const found = probe(program, solver, program.iterType(item, shape), autoref, name);
+  if (!found) return;
+  const adjust: ReceiverAdjust = { derefs: step.derefs, autoref, asIter: true };
+  if (type.kind === 'ref' && found.fn.selfMode === 'value') {
+    adjust.autoref = 'mut';
+    adjust.derefs = [...step.derefs, 'mutRef'];
+  }
+  return { ...found, adjust };
 }
 
 function isRangeIterator(type: Type): boolean {
@@ -362,15 +393,20 @@ export function lookupAssociated(
   program: Program,
   solver: TraitSolver,
   selfType: Type,
-  name: string
+  name: string,
+  inScope: (trait: TraitDef) => boolean
 ): Associated | undefined {
   const t = normalize(shallow(selfType));
-  return (
-    inherentAssociated(program, solver, t, name) ??
-    boundAssociated(t, name) ??
-    traitImplAssociated(program, solver, t, name) ??
-    builtinTraitAssociated(program, solver, t, name)
-  );
+  const direct = inherentAssociated(program, solver, t, name) ?? boundAssociated(t, name);
+  if (direct) return direct;
+  const candidates = associatedCandidates(program, solver, t, name);
+  const matching = candidates.filter((candidate) => applies(solver, candidate.attempt));
+  const visible = matching.filter(({ trait }) => inScope(trait));
+  const first = visible[0] ?? matching[0];
+  if (!first) return;
+  const second = visible.find(({ trait }) => trait !== first.trait);
+  const found = first.attempt()!;
+  return second ? { ...found, ambiguousWith: second.trait } : found;
 }
 
 function inherentAssociated(program: Program, solver: TraitSolver, t: Type, name: string): Associated | undefined {
@@ -403,46 +439,50 @@ function boundMethods(t: Type, name: string): { bound: TraitRef; fn: FnDef }[] {
   });
 }
 
-function traitImplAssociated(program: Program, solver: TraitSolver, t: Type, name: string): Associated | undefined {
+interface AssociatedCandidate {
+  trait: TraitDef;
+  attempt: () => Associated | undefined;
+}
+
+function associatedCandidates(program: Program, solver: TraitSolver, t: Type, name: string): AssociatedCandidate[] {
+  const candidates: AssociatedCandidate[] = [];
   for (const impl of program.impls) {
     if (!impl.trait) continue;
     const { trait } = impl.trait;
     const declared = trait.methods.get(name);
-    if (!declared) continue;
-    if (trait.params.length > 0) {
-      if (applies(solver, () => solver.matchImpl(impl, t))) return independentTraitMethod(trait, declared, t);
-      continue;
-    }
-    const subst = solver.matchImpl(impl, t);
-    if (!subst) continue;
-    const fn = impl.methods.get(name);
-    if (fn) return { fn, typeArgs: [...impl.params.map((param) => subst.get(param) as Type), ...ownParams(fn)] };
-    return {
-      fn: declared,
-      typeArgs: [t, ...impl.trait.args.map((arg) => substitute(arg, subst)), ...ownParams(declared)],
-    };
+    if (declared) candidates.push({ trait, attempt: () => matchImplAssociated(solver, impl, declared, t) });
   }
-  return undefined;
+  for (const trait of program.traits) {
+    if (!trait.builtin) continue;
+    const fn = trait.methods.get(name);
+    if (fn) candidates.push({ trait, attempt: () => matchBuiltinAssociated(solver, trait, fn, t) });
+  }
+  return candidates;
+}
+
+function matchImplAssociated(solver: TraitSolver, impl: ImplDef, declared: FnDef, t: Type): Associated | undefined {
+  const { trait, args } = impl.trait!;
+  if (trait.params.length > 0) {
+    return applies(solver, () => solver.matchImpl(impl, t)) ? independentTraitMethod(trait, declared, t) : undefined;
+  }
+  const subst = solver.matchImpl(impl, t);
+  if (!subst) return;
+  const fn = impl.methods.get(declared.name);
+  if (fn) return { fn, typeArgs: [...impl.params.map((param) => subst.get(param) as Type), ...ownParams(fn)] };
+  return { fn: declared, typeArgs: [t, ...args.map((arg) => substitute(arg, subst)), ...ownParams(declared)] };
 }
 
 function independentTraitMethod(trait: TraitDef, fn: FnDef, self: Type): Associated {
   return { fn, typeArgs: [self, ...trait.params.map(() => freshVar()), ...ownParams(fn)] };
 }
 
-function builtinTraitAssociated(program: Program, solver: TraitSolver, t: Type, name: string): Associated | undefined {
-  for (const trait of program.traits) {
-    if (!trait.builtin) continue;
-    const fn = trait.methods.get(name);
-    if (!fn) continue;
-    const args = trait.params.map(() => freshVar());
-    const snapshot = solver.unifier.snapshot();
-    const answer = solver.implements(t, { trait, args });
-    // A derive implements the trait for every type argument that meets it, which may not be known yet (`W::default()`).
-    const derived = t.kind === 'adt' && t.def.derives.has(trait.builtin);
-    const boxDefault = trait.builtin === 'Default' && t.kind === 'adt' && t.def.builtin === 'Box';
-    if (answer === 'yes' || (answer === 'unknown' && (args.length > 0 || derived || boxDefault)))
-      return { fn, typeArgs: [t, ...args, ...ownParams(fn)] };
-    solver.unifier.rollback(snapshot);
+function matchBuiltinAssociated(solver: TraitSolver, trait: TraitDef, fn: FnDef, t: Type): Associated | undefined {
+  const args = trait.params.map(() => freshVar());
+  const answer = solver.implements(t, { trait, args });
+  const derived = t.kind === 'adt' && t.def.derives.has(trait.builtin!);
+  const boxDefault = trait.builtin === 'Default' && t.kind === 'adt' && t.def.builtin === 'Box';
+  if (answer === 'yes' || (answer === 'unknown' && (args.length > 0 || derived || boxDefault))) {
+    return { fn, typeArgs: [t, ...args, ...ownParams(fn)] };
   }
   return undefined;
 }

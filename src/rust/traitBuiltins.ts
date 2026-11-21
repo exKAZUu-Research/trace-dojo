@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 514 -- One rule per trait of the standard library.
+// code-gauge-allow-file fileNcss 516 -- One rule per trait of the standard library.
 import { collectionKeyAnswer } from './collectionBounds';
 import { normalize } from './infer';
 import { supportsDebug } from './iterDebug';
-import { intoIterItem } from './iterTypes';
+import { dynIteratorTarget, intoIterItem } from './iterTypes';
 import { conversionExists, intoConversion } from './traitConversions';
 import { doubleEndedSearcher, iteratorCapability } from './traitIterators';
 import type { Answer, TraitSolver } from './traits';
@@ -734,6 +734,7 @@ function borrowedSliceElem(type: Type): Type | 'unknown' | undefined {
 
 /** Whether a type is an iterator itself, not only a collection that makes one: `IterImpl`, a range, or `&mut` of one. */
 function isIterator(type: Type): boolean {
+  if (dynIteratorTarget(type)) return true;
   const t = type.kind === 'ref' && type.mutable ? normalize(shallow(type.target)) : type;
   if (t.kind === 'param' || t.kind === 'opaque') return true;
   return (

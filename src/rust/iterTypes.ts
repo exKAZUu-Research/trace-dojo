@@ -26,42 +26,14 @@ const RANGE_SHAPES: Record<string, string> = {
 // code-gauge-allow functionCognitiveComplexity 24 -- Follows std's `IntoIterator` impls case by case.
 export function intoIterItem(type: Type): Type | undefined {
   const t = normalize(shallow(type));
+  const dynamic = dynIteratorTarget(t);
+  if (dynamic) return iterationBound(dynamic)?.item;
   if (t.kind === 'param' || t.kind === 'opaque') {
     const bound = iterationBound(t);
     return bound && (bound.item ?? adt((bound.trait.module as Module).program.adtDef('IntoItem'), [t]));
   }
   if (t.kind === 'array') return t.elem;
-  if (t.kind === 'ref') {
-    const target = normalize(shallow(t.target));
-    if (target.kind === 'array' || target.kind === 'slice') return ref(target.elem, t.mutable);
-    if (target.kind !== 'adt') return undefined;
-    switch (target.def.builtin) {
-      case 'Vec':
-      case 'VecDeque': {
-        return ref(target.args[0], t.mutable);
-      }
-      case 'HashSet':
-      case 'BTreeSet':
-      case 'BinaryHeap': {
-        // Sets and heaps do not let their elements change in place, so `&mut` of them is no iterable.
-        return t.mutable ? undefined : ref(target.args[0]);
-      }
-      case 'HashMap':
-      case 'BTreeMap': {
-        return { kind: 'tuple', elems: [ref(target.args[0]), ref(target.args[1], t.mutable)] };
-      }
-      case 'Option':
-      case 'Result': {
-        return ref(target.args[0], t.mutable);
-      }
-      case 'Iter': {
-        return t.mutable ? target.args[0] : undefined;
-      }
-      default: {
-        return undefined;
-      }
-    }
-  }
+  if (t.kind === 'ref') return borrowedIterItem(t);
   if (t.kind !== 'adt') return undefined;
   switch (t.def.builtin) {
     case 'CaseIter': {
@@ -98,9 +70,43 @@ export function intoIterItem(type: Type): Type | undefined {
   }
 }
 
+function borrowedIterItem(type: Extract<Type, { kind: 'ref' }>): Type | undefined {
+  const target = normalize(shallow(type.target));
+  if (target.kind === 'array' || target.kind === 'slice') return ref(target.elem, type.mutable);
+  if (target.kind !== 'adt') return undefined;
+  switch (target.def.builtin) {
+    case 'Vec':
+    case 'VecDeque': {
+      return ref(target.args[0], type.mutable);
+    }
+    case 'HashSet':
+    case 'BTreeSet':
+    case 'BinaryHeap': {
+      // Sets and heaps do not let their elements change in place, so `&mut` of them is no iterable.
+      return type.mutable ? undefined : ref(target.args[0]);
+    }
+    case 'HashMap':
+    case 'BTreeMap': {
+      return { kind: 'tuple', elems: [ref(target.args[0]), ref(target.args[1], type.mutable)] };
+    }
+    case 'Option':
+    case 'Result': {
+      return ref(target.args[0], type.mutable);
+    }
+    case 'Iter': {
+      return type.mutable ? target.args[0] : undefined;
+    }
+    default: {
+      return undefined;
+    }
+  }
+}
+
 /** The shape of the iterator that `IntoIterator` makes of a value of this type. */
 export function intoIterShape(program: Program, type: Type): Type | undefined {
   const t = normalize(shallow(type));
+  const dynamic = dynIteratorTarget(t);
+  if (dynamic) return program.shapeType('DynIteratorShape', [dynamic]);
   if (t.kind === 'param' || t.kind === 'opaque') return iterationBound(t) && adt(program.adtDef('IntoShape'), [t]);
   if (t.kind === 'array') return program.shapeType('ArrayIntoIterShape', [t.elem]);
   if (t.kind === 'ref') return borrowedIterShape(program, t.target, t.mutable);
@@ -133,11 +139,26 @@ function borrowedIterShape(program: Program, type: Type, mutable: boolean): Type
 
 /** The `Iterator` or `IntoIterator` bound of a type parameter or an opaque type, by which it iterates. */
 export function iterationBound(type: Type): TraitRef | undefined {
-  const bounds = type.kind === 'param' ? type.param.bounds : type.kind === 'opaque' ? type.opaque.bounds : undefined;
+  const bounds =
+    type.kind === 'param'
+      ? type.param.bounds
+      : type.kind === 'opaque'
+        ? type.opaque.bounds
+        : type.kind === 'dyn'
+          ? [type.trait]
+          : undefined;
   if (!bounds) return;
   const inherited = allSupertraits(bounds, type);
   return (
     inherited.find((bound) => bound.trait.builtin === 'Iterator') ??
     inherited.find((bound) => bound.trait.builtin === 'IntoIterator')
   );
+}
+
+export function dynIteratorTarget(type: Type): Extract<Type, { kind: 'dyn' }> | undefined {
+  let t = normalize(shallow(type));
+  while ((t.kind === 'ref' && t.mutable) || (t.kind === 'adt' && t.def.builtin === 'Box')) {
+    t = normalize(shallow(t.kind === 'ref' ? t.target : t.args[0]));
+  }
+  return t.kind === 'dyn' && iterationBound(t)?.trait.builtin === 'Iterator' ? t : undefined;
 }

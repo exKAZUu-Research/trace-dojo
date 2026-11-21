@@ -86,7 +86,8 @@ export class ElementPlace implements Place {
   readonly isPlace = true;
   constructor(
     readonly array: Value[],
-    readonly index: number
+    readonly index: number,
+    readonly owner?: CellPlace | ElementPlace
   ) {}
 
   get(): Value {

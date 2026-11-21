@@ -1,6 +1,6 @@
 import { normalize } from './infer';
 import type { Answer, TraitSolver } from './traits';
-import { shallow, type Type } from './types';
+import { allSupertraits, shallow, type Type } from './types';
 
 /** What an iterator's shape gives: taking from the back (`DoubleEndedIterator`) and its length (`ExactSizeIterator`). */
 type Capability = 'back' | 'exact';
@@ -70,8 +70,20 @@ export function iteratorCapability(type: Type, capability: Capability, solver?: 
   const t = normalize(shallow(type));
   if (t.kind === 'var') return 'unknown';
   if (t.kind === 'ref') return t.mutable ? iteratorCapability(t.target, capability, solver) : 'no';
+  if (t.kind === 'dyn') {
+    return allSupertraits([t.trait], t).some((bound) => bound.trait.builtin === CAPABILITY_TRAITS[capability])
+      ? 'yes'
+      : 'no';
+  }
   if (t.kind !== 'adt') return 'no';
   if (t.def.builtin === 'Iter') return iteratorCapability(t.args[1], capability, solver);
+  if (t.def.name === 'DynIteratorShape' || t.def.builtin === 'Box')
+    return iteratorCapability(t.args[0], capability, solver);
+  return shapeCapability(t, capability, solver);
+}
+
+// code-gauge-allow functionCognitiveComplexity 23 -- The standard iterator shapes have separate capability rules.
+function shapeCapability(t: Extract<Type, { kind: 'adt' }>, capability: Capability, solver?: TraitSolver): Answer {
   const raw = t.def.builtin;
   if (raw === 'IntoShape') return abstractCapability(t.args[0], capability, solver);
   const name = raw === 'CaseIter' ? 'CaseMappingShape' : raw && DIRECT_ITERATORS.has(raw) ? `${raw}Shape` : t.def.name;

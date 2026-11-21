@@ -257,7 +257,7 @@ export class Interpreter implements CallSupport {
     const context: NativeContext = { interp: this, runtime: this.runtime, frame, span, typeArgs };
     const before = receiverText(args[0]);
     const result = this.runtime.withRoots(args, () =>
-      this.runtime.withActiveIterators(args, () => native(args, context))
+      this.runtime.withActiveBorrows(args, () => native(args, context))
     );
     // Library functions build `String`s through these two ways out: a result, and a receiver they write to.
     if ((typeof result === 'string' || result instanceof StringValue) && shallow(def.ret).kind !== 'ref') {

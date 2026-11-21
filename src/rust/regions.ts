@@ -30,7 +30,7 @@ export function layoutOf(type: Type | undefined, fresh: () => RVar, staticRegion
       return { kind: 'ref', region, mutable: t.mutable, target };
     }
     case 'adt': {
-      const own = (t.def.lifetimeParams ?? []).map(() => fresh());
+      const own = Array.from({ length: lifetimeCount(t) }, () => fresh());
       const args = t.args.map((arg) => layoutOf(arg, fresh, staticRegion));
       return adtLayout(t.def, own, args);
     }
@@ -65,6 +65,10 @@ export function layoutOf(type: Type | undefined, fresh: () => RVar, staticRegion
 function referencedObject(type: Type, region: RVar): Layout | undefined {
   const target = shallow(type);
   return target.kind === 'dyn' && target.objectLifetime === 'reference' ? { kind: 'opaque', region } : undefined;
+}
+
+function lifetimeCount(type: Extract<Type, { kind: 'adt' }>): number {
+  return Math.max(type.def.lifetimeParams?.length ?? 0, type.lifetimes?.length ?? 0);
 }
 
 function adtLayout(def: AdtDef, own: RVar[], args: Layout[]): Layout {
@@ -193,7 +197,7 @@ export function instantiate(declared: Type, subst: Subst, fresh: () => RVar): La
     }
     case 'adt': {
       const written = t.lifetimes ?? [];
-      const own = (t.def.lifetimeParams ?? []).map((_, index) => subst.lifetime(written[index]));
+      const own = Array.from({ length: lifetimeCount(t) }, (_, index) => subst.lifetime(written[index]));
       const args = t.args.map((arg) => instantiate(arg, subst, fresh));
       return adtLayout(t.def, own, args);
     }

@@ -75,9 +75,10 @@ function fieldPlace(c: Compiler, expr: ExprOf<'field'>): PlaceEval | undefined {
   const { index } = field;
   if (field.range) return rangeFieldPlace(base, index);
   return (frame) => {
-    const owner = base(frame).get();
-    const fields = Array.isArray(owner) ? owner : (owner as StructValue).fields;
-    return new ElementPlace(fields, index);
+    const place = base(frame);
+    const value = place.get();
+    const fields = Array.isArray(value) ? value : (value as StructValue).fields;
+    return new ElementPlace(fields, index, temporaryOwner(place));
   };
 }
 
@@ -119,15 +120,20 @@ function indexPlace(c: Compiler, expr: ExprOf<'index'>): PlaceEval {
     return (frame) => new CellPlace(read(frame));
   }
   return (frame) => {
-    const container = base(frame).get();
+    const place = base(frame);
+    const container = place.get();
     return frame.runtime.withRoots([container], () => {
       const position = index(frame) as bigint;
       const length = sliceLength(container);
       if (position >= length) throw new RustPanic(indexPanic(res.container, length, position), span);
       const { base: array, start } = sliceBase(container);
-      return new ElementPlace(array, start + Number(position));
+      return new ElementPlace(array, start + Number(position), temporaryOwner(place));
     });
   };
+}
+
+function temporaryOwner(place: Place): CellPlace | ElementPlace | undefined {
+  return place instanceof CellPlace || place instanceof ElementPlace ? place : undefined;
 }
 
 /** The place an operand reaches through derefs: through `&mut` references and owners (`Box`, `Vec`, `String`). */

@@ -440,6 +440,7 @@ export class BorrowChecker {
       .map((part) => part.path);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Applies the receiver adjustment before checking argument moves.
   private methodCall(expr: Extract<Expr, { kind: 'methodCall' }>, state: State): State {
     const method = this.annotations.methods.get(expr);
     let current = state;
@@ -450,7 +451,9 @@ export class BorrowChecker {
         current = this.expr(expr.receiver, current, 'mut');
       } else {
         const adjusted = typeAfter(expr.receiver.ty, receiver.derefs);
-        const moves = method.fn.selfMode === 'value' && !throughRef && !receiver.asIter && !this.isCopy(adjusted);
+        const ownsIterator = adjusted?.kind === 'adt' && adjusted.def.builtin === 'Box';
+        const moves =
+          method.fn.selfMode === 'value' && !throughRef && (!receiver.asIter || ownsIterator) && !this.isCopy(adjusted);
         current = this.expr(expr.receiver, current, moves ? 'move' : 'read');
       }
     } else {

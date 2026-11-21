@@ -307,8 +307,9 @@ export function checkMethodCall(
   }
   checkArgs(c, expr.args, sig.params, expectations(c, sig.ret, sig.params, expected));
   c.annotations.methods.set(expr, { fn, typeArgs: found.typeArgs, receiver: found.adjust });
-  if (fn.selfMode === 'value') checkMoveOutOfRef(c, expr, found.adjust, found.selfType);
-  if (expr.method === 'map') return arrayMapResult(stripped, found.selfType, sig.ret);
+  const adjusted = typeAfter(receiverType, found.adjust.derefs) ?? found.selfType;
+  if (fn.selfMode === 'value') checkMoveOutOfRef(c, expr, found.adjust, adjusted);
+  if (expr.method === 'map') return arrayMapResult(adjusted, found.selfType, sig.ret);
   return sig.ret;
 }
 
@@ -383,8 +384,9 @@ function checkMoveOutOfRef(
   adjust: ReceiverAdjust,
   selfType: Type
 ): void {
-  if (adjust.autoref !== 'none' || adjust.asIter) return;
-  c.requireTrait(typeAfter(expr.receiver.ty, adjust.derefs) ?? selfType, 'Sized', expr.receiver.span);
+  if (adjust.autoref !== 'none') return;
+  if (adjust.asIter && !isBuiltin(shallow(selfType), 'Box')) return;
+  c.requireTrait(selfType, 'Sized', expr.receiver.span);
   const throughRef = adjust.derefs.some((step) => step === 'ref' || step === 'mutRef');
   if (!throughRef) return;
   c.deferredChecks.push(() => {
@@ -417,10 +419,11 @@ function checkReceiverAdjust(
 
 /** An array's `map` gives an array of its length, which the declaration on `[T]` cannot say. */
 function arrayMapResult(receiver: Type, selfType: Type, ret: Type): Type {
+  const array = normalize(shallow(receiver));
   const self = normalize(shallow(selfType));
   const r = normalize(shallow(ret));
-  if (receiver.kind === 'array' && self.kind === 'slice' && r.kind === 'slice') {
-    return { kind: 'array', elem: r.elem, len: receiver.len };
+  if (array.kind === 'array' && self.kind === 'slice' && r.kind === 'slice') {
+    return { kind: 'array', elem: r.elem, len: array.len };
   }
   return ret;
 }

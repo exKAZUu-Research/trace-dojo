@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 877 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 880 -- One native per method of the standard library.
 import { collectedVecCapacity, inPlaceCapacity, setVecCapacity, sizeTable, type TableMap } from '../capacity';
 import type { DebugPart } from '../debugText';
 import { normalize } from '../infer';
@@ -23,6 +23,7 @@ import { sameType, shallow, type Type } from '../types';
 import {
   CellPlace,
   DONE,
+  DynValue,
   ElementPlace,
   EnumValue,
   IterValue,
@@ -114,10 +115,12 @@ export function sliceIter(slice: Value, places: boolean): IterValue {
 }
 
 /** The iterator `for` uses for a value of a type, as `IntoIterator` makes it. */
-// code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of iterable type.
+// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of iterable type.
 export function toIterator(value: Value, from: Type): Value {
   const t = normalize(shallow(from));
   if (value instanceof IterValue) return value;
+  const dynamic = deref(value);
+  if (dynamic instanceof DynValue) return toIterator(deref(dynamic.value), dynamic.type);
   if (t.kind === 'opaque' && t.opaque.hidden) return toIterator(value, t.opaque.hidden);
   if (t.kind === 'array') return ownedIter(sliceItems(value), t.elem);
   if (t.kind === 'ref') {

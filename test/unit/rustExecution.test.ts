@@ -5720,3 +5720,170 @@ test('advances UTF-8 string iterators lazily from both ends', () => {
       'Some(240) Some(169) 4 [195, 130, 153, 159]\n',
   });
 });
+
+test('checks storage cycles in unused Rust structs and enums', () => {
+  for (const declaration of [
+    'struct Node { next: Node }',
+    'enum List { End, Next(i32, List) }',
+    'struct Left(Right); struct Right(Left);',
+    'struct Node(Wrap<Node>); struct Wrap<T>(T);',
+    'struct Node([Option<Node>; 0]);',
+  ]) {
+    expect(executeProgram('rust', `${declaration}\nfn main() {}`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ message: expect.stringContaining('自分自身を含んでいる') }],
+    });
+  }
+  const program = `struct Wrap<T>(T);
+struct Nest(Wrap<Wrap<i32>>);
+struct BoxWrap<T>(Box<T>);
+struct Link(Option<BoxWrap<Link>>);
+struct Children(Vec<Children>);
+fn main() { println!("ok"); }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'ok\n' });
+});
+
+test('checks declared lifetimes through nested Rust fields', () => {
+  for (const outer of [
+    'struct Outer { item: Borrowed }',
+    "struct Outer { item: Box<Borrowed<'_>> }",
+    "struct Outer<'a> { item: Borrowed<'b> }",
+    'enum Outer { Item(Option<Borrowed>) }',
+  ]) {
+    const program = `struct Borrowed<'a> { text: &'a str }\n${outer}\nfn main() {}`;
+    expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
+  }
+  const program = `struct Borrowed<'a> { text: &'a str }
+struct Outer<'a> { item: Box<Borrowed<'a>> }
+fn main() { println!("ok"); }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'ok\n' });
+});
+
+test('projects Rust constant struct fields with their declared types during item and body checking', () => {
+  const program = `fn use_len(_: [i32; ARR[1].0.len() + MAIN.n]) {}
+struct Tuple<T>(T);
+struct Named<T> { n: T }
+const ARR: [Tuple<[i32; 2]>; 2] = [Tuple([1, 2]), Tuple([3, 4])];
+const MAIN: Named<usize> = Named { n: 3 };
+const OTHER: Named<i32> = Named { n: 3 };
+fn main() {
+    let array = [0; ARR[1].0.len() + MAIN.n];
+    use_len(array);
+    println!("{}", array.len());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '5\n' });
+  expect(executeProgram('rust', program.replace('len() + MAIN.n])', 'len() + OTHER.n])'))).toMatchObject({
+    kind: 'compileError',
+  });
+  const cycle = `struct Node { data: [u8; VALUE.data.len()] }
+const VALUE: Node = Node { data: [0] };
+fn main() {}`;
+  expect(executeProgram('rust', cycle)).toMatchObject({ kind: 'compileError' });
+});
+
+test('resolves Rust associated functions across visible trait candidates', () => {
+  const program = `struct Item;
+mod hidden {
+    pub trait First { fn make() -> i32; }
+    impl First for super::Item { fn make() -> i32 { 1 } }
+}
+trait Second { fn make() -> i32; }
+impl Second for Item { fn make() -> i32 { 2 } }
+fn main() { println!("{}", Item::make()); }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '2\n' });
+  expect(executeProgram('rust', `use hidden::First as Alias;\n${program}`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining('両方にあります') }],
+  });
+  const inherent = `use hidden::First;
+${program}
+impl Item { fn make() -> i32 { 3 } }`;
+  expect(executeProgram('rust', inherent)).toMatchObject({ kind: 'executed', stdout: '3\n' });
+});
+
+test('drops collection owners after the last use of a mutable element place', () => {
+  for (const collection of ['vec![Turtle::new(0, 1)]', '[Turtle::new(0, 1)]']) {
+    const program = `fn main() {
+    let observer = Turtle::new(0, 0);
+    let mut owners = ${collection};
+    let borrowed = (Some(&mut owners[0]),);
+    println!("{}", borrowed.0.is_some());
+    drop(owners);
+    println!("{}", observer.can_move_forward());
+    {
+        let temporary = &mut vec![Turtle::new(0, 1)][0];
+        println!("{}", observer.can_move_forward());
+        temporary.forward();
+    }
+    println!("{}", observer.can_move_forward());
+}`;
+    expect(executeProgram('rust', program)).toMatchObject({
+      kind: 'executed',
+      stdout: 'true\ntrue\nfalse\ntrue\n',
+      finalTurtles: [{ x: 0, y: 0, color: '#', dir: 'N' }],
+    });
+  }
+});
+
+test('keeps boxed Rust array map results sized through autoderef', () => {
+  const program = `fn main() {
+    let boxed = Box::new([1, 2]);
+    let shared = &boxed;
+    println!("{:?} {:?}", shared.map(|x| x + 1), shared);
+    let mapped = boxed.map(|x| x * 2);
+    println!("{:?}", mapped);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[2, 3] [1, 2]\n[2, 4]\n' });
+});
+
+test('runs Rust Iterator adapters through mutable and boxed trait objects', () => {
+  const program = `fn next_item(it: &mut dyn Iterator<Item = i32>) -> Option<i32> { it.next() }
+fn ends(it: &mut dyn DoubleEndedIterator<Item = i32>) {
+    println!("{:?} {:?}", it.next(), it.next_back());
+}
+fn remaining(it: &mut dyn Iterator<Item = i32>) {
+    let items: Vec<_> = it.collect();
+    println!("{:?} {:?}", items, it.next());
+}
+fn main() {
+    let mut concrete = (0..4).map(|x| 10 + x);
+    println!("{:?} {:?}", next_item(&mut concrete), next_item(&mut concrete));
+    remaining(&mut concrete);
+    ends(&mut (0..4));
+    let boxed: Box<dyn Iterator<Item = i32>> = Box::new([7, 8].into_iter());
+    let items: Vec<_> = boxed.collect();
+    println!("{:?}", items);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Some(10) Some(11)\n[12, 13] None\nSome(0) Some(3)\n[7, 8]\n',
+  });
+  for (const body of ['it.by_ref();', 'let _: Vec<_> = (*it).collect();']) {
+    const invalid = `fn f(it: &mut dyn Iterator<Item = i32>) { ${body} } fn main() {}`;
+    expect(executeProgram('rust', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('keeps written lifetimes in Rust iterator aliases stored in structs', () => {
+  const program = `use std::iter::{Enumerate, Peekable, Rev};
+use std::slice::Iter;
+use std::str::Chars;
+struct Lexer<'text> { chars: Peekable<Chars<'text>> }
+struct Indexer<'text> { chars: Enumerate<Chars<'text>> }
+struct Reversed<'slice> { items: Rev<Iter<'slice, i32>> }
+impl<'text> Indexer<'text> {
+    fn new(text: &'text str) -> Self { Indexer { chars: text.chars().enumerate() } }
+}
+fn main() {
+    let text = String::from("xy");
+    let mut index = Indexer::new(&text);
+    let mut lexer = Lexer { chars: text.chars().peekable() };
+    let items = [1, 2];
+    let mut reversed = Reversed { items: items.iter().rev() };
+    println!("{:?} {:?} {:?}", index.chars.next(), lexer.chars.peek(), reversed.items.next());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: "Some((0, 'x')) Some('x') Some(2)\n",
+  });
+});

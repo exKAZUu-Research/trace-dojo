@@ -175,12 +175,12 @@ function associatedValueRes(c: Checker, t: Type, last: PathAst['segments'][numbe
   }
   const constant = associatedConst(c, t, last.name, span);
   if (constant) return constant;
-  const found = lookupAssociated(c.program, c.solver, t, last.name);
+  const found = lookupAssociated(c.program, c.solver, t, last.name, (trait) => traitInScope(c, trait));
   if (!found) missingAssociatedValue(t, last.name, span);
   if (found.ambiguousWith) {
     compileError(
       span,
-      `関連関数 ${last.name} は、トレイト ${found.fn.trait!.name} と ${found.ambiguousWith.name} の両方にあります。`
+      `関連関数 ${last.name} は、トレイト ${(found.fn.trait ?? found.fn.impl?.trait?.trait)?.name} と ${found.ambiguousWith.name} の両方にあります。`
     );
   }
   checkMethodVisible(c, found.fn, span);
@@ -251,7 +251,7 @@ export function checkMethodVisible(c: Checker, fn: FnDef, span: Span): void {
  */
 export function checkTraitInScope(c: Checker, fn: FnDef, selfType: Type, span: Span, what: string): void {
   const isStd = (fn.trait?.module as Module | undefined)?.isStd;
-  const trait = isStd ? fn.trait : fn.impl?.trait?.trait;
+  const trait = fn.trait ?? fn.impl?.trait?.trait;
   if (!trait || boundsOf(selfType) || traitInScope(c, trait)) return;
   if (!isStd && (trait.module as Module).isStd && (trait.module as Module).path !== 'std::io') return;
   compileError(span, `${what} はトレイト ${trait.name} のものなので、use でトレイトを取り込んでください。`);

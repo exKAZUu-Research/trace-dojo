@@ -1,5 +1,5 @@
-// code-gauge-allow-file fileNcss 433 -- Defines Rust types, their substitutions and their shared structural operations.
-import type { ConstItem, FnItem, Span } from './ast';
+// code-gauge-allow-file fileNcss 434 -- Defines Rust types, their substitutions and their shared structural operations.
+import type { ConstItem, FieldAst, FnItem, Span } from './ast';
 import type { Module } from './items';
 
 export type IntName = 'i8' | 'i16' | 'i32' | 'i64' | 'i128' | 'isize' | 'u8' | 'u16' | 'u32' | 'u64' | 'u128' | 'usize';
@@ -142,6 +142,7 @@ export interface AdtDef {
   params: TypeParam[];
   /** A struct's single variant, or an enum's variants. */
   variants: VariantDef[];
+  writtenFields?: readonly FieldAst[];
   derives: Set<string>;
   /** Where the type is declared, whose name rustc reports for errors about its derives. */
   span: Span;
@@ -339,10 +340,10 @@ export function mapChildren(t: Type, f: (child: Type) => Type): Type {
       return { kind: 'slice', elem: f(t.elem) };
     }
     case 'ref': {
-      return { kind: 'ref', mutable: t.mutable, target: f(t.target) };
+      return { ...t, target: f(t.target) };
     }
     case 'adt': {
-      return t.args.length === 0 ? t : { kind: 'adt', def: t.def, args: t.args.map(f) };
+      return t.args.length === 0 ? t : { ...t, args: t.args.map(f) };
     }
     case 'fn': {
       return { ...t, params: t.params.map(f), ret: f(t.ret) };

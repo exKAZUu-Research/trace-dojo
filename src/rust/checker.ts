@@ -1,6 +1,7 @@
-// code-gauge-allow-file fileNcss 877 -- The checker core owns body, entry point, and type obligations.
+// code-gauge-allow-file fileNcss 896 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
+import { AdtStorage } from './adtStorage';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
 import type { Block, Expr, FnItem, Pattern, Span, Stmt, TypeAst } from './ast';
 import { forEachResult } from './astWalk';
@@ -12,7 +13,7 @@ import { checkConstOperations, ConstLint } from './constLint';
 import { isIrrefutable, lowerPattern } from './exhaustiveness';
 import { deepNormalize, isPseudo, normalize, Unifier } from './infer';
 import { compileError, ItemCollector, lowerType, Module, type Program, resolveImports, type TypeScope } from './items';
-import { intoIterItem, intoIterShape } from './iterTypes';
+import { dynIteratorTarget, intoIterItem, intoIterShape } from './iterTypes';
 import { autoderefSteps, derefOnce } from './methods';
 import { TraitSolver } from './traits';
 import {
@@ -90,6 +91,7 @@ let nextLocalId = 0;
 
 /** Checks the types of every function body, recording what the compiler needs in {@link Annotations}. */
 export class Checker {
+  private readonly adtStorage: AdtStorage;
   readonly annotations = new Annotations();
   readonly unifier = new Unifier();
   readonly solver: TraitSolver;
@@ -126,6 +128,7 @@ export class Checker {
     private readonly budget: ExecutionBudget
   ) {
     this.solver = new TraitSolver(program, this.unifier);
+    this.adtStorage = new AdtStorage(budget);
   }
 
   checkProgram(): void {
@@ -171,6 +174,7 @@ export class Checker {
   }
 
   private checkAdtDeclaration(def: AdtDef): void {
+    this.adtStorage.check(def);
     this.checkParamBounds(def.params, def.span);
     for (const variant of def.variants) {
       for (const [index, field] of variant.fields.entries()) {
@@ -1064,25 +1068,28 @@ export class Checker {
    * Rejects what rustc rejects in a written type: a trait object of a trait that methods returning `Self` or taking
    * type parameters make not dyn compatible (E0038), and an unsized type (`dyn T`, `str`) as a type argument (E0277).
    */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Checks type well-formedness at each nested written type.
   private checkWrittenType(type: Type, span: Span): void {
     const t = shallow(type);
     if (t.kind === 'dyn') {
       checkDynCompatible(t.trait.trait, span);
       this.checkTraitApplication(t, t.trait, span);
+      if (dynIteratorTarget(t) && !intoIterItem(t)) compileError(span, 'dyn Iterator には Item の型を書いてください。');
     }
     if (t.kind === 'opaque') {
       for (const bound of t.opaque.bounds) this.checkTraitApplication(t, bound, span);
     }
-    if (t.kind === 'array') this.requireTrait(t.elem, 'Sized', span);
-    if (t.kind === 'adt') {
-      for (const [arg, bound] of adtArgumentBounds(t.def, t.args)) {
-        if (this.solver.implements(arg, bound) === 'no') {
-          compileError(span, `${typeToString(arg)} にトレイト ${bound.trait.name} が実装されていません。`);
-        }
+    if (t.kind === 'array' || t.kind === 'slice') this.requireTrait(t.elem, 'Sized', span);
+    if (t.kind === 'adt') this.checkAdtWrittenType(t, span);
+    for (const child of childTypes(t)) if (child.kind !== 'closure') this.checkWrittenType(child, span);
+  }
+
+  private checkAdtWrittenType(t: Extract<Type, { kind: 'adt' }>, span: Span): void {
+    for (const [arg, bound] of adtArgumentBounds(t.def, t.args)) {
+      if (this.solver.implements(arg, bound) === 'no') {
+        compileError(span, `${typeToString(arg)} にトレイト ${bound.trait.name} が実装されていません。`);
       }
     }
-    if (t.kind === 'adt' && t.def.builtin !== 'Box') {
+    if (t.def.builtin !== 'Box') {
       for (const arg of t.args) {
         const a = shallow(arg);
         if (a.kind === 'dyn' || a.kind === 'str' || a.kind === 'slice') {
@@ -1093,7 +1100,6 @@ export class Checker {
         }
       }
     }
-    for (const child of childTypes(t)) if (child.kind !== 'closure') this.checkWrittenType(child, span);
   }
 
   private requireDyn(type: Type, trait: TraitRef, span: Span): void {
@@ -1277,16 +1283,25 @@ function* adtArgumentBounds(def: AdtDef, args: Type[]): Iterable<[Type, TraitRef
 
 function checkFieldLifetimes(type: Type, span: Span, declared: string[]): void {
   const t = shallow(type);
-  if (t.kind === 'ref') {
-    if (!t.lifetime || t.lifetime === "'_") {
-      compileError(span, 'フィールドの参照型には、ライフタイムを書いてください。');
+  if (t.kind === 'ref') checkFieldLifetime(t.lifetime, span, declared);
+  if (t.kind === 'dyn' && t.lifetime) checkFieldLifetime(t.lifetime, span, declared);
+  if (t.kind === 'adt' && !(t.def.module as Module | undefined)?.isStd) {
+    const expected = t.def.lifetimeParams?.length ?? 0;
+    const lifetimes = t.lifetimes ?? [];
+    if (lifetimes.length !== expected) {
+      compileError(span, `フィールドの型 ${t.def.name} には、ライフタイムを ${expected} 個書いてください。`);
     }
-    if (t.lifetime !== "'static" && !declared.includes(t.lifetime)) {
-      compileError(span, `ライフタイム ${t.lifetime} が宣言されていません。`);
-    }
+    for (const lifetime of lifetimes) checkFieldLifetime(lifetime, span, declared);
   }
   const stored = t.kind === 'dyn' ? t.trait.args : childTypes(t);
   for (const child of stored) checkFieldLifetimes(child, span, declared);
+}
+
+function checkFieldLifetime(lifetime: string | undefined, span: Span, declared: string[]): void {
+  if (!lifetime || lifetime === "'_") compileError(span, 'フィールドの型には、ライフタイムを書いてください。');
+  if (lifetime !== "'static" && !declared.includes(lifetime)) {
+    compileError(span, `ライフタイム ${lifetime} が宣言されていません。`);
+  }
 }
 
 function checkFloatLiteral(literal: Extract<Expr, { kind: 'float' }>, name: FloatName): void {

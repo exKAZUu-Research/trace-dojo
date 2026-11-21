@@ -146,11 +146,14 @@ export class Runtime implements TracedRuntime<Frame> {
     }
   }
 
-  withActiveIterators<T>(values: Value[], use: () => T): T {
+  withActiveBorrows<T>(values: Value[], use: () => T): T {
     const roots: Value[] = [];
     const seen = new Set<IterValue>();
     const visit = (value: unknown): void => {
-      while (isPlace(value)) value = value.get();
+      while (isPlace(value)) {
+        value = value.get();
+        roots.push(value as Value);
+      }
       if (!(value instanceof IterValue) || seen.has(value)) return;
       seen.add(value);
       for (const borrow of value.borrowedRoots) roots.push(borrow);
@@ -246,7 +249,7 @@ function pushChildren(item: object, stack: unknown[]): void {
   } else if (item instanceof CellPlace) {
     stack.push(item.value);
   } else if (item instanceof ElementPlace) {
-    stack.push(item.array);
+    stack.push(item.owner);
   } else if (item instanceof SliceView) {
     stack.push(item.base);
   } else if (item instanceof MapValue) {

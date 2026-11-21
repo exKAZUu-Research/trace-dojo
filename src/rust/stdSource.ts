@@ -878,6 +878,7 @@ pub mod iter {
         pub struct ChunksExactShape;
         pub struct CharsShape;
         pub struct BytesShape;
+        pub struct DynIteratorShape<D>;
         pub struct CharIndicesShape;
         pub struct SplitWhitespaceShape;
         pub struct LinesShape;

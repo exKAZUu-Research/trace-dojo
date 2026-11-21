@@ -1,10 +1,11 @@
-// code-gauge-allow-file fileNcss 938 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss 961 -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
   ConstItem,
   Crate,
   EnumItem,
+  Expr,
   FnItem,
   Generics,
   ImplItem,
@@ -38,6 +39,7 @@ import {
   intMax,
   intMin,
   intType,
+  mapChildren,
   NEVER,
   newOpaque,
   newTypeParam,
@@ -60,7 +62,7 @@ export type TypeBinding =
   | { kind: 'adt'; def: AdtDef }
   | { kind: 'trait'; def: TraitDef }
   | { kind: 'mod'; module: Module }
-  | { kind: 'alias'; params: TypeParam[]; resolve: () => Type }
+  | { kind: 'alias'; params: TypeParam[]; lifetimes: string[]; resolve: () => Type }
   | { kind: 'prim'; type: Type };
 
 export type ValueBinding =
@@ -198,6 +200,7 @@ export interface TypeScope {
   module: Module;
   params: Map<string, TypeParam>;
   selfType: Type | undefined;
+  evaluatingLengths?: Set<Expr>;
   /** In a function's parameters, `impl Trait` adds an anonymous type parameter here. */
   implParams?: TypeParam[];
   /** In a function's result, `impl Trait` is an opaque type. */
@@ -298,7 +301,12 @@ export class ItemCollector {
           this.declareType(
             module,
             item.name,
-            { kind: 'alias', params, resolve: () => (resolved ??= lowerType(item.type, scope)) },
+            {
+              kind: 'alias',
+              params,
+              lifetimes: item.generics.lifetimes,
+              resolve: () => (resolved ??= lowerType(item.type, scope)),
+            },
             item.vis,
             item.span
           );
@@ -327,6 +335,7 @@ export class ItemCollector {
       kind: 'struct',
       params: item.generics.params.map((param) => newTypeParam(param.name)),
       variants: [],
+      writtenFields: item.fields,
       derives: new Set(item.attrs.derives.map((derive) => derive.name)),
       span: item.span,
       lifetimeParams: item.generics.lifetimes,
@@ -1536,11 +1545,31 @@ function lowerLocalTypeName(path: PathAst, scope: TypeScope): Type | undefined {
 }
 
 function lowerAliasPath(path: PathAst, binding: TypeBinding & { kind: 'alias' }, args: Type[]): Type {
-  if (binding.params.length === 0) return binding.resolve();
   if (args.length !== binding.params.length) {
     compileError(path.span, `${path.segments.at(-1)!.name} には型引数を ${binding.params.length} 個書いてください。`);
   }
-  return substitute(binding.resolve(), new Map(binding.params.map((param, index) => [param, args[index]])));
+  const named = path.segments.at(-1)?.lifetimes ?? [];
+  const lifetimes = new Map(binding.lifetimes.map((name, index) => [name, named[index]]));
+  const template = lifetimes.size > 0 ? renameAliasLifetimes(binding.resolve(), lifetimes) : binding.resolve();
+  const type = substitute(template, new Map(binding.params.map((param, index) => [param, args[index]])));
+  if (type.kind === 'adt' && type.def.builtin === 'Iter' && !type.lifetimes?.length) {
+    const inherited = args.flatMap((arg) =>
+      arg.kind === 'adt' && arg.def.builtin === 'Iter' ? (arg.lifetimes ?? []) : []
+    );
+    if (inherited.length > 0) return { ...type, lifetimes: [...new Set(inherited)] };
+  }
+  return type;
+}
+
+function renameAliasLifetimes(type: Type, names: ReadonlyMap<string, string | undefined>): Type {
+  const mapped = mapChildren(type, (child) => renameAliasLifetimes(child, names));
+  const rename = (name: string): string | undefined => (names.has(name) ? names.get(name) : name);
+  if (mapped.kind === 'ref' && mapped.lifetime) return { ...mapped, lifetime: rename(mapped.lifetime) };
+  if (mapped.kind === 'adt' && mapped.lifetimes) {
+    const lifetimes = mapped.lifetimes.map((name) => rename(name) ?? "'_");
+    return { ...mapped, lifetimes };
+  }
+  return mapped;
 }
 
 function lowerAdtPath(path: PathAst, def: AdtDef, args: Type[], scope: TypeScope): Type {
