@@ -1615,14 +1615,22 @@ test.each([
   'class B extends A implements A, C {}',
   'mixin M on A, A {}',
   'mixin M on A implements A {}',
+  'class B implements Object {}',
+  'mixin M implements Object {}',
 ])('Dart rejects a supertype listed twice across clauses: %s', (declaration) => {
   expect(executeProgram('dart', `class A {}\nclass C {}\n${declaration}\nvoid main() {}`)).toMatchObject({
     kind: 'compileError',
     diagnostics: [expect.objectContaining({ row: 2 })],
   });
-  expect(executeProgram('dart', 'mixin A {}\nclass B with A implements A {}\nvoid main() {}')).toMatchObject({
-    kind: 'executed',
-  });
+  for (const valid of [
+    'mixin M {}\nclass B with M implements M {}',
+    'mixin M on A, C implements A, C {}',
+    'enum E implements Object { a }',
+  ]) {
+    expect(executeProgram('dart', `class A {}\nclass C {}\n${valid}\nvoid main() {}`)).toMatchObject({
+      kind: 'executed',
+    });
+  }
 });
 
 test('Dart extension types are Objects only through the supertypes they implement', () => {

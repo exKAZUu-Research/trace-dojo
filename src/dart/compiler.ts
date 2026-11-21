@@ -282,11 +282,23 @@ export class Compiler extends MemberCompiler {
     return ordered;
   }
 
+  /**
+   * The direct superclass `implements` may not repeat: the written or implicit Object superclass of a class, a mixin's
+   * only `on` type (Object without one), and none for enums, extension types, or mixins with several `on` types, whose
+   * superclass Dart synthesizes.
+   */
+  private effectiveSuperclasses(cls: ClassInfo): InterfaceType[] {
+    if (cls.kind === 'enum' || cls.kind === 'extensionType') return [];
+    if (cls.kind === 'mixin') return cls.onTypes.length > 1 ? [] : [cls.onTypes[0] ?? objectType()];
+    return cls.superclass ? [cls.superclass] : [];
+  }
+
   // code-gauge-allow functionCognitiveComplexity 25 -- Each branch is one of the cases Dart distinguishes for this construct.
   private resolveHeader(work: ClassWork): void {
     const { cls, declaration } = work;
     this.withTypeParams(cls.typeParams, () => {
       this.resolveSuperclass(work);
+      const extended = this.effectiveSuperclasses(cls);
       this.resolveMixins(work);
       if (cls.kind === 'mixinClass' && cls.superclass?.cls !== coreTypes.object)
         this.error(
@@ -300,7 +312,6 @@ export class Compiler extends MemberCompiler {
         if (cls.onTypes.slice(0, index).some((other) => other.cls === type.cls))
           this.error(declaration.onTypes[index], `${type.cls.name} は、1 回しか on に書けません。`);
       }
-      const extended = declaration.superclass && cls.superclass ? [cls.superclass] : cls.onTypes;
       for (const [index, type] of interfaces.entries()) {
         if (interfaces.slice(0, index).some((other) => other.cls === type.cls)) {
           this.error(declaration.interfaces[index], `${type.cls.name} は、1 回しか implements に書けません。`);
