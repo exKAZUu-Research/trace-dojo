@@ -298,21 +298,51 @@ define('BigInt.pow', (runtime, receiver, [exponent]) => {
   return newBigInt(runtime, base ** power);
 });
 define('BigInt.modPow', (runtime, receiver, [exponent, modulus]) => {
-  let power = valueOf(runtime, exponent, 'exponent');
+  const power = valueOf(runtime, exponent, 'exponent');
   const m = valueOf(runtime, modulus, 'modulus');
   if (power < 0n) runtime.throwError('ArgumentError', '', [`Exponent must not be negative: ${power}`]);
   if (m <= 0n) runtime.throwError('ArgumentError', '', [`Modulus must be strictly positive: ${m}`]);
-  // A squaring and a reduction modulo `m` per bit of the exponent.
-  reserve(runtime, bitsOf(m), (bitsOf(power) * bitsOf(m)) / 512);
-  let result = 1n % m;
-  let base = ((valueOf(runtime, receiver) % m) + m) % m;
-  while (power > 0n) {
-    if (power & 1n) result = (result * base) % m;
-    base = (base * base) % m;
-    power >>= 1n;
-  }
-  return newBigInt(runtime, result);
+  return newBigInt(runtime, modularPower(runtime, valueOf(runtime, receiver), power, m));
 });
+
+function modularPower(runtime: Runtime, base: bigint, exponent: bigint, modulus: bigint): bigint {
+  if (modulus === 1n) return 0n;
+  if (exponent === 0n) return 1n;
+  const modulusWords = bigintWords(modulus);
+  let factor = modularRemainder(runtime, base, modulus, modulusWords);
+  if (factor < 0n) factor += modulus;
+  if (factor <= 1n) return factor;
+  runtime.spend(1 + bitsOf(exponent) / 8);
+  const bits = exponent.toString(2);
+  let result = factor;
+  for (let index = 1; index < bits.length; index++) {
+    result = multiplyMod(runtime, result, result, modulus, modulusWords);
+    if (bits[index] === '1') result = multiplyMod(runtime, result, factor, modulus, modulusWords);
+  }
+  return result;
+}
+
+function multiplyMod(runtime: Runtime, left: bigint, right: bigint, modulus: bigint, modulusWords: number): bigint {
+  runtime.spend(1 + (bigintWords(left) * bigintWords(right)) / 128);
+  const product = left * right;
+  runtime.budget.checkClock();
+  return modularRemainder(runtime, product, modulus, modulusWords);
+}
+
+function modularRemainder(runtime: Runtime, value: bigint, modulus: bigint, modulusWords: number): bigint {
+  if (value >= modulus || value <= -modulus) {
+    runtime.spend(1 + ((bigintWords(value) - modulusWords + 1) * modulusWords) / 128);
+    const remainder = value % modulus;
+    runtime.budget.checkClock();
+    return remainder;
+  }
+  return value;
+}
+
+function bigintWords(value: bigint): number {
+  return Math.max(1, Math.ceil(bitsOf(value) / 32));
+}
+
 define(
   'BigInt.isValidInt',
   (runtime, receiver) => BigInt.asIntN(64, valueOf(runtime, receiver)) === valueOf(runtime, receiver)

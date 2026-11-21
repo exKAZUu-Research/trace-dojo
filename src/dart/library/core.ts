@@ -944,10 +944,9 @@ abstract mixin class Iterable<E> {
     return _GeneratorIterable<E>(count, generator);
   }
   factory Iterable.empty() => EmptyIterable<E>();
-  static Iterable<T> castFrom<S, T>(Iterable<S> source) =>
-      _hasEfficientLength(source) ? _EfficientLengthCastIterable<S, T>(source) : CastIterable<S, T>(source);
+  static Iterable<T> castFrom<S, T>(Iterable<S> source) => CastIterable<S, T>(source);
   Iterator<E> get iterator;
-  Iterable<R> cast<R>() => _hasEfficientLength(this) ? _EfficientLengthCastIterable<E, R>(this) : CastIterable<E, R>(this);
+  Iterable<R> cast<R>() => CastIterable<E, R>(this);
   Iterable<E> followedBy(Iterable<E> other) =>
       _hasEfficientLength(this) && _hasEfficientLength(other)
           ? EfficientLengthFollowedByIterable<E>(this, other)
@@ -1431,6 +1430,21 @@ class FollowedByIterable<E> extends Iterable<E> {
   final Iterable<E> _second;
   FollowedByIterable(this._first, this._second);
   Iterator<E> get iterator => FollowedByIterator<E>(_first, _second);
+  int get length => _first.length + _second.length;
+  bool get isEmpty => _first.isEmpty && _second.isEmpty;
+  bool get isNotEmpty => _first.isNotEmpty || _second.isNotEmpty;
+  bool contains(Object? value) => _first.contains(value) || _second.contains(value);
+  E get first {
+    final cursor = _first.iterator;
+    return cursor.moveNext() ? cursor.current : _second.first;
+  }
+  E get last {
+    final cursor = _second.iterator;
+    if (!cursor.moveNext()) return _first.last;
+    E result = cursor.current;
+    while (cursor.moveNext()) result = cursor.current;
+    return result;
+  }
 }
 
 /**
@@ -1472,7 +1486,12 @@ class EfficientLengthSkipIterable<E> extends SkipIterable<E> implements Efficien
 
 class EfficientLengthFollowedByIterable<E> extends FollowedByIterable<E> implements EfficientLengthIterable<E> {
   EfficientLengthFollowedByIterable(Iterable<E> first, Iterable<E> second) : super(first, second);
-  int get length => _first.length + _second.length;
+  E get first => _first.isNotEmpty ? _first.first : _second.first;
+  E get last => _second.isNotEmpty ? _second.last : _first.last;
+  E elementAt(int index) {
+    final firstLength = _first.length;
+    return index < firstLength ? _first.elementAt(index) : _second.elementAt(index - firstLength);
+  }
 }
 
 class FollowedByIterator<E> implements Iterator<E> {
@@ -1493,13 +1512,29 @@ class FollowedByIterator<E> implements Iterator<E> {
 
 class CastIterable<S, T> extends Iterable<T> {
   final Iterable<S> _source;
-  CastIterable(this._source);
+  factory CastIterable(Iterable<S> source) => _hasEfficientLength(source)
+      ? _EfficientLengthCastIterable<S, T>(source)
+      : CastIterable<S, T>._(source);
+  CastIterable._(this._source);
+  Iterable<R> cast<R>() => CastIterable<S, R>(_source);
   Iterator<T> get iterator => CastIterator<S, T>(_source.iterator);
+  int get length => _source.length;
+  bool get isEmpty => _source.isEmpty;
+  bool get isNotEmpty => _source.isNotEmpty;
+  bool contains(Object? value) => _source.contains(value);
+  Iterable<T> skip(int count) => CastIterable<S, T>(_source.skip(count));
+  Iterable<T> take(int count) => CastIterable<S, T>(_source.take(count));
+  T elementAt(int index) => _source.elementAt(index) as T;
+  T get first => _source.first as T;
+  T get last => _source.last as T;
+  T get single => _source.single as T;
+  T lastWhere(bool Function(T element) test, {T Function()? orElse}) => _source.lastWhere(
+      (element) => test(element as T), orElse: orElse == null ? null : () => orElse() as S) as T;
+  String toString() => _source.toString();
 }
 
 class _EfficientLengthCastIterable<S, T> extends CastIterable<S, T> implements EfficientLengthIterable<T> {
-  _EfficientLengthCastIterable(Iterable<S> source) : super(source);
-  int get length => _source.length;
+  _EfficientLengthCastIterable(Iterable<S> source) : super._(source);
 }
 
 class CastIterator<S, T> implements Iterator<T> {
@@ -1554,6 +1589,16 @@ abstract class ListIterable<E> extends EfficientLengthIterable<E> {
       if (length != this.length) throw ConcurrentModificationError(this);
     }
     return false;
+  }
+  E lastWhere(bool Function(E element) test, {E Function()? orElse}) {
+    final count = length;
+    for (int i = count - 1; i >= 0; i--) {
+      final item = elementAt(i);
+      if (test(item)) return item;
+      if (length != count) throw ConcurrentModificationError(this);
+    }
+    if (orElse != null) return orElse();
+    throw StateError("No element");
   }
   Iterable<T> map<T>(T Function(E element) toElement) => MappedListIterable<E, T>(this, toElement);
   Iterable<E> skip(int count) => SubListIterable<E>(this, count, null);
@@ -1686,9 +1731,72 @@ extension IterableExtensions<T> on Iterable<T> {
     }
     return iterator.current;
   }
-  Iterable<(int, T)> get indexed sync* {
-    var index = 0;
-    for (var element in this) yield (index++, element);
+  Iterable<(int, T)> get indexed => _hasEfficientLength(this)
+      ? EfficientLengthIndexedIterable<T>(this, 0)
+      : IndexedIterable<T>(this, 0);
+}
+
+class IndexedIterable<T> extends Iterable<(int, T)> {
+  final Iterable<T> _source;
+  final int _offset;
+  IndexedIterable(this._source, this._offset);
+  int get length => _source.length;
+  bool get isEmpty => _source.isEmpty;
+  bool get isNotEmpty => _source.isNotEmpty;
+  (int, T) get first => (_offset, _source.first);
+  (int, T) get single => (_offset, _source.single);
+  (int, T) elementAt(int index) => (_offset + index, _source.elementAt(index));
+  Iterator<(int, T)> get iterator => IndexedIterator<T>(_source.iterator, _offset);
+  bool contains(Object? value) {
+    if (value case (int index, Object? expected) when index >= _offset) {
+      final position = index - _offset;
+      if (this is EfficientLengthIndexedIterable<T>) {
+        return position < _source.length && _source.elementAt(position) == expected;
+      }
+      final cursor = _source.skip(position).iterator;
+      return cursor.moveNext() && cursor.current == expected;
+    }
+    return false;
+  }
+  Iterable<(int, T)> take(int count) {
+    RangeError.checkNotNegative(count, "count");
+    return _withSource(_source.take(count), _offset);
+  }
+  Iterable<(int, T)> skip(int count) {
+    RangeError.checkNotNegative(count, "count");
+    return _withSource(_source.skip(count), _offset + count);
+  }
+  Iterable<(int, T)> _withSource(Iterable<T> source, int offset) => this is EfficientLengthIndexedIterable<T>
+      ? EfficientLengthIndexedIterable<T>(source, offset)
+      : IndexedIterable<T>(source, offset);
+}
+
+class EfficientLengthIndexedIterable<T> extends IndexedIterable<T> implements EfficientLengthIterable<(int, T)> {
+  EfficientLengthIndexedIterable(Iterable<T> source, int offset) : super(source, offset);
+  (int, T) get last {
+    final count = _source.length;
+    if (count <= 0) throw StateError("No element");
+    final item = _source.last;
+    if (count != _source.length) throw ConcurrentModificationError(this);
+    return (_offset + count - 1, item);
+  }
+}
+
+class IndexedIterator<T> implements Iterator<(int, T)> {
+  final Iterator<T> _source;
+  final int _offset;
+  int _index = -1;
+  IndexedIterator(this._source, this._offset);
+  bool moveNext() {
+    if (_index < -1) return false;
+    _index++;
+    if (_source.moveNext()) return true;
+    _index = -2;
+    return false;
+  }
+  (int, T) get current {
+    if (_index < 0) throw StateError("No element");
+    return (_offset + _index, _source.current);
   }
 }
 

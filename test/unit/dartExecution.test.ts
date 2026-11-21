@@ -4766,6 +4766,172 @@ test('elementAtOrNull uses indexed access when its iterable has efficient length
   });
 });
 
+test('indexed views preserve source lookups, offsets, and cursor state', () => {
+  const program = `Iterable<int> lazy() sync* {
+    print('start'); yield 1;
+    print('next'); yield 2;
+  }
+  void main() {
+    final view = [1, 2, 3].map((n) { print('map $n'); return n; }).indexed;
+    print(view.length);
+    print(view.elementAt(1));
+    print(view.skip(1).take(1).toList());
+    print(view.contains((2, 3)));
+    print(view.contains((7, 7)));
+    print(view.last);
+    print(lazy().indexed.skip(1).first);
+    final iterator = [9].indexed.iterator;
+    try { print(iterator.current); } catch (error) { print(error); }
+    print(iterator.moveNext());
+    print(iterator.current);
+    print(iterator.moveNext());
+    print(iterator.moveNext());
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '3\nmap 2\n(1, 2)\nmap 2\n[(1, 2)]\nmap 3\ntrue\nfalse\nmap 3\n(2, 3)\nstart\nnext\n(1, 2)\nBad state: No element\ntrue\n(0, 9)\nfalse\nfalse\n',
+  });
+});
+
+test('cast iterables delegate queries and cast only the values they return', () => {
+  const program = `void main() {
+    final source = <Object>['x', 1].map((value) => value);
+    final view = source.cast<int>();
+    print(view.length);
+    print(view.contains('x'));
+    print(view.last);
+    print(view.elementAt(1));
+    print(view.skip(1).first);
+    print(view.take(1).contains('x'));
+    print(view.lastWhere((value) => value == 1));
+    print(view);
+    print(view.cast<Object>().first);
+    try { print(view.first); } catch (error) { print(error.runtimeType); }
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '2\ntrue\n1\n1\n1\ntrue\n1\n(x, 1)\nx\n_TypeError\n',
+  });
+});
+
+test('followedBy forwards endpoint and indexed queries to the appropriate source', () => {
+  const program = `Iterable<int> lazy(String name, int value) sync* { print(name); yield value; }
+  void main() {
+    print(lazy('left', 1).followedBy(lazy('right', 2)).last);
+    print(lazy('left', 1).followedBy(lazy('right', 2)).first);
+    final mapped = [1, 2].map((n) { print('map $n'); return n; });
+    final both = mapped.followedBy([3]);
+    print(both.length);
+    print(both.elementAt(1));
+    print(both.elementAt(2));
+    print(both.last);
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'right\n2\nleft\n1\n3\nmap 2\n2\n3\n3\n',
+  });
+});
+
+test('ListBase insertAll shifts before evaluating efficient mapped sets and map values', () => {
+  const program = `import 'dart:collection';
+  class Target extends ListBase<int?> {
+    final values = <int?>[1, 2, 3];
+    int get length => values.length;
+    set length(int count) => values.length = count;
+    int? operator [](int position) => values[position];
+    void operator []=(int position, int? value) { values[position] = value; }
+  }
+  void main() {
+    final setTarget = Target();
+    setTarget.insertAll(1, {4, 5}.map((n) { print(setTarget); return n; }));
+    print(setTarget);
+    final mapTarget = Target();
+    try {
+      mapTarget.insertAll(1, {1: 6, 2: 7}.values.map((n) {
+        print(mapTarget);
+        if (n == 7) throw 'stop';
+        return n;
+      }));
+    } catch (error) { print(error); }
+    print(mapTarget);
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[1, 2, 3, 2, 3]\n[1, 4, 3, 2, 3]\n[1, 4, 5, 2, 3]\n[1, 2, 3, 2, 3]\n[1, 6, 3, 2, 3]\nstop\n[1, 6, 3, 2, 3]\n',
+  });
+});
+
+test('IterableMixin and IterableBase share Iterable type identity and method behavior', () => {
+  const program = `import 'dart:collection';
+  class Cursor implements Iterator<int> {
+    int index = -1;
+    bool moveNext() => ++index < 2;
+    int get current { print('current $index'); return index; }
+  }
+  class Mixed with IterableMixin<int> {
+    Iterator<int> get iterator => Cursor();
+  }
+  class Extended extends IterableBase<int> {
+    Iterator<int> get iterator => Cursor();
+  }
+  void main() {
+    print([IterableMixin == Iterable, IterableBase == Iterable]);
+    print(Mixed().elementAt(1));
+    print(Extended().elementAt(1));
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[true, true]\ncurrent 1\n1\ncurrent 1\n1\n',
+  });
+});
+
+test('native concatenation keeps the copied prefix alive during the right length callback', () => {
+  const program = `import 'dart:collection';
+  late List<Turtle> original;
+  class Source extends ListBase<Turtle> {
+    final added = Turtle(2, 2);
+    int get length {
+      original.clear();
+      Turtle(3, 3).canMoveForward();
+      return 1;
+    }
+    set length(int count) {}
+    Turtle operator [](int position) => added;
+    void operator []=(int position, Turtle value) {}
+    Iterator<Turtle> get iterator => [added].iterator;
+  }
+  void main() {
+    original = [Turtle(1, 1)];
+    final result = original + Source();
+    result.first.forward();
+  }`;
+  const finalTurtles = [
+    { x: 1, y: 2 },
+    { x: 2, y: 2 },
+  ];
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', finalTurtles });
+  expect(traceProgram('dart', program, program)).toMatchObject({ finalTurtles });
+});
+
+test('BigInt modPow meters wide multiplies and preserves small powers', () => {
+  const valid = `void main() {
+    print(BigInt.from(-2).modPow(BigInt.from(7), BigInt.from(101)));
+    print(BigInt.two.modPow(BigInt.from(10), BigInt.from(1000)));
+    print(BigInt.zero.modPow(BigInt.zero, BigInt.two));
+    print(BigInt.two.modPow(BigInt.zero, BigInt.one));
+  }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '74\n24\n1\n0\n' });
+  const wide = `void main() {
+    final modulus = (BigInt.one << 1000000) - BigInt.from(3);
+    final base = (BigInt.one << 999999) + BigInt.from(123);
+    final exponent = (BigInt.one << 128) - BigInt.one;
+    print(base.modPow(exponent, modulus));
+  }`;
+  expect(executeProgram('dart', wide)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
 test('dynamic native calls and tear-offs validate named arguments before dispatch', () => {
   const program = `void main() {
     dynamic text = 'abc';

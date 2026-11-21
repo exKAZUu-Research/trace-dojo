@@ -526,8 +526,8 @@ define('List.+', (runtime, receiver, [other]) => {
     return new DartList(coreTypes.list, elementType, target.elements.concat(other.elements), true);
   }
   const result = copyListSlice(runtime, target, 0, target.elements.length);
-  if (listLength(runtime, other) === 0n) return result;
   runtime.withCallRoots(result, { positional: [], named: undefined }, () => {
+    if (listLength(runtime, other) === 0n) return;
     forEachValue(runtime, other, (value) => {
       runtime.allocate(1);
       result.elements.push(value);

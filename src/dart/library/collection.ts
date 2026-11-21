@@ -4,146 +4,8 @@
  * see. The source must not contain `${`.
  */
 export const COLLECTION_SOURCE = String.raw`
-abstract mixin class IterableMixin<E> implements Iterable<E> {
-  Iterator<E> get iterator;
-  Iterable<R> cast<R>() => Iterable.castFrom<E, R>(this);
-  Iterable<E> followedBy(Iterable<E> other) => FollowedByIterable<E>(this, other);
-  Iterable<T> map<T>(T Function(E e) toElement) => MappedIterable<E, T>(this, toElement);
-  Iterable<E> where(bool Function(E element) test) => WhereIterable<E>(this, test);
-  Iterable<T> whereType<T>() => WhereTypeIterable<T>(this);
-  Iterable<T> expand<T>(Iterable<T> Function(E element) toElements) => ExpandIterable<E, T>(this, toElements);
-  bool contains(Object? element) {
-    for (E e in this) {
-      if (e == element) return true;
-    }
-    return false;
-  }
-  void forEach(void Function(E element) action) {
-    for (E element in this) action(element);
-  }
-  E reduce(E Function(E value, E element) combine) {
-    Iterator<E> iterator = this.iterator;
-    if (!iterator.moveNext()) throw StateError("No element");
-    E value = iterator.current;
-    while (iterator.moveNext()) value = combine(value, iterator.current);
-    return value;
-  }
-  T fold<T>(T initialValue, T Function(T previousValue, E element) combine) {
-    var value = initialValue;
-    for (E element in this) value = combine(value, element);
-    return value;
-  }
-  bool every(bool Function(E element) test) {
-    for (E element in this) {
-      if (!test(element)) return false;
-    }
-    return true;
-  }
-  String join([String separator = ""]) {
-    var buffer = StringBuffer();
-    buffer.writeAll(this, separator);
-    return buffer.toString();
-  }
-  bool any(bool Function(E element) test) {
-    for (E element in this) {
-      if (test(element)) return true;
-    }
-    return false;
-  }
-  List<E> toList({bool growable = true}) => List<E>.of(this, growable: growable);
-  Set<E> toSet() => Set<E>.of(this);
-  int get length {
-    int count = 0;
-    Iterator<E> it = iterator;
-    while (it.moveNext()) count++;
-    return count;
-  }
-  bool get isEmpty => !iterator.moveNext();
-  bool get isNotEmpty => !isEmpty;
-  Iterable<E> take(int count) {
-    RangeError.checkNotNegative(count, "takeCount");
-    return TakeIterable<E>(this, count);
-  }
-  Iterable<E> takeWhile(bool Function(E value) test) => TakeWhileIterable<E>(this, test);
-  Iterable<E> skip(int count) {
-    RangeError.checkNotNegative(count, "count");
-    return SkipIterable<E>(this, count);
-  }
-  Iterable<E> skipWhile(bool Function(E value) test) => SkipWhileIterable<E>(this, test);
-  E get first {
-    Iterator<E> it = iterator;
-    if (!it.moveNext()) throw StateError("No element");
-    return it.current;
-  }
-  E get last {
-    Iterator<E> it = iterator;
-    if (!it.moveNext()) throw StateError("No element");
-    E result;
-    do {
-      result = it.current;
-    } while (it.moveNext());
-    return result;
-  }
-  E get single {
-    Iterator<E> it = iterator;
-    if (!it.moveNext()) throw StateError("No element");
-    E result = it.current;
-    if (it.moveNext()) throw StateError("Too many elements");
-    return result;
-  }
-  E firstWhere(bool Function(E value) test, {E Function()? orElse}) {
-    for (E element in this) {
-      if (test(element)) return element;
-    }
-    if (orElse != null) return orElse();
-    throw StateError("No element");
-  }
-  E lastWhere(bool Function(E value) test, {E Function()? orElse}) {
-    late E result;
-    bool foundMatching = false;
-    for (E element in this) {
-      if (test(element)) {
-        result = element;
-        foundMatching = true;
-      }
-    }
-    if (foundMatching) return result;
-    if (orElse != null) return orElse();
-    throw StateError("No element");
-  }
-  E singleWhere(bool Function(E element) test, {E Function()? orElse}) {
-    late E result;
-    bool foundMatching = false;
-    for (E element in this) {
-      if (test(element)) {
-        if (foundMatching) throw StateError("Too many elements");
-        result = element;
-        foundMatching = true;
-      }
-    }
-    if (foundMatching) return result;
-    if (orElse != null) return orElse();
-    throw StateError("No element");
-  }
-  E elementAt(int index) {
-    RangeError.checkNotNegative(index, "index");
-    int elementIndex = 0;
-    for (E element in this) {
-      if (index == elementIndex) return element;
-      elementIndex++;
-    }
-    throw IndexError.withLength(index, elementIndex, indexable: this, name: "index");
-  }
-  String toString() => Iterable.iterableToShortString(this, '(', ')');
-}
-
-abstract class IterableBase<E> extends Iterable<E> {
-  const IterableBase();
-  static String iterableToShortString(Iterable iterable, [String leftDelimiter = '(', String rightDelimiter = ')']) =>
-      Iterable.iterableToShortString(iterable, leftDelimiter, rightDelimiter);
-  static String iterableToFullString(Iterable iterable, [String leftDelimiter = '(', String rightDelimiter = ')']) =>
-      Iterable.iterableToFullString(iterable, leftDelimiter, rightDelimiter);
-}
+typedef IterableMixin<E> = Iterable<E>;
+typedef IterableBase<E> = Iterable<E>;
 
 // Lists the program implements
 
@@ -505,7 +367,7 @@ abstract mixin class ListBase<E> implements List<E> {
       addAll(iterable);
       return;
     }
-    if (!_isEfficientLength(iterable) || identical(iterable, this)) {
+    if (iterable is! EfficientLengthIterable || identical(iterable, this)) {
       iterable = iterable.toList();
     }
     int insertionLength = iterable.length;
@@ -538,8 +400,6 @@ abstract mixin class ListBase<E> implements List<E> {
   Iterable<E> get reversed => ReversedListIterable<E>(this);
   String toString() => Iterable.iterableToFullString(this, '[', ']');
 }
-
-bool _isEfficientLength(Iterable<Object?> iterable) => iterable is List || iterable is Set || iterable is ListIterable;
 
 /** The view Set.cast returns, as the SDK's CastSet (internal/cast.dart). */
 class CastSet<S, T> extends SetBase<T> {
