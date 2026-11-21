@@ -37,17 +37,52 @@ function locateDartErrors(root: Node, errors: SourceDiagnostic[]): SourceDiagnos
       message: `「${CLOSERS[token.type]}」が足りません。`,
     }));
   }
-  const moved = new Map<number, number>();
-  for (const node of errorNodes(root)) {
-    const previous = tokens.findLast((token) => token.endIndex <= node.startIndex);
-    if (previous && previous.endPosition.row < node.startPosition.row && !STATEMENT_ENDS.has(previous.type)) {
-      moved.set(node.startPosition.row, previous.endPosition.row);
-    }
-  }
-  return errors.map((error) => {
-    const row = moved.get(error.row);
+  const nodes = errorNodes(root, errors.length);
+  return errors.map((error, index) => {
+    const row = semicolonRow(nodes[index], tokens);
     return row === undefined ? error : { row, message: '「;」が足りません。' };
   });
+}
+
+function semicolonRow(node: Node, tokens: readonly Node[]): number | undefined {
+  if (node.isMissing && node.type !== ';') return undefined;
+  const index = tokens.findLastIndex((token) => token.endIndex <= node.startIndex);
+  const previous = tokens[index];
+  if (!previous) return undefined;
+  if (previous.type === '}' && isRecoveredBodyLiteral(previous.parent)) {
+    return tokens[recoveredBodyEnd(tokens, index - 1)].endPosition.row;
+  }
+  if (node.isError && previous.endPosition.row < node.startPosition.row && !STATEMENT_ENDS.has(previous.type)) {
+    return previous.endPosition.row;
+  }
+  return undefined;
+}
+
+function recoveredBodyEnd(tokens: readonly Node[], end: number): number {
+  while (tokens[end].type === '}') {
+    const literal = tokens[end].parent;
+    const element = literal?.parent;
+    if (
+      literal?.type !== 'set_or_map_literal' ||
+      literal.namedChildCount === 0 ||
+      (element?.type !== 'if_element' && element?.type !== 'for_element')
+    )
+      break;
+    end--;
+  }
+  return end;
+}
+
+// The grammar can recover an embedded block missing its last semicolon as a set literal.
+function isRecoveredBodyLiteral(literal: Node | null): boolean {
+  if (literal?.type !== 'set_or_map_literal' || literal.namedChildCount === 0) return false;
+  for (let node: Node | null = literal.parent; node?.startIndex === literal.startIndex; node = node.parent) {
+    if (node.type !== 'expression_statement') continue;
+    const parent = node.parent;
+    const id = node.id;
+    return ['body', 'consequence', 'alternative'].some((field) => parent?.childForFieldName(field)?.id === id);
+  }
+  return false;
 }
 
 const CLOSERS: Record<string, string> = { '{': '}', '${': '}', '(': ')', '[': ']', '?[': ']' };
@@ -67,10 +102,11 @@ function leafTokens(root: Node): Node[] {
   return tokens;
 }
 
-function errorNodes(root: Node): Node[] {
+function errorNodes(root: Node, limit: number): Node[] {
   const found: Node[] = [];
   const visit = (node: Node): void => {
-    if (node.isError) {
+    if (found.length === limit) return;
+    if (node.isError || node.isMissing) {
       found.push(node);
       return;
     }

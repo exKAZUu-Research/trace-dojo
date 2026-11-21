@@ -8824,3 +8824,30 @@ void main() {
       '_Set<num>\n',
   });
 });
+
+test('Dart missing semicolon diagnostics use the statement row in recovered control-flow bodies', () => {
+  for (const body of [
+    'var l = [1, 2];\nfor (var value in l) {\n  print(value)\n}',
+    'var x = 0;\nfor (var i = 0; i < 2; i++) {\n  x++\n}',
+    'var x = 0;\nwhile (x < 3) {\n  x++\n}',
+    'var x = 0;\ndo {\n  x++\n} while (x < 3);',
+    'var x = 1;\nif (x > 0) {\n  x += 1\n} else {\n  x = 0;\n}',
+    'var x = 1;\nif (x > 0) { x = 2; } else {\n  x = 0\n}\nprint(x);',
+  ]) {
+    expect(executeProgram('dart', `void main() {\n${body}\n}`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 3, message: '「;」が足りません。' }],
+    });
+  }
+  for (const [program, rows] of [
+    ['void main() {\n  var x = 0;\n  x++\n}', [2]],
+    ['class C { void f() {\n  var x = 0;\n  if (x == 0) {\n    x++\n  }\n} }\nvoid main() {}', [3]],
+    ['void main() {\n  for (var i = 0; i < 1; i++) {\n    if (i == 0) {\n      print(i)\n    }\n  }\n}', [3]],
+    ['void main() {\n  if (true) {\n    print(0)\n  } else {\n    print(1)\n  }\n  print(2);\n}', [2, 4]],
+  ] as const) {
+    expect(executeProgram('dart', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: rows.map((row) => ({ row, message: '「;」が足りません。' })),
+    });
+  }
+});
