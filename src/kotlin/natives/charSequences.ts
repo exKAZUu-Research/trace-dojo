@@ -216,7 +216,7 @@ export function charSequence(frame: Frame, value: Value): Sequence {
     return {
       length: () => storage.length,
       at: (index) => {
-        checkStringIndex(frame, index, storage.length);
+        checkStringIndex(frame, index, storage.readableLength);
         return storage.codeAt(index);
       },
       subSequenceText: (from, to) => substring(frame, storage.text(), from, to),

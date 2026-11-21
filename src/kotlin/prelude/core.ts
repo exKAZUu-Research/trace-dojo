@@ -247,9 +247,7 @@ class UByte private constructor() : Comparable<UByte> {
 ${numberOperators('UByte')}
     external operator fun inc(): UByte
     external operator fun dec(): UByte
-    external fun toInt(): Int
-    external fun toLong(): Long
-    external fun toUInt(): UInt
+    ${unsignedValueConversions()}
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String
@@ -259,9 +257,7 @@ class UShort private constructor() : Comparable<UShort> {
 ${numberOperators('UShort')}
     external operator fun inc(): UShort
     external operator fun dec(): UShort
-    external fun toInt(): Int
-    external fun toLong(): Long
-    external fun toUInt(): UInt
+    ${unsignedValueConversions()}
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String
@@ -271,10 +267,7 @@ class UInt private constructor() : Comparable<UInt> {
 ${numberOperators('UInt')}
     external operator fun inc(): UInt
     external operator fun dec(): UInt
-    external fun toInt(): Int
-    external fun toLong(): Long
-    external fun toULong(): ULong
-    external fun toDouble(): Double
+    ${unsignedValueConversions()}
     external infix fun and(other: UInt): UInt
     external infix fun or(other: UInt): UInt
     external infix fun xor(other: UInt): UInt
@@ -293,10 +286,7 @@ class ULong private constructor() : Comparable<ULong> {
 ${numberOperators('ULong')}
     external operator fun inc(): ULong
     external operator fun dec(): ULong
-    external fun toInt(): Int
-    external fun toLong(): Long
-    external fun toUInt(): UInt
-    external fun toDouble(): Double
+    ${unsignedValueConversions()}
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String
@@ -349,6 +339,11 @@ open external class Throwable {
 function unsignedConversions(floating = false): string {
   const targets = floating ? ['UInt', 'ULong'] : ['UByte', 'UShort', 'UInt', 'ULong'];
   return targets.map((target) => `    external fun to${target}(): ${target}`).join('\n');
+}
+
+function unsignedValueConversions(): string {
+  const kinds = [...SIGNED_NUMBER_KINDS, ...UNSIGNED_NUMBER_KINDS];
+  return kinds.map((kind) => `external fun to${kind}(): ${kind}`).join('\n    ');
 }
 
 function numberOperators(kind: NumericKind): string {

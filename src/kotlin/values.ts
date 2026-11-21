@@ -43,7 +43,7 @@ export class Boxed {
 const boxCache = new Map<PrimitiveKind, Boxed[]>();
 
 export function box(kind: PrimitiveKind, value: number | bigint): Boxed {
-  const cachesSmall = kind !== 'Double' && kind !== 'Float' && kind !== 'UInt' && kind !== 'ULong';
+  const cachesSmall = kind !== 'Double' && kind !== 'Float' && !kind.startsWith('U');
   if (cachesSmall) {
     const small = Number(value);
     const low = kind === 'Char' ? 0 : -128;

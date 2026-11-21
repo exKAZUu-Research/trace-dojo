@@ -21,6 +21,10 @@ export class StringBuilderStorage {
     return (this.bytes[2 * index] ?? 0) | ((this.bytes[2 * index + 1] ?? 0) << 8);
   }
 
+  get readableLength(): number {
+    return Math.min(this.length, this.bytes.length >> Number(this.wide));
+  }
+
   position(): BuilderPosition {
     return { length: this.length, wide: this.wide };
   }

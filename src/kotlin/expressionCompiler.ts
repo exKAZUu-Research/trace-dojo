@@ -1,4 +1,5 @@
 // code-gauge-allow-file fileNcss 999 -- expression compilation shares name resolution, call dispatch, and type inference.
+import { CompileError } from '../interpreter/diagnostics';
 import type { Block, Expression, LambdaExpression } from './ast';
 import {
   type ArgumentSyntax,
@@ -28,10 +29,11 @@ import { keyOf } from './flowKeys';
 import { localRefinement, refineLocalType } from './flowWrites';
 import { formatPrimitive, stringOf } from './format';
 import { mostSpecificProperties } from './inheritedMembers';
+import { invokeFunctionValue, lambdaValue } from './lambdaValue';
 import { unavailableLibraryMember, unavailableQualifiedLibraryMember } from './libraryApi';
 import { literalFits } from './literals';
 import { floatRangeBounds } from './rangeBounds';
-import { type Frame, type FunctionInfo, KotlinThrow, LoopSignal, ReturnSignal } from './runtime';
+import { type Frame, KotlinThrow, LoopSignal, ReturnSignal } from './runtime';
 import {
   type ClassSymbol,
   type FunctionSymbol,
@@ -63,7 +65,7 @@ import {
   substitute,
   typeToString,
 } from './types';
-import { box, Boxed, KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
+import { box, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
 
 /** A place to store a value, with its receiver and indexes evaluated. */
 export interface BoundPlace {
@@ -1012,6 +1014,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionParameterCount 8 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity 18 -- callable values, receiver members, and constructors follow Kotlin resolution levels.
   private compileNamedCall(
     scope: Scope,
     context: FunctionContext,
@@ -1025,16 +1028,11 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const enumCall = this.reifiedEnumCall(scope, context, name, args, typeArgs, row);
     if (enumCall) return enumCall;
     const variable = this.findVariable(scope, name);
-    if (variable && resolved(variable.type).kind === 'function') {
-      return this.compileInvoke(
-        scope,
-        context,
-        this.readVariable(scope, context, variable, row),
-        args,
-        hasTrailingLambda,
-        row
-      );
-    }
+    const local =
+      variable && typeArgs.length === 0 && resolved(variable.type).kind === 'function'
+        ? this.tryLocalFunction(scope, context, variable, args, hasTrailingLambda, row)
+        : undefined;
+    if (local && !(local instanceof CompileError)) return local;
     const receiverLevels = this.receiverLevels(scope, context, name, row);
     if (!Array.isArray(receiverLevels))
       return this.compileInvoke(scope, context, receiverLevels, args, hasTrailingLambda, row);
@@ -1054,9 +1052,34 @@ export abstract class ExpressionCompiler extends CallCompiler {
       const constructors = this.constructorCandidates(cls, row);
       if (constructors.length > 0) levels.push({ candidates: constructors, receiver: undefined });
     }
-    if (levels.length === 0)
+    if (levels.length === 0) {
+      if (local) throw local;
       return this.compileUnresolvedCall(scope, context, name, args, hasTrailingLambda, variable !== undefined, row);
-    return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name);
+    }
+    return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name, local);
+  }
+
+  private tryLocalFunction(
+    scope: Scope,
+    context: FunctionContext,
+    variable: VariableSymbol,
+    args: ArgumentSyntax[],
+    hasTrailingLambda: boolean,
+    row: number
+  ): Compiled | CompileError {
+    const narrowed = refineLocalType(
+      localRefinement(scope, context, variable),
+      variable,
+      this.flow.narrowed.get(keyOf(variable))
+    );
+    const unavailable = this.probeApplicability(context, (probe) => {
+      const candidate: Compiled = { type: narrowed ?? variable.type, repr: 'ref', eval: returnUnit };
+      this.compileInvoke(scope, probe, candidate, args, hasTrailingLambda, row);
+    });
+    return (
+      unavailable ??
+      this.compileInvoke(scope, context, this.readVariable(scope, context, variable, row), args, hasTrailingLambda, row)
+    );
   }
 
   /** The reified enumValues<E>() and enumValueOf<E>(name), which are the enum's own values() and valueOf(name). */
@@ -1224,7 +1247,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   protected abstract reportUnknownFunction(name: string, row: number): never;
 
   /** Resolves a call whose candidates come with different receivers, the nearest level first. */
-  // code-gauge-allow functionParameterCount 9 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionParameterCount 10 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   protected resolveInLevels(
     scope: Scope,
     context: FunctionContext,
@@ -1234,7 +1257,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     typeArgs: KType[],
     expected: KType | undefined,
     row: number,
-    name: string
+    name: string,
+    fallbackError?: CompileError
   ): Compiled {
     // Each level resolves with its own receiver; the first level with an applicable candidate decides.
     const receiverOf = new Map<Candidate, Compiled | undefined>();
@@ -1259,7 +1283,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
       expected,
       (candidate) => receiverOf.get(candidate),
       row,
-      name
+      name,
+      fallbackError
     );
     return this.finishCall(resolvedCall, receiverOf.get(resolvedCall.candidate), row);
   }
@@ -1971,18 +1996,6 @@ const COLLECTION_FACTORIES = new Set(['arrayOf', 'listOf', 'mutableListOf', 'arr
 
 const PROBE_PARAM = new (class extends Object {})() as unknown as TypeParameterSymbol;
 
-/** Calls a function value with arguments held as references. */
-function invokeFunctionValue(frame: Frame, fn: KObject, args: Value[]): Value {
-  const { function: callable } = fn;
-  if (!callable) throw new Error('A function value without its function');
-  return callable.call(frame, args);
-}
-
-/** Function values receive their arguments boxed, while a parameter of a primitive type holds the bare value. */
-function unboxedIf(unboxed: boolean, value: Value): Value {
-  return unboxed && value instanceof Boxed ? value.value : value;
-}
-
 /** `s.isNullOrEmpty()` and `s.isNullOrBlank()` are false only for a receiver that is not null, as their contracts say. */
 function nullOrEmptyNarrowing(call: ResolvedCall, receiver: Compiled | undefined): Compiled['narrowing'] {
   const { symbol } = call;
@@ -2004,39 +2017,4 @@ type Qualifier = { kind: 'class'; cls: ClassSymbol } | PackageQualifier;
 interface CandidateLevel {
   candidates: Candidate[];
   receiver: Compiled | undefined;
-}
-
-/**
- * Makes a lambda's function value, which captures its environment and calls the lambda's body with the receiver and
- * the arguments, unboxing those that the lambda holds as primitives.
- */
-function lambdaValue(lambda: {
-  captureBuilder: (frame: Frame) => unknown[];
-  info: FunctionInfo;
-  arity: number;
-  hasReceiver: boolean;
-  receiverIsUnboxed: boolean;
-  paramReprs: Repr[];
-  nonNullParameters: boolean[];
-  resultEval: Eval;
-  functionClass: ClassSymbol;
-}): Eval {
-  const { captureBuilder, info, arity, hasReceiver, receiverIsUnboxed, paramReprs, resultEval, functionClass } = lambda;
-  return (frame) => {
-    const env = captureBuilder(frame);
-    const value = new KObject(functionClass, 0);
-    value.env = env;
-    value.function = {
-      arity,
-      call: (caller, args) => {
-        if (args.some((value, index) => value === undefined && lambda.nonNullParameters[index]))
-          caller.runtime.throwError(caller, 'java.lang.NullPointerException');
-        const receiver = hasReceiver ? unboxedIf(receiverIsUnboxed, args[0]) : undefined;
-        const values = hasReceiver ? args.slice(1) : args;
-        const converted = values.map((arg, index) => unboxedIf(paramReprs[index] !== 'ref', arg));
-        return frame.runtime.call(info, caller, env, receiver, converted, undefined, resultEval);
-      },
-    };
-    return value;
-  };
 }

@@ -1784,10 +1784,15 @@ fun main() {
 enum class Direction { LEFT, RIGHT }
 enum class NoEntries {}
 fun main() {
-    for (capacity in listOf(3, 16)) {
+    for (capacity in listOf(2, 3, 16)) {
         val builder = StringBuilder(capacity).append("abc")
         builder.insert(1, EncodedInput(builder))
         println(builder.toString().map { it.code })
+        for (index in 3..4) {
+            try { println(builder[index].code) } catch (e: Exception) { println(e) }
+        }
+        val sequence: CharSequence = builder
+        try { println(sequence[4].code) } catch (e: Exception) { println(e) }
     }
     val list = Direction.entries
     println(list === Direction.entries)
@@ -1800,7 +1805,7 @@ fun main() {
     println(Direction.valueOf("LEFT") === list[0])
 }`,
     stdout:
-      '[30817, 25209, 99, 0, 0]\n[30817, 25209, 99, 0, 0]\ntrue\ntrue\n[LEFT, RIGHT]\nfalse\n[LEFT, RIGHT]\ntrue\n',
+      '[30817, 25209, 99, 0, 0]\njava.lang.StringIndexOutOfBoundsException: Index 3 out of bounds for length 3\njava.lang.StringIndexOutOfBoundsException: Index 4 out of bounds for length 3\njava.lang.StringIndexOutOfBoundsException: Index 4 out of bounds for length 3\n[30817, 25209, 99, 0, 0]\n0\njava.lang.StringIndexOutOfBoundsException: Index 4 out of bounds for length 4\njava.lang.StringIndexOutOfBoundsException: Index 4 out of bounds for length 4\n[30817, 25209, 99, 0, 0]\n0\n0\n0\ntrue\ntrue\n[LEFT, RIGHT]\nfalse\n[LEFT, RIGHT]\ntrue\n',
   },
   {
     name: 'reversed searches and removals respect the iterator and singleton mutability',
@@ -1827,6 +1832,49 @@ fun main() {
     try { singleton.remove("only") } catch (e: UnsupportedOperationException) { println("immutable") }
 }`,
     stdout: 'concurrent\n3\nconcurrent\n3\nconcurrent\n3\nconcurrent\n3\nfalse\nfalse\nimmutable\n',
+  },
+  {
+    name: 'local function calls fall through by applicability and unsigned values use JVM boxing',
+    source: `fun add(x: Int): Int = 100 + x
+fun display(x: Int): String = "number $x"
+class Calls {
+    fun go(x: Int): Int = x + 1
+    fun run(): Int {
+        val go: (Int, Int) -> Int = { a, b -> a * b }
+        return go(4)
+    }
+}
+fun main() {
+    val add: (Int, Int) -> Int = { a, b -> a * b }
+    println(add(2, 3))
+    println(add(2))
+    println(mutableListOf(1).apply { add(2) })
+    println(Calls().run())
+    val display: (String) -> String = { "text $it" }
+    println(display(2))
+    println(display("x"))
+    println(display(x = 3))
+    val byte: UByte = 255u
+    val short: UShort = 65_535u
+    val long = 18_446_744_073_709_551_615uL
+    val a: Any = byte
+    val b: Any = byte
+    val c: Any = 1u.toUShort()
+    val d: Any = 1u.toUShort()
+    println(a === b)
+    println(c === d)
+    println(byte.hashCode())
+    println(short.hashCode())
+    println(long.toUByte())
+    println(long.toUShort())
+    println(long.toUInt())
+    println(byte.toULong())
+    println(0x1_FFFFu.toUShort())
+    println(byte.toByte())
+    println(short.toShort())
+}`,
+    stdout:
+      '6\n102\n[1, 2]\n5\nnumber 2\ntext x\nnumber 3\nfalse\nfalse\n-1\n-1\n255\n65535\n4294967295\n255\n65535\n-1\n-1\n',
   },
   {
     name: 'exactly-once scope lambdas initialize deferred vals',

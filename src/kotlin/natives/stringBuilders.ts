@@ -48,7 +48,7 @@ function defineReaders(): void {
   defineNative(`${BUILDER}.get(Int)`, (frame, receiver, [index]) => {
     const storage = builder(receiver);
     const position = index as number;
-    checkStringIndex(frame, position, storage.length);
+    checkStringIndex(frame, position, storage.readableLength);
     return storage.codeAt(position);
   });
   defineNative(`${BUILDER}.subSequence(Int, Int)`, builderSubstring);

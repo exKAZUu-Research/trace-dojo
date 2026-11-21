@@ -1,5 +1,4 @@
 // code-gauge-allow-file fileNcss 991 -- One method per kind of Kotlin statement and control structure.
-import { CompileError } from '../interpreter/diagnostics';
 import type {
   AssignmentStatement,
   Block,
@@ -14,22 +13,20 @@ import type {
 } from './ast';
 import { isNullLiteral } from './ast';
 import type { ArgumentSyntax } from './callCompiler';
-import {
+import { type FunctionContext,
   type Compiled,
   convertRepr,
   type Eval,
   excludingCases,
   type ExpressionUse,
   Flow,
-  FunctionContext,
   Handoff,
   isBareCall,
   type LoopContext,
   type Repr,
   reprOf,
   Scope,
-  typeMismatchMessage,
-} from './compilerBase';
+  typeMismatchMessage } from './compilerBase';
 import { getPropertyValue, setPropertyValue } from './dispatch';
 import { type BoundPlace, type Place } from './expressionCompiler';
 import { caseOf, keyOf } from './flowKeys';
@@ -423,27 +420,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   private isApplicableAssignment(context: FunctionContext, compile: (probe: FunctionContext) => Exec): boolean {
-    const saved = this.flow;
-    this.flow = saved.copy();
-    const probe = new FunctionContext(
-      context,
-      true,
-      '<assignment probe>',
-      context.info.isLibrary,
-      context.isLambda ? context.returnTarget : context,
-      true
-    );
-    probe.inlineLambda = true;
-    probe.loops = context.loops.map((loop) => ({ ...loop, breaks: [], continues: [], valWrites: new Map() }));
-    try {
-      compile(probe);
-      return true;
-    } catch (error) {
-      if (!(error instanceof CompileError)) throw error;
-      return false;
-    } finally {
-      this.flow = saved;
-    }
+    return this.probeApplicability(context, compile, true) === undefined;
   }
 
   private compileStoredCompoundAssignment(

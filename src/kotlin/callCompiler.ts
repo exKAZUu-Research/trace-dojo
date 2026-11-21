@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 631 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 648 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   type ArgumentEvaluation,
@@ -181,7 +181,7 @@ export abstract class CallCompiler extends CompilerCore {
    * Resolves a call among candidate levels, the nearest first: the first level with an applicable candidate decides,
    * as Kotlin's resolution goes from inner scopes to outer ones.
    */
-  // code-gauge-allow functionParameterCount 10 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionParameterCount 11 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   protected resolveCall(
     scope: Scope,
     context: FunctionContext,
@@ -192,7 +192,8 @@ export abstract class CallCompiler extends CompilerCore {
     expected: KType | undefined,
     receiver: Compiled | ((candidate: Candidate) => Compiled | undefined) | undefined,
     row: number,
-    name: string
+    name: string,
+    fallbackError?: CompileError
   ): ResolvedCall {
     const receiverOf = (candidate: Candidate): Compiled | undefined =>
       typeof receiver === 'function' ? receiver(candidate) : receiver;
@@ -210,7 +211,8 @@ export abstract class CallCompiler extends CompilerCore {
     if (!loneAttempt) this.constrainInitialHints(attempts, receiverOf, expected, row);
     const compiledArgs = this.compileArguments(scope, context, args, attempts, !lone);
     const chosen = this.chooseAttempt(scope, context, levels, call, compiledArgs, loneAttempt, receiverOf);
-    if (!chosen)
+    if (!chosen) {
+      if (fallbackError) throw fallbackError;
       return this.reportInapplicable(
         all,
         args,
@@ -221,6 +223,7 @@ export abstract class CallCompiler extends CompilerCore {
         row,
         name
       );
+    }
     this.checkAccessible(scope, chosen.candidate.symbol, row, chosen.candidate.receiverType);
     if (!this.file.isLibrary && chosen.candidate.symbol.isDeprecatedError)
       this.error(row, `${chosen.candidate.symbol.name} は Kotlin で非推奨になり、使用できません。`);
@@ -1043,6 +1046,28 @@ export abstract class CallCompiler extends CompilerCore {
       }
     }
     return this.error(row, `${name} に、この引数で呼び出せるものがありません。`);
+  }
+
+  protected probeApplicability(
+    context: FunctionContext,
+    check: (probe: FunctionContext) => void,
+    inline = false
+  ): CompileError | undefined {
+    const savedFlow = this.flow;
+    const returnTarget = context.isLambda ? context.returnTarget : context;
+    const probe = new FunctionContext(context, true, '<probe>', context.info.isLibrary, returnTarget, true);
+    probe.inlineLambda = inline;
+    probe.loops = context.loops.map((loop) => ({ ...loop, breaks: [], continues: [], valWrites: new Map() }));
+    this.flow = savedFlow.copy();
+    try {
+      check(probe);
+      return undefined;
+    } catch (error) {
+      if (error instanceof CompileError) return error;
+      throw error;
+    } finally {
+      this.flow = savedFlow;
+    }
   }
 
   /** A context for compiling a lambda only to learn its result type, whose code is thrown away. */

@@ -115,6 +115,12 @@ function boxedHash(value: Boxed): number {
       hashView.setFloat32(0, value.value as number);
       return hashView.getInt32(0);
     }
+    case 'UByte': {
+      return ((value.value as number) << 24) >> 24;
+    }
+    case 'UShort': {
+      return ((value.value as number) << 16) >> 16;
+    }
     default: {
       return toInt32(value.value as number);
     }
