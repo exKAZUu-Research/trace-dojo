@@ -1,3 +1,4 @@
+import { UNSIGNED_NUMBER_KINDS } from '../operators';
 import { kotlin } from './source';
 
 /** `java.util.Locale`, which the prelude declares only for the overloads of `format` that take one. */
@@ -372,6 +373,10 @@ external fun String.toLong(): Long
 external fun String.toLong(radix: Int): Long
 external fun String.toLongOrNull(): Long?
 external fun String.toLongOrNull(radix: Int): Long?
+${UNSIGNED_NUMBER_KINDS.flatMap((kind) => [
+  `external fun String.to${kind}(radix: Int = 10): ${kind}`,
+  `external fun String.to${kind}OrNull(radix: Int = 10): ${kind}?`,
+]).join('\n')}
 external fun String.toShort(): Short
 external fun String.toShort(radix: Int): Short
 external fun String.toShortOrNull(): Short?

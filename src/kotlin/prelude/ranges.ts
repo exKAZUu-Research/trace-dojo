@@ -1,4 +1,5 @@
 import { kotlin, mixedIntegralOverloads } from './source';
+import { unsignedRanges } from './unsignedRanges';
 
 /** `kotlin.ranges`: ranges and progressions, written as the standard library writes them. */
 export const RANGES_SOURCE = kotlin`
@@ -44,6 +45,7 @@ operator fun <T : Comparable<T>> T.rangeUntil(that: T): OpenEndRange<T> = Compar
 ${floatingRanges()}
 ${mixedIntegralProgressions()}
 ${mixedRangeMembership()}
+${unsignedRanges()}
 
 fun <T : Comparable<T>> T.coerceIn(range: ClosedFloatingPointRange<T>): T {
     if (range.isEmpty()) throw IllegalArgumentException("Cannot coerce value to an empty range: $range.")

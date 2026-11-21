@@ -3,7 +3,7 @@ import { parseHexFloat } from '../../java/hexFloat';
 import { callFunction, runtimeClassOf } from '../dispatch';
 import { float32FromText } from '../float32';
 import { charToString, hashOf, stringOf } from '../format';
-import { toInt32 } from '../operators';
+import { toInt32, UNSIGNED_NUMBER_KINDS } from '../operators';
 import type { Frame } from '../runtime';
 import { Boxed, KObject, UNIT, type Value } from '../values';
 import {
@@ -87,13 +87,19 @@ function trimWith(value: string, start: boolean, end: boolean): string {
 }
 
 /** `String.toInt()`, whose errors are `NumberFormatException`s worded as Java's `Integer.parseInt` words them. */
-function parseInteger(frame: Frame, value: string, radix: number, bits: 8 | 16 | 32 | 64): bigint | undefined {
+function parseInteger(
+  frame: Frame,
+  value: string,
+  radix: number,
+  bits: 8 | 16 | 32 | 64,
+  unsigned = false
+): bigint | undefined {
   checkRadix(frame, radix);
   const negative = value.startsWith('-');
   const first = negative || value.startsWith('+') ? 1 : 0;
-  if (first === value.length) return undefined;
+  if (first === value.length || (unsigned && negative)) return undefined;
   const base = BigInt(radix);
-  const limit = (1n << BigInt(bits - 1)) - (negative ? 0n : 1n);
+  const limit = (1n << BigInt(unsigned ? bits : bits - 1)) - (negative ? 0n : 1n);
   const beforeLast = limit / base;
   const lastDigit = Number(limit % base);
   let parsed = 0n;
@@ -490,6 +496,25 @@ function defineStrings(): void {
     CHAR_NATIVES,
   ]) {
     for (const [signature, native] of Object.entries(natives)) defineNative(`${TEXT}.${signature}`, native);
+  }
+  defineUnsignedParsers();
+}
+
+function defineUnsignedParsers(): void {
+  const widths = { UByte: 8, UShort: 16, UInt: 32, ULong: 64 } as const;
+  for (const kind of UNSIGNED_NUMBER_KINDS) {
+    const convert = kind === 'ULong' ? (value: bigint) => value : Number;
+    const parse = (frame: Frame, value: Value, radix: Value): bigint | undefined =>
+      parseInteger(frame, text(value), radix as number, widths[kind], true);
+    defineNative(`${TEXT}.String.to${kind}(Int)`, (frame, receiver, [radix]) => {
+      const value = parse(frame, receiver, radix);
+      if (value !== undefined) return convert(value);
+      return throwError(frame, 'java.lang.NumberFormatException', `Invalid number format: '${text(receiver)}'`);
+    });
+    defineNative(`${TEXT}.String.to${kind}OrNull(Int)`, (frame, receiver, [radix]) => {
+      const value = parse(frame, receiver, radix);
+      return value === undefined ? undefined : new Boxed(kind, convert(value));
+    });
   }
 }
 

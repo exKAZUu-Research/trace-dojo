@@ -1,4 +1,10 @@
-import { forwardingSelectorExtrema, kotlin, NUMERIC_AGGREGATE_TYPES, numericAggregates } from './source';
+import {
+  forwardingSelectorExtrema,
+  kotlin,
+  NUMERIC_AGGREGATE_TYPES,
+  numericAggregates,
+  UNSIGNED_NUMERIC_AGGREGATE_TYPES,
+} from './source';
 
 /** The extension functions of `kotlin.collections`, transcribed from Kotlin's standard library. */
 export const COLLECTION_FUNCTIONS_SOURCE = kotlin`
@@ -378,7 +384,7 @@ fun <@OnlyInputTypes T> Iterable<T>.indexOf(element: T): Int {
     return -1
 }
 
-${NUMERIC_AGGREGATE_TYPES.flatMap((kind) => numericAggregates(`Iterable<${kind.element}>`, kind, true)).join('\n')}
+${[...NUMERIC_AGGREGATE_TYPES, ...UNSIGNED_NUMERIC_AGGREGATE_TYPES].flatMap((kind) => numericAggregates(`Iterable<${kind.element}>`, kind, true)).join('\n')}
 
 @OverloadResolutionByLambdaReturnType inline fun <T> Iterable<T>.sumOf(selector: (T) -> Int): Int {
     var sum = 0

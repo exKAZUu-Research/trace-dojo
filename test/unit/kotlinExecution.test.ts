@@ -1741,6 +1741,36 @@ fun main() {
       'concurrent\n[3, 1, 2, 3]\nconcurrent\n[1, 2, 3, 3]\ncontains 3\ncontains 2\ncontains 1\n[1, 3]\ncontains 2\ncontains 3\ncontains 1\n[2]\n[first, longer]\n1122\nfalse\nfalse\nimmutable\ntrue\ntrue\nfalse\n4\nfalse\nfalse\n',
   },
   {
+    name: 'unsigned progressions, sums, bit operations and numeric parsing',
+    source: `fun main() {
+    for (i in 1u..3u) print(i)
+    println()
+    println((0u until 4u).toList())
+    println((5u downTo 1u step 2).toList())
+    println((1u..4u).first)
+    println((1uL..3uL).sum())
+    println(listOf(3u, 1u).sum())
+    println(arrayOf(3uL, 1uL).sum())
+    println((UInt.MAX_VALUE - 2u..UInt.MAX_VALUE).toList())
+    println((ULong.MAX_VALUE downTo ULong.MAX_VALUE - 4uL step 2).toList())
+    println((0u..<0u).firstOrNull())
+    println((1uL..4uL).reversed().last())
+    println(2uL in (1u..3u))
+    println(ULong.MAX_VALUE in (1u..3u))
+    println(5uL shl 2)
+    println(5uL and 3uL)
+    println(5u.inv())
+    println(5u.floorDiv(2u))
+    println("12".toULong())
+    println("ff".toUByte(16))
+    println("g".toUIntOrNull(16))
+    println("18446744073709551616".toULongOrNull())
+    try { println("-1".toULong()) } catch (e: Exception) { println(e) }
+}`,
+    stdout:
+      "123\n[0, 1, 2, 3]\n[5, 3, 1]\n1\n6\n4\n4\n[4294967293, 4294967294, 4294967295]\n[18446744073709551615, 18446744073709551613, 18446744073709551611]\nnull\n1\ntrue\nfalse\n20\n1\n4294967290\n2\n12\n255\nnull\nnull\njava.lang.NumberFormatException: Invalid number format: '-1'\n",
+  },
+  {
     name: 'unsigned arithmetic and narrow radix parsing follow Kotlin numeric rules',
     source: `fun main() {
     println("7f".toByte(16))

@@ -1,4 +1,9 @@
-import { forwardingSelectorExtrema, NUMERIC_AGGREGATE_TYPES, numericAggregates } from './source';
+import {
+  forwardingSelectorExtrema,
+  NUMERIC_AGGREGATE_TYPES,
+  numericAggregates,
+  UNSIGNED_NUMERIC_AGGREGATE_TYPES,
+} from './source';
 
 /**
  * The functions of arrays, generated for `Array<T>` and each primitive array as Kotlin's standard library generates
@@ -283,7 +288,7 @@ fun <T> Array<out T>.sort(fromIndex: Int = 0, toIndex: Int = size) =
 fun <T> Array<out T>.sortWith(comparator: Comparator<in T>) = sortWith<T>(comparator, 0, size)
 external fun <T> Array<out T>.sortWith(comparator: Comparator<in T>, fromIndex: Int = 0, toIndex: Int = size)
 inline fun <T, R : Comparable<R>> Array<out T>.sortBy(crossinline selector: (T) -> R?) = sortWith(compareBy(selector))
-${NUMERIC_AGGREGATE_TYPES.flatMap((kind) => numericAggregates(`Array<out ${kind.element}>`, kind, true)).join('\n')}
+${[...NUMERIC_AGGREGATE_TYPES, ...UNSIGNED_NUMERIC_AGGREGATE_TYPES].flatMap((kind) => numericAggregates(`Array<out ${kind.element}>`, kind, true)).join('\n')}
 fun <T : Comparable<T>> Array<out T>.sortDescending() = sortDescending(0, size)
 fun <T : Comparable<T>> Array<out T>.sortDescending(fromIndex: Int, toIndex: Int) =
     sortWith<T>(reverseOrder<T>(), fromIndex, toIndex)

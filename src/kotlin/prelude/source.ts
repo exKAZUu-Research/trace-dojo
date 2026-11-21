@@ -46,6 +46,13 @@ export const NUMERIC_AGGREGATE_TYPES = [
   { element: 'Byte', sum: 'Int', zero: '0' },
 ] as const;
 
+export const UNSIGNED_NUMERIC_AGGREGATE_TYPES = [
+  { element: 'UInt', sum: 'UInt', zero: '0u' },
+  { element: 'ULong', sum: 'ULong', zero: '0uL' },
+  { element: 'UByte', sum: 'UInt', zero: '0u' },
+  { element: 'UShort', sum: 'UInt', zero: '0u' },
+] as const;
+
 export function numericAggregates(
   receiver: string,
   kind: { element: string; sum: string; zero: string },

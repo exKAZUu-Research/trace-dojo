@@ -245,6 +245,7 @@ ${unsignedConversions(true)}
 
 class UByte private constructor() : Comparable<UByte> {
 ${numberOperators('UByte')}
+${unsignedDivision('UByte')}
     external operator fun inc(): UByte
     external operator fun dec(): UByte
     ${unsignedValueConversions()}
@@ -255,6 +256,7 @@ ${numberOperators('UByte')}
 
 class UShort private constructor() : Comparable<UShort> {
 ${numberOperators('UShort')}
+${unsignedDivision('UShort')}
     external operator fun inc(): UShort
     external operator fun dec(): UShort
     ${unsignedValueConversions()}
@@ -265,14 +267,11 @@ ${numberOperators('UShort')}
 
 class UInt private constructor() : Comparable<UInt> {
 ${numberOperators('UInt')}
+${unsignedDivision('UInt')}
     external operator fun inc(): UInt
     external operator fun dec(): UInt
     ${unsignedValueConversions()}
-    external infix fun and(other: UInt): UInt
-    external infix fun or(other: UInt): UInt
-    external infix fun xor(other: UInt): UInt
-    external infix fun shl(bitCount: Int): UInt
-    external infix fun shr(bitCount: Int): UInt
+    ${unsignedWideBits('UInt')}
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String
@@ -284,9 +283,11 @@ ${numberOperators('UInt')}
 
 class ULong private constructor() : Comparable<ULong> {
 ${numberOperators('ULong')}
+${unsignedDivision('ULong')}
     external operator fun inc(): ULong
     external operator fun dec(): ULong
     ${unsignedValueConversions()}
+    ${unsignedWideBits('ULong')}
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String
@@ -346,6 +347,14 @@ function unsignedValueConversions(): string {
   return kinds.map((kind) => `external fun to${kind}(): ${kind}`).join('\n    ');
 }
 
+function unsignedWideBits(kind: 'UInt' | 'ULong'): string {
+  return [
+    ...['and', 'or', 'xor'].map((name) => `external infix fun ${name}(other: ${kind}): ${kind}`),
+    ...['shl', 'shr'].map((name) => `external infix fun ${name}(bitCount: Int): ${kind}`),
+    `external fun inv(): ${kind}`,
+  ].join('\n    ');
+}
+
 function numberOperators(kind: NumericKind): string {
   const operands: readonly NumericKind[] = kind.startsWith('U') ? UNSIGNED_NUMBER_KINDS : SIGNED_NUMBER_KINDS;
   return operands
@@ -357,4 +366,15 @@ function numberOperators(kind: NumericKind): string {
       `    external ${other === kind ? 'override' : 'operator'} fun compareTo(other: ${other}): Int`,
     ])
     .join('\n');
+}
+
+function unsignedDivision(kind: (typeof UNSIGNED_NUMBER_KINDS)[number]): string {
+  return UNSIGNED_NUMBER_KINDS.flatMap((other) => {
+    const result = arithmeticResult(kind, other, '/');
+    const remainder = result === other ? 'rem(other)' : `rem(other).to${other}()`;
+    return [
+      `    inline fun floorDiv(other: ${other}): ${result} = div(other)`,
+      `    inline fun mod(other: ${other}): ${other} = ${remainder}`,
+    ];
+  }).join('\n');
 }
