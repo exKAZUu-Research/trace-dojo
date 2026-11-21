@@ -618,18 +618,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       name = prefix;
       prefix = undefined;
     }
-    const declaration = prefix === undefined ? this.library.lookup(name) : this.library.lookupPrefixed(prefix, name);
-    const writtenTypes = typeSyntax.args.length > 0 ? typeSyntax.args : undefined;
-    const target =
-      declaration?.kind === 'alias'
-        ? this.aliasConstructor(declaration.alias, writtenTypes, expression, expression.isSelectorCall)
-        : declaration?.kind === 'class'
-          ? { cls: declaration.cls, types: this.classTypeArguments(declaration.cls, writtenTypes, expression) }
-          : undefined;
-    if (!target) {
-      this.checkUnavailableName(expression, name, prefix);
-      return this.error(expression, 'クラス ' + name + ' が見つかりません。');
-    }
+    const target = this.resolveConstructorType({ ...typeSyntax, name, prefix }, expression, expression.isSelectorCall);
     return this.compileConstructorCall(
       target.cls,
       constructorName,
@@ -640,6 +629,26 @@ export abstract class CallCompiler extends OperatorCompiler {
       context,
       expression.isConst
     );
+  }
+
+  private resolveConstructorType(
+    { name, prefix, args }: Extract<TypeSyntax, { kind: 'named' }>,
+    span: Span,
+    isSelector = false
+  ): { cls: ClassInfo; types: ConstructorTypes } {
+    this.checkTypeNameBinding(name, prefix, span);
+    if (prefix === undefined && this.findTypeParam(name, span))
+      return this.error(span, `型引数 ${name} にはコンストラクタがありません。`);
+    const declaration = prefix === undefined ? this.library.lookup(name) : this.library.lookupPrefixed(prefix, name);
+    const writtenTypes = args.length > 0 ? args : undefined;
+    if (declaration?.kind === 'alias') {
+      return this.aliasConstructor(declaration.alias, writtenTypes, span, isSelector);
+    }
+    if (declaration?.kind === 'class') {
+      return { cls: declaration.cls, types: this.classTypeArguments(declaration.cls, writtenTypes, span) };
+    }
+    this.checkUnavailableName(span, name, prefix);
+    return this.error(span, `クラス ${name} が見つかりません。`);
   }
 
   /**
@@ -1049,21 +1058,7 @@ export abstract class CallCompiler extends OperatorCompiler {
 
   compileConstructorTearoff(type: TypeSyntax, name: string | undefined, span: Span): Compiled {
     if (type.kind !== 'named') return this.error(span, 'クラスの名前を書いてください。');
-    const declaration = type.prefix
-      ? this.library.lookupPrefixed(type.prefix, type.name)
-      : this.library.lookup(type.name);
-    const writtenTypes = type.args.length > 0 ? type.args : undefined;
-    const target =
-      declaration?.kind === 'alias'
-        ? this.aliasConstructor(declaration.alias, writtenTypes, span)
-        : declaration?.kind === 'class'
-          ? { cls: declaration.cls, types: this.classTypeArguments(declaration.cls, writtenTypes, span) }
-          : undefined;
-    if (!target) {
-      this.checkUnavailableName(span, type.name, type.prefix);
-      return this.error(span, 'クラス ' + type.name + ' が見つかりません。');
-    }
-    const { cls, types: typeArgs } = target;
+    const { cls, types: typeArgs } = this.resolveConstructorType(type, span);
     this.checkUnavailableStaticMember(cls, name ?? '', span);
     const constructor = cls.constructors.get(name === 'new' ? '' : (name ?? ''));
     if (!constructor)

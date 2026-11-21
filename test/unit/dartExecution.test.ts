@@ -950,6 +950,13 @@ test('local bindings shadow type names and library prefixes', () => {
     'void f(int List) { List<int> values = []; } void main() {}',
     'void f<T>() { var T = 1; T? value; } void main() {}',
     "import 'dart:core' as c; void main() { var c = 1; c.List<int> values = []; }",
+    'class C { C(); } void main() { var C = 1; print(new C()); }',
+    'class C { const C(); } void main() { var C = 1; print(const C()); }',
+    'class C<T> { C(); } void main() { var C = 1; print(C<int>.new); }',
+    'class C<T> { C(); } void f<C>() { print(new C()); } void main() {}',
+    'class C { C(); } class D { int C = 1; void f() { new C(); } } void main() {}',
+    "import 'dart:math' as m; void main() { var m = 1; print(new m.Random(1).nextInt(10)); }",
+    "import 'dart:math' as m; void main() { var m = 1; print(m.Random.new); }",
   ]) {
     expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
   }
@@ -965,6 +972,16 @@ void main() {
   print(numbers);
 }`;
   expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: 'nested\nBox\n[1, 2]\n' });
+  const constructors = `import 'dart:math' as m;
+class Box<T> { const Box(); const Box.named(); }
+typedef Value = Box<int>;
+void main() {
+  print([new Value(), const Box<String>.named(), Box<bool>.new(), new m.Random(1).nextInt(10)].map((x) => x.runtimeType).toList());
+}`;
+  expect(executeProgram('dart', constructors)).toMatchObject({
+    kind: 'executed',
+    stdout: '[Box<int>, Box<String>, Box<bool>, int]\n',
+  });
 });
 
 test('dynamic collection contexts constrain generic constructor inference', () => {

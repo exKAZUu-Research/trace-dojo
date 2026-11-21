@@ -393,7 +393,7 @@ export abstract class CompilerBase {
   // code-gauge-allow functionNcss 33 -- One case per form of the construct, which reads best together.
   private resolveNamedType(syntax: Extract<TypeSyntax, { kind: 'named' }>, options: TypeResolutionOptions): DartType {
     const { name, prefix } = syntax;
-    this.checkTypeNameBinding(prefix ?? name, syntax);
+    this.checkTypeNameBinding(name, prefix, syntax);
     if (prefix === undefined) {
       const param = this.findTypeParam(name, syntax);
       if (param) {
@@ -417,13 +417,13 @@ export abstract class CompilerBase {
     return this.error(syntax, `型 ${name} が見つかりません。`);
   }
 
-  private checkTypeNameBinding(name: string, syntax: Extract<TypeSyntax, { kind: 'named' }>): void {
-    const scope = this.typeScopeFor(name);
+  protected checkTypeNameBinding(name: string, prefix: string | undefined, span: Span): void {
+    const head = prefix ?? name;
+    const scope = this.typeScopeFor(head);
     const stopBefore = scope?.enclosingFunction ?? this.typeLookupBoundary;
-    const binding = this.findLocal(name, syntax, stopBefore) ?? (!scope && this.hasMemberBinding(name));
-    if (syntax.prefix !== undefined && (binding || scope))
-      this.error(syntax, `${name} は import の接頭辞ではありません。`);
-    if (binding) this.error(syntax, `${name} は型ではありません。`);
+    const binding = this.findLocal(head, span, stopBefore) ?? (!scope && this.hasMemberBinding(head));
+    if (prefix !== undefined && (binding || scope)) this.error(span, `${head} は import の接頭辞ではありません。`);
+    if (binding) this.error(span, `${head} は型ではありません。`);
   }
 
   private hasMemberBinding(name: string): boolean {
