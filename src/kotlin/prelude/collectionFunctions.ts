@@ -943,8 +943,12 @@ fun <T> List<T>.slice(indices: IntRange): List<T> {
     return this.subList(indices.start, indices.endInclusive + 1).toList()
 }
 
-fun <T> List<T>.slice(indices: Iterable<Int>): List<T> {
-    val list = ArrayList<T>()
+fun <T> List<T>.slice(indices: Iterable<Int>): List<T> = sliceByIndex(indices) { get(it) }
+
+internal inline fun <T> sliceByIndex(indices: Iterable<Int>, get: (Int) -> T): List<T> {
+    val size = indices.collectionSizeOrDefault(10)
+    if (size == 0) return emptyList()
+    val list = ArrayList<T>(size)
     for (index in indices) list.add(get(index))
     return list
 }

@@ -160,6 +160,7 @@ function functionsOf(kind: ArrayKind): string {
     `inline fun ${g()}${r}.takeWhile(predicate: (${e}) -> Boolean): List<${e}> = asList().takeWhile(predicate)`,
     `inline fun ${g()}${r}.dropWhile(predicate: (${e}) -> Boolean): List<${e}> = asList().dropWhile(predicate)`,
     `fun ${g()}${r}.slice(indices: IntRange): List<${e}> = asList().slice(indices)`,
+    `fun ${g()}${r}.slice(indices: Iterable<Int>): List<${e}> = sliceByIndex(indices) { get(it) }`,
     `fun ${g()}${r}.withIndex(): Iterable<IndexedValue<${e}>> = asList().withIndex()`,
     `inline fun ${g('K')}${r}.groupBy(keySelector: (${e}) -> K): Map<K, List<${e}>> = asList().groupBy(keySelector)`,
     `inline fun ${g('K, V')}${r}.associate(transform: (${e}) -> Pair<K, V>): Map<K, V> = asList().associate(transform)`,
@@ -210,6 +211,7 @@ function functionsOf(kind: ArrayKind): string {
           `inline fun <V> ${r}.zip(other: ${r}, transform: (a: ${e}, b: ${e}) -> V): List<V> = asList().zip(other.asList(), transform)`,
         ]),
     `fun ${g()}${r}.reversedArray(): ${r.replace('out ', '')} = copyOf().also { it.reverse() }`,
+    `external fun ${g()}${r}.sliceArray(indices: Collection<Int>): ${r.replace('out ', '')}`,
     `fun ${g()}${r}.sliceArray(indices: IntRange): ${r.replace('out ', '')} = if (indices.isEmpty()) copyOfRange(0, 0) else copyOfRange(indices.first, indices.last + 1)`,
     ...[1, 2, 3, 4, 5].map((n) => `operator fun ${g()}${r}.component${n}(): ${e} = get(${n - 1})`),
   ];

@@ -2985,6 +2985,37 @@ fun main() { println(A(3).values) }`,
     stdout: 'set\nmap\nkeys\nentry\n[1, 2]\n{1=a, 2=b}\n',
   },
   {
+    name: 'slicing calls index collections in JVM order and preserves array kinds',
+    source: `class IndexSelection(private val data: List<Int>) : Collection<Int> by data {
+    override val size: Int get() { println("size"); return data.size }
+    override fun iterator(): Iterator<Int> { println("iterator"); return data.iterator() }
+}
+@OptIn(ExperimentalUnsignedTypes::class)
+fun main() {
+    val empty = IndexSelection(emptyList())
+    val list = listOf(1, 2, 3)
+    val sequence: CharSequence = "abc"
+    println(list.slice(empty) is MutableList<*>)
+    println(sequence.slice(empty) is String)
+    println(arrayOf("a", "b").slice(empty) is MutableList<*>)
+    println(intArrayOf(10, 20).sliceArray(empty).contentToString())
+    val indices = IndexSelection(listOf(1, 0, 1))
+    println(list.slice(indices))
+    println(sequence.slice(indices))
+    println(arrayOf("a", "b").slice(indices))
+    println(arrayOf("a", null).sliceArray(indices).contentToString())
+    println(intArrayOf(10, 20).slice(indices))
+    println(uintArrayOf(10u, 20u).sliceArray(indices).contentToString())
+    try {
+        println(intArrayOf(1).slice(listOf(4)))
+    } catch (error: ArrayIndexOutOfBoundsException) {
+        println(error.message)
+    }
+}`,
+    stdout:
+      'size\nfalse\nsize\ntrue\nsize\nfalse\nsize\niterator\n[]\nsize\niterator\n[2, 1, 2]\nsize\niterator\nbab\nsize\niterator\n[b, a, b]\nsize\niterator\n[null, a, null]\nsize\niterator\n[20, 10, 20]\nsize\niterator\n[20, 10, 20]\nIndex 4 out of bounds for length 1\n',
+  },
+  {
     name: 'empty array slice ranges bypass endpoint bounds',
     source: `fun main() {
     println(intArrayOf(1, 2, 3).sliceArray(2..0).contentToString())

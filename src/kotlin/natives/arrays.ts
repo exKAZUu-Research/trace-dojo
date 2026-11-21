@@ -19,9 +19,9 @@ import { compareDoubles, compareNumbers, toInt32 } from '../operators';
 import { arrayFactoryName, UNSIGNED_ARRAYS } from '../prelude/arrays';
 import type { Frame } from '../runtime';
 import type { FunctionSymbol } from '../symbols';
-import { box, indexedSize, KObject, listView, NULL, type PrimitiveKind, UNIT, type Value } from '../values';
+import { box, type Boxed, indexedSize, KObject, listView, NULL, type PrimitiveKind, UNIT, type Value } from '../values';
 import { checkListView, elementsOf, joinRendered, newList, newPrimitiveArrayList, touch } from './collections';
-import { objectsEqual } from './collectionTraversal';
+import { collectionSize, forEachIterable, objectsEqual } from './collectionTraversal';
 import { arrayIterator, checkArrayIndex } from './core';
 import { defineNative, defineNativeProperty, libraryClass } from './registry';
 import { stableSort } from './timSort';
@@ -360,7 +360,7 @@ function defineArrayFunctions(): void {
   }
 }
 
-// code-gauge-allow functionNcss 36 -- Registers the array readers together in prelude declaration order.
+// code-gauge-allow functionNcss 39 -- Registers the array readers together in prelude declaration order.
 function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | undefined, zero: Value): void {
   const prefix = `kotlin.collections.${receiver}`;
   defineNative(`${prefix}.asList()`, (frame, array) => {
@@ -375,6 +375,9 @@ function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | 
     return arrayContentHash(frame, array, storage || kind);
   });
   defineNative(`${prefix}?.contentToString()`, (frame, array) => arrayContentString(frame, array, kind));
+  defineNative(`${prefix}.sliceArray(Collection<Int>)`, (frame, array, [indices]) =>
+    sliceArrayByIndex(frame, array, indices, zero)
+  );
   defineNative(`${prefix}.copyOf()`, cloneArray);
   defineNative(`${prefix}.copyOf(Int)`, (frame, array, [newSize]) => {
     const size = newSize as number;
@@ -392,6 +395,24 @@ function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | 
     const a = boxedItems(array, kind);
     const b = boxedItems(other, kind);
     return a.length === b.length && a.every((value, index) => objectsEqual(frame, value, b[index]));
+  });
+}
+
+function sliceArrayByIndex(frame: Frame, array: Value, indices: Value, zero: Value): Value {
+  const items = (array as KObject).items as Value[];
+  const size = collectionSize(frame, indices);
+  return copyArray(frame, array, size, () => {
+    const result = Array.from({ length: size }, () => zero);
+    let offset = 0;
+    frame.runtime.withNativeRoots([result], () => {
+      forEachIterable(frame, indices, (index) => {
+        const sourceIndex = (index as Boxed).value as number;
+        checkArrayIndex(frame, items, sourceIndex);
+        checkArrayIndex(frame, result, offset);
+        result[offset++] = items[sourceIndex];
+      });
+    });
+    return result;
   });
 }
 

@@ -173,7 +173,9 @@ fun <R> CharSequence.chunked(size: Int, transform: (CharSequence) -> R): List<R>
 fun CharSequence.slice(indices: IntRange): CharSequence =
     if (indices.isEmpty()) "" else subSequence(indices.first, indices.last + 1)
 fun CharSequence.slice(indices: Iterable<Int>): CharSequence {
-    val part = StringBuilder()
+    val size = indices.collectionSizeOrDefault(10)
+    if (size == 0) return ""
+    val part = StringBuilder(size)
     for (index in indices) part.append(this[index])
     return part
 }
