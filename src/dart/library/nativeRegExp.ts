@@ -195,11 +195,9 @@ define('RegExp.firstMatch', (runtime, receiver, [input]) => {
 });
 define('RegExp.allMatches', (runtime, receiver, [input, start = 0n]) => {
   const text = stringArg(runtime, input, 'input');
-  const at = intArg(runtime, start, 'start');
-  if (at < 0n || at > BigInt(text.length))
-    runtime.throwError('RangeError', 'range', [at, 0n, BigInt(text.length), 'start']);
+  const at = matchStart(runtime, start, text.length);
   const iterable = new DartObject(runtime.links.classNamed('_AllMatchesIterable'), [], []);
-  iterable.native = { pattern: receiver, text, start: index(at), values: () => [receiver] };
+  iterable.native = { pattern: receiver, text, start: at, values: () => [receiver] };
   return iterable;
 });
 
@@ -239,14 +237,19 @@ define('_RegExpMatchIterator.current', (runtime, receiver) => {
 });
 define('RegExp.matchAsPrefix', (runtime, receiver, [input, start = 0n]) => {
   const text = stringArg(runtime, input, 'string');
-  const at = intArg(runtime, start, 'start');
-  if (at < 0n || at > BigInt(text.length))
-    runtime.throwError('RangeError', 'range', [at, 0n, BigInt(text.length), 'start']);
-  const match = execAt(runtime, stateOf(receiver), text, index(at), true, true);
+  const at = matchStart(runtime, start, text.length);
+  const match = execAt(runtime, stateOf(receiver), text, at, true, true);
   if (!match) return;
   match.pattern = receiver;
   return newMatch(runtime, match);
 });
+
+function matchStart(runtime: Runtime, value: Value, length: number): number {
+  const start = intArg(runtime, value, 'start');
+  if (start < 0n || start > BigInt(length)) runtime.throwError('RangeError', 'range', [start, 0n, BigInt(length)]);
+  return index(start);
+}
+
 define(
   'RegExp.hasMatch',
   (runtime, receiver, [input]) =>

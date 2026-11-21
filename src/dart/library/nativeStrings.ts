@@ -433,7 +433,7 @@ define('String.allMatches', (runtime, receiver, [input, start = 0n]) => {
 define('String.matchAsPrefix', (runtime, receiver, [input, start = 0n]) => {
   const text = stringArg(runtime, input, 'string');
   const at = intArg(runtime, start, 'start');
-  if (at < 0n || at > BigInt(text.length)) rangeError(runtime, at, 0, text.length, 'start');
+  if (at < 0n || at > BigInt(text.length)) rangeError(runtime, at, 0, text.length, undefined);
   const pattern = self(receiver);
   if (!text.startsWith(pattern, index(at))) return;
   return runtime.links.construct(runtime, '_StringMatch', '', [at, text, pattern]);

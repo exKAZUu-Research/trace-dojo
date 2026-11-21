@@ -7168,6 +7168,24 @@ void main() {
   });
 });
 
+test('pattern start errors use the SDK argument labels', () => {
+  const program = `void main() {
+  for (final start in [-1, 5]) {
+    try { RegExp('a').allMatches('xyz', start); } catch (e) { print(e); }
+    try { RegExp('a').matchAsPrefix('xyz', start); } catch (e) { print(e); }
+    try { 'a'.matchAsPrefix('xyz', start); } catch (e) { print(e); }
+    try { 'a'.allMatches('xyz', start); } catch (e) { print(e); }
+  }
+  print(RegExp('').matchAsPrefix('xyz', 3)?.start);
+  print(''.matchAsPrefix('xyz', 3)?.start);
+}`;
+  const expected = [-1, 5].map((start) => {
+    const message = `Invalid value: Not in inclusive range 0..3: ${start}\n`;
+    return `RangeError: ${message}`.repeat(3) + `RangeError (start): ${message}`;
+  });
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: expected.join('') + '3\n3\n' });
+});
+
 test('regex group names use a fresh ordered set or the canonical empty list', () => {
   const source = `void main() {
   final match = RegExp(r'(?<first>a)(?<second>b)').firstMatch('ab')!;
