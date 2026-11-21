@@ -230,8 +230,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       else if (!symbol.type && decl.getter?.body) {
         symbol.type = this.compileAccessorType(entry);
       }
-      if (decl.getter?.body) this.compileGetter(entry);
-      if (decl.setter?.body) this.compileSetter(entry);
+      if (decl.getter?.body) this.withSavedState(entry.file, () => this.compileGetter(entry));
+      if (decl.setter?.body) this.withSavedState(entry.file, () => this.compileSetter(entry));
       this.validatePropertyStorage(entry);
       entry.state = 'done';
     });

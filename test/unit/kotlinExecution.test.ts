@@ -5447,6 +5447,17 @@ fun main() {
     'fun main() { while (true) { listOf(3, 1).sortedBy { if (it == 3) break; it } } }',
   ],
   [
+    'a setter reading an uninitialized local after a block-bodied getter',
+    false,
+    `var property: Int = 1
+    get() { return field }
+    set(value) {
+        val missing: Int
+        field = missing
+    }
+fun main() { println("started"); property = 2 }`,
+  ],
+  [
     'a function default reading its own unassigned parameter',
     false,
     'fun invalid(x: Int = x + 1) = x\nfun main() { println(invalid()) }',
