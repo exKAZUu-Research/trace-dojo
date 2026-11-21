@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 608 -- The operations of Dart's types belong together; each is a short case analysis.
+// code-gauge-allow-file fileNcss 616 -- The operations of Dart's types belong together; each is a short case analysis.
 import type { ClassInfo } from './classes';
 
 /** A type parameter of a class, a function type, or a generic function. */
@@ -675,6 +675,15 @@ export function closeTypeVariables(type: DartType, params: ReadonlySet<TypeParam
   return replaceTypeVariables(type, (variable, covariant) =>
     params.has(variable.param) ? (covariant ? NEVER : objectType(true)) : variable
   );
+}
+
+export function objectPatternBound(param: TypeParam, parameters: ReadonlySet<TypeParam>): DartType {
+  if (param.bound === undefined) return DYNAMIC;
+  const bound = resolveBound(typeParamType(param));
+  return replaceTypeVariables(bound, (variable, covariant) => {
+    if (!parameters.has(variable.param)) return variable;
+    return covariant ? objectType(true) : NEVER;
+  });
 }
 
 export function overapproximateType(type: DartType): DartType {

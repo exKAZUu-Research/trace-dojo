@@ -6453,6 +6453,44 @@ test('StringBuffer meters appends and preserves snapshots across writes and clea
   });
 });
 
+test('SDK class defaults dispatch through overrides on learner subclasses', () => {
+  const source = `class Shift extends Duration {
+  final int shift;
+  const Shift(this.shift) : super();
+  int get inMicroseconds => shift;
+}
+class Calls extends Invocation {
+  Symbol get memberName => #call;
+  List<dynamic> get positionalArguments => [];
+  Map<Symbol, dynamic> get namedArguments => {};
+  bool get isMethod => false;
+  bool get isGetter => true;
+  bool get isSetter => false;
+}
+class UpperBuffer extends StringBuffer {
+  UpperBuffer() : super('hi');
+  int get length => 0;
+  void write(Object? x) => super.write(x.toString().toUpperCase());
+}
+void main() {
+  const shifted = Shift(5000000);
+  const five = Duration(seconds: 5);
+  print([shifted.inSeconds, (shifted + const Duration(seconds: 1)).inSeconds, (five + shifted).inSeconds]);
+  print([shifted == five, shifted.hashCode == five.hashCode, shifted.compareTo(five), identical(shifted, shifted.abs())]);
+  print([const Shift(-5000000).abs().inSeconds, const Shift(-5000000).isNegative]);
+  final invocation = Calls();
+  print([invocation.isAccessor, identical(invocation.typeArguments, const <Type>[])]);
+  final buffer = UpperBuffer();
+  print([buffer.isEmpty, buffer.isNotEmpty, buffer.toString()]);
+  buffer.writeln('ok');
+  print(buffer.toString().codeUnits);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[5, 6, 10]\n[true, true, 0, true]\n[5, true]\n[true, true]\n[true, false, HI]\n[72, 73, 79, 75, 10]\n',
+  });
+});
+
 test('raw object patterns use a matched instance or instantiate to bounds', () => {
   const source = `class Box<T extends num> { final T value; Box(this.value); }
 class TextBox<T extends String> { final T value; TextBox(this.value); }
@@ -6467,6 +6505,34 @@ void main() {
   expect(executeProgram('dart', source)).toMatchObject({
     kind: 'executed',
     stdout: 'List<num>\nList<int>\nList<String>\n',
+  });
+});
+
+test('object patterns infer through raw aliases and close dependent bounds independently', () => {
+  const source = `class Box<T extends Iterable<U>, U extends num> {
+  final T value;
+  final U other;
+  Box(this.value, this.other);
+}
+class NumberBox<T extends num> {
+  final T value;
+  NumberBox(this.value);
+}
+typedef Alias<T extends num> = NumberBox<T>;
+class Child extends NumberBox<int> { Child() : super(1); }
+void main() {
+  Object subject = Box<List<int>, int>([1], 1);
+  if (subject case Box(value: var v, other: var o)) print([[v].runtimeType, [o].runtimeType]);
+  Box raw = Box<List<int>, int>([1], 1);
+  print([raw.value].runtimeType);
+  NumberBox<int>? narrowed = Child();
+  if (narrowed case Alias(value: var v)) print([v].runtimeType);
+  NumberBox<double> fraction = NumberBox(1.0);
+  print(switch (fraction) { Alias(value: var v) => [v].runtimeType });
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[List<Iterable<Object?>>, List<num>]\nList<Iterable<num>>\nList<int>\nList<double>\n',
   });
 });
 
@@ -6553,6 +6619,10 @@ void main() { print([First() is Object, Other() is Object]); }`;
   expect(executeProgram('dart', `class Base {} ${source.replace('Root = Object', 'Root = Base')}`)).toMatchObject({
     kind: 'compileError',
   });
+  for (const inheritance of ['with Parts', 'extends Object with Parts', 'extends Root with Parts']) {
+    const invalid = `mixin Parts {} typedef Root = Object; mixin class Mixed ${inheritance} {} void main() {}`;
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
 });
 
 test('empty iterables preserve SDK wrapper identities and index errors', () => {

@@ -10,6 +10,7 @@ import {
   lowerBound,
   mentionsTypeParams,
   NEVER,
+  objectPatternBound,
   type RecordType,
   resolveBound,
   substitute,
@@ -46,6 +47,31 @@ export function inferFromSubtype(
   upper?: Map<TypeParam, DartType>
 ): void {
   new InferenceConstraints(params, lower, upper, join).infer(actual, formal);
+}
+
+export function inferObjectPatternType(
+  matchedType: DartType,
+  template: DartType,
+  params: readonly TypeParam[]
+): DartType {
+  const parameters = new Set(params);
+  const lower = new Map<TypeParam, DartType>();
+  const upper = new Map<TypeParam, DartType>();
+  const constraints = new InferenceConstraints(parameters, lower, upper, upperBound, true);
+  const subject = resolveBound(matchedType);
+  if (subject.kind === 'interface') {
+    const inhabited = { ...subject, nullable: false };
+    constraints.infer(inhabited, template);
+    constraints.infer(inhabited, template, true);
+  }
+  const inferred = new Map(
+    params.map((param) => [param, lower.get(param) ?? upper.get(param) ?? objectPatternBound(param, parameters)])
+  );
+  for (const [param, candidate] of inferred) {
+    const declared = substitute(boundOf(param), inferred);
+    if (!isSubtype(candidate, declared)) inferred.set(param, objectPatternBound(param, parameters));
+  }
+  return substitute(template, inferred);
 }
 
 export function inferExtensionReceiver(actual: DartType, formal: DartType, params: readonly TypeParam[]): DartType[] {

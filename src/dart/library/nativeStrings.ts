@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 411 -- String methods and buffers share bounds, matching, and formatting helpers.
+// code-gauge-allow-file fileNcss 412 -- String methods and buffers share bounds, matching, and formatting helpers.
 import { LIMITS } from '../../interpreter/limits';
 import { stringOf } from '../format';
 import { concatenate } from '../operators';
@@ -510,11 +510,8 @@ interface BufferState {
 
 defineConstructor('StringBuffer.new', (runtime, instance, args) => {
   const object = instance as DartObject;
-  const content = args.positional[0];
-  const parts = new BoundedStringParts(runtime);
-  parts.append(content === undefined ? '' : stringOf(runtime, content));
   const state: BufferState = {
-    parts,
+    parts: new BoundedStringParts(runtime),
     snapshot: undefined,
     get text() {
       if (this.snapshot === undefined) {
@@ -526,23 +523,28 @@ defineConstructor('StringBuffer.new', (runtime, instance, args) => {
     values: () => [],
   };
   object.native = state as unknown as DartObject['native'];
+  writeBufferValue(runtime, object, args.positional);
 });
 define('StringBuffer.length', (_runtime, receiver) => BigInt(bufferOf(receiver).parts.length));
-define('StringBuffer.isEmpty', (_runtime, receiver) => bufferOf(receiver).parts.length === 0);
-define('StringBuffer.isNotEmpty', (_runtime, receiver) => bufferOf(receiver).parts.length > 0);
 define('StringBuffer.write', (runtime, receiver, [value]) => appendBuffer(receiver, stringOf(runtime, value)));
 define('StringBuffer.writeCharCode', (runtime, receiver, [code]) =>
   appendBuffer(receiver, characterOf(runtime, intArg(runtime, code, 'charCode')))
 );
-define('StringBuffer.writeln', (runtime, receiver, args) =>
-  appendBuffer(receiver, `${args.length === 0 ? '' : stringOf(runtime, args[0])}\n`)
-);
+define('StringBuffer.writeln', (runtime, receiver, args) => {
+  writeBufferValue(runtime, receiver, args);
+  return appendBuffer(receiver, '\n');
+});
 define('StringBuffer.clear', (runtime, receiver) => {
   const buffer = bufferOf(receiver);
   buffer.parts = new BoundedStringParts(runtime);
   buffer.snapshot = '';
 });
 define('StringBuffer.toString', (_runtime, receiver) => bufferOf(receiver).text);
+
+function writeBufferValue(runtime: Runtime, receiver: Value, args: readonly Value[]): void {
+  const content = args.length === 0 ? '' : args[0];
+  runtime.invoke(receiver, 'write', { positional: [content], named: undefined }, [], undefined);
+}
 
 function appendBuffer(receiver: Value, text: string): undefined {
   if (text.length === 0) return;

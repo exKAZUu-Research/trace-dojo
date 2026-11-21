@@ -62,13 +62,13 @@ abstract class Invocation {
   factory Invocation.getter(Symbol name) = _Invocation.getter;
   factory Invocation.setter(Symbol memberName, Object? argument) = _Invocation.setter;
   Symbol get memberName;
-  List<Type> get typeArguments;
+  List<Type> get typeArguments => const <Type>[];
   List<dynamic> get positionalArguments;
   Map<Symbol, dynamic> get namedArguments;
   bool get isMethod;
   bool get isGetter;
   bool get isSetter;
-  bool get isAccessor;
+  bool get isAccessor => isGetter || isSetter;
 }
 
 class _HashOmitted { const _HashOmitted(); }
@@ -402,8 +402,8 @@ abstract interface class StringSink {
 class StringBuffer implements StringSink {
   external StringBuffer([Object content = ""]);
   external int get length;
-  external bool get isEmpty;
-  external bool get isNotEmpty;
+  bool get isEmpty => length == 0;
+  bool get isNotEmpty => !isEmpty;
   external void write(Object? object);
   external void writeCharCode(int charCode);
   void writeAll(Iterable<dynamic> objects, [String separator = ""]) {
@@ -525,26 +525,26 @@ class Duration implements Comparable<Duration> {
   const Duration({int days = 0, int hours = 0, int minutes = 0, int seconds = 0, int milliseconds = 0, int microseconds = 0})
       : this._microseconds(microseconds + microsecondsPerMillisecond * milliseconds + microsecondsPerSecond * seconds + microsecondsPerMinute * minutes + microsecondsPerHour * hours + microsecondsPerDay * days);
   const Duration._microseconds(this._duration);
-  Duration operator +(Duration other) => Duration._microseconds(_duration + other._duration);
-  Duration operator -(Duration other) => Duration._microseconds(_duration - other._duration);
-  Duration operator *(num factor) => Duration._microseconds((_duration * factor).round());
+  Duration operator +(Duration other) => Duration._microseconds(inMicroseconds + other.inMicroseconds);
+  Duration operator -(Duration other) => Duration._microseconds(inMicroseconds - other.inMicroseconds);
+  Duration operator *(num factor) => Duration._microseconds((inMicroseconds * factor).round());
   Duration operator ~/(int quotient) {
     if (quotient == 0) throw IntegerDivisionByZeroException();
-    return Duration._microseconds(_duration ~/ quotient);
+    return Duration._microseconds(inMicroseconds ~/ quotient);
   }
-  bool operator <(Duration other) => _duration < other._duration;
-  bool operator >(Duration other) => _duration > other._duration;
-  bool operator <=(Duration other) => _duration <= other._duration;
-  bool operator >=(Duration other) => _duration >= other._duration;
-  int get inDays => _duration ~/ Duration.microsecondsPerDay;
-  int get inHours => _duration ~/ Duration.microsecondsPerHour;
-  int get inMinutes => _duration ~/ Duration.microsecondsPerMinute;
-  int get inSeconds => _duration ~/ Duration.microsecondsPerSecond;
-  int get inMilliseconds => _duration ~/ Duration.microsecondsPerMillisecond;
+  bool operator <(Duration other) => inMicroseconds < other.inMicroseconds;
+  bool operator >(Duration other) => inMicroseconds > other.inMicroseconds;
+  bool operator <=(Duration other) => inMicroseconds <= other.inMicroseconds;
+  bool operator >=(Duration other) => inMicroseconds >= other.inMicroseconds;
+  int get inDays => inMicroseconds ~/ Duration.microsecondsPerDay;
+  int get inHours => inMicroseconds ~/ Duration.microsecondsPerHour;
+  int get inMinutes => inMicroseconds ~/ Duration.microsecondsPerMinute;
+  int get inSeconds => inMicroseconds ~/ Duration.microsecondsPerSecond;
+  int get inMilliseconds => inMicroseconds ~/ Duration.microsecondsPerMillisecond;
   int get inMicroseconds => _duration;
-  bool operator ==(Object other) => other is Duration && _duration == other.inMicroseconds;
-  int get hashCode => _duration.hashCode;
-  int compareTo(Duration other) => _duration.compareTo(other._duration);
+  bool operator ==(Object other) => other is Duration && inMicroseconds == other.inMicroseconds;
+  int get hashCode => inMicroseconds.hashCode;
+  int compareTo(Duration other) => inMicroseconds.compareTo(other.inMicroseconds);
   String toString() {
     var microseconds = inMicroseconds;
     var sign = "";
@@ -565,9 +565,9 @@ class Duration implements Comparable<Duration> {
     var microsecondsText = microseconds.toString().padLeft(6, "0");
     return "$sign$hours:$minutesPadding$minutes:$secondsPadding$seconds.$microsecondsText";
   }
-  bool get isNegative => _duration < 0;
-  Duration abs() => Duration._microseconds(_duration < 0 ? -_duration : _duration);
-  Duration operator -() => Duration._microseconds(0 - _duration);
+  bool get isNegative => inMicroseconds < 0;
+  Duration abs() => inMicroseconds >= 0 ? this : Duration._microseconds(0 - inMicroseconds);
+  Duration operator -() => Duration._microseconds(0 - inMicroseconds);
 }
 
 // Errors and exceptions

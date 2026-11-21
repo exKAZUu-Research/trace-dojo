@@ -7,13 +7,13 @@ import { SHORTED } from './expressionCompiler';
 import { listElement, listLength } from './library/nativeSupport';
 import type { Frame } from './runtime';
 import { Flow, type LocalVar } from './scope';
+import { inferObjectPatternType } from './typeInference';
 import {
   asInstanceOf,
   coreTypes,
   type DartType,
   DYNAMIC,
   type FunctionType,
-  instantiateToBounds,
   interfaceType,
   isNullable,
   isPotentiallyNullable,
@@ -771,14 +771,10 @@ export abstract class PatternCompiler extends CallCompiler {
     options: PatternOptions,
     variables: Map<string, LocalVar>
   ): PatternMatch {
-    let type = this.resolveType(pattern.type, { allowRaw: true });
+    const type = this.resolveType(pattern.type, {
+      inferOmitted: (template, params) => inferObjectPatternType(matchedType, template, params),
+    });
     this.fieldNames(pattern.fields);
-    if (type.kind === 'interface' && type.args.length === 0 && type.cls.typeParams.length > 0) {
-      // `List()` infers its type arguments from the matched type, or else instantiates to bounds.
-      const base = resolveBound(matchedType);
-      const instance = base.kind === 'interface' ? asInstanceOf({ ...base, nullable: false }, type.cls) : undefined;
-      type = instance ?? interfaceType(type.cls, instantiateToBounds(type.cls.typeParams));
-    }
     this.objectPatternTypes.set(pattern, type);
     const receiver: Compiled = { type, run: (frame) => frame.temporaries.at(-1), isConst: false };
     const fields = pattern.fields.map((field) => {

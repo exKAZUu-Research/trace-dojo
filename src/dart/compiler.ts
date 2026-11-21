@@ -287,6 +287,11 @@ export class Compiler extends MemberCompiler {
     this.withTypeParams(cls.typeParams, () => {
       this.resolveSuperclass(work);
       this.resolveMixins(work);
+      if (cls.kind === 'mixinClass' && cls.superclass?.cls !== coreTypes.object)
+        this.error(
+          declaration.mixins[0] ?? declaration.superclass ?? declaration,
+          'mixin class のスーパークラスは Object でなければなりません。'
+        );
       const interfaces = declaration.interfaces.map((type) =>
         this.resolveSupertype(cls, type, '実装するインターフェース')
       );
@@ -328,8 +333,6 @@ export class Compiler extends MemberCompiler {
       cls.superclass = undefined;
     } else if (declaration.superclass) {
       cls.superclass = this.resolveSupertype(cls, declaration.superclass, 'スーパークラス');
-      if (cls.kind === 'mixinClass' && cls.superclass.cls !== coreTypes.object)
-        this.error(declaration.superclass, 'mixin class のスーパークラスは Object でなければなりません。');
       if (cls.superclass.cls.kind === 'mixin')
         this.error(
           declaration.superclass,

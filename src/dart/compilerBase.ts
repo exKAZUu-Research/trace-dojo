@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 548 -- Types and record shape metadata are resolved in the compiler environment.
+// code-gauge-allow-file fileNcss 551 -- Types and record shape metadata are resolved in the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
@@ -42,6 +42,11 @@ import { type Cell, DartClosure, type DartRecord, recordPositionalIndex, type Va
 export type Eval = (frame: Frame) => Value;
 
 /** A compiled expression: its static type and how to evaluate it. */
+interface TypeResolutionOptions {
+  allowRaw?: boolean;
+  inferOmitted?: (template: DartType, parameters: readonly TypeParam[]) => DartType;
+}
+
 export interface Compiled {
   type: DartType;
   run: Eval;
@@ -292,7 +297,7 @@ export abstract class CompilerBase {
     return undefined;
   }
 
-  resolveType(syntax: TypeSyntax, options: { allowRaw?: boolean } = {}): DartType {
+  resolveType(syntax: TypeSyntax, options: TypeResolutionOptions = {}): DartType {
     switch (syntax.kind) {
       case 'void': {
         return VOID;
@@ -364,7 +369,7 @@ export abstract class CompilerBase {
   }
 
   // code-gauge-allow functionNcss 33 -- One case per form of the construct, which reads best together.
-  private resolveNamedType(syntax: Extract<TypeSyntax, { kind: 'named' }>, options: { allowRaw?: boolean }): DartType {
+  private resolveNamedType(syntax: Extract<TypeSyntax, { kind: 'named' }>, options: TypeResolutionOptions): DartType {
     const { name, prefix } = syntax;
     if (prefix === undefined) {
       const param = this.findTypeParam(name, syntax);
@@ -383,15 +388,22 @@ export abstract class CompilerBase {
     }
     const declaration = prefix === undefined ? this.library.lookup(name) : this.library.lookupPrefixed(prefix, name);
     if (declaration?.kind === 'class') return this.instantiateClass(declaration.cls, syntax, options);
-    if (declaration?.kind === 'alias') {
-      const { alias } = declaration;
-      const type = this.resolveAlias(alias, syntax);
-      const args = this.typeArgumentsFor(alias.typeParams, syntax, name);
-      return substitute(type, new Map(alias.typeParams.map((param, index) => [param, args[index]])));
-    }
+    if (declaration?.kind === 'alias') return this.instantiateAlias(declaration.alias, syntax, options);
     if (declaration) return this.error(syntax, `${name} は型ではありません。`);
     this.checkUnavailableName(syntax, name, prefix);
     return this.error(syntax, `型 ${name} が見つかりません。`);
+  }
+
+  private instantiateAlias(
+    alias: TypeAlias,
+    syntax: Extract<TypeSyntax, { kind: 'named' }>,
+    options: TypeResolutionOptions
+  ): DartType {
+    const type = this.resolveAlias(alias, syntax);
+    if (syntax.args.length === 0 && alias.typeParams.length > 0 && options.inferOmitted)
+      return options.inferOmitted(type, alias.typeParams);
+    const args = this.typeArgumentsFor(alias.typeParams, syntax, syntax.name);
+    return substitute(type, new Map(alias.typeParams.map((param, index) => [param, args[index]])));
   }
 
   protected resolveAlias(alias: TypeAlias, span: Span): DartType {
@@ -430,11 +442,13 @@ export abstract class CompilerBase {
   private instantiateClass(
     cls: ClassInfo,
     syntax: Extract<TypeSyntax, { kind: 'named' }>,
-    options: { allowRaw?: boolean }
+    options: TypeResolutionOptions
   ): DartType {
     if (cls === coreTypes.nullClass) return NULL;
     if (syntax.args.length === 0 && options.allowRaw && cls.typeParams.length > 0) return interfaceType(cls, []);
     this.resolveClassBounds(cls);
+    if (syntax.args.length === 0 && cls.typeParams.length > 0 && options.inferOmitted)
+      return options.inferOmitted(cls.thisType, cls.typeParams);
     return interfaceType(cls, this.typeArgumentsFor(cls.typeParams, syntax, cls.name));
   }
 
