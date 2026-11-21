@@ -100,7 +100,6 @@ function numericOperand(type: Type): Type {
   return t;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows the type checking rules of rustc case by case.
 export function checkBinary(c: Checker, expr: Extract<Expr, { kind: 'binary' }>, expected: Type | undefined): Type {
   const { op } = expr;
   if (op === '&&' || op === '||') {
@@ -129,12 +128,17 @@ export function checkBinary(c: Checker, expr: Extract<Expr, { kind: 'binary' }>,
       '&str どうしは + でつなげません（String::from("...") + "..." や format! を使ってください）。'
     );
   }
-  if (op === '<<' || op === '>>') {
-    const rightType = numericOperand(c.expr(expr.right, undefined));
-    if (!isIntegral(left) || !isIntegral(rightType)) badOperands(expr, leftType, expr.right.ty as Type);
-    return left;
-  }
+  if (op === '<<' || op === '>>') return checkShift(c, expr, leftType, left);
   return arithmeticOrBitwise(c, expr, leftType, left);
+}
+
+/** The two sides of a shift have types of their own, so a right one not known yet is checked once it is. */
+function checkShift(c: Checker, expr: Extract<Expr, { kind: 'binary' }>, leftType: Type, left: Type): Type {
+  const rightType = c.expr(expr.right, undefined);
+  const right = numericOperand(rightType);
+  if (right.kind === 'var' && !right.v.literal) c.pendingBinaries.push({ expr, leftType, rightType, result: left });
+  else if (!isIntegral(left) || !isIntegral(right)) badOperands(expr, leftType, rightType);
+  return left;
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Follows the type checking rules of rustc case by case.

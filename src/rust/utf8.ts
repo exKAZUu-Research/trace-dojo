@@ -13,20 +13,24 @@ export function utf8Bytes(text: string, runtime: Runtime): bigint[] {
   return Array.from(encoder.encode(text), BigInt);
 }
 
+const KEPT_STRINGS = 8;
+
 /**
- * The UTF-8 bytes of strings, which callers only read. It keeps those of the last string asked about, since a program
- * that looks at one byte offset after another asks about the same string each time.
+ * The UTF-8 bytes of strings, which callers only read. It keeps those of the strings asked about last, since a
+ * program that looks at one byte offset after another asks about the same few strings each time.
  */
 export class Utf8Reader {
-  private text: string | undefined;
-  private bytes = new Uint8Array();
+  private readonly kept = new Map<string, Uint8Array>();
 
   of(text: string): Uint8Array {
-    if (text !== this.text) {
-      this.bytes = encoder.encode(text);
-      this.text = text;
+    let bytes = this.kept.get(text);
+    if (bytes) this.kept.delete(text);
+    else {
+      bytes = encoder.encode(text);
+      if (this.kept.size === KEPT_STRINGS) this.kept.delete(this.kept.keys().next().value as string);
     }
-    return this.bytes;
+    this.kept.set(text, bytes);
+    return bytes;
   }
 }
 

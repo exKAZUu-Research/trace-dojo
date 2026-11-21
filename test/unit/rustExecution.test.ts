@@ -7462,3 +7462,31 @@ Peekable { iter: Map { iter: Iter([2]) }, peeked: Some(Some(2)) } Skip { iter: C
     });
   }
 });
+
+test('shift counts typed by a later call work, and boundary checks may alternate between strings', () => {
+  const program = rustMain(`    let right = |n| 8u32 >> n;
+    let left = |n| 1u64 << n;
+    let both = |a, b| a << b;
+    let narrow = "é".repeat(20_000);
+    let wide = "あ".repeat(20_000);
+    let mut shared = 0;
+    for i in 0..narrow.len() {
+        if narrow.is_char_boundary(i) && wide.is_char_boundary(i) { shared += 1; }
+    }
+    println!("{} {} {} {}", right(1u8), left(3i32), both(1u8, 2u16), shared);`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '4 8 4 6667\n' });
+  expect(executeProgram('rust', rustMain('    let f = |n| 8u32 >> n;\n    println!("{}", f(1.5));'))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('>> で計算できません') })],
+  });
+});
+
+test.each(['assert_eq!(s, "y", "{}", { s.push_str("a"); 1 });', 'assert_ne!(s, "x", "{}", { s.clear(); 1 });'])(
+  'keeps the operands of %s borrowed while its message is evaluated',
+  (assertion) => {
+    expect(executeProgram('rust', rustMain(`    let mut s = String::from("x");\n    ${assertion}`))).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ row: 2, message: expect.stringContaining('借りられていて') })],
+    });
+  }
+);

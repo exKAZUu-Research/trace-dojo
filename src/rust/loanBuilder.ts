@@ -1310,13 +1310,12 @@ export class LoanBuilder {
       }
       case 'assert': {
         const value = this.value(macro.cond);
-        this.point({ uses: value === undefined ? [] : [value] });
-        this.failureMessage(macro.format);
+        this.assertion(value === undefined ? [] : [value], macro.format, false);
         return undefined;
       }
       case 'assertEq': {
-        this.point({ uses: this.formatArgs({ pieces: [], args: [macro.left, macro.right], span: expr.span }) });
-        this.failureMessage(macro.format);
+        const operands = this.formatArgs({ pieces: [], args: [macro.left, macro.right], span: expr.span });
+        this.assertion(operands, macro.format, true);
         return undefined;
       }
       case 'vec': {
@@ -1344,11 +1343,15 @@ export class LoanBuilder {
     }
   }
 
-  /** The message of an assertion, which is formatted only where the assertion fails and panics. */
-  private failureMessage(format: FormatArgs | undefined): void {
+  /**
+   * An assertion checks its operands, and formats its message only where it fails and panics. That panic also shows
+   * the operands that `assert_eq!` borrowed, so those stay borrowed while the message is evaluated.
+   */
+  private assertion(operands: Var[], format: FormatArgs | undefined, borrowed: boolean): void {
+    this.point({ uses: operands });
     if (!format) return;
     const passed = this.current;
-    this.point({ uses: this.formatArgs(format) });
+    this.point({ uses: borrowed ? [...this.formatArgs(format), ...operands] : this.formatArgs(format) });
     this.current = passed;
   }
 
