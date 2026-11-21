@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 477 -- Keep runtime dispatch alongside its reified types, call frames, and roots.
+// code-gauge-allow-file fileNcss 499 -- Keep runtime dispatch alongside its reified types, call frames, and roots.
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -143,6 +143,11 @@ export interface LibraryLinks {
   stringify(runtime: Runtime, value: Value): string;
 }
 
+interface InstantiatedTearOff {
+  typeArguments: readonly DartType[];
+  canonical?: DartClosure;
+}
+
 export class Runtime implements TracedRuntime<Frame> {
   readonly world = new TurtleWorld();
   readonly budget = new ExecutionBudget();
@@ -158,6 +163,8 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The canonical tear-offs of top-level functions and static methods. */
   readonly tearOffs = new Map<unknown, DartClosure>();
   private readonly constructorTearOffs = new Map<ConstructorInfo, DartClosure[]>();
+  private readonly tearOffConstructors = new WeakMap<DartClosure, ConstructorInfo>();
+  private readonly instantiatedTearOffs = new WeakMap<object, InstantiatedTearOff[]>();
   private readonly getterForwarders = new WeakMap<Member, Member>();
   private readonly setterForwarders = new WeakMap<Member, Member>();
   private readonly checkedMethods = new WeakMap<ClassInfo, Map<MethodMember, MethodMember>>();
@@ -474,6 +481,41 @@ export class Runtime implements TracedRuntime<Frame> {
     return closure;
   }
 
+  instantiateTearOff(original: DartClosure, typeArguments: readonly DartType[]): DartClosure {
+    const type = instantiateFunction(original.type, typeArguments);
+    const make = (key: object | undefined): DartClosure =>
+      new DartClosure(
+        coreTypes.function,
+        type,
+        (runtime, _receiver, args, _written, row) => runtime.callValue(original, args, typeArguments, row),
+        original.receiver,
+        [new Cell(original)],
+        original.description,
+        key
+      );
+    const constructor = this.tearOffConstructors.get(original);
+    if (constructor) return this.constructorTearOff(constructor, type, () => make(undefined));
+    const key = original.tearOffKey ?? original;
+    const instances = this.instantiatedTearOffs.get(key) ?? [];
+    let instance = instances.find((other) => {
+      this.spend();
+      return (
+        other.typeArguments.length === typeArguments.length &&
+        other.typeArguments.every((argument, index) => sameType(argument, typeArguments[index]))
+      );
+    });
+    if (!instance) {
+      instance = { typeArguments };
+      instances.push(instance);
+      this.instantiatedTearOffs.set(key, instances);
+    }
+    if (instance.canonical) return instance.canonical;
+    this.allocate(1);
+    const closure = make(instance);
+    if (this.tearOffs.get(key) === original) instance.canonical = closure;
+    return closure;
+  }
+
   constructorTearOff(constructor: ConstructorInfo, type: FunctionType, create: () => DartClosure): DartClosure {
     const closures = this.constructorTearOffs.get(constructor) ?? [];
     for (const closure of closures) {
@@ -484,6 +526,7 @@ export class Runtime implements TracedRuntime<Frame> {
     const closure = create();
     closures.push(closure);
     this.constructorTearOffs.set(constructor, closures);
+    this.tearOffConstructors.set(closure, constructor);
     return closure;
   }
 

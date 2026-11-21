@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 469 -- Switch coverage shares type partitions and pattern coverage rules.
+// code-gauge-allow-file fileNcss 474 -- Switch coverage shares type partitions and pattern coverage rules.
 import type { Expression, Pattern, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import type { ClassInfo, Member } from './classes';
@@ -296,18 +296,22 @@ function expandInterface(base: DartType & { kind: 'interface' }, listCutoff: num
       text: `${cls.name}.${member.name}`,
     }));
   }
-  if (cls.modifiers.isSealed) {
-    const spaces: Space[] = [];
-    for (const subclass of cls.subclasses) {
-      const options = expand(subclassType(base, subclass), listCutoff, listDepth);
-      if (spaces.length + options.length > MAX_SPACES) return [{ kind: 'type', type: base }];
-      spaces.push(...options);
-    }
-    return spaces;
-  }
+  if (cls.modifiers.isSealed) return expandSealed(base, listCutoff, listDepth);
   const list = listCutoff > 0 && listDepth > 0 ? asInstanceOf(base, coreTypes.list) : undefined;
   if (list) return expandList(base, list.args[0] ?? DYNAMIC, listCutoff, listDepth);
   return [{ kind: 'type', type: base }];
+}
+
+function expandSealed(base: DartType & { kind: 'interface' }, listCutoff: number, listDepth: number): Space[] {
+  const spaces: Space[] = [];
+  for (const subclass of base.cls.subclasses) {
+    const subtype = subclassType(base, subclass);
+    if (subclass.typeParams.length === 0 && !isSubtype(subtype, base)) continue;
+    const options = expand(subtype, listCutoff, listDepth);
+    if (spaces.length + options.length > MAX_SPACES) return [{ kind: 'type', type: base }];
+    spaces.push(...options);
+  }
+  return spaces;
 }
 
 function expandList(type: DartType, elementType: DartType, cutoff: number, depth: number): Space[] {

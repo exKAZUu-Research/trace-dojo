@@ -587,25 +587,24 @@ function asInterface(type: DartType): InterfaceType | undefined {
 }
 
 function functionUpperBound(a: FunctionType, b: FunctionType): DartType {
-  if (a.typeParams.length > 0 || b.typeParams.length > 0) {
-    if (sameType(a, b)) return a;
+  const aligned = alignTypeParams(a, b, sameType);
+  if (!aligned) return interfaceType(coreTypes.function);
+  const [left, right] = aligned;
+  const requiredCount = left.requiredCount;
+  if (requiredCount !== right.requiredCount) return interfaceType(coreTypes.function);
+  const length = Math.min(left.positional.length, right.positional.length);
+  const hasNamed = left.named.length > 0 || right.named.length > 0;
+  if (hasNamed && (left.positional.length !== requiredCount || right.positional.length !== requiredCount))
     return interfaceType(coreTypes.function);
-  }
-  const requiredCount = a.requiredCount;
-  if (requiredCount !== b.requiredCount) return interfaceType(coreTypes.function);
-  const length = Math.min(a.positional.length, b.positional.length);
-  const hasNamed = a.named.length > 0 || b.named.length > 0;
-  if (hasNamed && (a.positional.length !== requiredCount || b.positional.length !== requiredCount))
-    return interfaceType(coreTypes.function);
-  const named = mergeNamedUpperBound(a.named, b.named);
+  const named = mergeNamedUpperBound(left.named, right.named);
   if (!named) return interfaceType(coreTypes.function);
   return {
     kind: 'function',
-    typeParams: [],
-    positional: Array.from({ length }, (_, index) => lowerBound(a.positional[index], b.positional[index])),
+    typeParams: a.typeParams,
+    positional: Array.from({ length }, (_, index) => lowerBound(left.positional[index], right.positional[index])),
     requiredCount,
     named,
-    returnType: upperBound(a.returnType, b.returnType),
+    returnType: upperBound(left.returnType, right.returnType),
     nullable: false,
   };
 }

@@ -3945,3 +3945,80 @@ test('native set and map copies are charged against the allocation limit', () =>
     expect(executeProgram('dart', program)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
   }
 });
+
+test('sealed switch coverage excludes concrete alternatives with incompatible type arguments', () => {
+  const program = `sealed class Result<T> {}
+class IntResult extends Result<int> {}
+class StringResult extends Result<String> {}
+class BottomResult extends Result<Never> {}
+String label(Result<int>? value) => switch (value) {
+  IntResult() => 'int',
+  BottomResult() => 'bottom',
+  null => 'null',
+};
+void main() { print([label(IntResult()), label(BottomResult()), label(null)]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[int, bottom, null]\n' });
+  expect(executeProgram('dart', program.replace("  BottomResult() => 'bottom',", ''))).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('joining generic function types keeps their shared parameter scope', () => {
+  const program = `int f<T>(T x) => 1;
+double g<U>(U x) => 2.0;
+T same<T>(T x) => x;
+int bounded<T extends num>(T x) => 0;
+void main() {
+  var functions = [f, g];
+  print([functions.runtimeType, [same, f].runtimeType, [f, bounded].runtimeType]);
+  num result = functions.last<String>('text');
+  print(result);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[List<<Y0>(Y0) => num>, List<<Y0>(Y0) => Object?>, List<Function>]\n2.0\n',
+  });
+  expect(executeProgram('dart', program.replace('num result', 'String result'))).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('generic closure instantiations preserve function equality, hashing, and canonical tear-offs', () => {
+  const program = `T id<T>(T value) => value;
+class C {
+  T id<T>(T value) => value;
+  static T identity<T>(T value) => value;
+}
+class Box<T> {
+  final T value;
+  Box(this.value);
+}
+void check(Function a, Function b) {
+  print([a == b, identical(a, b), a.hashCode == b.hashCode, {a: 1}[b]]);
+}
+void main() {
+  int Function(int) a = id, b = id;
+  num Function(num) different = id;
+  check(a, b);
+  check(a, different);
+  var c = C();
+  int Function(int) method1 = c.id, method2 = c.id, other = C().id;
+  check(method1, method2);
+  check(method1, other);
+  int Function(int) static1 = C.identity, static2 = C.identity;
+  check(static1, static2);
+  final generic = <T>(T n) => n;
+  int Function(int) local1 = generic, local2 = generic;
+  check(local1, local2);
+  Box<int> Function(int) constructor = Box.new;
+  check(constructor, Box<int>.new);
+  T Function<T>(T)? absent;
+  int Function(int)? nullable = absent;
+  print([a(5), method1(6), constructor(7).value, nullable]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[true, true, true, 1]\n[false, false, false, null]\n[true, false, true, 1]\n[false, false, false, null]\n[true, true, true, 1]\n[true, false, true, 1]\n[true, true, true, 1]\n[5, 6, 7, null]\n',
+  });
+});

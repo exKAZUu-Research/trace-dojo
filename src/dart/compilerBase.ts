@@ -34,7 +34,7 @@ import {
   vmTypeString,
   VOID,
 } from './types';
-import { type Cell, DartClosure as DartClosureValue, type DartRecord, type Value } from './values';
+import { type Cell, DartClosure, type DartRecord, type Value } from './values';
 
 export type Eval = (frame: Frame) => Value;
 
@@ -746,16 +746,12 @@ export abstract class CompilerBase {
       isConst: compiled.isConst,
       run: (frame) => {
         const original = run(frame);
-        const fixed = resolveArgs.map((resolve) => resolve(frame));
-        return new DartClosureValue(
-          coreTypes.function,
-          substitute(type, frame.typeEnv) as FunctionType,
-          (runtime, receiver, args, _typeArgs, callRow) => runtime.callValue(receiver, args, fixed, callRow),
-          original,
-          [],
-          { name: undefined, origin: undefined },
-          undefined
-        );
+        return original instanceof DartClosure
+          ? frame.runtime.instantiateTearOff(
+              original,
+              resolveArgs.map((resolve) => resolve(frame))
+            )
+          : original;
       },
     };
   }
