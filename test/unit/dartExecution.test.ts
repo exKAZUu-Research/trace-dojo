@@ -5942,6 +5942,25 @@ void main() { print(add<int, int>(2)); show<Map<int, int>?>(null); show({1: 2});
   expect(executeProgram('dart', bounds)).toMatchObject({ kind: 'executed', stdout: '3\n{}\n{1: 2}\n' });
 });
 
+test('super delegation uses the originating library of a forwarded constructor', () => {
+  const aliases = `mixin M {}
+mixin N {}
+class D = Duration with M;
+class F = D with N;`;
+  for (const name of ['D', 'F']) {
+    const source = `${aliases} class E extends ${name} { E() : super._microseconds(3); } void main() {}`;
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+  const direct = `${aliases} void main() { print(D._microseconds(3).inMicroseconds); }`;
+  expect(executeProgram('dart', direct)).toMatchObject({ kind: 'executed', stdout: '3\n' });
+  const sameLibrary = `class A { A._private(); }
+mixin M {}
+class B = A with M;
+class C extends B { C() : super._private(); }
+void main() { print(C().runtimeType); }`;
+  expect(executeProgram('dart', sameLibrary)).toMatchObject({ kind: 'executed', stdout: 'C\n' });
+});
+
 test('generic result contexts combine covariant and contravariant positions', () => {
   const source = `Map<T, T> makeMap<T>() => {};
 (List<T>, Set<T>) makePair<T>() => (<T>[], <T>{});

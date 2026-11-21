@@ -98,6 +98,7 @@ export interface FieldMember extends MemberBase {
 export interface ConstructorInfo {
   name: string;
   owner: ClassInfo;
+  forwardedFrom?: ClassInfo;
   /** The parameters as a function type whose result is the class's own type. */
   type: FunctionType;
   kind: 'generative' | 'factory' | 'redirectingFactory';

@@ -617,6 +617,7 @@ export class Compiler extends MemberCompiler {
       application.constructors.set(name, {
         name,
         owner: application,
+        forwardedFrom: constructor.forwardedFrom ?? constructor.owner,
         type: { ...signature, returnType: application.thisType },
         kind: 'generative',
         isConst: constructor.isConst && mixin.fields.length === 0,

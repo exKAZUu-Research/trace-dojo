@@ -728,8 +728,8 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     isImplicit = false
   ): (frame: Frame) => void {
     const targetType = kind === 'super' ? (cls.superclass as InterfaceType) : cls.thisType;
-    this.checkUnavailableStaticMember(targetType.cls, name ?? '', span);
     const target = targetType.cls.constructors.get(name ?? '');
+    this.checkUnavailableStaticMember(target?.forwardedFrom ?? targetType.cls, name ?? '', span);
     if (!target) {
       if (isImplicit) {
         return this.error(
