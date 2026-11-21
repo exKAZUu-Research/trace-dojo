@@ -974,8 +974,8 @@ abstract mixin class Iterable<E> {
   Iterator<E> get iterator;
   Iterable<R> cast<R>() => CastIterable<E, R>(this);
   Iterable<E> followedBy(Iterable<E> other) =>
-      _hasEfficientLength(this) && _hasEfficientLength(other)
-          ? EfficientLengthFollowedByIterable<E>(this, other)
+      _hasEfficientLength(this)
+          ? FollowedByIterable<E>.firstEfficient(this, other)
           : FollowedByIterable<E>(this, other);
   Iterable<T> map<T>(T Function(E e) toElement) =>
       _hasEfficientLength(this) ? EfficientLengthMappedIterable<E, T>(this, toElement) : MappedIterable<E, T>(this, toElement);
@@ -1476,6 +1476,10 @@ class FollowedByIterable<E> extends Iterable<E> {
   final Iterable<E> _first;
   final Iterable<E> _second;
   FollowedByIterable(this._first, this._second);
+  factory FollowedByIterable.firstEfficient(Iterable<E> first, Iterable<E> second) =>
+      _hasEfficientLength(second)
+          ? EfficientLengthFollowedByIterable<E>(first, second)
+          : FollowedByIterable<E>(first, second);
   Iterator<E> get iterator => FollowedByIterator<E>(_first, _second);
   int get length => _first.length + _second.length;
   bool get isEmpty => _first.isEmpty && _second.isEmpty;
@@ -1947,7 +1951,7 @@ abstract interface class List<E> extends EfficientLengthIterable<E> {
   Iterable<T> whereType<T>() => WhereTypeIterable<T>(this);
   Iterable<T> expand<T>(Iterable<T> Function(E element) toElements) => ExpandIterable<E, T>(this, toElements);
   Iterable<E> followedBy(Iterable<E> other) =>
-      _hasEfficientLength(other) ? EfficientLengthFollowedByIterable<E>(this, other) : FollowedByIterable<E>(this, other);
+      FollowedByIterable<E>.firstEfficient(this, other);
   E reduce(E Function(E value, E element) combine) {
     int length = this.length;
     if (length == 0) throw StateError("No element");

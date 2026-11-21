@@ -19,7 +19,7 @@ abstract mixin class ListBase<E> implements List<E> {
   Iterator<E> get iterator => ListIterator<E>(this);
   E elementAt(int index) => this[index];
   Iterable<E> followedBy(Iterable<E> other) =>
-      FollowedByIterable<E>(this, other);
+      FollowedByIterable<E>.firstEfficient(this, other);
   void forEach(void Function(E element) action) {
     int length = this.length;
     for (int i = 0; i < length; i++) {
@@ -555,7 +555,7 @@ class _Uint8List extends ListBase<int> {
   external _Uint8List sublist(int start, [int? end]);
   Iterator<int> get iterator => _TypedListIterator<int>(this);
   Iterable<int> getRange(int start, [int? end]) => super.getRange(start, end ?? length);
-  Iterable<T> map<T>(T Function(int) transform) => MappedIterable<int, T>(this, transform);
+  Iterable<T> map<T>(T Function(int) transform) => EfficientLengthMappedIterable<int, T>(this, transform);
   int indexOf(covariant int element, [int start = 0]) => super.indexOf(element, start);
   int lastIndexOf(covariant int element, [int? start]) => super.lastIndexOf(element, start);
   void add(int value) => throw UnsupportedError("Cannot add to a fixed-length list");
@@ -807,7 +807,7 @@ abstract mixin class SetBase<E> implements Set<E> {
   bool get isEmpty => length == 0;
   bool get isNotEmpty => length != 0;
   Set<R> cast<R>() => Set.castFrom<E, R>(this);
-  Iterable<E> followedBy(Iterable<E> other) => FollowedByIterable<E>(this, other);
+  Iterable<E> followedBy(Iterable<E> other) => FollowedByIterable<E>.firstEfficient(this, other);
   Iterable<T> whereType<T>() => WhereTypeIterable<T>(this);
   void clear() {
     removeAll(toList());
@@ -904,12 +904,12 @@ abstract mixin class SetBase<E> implements Set<E> {
   }
   Iterable<E> take(int count) {
     RangeError.checkNotNegative(count, "takeCount");
-    return TakeIterable<E>(this, count);
+    return EfficientLengthTakeIterable<E>(this, count);
   }
   Iterable<E> takeWhile(bool Function(E value) test) => TakeWhileIterable<E>(this, test);
   Iterable<E> skip(int count) {
     RangeError.checkNotNegative(count, "count");
-    return SkipIterable<E>(this, count);
+    return EfficientLengthSkipIterable<E>(this, count);
   }
   Iterable<E> skipWhile(bool Function(E value) test) => SkipWhileIterable<E>(this, test);
   E get first {

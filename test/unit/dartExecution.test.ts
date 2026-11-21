@@ -8378,3 +8378,77 @@ class B extends A { const B({required super.x}) : super.named(y: 3); }
 void main() { final b = const B(x: 2); print([b.x, b.y]); }`;
   expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[2, 3]\n' });
 });
+
+test('Dart collection views preserve efficient length and lazy mapping', () => {
+  const program = `import 'dart:collection';
+import 'dart:convert';
+
+class ListView extends ListBase<int> {
+  final List<int> data = [7,8];
+  int get length => data.length;
+  set length(int count) { data.length = count; }
+  int operator [](int index) => data[index];
+  void operator []=(int index, int value) { data[index] = value; }
+}
+Iterable<int> noisy() sync* {
+  print('source');
+  yield 13;
+}
+void inspect(Iterable<int> values) {
+  print([values.runtimeType, values.runtimeType.hashCode]);
+  var mapped = values.map((x) { print('map $x'); return x; });
+  print([mapped.take(1).length, mapped.skip(1).length]);
+}
+void main() {
+  final bytes = utf8.encode('hi');
+  final mapped = bytes.map((x) { print('byte $x'); return x; });
+  print([mapped.runtimeType, mapped.runtimeType.hashCode, mapped.take(1).length, mapped.skip(1).length]);
+  print(mapped.take(1).toList());
+  final base64Mapped = base64.decode('aGk=').map((x) => x.toString());
+  print([base64Mapped.runtimeType, base64Mapped.runtimeType.hashCode, base64Mapped.toList()]);
+  final set = HashSet<int>.of([1,2,3]);
+  for(final view in [bytes.followedBy([4]), ListView().followedBy(set), set.followedBy([4])]) { inspect(view); }
+  inspect(bytes.followedBy(noisy()));
+  inspect(set.followedBy(noisy()));
+  inspect(set.take(2));
+  inspect(set.skip(1));
+  for(final operation in [set.take,set.skip]) {
+    try { operation(-1); } catch(error) { print(error); }
+  }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[EfficientLengthMappedIterable<int, int>, 538845270, 1, 1]\n' +
+      'byte 104\n' +
+      '[104]\n' +
+      '[EfficientLengthMappedIterable<int, String>, 794324298, [104, 105]]\n' +
+      '[EfficientLengthFollowedByIterable<int>, 16609695]\n' +
+      '[1, 2]\n' +
+      '[EfficientLengthFollowedByIterable<int>, 16609695]\n' +
+      '[1, 4]\n' +
+      '[EfficientLengthFollowedByIterable<int>, 16609695]\n' +
+      '[1, 3]\n' +
+      '[FollowedByIterable<int>, 927751392]\n' +
+      'map 104\n' +
+      'map 104\n' +
+      'map 105\n' +
+      'source\n' +
+      'map 13\n' +
+      '[1, 2]\n' +
+      '[FollowedByIterable<int>, 927751392]\n' +
+      'map 1\n' +
+      'map 1\n' +
+      'map 2\n' +
+      'map 3\n' +
+      'source\n' +
+      'map 13\n' +
+      '[1, 3]\n' +
+      '[EfficientLengthTakeIterable<int>, 586615924]\n' +
+      '[1, 1]\n' +
+      '[EfficientLengthSkipIterable<int>, 361295448]\n' +
+      '[1, 1]\n' +
+      'RangeError (takeCount): Invalid value: Not greater than or equal to 0: -1\n' +
+      'RangeError (count): Invalid value: Not greater than or equal to 0: -1\n',
+  });
+});
