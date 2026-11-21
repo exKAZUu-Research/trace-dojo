@@ -196,8 +196,14 @@ fun main() {
     view.addFirst(0)
     view.addLast(7)
     println(source)
+    val inserted = source.asReversed().listIterator()
+    inserted.add(10)
+    inserted.set(11)
+    println(source)
+    inserted.remove()
+    println(source)
 }`,
-    stdout: '2\n8\n[1, 9, 3]\n1\n[9, 3]\n[0, 9, 3, 7]\n',
+    stdout: '2\n8\n[1, 9, 3]\n1\n[9, 3]\n[0, 9, 3, 7]\n[0, 9, 3, 7, 11]\n[0, 9, 3, 7]\n',
   },
   {
     name: 'bulk mutations through a reversed view',

@@ -101,31 +101,11 @@ private class MutableReversedList<T>(private val backing: MutableList<T>) : Reve
 
 private class MutableReversedListIterator<T>(private val backing: MutableListIterator<T>, source: List<T>) :
     ReversedListIterator<T>(backing, source), MutableListIterator<T> {
-    private var canModify = false
-
-    override fun next(): T {
-        val value = super.next()
-        canModify = true
-        return value
-    }
-    override fun previous(): T {
-        val value = super.previous()
-        canModify = true
-        return value
-    }
-    override fun remove() {
-        if (!canModify) throw IllegalStateException()
-        backing.remove()
-        canModify = false
-    }
-    override fun set(element: T) {
-        if (!canModify) throw IllegalStateException()
-        backing.set(element)
-    }
+    override fun remove() = backing.remove()
+    override fun set(element: T) = backing.set(element)
     override fun add(element: T) {
         backing.add(element)
         backing.previous()
-        canModify = false
     }
 }
 
