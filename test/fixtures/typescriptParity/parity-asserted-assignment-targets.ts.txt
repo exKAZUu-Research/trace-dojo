@@ -1,0 +1,22 @@
+let x = 1; (x as number)++; console.log(x);
+(x as number) = 2; console.log(x);
+(<number>x) = 3; console.log(x);
+const o = { a: 1 }; (o.a as number) += 2; console.log(o.a);
+for ((x as number) of [5]) {} console.log(x);
+[(x as number)] = [7]; console.log(x);
+({ a: (x as number) } = { a: 8 }); console.log(x);
+((x as number)) -= 1; console.log(x);
+--(x as number); console.log(x);
+(o as { a: number }).a = 9; console.log(o.a);
+let w: unknown = 0; [...(w as any)] = [1]; console.log(w);
+const c = 1;
+const ro = { a: 1 } as const; (ro.a as number) = 3; console.log(ro.a);
+let v: string | number = "a"; (v as any) = 1; console.log(typeof v);
+let u: number | undefined = 1;
+((u as any) as number) = 2; console.log(u);
+(u! as number) = 3; console.log(u);
+const p: { a?: { b: number } } = { a: { b: 1 } };
+(p.a!.b as number)++; console.log(p.a);
+class K { readonly r = 1; m() { (this.r as number) = 2; return this.r; } }
+console.log(new K().m());
+try { (c as number) = 2; } catch (e) { console.log((e as Error).name); }

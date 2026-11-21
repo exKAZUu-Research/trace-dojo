@@ -1,0 +1,33 @@
+function objectDefault() {
+  let saved: number;
+  const { value = (saved = 1) } = { value: 2 };
+  console.log(saved);
+}
+function arrayDefault() {
+  let saved: number;
+  const [value = (saved = 1)] = [2];
+  console.log(saved);
+}
+function nestedDefault() {
+  let saved: number;
+  const { pair: [[value = (saved = 1)] = []] } = { pair: [[2]] };
+  console.log(saved);
+}
+function narrowedDefault() {
+  let saved: number | string = 1;
+  const { value = (saved = 'assigned') } = { value: 'supplied' };
+  console.log(saved.toUpperCase());
+}
+function definiteDefault() {
+  let saved: number;
+  const { value = (saved = 1) } = { value: undefined };
+  console.log(saved);
+}
+function assignments() {
+  let a: number;
+  let b: number;
+  let value: number;
+  ({ value: value = (a = 1) } = { value: 2 });
+  [value = (b = 1)] = [2];
+  console.log(a, b, value);
+}

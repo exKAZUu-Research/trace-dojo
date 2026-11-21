@@ -1,0 +1,33 @@
+type Id = string | number;
+function show<T extends Id>(xs: T[]): string {
+  return xs.map((x) => x.toString()).join();
+}
+function longest<T extends string | any[]>(a: T, b: T): T {
+  return a.length >= b.length ? a : b;
+}
+function readA<T extends { a: number } | { a: string }>(x: T): number | string {
+  const { a } = x;
+  return x.a ?? a;
+}
+function size<T extends string[] | number[]>(x: T): number {
+  return x.map((v) => v).length + x.length;
+}
+function call<T extends (() => number) | (() => string)>(f: T): number | string {
+  return f();
+}
+function method<T extends { m(): number } | { m(): string }>(x: T): number | string {
+  return x.m();
+}
+function maybe<T extends { a?: number } | { a: string }>(x: T): number | string | undefined {
+  return x.a;
+}
+function nested<T extends string | number, U extends T>(x: U): string {
+  return x.toString();
+}
+function write<T extends { a: number } | { a: string }>(x: T): T {
+  x.a = 3;
+  return x;
+}
+console.log(show([1, "x"]), longest("ab", "c"), longest([1], [2, 3]));
+console.log(readA({ a: "s" }), size([1, 2]), call(() => 1), method({ m: () => "m" }));
+console.log(maybe({}), nested<string, "n">("n"), write({ a: "w" }));

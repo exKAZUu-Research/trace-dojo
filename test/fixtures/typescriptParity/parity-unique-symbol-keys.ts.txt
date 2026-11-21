@@ -1,0 +1,30 @@
+const id = Symbol("id");
+const user = { [id]: 7, name: "a" };
+console.log(user[id], user);
+user[id] = 8;
+console.log(user[id] + 1);
+const step = Symbol("step");
+class Counter {
+  static readonly kind = Symbol("kind");
+  [id] = 1;
+  [step]() {
+    return this[id] * 2;
+  }
+}
+const counter = new Counter();
+console.log(counter[id], counter[step](), typeof Counter.kind);
+interface Labeled {
+  [id]: number;
+  label: string;
+}
+const labeled: Labeled = { [id]: 3, label: "x" };
+console.log(labeled[id]);
+let copy = id;
+copy = Symbol("next");
+const key: symbol = id;
+console.log(typeof key, copy.toString(), id.description);
+const registered = Symbol.for("shared");
+const shared = { [registered]: true };
+console.log(shared[registered], Symbol.for("shared") === registered);
+const spread = { ...user, extra: 1 };
+console.log(spread[id], Object.keys(spread));

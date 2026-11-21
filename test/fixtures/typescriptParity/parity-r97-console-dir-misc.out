@@ -1,0 +1,25 @@
+'str'
+[ 1, 'a' ]
+{ a: [Object] }
+{ arr: [ 0, 1, ... 8 more items ] }
+{
+  s: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+}
+{
+  a: 1,
+  b: {
+    c: 2
+  }
+}
+[ 1, 2, [length]: 2 ]
+Map(1) { 1 => { a: [ 1, 2 ] } }
+{
+  s: 'abcde'... 21 more characters,
+  long: 'abcab'... 25 more characters
+}
+{
+  a: [
+    1, 2, 3, 4,
+    5, 6, 7
+  ]
+}

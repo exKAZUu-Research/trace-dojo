@@ -1,0 +1,16 @@
+(3,3): error TS2322: Type 'string' is not assignable to type 'number'.
+(7,3): error TS2322: Type 'string' is not assignable to type 'number'.
+(9,7): error TS2322: Type '[undefined, string]' is not assignable to type '[number, string]'.
+  Type at position 0 in source is not compatible with type at position 0 in target.
+    Type 'undefined' is not assignable to type 'number'.
+(15,3): error TS2322: Type 'number' is not assignable to type 'string'.
+(17,7): error TS2322: Type '[string, number, boolean]' is not assignable to type '[string, number, string]'.
+  Type at position 2 in source is not compatible with type at position 2 in target.
+    Type 'boolean' is not assignable to type 'string'.
+(21,7): error TS2322: Type '[string, boolean]' is not assignable to type '[string, ...number[]]'.
+  Type at position 1 in source is not compatible with type at position 1 in target.
+    Type 'boolean' is not assignable to type 'number'.
+(26,3): error TS2322: Type 'boolean' is not assignable to type 'string'.
+(29,7): error TS2322: Type '[string, number, string]' is not assignable to type '[string, ...number[], boolean]'.
+  Type at position 2 in source is not compatible with type at position 2 in target.
+    Type 'string' is not assignable to type 'boolean'.

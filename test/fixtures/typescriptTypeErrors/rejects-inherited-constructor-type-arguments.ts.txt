@@ -1,0 +1,20 @@
+class Box<T> { constructor(public value: T) {} }
+class NumberBox extends Box<number> {}
+new NumberBox("x");
+class StringBox extends Box<string> {}
+new StringBox(123);
+class Pair<T, U = string> { constructor(public first: T, public second: U) {} }
+class NumberPair extends Pair<number> {}
+new NumberPair(1, 2);
+class ListBox<U> extends Box<U[]> {}
+new ListBox<number>(["a"]);
+class SmallBox extends NumberBox {}
+new SmallBox("x");
+class WithList<T, U = T[]> { constructor(public first: T, public rest?: U) {} }
+class NumberList extends WithList<number> {}
+new NumberList(1, [2]);
+new NumberList(1, ["x"]);
+class Wrapper extends Box<number> { constructor() { super("a"); } }
+class Inner extends NumberBox { constructor() { super("x"); } }
+const Anonymous = class extends Box<string> {};
+new Anonymous(1);

@@ -1,0 +1,10 @@
+function identity<T>(value:T):T{return value;}
+const called=identity.call(null,'g');
+const applied=identity.apply(null,['g']);
+console.log(called, applied, identity.bind(null)('bound').toUpperCase());
+function rest<T extends string[]>(...values:T):T{return values;}
+console.log(rest.call(null,'x').join(','), rest.apply(null,['y']).join(','));
+
+type GenericRest = <A extends string[]>(...values:A)=>A;
+const forward:GenericRest=<T extends string[]>(...values:T):T=>values;
+console.log(forward('same')[0].toUpperCase());

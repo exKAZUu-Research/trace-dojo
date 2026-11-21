@@ -1,0 +1,11 @@
+function ready() { return false; }
+function valid() { return true; }
+const flag = Boolean(1);
+console.log(ready && ready());
+console.log(ready && (flag && ready()));
+if (ready && valid) console.log(ready(), valid());
+while (ready) { console.log("loop"); break; }
+const subject = { ready };
+console.log(subject.ready && subject.ready());
+const candidate = ready || valid;
+console.log(candidate());

@@ -1,0 +1,2 @@
+(2,8): error TS2790: The operand of a 'delete' operator must be optional.
+(4,8): error TS2704: The operand of a 'delete' operator cannot be a read-only property.

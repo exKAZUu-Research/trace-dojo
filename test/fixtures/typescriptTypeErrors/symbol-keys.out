@@ -1,0 +1,4 @@
+(4,7): error TS2322: Type '"__@iterator"' is not assignable to type 'Extracted'.
+(6,7): error TS2322: Type 'typeof local' is not assignable to type 'typeof Symbol.iterator'.
+(7,7): error TS2322: Type 'typeof Symbol.unscopables' is not assignable to type 'typeof Symbol.iterator'.
+(8,50): error TS2322: Type 'number' is not assignable to type 'boolean | undefined'.

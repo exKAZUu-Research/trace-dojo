@@ -1,0 +1,5 @@
+class MyErr extends Error {
+  constructor(m: string) { super(m); (Error as any).captureStackTrace(this, MyErr); this.name = 'MyErr'; }
+}
+const e = new MyErr('hello');
+console.log(e.message, e.name, typeof (Error as any).captureStackTrace);

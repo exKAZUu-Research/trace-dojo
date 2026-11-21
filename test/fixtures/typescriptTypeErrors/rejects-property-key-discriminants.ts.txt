@@ -1,0 +1,41 @@
+const key = Symbol('key');
+const otherKey = Symbol('key');
+function absent(value: {[key]: number} | {other: string}) {
+  if (key in value) value.other.toUpperCase();
+  else value[key].toFixed();
+}
+function identity(value: object) {
+  if (key in value) console.log(value[otherKey]);
+}
+function optional(value: {[key]?: number} | {other: string}) {
+  if (key in value) value[key].toFixed();
+}
+type Result = {kind: 'ok'; value: string} | {kind: 'error'; value: Error};
+function wrongBranches(value: Result) {
+  if (value['kind'] === 'ok') value.value.message;
+  else value.value.toUpperCase();
+}
+function dynamicParameter(value: Result, property: 'kind') {
+  if (value[property] === 'ok') value.value.toUpperCase();
+}
+function dynamicLet(value: Result) {
+  let property = 'kind' as const;
+  if (value[property] === 'ok') value.value.toUpperCase();
+}
+function tuple(value: ['ok', string] | ['error', Error]) {
+  if (value[0] === 'ok') value[1].message;
+  else value[1].toUpperCase();
+}
+type Combined = {id: number} & ({kind: 'ok'; value: string} | {kind: 'error'; value: Error});
+function combined(value: Combined) {
+  if (value.kind === 'ok') value.value.message;
+  else value.value.toUpperCase();
+}
+type SymbolTagged = ({[key]: 'ok'} & {value: string}) | ({[key]: 'error'} & {value: Error});
+function symbolTagged(value: SymbolTagged) {
+  if (value[key] === 'ok') value.value.message;
+}
+function templateKeys(value: Result) {
+  if (value[`kind`] === 'ok') value.value.message;
+  if (value[`${'kind'}`] === 'ok') value.value.toUpperCase();
+}

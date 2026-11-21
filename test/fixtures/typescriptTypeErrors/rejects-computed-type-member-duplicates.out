@@ -1,0 +1,7 @@
+(3,3): error TS2300: Duplicate identifier 'x'.
+(4,3): error TS2300: Duplicate identifier 'x'.
+(7,3): error TS2300: Duplicate identifier 'x'.
+(8,3): error TS2300: Duplicate identifier 'x'.
+(22,3): error TS2300: Duplicate identifier '1'.
+(23,3): error TS2300: Duplicate identifier '1'.
+(26,3): error TS2717: Subsequent property declarations must have the same type.  Property '[k]' must be of type 'string', but here has type 'number'.

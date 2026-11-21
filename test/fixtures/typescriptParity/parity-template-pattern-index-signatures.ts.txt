@@ -1,0 +1,30 @@
+interface Scores {
+  [k: `math${number}`]: number;
+  [k: `note${string}`]: string;
+}
+interface Overlap {
+  [k: `a${string}`]: number | string;
+  readonly [k: `ab${string}`]: number;
+}
+const s: Scores = { math1: 90, noteA: "good" };
+s.math2 = 80;
+s["noteB"] = "ok";
+const total: number = s.math1 + s["math2"];
+console.log(total, s.noteA.toUpperCase(), s.noteB);
+type First<T extends Scores> = T["math1"];
+const first: First<Scores> = 5;
+console.log(first);
+const copy = { ...s };
+console.log(copy.math1, Object.keys(copy).join(","));
+const { math1, ...rest } = s;
+console.log(math1, rest.noteA.length);
+const key: keyof Scores = "math3";
+console.log(key);
+const o: Overlap = { a1: "x", ab1: 2 };
+o.a1 = 3;
+const ab: number = o.ab1;
+console.log(o.a1, ab + 1);
+function read<T extends Scores>(t: T): number {
+  return t.math1 * 2;
+}
+console.log(read(s));

@@ -1,0 +1,10 @@
+(2,29): error TS2555: Expected at least 1 arguments, but got 0.
+(4,30): error TS2555: Expected at least 1 arguments, but got 0.
+(6,30): error TS2554: Expected 2 arguments, but got 1.
+(8,30): error TS2554: Expected 2 arguments, but got 1.
+(10,30): error TS2554: Expected 1 arguments, but got 0.
+(12,42): error TS2554: Expected 1 arguments, but got 2.
+(12,47): error TS2554: Expected 1 arguments, but got 0.
+(14,60): error TS2555: Expected at least 1 arguments, but got 0.
+(16,30): error TS2555: Expected at least 1 arguments, but got 0.
+(17,18): error TS7006: Parameter 'x' implicitly has an 'any' type.

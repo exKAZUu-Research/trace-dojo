@@ -30,7 +30,7 @@ export function isObjectCreation(expression: Expression): boolean {
 }
 
 /** The expression inside any parentheses, which Java's parser drops and so never classifies. */
-function withoutParentheses(expression: Expression): Expression {
+export function withoutParentheses(expression: Expression): Expression {
   return expression.kind === 'parenthesized' ? withoutParentheses(expression.expression) : expression;
 }
 

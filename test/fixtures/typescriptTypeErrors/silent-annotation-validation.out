@@ -1,0 +1,4 @@
+(6,25): error TS2344: Type 'boolean' does not satisfy the constraint 'string | number | symbol'.
+(7,18): error TS2344: Type 'number' does not satisfy the constraint 'string'.
+(11,30): error TS2339: Property 'y' does not exist on type '{ x: number; }'.
+(15,26): error TS1257: A required element cannot follow an optional element.

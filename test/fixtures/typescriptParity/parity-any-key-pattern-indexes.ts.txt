@@ -1,0 +1,22 @@
+function readA(x: { [k: `a${string}`]: number }, k: any) {
+  const n: number = x[k];
+  console.log(n);
+}
+readA({ a1: 1 }, "a1");
+
+function readB(x: { [k: `b${string}`]: string }, k: any) {
+  console.log(x[k]);
+}
+readB({ b1: "hi" }, "b1");
+
+function both(x: { [k: `a${string}`]: number; [s: `b${string}`]: string }, k: any) {
+  const v: never = x[k];
+  console.log(v);
+}
+both({ a1: 1, b1: "s" }, "b1");
+
+function write(x: { [k: `a${string}`]: number }, k: any) {
+  x[k] = 2;
+  console.log(x);
+}
+write({ a1: 1 }, "a2");

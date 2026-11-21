@@ -1,0 +1,49 @@
+const primitiveSetterCalls: string[] = [];
+Object.defineProperty(String.prototype, '0', {
+  set(value: string) { primitiveSetterCalls.push('zero:' + typeof this + ':' + value); },
+  configurable: true,
+});
+Object.defineProperty(String.prototype, '4', {
+  set(value: string) { 'use strict'; primitiveSetterCalls.push('four:' + typeof this + ':' + value); },
+  configurable: true,
+});
+function strictStringWrite(value: any, key: string): void {
+  'use strict';
+  try { value[key] = 'changed'; console.log('strict-write', key, 'ok'); }
+  catch (error: any) { console.log('strict-write', key, error.name, error.message); }
+}
+function strictStringDelete(value: any, key: string): void {
+  'use strict';
+  try { console.log('strict-delete', key, delete value[key]); }
+  catch (error: any) { console.log('strict-delete', key, error.name, error.message); }
+}
+const primitiveCases: [string, string[]][] = [
+  ['abc', ['0', 'length', '4', '01', '-0']],
+  ['A😀B', ['1', '2', '3', 'length', '4']],
+  ['', ['0', 'length', '4']],
+];
+for (const [text, keys] of primitiveCases) {
+  const value: any = text;
+  console.log('string', JSON.stringify(text), text.length);
+  for (const key of keys) {
+    value[key] = 'changed';
+    console.log('sloppy-write', key, JSON.stringify(value[key]));
+    console.log('sloppy-delete', key, delete value[key]);
+    strictStringWrite(value, key);
+    strictStringDelete(value, key);
+  }
+}
+console.log(primitiveSetterCalls);
+const unicodePrimitive: any = 'A😀B';
+console.log(unicodePrimitive[1].charCodeAt(0), unicodePrimitive[2].charCodeAt(0));
+for (const nullish of [undefined, null]) {
+  const value: any = nullish;
+  try { value['0'] = 'changed'; } catch (error: any) { console.log('nullish-write', error.name, error.message); }
+  try { console.log(delete value['0']); } catch (error: any) { console.log('nullish-delete', error.name, error.message); }
+  strictStringWrite(value, '0');
+  strictStringDelete(value, '0');
+}
+const boxedText: any = Object('abc');
+console.log('boxed-delete', delete boxedText[0], delete boxedText.length, delete boxedText[4]);
+const numericPrimitive: any = 7;
+console.log('number-delete', delete numericPrimitive[0], delete numericPrimitive.length);

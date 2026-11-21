@@ -1,0 +1,5 @@
+const \u0074ype = 1; console.log(type);
+const \u0061sync = (x: number) => x; console.log(async(2));
+let \u006cet2 = 3; const s: string = let2;
+const o = { \u0069f: 1 }; const n: string = o.if;
+const { \u006b } = { k: 3 }; const after: string = k;

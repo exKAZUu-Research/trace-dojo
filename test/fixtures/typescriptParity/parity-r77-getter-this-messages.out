@@ -1,0 +1,8 @@
+TypeError Method get Map.prototype.size called on incompatible receiver #<Object>
+TypeError Method get Set.prototype.size called on incompatible receiver #<Map>
+TypeError RegExp.prototype.source getter called on non-RegExp object
+TypeError RegExp.prototype.flags getter called on non-object 5
+TypeError Symbol.prototype.toString requires that 'this' be a Symbol
+TypeError Symbol.prototype.description requires that 'this' be a Symbol
+TypeError Method Array Iterator.prototype.next called on incompatible receiver #<Object>
+TypeError Method Map Iterator.prototype.next called on incompatible receiver [object Array Iterator]

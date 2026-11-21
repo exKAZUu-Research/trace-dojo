@@ -1,0 +1,31 @@
+abstract class Abstract {
+  abstract run(): number;
+}
+class Concrete {
+  run() {
+    return 1;
+  }
+}
+function create<T extends typeof Abstract | typeof Concrete>(constructor: T) {
+  return new constructor();
+}
+create(Abstract);
+
+abstract class EmptyAbstract {}
+class EmptyConcrete {}
+function createEmpty<T extends typeof EmptyConcrete | typeof EmptyAbstract>(constructor: T) {
+  return new constructor();
+}
+createEmpty(EmptyConcrete);
+
+type AbstractConstructor = abstract new (value: number) => object;
+type ConcreteConstructor = new (value: number) => object;
+function createFromSignatures<T extends ConcreteConstructor | AbstractConstructor>(constructor: T) {
+  return new constructor(1);
+}
+function createFromIntersection<T extends ConcreteConstructor & AbstractConstructor>(constructor: T) {
+  return new constructor(1);
+}
+function createConcrete<T extends typeof Concrete | typeof EmptyConcrete>(constructor: T) {
+  return new constructor();
+}

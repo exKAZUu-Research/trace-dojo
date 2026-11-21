@@ -1,0 +1,6 @@
+const value:string|number='hello';
+class Method{text(){return value.toUpperCase();}}
+class Constructor{constructor(){console.log(value.toUpperCase());}}
+class Getter{get text(){return value.toUpperCase();}}
+function outer(){let local:string|number='hello';class Inner{method(){return local.toUpperCase();}constructor(){console.log(local.toUpperCase());}}return Inner;}
+class Fields{field=value.toUpperCase();arrow=()=>value.toUpperCase();}

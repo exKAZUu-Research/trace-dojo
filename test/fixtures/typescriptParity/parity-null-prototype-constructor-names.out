@@ -1,0 +1,14 @@
+[Other: null prototype] { value: 1 }
+[Third: null prototype] { value: 1 }
+[Box: null prototype] { value: 1 }
+[Box: null prototype] { value: 1 }
+[Box: null prototype] { value: 1 }
+[Object: null prototype] { value: 1 }
+[Object: null prototype] { value: 1 }
+[Object: null prototype] { value: 2, extra: 3 }
+[RestoredBox: null prototype] { value: 1 }
+[Object: null prototype] { value: 1 }
+[Object: null prototype] { value: 1 }
+[RestoredBox: null prototype] { value: 1 }
+[RestoredBox: null prototype] { value: 1 }
+[Object: null prototype] {}

@@ -1,0 +1,9 @@
+const x: Record<string, { a: number }> = { foo: { a: 1, b: 2 } };
+interface D { [k: string]: { a: number }; foo: { a: number } }
+const d: D = { foo: { a: 1, b: 2 }, bar: { a: 2 } };
+const n: { [k: number]: { a: number } } = { 0: { a: 1, c: 3 } };
+const r: Record<"p" | "q", { a: number }> = { p: { a: 1 }, q: { a: 2, z: 1 } };
+const ok: Record<string, { a: number }> = { foo: { a: 1 }, bar: { a: 2 } };
+function g<T>(v: Record<string, T>) { return v; }
+g({ a: { x: 1 } });
+console.log(ok.foo.a);

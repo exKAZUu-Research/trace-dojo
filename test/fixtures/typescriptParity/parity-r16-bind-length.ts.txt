@@ -1,0 +1,5 @@
+function f(a: number, b: number, c: number) { return a + b + c; }
+const g = f.bind(null, 1);
+console.log(g.length, g.name);
+console.log((f as any).bind(null, 1, 2, 3, 4).length);
+console.log(g);

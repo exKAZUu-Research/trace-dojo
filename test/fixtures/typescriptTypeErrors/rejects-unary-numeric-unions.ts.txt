@@ -1,0 +1,8 @@
+function negate(value:number|bigint){return -value;}
+function invert(value:number|bigint){return ~value;}
+function generic<T extends number|bigint>(value:T){return -value;}
+const negative:number=negate(1n);
+const complement:number=invert(1n);
+const constrained:number=generic(1n);
+function plus(value:number|bigint){return +value;}
+function genericPlus<T extends number|bigint>(value:T){return +value;}

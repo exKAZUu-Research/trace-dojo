@@ -1,0 +1,6 @@
+class OA { get v?(): number { return 1; } }
+class OB { set v?(v: number) {} }
+interface OI { get v?(): number }
+type OT = { get v?(): number };
+class OK { run?(): number; }
+console.log(new OA(), new OB(), new OK());

@@ -1,0 +1,8 @@
+class Base { protected value = 1; read() { return this.value; } }
+class Derived extends Base { public value = 2; }
+const base: Base = new Derived();
+console.log(base.read());
+class Reader { protected read() { return 'base'; } show() { return this.read(); } }
+class OpenReader extends Reader { public read() { return 'open'; } }
+const reader: Reader = new OpenReader();
+console.log(reader.show(), new OpenReader().read());

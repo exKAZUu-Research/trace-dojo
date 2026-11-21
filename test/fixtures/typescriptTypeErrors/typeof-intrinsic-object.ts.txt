@@ -1,0 +1,10 @@
+function strict(value: object) {
+  if (typeof value === 'object') {
+    const impossible: string = value;
+  }
+}
+function nullable(value: unknown) {
+  if (typeof value === 'object') {
+    const present: object = value;
+  }
+}

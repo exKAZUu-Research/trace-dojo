@@ -1,0 +1,1 @@
+(2,21): error TS2425: Class 'A' defines instance member property 'greet', but extended class 'B' defines it as instance member function.

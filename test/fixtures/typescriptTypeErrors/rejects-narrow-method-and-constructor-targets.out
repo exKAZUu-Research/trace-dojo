@@ -1,0 +1,9 @@
+(15,7): error TS2322: Type '(dog: Dog) => string' is not assignable to type '(animal: Animal) => string'.
+  Types of parameters 'dog' and 'animal' are incompatible.
+    Property 'bark' is missing in type 'Animal' but required in type 'Dog'.
+(16,7): error TS2322: Type '(dog: Dog) => string' is not assignable to type '(animal: Animal) => string'.
+  Types of parameters 'dog' and 'animal' are incompatible.
+    Property 'bark' is missing in type 'Animal' but required in type 'Dog'.
+(17,7): error TS2322: Type 'typeof DogHandler' is not assignable to type 'new (animal: Animal) => DogHandler'.
+  Types of parameters 'dog' and 'animal' are incompatible.
+    Property 'bark' is missing in type 'Animal' but required in type 'Dog'.

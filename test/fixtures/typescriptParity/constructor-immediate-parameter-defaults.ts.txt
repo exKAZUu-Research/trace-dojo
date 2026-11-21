@@ -1,0 +1,19 @@
+class Defaulted {
+  value;
+  constructor(skip: boolean) {
+    ((value = (this.value = 1)) => {})(skip ? 0 : undefined);
+  }
+}
+class Destructured {
+  value;
+  constructor() {
+    (({ inner: { number = (this.value = 2) } = {} } = {}) => {})();
+  }
+}
+class OptionalImmediate {
+  value;
+  constructor() {
+    (() => { this.value = 4; })?.();
+  }
+}
+console.log(new Defaulted(false).value, new Defaulted(true).value ?? 0, new Destructured().value, new OptionalImmediate().value);

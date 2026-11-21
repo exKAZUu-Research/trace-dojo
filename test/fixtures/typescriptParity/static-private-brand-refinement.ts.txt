@@ -1,0 +1,21 @@
+class Base {
+  static #tag = 8;
+  static read(value: typeof Base | { other: number }): number {
+    if (#tag in value) return value.#tag;
+    return "other" in value ? value.other : 0;
+  }
+  static exact(value: typeof Base): number {
+    if (#tag in value) return value.#tag;
+    const impossible: never = value;
+    return impossible;
+  }
+}
+class Derived extends Base {
+  static extra = true;
+}
+class PrivateOnly {
+  static #tag = 3;
+}
+class Unrelated {}
+const constructorValue: typeof PrivateOnly = Unrelated;
+console.log(Base.read(Base), Base.read(Derived), Base.read({ other: 5 }), Base.exact(Base), constructorValue === Unrelated);

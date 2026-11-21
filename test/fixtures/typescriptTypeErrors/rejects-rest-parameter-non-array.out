@@ -1,0 +1,14 @@
+(1,23): error TS2370: A rest parameter must be of an array type.
+(2,12): error TS2370: A rest parameter must be of an array type.
+(3,13): error TS2370: A rest parameter must be of an array type.
+(4,11): error TS2370: A rest parameter must be of an array type.
+(5,30): error TS2370: A rest parameter must be of an array type.
+(11,17): error TS2370: A rest parameter must be of an array type.
+(12,14): error TS2370: A rest parameter must be of an array type.
+(13,17): error TS2370: A rest parameter must be of an array type.
+(13,43): error TS2370: A rest parameter must be of an array type.
+(14,13): error TS2370: A rest parameter must be of an array type.
+(17,15): error TS2370: A rest parameter must be of an array type.
+(18,15): error TS7019: Rest parameter 'a' implicitly has an 'any[]' type.
+(19,24): error TS2488: Type 'number' must have a '[Symbol.iterator]()' method that returns an iterator.
+(22,33): error TS2370: A rest parameter must be of an array type.

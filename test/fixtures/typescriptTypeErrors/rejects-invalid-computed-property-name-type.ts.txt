@@ -1,0 +1,18 @@
+const enabled = true;
+const flagged = { [enabled]: 1 };
+const key = { id: 1 };
+const keyed = { [key]: "value" };
+const method = { [enabled]() { return 1; } };
+const getter = { get [key]() { return 1; } };
+class Flagged { [enabled]() { return 1; } }
+const unknownKey: unknown = 1;
+const fromUnknown = { [unknownKey]: 1 };
+const either: string | number = Number("1") > 0.5 ? "a" : 1;
+const fromEither = { [either]: 1 };
+const missing: undefined = undefined;
+const fromMissing = { [missing]: 1 };
+function make<T extends PropertyKey, U>(t: T, u: U) { return { [t]: 1, [u]: 2 }; }
+const big = { [10n]: 1 };
+const loose: any = "k";
+const fromAny = { [loose]: 1, [Symbol("s")]: 2, ["s"]: 3, [4]: 5 };
+console.log(flagged, keyed, method, getter, new Flagged(), fromUnknown, fromEither, fromMissing, make("a", "b"), big, fromAny);

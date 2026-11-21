@@ -1,0 +1,3 @@
+type Dict = { [key: string]: number; name: string };
+const d: Dict = { name: 1 as never };
+console.log(d);

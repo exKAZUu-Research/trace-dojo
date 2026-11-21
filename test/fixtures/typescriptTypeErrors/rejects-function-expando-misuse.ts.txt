@@ -1,0 +1,23 @@
+let f = (a: number) => String(a);
+f.desc = "d";
+const m: () => number = () => 1;
+m.z = 1;
+const n = 1 > 0 ? () => 1 : () => 2;
+n.w = 2;
+const p = ((a: number) => a);
+p.r = 1;
+function a() { return 1; }
+console.log(a.u);
+a.u = 1;
+const b = () => 1;
+console.log(b.u);
+b.u = 1;
+const c = () => 1;
+if (c) { c.u = 1; }
+console.log(c.u);
+const e = () => 1;
+function setE() { e.v = 1; }
+setE();
+const g = () => 1;
+for (let i = 0; i < 1; i++) g.w = i;
+console.log(g.w);

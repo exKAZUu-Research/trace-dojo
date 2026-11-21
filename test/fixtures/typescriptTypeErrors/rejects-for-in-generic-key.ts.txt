@@ -1,0 +1,24 @@
+function a<T extends object>(o: T) {
+  const r = {} as { [K in keyof T]: string };
+  for (const k in o) {
+    r[k] = 1;
+    const v: T[keyof T] = o[k];
+    const w: T[Extract<keyof T, string>] = o[k];
+    const s: string = k;
+  }
+}
+function b<T extends { a: number }>(o: T | undefined) {
+  for (const k in o) { const x: keyof T = k; }
+}
+function c<T extends { a: number }>(o: T & { b: string }) {
+  for (const k in o) { const x: keyof T = k; }
+}
+function d(o: { a: number }) {
+  for (const k in o) { const x: "a" = k; }
+}
+function e<T extends Record<string, number>>(o: T) {
+  for (const k in o) { const n: number = o[k]; const m: string = o[k]; }
+}
+function f<T extends { a: number }>(o: T | { b: string }) {
+  for (const k in o) { const x: keyof T = k; }
+}

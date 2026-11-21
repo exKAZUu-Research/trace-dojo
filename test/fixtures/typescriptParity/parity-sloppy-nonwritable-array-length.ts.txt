@@ -1,0 +1,4 @@
+const a: any = [1, 2];
+Object.defineProperty(a, "length", { writable: false });
+try { a.push(3); } catch (e) { console.log((e as Error).name); }
+console.log(a);

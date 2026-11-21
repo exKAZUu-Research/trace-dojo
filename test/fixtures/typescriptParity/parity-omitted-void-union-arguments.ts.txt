@@ -1,0 +1,14 @@
+type MaybeVoid = number | void;
+function a(x: MaybeVoid) { console.log(x); }
+a();
+function g<T>(x: T | void) { console.log(x); }
+g<string>();
+g();
+class C { constructor(x: boolean | void) { console.log(x); } m(y: string | void, z: void) { console.log(y, z); } }
+new C().m();
+const fn: (p: number | void) => void = (p) => console.log(p);
+fn();
+const target: () => void = a;
+target();
+function f(x: string | void) { console.log(x); } f();
+const h = (x: number, y: void | boolean) => console.log(x, y); h(1);

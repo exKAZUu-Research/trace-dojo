@@ -1,0 +1,7 @@
+interface A<T> { x: T }
+interface A<U> { y: U }
+const a: A<number> = { x: 1, y: 2 };
+interface B<T extends number> { x: T }
+interface B<T extends string> { y: T }
+interface C<T = number> { x: T }
+interface C<T = string> { y: T }

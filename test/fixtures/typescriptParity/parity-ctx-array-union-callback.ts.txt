@@ -1,0 +1,4 @@
+function lens(arr: string[] | number[]): void {
+  arr.forEach((x) => console.log(typeof x === "string" ? x.length : x.toFixed(0)));
+}
+lens(["a"]);

@@ -1,0 +1,5 @@
+(1,15): error TS2687: All declarations of 'x' must have identical modifiers.
+(2,15): error TS2687: All declarations of 'x' must have identical modifiers.
+(2,15): error TS2717: Subsequent property declarations must have the same type.  Property 'x' must be of type 'number', but here has type 'number | undefined'.
+(3,24): error TS2687: All declarations of 'x' must have identical modifiers.
+(4,15): error TS2687: All declarations of 'x' must have identical modifiers.

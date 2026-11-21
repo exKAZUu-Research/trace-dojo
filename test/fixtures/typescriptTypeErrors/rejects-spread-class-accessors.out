@@ -1,0 +1,4 @@
+(3,21): error TS2339: Property 'value' does not exist on type '{}'.
+(6,20): error TS2339: Property 'value' does not exist on type '{ v: number; }'.
+(11,21): error TS2339: Property 'doubled' does not exist on type '{ v: number; w: number; }'.
+(20,7): error TS2322: Type '{ v: number; w: number; n: number; }' is not assignable to type 'number'.

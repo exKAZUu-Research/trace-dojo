@@ -1,0 +1,12 @@
+function f(a?: number) { return a; }
+function g(a: number, b?: string) { return a; }
+function h(a: number) { return a; }
+function k(a: number, b: string) { return a; }
+const t: [number?] = [];
+const u: [number, string?] = [1];
+f(...t);
+g(...u);
+h(...t);
+k(...u);
+g(...t);
+f(1, ...t);

@@ -1,0 +1,23 @@
+let reads = 0;
+const object = {
+  get only() { reads++; return 1; },
+  get both() { reads++; return 2; },
+  set both(value: number) { reads += value; },
+};
+for (const getters of ['all', 1, ['get'], false, 'get', 'set', true]) {
+  console.dir(object, { getters });
+  console.log(reads);
+}
+const method = Object.prototype.toLocaleString;
+for (const receiver of [null, undefined]) {
+  try { method.call(receiver); }
+  catch (error) { if (error instanceof Error) console.log(error.message); }
+}
+const custom = {
+  n: 12,
+  get toString() {
+    console.log('read toString');
+    return function (this: { n: number }) { return 'custom ' + this.n; };
+  },
+};
+console.log(method.call(custom), method.call(42));

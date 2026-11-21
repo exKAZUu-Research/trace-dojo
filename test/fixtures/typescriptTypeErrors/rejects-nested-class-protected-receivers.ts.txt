@@ -1,0 +1,12 @@
+class ProtectedRoot { protected x = 1; }
+class ProtectedDerived extends ProtectedRoot {
+  make() { return new class { get(a: ProtectedRoot) { return a.x; } }; }
+}
+class PrivateRoot { private x = 1; }
+class PrivateDerived extends PrivateRoot {
+  make() { return new class { get(a: PrivateRoot) { return a.x; } }; }
+}
+class NestedDerivedAccess {
+  protected value=4;
+  make() { return new class extends NestedDerivedAccess { get(a:NestedDerivedAccess) { return a.value; } }; }
+}

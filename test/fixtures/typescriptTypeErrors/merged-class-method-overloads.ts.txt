@@ -1,0 +1,15 @@
+interface Arg { action(value: number): void; }
+class Arg { action(value: string) { console.log(value.toUpperCase()); } }
+new Arg().action(1);
+
+class Returned { action(value: number) { return value; } }
+interface Returned { action(value: number): string; }
+
+const prop = Symbol("action");
+interface Keyed { [prop](value: number): void; }
+class Keyed { [prop](value: string) { console.log(value.toUpperCase()); } }
+
+class Ordinary {
+  action(value: number): void;
+  action(value: string) { console.log(value.toUpperCase()); }
+}

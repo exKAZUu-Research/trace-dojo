@@ -1,0 +1,7 @@
+[ 1, 'a' ] 1
+[ 2, 3 ]
+yesyes
+boxbox
+{ n: 2 } { n: 2 }
+[ { n: 4 } ] 3
+{ n: 4, detail: 'extra' } { n: 2 }

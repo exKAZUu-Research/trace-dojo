@@ -1,0 +1,2 @@
+console.log(encodeURIComponent("a b&é"), decodeURIComponent("%E3%81%82"), encodeURI("http://x/a b"), decodeURI("%20"));
+try { decodeURIComponent("%zz"); } catch (e: any) { console.log(e.name, e.message, e instanceof URIError); }

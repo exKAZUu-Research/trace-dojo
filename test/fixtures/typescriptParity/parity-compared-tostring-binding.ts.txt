@@ -1,0 +1,5 @@
+const f = () => 1;
+const b1 = f.toString;
+console.log(typeof b1, b1 === Function.prototype.toString);
+const b2 = (f.toString);
+console.log(b2 !== undefined);

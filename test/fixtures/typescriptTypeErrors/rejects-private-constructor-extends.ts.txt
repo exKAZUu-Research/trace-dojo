@@ -1,0 +1,9 @@
+class Singleton { private constructor() {} }
+class Derived extends Singleton {}
+class GrandChild extends Derived {}
+const Alias = Singleton;
+class FromAlias extends Alias {}
+class WithConstructor extends Singleton { constructor() { super(); } }
+class Generic<T> { private constructor(public value: T) {} }
+class FromGeneric extends Generic<number> {}
+const Anonymous = class extends Singleton {};

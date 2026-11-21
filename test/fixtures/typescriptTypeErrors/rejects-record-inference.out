@@ -1,0 +1,11 @@
+(4,18): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(5,20): error TS2551: Property 'toFixed' does not exist on type 'string'. Did you mean 'fixed'?
+(6,7): error TS2322: Type '"a"' is not assignable to type '"b"'.
+(7,7): error TS2322: Type 'string | number' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+(8,15): error TS2339: Property 'toFixed' does not exist on type 'never'.
+(10,1): error TS2571: Object is of type 'unknown'.
+(11,11): error TS2353: Object literal may only specify known properties, and 'b' does not exist in type 'Record<"a", number>'.
+(13,7): error TS2322: Type 'string | number' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+(15,1): error TS2571: Object is of type 'unknown'.

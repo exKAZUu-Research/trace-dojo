@@ -1,0 +1,8 @@
+(1,36): error TS2536: Type 'symbol' cannot be used to index type 'T'.
+(2,40): error TS2536: Type 'symbol' cannot be used to index type 'T'.
+(3,46): error TS2536: Type 'symbol' cannot be used to index type 'T'.
+(4,46): error TS2536: Type 'string | symbol' cannot be used to index type 'T'.
+(6,36): error TS2536: Type 'unique symbol' cannot be used to index type 'T'.
+(7,46): error TS2536: Type 'unique symbol' cannot be used to index type 'T'.
+(9,46): error TS2536: Type 'number | symbol' cannot be used to index type 'T'.
+(11,24): error TS2536: Type '"1"' cannot be used to index type 'T'.

@@ -1,0 +1,6 @@
+function f(x: string | undefined) { let y: string | number = 1; x ||= (y = "a"); console.log(y.toUpperCase()); }
+function g(x: string) { let y: string | number = 1; x &&= (y = "a"); console.log(y.toUpperCase()); }
+function h(x: string | undefined) { let y: string | number = 1; x ??= (y = "a"); console.log(y.toUpperCase()); }
+function k(x: string | undefined) { x ??= "d"; const s: string = x; return s; }
+function m(x: string | undefined) { let y: number; x ||= String(y = 1); return y; }
+console.log(k(undefined));

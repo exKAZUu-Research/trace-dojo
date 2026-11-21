@@ -1,0 +1,8 @@
+const a = [1, , ] as const;
+console.log(a.length, a[1]);
+const b = [, ,];
+console.log(b.length, b[0]);
+const c: [number, undefined] = [2, ,];
+console.log(c.length);
+const d = [, 3, ,];
+console.log(d.length, d[1]);

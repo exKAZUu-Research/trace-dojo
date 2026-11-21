@@ -1,0 +1,84 @@
+function pair<T extends [number, string?]>(source: T): [number, string?] {
+  return [...source];
+}
+function copyOpen<T extends [string, ...number[]]>(source: T): [string, ...number[]] {
+  return [...source];
+}
+function readonly<T extends readonly [a: number, ...rest: string[]]>(source: T): [number, ...string[]] {
+  return [...source];
+}
+function both<T extends [number] | [number, string]>(source: T): [number, string?] {
+  return [...source];
+}
+function wrapped<T extends readonly [number, ...string[]]>(source: T): [bool: boolean, number, ...string[]] {
+  return [false, ...source];
+}
+console.log(pair([1, 'ready']), copyOpen(['ready', 1, 2]));
+console.log(readonly([1, 'a', 'b'] as const), both([2]), wrapped([3, 'c']));
+
+function nested<U extends [number], T extends [...U, string]>(source: T): [number, string] {
+  return [...source];
+}
+function nestedReadonly<U extends readonly [number], T extends readonly [...U, string]>(source: T): [number, string] {
+  return [...source];
+}
+function tagged<T extends [number] & { tag: string }>(source: T): [number] {
+  return [...source];
+}
+function zipped<U extends [number], V extends [string], T extends [...U, ...V]>(source: T): [number, string] {
+  return [...source];
+}
+function choice<T extends ([number] & { tag: string }) | ([string] & { tag: string })>(source: T): [number | string] {
+  return [...source];
+}
+function narrower<T extends [number] & [1]>(source: T): [1] {
+  return [...source];
+}
+console.log(
+  nested<[number], [number, string]>([1, 'a']),
+  nestedReadonly<readonly [number], readonly [number, string]>([2, 'b']),
+  tagged(Object.assign([3] as [number], { tag: 'tag' })),
+  zipped<[number], [string], [number, string]>([4, 'd']),
+  choice(Object.assign(['choice'] as [string], { tag: 'tag' })),
+  narrower([1])
+);
+
+function readonlyTagged<T extends readonly [number] & { tag: string }>(source: T): readonly [number] {
+  return [...source];
+}
+function mixed<T extends [number] & readonly [1]>(source: T): [number] {
+  return [...source];
+}
+function readonlyMixed<T extends [number] & readonly [1]>(source: T): readonly [1] {
+  return [...source];
+}
+function readonlyChoice<T extends [number] | (readonly [string] & { tag: string })>(source: T): readonly [number | string] {
+  return [...source];
+}
+console.log(
+  readonlyTagged(Object.assign([5] as const, { tag: 'tag' })),
+  mixed([1]),
+  readonlyMixed([1]),
+  readonlyChoice(Object.assign(['six'] as const, { tag: 'tag' }))
+);
+
+function sameTagged<T extends [number] & { tag: string }>(source: T): T {
+  return [...source];
+}
+function positionalTagged<T extends [number] & { tag: string }>(source: T): { 0: number } {
+  return [...source];
+}
+function relayed<A extends [number], T extends A>(source: T): T {
+  return [...source];
+}
+const positional: { 0: 'first'; 1: 2 } = ['first', 2];
+const exactLength: string[] & { length: 1 } = ['one'];
+const intersected: { 0: 'first' } & { 1: 'second' } = ['first', 'second'];
+console.log(
+  sameTagged(Object.assign([1] as [number], { tag: 'tag' })),
+  positionalTagged(Object.assign([2] as [number], { tag: 'tag' })),
+  relayed([3]),
+  positional,
+  exactLength,
+  intersected
+);

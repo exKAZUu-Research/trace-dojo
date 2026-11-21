@@ -1,0 +1,7 @@
+const t: "a\nb" = `a\nb`;
+const u: `a\nb` = "a\nb";
+const v: `xA${number}` = "xA1";
+const w: "a\tb" = `a\tb`;
+const q: "a`b" = `a\`b`;
+const bad: "ab" = `a\nb`;
+console.log(t, u, v, w, q);

@@ -1,0 +1,17 @@
+function checked<T>(value: T) {
+  if (typeof value === "object" && value !== null) return value.toString();
+}
+function reversed<T>(value: T) {
+  if (value != null && typeof value === "object") return value["toString"]();
+}
+function optional<T>(value: T) {
+  if (typeof value === "object") return value?.toString();
+}
+function preserved<T extends { id: number } | null>(value: T) {
+  if (typeof value === "object" && value !== null) return value.id;
+}
+function exact<T extends { id: number }>(value: T) {
+  if (typeof value === "object") return value.id;
+}
+console.log(checked(null), checked({}), reversed({}), optional(null), optional({}));
+console.log(preserved(null), preserved({ id: 1 }), exact({ id: 2 }));

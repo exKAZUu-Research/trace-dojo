@@ -1,0 +1,15 @@
+console.table([1, "two", { a: 1 }]);
+console.table({ x: { a: 1, b: [1, 2, 3, 4] }, y: { b: "s", c: null } });
+console.table(new Map([["k", 1], ["j", 2]]));
+console.table(new Set(["a", "b"]));
+console.table([{ a: 1, b: 2 }, { a: 3 }], ["a"]);
+console.table("not tabular");
+console.table([[1, 2], [3, 4, 5]]);
+console.table([{ 名前: "亀", x: { p: 1, q: 2, r: 3 } }]);
+console.log("%o", [1, [2, 3]], "%o");
+console.log("%o", []);
+console.log("%o", Array.from({ length: 8 }, (_, i) => i));
+console.dirxml("x", 1);
+console.trace("t");
+console.clear();
+console.log("end");

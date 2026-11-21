@@ -1,0 +1,6 @@
+(5,50): error TS2322: Type 'number | null' is not assignable to type 'number'.
+  Type 'null' is not assignable to type 'number'.
+(10,7): error TS2322: Type 'string | number' is not assignable to type 'string'.
+  Type 'number' is not assignable to type 'string'.
+(13,3): error TS2339: Property 'tag' does not exist on type '() => number'.
+(14,15): error TS2339: Property 'tag' does not exist on type '() => number'.

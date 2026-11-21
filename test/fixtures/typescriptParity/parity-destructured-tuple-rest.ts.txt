@@ -1,0 +1,7 @@
+function tupleRest(...[n, s]: [number, string]) { return n + s.toUpperCase(); }
+function prefixed(prefix: string, ...[n, s]: [number, string]) { return prefix + n + s.toUpperCase(); }
+const contextual: (n: number, s: string) => string = (...[n, s]) => n + s.toUpperCase();
+function nested(...[{value}, [first, second]]: [{value: number}, [number, string]]) { return value + first + second.toUpperCase(); }
+console.log(tupleRest(1, "b"), prefixed("a", 2, "b"), contextual(3, "b"), nested({value: 4}, [5, "b"]));
+function optionalTupleRest(...[n, s = "fallback"]: [number, string?]) { return n + s.toUpperCase(); }
+console.log(optionalTupleRest(6));

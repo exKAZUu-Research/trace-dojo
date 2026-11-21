@@ -1,0 +1,29 @@
+class EarlyRead {
+  x: number;
+  #amount: number;
+  constructor() {
+    console.log(this.x);
+    console.log(this["x"]);
+    (() => console.log(this.#amount))();
+    this.x = 1;
+    this.#amount = 2;
+  }
+}
+class CompoundRead {
+  value: number;
+  constructor() {
+    this.value += 1;
+    console.log(this.value);
+  }
+}
+class ConditionalWrite {
+  value: number;
+  constructor() {
+    this.value &&= 1;
+    console.log(this.value);
+  }
+}
+class VoidField {
+  value: void;
+  constructor() { console.log(this.value); }
+}

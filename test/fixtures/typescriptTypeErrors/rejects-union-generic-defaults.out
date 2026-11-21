@@ -1,0 +1,7 @@
+(6,30): error TS2349: This expression is not callable.
+  Each member of the union type 'H' has signatures, but none of those signatures are compatible with each other.
+(8,29): error TS2322: Type '1 | 1[]' is not assignable to type 'null'.
+  Type '1' is not assignable to type 'null'.
+(10,29): error TS2322: Type 'true' is not assignable to type 'null'.
+(11,18): error TS7006: Parameter 'x' implicitly has an 'any' type.
+(11,34): error TS7006: Parameter 'x' implicitly has an 'any' type.

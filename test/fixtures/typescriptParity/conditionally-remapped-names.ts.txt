@@ -1,0 +1,40 @@
+type Direct<T,K extends keyof T> =
+  T[K] extends {key:'x'} ? {[P in 'a' as T[K]['key']]:number}['x'] : never;
+type ViaReadonly<T,K extends keyof T> =
+  T[K] extends {key:'x'} ? Readonly<{[P in 'a' as T[K]['key']]:number}>['x'] : never;
+type WithPrefix<T,K extends keyof T> =
+  T[K] extends {key:'x'} ? {[P in 'a' as `pre-${T[K]['key']}`]:number}['pre-x'] : never;
+type BoundedIndex<T extends Record<string,{key:'x'|'y'}>,K extends keyof T> =
+  T[K] extends {key:'x'} ? {[P in 'a' as T[K]['key']]:number}['x'] : never;
+type Bounded<T extends {key:'x'|'y'}> =
+  T extends {key:'x'} ? {[P in 'a' as T['key']]:number}['x'] : never;
+type ReadonlyBoundedIndex<T extends Record<string,{key:'x'|'y'}>,K extends keyof T> =
+  T[K] extends {key:'x'} ? Readonly<{[P in 'a' as T[K]['key']]:number}>['x'] : never;
+type ReadonlyBounded<T extends {key:'x'|'y'}> =
+  T extends {key:'x'} ? Readonly<{[P in 'a' as T['key']]:number}>['x'] : never;
+type Upper<T,K extends keyof T> =
+  T[K] extends {key:'x'} ? {[P in 'a' as Uppercase<T[K]['key']>]:number} : never;
+type Numeric<T, K extends keyof T> =
+  T[K] extends {key: 2} ? {[P in 'a' as T[K]['key']]: number}[2] : never;
+type Alternatives<T, K extends keyof T> =
+  T[K] extends {key: 'x' | 'y'} ? {[P in 'a' as T[K]['key']]: number}['x'] : never;
+type Unspellable<T, K extends keyof T> =
+  T[K] extends {a: never, b: never} ? Uppercase<T[K]['a'] | T[K]['b']> : never;
+type Mixed<T,K extends keyof T> =
+  T[K] extends {key:'x'} ? {[P in 'a'|'b' as `${P}-${T[K]['key']}`]:P}['b-x'] : never;
+type NameFromValue<T extends string> = {[P in 'a' as T]: number};
+const count: Direct<{p: {key: 'x'}}, 'p'> = 42;
+const mixed: Mixed<{p: {key: 'x'}}, 'p'> = 'b';
+const concrete: NameFromValue<'value'> = {value: 2};
+const primitive: keyof NameFromValue<'value'> = 'value';
+console.log(count, mixed, concrete.value, primitive);
+interface Box<T> { value: T }
+type Remap<T> = {[K in keyof T as K]: T[K]};
+type ConditionalRemap<T> = {[K in keyof T as K extends string ? K : never]: T[K]};
+type Frozen = Box<FrozenLink>;
+type FrozenLink = Remap<Box<Frozen>['value']>;
+type Conditional = Box<ConditionalLink>;
+type ConditionalLink = ConditionalRemap<Box<Conditional>['value']>;
+const frozen: Frozen = {value: {value: {} as FrozenLink}};
+const conditional: Conditional = {value: {value: {} as ConditionalLink}};
+console.log(typeof frozen.value, typeof conditional.value);

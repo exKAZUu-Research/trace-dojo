@@ -1,0 +1,23 @@
+function readNumeric<T extends { [key: `${number}`]: string }>(table: T): string {
+  const first: string = table[1];
+  return first;
+}
+function writeNumeric<T extends { [key: `${number}`]: string }>(table: T): void {
+  table[1] = "a";
+}
+function readNamed<T extends { name: string }>(record: T): number {
+  const name: number = record["name"];
+  return name;
+}
+function writeThroughIndex<T extends Record<string, number>>(scores: T, key: string): void {
+  scores[key] = 1;
+  scores["total"] += 1;
+  scores.average = 0;
+}
+function writeNumbered<T extends { [index: number]: string }>(items: T): void {
+  items[0] = "first";
+}
+function readUnconstrained<T>(value: T): unknown {
+  return value[0];
+}
+console.log(readNumeric({ "0": "a" }), readNamed({ name: "b" }), writeNumbered, writeNumeric, writeThroughIndex, readUnconstrained);

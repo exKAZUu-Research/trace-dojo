@@ -1,0 +1,17 @@
+type Pick2<X, T> = X extends false ? T : string;
+type Inferred<X, T> = X extends [infer H] ? T : string;
+type Reversed<T> = string extends T ? T : number;
+type Wrapped<T> = T[] extends string[] ? T : number;
+type Last<T> = T extends [infer H] ? H : T extends [unknown, ...infer R] ? Last<R> : never;
+type Deep<T> = T extends [infer H, ...infer R] ? Deep<R> : T;
+function picked<T extends Pick2<true, T>>() {}
+function chosen<T extends Pick2<false, T>>() {}
+function distributed<T extends Pick2<boolean, T>>() {}
+function inferred<T extends Inferred<[1], T>>() {}
+function unmatched<T extends Inferred<1, T>>() {}
+function reversed<T extends Reversed<T>>() {}
+function anyCheck<T extends (any extends false ? T : string)>() {}
+function wrapped<T extends Wrapped<T>>() {}
+function last<T extends Last<[1, T]>>() {}
+function deep<T extends Deep<T>>() {}
+console.log('ready');

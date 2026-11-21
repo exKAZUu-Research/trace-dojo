@@ -1,0 +1,4 @@
+(5,3): error TS2322: Type 'U' is not assignable to type 'string'.
+(8,3): error TS2322: Type 'U' is not assignable to type 'string'.
+(14,3): error TS2322: Type 'U' is not assignable to type 'number'.
+(20,3): error TS2322: Type 'U' is not assignable to type 'string'.

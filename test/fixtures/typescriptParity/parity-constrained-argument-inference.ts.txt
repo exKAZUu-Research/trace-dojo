@@ -1,0 +1,48 @@
+function first<U>(items: U[]): U {
+  return items[0];
+}
+function valueOf<U>(box: { v: U }): U {
+  return box.v;
+}
+function anyValue<U>(record: Record<string, U>): U {
+  return Object.values(record)[0];
+}
+function valuesOf<U>(map: Map<string, U>): U[] {
+  return [...map.values()];
+}
+
+function firstPlusOne<T extends number[]>(items: T): number {
+  return first(items) + 1;
+}
+function sum<T extends Record<string, number>>(record: T): number {
+  return Object.values(record).reduce((a, b) => a + b, 0);
+}
+function largest<T extends Record<string, number>>(record: T): number {
+  return Math.max(...Object.values(record));
+}
+function doubled<T extends Record<string, number>>(record: T): number[] {
+  return Object.values(record).map((x) => x * 2);
+}
+function loopSum<T extends Record<string, number>>(record: T): number {
+  let total = 0;
+  for (const value of Object.values(record)) total += value;
+  return total;
+}
+function boxed<T extends { v: number }>(box: T): number {
+  return valueOf(box) * 10;
+}
+function anyPlusOne<T extends Record<string, number>>(record: T): number {
+  return anyValue(record) + 1;
+}
+function mapFirst<T extends Map<string, number>>(map: T): number {
+  return valuesOf(map)[0] + 1;
+}
+function either<T extends number[] | string[]>(items: T): string {
+  return String(first<number | string>(items));
+}
+
+const scores = { math: 3, art: 5 };
+console.log(firstPlusOne([1, 2]));
+console.log(sum(scores), largest(scores), doubled(scores), loopSum(scores));
+console.log(boxed({ v: 4, label: "x" }), anyPlusOne(scores));
+console.log(mapFirst(new Map([["a", 7]])), either(["q"]));

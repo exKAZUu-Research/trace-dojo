@@ -1,0 +1,27 @@
+'use strict';
+console.log(typeof this, this === undefined, Object.keys(this));
+function ordinary(this: unknown) {
+  console.log(this === undefined);
+}
+ordinary();
+
+function named() {}
+Object.defineProperty(named, 'length', {
+  get() { console.log('length'); return 3; },
+});
+Object.defineProperty(named, 'name', {
+  get() { console.log('name'); return 'accessor'; },
+});
+const bound = named.bind(null);
+console.log(bound.name, bound.length);
+delete (named as any).name;
+Object.setPrototypeOf(named, Object.create(Function.prototype, { name: { value: 'inherited' } }));
+console.log(named.bind(null).name);
+
+function numeric() {}
+console.log('%i %f', numeric, numeric);
+console.log(parseInt(numeric as any), Number.parseFloat(numeric as any));
+Object.defineProperty(numeric, 'toString', {
+  value() { console.log('string hint'); return '12.5'; },
+});
+console.log('%i %f', numeric, numeric);

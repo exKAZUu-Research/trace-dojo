@@ -1,0 +1,28 @@
+type Result = ['success', string] | ['failure', Error];
+function show(result: Result) {
+ const [status, value] = result;
+ if (status === 'success') console.log(value.toUpperCase());
+ else console.log(value.message);
+}
+show(['success', 'ok']);
+function showPair(...[kind, value]: ['text', string] | ['count', number]) {
+  if (kind === 'text') console.log(value.toUpperCase());
+  else console.log(value.toFixed());
+}
+showPair('text', 'ok');
+showPair('count', 3);
+function pick(flag: boolean): [1, 'a'] | [2, 'b', true] {
+  return flag ? [1, 'a'] : [2, 'b', true];
+}
+const [x, y] = pick(true);
+const kx: 1 | 2 = x;
+const ky: 'a' | 'b' = y;
+const [p, q, r] = pick(false);
+const [m, ...rest] = pick(false);
+const rr: ['a'] | ['b', true] = rest;
+function mixed(flag: boolean): [1, 'a'] | string[] {
+  return flag ? [1, 'a'] : ['s'];
+}
+const [u, v] = mixed(true);
+const uu: 1 | string = u;
+console.log(x, y, p, q, r, m, rest, u, v, kx, ky, rr, uu);

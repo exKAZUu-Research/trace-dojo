@@ -1,0 +1,16 @@
+function r1<K extends string>() { const x: Record<K, number> = {}; return x; }
+function r2<T>() { const x: { [P in keyof T]: number } = {}; return x; }
+function r3<T>() { const x: Required<T> = {}; return x; }
+function r4<T>() { const x: Partial<T> = { a: 1 }; return x; }
+function r5<T>() { const x: Readonly<T> = {}; return x; }
+function r6<T>(p: Partial<T>) { const x: Partial<T> = p; const y: Partial<T> = {} as Partial<T>; return [x, y]; }
+function r7<T>() { const x: { [P in keyof T]?: T[P] } = {}; return x; }
+function r8<T>() { const x: { -readonly [P in keyof T]?: T[P] } = {}; return x; }
+function r9<T>() { const x: { [P in keyof T]+?: T[P] } = {}; return x; }
+function r10<T>() { const x: { [P in keyof T]-?: T[P] } = {}; return x; }
+function r11<T>() { const e = {}; const x: Partial<T> = e; return x; }
+function r12<T>(o: object) { const x: Partial<T> = o; return x; }
+function r13<T>() { const x: Partial<T> = []; return x; }
+function r14<T>() { const x: Pick<T, keyof T> = {}; return x; }
+function r15<T, K extends keyof T>() { const x: Partial<Pick<T, K>> = {}; return x; }
+function r16<T>() { const x: Partial<T> = { } as {}; return x; }

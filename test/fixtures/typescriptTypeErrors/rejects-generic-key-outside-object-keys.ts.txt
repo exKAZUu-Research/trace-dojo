@@ -1,0 +1,29 @@
+function read<K extends string | number>(k: K, r: Record<string, number>): number {
+  return r[k];
+}
+function write<K extends string | number>(k: K, r: Record<string, number>): void {
+  r[k] = 1;
+}
+function literalKeys<K extends "a" | 1>(k: K, r: Record<string, number>): number {
+  return r[k];
+}
+function fromNumberRecord<K extends string>(k: K, r: Record<number, number>): number {
+  return r[k];
+}
+function fromArray<K extends string | number>(k: K, r: number[]): number {
+  return r[k];
+}
+function fromEither<K extends string | number>(k: K, r: Record<string, number> | { [key: string]: number }): number {
+  return r[k];
+}
+function fromSignature<K extends string | number>(k: K, r: { [key: string]: number }): number {
+  return r[k];
+}
+function byNumber<K extends number>(k: K, r: Record<string, number>): number {
+  return r[k];
+}
+const key: keyof Record<string, number> = 1;
+const mappedKey: keyof { [P in string]: number } = 2;
+const signatureKey: keyof { [key: string]: number } = 3;
+console.log(read, write, literalKeys, fromNumberRecord, fromArray, fromEither, fromSignature, byNumber);
+console.log(key, mappedKey, signatureKey);

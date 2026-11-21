@@ -1,0 +1,1 @@
+(1,11): error TS2869: Right operand of ?? is unreachable because the left operand is never nullish.

@@ -1,0 +1,14 @@
+Object.defineProperty(Object.prototype, 'common', { value: 1, enumerable: true });
+Object.defineProperty(String.prototype, 'specific', { configurable: true, value: 1, enumerable: true });
+Object.defineProperty(Number.prototype, 'common', { value: 2, enumerable: false });
+function keys(value: any): string {
+  const visited: string[] = [];
+  for (const key in value) visited.push(key);
+  return visited.join(',');
+}
+console.log(keys('a😀'), keys(1) || '-');
+console.log(keys(true), keys(1n), keys(Symbol('local')), keys(null) || '-', keys(undefined) || '-');
+for (const key in 'ab' as any) {
+  if (key === '0') delete (String.prototype as any).specific;
+  console.log(key);
+}

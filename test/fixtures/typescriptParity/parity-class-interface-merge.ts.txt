@@ -1,0 +1,49 @@
+class Point {
+  constructor(public x: number) {}
+}
+interface Point {
+  label?: string;
+}
+const p = new Point(1);
+p.label = "a";
+console.log(p.x, p.label);
+
+interface Box<T> {
+  tag?: T;
+}
+class Box<T> {
+  constructor(public value: T) {}
+}
+const box = new Box(1);
+box.tag = 2;
+const tag: number | undefined = box.tag;
+console.log(box.value, tag);
+
+interface Named {
+  name: string;
+}
+class Pet {
+  constructor(name: string) {
+    this.name = name;
+  }
+}
+interface Pet extends Named {
+  describe?(): string;
+}
+const pet: Pet = new Pet("Tama");
+pet.describe = () => `pet ${pet.name}`;
+console.log(pet.describe?.());
+const plain: Point = { x: 2 };
+console.log(plain.x);
+class Greeter {
+  greet(): string {
+    return "hi";
+  }
+}
+interface Greeter {
+  greet(name: string): string;
+}
+Greeter.prototype.greet = function (name?: string) {
+  return name ? `hi ${name}` : "hi";
+};
+console.log(new Greeter().greet(), new Greeter().greet("Ann"));

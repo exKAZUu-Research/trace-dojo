@@ -1,0 +1,19 @@
+function inc<T extends { n: number }>(o: T): T { o["n"] = 5; o.n = 6; return o; }
+function reset<T extends { n: number; s: string }>(o: T, v: T["n"]) { const w: T["n"] = 0; return v + w; }
+function f1<T extends { a: string }>(o: T) { let x: T["a"] = "z"; return x; }
+function h<T extends Record<string, number>, K extends string>(o: T, k: K) { const x: T[K] = 1; }
+function j<T extends { a: string }>(o: T) { let x: T["a"] = 1; return x; }
+function a1<T extends { a: string; b: string }, K extends keyof T>(o: T, k: K) { const x: T[K] = "x"; }
+function a2<T extends { a: string; b: string }, K extends "a" | "b">(o: T, k: K) { const x: T[K] = "x"; }
+function a3<T extends { a: string; b: number }, K extends "a" | "b">(o: T, k: K) { const x: T[K] = "x"; }
+function a4<T extends number[]>(o: T) { const x: T[0] = 1; }
+function a5<T extends [number, string]>(o: T) { const x: T[0] = 1; }
+function a6<T extends { a?: string }>(o: T) { const x: T["a"] = undefined; }
+function a7<T extends { readonly a: string }>(o: T) { const x: T["a"] = "s"; }
+function a8<T extends { n: number }>(o: T) { o["n"] = 5; o.n = 6; }
+function a9<T extends { n: number }, U extends T>(o: U) { const x: U["n"] = 1; }
+function b1<T>(o: T) { const x: T["n" & keyof T] = 1; }
+function b2<T extends { a: string } | { a: number }>(o: T) { const x: T["a"] = 1; }
+function b3<T extends { a: "x" | "y" }>(o: T) { const x: T["a"] = "x"; }
+function b4<T extends Record<string, number>>(o: T) { const x: T["a"] = 1; }
+function c1<K extends string>(o: Record<string, number>, k: K) { const x: Record<string, number>[K] = 1; }

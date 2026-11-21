@@ -1,0 +1,6 @@
+const spreadText = "ab";
+const textSpread = {...spreadText};
+const numberSpread = {...5};
+const booleanSpread = {...true};
+const nullSpread = {...null};
+const undefinedSpread = {...undefined};

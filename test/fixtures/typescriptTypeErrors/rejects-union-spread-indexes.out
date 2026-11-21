@@ -1,0 +1,24 @@
+(4,38): error TS2322: Type 'string | number' is not assignable to type 'boolean'.
+  Type 'string' is not assignable to type 'boolean'.
+(5,54): error TS2339: Property 'foo' does not exist on type '{ a: number; }'.
+(6,54): error TS2339: Property 'foo' does not exist on type '{ a: number; }'.
+(7,48): error TS2339: Property 'foo' does not exist on type '{}'.
+(8,37): error TS2322: Type 'string | number' is not assignable to type 'boolean'.
+  Type 'string' is not assignable to type 'boolean'.
+(9,37): error TS2322: Type 'string | number' is not assignable to type 'boolean'.
+  Type 'string' is not assignable to type 'boolean'.
+(11,31): error TS2322: Type 'string | number' is not assignable to type 'boolean'.
+  Type 'string' is not assignable to type 'boolean'.
+(12,49): error TS2339: Property 'zz' does not exist on type '{ [x: string]: number; } | { a: string; }'.
+  Property 'zz' does not exist on type '{ a: string; }'.
+(13,53): error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type '{}'.
+  Property '0' does not exist on type '{}'.
+(14,54): error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type '{}'.
+  Property '0' does not exist on type '{}'.
+(15,43): error TS2322: Type 'number | boolean' is not assignable to type 'number'.
+  Type 'boolean' is not assignable to type 'number'.
+(16,43): error TS2322: Type 'number | boolean' is not assignable to type 'number'.
+  Type 'boolean' is not assignable to type 'number'.
+(17,42): error TS2322: Type 'string | number | boolean' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+(18,57): error TS2339: Property 'foo' does not exist on type '{}'.

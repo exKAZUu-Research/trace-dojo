@@ -1,0 +1,19 @@
+function id<T>(value:T):T { return value; }
+function constId<const T>(value:T):T { return value; }
+const a:{x:1}=id({x:1});
+const b:{x:'a'|'b'}=id({x:'a'});
+const c:{readonly x:1}=constId({x:1});
+const d:{readonly x:'a'}=constId({x:'a'});
+const e:{readonly x:{readonly y:1}}=constId({x:{y:1}});
+const f:{items:('a'|'b')[]}=id({items:['a','b']});
+const g: [1, 'hello', { flag: true }] = id([1, 'hello', { flag: true }]);
+const x = 5;
+const h: { x: 5 } = id({ x });
+function pick(): boolean { return true; }
+
+const i: { x: 5 | 6 } = id({ x: pick() ? 5 : 6 });
+const j: { key: `tag:${string}` } = id({ key: 'tag:entry' });
+const ordinary = id({ count: 1, item: 'text' });
+ordinary.count = 2;
+ordinary.item = 'updated';
+console.log(a.x,b.x,c.x,d.x,e.x.y,f.items.join(''),g[0],g[1],g[2].flag,h.x,i.x,j.key,ordinary.count,ordinary.item);

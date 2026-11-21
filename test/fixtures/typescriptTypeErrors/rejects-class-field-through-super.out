@@ -1,0 +1,13 @@
+(15,13): error TS2855: Class field 'name' defined by the parent class is not accessible in the child class via super.
+(16,29): error TS2855: Class field 'name' defined by the parent class is not accessible in the child class via super.
+(18,22): error TS2855: Class field 'age' defined by the parent class is not accessible in the child class via super.
+(18,35): error TS2855: Class field 'opt' defined by the parent class is not accessible in the child class via super.
+(19,22): error TS2855: Class field 'arrow' defined by the parent class is not accessible in the child class via super.
+(22,15): error TS2855: Class field 'name' defined by the parent class is not accessible in the child class via super.
+(27,22): error TS2855: Class field 'name' defined by the parent class is not accessible in the child class via super.
+(40,22): error TS2855: Class field 'p' defined by the parent class is not accessible in the child class via super.
+(40,32): error TS2855: Class field 'q' defined by the parent class is not accessible in the child class via super.
+(40,42): error TS2855: Class field 'r' defined by the parent class is not accessible in the child class via super.
+(40,52): error TS2513: Abstract method 's' in class 'Base' cannot be accessed via super expression.
+(41,19): error TS2855: Class field 'q' defined by the parent class is not accessible in the child class via super.
+(42,22): error TS2513: Abstract method 'm' in class 'Base' cannot be accessed via super expression.

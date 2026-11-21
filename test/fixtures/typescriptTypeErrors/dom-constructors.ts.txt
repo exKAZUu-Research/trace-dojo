@@ -1,0 +1,8 @@
+function pages() {
+  const extra = new HTMLDivElement(1);
+  const wrongResult: HTMLInputElement = new HTMLDivElement();
+  const wrongStatic: string = Node.ELEMENT_NODE;
+  const wrongCallback = new MutationObserver(records => records[0].missing);
+  const extraField = HTMLInputElement.missing;
+  console.log(extra, wrongResult, wrongStatic, wrongCallback, extraField);
+}

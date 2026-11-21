@@ -1,0 +1,32 @@
+type A = { a: number };
+type B = { b: number };
+type Tagged = (() => number) & { tag: string };
+type Id = string & { __brand: 'id' };
+
+function sum(x: (A & B) | number) {
+  if (typeof x === 'object') return x.a + x.b;
+  return x;
+}
+function read(x: Tagged | number) {
+  if (typeof x === 'function') return `${x.tag}:${x()}`;
+  return x.toFixed(1);
+}
+function notFunction(x: Tagged | A) {
+  if (typeof x !== 'function') return x.a;
+  return x();
+}
+function idLength(x: Id | number) {
+  if (typeof x === 'string') return x.length;
+  return x;
+}
+function generic<T>(x: T & A) {
+  if (typeof x === 'object') return x.a;
+  return -1;
+}
+
+const tagged = Object.assign(() => 7, { tag: 't' });
+console.log(sum({ a: 1, b: 2 }), sum(4));
+console.log(read(tagged), read(2));
+console.log(notFunction({ a: 3 }), notFunction(tagged));
+console.log(idLength('abc' as Id), idLength(9));
+console.log(generic({ a: 5 }));

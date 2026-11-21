@@ -1,0 +1,3 @@
+(9,7): error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+(11,10): error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+(14,8): error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.

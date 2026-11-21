@@ -1,0 +1,21 @@
+const f: (this: { x: number }) => void = function (this: { x: string }) {
+  console.log(this.x.toUpperCase());
+};
+const narrower: (this: { x: number }) => void = function (this: { x: number; y: string }) {};
+const wider: (this: { x: number; y: string }) => void = function (this: { x: number }) {};
+const untyped: (this: { x: number }) => void = function () {};
+const ignoresThis: () => void = function (this: { x: number }) {};
+const voidThis: (this: { x: string }) => void = function (this: void) {};
+interface Callback {
+  cb: (this: { value: number }) => void;
+}
+const c: Callback = {
+  cb(this: { value: string }) {},
+};
+interface Handler {
+  handle(this: { value: number }): void;
+}
+const h: Handler = {
+  handle: function (this: { value: 1 }) {},
+};
+const generic: (this: { x: number }) => void = function <T extends { x: string }>(this: T) {};

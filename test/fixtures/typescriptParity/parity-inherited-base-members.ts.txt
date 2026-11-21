@@ -1,0 +1,41 @@
+class Holder<Out = string> {
+  constructor(public value: Out) {}
+
+  describe(): Out {
+    return this.value;
+  }
+}
+
+class DefaultHolder extends Holder {}
+
+class NumberHolder extends Holder<number> {
+  double(): number {
+    return this.value * 2;
+  }
+}
+
+class ListHolder<U> extends Holder<U[]> {
+  first(): U {
+    return this.value[0];
+  }
+}
+
+class Pair<T, U = T[]> {
+  constructor(
+    public first: T,
+    public rest: U
+  ) {}
+}
+
+class NumberPair extends Pair<number> {}
+
+const text: string = new DefaultHolder("hello").value;
+const described: string = new DefaultHolder("world").describe();
+const base: Holder<string> = new DefaultHolder("base");
+type IsStringHolder = DefaultHolder extends Holder<string> ? true : false;
+const isStringHolder: IsStringHolder = true;
+const doubled: number = new NumberHolder(21).double();
+const first: number = new ListHolder([7, 8]).first();
+const rest: number[] = new NumberPair(1, [2, 3]).rest;
+console.log(text, described, base.value, isStringHolder);
+console.log(doubled, first, rest.join(","));

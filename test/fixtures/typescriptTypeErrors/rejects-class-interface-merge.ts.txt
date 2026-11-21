@@ -1,0 +1,25 @@
+class Point {
+  x = 1;
+  y: string = "";
+  z?: number;
+  constructor(public w: number) {}
+}
+interface Point {
+  x: string;
+  y: string;
+  z: number;
+  w: number;
+  extra?: boolean;
+}
+interface Later {
+  a: number;
+}
+class Later {
+  a: string = "";
+}
+class Mod {
+  readonly r = 1;
+}
+interface Mod {
+  r: number;
+}

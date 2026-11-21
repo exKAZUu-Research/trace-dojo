@@ -1,0 +1,41 @@
+class ThrowsBeforeReturning {
+  value;
+  constructor() {
+    try { throw 0; }
+    finally { this.value = 1; return; }
+  }
+}
+class ThrowsInHandler {
+  value;
+  constructor() {
+    try { throw 0; }
+    catch { this.value = 'caught'; throw 1; }
+    finally { this.value = 'returned'; return; }
+  }
+}
+class CompletesOrThrows {
+  value;
+  constructor(flag: boolean) {
+    try {
+      if (!flag) throw 0;
+      this.value = 2;
+    } finally {
+      if (!flag) { this.value = 3; return; }
+    }
+  }
+}
+class Nested {
+  value;
+  constructor() {
+    try {
+      try { throw 0; }
+      finally { this.value = "visited"; }
+    } finally {
+      this.value ??= "returned";
+      return;
+    }
+  }
+}
+console.log(new ThrowsBeforeReturning().value.toFixed(), new ThrowsInHandler().value.toUpperCase());
+console.log(new CompletesOrThrows(false).value.toFixed(), new CompletesOrThrows(true).value.toFixed());
+console.log(new Nested().value.toUpperCase());

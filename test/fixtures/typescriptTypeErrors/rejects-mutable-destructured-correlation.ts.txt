@@ -1,0 +1,17 @@
+type UncorrelatedShape = {kind:"text";value:string}|{kind:"count";value:number};
+function mutablePattern(shape: UncorrelatedShape) {
+  let {kind, value} = shape;
+  if (kind === "text") value.toUpperCase();
+}
+function separatePatterns(shape: UncorrelatedShape) {
+  const {kind} = shape;
+  const {value} = shape;
+  if (kind === "text") value.toUpperCase();
+}
+function restTypeMismatch(...[n, s]: [number,string]) {
+  return s.toFixed();
+}
+function assignedParameter({kind, value}: UncorrelatedShape) {
+  if (kind === "text") value.toUpperCase();
+  value = "assigned";
+}

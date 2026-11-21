@@ -1,0 +1,4 @@
+try { Number.prototype.toString.call('x' as any); } catch (e: any) { console.log(e.message); }
+try { Number.prototype.toFixed.call('x' as any, 1); } catch (e: any) { console.log(e.message); }
+try { Boolean.prototype.toString.call(1 as any); } catch (e: any) { console.log(e.message); }
+try { String.prototype.toString.call(1 as any); } catch (e: any) { console.log(e.message); }

@@ -1,0 +1,8 @@
+(2,7): error TS2741: Property '1' is missing in type 'Record<number, number>' but required in type 'Record<"1", number>'.
+(4,7): error TS2741: Property '2' is missing in type 'Record<string, number>' but required in type 'Record<2, number>'.
+(7,7): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+(7,7): error TS2378: A 'get' accessor must return a value.
+(12,7): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+(12,7): error TS2378: A 'get' accessor must return a value.
+(19,9): error TS2322: Type 'number' is not assignable to type 'Object'.
+(24,12): error TS1267: Property 'value' cannot have an initializer because it is marked abstract.

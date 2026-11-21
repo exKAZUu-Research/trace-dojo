@@ -1,0 +1,15 @@
+class Priv { private constructor() {} static make() { return new Priv(); } }
+class Left { left = 1; }
+class Right { right = 2; }
+abstract class Abs { a = 1; }
+class Two { constructor(public s: string) {} }
+class Many { constructor(a: number); constructor(a: string); constructor(a: number | string) {} }
+const flag = Boolean(1);
+const a = new (flag ? Left : Abs)();
+const b = new (flag ? Abs : Left)();
+const c = new (flag ? Left : Priv)();
+const d = new (flag ? Two : Two)(1);
+const e = (flag ? Left : Right)();
+const f = new (flag ? Many : Left)(true);
+const g: Left = new (flag ? Left : Right)();
+console.log(a, b, c, d, e, f, g);

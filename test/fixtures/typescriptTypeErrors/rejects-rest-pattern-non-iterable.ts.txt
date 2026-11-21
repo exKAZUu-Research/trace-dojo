@@ -1,0 +1,8 @@
+const [...fromNumber] = 5;
+let target: number[];
+[...target] = 5;
+function takesNumber([...items]: number): void {}
+function nothing(): void {}
+const [...fromVoid] = nothing();
+for (const [...digits] of [1, 2]) console.log(digits);
+const [first, ...others] = 7;

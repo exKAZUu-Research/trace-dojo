@@ -1,0 +1,7 @@
+interface Chain { get(): this }
+interface Invalid extends Chain { get(): Chain }
+class Container implements Chain {
+  get(): Chain { return this; }
+}
+function merge<T extends Chain | { get(): number }>(value: T): T { return value.get(); }
+const viaValue: Chain = new Container();

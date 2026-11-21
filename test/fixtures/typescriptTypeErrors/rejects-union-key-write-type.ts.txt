@@ -1,0 +1,38 @@
+type Person = { name: string; age: number };
+type Scores = { math: number; art: number | string; memo?: number };
+
+function setPerson(person: Person, key: keyof Person): void {
+  person[key] = 42;
+}
+
+function setScore(scores: Scores, key: "math" | "art"): void {
+  scores[key] = 1;
+  scores[key] = "A";
+}
+
+function addScore(scores: { math: number; art: number }, key: "math" | "art"): void {
+  scores[key] += 1;
+  scores[key] += "x";
+}
+
+function clearScore(scores: Scores, key: "math" | "memo"): void {
+  scores[key] = 0;
+  scores[key] = undefined;
+}
+
+function setPair(pair: [number, string], index: 0 | 1): void {
+  pair[index] = 1;
+}
+
+function setLimit(limits: { [name: string]: number; max: 10 }, key: "max" | "min"): void {
+  limits[key] = 10;
+  limits[key] = 5;
+}
+
+function setValue(value: { a: number } | { a: string }): void {
+  value["a"] = 1;
+}
+
+const person: Person = { name: "A", age: 2 };
+setPerson(person, "name");
+console.log(person.name.toUpperCase());

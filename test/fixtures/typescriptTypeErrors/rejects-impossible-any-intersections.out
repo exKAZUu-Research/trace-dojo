@@ -1,0 +1,9 @@
+(2,7): error TS2322: Type '42' is not assignable to type 'never'.
+(3,7): error TS2322: Type '42' is not assignable to type 'never'.
+(4,7): error TS2322: Type '42' is not assignable to type 'never'.
+(5,7): error TS2322: Type '42' is not assignable to type 'never'.
+(6,7): error TS2322: Type '42' is not assignable to type 'never'.
+(7,7): error TS2322: Type '42' is not assignable to type 'never'.
+(8,7): error TS2322: Type '42' is not assignable to type 'never'.
+(9,7): error TS2322: Type '42' is not assignable to type 'never'.
+(10,7): error TS2322: Type '42' is not assignable to type 'never'.

@@ -1,0 +1,13 @@
+type StringMap<T> = { [K in keyof (T & string)]: unknown };
+type StringBound<U extends StringMap<U>> = U;
+type ForwardNumberBound<U extends NumberMap<U>> = U;
+type NumberMap<T> = { [K in keyof (T & number)]: unknown };
+type Remap<T> = { [K in keyof (T & string) as K]: unknown };
+type Renamed<U extends Remap<U>> = U;
+type ForwardRemap<U extends LateRemap<U>> = U;
+type LateRemap<T> = { [K in keyof (T & number) as K]: unknown };
+type ArrayOfMaps<U extends Array<StringMap<U>>> = U;
+type TupleOfMaps<U extends [NumberMap<U>]> = U;
+type Inferred<T> = T extends infer U extends Remap<U> ? U : never;
+
+console.log('done');

@@ -1,0 +1,7 @@
+function wrapObject<T extends {name: string} & {id: number}>(value: T): T[] { return [value]; }
+function wrapEmpty<T extends {} & {}>(value: T): {value: T} { return {value}; }
+
+const objects = wrapObject({name: 'first', id: 1});
+const primitive = wrapEmpty('second');
+const first: 'first' = objects[0].name;
+const second: 'second' = primitive.value;

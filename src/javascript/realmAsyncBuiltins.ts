@@ -98,7 +98,7 @@ type Add = (value: Value, fail: Failure, next: () => Step) => Step;
 function startFromAsync(runtime: Runtime, promise: JsObject, args: Value[]): Step {
   const [items, mapper, thisArg] = args;
   if (mapper !== undefined && !isCallable(mapper)) {
-    runtime.throwError('TypeError', `${runtime.describe(mapper)} is not a function`);
+    runtime.throwError('TypeError', `${runtime.describeTyped(mapper)} is not a function`);
   }
   if (items === undefined || items === null) runtime.throwError('TypeError', `${String(items)} is not iterable`);
   const array = runtime.newArray([]);

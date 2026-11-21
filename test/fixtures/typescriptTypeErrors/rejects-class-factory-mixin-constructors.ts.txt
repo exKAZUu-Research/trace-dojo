@@ -1,0 +1,19 @@
+function label<T extends new (...args: any[]) => object>(Base: T) {
+  return class extends Base { label = "item"; };
+}
+class Box { constructor(public value: number) {} }
+const Labeled = label(Box);
+new Labeled("text");
+new Labeled();
+
+function fixed<T extends new (value: string) => object>(Base: T) {
+  return class extends Base {};
+}
+function wrong<T extends new (...args: any[]) => object>(Base: T) {
+  return class extends Base {
+    constructor(value: string) { super(value); }
+  };
+}
+function abstractBase<T extends abstract new (...args: any[]) => object>(Base: T) {
+  return class extends Base {};
+}

@@ -1,0 +1,4 @@
+(7,24): error TS2322: Type 'string' is not assignable to type 'number'.
+(8,7): error TS2741: Property '[key]' is missing in type '{ 1: string; }' but required in type 'Named'.
+(10,7): error TS2540: Cannot assign to '[index]' because it is a read-only property.
+(12,39): error TS2322: Type 'string' is not assignable to type 'number'.

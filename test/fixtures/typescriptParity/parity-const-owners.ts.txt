@@ -1,0 +1,10 @@
+type Identity = <const T>(value: T) => T;
+const identity: Identity = <const T>(value: T): T => value;
+interface Callable { <const T>(value: T): T }
+interface Constructible { new<const T>(value: T): object }
+type Constructor = new<const T>(value: T) => object;
+class Box<const T> { value:T; constructor(value:T){this.value=value;} method<const U>(value:U):U {return value;} }
+const literal: 'a' = identity({kind:'a'}).kind;
+const box = new Box({kind:'b'});
+const kind: 'b' = box.value.kind;
+console.log(literal, kind, box.method({count:1}).count);

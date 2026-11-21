@@ -1,0 +1,12 @@
+;
+'use strict';
+const sloppyObject:any=Object.freeze({x:1});
+try { sloppyObject.x=2; console.log('program sloppy', sloppyObject.x); } catch { console.log('program strict'); }
+function sloppyEmpty() {
+  ;
+  type Local=number;
+  'use strict';
+  const object:any=Object.freeze({x:1});
+  try { object.x=2; console.log('function sloppy', object.x); } catch { console.log('function strict'); }
+}
+sloppyEmpty();

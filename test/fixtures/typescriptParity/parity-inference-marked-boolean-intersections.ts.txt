@@ -1,0 +1,17 @@
+type Left = NoInfer<true> | false;
+type Right = true | NoInfer<false>;
+type Both = NoInfer<true> | NoInfer<false>;
+type Mixed = (NoInfer<true> | 1) & any & object;
+const a: Left & any & null = 1;
+const b: Right & any & null = 2;
+const c: Both & any & null = 3;
+const d: Mixed = 4;
+console.log(a, b, c, d);
+
+type Brand = string & { tag: 1 };
+type Shapes = { left: number } | { right: string };
+type Meet<A, B, C> = A & B & C;
+const branded: Meet<NoInfer<Brand>, any, number> = 5;
+const structured: NoInfer<{ x: number }> & any & null = 6;
+const shaped: NoInfer<Shapes> & { tag: 'ok' } = { right: 'r', tag: 'ok' };
+console.log(branded, structured, shaped.tag);

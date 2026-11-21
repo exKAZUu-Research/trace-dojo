@@ -1,0 +1,25 @@
+function make() {
+  const f = () => 1;
+  console.log(f.tag);
+  f.tag = "t";
+  return f;
+}
+make();
+function named() {
+  return 2;
+}
+console.log(named.label);
+named.label = "n";
+(() => {
+  console.log(k.size);
+})();
+const k = () => 3;
+k.size = 1;
+const e = () => 4;
+console.log(e["label"]);
+e.label = "e";
+const g = () => 5;
+if (g() > 2) {
+  g.tag = "g";
+}
+console.log(g.tag);

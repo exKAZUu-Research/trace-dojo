@@ -1,0 +1,5 @@
+(2,7): error TS2322: Type 'false' is not assignable to type 'true'.
+(3,7): error TS2322: Type 'true' is not assignable to type 'false'.
+(5,7): error TS2322: Type '3' is not assignable to type '1'.
+(7,7): error TS2322: Type '4n' is not assignable to type '2n'.
+(9,7): error TS2322: Type 'true' is not assignable to type '"true"'.

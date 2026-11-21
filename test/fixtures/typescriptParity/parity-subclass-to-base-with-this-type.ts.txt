@@ -1,0 +1,17 @@
+class A { add() { return this; } }
+class B extends A { y = 2; }
+function f(a: A) { return a; }
+f(new B());
+const a: A = new B();
+const bs: B[] = [];
+const as: A[] = bs;
+class C { add(): this { return this; } }
+class D extends C { y = 2; }
+const c: C = new D();
+class Shape { same(o: this): boolean { return true; } }
+class Sq extends Shape { s = 1; }
+const x: Shape = new Sq();
+interface I { m(): this }
+class E implements I { m() { return this; } z = 1 }
+const i: I = new E();
+console.log(a, as, c, x, i);

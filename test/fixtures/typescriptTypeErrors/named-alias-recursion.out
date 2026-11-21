@@ -1,0 +1,6 @@
+(9,7): error TS2322: Type 'Short' is not assignable to type 'Loop'.
+  The types of 'next.next.next' are incompatible between these types.
+    Type 'string' is not assignable to type 'Loop'.
+(10,7): error TS2322: Type 'Inline' is not assignable to type 'Loop'.
+  The types of 'next.next.next.next.next.next' are incompatible between these types.
+    Type 'string' is not assignable to type 'Loop'.

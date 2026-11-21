@@ -1,0 +1,25 @@
+class And {
+  value;
+  constructor(flag: boolean) { flag &&= (this.value = 1) > 0; }
+}
+class Or {
+  value;
+  constructor(flag: boolean) { flag ||= (this.value = 2) > 0; }
+}
+class Nullish {
+  value;
+  constructor(flag: number | undefined) { flag ??= (this.value = 3); }
+}
+
+new And(false).value.toFixed();
+new Or(true).value.toFixed();
+new Nullish(0).value.toFixed();
+
+function receiverOf(value: number, receiver: { flag: boolean }) { return receiver; }
+class AssignedOnLeft {
+  value;
+  constructor(receiver: { flag: boolean }) {
+    receiverOf(this.value = 1, receiver).flag ||= (this.value = 2) > 0;
+  }
+}
+new AssignedOnLeft({ flag: true }).value.toFixed();

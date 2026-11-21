@@ -1,0 +1,15 @@
+(3,11): error TS2413: '`ab${string}`' index type 'string' is not assignable to '`a${string}`' index type 'number'.
+(6,11): error TS2413: '`a${string}`' index type 'string' is not assignable to 'string' index type 'number'.
+(8,26): error TS2413: '`a${string}`' index type 'string' is not assignable to 'string' index type 'number'.
+(10,26): error TS2413: '`a${string}`' index type 'string' is not assignable to 'string' index type 'number'.
+(13,11): error TS2411: Property 'a1' of type 'string' is not assignable to '`a${string}`' index type 'number'.
+(14,37): error TS2411: Property 'x' of type 'string' is not assignable to 'string' index type 'number'.
+(18,11): error TS2413: 'number' index type 'string' is not assignable to 'string' index type 'number'.
+(19,16): error TS2411: Property 'extra' of type 'boolean' is not assignable to 'string' index type 'number'.
+(20,43): error TS2413: '`ab${string}`' index type 'string' is not assignable to '`a${string}`' index type 'number'.
+(22,34): error TS2413: 'number' index type 'string' is not assignable to 'string' index type 'number'.
+(23,11): error TS2413: '`ab${string}`' index type 'string' is not assignable to '`a${string}`' index type 'number'.
+(27,11): error TS2413: '`n${string}`' index type 'string' is not assignable to 'string' index type 'number'.
+(29,37): error TS2411: Property 'y' of type 'string' is not assignable to 'string' index type 'number'.
+(31,11): error TS2413: '`n${string}`' index type 'string' is not assignable to 'string' index type 'number'.
+(34,11): error TS2411: Property 'a' of type 'string' is not assignable to 'string' index type 'number'.

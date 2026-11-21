@@ -1,0 +1,28 @@
+function shout<T extends Record<string, string>>(record: T, key: keyof T): string {
+  return record[key].toUpperCase() + record[key].length;
+}
+function addOne<T extends Record<string, number>>(record: T, key: keyof T): number {
+  return record[key] + 1;
+}
+function fixed<T extends { [name: string]: number }, K extends keyof T>(record: T, key: K): string {
+  return record[key].toFixed(1);
+}
+function compare<T extends Record<string, number>, K extends keyof T>(record: T, key: K): boolean {
+  const value = record[key];
+  return value * 2 > 5;
+}
+function firstOf<U>(items: U[]): U {
+  return items[0];
+}
+function firstUpper<T extends Record<string, string[]>, K extends keyof T>(record: T, key: K): string {
+  return firstOf(record[key]).toUpperCase();
+}
+function describe<T extends Record<string, string | number>>(record: T, key: keyof T): string {
+  return `${record[key].toString()}!`;
+}
+
+const names = { first: "ann", last: "lee" };
+const counts = { apples: 2, pears: 3.25 };
+console.log(shout(names, "last"), addOne(counts, "apples"), fixed(counts, "pears"));
+console.log(compare(counts, "pears"), compare(counts, "apples"));
+console.log(firstUpper({ tags: ["x", "y"] }, "tags"), describe({ id: 7 }, "id"));

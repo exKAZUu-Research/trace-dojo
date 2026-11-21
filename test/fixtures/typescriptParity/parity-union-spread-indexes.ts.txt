@@ -1,0 +1,15 @@
+function copyNumbers(x: { [n: number]: number } | { [n: number]: string }) {
+  const y = { ...x };
+  console.log(y[0]);
+}
+function copyRecord(x: Record<string, number> | Record<string, string>) {
+  const y = { ...x };
+  console.log(y.foo);
+}
+function mergeRecords(x: Record<string, number>, z: Record<string, number> | Record<string, string>) {
+  const y = { ...x, ...z };
+  console.log(y.foo, y.bar);
+}
+copyNumbers({ 0: 1 });
+copyRecord({ foo: 1 });
+mergeRecords({ foo: 1 }, { bar: "b" });

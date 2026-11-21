@@ -1,0 +1,5 @@
+const tries: (() => unknown)[] = [
+  () => 'a' in ('str' as any), () => 'a' in (5 as any), () => 'a' in (undefined as any), () => 1 in (null as any),
+  () => Symbol('s') in (true as any), () => 'x' in ('a very long string value that goes on and on' as any),
+];
+for (const t of tries) { try { console.log(t()); } catch (e: any) { console.log(e.constructor.name, e.message); } }

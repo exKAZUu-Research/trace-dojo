@@ -1,0 +1,14 @@
+function run(arr: number[], tup: [number, ...string[]], none: string[]) {
+  function opt(a: number, b?: string) { return b; }
+  function opt2(a?: number, b?: string, c?: boolean) { return c; }
+  function req(a: number, b: string) { return b; }
+  function one(a?: number) { return a; }
+  function rest(a: number, ...r: string[]) { return r; }
+  opt(...tup);
+  opt2(...tup);
+  one(...arr);
+  opt(1, ...none, "x");
+  rest(...tup);
+  return opt(...tup);
+}
+console.log(run([1], [1, "a"], []));

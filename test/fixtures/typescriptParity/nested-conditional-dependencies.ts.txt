@@ -1,0 +1,15 @@
+type Decide<T> = { x: T extends string ? true : false } extends { x: true } ? "yes" : "no";
+const text: Decide<string> = "yes";
+const number: Decide<number> = "no";
+
+type FromTuple<T> = { value: T extends [infer U] ? U : false } extends { value: true } ? "yes" : "no";
+const inferred: FromTuple<[true]> = "yes";
+
+type Impossible<T> = { x: T extends string ? true : false; n: 0 } extends { x: true; n: 1 } ? "yes" : "no";
+function impossible<T>(value: Impossible<T>): "no" { return value; }
+
+type Unwrap<T> = T extends [infer U] ? Unwrap<U> : T;
+type Recursive<T> = { value: Unwrap<T> } extends { value: string } ? "yes" : "no";
+const recursive: Recursive<[[["x"]]]> = "yes";
+
+console.log(text, number, inferred, impossible<string>("no"), recursive);

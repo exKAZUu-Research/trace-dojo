@@ -1,0 +1,22 @@
+type Keys<T> = keyof (T & string);
+type KeyBound<U extends Keys<U>> = U;
+type KeyMapping<U extends { [K in Keys<U>]: unknown }> = U;
+type WrappedKeyMapping<U extends [{ [K in Keys<U>]: unknown }]> = U;
+type KeyInfer<T> = T extends infer U extends { [K in Keys<U>]: unknown } ? U : never;
+type KeyConditional<V, T> = V extends true ? keyof (T & string) : {};
+type ConditionalBound<U extends Array<KeyConditional<true, U>>> = U;
+type ConditionalInfer<T> = T extends infer U extends [Array<KeyConditional<true, U>>] ? U : never;
+type Callback<T> = (x: keyof (T & string)) => void;
+type Optional<T> = (x?: keyof (T & string)) => void;
+type Rest<T> = (...x: Array<keyof (T & string)>) => void;
+type Constructor<T> = new (x: keyof (T & string)) => object;
+type Returning<T> = () => keyof (T & string);
+type CallbackProjection<U extends Parameters<Callback<U>>[0]> = U;
+type OptionalProjection<U extends Parameters<Optional<U>>[0]> = U;
+type RestProjection<U extends Parameters<Rest<U>>[0]> = U;
+type ConstructorProjection<U extends ConstructorParameters<Constructor<U>>[0]> = U;
+type ReturnProjection<U extends ReturnType<Returning<U>>> = U;
+type InferredProjection<T> = T extends infer U extends Parameters<Callback<U>>[0] ? U : never;
+type InferredReturn<T> = T extends infer U extends ReturnType<Returning<U>> ? U : never;
+
+console.log('done');

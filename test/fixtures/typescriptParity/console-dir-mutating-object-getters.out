@@ -1,0 +1,8 @@
+caught TypeError: Cannot read properties of undefined (reading 'value')
+caught TypeError: Cannot read properties of undefined (reading 'value')
+caught TypeError: Cannot read properties of undefined (reading 'value')
+own getter
+{ first: [Getter: 1], later: 2 }
+prototype getter
+{ marker: 3, first: [Getter: 3] }
+{ first: [Getter: 1], later: 7 }

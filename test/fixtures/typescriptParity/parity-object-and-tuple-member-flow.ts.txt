@@ -1,0 +1,24 @@
+let value: string | number = "a";
+const before = {
+  show() { console.log(this.item.toUpperCase(), this.value.toUpperCase()); },
+  item: value,
+  value,
+};
+value = 1;
+before.show();
+
+value = "before";
+const ordered = {
+  show() { console.log(this.item.toFixed(1), this.shorthand.toFixed(1)); },
+  change: (value = 3),
+  item: value,
+  ...{ shorthand: value },
+};
+ordered.show();
+
+let tuple: [number] | [number, number] = [1];
+const growing: [[number, number], number, number, (x: number) => string] =
+  [tuple = [1, 2], ...tuple, x => x.toFixed(1)];
+const shrinking: [[number], number, (x: string) => string] =
+  [tuple = [1], ...tuple, x => x.toUpperCase()];
+console.log(growing[3](3), shrinking[2]("tuple"));

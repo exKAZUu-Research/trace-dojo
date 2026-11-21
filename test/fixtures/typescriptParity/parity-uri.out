@@ -1,0 +1,2 @@
+a%20b%26%C3%A9 あ http://x/a%20b  
+URIError URI malformed true

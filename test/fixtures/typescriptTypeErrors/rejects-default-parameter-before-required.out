@@ -1,0 +1,7 @@
+(7,3): error TS2416: Property 'greet' in type 'LoudGreeter' is not assignable to the same property in base type 'Greeter'.
+  Type '(name: string | undefined, times: number) => string' is not assignable to type '(name?: string) => string'.
+    Target signature provides too few arguments. Expected 2 or more, but got 1.
+(11,7): error TS2322: Type '(value: number | undefined, label: string) => void' is not assignable to type '(value?: number | undefined) => void'.
+  Target signature provides too few arguments. Expected 2 or more, but got 1.
+(15,7): error TS2322: Type '(width: number | undefined, text: string) => string' is not assignable to type '(text: string) => string'.
+  Target signature provides too few arguments. Expected 2 or more, but got 1.

@@ -1,0 +1,19 @@
+84
+not a number: x
+[ 'number(1.0)', 'string(2)', 'boolean(true)', 'null', 'undefined' ]
+[ { name: 'Ann', avg: 85 }, { name: 'Ben', avg: 60 } ]
+{ Ann: 2, Ben: 3 }
+15 [ 10, 20, 30 ]
+2
+HELLO
+1
+6 0
+2024 1 { d: 5 }
+...
+.#.
+...
+max=24.3 min=19 range=5.3
+5 tqbf
+[ 'X' ]
+RangeError: must be positive: -5
+done

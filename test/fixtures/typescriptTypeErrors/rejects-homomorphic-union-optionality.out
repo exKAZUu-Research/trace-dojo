@@ -1,0 +1,9 @@
+(1,44): error TS2322: Type 'undefined' is not assignable to type 'string | number'.
+(2,43): error TS2322: Type 'undefined' is not assignable to type 'string | number'.
+(4,7): error TS2322: Type '{ kind: "s"; value: undefined; }' is not assignable to type 'Required<Shape>'.
+  Types of property 'value' are incompatible.
+    Type 'undefined' is not assignable to type 'string'.
+(5,7): error TS2322: Type '{ kind: "n"; }' is not assignable to type 'Required<Shape>'.
+  Property 'value' is missing in type '{ kind: "n"; }' but required in type 'Required<{ kind: "n"; value: number | undefined; }>'.
+(7,66): error TS2322: Type 'undefined' is not assignable to type 'string | number'.
+(9,22): error TS2322: Type 'undefined' is not assignable to type 'string | number'.

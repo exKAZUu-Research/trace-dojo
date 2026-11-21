@@ -1,0 +1,7 @@
+(2,7): error TS2741: Property 'y' is missing in type '{ x: number; }' but required in type 'Pt'.
+(3,29): error TS2353: Object literal may only specify known properties, and 'z' does not exist in type 'Pt'.
+(5,17): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type 'Pt'.
+(7,3): error TS2540: Cannot assign to 'r' because it is a read-only property.
+(8,37): error TS2322: Type 'string' is not assignable to type 'number'.
+(10,5): error TS2540: Cannot assign to '0' because it is a read-only property.
+(12,4): error TS2339: Property 'push' does not exist on type 'readonly number[]'.

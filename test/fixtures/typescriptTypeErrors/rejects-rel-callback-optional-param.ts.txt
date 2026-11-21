@@ -1,0 +1,2 @@
+function each(xs: number[], cb: (x: number, i?: number) => void) { xs.forEach((x, i) => cb(x, i)); }
+each([1], (x, i) => console.log(x + i));

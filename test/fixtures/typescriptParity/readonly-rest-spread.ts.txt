@@ -1,0 +1,20 @@
+const out: unknown[] = [];
+function last(...values: [...number[], string]) { out.push(values); }
+const value: readonly [number, string] = [1, 'value'];
+last(...value);
+last(...([2, 'literal'] as const));
+function generic<T extends readonly [...number[], string]>(args: T) { last(...args); }
+function relay<T extends [...number[], string]>(args: T) { last(...args); }
+function pipe<T extends readonly unknown[]>(...args: T): T { return args; }
+function readonlyForward<T extends readonly unknown[]>(args: T): T { return pipe<T>(...args); }
+function asReadonly<T extends readonly [number, string]>(args:T) { last(...args); }
+function asTupleUnion(args: readonly [number, string] | readonly [number, number, string]) { last(...args); }
+function optionalTuple<T extends readonly [...number[], string]>(wrapped: readonly [...T]) { last(...wrapped); }
+function readonlyArray<T extends readonly number[]>(args:T) { return pipe(...args); }
+function preserveBrand<T extends number[]>(v:T):T { return pipe<T>(...v); }
+generic([3, 'generic']);
+relay([4, 'relay']);
+asReadonly([5, 'readonly']);
+asTupleUnion([6, 7, 'union']);
+optionalTuple([8, 'variadic']);
+console.log(out);

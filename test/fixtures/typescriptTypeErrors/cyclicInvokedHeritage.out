@@ -1,0 +1,8 @@
+(1,7): error TS2506: 'ReturnsItself' is referenced directly or indirectly in its own base expression.
+(1,30): error TS7024: Function implicitly has return type 'any' because it does not have a return type annotation and is referenced directly or indirectly in one of its return expressions.
+(2,7): error TS2506: 'ArrowCycle' is referenced directly or indirectly in its own base expression.
+(2,27): error TS7024: Function implicitly has return type 'any' because it does not have a return type annotation and is referenced directly or indirectly in one of its return expressions.
+(3,7): error TS2506: 'First' is referenced directly or indirectly in its own base expression.
+(3,22): error TS7024: Function implicitly has return type 'any' because it does not have a return type annotation and is referenced directly or indirectly in one of its return expressions.
+(3,28): error TS2449: Class 'Second' used before its declaration.
+(4,7): error TS2506: 'Second' is referenced directly or indirectly in its own base expression.

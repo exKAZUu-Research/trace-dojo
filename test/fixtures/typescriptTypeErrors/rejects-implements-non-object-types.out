@@ -1,0 +1,3 @@
+(2,24): error TS2422: A class can only implement an object type or intersection of object types with statically known members.
+(13,24): error TS2864: A class cannot implement a primitive type like 'number'. It can only implement other named object types.
+(17,25): error TS2422: A class can only implement an object type or intersection of object types with statically known members.

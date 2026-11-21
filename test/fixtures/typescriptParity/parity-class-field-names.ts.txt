@@ -1,0 +1,19 @@
+class Fields {
+  x = 1;
+  arrow = () => this.x;
+  fn = function () {};
+  nested = class {};
+  static fn = function () {};
+  #private = () => 2;
+  privateName() { return this.#private.name; }
+}
+const fields = new Fields();
+console.log(fields.arrow(), fields.arrow.name, fields.fn.name, fields.nested.name, Fields.fn.name, fields.privateName());
+console.log(fields);
+
+const field = 7;
+class Host {
+  field = class { static seen = this.name; static resolve() { return field; } };
+}
+const host = new Host();
+console.log(host.field.seen, host.field.resolve());

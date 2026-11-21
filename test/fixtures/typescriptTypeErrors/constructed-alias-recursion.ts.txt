@@ -1,0 +1,15 @@
+class Box<T> {
+  constructor(public next: T) {}
+}
+interface Loop { next: Loop }
+type Forward = Box<Middle>;
+type Middle = Box<Inner>;
+type Inner = Box<string>;
+type BackInner = (Box<string>);
+type BackMiddle = (Box<BackInner>);
+type Backward = (Box<BackMiddle>);
+const source: Forward = new Box(new Box(new Box('forward')));
+const reverse: Backward = new Box(new Box(new Box('backward')));
+const rejected: Loop = source;
+const alsoRejected: Loop = reverse;
+console.log(rejected, alsoRejected);

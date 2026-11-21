@@ -1,0 +1,3 @@
+(5,46): error TS2722: Cannot invoke an object which is possibly 'undefined'.
+(6,50): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.

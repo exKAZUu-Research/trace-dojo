@@ -1,0 +1,10 @@
+function show<T extends { value: number }>(item: T) {
+  const key: keyof T = "value";
+  console.log(item[key]);
+}
+function pick<T extends { value: number }>(item: T): Pick<T, "value"> { return { value: item.value }; }
+function chained<T extends U, U extends { value: number }>(item: T, base: U): keyof T { return "value"; }
+function common<T extends { left: 1, shared: 4 } | { right: 2, shared: 4 }>(): keyof T { return "shared"; }
+function fixed<T extends unknown[]>(): keyof [string, ...T] { return "0"; }
+show({ value: 1, extra: 2 });
+console.log(pick({ value: 3 }), chained({ value: 4 }, { value: 4 }), common(), fixed());

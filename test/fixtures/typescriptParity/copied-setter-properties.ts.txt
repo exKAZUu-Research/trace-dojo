@@ -1,0 +1,31 @@
+const accessorSource = {
+  set value(next: number) { console.log(next); },
+  get other(): number { return 2; },
+  get paired(): number { return 3; },
+  set paired(next: number) { console.log(next); },
+  set reverse(next: number) { console.log(next); },
+  get reverse(): number { return 4; },
+};
+const spread = { ...accessorSource };
+const { other, ...rest } = accessorSource;
+const fromSpread: undefined = spread.value;
+const fromRest: undefined = rest.value;
+const pair: number = rest.paired;
+const reversed: number = spread.reverse;
+const asContract: { set value(next: number); get other(): number } = accessorSource;
+const contractCopy: undefined = { ...asContract }.value;
+const withConst: undefined = ({ ...accessorSource } as const).value;
+const direct: number = accessorSource.value;
+accessorSource.value = 9;
+console.log(fromSpread, fromRest, pair, reversed, other, contractCopy, withConst, direct);
+const receiver = {
+  set value(next: number) {},
+  get paired(): number { return 5; },
+  set paired(next: number) {},
+  spread() { return { ...this }; },
+  rest() { const { ...rest } = this; return rest; },
+};
+const spreadReceiver: undefined = receiver.spread().value;
+const restReceiver: undefined = receiver.rest().value;
+const pairedReceiver: number = receiver.rest().paired;
+console.log(spreadReceiver, restReceiver, pairedReceiver);

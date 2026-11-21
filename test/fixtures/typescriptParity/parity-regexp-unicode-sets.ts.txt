@@ -1,0 +1,8 @@
+const sets: RegExp = /[\p{L}--[a-z]]/v;
+console.log(sets.unicodeSets, sets.flags);
+const plain = /a/u;
+console.log(plain.unicodeSets, plain.unicode);
+const built = new RegExp("[ab]", "v");
+console.log(built.unicodeSets, built.test("b"));
+const flags: boolean[] = [sets, plain, built].map((r) => r.unicodeSets);
+console.log(flags);

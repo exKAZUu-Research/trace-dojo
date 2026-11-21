@@ -1,0 +1,23 @@
+class Point {
+  x: number;
+  "constructor"(x: number) {
+    this.x = x;
+  }
+}
+class Base {
+  'constructor'(public y: number) {}
+}
+class Derived extends Base {
+  z: number;
+  "constructor"(y: number, z: number) {
+    super(y);
+    this.z = z;
+  }
+}
+class Keyed {
+  ["constructor"](x: number) {
+    return x * 2;
+  }
+}
+const d = new Derived(3, 4);
+console.log(new Point(2).x, d.y, d.z, new Keyed()["constructor"](5));

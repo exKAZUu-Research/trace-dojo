@@ -1,0 +1,5 @@
+(1,7): error TS2322: Type '"a-b-1"' is not assignable to type '`${string}-${number}`'.
+(4,7): error TS2322: Type '"1px2px"' is not assignable to type '`${number}px`'.
+(6,7): error TS2322: Type '"1-2-3"' is not assignable to type '`${number}-${number}`'.
+(8,7): error TS2322: Type '"ab1"' is not assignable to type '`${string}${number}`'.
+(11,7): error TS2322: Type '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' is not assignable to type '`${string}${string}${string}${string}${string}${string}z`'.

@@ -1,0 +1,2 @@
+function f(this: any) { return typeof this; }
+console.log(f());

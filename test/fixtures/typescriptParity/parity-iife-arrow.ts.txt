@@ -1,0 +1,2 @@
+const v = ((x) => x * 2)(3);
+console.log(v);

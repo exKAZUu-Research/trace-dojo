@@ -1,0 +1,27 @@
+function fromObject<T extends number | undefined>(fallback: T) {
+  const { x = fallback }: { x?: number } = {};
+  const y: number = x;
+  return y;
+}
+function fromTuple<U extends number | undefined, T extends U>(fallback: T) {
+  const [x = fallback]: [number?] = [];
+  const y: number = x;
+  return y;
+}
+function fromParameter<T extends string | undefined>(fallback: T, x: string | undefined = fallback) {
+  const y: string = x;
+  return y;
+}
+function fromUnconstrained<T>(fallback: T) {
+  const { x = fallback }: { x?: number } = {};
+  return x;
+}
+function fromUnknown(fallback: unknown) {
+  const { x = fallback }: { x?: number } = {};
+  return x;
+}
+function fromVoid(fallback: void) {
+  const { x = fallback }: { x?: number } = {};
+  return x;
+}
+console.log(fromObject(1), fromTuple(2), fromParameter("p"), fromUnconstrained(3), fromUnknown(4), fromVoid());

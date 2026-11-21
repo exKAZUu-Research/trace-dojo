@@ -1,0 +1,11 @@
+function omitComputed<T extends object,K extends keyof T>(o:T,k:K):Omit<T,K>{const {[k]:_,...r}=o;return r;}
+function assignComputed<T extends object,K extends keyof T>(o:T,k:K):Omit<T,K>{let selected:T[K];let rest:Omit<T,K>;({[k]:selected,...rest}=o);return rest;}
+function selectGeneric<T extends {a:number,b:string},K extends keyof T>(o:T,k:K):T[K]{const {[k]:value}=o;return value;}
+function retainedKnown<T extends {a:number,b:number}>(o:T){const {b,...r}=o;return r.a;}
+function concreteUnion(k:'a'|'b'){const {[k]:_,...r}={a:1,b:2,c:3};return r.c;}
+function numericString<T extends {1:number}>(o:T){const {'1':_,...r}=o;return r[1];}
+const source={a:1,b:'two',c:true};
+console.log(omitComputed(source,'a'),assignComputed(source,'b'),selectGeneric(source,'b'),retainedKnown({a:3,b:4}),concreteUnion('a'));
+console.log(numericString({1:7,a:1}));
+const {1:removed,...restNumber}={1:8,a:9};
+console.log(restNumber);

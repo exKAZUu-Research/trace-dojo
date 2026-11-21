@@ -1,0 +1,45 @@
+function make() {
+  const f = () => 1;
+  f.tag = "t";
+  return f;
+}
+console.log(make().tag);
+const made = make();
+console.log(made.tag);
+
+function makeBox() {
+  const f = () => 2;
+  f.tag = "box";
+  return { f };
+}
+console.log(makeBox().f.tag);
+
+const makeArrow = () => {
+  const f = () => 3;
+  f.tag = "arrow";
+  return f;
+};
+console.log(makeArrow().tag);
+
+class Factory {
+  static make() {
+    const f = () => 4;
+    f.tag = "static";
+    return f;
+  }
+}
+console.log(Factory.make().tag);
+
+function read(g: typeof made) {
+  return g.tag;
+}
+console.log(read(made));
+
+const counter = () => 5;
+const alias = counter;
+console.log(alias.label);
+counter.label = "late";
+{
+  counter.size = 1;
+}
+console.log(counter.size, counter["label"]);

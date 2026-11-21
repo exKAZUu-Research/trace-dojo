@@ -1,0 +1,20 @@
+(9,7): error TS2322: Type 'Iterator<number, undefined, string>' is not assignable to type 'Iterator<string, undefined, string>'.
+  The types returned by 'next(...)' are incompatible between these types.
+    Type 'IteratorResult<number, undefined>' is not assignable to type 'IteratorResult<string, undefined>'.
+      Type 'IteratorYieldResult<number>' is not assignable to type 'IteratorResult<string, undefined>'.
+        Type 'IteratorYieldResult<number>' is not assignable to type 'IteratorYieldResult<string>'.
+          Type 'number' is not assignable to type 'string'.
+(10,7): error TS2322: Type 'Iterator<number, undefined, string>' is not assignable to type 'Iterator<number, string, string>'.
+  The types returned by 'next(...)' are incompatible between these types.
+    Type 'IteratorResult<number, undefined>' is not assignable to type 'IteratorResult<number, string>'.
+      Type 'IteratorReturnResult<undefined>' is not assignable to type 'IteratorResult<number, string>'.
+        Type 'IteratorReturnResult<undefined>' is not assignable to type 'IteratorReturnResult<string>'.
+          Type 'undefined' is not assignable to type 'string'.
+(11,7): error TS2322: Type 'Iterator<number, undefined, string>' is not assignable to type 'Iterator<number, undefined, number>'.
+  Types of property 'next' are incompatible.
+    Type '(...[value]: [] | [string]) => IteratorResult<number, undefined>' is not assignable to type '(...[value]: [] | [number]) => IteratorResult<number, undefined>'.
+      Types of parameters '__0' and '__0' are incompatible.
+        Type '[] | [number]' is not assignable to type '[] | [string]'.
+          Type '[number]' is not assignable to type '[] | [string]'.
+            Type '[number]' is not assignable to type '[string]'.
+              Type 'number' is not assignable to type 'string'.

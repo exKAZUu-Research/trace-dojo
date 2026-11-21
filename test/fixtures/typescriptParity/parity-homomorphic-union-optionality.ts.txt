@@ -1,0 +1,12 @@
+const a:Required<{x:string|undefined}|{x?:number}>={x:undefined};
+const b:Required<{x?:string}|{x:number|undefined}>={x:undefined};
+type Shape = {kind:"s";value?:string} | {kind:"n";value:number|undefined};
+const c:Required<Shape>={kind:"n",value:undefined};
+function show(value:Required<Shape>){if(value.kind==="s")console.log(value.value.toUpperCase());else console.log(value.value);}
+show({kind:"s",value:"ok"});show(c);
+type Remapped<T> = {[K in keyof T as `copy_${K & string}`]-?:T[K]};
+const d:Remapped<{x:string|undefined}|{x?:number}>={copy_x:undefined};
+const e:Required<string|{x?:number}>="text";
+const f:Required<null|{x?:number}>=null;
+const g:Required<undefined|{x?:number}>=undefined;
+console.log(a,b,c,d,e,f,g);

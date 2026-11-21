@@ -1,0 +1,14 @@
+type G<T> = T | G<T[]>[];
+function f<U>(x: G<U>): G<U> { const y: G<U> = x; return y; }
+type IsNum<X> = X extends number ? 1 : 2;
+function k<U>(x: G<U>): IsNum<G<U>[]> { return 2; }
+function m(x: G<number>): IsNum<G<number>[]> { return 2; }
+const g: G<string>[] = [["a"]];
+const z: keyof G<number>[] = "length";
+function idx<U>(x: Record<string, G<U>>, key: string) { x[key] = []; return x[key]; }
+type T = number | [T];
+function t1(t: T): T { const y: T = t; return [y]; }
+type R<X> = X | [R<X[]>];
+function r1(t: R<number>): R<number> { const y: R<number> = t; return y; }
+const t2: T = [[[1]]];
+const t3: T = [["x"]];

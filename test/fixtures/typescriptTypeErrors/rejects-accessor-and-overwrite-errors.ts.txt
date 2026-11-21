@@ -1,0 +1,48 @@
+class WrongReturn {
+  get value() { return 1; }
+  set value(_arg: string) {}
+}
+const invalidObject = {
+  get value() { return 1; },
+  set value(_arg: string) {},
+};
+class Restricted {
+  get value() { return 1; }
+  private set value(_arg: number) {}
+}
+new Restricted().value = 2;
+class Reversed {
+  protected get value() { return 1; }
+  set value(_arg: number) {}
+}
+class Missing {
+  get value() {}
+  set value(_arg: number) { return 1; }
+}
+class InvalidParameter {
+  set optional(_arg?: number) {}
+  set defaulted(_arg = 1) {}
+  set rest(..._args: number[]) {}
+  set annotated(_arg: number): void {}
+}
+interface MissingBodies {
+  set optional(arg?: number);
+  get unexpected(arg: number): string;
+}
+const defaults = { color: 'blue' };
+const options = {
+  color: 'red',
+  ...defaults,
+};
+class Uninitialized {
+  value;
+  constructor() {
+    while (false) { this.value = 1; }
+  }
+}
+class EmptyFor {
+  value;
+  constructor() {
+    for (; false;) { this.value = 1; }
+  }
+}

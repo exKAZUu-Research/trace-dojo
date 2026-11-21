@@ -1,0 +1,18 @@
+function use(cb: ((x: string) => number) | ((x: number) => string)) { console.log(cb); }
+use((x) => 1);
+const f: ((x: number) => number) | ((x: number) => string) = (x) => x + 1;
+const g: ((x: number) => number) | ((x: string) => string) = (x) => 1;
+const h: ((x: number, y?: string) => number) | ((x: number) => string) = (x) => 1;
+const i: ((x: number) => number) | ((x: number, y: string) => string) = (x) => 1;
+const j: ((x: number) => number) | ((x: number, y: string) => string) = (x, y) => 1;
+const k: ((x: number) => number) | ((x: number) => string) | undefined = (x) => x;
+const l: ((x: number) => number) | ((x: number) => string) = (x) => true;
+const a: { (x: string): void; (x: number): void } = (x) => { const t: string = x; };
+const b: { (x: string): void; (x: number, y: number): void } = (x) => { const t: string = x; };
+const c: ((x: string) => void) & ((x: number) => void) = (x) => { const t: string = x; };
+const d: ((x: any) => number) | ((x: number) => string) = (x) => 1;
+const e: (<T>(x: T) => T) | (<T>(x: T) => T) = (x) => x;
+const m: ((x: number) => void) | { (x: number): void; (x: number, y: string): void } = (x) => {};
+const n: ((x: number) => void) | { (x: number): void; (x: string, y: string): void } = (x, y) => {};
+const o: ((...a: number[]) => void) | ((...b: number[]) => number) = (x) => {};
+console.log(f, g, h, i, j, k, l, a, b, c, d, e, m, n, o);

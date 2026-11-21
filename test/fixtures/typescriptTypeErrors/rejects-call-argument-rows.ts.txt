@@ -1,0 +1,45 @@
+const arr: number[] = [1, 2].map((x) =>
+  String(x)
+);
+const arr2: { n: number }[] = [1, 2].map((x) => ({
+  n: "s",
+}));
+function id<T>(f: () => T): T { return f(); }
+const v: number = id(() =>
+  "s"
+);
+const m = new Map<string, number>([
+  ["a", 1],
+  ["b", "x"],
+]);
+function take(o: { a: number }) {}
+take({
+  a: "s",
+});
+const fn: (n: number) => string = (n) =>
+  n * 2;
+const s = "abc".replace(
+  1,
+  "x"
+);
+const t = "abc".split(
+  "b",
+  "2"
+);
+const m2 = new Map<string, number>([
+  ["a", "1"],
+]);
+function f(a: string): void;
+function f(a: number, b: string): void;
+function f(a: any, b?: any) {}
+f(
+  true
+);
+f(
+  1,
+  2
+);
+const d = [1, 2].reduce(
+  (acc, x) => acc + x,
+  "s"
+);

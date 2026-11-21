@@ -1,0 +1,7 @@
+function f(s: string): void {
+  if (!s) {
+    const t: "" = s;
+    console.log(t);
+  }
+}
+f("");

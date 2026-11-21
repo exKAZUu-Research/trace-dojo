@@ -1,0 +1,4 @@
+function f<T extends string>(t: T) { return { ...t }; }
+class C { private p = 1; protected q = 2; r = 3; }
+const s = { ...new C() };
+console.log(s.p, s.q, s.r);

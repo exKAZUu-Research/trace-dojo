@@ -1,0 +1,24 @@
+type Digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
+type PostalCode<T extends string> = `${T}${T}${T}${T}${T}`;
+const code: PostalCode<Digit> = "bad postal code";
+type Again = PostalCode<Digit>;
+type HexDigit = Digit | "a" | "b" | "c" | "d" | "e" | "f";
+type HexColor<T extends string> = `#${T}${T}${T}${T}${T}${T}`;
+const color: HexColor<HexDigit> = "bad color";
+interface Deferred<T extends string> { value: PostalCode<T> }
+function read(carrier: Deferred<Digit>) {
+  const value = carrier.value;
+  return [value, carrier.value];
+}
+type Optional<T extends string> = { value: HexColor<T> } | undefined;
+function optional(carrier: Optional<HexDigit>) {
+  return carrier?.value;
+}
+function obtain<T extends string>(input: T): PostalCode<T> { return input as unknown as PostalCode<T>; }
+function inferred(digit: Digit) {
+  return obtain(digit);
+}
+function make<T extends string>(input: T): HexColor<T> { return input as unknown as HexColor<T>; }
+function explicit() {
+  return make<HexDigit>("a");
+}

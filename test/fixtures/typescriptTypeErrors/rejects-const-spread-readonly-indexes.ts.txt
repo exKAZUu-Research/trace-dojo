@@ -1,0 +1,24 @@
+function strings(a: Record<string, number>, b: Record<string, number>) {
+  const c = { ...a, ...b } as const;
+  c.x = 2;
+  console.log(c.x);
+}
+strings({ x: 1 }, {});
+function numbers(a: Record<number, number>, b: Record<number, number>) {
+  const c = { ...a, ...b } as const;
+  c[0] = 2;
+  console.log(c[0]);
+}
+numbers({ 0: 1 }, {});
+function alternatives(a: Record<string, number> | Record<string, string>, b: Record<string, number>) {
+  const c = { ...a, ...b } as const;
+  c.y = 3;
+}
+function writable(a: Record<string, number>, b: Record<string, number>) {
+  const c = { ...a, ...b };
+  c.z = 4;
+}
+function written(k: string, b: Record<string, number>) {
+  const c = { [k]: 1, ...b } as const;
+  c.w = 5;
+}

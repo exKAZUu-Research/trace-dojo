@@ -1,0 +1,17 @@
+const a: (<T extends string>(x: T) => T) | (<T extends number>(x: T) => T) = (x) => x;
+const b: (<T extends string>(x: T) => T) | (<U extends string>(x: U) => U) = (x) => x;
+const c: (<T>(x: T) => T) | (<T extends unknown>(x: T) => T) = (x) => x;
+const d: (<T = string>(x: T) => T) | (<T = number>(x: T) => T) = (x) => x;
+const e: (<T = unknown>(x: T) => T) | (<T>(x: T) => T) = (x) => x;
+const f: (<T, U extends T>(x: T, y: U) => T) | (<A, B extends A>(x: A, y: B) => A) = (x, y) => x;
+const g: (<T, U extends T>(x: T, y: U) => T) | (<A, B extends string>(x: A, y: B) => A) = (x, y) => x;
+const h: (<T extends any>(x: T) => T) | (<T extends unknown>(x: T) => T) = (x) => x;
+const i: { <T>(x: T): T; <U>(x: U, y?: number): U } = (x) => {
+  const s: string = x;
+  return x;
+};
+const j: { <T extends string>(x: T): T; <U extends number>(x: U, y?: number): U } = (x) => x;
+function k<T extends any>(x: T): void {
+  const s: string = x;
+}
+console.log(a, b, c, d, e, f, g, h, i, j, k);

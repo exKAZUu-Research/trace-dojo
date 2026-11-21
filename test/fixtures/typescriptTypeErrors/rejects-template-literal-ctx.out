@@ -1,0 +1,1 @@
+(4,7): error TS2322: Type '"bye bob"' is not assignable to type '`hello ${string}`'.

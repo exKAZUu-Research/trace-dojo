@@ -1,0 +1,4 @@
+const obj = { x: { q: 1 } };
+let q: number;
+({ q } = obj.x);
+console.log(q);

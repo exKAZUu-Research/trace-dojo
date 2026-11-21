@@ -1,0 +1,8 @@
+read constructor
+Error: constructor failed
+read name
+TypeError [ERR_INVALID_ARG_TYPE]: The "properties" argument must be an instance of Array. Received an instance of Custom
+Error: name failed
+TypeError [ERR_INVALID_ARG_TYPE]: The "properties" argument must be an instance of Array. Received [Object]
+TypeError [ERR_INVALID_ARG_TYPE]: The "properties" argument must be an instance of Array. Received [Object]
+TypeError [ERR_INVALID_ARG_TYPE]: The "properties" argument must be an instance of Array. Received [Object: null prototype] {}

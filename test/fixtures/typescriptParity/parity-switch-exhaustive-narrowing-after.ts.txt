@@ -1,0 +1,93 @@
+type Shape = { kind: 'square'; side: number } | { kind: 'circle'; radius: number };
+
+function tag(u: 'a' | 'b'): string {
+  switch (u) {
+    case 'a':
+      return 'A';
+    case 'b':
+      return 'B';
+  }
+  const rest: never = u;
+  return rest;
+}
+
+function area(shape: Shape): number {
+  switch (shape.kind) {
+    case 'square': {
+      return shape.side * shape.side;
+    }
+    case 'circle': {
+      return 3 * shape.radius * shape.radius;
+    }
+  }
+  const rest: never = shape;
+  return rest;
+}
+
+function grouped(u: 'a' | 'b' | 'c'): string {
+  switch (u) {
+    case 'a':
+    case 'b':
+      return 'ab';
+    case 'c':
+      throw new Error('c');
+  }
+  const exact: 'a' = u;
+  return exact;
+}
+
+function nested(u: 'a' | 'b', v: 'x' | 'y'): string {
+  switch (u) {
+    case 'a':
+      switch (v) {
+        case 'x':
+          return 'ax';
+        case 'y':
+          return 'ay';
+      }
+      const restV: never = v;
+      return restV;
+    case 'b':
+      return 'b';
+  }
+}
+
+function byType(x: string | number): string {
+  switch (typeof x) {
+    case 'string':
+      return 'string';
+    case 'number':
+      return 'number';
+  }
+}
+
+function unused(u: 'a' | 'b'): string {
+  switch (u) {
+    case 'a':
+      return 'A';
+    case 'b':
+      return 'B';
+  }
+  const rest: never = u;
+}
+
+function inBranch(u: 'a' | 'b', q: string | number): string {
+  if (typeof q === 'string') {
+    switch (u) {
+      case 'a':
+        return 'A' + q;
+      case 'b':
+        return 'B' + q;
+    }
+  }
+  const n: number = q;
+  return 'n' + n;
+}
+
+console.log(tag('a'), tag('b'));
+console.log(area({ kind: 'square', side: 2 }), area({ kind: 'circle', radius: 1 }));
+console.log(grouped('b'));
+console.log(nested('a', 'y'), nested('b', 'x'));
+console.log(byType(1), byType('s'));
+console.log(unused('b'));
+console.log(inBranch('a', 'q'), inBranch('b', 3));

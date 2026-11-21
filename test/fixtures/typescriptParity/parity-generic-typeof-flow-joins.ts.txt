@@ -1,0 +1,21 @@
+function preserveTernary<T>(value: T): T {
+  typeof value === "string" ? console.log(value.length) : console.log(String(value));
+  return value;
+}
+function preserveIf<T>(value: T): T {
+  if (typeof value === "number") console.log(value + 1);
+  else console.log(String(value));
+  return value;
+}
+function preserveInitializer<T>(value: T): T {
+  const length = typeof value === "string" ? value.length : 1;
+  console.log(length);
+  return value;
+}
+function preserveConstrained<T extends string | number>(value: T): T {
+  if (typeof value === "string") console.log(value.length);
+  else console.log(value.toFixed(1));
+  return value;
+}
+console.log(preserveTernary("hi"), preserveIf(2), preserveInitializer("four"));
+console.log(preserveConstrained("five"), preserveConstrained(6));

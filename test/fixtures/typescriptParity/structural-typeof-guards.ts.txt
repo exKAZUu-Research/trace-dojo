@@ -1,0 +1,43 @@
+function core(value: Object) {
+  if (typeof value === "string") return value.toUpperCase();
+  if (typeof value === "number") return value.toFixed();
+  return value.toString();
+}
+function structural(value: { toString(): string }) {
+  if (typeof value === "string") return value.toUpperCase();
+  if (typeof value === "boolean") return value.valueOf();
+  return value.toString();
+}
+function stringShape(value: { length: number }) {
+  if (typeof value === "string") return value.toUpperCase();
+  return value.length;
+}
+function boxed(value: String) {
+  if (typeof value === "string") return value.toUpperCase();
+  return value.toString();
+}
+function callable(value: { toString(): string }) {
+  if (typeof value === "function") return value();
+  return value.toString();
+}
+function subtract(value: Object) {
+  if (typeof value === "number") return "number";
+  return value.toString();
+}
+console.log(core("hello"), core(2), core({}), core(true));
+console.log(structural("shape"), structural(false), structural({ toString() { return "custom"; } }));
+console.log(stringShape("text"), stringShape({ length: 4 }), boxed("plain"), boxed(new String("boxed")));
+console.log(callable(() => "called"), callable(false), subtract(3), subtract("remaining"));
+function augmentedPrimitive(value: string & { tag?: number }) {
+  if (typeof value === "string") return value.toUpperCase();
+}
+function genericPrimitive<T extends string>(value: T & { tag?: number }) {
+  if (typeof value === "string") return value.toUpperCase();
+}
+function augmentedFunction(value: (() => number) & { tag?: number }) {
+  if (typeof value === "function") return value();
+}
+function redundantIntersection(value: Object & {}) {
+  if (typeof value === "string") return value.toUpperCase();
+}
+console.log(augmentedPrimitive("tagged"), genericPrimitive("generic"), augmentedFunction(() => 8), redundantIntersection("empty"));

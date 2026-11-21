@@ -1,0 +1,11 @@
+function choose<C extends string>(values: C[], fallback?: NoInfer<C>): C {
+  return fallback ?? values[0];
+}
+function build<C extends string>(values: C[], transform: (value: C) => C): C {
+  return transform(values[0]);
+}
+function result<T>(make: () => T): T { return make(); }
+const chosen: any = choose(['red', 'blue'], 'red');
+const combined: 'red' | 'blue' | 'green' = build(['red', 'blue'], () => 'green');
+const tuple: [number, string] = result(() => [1, 'two']);
+console.log(chosen, combined, tuple);

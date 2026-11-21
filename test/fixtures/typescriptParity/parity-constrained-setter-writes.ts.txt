@@ -1,0 +1,22 @@
+class Box {
+  #stored = 0;
+  get value(): number { return this.#stored; }
+  set value(value: number | string) { this.#stored = Number(value); }
+  set label(value: string) { console.log(value); }
+}
+function setOne<K extends 'value'>(box: Box, key: K, value: string) {
+  box[key] = value;
+}
+function setBoth<K extends 'value' | 'label'>(box: Box, key: K, value: string) {
+  box[key] = value;
+}
+function setBound<T extends Box, K extends 'value'>(box: T, key: K, value: string) {
+  box[key] = value;
+}
+const box = new Box();
+setOne(box, 'value', '5');
+console.log(box.value);
+setBoth(box, 'label', 'hello');
+setBoth(box, 'value', '7');
+setBound(box, 'value', '8');
+console.log(box.value);

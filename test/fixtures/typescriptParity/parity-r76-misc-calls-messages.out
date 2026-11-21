@@ -1,0 +1,20 @@
+RangeError toFixed() digits argument must be between 0 and 100
+RangeError toString() radix argument must be between 2 and 36
+RangeError toPrecision() argument must be between 1 and 100
+RangeError toExponential() argument must be between 0 and 100
+RangeError Invalid array length
+RangeError Invalid array length
+RangeError Invalid array length
+TypeError Reduce of empty array with no initial value
+RangeError Invalid index : 5
+[ 1 ]
+TypeError Array.prototype.map called on null or undefined
+RangeError -1 must be positive
+RangeError NaN must be positive
+TypeError number 5 is not a function
+[]
+[Function: set]
+TypeError Method Map.prototype.get called on incompatible receiver #<Object>
+TypeError Method Map.prototype.get called on incompatible receiver #<Set>
+TypeError Method Set.prototype.add called on incompatible receiver #<Object>
+[object Object]

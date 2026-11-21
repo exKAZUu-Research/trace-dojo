@@ -1,0 +1,10 @@
+(11,14): error TS2345: Argument of type 'string | { name: string; } | { id: number; }' is not assignable to parameter of type 'object'.
+  Type 'string' is not assignable to type 'object'.
+(11,26): error TS2322: Type '(string | { name: string; } | { id: number; }) & { age: number; }' is not assignable to type 'null'.
+  Type 'string & { age: number; }' is not assignable to type 'null'.
+(12,26): error TS2322: Type '(string | { name: string; } | { id: number; }) & { tag: string; }' is not assignable to type 'null'.
+  Type 'string & { tag: string; }' is not assignable to type 'null'.
+(15,26): error TS2322: Type '{ name: string; } & { tag: string; }' is not assignable to type 'null'.
+(15,54): error TS2322: Type '{ name: string; }' is not assignable to type 'null'.
+(20,27): error TS2322: Type 'Animal & { fly(): void; }' is not assignable to type 'null'.
+(24,25): error TS2322: Type '{ name: string; } & string' is not assignable to type 'null'.

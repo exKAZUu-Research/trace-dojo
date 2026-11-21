@@ -1,0 +1,10 @@
+(1,88): error TS2542: Index signature in type '{ readonly [key: string]: number; }' only permits reading.
+(2,88): error TS2542: Index signature in type '{ readonly [key: number]: number; }' only permits reading.
+(3,95): error TS2542: Index signature in type '{ readonly [key: string]: number; }' only permits reading.
+(5,8): error TS2790: The operand of a 'delete' operator must be optional.
+(7,8): error TS2704: The operand of a 'delete' operator cannot be a read-only property.
+(8,109): error TS2542: Index signature in type '{ readonly [key: string]: number; } | { [key: string]: number; }' only permits reading.
+(9,77): error TS2542: Index signature in type 'readonly number[]' only permits reading.
+(10,87): error TS2704: The operand of a 'delete' operator cannot be a read-only property.
+(11,79): error TS2542: Index signature in type '{ readonly [key: number]: number; }' only permits reading.
+(12,114): error TS2542: Index signature in type '{ readonly [key: number]: number; [key: string]: number; }' only permits reading.

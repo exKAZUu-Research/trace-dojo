@@ -1,0 +1,16 @@
+function nested<T extends string>(t: T): `(${T})` {
+  return `(${`${t}`})`;
+}
+function unconstrained<T>(t: T): `<${T & string}>` {
+  return `<${t}>`;
+}
+function numeric<T extends number>(t: T): `${T}` {
+  const text = `${t}`;
+  return text;
+}
+function other<T extends string>(t: T): "x" {
+  return `<${t}>`;
+}
+const point = { x: 1 };
+const shown: `p${number}` = `p${point}`;
+console.log(nested, unconstrained, numeric, other, shown);

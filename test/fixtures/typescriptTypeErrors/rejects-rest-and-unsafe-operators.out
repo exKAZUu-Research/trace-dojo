@@ -1,0 +1,9 @@
+(2,6): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+(3,3): error TS2304: Cannot find name 'missingName'.
+(5,27): error TS2469: The '+' operator cannot be applied to type 'symbol'.
+(6,18): error TS2731: Implicit conversion of a 'symbol' to a 'string' will fail at runtime. Consider wrapping this expression in 'String(...)'.
+(9,10): error TS2790: The operand of a 'delete' operator must be optional.
+(10,10): error TS2790: The operand of a 'delete' operator must be optional.
+(11,10): error TS2790: The operand of a 'delete' operator must be optional.
+(15,15): error TS2358: The left-hand side of an 'instanceof' expression must be of type 'any', an object type or a type parameter.
+(16,15): error TS2358: The left-hand side of an 'instanceof' expression must be of type 'any', an object type or a type parameter.

@@ -1,0 +1,15 @@
+class TypedFunctionFields {
+  x=4;
+  arrow=()=>this.x;
+  explicit=function(this:TypedFunctionFields) { return this.x; };
+  contextual:(this:{x:number})=>number=function() { return this.x; };
+  nestedArrow=function(this:TypedFunctionFields) { return (()=>this.x)(); };
+  static x=5;
+  static arrow=()=>this.x;
+}
+const typedFields=new TypedFunctionFields();
+console.log(typedFields.arrow(), typedFields.explicit(), typedFields.contextual(), typedFields.nestedArrow(), TypedFunctionFields.arrow());
+function sameDefault(x=1) { var x=2; return x; }
+function samePattern({x}:{x:number}) { var x=3; return x; }
+const sameContextual:(x:number)=>number=function(x) { var x=4; return x; };
+console.log(sameDefault(), samePattern({x:1}), sameContextual(1));

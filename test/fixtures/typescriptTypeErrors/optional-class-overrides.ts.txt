@@ -1,0 +1,14 @@
+class Base { value: number = 1; }
+class Derived extends Base { value?: number = 2; }
+
+class BaseStatic { static value: number = 1; }
+class DerivedStatic extends BaseStatic { static value?: number = 2; }
+
+class BaseUndefined { value: number | undefined = 1; }
+class DerivedUndefined extends BaseUndefined { value?: number = 2; }
+
+class BaseStaticUndefined { static value: number | undefined = 1; }
+class DerivedStaticUndefined extends BaseStaticUndefined { static value?: number = 2; }
+
+class BaseOptional { value?: number; static value?: number; }
+class DerivedRequired extends BaseOptional { value = 1; static value = 2; }

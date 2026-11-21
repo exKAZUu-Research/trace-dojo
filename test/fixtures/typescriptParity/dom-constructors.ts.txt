@@ -1,0 +1,10 @@
+function readInput(value: Element): string | undefined {
+  if (value instanceof HTMLInputElement) return value.value.toUpperCase();
+}
+function domStatics(): [1, string] {
+  const fromPrototype: HTMLInputElement = HTMLInputElement.prototype;
+  const input = new HTMLInputElement();
+  new MutationObserver(records => { records.forEach(record => console.log(record.target.nodeName)); });
+  return [Node.ELEMENT_NODE, fromPrototype.value || input.value];
+}
+console.log('done');

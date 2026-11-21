@@ -1,0 +1,8 @@
+(3,7): error TS2322: Type 'string' is not assignable to type 'number'.
+(5,15): error TS2565: Property 'label' is used before being assigned.
+(8,24): error TS2339: Property 'hidden' does not exist on type '() => void'.
+(9,15): error TS2339: Property 'hidden' does not exist on type '() => void'.
+(11,11): error TS2339: Property 'hidden' does not exist on type '() => void'.
+(12,15): error TS2339: Property 'hidden' does not exist on type '() => void'.
+(14,29): error TS2339: Property 'hidden' does not exist on type '() => void'.
+(15,15): error TS2339: Property 'hidden' does not exist on type '() => void'.

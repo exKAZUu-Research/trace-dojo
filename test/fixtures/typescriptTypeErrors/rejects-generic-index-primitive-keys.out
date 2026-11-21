@@ -1,0 +1,11 @@
+(1,31): error TS2536: Type 'null' cannot be used to index type 'T'.
+(2,31): error TS2536: Type 'undefined' cannot be used to index type 'T'.
+(3,31): error TS2536: Type 'void' cannot be used to index type 'T'.
+(4,31): error TS2536: Type 'bigint' cannot be used to index type 'T'.
+(7,31): error TS2536: Type 'boolean' cannot be used to index type 'T'.
+(8,31): error TS2536: Type 'object' cannot be used to index type 'T'.
+(9,31): error TS2536: Type 'true' cannot be used to index type 'T'.
+(10,32): error TS2536: Type '1n' cannot be used to index type 'T'.
+(11,32): error TS2536: Type 'unknown' cannot be used to index type 'T'.
+(12,32): error TS2536: Type 'string' cannot be used to index type 'T'.
+(13,32): error TS2536: Type 'symbol' cannot be used to index type 'T'.

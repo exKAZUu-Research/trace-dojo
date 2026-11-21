@@ -1,0 +1,13 @@
+type Tree = Tree[];
+const bad: Tree = [[1]];
+type Direct = Direct;
+type InUnion = InUnion | number;
+type InRecord = Record<string, InRecord>;
+type InPartial = Partial<InPartial>;
+type KeyOfArray = keyof KeyOfArray[];
+type ElementOfArray = ElementOfArray[][number];
+type LengthOfArray = LengthOfArray[]["length"];
+type FirstOfTuple = [FirstOfTuple][0];
+type CheckedArray = CheckedArray[] extends unknown[] ? 1 : 2;
+type MappedArray = Partial<MappedArray[]>;
+console.log(bad);

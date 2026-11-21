@@ -1,0 +1,14 @@
+class Tagged {}
+Object.defineProperty(Tagged, 'name', { value: Symbol('label'), configurable: true });
+const value = new Tagged();
+console.log(value);
+console.dir(value, { showHidden: true });
+let reads = 0;
+Object.defineProperty(Tagged, 'name', {
+  get() { reads++; return Symbol('label' + reads); },
+});
+console.log(value, reads);
+console.dir(value, { showHidden: true });
+console.log(reads);
+Object.defineProperty(Tagged, 'name', { value: 17 });
+console.log(value);

@@ -1,0 +1,4 @@
+const o = {} as { x: number };
+Object.defineProperty(o, "x", { value: 1 });
+o.x = 2;
+console.log(o.x);

@@ -1,0 +1,13 @@
+let sourceText: string | number = "hi";
+function textMetadata() {}
+textMetadata.value = sourceText;
+function readText() { return textMetadata.value.toUpperCase(); }
+sourceText = 3;
+console.log(readText());
+
+let sourceNumber: string | number = 1;
+const numberMetadata = () => {};
+numberMetadata.value = sourceNumber;
+function readNumber() { return numberMetadata.value.toFixed(1); }
+sourceNumber = "changed";
+console.log(readNumber());

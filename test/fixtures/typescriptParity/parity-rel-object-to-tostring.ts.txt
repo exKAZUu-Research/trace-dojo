@@ -1,0 +1,3 @@
+const o: object = { a: 1 };
+const t: { toString(): string } = o;
+console.log(t.toString());

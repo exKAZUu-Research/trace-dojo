@@ -1,0 +1,1 @@
+(4,32): error TS2540: Cannot assign to 'count' because it is a read-only property.

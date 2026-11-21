@@ -1,0 +1,4 @@
+(2,7): error TS2322: Type '"s"' is not assignable to type 'never'.
+(4,7): error TS2322: Type 'null' is not assignable to type 'never'.
+(6,7): error TS2322: Type '1' is not assignable to type 'undefined'.
+(8,7): error TS2322: Type '1' is not assignable to type 'never'.

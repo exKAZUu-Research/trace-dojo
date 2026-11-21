@@ -1,0 +1,14 @@
+const anyCall:any=(x:number)=>x;
+anyCall<number>(3);
+const broad:Function=(x:number)=>x;
+broad<number>(3);
+anyCall?.<number>(3);
+const Factory:any=class{value=3;};
+new Factory<number>();
+anyCall<
+ MissingType
+>(3);
+new Factory<
+ MissingConstructorType
+>();
+let values=[];values.push<number>(1);

@@ -1,0 +1,9 @@
+function fail(message: string): never {
+  throw new Error(message);
+}
+function sign(x: number): string {
+  if (x > 0) return "plus";
+  if (x < 0) return "minus";
+  fail("zero");
+}
+console.log(sign(1));

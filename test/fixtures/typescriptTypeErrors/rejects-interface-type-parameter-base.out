@@ -1,0 +1,14 @@
+(1,11): error TS2430: Interface 'Labeled<T>' incorrectly extends interface 'T'.
+  'Labeled<T>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint '{ value: number; }'.
+(4,11): error TS2430: Interface 'FromObject<T>' incorrectly extends interface 'T'.
+  'FromObject<T>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'object'.
+(5,11): error TS2430: Interface 'FromEmpty<T>' incorrectly extends interface 'T'.
+  'FromEmpty<T>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint '{}'.
+(6,11): error TS2430: Interface 'FromOther<T, U>' incorrectly extends interface 'U'.
+  'FromOther<T, U>' is assignable to the constraint of type 'U', but 'U' could be instantiated with a different subtype of constraint '{ a: number; }'.
+(7,11): error TS2430: Interface 'WithObject<T>' incorrectly extends interface 'T'.
+  'WithObject<T>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint '{ a: number; }'.
+(8,11): error TS2430: Interface 'Redeclared<T>' incorrectly extends interface 'T'.
+  'Redeclared<T>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint '{ value: number; }'.
+(11,11): error TS2430: Interface 'SelfConstrained<T>' incorrectly extends interface 'T'.
+  'SelfConstrained<T>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint '{ a: T; }'.

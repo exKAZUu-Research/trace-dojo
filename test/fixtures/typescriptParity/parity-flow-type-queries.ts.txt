@@ -1,0 +1,51 @@
+const key = Symbol('key');
+function reflect(value: object) {
+  if (key in value) { const own: keyof typeof value = key; console.log(value[own]); }
+}
+function narrowed(value: string | number) {
+  if (typeof value === 'string') { const copy: typeof value = 'copy'; console.log(copy.toUpperCase()); }
+}
+function before() {
+  type Later = typeof value;
+  let value: string | number = 'later';
+  const copy: Later = 1;
+  console.log(copy, value);
+}
+function unassigned() {
+  let value: number;
+  type NumberValue = typeof value;
+  const copy: NumberValue = 2;
+  let empty;
+  const nothing: typeof empty = undefined;
+  console.log(copy, nothing);
+}
+function member(value: {item: string | number}) {
+  if (typeof value.item === 'string') { const copy: typeof value.item = 'member'; console.log(copy.toUpperCase()); }
+}
+function captures() {
+  let value: string | number = 'initial';
+  const arrow = () => { const copy: typeof value = 'captured'; return copy.toUpperCase(); };
+  function deferred() { const copy: typeof value = 3; return copy; }
+  console.log(arrow(), deferred());
+}
+reflect({[key]: 3});
+narrowed('text');
+before();
+unassigned();
+member({item: 'text'});
+captures();
+function snapshot() {
+  let value: string | number = 'initial';
+  type Initial = typeof value;
+  value = 1;
+  const copy: Initial = 'snapshot';
+  console.log(copy, value);
+}
+function beforeMember() {
+  type Item = typeof later.item;
+  const later = {item: 1};
+  const copy: Item = 2;
+  console.log(copy, later.item);
+}
+snapshot();
+beforeMember();

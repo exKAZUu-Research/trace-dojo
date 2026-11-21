@@ -1,0 +1,4 @@
+class ReturnsItself extends (function () { return ReturnsItself; })() {}
+class ArrowCycle extends (() => ArrowCycle)() {}
+class First extends (() => Second)() {}
+class Second extends First {}

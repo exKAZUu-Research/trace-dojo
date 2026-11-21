@@ -1,0 +1,7 @@
+function show(x: unknown): void {
+  if (x) {
+    const y: {} = x;
+    console.log(y);
+  }
+}
+show(1);

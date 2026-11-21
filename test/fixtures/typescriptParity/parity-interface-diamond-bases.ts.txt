@@ -1,0 +1,56 @@
+interface A0 {
+  x: number;
+}
+interface B0 {
+  x: number;
+}
+interface A1 extends A0, B0 {}
+interface B1 extends A0, B0 {}
+interface A2 extends A1, B1 {}
+interface B2 extends A1, B1 {}
+interface A3 extends A2, B2 {}
+interface B3 extends A2, B2 {}
+interface A4 extends A3, B3 {}
+interface B4 extends A3, B3 {}
+interface A5 extends A4, B4 {}
+interface B5 extends A4, B4 {}
+interface A6 extends A5, B5 {}
+interface B6 extends A5, B5 {}
+interface A7 extends A6, B6 {}
+interface B7 extends A6, B6 {}
+interface A8 extends A7, B7 {}
+interface B8 extends A7, B7 {}
+interface A9 extends A8, B8 {}
+interface B9 extends A8, B8 {}
+interface A10 extends A9, B9 {}
+interface B10 extends A9, B9 {}
+interface A11 extends A10, B10 {}
+interface B11 extends A10, B10 {}
+interface A12 extends A11, B11 {}
+interface B12 extends A11, B11 {}
+interface A13 extends A12, B12 {}
+interface B13 extends A12, B12 {}
+interface A14 extends A13, B13 {}
+interface B14 extends A13, B13 {}
+interface A15 extends A14, B14 {}
+interface B15 extends A14, B14 {}
+interface A16 extends A15, B15 {}
+interface B16 extends A15, B15 {}
+interface A17 extends A16, B16 {}
+interface B17 extends A16, B16 {}
+interface A18 extends A17, B17 {}
+interface B18 extends A17, B17 {}
+interface A19 extends A18, B18 {}
+interface B19 extends A18, B18 {}
+interface A20 extends A19, B19 {}
+interface B20 extends A19, B19 {}
+interface A21 extends A20, B20 {}
+interface B21 extends A20, B20 {}
+interface A22 extends A21, B21 {}
+interface B22 extends A21, B21 {}
+interface A23 extends A22, B22 {}
+interface B23 extends A22, B22 {}
+interface A24 extends A23, B23 {}
+interface B24 extends A23, B23 {}
+const value: A24 = { x: 1 };
+console.log(value.x);

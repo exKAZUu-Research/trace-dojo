@@ -1,0 +1,5 @@
+(2,39): error TS2536: Type '"a" | "missing"' cannot be used to index type 'T'.
+(3,23): error TS2536: Type '"a" | "missing"' cannot be used to index type 'T'.
+(4,45): error TS2536: Type 'string' cannot be used to index type 'T'.
+(5,23): error TS2536: Type 'number' cannot be used to index type 'T'.
+(10,40): error TS2536: Type '"a" | "b"' cannot be used to index type 'T'.

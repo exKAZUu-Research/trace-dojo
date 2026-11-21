@@ -1,0 +1,8 @@
+(4,3): error TS2687: All declarations of 'z' must have identical modifiers.
+(8,3): error TS2717: Subsequent property declarations must have the same type.  Property 'x' must be of type 'number', but here has type 'string'.
+(10,3): error TS2687: All declarations of 'z' must have identical modifiers.
+(10,3): error TS2717: Subsequent property declarations must have the same type.  Property 'z' must be of type 'number | undefined', but here has type 'number'.
+(18,3): error TS2717: Subsequent property declarations must have the same type.  Property 'a' must be of type 'number', but here has type 'string'.
+(21,12): error TS2687: All declarations of 'r' must have identical modifiers.
+(24,3): error TS2687: All declarations of 'r' must have identical modifiers.
+(24,3): error TS2717: Subsequent property declarations must have the same type.  Property 'r' must be of type '1', but here has type 'number'.

@@ -1,0 +1,9 @@
+(5,3): error TS2564: Property 'x' has no initializer and is not definitely assigned in the constructor.
+(8,15): error TS2341: Property 'secret' is private and only accessible within class 'A'.
+(8,25): error TS2445: Property 'prot' is protected and only accessible within class 'A' and its subclasses.
+(9,3): error TS2540: Cannot assign to 'ro' because it is a read-only property.
+(13,1): error TS2511: Cannot create an instance of an abstract class.
+(14,7): error TS2515: Non-abstract class 'C' does not implement inherited abstract member f from class 'B'.
+(18,7): error TS2420: Class 'D' incorrectly implements interface 'I'.
+(21,5): error TS17009: 'super' must be called before accessing 'this' in the constructor of a derived class.
+(26,3): error TS2377: Constructors for derived classes must contain a 'super' call.

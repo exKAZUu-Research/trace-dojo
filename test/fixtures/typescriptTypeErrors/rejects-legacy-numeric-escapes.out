@@ -1,0 +1,9 @@
+(1,22): error TS1487: Octal escape sequences are not allowed. Use the syntax '\x41'.
+(2,25): error TS1487: Octal escape sequences are not allowed. Use the syntax '\x01'.
+(2,27): error TS1487: Octal escape sequences are not allowed. Use the syntax '\x02'.
+(3,21): error TS1487: Octal escape sequences are not allowed. Use the syntax '\x28'.
+(4,24): error TS1488: Escape sequence '\8' is not allowed.
+(4,26): error TS1488: Escape sequence '\9' is not allowed.
+(5,23): error TS1487: Octal escape sequences are not allowed. Use the syntax '\x00'.
+(6,25): error TS1487: Octal escape sequences are not allowed. Use the syntax '\x01'.
+(7,21): error TS1487: Octal escape sequences are not allowed. Use the syntax '\x41'.

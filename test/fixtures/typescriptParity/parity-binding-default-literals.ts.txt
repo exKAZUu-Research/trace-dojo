@@ -1,0 +1,72 @@
+const { direction = 'left' } = {};
+const left: 'left' = direction;
+const { count = 1 } = {};
+const one: 1 = count;
+const { missing: { value = 3 } = {} } = {};
+const three: 3 = value;
+const [four = 4] = [];
+const fourLit: 4 = four;
+const property = 'fifth';
+const { [property]: five = 5 } = {};
+const fiveLit: 5 = five;
+function choose(value: boolean) {
+  return value ? { six: 6 as const } : {};
+}
+const { six = 0 } = choose(true);
+const sixOrZero: 6 | 0 = six;
+let { mutable = 7 } = {};
+mutable = 8;
+let assigned = 0;
+({ assigned = 9 } = {});
+console.log(left, one, three, fourLit, fiveLit, sixOrZero, mutable, assigned);
+function undefinedDefault(flag: boolean) {
+  const { result = flag ? 'on' : undefined } = {};
+  const typed: 'on' | undefined = result;
+  console.log(typed);
+}
+undefinedDefault(false);
+for (const { value = 'seed' } of [{}]) {
+  const seed:'seed' = value;
+  console.log(seed);
+}
+function defaults({ one = 1, two = 2 } = { two: 4 }) {
+  console.log(one, two);
+}
+defaults();
+defaults({});
+defaults({ one: 5 });
+function listDefaults([first = 1, second = 2] = []) {
+  console.log(first, second);
+}
+listDefaults();
+listDefaults([3]);
+
+{
+  const {outer: {value} = {value: 1}} = {outer: {value: 2, extra: true}};
+  const result: number = value;
+  console.log(result);
+}
+{
+  let {outer: {value} = {value: 3}} = {outer: {extra: true}};
+  const result: number | undefined = value;
+  console.log(result);
+}
+{
+  const {outer: {value = 4} = {value: 5}} = {outer: {extra: true}};
+  console.log(value);
+}
+function annotatedVariableDefault() {
+  const {outer: {value} = {value: 6, extra: true}}: {outer?: {value: number; extra: boolean}} = {};
+  return value;
+}
+console.log(annotatedVariableDefault());
+
+function objectOrEmptyBranch(flag: boolean) {
+  const {outer: {value} = {value: 1}} = flag ? {outer: {value: 2}} : {outer: {}};
+  return value;
+}
+function objectOrMissingBranch(flag: boolean) {
+  const {outer: {value} = {value: 1}} = flag ? {outer: {value: 2}} : {};
+  return value;
+}
+console.log(objectOrEmptyBranch(true), objectOrEmptyBranch(false), objectOrMissingBranch(true), objectOrMissingBranch(false));

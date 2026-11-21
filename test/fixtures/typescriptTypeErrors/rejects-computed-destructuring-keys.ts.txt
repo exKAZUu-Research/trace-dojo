@@ -1,0 +1,15 @@
+class ComputedPrivate {private value=1;}
+const privateKey="value";
+const {[privateKey]: privateValue}=new ComputedPrivate();
+const broadKey: string="value";
+const {[broadKey]: broadValue}={value:1};
+const missingUnionKey="value" as "value"|"missing";
+const {[missingUnionKey]: missingUnionValue}={value:1};
+const exactKey="value";
+const {[exactKey]: wrongType}={value:1};
+const stringCheck: string=wrongType;
+const {[exactKey]: omitted, ...rest}={value:1,label:"kept"};
+console.log(rest.value);
+const possibleKeys="left" as "left"|"right";
+const {[possibleKeys]: choice, ...choicesRest}={left:1,right:2,kept:3};
+console.log(choicesRest.left);

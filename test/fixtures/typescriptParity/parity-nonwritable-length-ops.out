@@ -1,0 +1,5 @@
+[ 7, 2 ] { value: 2, writable: false, enumerable: false, configurable: false }
+Cannot assign to read only property 'length' of object '[object Array]'
+Cannot assign to read only property 'length' of object '[object Array]'
+Cannot assign to read only property 'length' of object '[object Array]'
+[ 7, <1 empty item> ]

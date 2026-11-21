@@ -1,0 +1,8 @@
+Set(4) { 1, 2, 3, 4 } Set(1) { 2 } Set(2) { 2, 3 } Set(3) { 1, 2, 5 }
+true true
+TypeError The .size property is NaN
+TypeError Set.prototype.union argument must be an object
+TypeError string "has" is not a function
+RangeError '-1' is an invalid size
+TypeError Constructor Map requires 'new'
+TypeError number 5 is not a function

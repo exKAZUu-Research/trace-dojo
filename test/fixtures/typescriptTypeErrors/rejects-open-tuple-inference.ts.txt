@@ -1,0 +1,14 @@
+function roOne<T>(input: T | readonly [T]): T[] { return []; }
+function starts<T>(input: T | [T, ...T[]]): T[] { return []; }
+function mutOne<T>(input: T | [T]): T[] { return []; }
+function mutOpt<T>(input: T | [T,T?]): T[] { return []; }
+function ends<T>(input: T | [...T[], T]): T[] { return []; }
+function middle<T>(input: T | [T,...T[],T]): T[] { return []; }
+const array: number[] = [1,2];
+const readonlyArray: readonly number[] = [1,2];
+const c: number[][] = mutOne(array);
+const d: number[][] = mutOpt(array);
+const e: (readonly number[])[] = roOne(readonlyArray);
+const f: (readonly number[])[] = mutOne(readonlyArray);
+const n: number[][] = starts(array);
+const o: number[][] = ends(array);

@@ -1,0 +1,26 @@
+const values: (string | number | null)[] = [1, "a", null];
+
+const twoReturns = values.filter((x) => {
+  if (x === null) return false;
+  return typeof x === "string";
+});
+twoReturns[0].toUpperCase();
+
+const mutableAlias = values.filter((x) => {
+  let isText = typeof x === "string";
+  return isText;
+});
+mutableAlias[0].toUpperCase();
+
+const implicitEnd = values.filter((x) => {
+  if (x !== null) {
+    return typeof x === "string";
+  }
+});
+implicitEnd[0].toUpperCase();
+
+const reassigned = values.filter((x) => {
+  x = x ?? "none";
+  return typeof x === "string";
+});
+reassigned[0].toUpperCase();

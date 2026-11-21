@@ -1,0 +1,18 @@
+var status: string;
+var status = "ready";
+var closed: boolean;
+var closed = true;
+var top: WindowProxy | null;
+var top: null | WindowProxy;
+var top: Window | null;
+var top: typeof top;
+var event: Event | undefined;
+type CurrentEvent = Event | undefined;
+var event: CurrentEvent;
+var event = null as unknown as CurrentEvent;
+var HTMLDivElement: typeof HTMLDivElement;
+function close() { return 1; }
+function open() { return null; }
+function print() { return 3; }
+function local() { var status = 4; return status; }
+console.log(status, closed, typeof top, event, typeof HTMLDivElement, close(), open(), print(), local());

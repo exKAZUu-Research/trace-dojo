@@ -1,0 +1,33 @@
+const a: (this: { x: number }) => void = function () {
+  const s: string = this.x;
+};
+const b: ((this: { x: number }) => void) | ((this: { y: string }) => void) = function () {
+  const n: number = this.x;
+  const s: string = this.y;
+};
+const c: (() => void) | ((this: { x: number }) => void) = function () {
+  console.log(this);
+};
+const d: { (this: { x: number }): void; (this: { y: number }, n?: number): void } = function () {
+  const s: string = this;
+};
+const e: { m(this: { x: number }): void } = {
+  m() {
+    const s: string = this;
+  },
+};
+const f: (this: { x: number }) => void = function <T>(t: T) {
+  console.log(this, t);
+};
+function call(callback: (this: { n: number }) => void): void {
+  callback.call({ n: 1 });
+}
+call(function () {
+  const s: string = this;
+});
+const g: (this: { x: number }) => () => void = function () {
+  return () => {
+    const s: string = this;
+  };
+};
+console.log(a, b, c, d, e, f, g);

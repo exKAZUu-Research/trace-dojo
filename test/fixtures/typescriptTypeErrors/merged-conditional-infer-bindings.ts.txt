@@ -1,0 +1,21 @@
+interface Direct<T> { value: T extends { value: infer U } ? U : never; }
+interface Direct<T> { value: T extends { value: infer V } ? V : never; }
+
+type Left<T> = T extends { value: infer U } ? U : never;
+type Right<T> = T extends { value: infer U } ? U : never;
+interface Aliased<T> { value: Left<T>; }
+interface Aliased<T> { value: Right<T>; }
+
+interface Callable {
+  value: <T>(arg: T) => T extends { value: infer U } ? U : never;
+}
+interface Callable {
+  value: <S>(arg: S) => S extends { value: infer U } ? U : never;
+}
+
+interface Shared {
+  value: <T>(arg: T) => Left<T>;
+}
+interface Shared {
+  value: <S>(arg: S) => Left<S>;
+}

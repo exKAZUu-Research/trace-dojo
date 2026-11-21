@@ -1,0 +1,5 @@
+(3,33): error TS2339: Property 'foo' does not exist on type '{ b: number; }'.
+(4,33): error TS2339: Property 'foo' does not exist on type '{ b: number; }'.
+(6,24): error TS18048: 'y5.a' is possibly 'undefined'.
+(7,24): error TS18048: 'y6.a' is possibly 'undefined'.
+(9,27): error TS2339: Property 'a' does not exist on type '{}'.

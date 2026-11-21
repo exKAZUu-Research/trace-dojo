@@ -1,0 +1,2 @@
+(1,6): error TS2300: Duplicate identifier 'T'.
+(2,6): error TS2300: Duplicate identifier 'T'.

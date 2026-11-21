@@ -1,0 +1,9 @@
+(2,19): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+(4,17): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+(5,18): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+(6,22): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+(7,17): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+(9,23): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+(13,23): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+(14,72): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+(15,15): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.

@@ -1,0 +1,5 @@
+hello [Function: f]
+%s [Function: f]
+1 hello [Function: f]
+%z hello [Function: f]
+%hello [Function: f]

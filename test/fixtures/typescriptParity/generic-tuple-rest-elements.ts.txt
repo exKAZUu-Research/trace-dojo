@@ -1,0 +1,8 @@
+function read<T extends string[]>(values: [...T]) {
+  const [first] = values;
+  const same: T[number] = values[0];
+  const incoming: string[] = [];
+  for (const value of values) incoming.push(value.toUpperCase());
+  console.log(first, same, incoming.join(','));
+}
+read(['first', 'second']);

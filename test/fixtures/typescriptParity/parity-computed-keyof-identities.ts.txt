@@ -1,0 +1,16 @@
+const fieldKey = Symbol('key');
+const methodKey = Symbol('key');
+const getterKey = Symbol('key');
+const numeric = 0;
+class Item {
+  [fieldKey] = 3;
+  [methodKey]() {return 4;}
+  get [getterKey]() {return 5;}
+  [numeric] = 6;
+}
+const field: keyof Item = fieldKey;
+const method: keyof Item = methodKey;
+const getter: keyof Item = getterKey;
+const number: keyof Item = 0;
+const item = new Item();
+console.log(item[field], item[method](), item[getter], item[number]);

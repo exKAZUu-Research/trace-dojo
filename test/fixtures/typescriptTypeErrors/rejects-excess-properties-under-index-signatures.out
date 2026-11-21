@@ -1,0 +1,4 @@
+(1,57): error TS2353: Object literal may only specify known properties, and 'b' does not exist in type '{ a: number; }'.
+(3,29): error TS2353: Object literal may only specify known properties, and 'b' does not exist in type '{ a: number; }'.
+(4,56): error TS2353: Object literal may only specify known properties, and 'c' does not exist in type '{ a: number; }'.
+(5,71): error TS2353: Object literal may only specify known properties, and 'z' does not exist in type '{ a: number; }'.

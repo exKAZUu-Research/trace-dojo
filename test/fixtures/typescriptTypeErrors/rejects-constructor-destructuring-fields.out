@@ -1,0 +1,6 @@
+(7,1): error TS2322: Type 'string' is not assignable to type 'number'.
+(14,7): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+(25,1): error TS2322: Type 'string' is not assignable to type 'number'.
+(26,16): error TS2322: Type 'boolean' is not assignable to type 'string | number'.
+(29,3): error TS2564: Property 'value' has no initializer and is not definitely assigned in the constructor.

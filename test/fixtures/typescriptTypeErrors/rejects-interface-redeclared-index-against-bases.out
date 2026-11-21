@@ -1,0 +1,13 @@
+(7,11): error TS2430: Interface 'NarrowsLonger' incorrectly extends interface 'LongerPrefixed'.
+  'unknown' and '`ab${string}`' index signatures are incompatible.
+    Type 'number' is not assignable to type 'string'.
+(10,11): error TS2430: Interface 'RedeclaresShorter' incorrectly extends interface 'Prefixed'.
+  '`a${string}`' index signatures are incompatible.
+    Type 'string' is not assignable to type 'number'.
+(16,11): error TS2430: Interface 'Labels' incorrectly extends interface 'Scores'.
+  'string' index signatures are incompatible.
+    Type 'string' is not assignable to type 'number'.
+(19,11): error TS2430: Interface 'FirstBaseWins' incorrectly extends interface 'Record<string, string>'.
+  'string' index signatures are incompatible.
+    Type 'number' is not assignable to type 'string'.
+(21,3): error TS2413: '`ab${string}`' index type 'string' is not assignable to '`a${string}`' index type '1'.

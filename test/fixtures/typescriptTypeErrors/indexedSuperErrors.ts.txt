@@ -1,0 +1,12 @@
+class Base {
+  value() { return 1; }
+  static number() { return 2; }
+  get count() { return 0; }
+  set count(value: number) {}
+}
+class Derived extends Base {
+  read() { return super["value"]().toUpperCase(); }
+  missing() { return super["missing"]; }
+  write() { super["count"] = "wrong"; }
+  static wrong() { return super["number"]().toUpperCase(); }
+}

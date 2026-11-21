@@ -1,0 +1,14 @@
+const value = 1;
+class A { constructor(read = () => value) { var value = 2; console.log(read(), value); } }
+new A();
+class B { constructor({ read = () => value } = {}) { var value = 2; console.log(read()); } }
+new B();
+class Base { constructor(public tag: string) {} }
+class C extends Base {
+  constructor(public n = 3, read = () => n) { super("c"); var n = 10; console.log(this.n, read(), n, this.tag); }
+}
+new C();
+class D { constructor(public k: number, get = () => helper()) { function helper() { return "inner"; } try { console.log(get()); } catch (e) { console.log((e as Error).constructor.name); } } }
+new D(1);
+class E { constructor(x: number) { var x: number; console.log(x); } }
+new E(5);

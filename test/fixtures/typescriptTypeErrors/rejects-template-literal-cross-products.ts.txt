@@ -1,0 +1,11 @@
+type D = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
+type M5 = { [K in `${D}${D}${D}${D}${D}`]: K };
+const k5: keyof M5 = "12345";
+const m5: Partial<M5> = {};
+type M4 = { [K in `${D}${D}${D}${D}`]: K };
+const k4: keyof M4 = "1234";
+const bad4: keyof M4 = "12345";
+type MA = { [K in any]: K };
+const ka: keyof MA = "a";
+const na: keyof MA = 1;
+console.log(k4, ka, na);

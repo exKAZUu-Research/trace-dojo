@@ -1,0 +1,19 @@
+function invalidGenericKey<K extends 'x' | 'y'>(key: K, object: {x: number}) {
+  const {[key]: value} = object;
+  return value;
+}
+function invalidConcreteKey(key: 'x' | 'y', object: {x: number}) {
+  const {[key]: value} = object;
+  return value;
+}
+function invalidPropertyKey<K>(key: K, object: {x: number}) {
+  const {[key]: value} = object;
+  return value;
+}
+function invalidBooleanKey<K extends true>(key: K, object: {x: number}) {
+  const {[key]: value} = object;
+  return value;
+}
+function invalidElementAccess<K extends 'x' | 'y'>(key: K, object: {x: number}) {
+  return object[key];
+}

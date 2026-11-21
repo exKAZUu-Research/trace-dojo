@@ -1,0 +1,6 @@
+(2,29): error TS18048: 'fieldGlobal' is possibly 'undefined'.
+(3,34): error TS18048: 'fieldGlobal' is possibly 'undefined'.
+(4,37): error TS18048: 'fieldGlobal' is possibly 'undefined'.
+(6,29): error TS18048: 'fieldConstant' is possibly 'undefined'.
+(7,80): error TS18048: 'local' is possibly 'undefined'.
+(8,59): error TS18048: 'fieldConstant' is possibly 'undefined'.

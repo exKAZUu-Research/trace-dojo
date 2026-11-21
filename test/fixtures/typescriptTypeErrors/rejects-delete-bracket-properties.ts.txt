@@ -1,0 +1,4 @@
+const requiredProperty: {x: number} = {x: 1};
+delete requiredProperty["x"];
+const readonlyProperty: {readonly x?: number} = {x: 1};
+delete readonlyProperty["x"];

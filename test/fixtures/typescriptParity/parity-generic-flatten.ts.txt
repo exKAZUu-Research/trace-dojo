@@ -1,0 +1,7 @@
+function flatten<T>(xs: T[][]): T[] { return xs.flat(); }
+console.log(flatten([[1], [2]]));
+function f<T>(xs: T[]): T[] { return [xs, xs].flat(); }
+console.log(f([1]));
+function chunk<T>(xs: T[], n: number): T[][] { const r: T[][] = []; for (let i = 0; i < xs.length; i += n) r.push(xs.slice(i, i + n)); return r; }
+function rot<T>(xs: T[]): T[] { return chunk(xs, 2).flat(); }
+console.log(rot([1, 2, 3]));

@@ -1,0 +1,7 @@
+var firstConflict = 1;
+function firstConflict(): void {}
+function secondConflict(): void {}
+var secondConflict = 1;
+var secondConflict = 2;
+var uninitializedConflict: string;
+function uninitializedConflict(): void {}

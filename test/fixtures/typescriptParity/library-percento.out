@@ -1,0 +1,39 @@
+<ref *1> [Function: f] {
+  [length]: 2,
+  [name]: 'f',
+  [prototype]: { [constructor]: [Circular *1] }
+}
+[Function: g] { [length]: 1, [name]: 'g' }
+<ref *1> [class A] {
+  [length]: 0,
+  [name]: 'A',
+  [prototype]: {
+    [constructor]: [Circular *1],
+    [m]: [Function: m] { [length]: 0, [name]: 'm' }
+  },
+  s: 1
+}
+{
+  k: 1,
+  m: [Function: m] { [length]: 0, [name]: 'm' },
+  arrow: [Function: arrow] { [length]: 0, [name]: 'arrow' }
+}
+[
+  <ref *1> [Function: f] {
+    [length]: 2,
+    [name]: 'f',
+    [prototype]: { [constructor]: [Circular *1] }
+  },
+  [length]: 1
+]
+A {}
+{
+  nested: {
+    deep: { deeper: { deepest: [ 1, [length]: 1 ] } }
+  }
+}
+'str' %o 1
+Map(1) { 'a' => [ 1, [length]: 1 ] } Set(1) { 1 }
+null undefined
+[ 1, { a: [ 2, [length]: 1 ] }, [length]: 2 ]
+{ f: [Function] }

@@ -1,0 +1,6 @@
+type TreeValue<T> = { item: T; children: TreeValue<T>[] };
+function first<T extends string>(forced: NoInfer<T>[], values: T[]): T { return values[0]; }
+function fromTree<T extends string>(forced: TreeValue<NoInfer<T>>, values: TreeValue<T>): T { return values.item; }
+const x: 'a' = first(['a'], ['a']);
+const y: 'b' = fromTree({ item: 'b', children: [] }, { item: 'b', children: [] });
+console.log(x, y);

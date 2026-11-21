@@ -1,0 +1,19 @@
+class Widget {
+  render?(): string;
+  static create?(): Widget;
+  describe?(): string {
+    return "widget";
+  }
+}
+class Button extends Widget {
+  render(): string {
+    return "<button>";
+  }
+}
+const plain = new Widget();
+const button = new Button();
+console.log(plain.render ? plain.render() : "no render");
+console.log(button.render?.() ?? "no render");
+console.log(plain.describe?.());
+console.log(typeof Widget.create);
+console.log(Object.getOwnPropertyNames(Widget.prototype).join(","));

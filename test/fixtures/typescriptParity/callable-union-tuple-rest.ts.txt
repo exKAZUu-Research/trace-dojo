@@ -1,0 +1,27 @@
+function pair(f: ((...args: [string, number]) => void) | ((...args: [string, boolean]) => void)) {
+  f();
+  f('text');
+}
+pair((text: string, value: number) => console.log(text, value));
+function single(f: ((...args: [number]) => void) | ((...args: [string]) => void)) {
+  f();
+}
+single((value: number) => console.log(value));
+function prefix(f: ((label: string, ...args: [number]) => void) | ((label: string, ...args: [boolean]) => void)) {
+  f('label');
+}
+prefix((label: string, value: number) => console.log(label, value));
+function variadic(f: ((...args: [string, number, ...boolean[]]) => void) | ((...args: [string, string, ...number[]]) => void)) {
+  f();
+  f('prefix');
+}
+variadic((label: string, value: number) => console.log(label, value));
+function optional(f: ((...args: [string, number?]) => void) | ((...args: [string, boolean?]) => void)) {
+  f();
+  f('optional', undefined);
+}
+optional((label: string, value?: number) => console.log(label, value));
+function acceptsVoid(f: ((label: string | void, ...args: [number]) => void) | ((label: string | void, ...args: [string]) => void)) {
+  f();
+}
+acceptsVoid((label: string | void, value: number) => console.log(label, value));

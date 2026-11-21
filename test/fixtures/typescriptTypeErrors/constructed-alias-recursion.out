@@ -1,0 +1,6 @@
+(13,7): error TS2322: Type 'Forward' is not assignable to type 'Loop'.
+  The types of 'next.next.next' are incompatible between these types.
+    Type 'string' is not assignable to type 'Loop'.
+(14,7): error TS2322: Type 'Backward' is not assignable to type 'Loop'.
+  The types of 'next.next.next' are incompatible between these types.
+    Type 'string' is not assignable to type 'Loop'.

@@ -1,0 +1,6 @@
+1 a
+null undefined
+{ x: 1 }
+Map(2) { 'a' => 1, 'b' => undefined }
+Map(2) { 'a' => { atk: 5 }, 'b' => { heal: 3 } }
+[ 1 ]

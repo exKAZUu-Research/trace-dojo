@@ -1,0 +1,2 @@
+(4,15): error TS2322: Type '"b"' is not assignable to type '"a"'.
+(5,41): error TS2322: Type '"b"' is not assignable to type '"a"'.

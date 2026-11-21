@@ -1,0 +1,10 @@
+function InsideBlock<Z>() {
+  type Key<O, LocalZ, P extends (LocalZ extends true ? keyof O : keyof O)> = P;
+  type Success<T, K extends keyof T> = T[K] extends {key: 'x'} ? Key<T[K], Z, 'key'> : never;
+  const result: Success<{one: {key: 'x'}}, 'one'> = 'key';
+  return result;
+}
+type Key<O, Z, P extends (Z extends true ? keyof O : keyof O)> = P;
+type Outside<T, K extends keyof T, Z> = T[K] extends {key: 'x'} ? Key<T[K], Z, 'key'> : never;
+const result: Outside<{one: {key: 'x'}}, 'one', boolean> = 'key';
+console.log(InsideBlock<true>(), result);

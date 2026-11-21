@@ -1,0 +1,7 @@
+(12,13): error TS2454: Variable 'index' is used before being assigned.
+(16,13): error TS2454: Variable 'argument' is used before being assigned.
+(21,10): error TS2454: Variable 'x' is used before being assigned.
+(26,10): error TS2454: Variable 'x' is used before being assigned.
+(31,10): error TS2454: Variable 'x' is used before being assigned.
+(35,35): error TS2454: Variable 'x' is used before being assigned.
+(39,23): error TS18048: 'a' is possibly 'undefined'.

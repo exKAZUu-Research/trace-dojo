@@ -1,0 +1,21 @@
+type Variants = [number] | [string, string];
+type Direct = [...Variants];
+function tupleLength(args: Direct): 1 | 2 { return args.length; }
+function variadic(...args: [...Variants]): 1 | 2 { return args.length; }
+type Wrapped<A extends readonly unknown[]> = readonly ['begin', ...A, 'end'];
+function wrappedLength(args: Wrapped<Variants>): 3 | 4 { return args.length; }
+function instantiation(args: Wrapped<Variants>, value: Variants): number {
+  const copy: Wrapped<Variants> = ['begin', ...value, 'end'] as const;
+  return args.length + copy.length;
+}
+type Cartesian<A extends readonly unknown[], B extends readonly unknown[]> = [0, ...A, 1, ...B, 2];
+function crossed(v: Cartesian<[] | [string], [] | [boolean]>): 3 | 4 | 5 { return v.length; }
+type Lots<A extends unknown[], B extends unknown[]> = [0, ...A, 'middle', ...B, 1];
+const arrays: Lots<number[], boolean[]> = [0, 99, 'middle', true, false, 1];
+const nothing: [...never] = null as never;
+const inferNothing: (x: typeof nothing) => never = x => x;
+function suffix(mixed: [0, ...([string] | number[]), true]): number | boolean { return mixed[mixed.length - 1] as number | boolean; }
+console.log(tupleLength([1]), tupleLength(['a','b']), variadic(2), variadic('x','y'));
+console.log(wrappedLength(['begin',1,'end']), wrappedLength(['begin','a','b','end']));
+console.log(instantiation(['begin', 1,'end'], ['x','y']), crossed([0,'a',1,true,2]), crossed([0,1,2]));
+console.log(arrays.length, suffix([0,'text',true]), typeof inferNothing);

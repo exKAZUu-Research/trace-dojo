@@ -1,0 +1,2 @@
+const o = { v: 1, get() { return this.v; } };
+const n: string = o.get();

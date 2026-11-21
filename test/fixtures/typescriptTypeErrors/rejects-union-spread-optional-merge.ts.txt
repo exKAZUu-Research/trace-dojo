@@ -1,0 +1,16 @@
+function partial(x: { a: number } | { b: boolean }, z: { a?: string }) {
+  const y = { ...x, ...z };
+  const a: string = y.a;
+  return a;
+}
+function bothHaveA(x: { a: number } | { a: number; b: boolean }, z: { a?: string }) {
+  const y = { ...x, ...z };
+  const a: string = y.a;
+  return a;
+}
+function required(x: { a: number } | { a: number; b: boolean }, z: { a: string }) {
+  const y = { ...x, ...z };
+  const a: number = y.a;
+  return a;
+}
+console.log(partial({ a: 1 }, {}), bothHaveA({ a: 1 }, {}), required({ a: 1 }, { a: "" }));

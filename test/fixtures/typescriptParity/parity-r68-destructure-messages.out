@@ -1,0 +1,6 @@
+TypeError Cannot destructure property 'a' of 'obj.x' as it is undefined.
+TypeError Cannot destructure property 'a' of 'obj.n' as it is null.
+TypeError Cannot destructure 'obj.x' as it is undefined.
+TypeError Cannot read properties of undefined (reading 'b')
+TypeError Cannot destructure property 'a' of 'undefined' as it is undefined.
+TypeError object null is not iterable (cannot read property Symbol(Symbol.iterator))

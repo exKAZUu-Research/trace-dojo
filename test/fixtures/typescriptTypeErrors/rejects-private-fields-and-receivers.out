@@ -1,0 +1,6 @@
+(4,21): error TS2532: Object is possibly 'undefined'.
+(5,21): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+(8,17): error TS2729: Property '#second' is used before its initialization.
+(10,31): error TS2729: Property '#secondStatic' is used before its initialization.
+(14,22): error TS2345: Argument of type '{}' is not assignable to parameter of type 'void'.

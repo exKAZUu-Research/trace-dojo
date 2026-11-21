@@ -1,0 +1,18 @@
+type Matches<T, U> = T extends [infer U, U] ? "yes" : "no";
+const matched: Matches<[1, string], string> = "yes";
+const unmatched: Matches<[1, 1], string> = "no";
+console.log(matched, unmatched);
+
+type Outer<T, U> = T extends [infer U, U] ? U : never;
+const first: Outer<[1, string], string> = 1;
+
+type Own<T> = T extends infer U extends { next?: U } ? U : never;
+const node: Own<{ next?: { next?: {} } }> = { next: {} };
+
+type Nested<T> = T extends [infer U] ? (U extends [infer W, ...infer _] ? [U, W] : never) : never;
+const nested: Nested<[[2, 3]]> = [[2, 3], 2];
+
+type Callback<T> = T extends { run: (input: infer I) => infer O } ? [I, O] : never;
+const callback: Callback<{ run: (input: number) => string }> = [4, "four"];
+
+console.log(first, JSON.stringify(node), JSON.stringify(nested), callback.join(" "));

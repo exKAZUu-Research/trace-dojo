@@ -1,0 +1,16 @@
+interface Overloaded {convert(value: string): string;}
+interface Overloaded {convert(value: number): number;}
+class Overloaded {convert(value: any): any {return value;}}
+interface Accessed {value: number;}
+class Accessed {get value() {return 3;}}
+interface Mutable {get value(): number;}
+class Mutable {value = 4;}
+interface Paired {get value(): number;}
+interface Paired {set value(value: number);}
+class Paired {value = 5;}
+interface StaticSplit {run(): number;}
+class StaticSplit {static run = 'static'; run() {return 6;}}
+const overloaded = new Overloaded();
+const text: string = overloaded.convert('text');
+const number: number = overloaded.convert(2);
+console.log(text, number, new Accessed().value, new Mutable().value, new Paired().value, StaticSplit.run, new StaticSplit().run());

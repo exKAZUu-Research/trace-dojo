@@ -1,0 +1,19 @@
+(1,24): error TS1119: An object literal cannot have property and accessor with the same name.
+(2,14): error TS2300: Duplicate identifier 'a'.
+(2,37): error TS1119: An object literal cannot have property and accessor with the same name.
+(2,37): error TS2300: Duplicate identifier 'a'.
+(3,37): error TS1119: An object literal cannot have property and accessor with the same name.
+(5,35): error TS1119: An object literal cannot have property and accessor with the same name.
+(6,18): error TS2300: Duplicate identifier 'a'.
+(6,41): error TS1118: An object literal cannot have multiple get/set accessors with the same name.
+(6,41): error TS2300: Duplicate identifier 'a'.
+(7,20): error TS1117: An object literal cannot have multiple properties with the same name.
+(8,14): error TS2300: Duplicate identifier 'a'.
+(8,20): error TS1119: An object literal cannot have property and accessor with the same name.
+(8,20): error TS2300: Duplicate identifier 'a'.
+(9,58): error TS1119: An object literal cannot have property and accessor with the same name.
+(10,15): error TS2454: Variable 'a' is used before being assigned.
+(10,22): error TS1119: An object literal cannot have property and accessor with the same name.
+(12,29): error TS1119: An object literal cannot have property and accessor with the same name.
+(13,25): error TS1119: An object literal cannot have property and accessor with the same name.
+(14,25): error TS1119: An object literal cannot have property and accessor with the same name.

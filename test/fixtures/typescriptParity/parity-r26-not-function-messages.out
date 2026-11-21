@@ -1,0 +1,9 @@
+TypeError number 5 is not a function
+TypeError object is not a function
+TypeError string "abc" is not a function
+TypeError object is not a function
+TypeError object null is not a function
+TypeError undefined is not a function
+TypeError boolean true is not a function
+TypeError symbol is not a function
+TypeError The comparison function must be either a function or undefined: 3

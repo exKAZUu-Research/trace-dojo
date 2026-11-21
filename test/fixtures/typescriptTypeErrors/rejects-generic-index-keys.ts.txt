@@ -1,0 +1,12 @@
+type NumberIndexed<T extends { [n: number]: string }> = T["a"];
+type StringKey<T extends { "0": string }> = T[0];
+type NumberKey<T extends { 0: string }> = T["0"];
+type LeadingZero<T extends { [n: number]: string }> = T["01"];
+type Missing<T extends { a: string }> = T["b"];
+type StringMember<T extends string> = T["nope"];
+type ObjectKey<T extends object> = T["a"];
+type BooleanKey<T extends [number]> = T[true];
+type UnknownKey<T extends unknown> = T["a"];
+type AnyKey<T extends any> = T["x"];
+type Nested<T extends { a: number }, U extends T> = U["b"];
+type UnionKey<T extends { a: 1 } | { b: 2 }> = T["a"];

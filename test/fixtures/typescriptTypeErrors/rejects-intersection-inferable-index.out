@@ -1,0 +1,17 @@
+(5,32): error TS2322: Type 'A & B' is not assignable to type 'Record<string, number>'.
+  Index signature for type 'string' is missing in type 'A & B'.
+(6,32): error TS2322: Type 'P & B' is not assignable to type '{ [k: string]: number; }'.
+  Index signature for type 'string' is missing in type 'P & B'.
+(9,43): error TS2322: Type '(() => void) & B' is not assignable to type '{ [k: string]: unknown; }'.
+  Index signature for type 'string' is missing in type '(() => void) & B'.
+(10,32): error TS2322: Type 'A & B' is not assignable to type '{ [k: string]: unknown; }'.
+  Index signature for type 'string' is missing in type 'A & B'.
+(11,44): error TS2322: Type 'B & { c: string; }' is not assignable to type 'Record<string, number>'.
+  Property 'c' is incompatible with index signature.
+    Type 'string' is not assignable to type 'number'.
+(12,38): error TS2322: Type '{ n: A & B; }' is not assignable to type '{ n: Record<string, number>; }'.
+  Types of property 'n' are incompatible.
+    Type 'A & B' is not assignable to type 'Record<string, number>'.
+      Index signature for type 'string' is missing in type 'A & B'.
+(14,7): error TS2322: Type 'A & B' is not assignable to type 'Record<string, number>'.
+  Index signature for type 'string' is missing in type 'A & B'.

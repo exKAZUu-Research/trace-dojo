@@ -1,0 +1,4 @@
+(5,7): error TS2322: Type '"wrong"' is not assignable to type '"\\u{110000}"'.
+(6,7): error TS2322: Type '"wrong"' is not assignable to type '"\\xGG"'.
+(7,7): error TS2322: Type '"wrong"' is not assignable to type '"\\1"'.
+(8,7): error TS2322: Type '"wrong"' is not assignable to type '"\\09"'.

@@ -1,0 +1,9 @@
+Rex says woof! Rex (3) 42 1 true Dog { name: 'Rex', age: 3, sound: 'woof' }
+R Animal { name: 'Cat', age: 1, sound: '...' } 2
+area=12.57
+hello
+2 a Box { items: [ 'a', 'b' ] }
+static block
+Counter { value: 1 }
+named class
+Err custom true

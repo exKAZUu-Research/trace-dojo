@@ -1,0 +1,33 @@
+const f = (a: number) => String(a);
+f.desc = "d";
+console.log(f.desc, f(1));
+const g = function (a: number) { return a; };
+g.count = 0;
+g.count++;
+console.log(g.count);
+type D = { (a: number): number; desc: string };
+const h = (a: number) => a;
+h.desc = "x";
+const d: D = h;
+console.log(d.desc, d(3));
+function outer() {
+  const k = () => 1;
+  k.tag = "t";
+  return k.tag;
+}
+console.log(outer());
+function e() { return 1; }
+e.n = 1;
+e.n = "s";
+const n1: string = e.n;
+const q = <T,>(a: T) => a;
+q.r = 1;
+console.log(q.r, q("x"), n1);
+const s = () => 1;
+s["k"] = [1];
+s.k.push(2);
+function show() { return s.k.length; }
+console.log(s.k, show());
+const nm = function named() { return 1; };
+nm.v = 2;
+console.log(nm.v + nm());

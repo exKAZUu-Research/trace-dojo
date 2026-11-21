@@ -1,0 +1,5 @@
+const pair: [number, string] = [1, 'hi'];
+const tuple: [number, string, 'ok'] = [...pair, 'bad'];
+const callback: [number, string, (x:number)=>number] = [...pair, x => x.toUpperCase()];
+const values: number[] = [1, 2];
+const trailing: [...number[], (x:string)=>string] = [...values, x => x.toFixed()];

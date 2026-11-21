@@ -1,0 +1,17 @@
+const s = "Hello, World";
+console.log(s.length, s.charAt(1), s[4], s.charCodeAt(0), s.codePointAt(1), s.at(-1));
+console.log(s.indexOf("o"), s.lastIndexOf("o"), s.includes("World"), s.startsWith("He"), s.endsWith("x"));
+console.log(s.slice(0, 5), s.slice(-5), s.substring(7), s.toUpperCase(), s.toLowerCase());
+console.log("  pad ".trim() + "|", "  pad ".trimStart() + "|", "  pad ".trimEnd() + "|");
+console.log("7".padStart(3, "0"), "7".padEnd(3, "-"), "ab".repeat(3), s.split(", "), "a-b-c".split("-", 2));
+console.log("a,b".concat("!", "?"), s.replace("o", "0"), s.replaceAll("o", "0"), s.search(/W/));
+console.log(s.match(/o/g), "x1y22z".match(/\d+/)?.[0], "abc".localeCompare("abd"), String.fromCharCode(65, 66));
+console.log([..."héllo"], "abc".split(""), Array.from("ab"), "A".codePointAt(0)?.toString(16));
+const label = "ts";
+console.log(`template ${label.toUpperCase()} ${1 + 2} ${[1, 2]} ${{}} ${null} ${undefined}`);
+console.log(String(123), String(true), String(null), (12.5).toString(), (255).toString(2), (255).toString(16));
+console.log("multi\nline", "tab\there", 'quote"s', "back\\slash");
+console.log(["a", "b"].join("+"), "z".localeCompare("a"), "abc" < "abd", "B" < "a");
+const words = "the quick brown fox".split(" ");
+console.log(words.map((w) => w[0].toUpperCase() + w.slice(1)).join(" "));
+console.log("x".normalize(), "ß".toUpperCase(), "İ".toLowerCase().length, "abc".at(5));

@@ -1,0 +1,22 @@
+const properties = {
+  get constructor() {
+    console.log("read constructor");
+    throw new Error("constructor failed");
+  },
+};
+const named = {
+  constructor: {
+    get name() {
+      console.log("read name");
+      return "Custom";
+    },
+  },
+};
+const badName = { constructor: { get name() { throw new Error("name failed"); } } };
+for (const invalid of [properties, named, badName, { constructor: null }, { constructor: { name: "" } }, Object.create(null)]) {
+  try {
+    console.table([], invalid as any);
+  } catch (error) {
+    console.log(String(error));
+  }
+}

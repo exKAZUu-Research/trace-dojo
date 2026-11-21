@@ -1,0 +1,47 @@
+function v1() { var x: number; const f = () => x; return f; }
+function v2() { let x: number; const f = () => x; x += 1; return f; }
+function v3() { let x: number; const f = () => x; [x] = [1]; return f; }
+function v4() { let x: number; const f = () => x; for (x of [1]) {} return f; }
+function v5() { let x: number; const f = () => { x = 1; }; const g = () => x; return [f, g]; }
+function v6() { let x: number | undefined; const f = () => x; return f; }
+function v7() { let x: any; const f = () => x; return f; }
+function v8() { let x!: number; const f = () => x; return f; }
+function v9() { let x: number; const f = () => { if (x) return 1; return x; }; return f; }
+function w1() { let x: number; x++; const f = () => x; return f; }
+function w2() { let x: number; const f = () => x; ({ x } = { x: 1 }); return f; }
+function w3() { let x: number; const f = (): number => x!; return f; }
+function w4() { let x: unknown; const f = () => x; return f; }
+function w5() { let x: string; const f = () => typeof x; return f; }
+function w6() { let x: number; class C { m() { return x; } } return C; }
+function w7() { let x; const f = () => x; return f; }
+function z() {
+  let x: number;
+  if (x) {
+    return x;
+  }
+  return x;
+}
+function y() {
+  let x: number;
+  const f = () => {
+    if (x) {
+      return x;
+    }
+    return x;
+  };
+  return f;
+}
+function w() {
+  let x: number;
+  x ??= 1;
+  const f = () => x;
+  return f;
+}
+function v() {
+  let x: number;
+  const f = () => {
+    x = 2;
+    return x;
+  };
+  return f;
+}

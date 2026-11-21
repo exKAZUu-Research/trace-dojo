@@ -1,0 +1,3 @@
+class NarrowA {p=1;}
+class NarrowOther {q=2;}
+function concreteNarrow(value:NarrowA|NarrowOther){if(value instanceof NarrowA){const wrong:NarrowOther=value;return wrong;}}

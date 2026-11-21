@@ -1,0 +1,8 @@
+function value(a?: { number?: number }): void {
+  console.log(a?.number.toFixed());
+  console.log(a?.["number"].toFixed());
+}
+function call(a?: { compute?: () => number }): void {
+  console.log(a?.compute());
+  console.log(a?.["compute"]());
+}

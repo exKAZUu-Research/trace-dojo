@@ -1,0 +1,12 @@
+function pick9<T>(x: number): T { return x as T; }
+function withNum<T>(x: T): number { return Number(x as number); }
+class G<T = number> { parts: [T] = [0 as T]; }
+function isDefault<T>(v: T): boolean { return v === 'x'; }
+function both<R, T>(r: R): T { return r as T; }
+function con<T extends number>(x: string): T { return x as T; }
+function con2<T extends number>(x: number): T { return x as T; }
+function con3<T extends string>(v: T): boolean { return v === 1; }
+function ok<T>(v: T, w: T): boolean { return v === w || v !== undefined; }
+function asg<T>(v: T): {} { return v; }
+function asg2<T>(x: number): T { return x; }
+console.log(pick9(3), withNum(4), new G().parts, isDefault('x'));

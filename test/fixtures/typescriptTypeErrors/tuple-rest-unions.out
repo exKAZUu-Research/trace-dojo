@@ -1,0 +1,18 @@
+(2,24): error TS2322: Type 'number' is not assignable to type 'string'.
+(3,7): error TS2322: Type '[string]' is not assignable to type '[number] | [string, string]'.
+  Type '[string]' is not assignable to type '[number]'.
+    Type 'string' is not assignable to type 'number'.
+(5,56): error TS2322: Type '2' is not assignable to type 'string | 1'.
+(7,7): error TS2345: Argument of type '[1, 2]' is not assignable to parameter of type '[number] | [string, string]'.
+  Type '[1, 2]' is not assignable to type '[string, string]'.
+    Type at position 0 in source is not compatible with type at position 0 in target.
+      Type 'number' is not assignable to type 'string'.
+(8,1): error TS2345: Argument of type '[]' is not assignable to parameter of type '[number] | [string, string]'.
+  Type '[]' is not assignable to type '[string, string]'.
+    Source has 0 element(s) but target requires 2.
+(9,7): error TS2345: Argument of type '["x"]' is not assignable to parameter of type '[number] | [string, string]'.
+  Type '["x"]' is not assignable to type '[number]'.
+    Type 'string' is not assignable to type 'number'.
+(11,15): error TS2540: Cannot assign to '0' because it is a read-only property.
+(12,7): error TS2322: Type 'never[]' is not assignable to type 'never'.
+(15,18): error TS2590: Expression produces a union type that is too complex to represent.

@@ -1,0 +1,83 @@
+type Shape = { kind: 'square'; side: number } | { kind: 'circle'; radius: number };
+
+function withBreak(u: 'a' | 'b'): string {
+  switch (u) {
+    case 'a':
+      return 'A';
+    case 'b':
+      break;
+  }
+  const rest: never = u;
+  return rest;
+}
+
+function objectWithBreak(shape: Shape): number {
+  switch (shape.kind) {
+    case 'square':
+      return shape.side;
+    case 'circle':
+      break;
+  }
+  const rest: never = shape;
+  return rest;
+}
+
+function withDefault(u: 'a' | 'b'): string {
+  switch (u) {
+    case 'a':
+      return 'A';
+    default:
+      return 'B';
+  }
+  const rest: never = u;
+  return rest;
+}
+
+function neverMember(u: 'a' | 'b'): string {
+  switch (u) {
+    case 'a':
+      return 'A';
+    case 'b':
+      return 'B';
+  }
+  return u.toUpperCase();
+}
+
+function assignedAfter(u: 'a' | 'b'): string {
+  let q: string | number = 1;
+  switch (u) {
+    case 'a':
+      return 'A';
+    case 'b':
+      return 'B';
+  }
+  q = 'k';
+  const text: string = q;
+  return text;
+}
+
+function mergedAfter(u: 'a' | 'b', q: string | number): string {
+  if (typeof q === 'string') {
+    switch (u) {
+      case 'a':
+        return 'A';
+      case 'b':
+        return 'B';
+    }
+    const rest: never = u;
+  }
+  const n: number = q;
+  return 'n' + n;
+}
+
+function partial(u: 'a' | 'b' | 'c'): string {
+  switch (u) {
+    case 'a':
+      return 'A';
+    case 'b':
+      return 'B';
+  }
+}
+
+console.log(withBreak('a'), objectWithBreak({ kind: 'square', side: 1 }), withDefault('a'));
+console.log(neverMember('a'), assignedAfter('a'), mergedAfter('a', 1), partial('a'));

@@ -1,0 +1,15 @@
+function values<K extends PropertyKey,T>(obj:Record<K,T>):T[]{return Object.values(obj);}
+function read<K extends string,T>(obj:Record<K,T>,key:K):T{return obj[key];}
+function keys<K extends PropertyKey,T>(obj:Record<K,T>):K[]{return Object.keys(obj) as K[];}
+values({a:3})[0].toUpperCase();
+read({a:'hi'},'a').toFixed();
+const key:'b'=keys({a:3})[0];
+const onlyNumber:number=values({a:3,b:'hi'})[0];
+values({})[0].toFixed();
+function renamed<K extends string,T>(obj:{[P in K as `get${P}`]:T}):T{return undefined as T;}
+renamed({getA:3}).toFixed();
+read({a:3,b:4},'a');
+const data={a:3,b:'hi'};
+const selected:number=read(data,'a');
+function remapped<T>(obj:{[P in keyof T as P]:T[P]}):T{return obj as T;}
+remapped({a:3}).a.toFixed();

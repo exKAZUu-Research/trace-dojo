@@ -1,0 +1,4 @@
+const xs: (number | null)[] = [1, null, 2];
+const ns: number[] = xs.filter((x): x is number => x !== null);
+const ns2: number[] = xs.filter((x) => x !== null);
+console.log(ns, ns2);
