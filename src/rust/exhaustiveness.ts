@@ -94,7 +94,9 @@ function constructorsOf(type: Type): { ctor: string; types: Type[] }[] | undefin
       return [{ ctor: 'tuple', types: t.elems }];
     }
     case 'ref': {
-      return constructorsOf(t.target);
+      // A reference is a value even when what it points to has none (`&Infallible`), as rustc treats it.
+      const target = constructorsOf(t.target);
+      return target?.length === 0 ? undefined : target;
     }
     case 'adt': {
       if (t.def.builtin && !['Option', 'Result', 'Ordering', 'Reverse', 'Infallible'].includes(t.def.builtin)) {
