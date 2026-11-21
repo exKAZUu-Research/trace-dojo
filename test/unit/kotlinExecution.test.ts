@@ -316,6 +316,33 @@ fun main() {
     stdout: '[8, 1, 2, 3, 7]\n[9, 2, 3]\n[8, 9, 2, 3, 4, 7]\n[9, 2, 3, 4]\n[4, 3, 2]\n[8, 2, 3, 4, 9, 7]\nstale\n',
   },
   {
+    name: 'character iterables and grouping traverse their sources on demand',
+    source: `fun main() {
+    val letters = StringBuilder()
+    val iterable = letters.asIterable()
+    val groups = letters.groupingBy { it }
+    letters.append("aba")
+    println(iterable.toList())
+    println(groups.eachCount())
+    letters[0] = 'c'
+    println(groups.eachCount())
+
+    val words = mutableListOf("a", "b")
+    var calls = 0
+    val byLength = words.groupingBy {
+        calls++
+        it.length
+    }
+    println(calls)
+    words.add("cc")
+    println(byLength.eachCount())
+    words[0] = "ddd"
+    println(byLength.eachCount())
+    println(calls)
+}`,
+    stdout: '[a, b, a]\n{a=2, b=1}\n{c=1, b=1, a=1}\n0\n{1=2, 2=1}\n{3=1, 1=1, 2=1}\n6\n',
+  },
+  {
     name: 'bulk mutations through a reversed view',
     source: `fun main() {
     val source = mutableListOf(1, 3, 2)
@@ -869,6 +896,7 @@ fun main() { println(C().f(1)) }`,
   ['an integer tested against a floating-point range', false, 'fun main() { val n = 1; println(n in 0.0..2.0) }'],
   ['a floating-point value tested against an integer range', false, 'fun main() { val n = 1.5f; println(n in 0..2) }'],
   ['membership inferred from unrelated element types', false, 'fun main() { println(1 in listOf("x")) }'],
+  ['a direct Grouping constructor call', false, 'fun main() { println(Grouping(listOf(1), listOf("a"))) }'],
   ['an unknown name', false, 'fun main() {\n    println(y)\n}'],
   ['a missing return', false, 'fun f(x: Int): Int {\n    if (x > 0) return 1\n}\nfun main() {\n    println(f(1))\n}'],
   ['an uninitialized val', false, 'fun main() {\n    val x: Int\n    println(x)\n}'],

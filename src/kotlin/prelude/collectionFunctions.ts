@@ -1050,17 +1050,30 @@ inline fun <T, K, V> Iterable<T>.groupBy(keySelector: (T) -> K, valueTransform: 
     return destination
 }
 
-inline fun <T, K> Iterable<T>.groupingBy(crossinline keySelector: (T) -> K): Grouping<T, K> {
-    val source = this
-    return Grouping(source.toList(), source.map { keySelector(it) })
+inline fun <T, K> Iterable<T>.groupingBy(crossinline keySelector: (T) -> K): Grouping<T, K> =
+    IterableGrouping(this, keySelector)
+
+interface Grouping<T, out K> {
+    fun sourceIterator(): Iterator<T>
+    fun keyOf(element: T): K
 }
 
-class Grouping<T, K>(val elements: List<T>, val keys: List<K>) {
-    fun eachCount(): Map<K, Int> {
-        val destination = LinkedHashMap<K, Int>()
-        for (key in keys) destination[key] = (destination[key] ?: 0) + 1
-        return destination
+private class IterableGrouping<T, K>(
+    private val source: Iterable<T>,
+    private val selector: (T) -> K
+) : Grouping<T, K> {
+    override fun sourceIterator(): Iterator<T> = source.iterator()
+    override fun keyOf(element: T): K = selector(element)
+}
+
+fun <T, K> Grouping<T, K>.eachCount(): Map<K, Int> {
+    val destination = LinkedHashMap<K, Int>()
+    val elements = sourceIterator()
+    while (elements.hasNext()) {
+        val key = keyOf(elements.next())
+        destination[key] = (destination[key] ?: 0) + 1
     }
+    return destination
 }
 
 inline fun <T, K, V> Iterable<T>.associate(transform: (T) -> Pair<K, V>): Map<K, V> {

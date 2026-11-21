@@ -125,7 +125,12 @@ inline fun CharSequence.partition(predicate: (Char) -> Boolean): Pair<String, St
 }
 fun CharSequence.zipWithNext(): List<Pair<Char, Char>> = toList().zipWithNext()
 inline fun <R> CharSequence.zipWithNext(transform: (Char, Char) -> R): List<R> = toList().zipWithNext(transform)
-fun CharSequence.asIterable(): Iterable<Char> = toList()
+fun CharSequence.asIterable(): Iterable<Char> =
+    if (this is String && isEmpty()) emptyList() else CharSequenceIterable(this)
+
+private class CharSequenceIterable(private val source: CharSequence) : Iterable<Char> {
+    override fun iterator(): Iterator<Char> = source.iterator()
+}
 fun <R> CharSequence.chunked(size: Int, transform: (CharSequence) -> R): List<R> = chunked(size).map(transform)
 fun String.slice(indices: IntRange): String = if (indices.isEmpty()) "" else substring(indices.first, indices.last + 1)
 fun String.replaceRange(startIndex: Int, endIndex: Int, replacement: CharSequence): String {
@@ -371,7 +376,7 @@ inline fun <K> CharSequence.groupBy(keySelector: (Char) -> K): Map<K, List<Char>
     }
     return destination
 }
-inline fun <K> CharSequence.groupingBy(crossinline keySelector: (Char) -> K): Grouping<Char, K> = toList().groupingBy(keySelector)
+inline fun <K> CharSequence.groupingBy(crossinline keySelector: (Char) -> K): Grouping<Char, K> = asIterable().groupingBy(keySelector)
 fun CharSequence.toList(): List<Char> {
     val result = ArrayList<Char>(length)
     for (char in this) result.add(char)
