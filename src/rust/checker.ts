@@ -1346,7 +1346,8 @@ function checkFloatLiteral(literal: Extract<Expr, { kind: 'float' }>, name: Floa
 
 function checkIntLiteral(literal: Extract<Expr, { kind: 'int' }>, name: IntName, negated: boolean): void {
   const limit = negated && isSigned(name) ? -intMin(name) : intMax(name);
-  if (literal.value <= limit) return;
+  // A pattern's literal holds its sign, so its value may be below the type's minimum.
+  if (literal.value <= limit && literal.value >= intMin(name)) return;
   compileError(
     literal.span,
     `リテラル ${negated ? '-' : ''}${literal.value} は ${name} の範囲（${intMin(name)}〜${intMax(name)}）を超えています。`
