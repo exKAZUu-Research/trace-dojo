@@ -1,9 +1,8 @@
 import { CompileError } from '../interpreter/diagnostics';
 import { orderBuiltinMembers } from './builtinOrder';
-import { defineFunctionProperties } from './memberProperties';
-import type { Realm } from './realm';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
-import { JsFunction, JsObject, type Key, type Value } from './values';
+import type { Runtime } from './runtime';
+import { JsObject, type Key, type NativeCall, type Value } from './values';
 
 /** Names an unavailable library member on a receiver, or gives undefined for any other. */
 export type UnavailableMemberCheck = (value: Value, key: Key | undefined) => string | undefined;
@@ -50,11 +49,14 @@ const consoleTimers = new Set<Key | undefined>(['time', 'timeEnd', 'timeLog', 't
  * Defines reflected method properties whose calls remain unavailable, and checks unavailable reads the type checker
  * cannot resolve, such as those through `any`.
  */
-export function unavailableMemberCheck(realm: Realm): UnavailableMemberCheck {
+export function unavailableMemberCheck(runtime: Runtime): UnavailableMemberCheck {
+  const { realm } = runtime;
   const symbol = realm.globals.lookup('Symbol')?.value;
   const math = realm.globals.lookup('Math')?.value;
   const console = realm.globals.lookup('console')?.value;
-  defineUnavailableMethods(realm, math, console);
+  defineUnavailableMethods(runtime, math, console);
+  defineUnavailableRegExpStatics(runtime);
+  orderBuiltinMembers(realm);
   return (value, key) => unavailableSymbolFeature(value, key, symbol);
 }
 
@@ -75,29 +77,43 @@ export function rejectUnavailableMember(feature: string, row: number | undefined
   throw new CompileError([{ row: row ?? 0, message: `${feature}${separator}は、この採点環境では使えません。` }]);
 }
 
-function defineUnavailableMethods(realm: Realm, math: Value, console: Value): void {
+function defineUnavailableMethods(runtime: Runtime, math: Value, console: Value): void {
+  const { realm } = runtime;
   const array = realm.globals.lookup('Array')?.value;
-  if (array instanceof JsObject) defineUnavailableMethod(realm, array, 'fromAsync', 'Array.fromAsync', { length: 1 });
-  if (math instanceof JsObject) defineUnavailableMethod(realm, math, 'random', 'Math.random');
+  if (array instanceof JsObject) defineUnavailableMethod(runtime, array, 'fromAsync', 'Array.fromAsync', { length: 1 });
+  if (math instanceof JsObject) defineUnavailableMethod(runtime, math, 'random', 'Math.random');
   if (console instanceof JsObject)
     for (const name of consoleTimers)
-      defineUnavailableMethod(realm, console, String(name), `console.${String(name)}`, { enumerable: true });
-  defineUnavailableMethod(realm, realm.regExpPrototype, 'compile', 'RegExp の compile', { length: 2 });
-  orderBuiltinMembers(realm);
+      defineUnavailableMethod(runtime, console, String(name), `console.${String(name)}`, { enumerable: true });
+  defineUnavailableMethod(runtime, realm.regExpPrototype, 'compile', 'RegExp の compile', { length: 2 });
 }
 
 function defineUnavailableMethod(
-  realm: Realm,
+  runtime: Runtime,
   object: JsObject,
   name: string,
   feature: string,
   { length = 0, enumerable = false } = {}
 ): void {
-  const method = new JsFunction(realm.functionPrototype, {
-    kind: 'native',
-    run: ({ runtime }) => rejectUnavailableMember(feature, runtime.currentRow),
-    isConstructor: false,
-  });
-  defineFunctionProperties(method, name, length);
+  const method = runtime.newNativeFunction(name, length, ({ runtime: caller }) =>
+    rejectUnavailableMember(feature, caller.currentRow)
+  );
   object.properties.set(name, { value: method, writable: true, enumerable, configurable: true });
+}
+
+function defineUnavailableRegExpStatics(runtime: Runtime): void {
+  const constructor = runtime.realm.regExpConstructor;
+  if (!constructor) return;
+  for (const name of unavailableRegExpStatics) {
+    constructor.properties.set(name, {
+      get: runtime.newNativeFunction(`get ${name}`, 0, rejectLegacyRegExpStatic),
+      set: runtime.newNativeFunction(`set ${name}`, 1, rejectLegacyRegExpStatic),
+      enumerable: false,
+      configurable: true,
+    });
+  }
+}
+
+function rejectLegacyRegExpStatic({ runtime }: NativeCall): never {
+  return rejectUnavailableMember(legacyRegExpStaticsFeature, runtime.currentRow);
 }

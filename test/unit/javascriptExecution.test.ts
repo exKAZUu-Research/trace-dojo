@@ -59,6 +59,20 @@ console.log(error);`
   });
 });
 
+test('JavaScript can read and define legacy RegExp static names', () => {
+  const result = executeProgram(
+    'javascript',
+    `console.log(RegExp.$1, RegExp.input, Object.hasOwn(RegExp, '$1'));
+console.log(/(a)/.exec('a')[1], RegExp.$1);
+RegExp.input = 'learner value';
+console.log(RegExp.input, Object.hasOwn(RegExp, 'input'));`
+  );
+  expect(result).toMatchObject({
+    kind: 'executed',
+    stdout: 'undefined undefined false\na undefined\nlearner value true\n',
+  });
+});
+
 test.each([
   ['a duplicate declaration', 'let a = 1;\nlet a = 2;', 1, 'a はすでに宣言されています。'],
   ['a let that redeclares a var in its block', '{\n  var a = 1;\n  let a = 2;\n}', 2, 'a はすでに宣言されています。'],

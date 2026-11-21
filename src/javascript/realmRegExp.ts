@@ -3,7 +3,6 @@ import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
 import { defineHostIteratorPrototype, newHostIterator, WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
-import { legacyRegExpStaticsFeature, rejectUnavailableMember, unavailableRegExpStatics } from './unavailableMembers';
 import {
   isAccessor,
   isCallable,
@@ -50,18 +49,8 @@ export function defineRegExpBuiltins(builder: RealmBuilder): void {
   });
   builder.realm.regExpConstructor = constructor;
   builder.getter(constructor, WELL_KNOWN_SYMBOLS.species, ({ thisValue }) => thisValue);
-  defineLegacyStatics(builder, constructor);
   defineRegExpPrototype(builder);
   defineStringMethods(builder);
-}
-
-function defineLegacyStatics(builder: RealmBuilder, constructor: JsObject): void {
-  for (const name of unavailableRegExpStatics)
-    builder.getter(constructor, name, rejectLegacyRegExpStatic, rejectLegacyRegExpStatic);
-}
-
-function rejectLegacyRegExpStatic({ runtime }: NativeCall): never {
-  return rejectUnavailableMember(legacyRegExpStaticsFeature, runtime.currentRow);
 }
 
 /** Creates a regular expression object, throwing JavaScript's SyntaxError for an invalid pattern or flags. */

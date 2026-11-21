@@ -44,7 +44,7 @@ export function executeParsedProgram(parse: () => Program, input?: ProgramInput)
 export function runProgram(runtime: Runtime, program: Program, onEnd?: (scope: Scope) => void): ProgramRun {
   runtime.rejectsFunctionText = program.rejectsFunctionText ?? false;
   runtime.allowsOnlyStringRawTag = program.allowsOnlyStringRawTag ?? false;
-  if (program.rejectsUnavailableMembers) runtime.unavailableMember = unavailableMemberCheck(runtime.realm);
+  if (program.rejectsUnavailableMembers) runtime.unavailableMember = unavailableMemberCheck(runtime);
   const hasReceiver = program.hasCommonJsReceiver || !program.isStrict;
   const scope = new Scope(runtime.realm.globals, {
     thisValue: hasReceiver ? runtime.newObject() : undefined,
