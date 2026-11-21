@@ -118,7 +118,7 @@ export abstract class StatementCompiler extends PatternCompiler {
         run = this.compileGeneratorBody(spec, expectedReturn);
       } else if (spec.body.kind === 'expression') {
         const body = spec.body.expression;
-        const compiled = this.compileReturnValue(body, expectedReturn, spec, true);
+        const compiled = this.compileReturnValue(body, expectedReturn, true);
         const valueRun = compiled.run;
         run = (frame) => valueRun(frame);
       } else {
@@ -185,38 +185,21 @@ export abstract class StatementCompiler extends PatternCompiler {
     return element ?? DYNAMIC;
   }
 
-  /** Compiles a returned value: checks it against the declared return type, or collects its type to infer one. */
-  private compileReturnValue(
-    expression: Expression,
-    expected: DartType | undefined,
-    spec: FunctionSpec,
-    isArrow: boolean
-  ): Compiled {
-    const context = expected && expected.kind !== 'void' ? expected : undefined;
+  private compileReturnValue(expression: Expression, expected: DartType | undefined, isArrow: boolean): Compiled {
+    const context = expected?.kind === 'void' ? undefined : expected;
     const compiled = this.compileExpression(expression, context);
-    if (!expected || expected.kind === 'void' || (compiled.type.kind === 'void' && !spec.returnType)) {
-      this.fn.returnTypes?.push(compiled.type);
+    const kind = compiled.type.kind;
+    if (expected?.kind === 'void' && !isArrow && kind !== 'void' && kind !== 'dynamic' && kind !== 'null') {
+      this.error(expression, '戻り値の型が void の関数は、値を返せません。');
     }
-    if (!expected) return compiled;
-    if (expected.kind === 'void') {
-      if (!isArrow && !isTop(compiled.type) && compiled.type.kind !== 'null' && !(compiled.type.kind === 'never')) {
-        this.error(expression, `戻り値の型が void の関数 ${displayName(spec.name)} は、値を返せません。`);
-      }
-      return compiled;
-    }
-    // A closure's return type is inferred, so a void body makes it return void whatever its context.
-    if (compiled.type.kind === 'void' && !spec.returnType) return compiled;
-    if (compiled.type.kind === 'void' && !isTop(expected)) {
-      this.error(expression, 'void の値は返せません。');
-    }
-    const coerced = this.coerce(
-      compiled,
-      expected,
-      expression,
-      (from, to) => `${from} 型の値は、戻り値の型 ${to} に合いません。`
-    );
-    this.fn.returnTypes?.push(coerced.type);
-    return coerced;
+    const allowsVoid =
+      kind === 'void' && context && (context.kind === 'dynamic' || (this.fn.returnTypes && isTop(context)));
+    const returned =
+      context && !allowsVoid
+        ? this.coerce(compiled, context, expression, (from, to) => `${from} 型の値は、戻り値の型 ${to} に合いません。`)
+        : compiled;
+    this.fn.returnTypes?.push(returned.type);
+    return returned;
   }
 
   // code-gauge-allow functionCognitiveComplexity 19 -- Positional and named parameters bind alike, each with its covariance check.
@@ -1098,28 +1081,10 @@ export abstract class StatementCompiler extends PatternCompiler {
       return () => completion;
     }
     if (this.fn.kind.isConstructor) this.error(statement, 'コンストラクタからは値を返せません。');
-    const compiled = this.compileReturnValueOf(statement.value, expected);
+    const compiled = this.compileReturnValue(statement.value, expected ?? this.fn.contextReturn, false);
     this.flow = this.flow.unreachable;
     const { run } = compiled;
     return (frame) => ({ kind: 'return', value: run(frame) });
-  }
-
-  private compileReturnValueOf(value: Expression, expected: DartType | undefined): Compiled {
-    const context = expected ?? this.closureContextReturn();
-    const compiled = this.compileExpression(value, context?.kind === 'void' ? undefined : context);
-    if (expected?.kind === 'void' && !isTop(compiled.type) && compiled.type.kind !== 'null')
-      this.error(value, '戻り値の型が void の関数は、値を返せません。');
-    const returned =
-      context && context.kind !== 'void'
-        ? this.coerce(compiled, context, value, (from, to) => `${from} 型の値は、戻り値の型 ${to} に合いません。`)
-        : compiled;
-    this.fn.returnTypes?.push(returned.type);
-    return returned;
-  }
-
-  /** The return type a closure's context expects, which its returns are checked against. */
-  protected closureContextReturn(): DartType | undefined {
-    return this.fn.contextReturn;
   }
 
   /** The slots holding the exceptions of the catch clauses being compiled, innermost last. */

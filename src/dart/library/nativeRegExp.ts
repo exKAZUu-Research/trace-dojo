@@ -125,7 +125,10 @@ export function* allMatchesOf(
 
 export function patternIndex(runtime: Runtime, pattern: Value, input: string, position: number): number {
   if (typeof pattern === 'string') return input.indexOf(pattern, position);
-  if (isRegExp(runtime, pattern)) return execAt(runtime, stateOf(pattern), input, position, false)?.start ?? -1;
+  if (isRegExp(runtime, pattern)) {
+    const match = execAt(runtime, stateOf(pattern), input, position, false);
+    return match ? Math.max(position, match.start) : -1;
+  }
   for (let at = position; at <= input.length; at++) {
     if (hasPrefixMatch(runtime, pattern, input, at)) return at;
   }
@@ -159,7 +162,7 @@ function matchState(value: Value): MatchState {
 
 define('RegExp.escape', (runtime, _receiver, [text]) => {
   const result = new BoundedStringParts(runtime);
-  result.appendEscaped(stringArg(runtime, text, 'text'), /[$()*+./?[\\\]^{|}-]/g, (character) => '\\' + character);
+  result.appendEscaped(stringArg(runtime, text, 'text'), /[$()*+.?[\\\]^{|}]/g, (character) => '\\' + character);
   return result.text();
 });
 define('RegExp.firstMatch', (runtime, receiver, [input]) => {

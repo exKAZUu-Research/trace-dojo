@@ -67,7 +67,8 @@ export function execRegExp(
   charge: () => void
 ): RegExpMatchResult | undefined {
   const machine = new Machine(compiled, input, charge);
-  for (let position = start; position <= input.length;) {
+  const first = compiled.unicode && isSurrogatePairAt(input, start - 1) ? start - 1 : start;
+  for (let position = first; position <= input.length;) {
     const end = machine.attempt(position);
     if (end >= 0) return { start: position, end, groups: [input.slice(position, end), ...machine.groupTexts()] };
     if (sticky) return undefined;

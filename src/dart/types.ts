@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 568 -- The operations of Dart's types belong together; each is a short case analysis.
+// code-gauge-allow-file fileNcss 586 -- The operations of Dart's types belong together; each is a short case analysis.
 import type { ClassInfo } from './classes';
 
 /** A type parameter of a class, a function type, or a generic function. */
@@ -587,22 +587,48 @@ function asInterface(type: DartType): InterfaceType | undefined {
 }
 
 function functionUpperBound(a: FunctionType, b: FunctionType): DartType {
-  if (a.typeParams.length > 0 || b.typeParams.length > 0 || a.named.length > 0 || b.named.length > 0) {
+  if (a.typeParams.length > 0 || b.typeParams.length > 0) {
     if (sameType(a, b)) return a;
     return interfaceType(coreTypes.function);
   }
-  const requiredCount = Math.max(a.requiredCount, b.requiredCount);
+  const requiredCount = a.requiredCount;
+  if (requiredCount !== b.requiredCount) return interfaceType(coreTypes.function);
   const length = Math.min(a.positional.length, b.positional.length);
-  if (requiredCount > length) return interfaceType(coreTypes.function);
+  const hasNamed = a.named.length > 0 || b.named.length > 0;
+  if (hasNamed && (a.positional.length !== requiredCount || b.positional.length !== requiredCount))
+    return interfaceType(coreTypes.function);
+  const named = mergeNamedUpperBound(a.named, b.named);
+  if (!named) return interfaceType(coreTypes.function);
   return {
     kind: 'function',
     typeParams: [],
     positional: Array.from({ length }, (_, index) => lowerBound(a.positional[index], b.positional[index])),
     requiredCount,
-    named: [],
+    named,
     returnType: upperBound(a.returnType, b.returnType),
     nullable: false,
   };
+}
+
+function mergeNamedUpperBound(
+  a: readonly NamedParameterType[],
+  b: readonly NamedParameterType[]
+): NamedParameterType[] | undefined {
+  if (b.some((other) => other.isRequired && !a.some(({ name }) => name === other.name))) return undefined;
+  const shared: NamedParameterType[] = [];
+  for (const parameter of a) {
+    const other = b.find(({ name }) => name === parameter.name);
+    if (other) {
+      shared.push({
+        name: parameter.name,
+        type: lowerBound(parameter.type, other.type),
+        isRequired: parameter.isRequired || other.isRequired,
+      });
+    } else if (parameter.isRequired) {
+      return undefined;
+    }
+  }
+  return shared;
 }
 
 /** The greatest lower bound (Dart's DOWN), approximated by the smaller of two related types. */

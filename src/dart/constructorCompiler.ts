@@ -327,7 +327,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     return resolution?.kind === 'declaration' && resolution.declaration.kind === 'class';
   }
 
-  // code-gauge-allow functionNcss 34 -- The steps of a generative constructor: checks, its frame, initializers, and body, in order.
+  // code-gauge-allow functionNcss 38 -- The steps of a generative constructor: checks, its frame, initializers, and body, in order.
   private compileGenerative(
     cls: ClassInfo,
     constructor: ConstructorInfo,
@@ -376,6 +376,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       this.error(declaration.body, 'コンストラクタには => の本体は書けません。');
     // The initializers compile in the constructor's own context, before its body, with `this` unavailable.
     let prologue: ((frame: Frame) => void) | undefined;
+    let initializerSlots: number[] = [];
     const initializedFields = new Set<string>();
     const compiled = this.compileFunctionWithPrologue(spec, () => {
       const previous = this.potentialConstInitializer;
@@ -385,6 +386,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       } finally {
         this.potentialConstInitializer = previous;
       }
+      initializerSlots = this.endInitializerScope(parameters);
     });
     constructor.defaults = {
       positional: parameters.positional.map((parameter) => defaults.get(parameter)),
@@ -401,6 +403,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       try {
         compiled.bind(frame, args);
         prologue?.(frame);
+        for (const slot of initializerSlots) frame.locals[slot] = undefined;
         if (cls.kind === 'extensionType') frame.receiver = (instance as DartObject).fields[0];
         compiled.run(frame);
       } finally {
@@ -408,6 +411,18 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       }
       return;
     };
+  }
+
+  private endInitializerScope(parameters: FormalParameters): number[] {
+    const scope = this.fn.scopes[0];
+    const slots: number[] = [];
+    for (const parameter of [...parameters.positional, ...parameters.named]) {
+      if (parameter.binding === 'plain') continue;
+      const variable = scope.get(parameter.name);
+      if (variable) slots.push(variable.slot);
+      scope.delete(parameter.name);
+    }
+    return slots;
   }
 
   private checkConstConstructor(
@@ -449,18 +464,11 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     spec: FunctionSpec & { isClosure: boolean },
     prologue: () => void
   ): CompiledFunction {
-    const original = this.compileStatements.bind(this);
-    let used = false;
-    this.compileStatementsHook = () => {
-      if (used) return;
-      used = true;
-      prologue();
-    };
+    this.compileStatementsHook = prologue;
     try {
       return this.compileFunction(spec);
     } finally {
       this.compileStatementsHook = undefined;
-      void original;
     }
   }
 

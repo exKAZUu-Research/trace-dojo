@@ -141,10 +141,11 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     }
     if (left.type.kind === 'dynamic') {
       const right = this.compileExpression(expression.right);
+      if (right.type.kind === 'void') this.error(rightSyntax, 'void の値には演算子を使えません。');
       const leftRun = left.run;
       const rightRun = right.run;
       return {
-        type: ['<', '<=', '>', '>='].includes(operator) ? DYNAMIC : DYNAMIC,
+        type: DYNAMIC,
         run: (frame) => {
           const a = leftRun(frame);
           frame.temporaries.push(a);

@@ -3607,3 +3607,90 @@ test('assignment indices must be usable values on dynamic and static receivers',
     expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
   }
 });
+
+test('void return checks use both declared and contextual function types', () => {
+  const program = `void arrow() => 2;
+void accept(void Function() callback) { callback(); }
+void main() {
+  void Function() callback = () => 1;
+  callback();
+  arrow();
+  accept(() { return print('ran'); });
+  accept(() { return null; });
+  dynamic value = 3;
+  accept(() { return value; });
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'ran\n' });
+  for (const source of [
+    'void main() { void Function() callback = () { return 1; }; callback(); }',
+    'void take(void Function() f) {} void main() { take(() { return 1; }); }',
+    'void f(Object? x) { return x; } void main() {}',
+    'void f() { return throw 1; } void main() {}',
+  ]) {
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('dynamic operators reject void operands before execution', () => {
+  for (const operator of ['+', '<', '&']) {
+    const program = `void main() { dynamic value = 1; print(value ${operator} print('operand')); }`;
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('function upper bounds preserve compatible named parameter signatures', () => {
+  const program = `void main() {
+  var optional = [({int n = 0}) => n, ({num n = 0}) => n.toInt()];
+  var required = [({required int n, String x = ''}) => n, ({num n = 0, int y = 0}) => n.toInt()];
+  var noNames = [({int x = 1}) => x, ({int y = 2}) => y];
+  var incompatible = [({required int x}) => x, ({int y = 0}) => y];
+  print([optional.runtimeType, required.runtimeType, noNames.runtimeType, incompatible.runtimeType]);
+  print([optional.first(n: 3), required.last(n: 4), noNames.last()]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[List<({int n}) => int>, List<({required int n}) => int>, List<() => int>, List<Function>]\n[3, 4, 2]\n',
+  });
+  expect(executeProgram('dart', program.replace('optional.first(n: 3)', 'optional.first(n: "bad")'))).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('regular expressions preserve escaped text and UTF-16 search offsets', () => {
+  const program = `void main() {
+  var literal = RegExp.escape('a-b/c');
+  print([literal, RegExp(literal, unicode: true).hasMatch('a-b/c')]);
+  var regex = RegExp('.', unicode: true);
+  print(regex.allMatches('😀x', 1).map((m) => [m.start, m.end, m[0]]).toList());
+  print(RegExp('😀', unicode: true).allMatches('😀x', 1).map((m) => [m.start, m.end, m[0]]).toList());
+  var prefix = regex.matchAsPrefix('😀x', 1)!;
+  print([prefix.start, prefix.end, prefix[0], '😀x'.indexOf(regex, 1), '😀x'.startsWith(regex, 1)]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[a-b/c, true]\n[[0, 2, 😀], [2, 3, x]]\n[[0, 2, 😀]]\n[0, 2, 😀, 1, true]\n',
+  });
+});
+
+test('initializing and super formals leave scope when a constructor body begins', () => {
+  const program = `class A {
+  int x;
+  int y;
+  A(this.x) : y = x + 1 {
+    void change() { x += 10; }
+    change();
+  }
+}
+class B extends A {
+  B(super.x) { x *= 2; }
+}
+void main() {
+  var a = A(2);
+  var b = B(3);
+  print([a.x, a.y, b.x, b.y]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[12, 3, 26, 4]\n' });
+  expect(executeProgram('dart', 'class C { final int x; C(this.x) { x = 2; } } void main() { C(1); }')).toMatchObject({
+    kind: 'compileError',
+  });
+});
