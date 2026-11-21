@@ -15,6 +15,11 @@ test.each([
     stdout: '{banana=1, date=4, apple=2, cherry=3, elderberry=5}\n[zeta, mu, 100, beta, alpha]\n[3, 1, 2, 10, -1]\n',
   },
   {
+    name: 'string content that resembles property accessors',
+    source: 'fun main() { println(" get()=1; set(x)") }',
+    stdout: ' get()=1; set(x)\n',
+  },
+  {
     name: 'split limits and delimiter order with empty delimiters',
     source: `fun main() {
     println("abc".split("", limit = 2))
