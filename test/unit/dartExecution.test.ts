@@ -755,6 +755,32 @@ test('num.compareTo orders precise integers, signed zeros, and NaN', () => {
   });
 });
 
+test('nullable receivers still check covariant equality parameters', () => {
+  const declaration = 'class C { bool operator ==(covariant C other) => true; }';
+  const program = `${declaration}
+void compare(C? value, C? other) {
+  print([value == other, value != other]);
+}
+void main() {
+  compare(C(), C());
+  compare(null, C());
+  compare(C(), null);
+  compare(null, null);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[true, false]\n[false, true]\n[false, true]\n[true, false]\n',
+  });
+  for (const comparison of ['value == 1', "value != 'wrong'"]) {
+    expect(
+      executeProgram(
+        'dart',
+        `${declaration} void compare(C? value) { print(${comparison}); } void main() { compare(null); }`
+      )
+    ).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('min and max use Dart mixed comparisons and preserve signed-zero results', () => {
   const program = `import 'dart:math';
 void main() {

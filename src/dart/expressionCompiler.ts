@@ -407,18 +407,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected equalityOf(left: Compiled, right: Compiled, negated: boolean, span: Span): Compiled {
-    if (!isPotentiallyNullable(left.type)) {
-      const equals = this.lookupMember(left.type, '==', false);
-      if (equals?.member.kind === 'method') {
-        const parameter = (equals.type as FunctionType).positional[0];
-        if (
-          parameter &&
-          !isSubtype(nonNullable(right.type), parameter) &&
-          right.type.kind !== 'dynamic' &&
-          right.type.kind !== 'null'
-        ) {
-          this.error(span, `${typeName(right.type)} 型の値は、== の右辺 ${typeName(parameter)} に合いません。`);
-        }
+    const equals = this.lookupMember(nonNullable(left.type), '==', false);
+    const parameter = equals?.member.kind === 'method' ? (equals.type as FunctionType).positional[0] : undefined;
+    if (parameter && right.type.kind !== 'dynamic') {
+      const target = makeNullable(parameter);
+      if (!isSubtype(right.type, target)) {
+        this.error(span, `${typeName(right.type)} 型の値は、== の右辺 ${typeName(target)} に合いません。`);
       }
     }
     const leftRun = left.run;
