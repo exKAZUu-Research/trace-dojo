@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 559 -- Keep declaration syntax and parameter validation together.
+// code-gauge-allow-file fileNcss 561 -- Keep declaration syntax and parameter validation together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -729,6 +729,8 @@ export class Converter extends ExpressionConverter {
 
   private convertExternalTopLevel(node: Node): TopLevelDeclaration {
     const signature = requireNode(fieldOf(node, 'signature'), node);
+    if (fieldOf(node, 'modifier')?.type !== 'external')
+      return syntaxError(node, '関数・ゲッター・セッターには本体を書いてください。');
     const kind =
       node.type === 'external_getter_declaration'
         ? 'getter'

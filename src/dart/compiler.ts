@@ -328,6 +328,8 @@ export class Compiler extends MemberCompiler {
       cls.superclass = undefined;
     } else if (declaration.superclass) {
       cls.superclass = this.resolveSupertype(cls, declaration.superclass, 'スーパークラス');
+      if (cls.kind === 'mixinClass' && cls.superclass.cls !== coreTypes.object)
+        this.error(declaration.superclass, 'mixin class のスーパークラスは Object でなければなりません。');
       if (cls.superclass.cls.kind === 'mixin')
         this.error(
           declaration.superclass,

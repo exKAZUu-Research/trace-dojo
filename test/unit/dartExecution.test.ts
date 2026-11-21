@@ -6354,6 +6354,52 @@ void main() { print([f<E?, E?>(null), f<E, E?>(E.x)]); }`;
   expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[0, 1]\n' });
 });
 
+test('List.writeIterable checks the start and retains writes before overflow', () => {
+  const source = `Iterable<int> values() sync* {
+  print('first');
+  yield 7;
+  print('second');
+  yield 8;
+  print('finished');
+}
+void main() {
+  var target = [0, 0];
+  try { List.writeIterable(target, -1, values()); } catch (e) { print(e); }
+  try { List.writeIterable(target, 1, values()); } catch (e) { print(e); }
+  List.writeIterable(target, target.length, const []);
+  print(target);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'RangeError (at): Invalid value: Not in inclusive range 0..2: -1\nfirst\nsecond\n' +
+      'RangeError: Index out of range: index should be less than 2: 2\n[0, 7]\n',
+  });
+});
+
+test('bodyless top-level functions and accessors require the external modifier', () => {
+  const declarations = ['void greet();', 'int get answer;', 'set answer(int value);'];
+  for (const declaration of declarations) {
+    expect(executeProgram('dart', `${declaration} void main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+  const external = declarations.map((declaration) => `external ${declaration}`).join('\n');
+  expect(executeProgram('dart', `${external} void main() { print('ready'); }`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ready\n',
+  });
+});
+
+test('mixin class superclasses resolve to Object through aliases', () => {
+  const source = `typedef Root = Object;
+mixin class First extends Object {}
+mixin class Other extends Root {}
+void main() { print([First() is Object, Other() is Object]); }`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[true, true]\n' });
+  expect(executeProgram('dart', `class Base {} ${source.replace('Root = Object', 'Root = Base')}`)).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
 test('empty iterables preserve SDK wrapper identities and index errors', () => {
   const source = `void main() {
   for (final empty in [const Iterable<int>.empty(), Iterable<int>.generate(0)]) {

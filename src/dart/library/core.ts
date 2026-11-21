@@ -1859,6 +1859,16 @@ abstract interface class List<E> extends EfficientLengthIterable<E> {
       for (int i = length; --i >= 0;) target[at + i] = source[start + i];
     }
   }
+  static void writeIterable<T>(List<T> target, int at, Iterable<T> source) {
+    RangeError.checkValueInInterval(at, 0, target.length, "at");
+    int index = at;
+    int targetLength = target.length;
+    for (var element in source) {
+      if (index == targetLength) throw IndexError.withLength(index, targetLength, indexable: target);
+      target[index] = element;
+      index++;
+    }
+  }
   external E operator [](int index);
   external void operator []=(int index, E value);
   external int get length;
