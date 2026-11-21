@@ -111,10 +111,26 @@ export class ConstLint {
   check(block: Block): void {
     this.modes = propagationModes(block, this.annotations);
     this.block(block);
+    walkBlock(block, (expr) => this.closureBodies(expr));
   }
 
   checkExpr(expr: Expr): void {
     this.expr(expr);
+    this.closureBodies(expr);
+  }
+
+  /**
+   * Lints each closure written in an expression as a body of its own, as rustc does: wherever it is written, even in
+   * code that never runs, and without the values of the variables of the body around it.
+   */
+  private closureBodies(expr: Expr): void {
+    if (expr.kind !== 'closure') {
+      forEachDirect(expr, (child) => this.closureBodies(child));
+      return;
+    }
+    const lint = new ConstLint(this.annotations);
+    lint.modes = this.modes;
+    lint.checkExpr(expr.body);
   }
 
   private setKnown(local: LocalVar, value: Known | undefined): void {
@@ -129,20 +145,11 @@ export class ConstLint {
   }
 
   private block(block: Block): Known | undefined {
-    for (const [index, stmt] of block.stmts.entries()) {
-      if (this.diverged) {
-        walkBlock({ ...block, stmts: block.stmts.slice(index) }, (expr) => this.unreachable(expr));
-        return undefined;
-      }
+    for (const stmt of block.stmts) {
+      if (this.diverged) return undefined;
       this.stmt(stmt);
     }
     return block.tail ? this.expr(block.tail) : undefined;
-  }
-
-  /** Code that never runs is not linted, but a closure in it is a body of its own, which rustc lints all the same. */
-  private unreachable(expr: Expr): void {
-    if (expr.kind === 'closure') new ConstLint(this.annotations).checkExpr(expr.body);
-    else forEachDirect(expr, (child) => this.unreachable(child));
   }
 
   private stmt(stmt: Stmt): void {
@@ -203,9 +210,7 @@ export class ConstLint {
   /** Checks an expression's operations, returning its value when it is a constant. */
   private expr(expr: Expr): Known | undefined {
     // What follows an operand that never finishes (a later argument, the other side of an operator) is unreachable.
-    if (!this.diverged) return this.reachable(expr);
-    this.unreachable(expr);
-    return undefined;
+    return this.diverged ? undefined : this.reachable(expr);
   }
 
   // code-gauge-allow functionNcss 35 -- Constant propagation follows each expression kind using its checked type.
@@ -328,8 +333,8 @@ export class ConstLint {
         this.branch(() => this.block(expr.body));
         return;
       }
+      // A closure is a body of its own, which is linted apart from this one.
       case 'closure': {
-        this.closure(expr);
         return;
       }
       default: {
@@ -429,14 +434,6 @@ export class ConstLint {
       return this.construct(res, [...base.fields, ...fields]);
     }
     return undefined;
-  }
-
-  private closure(expr: Extract<Expr, { kind: 'closure' }>): void {
-    const lint = new ConstLint(this.annotations);
-    lint.modes = this.modes;
-    for (const [local, value] of this.known) lint.known.set(local, value);
-    if (expr.body.kind === 'block') lint.block(expr.body);
-    else lint.expr(expr.body);
   }
 
   /** An element of an array at an index, whose bound rustc checks from the array's type. */

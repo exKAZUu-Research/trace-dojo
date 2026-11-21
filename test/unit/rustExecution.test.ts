@@ -7776,3 +7776,48 @@ test.each([
   const execution = executeProgram('rust', rustMain(`    let mut v = vec![1];\n    ${statement}`));
   expect(execution.kind === 'executed' && execution.uncaughtException).toContain(`\n${message}\n`);
 });
+
+test('patterns bind mutable variables, and closures do not see the constants around them', () => {
+  const program = `struct Point { x: i32, y: i32 }
+fn main() {
+    let (mut a, mut b) = (0u64, 1u64);
+    for _ in 0..10 { let t = a + b; a = b; b = t; }
+    let mut total = 0;
+    for mut x in vec![1, 2] { x += 1; total += x; }
+    if let Some(mut y) = Some(3) { y *= 2; total += y; }
+    match Some(3) { Some(mut z) => { z += 1; total += z; } None => {} }
+    let Point { x: mut px, y } = Point { x: 1, y: 2 };
+    px += y;
+    let mut stack = vec![Some(1), None, Some(3)];
+    while let Some(Some(mut top)) = stack.pop() { top += 1; total += top; }
+    let zero = 0;
+    let divide = || 1 / zero;
+    println!("{a} {b} {total} {px}");
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '55 89 19 3\n' });
+  expect(executeProgram('rust', rustMain('    let (a, mut b) = (0, 1);\n    a = 2;\n    b = 3;'))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 2, message: expect.stringContaining('もう一度代入できません') })],
+  });
+});
+
+test.each([
+  ['a closure with its own constants', 'let f = || { let z = 0; 1 / z };', '必ず panic'],
+  ['a closure inside a closure', 'let f = || { let g = || 255u8 + 1; g() };', '必ずあふれます'],
+  [
+    'a closure in the message of an assertion that holds',
+    'assert!(true, "{}", { let f = || 1 / 0; 0 });',
+    '必ず panic',
+  ],
+  [
+    'a closure in an operand that a return precedes',
+    'let _ = { return; false } && { let f = || 1 / 0; true };',
+    '必ず panic',
+  ],
+  ['a closure in a branch that is never taken', 'if false { let f = || 200u8 + 100; }', '必ずあふれます'],
+])('lints %s as a body of its own', (_name, body, message) => {
+  expect(executeProgram('rust', rustMain(`    ${body}`))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
+  });
+});

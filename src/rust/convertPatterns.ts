@@ -8,7 +8,6 @@ const UNSUPPORTED_PATTERNS: Record<string, string> = {
   range_pattern: '範囲のパターン（1..=5）',
   captured_pattern: '@ で名前を付けるパターン',
   ref_pattern: 'ref パターン',
-  mut_pattern: 'パターンの中の mut',
   slice_pattern: 'スライスのパターン（[a, b]）',
   box_pattern: 'box パターン',
   generic_pattern: '型引数を書いたパターン',
@@ -16,13 +15,23 @@ const UNSUPPORTED_PATTERNS: Record<string, string> = {
 
 /** Converts patterns. */
 export abstract class PatternConverter extends SyntaxConverter {
-  // code-gauge-allow functionNcss 38 -- One case per kind of syntax node.
+  /** `mut name` in a pattern, which binds a variable that can be assigned to. */
+  private mutableBinding(node: Node, span: Span): Pattern {
+    const name = node.namedChildren.find((child) => child.type === 'identifier');
+    if (!name) return unavailable(span, 'パターンの中の mut');
+    return { kind: 'binding', name: this.identifier(name), mutable: true, sub: undefined, span };
+  }
+
+  // code-gauge-allow functionNcss 39 -- One case per kind of syntax node.
   pattern(node: Node): Pattern {
     const span = this.span(node);
     switch (node.type) {
       case 'identifier': {
         if (node.text === '_') return { kind: 'wild', span };
         return { kind: 'binding', name: this.identifier(node), mutable: false, sub: undefined, span };
+      }
+      case 'mut_pattern': {
+        return this.mutableBinding(node, span);
       }
       case 'scoped_identifier': {
         return { kind: 'path', path: this.exprPath(node), span };
