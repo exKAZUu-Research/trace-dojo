@@ -1448,6 +1448,27 @@ inline fun <K, V> Map<out K, V>.all(predicate: (Map.Entry<K, V>) -> Boolean): Bo
     return true
 }
 
+fun <K, V> Map<out K, V>.none(): Boolean = isEmpty()
+
+inline fun <M, R> M.ifEmpty(defaultValue: () -> R): R where M : Map<*, *>, M : R =
+    if (isEmpty()) defaultValue() else this
+
+inline fun <K, V, M : Map<out K, V>> M.onEach(action: (Map.Entry<K, V>) -> Unit): M {
+    for (entry in this) action(entry)
+    return this
+}
+
+inline fun <K, V, R : Any> Map<out K, V>.firstNotNullOf(transform: (Map.Entry<K, V>) -> R?): R =
+    firstNotNullOfOrNull(transform) ?: throw NoSuchElementException("No element of the map was transformed to a non-null value.")
+
+inline fun <K, V, R : Any> Map<out K, V>.firstNotNullOfOrNull(transform: (Map.Entry<K, V>) -> R?): R? {
+    for (entry in this) {
+        val result = transform(entry)
+        if (result != null) return result
+    }
+    return null
+}
+
 inline fun <K, V> Map<out K, V>.none(predicate: (Map.Entry<K, V>) -> Boolean): Boolean {
     for (element in this) if (predicate(element)) return false
     return true

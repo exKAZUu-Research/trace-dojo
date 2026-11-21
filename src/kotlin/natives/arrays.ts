@@ -457,6 +457,10 @@ function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | 
 /** What changes an array in place. */
 function defineArrayChanging(receiver: string, kind: PrimitiveKind | 'Boolean' | undefined): void {
   const prefix = `kotlin.collections.${receiver}`;
+  const target = receiver.replace('out ', '');
+  defineNative(`${prefix}.copyInto(${target}, Int, Int, Int)`, (frame, source, args) =>
+    copyArrayInto(frame, kind, source, args)
+  );
   const element = kind ?? 'T';
   defineNative(`${prefix}.fill(${element}, Int, Int)`, (frame, array, [value, from, to]) => {
     const items = (array as KObject).items as Value[];
@@ -489,6 +493,29 @@ function defineArrayChanging(receiver: string, kind: PrimitiveKind | 'Boolean' |
       return UNIT;
     });
   }
+}
+
+function copyArrayInto(frame: Frame, kind: PrimitiveKind | 'Boolean' | undefined, source: Value, args: Value[]): Value {
+  const [destination, destinationOffset, startIndex, endIndex] = args;
+  const from = (source as KObject).items as Value[];
+  const to = (destination as KObject).items as Value[];
+  const start = startIndex as number;
+  const offset = destinationOffset as number;
+  const length = toInt32((endIndex as number) - start);
+  const name = kind?.replace(/^U/, '').toLowerCase() ?? 'object array';
+  const reject = (message: string): never =>
+    frame.runtime.throwError(frame, 'java.lang.ArrayIndexOutOfBoundsException', `arraycopy: ${message}`);
+  if (start < 0) reject(`source index ${start} out of bounds for ${name}[${from.length}]`);
+  if (offset < 0) reject(`destination index ${offset} out of bounds for ${name}[${to.length}]`);
+  if (length < 0) reject(`length ${length} is negative`);
+  if (start + length > from.length)
+    reject(`last source index ${start + length} out of bounds for ${name}[${from.length}]`);
+  if (offset + length > to.length)
+    reject(`last destination index ${offset + length} out of bounds for ${name}[${to.length}]`);
+  frame.runtime.spend(Math.ceil(length / 64));
+  if (from === to) to.copyWithin(offset, start, start + length);
+  else for (let index = 0; index < length; index++) to[offset + index] = from[start + index];
+  return destination;
 }
 
 defineArrays();

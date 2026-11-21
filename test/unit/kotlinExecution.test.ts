@@ -149,6 +149,38 @@ fun main() {
     stdout: ' get()=1; set(x)\n',
   },
   {
+    name: 'array copying, searching, shuffling, and map operations',
+    source: `import kotlin.random.Random
+fun main() {
+    val contents = intArrayOf(3, 1, 2)
+    contents.shuffle(Random(42))
+    println(contents.toList())
+    println((contents + 9).toList())
+    println((contents + intArrayOf(7, 8)).toList())
+    println((longArrayOf(1) + listOf(2L, 3L)).toList())
+    println((arrayOf("x") + arrayOf("y")).toList())
+    println((arrayOf("x") + "z").toList())
+    println(intArrayOf(1, 3, 5).binarySearch(3))
+    println(intArrayOf(1, 3, 5).binarySearch(4))
+    val target = IntArray(5)
+    contents.copyInto(target, 1)
+    println(target.toList())
+    target.copyInto(target, 2, 1, 4)
+    println(target.toList())
+    val iterable = target.asIterable()
+    target[0] = -1
+    println(iterable.first())
+    println(intArrayOf(2, 3).contentHashCode())
+    println(arrayOf(2, 3).toIntArray().toList())
+    val labels = mapOf(1 to "a")
+    println(labels.none())
+    println(emptyMap<Int, String>().ifEmpty { mapOf(0 to "empty") })
+    println(labels.onEach { println(it.key) }.firstNotNullOf { it.value })
+}`,
+    stdout:
+      '[1, 3, 2]\n[1, 3, 2, 9]\n[1, 3, 2, 7, 8]\n[1, 2, 3]\n[x, y]\n[x, z]\n1\n-3\n[0, 1, 3, 2, 0]\n[0, 1, 1, 3, 2]\n-1\n1026\n[2, 3]\nfalse\n{0=empty}\n1\na\n',
+  },
+  {
     name: 'floating ranges and mixed numeric progressions and membership',
     source: `import kotlin.random.Random
 fun main() {

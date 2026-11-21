@@ -123,6 +123,7 @@ function functionsOf(kind: ArrayKind): string {
     `inline fun ${g('R : Comparable<R>')}${r}.minBy(selector: (${e}) -> R): ${e} { if (isEmpty()) throw NoSuchElementException(); return asList().minBy(selector) }`,
     `inline fun ${g('R : Comparable<R>')}${r}.maxByOrNull(selector: (${e}) -> R): ${e}? = asList().maxByOrNull(selector)`,
     `inline fun ${g('R : Comparable<R>')}${r}.minByOrNull(selector: (${e}) -> R): ${e}? = asList().minByOrNull(selector)`,
+    ...arrayUtilities(kind),
     ...forwardingSelectorExtrema(r, e, 'asList()', kind.typeParameters),
     `inline fun ${g('R : Comparable<R>')}${r}.sortedBy(crossinline selector: (${e}) -> R?): List<${e}> = asList().sortedBy(selector)`,
     `inline fun ${g('R : Comparable<R>')}${r}.sortedByDescending(crossinline selector: (${e}) -> R?): List<${e}> = asList().sortedByDescending(selector)`,
@@ -203,6 +204,54 @@ function functionsOf(kind: ArrayKind): string {
 }
 
 /** `Array<T>`'s functions that need its elements to be comparable or nullable, and the arrays' factories. */
+function arrayUtilities(kind: ArrayKind): string[] {
+  const { receiver, element, typeParameters, isComparable } = kind;
+  const g = generics(kind, '');
+  const result = receiver.replace('out ', '');
+  const cast = typeParameters ? ` as ${result}` : '';
+  const mutableReceiver = typeParameters ? '(this as Array<T>)' : 'this';
+  const unsigned = element.startsWith('U');
+  const lines = [
+    `external fun ${g}${receiver}.copyInto(destination: ${result}, destinationOffset: Int = 0, startIndex: Int = 0, endIndex: Int = size): ${result}`,
+    `fun ${g}${receiver}?.contentHashCode(): Int = this?.asList()?.hashCode() ?: 0`,
+    `operator fun ${g}${receiver}.plus(element: ${element}): ${result} {
+        val result = copyOf(size + 1)${cast}
+        result[size] = element
+        return result
+    }`,
+    `operator fun ${g}${receiver}.plus(elements: ${receiver}): ${result} {
+        val result = copyOf(size + elements.size)${cast}
+        return elements.copyInto(result, size)
+    }`,
+    `operator fun ${g}${receiver}.plus(elements: Collection<${element}>): ${result} {
+        val result = copyOf(size + elements.size)${cast}
+        var index = size
+        for (element in elements) result[index++] = element
+        return result
+    }`,
+    `fun ${g}${receiver}.shuffle() = shuffle(kotlin.random.Random)`,
+    `fun ${g}${receiver}.shuffle(random: kotlin.random.Random) {
+        val array = ${mutableReceiver}
+        for (index in lastIndex downTo 1) {
+            val other = random.nextInt(index + 1)
+            val element = array[index]
+            array[index] = array[other]
+            array[other] = element
+        }
+    }`,
+  ];
+  if (!unsigned)
+    lines.push(
+      `fun ${g}${receiver}.asIterable(): Iterable<${element}> = if (isEmpty()) emptyList() else ArrayElements(asList())`
+    );
+  if (!unsigned && (isComparable || typeParameters)) {
+    const comparable = typeParameters ? '(this[it] as Comparable<T>)' : 'this[it]';
+    lines.push(`fun ${g}${receiver}.binarySearch(element: ${element}, fromIndex: Int = 0, toIndex: Int = size): Int =
+        binarySearchArray(size, fromIndex, toIndex) { ${comparable}.compareTo(element) }`);
+  }
+  return lines;
+}
+
 const GENERIC_ARRAY_SOURCE = `
 fun <T : Any> Array<out T?>.filterNotNull(): List<T> = asList().filterNotNull()
 fun <T : Comparable<T>> Array<out T>.max(): T = asList().max()
@@ -234,7 +283,32 @@ private fun deepString(element: Any?): String = when (element) {
     is BooleanArray -> element.contentToString()
     else -> element.toString()
 }
-operator fun <T> Array<T>.plus(element: T): Array<T> = (asList() + element).toTypedArray()
+private class ArrayElements<T>(private val values: List<T>) : Iterable<T> {
+    override fun iterator(): Iterator<T> = values.iterator()
+}
+
+private inline fun binarySearchArray(size: Int, fromIndex: Int, toIndex: Int, compareAt: (Int) -> Int): Int {
+    if (fromIndex > toIndex) throw IllegalArgumentException("fromIndex($fromIndex) > toIndex($toIndex)")
+    if (fromIndex < 0) throw ArrayIndexOutOfBoundsException("Array index out of range: $fromIndex")
+    if (toIndex > size) throw ArrayIndexOutOfBoundsException("Array index out of range: $toIndex")
+    var low = fromIndex
+    var high = toIndex - 1
+    while (low <= high) {
+        val index = (low + high).ushr(1)
+        val order = compareAt(index)
+        if (order < 0) low = index + 1 else if (order > 0) high = index - 1 else return index
+    }
+    return -low - 1
+}
+
+fun <T> Array<out T>.binarySearch(element: T, comparator: Comparator<in T>, fromIndex: Int = 0, toIndex: Int = size): Int =
+    binarySearchArray(size, fromIndex, toIndex) { comparator.compare(this[it], element) }
+
+${KINDS.filter(({ element }) => element !== 'T' && !element.startsWith('U'))
+  .map(
+    ({ receiver, element }) => `fun Array<out ${element}>.to${receiver}(): ${receiver} = ${receiver}(size) { this[it] }`
+  )
+  .join('\n')}
 
 external fun <reified T> arrayOf(vararg elements: T): Array<T>
 external fun <T> arrayOfNulls(size: Int): Array<T?>
