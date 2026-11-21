@@ -789,13 +789,16 @@ export class TypeOperators {
 
   private resolveConditionalBranch(deferred: ConditionalInstantiation, forConstraint: boolean): Type {
     const { type, outer, mapper, checkType, extendsType, inferTypeParameters } = deferred;
-    if (isGenericObjectOrIndexType(checkType) || isGenericObjectOrIndexType(extendsType, inferTypeParameters))
-      return this.deferredConditional(deferred);
+    if (isGenericObjectOrIndexType(checkType)) return this.deferredConditional(deferred);
     const inferred = this.inferredMapper(deferred, forConstraint);
     const falseType = (): Type => this.c.instantiate(type.falseType, outer);
-    if (!inferred) return forConstraint ? this.deferredConditional(deferred) : falseType();
+    if (!inferred)
+      return forConstraint || isGenericObjectOrIndexType(extendsType, inferTypeParameters)
+        ? this.deferredConditional(deferred)
+        : falseType();
     const trueType = (): Type => this.c.instantiate(this.c.instantiate(type.trueType, mapper), inferred);
     const inferredExtends = this.c.instantiate(extendsType, inferred);
+    if (isGenericObjectOrIndexType(inferredExtends)) return this.deferredConditional(deferred);
     const branch = conditionalBranch(this.c, checkType, inferredExtends);
     if (branch === undefined || (forConstraint && this.isInconclusiveConstraint(branch, checkType, inferredExtends)))
       return this.deferredConditional(deferred);

@@ -384,6 +384,8 @@ export class TypeInference {
       return;
     }
     if (target.kind === 'templateLiteral') this.inferTemplateLiteral(source, target, recurse);
+    if (source.kind === 'stringMapping' && target.kind === 'stringMapping' && source.mapping === target.mapping)
+      recurse(source.type, target.type);
     if (target.kind === 'object') this.inferToObject(run, source, target, path, recurse);
   }
 

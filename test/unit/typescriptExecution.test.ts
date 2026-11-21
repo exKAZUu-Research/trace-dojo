@@ -51,6 +51,43 @@ copy(['1']);`;
   expect(diagnosticsOf(source)).toEqual([expect.stringMatching(/^4: .*"1".*"b"/)]);
 });
 
+test('relates conditional types with the same string mapping inside and outside templates', () => {
+  const source = `function consume<T extends string>(value: T extends Uppercase<infer S> ? S : never) {
+  console.log(value);
+}
+function forward<T extends string>(value: T extends Uppercase<infer W> ? W : never) {
+  consume<T>(value);
+}
+function parse<T extends string>(value: T): T extends \`x-\${Uppercase<infer W>}\` ? W : never {
+  return value as unknown as T extends \`x-\${Uppercase<infer M>}\` ? M : never;
+}
+forward<'OK'>('OK');
+console.log(parse('x-OK'));`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'OK\nx-OK\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('infers mapped keys before choosing a conditional branch', () => {
+  const source = `type KeysOf<T> = T extends Record<infer K, unknown> ? K : never;
+type EntriesOf<T> = T extends Record<infer K, infer V> ? [K, V] : never;
+type UsingIndex<T> = T extends { [P in infer K]: P } ? K : never;
+type ForKey<K extends PropertyKey> = { a: 1 } extends Record<K, infer V> ? V : 'missing';
+const key: KeysOf<{ a: 1; b: 2 }> = 'a';
+const entry: EntriesOf<{ a: 1 }> = ['a', 1];
+const ownKey: UsingIndex<{ prop: 'prop' }> = 'prop';
+const value: ForKey<'a'> = 1;
+const absent: ForKey<'b'> = 'missing';
+console.log(key, entry, ownKey, value, absent);`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: "a [ 'a', 1 ] prop 1 missing\n",
+    uncaughtException: undefined,
+  });
+});
+
 test.each([
   ['LF before the closing quote', "console.log('text\n');"],
   ['CRLF in an empty double-quoted string', 'console.log("\r\n");'],
