@@ -134,15 +134,12 @@ export class AssignmentChecker {
     this.c.flow.invalidate(key);
     if (initializesField && /^this\d+\.[^.]*$/.test(key)) this.c.flow.current?.assignedFields.add(key);
     if (declared === errorType) return;
-    const accessor = this.assignedAccessorType(target);
-    if (accessor) {
-      this.c.flow.set(key, { type: accessor, assigned: true }, target);
-      return;
-    }
     const entry = this.c.flow.entry(key);
     const symbol = target.type === 'identifier' ? this.c.scopeOf(target).lookupValue(target.text) : undefined;
     const isAuto = symbol !== undefined && this.isAutoTyped(symbol);
-    const type = isAuto ? this.c.widen(assigned) : this.c.flow.assignmentReduced(declared, assigned);
+    const type = isAuto
+      ? this.c.widen(assigned)
+      : this.c.flow.assignmentReduced(this.assignedAccessorType(target) ?? declared, assigned);
     this.c.flow.set(key, { type, assigned: true, evolving: entry?.evolving }, target);
   }
 
