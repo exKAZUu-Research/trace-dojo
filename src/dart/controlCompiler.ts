@@ -257,7 +257,8 @@ export abstract class ControlCompiler extends StatementCompiler {
     this.flow = Flow.join(afterTry, this.forgetWrites(before, tryBlocks));
     const run = compile(block);
     const afterFinally = this.flow;
-    const promotions = new Map(this.forgetWrites(afterTry, block).promotions);
+    const afterPossibleWrites = this.forgetWrites(afterTry, block);
+    const promotions = new Map(afterPossibleWrites.promotions);
     for (const [variable, chain] of afterFinally.promotions) {
       const existing = promotions.get(variable) ?? [];
       const current = existing.at(-1);
@@ -270,7 +271,7 @@ export abstract class ControlCompiler extends StatementCompiler {
       new Set([...afterTry.assigned, ...afterFinally.assigned]),
       new Set([...afterTry.maybeAssigned, ...afterFinally.maybeAssigned]),
       afterFinally.writes,
-      afterFinally.writeCaptured
+      { ...afterFinally.facts, conditions: afterPossibleWrites.facts.conditions }
     );
     return run;
   }

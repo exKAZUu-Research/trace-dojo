@@ -101,18 +101,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     this.fn = fn;
     // A closure sees what is known of the enclosing function's variables where it is created, except promotions of
     // variables assigned anywhere after their declarations, which may change before the closure runs.
-    this.flow = isClosure
-      ? new Flow(
-          true,
-          new Map(
-            [...savedFlow.promotions].filter(([variable]) => !variable.hasAssignment && !variable.isWriteCaptured)
-          ),
-          savedFlow.assigned,
-          savedFlow.maybeAssigned,
-          undefined,
-          savedFlow.writeCaptured
-        )
-      : Flow.start();
+    this.flow = isClosure ? savedFlow.forClosure() : Flow.start();
     this.recordsSteps = this.isTracing;
     try {
       this.checkParameterAnnotations(spec.parameters);
@@ -495,6 +484,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       }
       if (compiled && !declaration.isLate) this.flowAfterInitializer(variable, compiled, declaredType);
       variable.condition = this.pendingCondition;
+      this.flow = this.flow.rememberCondition(variable);
       this.pendingCondition = undefined;
       parts.push({ slot: variable.slot, run: compiled?.run, isLate: declaration.isLate });
     }

@@ -2746,6 +2746,27 @@ void main() { print([A == B, A == C, F == G, <Type>{A, B, C}.length]); }`;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[false, true, true, 2]\n' });
 });
 
+test('stored boolean promotions survive until the relevant path may be written', () => {
+  const valid = `void sample(Object? x, Object? y) {
+  final before = x is String;
+  if (before) print(x.length);
+  final both = x is String && y is String;
+  try { print('try'); } finally { x = 1; }
+  if (both) print(y.length);
+}
+void main() { sample('hello', 'Dart'); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '5\ntry\n4\n' });
+  for (const body of [
+    'final matches = x is String; if (change) x = 1; if (matches) print(x.length);',
+    'final matches = x is String; while (change) { x = 1; break; } if (matches) print(x.length);',
+    'var matches = x is String; matches = true; if (matches) print(x.length);',
+    'final matches = x is String; void later() { if (matches) print(x.length); } x = 1; later();',
+  ]) {
+    const program = `void probe(Object? x, bool change) { ${body} } void main() {}`;
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('joined branches retain only promotions shared by both paths', () => {
   const shared = `void show(Object x) {
   if (x is num) {

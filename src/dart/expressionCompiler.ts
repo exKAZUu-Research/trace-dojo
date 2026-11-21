@@ -236,22 +236,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return compiled;
   }
 
-  /**
-   * A condition variable's stored flow holds while neither it nor the variables it promotes may have been assigned
-   * since: they are final, or nothing in the function assigns them.
-   */
-  private usableCondition(variable: LocalVar): LocalVar['condition'] {
-    const { condition } = variable;
-    if (!condition) return undefined;
-    if (!isStable(variable)) return undefined;
-    const promoted = [...condition.whenTrue.promotions, ...condition.whenFalse.promotions];
-    return promoted.every(([local]) => isStable(local)) ? condition : undefined;
-  }
-
-  private applyStoredFlow(stored: StoredFlow): Flow {
+  private applyStoredFlow(stored: StoredFlow, dependencies: ReadonlySet<LocalVar>): Flow {
     if (!stored.reachable) return this.flow.unreachable;
     let flow = this.flow;
     for (const [local, chain] of stored.promotions) {
+      if (!dependencies.has(local) || !this.isPromotable(local)) continue;
       for (const type of chain) {
         const current = flow.promotions.get(local)?.at(-1) ?? local.type;
         if (isSubtype(type, current)) flow = flow.promote(local, type);
@@ -269,14 +258,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
       }
       case 'identifier': {
         const resolution = this.resolveName(expression.name);
-        const condition = resolution?.kind === 'local' ? this.usableCondition(resolution.variable) : undefined;
-        if (!condition) break;
+        if (resolution?.kind !== 'local') break;
+        const { variable } = resolution;
+        const dependencies = this.flow.facts.conditions.get(variable);
+        const { condition } = variable;
+        if (!condition || !dependencies) break;
         const compiled = this.compileExpression(expression);
         return {
           compiled,
           flow: {
-            whenTrue: this.applyStoredFlow(condition.whenTrue),
-            whenFalse: this.applyStoredFlow(condition.whenFalse),
+            whenTrue: this.applyStoredFlow(condition.whenTrue, dependencies),
+            whenFalse: this.applyStoredFlow(condition.whenFalse, dependencies),
           },
         };
       }
@@ -1728,11 +1720,6 @@ function extensionTearOffDefaults(member: Member & { kind: 'method' }): readonly
   const substitutions = new Map(member.owner.typeParams.map((param, index) => [param, ownerDefaults[index]]));
   const signature = substitute(member.type, substitutions) as FunctionType;
   return instantiateToBounds(signature.typeParams);
-}
-
-/** Whether a local keeps its value from its declaration on: final, or assigned nowhere else, closures included. */
-function isStable(local: LocalVar): boolean {
-  return (local.options.isFinal || !local.hasAssignment) && !local.isWriteCaptured;
 }
 
 export function inferElementType(types: DartType[]): DartType {

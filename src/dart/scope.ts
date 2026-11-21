@@ -121,6 +121,13 @@ export class FunctionContext {
 
 const NO_LOCALS: ReadonlySet<LocalVar> = new Set();
 
+interface FlowFacts {
+  writeCaptured: ReadonlySet<LocalVar>;
+  conditions: ReadonlyMap<LocalVar, ReadonlySet<LocalVar>>;
+}
+
+const NO_FACTS: FlowFacts = { writeCaptured: NO_LOCALS, conditions: new Map() };
+
 /** What flow analysis knows at a point of a function: reachability, promotions, and definite assignment. */
 export class Flow {
   constructor(
@@ -131,7 +138,7 @@ export class Flow {
     /** Variables possibly assigned, for `final` and `late final` checks. */
     readonly maybeAssigned: ReadonlySet<LocalVar>,
     readonly writes?: ReadonlySet<LocalVar>,
-    readonly writeCaptured: ReadonlySet<LocalVar> = NO_LOCALS
+    readonly facts: FlowFacts = NO_FACTS
   ) {}
 
   static start(): Flow {
@@ -139,11 +146,37 @@ export class Flow {
   }
 
   get unreachable(): Flow {
-    return new Flow(false, this.promotions, this.assigned, this.maybeAssigned, this.writes, this.writeCaptured);
+    return new Flow(false, this.promotions, this.assigned, this.maybeAssigned, this.writes, this.facts);
+  }
+
+  get writeCaptured(): ReadonlySet<LocalVar> {
+    return this.facts.writeCaptured;
+  }
+
+  forClosure(): Flow {
+    const promotions = new Map([...this.promotions].filter(([variable]) => this.keepsValueInClosure(variable)));
+    const conditions = filterConditions(this.facts.conditions, (local) => this.keepsValueInClosure(local));
+    return new Flow(true, promotions, this.assigned, this.maybeAssigned, undefined, { ...this.facts, conditions });
+  }
+
+  private keepsValueInClosure(variable: LocalVar): boolean {
+    return !affectedPath(variable, (part) => part.hasAssignment || part.isWriteCaptured);
+  }
+
+  rememberCondition(variable: LocalVar): Flow {
+    if (!variable.condition) return this;
+    const { whenTrue, whenFalse } = variable.condition;
+    const dependencies = new Set([...whenTrue.promotions, ...whenFalse.promotions].map(([local]) => local));
+    if (dependencies.size === 0 && whenTrue.reachable && whenFalse.reachable) return this;
+    const conditions = new Map([...this.facts.conditions, [variable, dependencies]]);
+    return new Flow(this.reachable, this.promotions, this.assigned, this.maybeAssigned, this.writes, {
+      ...this.facts,
+      conditions,
+    });
   }
 
   withWrites(writes: ReadonlySet<LocalVar> | undefined): Flow {
-    return new Flow(this.reachable, this.promotions, this.assigned, this.maybeAssigned, writes, this.writeCaptured);
+    return new Flow(this.reachable, this.promotions, this.assigned, this.maybeAssigned, writes, this.facts);
   }
 
   restoreWrites(outer: ReadonlySet<LocalVar> | undefined): Flow {
@@ -151,10 +184,7 @@ export class Flow {
   }
 
   wrotePath(variable: LocalVar): boolean {
-    for (let part: LocalVar | undefined = variable; part; part = part.fieldReceiver) {
-      if (this.writes?.has(part)) return true;
-    }
-    return false;
+    return affectedPath(variable, (part) => this.writes?.has(part) ?? false);
   }
 
   promote(variable: LocalVar, type: DartType): Flow {
@@ -169,7 +199,7 @@ export class Flow {
       this.assigned,
       this.maybeAssigned,
       this.writes,
-      this.writeCaptured
+      this.facts
     );
   }
 
@@ -177,7 +207,7 @@ export class Flow {
     const promotions = new Map(this.promotions);
     forgetPromotions(promotions, new Set([variable]));
     if (promotions.size === this.promotions.size) return this;
-    return new Flow(this.reachable, promotions, this.assigned, this.maybeAssigned, this.writes, this.writeCaptured);
+    return new Flow(this.reachable, promotions, this.assigned, this.maybeAssigned, this.writes, this.facts);
   }
 
   assign(variable: LocalVar): Flow {
@@ -187,7 +217,7 @@ export class Flow {
       new Set([...this.assigned, variable]),
       new Set([...this.maybeAssigned, variable]),
       this.writes ? new Set([...this.writes, variable]) : undefined,
-      this.writeCaptured
+      this.factsAfterWrites(new Set([variable]))
     );
   }
 
@@ -204,8 +234,15 @@ export class Flow {
       this.assigned,
       maybeAssigned,
       this.writes && union(this.writes, names),
-      captured.length > 0 ? new Set([...this.writeCaptured, ...captured]) : this.writeCaptured
+      this.factsAfterWrites(names, captured)
     );
+  }
+
+  private factsAfterWrites(writes: ReadonlySet<LocalVar>, captured: readonly LocalVar[] = []): FlowFacts {
+    return {
+      writeCaptured: captured.length > 0 ? new Set([...this.writeCaptured, ...captured]) : this.writeCaptured,
+      conditions: filterConditions(this.facts.conditions, (local) => !affectedPath(local, (part) => writes.has(part))),
+    };
   }
 
   /** What is known after two paths meet. */
@@ -219,7 +256,7 @@ export class Flow {
             intersect(a.assigned, b.assigned),
             union(a.maybeAssigned, b.maybeAssigned),
             combineWrites(a.writes, b.writes),
-            union(a.writeCaptured, b.writeCaptured)
+            joinFacts(a, b)
           );
     if (!b.reachable) return a;
     const promotions = new Map<LocalVar, readonly DartType[]>();
@@ -235,9 +272,18 @@ export class Flow {
       intersect(a.assigned, b.assigned),
       union(a.maybeAssigned, b.maybeAssigned),
       combineWrites(a.writes, b.writes),
-      union(a.writeCaptured, b.writeCaptured)
+      joinFacts(a, b)
     );
   }
+}
+
+function joinFacts(a: Flow, b: Flow): FlowFacts {
+  const conditions = new Map<LocalVar, ReadonlySet<LocalVar>>();
+  for (const [local, dependencies] of a.facts.conditions) {
+    const other = b.facts.conditions.get(local);
+    if (other) conditions.set(local, intersect(dependencies, other));
+  }
+  return { writeCaptured: union(a.writeCaptured, b.writeCaptured), conditions };
 }
 
 function combineWrites(
@@ -269,11 +315,25 @@ export type { FunctionType, TypeEnv, TypeParam };
 
 function forgetPromotions(promotions: Map<LocalVar, readonly DartType[]>, roots: ReadonlySet<LocalVar>): void {
   for (const variable of promotions.keys()) {
-    for (let current: LocalVar | undefined = variable; current; current = current.fieldReceiver) {
-      if (roots.has(current)) {
-        promotions.delete(variable);
-        break;
-      }
-    }
+    if (affectedPath(variable, (part) => roots.has(part))) promotions.delete(variable);
   }
+}
+
+function filterConditions(
+  conditions: ReadonlyMap<LocalVar, ReadonlySet<LocalVar>>,
+  keep: (variable: LocalVar) => boolean
+): ReadonlyMap<LocalVar, ReadonlySet<LocalVar>> {
+  if (conditions.size === 0) return conditions;
+  const retained = new Map<LocalVar, ReadonlySet<LocalVar>>();
+  for (const [variable, dependencies] of conditions) {
+    if (keep(variable)) retained.set(variable, new Set([...dependencies].filter(keep)));
+  }
+  return retained;
+}
+
+function affectedPath(variable: LocalVar, matches: (part: LocalVar) => boolean): boolean {
+  for (let current: LocalVar | undefined = variable; current; current = current.fieldReceiver) {
+    if (matches(current)) return true;
+  }
+  return false;
 }
