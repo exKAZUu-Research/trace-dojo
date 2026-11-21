@@ -8740,6 +8740,19 @@ test('Dart native list callbacks consume the shared execution budget', () => {
   });
 });
 
+test('Dart leaves a type parameter unconstrained when Null matches its nullable form', () => {
+  const program = `extension E<T extends Object> on List<T?> { List<T> fresh() => <T>[]; }
+void main() {
+  final a = <Null>[null].nonNulls.toList();
+  a.add(1);
+  print(a.runtimeType);
+  final b = <Null>[null].fresh();
+  b.add('x');
+  print(b);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'List<Object>\n[x]\n' });
+});
+
 test('Dart nonNulls preserves its lazy view identity and iterator states', () => {
   const program = `import 'dart:collection';
 class Source extends Iterable<int?> {
