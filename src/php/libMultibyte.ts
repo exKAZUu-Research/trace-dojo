@@ -971,6 +971,8 @@ const DECODER_LABELS: Record<string, string> = {
  */
 const NARROW_UNITS: Record<string, string> = {
   'EUC-CN': String.raw`[\xa1-\xa9\xb0-\xf7][\xa1-\xfe]`,
+  CP936: String.raw`\x80|[\x81-\xfe][\x40-\x7e\x80-\xfe]`,
+  CP950: String.raw`[\x81-\xfe][\x40-\x7e\xa1-\xfe]`,
   'EUC-KR': String.raw`[\xa1-\xfe][\xa1-\xfe]`,
   'EUC-JP': String.raw`[\xa1-\xac\xae-\xf8][\xa1-\xfe]|\x8e[\xa1-\xdf]|\x8f[\xa1-\xfe][\xa1-\xfe]`,
   CP51932: String.raw`[\xa1-\xfe][\xa1-\xfe]|\x8e[\xa1-\xdf]`,
