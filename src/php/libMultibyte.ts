@@ -965,6 +965,19 @@ const DECODER_LABELS: Record<string, string> = {
   UHC: 'euc-kr',
 };
 
+/**
+ * The bytes of one character in the encodings that are narrower than the host decoder reading them, which also reads
+ * extensions such as GBK's of EUC-CN. Other bytes are invalid in the encoding.
+ */
+const NARROW_UNITS: Record<string, string> = {
+  'EUC-CN': String.raw`[\xa1-\xa9\xb0-\xf7][\xa1-\xfe]`,
+  'EUC-KR': String.raw`[\xa1-\xfe][\xa1-\xfe]`,
+  'EUC-JP': String.raw`[\xa1-\xac\xae-\xf8][\xa1-\xfe]|\x8e[\xa1-\xdf]|\x8f[\xa1-\xfe][\xa1-\xfe]`,
+  CP51932: String.raw`[\xa1-\xfe][\xa1-\xfe]|\x8e[\xa1-\xdf]`,
+  SJIS: String.raw`[\xa1-\xdf]|[\x81-\x86\x88-\x9f\xe0-\xec\xef][\x40-\x7e\x80-\xfc]`,
+  'BIG-5': String.raw`[\xa1-\xc7\xc9-\xf9][\x40-\x7e\xa1-\xfe]`,
+};
+
 function encodingReader(name: string): EncodingReader {
   const codec = CODECS.get(lower(name));
   if (codec) return codec;
@@ -973,7 +986,20 @@ function encodingReader(name: string): EncodingReader {
     const unicode = CODECS.get(UNICODE_READERS[name]);
     const decoder = unicode ? undefined : legacyTextDecoder(DECODER_LABELS[name] ?? name);
     if (!unicode && !decoder) throw new UnsupportedFeatureError(`文字コード ${name} の判定（mb_detect_encoding）`);
-    reader = { name, decode: unicode?.decode ?? ((text) => decodeLegacy(text, decoder as TextDecoder)) };
+    const units = NARROW_UNITS[name];
+    // oxlint-disable-next-line no-control-regex -- The units are bytes, of which ASCII ones are valid in each encoding.
+    const runs = units === undefined ? undefined : new RegExp(String.raw`((?:[\x00-\x7f]|${units})+)|[\s\S]`, 'g');
+    reader = {
+      name,
+      decode:
+        unicode?.decode ??
+        ((text) =>
+          runs
+            ? Array.from(text.matchAll(runs), ([byte, run]) =>
+                run === undefined ? [BAD] : decodeLegacy(byte, decoder as TextDecoder)
+              ).flat()
+            : decodeLegacy(text, decoder as TextDecoder)),
+    };
     detectionReaders.set(name, reader);
   }
   return reader;
