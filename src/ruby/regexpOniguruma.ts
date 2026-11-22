@@ -32,7 +32,8 @@ export function onigurumaSource(source: string, extended: boolean): string {
   const names = new Set(tokens.map((token) => token.name));
   let serial = 0;
   for (const name of names) {
-    if (name === undefined || ASCII_NAME.test(name)) continue;
+    // A name that starts with a digit stays, so that the library rejects it as Ruby does.
+    if (name === undefined || ASCII_NAME.test(name) || /^\d/.test(name)) continue;
     while (names.has(`__capture${serial}__`)) serial++;
     aliases.set(name, `__capture${serial++}__`);
   }

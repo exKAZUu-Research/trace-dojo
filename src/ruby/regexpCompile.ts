@@ -74,7 +74,7 @@ const RUBY_REASONS: readonly (readonly [string, string | ((rejection: Rejection)
   ],
   [
     "Subroutine uses a group name that's not defined",
-    ({ quoted }) => `undefined name <${/^\\g<(.*)>$/.exec(quoted)?.[1] ?? ''}> call`,
+    ({ quoted }) => `undefined name <${/^\\g<(.*)>$/.exec(quoted)?.[1] ?? ''}> reference`,
   ],
   [
     'Not enough capturing groups defined to the left',

@@ -124,6 +124,13 @@ export function hasRegexpProperty(source: string, extended: boolean): boolean {
   );
 }
 
+export function hasSearchStartAnchor(source: string, extended: boolean): boolean {
+  return (
+    source.includes(String.raw`\G`) &&
+    regexpTokens(source, extended).some((token) => token.raw === String.raw`\G` && !token.inClass)
+  );
+}
+
 export function hasNonAsciiRegexpEscape(source: string, extended: boolean): boolean {
   return regexpTokens(source, extended).some((token) => {
     if (token.kind !== 'escape') return false;

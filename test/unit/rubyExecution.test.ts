@@ -560,7 +560,7 @@ test.each([
     `-Infinity\nInfinity\n[Infinity, -1]\n[Infinity, ${process.platform === 'linux' ? '-1' : '1'}]\n[0.0, 1]\nMath::DomainError\n`,
   ],
   [
-    'Math gamma and lgamma match reference small arguments',
+    'Math gamma and lgamma approximate small arguments',
     'p Math.gamma(-0.5),Math.gamma(0.5),Math.gamma(2.5),Math.lgamma(3),Math.lgamma(5)',
     '-3.5449077018110335\n1.7724538509055154\n1.3293403881791368\n[0.6931471805599453, 1]\n[3.1780538303479458, 1]\n',
   ],

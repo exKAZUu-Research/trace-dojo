@@ -49,6 +49,7 @@ import { charIndex, regexpByteIndex, unitIndex } from './regexpPositions';
 import {
   hasNonAsciiRegexpEscape,
   hasRegexpProperty,
+  hasSearchStartAnchor,
   regexpCaptureNames,
   regexpOuterOptions,
   supportsRegexpByteView,
@@ -1431,6 +1432,9 @@ function reverseRegexpSearch(regexp: RObject, source: RString, start: number): M
   const sticky = (data.sticky ??= stickyRegexp(data.js));
   // An expression that starts with `\G` matches only where the search starts, which the library expresses as sticky.
   const first = data.js.sticky ? start : 0;
+  // Elsewhere in an expression, `\G` would follow each probed position instead of staying at the search start.
+  if (!data.js.sticky && hasSearchStartAnchor(data.source, data.extended))
+    throw new UnsupportedFeatureError(String.raw`\G を含む正規表現の後方検索`);
   for (let position = start; position >= first; position--) {
     if ((start - position) % 64 === 0) rt().spend();
     sticky.lastIndex = unitIndex(source.s, position);
