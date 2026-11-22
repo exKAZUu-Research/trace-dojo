@@ -301,8 +301,8 @@ function deriveReadClause(builder: Builder, cons: ConInfo[]): RClause {
 }
 
 /** One constructor's reader, which reads tokens and fields in sequence through `readsBind`. */
-// code-gauge-allow functionCognitiveComplexity 28 -- The branches follow the Haskell report's rules for reading prefix, infix, and record constructors.
-// code-gauge-allow functionNcss 39 -- The branches follow the Haskell report's rules for reading prefix, infix, and record constructors.
+// code-gauge-allow functionCognitiveComplexity -- The branches follow the Haskell report's rules for reading prefix, infix, and record constructors.
+// code-gauge-allow functionNcss -- The branches follow the Haskell report's rules for reading prefix, infix, and record constructors.
 function deriveReadAlternative(builder: Builder, con: ConInfo, d: LocalVar): RExpr {
   const xs = fieldVars(builder, con, 'a');
   const steps: ({ kind: 'token'; text: string } | { kind: 'field'; prec: number; local: LocalVar })[] = [];

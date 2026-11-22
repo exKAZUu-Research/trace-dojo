@@ -89,7 +89,7 @@ function underscoreOK(text: string): boolean {
   return saw !== '_';
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- A transcription of Go's ParseUint.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of Go's ParseUint.
 export function parseUint(text: string, baseArg: number, bitSizeArg: number, func: string): [bigint, Value] {
   if (text === '') return [0n, numError(func, text, ERR_SYNTAX)];
   const base0 = baseArg === 0;
@@ -157,7 +157,6 @@ export function parseFloat(text: string, bitSize: number): [number, Value] {
   return [value, error && numError('ParseFloat', text, error)];
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- A transcription of Go's ParseComplex.
 export function parseComplex(text: string, bitSize: number): [Complex, Value] {
   const size = bitSize === 64 ? 32 : 64;
   const syntaxError: [Complex, Value] = [new Complex(0, 0), numError('ParseComplex', text, ERR_SYNTAX)];
@@ -240,7 +239,7 @@ interface FloatSyntax {
  */
 const MAX_KEPT_DIGITS = 800;
 
-// code-gauge-allow functionCognitiveComplexity 45 -- A transcription of Go's readFloat.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of Go's readFloat.
 function readFloat(s: string): FloatSyntax | undefined {
   let index = 0;
   let underscores = false;
@@ -451,7 +450,7 @@ export function unquoteLiteral(text: string): [string, Value] {
 }
 
 /** Go's `unquote`: the quoted literal at the start of `input` (unescaped when `unescape`), the rest, and any error. */
-// code-gauge-allow functionCognitiveComplexity 30 -- A transcription of Go's unquote.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of Go's unquote.
 function unquote(input: string, unescape: boolean): [string, string, Value] {
   const failure: [string, string, Value] = ['', input, ERR_SYNTAX];
   if (input.length < 2) return failure;
@@ -500,7 +499,7 @@ const SIMPLE_ESCAPES: Partial<Record<string, number>> = { a: 7, b: 8, f: 12, n: 
 const HEX_ESCAPE_DIGITS: Partial<Record<string, number>> = { x: 2, u: 4, U: 8 };
 
 /** `strconv.UnquoteChar`: the first character of an escaped literal body, whether it needs multiple bytes, and the rest. */
-// code-gauge-allow functionCognitiveComplexity 25 -- A transcription of Go's UnquoteChar.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of Go's UnquoteChar.
 export function unquoteChar(text: string, quoteByte: number): [number, boolean, string, Value] {
   const failure: [number, boolean, string, Value] = [0, false, '', ERR_SYNTAX];
   if (text === '') return failure;

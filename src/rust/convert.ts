@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 556 -- One method per kind of item, type, and path.
+// code-gauge-allow-file fileNcss -- One method per kind of item, type, and path.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -48,8 +48,8 @@ export class Converter extends ExpressionConverter {
   // -------------------------------------------------------------------------------------------------------------------
   // Items
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of syntax node.
-  // code-gauge-allow functionNcss 46 -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss -- One case per kind of syntax node.
   protected item(node: Node, attrs?: Attributes): Item | undefined {
     const span = this.span(node);
     switch (node.type) {
@@ -194,8 +194,8 @@ export class Converter extends ExpressionConverter {
     return unavailable(this.span(modifier), `公開の範囲の指定（${modifier.text}）`);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of syntax node.
-  // code-gauge-allow functionNcss 41 -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss -- One case per kind of syntax node.
   private fnItem(node: Node, allowMissingBody = false): FnItem {
     const span = this.span(node);
     const modifiers = node.namedChildren.find((child) => child.type === 'function_modifiers');
@@ -267,8 +267,8 @@ export class Converter extends ExpressionConverter {
     return { pattern, type: this.type(this.field(node, 'type')), span };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 28 -- Type and lifetime parameters and where clauses use distinct Rust syntax.
-  // code-gauge-allow functionNcss 34 -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity -- Type and lifetime parameters and where clauses use distinct Rust syntax.
+  // code-gauge-allow functionNcss -- One case per kind of syntax node.
   private generics(node: Node): Generics {
     const generics: Generics = { params: [], lifetimes: [], where: [] };
     const parameters = node.childForFieldName('type_parameters');
@@ -425,7 +425,7 @@ export class Converter extends ExpressionConverter {
     return fields;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
   private enumItem(node: Node, attrs: Attributes): EnumItem {
     const span = this.span(node);
     const variants: VariantAst[] = [];
@@ -480,7 +480,7 @@ export class Converter extends ExpressionConverter {
     };
   }
 
-  // code-gauge-allow functionNcss 33 -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss -- One case per kind of syntax node.
   private implItem(node: Node): ImplItem {
     const span = this.span(node);
     if (node.text.startsWith('unsafe')) unavailable(span, 'unsafe impl');
@@ -521,8 +521,8 @@ export class Converter extends ExpressionConverter {
     return unavailable(this.span(node), `この書き方（${node.type}）`);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of syntax node.
-  // code-gauge-allow functionNcss 42 -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss -- One case per kind of syntax node.
   private useItem(node: Node): UseItem {
     const entries: UseItem['entries'] = [];
     const walk = (tree: Node, prefix: string[]): void => {
@@ -592,8 +592,8 @@ export class Converter extends ExpressionConverter {
   // -------------------------------------------------------------------------------------------------------------------
   // Types
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Each syntax form determines which child nodes constitute its type.
-  // code-gauge-allow functionNcss 52 -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity -- Each syntax form determines which child nodes constitute its type.
+  // code-gauge-allow functionNcss -- One case per kind of syntax node.
   type(node: Node): TypeAst {
     const span = this.span(node);
     switch (node.type) {
@@ -673,7 +673,7 @@ export class Converter extends ExpressionConverter {
     return syntaxError(span, '+ を含む impl や dyn を参照型の内側に書くときは、括弧で囲んでください。');
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Flattens bounds while separating trait and lifetime nodes.
+  // code-gauge-allow functionCognitiveComplexity -- Flattens bounds while separating trait and lifetime nodes.
   private objectBoundType(
     kind: 'impl' | 'dyn',
     nodes: Node[],

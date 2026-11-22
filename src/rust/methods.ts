@@ -82,7 +82,7 @@ const RANGE_ITERATORS = new Set(['Range', 'RangeInclusive', 'RangeFrom']);
  * then by shared reference, then by mutable reference; inherent methods before trait methods, of the standard
  * library's traits those that `inScope` accepts.
  */
-// code-gauge-allow functionCognitiveComplexity 28 -- Follows rustc's method probe step by step.
+// code-gauge-allow functionCognitiveComplexity -- Follows rustc's method probe step by step.
 export function lookupMethod(
   program: Program,
   solver: TraitSolver,
@@ -260,7 +260,7 @@ interface TraitCandidate {
 }
 
 /** The trait methods of a name that may take the receiver: of trait impls, then of the std traits builtin types have. */
-// code-gauge-allow functionCognitiveComplexity 23 -- Follows rustc's method probe step by step.
+// code-gauge-allow functionCognitiveComplexity -- Follows rustc's method probe step by step.
 function traitCandidates(
   program: Program,
   solver: TraitSolver,

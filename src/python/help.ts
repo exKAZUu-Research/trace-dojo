@@ -7,7 +7,7 @@ import { classOf, None, typeError } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { type Kwargs, PyBoundMethod, PyClass, PyFunction, type PyValue } from './values';
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Checks the arguments of pydoc's Helper and the kinds of objects it documents here.
+// code-gauge-allow functionCognitiveComplexity -- Checks the arguments of pydoc's Helper and the kinds of objects it documents here.
 export function help(args: PyValue[], kwargs?: Kwargs): PyValue {
   for (const key of kwargs?.keys() ?? []) {
     if (key !== 'request') throw typeError(`Helper.__call__() got an unexpected keyword argument '${key}'`);

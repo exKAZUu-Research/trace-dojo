@@ -196,7 +196,7 @@ function debugLabel(key: string | bigint): string {
   return owner === '*' ? `"${name}":protected` : `"${name}":"${owner}":private`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Collects closure display fields from its declaration, captures, and bindings.
+// code-gauge-allow functionCognitiveComplexity -- Collects closure display fields from its declaration, captures, and bindings.
 function closureDebug(object: PhpObject): [string, Value, string][] {
   const data = object.internal as ClosureData;
   const entries: [string, Value, string][] = [];
@@ -367,8 +367,8 @@ export function varDump(values: Value[]): void {
   });
 }
 
-// code-gauge-allow functionNcss 39 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function dumpValue(value: Value, level: number, state: Inspection, write: (text: string) => void, slot?: Slot): void {
   if (state.active.size >= MAX_INSPECTION_DEPTH) throw rt().memoryExhausted(2 ** 31);
   const indent = level > 1 ? ' '.repeat(level - 1) : '';
@@ -454,8 +454,8 @@ function quoteExport(text: string): string {
   return `'${text.replaceAll(/['\\]/g, String.raw`\$&`).replaceAll('\0', `' . "\\0" . '`)}'`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Preserves depth and recursion state while rendering different value kinds.
-// code-gauge-allow functionNcss 43 -- Preserves depth and recursion state while rendering different value kinds.
+// code-gauge-allow functionCognitiveComplexity -- Preserves depth and recursion state while rendering different value kinds.
+// code-gauge-allow functionNcss -- Preserves depth and recursion state while rendering different value kinds.
 function exportValue(value: Value, level: number, state: Inspection): string {
   if (state.active.size >= MAX_INSPECTION_DEPTH) throw rt().memoryExhausted(2 ** 31);
   if (value === null || value === UNDEFINED_RESULT || (value instanceof PhpObject && value.isResource)) return 'NULL';

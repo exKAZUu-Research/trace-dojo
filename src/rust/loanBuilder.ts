@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 1000 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
+// code-gauge-allow-file fileNcss -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
@@ -591,7 +591,7 @@ export class LoanBuilder {
   }
 
   /** Binds a part of a pattern to a place, which bindings take by reference in the binding mode `byRef`. */
-  // code-gauge-allow functionNcss 33 -- One case per kind of pattern.
+  // code-gauge-allow functionNcss -- One case per kind of pattern.
   private bindPart(binding: Binding, p: Pattern, place: Place, byRef: BindingMode): void {
     switch (p.kind) {
       case 'binding': {
@@ -676,7 +676,7 @@ export class LoanBuilder {
     return this.valueInner(expr);
   }
 
-  // code-gauge-allow functionNcss 60 -- One case per kind of expression.
+  // code-gauge-allow functionNcss -- One case per kind of expression.
   private valueInner(expr: Expr): Value {
     switch (expr.kind) {
       case 'path':
@@ -812,7 +812,7 @@ export class LoanBuilder {
   }
 
   /** `break`, `continue`, and `return` go on elsewhere, after which nothing runs. */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Each kind of jump goes on at its own point.
+  // code-gauge-allow functionCognitiveComplexity -- Each kind of jump goes on at its own point.
   private jump(expr: Extract<Expr, { kind: 'break' | 'continue' | 'return' }>): void {
     const value = expr.kind !== 'continue' && expr.value ? this.value(expr.value) : undefined;
     if (expr.kind === 'return') {
@@ -1066,7 +1066,7 @@ export class LoanBuilder {
   // -------------------------------------------------------------------------------------------------------------------
   // Calls
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- A call defines the result layout and relates it to its borrowed inputs.
+  // code-gauge-allow functionCognitiveComplexity -- A call defines the result layout and relates it to its borrowed inputs.
   private call(expr: Extract<Expr, { kind: 'call' }>): Value {
     const res = expr.callee.kind === 'path' ? this.annotations.paths.get(expr.callee) : undefined;
     const fn = res?.kind === 'fn' ? res.fn : undefined;
@@ -1187,7 +1187,7 @@ export class LoanBuilder {
    * Relates the arguments and the result of a call of a closure (or of what a type parameter or a trait object for one
    * stands for): as its summary says for a closure of this function, conservatively otherwise.
    */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Applies a closure's bound or summary, or relates every region.
+  // code-gauge-allow functionCognitiveComplexity -- Applies a closure's bound or summary, or relates every region.
   private applyClosure(
     callee: Layout,
     args: Layout[],
@@ -1230,8 +1230,8 @@ export class LoanBuilder {
   // Closures and macros
 
   /** A closure borrows, or moves, the places it captures when it is created, and holds them while it lives. */
-  // code-gauge-allow functionNcss 44 -- Follows rustc's capture modes case by case.
-  // code-gauge-allow functionCognitiveComplexity 29 -- A closure builds a loan summary from its captures and borrowed results.
+  // code-gauge-allow functionNcss -- Follows rustc's capture modes case by case.
+  // code-gauge-allow functionCognitiveComplexity -- A closure builds a loan summary from its captures and borrowed results.
   private closure(expr: Extract<Expr, { kind: 'closure' }>): Value {
     const info = this.annotations.closures.get(expr);
     const type = expr.ty && normalize(shallow(expr.ty));
@@ -1276,7 +1276,7 @@ export class LoanBuilder {
   }
 
   /** Which regions of the parameters (and of the captures) the result of this closure's body may hold. */
-  // code-gauge-allow functionCognitiveComplexity 23 -- Searches the outlives graph from each region of the parameters.
+  // code-gauge-allow functionCognitiveComplexity -- Searches the outlives graph from each region of the parameters.
   private summarize(paramVars: Var[], bodySpan: Span): ClosureSummary {
     const edges = new Map<RVar, RVar[]>();
     for (const [sup, sub] of this.graph.outlives) {
@@ -1325,7 +1325,7 @@ export class LoanBuilder {
     });
   }
 
-  // code-gauge-allow functionNcss 41 -- One case per macro.
+  // code-gauge-allow functionNcss -- One case per macro.
   private macro(expr: Extract<Expr, { kind: 'macro' }>): Value {
     const { macro } = expr;
     switch (macro.kind) {

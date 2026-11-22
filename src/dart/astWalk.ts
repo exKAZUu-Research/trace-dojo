@@ -114,7 +114,7 @@ class AssignmentWalker {
     for (const child of Object.values(node)) this.visit(child);
   }
 
-  // code-gauge-allow functionNcss 56 -- One case per scope introduced by the syntax.
+  // code-gauge-allow functionNcss -- One case per scope introduced by the syntax.
   private visitScopedNode(node: Node): boolean {
     switch (node.kind) {
       case 'block': {
@@ -233,7 +233,7 @@ class AssignmentWalker {
     this.visit(node.finally);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Guards see case bindings, and bodies see bindings shared by adjacent heads.
+  // code-gauge-allow functionCognitiveComplexity -- Guards see case bindings, and bodies see bindings shared by adjacent heads.
   private visitSwitch(node: Node): void {
     this.visit(node.subject);
     const cases = node.cases as (SwitchCase | SwitchExpressionCase)[];

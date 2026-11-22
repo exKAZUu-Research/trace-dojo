@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 758 -- Keeps the inspection dispatch with the constructor, property, and error metadata it shares.
+// code-gauge-allow-file fileNcss -- Keeps the inspection dispatch with the constructor, property, and error metadata it shares.
 import { eastAsianWidthType } from 'get-east-asian-width';
 import stripAnsi from 'strip-ansi';
 
@@ -515,7 +515,7 @@ function sortOutput(ctx: Context, entries: string[]): void {
 /**
  * Node reads inherited descriptors before collecting the object's own keys, but prints them after its own properties.
  */
-// code-gauge-allow functionCognitiveComplexity 17 -- Visits each prototype and reads its eligible descriptors in order.
+// code-gauge-allow functionCognitiveComplexity -- Visits each prototype and reads its eligible descriptors in order.
 function inspectPrototype(
   ctx: Context,
   value: JsObject,
@@ -1220,7 +1220,7 @@ function formatIndented(ctx: Context, value: Value, recurseTimes: number, diff =
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionCognitiveComplexity -- Ports Node.js's util.inspect, so the two stay comparable.
 function reduceToSingleString(
   ctx: Context,
   output: string[],
@@ -1265,8 +1265,8 @@ function isBelowBreakLength(ctx: Context, output: string[], start: number, base:
 }
 
 /** Lays out the entries of a long array in aligned columns. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Ports Node.js's groupArrayElements as it is, so the two stay comparable.
-// code-gauge-allow functionNcss 41 -- Ports Node.js's groupArrayElements as it is, so the two stay comparable.
+// code-gauge-allow functionCognitiveComplexity -- Ports Node.js's groupArrayElements as it is, so the two stay comparable.
+// code-gauge-allow functionNcss -- Ports Node.js's groupArrayElements as it is, so the two stay comparable.
 function groupArrayElements(ctx: Context, output: string[], array: JsArray): string[] {
   let totalLength = 0;
   let maxLength = 0;

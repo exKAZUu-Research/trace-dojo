@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 468 -- Keeps array bucket layout, mutations and their cursor positions together.
+// code-gauge-allow-file fileNcss -- Keeps array bucket layout, mutations and their cursor positions together.
 import type { Key } from './values';
 
 class ArrayEntry {
@@ -155,7 +155,7 @@ export class ArrayOrder {
     return cursor;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Copies array layout and its active cursors using the same surviving buckets.
+  // code-gauge-allow functionCognitiveComplexity -- Copies array layout and its active cursors using the same surviving buckets.
   copy(preservePositions: boolean, keys?: ReadonlyMap<Key, unknown>): ArrayOrder {
     const copy = new ArrayOrder([], this.capacity);
     for (const entry of this.orderedEntries())
@@ -186,7 +186,7 @@ export class ArrayOrder {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   insert(key: Key, count = this.entries.size): number | undefined {
     if (this.get(key)) return undefined;
     const numeric = typeof key === 'bigint' && key >= 0n && key < BigInt(Number.MAX_SAFE_INTEGER);

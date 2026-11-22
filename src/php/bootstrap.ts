@@ -79,7 +79,7 @@ defineClass({
   methods: [{ signature: 'jsonSerialize(): mixed', impl: () => null, isAbstract: true }],
 });
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function closureBinding(
   closure: PhpObject,
   newThis: Value,
@@ -220,7 +220,7 @@ function turtleOf(object: PhpObject): TurtleState {
   if (!state) throwError('Error', 'Turtle method called on an object that is not a turtle');
   return state;
 }
-// code-gauge-allow functionNcss 34 -- The Turtle registrations share receiver state and movement helpers.
+// code-gauge-allow functionNcss -- The Turtle registrations share receiver state and movement helpers.
 function defineTurtleMethods(): NativeMethod[] {
   const methods: NativeMethod[] = [
     {

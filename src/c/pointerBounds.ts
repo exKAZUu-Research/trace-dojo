@@ -119,7 +119,7 @@ export function boundPointer(frame: Frame, address: number, element: CType): Add
   return { address, ...(range ?? { start: block.base, end: block.end }) };
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Array and record recursion must preserve the same address and element-type context.
+// code-gauge-allow functionCognitiveComplexity -- Array and record recursion must preserve the same address and element-type context.
 function subobjectRange(
   type: CType,
   base: number,
@@ -234,7 +234,7 @@ function coherentOrigin(
   return true;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Byte identities and address roles are selected together before the resulting metadata is emitted.
+// code-gauge-allow functionCognitiveComplexity -- Byte identities and address roles are selected together before the resulting metadata is emitted.
 export function arithmeticResult(
   value: Scalar,
   operands: Evaluated[],

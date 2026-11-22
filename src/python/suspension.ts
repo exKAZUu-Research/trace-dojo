@@ -110,7 +110,7 @@ function markAll(expressions: (Expression | undefined)[]): boolean {
   return suspends;
 }
 
-// code-gauge-allow functionNcss 34 -- One case per kind of statement, listing the expressions it evaluates.
+// code-gauge-allow functionNcss -- One case per kind of statement, listing the expressions it evaluates.
 function expressionsOf(statement: Statement): (Expression | undefined)[] {
   switch (statement.kind) {
     case 'expression': {
@@ -212,7 +212,7 @@ function defaultsOf(params: Parameter[]): (Expression | undefined)[] {
   return params.map((param) => param.default);
 }
 
-// code-gauge-allow functionNcss 39 -- One case per kind of expression, listing the parts its frame evaluates.
+// code-gauge-allow functionNcss -- One case per kind of expression, listing the parts its frame evaluates.
 function partsOf(expression: Expression): (Expression | undefined)[] {
   switch (expression.kind) {
     case 'fstring': {

@@ -62,7 +62,7 @@ function settledOutput(c: Checker, expr: Extract<Expr, { kind: 'binary' }>, l: T
   return isArithmeticOperand(l) && !(bitwise && l.kind === 'float') && c.unifier.tryUnify(l, r) ? l : undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows the type checking rules of rustc case by case.
+// code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
 export function checkUnary(c: Checker, expr: Extract<Expr, { kind: 'unary' }>, expected: Type | undefined): Type {
   if (expr.op === '*') {
     const type = normalize(shallow(c.settled(c.expr(expr.operand, undefined))));
@@ -141,7 +141,7 @@ function checkShift(c: Checker, expr: Extract<Expr, { kind: 'binary' }>, leftTyp
   return left;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows the type checking rules of rustc case by case.
+// code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
 function arithmeticOrBitwise(c: Checker, expr: Extract<Expr, { kind: 'binary' }>, leftType: Type, left: Type): Type {
   const { op } = expr;
   const rightType = c.expr(expr.right, left.kind === 'var' && !left.v.literal ? undefined : left);
@@ -247,7 +247,7 @@ export function checkAssign(c: Checker, expr: Extract<Expr, { kind: 'assign' }>)
   return UNIT;
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Follows the type checking rules of rustc case by case.
+// code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
 export function checkCompoundAssign(c: Checker, expr: Extract<Expr, { kind: 'compoundAssign' }>): Type {
   const targetType = c.expr(expr.target, undefined);
   if (!isPlaceExpr(c, expr.target))
@@ -316,7 +316,7 @@ export function checkCast(c: Checker, expr: Extract<Expr, { kind: 'cast' }>): Ty
   return validateCast(c, expr, sourceType, target);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows the type checking rules of rustc case by case.
+// code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
 function validateCast(c: Checker, expr: Extract<Expr, { kind: 'cast' }>, sourceType: Type, target: Type): Type {
   const s = normalize(shallow(sourceType));
   const t = normalize(shallow(target));

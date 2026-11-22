@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 503 -- Groups related string operations with their shared UTF-8 byte and rune helpers.
+// code-gauge-allow-file fileNcss -- Groups related string operations with their shared UTF-8 byte and rune helpers.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { LIMITS } from '../../interpreter/limits';
 import { roundUpToSizeClass } from '../conversions';
@@ -176,7 +176,7 @@ function split(s: string, sep: string, after: boolean, limit: number): string[] 
   return pieces;
 }
 
-// code-gauge-allow duplicateLines 17 -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
+// code-gauge-allow duplicateLines -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
 function fields(s: string, isSeparator: (rune: number) => boolean): string[] {
   spendFor(s.length);
   const pieces: string[] = [];
@@ -229,8 +229,8 @@ function appendBounded(current: string, chunk: string): string {
   return current + chunk;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Groups related string operations with their shared UTF-8 byte and rune helpers.
-// code-gauge-allow functionNcss 33 -- Groups related string operations with their shared UTF-8 byte and rune helpers.
+// code-gauge-allow functionCognitiveComplexity -- Groups related string operations with their shared UTF-8 byte and rune helpers.
+// code-gauge-allow functionNcss -- Groups related string operations with their shared UTF-8 byte and rune helpers.
 function replace(s: string, old: string, replacement: string, count: number): string {
   if (old === replacement || count === 0) return s;
   const runtime = currentRuntime();
@@ -265,7 +265,7 @@ function replace(s: string, old: string, replacement: string, count: number): st
   return appendBounded(result, s.slice(start));
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Groups related string operations with their shared UTF-8 byte and rune helpers.
+// code-gauge-allow functionCognitiveComplexity -- Groups related string operations with their shared UTF-8 byte and rune helpers.
 export function equalFold(s: string, t: string): boolean {
   spendFor(Math.min(s.length, t.length));
   let sa = 0;

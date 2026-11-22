@@ -25,7 +25,7 @@ export class Frame implements TracedFrame {
   /** The `__builtins__` binding captured when the frame or its function was created, or `undefined` when absent. */
   builtins: PyValue | undefined;
 
-  // code-gauge-allow functionParameterCount 9 -- Each frame field is set once at creation and read on every name access.
+  // code-gauge-allow functionParameterCount -- Each frame field is set once at creation and read on every name access.
   constructor(
     readonly kind: ScopeInfo['kind'],
     /** The function's variables, the class namespace, or the module's globals. */

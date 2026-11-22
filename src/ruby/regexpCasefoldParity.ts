@@ -105,7 +105,7 @@ export function releaseNativeCasefold(runtime: object): void {
   state.idle.unref();
 }
 
-// code-gauge-allow functionNcss 39 -- The bounded request and its per-run capture cache share one search lifecycle.
+// code-gauge-allow functionNcss -- The bounded request and its per-run capture cache share one search lifecycle.
 function nativeSearch(data: RegexpData, pattern: NativePattern, start: number): NativeRanges {
   const runtime = rt();
   const cached = pattern.searches.get(start);
@@ -164,7 +164,7 @@ function nativeSearch(data: RegexpData, pattern: NativePattern, start: number): 
   return native;
 }
 
-// code-gauge-allow functionNcss 33 -- Claiming a warm lease and creating its replacement share process ownership and cleanup.
+// code-gauge-allow functionNcss -- Claiming a warm lease and creating its replacement share process ownership and cleanup.
 function nativeProcess(runtime: object): NativeProcess {
   const existing = nativeProcesses.get(runtime);
   if (existing) return existing;
@@ -202,7 +202,7 @@ function nativeProcess(runtime: object): NativeProcess {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- One polling loop checks the hard deadline, process errors and validated atomic responses.
+// code-gauge-allow functionCognitiveComplexity -- One polling loop checks the hard deadline, process errors and validated atomic responses.
 function awaitNativeResult(
   state: NativeProcess,
   id: number,

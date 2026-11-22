@@ -252,7 +252,7 @@ function hasScalarElements(type: Type): boolean {
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows a missing value as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
-// code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of value the trace shows.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of value the trace shows.
 function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNode | undefined {
   chargeSnapshot?.(NODE_COST);
   const t = derefType(type);

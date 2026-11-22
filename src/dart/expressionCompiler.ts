@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 999 -- Expression kinds share the same scope and evaluation rules.
+// code-gauge-allow-file fileNcss -- Expression kinds share the same scope and evaluation rules.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import type {
@@ -286,7 +286,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return compiled;
   }
 
-  // code-gauge-allow functionNcss 37 -- One case per kind of condition that tells flow analysis something.
+  // code-gauge-allow functionNcss -- One case per kind of condition that tells flow analysis something.
   protected compileConditionInner(expression: Expression): { compiled: Compiled; flow: ConditionFlow } {
     switch (expression.kind) {
       case 'parenthesized': {
@@ -382,7 +382,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   /** `super == other`, which calls the superclass's `==`. */
   protected abstract compileSuperEquality(expression: Extract<Expression, { kind: 'binary' }>): Compiled;
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Equality evaluates both operands in order and promotes only stable paths.
+  // code-gauge-allow functionCognitiveComplexity -- Equality evaluates both operands in order and promotes only stable paths.
   protected compileEquality(expression: Extract<Expression, { kind: 'binary' }>): {
     compiled: Compiled;
     flow: ConditionFlow;
@@ -519,7 +519,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return compiled;
   }
 
-  // code-gauge-allow functionNcss 38 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionNcss -- One case per form of the construct, which reads best together.
   private compileChainNode(expression: Expression, context: DartType | undefined): Compiled {
     switch (expression.kind) {
       case 'assign': {
@@ -580,7 +580,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** Literals, names, and the selectors of member access, indexing, calls, and creation. */
-  // code-gauge-allow functionNcss 40 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionNcss -- One case per form of the construct, which reads best together.
   private compilePrimary(expression: PrimaryExpression, context: DartType | undefined): Compiled {
     switch (expression.kind) {
       case 'int': {
@@ -647,7 +647,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // Literals
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Apply the distinct literal ranges and exact double conversion.
+  // code-gauge-allow functionCognitiveComplexity -- Apply the distinct literal ranges and exact double conversion.
   protected compileInt(
     expression: Extract<Expression, { kind: 'int' }>,
     context: DartType | undefined,
@@ -747,8 +747,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return { type, run: isConst ? this.canonicalized(build) : build, isConst, creates: elements.creates };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 38 -- The context, leaf elements, and spreads decide set or map in the order Dart specifies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss -- The context, leaf elements, and spreads decide set or map in the order Dart specifies.
   private compileSetOrMapLiteral(
     expression: Extract<Expression, { kind: 'setOrMap' }>,
     context: DartType | undefined
@@ -939,7 +939,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     isConst: boolean
   ): Compiled;
 
-  // code-gauge-allow functionCognitiveComplexity 29 -- Compile fields in source order and keep named fields sorted in the type and value.
+  // code-gauge-allow functionCognitiveComplexity -- Compile fields in source order and keep named fields sorted in the type and value.
   private compileRecordLiteral(
     expression: Extract<Expression, { kind: 'record' }>,
     context: DartType | undefined
@@ -1045,8 +1045,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
   // Names
 
   /** What a name means: a local, a member of the enclosing class or extension, or a top-level declaration. */
-  // code-gauge-allow functionCognitiveComplexity 30 -- Lookup order depends on lexical scope and the enclosing declaration.
-  // code-gauge-allow functionNcss 41 -- The lookup cases read in scope order.
+  // code-gauge-allow functionCognitiveComplexity -- Lookup order depends on lexical scope and the enclosing declaration.
+  // code-gauge-allow functionNcss -- The lookup cases read in scope order.
   resolveName(name: string, span?: Span): NameResolution | undefined {
     const local = this.findLocal(name, span);
     if (local) return { kind: 'local', variable: local };
@@ -1091,8 +1091,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of name a resolution yields.
-  // code-gauge-allow functionNcss 31 -- One case per kind of name a resolution yields.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of name a resolution yields.
+  // code-gauge-allow functionNcss -- One case per kind of name a resolution yields.
   protected compileIdentifier(expression: Extract<Expression, { kind: 'identifier' }>): Compiled {
     const { name } = expression;
     if (name === '_') return this.error(expression, '_ は値として使えません。');
@@ -1232,7 +1232,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return value;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Ordinary and pattern assignments share the local write rules.
+  // code-gauge-allow functionCognitiveComplexity -- Ordinary and pattern assignments share the local write rules.
   protected localWriter(variable: LocalVar, span: Span, readsCurrent = false): (frame: Frame, value: Value) => void {
     const { options, name } = variable;
     if (variable.unavailable) this.error(span, variable.unavailable);
@@ -1391,7 +1391,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** What a member access on a value of the receiver's static type reads, checking nullability. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Resolve static and dynamic reads and their distinct nullable cases.
+  // code-gauge-allow functionCognitiveComplexity -- Resolve static and dynamic reads and their distinct nullable cases.
   protected readMemberOf(receiver: Compiled, name: string, span: Span, nullAware: boolean): Compiled {
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
@@ -1435,7 +1435,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** Reads a member found statically: a field or getter through dynamic dispatch, a method as a tear-off. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Ordinary reads keep record getters and null-shorting dispatch.
+  // code-gauge-allow functionCognitiveComplexity -- Ordinary reads keep record getters and null-shorting dispatch.
   protected readMember(
     receiver: Compiled,
     resolved: ResolvedMember,

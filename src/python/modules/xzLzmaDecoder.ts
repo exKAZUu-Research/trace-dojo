@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 557 -- Transcribes liblzma 5.8.4 C sources together, which read best side by side with them.
+// code-gauge-allow-file fileNcss -- Transcribes liblzma 5.8.4 C sources together, which read best side by side with them.
 // The LZMA1 and LZMA2 decoders of liblzma 5.8.4 (`lz_decoder.c`, `lzma_decoder.c`, `lzma2_decoder.c`). The LZMA
 // decoder is the "safe" half of `lzma_decode`, which decodes the same bits as its fast half while stopping wherever
 // the input runs out. The dictionary grows as it fills rather than being allocated at its full size.
@@ -356,7 +356,7 @@ export class Lzma1Decoder implements LzDecoderCoder {
     return this.dict.full > distance;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   private isMatch(): number {
     const { dict } = this;
     if (this.mightFinishWithoutEopm && dict.pos === dict.limit) {
@@ -433,7 +433,7 @@ export class Lzma1Decoder implements LzDecoderCoder {
   }
 
   /** `len_decode` of the length coder at `coder`, whose sequences start at `choiceSequence`. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   private length(choiceSequence: number, coder: number): number {
     if (this.sequence === choiceSequence) {
       const bit = this.bit(coder + LEN_CHOICE);
@@ -648,8 +648,8 @@ class Lzma2Decoder implements LzDecoderCoder {
     this.options = { ...options };
   }
 
-  // code-gauge-allow functionNcss 51 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
-  // code-gauge-allow functionCognitiveComplexity 22 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   code(dict: Dict, input: Uint8Array, inPos: Pos, inSize: number): number {
     while (inPos.value < inSize || this.sequence === L2_LZMA) {
       switch (this.sequence) {
@@ -707,8 +707,8 @@ class Lzma2Decoder implements LzDecoderCoder {
     return LZMA_OK;
   }
 
-  // code-gauge-allow functionNcss 32 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
-  // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   private control(dict: Dict, control: number): number {
     if (control === 0) return LZMA_STREAM_END;
     if (control >= 0xe0 || control === 1) {

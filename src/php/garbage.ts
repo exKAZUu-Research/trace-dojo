@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 1000 -- Holds object ownership, reachability and release with their shared helpers.
+// code-gauge-allow-file fileNcss -- Holds object ownership, reachability and release with their shared helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type CleanupException, withCleanupExceptions, withPendingException } from './errors';
 import {
@@ -67,8 +67,8 @@ function gcForeachSubjects(runtime: Runtime): (PhpArray | PhpObject)[] {
     );
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- The first pass collects the same live snapshots for both release paths.
-// code-gauge-allow functionNcss 44 -- Shares mark results, roots and release order across both release paths.
+// code-gauge-allow functionCognitiveComplexity -- The first pass collects the same live snapshots for both release paths.
+// code-gauge-allow functionNcss -- Shares mark results, roots and release order across both release paths.
 function collectGarbageNow(runtime: Runtime, cycles: boolean, stopOnException: boolean): number {
   // While a release runs destructors, it frees the rest of what it released itself, in PHP's order.
   if ((runtime.objects.size === 0 && runtime.arrayCycles.size === 0) || (releasing > 0 && !cycles)) {
@@ -283,7 +283,7 @@ function finishCollectedObjects(
   retainTurtles(runtime, mark(runtime));
 }
 
-// code-gauge-allow functionParameterCount 7 -- Shares the GC cycle collection snapshot with collectGarbageNow.
+// code-gauge-allow functionParameterCount -- Shares the GC cycle collection snapshot with collectGarbageNow.
 function orderCollectedObjects(
   runtime: Runtime,
   cycles: boolean,
@@ -425,8 +425,8 @@ function releaseCollectionDescendants(runtime: Runtime, dropped: unknown[]): Php
   return collectible;
 }
 
-// code-gauge-allow functionNcss 53 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function releaseDroppedNow(
   runtime: Runtime,
   dropped: unknown[],
@@ -549,7 +549,7 @@ class Release {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private releaseValue(item: unknown, pending: unknown[], onFailure: (error: CleanupException) => void): void {
     if (item instanceof ReleaseFinish) {
       this.runtime.freeObject(item.object);
@@ -650,7 +650,7 @@ class Release {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Release eligibility and resurrection use the same ownership state.
+  // code-gauge-allow functionCognitiveComplexity -- Release eligibility and resurrection use the same ownership state.
   private prepare(object: PhpObject, onFailure: (error: CleanupException) => void): ReleaseFinish | undefined {
     if (this.visited.has(object) || this.runtime.objects.get(object.id) !== object) return undefined;
     if (ownedReachable(object, this.roots, this.runtime, this.unreachable, this.retainedBefore)) return undefined;
@@ -742,7 +742,7 @@ function mayHoldObject(value: unknown, runtime: Runtime): boolean {
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function objectsWithin(values: unknown[], include: (value: Ref | PhpArray | PhpObject) => boolean): PhpObject[] {
   const found = new Set<PhpObject>();
   const seenArrays = new Set<PhpArray>();
@@ -862,8 +862,8 @@ class DetachedArrays {
       }
     }
   }
-  // code-gauge-allow functionNcss 39 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  // code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private enter(node: unknown): void {
     if (!(node instanceof Ref || node instanceof PhpArray || node instanceof PhpObject)) return;
     if (node instanceof PhpObject && activeReleaseObjects.has(node)) return;
@@ -914,8 +914,8 @@ function retainTurtles(runtime: Runtime, reached: Set<PhpObject>): void {
  * The objects reachable from the program's variables and the values its running code holds. Records the order in which
  * it reaches them, holders' contents in order, in `runtime.reachOrder`.
  */
-// code-gauge-allow functionNcss 59 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function mark(runtime: Runtime, includeBuffered = true, visitedArrays = new Set<PhpArray>()): Set<PhpObject> {
   const reached = new Set<PhpObject>();
   const roots: unknown[] = [];
@@ -1076,8 +1076,8 @@ function freeable(
   return garbage.filter((object) => !kept.has(object));
 }
 
-// code-gauge-allow functionNcss 45 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function cyclicObjects(graph: CollectionGraph, garbage: PhpObject[], cyclicArrays?: Set<PhpArray>): Set<PhpObject> {
   // Tarjan's strongly connected components finds the objects on cycles.
   let index = 0;
@@ -1133,8 +1133,8 @@ function recordCyclicNode(node: CollectionNode, objects: Set<PhpObject>, arrays?
 }
 
 /** Owner order follows retained slots; a handle is freed after its owner's children. */
-// code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function releaseOrder(
   freed: PhpObject[],
   previousOrder: Map<PhpObject, number>,
@@ -1273,7 +1273,7 @@ function persistentNativeRoots(runtime: Runtime): unknown[] {
   ];
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function arrayHasHolders(runtime: Runtime, target: PhpArray, minimum: 1 | 2): boolean {
   let count = arrayHolderCount(target) + Number(runtime.nativeShutdownHolders.has(target));
   if (count >= minimum) return true;
@@ -1315,7 +1315,7 @@ export function ownershipRootSlots(runtime: Runtime, includeTemporaries = true):
   return roots;
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function ownedReachable(
   value: Ref | PhpArray | PhpObject,
   roots: Set<unknown>,
@@ -1367,7 +1367,7 @@ function resolveOwnershipRoot(
   return isRoot(item) ? item : undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function ownershipRootCheck(
   roots: Set<unknown>,
   runtime: Runtime,

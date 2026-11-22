@@ -120,8 +120,8 @@ export function numericBinary(runtime: Runtime, operator: string, a: bigint | nu
 
 const NOT_INT_OPERATOR = Symbol('not an int operator');
 
-// code-gauge-allow duplicateLines 45 -- The int and double operators share their shape but not their semantics.
-// code-gauge-allow functionNcss 36 -- One case per operator of int.
+// code-gauge-allow duplicateLines -- The int and double operators share their shape but not their semantics.
+// code-gauge-allow functionNcss -- One case per operator of int.
 function intBinary(runtime: Runtime, operator: string, a: bigint, b: bigint): Value | typeof NOT_INT_OPERATOR {
   switch (operator) {
     case '+': {
@@ -178,7 +178,7 @@ function intBinary(runtime: Runtime, operator: string, a: bigint, b: bigint): Va
   }
 }
 
-// code-gauge-allow duplicateLines 36 -- The int and double operators share their shape but not their semantics.
+// code-gauge-allow duplicateLines -- The int and double operators share their shape but not their semantics.
 function doubleBinary(runtime: Runtime, operator: string, a: bigint | number, b: bigint | number): Value {
   const x = toDouble(a);
   const y = toDouble(b);

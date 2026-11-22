@@ -192,7 +192,7 @@ function mergeAt<T>(ms: MergeState<T>, i: number): void {
 }
 
 /** `merge_lo`: merges from the left, with run A moved to a temporary array. */
-// code-gauge-allow duplicateLines 16 -- Transcribes merge_lo of CPython's listobject.c.
+// code-gauge-allow duplicateLines -- Transcribes merge_lo of CPython's listobject.c.
 function mergeLo<T>(ms: MergeState<T>, baseA: number, na: number, baseB: number, nb: number): void {
   const { items } = ms;
   const temp = items.slice(baseA, baseA + na);
@@ -223,7 +223,7 @@ function mergeLoRuns<T>(ms: MergeState<T>, temp: T[], c: MergeCursor): boolean {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes merge_lo of CPython's listobject.c.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes merge_lo of CPython's listobject.c.
 function mergeLoOneAtATime<T>(
   { items, less, minGallop }: MergeState<T>,
   temp: T[],
@@ -250,8 +250,8 @@ function mergeLoOneAtATime<T>(
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes merge_lo of CPython's listobject.c.
-// code-gauge-allow functionNcss 36 -- Transcribes merge_lo of CPython's listobject.c.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes merge_lo of CPython's listobject.c.
+// code-gauge-allow functionNcss -- Transcribes merge_lo of CPython's listobject.c.
 function mergeLoGalloping<T>(ms: MergeState<T>, temp: T[], c: MergeCursor): boolean | undefined {
   const { items, less } = ms;
   let aCount: number;
@@ -290,7 +290,7 @@ function mergeLoGalloping<T>(ms: MergeState<T>, temp: T[], c: MergeCursor): bool
 }
 
 /** `merge_hi`: merges from the right, with run B moved to a temporary array. */
-// code-gauge-allow duplicateLines 16 -- Transcribes merge_hi of CPython's listobject.c.
+// code-gauge-allow duplicateLines -- Transcribes merge_hi of CPython's listobject.c.
 function mergeHi<T>(ms: MergeState<T>, baseA: number, na: number, baseB: number, nb: number): void {
   const { items } = ms;
   const temp = items.slice(baseB, baseB + nb);
@@ -321,7 +321,7 @@ function mergeHiRuns<T>(ms: MergeState<T>, temp: T[], baseA: number, c: MergeCur
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes merge_hi of CPython's listobject.c.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes merge_hi of CPython's listobject.c.
 function mergeHiOneAtATime<T>(
   { items, less, minGallop }: MergeState<T>,
   temp: T[],
@@ -348,8 +348,8 @@ function mergeHiOneAtATime<T>(
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes merge_hi of CPython's listobject.c.
-// code-gauge-allow functionNcss 36 -- Transcribes merge_hi of CPython's listobject.c.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes merge_hi of CPython's listobject.c.
+// code-gauge-allow functionNcss -- Transcribes merge_hi of CPython's listobject.c.
 function mergeHiGalloping<T>(ms: MergeState<T>, temp: T[], baseA: number, c: MergeCursor): boolean | undefined {
   const { items, less } = ms;
   let aCount: number;

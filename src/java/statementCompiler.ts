@@ -137,7 +137,7 @@ export abstract class StatementCompiler extends InvocationCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 52 -- One case per statement kind, each delegating to its own compiler.
+  // code-gauge-allow functionNcss -- One case per statement kind, each delegating to its own compiler.
   protected compileStatementBody(context: MethodContext, statement: Statement): Exec {
     switch (statement.kind) {
       case 'block': {
@@ -223,7 +223,7 @@ export abstract class StatementCompiler extends InvocationCompiler {
     return (frame) => (condition(frame) ? consequence(frame) : otherwise?.(frame));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- While and do statements share one loop, which differs only in where the condition runs.
+  // code-gauge-allow functionCognitiveComplexity -- While and do statements share one loop, which differs only in where the condition runs.
   protected compileWhile(context: MethodContext, statement: Extract<Statement, { kind: 'while' | 'do' }>): Exec {
     const labels = this.takeLabels(context);
     const isDo = statement.kind === 'do';

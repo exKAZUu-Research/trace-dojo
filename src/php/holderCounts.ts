@@ -3,7 +3,7 @@ import type { Runtime } from './runtime';
 import { PhpArray, PhpObject, Ref } from './values';
 
 /** Counts the holders of each reachable object: variables, elements, and properties that refer to it. */
-// code-gauge-allow functionNcss 49 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
   const counts = new Map<PhpObject, number>();
   const visitedArrays = new Set<PhpArray>();

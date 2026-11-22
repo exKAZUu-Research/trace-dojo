@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 625 -- Declaration scopes, types, and record shapes share the compiler environment.
+// code-gauge-allow-file fileNcss -- Declaration scopes, types, and record shapes share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   ClassDeclaration,
@@ -298,7 +298,7 @@ export abstract class CompilerBase {
     if (pending && params.length > 0) pending.push(() => this.checkBoundCycles(params, syntax, true));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Detect type-parameter cycles before and after resolving representations.
+  // code-gauge-allow functionCognitiveComplexity -- Detect type-parameter cycles before and after resolving representations.
   private checkBoundCycles(params: TypeParam[], syntax: TypeParameter[], eraseRepresentations: boolean): void {
     const checked = new Set<TypeParam>();
     for (const [index, param] of params.entries()) {

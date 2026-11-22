@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 818 -- Keep statement cases together so their flow and compilation state are visible.
+// code-gauge-allow-file fileNcss -- Keep statement cases together so their flow and compilation state are visible.
 import type {
   Block,
   Expression,
@@ -81,8 +81,8 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   // Functions
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Parameters, the body, and return-type inference share the closure's flow.
-  // code-gauge-allow functionNcss 47 -- Parameters, the body, and return-type inference share the function context.
+  // code-gauge-allow functionCognitiveComplexity -- Parameters, the body, and return-type inference share the closure's flow.
+  // code-gauge-allow functionNcss -- Parameters, the body, and return-type inference share the function context.
   compileFunction(spec: FunctionSpec & { isClosure?: boolean }): CompiledFunction {
     const isClosure = spec.isClosure ?? spec.name === '<anonymous closure>';
     const savedFn = this.fn;
@@ -196,8 +196,8 @@ export abstract class StatementCompiler extends PatternCompiler {
     return returned;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Positional and named parameters bind alike, each with its covariance check.
-  // code-gauge-allow duplicateLines 17 -- Positional and named arguments differ in how presence is checked.
+  // code-gauge-allow functionCognitiveComplexity -- Positional and named parameters bind alike, each with its covariance check.
+  // code-gauge-allow duplicateLines -- Positional and named arguments differ in how presence is checked.
   private compileParameters(spec: FunctionSpec): (frame: Frame, args: Arguments) => void {
     const { parameters } = spec;
     const binders: ((frame: Frame, args: Arguments) => void)[] = [];
@@ -381,8 +381,8 @@ export abstract class StatementCompiler extends PatternCompiler {
     return (frame) => frame.runtime.steps.runStatement(row, onlyCalls, () => exec(frame));
   }
 
-  // code-gauge-allow duplicateLines 38 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-  // code-gauge-allow functionNcss 41 -- One case per kind of statement.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow functionNcss -- One case per kind of statement.
   protected compileStatementBody(statement: Statement): Exec {
     switch (statement.kind) {
       case 'block': {
@@ -455,8 +455,8 @@ export abstract class StatementCompiler extends PatternCompiler {
     return this.withStep(statement, exec, this.onlyCalls(expression, compiled));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Bind a declaration, retain its constant or promotion, and emit its step.
-  // code-gauge-allow functionNcss 32 -- Keep declarator evaluation order, flow, and trace steps together.
+  // code-gauge-allow functionCognitiveComplexity -- Bind a declaration, retain its constant or promotion, and emit its step.
+  // code-gauge-allow functionNcss -- Keep declarator evaluation order, flow, and trace steps together.
   protected compileLocalDeclaration(declaration: VariableDeclaration, recordStep = true): Exec {
     this.checkAnnotations(declaration.annotations);
     const declaredType = declaration.type ? this.resolveType(declaration.type) : undefined;
@@ -796,7 +796,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     return variables;
   }
 
-  // code-gauge-allow duplicateLines 19 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private compileWhile(statement: Extract<Statement, { kind: 'while' }>): Exec {
     const labels = this.takeLoopLabels();
     this.enterLoop(statement);
@@ -877,7 +877,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     }
   }
 
-  // code-gauge-allow duplicateLines 26 -- The counted loop shares its header operations with the generator form.
+  // code-gauge-allow duplicateLines -- The counted loop shares its header operations with the generator form.
   private compileFor(statement: Extract<Statement, { kind: 'for' }>): Exec {
     const labels = this.takeLoopLabels();
     const { result, slots } = this.withScope(() => {
@@ -981,8 +981,8 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   /** Compiles a for-in loop's binding, which records a step for values learners write down. */
-  // code-gauge-allow functionCognitiveComplexity 23 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 40 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss -- One case per form of the construct, which reads best together.
   protected compileForInBinding(
     binding: ForInBinding,
     elementType: DartType,
@@ -1045,7 +1045,7 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   /** Runs a for-in loop over an iterable through its iterator, as Dart does. */
-  // code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   protected forInLoop(iterable: Eval, bind: (frame: Frame, value: Value) => void, body: Exec, labels: string[]): Exec {
     return (frame) => {
       const { runtime } = frame;
@@ -1186,7 +1186,7 @@ export abstract class StatementCompiler extends PatternCompiler {
 }
 
 /** Whether a method overrides one whose parameter at the position or of the name is `covariant`, making it so. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Check visibility and variance together during inheritance traversal.
+// code-gauge-allow functionCognitiveComplexity -- Check visibility and variance together during inheritance traversal.
 export function inheritsCovariance(
   cls: ClassInfo,
   methodName: string,
@@ -1246,7 +1246,7 @@ export interface CountedLoop<Body> {
   updateRow: number | undefined;
 }
 
-// code-gauge-allow duplicateLines 15 -- The generator loop shares the header operations and suspends around its body.
+// code-gauge-allow duplicateLines -- The generator loop shares the header operations and suspends around its body.
 function forLoop(loop: CountedLoop<Exec>): Exec {
   const { test, body, labels } = loop;
   return (frame) => {

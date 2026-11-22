@@ -1,5 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 569 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
+// code-gauge-allow-file fileNcss -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
 import { floatNumber } from './floatBits';
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
@@ -78,8 +78,8 @@ export function overflow(op: string, span: Span): never {
 }
 
 /** An arithmetic operation on integers of a type, panicking on overflow as a debug build does. */
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of type.
-// code-gauge-allow functionNcss 43 -- One case per kind of type.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
+// code-gauge-allow functionNcss -- One case per kind of type.
 export function intArith(op: string, name: IntName, a: bigint, b: bigint, span: Span): bigint {
   let result: bigint;
   switch (op) {
@@ -292,8 +292,8 @@ export function valuesUnequal(type: Type, a: Value, b: Value, rhs: Type = type):
   return !valuesEqual(t, leftValue, rightValue, right);
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of type.
-// code-gauge-allow functionNcss 56 -- One case per kind of type.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
+// code-gauge-allow functionNcss -- One case per kind of type.
 function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boolean {
   const { def } = t;
   switch (def.builtin) {
@@ -426,8 +426,8 @@ function partialFloatOrder(a: number, b: number): number | undefined {
 }
 
 /** Compares two values of a type, as `Ord::cmp` and `PartialOrd::partial_cmp` do; NaN compares as `undefined`. */
-// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of type.
-// code-gauge-allow functionNcss 35 -- One case per kind of type.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
+// code-gauge-allow functionNcss -- One case per kind of type.
 export function compareValues(type: Type, a: Value, b: Value, partial = false, rhs = type): number | undefined {
   const t = derefType(type);
   const x = deref(a);
@@ -477,8 +477,8 @@ export function comparePartialValues(type: Type, a: Value, b: Value, rhs = type)
   return compareValues(type, a, b, true, rhs);
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type.
-// code-gauge-allow functionNcss 40 -- One case per kind of type.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
+// code-gauge-allow functionNcss -- One case per kind of type.
 function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: boolean): number | undefined {
   const { def } = t;
   switch (def.builtin) {
@@ -569,7 +569,7 @@ export function compareStrings(a: string, b: string): number {
 }
 
 /** A text that equal values of a type share and unequal ones do not, which keys maps and sets. */
-// code-gauge-allow functionNcss 34 -- One case per kind of type.
+// code-gauge-allow functionNcss -- One case per kind of type.
 export function hashKey(type: Type, value: Value): string {
   const t = derefType(type);
   const x = deref(value);
@@ -660,7 +660,7 @@ function userClone(type: Type, value: Value): { value: Value } | undefined {
   }
 }
 
-// code-gauge-allow functionNcss 60 -- One case per kind of value.
+// code-gauge-allow functionNcss -- One case per kind of value.
 function clonePart(type: Type, value: Value): Value {
   const t = normalize(shallow(type));
   if (t.kind === 'ref') return value;

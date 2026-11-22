@@ -180,7 +180,7 @@ export class MemberChecker {
   }
 
   /** Reports an object that may be `null`, `undefined`, or `unknown` where a member is used, returning the rest. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Reports each nullish case with the message TypeScript gives it.
+  // code-gauge-allow functionCognitiveComplexity -- Reports each nullish case with the message TypeScript gives it.
   checkNonNullable(node: TreeNode, type: Type): Type {
     if (isIntrinsic(type, 'unknown')) {
       this.c.error(

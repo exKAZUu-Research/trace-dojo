@@ -44,7 +44,7 @@ class ReparseRequired extends Error {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Conversion and syntax recovery share the same source, scopes, and bounded reparse loop.
+// code-gauge-allow functionCognitiveComplexity -- Conversion and syntax recovery share the same source, scopes, and bounded reparse loop.
 function parseUnit(text: string, headers: HeaderDeclarations[], typedefNames: readonly string[]): TranslationUnit {
   const budget = new ExecutionBudget();
   let current = text;

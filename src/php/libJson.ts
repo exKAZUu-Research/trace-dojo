@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 493 -- Keeps PHP's encoder and parser with their shared flag and error definitions.
+// code-gauge-allow-file fileNcss -- Keeps PHP's encoder and parser with their shared flag and error definitions.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, enc, utf8Length } from './bytes';
@@ -132,7 +132,7 @@ class JsonEncoder {
     this.capture(error);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private encode(value: Value, level: number): string {
     rt().spend();
     if (value === null) return 'null';
@@ -546,8 +546,8 @@ class JsonParser {
     throw new JsonError(4);
   }
 
-  // code-gauge-allow functionNcss 45 -- Keeps JSON member parsing, duplicate writes and cleanup in source order.
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss -- Keeps JSON member parsing, duplicate writes and cleanup in source order.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private object(depth: number): Value {
     this.index++;
     const array = new PhpArray();

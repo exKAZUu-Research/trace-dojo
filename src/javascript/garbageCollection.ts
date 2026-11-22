@@ -3,8 +3,8 @@ import type { CollectionState } from './realmCollections';
 import { isAccessor, JsArray, JsFunction, JsObject, type Property, Scope, UNINITIALIZED } from './values';
 
 /** Finds the turtles that `roots` reach, with the number of items scanned to find them. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One worklist loop over every kind of reference, with WeakMap entries waiting for their keys.
-// code-gauge-allow functionNcss 37 -- One worklist loop over every kind of reference, with WeakMap entries waiting for their keys.
+// code-gauge-allow functionCognitiveComplexity -- One worklist loop over every kind of reference, with WeakMap entries waiting for their keys.
+// code-gauge-allow functionNcss -- One worklist loop over every kind of reference, with WeakMap entries waiting for their keys.
 export function findReachableTurtles(roots: unknown[]): { reached: Set<TurtleState>; scanned: number } {
   const reached = new Set<TurtleState>();
   const visited = new Set<JsObject | Scope>();
@@ -56,7 +56,7 @@ function pushScopeReferences(pending: unknown[], scope: Scope): void {
 }
 
 /** Pushes what an object refers to, returning the number of array elements among them. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Lists what each kind of builtin state refers to, one branch per kind.
+// code-gauge-allow functionCognitiveComplexity -- Lists what each kind of builtin state refers to, one branch per kind.
 function pushObjectReferences(
   pending: unknown[],
   ephemeron: (key: unknown, value: unknown) => void,

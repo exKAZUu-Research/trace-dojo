@@ -227,7 +227,7 @@ test('numeric boundary operations preserve native floating arithmetic and expone
   if (result.kind !== 'executed') return;
   const [transcendentals, ...bounds] = result.stdout.trimEnd().split('\n');
   const [exponential, sine] = transcendentals.slice(1, -1).split(',').map(Number);
-  // Native libm implementations may differ by one Float ULP.
+  // The program prints Float values, which round these results.
   expect(exponential).toBeCloseTo(Math.exp(Math.fround(-0.212)), 7);
   expect(sine).toBeCloseTo(Math.sin(Math.fround(0.095)), 7);
   expect(bounds).toEqual(['(0.0,Infinity)', '(1,7,7)']);

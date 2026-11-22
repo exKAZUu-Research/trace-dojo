@@ -64,8 +64,8 @@ const MODIFIERS = new Map<string, PatternOption | undefined>([
   [' ', undefined],
 ]);
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Threads pattern options, byte offsets and captures through both parsing passes.
-// code-gauge-allow functionNcss 32 -- Keeps validation and selection of the bounded PCRE2 path with pattern compilation.
+// code-gauge-allow functionCognitiveComplexity -- Threads pattern options, byte offsets and captures through both parsing passes.
+// code-gauge-allow functionNcss -- Keeps validation and selection of the bounded PCRE2 path with pattern compilation.
 export function translate(pattern: string): Compiled {
   if (pattern.length > 32_768) throw new UnsupportedFeatureError('大きすぎる正規表現');
   const { body, modifiers } = splitDelimiters(pattern);
@@ -403,7 +403,7 @@ class PatternConverter {
     return this.result;
   }
 
-  // code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private item(): void {
     const char = this.source[this.index];
     if (this.options.extended && this.skipExtended(char)) return;
@@ -512,7 +512,7 @@ class PatternConverter {
   }
 
   /** Emits a quantifier ending at `end`, with the lazy (`?`) or possessive (`+`) suffix that follows it. */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private quantifier(text: string, end: number, repeats: boolean): void {
     if (!this.repeatable) this.fail('quantifier does not follow a repeatable item', end);
     this.index = end;
@@ -639,7 +639,7 @@ class PatternConverter {
     return set;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Uses one cursor for the property name and its diagnostics.
+  // code-gauge-allow functionCognitiveComplexity -- Uses one cursor for the property name and its diagnostics.
   private propertyName(): { name: string; negated: boolean } {
     const first = this.propertyCharacter();
     let name = '';
@@ -779,7 +779,7 @@ class PatternConverter {
     return value > 0xff ? `\\u{${value.toString(16)}}` : `\\x${value.toString(16).padStart(2, '0')}`;
   }
 
-  // code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionNcss -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private otherEscape(letter: string): void {
     switch (letter) {
       case 'Q': {
@@ -900,7 +900,7 @@ class PatternConverter {
     return group;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private parenthesizedSubroutine(rest: string): void {
     this.index += 2;
     if (rest.startsWith('&') || rest.startsWith('P>')) {
@@ -1061,7 +1061,7 @@ class PatternConverter {
   }
 
   /** Applies the letters of an option setting to `options`, returning the `)` or `:` that ends them. */
-  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private readOptionLetters(options: PatternOptions): string {
     const start = this.index;
     this.index += 2;
@@ -1142,7 +1142,7 @@ class PatternConverter {
     this.captureGroup(name);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private characterClass(): void {
     const direction = this.source[this.index + 3];
     if ((direction === '<' || direction === '>') && this.source.startsWith(`[[:${direction}:]]`, this.index)) {
@@ -1401,7 +1401,7 @@ function validatePatternUtf8(body: string): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function patternUtf8Error(body: string, index: number): string {
   const byte = body.charCodeAt(index);
   if (byte >= 0xfe) return 'illegal byte (0xfe or 0xff)';

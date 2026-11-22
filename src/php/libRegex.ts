@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 462 -- The regex functions share matching, offsets, capture handling, and error state.
+// code-gauge-allow-file fileNcss -- The regex functions share matching, offsets, capture handling, and error state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
 import { callCallback, consumeInvokedResult } from './callables';
@@ -127,7 +127,7 @@ interface ScanPlan<T> {
   value(result: MatchOffsets, retry: boolean): T;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Shares retry, offset advancement and PHP error state across both matching engines.
+// code-gauge-allow functionCognitiveComplexity -- Shares retry, offset advancement and PHP error state across both matching engines.
 function* scanMatches<T>(
   compiled: Compiled,
   subject: string,
@@ -286,7 +286,7 @@ function toMatch(
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function byteIndexer(text: string): (index: number) => number {
   let offsets: Uint32Array | undefined;
   let cursor = 0;
@@ -478,8 +478,8 @@ function replaceOne(
   return result + subject.slice(last);
 }
 
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function pregReplace(
   name: string,
   args: Value[],
@@ -647,8 +647,8 @@ defineFunction(
 );
 defineFunction(
   'preg_split(string $pattern, string $subject, int $limit = -1, int $flags = 0): array|false',
-  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the match iterator, capture offsets and split flags on the same state.
-  // code-gauge-allow functionNcss 39 -- Keeps the match iterator, capture offsets and split flags on the same state.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the match iterator, capture offsets and split flags on the same state.
+  // code-gauge-allow functionNcss -- Keeps the match iterator, capture offsets and split flags on the same state.
   ({ args }) => {
     const compiled = compile('preg_split', args[0] as string);
     if (!compiled) return false;

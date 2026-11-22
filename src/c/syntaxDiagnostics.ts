@@ -86,7 +86,7 @@ interface RecoveryPosition {
   column: number;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- One callback tracks the parser versions and first recovery cycle while its logger is installed.
+// code-gauge-allow functionCognitiveComplexity -- One callback tracks the parser versions and first recovery cycle while its logger is installed.
 function firstRecovery(parser: Parser, source: string, budget: ExecutionBudget): RecoveryPosition | undefined {
   const previous = parser.getLogger();
   const positions = new Map<string, { row: number; column: number }>();

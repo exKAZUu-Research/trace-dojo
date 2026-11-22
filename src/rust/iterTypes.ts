@@ -22,8 +22,7 @@ const RANGE_SHAPES: Record<string, string> = {
 };
 
 /** The element type a `for` loop over a value of this type binds, as `IntoIterator` gives it. */
-// code-gauge-allow functionNcss 58 -- Follows std's `IntoIterator` impls case by case.
-// code-gauge-allow functionCognitiveComplexity 24 -- Follows std's `IntoIterator` impls case by case.
+// code-gauge-allow functionNcss -- Follows std's `IntoIterator` impls case by case.
 export function intoIterItem(type: Type): Type | undefined {
   const t = normalize(shallow(type));
   const dynamic = dynIteratorTarget(t);

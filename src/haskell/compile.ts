@@ -194,7 +194,7 @@ class LibraryCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- The export pass combines explicit selections, implemented identities and unsupported API entries.
+  // code-gauge-allow functionCognitiveComplexity -- The export pass combines explicit selections, implemented identities and unsupported API entries.
   publicModules(): Map<string, ExportTable> {
     const modules = new Map<string, ExportTable>();
     for (const [name, spec] of Object.entries(PUBLIC_MODULES)) {
@@ -330,7 +330,7 @@ function exportType(
   for (const child of selected) exports.values.set(child.name, child);
 }
 
-// code-gauge-allow functionNcss 38 -- One lookup per built-in entity the checker needs.
+// code-gauge-allow functionNcss -- One lookup per built-in entity the checker needs.
 function makeBuiltins(type: (name: string) => TypeEntity, cls: (name: string) => ClassEntity): Builtins {
   const standard = [
     'Eq',

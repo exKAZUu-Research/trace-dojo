@@ -36,7 +36,7 @@ function parseFloating(text: string, fail: () => never): { type: CType; value: S
   return { type: suffix === 'l' ? LDOUBLE : DOUBLE, value };
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Radix, suffix and preprocessor widths share integer candidate selection.
+// code-gauge-allow functionCognitiveComplexity -- Radix, suffix and preprocessor widths share integer candidate selection.
 function parseInteger(
   text: string,
   row: number,

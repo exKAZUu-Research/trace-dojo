@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 439 -- Class creation, its MRO, and its slots follow CPython's type creation together.
+// code-gauge-allow-file fileNcss -- Class creation, its MRO, and its slots follow CPython's type creation together.
 import {
   annotationClosure,
   annotationReferences,
@@ -92,7 +92,7 @@ export const classDefinitions = new WeakMap<PyClass, ClassDef>();
 // The class statement -----------------------------------------------------------------------------------------------
 
 /** Runs a class statement: evaluates the bases, runs the body in a namespace, and calls the metaclass. */
-// code-gauge-allow functionNcss 46 -- Follows how a class statement prepares its namespace and calls its metaclass.
+// code-gauge-allow functionNcss -- Follows how a class statement prepares its namespace and calls its metaclass.
 export function createClass(
   evaluator: Evaluator,
   def: ClassDef,
@@ -383,7 +383,7 @@ function isKeyError(error: unknown): boolean {
 // type.__new__ ------------------------------------------------------------------------------------------------------
 
 /** `type.__new__(meta, name, bases, namespace, **kwargs)`: creates a class and runs the hooks its bases define. */
-// code-gauge-allow functionNcss 42 -- Follows the steps of type.__new__ in order.
+// code-gauge-allow functionNcss -- Follows the steps of type.__new__ in order.
 export function typeNew(
   meta: PyClass,
   name: PyValue,

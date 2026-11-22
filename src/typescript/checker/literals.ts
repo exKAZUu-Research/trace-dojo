@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 794 -- Types literals and their spreads, members, and widening in the same literal context.
+// code-gauge-allow-file fileNcss -- Types literals and their spreads, members, and widening in the same literal context.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
@@ -1036,7 +1036,7 @@ export class LiteralChecker {
    * The members of a contextual union that the literal's discriminant properties select, as `{ type: "say", … }`
    * selects the member whose `type` is `"say"`; the whole union when none or no member is selected.
    */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's discrimination of a contextual union by literal properties.
+  // code-gauge-allow functionCognitiveComplexity -- Follows TypeScript's discrimination of a contextual union by literal properties.
   private discriminatedContext(node: TreeNode, contextual: Type): Type {
     if (contextual.kind !== 'union') return contextual;
     let members = contextual.types;

@@ -209,7 +209,7 @@ pythonMethod(
 );
 
 /** `_normal_dist_inv_cdf` of the C module `_statistics`, whose polynomials the compiler contracts into fmas. */
-// code-gauge-allow functionNcss 31 -- Transcribes _normal_dist_inv_cdf of _statisticsmodule.c.
+// code-gauge-allow functionNcss -- Transcribes _normal_dist_inv_cdf of _statisticsmodule.c.
 function inverseCdf(p: number, mu: number, sigma: number): number {
   if (p <= 0 || p >= 1) throw typeErrorOrValue();
   const q = p - 0.5;

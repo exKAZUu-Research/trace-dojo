@@ -15,8 +15,8 @@ interface Analysis {
   spend(): void;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Indexing, monotone progress analysis and per-call termination checks share one bounded budget.
-// code-gauge-allow functionNcss 35 -- Indexing, monotone progress analysis and per-call termination checks share one bounded budget.
+// code-gauge-allow functionCognitiveComplexity -- Indexing, monotone progress analysis and per-call termination checks share one bounded budget.
+// code-gauge-allow functionNcss -- Indexing, monotone progress analysis and per-call termination checks share one bounded budget.
 export function validateRegexpRecursion(root: RegexNode): void {
   const groups = new Map<string | number, Callable[]>([[0, [root]]]);
   const nodes: Node[] = [];

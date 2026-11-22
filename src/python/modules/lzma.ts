@@ -146,7 +146,7 @@ function parseInt(value: PyValue | undefined, fallback: number): number {
 // Filter specifiers --------------------------------------------------------------------------------------------------
 
 /** `lzma_lzma_preset`, or undefined for an invalid preset. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes lzma_lzma_preset of liblzma 5.8.4, keeping it comparable with the C.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes lzma_lzma_preset of liblzma 5.8.4, keeping it comparable with the C.
 function lzmaPreset(preset: number): LzmaOptions | undefined {
   const level = preset & 0x1f;
   const flags = preset & ~0x1f;
@@ -327,8 +327,8 @@ function coderOrThrow(result: CoderResult): Coder {
   return result.coder as Coder;
 }
 
-// code-gauge-allow functionNcss 34 -- Follows CPython's _lzmamodule.c, whose order of checks decides which error is raised.
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows CPython's _lzmamodule.c, whose order of checks decides which error is raised.
+// code-gauge-allow functionNcss -- Follows CPython's _lzmamodule.c, whose order of checks decides which error is raised.
+// code-gauge-allow functionCognitiveComplexity -- Follows CPython's _lzmamodule.c, whose order of checks decides which error is raised.
 compressorClass.construct = (cls, args, kwargs) => {
   const [formatValue, checkValue, presetValue, filterValue] = clinicArgs(
     {
@@ -429,7 +429,7 @@ interface DecompressorState {
 
 const decompressorOf = (self: PyValue): DecompressorState => (self as PyOpaque).data as DecompressorState;
 
-// code-gauge-allow functionNcss 33 -- Follows CPython's _lzmamodule.c, whose order of checks decides which error is raised.
+// code-gauge-allow functionNcss -- Follows CPython's _lzmamodule.c, whose order of checks decides which error is raised.
 decompressorClass.construct = (cls, args, kwargs) => {
   const [formatValue, memlimitValue, filterValue] = clinicArgs(
     {

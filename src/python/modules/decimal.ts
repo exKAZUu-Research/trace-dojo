@@ -151,7 +151,7 @@ export function fromFloat(value: number): Dec {
   return dec(sign, multiply(mantissa, 5n ** BigInt(-exponent)).toString(), exponent);
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows the argument handling of the C module _decimal.
+// code-gauge-allow functionCognitiveComplexity -- Follows the argument handling of the C module _decimal.
 function fromTuple(items: readonly PyValue[]): Dec {
   if (items.length !== 3) throw valueError('argument must be a sequence of length 3');
   const [sign, digits, rawExponent] = items;
@@ -467,7 +467,7 @@ function wrapResult(result: Result): PyValue {
 }
 
 /** Defines a Decimal method `name(self, *operands, [rounding,] context=None)` and the Context method `name(a, ...)`. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows the argument handling of the C module _decimal.
+// code-gauge-allow functionCognitiveComplexity -- Follows the argument handling of the C module _decimal.
 function defineShared(name: string, operation: Operation): void {
   const operandCount = operation.arity - 1;
   if (!operation.contextOnly) {

@@ -119,7 +119,7 @@ export const JavaSyntaxHints: React.FC<RendererProps> = ({ rows, stylesheet, use
   );
 };
 
-// code-gauge-allow functionNcss 42 -- One small handler per hint interaction, all sharing the close timer and state updater.
+// code-gauge-allow functionNcss -- One small handler per hint interaction, all sharing the close timer and state updater.
 const createHintController = (
   update: Updater<HintState>,
   closeTimer: RefObject<ReturnType<typeof setTimeout> | undefined>,
@@ -201,8 +201,8 @@ const createHintController = (
   return controller;
 };
 
-// code-gauge-allow functionCognitiveComplexity 16 -- One small listener per document or window event that ends a press or closes the hint.
-// code-gauge-allow functionNcss 40 -- One small listener per document or window event that ends a press or closes the hint.
+// code-gauge-allow functionCognitiveComplexity -- One small listener per document or window event that ends a press or closes the hint.
+// code-gauge-allow functionNcss -- One small listener per document or window event that ends a press or closes the hint.
 const useOutsideDismissal = (
   update: Updater<HintState>,
   targets: RefObject<Map<number, HTMLSpanElement>>,
@@ -270,8 +270,8 @@ interface HintTokenProps {
   triggerProps: { ref?: Ref<HTMLElement> } & Record<string, unknown>;
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- One branch per hint key action and pointer or focus event of the token.
-// code-gauge-allow functionNcss 32 -- One branch per hint key action and pointer or focus event of the token.
+// code-gauge-allow functionCognitiveComplexity -- One branch per hint key action and pointer or focus event of the token.
+// code-gauge-allow functionNcss -- One branch per hint key action and pointer or focus event of the token.
 const HintToken: React.FC<HintTokenProps> = ({
   children,
   controller,

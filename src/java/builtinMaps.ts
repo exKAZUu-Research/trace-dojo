@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 463 -- The set and map classes, which share one hash and tree store and its views.
+// code-gauge-allow-file fileNcss -- The set and map classes, which share one hash and tree store and its views.
 import { classObjectOf } from './builtinClass';
 import {
   builtinClassOf,
@@ -83,7 +83,7 @@ export function defineSets(
   };
 }
 
-// code-gauge-allow functionNcss 52 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss -- One registration per builtin method, each a small native.
 function defineSetClass(
   context: Context,
   name: string,
@@ -182,7 +182,7 @@ function defineSetClass(
   return cls;
 }
 
-// code-gauge-allow functionNcss 31 -- One registration per map class and view, each a short call.
+// code-gauge-allow functionNcss -- One registration per map class and view, each a short call.
 export function defineHashMap(
   context: Context,
   views: { setClass: ClassInfo; collectionClass: ClassInfo; snapshotSet: ClassInfo; snapshotCollection: ClassInfo }
@@ -437,7 +437,7 @@ function entrySetView(frame: Frame, map: Value, viewClass: ClassInfo, nodeClass:
 }
 
 /** `equals` and `hashCode` of a map, which compare and hash its entries as `AbstractMap` does. */
-// code-gauge-allow functionCognitiveComplexity 20 -- AbstractMap.equals and hashCode, with the wrapper and access-order cases they need.
+// code-gauge-allow functionCognitiveComplexity -- AbstractMap.equals and hashCode, with the wrapper and access-order cases they need.
 function defineMapEquality(cls: ClassInfo, context: Context, mapClass: ClassInfo): void {
   addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
     if (other === receiver) return true;
@@ -658,8 +658,7 @@ export function createEntryNode(
   return node;
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- One registration per builtin method, each a small native.
-// code-gauge-allow functionNcss 52 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss -- One registration per builtin method, each a small native.
 export function defineMapMethods(
   cls: ClassInfo,
   name: string,
@@ -803,7 +802,7 @@ export function sortedKeys(receiver: Value): Value[] {
 }
 
 /** The navigation methods of `TreeMap` (on keys) and `TreeSet`: the first and last keys and the nearest ones. */
-// code-gauge-allow functionCognitiveComplexity 20 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionCognitiveComplexity -- One registration per builtin method, each a small native.
 export function defineNavigation(cls: ClassInfo, key: JavaType, isMap: boolean): void {
   const suffix = isMap ? 'Key' : '';
   for (const [name, isFirst] of [
@@ -949,7 +948,7 @@ export function findEntry(frame: Frame, receiver: Value, key: Value): HashStore[
 }
 
 /** Adds or replaces an entry, returning the value it replaced or `NO_ENTRY`; a set keeps an existing entry. */
-// code-gauge-allow functionParameterCount 7 -- Each flag is a distinct JDK put path (sets, bucket heads, eviction), passed by its callers.
+// code-gauge-allow functionParameterCount -- Each flag is a distinct JDK put path (sets, bucket heads, eviction), passed by its callers.
 export function putEntry(
   frame: Frame,
   receiver: Value,

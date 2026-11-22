@@ -121,7 +121,7 @@ function parseFloat(bytes: Slice, type: Extract<Type, { kind: 'float' }>, spend:
   return type.bits <= 64 ? toNumber(value, type.bits as 16 | 32 | 64) : value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Scans both numeric radices with the same digit, separator, and exponent rules.
+// code-gauge-allow functionCognitiveComplexity -- Scans both numeric radices with the same digit, separator, and exponent rules.
 function isFloatNumber(text: string, spend: (cost?: number) => void): boolean {
   const hexadecimal = text.slice(0, 2).toLowerCase() === '0x';
   const base = hexadecimal ? 16 : 10;

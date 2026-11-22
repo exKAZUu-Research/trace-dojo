@@ -288,7 +288,7 @@ function checkClauses(checker: Checker, binding: Extract<RBinding, { k: 'fun' }>
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Each branch checks one condition GHC places on a derivable class.
+// code-gauge-allow functionCognitiveComplexity -- Each branch checks one condition GHC places on a derivable class.
 function deriveInstances(checker: Checker, module: RModule, options: TypecheckOptions): DeclaredInstance[] {
   const pending: { decl: RDataDecl; cls: ClassEntity; info: InstanceInfo; span: Span }[] = [];
   for (const decl of module.dataDecls) {

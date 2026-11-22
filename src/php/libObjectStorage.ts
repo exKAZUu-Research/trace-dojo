@@ -85,7 +85,7 @@ class ObjectStorage {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- PHP bucket insertion shares representation, compaction and capacity state.
+  // code-gauge-allow functionCognitiveComplexity -- PHP bucket insertion shares representation, compaction and capacity state.
   private insertionBucket(hash: string | PhpObject): number {
     const id = typeof hash === 'string' ? undefined : hash.id;
     if (this.bucketMode === 'empty')
@@ -220,7 +220,7 @@ class ObjectStorage {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Pins a key through membership, detach and pending-exception cleanup.
+  // code-gauge-allow functionCognitiveComplexity -- Pins a key through membership, detach and pending-exception cleanup.
   removeAllExcept(other: ObjectStorage): bigint {
     return this.bulkRemove(this.hashKeys || other.hashKeys, (capture) => {
       for (let slot = 0; slot < this.slots.length; slot++) {

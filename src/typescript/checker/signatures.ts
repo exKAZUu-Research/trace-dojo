@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 511 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
+// code-gauge-allow-file fileNcss -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { erasedStatementTypes } from '../erasedSyntax';
@@ -61,7 +61,7 @@ export class Signatures {
 
   constructor(private readonly c: Checker) {}
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Builds lazy annotation or body signatures and caches only context-free complete signatures.
+  // code-gauge-allow functionCognitiveComplexity -- Builds lazy annotation or body signatures and caches only context-free complete signatures.
   signatureOf(node: TreeNode, contextual?: Signature, inferPredicate = true): Signature {
     if (!contextual && inferPredicate) {
       const cached = this.signatureCache.get(node.id);

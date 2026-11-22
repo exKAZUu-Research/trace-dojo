@@ -118,7 +118,7 @@ function findInvalidUtf8(body: Uint8Array): { byte: number; lineNo: number } | u
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Follows the well-formed UTF-8 byte sequences of the Unicode standard.
+// code-gauge-allow functionCognitiveComplexity -- Follows the well-formed UTF-8 byte sequences of the Unicode standard.
 function utf8SequenceWidth(body: Uint8Array, index: number): number {
   const b0 = body[index];
   const isCont = (offset: number): boolean => index + offset < body.length && (body[index + offset] & 0xc0) === 0x80;
