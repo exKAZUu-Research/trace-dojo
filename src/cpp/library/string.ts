@@ -969,7 +969,7 @@ function concatenation(a: TextOperand, b: TextOperand, reused: number): Eval<Str
 }
 
 /** The operators of `std::string`: `+`, `+=`, `=`, comparisons, and `[]`. */
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per operator, each with its operand forms.
+// code-gauge-allow functionCognitiveComplexity -- One case per operator, each with its operand forms.
 function stringOperator(
   compiler: ExpressionCompiler,
   cls: ClassInfo,

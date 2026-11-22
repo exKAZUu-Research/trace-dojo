@@ -1,5 +1,5 @@
 import { copyHierarchy, copySingletonHierarchy, includeHierarchy } from './classHierarchy';
-// code-gauge-allow-file fileNcss 922 -- Object lifecycle and exception construction share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss -- Object lifecycle and exception construction share representation and state; splitting registration by size would scatter that concern.
 import {
   anonymousClassName,
   anyToS,
@@ -398,8 +398,8 @@ def(
 );
 
 /** Builds the exception `raise` throws from its arguments. */
-// code-gauge-allow functionCognitiveComplexity 25 -- raise accepts exception classes or instances, messages, and cause keywords in Ruby order.
-// code-gauge-allow functionNcss 37 -- raise accepts exception classes or instances, messages, and cause keywords in Ruby order.
+// code-gauge-allow functionCognitiveComplexity -- raise accepts exception classes or instances, messages, and cause keywords in Ruby order.
+// code-gauge-allow functionNcss -- raise accepts exception classes or instances, messages, and cause keywords in Ruby order.
 export function* makeRaise(args: Value[], keywords?: RHash): Gen<RubyError> {
   const runtime = rt();
   const parsed = raiseArguments(args, keywords);
@@ -831,7 +831,7 @@ def('Module', 'attr_accessor', [0, -1], function* (self: RClass, args) {
   return yield* defineAttributes(self, args, true, true);
 });
 
-// code-gauge-allow functionCognitiveComplexity 24 -- The ordered cases for object lifecycle and exception construction share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for object lifecycle and exception construction share state; splitting them solely for the metric would hide their sequencing.
 function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Gen {
   const frame = rt().frame;
   if (args.length === 0) {

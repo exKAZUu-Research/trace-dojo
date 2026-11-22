@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 973 -- Keeps declaration conversion with its shared parsing and validation rules.
+// code-gauge-allow-file fileNcss -- Keeps declaration conversion with its shared parsing and validation rules.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -152,8 +152,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     return this.withClassContext(undefined, () => this.convertFunction(node, false));
   }
 
-  // code-gauge-allow functionNcss 44 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
-  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionNcss -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private convertFunction(node: Node, isClosure: boolean, className?: string): FunctionDecl {
     const attributes = node.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -249,7 +249,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       this.error(node, 'Cannot take reference of a nullsafe chain');
   }
 
-  // code-gauge-allow functionNcss 58 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected params(node: Node, functionName: string, className?: string): ParamDecl[] {
     const params: ParamDecl[] = [];
     const seen = new Set<string>();
@@ -399,7 +399,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private checkUnion(node: Node, type: Extract<TypeDecl, { k: 'union' }>): void {
     const seen = new Set<string>();
     for (const member of type.types) {
@@ -427,7 +427,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     this.checkRedundantIntersections(node, type.types);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private checkRedundantIntersections(node: Node, members: TypeDecl[]): void {
     if (!members.some((member) => member.k === 'inter')) return;
     const types = members.map((member) => {
@@ -534,8 +534,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     return expression;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 29 -- Follows the constant-expression AST order with a shared row.
-  // code-gauge-allow functionNcss 40 -- Follows the constant-expression AST order with a shared row.
+  // code-gauge-allow functionCognitiveComplexity -- Follows the constant-expression AST order with a shared row.
+  // code-gauge-allow functionNcss -- Follows the constant-expression AST order with a shared row.
   protected constantCompileRow(expression: Expr, row: number, preserveNames = false): number {
     const fold = (value: Expr): Constant | undefined =>
       foldedConstant(value, { compiler: true, preserveNamedConstants: preserveNames, budget: this.compileBudget });
@@ -690,7 +690,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private checkDefaultType(node: Node, name: string, type: TypeDecl, value: Expr, property?: ClassDecl): void {
     const literalType = foldedDefaultType(value, {
       budget: this.compileBudget,
@@ -762,8 +762,8 @@ export abstract class DeclarationConverter extends ConverterBase {
 
   // Classes -----------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 48 -- Builds one declaration and validates its scoped members in source order.
-  // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionNcss -- Builds one declaration and validates its scoped members in source order.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   classDecl(node: Node, anonymous = false, topLevel = true): ClassDecl {
     this.checkUnscopedModifiers(node);
     if (!this.preserveSyntax && !anonymous && this.currentClass !== undefined)
@@ -863,7 +863,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Chooses the PHP parser expectation from the prefix already read.
+  // code-gauge-allow functionCognitiveComplexity -- Chooses the PHP parser expectation from the prefix already read.
   protected checkUnscopedModifiers(node: Node): void {
     const classModifiers = new Set(['abstract_modifier', 'final_modifier', 'readonly_modifier']);
     const namedClass = node.type === 'class_declaration';
@@ -911,7 +911,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     if (decl.isAbstract && decl.isFinal) this.error(node, 'Cannot use the final modifier on an abstract class');
   }
 
-  // code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionNcss -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private classMember(member: Node, decl: ClassDecl, methodNames: Set<string>): void {
     switch (member.type) {
       case 'const_declaration': {
@@ -1014,7 +1014,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private checkMemberModifiers(member: Node, modifiers: Node[]): void {
     const varModifier = modifiers.find((node) => node.type === 'var_modifier');
     if (varModifier) {
@@ -1043,7 +1043,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       this.error(member, 'Cannot use the final modifier on an abstract class member');
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected classConsts(member: Node, decl: ClassDecl, kind: ClassDecl['kind']): void {
     const attributes = member.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -1122,7 +1122,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       this.error(node, 'static のプロパティは readonly にできません（Static property cannot be readonly）。');
   }
 
-  // code-gauge-allow functionNcss 39 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected properties(member: Node, decl: ClassDecl, kind: ClassDecl['kind']): void {
     const attributes = member.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -1376,7 +1376,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     } else if (!hasBody) this.error(hook, 'Non-abstract property hook must have a body');
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected methodDecl(member: Node, decl: ClassDecl): MethodDeclAst {
     const modifiers = this.memberModifiers(member);
     if (!this.preserveSyntax && modifiers.isReadonly)
@@ -1446,7 +1446,7 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   /** Checks the declaration of a magic method as PHP's zend_check_magic_method_implementation does, in its order. */
-  // code-gauge-allow functionCognitiveComplexity 23 -- Checks PHP's rules for each magic method in PHP's order, which decides the error shown.
+  // code-gauge-allow functionCognitiveComplexity -- Checks PHP's rules for each magic method in PHP's order, which decides the error shown.
   private checkMagicMethod(
     member: Node,
     className: string,

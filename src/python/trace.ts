@@ -115,7 +115,7 @@ function isHiddenInstance(instance: PyInstance): boolean {
   return cls.isBuiltin || isLibraryClass(cls);
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- One check per class whose objects traces show as values.
+// code-gauge-allow functionCognitiveComplexity -- One check per class whose objects traces show as values.
 function isValueLikeInstance(instance: PyInstance): boolean {
   const { cls } = instance;
   if (cls.module === 'decimal' && cls.name === 'Decimal') return true;
@@ -219,8 +219,8 @@ function traceIntOf(value: bigint): number | bigint {
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 /** The node showing a value as learners see it, or `undefined` for a value the trace hides. */
-// code-gauge-allow functionCognitiveComplexity 26 -- One case per kind of value the trace shows.
-// code-gauge-allow functionNcss 35 -- One case per kind of value the trace shows.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of value the trace shows.
+// code-gauge-allow functionNcss -- One case per kind of value the trace shows.
 function displayNodeOf(item: PyValue, seen: Set<PyObject>): DisplayNode | undefined {
   if (item instanceof PyInstance && item.enumValue !== undefined) {
     if (!isVariableValue(item) || seen.has(item)) return undefined;

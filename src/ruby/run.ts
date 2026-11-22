@@ -29,7 +29,7 @@ import { isA } from './values';
 
 import './library';
 
-// code-gauge-allow duplicateLines 15 -- The interpreter entry points mirror the other languages so callers use one contract.
+// code-gauge-allow duplicateLines -- The interpreter entry points mirror the other languages so callers use one contract.
 export function executeRubyProgram(source: string, input?: ProgramInput): ProgramExecution {
   let program: Program;
   try {
@@ -51,8 +51,8 @@ export function executeRubyProgram(source: string, input?: ProgramInput): Progra
  *
  * @param onEnd Called when the program ends, while its frame still holds its variables.
  */
-// code-gauge-allow functionCognitiveComplexity 20 -- The ordered cases for Ruby execution lifecycle share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 35 -- The ordered cases for Ruby execution lifecycle share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby execution lifecycle share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for Ruby execution lifecycle share state; splitting them solely for the metric would hide their sequencing.
 export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: Frame) => void): ProgramRun {
   return withRuntime(runtime, () => {
     bootstrap(runtime);

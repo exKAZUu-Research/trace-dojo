@@ -1,7 +1,7 @@
-// code-gauge-allow-file fileNcss 471 -- Keeps hash-map state, storage layout, and public method registration together.
+// code-gauge-allow-file fileNcss -- Keeps hash-map state, storage layout, and public method registration together.
 import { allocationSlots, transferCost } from '../allocation';
 import { type ByteRegion, reserveAllocatorBytes } from '../allocatorStorage';
-// code-gauge-allow-file duplicateLines 19 -- Library types repeat the same shape of method on purpose, each over its own state.
+// code-gauge-allow-file duplicateLines -- Library types repeat the same shape of method on purpose, each over its own state.
 import { panic } from '../arith';
 import type { Expression, Span } from '../ast';
 import { bindBufferMemory } from '../bufferMemory';
@@ -190,7 +190,7 @@ function getIndex(frame: Frame, state: MapState, key: Value, keyType: Type, kind
   return -1;
 }
 
-// code-gauge-allow functionParameterCount 7 -- Rehashing binds both typed payloads to the table, runtime and key strategy.
+// code-gauge-allow functionParameterCount -- Rehashing binds both typed payloads to the table, runtime and key strategy.
 function putNoClobber(
   frame: Frame,
   state: MapState,
@@ -424,7 +424,7 @@ function hashMapType(name: string, keyType: Type, valueType: Type, kind: KeyKind
 }
 
 /** The state of the map a method is called on, by value or through a pointer. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Validates the receiver and selects value or pointer semantics together.
+// code-gauge-allow functionCognitiveComplexity -- Validates the receiver and selects value or pointer semantics together.
 function stateOf(
   sema: SemaApi,
   receiver: TExpr | undefined,
@@ -806,7 +806,7 @@ function mapFactory(name: string, kind: KeyKind, managed: boolean): () => Member
   });
 }
 
-// code-gauge-allow functionNcss 45 -- Validates each key representation once per slice policy before hashing.
+// code-gauge-allow functionNcss -- Validates each key representation once per slice policy before hashing.
 function validateAutoKey(
   sema: SemaApi,
   type: Type,

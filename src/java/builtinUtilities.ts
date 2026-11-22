@@ -415,8 +415,8 @@ function arrayOf(frame: Frame, value: Value): JavaArray {
   return value;
 }
 
-// code-gauge-allow functionNcss 60 -- One registration per Arrays method and element type.
-// code-gauge-allow functionCognitiveComplexity 27 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss -- One registration per Arrays method and element type.
+// code-gauge-allow functionCognitiveComplexity -- One registration per builtin method, each a small native.
 function defineArrays(
   registry: Registry,
   objectClass: ClassInfo,
@@ -528,7 +528,7 @@ function fillArray(frame: Frame, array: JavaArray, value: Value, from: number, t
 }
 
 /** Orders primitive values as `Arrays.sort` does, with -0.0 before 0.0 and NaN last. */
-// code-gauge-allow functionCognitiveComplexity 23 -- Java's order puts -0.0 before 0.0 and NaN last, which takes one branch per case.
+// code-gauge-allow functionCognitiveComplexity -- Java's order puts -0.0 before 0.0 and NaN last, which takes one branch per case.
 function comparePrimitives(a: Value, b: Value): number {
   if (typeof a === 'bigint' && typeof b === 'bigint') return a < b ? -1 : a > b ? 1 : 0;
   const x = a as number;
@@ -667,8 +667,8 @@ function anyOf(owner: ClassInfo): ClassType {
   return { kind: 'class', cls: owner, args: [{ kind: 'wildcard', bound: undefined, isSuper: false }] };
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- One registration per builtin method, each a small native.
-// code-gauge-allow functionNcss 56 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionCognitiveComplexity -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss -- One registration per builtin method, each a small native.
 function defineCollectionsClass(
   registry: Registry,
   objectClass: ClassInfo,

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 707 -- The operator implementations of the builtin types belong together.
+// code-gauge-allow-file fileNcss -- The operator implementations of the builtin types belong together.
 import type { BinaryOperator, CompareOperator } from './ast';
 import { isBytesLike, PyBytes } from './bytesValues';
 import { complexBinary, isComplexOperand, newComplex } from './complexNumbers';
@@ -131,7 +131,7 @@ function dispatchOrRaise(operator: BinaryOperator, left: PyValue, right: PyValue
 }
 
 /** Python's augmented assignment operators, which try the in-place method first. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows CPython's augmented-assignment slot fallback order.
+// code-gauge-allow functionCognitiveComplexity -- Follows CPython's augmented-assignment slot fallback order.
 export function inplaceOp(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
   if ((operator === '+' || operator === '*') && isMutableSequence(left)) return sequenceInplace(operator, left, right);
   if (typeof left === 'object' && left.cls.isBuiltin) {
@@ -377,7 +377,7 @@ function isUnrepeatableContainer(value: PyValue): boolean {
 }
 
 /** The result of an operator on builtin operands, or NotImplemented when their types do not define it. */
-// code-gauge-allow functionCognitiveComplexity 19 -- One case per builtin type that defines binary operators.
+// code-gauge-allow functionCognitiveComplexity -- One case per builtin type that defines binary operators.
 export function nativeBinary(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
   if (isNumeric(left) && isNumeric(right)) return numericBinary(operator, left, right);
   if (isComplexOperand(left) && isComplexOperand(right) && (left instanceof PyComplex || right instanceof PyComplex)) {
@@ -488,8 +488,8 @@ function setBinary(operator: BinaryOperator, left: PySet, right: PySet): PyValue
   }
 }
 
-// code-gauge-allow functionNcss 59 -- One case per operator for ints and floats.
-// code-gauge-allow functionCognitiveComplexity 27 -- One case per operator for ints and floats.
+// code-gauge-allow functionNcss -- One case per operator for ints and floats.
+// code-gauge-allow functionCognitiveComplexity -- One case per operator for ints and floats.
 function numericBinary(operator: BinaryOperator, left: Numeric, right: Numeric): PyValue {
   const runtime = currentRuntime();
   if (typeof left !== 'number' && typeof right !== 'number') {
@@ -701,7 +701,7 @@ function isTruthyValue(value: PyValue): boolean {
   return currentRuntime().truthy(value);
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of builtin value.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of builtin value.
 export function nativeCompare(operator: keyof typeof COMPARE_NAMES, left: PyValue, right: PyValue): PyValue {
   if (isNumeric(left) && isNumeric(right)) {
     const a = typeof left === 'boolean' ? Number(left) : left;
@@ -751,7 +751,7 @@ function applyOrderValue(operator: keyof typeof COMPARE_NAMES, order: number): b
 }
 
 /** Equality of builtin values whose types define it natively, or undefined to defer to `__eq__` and the containers. */
-// code-gauge-allow functionCognitiveComplexity 28 -- One case per kind of builtin value.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of builtin value.
 function nativeEquals(left: PyValue, right: PyValue): boolean | undefined {
   if (definesEquality(left) || definesEquality(right) || isBytesLike(left) || isBytesLike(right)) return undefined;
   if (left instanceof PyComplex || right instanceof PyComplex) {

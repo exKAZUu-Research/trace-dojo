@@ -107,7 +107,7 @@ function integerArgument(value: PyValue): bigint {
   return toIndex(value);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows math.floor and math.ceil's special methods and float checks.
+// code-gauge-allow functionCognitiveComplexity -- Follows math.floor and math.ceil's special methods and float checks.
 function floorOrCeil(name: string, round: (x: number) => number, special: string): PyValue {
   return builtin(name, 'one', 1, 1, ([value]) => {
     if (typeof value === 'bigint') return value;

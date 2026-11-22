@@ -110,7 +110,7 @@ function incompleteUtf8Tail(data: Uint8Array): number {
 }
 
 /** Generic UTF-16/32 uses state 2 before its BOM, then 0 for native little-endian or 1 for big-endian. */
-// code-gauge-allow functionCognitiveComplexity 28 -- Handles BOM rejection and byte order, whole code units, and a split surrogate pair.
+// code-gauge-allow functionCognitiveComplexity -- Handles BOM rejection and byte order, whole code units, and a split surrogate pair.
 function decodeUnits(
   module: string,
   errors: string,

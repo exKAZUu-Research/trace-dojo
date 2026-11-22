@@ -99,7 +99,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     return { callee: this.resolveDecl(decl, span) };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Preserves receiver and result contracts when dispatching direct and coerced function calls.
+  // code-gauge-allow functionCognitiveComplexity -- Preserves receiver and result contracts when dispatching direct and coerced function calls.
   private callValue(
     callee: TExpr,
     receiver: TExpr | undefined,
@@ -174,7 +174,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps one operation of the interpreter in one place.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps one operation of the interpreter in one place.
   private callDeclaration(
     ref: FnRef,
     receiver: TExpr | undefined,
@@ -361,8 +361,8 @@ export abstract class CallCompiler extends BuiltinCompiler {
   }
 
   /** The instance of a function for argument types, compiling its body the first time. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- Resolves parameter and return types in the same specialization scope.
-  // code-gauge-allow functionNcss 36 -- Keeps specialization identity and its compilation inputs together.
+  // code-gauge-allow functionCognitiveComplexity -- Resolves parameter and return types in the same specialization scope.
+  // code-gauge-allow functionNcss -- Keeps specialization identity and its compilation inputs together.
   instantiate(ref: FnRef, argTypes: readonly Type[], span: Span, args: readonly TExpr[] = []): FunctionInstance {
     const { decl } = ref;
     const syntax = decl.syntax;

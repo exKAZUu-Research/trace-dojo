@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 500 -- Scalar answers and reference nodes share bounded display traversal and caches.
+// code-gauge-allow-file fileNcss -- Scalar answers and reference nodes share bounded display traversal and caches.
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
@@ -334,7 +334,6 @@ function traceFloat(value: number, type: Type): number {
   return Math.sign(value) * Number(`${digits.join('')}e${exponent - digits.length}`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- One branch per kind of value shown as a scalar.
 function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Scalar | typeof NOT_SCALAR {
   runtime.spend();
   if (depth > MAX_DISPLAY_DEPTH) return NOT_SCALAR;
@@ -447,8 +446,8 @@ class DisplayNodes {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- One branch per kind of value shown as a node.
-  // code-gauge-allow functionNcss 34 -- Node formatting dispatches on each supported value representation.
+  // code-gauge-allow functionCognitiveComplexity -- One branch per kind of value shown as a node.
+  // code-gauge-allow functionNcss -- Node formatting dispatches on each supported value representation.
   private nodeOf(value: Value, type: Type, depth: number): DisplayNode | undefined {
     if (typeof value === 'bigint') return { kind: 'value', value: traceInt(value) };
     if (typeof value === 'number') return { kind: 'value', value: traceFloat(value, type) };
@@ -480,7 +479,7 @@ class DisplayNodes {
     return this.dataNodeOf(value, type, depth);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- One bounded in-order walk handles the shared Set and Map tree representation.
+  // code-gauge-allow functionCognitiveComplexity -- One bounded in-order walk handles the shared Set and Map tree representation.
   private containerNodeOf(value: ConValue, type: Type, depth: number, kind: 'map' | 'set'): DisplayNode {
     const entries: Record<string, DisplayNode> = Object.create(null);
     let count = 0;
@@ -598,7 +597,7 @@ class DisplayNodes {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- One postorder walk settles a shared cache-dependency graph once.
+  // code-gauge-allow functionCognitiveComplexity -- One postorder walk settles a shared cache-dependency graph once.
   private reuse(cached: CachedDisplay): void {
     if (cached.pending) {
       const pending = [{ view: cached, visited: false }];

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 466 -- One evaluator of every expression kind, whose cases share its references and calls.
+// code-gauge-allow-file fileNcss -- One evaluator of every expression kind, whose cases share its references and calls.
 import { LIMITS } from '../interpreter/limits';
 import type { Argument, ClassNode, Expression, MemberExpression, ObjectMember } from './ast';
 import { EvaluatorBase, nameFunction, type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
@@ -49,7 +49,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     }
   }
 
-  // code-gauge-allow functionNcss 60 -- One case per expression kind, each delegating where it grows.
+  // code-gauge-allow functionNcss -- One case per expression kind, each delegating where it grows.
   private evaluateKind(expression: Expression, classBinding: Binding | undefined): ChainValue {
     const { runtime } = this;
     switch (expression.kind) {
@@ -205,7 +205,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   }
 
   /** Evaluates elements in order, holding the values so far for garbage collection; an elision leaves a hole. */
-  // code-gauge-allow duplicateLines 28 -- Mirrors the generator version in stepEvaluator.ts, kept apart so that code without yield or await runs without generator frames.
+  // code-gauge-allow duplicateLines -- Mirrors the generator version in stepEvaluator.ts, kept apart so that code without yield or await runs without generator frames.
   private evaluateElements(args: (Argument | undefined)[], callArguments = false): Element[] {
     const { runtime } = this;
     const callSpread =
@@ -380,7 +380,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     }
   }
 
-  // code-gauge-allow duplicateLines 18 -- Mirrors the generator version in stepEvaluator.ts, kept apart so that code without yield or await runs without generator frames.
+  // code-gauge-allow duplicateLines -- Mirrors the generator version in stepEvaluator.ts, kept apart so that code without yield or await runs without generator frames.
   private assign(expression: Extract<Expression, { kind: 'assign' }>): Value {
     const { runtime } = this;
     const { operator, target } = expression;
@@ -480,7 +480,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     }
   }
 
-  // code-gauge-allow functionNcss 40 -- One case per operator.
+  // code-gauge-allow functionNcss -- One case per operator.
   binary(operator: string, left: Value, right: Value): Value {
     const { runtime } = this;
     switch (operator) {
@@ -591,8 +591,8 @@ function arithmetic(
   return numberArithmetic(operator, left, right);
 }
 
-// code-gauge-allow functionNcss 40 -- One case per operator, as for numbers.
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per operator, as for numbers.
+// code-gauge-allow functionNcss -- One case per operator, as for numbers.
+// code-gauge-allow functionCognitiveComplexity -- One case per operator, as for numbers.
 function bigintArithmetic(runtime: Runtime, operator: string, left: bigint, right: bigint): bigint {
   switch (operator) {
     case '+': {
@@ -650,7 +650,7 @@ export function bitLength(value: bigint): number {
   return (value < 0n ? -value : value).toString(2).length;
 }
 
-// code-gauge-allow duplicateLines 18 -- Numeric operators overlap other interpreters, while each language keeps its own coercion, division, and exception rules.
+// code-gauge-allow duplicateLines -- Numeric operators overlap other interpreters, while each language keeps its own coercion, division, and exception rules.
 function numberArithmetic(operator: string, left: number, right: number): number {
   switch (operator) {
     case '+': {

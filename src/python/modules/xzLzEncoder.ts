@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 460 -- Transcribes liblzma 5.8.4 C sources together, which read best side by side with them.
+// code-gauge-allow-file fileNcss -- Transcribes liblzma 5.8.4 C sources together, which read best side by side with them.
 // The LZ encoder of liblzma 5.8.4 (`lz_encoder.c`, `lz_encoder_mf.c`): the window that the filters before it fill, and
 // its hash chain and binary tree match finders. The window, hash table, and tree grow as they are used rather than being
 // allocated at their full size, charging the runtime budget before each host allocation.
@@ -115,8 +115,8 @@ export class MatchFinder {
   matchesCount = 0;
 
   /** `lz_encoder_prepare`, which reports whether the options are invalid. */
-  // code-gauge-allow functionNcss 43 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
-  // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   prepare(options: LzOptions): boolean {
     const { dictSize } = options;
     if (dictSize < 4096 || dictSize > 2 ** 30 + 2 ** 29 || options.niceLen > options.matchLenMax) return true;
@@ -307,7 +307,7 @@ export class MatchFinder {
   }
 
   /** `hc_find`/`bt_find`, which also move to the next position. */
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
   private chainFind(
     isBt: boolean,
     lenLimit: number,
@@ -331,7 +331,7 @@ export class MatchFinder {
   }
 
   /** One position of the `*_skip` functions; false when too little data is left. */
-  // code-gauge-allow functionNcss 36 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   private skipOne(): boolean {
     const isBt = (this.kind & 0x10) !== 0;
     const hashBytes = hashBytesOf(this.kind);
@@ -369,7 +369,7 @@ export class MatchFinder {
     return true;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   private hcFindFunc(
     lenLimit: number,
     pos: number,
@@ -401,8 +401,8 @@ export class MatchFinder {
     }
   }
 
-  // code-gauge-allow functionNcss 39 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
-  // code-gauge-allow functionCognitiveComplexity 18 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   private btFindFunc(
     lenLimit: number,
     pos: number,
@@ -457,7 +457,7 @@ export class MatchFinder {
     }
   }
 
-  // code-gauge-allow functionNcss 33 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   private btSkipFunc(lenLimit: number, pos: number, cur: number, startMatch: number): void {
     const { buffer, son, cyclicPos, cyclicSize } = this;
     let curMatch = startMatch;
@@ -535,7 +535,7 @@ export class LzEncoder implements Coder {
     private readonly next: Coder | undefined
   ) {}
 
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
   code(
     input: Uint8Array,
     inPos: Pos,
@@ -560,7 +560,7 @@ export class LzEncoder implements Coder {
     return LZMA_OK;
   }
 
-  // code-gauge-allow functionNcss 31 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   private fillWindow(input: Uint8Array, inPos: Pos, inSize: number, action: number): number {
     const { mf } = this;
     if (mf.readPos >= mf.size - mf.keepSizeAfter) this.moveWindow();

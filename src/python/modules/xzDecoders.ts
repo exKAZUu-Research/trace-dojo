@@ -70,8 +70,8 @@ function decodeSize(input: Uint8Array, inPos: Pos, inSize: number): { ret: numbe
 }
 
 /** `lzma_block_header_decode`. */
-// code-gauge-allow functionNcss 36 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
-// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+// code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
 function blockHeaderDecode(block: Block, input: Uint8Array): number {
   block.filters = [];
   if ((input[0] + 1) * 4 !== block.headerSize || block.check > LZMA_CHECK_ID_MAX) return LZMA_PROG_ERROR;
@@ -142,8 +142,8 @@ class BlockDecoder implements Coder {
     this.check = new CheckState(block.check);
   }
 
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
-  // code-gauge-allow functionCognitiveComplexity 17 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   code(
     input: Uint8Array,
     inPos: Pos,
@@ -177,7 +177,7 @@ class BlockDecoder implements Coder {
   }
 
   /** The `SEQ_CODE` part of `block_decode`, returning `LZMA_STREAM_END` once the data has ended. */
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
   private decodeData(
     input: Uint8Array,
     inPos: Pos,
@@ -409,7 +409,7 @@ export class StreamDecoder implements TopDecoder {
     return this.check;
   }
 
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
   code(
     input: Uint8Array,
     inPos: Pos,
@@ -426,9 +426,9 @@ export class StreamDecoder implements TopDecoder {
   }
 
   /** One state of `stream_decode`, which moves to the next state and returns `CONTINUE` where C falls through. */
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
-  // code-gauge-allow functionNcss 38 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
-  // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   private step(
     input: Uint8Array,
     inPos: Pos,

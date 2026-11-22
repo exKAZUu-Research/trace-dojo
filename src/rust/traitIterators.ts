@@ -71,7 +71,6 @@ const RANGE_EXACT: Record<string, ReadonlySet<string>> = {
 };
 
 /** Whether an iterator (an `IterImpl`, a `&mut` one, or a shape) has a capability, as std's impls decide. */
-// code-gauge-allow functionCognitiveComplexity 29 -- Follows std's impls of the iterator traits case by case.
 export function iteratorCapability(type: Type, capability: Capability, solver?: TraitSolver): Answer {
   const t = normalize(shallow(type));
   if (t.kind === 'var') return 'unknown';
@@ -88,7 +87,7 @@ export function iteratorCapability(type: Type, capability: Capability, solver?: 
   return shapeCapability(t, capability, solver);
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- The standard iterator shapes have separate capability rules.
+// code-gauge-allow functionCognitiveComplexity -- The standard iterator shapes have separate capability rules.
 function shapeCapability(t: Extract<Type, { kind: 'adt' }>, capability: Capability, solver?: TraitSolver): Answer {
   const raw = t.def.builtin;
   if (raw === 'IntoShape') return abstractCapability(t.args[0], capability, solver);

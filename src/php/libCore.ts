@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 600 -- Keeps core built-ins with their shared interpreter helpers.
+// code-gauge-allow-file fileNcss -- Keeps core built-ins with their shared interpreter helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { arrayObjectProperty } from './arrayObjectProperties';
 import { byteAt, lower, untilNul } from './bytes';
@@ -166,7 +166,7 @@ defineFunction('is_countable(mixed $value): bool', ({ args }) => {
 });
 defineFunction(
   'is_callable(mixed $value, bool $syntax_only = false, &$callable_name = null): bool',
-  // code-gauge-allow functionCognitiveComplexity 17 -- Reports each callable syntax form with its native name.
+  // code-gauge-allow functionCognitiveComplexity -- Reports each callable syntax form with its native name.
   ({ args, refs }) => {
     const value = args[0];
     let name = 'Array';
@@ -221,8 +221,8 @@ defineFunction('settype(mixed &$var, string $type): bool', ({ args, refs }) => {
 });
 
 /** Parses an integer in a base as `intval($string, $base)` does, with base 0 detecting a prefix. */
-// code-gauge-allow functionCognitiveComplexity 28 -- Keeps prefix selection, digit validation and overflow in the same scan.
-// code-gauge-allow functionNcss 45 -- Keeps prefix selection, digit validation and overflow in the same scan.
+// code-gauge-allow functionCognitiveComplexity -- Keeps prefix selection, digit validation and overflow in the same scan.
+// code-gauge-allow functionNcss -- Keeps prefix selection, digit validation and overflow in the same scan.
 function parseIntBase(text: string, base: number): bigint {
   if (base !== 0 && (base < 2 || base > 36)) return 0n;
   const runtime = rt();

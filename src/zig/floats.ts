@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 407 -- Keeps IEEE arithmetic, conversions, and rounding with their shared representation.
+// code-gauge-allow-file fileNcss -- Keeps IEEE arithmetic, conversions, and rounding with their shared representation.
 import { spendIntegerOperation, spendIntegerShift, spendIntegerWidth } from './integerWork';
 import { spendMemory } from './memoryAccounting';
 
@@ -239,8 +239,8 @@ function arithmeticNumber(a: number, b: number, operator: '+' | '-' | '*' | '/')
 }
 
 /** `a op b` rounded to a format, for BigFloats. */
-// code-gauge-allow functionNcss 41 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
-// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionNcss -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 export function bigArithmetic(a: BigFloat, b: BigFloat, operator: '+' | '-' | '*' | '/', bits: FloatBits): BigFloat {
   const special = specialResult(a, b, operator);
   if (special) return special.kind === 'finite' ? roundTo(special, bits) : special;
@@ -311,7 +311,7 @@ export function minMaxFloat(a: AnyFloat, b: AnyFloat, isMax: boolean, comptime =
 }
 
 /** Compares two floats: -1, 0, or 1, or undefined when either is NaN. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Compares IEEE special values before bounded finite significands.
+// code-gauge-allow functionCognitiveComplexity -- Compares IEEE special values before bounded finite significands.
 export function compareFloats(a: AnyFloat, b: AnyFloat): -1 | 0 | 1 | undefined {
   if (typeof a === 'number' && typeof b === 'number') {
     if (Number.isNaN(a) || Number.isNaN(b)) return undefined;
@@ -328,7 +328,7 @@ export function compareFloats(a: AnyFloat, b: AnyFloat): -1 | 0 | 1 | undefined 
   return compareFinite(x, y);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps zero, signs, leading exponents and bounded significands in one comparison.
+// code-gauge-allow functionCognitiveComplexity -- Keeps zero, signs, leading exponents and bounded significands in one comparison.
 function compareFinite(x: BigFloat, y: BigFloat): -1 | 0 | 1 {
   if (x.isZero && y.isZero) return 0;
   if (x.isZero) return y.sign ? 1 : -1;
@@ -409,8 +409,8 @@ export function integerSqrt(value: bigint, spend: (cost: number) => void = spend
 // Literals ------------------------------------------------------------------------------------------------------------
 
 /** Parses a Zig float literal (decimal or hexadecimal, with `_` separators) to the nearest float of a format. */
-// code-gauge-allow functionNcss 48 -- Keeps decimal and hexadecimal literal conversion and accounting together.
-// code-gauge-allow functionCognitiveComplexity 19 -- Checks both literal radices before allocating their exact values.
+// code-gauge-allow functionNcss -- Keeps decimal and hexadecimal literal conversion and accounting together.
+// code-gauge-allow functionCognitiveComplexity -- Checks both literal radices before allocating their exact values.
 export function parseFloatLiteral(text: string, bits: FloatBits, spend = spendMemory): BigFloat {
   spend(text.length);
   const clean = text.replaceAll('_', '');
@@ -473,8 +473,8 @@ export interface Decimal {
  * last digit), which is what Ryu computes. A float halfway between two decimals of the interval's ends belongs to it
  * when the float's significand is even, as round-to-nearest-even reads it back.
  */
-// code-gauge-allow functionNcss 48 -- Keeps the exact rounding interval and shortest decimal candidate selection together.
-// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the exact rounding interval and shortest decimal candidate selection together.
+// code-gauge-allow functionNcss -- Keeps the exact rounding interval and shortest decimal candidate selection together.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the exact rounding interval and shortest decimal candidate selection together.
 export function shortestDecimal(value: AnyFloat, bits: FloatBits): Decimal {
   const big = asBigFloat(value);
   if (big.kind === 'nan') return { sign: big.sign, mantissa: 1n, exponent: 0, special: 'nan' };

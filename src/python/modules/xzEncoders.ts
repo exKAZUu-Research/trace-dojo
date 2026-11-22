@@ -112,7 +112,7 @@ class BlockEncoder implements Coder {
     this.check = new CheckState(block.check);
   }
 
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
   code(
     input: Uint8Array,
     inPos: Pos,
@@ -200,7 +200,7 @@ class IndexEncoder {
   }
 
   /** One state of `index_encode`: `CONTINUE` goes on, and a result leaving through `out:` has summed the CRC. */
-  // code-gauge-allow functionNcss 31 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   private step(out: Uint8Array, outPos: Pos, outSize: number, outStart: number): number {
     switch (this.sequence) {
       case INDEX_INDICATOR: {
@@ -298,7 +298,7 @@ class StreamEncoder implements Coder {
     return result.ret;
   }
 
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
   code(
     input: Uint8Array,
     inPos: Pos,
@@ -316,8 +316,8 @@ class StreamEncoder implements Coder {
   }
 
   /** One state of `stream_encode`. */
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
-  // code-gauge-allow functionNcss 32 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   private step(
     input: Uint8Array,
     inPos: Pos,
@@ -404,7 +404,7 @@ class AloneEncoder implements Coder {
     private readonly next: Coder
   ) {}
 
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
   code(
     input: Uint8Array,
     inPos: Pos,

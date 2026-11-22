@@ -93,7 +93,7 @@ function futureFlagsOf(code: Code, flags: bigint): bigint {
 export const COMPILE_KEYWORDS = ['source', 'filename', 'mode', 'flags', 'dont_inherit', 'optimize', '_feature_version'];
 
 /** `compile(source, filename, mode, flags=0, dont_inherit=False, optimize=-1)`. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Checks the arguments in the order CPython reports their errors in.
+// code-gauge-allow functionCognitiveComplexity -- Checks the arguments in the order CPython reports their errors in.
 export function compile(args: PyValue[], kwargs: Kwargs): PyValue {
   const [source, filenameValue, modeValue, flags, dontInherit, optimize] = COMPILE_KEYWORDS.map((name, index) =>
     argument(args, kwargs, index, name)
@@ -136,7 +136,7 @@ const ALLOW_INCOMPLETE_INPUT = 0x40_00n;
  * mode needs the newline after it, and with incomplete input allowed, text that may continue raises
  * `_IncompleteInputError`.
  */
-// code-gauge-allow functionParameterCount 7 -- Carries each resolved compile() argument into compilation.
+// code-gauge-allow functionParameterCount -- Carries each resolved compile() argument into compilation.
 function compileInput(
   text: string,
   mode: Mode,

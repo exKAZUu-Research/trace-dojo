@@ -90,7 +90,7 @@ export function checkExtraName(value: PyValue, name: string): void {
 }
 
 /** The module or class whose extra name `name` makes reading it from `value` differ from CPython, or undefined. */
-// code-gauge-allow functionCognitiveComplexity 16 -- A module and a class keep their extra names in different tables.
+// code-gauge-allow functionCognitiveComplexity -- A module and a class keep their extra names in different tables.
 function extraOwner(value: PyValue, name: string): string | undefined {
   if (!extraNames.has(name)) return undefined;
   if (value instanceof PyModule) {

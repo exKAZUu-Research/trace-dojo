@@ -566,7 +566,7 @@ function isNullishIntrinsic(type: Type): boolean {
 }
 
 /** Whether an expression can be `null` or `undefined` by its syntax alone, as TypeScript decides for `??`. */
-// code-gauge-allow functionNcss 32 -- Distinguishes syntactic operand kinds for nullish coalescing.
+// code-gauge-allow functionNcss -- Distinguishes syntactic operand kinds for nullish coalescing.
 function syntacticNullishness(c: Checker, node: TreeNode): 'always' | 'never' | 'sometimes' {
   const expression = withoutAssertions(node);
   switch (expression.type) {

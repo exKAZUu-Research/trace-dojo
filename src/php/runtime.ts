@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 413 -- Keeps the execution budget, frame state, and runtime ownership hooks together.
+// code-gauge-allow-file fileNcss -- Keeps the execution budget, frame state, and runtime ownership hooks together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
@@ -106,7 +106,7 @@ export class Frame {
   /** The local a `return $var;` moved out, which PHP buffers as a possible root before freeing the other locals. */
   returnedLocal?: Ref;
 
-  // code-gauge-allow functionParameterCount 8 -- A frame takes the parts of a call that stay fixed while it runs.
+  // code-gauge-allow functionParameterCount -- A frame takes the parts of a call that stay fixed while it runs.
   constructor(
     readonly fn: Callable | undefined,
     readonly callRow: number | undefined,
@@ -474,7 +474,7 @@ export class Runtime {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   freeObject(object: PhpObject): void {
     this.retiringObjects.delete(object);
     if (this.objects.get(object.id) !== object) return;
@@ -566,7 +566,7 @@ export class Runtime {
 }
 
 /** The length of the longest prefix of a byte string that does not end inside a UTF-8 sequence. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Locates the largest UTF-8 prefix that ends before a partial final sequence.
+// code-gauge-allow functionCognitiveComplexity -- Locates the largest UTF-8 prefix that ends before a partial final sequence.
 function completePrefix(bytes: string): number {
   let index = bytes.length;
   for (let back = 1; back <= 3 && index - back >= 0; back++) {

@@ -79,7 +79,7 @@ export function getBuiltins(): Builtins {
   return cachedBuiltins;
 }
 
-// code-gauge-allow functionNcss 32 -- One call per builtin family, in the order their definitions depend on.
+// code-gauge-allow functionNcss -- One call per builtin family, in the order their definitions depend on.
 function createBuiltins(): Builtins {
   const registry = createRegistry();
   const objectClass = registry.define('Object', undefined);
@@ -228,7 +228,7 @@ export function defineThrowableIn(
   return cls;
 }
 
-// code-gauge-allow functionNcss 54 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss -- One registration per builtin method, each a small native.
 function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType: JavaType): ClassInfo {
   const defineThrowable = (name: string, superclass: ClassInfo, packageName = 'java.lang'): ClassInfo =>
     defineThrowableIn(registry, name, superclass, packageName);
@@ -409,7 +409,7 @@ function defineString(stringClass: ClassInfo, objectType: JavaType): void {
   defineStringTransforms(stringClass, objectType);
 }
 
-// code-gauge-allow functionNcss 47 -- One registration per String method, each charging the characters it reads.
+// code-gauge-allow functionNcss -- One registration per String method, each charging the characters it reads.
 function defineStringQueries(stringClass: ClassInfo, objectType: JavaType): void {
   const stringType = stringClass.type;
   addMethod(stringClass, 'length', [], INT, false, (_, receiver) => text(receiver).length);
@@ -469,7 +469,7 @@ function defineStringQueries(stringClass: ClassInfo, objectType: JavaType): void
   }
 }
 
-// code-gauge-allow functionNcss 38 -- One registration per String method, each charging the characters it reads.
+// code-gauge-allow functionNcss -- One registration per String method, each charging the characters it reads.
 function defineStringTransforms(stringClass: ClassInfo, objectType: JavaType): void {
   const stringType = stringClass.type;
   addMethod(stringClass, 'toUpperCase', [], stringType, false, (frame, receiver) =>

@@ -684,7 +684,7 @@ class ScanState {
     if (!this.accept('%')) this.errorString('missing literal %');
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of destination, as Go's scanOne.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of destination, as Go's scanOne.
   private scanOne(verb: number, arg: Value): void {
     this.buf = '';
     if (arg instanceof Iface && assignFailure(arg.type, SCANNER) === undefined) {

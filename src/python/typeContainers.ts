@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 436 -- The list, tuple, and dict types keep their methods together.
+// code-gauge-allow-file fileNcss -- The list, tuple, and dict types keep their methods together.
 import { keywordEntries, mappingEntries } from './callArguments';
 import { pyRepr } from './conversions';
 import { method } from './define';

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 560 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { assertedExpression } from '../erasedSyntax';
@@ -591,7 +591,7 @@ export class ExpressionChecker {
     return typeName === 'any' ? anyType : this.c.arrayType(anyType);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Follows TypeScript's rules for uses before a declaration, which depend on when the use runs.
+  // code-gauge-allow functionCognitiveComplexity -- Follows TypeScript's rules for uses before a declaration, which depend on when the use runs.
   checkUsedBeforeDeclaration(node: TreeNode, symbol: Sym): void {
     if (symbol.valueKind === 'function') {
       this.checkParameterUseOfBodyFunction(node, symbol);

@@ -292,7 +292,7 @@ export class Runtime implements TracedRuntime<Frame> {
    *
    * @param onReturn Receives the callee's frame when it returns, while the frame still holds its variables.
    */
-  // code-gauge-allow functionNcss 31 -- Call setup and cleanup share the frame and argument metadata.
+  // code-gauge-allow functionNcss -- Call setup and cleanup share the frame and argument metadata.
   call(
     fn: FunctionInfo,
     args: Value[],
@@ -370,7 +370,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly varargTypes = new Map<number, CType[]>();
 
   /** Removes the turtles that no variable, nor any block a variable reaches, points to any longer. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Root discovery and the reachability worklist share allocation identities; retain the single traversal.
+  // code-gauge-allow functionCognitiveComplexity -- Root discovery and the reachability worklist share allocation identities; retain the single traversal.
   collectGarbage(): void {
     if (!this.world.hasTurtles) return;
     const reached = new Set<Allocation>();

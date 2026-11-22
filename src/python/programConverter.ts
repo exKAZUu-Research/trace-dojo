@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 880 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -51,7 +51,7 @@ export class ProgramConverter extends ExpressionConverter {
   /** The top-level packages the module imports, which tell whether it may run threads. */
   private readonly importedPackages = new Set<string>();
 
-  // code-gauge-allow functionParameterCount 7 -- Each compiler flag comes from parseModule / compile().
+  // code-gauge-allow functionParameterCount -- Each compiler flag comes from parseModule / compile().
   constructor(
     source: string,
     private readonly trace: TraceOptions | undefined,
@@ -111,7 +111,7 @@ export class ProgramConverter extends ExpressionConverter {
     return this.syntaxStorage?.account(statements) ?? statements;
   }
 
-  // code-gauge-allow functionNcss 56 -- One case per kind of statement node, each delegating where it grows.
+  // code-gauge-allow functionNcss -- One case per kind of statement node, each delegating where it grows.
   private statementValue(node: Node): Statement[] {
     const row = rowOf(node);
     checkClauseLines(node);
@@ -299,7 +299,7 @@ export class ProgramConverter extends ExpressionConverter {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Follows the rules CPython applies to each kind of assignment.
+  // code-gauge-allow functionCognitiveComplexity -- Follows the rules CPython applies to each kind of assignment.
   private assignment(statementNode: Node, node: Node): Statement {
     const row = rowOf(node);
     const typeNode = node.childForFieldName('type');
@@ -813,8 +813,8 @@ export class ProgramConverter extends ExpressionConverter {
     return { kind: 'match', subject, cases, row };
   }
 
-  // code-gauge-allow functionNcss 58 -- One case per kind of pattern node.
-  // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of pattern node.
+  // code-gauge-allow functionNcss -- One case per kind of pattern node.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of pattern node.
   private pattern(node: Node, names: Set<string>): Pattern {
     const row = rowOf(node);
     const named = namedChildren(node);
@@ -1030,7 +1030,7 @@ export class ProgramConverter extends ExpressionConverter {
     return this.pattern(node, names);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Checks the rules CPython applies to the alternatives of an or-pattern.
+  // code-gauge-allow functionCognitiveComplexity -- Checks the rules CPython applies to the alternatives of an or-pattern.
   private orPattern(node: Node, names: Set<string>): Pattern {
     const alternatives = patternChildren(node);
     const signs = new Map<number, Node>();
@@ -1088,7 +1088,7 @@ function staticAttributesOf(body: Statement[]): string[] {
   return [...names].toSorted();
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Walks each kind of statement for self attribute stores, as __static_attributes__ does.
+// code-gauge-allow functionCognitiveComplexity -- Walks each kind of statement for self attribute stores, as __static_attributes__ does.
 function collectAttributeStores(statements: Statement[], self: string, names: Set<string>): void {
   const visitTarget = (target: Target): void => {
     if (target.kind === 'attribute' && target.object.kind === 'name' && target.object.name === self)

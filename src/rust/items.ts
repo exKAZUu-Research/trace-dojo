@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 969 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
@@ -268,7 +268,7 @@ export class ItemCollector {
     for (const body of this.bodies.splice(0)) body();
   }
 
-  // code-gauge-allow functionNcss 40 -- Follows Rust's name resolution case by case.
+  // code-gauge-allow functionNcss -- Follows Rust's name resolution case by case.
   collectItems(items: Item[], module: Module): void {
     for (const item of items) {
       switch (item.kind) {
@@ -398,8 +398,8 @@ export class ItemCollector {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- Resolves enum declarations, variants, and discriminants in order.
-  // code-gauge-allow functionNcss 43 -- Follows Rust's name resolution case by case.
+  // code-gauge-allow functionCognitiveComplexity -- Resolves enum declarations, variants, and discriminants in order.
+  // code-gauge-allow functionNcss -- Follows Rust's name resolution case by case.
   private enumItem(item: EnumItem, module: Module): void {
     const def: AdtDef = {
       name: item.name,
@@ -483,7 +483,7 @@ export class ItemCollector {
     return scope;
   }
 
-  // code-gauge-allow functionNcss 33 -- Collects traits and lowers their generic and inherited bounds together.
+  // code-gauge-allow functionNcss -- Collects traits and lowers their generic and inherited bounds together.
   private traitItem(item: TraitItem, module: Module): void {
     const self = newTypeParam('Self', true);
     const def: TraitDef = {
@@ -529,8 +529,8 @@ export class ItemCollector {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Follows Rust's name resolution case by case.
-  // code-gauge-allow functionNcss 33 -- Follows Rust's name resolution case by case.
+  // code-gauge-allow functionCognitiveComplexity -- Follows Rust's name resolution case by case.
+  // code-gauge-allow functionNcss -- Follows Rust's name resolution case by case.
   private implItem(item: ImplItem, module: Module): void {
     const impl: ImplDef = {
       params: declareTypeParams(item.generics),
@@ -590,7 +590,7 @@ export class ItemCollector {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Follows Rust's name resolution case by case.
+  // code-gauge-allow functionCognitiveComplexity -- Follows Rust's name resolution case by case.
   private checkTraitImpl(item: ImplItem, impl: ImplDef, trait: TraitDef): void {
     for (const method of item.methods) {
       if (!trait.methods.has(method.name)) {
@@ -792,7 +792,7 @@ const REQUIRED_STD_METHODS: Record<string, string[]> = {
 };
 
 /** A key for an impl's self type in the standard library, naming the natives of its methods (`Vec<_>::push`). */
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows Rust's name resolution case by case.
+// code-gauge-allow functionCognitiveComplexity -- Follows Rust's name resolution case by case.
 function renderTypeKey(type: TypeAst, generics: Generics): string {
   const render = (t: TypeAst, useBound = true): string => {
     switch (t.kind) {
@@ -1016,7 +1016,7 @@ export function resolveImports(module: Module): void {
 const stdIndexes = new WeakMap<Program, { type: Map<string, unknown>; value: Map<string, unknown> }>();
 
 /** The standard library's declarations see each other's items by name, wherever they are declared. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Follows Rust's name resolution case by case.
+// code-gauge-allow functionCognitiveComplexity -- Follows Rust's name resolution case by case.
 function stdIndex(program: Program, ns: 'type' | 'value'): Map<string, unknown> {
   let index = stdIndexes.get(program);
   if (!index) {
@@ -1291,8 +1291,8 @@ export function lookupQualifiedValue(module: Module, from: Module, name: string,
 }
 
 /** Resolves a path in the type namespace: a module, a type, or a trait. */
-// code-gauge-allow functionCognitiveComplexity 28 -- Follows Rust's name resolution case by case.
-// code-gauge-allow functionNcss 40 -- Follows Rust's name resolution case by case.
+// code-gauge-allow functionCognitiveComplexity -- Follows Rust's name resolution case by case.
+// code-gauge-allow functionNcss -- Follows Rust's name resolution case by case.
 export function resolveTypePath(segments: string[], module: Module, span: Span): TypeBinding {
   if (segments.length === 0) return { kind: 'mod', module: module.program.root };
   let current: TypeBinding | undefined;
@@ -1421,8 +1421,8 @@ function traitArguments(def: TraitDef, written: TypeAst[], scope: TypeScope, spa
 // ---------------------------------------------------------------------------------------------------------------------
 // Lowering types
 
-// code-gauge-allow functionNcss 52 -- Follows Rust's name resolution case by case.
-// code-gauge-allow functionCognitiveComplexity 27 -- Each Rust type form has distinct lowering and diagnostics.
+// code-gauge-allow functionNcss -- Follows Rust's name resolution case by case.
+// code-gauge-allow functionCognitiveComplexity -- Each Rust type form has distinct lowering and diagnostics.
 export function lowerType(ast: TypeAst, scope: TypeScope): Type {
   switch (ast.kind) {
     case 'path': {

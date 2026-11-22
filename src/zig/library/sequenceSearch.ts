@@ -18,8 +18,8 @@ export function findSequence<T>(
   return sequenceMatches(text, pattern, from, equal).next().value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Keeps short search paths and the non-overlapping scan together.
-// code-gauge-allow functionNcss 33 -- Keeps edge cases and per-match scan state with the matcher.
+// code-gauge-allow functionCognitiveComplexity -- Keeps short search paths and the non-overlapping scan together.
+// code-gauge-allow functionNcss -- Keeps edge cases and per-match scan state with the matcher.
 export function* sequenceMatches<T>(
   text: SearchSequence<T>,
   pattern: SearchSequence<T>,

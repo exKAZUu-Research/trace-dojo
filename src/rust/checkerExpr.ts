@@ -30,7 +30,7 @@ import {
   USIZE,
 } from './types';
 
-// code-gauge-allow functionNcss 55 -- One case per kind of expression.
+// code-gauge-allow functionNcss -- One case per kind of expression.
 export function exprInner(c: Checker, expr: Expr, expected: Type | undefined): Type {
   switch (expr.kind) {
     case 'int':
@@ -473,7 +473,7 @@ function forExpr(c: Checker, expr: Extract<Expr, { kind: 'for' }>): Type {
   return UNIT;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows the type checking rules of rustc case by case.
+// code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
 function checkRange(c: Checker, expr: Extract<Expr, { kind: 'range' }>, expected: Type | undefined): Type {
   let elem: Type = freshVar();
   const e = expected ? normalize(shallow(expected)) : undefined;
@@ -495,7 +495,7 @@ function checkRange(c: Checker, expr: Extract<Expr, { kind: 'range' }>, expected
   return c.program.builtinType(name, [elem]);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows rustc's desugaring of `?` for `Option` and `Result`.
+// code-gauge-allow functionCognitiveComplexity -- Follows rustc's desugaring of `?` for `Option` and `Result`.
 function tryExpr(c: Checker, expr: Extract<Expr, { kind: 'try' }>): Type {
   const operand = normalize(shallow(c.expr(expr.operand, undefined)));
   const ret = normalize(shallow(c.body.retType));

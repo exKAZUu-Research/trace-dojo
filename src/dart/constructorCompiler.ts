@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 457 -- Constructor types, initializer ordering, and delegation share the same declarations.
+// code-gauge-allow-file fileNcss -- Constructor types, initializer ordering, and delegation share the same declarations.
 import { AssignmentCompiler } from './assignmentCompiler';
 import type {
   Arguments as ArgumentsSyntax,
@@ -59,7 +59,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     this.constructorRedirects.clear();
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Validate declaration names and class modifiers before registering the signature.
+  // code-gauge-allow functionCognitiveComplexity -- Validate declaration names and class modifiers before registering the signature.
   protected declareConstructor(cls: ClassInfo, declaration: ConstructorDeclaration): void {
     if (declaration.name === '\0primaryBody') return;
     if (declaration.className !== undefined && declaration.className !== cls.name) {
@@ -296,7 +296,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     }
   }
 
-  // code-gauge-allow duplicateLines 24 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private compileFactory(
     cls: ClassInfo,
     constructor: ConstructorInfo,
@@ -396,7 +396,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     return resolution?.kind === 'declaration' && resolution.declaration.kind === 'class';
   }
 
-  // code-gauge-allow functionNcss 38 -- The steps of a generative constructor: checks, its frame, initializers, and body, in order.
+  // code-gauge-allow functionNcss -- The steps of a generative constructor: checks, its frame, initializers, and body, in order.
   private compileGenerative(
     cls: ClassInfo,
     constructor: ConstructorInfo,
@@ -578,8 +578,8 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     }
   }
 
-  // code-gauge-allow functionNcss 45 -- The initializer list's entries and the implicit super().
-  // code-gauge-allow functionCognitiveComplexity 21 -- The initializer list's entries and the implicit super().
+  // code-gauge-allow functionNcss -- The initializer list's entries and the implicit super().
+  // code-gauge-allow functionCognitiveComplexity -- The initializer list's entries and the implicit super().
   private compileInitializerSteps(
     cls: ClassInfo,
     declaration: ConstructorDeclaration,
@@ -797,9 +797,9 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
   }
 
   /** The call of the superclass's constructor or of another constructor of the class, in an initializer list. */
-  // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
-  // code-gauge-allow functionCognitiveComplexity 27 -- Validate redirects and splice the forwarded parameters into the call order.
-  // code-gauge-allow functionNcss 33 -- Delegation checks share the resolved constructor and its signature.
+  // code-gauge-allow functionParameterCount -- The parameters are the parts a caller already holds; grouping them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity -- Validate redirects and splice the forwarded parameters into the call order.
+  // code-gauge-allow functionNcss -- Delegation checks share the resolved constructor and its signature.
   private compileDelegation(
     cls: ClassInfo,
     declaration: ConstructorDeclaration,

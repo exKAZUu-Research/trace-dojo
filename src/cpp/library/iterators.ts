@@ -174,7 +174,7 @@ export function moveIterator(pointer: Ptr, delta: number, isReverse: boolean): P
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per iterator operator.
+// code-gauge-allow functionCognitiveComplexity -- One case per iterator operator.
 function iteratorOperator(
   compiler: ExpressionCompiler,
   cls: ClassInfo,

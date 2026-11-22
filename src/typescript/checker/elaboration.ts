@@ -114,7 +114,7 @@ export class Elaboration {
     return printedPropertyName(property.name, this.c.typeOperators.propertyKeyType(property));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Matches each written member to its contextual type before recursively locating its error.
+  // code-gauge-allow functionCognitiveComplexity -- Matches each written member to its contextual type before recursively locating its error.
   private reportProperties(node: TreeNode, source: Type, target: Type): boolean {
     let reported = false;
     for (const member of named(node)) {

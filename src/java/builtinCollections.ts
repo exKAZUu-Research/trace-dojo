@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 478 -- The list classes and their sublist and restricted variants, which share one definition of the list methods.
+// code-gauge-allow-file fileNcss -- The list classes and their sublist and restricted variants, which share one definition of the list methods.
 import { checkCopiedElement } from './arrayCopy';
 import { checkStore } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
@@ -107,7 +107,7 @@ export interface Collections {
   next: MethodInfo;
 }
 
-// code-gauge-allow functionNcss 45 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss -- One registration per builtin method, each a small native.
 export function defineCollections(
   registry: Registry,
   objectClass: ClassInfo,
@@ -552,7 +552,7 @@ function declareListMethods(cls: ClassInfo, element: JavaType, collectionClass: 
 }
 
 /** `ArrayList` and `LinkedList`, which differ only in performance, as far as these programs can tell. */
-// code-gauge-allow functionNcss 34 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss -- One registration per builtin method, each a small native.
 function defineArrayList(
   context: Context,
   name: string,
@@ -774,7 +774,7 @@ function isList(object: JavaObject): boolean {
 }
 
 /** The queue and stack methods of `LinkedList`, which learners use for breadth-first searches and stacks. */
-// code-gauge-allow functionCognitiveComplexity 24 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionCognitiveComplexity -- One registration per builtin method, each a small native.
 function defineDequeMethods(cls: ClassInfo, element: JavaType, itrClass: ClassInfo): void {
   defineDescendingIterator(cls, element, itrClass);
   for (const [name, atEnd] of [

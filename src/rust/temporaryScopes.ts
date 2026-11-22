@@ -6,8 +6,8 @@ import { constantNeedsDrop } from './constLint';
 import { normalize } from './infer';
 import { integerConst, intMin, shallow } from './types';
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Traverses the expression forms that extend temporary scopes.
-// code-gauge-allow functionNcss 37 -- Traverses the expression forms that extend temporary scopes.
+// code-gauge-allow functionCognitiveComplexity -- Traverses the expression forms that extend temporary scopes.
+// code-gauge-allow functionNcss -- Traverses the expression forms that extend temporary scopes.
 export function markExtendedTemporaries(expr: Expr, annotations: Annotations, mark: (operand: Expr) => void): void {
   const visit = (child: Expr): void => markExtendedTemporaries(child, annotations, mark);
   switch (expr.kind) {
@@ -62,8 +62,8 @@ function extendOperand(expr: Expr, mark: (operand: Expr) => void): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Each kind has its own constant-promotion condition.
-// code-gauge-allow functionNcss 46 -- Each kind has its own constant-promotion condition.
+// code-gauge-allow functionCognitiveComplexity -- Each kind has its own constant-promotion condition.
+// code-gauge-allow functionNcss -- Each kind has its own constant-promotion condition.
 export function promotable(expr: Expr, annotations: Annotations, budget: ExecutionBudget): boolean {
   budget.spend();
   const child = (value: Expr): boolean => promotable(value, annotations, budget);

@@ -108,7 +108,7 @@ export function sizeofTypeFollowers(
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- One source-order pass shares type scopes and delimiter matches across declaration and expression prefixes.
+// code-gauge-allow functionCognitiveComplexity -- One source-order pass shares type scopes and delimiter matches across declaration and expression prefixes.
 export function syntaxBoundaryFollowers(
   tokens: SourceToken[],
   starts: readonly number[],
@@ -148,7 +148,7 @@ function expressionContinues(text: string): boolean {
   return (CONTINUATIONS.has(text) && text !== '{') || ['(', '[', '.', '->', '++', '--'].includes(text);
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Type words, tag bodies, and interleaved qualifiers determine one declaration prefix.
+// code-gauge-allow functionCognitiveComplexity -- Type words, tag bodies, and interleaved qualifiers determine one declaration prefix.
 function afterDeclarationSpecifiers(
   tokens: SourceToken[],
   start: number,
@@ -284,7 +284,7 @@ function closingDelimiters(
   return closes;
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Delimiter depth and initialization state must advance on the same declarator token stream.
+// code-gauge-allow functionCognitiveComplexity -- Delimiter depth and initialization state must advance on the same declarator token stream.
 function declarationFollower(
   tokens: SourceToken[],
   start: number,

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 586 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss -- Groups the related standard library operations that share this module.
 import {
   checked,
   divCeil,
@@ -306,7 +306,7 @@ function shiftedBy(value: bigint, distance: bigint, toLeft: boolean, type: IntTy
 }
 
 /** `rotl` and `rotr` of `(T, x, r)` for an unsigned `T`, taking the amount modulo the bit count. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Validates the rotation domain before sharing the modulo and bit arithmetic for both directions.
+// code-gauge-allow functionCognitiveComplexity -- Validates the rotation domain before sharing the modulo and bit arithmetic for both directions.
 function rotate(name: string, left: boolean): () => Member {
   return generic(name, 3, (sema, call, type, [xArg, amountArg]) => {
     if (type.kind !== 'int' || type.signed) {
@@ -349,7 +349,7 @@ function floatConstant(name: string, exponent: (format: (typeof FORMATS)[FloatBi
 const DIVISION_ERRORS = errorSetOf(['DivisionByZero', 'Overflow']);
 const MOD_ERRORS = errorSetOf(['DivisionByZero', 'NegativeDenominator']);
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Shares argument validation and error-union handling across integer division variants.
+// code-gauge-allow functionCognitiveComplexity -- Shares argument validation and error-union handling across integer division variants.
 function intDivision(
   name: string,
   errors: typeof DIVISION_ERRORS,
@@ -487,8 +487,8 @@ function gcd(a: bigint, b: bigint, spend: (cost: number) => void): bigint {
 const POW_ERRORS = errorSetOf(['Overflow', 'Underflow']);
 
 /** `std.math.powi`, transcribed: the power, or the name of the error it returns. */
-// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
-// code-gauge-allow functionNcss 33 -- Keeps checked, metered exponentiation and its numeric edge cases together.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionNcss -- Keeps checked, metered exponentiation and its numeric edge cases together.
 function powi(x: bigint, y: bigint, type: IntType, spend: (cost: number) => void): bigint | 'Overflow' | 'Underflow' {
   const oneOverflows = maxInt(type) < 1n;
   const yEven = !oneOverflows && (y & 1n) === 0n;
@@ -519,7 +519,7 @@ function powi(x: bigint, y: bigint, type: IntType, spend: (cost: number) => void
   return accumulator;
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Implements precision-aware tolerance, equality and special-value rules as one operation.
+// code-gauge-allow functionCognitiveComplexity -- Implements precision-aware tolerance, equality and special-value rules as one operation.
 function approximateEquality(relative: boolean): () => Member {
   const name = relative ? 'std.math.approxEqRel' : 'std.math.approxEqAbs';
   return generic(name, 4, (sema, call, type, args) => {
@@ -668,7 +668,7 @@ const MEMBERS: Record<string, () => Member> = {
   ),
   atan2: binaryFloat('std.math.atan2', 'f32-f64'),
   hypot: binaryFloat('std.math.hypot', 'comptime'),
-  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps integer and float logarithm analysis with their generated computation.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps integer and float logarithm analysis with their generated computation.
   log: generic('std.math.log', 3, (sema, call, type, [baseArg, xArg]) => {
     if (!isArithmeticType(type)) return sema.error(call.span, 'std.math.log の型は整数か浮動小数点数にしてください。');
     if (type.kind === 'float' && type.bits !== 32 && type.bits !== 64)
@@ -716,7 +716,7 @@ const MEMBERS: Record<string, () => Member> = {
       return typeof result === 'string' ? ErrorValue.of(result) : result;
     });
   }),
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps numeric type checks, ordered-bound assertions, and float min/max behavior together.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps numeric type checks, ordered-bound assertions, and float min/max behavior together.
   clamp: fnMember('std.math.clamp', (sema, call) => {
     const [valueArg, lowArg, highArg] = expectArgs(sema, call, 3, 'std.math.clamp');
     const parts = [valueArg, lowArg, highArg].map((arg) => sema.compile(arg));
@@ -859,7 +859,7 @@ const MEMBERS: Record<string, () => Member> = {
     }
     return computed(log2IntType(type), [value], call.span, ([x]) => integerLogarithm(10n, x as bigint, spendMemory));
   }),
-  // code-gauge-allow functionCognitiveComplexity 16 -- Validates numeric domains before selecting integer clamping or float conversion.
+  // code-gauge-allow functionCognitiveComplexity -- Validates numeric domains before selecting integer clamping or float conversion.
   lossyCast: generic('std.math.lossyCast', 2, (sema, call, type, [valueArg]) => {
     const value = sema.compile(valueArg);
     if (!isArithmeticType(value.type)) return sema.error(valueArg, 'std.math.lossyCast の値は数にしてください。');
@@ -883,7 +883,7 @@ const MEMBERS: Record<string, () => Member> = {
   sin: builtinAlias('std.math.sin', '@sin'),
   cos: builtinAlias('std.math.cos', '@cos'),
   tan: builtinAlias('std.math.tan', '@tan'),
-  // code-gauge-allow functionCognitiveComplexity 24 -- Resolves the sign result type and value for integer and float arguments.
+  // code-gauge-allow functionCognitiveComplexity -- Resolves the sign result type and value for integer and float arguments.
   sign: fnMember('std.math.sign', (sema, call) => {
     const [arg] = expectArgs(sema, call, 1, 'std.math.sign');
     const value = sema.compile(arg);

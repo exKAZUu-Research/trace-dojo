@@ -140,7 +140,7 @@ const ZONE_CHUNKS: [string, string, number][] = [
   ['Z', 'Z07', STD_ISO8601_SHORT_TZ],
 ];
 
-// code-gauge-allow functionCognitiveComplexity 60 -- A transcription of format.go's nextStdChunk switch.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of format.go's nextStdChunk switch.
 function nextStdChunk(layout: string): [string, number, string] {
   for (let i = 0; i < layout.length; i++) {
     const c = layout[i];
@@ -274,7 +274,7 @@ export function format(t: Time, layout: string): string {
   return appendFormat(t, layout);
 }
 
-// code-gauge-allow functionCognitiveComplexity 60 -- A transcription of format.go's appendFormat switch.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of format.go's appendFormat switch.
 function appendFormat(t: Time, layoutValue: string): string {
   const { name, offset, abs } = locabs(t);
   const days = daysOf(abs);
@@ -690,7 +690,6 @@ interface ParseState {
   range: string;
 }
 
-// code-gauge-allow functionCognitiveComplexity 40 -- A transcription of format.go's parse.
 function parseLayout(layoutValue: string, valueText: string, defaultLocation: Location, local: Location): ParseResult {
   const failure = (layoutElem: string, valueElem: string, message: string): ParseResult => ({
     error: { layout: layoutValue, value: valueText, layoutElem, valueElem, message },
@@ -733,7 +732,7 @@ function parseLayout(layoutValue: string, valueText: string, defaultLocation: Lo
   return finishParse(state, value, defaultLocation, local, failure);
 }
 
-// code-gauge-allow functionCognitiveComplexity 80 -- A transcription of the element switch of format.go's parse.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of the element switch of format.go's parse.
 function parseElement(std: number, valueText: string, layout: string, state: ParseState): string | typeof BAD {
   let value = valueText;
   const take = (result: [bigint, string] | typeof BAD, set: (n: bigint) => void): string | typeof BAD => {
@@ -1104,7 +1103,7 @@ function leadingFraction(s: string): [bigint, number, string] {
 }
 
 /** `time.ParseDuration`: the duration, or the message of its error. */
-// code-gauge-allow functionCognitiveComplexity 30 -- A transcription of format.go's ParseDuration.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of format.go's ParseDuration.
 export function parseDuration(orig: string): { duration: bigint } | { error: string } {
   const invalid = { error: `time: invalid duration ${quote(orig)}` };
   let s = orig;

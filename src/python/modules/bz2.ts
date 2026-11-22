@@ -135,8 +135,8 @@ defineMethod(decompressorClass, 'decompress', (self, args, kwargs) => {
   return decompressInto(state, data, maxLength);
 });
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Mirrors decompress and decompress_buf of CPython's _bz2module.c.
-// code-gauge-allow functionNcss 34 -- Mirrors decompress and decompress_buf of CPython's _bz2module.c.
+// code-gauge-allow functionCognitiveComplexity -- Mirrors decompress and decompress_buf of CPython's _bz2module.c.
+// code-gauge-allow functionNcss -- Mirrors decompress and decompress_buf of CPython's _bz2module.c.
 function decompressInto(state: DecompressorState, data: Uint8Array, maxLength: number): PyValue {
   const { decompressor } = state;
   const { strm } = decompressor;

@@ -32,8 +32,8 @@ export class TurtleReachability {
 
   constructor(private readonly spend: (cost?: number) => void) {}
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Collects typed roots and walks the graph without host recursion.
-  // code-gauge-allow functionNcss 33 -- Keeps per-collection work and cycle tracking together.
+  // code-gauge-allow functionCognitiveComplexity -- Collects typed roots and walks the graph without host recursion.
+  // code-gauge-allow functionNcss -- Keeps per-collection work and cycle tracking together.
   collect(globals: readonly Root[], frames: readonly Frame[]): Set<unknown> {
     const stack: WorkItem[] = [];
     const push: Push = (value, type) => {
@@ -128,7 +128,7 @@ export class TurtleReachability {
     }
   }
 
-  // code-gauge-allow functionNcss 35 -- Covers each representation that can retain a turtle.
+  // code-gauge-allow functionNcss -- Covers each representation that can retain a turtle.
   private typedChildren(value: Value, type: Type, push: Push, turtles: Set<unknown>): void {
     if (value instanceof ZUnion && value.backingReferences) {
       this.unionChildren(value, push);
@@ -211,7 +211,7 @@ export class TurtleReachability {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Traverses untyped temporaries and native storage without recursive host calls.
+  // code-gauge-allow functionCognitiveComplexity -- Traverses untyped temporaries and native storage without recursive host calls.
   private children(item: object, push: Push, turtles: Set<unknown>): void {
     if (item instanceof ZUnion) this.unionChildren(item, push);
     else if (item instanceof ZArray || item instanceof Slice) this.untypedSequence(item, push);

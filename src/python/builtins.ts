@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 531 -- The builtins module keeps every builtin function together.
+// code-gauge-allow-file fileNcss -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass, PyBytes } from './bytesValues';
 import { unicodeKeywords } from './callArguments';
 import { checkShortcuts } from './checkShortcuts';
@@ -136,8 +136,8 @@ function checkEnumerateArgs(count: number, keywords: string[]): void {
 }
 
 export const zipClass = builtinClass('zip');
-// code-gauge-allow functionCognitiveComplexity 26 -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
-// code-gauge-allow functionNcss 35 -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
+// code-gauge-allow functionCognitiveComplexity -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
+// code-gauge-allow functionNcss -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
 zipClass.construct = (cls, args, kwargs) => {
   checkArgs(
     { qualified: 'zip', min: 0, max: Number.POSITIVE_INFINITY, style: 'takes', keywords: ['strict'] },
@@ -199,7 +199,7 @@ function checkStrictLengths(name: 'zip' | 'map', nexts: (() => PyValue | typeof 
 }
 
 export const mapClass = builtinClass('map');
-// code-gauge-allow functionCognitiveComplexity 21 -- As zip's, map's iterator keeps its next function, its reduction, and its suspending next together.
+// code-gauge-allow functionCognitiveComplexity -- As zip's, map's iterator keeps its next function, its reduction, and its suspending next together.
 mapClass.construct = (cls, args, kwargs) => {
   checkArgs(
     { qualified: 'map', min: 0, max: Number.POSITIVE_INFINITY, style: 'takes', keywords: ['strict'] },
@@ -239,7 +239,7 @@ mapClass.construct = (cls, args, kwargs) => {
 };
 
 export const filterClass = builtinClass('filter');
-// code-gauge-allow functionCognitiveComplexity 18 -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
+// code-gauge-allow functionCognitiveComplexity -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
 filterClass.construct = (cls, args, kwargs) => {
   checkArgs({ qualified: 'filter', min: 2, max: 2, style: 'expected' }, args, kwargs);
   const [fn, iterable] = args;
@@ -265,7 +265,7 @@ filterClass.construct = (cls, args, kwargs) => {
 };
 
 export const reversedClass = builtinClass('reversed');
-// code-gauge-allow functionCognitiveComplexity 20 -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
+// code-gauge-allow functionCognitiveComplexity -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
 reversedClass.construct = (_cls, args, kwargs) => {
   checkArgs({ qualified: 'reversed', min: 1, max: 1, style: 'expected' }, args, kwargs);
   const [sequence] = args;

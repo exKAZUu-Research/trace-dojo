@@ -91,7 +91,7 @@ function sliceElem(item: Type): Type {
   return t.kind === 'slice' || t.kind === 'array' ? t.elem : t;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- All six chunk methods share the same window and remainder calculations.
+// code-gauge-allow functionCognitiveComplexity -- All six chunk methods share the same window and remainder calculations.
 export function chunksNative(
   exact: boolean,
   reverse: boolean,

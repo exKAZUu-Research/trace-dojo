@@ -190,8 +190,8 @@ function walk(
 }
 
 /** Pushes what an object refers to, returning the number of elements among them. */
-// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of object that refers to others.
-// code-gauge-allow functionNcss 50 -- One case per kind of object that refers to others.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of object that refers to others.
+// code-gauge-allow functionNcss -- One case per kind of object that refers to others.
 function pushReferences(pending: unknown[], object: PyObject, reached: Set<TurtleState>): number {
   if (object instanceof PyList || object instanceof PyTuple || object instanceof PyDeque) {
     pushAll(pending, object.items);

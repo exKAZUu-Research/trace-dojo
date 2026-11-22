@@ -1,5 +1,5 @@
 import { pushAll } from '../arrays';
-// code-gauge-allow-file fileNcss 430 -- The iterators of itertools and their shared helpers belong together.
+// code-gauge-allow-file fileNcss -- The iterators of itertools and their shared helpers belong together.
 import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { registerModule } from '../modules';
@@ -262,7 +262,7 @@ function chainOf(nextIterable: NextFunction, holds: () => unknown[]): PyIterator
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes the index loop of itertools.combinations.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the index loop of itertools.combinations.
 function* combinations(pool: PyValue[], r: number, withReplacement: boolean): Generator<PyValue[]> {
   const n = pool.length;
   if (!withReplacement && r > n) return;
@@ -347,8 +347,8 @@ function* productOf(pools: PyValue[][]): Generator<PyValue[]> {
   }
 }
 
-// code-gauge-allow functionNcss 34 -- Follows itertools.groupby, whose groups share one underlying iterator.
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows itertools.groupby, whose groups share one underlying iterator.
+// code-gauge-allow functionNcss -- Follows itertools.groupby, whose groups share one underlying iterator.
+// code-gauge-allow functionCognitiveComplexity -- Follows itertools.groupby, whose groups share one underlying iterator.
 function groupby(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs(
     { qualified: 'groupby', min: 1, max: 2, style: 'takes', keywords: ['iterable', 'key'], named: 2 },
@@ -463,7 +463,7 @@ function ssizeOrMinusOne(value: PyValue): number {
   return index > MAX_SSIZE || index < -MAX_SSIZE - 1n ? -1 : Number(index);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows itertools.zip_longest, which stops when every iterable is exhausted.
+// code-gauge-allow functionCognitiveComplexity -- Follows itertools.zip_longest, which stops when every iterable is exhausted.
 function zipLongest(args: PyValue[], kwargs: Kwargs): PyValue {
   if (kwargs && (kwargs.size > 1 || (kwargs.size === 1 && !kwargs.has('fillvalue')))) {
     throw typeError('zip_longest() got an unexpected keyword argument');

@@ -17,7 +17,7 @@ export function probablyPrime(
   return millerRabin(value, rounds, power) && lucas(value, sqrt);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps Go primality rounds, Lucas recurrence and parameter selection together with deadline checks.
+// code-gauge-allow functionCognitiveComplexity -- Keeps Go primality rounds, Lucas recurrence and parameter selection together with deadline checks.
 function millerRabin(value: bigint, rounds: bigint, power: ModularPower): boolean {
   const bits = (value - 1n).toString(2);
   const zeros = bits.length - bits.lastIndexOf('1') - 1;
@@ -59,8 +59,8 @@ function randomBelow(limit: bigint, random: LaggedFibonacci): bigint {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps Go primality rounds, Lucas recurrence and parameter selection together with deadline checks.
-// code-gauge-allow functionNcss 36 -- Keeps Go primality rounds, Lucas recurrence and parameter selection together with deadline checks.
+// code-gauge-allow functionCognitiveComplexity -- Keeps Go primality rounds, Lucas recurrence and parameter selection together with deadline checks.
+// code-gauge-allow functionNcss -- Keeps Go primality rounds, Lucas recurrence and parameter selection together with deadline checks.
 function lucas(value: bigint, sqrt: (value: bigint) => bigint): boolean {
   let p = 3n;
   for (;;) {
