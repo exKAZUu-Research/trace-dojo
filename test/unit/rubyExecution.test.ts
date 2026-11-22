@@ -557,7 +557,7 @@ test.each([
   [
     'Math gamma handles signed zero and infinite domain',
     'p Math.gamma(-0.0),Math.gamma(0.0),Math.lgamma(-0.0),Math.lgamma(-1.0),Math.lgamma(1.0);begin;p Math.lgamma(-Float::INFINITY);rescue=>e;p e.class;end',
-    `-Infinity\nInfinity\n[Infinity, -1]\n[Infinity, ${process.platform === 'linux' ? '-1' : '1'}]\n[0.0, 1]\nMath::DomainError\n`,
+    `-Infinity\nInfinity\n[Infinity, -1]\n[Infinity, 1]\n[0.0, 1]\nMath::DomainError\n`,
   ],
   [
     'Math gamma and lgamma approximate small arguments',
