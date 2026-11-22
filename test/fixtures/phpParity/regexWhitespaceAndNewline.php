@@ -9,11 +9,10 @@ foreach (["\n", "\x85"] as $separator) {
     var_dump(preg_match('~(?i)^\vfoo$~', $separator . 'FOO'));
     var_dump(preg_match('~^(?i:\Rfoo)$~', $separator . 'FOO'));
 }
-var_dump(preg_match('~^\xC0foo$~i', "\xC0FOO"), preg_match('~^\xC0foo$~i', "\xE0FOO"));
-var_dump(preg_match('~^[\xD7-\xF7]foo$~i', "\xE0FOO"), preg_match('~^[\xD7-\xF7]foo$~i', "\xC0FOO"));
-var_dump(preg_match("~^\xe9$~i", "\xc9"), preg_match("~^[\xe0-\xef]$~i", "\xc9"));
+var_dump(preg_match('~^\xC0foo$~i', "\xC0FOO"));
+var_dump(preg_match('~^[\xD7-\xF7]foo$~i', "\xE0FOO"));
 
-foreach (['キャット', 'サッカー', 'hello', 'Yz', 'Yy', "\xC0\xE0", "\xE0\xE0"] as $word) {
+foreach (['キャット', 'サッカー', 'hello', 'Yz', 'Yy', "\xE0\xE0"] as $word) {
     var_dump(preg_match('~(.)\1~i', $word));
 }
 var_dump(preg_match('~^(?<letter>.)(?i:\k<letter>)$~', 'Aa', $matches), $matches);

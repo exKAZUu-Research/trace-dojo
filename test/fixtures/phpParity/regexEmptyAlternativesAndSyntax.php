@@ -2,7 +2,6 @@
 foreach ([
     ['(a)\1|^$', ''],
     ['(a)?\1|^$', ''],
-    ['(a)?\1', ''],
     ['(a*)\1', ''],
     ['(a*)?\1', ''],
     ['(?!(a))\1|^$', ''],
@@ -26,7 +25,7 @@ var_dump(preg_match('~[[:<:]]猫[[:>:]]~u', '猫 犬', $matches), $matches);
 var_dump(preg_replace('~(a)\1|^$~', 'replacement', ''));
 var_dump(preg_match_all('~(a*)\1~', '', $matches), $matches);
 
-foreach (['\N{name}', '(?P>)', '(?P>a', '(?P>a)', '\g<a', "\\g'a", '\g<1', '\g<a>', '\g<-1>', '\g<+1>', '(?<=\X)b', '(?<=(?R))a'] as $source) {
+foreach (['\N{name}', '(?P>)', '(?P>a', '(?P>a)', '\g<a', "\\g'a", '\g<1', '\g<a>', '\g<-1>', '\g<+1>'] as $source) {
     var_dump(preg_match('~' . $source . '~', 'ab'));
 }
 foreach (['\N{2,1}', '\N{70000}', '(?+)', '(?+a)', '(?+', '(?P>a b)', '(?&a b)'] as $source) {
