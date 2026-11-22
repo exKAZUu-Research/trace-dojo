@@ -1,4 +1,4 @@
-import { platformPower, platformUnary } from '../interpreter/platformMath';
+import { power } from '../interpreter/power';
 // code-gauge-allow-file fileNcss 520 -- The primitive table lists every built-in operation the Haskell library calls.
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { CONS_CON, tupleCon, UNIT_CON } from './builtinTypes';
@@ -301,10 +301,10 @@ function defineFloating(prefix: 'double' | 'float', round: (value: number) => nu
     'Asinh',
     'Acosh',
     'Atanh',
-  ];
+  ] as const;
   for (const name of unary)
-    strict(`${prefix}${name}`, 1, ([a]) => platformUnary(name, a as number, prefix === 'float'));
-  strict(`${prefix}Pow`, 2, ([a, b]) => platformPower(a as number, b as number, prefix === 'float'));
+    strict(`${prefix}${name}`, 1, ([a]) => round(Math[name.toLowerCase() as Lowercase<typeof name>](a as number)));
+  strict(`${prefix}Pow`, 2, ([a, b]) => round(power(a as number, b as number)));
   strict(`${prefix}IsNaN`, 1, ([a]) => bool(Number.isNaN(a)));
   strict(`${prefix}IsInfinite`, 1, ([a]) => bool(a === Number.POSITIVE_INFINITY || a === Number.NEGATIVE_INFINITY));
   strict(`${prefix}IsNegativeZero`, 1, ([a]) => bool(Object.is(a, -0)));

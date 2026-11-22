@@ -1,23 +1,16 @@
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import path from 'node:path';
-
 import { Language, type Node, Parser } from '@willbooster/web-tree-sitter';
+
+import { readWasm } from '#interpreterWasm';
 
 import { CompileError, type SourceDiagnostic } from './diagnostics';
 
-// Resolving from the working directory keeps the lookup independent of how Next.js bundles this module.
-const requireFromRoot = createRequire(path.join(process.cwd(), 'package.json'));
-// Copying into this realm's Uint8Array passes the runtime's `instanceof` check, which a Buffer from another realm
-// (as under jsdom) fails.
-const readWasm = (specifier: string): Uint8Array => new Uint8Array(readFileSync(requireFromRoot.resolve(specifier)));
-await Parser.init({
-  wasmBinary: readWasm('@willbooster/web-tree-sitter/web-tree-sitter.wasm').buffer as ArrayBuffer,
-});
+const runtimeWasm = await readWasm('@willbooster/web-tree-sitter/web-tree-sitter.wasm');
+await Parser.init({ wasmBinary: runtimeWasm.buffer });
 
+/** @param languageWasmSpecifier One of the grammars that `#interpreterWasm` resolves. */
 export async function loadParser(languageWasmSpecifier: string): Promise<Parser> {
   const parser = new Parser();
-  parser.setLanguage(await Language.load(readWasm(languageWasmSpecifier)));
+  parser.setLanguage(await Language.load(await readWasm(languageWasmSpecifier)));
   return parser;
 }
 
