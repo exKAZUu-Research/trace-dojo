@@ -195,6 +195,10 @@ test.each([
   expect(diagnosticsOf(source)).toEqual(['1: 文字列リテラルが閉じられていません。']);
 });
 
+test('rejects an unfinished template ending in a backslash', () => {
+  expect(diagnosticsOf('console.log(`hello\\')).toEqual(['1: 書き方に誤りがあります。']);
+});
+
 test('hidden error inspection lists own properties alongside the headline', () => {
   const execution = executeProgram(
     'typescript',

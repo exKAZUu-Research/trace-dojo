@@ -317,7 +317,8 @@ function lexTemplate(lexer: Lexer, index: number): number {
     if (source.startsWith('${', index)) index = lexCode(lexer, index + 2, undefined);
     else index += source[index] === '\\' ? 2 : 1;
   }
-  return index;
+  // A backslash ending the program steps past its end.
+  return Math.min(index, source.length);
 }
 
 /** The index of the quote closing the string opening at `opening`, or the end, and of its first raw line break. */
