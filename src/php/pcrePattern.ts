@@ -441,14 +441,7 @@ class PatternConverter {
   private quantifier(text: string, end: number): void {
     if (!this.repeatable) this.fail('quantifier does not follow a repeatable item', end);
     this.checkLookbehindQuantifier(text);
-    if (/^(?:[*?]|\{0[,}])/.test(text)) {
-      this.skippable.push({ groups: this.itemGroups, start: this.itemAt, end: this.index });
-      for (const open of this.frames) open.passable = true;
-    }
-    // JavaScript forgets the capture that marks a `\K` when a later round of a repetition does not pass it.
-    if (this.itemCanLoseKeep && text !== '?' && !/^\{[01](?:,1)?\}$/.test(text)) {
-      this.unavailable ??= String.raw`繰り返しの中での選択や省略と \K の併用`;
-    }
+    this.noteRepetition(text);
     this.index = end;
     while (this.index < this.source.length) {
       if (this.source.startsWith('(?#', this.index)) this.skipGroupComment();
@@ -480,6 +473,18 @@ class PatternConverter {
   /** Rejects what a lookbehind would get wrong, because JavaScript matches a lookbehind from its end to its start. */
   private rejectInLookbehind(what: string): void {
     if (this.frames.some((frame) => frame.lookaround === 'behind')) this.unavailable ??= `後読みの中の${what}`;
+  }
+
+  /** Records what the quantifier of the last item means for back references and `\K` points. */
+  private noteRepetition(text: string): void {
+    if (/^(?:[*?]|\{0[,}])/.test(text)) {
+      this.skippable.push({ groups: this.itemGroups, start: this.itemAt, end: this.index });
+      for (const open of this.frames) open.passable = true;
+    }
+    // JavaScript forgets the capture that marks a `\K` when a later round of a repetition does not pass it.
+    if (this.itemCanLoseKeep && text !== '?' && !/^\{[01](?:,1)?\}$/.test(text)) {
+      this.unavailable ??= String.raw`繰り返しの中での選択や省略と \K の併用`;
+    }
   }
 
   private checkLookbehindQuantifier(quantifier: string): void {
