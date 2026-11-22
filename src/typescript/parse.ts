@@ -179,7 +179,7 @@ function typeScriptSyntaxErrors(root: Node, source: string, parseErrors: SourceD
 function withUnterminatedStrings(root: Node, source: string, parseErrors: SourceDiagnostic[]): SourceDiagnostic[] {
   const lexer: Lexer = { source, validTokenEnds: validTokenEnds(root), strings: [] };
   let lexedUntil = 0;
-  for (const node of outermostErrorNodes(root)) {
+  for (const node of unreadNodes(root)) {
     // A string opening in the node may run past its end, which the parser can place before the line break.
     lexedUntil = lexCode(lexer, Math.max(node.startIndex, lexedUntil), node.endIndex);
   }
@@ -237,10 +237,11 @@ function validTokenEnds(root: Node): Map<number, number> {
   return new Map(tokens.filter((token) => !token.hasError).map((token) => [token.startIndex, token.endIndex]));
 }
 
-function outermostErrorNodes(root: Node): Node[] {
+/** The outermost ERROR nodes, and the strings whose closing quote the parser inserted. */
+function unreadNodes(root: Node): Node[] {
   const found: Node[] = [];
   const visit = (node: Node): void => {
-    if (node.isError) found.push(node);
+    if (node.isError || (node.type === 'string' && node.hasError)) found.push(node);
     else if (node.hasError) for (const child of node.children) visit(child);
   };
   visit(root);
