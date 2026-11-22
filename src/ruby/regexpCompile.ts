@@ -3,7 +3,7 @@ import { EmulatedRegExp, toRegExp } from 'oniguruma-to-es';
 import { ExecutionLimitError } from '../interpreter/limits';
 import { RegexpSourceError } from './regexpEscapes';
 import { onigurumaSource } from './regexpOniguruma';
-import { regexpCaptureNames, type RegexpToken, regexpTokens } from './regexpTokens';
+import { hasSearchStartAnchor, regexpCaptureNames, type RegexpToken, regexpTokens } from './regexpTokens';
 import { UnsupportedFeatureError } from './runtime';
 
 interface RegexpFlags {
@@ -108,8 +108,9 @@ export function compileRegexp(source: string, flags: RegexpFlags): RegExp {
   if (calls.length * source.length > MAX_SUBROUTINE_EXPANSION)
     throw new UnsupportedFeatureError('複雑な再帰構造の正規表現');
   const prepared = onigurumaSource(source, extended);
+  let compiled: RegExp;
   try {
-    return toRegExp(prepared, {
+    compiled = toRegExp(prepared, {
       flags: `${flags.ignoreCase ? 'i' : ''}${flags.multiline ? 'm' : ''}${extended ? 'x' : ''}`,
       global: true,
       hasIndices: true,
@@ -117,6 +118,11 @@ export function compileRegexp(source: string, flags: RegexpFlags): RegExp {
   } catch (error) {
     throw compileError(error, source, extended);
   }
+  // The library makes an expression that starts with `\G` sticky, which is exact; its emulation of `\G` elsewhere
+  // searches a clipped subject, which changes what other anchors and look-behind see.
+  if (!compiled.sticky && hasSearchStartAnchor(source, extended))
+    throw new UnsupportedFeatureError(`正規表現の先頭以外の${String.raw`\G`}`);
+  return compiled;
 }
 
 /** The same expression matching only at `lastIndex`. */
