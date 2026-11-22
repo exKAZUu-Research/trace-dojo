@@ -107,7 +107,9 @@ function execAt(
   regExp.lastIndex = start;
   const found = regExp.exec(input);
   const end = found ? found.index + found[0].length : input.length;
-  runtime.spend(1 + Math.ceil(Math.max(0, end - start) / CODE_UNITS_PER_OPERATION));
+  // A failed sticky match tried one position only, while a failed search went through the rest of the text.
+  const scanned = found || !sticky ? end - start : 0;
+  runtime.spend(1 + Math.ceil(Math.max(0, scanned) / CODE_UNITS_PER_OPERATION));
   runtime.budget.checkClock();
   if (!found) return undefined;
   if (capture) runtime.allocate(2 * state.groupCount);
