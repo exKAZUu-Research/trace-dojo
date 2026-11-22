@@ -76,6 +76,7 @@ type BrowserSideCaller = Omit<ServerCaller, 'submitExercise' | 'createFillInBlan
   ) => Promise<FillInBlankVerdict>;
 };
 let caller: BrowserSideCaller;
+let serverCaller: Record<string, (input: object) => Promise<unknown>>;
 let runtimeCaller: { mutation: (procedure: string, input: object) => Promise<unknown> };
 let instantiateProblem: typeof instantiateProblemType;
 let challengeMap: ChallengeMap;
@@ -117,11 +118,11 @@ beforeAll(async () => {
   runtimeCaller = {
     mutation: withBrowserSide((procedure, input) => runtimeClient.mutation(procedure, input), findStoredProblem),
   };
-  const serverCaller = backendRouter.createCaller({
+  serverCaller = backendRouter.createCaller({
     req: new Request('http://localhost', { headers: { Cookie: 'sAccessToken=test' } }),
     resHeaders: new Headers(),
     info: {} as never,
-  }) as unknown as Record<string, (input: object) => Promise<unknown>>;
+  }) as unknown as typeof serverCaller;
   const invoke = withBrowserSide((procedure, input) => serverCaller[procedure](input), findStoredProblem);
   caller = new Proxy(
     {},
@@ -167,6 +168,24 @@ afterAll(() => {
   sqlite?.close();
   if (directory) rmSync(directory, { recursive: true, force: true });
   vi.unstubAllEnvs();
+});
+
+test('a submission from a page opened before the browser graded asks that page to reload', async () => {
+  const blank = await start();
+  await expect(
+    serverCaller.submitExercise({ ...locationOnly(), sessionId: blank.sessionId, code: 'class Main {}' })
+  ).rejects.toMatchObject({ code: 'CONFLICT' });
+  const regular = await startRegular();
+  await expect(
+    serverCaller.submitRegularExercise({
+      ...locationOnly(),
+      sessionId: regular.sessionId,
+      requestId: 'pre-deployment',
+      context: { problemType: 'executionResult', traceItemIndex: 0 },
+      isCorrect: true,
+    })
+  ).rejects.toMatchObject({ code: 'CONFLICT' });
+  expect(exerciseRows().submissions).toEqual([]);
 });
 
 test('stores identity and seed without snapshots, then regenerates a safe DTO', async () => {

@@ -61,9 +61,10 @@ const submissionSchema = locationSchema.extend({
   learningMode: challengeModeSchema,
   sessionId: z.number().int().positive(),
   code: z.string().min(1).max(MAX_JAVA_PROGRAM_LENGTH),
-  status: z.enum(['correct', 'incorrect']),
+  // Optional only to tell a page opened before the browser graded to reload: see `assertSentByCurrentPage`.
+  status: z.enum(['correct', 'incorrect']).optional(),
 });
-type JavaSubmission = z.infer<typeof submissionSchema>;
+type JavaSubmission = z.infer<typeof submissionSchema> & { status: 'correct' | 'incorrect' };
 const regularSubmissionSchema = locationSchema
   .extend({
     sessionId: z.number().int().positive(),
@@ -73,8 +74,11 @@ const regularSubmissionSchema = locationSchema
       .object({ problemType: z.enum(['executionResult', 'step']), traceItemIndex: z.number().int().nonnegative() })
       .strict(),
     isCorrect: z.boolean(),
-    /** Whether the answered step is the last one of the trace, which only the browser generates. */
-    isLastStep: z.boolean(),
+    /**
+     * Whether the answered step is the last one of the trace, which only the browser generates. Optional only to tell
+     * a page opened before the browser generated traces to reload: see `assertSentByCurrentPage`.
+     */
+    isLastStep: z.boolean().optional(),
   })
   .strict();
 const switchSchema = locationSchema
@@ -182,7 +186,11 @@ export const exerciseProcedures = {
       const key = `${input.sessionId}:${input.status}:${input.code}`;
       const existing = savingSubmissions.get(key);
       if (existing) return await existing;
-      const saving = enqueue(input.sessionId, () => saveJavaSubmission(userId, input, receivedAt, format));
+      const { status } = input;
+      assertSentByCurrentPage(status);
+      const saving = enqueue(input.sessionId, () =>
+        saveJavaSubmission(userId, { ...input, status }, receivedAt, format)
+      );
       savingSubmissions.set(key, saving);
       try {
         await saving;
@@ -199,7 +207,9 @@ export const exerciseProcedures = {
       assertNotEnded(
         ownedSession(input.sessionId, userId, input.courseId, input.lectureId, 'regular', input.learningMode)
       );
-      return await enqueue(input.sessionId, () => saveRegularVerdict(userId, input));
+      const { isLastStep } = input;
+      assertSentByCurrentPage(isLastStep);
+      return await enqueue(input.sessionId, () => saveRegularVerdict(userId, { ...input, isLastStep }));
     }),
   switchRegularExerciseToStep: procedure
     .use(authorize)
@@ -235,6 +245,13 @@ export const exerciseProcedures = {
     }),
 };
 
+/**
+ * A page opened before a deployment added `reported` to its request cannot report it. CONFLICT makes such a page
+ * show its reload notice, whereas the BAD_REQUEST of input validation would look like a network failure to retry.
+ */
+function assertSentByCurrentPage<T>(reported: T | undefined): asserts reported is T {
+  if (reported === undefined) throw new TRPCError({ code: 'CONFLICT', message: 'Reload the page to submit' });
+}
 const enqueue = async <T>(sessionId: number, action: () => T | Promise<T>): Promise<T> =>
   await serialize(`session:${sessionId}`, action);
 const lockedStart = async <T>(key: string, action: () => T | Promise<T>): Promise<T> =>
@@ -454,7 +471,10 @@ const toDisplay = (row: ExerciseSession, format: ProblemFormat): ExerciseDisplay
   };
 };
 // code-gauge-allow functionCognitiveComplexity -- The function predates this change, which only renames the value it returns.
-const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmissionSchema>): RegularExerciseState =>
+const saveRegularVerdict = (
+  userId: string,
+  input: z.infer<typeof regularSubmissionSchema> & { isLastStep: boolean }
+): RegularExerciseState =>
   db.transaction((tx) => {
     const current = ownedSession(
       input.sessionId,
