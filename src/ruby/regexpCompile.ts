@@ -161,7 +161,7 @@ function quantifierLacksTarget(source: string, extended: boolean): boolean {
       previous.kind === 'groupOpen' ||
       previous.kind === 'directive' ||
       (!previous.inClass && previous.raw === '|');
-    if (opensOperand && !token.inClass && token.kind === 'char' && /^[*+?]$/.test(token.raw)) return true;
+    if (opensOperand && !token.inClass && token.kind === 'char' && /^[*+?{]$/.test(token.raw)) return true;
     previous = token;
   }
   return false;
