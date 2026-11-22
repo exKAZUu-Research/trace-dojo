@@ -12,9 +12,7 @@ import { throwableText, traceText } from './exceptions';
 import { releaseDropped, releaseGlobalObject } from './garbage';
 import { holderCounts } from './holderCounts';
 import { type ParsedProgram, parsePhp } from './parse';
-import { releaseBoundedRegexSubject } from './regexExecution';
 import { ExitSignal, FatalError, type Frame, PhpThrow, Runtime, SCRIPT_PATH, withRuntime } from './runtime';
-import { runExecuteOnLargeStack } from './stackFallback';
 import { mayDestruct, runStatements } from './statements';
 import { UnsupportedFeatureError } from './unsupported';
 import { PhpObject } from './values';
@@ -24,13 +22,7 @@ import './library';
 export function executePhpProgram(source: string, input?: ProgramInput): ProgramExecution {
   try {
     const parsed = parsePhp(source);
-    const runtime = new Runtime(input);
-    const run = runProgram(runtime, parsed);
-    if (runtime.hostStackExhausted) {
-      const retried = runExecuteOnLargeStack(source, runtime.budget.remainingMilliseconds, input);
-      if (retried) return retried;
-    }
-    return { kind: 'executed', ...run };
+    return { kind: 'executed', ...runProgram(new Runtime(input), parsed) };
   } catch (error) {
     if (error instanceof CompileError) return { kind: 'compileError', diagnostics: error.diagnostics };
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
@@ -61,7 +53,6 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
       // A rejection of an unsupported feature ends the run outside PHP, so PHP's shutdown does not run after it.
       if (!rejectedRuns.has(runtime)) uncaughtException = shutdown(runtime) ?? uncaughtException;
     } finally {
-      releaseBoundedRegexSubject();
       runtime.flush();
     }
     const stdoutBytes = runtime.stdoutBytes;

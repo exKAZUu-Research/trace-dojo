@@ -1,8 +1,7 @@
+// code-gauge-allow-file fileNcss -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { createHash, createHmac } from 'node:crypto';
-
 import { byteAt, charAt, enc, lower, untilNul, upper } from './bytes';
 import { byteMembership, literalMatches, spendScan } from './byteSearch';
 import { callStack } from './calls';
@@ -1168,80 +1167,6 @@ defineFunction('str_shuffle(string $string): string', ({ args }) => {
   shuffle(chars, (end) => mt.range(0n, end));
   return chars.join('');
 });
-defineFunction('md5(string $string, bool $binary = false): string', ({ args }) =>
-  hash('md5', s(args[0]), args[1] === true)
-);
-defineFunction('sha1(string $string, bool $binary = false): string', ({ args }) =>
-  hash('sha1', s(args[0]), args[1] === true)
-);
-defineFunction('crc32(string $string): int', ({ args }) => BigInt(crc32(s(args[0]))));
-/** The algorithms of PHP's `hash_algos()`, whose cryptographic ones come before `adler32`. */
-const PHP_HASHES =
-  'md2 md4 md5 sha1 sha224 sha256 sha384 sha512/224 sha512/256 sha512 sha3-224 sha3-256 sha3-384 sha3-512 ripemd128 ripemd160 ripemd256 ripemd320 whirlpool tiger128,3 tiger160,3 tiger192,3 tiger128,4 tiger160,4 tiger192,4 snefru snefru256 gost gost-crypto haval128,3 haval160,3 haval192,3 haval224,3 haval256,3 haval128,4 haval160,4 haval192,4 haval224,4 haval256,4 haval128,5 haval160,5 haval192,5 haval224,5 haval256,5 adler32 crc32 crc32b crc32c fnv132 fnv1a32 fnv164 fnv1a64 joaat murmur3a murmur3c murmur3f xxh32 xxh64 xxh3 xxh128'.split(
-    ' '
-  );
-
-defineFunction('hash(string $algo, string $data, bool $binary = false, array $options = []): string', ({ args }) => {
-  const algorithm = lower(s(args[0]));
-  if (algorithm === 'crc32b') {
-    const digest = crc32(s(args[1])).toString(16).padStart(8, '0');
-    return args[2] === true
-      ? digest.replaceAll(/../g, (byte) => String.fromCharCode(Number.parseInt(byte, 16)))
-      : digest;
-  }
-  if (!PHP_HASHES.includes(algorithm))
-    throwError('ValueError', 'hash(): Argument #1 ($algo) must be a valid hashing algorithm');
-  return hash(nodeHashName(algorithm, 'hash'), s(args[1]), args[2] === true);
-});
-defineFunction('hash_hmac(string $algo, string $data, string $key, bool $binary = false): string', ({ args }) => {
-  const algorithm = lower(s(args[0]));
-  if (!PHP_HASHES.slice(0, PHP_HASHES.indexOf('adler32')).includes(algorithm)) {
-    throwError('ValueError', 'hash_hmac(): Argument #1 ($algo) must be a valid cryptographic hashing algorithm');
-  }
-  const hmac = createHmac(nodeHashName(algorithm, 'hash_hmac'), Buffer.from(s(args[2]), 'latin1'));
-  hmac.update(Buffer.from(s(args[1]), 'latin1'));
-  return args[3] === true ? hmac.digest('latin1') : hmac.digest('hex');
-});
-
-const NODE_HASHES = new Map([
-  ...[
-    'md5',
-    'sha1',
-    'sha224',
-    'sha256',
-    'sha384',
-    'sha512',
-    'sha3-224',
-    'sha3-256',
-    'sha3-384',
-    'sha3-512',
-    'ripemd160',
-  ].map((name): [string, string] => [name, name]),
-  ['sha512/224', 'sha512-224'],
-  ['sha512/256', 'sha512-256'],
-]);
-
-/** The name Node's crypto module gives an algorithm of PHP's, which stops the program when this grader lacks it. */
-function nodeHashName(algorithm: string, functionName: string): string {
-  const name = NODE_HASHES.get(algorithm);
-  if (!name) throw new UnsupportedFeatureError(`ハッシュアルゴリズム ${algorithm}（${functionName}）`);
-  return name;
-}
-
-function hash(algorithm: string, data: string, binary: boolean): string {
-  const digest = createHash(algorithm).update(Buffer.from(data, 'latin1'));
-  return binary ? digest.digest('latin1') : digest.digest('hex');
-}
-
-function crc32(data: string): number {
-  let crc = 0xff_ff_ff_ff;
-  for (let index = 0; index < data.length; index++) {
-    crc ^= data.charCodeAt(index);
-    for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? (crc >>> 1) ^ 0xed_b8_83_20 : crc >>> 1;
-  }
-  return (crc ^ 0xff_ff_ff_ff) >>> 0;
-}
-
 defineFunction('bin2hex(string $string): string', ({ args }) =>
   [...s(args[0])].map((char) => char.charCodeAt(0).toString(16).padStart(2, '0')).join('')
 );

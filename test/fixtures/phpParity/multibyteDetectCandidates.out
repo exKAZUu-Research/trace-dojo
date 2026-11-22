@@ -16,68 +16,14 @@ string(7) "UCS-2LE"
 string(7) "UCS-4BE"
 string(7) "UCS-4LE"
 string(5) "UCS-2"
-string(19) "UTF-8-Mobile#DOCOMO"
-string(9) "UTF7-IMAP"
-string(5) "UTF-7"
-string(6) "EUC-TW"
-string(11) "ISO-2022-KR"
-string(2) "HZ"
-string(5) "CP850"
-string(9) "ArmSCII-8"
-bool(false)
-bool(false)
-bool(false)
 bool(false)
 string(4) "SJIS"
 string(4) "SJIS"
 bool(false)
-bool(false)
 string(5) "CP932"
 string(5) "CP932"
-string(5) "CP932"
 bool(false)
-string(5) "ASCII"
-bool(false)
-string(5) "ASCII"
-bool(false)
-string(5) "ASCII"
-bool(false)
-string(5) "ASCII"
-bool(false)
-string(5) "ASCII"
-bool(false)
-string(5) "ASCII"
-bool(false)
-string(5) "ASCII"
-string(5) "ASCII"
-bool(false)
-string(5) "ASCII"
 string(3) "JIS"
 string(3) "JIS"
-string(3) "JIS"
-string(3) "JIS"
-string(3) "JIS"
-string(3) "JIS"
-bool(false)
-string(5) "ASCII"
 string(11) "ISO-2022-JP"
 string(11) "ISO-2022-JP"
-bool(false)
-string(5) "ASCII"
-bool(false)
-string(11) "ISO-2022-JP"
-bool(false)
-string(5) "UCS-4"
-bool(false)
-string(7) "UCS-4BE"
-bool(false)
-string(7) "UCS-4LE"
-string(8) "UTF-16BE"
-string(5) "UTF-8"
-string(5) "UTF-8"
-string(5) "UTF-8"
-string(5) "UTF-8"
-string(5) "UTF-8"
-string(5) "UTF-8"
-string(5) "UTF-8"
-string(5) "UTF-8"

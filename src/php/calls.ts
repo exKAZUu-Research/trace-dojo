@@ -291,7 +291,6 @@ export function deprecateNative(fn: NativeFunction, deprecation: string): void {
   nativeDeprecations.set(fn, deprecation);
 }
 
-// code-gauge-allow functionNcss -- Reports the deprecation, binds, calls and finishes a native call in PHP's order in one frame.
 export function invokeNative(
   target: CallTarget,
   fn: NativeFunction,
@@ -316,13 +315,8 @@ export function invokeNative(
     target.captureReturn?.(result);
   } catch (error) {
     failed = true;
-    if (error instanceof RangeError && isHostMemoryError(error.message)) {
-      if (error.message.toLowerCase().includes('maximum call stack size exceeded'))
-        saved.runtime.hostStackExhausted = true;
-      failure = saved.runtime.memoryExhausted(2 ** 31);
-    } else {
-      failure = error;
-    }
+    failure =
+      error instanceof RangeError && isHostMemoryError(error.message) ? saved.runtime.memoryExhausted(2 ** 31) : error;
     throw failure;
   } finally {
     if (target.thisObj) nativeOwnershipChanged(target.thisObj);
@@ -706,7 +700,6 @@ export function invokeUser(
   } catch (error) {
     if (error instanceof RangeError && saved.bound) {
       saved.runtime.exhausted = true;
-      saved.runtime.hostStackExhausted = true;
       hostStackExhaustion.record ??= callStack.at(-1);
       hostStackExhaustion.row ??= saved.runtime.row;
       failure = hostStackExhaustion;

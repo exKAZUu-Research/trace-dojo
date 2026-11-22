@@ -20,9 +20,7 @@ defineConstant('PHP_QUERY_RFC3986', 2n);
 
 const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
-defineFunction('base64_encode(string $string): string', ({ args }) =>
-  Buffer.from(s(args[0]), 'latin1').toString('base64')
-);
+defineFunction('base64_encode(string $string): string', ({ args }) => btoa(s(args[0])));
 // code-gauge-allow functionCognitiveComplexity -- Applies strict padding and byte validation to the same decoding pass.
 defineFunction('base64_decode(string $string, bool $strict = false): string|false', ({ args }) => {
   const strict = args[1] === true;

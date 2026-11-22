@@ -133,20 +133,11 @@ function isUnboundCallableClosure(value: PhpObject): boolean {
   return closure?.isCallable === true && closure.thisObj === undefined;
 }
 
-function createBudget(): ExecutionBudget {
-  const remaining = process.env.PHP_REMAINING_MS;
-  if (remaining === undefined) return new ExecutionBudget();
-  const parsed = Number(remaining);
-  return new ExecutionBudget(
-    Number.isFinite(parsed) && parsed >= 0 ? Math.min(parsed, LIMITS.maxMilliseconds) : LIMITS.maxMilliseconds
-  );
-}
-
 export class Runtime {
   // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- PHP returns this canonical encoding name.
   mbEncoding = 'UTF-8';
   readonly activeErrorHandlers = new Set<Value>();
-  readonly budget = createBudget();
+  readonly budget = new ExecutionBudget();
   readonly io: ProgramIO;
   readonly world = new TurtleWorld();
   readonly steps = new StepTracker();
@@ -236,7 +227,6 @@ export class Runtime {
     }
   }
   exhausted = false;
-  hostStackExhausted = false;
   private rawOutput?: string;
   private pendingOutput = '';
   /** The classes a program declared, in declaration order, whose static properties the trace shows. */

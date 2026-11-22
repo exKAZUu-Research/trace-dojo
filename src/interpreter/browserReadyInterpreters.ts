@@ -12,6 +12,7 @@ export const browserReadyInterpreters = {
   haskell: () => import('./languages/haskell'),
   java: () => import('./languages/java'),
   javascript: () => import('./languages/javascript'),
+  php: () => import('./languages/php'),
   python: () => import('./languages/python'),
   rust: () => import('./languages/rust'),
   typescript: () => import('./languages/typescript'),
