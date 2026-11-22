@@ -69,3 +69,13 @@
 - When a review comment or an issue reports a difference from the reference implementation, fix it if mainstream learner programs would hit it or the fix is small adapter code; otherwise decline, citing this section.
 - A language whose interpreter meets the first rule is listed in `src/interpreter/browserReadyInterpreters.ts`, which enforces the rule by lint and a browser test; when making a language meet it, add the language there.
 - Only browsers run the interpreters for the product: nothing the server evaluates (server components, route handlers, tRPC routers) may import `src/interpreter/` or a language directory, which `test/unit/serverModules.test.ts` enforces. Client components trace and grade through `src/problems/browserProblemRunner.ts`, the server stores what they report without re-running it, and what the server must know about a program is precomputed by a script under `scripts/`.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
