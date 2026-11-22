@@ -1,61 +1,21 @@
-import { execFileSync } from 'node:child_process';
-import { createReadStream, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
-import path from 'node:path';
-
-import { type BrowserServer, chromium, type Page } from 'playwright';
+import type { Page } from 'playwright';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 
 import { browserReadyInterpreters, type BrowserReadyLanguage } from '../../src/interpreter/browserReadyInterpreters';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
 import { SAMPLE_PROGRAMS } from '../helpers/browserInterpreterSamples';
+import { type BrowserInterpreterSession, openBrowserInterpreterPage } from '../helpers/browserInterpreterSession';
 
-const CONTENT_TYPES: Record<string, string> = {
-  '.html': 'text/html',
-  '.js': 'text/javascript',
-  '.wasm': 'application/wasm',
-};
-
-let bundleDirectory: string;
-let server: Server;
-let browserServer: BrowserServer;
+let session: BrowserInterpreterSession;
 let page: Page;
 
 beforeAll(async () => {
-  mkdirSync('.tmp', { recursive: true });
-  bundleDirectory = mkdtempSync('.tmp/browser-interpreters-');
-  execFileSync('bun', ['test/helpers/buildBrowserInterpreters.ts', bundleDirectory], { stdio: 'inherit' });
-  server = createServer((request, response) => {
-    const { pathname } = new URL(request.url ?? '/', 'http://localhost');
-    if (pathname === '/') {
-      response.setHeader('Content-Type', CONTENT_TYPES['.html']);
-      response.end('<script type="module" src="/test/helpers/browserInterpreterPage.js"></script>');
-      return;
-    }
-    // The grammars stay in `node_modules`, where the bundle refers to them.
-    const file = path.join(pathname.startsWith('/node_modules/') ? '.' : bundleDirectory, pathname);
-    if (!existsSync(file)) {
-      response.statusCode = 404;
-      response.end();
-      return;
-    }
-    response.setHeader('Content-Type', CONTENT_TYPES[path.extname(file)]);
-    createReadStream(file).pipe(response);
-  });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  browserServer = await chromium.launchServer();
-  const browser = await chromium.connect(browserServer.wsEndpoint());
-  page = await browser.newPage();
-  await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/`);
-  await page.waitForFunction(() => 'createRunner' in globalThis);
+  session = await openBrowserInterpreterPage('test/helpers/browserInterpreterPage.ts', 'createRunner');
+  ({ page } = session);
 }, 120_000);
 
 afterAll(async () => {
-  // Chromium takes 10 seconds to close after a page terminated a worker, and there is no state to save.
-  await browserServer?.kill();
-  server?.close();
-  if (bundleDirectory) rmSync(bundleDirectory, { recursive: true });
+  await session?.close();
 });
 
 test.each(Object.keys(browserReadyInterpreters) as BrowserReadyLanguage[])(

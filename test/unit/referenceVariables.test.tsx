@@ -6,13 +6,10 @@ import { z } from 'zod';
 import { TraceViewer } from '../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/TraceViewer';
 import { Variables } from '../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/Variables';
 import { traceProgram } from '../../src/interpreter/program';
-import { type InstantiatedProblem, instantiateProblem } from '../../src/problems/instantiateProblem';
+import type { InstantiatedProblem } from '../../src/problems/instantiateTemplate';
+import { instantiateProblem } from '../helpers/nodeProblems';
 
-const problem = (id: string): InstantiatedProblem => {
-  const instantiated = instantiateProblem(id, 'turtle-variables');
-  if (!instantiated) throw new Error(`Missing problem: ${id}`);
-  return instantiated;
-};
+const problem = async (id: string): Promise<InstantiatedProblem> => await instantiateProblem(id, 'turtle-variables');
 
 const referenceVars = (item: unknown): Record<string, unknown> =>
   z.object({ referenceVars: z.record(z.string(), z.unknown()) }).parse(item).referenceVars;
@@ -45,8 +42,8 @@ const renderViewer = (
     })
   );
 
-test('Java turtle names show their selected-step coordinates apart from answer variables', () => {
-  const instantiated = problem('variable3');
+test('Java turtle names show their selected-step coordinates apart from answer variables', async () => {
+  const instantiated = await problem('variable3');
   const beforeCreation = instantiated.traceItems.find((item) => item.line === 5);
   const afterCreation = instantiated.traceItems.find((item) => item.line === 6);
   const afterMoving = instantiated.traceItems.find((item) => item.line === 7);
@@ -73,14 +70,14 @@ test('Java turtle names show their selected-step coordinates apart from answer v
   expect(html.match(/<thead\b/g)).toHaveLength(1);
 });
 
-test('multiple turtles and arrays retain Java reference paths', () => {
-  const multiple = problem('multiObject1');
+test('multiple turtles and arrays retain Java reference paths', async () => {
+  const multiple = await problem('multiObject1');
   expect(referenceVars(multiple.traceItems.find((item) => item.line === 4))).toMatchObject({
     t1: object({ x: scalar(1), y: scalar(1) }),
     t2: object({ x: scalar(3), y: scalar(3) }),
   });
 
-  const indexed = problem('multiObject6');
+  const indexed = await problem('multiObject6');
   const afterThreeCreations = indexed.traceItems.find((item) => item.turtles.length === 3);
   expect(referenceVars(afterThreeCreations)).toEqual({
     turtles: array({
@@ -90,15 +87,15 @@ test('multiple turtles and arrays retain Java reference paths', () => {
     }),
   });
 
-  const unassigned = problem('garbageCollection4');
+  const unassigned = await problem('garbageCollection4');
   expect(referenceVars(unassigned.traceItems.find((item) => item.line === 4))).toEqual({
     // oxlint-disable-next-line unicorn/no-null -- Snapshots represent unassigned Java array slots as null.
     turtles: array(Object.fromEntries(Array.from({ length: 5 }, (_, i) => [String(i), scalar(null)]))),
   });
 });
 
-test('alias assignment and removal update reference values at their Java steps', () => {
-  const assigned = problem('garbageCollection1');
+test('alias assignment and removal update reference values at their Java steps', async () => {
+  const assigned = await problem('garbageCollection1');
   expect(referenceVars(assigned.traceItems.find((item) => item.line === 9))).toMatchObject({
     t1: object({ x: scalar(1), y: scalar(2) }),
     t2: object({ x: scalar(1), y: scalar(2) }),
@@ -108,7 +105,7 @@ test('alias assignment and removal update reference values at their Java steps',
     t2: object({ x: scalar(2), y: scalar(2) }),
   });
 
-  const removed = problem('garbageCollection4');
+  const removed = await problem('garbageCollection4');
   const firstRemoval = removed.traceItems.find((item) => item.line === 11 && item.turtles.length === 4);
   const insideLoop = removed.traceItems.find((item) => item.line === 15 && item.turtles.length === 4);
   const secondRemoval = removed.traceItems.find((item) => item.line === 11 && item.turtles.length === 3);
@@ -120,8 +117,8 @@ test('alias assignment and removal update reference values at their Java steps',
   expect(referenceVars(secondRemoval)).not.toHaveProperty('t');
 });
 
-test('method argument references follow the active call scope and leave no stale reference', () => {
-  const instantiated = problem('method1');
+test('method argument references follow the active call scope and leave no stale reference', async () => {
+  const instantiated = await problem('method1');
   const insideMethod = instantiated.traceItems.find((item) => item.callLines.length === 1);
   const afterReturn = instantiated.traceItems.find((item) => item.callLines.length === 0 && item.line === 5);
 
@@ -131,8 +128,8 @@ test('method argument references follow the active call scope and leave no stale
   expect(afterReturn!.callLines).toEqual([]);
 });
 
-test('class fields are captured in the active scope with immutable past values', () => {
-  const instantiated = problem('makeClass1');
+test('class fields are captured in the active scope with immutable past values', async () => {
+  const instantiated = await problem('makeClass1');
   const insideConstructor = instantiated.traceItems.find((item) => item.line === 12 && item.callLines.length === 1);
   const insideMethod = instantiated.traceItems.find((item) => item.line === 16 && item.callLines.length === 1);
   const inMain = instantiated.traceItems.find((item) => item.line === 5 && item.callLines.length === 0);
@@ -154,8 +151,8 @@ test('class fields are captured in the active scope with immutable past values',
   expect(inMain!.vars).toEqual({});
 });
 
-test('replacement and alias assignment update fields inside a wrapper instance', () => {
-  const instantiated = problem('constructor4');
+test('replacement and alias assignment update fields inside a wrapper instance', async () => {
+  const instantiated = await problem('constructor4');
   const afterReplacement = instantiated.traceItems.find((item) => item.callLines.length === 0 && item.line === 7);
   const afterAlias = instantiated.traceItems.find((item) => item.callLines.length === 0 && item.line === 9);
   expect(referenceVars(afterReplacement)).toMatchObject({
@@ -167,8 +164,8 @@ test('replacement and alias assignment update fields inside a wrapper instance',
   });
 });
 
-test('viewer opens this, folds other instances, and keeps all direct fields in a readable summary', () => {
-  const instantiated = problem('makeClass1');
+test('viewer opens this, folds other instances, and keeps all direct fields in a readable summary', async () => {
+  const instantiated = await problem('makeClass1');
   const inMethodIndex = instantiated.traceItems.findIndex((item) => item.line === 16 && item.callLines.length === 1);
   const inMainIndex = instantiated.traceItems.findIndex((item) => item.line === 5 && item.callLines.length === 0);
   const methodHtml = renderViewer(instantiated, inMethodIndex, inMethodIndex + 1);
@@ -194,8 +191,8 @@ test('viewer opens this, folds other instances, and keeps all direct fields in a
   expect(mainHtml).not.toContain('t.t.x');
 });
 
-test('nested turtle instances have their own closed row inside the open this instance', () => {
-  const instantiated = problem('makeClass1');
+test('nested turtle instances have their own closed row inside the open this instance', async () => {
+  const instantiated = await problem('makeClass1');
   const inMethodIndex = instantiated.traceItems.findIndex((item) => item.line === 16 && item.callLines.length === 1);
   const html = renderViewer(instantiated, inMethodIndex, inMethodIndex + 1);
   const buttons = [...html.matchAll(/<button[^>]*aria-expanded="(true|false)"[^>]*>/g)];
@@ -210,8 +207,8 @@ test('nested turtle instances have their own closed row inside the open this ins
   expect(html).not.toContain('this.t.x');
 });
 
-test('a class field appears once inside its instance without answer annotations', () => {
-  const instantiated = problem('makeClass1');
+test('a class field appears once inside its instance without answer annotations', async () => {
+  const instantiated = await problem('makeClass1');
   const viewingTraceItemIndex = instantiated.traceItems.findIndex(
     (item) => item.line === 16 && item.callLines.length === 1
   );
@@ -221,8 +218,8 @@ test('a class field appears once inside its instance without answer annotations'
   expect(html).toMatch(/<button[^>]*>[\s\S]*?speed=2[\s\S]*?<\/button>/);
 });
 
-test('the viewed past instance remains unchanged when the current step is elsewhere', () => {
-  const instantiated = problem('makeClass1');
+test('the viewed past instance remains unchanged when the current step is elsewhere', async () => {
+  const instantiated = await problem('makeClass1');
   const pastMethodIndex = instantiated.traceItems.findIndex((item) => item.line === 16 && item.callLines.length === 1);
   const currentMainIndex = instantiated.traceItems.findIndex((item) => item.line === 5 && item.callLines.length === 0);
   const pastHtml = renderViewer(instantiated, pastMethodIndex, currentMainIndex);
@@ -234,8 +231,8 @@ test('the viewed past instance remains unchanged when the current step is elsewh
   expect(mainHtml).not.toContain('t.speed');
 });
 
-test('fill in blank grading variables remain separate from references', () => {
-  const instantiated = problem('fillInBlank1');
+test('fill in blank grading variables remain separate from references', async () => {
+  const instantiated = await problem('fillInBlank1');
   expect(referenceVars(instantiated.traceItems.find((item) => item.line === 3))).toMatchObject({
     t: object({ x: scalar(0), y: scalar(0) }),
   });
@@ -349,8 +346,8 @@ class Counter {
   expect(html.match(/変数\/式/g)).toHaveLength(1);
 });
 
-test('the variable table appears for references alone and disappears when the snapshot is empty', () => {
-  const instantiated = problem('makeClass1');
+test('the variable table appears for references alone and disappears when the snapshot is empty', async () => {
+  const instantiated = await problem('makeClass1');
   const constructorItem = instantiated.traceItems.find((item) => item.line === 12 && item.callLines.length === 1);
   const referenceOnlyHtml = renderToStaticMarkup(
     createElement(Variables, { traceItemVars: {}, referenceVars: constructorItem!.referenceVars })

@@ -2,13 +2,14 @@ import { expect, test } from 'vitest';
 
 import { challengeBases } from '../../src/problems/challenge/definitions';
 import { challengeMetadata } from '../../src/problems/challenge/metadata';
-import { instantiateRegularChallenge } from '../../src/problems/challenge/regular';
+import { challengeTargets } from '../../src/problems/challenge/targets';
 import { stripJavaTraceAnnotations } from '../../src/problems/fillInBlank/javaSource';
 import { javaChallengeDefinitions } from '../../src/problems/javaChallenges/definitions';
 import { instantiateJavaChallenge } from '../../src/problems/javaChallenges/instantiate';
 import { courseIdToLectureIndexToProblemIds } from '../../src/problems/problemData';
+import { instantiateProblem } from '../helpers/nodeProblems';
 
-test('all independent regular challenges render bounded traces', () => {
+test('all independent regular challenges render bounded traces that end in their generated targets', async () => {
   expect(challengeBases).toHaveLength(160);
   for (const courseId of ['tuBeginner1', 'tuBeginner2'])
     for (let lectureIndex = 0; lectureIndex < 8; lectureIndex++)
@@ -20,9 +21,13 @@ test('all independent regular challenges render bounded traces', () => {
   for (const base of challengeBases) {
     expect(seen.has(base.id), base.id).toBe(false);
     seen.add(base.id);
-    const problem = instantiateRegularChallenge(base.id);
-    if (!problem) throw new Error(`Missing regular projection: ${base.id}`);
+    const problem = await instantiateProblem(base.id, '');
+    expect(problem.displayProgram, base.id).toBe(base.java);
     expect(problem.uncaughtException, base.id).toBeUndefined();
+    expect(challengeTargets[base.id], `${base.id}: run "bun run gen-code"`).toEqual({
+      finalBoard: problem.finalBoard,
+      finalTurtles: problem.finalTurtles,
+    });
     expect(problem.traceItems.length - 1, base.id).toBeGreaterThan(0);
     expect(problem.traceItems.length - 1, base.id).toBeLessThanOrEqual(30);
     expect(courseIdToLectureIndexToProblemIds[base.courseId].flat(), base.id).not.toContain(base.id);

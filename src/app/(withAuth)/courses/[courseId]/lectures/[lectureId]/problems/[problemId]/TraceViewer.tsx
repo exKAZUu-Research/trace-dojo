@@ -4,7 +4,7 @@ import type React from 'react';
 
 import { Box, Button, Card, Heading, HStack, VStack } from '@/infrastructures/useClient/chakra';
 
-import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
+import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateTemplate';
 import { BoardViewer } from './BoardViewer';
 import { Variables } from './Variables';
 

@@ -5,9 +5,13 @@ import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { db } from '@/infrastructures/database';
 import { logger } from '@/infrastructures/pino';
 import { getLearningPeriodFilter } from '@/learningPeriod';
-import { instantiateProblem, isFillInBlankProblem } from '@/problems/instantiateProblem';
 import { findOrdinaryJavaProblem, isOrdinaryBugProblem } from '@/problems/javaChallenges/ordinaryProblem';
-import { courseIdToLectureIds, courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
+import {
+  courseIdToLectureIds,
+  courseIdToLectureIndexToProblemIds,
+  getProblemProgram,
+  isFillInBlankProblem,
+} from '@/problems/problemData';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 
 import { problemSessions } from '../../../../../../../../../db/schema';
@@ -32,6 +36,7 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
   const javaProblem = isOrdinaryBugProblem(params.problemId)
     ? (findOrdinaryJavaProblem(params.problemId, params.courseId, params.lectureId) ?? notFound())
     : undefined;
+  const programTemplate = javaProblem ? undefined : (getProblemProgram(params.problemId) ?? notFound());
   let incompleteProblemSession = await db.query.problemSessions.findFirst({
     where: {
       ...getLearningPeriodFilter(),
@@ -63,15 +68,11 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
     .get()!;
   logger.debug('incompleteProblemSession: %o', incompleteProblemSession);
 
-  const problem = javaProblem
-    ? undefined
-    : (instantiateProblem(params.problemId, incompleteProblemSession.problemVariablesSeed) ?? notFound());
-
   return (
     <ProblemPageOnClient
       key={incompleteProblemSession.id}
       javaProblem={javaProblem}
-      problem={problem}
+      programTemplate={programTemplate}
       initialProblemSession={incompleteProblemSession}
       userId={session.superTokensUserId}
     />

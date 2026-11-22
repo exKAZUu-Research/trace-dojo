@@ -39,7 +39,13 @@ const PracticeSession: React.FC<{ courseId: CourseId; lectureId: string }> = ({ 
     if (request.current?.generation !== generation) {
       request.current = {
         generation,
-        promise: start({ courseId, lectureId, learningMode: 'practice', problemFormat: 'regular' }),
+        promise: start({
+          courseId,
+          lectureId,
+          learningMode: 'practice',
+          problemFormat: 'regular',
+          tracesInBrowser: true,
+        }),
       };
     }
     void request.current.promise
@@ -94,7 +100,9 @@ const PracticeSession: React.FC<{ courseId: CourseId; lectureId: string }> = ({ 
               await detectStale(switchToStep.mutateAsync({ ...location, sessionId })),
             next: async ({ sessionId }) => {
               const value = await withFailureMessage(
-                detectStale(next.mutateAsync({ ...location, sessionId, problemFormat: 'regular' })),
+                detectStale(
+                  next.mutateAsync({ ...location, sessionId, problemFormat: 'regular', tracesInBrowser: true })
+                ),
                 '次の問題を取得できませんでした。'
               );
               if ('status' in value || value.problemFormat !== 'regular')

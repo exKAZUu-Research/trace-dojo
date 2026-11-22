@@ -17,7 +17,7 @@ import {
 const infrastructure = vi.hoisted(() => ({
   isAdmin: false,
   problemId: 'test3',
-  grade: vi.fn(),
+  save: vi.fn(),
   update: vi.fn(),
   start: vi.fn(),
 }));
@@ -40,27 +40,40 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
     startExercise: { useMutation: () => ({ mutateAsync: infrastructure.start }) },
     nextExercise: { useMutation: () => ({ mutateAsync: vi.fn() }) },
     endExercise: { useMutation: () => ({ mutateAsync: vi.fn() }) },
-    submitExercise: { useMutation: () => ({ mutateAsync: infrastructure.grade }) },
+    submitExercise: { useMutation: () => ({ mutateAsync: infrastructure.save }) },
     submitRegularExercise: { useMutation: () => ({ mutateAsync: vi.fn() }) },
     switchRegularExerciseToStep: { useMutation: () => ({ mutateAsync: vi.fn() }) },
     countIncorrectSubmissions: { useQuery: () => ({ refetch: vi.fn() }) },
     createProblemSubmission: { useMutation: () => ({ mutateAsync: vi.fn() }) },
-    gradeFillInBlankAnswers: { useMutation: () => ({ mutateAsync: infrastructure.grade }) },
+    createFillInBlankSubmission: { useMutation: () => ({ mutateAsync: infrastructure.save }) },
     updateProblemSession: { useMutation: () => ({ mutate: vi.fn(), mutateAsync: infrastructure.update }) },
   },
 }));
+vi.mock('../../../src/problems/browserProblemRunner', async () => {
+  const { nodeRunner } = await import('../../helpers/nodeProblems');
+  return { getBrowserProblemRunner: () => nodeRunner };
+});
+vi.mock(import('../../../src/problems/fillInBlank/grade'), async (importOriginal) => {
+  const original = await importOriginal();
+  return { ...original, gradeFillInBlankCode: vi.fn(original.gradeFillInBlankCode) };
+});
 
 import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
 import { ProblemPageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/pageOnClient';
-import { instantiateProblem } from '../../../src/problems/instantiateProblem';
+import { gradeFillInBlankCode } from '../../../src/problems/fillInBlank/grade';
 import { instantiateJavaChallenge } from '../../../src/problems/javaChallenges/instantiate';
+import { getProblemProgram } from '../../../src/problems/problemData';
+import { waitForProblemPreparation } from '../../helpers/problemPreparation';
+
+const grade = vi.mocked(gradeFillInBlankCode);
 
 beforeEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
   infrastructure.isAdmin = false;
   infrastructure.problemId = 'test3';
-  infrastructure.grade.mockReset();
+  grade.mockReset();
+  infrastructure.save.mockReset();
   infrastructure.start.mockReset();
   infrastructure.update.mockReset().mockResolvedValue({ elapsedMilliseconds: 123 });
 });
@@ -69,7 +82,7 @@ test.each([
   ['executionResult', '諦めてステップ実行モードに移る'],
   ['step', 'ステップ実行モードで最初からやり直す'],
 ] as const)('keeps the normal header and %s control', async (problemType, controlName) => {
-  renderPage(problemType);
+  await renderPage(problemType);
   expect(screen.getByRole('link', { name: '動作確認用' })).toBeVisible();
   expect(screen.getByRole('link', { name: '第1回' })).toBeVisible();
   expect(screen.getByRole('heading', { level: 1, name: 'ステップ実行のテスト用問題(3)' })).toBeVisible();
@@ -84,30 +97,30 @@ test.each([
 test('keeps syntax hints disabled in ordinary fill-in questions', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   expect(screen.queryByRole('button', { name: /の説明$/ })).not.toBeInTheDocument();
   await user.hover(within(editor).getAllByText(/\bint\b/)[0]);
   expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
 });
 
-test('hides regular controls for fill-in-blank and retains the admin next-step action', () => {
-  const rendered = renderPage('fillInBlank');
+test('hides regular controls for fill-in-blank and retains the admin next-step action', async () => {
+  const rendered = await renderPage('fillInBlank');
   expect(screen.queryByRole('button', { name: /ステップ実行モード/ })).not.toBeInTheDocument();
 
   rendered.unmount();
   infrastructure.isAdmin = true;
-  renderPage('step');
+  await renderPage('step');
   expect(screen.getByRole('button', { name: '次のステップに進む（管理者のみ）' })).toBeVisible();
 });
 
-const renderPage = (
+const renderPage = async (
   problemType: 'executionResult' | 'step' | 'fillInBlank',
   userId = 'user-1',
   sessionId = 10,
   seed = 'normal-component'
-): ReturnType<typeof render> =>
-  render(
+): Promise<ReturnType<typeof render>> => {
+  const rendered = render(
     <ChakraProvider>
       <ProblemPageOnClient
         initialProblemSession={
@@ -118,21 +131,20 @@ const renderPage = (
             traceItemIndex: problemType === 'step' ? 1 : 0,
           } as never
         }
-        problem={instantiateProblem(infrastructure.problemId, seed)}
+        programTemplate={getProblemProgram(infrastructure.problemId)}
         userId={userId}
       />
     </ChakraProvider>
   );
+  await waitForProblemPreparation();
+  return rendered;
+};
 
 test('ordinary full-source editing submits exact multiline code only on explicit Submit and hides expected variables', async () => {
   infrastructure.problemId = 'fillInBlank2';
-  infrastructure.grade.mockResolvedValue({
-    status: 'incorrect',
-    detail: 'The final state differs from the expected one.',
-  });
   const user = userEvent.setup();
-  renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   expect(editor).toHaveAttribute('aria-multiline', 'true');
   expect(editor).not.toHaveAttribute('aria-describedby');
   expect(screen.queryByText(/Tab.*(?:Escape|Esc|インデント)/)).not.toBeInTheDocument();
@@ -143,11 +155,16 @@ test('ordinary full-source editing submits exact multiline code only on explicit
   await replaceJavaSource(editor, code);
   await user.keyboard('{End}{Enter}');
   composeWithoutSubmitting(editor);
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
   await replaceJavaSource(editor, code);
   await user.click(screen.getByRole('button', { name: '提出' }));
   await waitFor(() =>
-    expect(infrastructure.grade).toHaveBeenCalledWith({ sessionId: 10, code, elapsedMilliseconds: 123 })
+    expect(infrastructure.save).toHaveBeenCalledWith({
+      sessionId: 10,
+      code,
+      elapsedMilliseconds: 123,
+      isCorrect: false,
+    })
   );
   expectJavaSource(editor, code);
 });
@@ -155,22 +172,22 @@ test('ordinary full-source editing submits exact multiline code only on explicit
 test('unfinished code-context placeholders show local feedback only when Submit is pressed', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
-  screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  await screen.findByRole('textbox', { name: /Java/ });
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: '提出' }));
   const header = await screen.findByText(/未入力|未完成|空欄.*(?:残|入力)/);
   await waitFor(() => expect(header).toBeVisible());
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
   expect(infrastructure.update).not.toHaveBeenCalled();
 });
 
 test('marker-looking comments, strings, character literals, and text blocks are submitted as ordinary source', async () => {
   infrastructure.problemId = 'fillInBlank2';
-  infrastructure.grade.mockResolvedValue({ status: 'ungradable', detail: 'provider offline' });
+  grade.mockResolvedValue({ status: 'ungradable', detail: 'provider offline' });
   const user = userEvent.setup();
-  renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   const code = `class Literals {
   public static void main(String[] args) {
     // 【1】
@@ -184,9 +201,7 @@ test('marker-looking comments, strings, character literals, and text blocks are 
 }`;
   await replaceJavaSource(editor, code);
   await user.click(screen.getByRole('button', { name: '提出' }));
-  await waitFor(() =>
-    expect(infrastructure.grade).toHaveBeenCalledWith({ sessionId: 10, code, elapsedMilliseconds: 123 })
-  );
+  await waitFor(() => expect(grade).toHaveBeenCalledWith(expect.anything(), expect.anything(), code));
   expect(await screen.findByRole('alertdialog')).toHaveTextContent('採点できませんでした');
   expect(readRenderedJavaSource(editor)).toBe(code);
   expect(editor).toHaveAttribute('contenteditable', 'false');
@@ -197,25 +212,26 @@ test('marker-looking comments, strings, character literals, and text blocks are 
   expect(readRenderedJavaSource(editor)).not.toBe(code);
   await user.click(screen.getByRole('button', { name: 'やり直す' }));
   expect(readRenderedJavaSource(editor)).toBe(code);
-  expect(infrastructure.grade).toHaveBeenCalledTimes(1);
+  expect(grade).toHaveBeenCalledTimes(1);
+  expect(infrastructure.save).not.toHaveBeenCalled();
 });
 
 test('a network failure preserves edited source and releases the pending state', async () => {
   infrastructure.problemId = 'fillInBlank1';
   let reject!: (error: Error) => void;
-  infrastructure.grade.mockReturnValue(
+  infrastructure.save.mockReturnValue(
     new Promise((_resolve, _reject) => {
       reject = _reject;
     })
   );
   const user = userEvent.setup();
-  renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   const code = 'class MyProgram { public static void main(String[] args) {} }';
   const starter = readRenderedJavaSource(editor);
   await replaceJavaSource(editor, code);
   await user.click(screen.getByRole('button', { name: '提出' }));
-  await waitFor(() => expect(infrastructure.grade).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(infrastructure.save).toHaveBeenCalledTimes(1));
   expect(screen.getByRole('button', { name: '元に戻す' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'やり直す' })).toBeDisabled();
   expect(editor).toHaveAttribute('contenteditable', 'false');
@@ -228,13 +244,13 @@ test('a network failure preserves edited source and releases the pending state',
   expect(readRenderedJavaSource(editor)).toBe(starter);
   await user.click(screen.getByRole('button', { name: 'やり直す' }));
   expect(readRenderedJavaSource(editor)).toBe(code);
-  expect(infrastructure.grade).toHaveBeenCalledTimes(1);
+  expect(infrastructure.save).toHaveBeenCalledTimes(1);
 });
 
 test('ordinary session identity changes replace edited code with the new starter', async () => {
   infrastructure.problemId = 'fillInBlank2';
-  const rendered = renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  const rendered = await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   await replaceJavaSource(editor, 'class PreviousAttempt {}');
   rendered.rerender(
     <ChakraProvider>
@@ -247,7 +263,7 @@ test('ordinary session identity changes replace edited code with the new starter
             traceItemIndex: 0,
           } as never
         }
-        problem={instantiateProblem(infrastructure.problemId, 'replacement-session')}
+        programTemplate={getProblemProgram(infrastructure.problemId)}
         userId="user-1"
       />
     </ChakraProvider>
@@ -266,8 +282,8 @@ test.each(['edited', 'empty'] as const)(
   async (source) => {
     infrastructure.problemId = 'fillInBlank2';
     const user = userEvent.setup();
-    renderPage('fillInBlank');
-    const editor = screen.getByRole('textbox', { name: /Java/ });
+    await renderPage('fillInBlank');
+    const editor = await screen.findByRole('textbox', { name: /Java/ });
     const starter = readRenderedJavaSource(editor);
     expect(starter).toContain('【1】');
     expect(starter).toContain('\n');
@@ -286,7 +302,7 @@ test.each(['edited', 'empty'] as const)(
     expect(readRenderedJavaSource(editor)).toBe(draft);
     await user.click(screen.getByRole('button', { name: 'リセットする' }));
     await waitFor(() => expect(readRenderedJavaSource(editor)).toBe(starter));
-    expect(infrastructure.grade).not.toHaveBeenCalled();
+    expect(grade).not.toHaveBeenCalled();
     expect(infrastructure.update).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   }
@@ -295,8 +311,8 @@ test.each(['edited', 'empty'] as const)(
 test('ordinary editor zoom preserves source and both undo and redo history without grading', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   const starter = readRenderedJavaSource(editor);
   const draft = 'class Draft {\n  // 日本語のコメント\n  int value = 42;\n}\n';
   await replaceJavaSource(editor, draft);
@@ -323,15 +339,15 @@ test('ordinary editor zoom preserves source and both undo and redo history witho
   expect(redo).toBeEnabled();
   await user.click(redo);
   expect(readRenderedJavaSource(editor)).toBe(draft);
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
   expect(infrastructure.update).not.toHaveBeenCalled();
 });
 
 test('ordinary editor zoom reaches each bound and permits reversing direction', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   const starter = readRenderedJavaSource(editor);
   const zoomOut = screen.getByRole<HTMLButtonElement>('button', { name: 'コードを縮小' });
   const zoomIn = screen.getByRole<HTMLButtonElement>('button', { name: 'コードを拡大' });
@@ -352,15 +368,15 @@ test('ordinary editor zoom reaches each bound and permits reversing direction', 
   }
   expect(screen.getByRole('button', { name: '元に戻す' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'やり直す' })).toBeDisabled();
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
   expect(infrastructure.update).not.toHaveBeenCalled();
 });
 
 test('ordinary editor shares keyboard and toolbar history and confirms an isolated undoable reset', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   const starter = readRenderedJavaSource(editor);
   const undo = screen.getByRole('button', { name: '元に戻す' });
   const redo = screen.getByRole('button', { name: 'やり直す' });
@@ -434,14 +450,14 @@ test('ordinary editor shares keyboard and toolbar history and confirms an isolat
   await replaceJavaSource(editor, replacement);
   expect(readRenderedJavaSource(editor)).toBe(replacement);
   expect(redo).toBeDisabled();
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
   expect(infrastructure.update).not.toHaveBeenCalled();
 });
 
 test('local hints identify a missing operand and disappear after a repair without grading', async () => {
   infrastructure.problemId = 'fillInBlank2';
-  renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   await replaceJavaSource(editor, 'class Main { void draw() { int x = ; } }');
   await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).toBeInTheDocument());
   fireEvent.keyDown(editor, { key: 'M', code: 'KeyM', keyCode: 77, ctrlKey: true, shiftKey: true });
@@ -462,13 +478,13 @@ test('local hints identify a missing operand and disappear after a repair withou
   await waitFor(() => expect(document.querySelectorAll('.cm-lintRange-error')).toHaveLength(1));
   const hinted = document.querySelector('.cm-lintRange-error')?.closest('.cm-line');
   expect(hinted).toHaveTextContent('int y = ;');
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
 });
 
 test('local hints keep uncertain recovery generic without flagging valid literal and empty-expression forms', async () => {
   infrastructure.problemId = 'fillInBlank2';
-  renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   const user = userEvent.setup();
   await user.click(editor);
   fireEvent.keyDown(editor, { key: 'M', code: 'KeyM', keyCode: 77, ctrlKey: true, shiftKey: true });
@@ -512,20 +528,20 @@ test('local hints keep uncertain recovery generic without flagging valid literal
   for (const line of lines.slice(0, -1)) {
     expect(line.querySelector('.cm-lintRange-error, .cm-lintPoint-error')).not.toBeInTheDocument();
   }
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
 });
 
 test('compiler feedback becomes historical on edit and undo never restores compiler annotations', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const message = 'この呼び出し方に合う名前が見つかりません。';
-  infrastructure.grade.mockResolvedValue({
+  grade.mockResolvedValue({
     status: 'incorrect',
     detail: 'Compile error.',
     diagnostics: [{ line: 3, message }],
   });
   const user = userEvent.setup();
-  renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   await replaceJavaSource(editor, 'class Main {\n public static void main(String[] args) {\n  missing();\n }\n}');
   await user.click(screen.getByRole('button', { name: '提出' }));
   await waitFor(() => expect(screen.getByRole('alertdialog')).toBeVisible());
@@ -554,14 +570,14 @@ test('compiler feedback becomes historical on edit and undo never restores compi
   await user.click(screen.getByRole('button', { name: 'やり直す' }));
   expect(screen.getByRole('region', { name: '前回提出したコードの確認結果' })).toHaveTextContent(message);
   expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
-  expect(infrastructure.grade).toHaveBeenCalledTimes(1);
+  expect(infrastructure.save).toHaveBeenCalledTimes(1);
 });
 
 test('Japanese Turtle completion inserts literal source, supports undo, and never grades', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   const prefix = 'class Main { void draw() { Turtle 亀 = new Turtle(); 亀.前';
   await replaceJavaSource(editor, prefix);
   await user.keyboard('{Control>} {/Control}');
@@ -571,14 +587,14 @@ test('Japanese Turtle completion inserts literal source, supports undo, and neve
   expect(readRenderedJavaSource(editor)).not.toMatch(/&|<span/);
   await user.click(screen.getByRole('button', { name: '元に戻す' }));
   expect(readRenderedJavaSource(editor)).toBe(prefix);
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
 });
 
 test('Turtle member completion follows a return keyword', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   await replaceJavaSource(editor, 'class Main { boolean check(Turtle t) { return t.前');
   await user.keyboard('{Control>} {/Control}');
   expect(await screen.findByRole('option', { name: /前に進めるか/ })).toBeVisible();
@@ -590,8 +606,8 @@ test.each([
 ])('Turtle creation completion inserts editable taught arguments: $suffix', async ({ option, suffix, inputs }) => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   const prefix = 'class Main { void draw() { ';
   await replaceJavaSource(editor, `${prefix}Tur`);
   await user.keyboard('{Control>} {/Control}');
@@ -602,7 +618,7 @@ test.each([
   }
   expect(readRenderedJavaSource(editor)).toBe(prefix + suffix);
   expect(editor).toHaveFocus();
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
 });
 
 test.each([
@@ -615,8 +631,8 @@ test.each([
 ])('does not suggest Turtle members outside a visible explicit Turtle local: %s', async (source) => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   await replaceJavaSource(editor, 'class Main { void draw(Turtle 亀) { 亀.前');
   await user.keyboard('{Control>} {/Control}');
   await screen.findByRole('option', { name: /前に進む/ });
@@ -630,14 +646,14 @@ test.each([
   expect(completionStatus(view.state)).toBe('pending');
   await waitFor(() => expect(completionStatus(view.state)).not.toBe('pending'));
   expect(screen.queryByRole('option', { name: /前に進む/ })).not.toBeInTheDocument();
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
 });
 
 test('Java snippet completion accepts with Enter and Tab navigates source placeholders without grading', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
-  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
   await replaceJavaSource(editor, 'class Main { void draw() { fo');
   await user.keyboard('{Control>} {/Control}');
   await screen.findByRole('option', { name: /for/ });
@@ -660,26 +676,30 @@ test('Java snippet completion accepts with Enter and Tab navigates source placeh
   expect(editor).toHaveFocus();
   await user.keyboard('{Escape}');
   expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
 });
 
 test('local draft restores exact multiline source and empty edits before explicit submission', async () => {
   infrastructure.problemId = 'fillInBlank2';
-  infrastructure.grade.mockResolvedValue({ status: 'incorrect', detail: 'Different final state.' });
   const user = userEvent.setup();
   const code = 'class Draft {\n  // 日本語\n  int count = 42;\n}\n';
-  let rendered = renderPage('fillInBlank');
+  let rendered = await renderPage('fillInBlank');
   await replaceJavaSource(await screen.findByRole('textbox', { name: /Java/ }), code);
   rendered.unmount();
-  rendered = renderPage('fillInBlank');
+  rendered = await renderPage('fillInBlank');
   let editor = await screen.findByRole('textbox', { name: /Java/ });
   expect(readRenderedJavaSource(editor)).toBe(code);
   expect(screen.getByRole('button', { name: '元に戻す' })).toBeDisabled();
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
   expect(infrastructure.update).not.toHaveBeenCalled();
   await user.click(screen.getByRole('button', { name: '提出' }));
   await waitFor(() =>
-    expect(infrastructure.grade).toHaveBeenCalledWith({ sessionId: 10, code, elapsedMilliseconds: 123 })
+    expect(infrastructure.save).toHaveBeenCalledWith({
+      sessionId: 10,
+      code,
+      elapsedMilliseconds: 123,
+      isCorrect: false,
+    })
   );
   await screen.findByRole('alertdialog');
   await user.keyboard('{Escape}');
@@ -688,38 +708,38 @@ test('local draft restores exact multiline source and empty edits before explici
   await user.keyboard('{Control>}a{/Control}{Backspace}');
   expect(readRenderedJavaSource(editor)).toBe('');
   rendered.unmount();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   editor = await screen.findByRole('textbox', { name: /Java/ });
   expect(readRenderedJavaSource(editor)).toBe('');
   expect(screen.getByRole('button', { name: '提出' })).toBeDisabled();
-  expect(infrastructure.grade).toHaveBeenCalledTimes(1);
+  expect(infrastructure.save).toHaveBeenCalledTimes(1);
 });
 
 test('local drafts isolate accounts and attempts while retaining the original attempt', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const original = 'class FirstAccount {}';
-  let rendered = renderPage('fillInBlank');
+  let rendered = await renderPage('fillInBlank');
   await replaceJavaSource(await screen.findByRole('textbox', { name: /Java/ }), original);
   rendered.unmount();
-  rendered = renderPage('fillInBlank', 'user-2');
+  rendered = await renderPage('fillInBlank', 'user-2');
   let editor = await screen.findByRole('textbox', { name: /Java/ });
   expect(readRenderedJavaSource(editor)).not.toBe(original);
   await replaceJavaSource(editor, 'class SecondAccount {}');
   rendered.unmount();
-  rendered = renderPage('fillInBlank', 'user-1', 11, 'next-attempt');
+  rendered = await renderPage('fillInBlank', 'user-1', 11, 'next-attempt');
   editor = await screen.findByRole('textbox', { name: /Java/ });
   expect(readRenderedJavaSource(editor)).not.toBe(original);
   await replaceJavaSource(editor, 'class NextAttempt {}');
   rendered.unmount();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(original);
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
 });
 
 test('local draft reset cancellation survives remount and undo of confirmed reset saves again', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  let rendered = renderPage('fillInBlank');
+  let rendered = await renderPage('fillInBlank');
   let editor = await screen.findByRole('textbox', { name: /Java/ });
   const starter = readRenderedJavaSource(editor);
   const code = 'class ResetDraft {}';
@@ -728,7 +748,7 @@ test('local draft reset cancellation survives remount and undo of confirmed rese
   await user.click(await screen.findByRole('button', { name: 'キャンセル' }));
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   rendered.unmount();
-  rendered = renderPage('fillInBlank');
+  rendered = await renderPage('fillInBlank');
   editor = await screen.findByRole('textbox', { name: /Java/ });
   expect(readRenderedJavaSource(editor)).toBe(code);
   await user.click(screen.getByRole('button', { name: 'リセット' }));
@@ -738,13 +758,13 @@ test('local draft reset cancellation survives remount and undo of confirmed rese
   await user.click(screen.getByRole('button', { name: '元に戻す' }));
   expect(readRenderedJavaSource(editor)).toBe(code);
   rendered.unmount();
-  rendered = renderPage('fillInBlank');
+  rendered = await renderPage('fillInBlank');
   expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(code);
   await user.click(screen.getByRole('button', { name: 'リセット' }));
   await user.click(await screen.findByRole('button', { name: 'リセットする' }));
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   rendered.unmount();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(starter);
 });
 
@@ -752,14 +772,14 @@ test('local draft quota failure keeps current code usable and both previously sa
   infrastructure.problemId = 'fillInBlank2';
   const first = 'class RecoverableFirst {}';
   const second = 'class RecoverableSecond {}';
-  let rendered = renderPage('fillInBlank');
+  let rendered = await renderPage('fillInBlank');
   await replaceJavaSource(await screen.findByRole('textbox', { name: /Java/ }), first);
   expectStoredDraft(first);
   rendered.unmount();
-  rendered = renderPage('fillInBlank', 'user-1', 11);
+  rendered = await renderPage('fillInBlank', 'user-1', 11);
   await replaceJavaSource(await screen.findByRole('textbox', { name: /Java/ }), second);
   rendered.unmount();
-  rendered = renderPage('fillInBlank');
+  rendered = await renderPage('fillInBlank');
   const editor = await screen.findByRole('textbox', { name: /Java/ });
   const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
     throw new DOMException('Storage full', 'QuotaExceededError');
@@ -771,10 +791,10 @@ test('local draft quota failure keeps current code usable and both previously sa
   expect(screen.queryByText(/保存しました|保存済み/)).not.toBeInTheDocument();
   write.mockRestore();
   rendered.unmount();
-  rendered = renderPage('fillInBlank');
+  rendered = await renderPage('fillInBlank');
   expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(first);
   rendered.unmount();
-  renderPage('fillInBlank', 'user-1', 11);
+  await renderPage('fillInBlank', 'user-1', 11);
   expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(second);
 });
 
@@ -782,14 +802,14 @@ test.each(['invalid JSON', 'unsupported version'] as const)(
   'local draft with %s falls back to starter without preventing edits',
   async (damage) => {
     infrastructure.problemId = 'fillInBlank2';
-    const rendered = renderPage('fillInBlank');
+    const rendered = await renderPage('fillInBlank');
     const editor = await screen.findByRole('textbox', { name: /Java/ });
     const starter = readRenderedJavaSource(editor);
     await replaceJavaSource(editor, 'class DamagedDraft {}');
     const { key, raw } = expectStoredDraft('class DamagedDraft {}');
     rendered.unmount();
     localStorage.setItem(key, damage === 'invalid JSON' ? '{' : JSON.stringify({ ...JSON.parse(raw), version: -1 }));
-    renderPage('fillInBlank');
+    await renderPage('fillInBlank');
     const restored = await screen.findByRole('textbox', { name: /Java/ });
     expect(readRenderedJavaSource(restored)).toBe(starter);
     await replaceJavaSource(restored, 'class RepairedDraft {}');
@@ -805,7 +825,7 @@ test.each([
   async ({ prefix, name }) => {
     infrastructure.problemId = 'fillInBlank2';
     const user = userEvent.setup();
-    renderPage('fillInBlank');
+    await renderPage('fillInBlank');
     const editor = await screen.findByRole('textbox', { name: /Java/ });
     const before = `class Main { public static int a(){return 1} public static void main(String[] args) { Turtle turtle = new Turtle(); turtle.前に進む(); ${prefix}`;
     const after = '; } }';
@@ -824,14 +844,14 @@ test.each([
       await user.click(screen.getByRole('button', { name: '元に戻す' }));
       expect(readRenderedJavaSource(editor)).toBe(before + after);
     }
-    expect(infrastructure.grade).not.toHaveBeenCalled();
+    expect(grade).not.toHaveBeenCalled();
   }
 );
 
 test('source-word completion refreshes edited code and excludes comments, literals and the caret occurrence', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   const editor = await screen.findByRole('textbox', { name: /Java/ });
   const before = `class Main { void wordOld() {} void draw() {
     // wordComment
@@ -862,13 +882,13 @@ test('source-word completion refreshes edited code and excludes comments, litera
   expect(screen.queryByRole('option', { name: /^wordCaretOnly/ })).not.toBeInTheDocument();
   await user.click(renamed);
   expect(readRenderedJavaSource(editor)).toBe(edited.slice(0, -4) + 'word新$名' + after);
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
 });
 
 test('method completion discovers document declarations and preserves a same-named variable without overload duplicates', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   const editor = await screen.findByRole('textbox', { name: /Java/ });
   const before = `interface Actions { void actionInterface(); }
     class Base { void actionBase() {} }
@@ -894,13 +914,13 @@ test('method completion discovers document declarations and preserves a same-nam
   expect(screen.getAllByRole('option', { name: /^actionShared/ })).toHaveLength(2);
   await user.click(screen.getByRole('option', { name: 'actionSharedコード内のメソッド' }));
   expect(readRenderedJavaSource(editor)).toBe(before.slice(0, -6) + 'actionShared' + after);
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
 });
 
 test('method completion keeps malformed headers, invocation-only names and constructor-only names as neutral words', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   const editor = await screen.findByRole('textbox', { name: /Java/ });
   const before = `class candidateConstructor { candidateConstructor() {} }
     class Broken { void candidateBroken( { value; } }
@@ -921,13 +941,13 @@ test('method completion keeps malformed headers, invocation-only names and const
   }
   await user.click(screen.getByRole('option', { name: 'candidateBrokenコード内の単語' }));
   expect(readRenderedJavaSource(editor)).toBe(before.slice(0, -9) + 'candidateBroken' + after);
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
 });
 
 test('variable completion inserts a Unicode parameter literally and undo restores the prefix without grading', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   const editor = await screen.findByRole('textbox', { name: /Java/ });
   const prefix = 'class Main { void draw(int 歩数) { int counter = 2; 歩';
   await replaceJavaSource(editor, prefix);
@@ -936,13 +956,13 @@ test('variable completion inserts a Unicode parameter literally and undo restore
   expect(readRenderedJavaSource(editor)).toBe(`${prefix}数`);
   await user.click(screen.getByRole('button', { name: '元に戻す' }));
   expect(readRenderedJavaSource(editor)).toBe(prefix);
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
 });
 
 test('variable completion updates its own visible locals after typing and backspacing', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   const editor = await screen.findByRole('textbox', { name: /Java/ });
   await replaceJavaSource(editor, 'class Main { void draw() { int counter = 1, countDown = 2; ');
   await user.keyboard('count');
@@ -955,13 +975,13 @@ test('variable completion updates its own visible locals after typing and backsp
   await screen.findByRole('option', { name: /^counter/ });
   await user.click(await screen.findByRole('option', { name: /^countDown/ }));
   expect(readRenderedJavaSource(editor)).toMatch(/; countDown$/);
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
 });
 
 test('variable completion preserves richer scoped candidates alongside neutral source words', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   const editor = await screen.findByRole('textbox', { name: /Java/ });
   const before =
     'class ScopeClass { void scopeMethod(int scopeParameter) { int scopeLocal = 1; { int scopeSibling = 2; } for (int scopeIndex = 0; scopeIndex < 3; scopeIndex++) { sco';
@@ -986,7 +1006,7 @@ test('variable completion preserves richer scoped candidates alongside neutral s
 test('variable completion includes later fields and constructor locals while respecting static context', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   const editor = await screen.findByRole('textbox', { name: /Java/ });
   const before = 'class Main { Main(int speedParameter) { int speedLocal = 1; spe';
   const after = '; } int speedField; static int speedShared; }';
@@ -1013,7 +1033,7 @@ test('variable completion includes later fields and constructor locals while res
 test('variable completion distinguishes enhanced-loop scope from neutral source words', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   const editor = await screen.findByRole('textbox', { name: /Java/ });
   const before = 'class Main { void draw(int[] itemValues) { for (int itemValue : item';
   const after = ') {} } }';
@@ -1032,21 +1052,20 @@ test('variable completion distinguishes enhanced-loop scope from neutral source 
 
 test('local draft storage read failures warn but do not block editing or explicit submission', async () => {
   infrastructure.problemId = 'fillInBlank2';
-  infrastructure.grade.mockResolvedValue({ status: 'ungradable', detail: 'Offline' });
+  grade.mockResolvedValue({ status: 'ungradable', detail: 'Offline' });
   const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
     throw new DOMException('Storage denied', 'SecurityError');
   });
   try {
     const user = userEvent.setup();
-    renderPage('fillInBlank');
+    await renderPage('fillInBlank');
     const editor = await screen.findByRole('textbox', { name: /Java/ });
     expect(screen.getByText(/一時保存の処理に失敗/)).toBeVisible();
     const code = 'class AvailableEditor {}';
     await replaceJavaSource(editor, code);
     await user.click(screen.getByRole('button', { name: '提出' }));
-    await waitFor(() =>
-      expect(infrastructure.grade).toHaveBeenCalledWith({ sessionId: 10, code, elapsedMilliseconds: 123 })
-    );
+    await waitFor(() => expect(grade).toHaveBeenCalledWith(expect.anything(), expect.anything(), code));
+    expect(infrastructure.save).not.toHaveBeenCalled();
     expect(readRenderedJavaSource(editor)).toBe(code);
   } finally {
     read.mockRestore();
@@ -1056,7 +1075,7 @@ test('local draft storage read failures warn but do not block editing or explici
 test('local draft reset removal failures warn and preserve the visible reset source', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   const editor = await screen.findByRole('textbox', { name: /Java/ });
   const starter = readRenderedJavaSource(editor);
   await replaceJavaSource(editor, 'class ResetFailure {}');
@@ -1079,7 +1098,7 @@ test('local draft reset removal failures warn and preserve the visible reset sou
 test('variable completion offers catch and lambda parameters without leaking completed scopes', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   const editor = await screen.findByRole('textbox', { name: /Java/ });
   await replaceJavaSource(
     editor,
@@ -1105,7 +1124,7 @@ test('variable completion offers catch and lambda parameters without leaking com
 test('variable completion respects local field shadowing before offering Turtle members', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   const editor = await screen.findByRole('textbox', { name: /Java/ });
   const before = 'class Main { void draw() { 亀.前';
   const after = '; } Turtle 亀 = new Turtle(); }';
@@ -1140,7 +1159,7 @@ function expectStoredDraft(code: string): { key: string; raw: string } {
 test('variable completion never offers source declarations in literals, comments or arbitrary members', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   const editor = await screen.findByRole('textbox', { name: /Java/ });
   const view = EditorView.findFromDOM(editor);
   expect(view, 'The rendered textbox must belong to a mounted CodeMirror view').toBeDefined();
@@ -1162,7 +1181,7 @@ test('variable completion never offers source declarations in literals, comments
 
 test('local draft identities separate ordinary and challenge modes with the same session and starter', async () => {
   infrastructure.problemId = 'fillInBlank2';
-  let rendered = renderPage('fillInBlank');
+  let rendered = await renderPage('fillInBlank');
   let editor = await screen.findByRole('textbox', { name: /Java/ });
   const starter = readRenderedJavaSource(editor);
   const ordinary = 'class OrdinaryDraft {}';
@@ -1187,9 +1206,9 @@ test('local draft identities separate ordinary and challenge modes with the same
   expect(readRenderedJavaSource(editor)).toBe(starter);
   await replaceJavaSource(editor, 'class ChallengeDraft {}');
   rendered.unmount();
-  renderPage('fillInBlank');
+  await renderPage('fillInBlank');
   expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(ordinary);
-  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
 });
 
 test.each(['fillInBlank', 'bugFix'] as const)(
@@ -1227,7 +1246,7 @@ test.each(['fillInBlank', 'bugFix'] as const)(
     editor = await screen.findByRole('textbox', { name: /Java/ });
     expect(readRenderedJavaSource(editor)).toBe(saved.code);
     expect(editor).toHaveAttribute('contenteditable', 'true');
-    expect(infrastructure.grade).not.toHaveBeenCalled();
+    expect(grade).not.toHaveBeenCalled();
     rendered.unmount();
     saved.baseline = 'class ChangedProblem {}';
     localStorage.setItem(entry.key, JSON.stringify(saved));

@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';
+import { assert } from 'es-toolkit';
 
 import type { BufferMemorySpace } from './bufferMemory';
 
@@ -21,16 +21,16 @@ export function withMemoryAccounting<T>(next: MemoryAccounting, evaluate: () => 
 }
 
 export function spendMemory(cost = 1): void {
-  assert.ok(accounting);
+  assert(accounting, 'No memory accounting is active');
   accounting.spend(cost);
 }
 
 export function reserveMemory(slots: number): void {
-  assert.ok(accounting);
+  assert(accounting, 'No memory accounting is active');
   accounting.reserve(slots);
 }
 
 export function memorySpace(): BufferMemorySpace {
-  assert.ok(accounting);
+  assert(accounting, 'No memory accounting is active');
   return accounting.space;
 }

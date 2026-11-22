@@ -1,4 +1,5 @@
 import { type ChallengeId, challengeMetadata } from './challenge/metadata';
+import { extractBlanks } from './fillInBlank/blanks';
 import { fillInBlankProblemDefinitions } from './fillInBlank/definitions';
 import { type JavaChallengeId, javaChallengeMetadata } from './javaChallenges/metadata';
 
@@ -421,6 +422,10 @@ export const courseIdToLectureIds = JSON.parse(process.env.NEXT_PUBLIC_COURSE_ID
 /** The Java program of a problem, from which its trace is generated. */
 export function getProblemProgram(problemId: string): string | undefined {
   return (problemIdToProgram as Partial<Record<string, string>>)[problemId];
+}
+
+export function isFillInBlankProblem(problemId: string): boolean {
+  return extractBlanks(getProblemProgram(problemId) ?? '').answers.length > 0;
 }
 
 export const problemIdToProgram: Record<LegacyProblemId, string> = {

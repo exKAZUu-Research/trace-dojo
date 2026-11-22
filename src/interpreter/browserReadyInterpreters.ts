@@ -8,10 +8,14 @@ export const browserReadyInterpreters = {
   c: () => import('./languages/c'),
   cpp: () => import('./languages/cpp'),
   go: () => import('./languages/go'),
+  haskell: () => import('./languages/haskell'),
   java: () => import('./languages/java'),
+  javascript: () => import('./languages/javascript'),
   python: () => import('./languages/python'),
   ruby: () => import('./languages/ruby'),
   rust: () => import('./languages/rust'),
+  typescript: () => import('./languages/typescript'),
+  zig: () => import('./languages/zig'),
 };
 
 export type BrowserReadyLanguage = keyof typeof browserReadyInterpreters;
