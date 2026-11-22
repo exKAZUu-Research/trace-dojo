@@ -85,7 +85,7 @@ const RUBY_REASONS: readonly (readonly [string, string | ((rejection: Rejection)
 ];
 
 const UNSUPPORTED_NAMES: readonly (readonly [string, string])[] = [
-  ['Quantifier requires a repeatable token', '正規表現のアンカーの繰り返し'],
+  ['Quantifier requires a repeatable token', '正規表現のこの位置の繰り返し'],
   ['Incomplete or invalid Unicode property', UNSUPPORTED_PROPERTY],
   ['Lookbehind includes a pattern not allowed', '正規表現の後読みの中のこの構文'],
   ['Unsupported conditional', '正規表現の条件分岐（(?(...)...)）'],
@@ -161,7 +161,7 @@ function quantifierLacksTarget(source: string, extended: boolean): boolean {
       previous.kind === 'groupOpen' ||
       previous.kind === 'directive' ||
       (!previous.inClass && previous.raw === '|');
-    if (opensOperand && !token.inClass && token.kind === 'char' && /^[*+?{]$/.test(token.raw)) return true;
+    if (opensOperand && !token.inClass && token.kind === 'char' && /^[*+?]$/.test(token.raw)) return true;
     previous = token;
   }
   return false;
