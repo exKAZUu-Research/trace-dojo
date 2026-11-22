@@ -192,7 +192,7 @@ test.each([
   ['CRLF in an empty double-quoted string', 'console.log("\r\n");'],
   ['an even number of backslashes before a newline', "console.log('text\\\\\n');"],
 ])('rejects a quoted string with %s', (_description, source) => {
-  expect(diagnosticsOf(source)).toContain('1: 文字列リテラルが閉じられていません。');
+  expect(diagnosticsOf(source)).toEqual(['1: 文字列リテラルが閉じられていません。']);
 });
 
 test('hidden error inspection lists own properties alongside the headline', () => {

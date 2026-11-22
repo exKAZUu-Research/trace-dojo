@@ -76,16 +76,22 @@ export function parseSource<T>(
   }
 }
 
-/** The syntax errors of a text that is not a whole program, such as the part of one before another error. */
+/**
+ * The syntax errors of a text that is not a whole program, such as the part of one before another error.
+ *
+ * @param includeHidden Whether to also report errors only a node's error flag shows, as {@link parseSource} does
+ * after converting.
+ */
 export function findSyntaxErrors(
   parser: Parser,
   source: string,
-  missingTokenNames: Record<string, string>
+  missingTokenNames: Record<string, string>,
+  includeHidden = true
 ): SourceDiagnostic[] {
   const tree = parser.parse(source);
   if (!tree) throw new Error('The parser returned no tree');
   try {
-    return collectSyntaxErrors(tree.rootNode, missingTokenNames, true);
+    return collectSyntaxErrors(tree.rootNode, missingTokenNames, includeHidden);
   } finally {
     tree.delete();
   }

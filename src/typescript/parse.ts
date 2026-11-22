@@ -3,7 +3,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import { CompileError, diagnosticIndex, type SourceDiagnostic, sourceDiagnostic } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
-import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
+import { commentTokens, findSyntaxErrors, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from '../javascript/ast';
 import { nameOf } from '../javascript/convertNodes';
 import { checkTypeScript } from './checker/checker';
@@ -47,6 +47,8 @@ const strictReservedWords = new Set([
   'yield',
 ]);
 
+const MISSING_TOKEN_NAMES = { identifier: '名前', type_identifier: '型の名前' };
+
 const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter-typescript.wasm');
 
 /**
@@ -59,7 +61,7 @@ export function parseTypeScript(source: string, trace?: TraceOptions): Program {
   return parseSource(
     parser,
     source,
-    { identifier: '名前', type_identifier: '型の名前' },
+    MISSING_TOKEN_NAMES,
     (root) => {
       const budget = new ExecutionBudget();
       rejectUnsupportedSyntax(root);
@@ -147,7 +149,8 @@ function decodedName(node: Node): string {
 }
 
 /** The syntax errors tsc's parser reports where the tree-sitter grammar accepts the program. */
-function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagnostic[]): SourceDiagnostic[] {
+function typeScriptSyntaxErrors(root: Node, source: string, parseErrors: SourceDiagnostic[]): SourceDiagnostic[] {
+  const errors = withUnterminatedStrings(root, source, parseErrors);
   const visit = (node: Node): void => {
     const message =
       numericEscapeError(node, source) ??
@@ -165,21 +168,54 @@ function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagno
     for (const child of node.children) if (child) visit(child);
   };
   visit(root);
-  return [...errors, ...unterminatedStringErrors(root, source)].toSorted((left, right) => left.row - right.row);
+  return errors.toSorted((left, right) => left.row - right.row);
 }
 
 /**
- * The strings left open by a raw line break or the end of the program in the text the parser could not read, as tsc
- * reports them. Tree-sitter's recovery does not lex that text as tsc does, so it is lexed here instead.
+ * Names each quoted string with a raw line break in the text the parser could not read, which tsc reports as
+ * unterminated, in place of the syntax errors it causes: those are the errors that disappear when the program is
+ * parsed again with each such string made valid, while every other mistake still shows there.
  */
-function unterminatedStringErrors(root: Node, source: string): SourceDiagnostic[] {
-  const stringEnds: number[] = [];
+function withUnterminatedStrings(root: Node, source: string, parseErrors: SourceDiagnostic[]): SourceDiagnostic[] {
+  const strings: BrokenString[] = [];
   let lexedUntil = 0;
   for (const node of outermostErrorNodes(root)) {
     // A string opening in the node may run past its end, which the parser can place before the line break.
-    lexedUntil = lexCode(source, Math.max(node.startIndex, lexedUntil), node.endIndex, stringEnds);
+    lexedUntil = lexCode(source, Math.max(node.startIndex, lexedUntil), node.endIndex, strings);
   }
-  return stringEnds.map((index) => ({ row: rowAt(source, index), message: '文字列リテラルが閉じられていません。' }));
+  if (strings.length === 0) return [...parseErrors];
+  let repaired = '';
+  let copiedUntil = 0;
+  for (const { startIndex, endIndex, closed } of strings) {
+    const text = source.slice(startIndex, endIndex);
+    // Replacements keep every index and row: a closed string becomes a template, which may span lines.
+    const replacement = closed
+      ? `\`${text.slice(1, -1).replaceAll(/[^\r\n]/g, ' ')}\``
+      : text.length === 1
+        ? '0'
+        : `''${' '.repeat(text.length - 2)}`;
+    repaired += source.slice(copiedUntil, startIndex) + replacement;
+    copiedUntil = endIndex;
+  }
+  repaired += source.slice(copiedUntil);
+  return [
+    ...findSyntaxErrors(parser, repaired, MISSING_TOKEN_NAMES, false),
+    ...strings.map(({ breakIndex }) => ({
+      row: rowAt(source, breakIndex),
+      message: '文字列リテラルが閉じられていません。',
+    })),
+  ];
+}
+
+/**
+ * A quoted string with a raw line break: `closed` when a matching quote follows, as in a string spanning lines, and
+ * otherwise ending at its first line break, as an unclosed one.
+ */
+interface BrokenString {
+  startIndex: number;
+  endIndex: number;
+  breakIndex: number;
+  closed: boolean;
 }
 
 function outermostErrorNodes(root: Node): Node[] {
@@ -193,10 +229,10 @@ function outermostErrorNodes(root: Node): Node[] {
 }
 
 /**
- * Lexes code from `index` up to `end`, or with no `end` through the `}` closing a template substitution, recording in
- * `stringEnds` where each quoted string is left open; returns where lexing stopped.
+ * Lexes code from `index` up to `end`, or with no `end` through the `}` closing a template substitution, recording the
+ * quoted strings with a raw line break; returns where lexing stopped.
  */
-function lexCode(source: string, index: number, end: number | undefined, stringEnds: number[]): number {
+function lexCode(source: string, index: number, end: number | undefined, strings: BrokenString[]): number {
   let braceDepth = 0;
   while (index < (end ?? source.length)) {
     const char = source[index];
@@ -207,15 +243,15 @@ function lexCode(source: string, index: number, end: number | undefined, stringE
       const close = source.indexOf('*/', index + 2);
       index = close === -1 ? source.length : close + 2;
     } else if (char === '`') {
-      index = lexTemplate(source, index + 1, stringEnds);
+      index = lexTemplate(source, index + 1, strings);
     } else if (char === "'" || char === '"') {
-      const close = closingQuoteIndex(source, index);
-      if (source[close] === char) {
-        index = close + 1;
-      } else {
-        stringEnds.push(close);
-        index = close;
+      const { close, breakIndex } = scanQuotedString(source, index);
+      const closed = source[close] === char;
+      const endIndex = closed ? close + 1 : (breakIndex ?? close);
+      if (breakIndex !== undefined || !closed) {
+        strings.push({ startIndex: index, endIndex, breakIndex: breakIndex ?? close, closed });
       }
+      index = endIndex;
     } else if (end === undefined && char === '}' && braceDepth === 0) {
       return index + 1;
     } else {
@@ -227,24 +263,26 @@ function lexCode(source: string, index: number, end: number | undefined, stringE
   return index;
 }
 
-function lexTemplate(source: string, index: number, stringEnds: number[]): number {
+function lexTemplate(source: string, index: number, strings: BrokenString[]): number {
   while (index < source.length) {
     if (source[index] === '`') return index + 1;
-    if (source.startsWith('${', index)) index = lexCode(source, index + 2, undefined, stringEnds);
+    if (source.startsWith('${', index)) index = lexCode(source, index + 2, undefined, strings);
     else index += source[index] === '\\' ? 2 : 1;
   }
   return index;
 }
 
-/** The index of the quote closing the string opening at `opening`, or of the line break or end that leaves it open. */
-function closingQuoteIndex(source: string, opening: number): number {
+/** The index of the quote closing the string opening at `opening`, or the end, and of its first raw line break. */
+function scanQuotedString(source: string, opening: number): { close: number; breakIndex: number | undefined } {
+  let breakIndex: number | undefined;
   let index = opening + 1;
   while (index < source.length) {
     const char = source[index];
-    if (char === source[opening] || char === '\r' || char === '\n') return index;
+    if (char === source[opening]) return { close: index, breakIndex };
+    if ((char === '\r' || char === '\n') && breakIndex === undefined) breakIndex = index;
     index += char === '\\' ? (source.startsWith('\r\n', index + 1) ? 3 : 2) : 1;
   }
-  return source.length;
+  return { close: source.length, breakIndex };
 }
 
 function rowAt(source: string, index: number): number {
