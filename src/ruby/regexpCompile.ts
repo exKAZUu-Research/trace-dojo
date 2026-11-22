@@ -120,7 +120,8 @@ export function compileRegexp(source: string, flags: RegexpFlags): RegExp {
   }
   // The library makes an expression that starts with `\G` sticky, which is exact; its emulation of `\G` elsewhere
   // searches a clipped subject, which changes what other anchors and look-behind see.
-  if (!compiled.sticky && hasSearchStartAnchor(source, extended))
+  const emulated = compiled instanceof EmulatedRegExp && Boolean(compiled.rawOptions.strategy);
+  if ((!compiled.sticky || emulated) && hasSearchStartAnchor(source, extended))
     throw new UnsupportedFeatureError(`正規表現の先頭以外の${String.raw`\G`}`);
   return compiled;
 }
