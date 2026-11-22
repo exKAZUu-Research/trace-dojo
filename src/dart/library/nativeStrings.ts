@@ -10,6 +10,7 @@ import {
   allMatchesOf,
   hasPrefixMatch,
   isRegExp,
+  isSurrogatePairAt,
   type MatchState,
   matchText,
   newMatch,
@@ -26,7 +27,6 @@ import {
   registerPackedList,
   stringArg,
 } from './nativeSupport';
-import { isSurrogatePairAt } from './regExpEngine';
 import { dartStringCase } from './stringCase';
 import { trimDartEnd, trimDartStart, trimDartWhitespace } from './stringWhitespace';
 

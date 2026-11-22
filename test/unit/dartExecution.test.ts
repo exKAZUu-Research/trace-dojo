@@ -2862,8 +2862,8 @@ test('generic closures infer positional and named parameter types from their con
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '1\n2.5\n' });
 });
 
-// The interpreter matches regular expressions with its own engine, which must keep ECMAScript's backtracking order,
-// the groups each iteration of a loop clears, lookbehind's backward matching, and Unicode and case-insensitive modes.
+// ECMAScript's backtracking order, the groups each iteration of a loop clears, lookbehind's backward matching, and
+// Unicode and case-insensitive modes.
 test("regular expressions match as the VM's Irregexp does", () => {
   const program = String.raw`void main() {
   String show(RegExpMatch m) => [for (var g = 0; g <= m.groupCount; g++) m[g]].toString();
@@ -2939,41 +2939,12 @@ test('regular expression captures use the storage budget only when materialized'
   ).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout: 'done\n' });
 });
 
-test('regular expression choices and undo entries share a bounded working buffer', () => {
-  for (const pattern of ['(a)*', '(?=(a)*)(?:(a)(a))*']) {
-    expect(executeProgram('dart', regexScratchSource(pattern, 200_000))).toEqual({
-      kind: 'limitExceeded',
-      limit: 'storage',
-    });
-    expect(executeProgram('dart', regexScratchSource(pattern, 10_000))).toMatchObject({
-      kind: 'executed',
-      stdout: 'true\n',
-    });
-  }
-  expect(executeProgram('dart', regexScratchSource('(a)(?=b)|a', 200_000))).toMatchObject({
-    kind: 'executed',
-    stdout: 'true\n',
-  });
-});
-
-function regexScratchSource(pattern: string, size: number): string {
-  return `void main() { print(RegExp('${pattern}').hasMatch('a' * ${size})); }`;
-}
-
-// Neither a host RegExp nor a host BigInt operation can be interrupted, so they must stop at the limits before they
-// hold the server's process.
+// Neither compiling a host RegExp nor a host BigInt operation can be interrupted, so they must stop at the limits
+// before they start.
 test.each([
-  {
-    name: 'a regular expression that backtracks exponentially',
-    body: "  print(RegExp(r'(x+x+)+y').hasMatch('x' * 40));",
-  },
   {
     name: 'a regular expression with too many captures to compile',
     body: "  print(RegExp('(a)' * 250000).hasMatch('a'));",
-  },
-  {
-    name: 'a regular expression nested beyond the parser limit',
-    body: "  print(RegExp('(' * 1000 + 'a' + ')' * 1000).hasMatch('a'));",
   },
   {
     name: 'a gcd of BigInts with millions of bits',

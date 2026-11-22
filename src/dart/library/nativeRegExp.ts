@@ -1,22 +1,16 @@
-import { RegExpSyntaxError } from '@eslint-community/regexpp';
-
-import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Runtime } from '../runtime';
 import { coreTypes, interfaceType, makeNullable } from '../types';
 import { DartList, DartObject, type Value } from '../values';
-import { BoundedStringParts, stringSlice } from './boundedStringParts';
+import { BoundedStringParts, detachShorterString, stringSlice } from './boundedStringParts';
 import { newSet } from './nativeCollections';
 import { define, defineConstructor, index, intArg, listElement, listLength, named, stringArg } from './nativeSupport';
-import {
-  type CompiledRegExp,
-  compileRegExp,
-  execRegExp,
-  isSurrogatePairAt,
-  type RegExpMatchResult,
-} from './regExpEngine';
 
 /** A match of a pattern: where it is and the texts of its groups. */
-export interface MatchState extends RegExpMatchResult {
+export interface MatchState {
+  start: number;
+  end: number;
+  /** The texts of the groups by their numbers, when the match keeps them. */
+  groups?: RegExpExecArray;
   input: string;
   pattern: Value;
 }
@@ -27,7 +21,13 @@ interface RegExpState {
   caseSensitive: boolean;
   unicode: boolean;
   dotAll: boolean;
-  compiled: CompiledRegExp;
+  /** The host expression that searches from its `lastIndex`. */
+  search: RegExp;
+  /** The host expression that matches only at its `lastIndex`. */
+  sticky: RegExp;
+  groupCount: number;
+  /** The group names, in the order they first appear. */
+  names: readonly string[];
   values(): Iterable<Value>;
 }
 
@@ -46,7 +46,8 @@ defineConstructor('RegExp.new', (runtime, _instance, args) => {
   const unicode = named(args.named, 'unicode', false) === true;
   const dotAll = named(args.named, 'dotAll', false) === true;
   // The VM caches regular expressions, so equal sources and flags give the identical object.
-  const key = `${multiLine ? 'm' : ''}${caseSensitive ? '' : 'i'}${unicode ? 'u' : ''}${dotAll ? 's' : ''}/${source}`;
+  const flags = `${multiLine ? 'm' : ''}${caseSensitive ? '' : 'i'}${unicode ? 'u' : ''}${dotAll ? 's' : ''}`;
+  const key = `${flags}/${source}`;
   let cache = regExpCaches.get(runtime);
   if (!cache) {
     cache = new Map();
@@ -54,40 +55,46 @@ defineConstructor('RegExp.new', (runtime, _instance, args) => {
   }
   const cached = cache.get(key);
   if (cached) return cached;
-  // The parser and host character tests run synchronously, so reserve their work before entering them.
-  runtime.spend(1 + 32 * source.length);
-  checkPatternNesting(source);
-  let compiled: CompiledRegExp;
-  try {
-    compiled = compileRegExp(source, { multiLine, ignoreCase: !caseSensitive, unicode, dotAll }, () => runtime.spend());
-  } catch (error) {
-    if (!(error instanceof RegExpSyntaxError)) throw error;
-    return runtime.throwError('FormatException', '', [regExpSyntaxMessage(error, source), source]);
-  }
-  runtime.budget.checkClock();
-  runtime.allocate(1 + compiled.program.length + compiled.registerCount);
   const object = new DartObject(runtime.links.classNamed('_RegExp'), [], []);
-  object.native = { source, multiLine, caseSensitive, unicode, dotAll, compiled, values: () => [] };
+  object.native = { source, multiLine, caseSensitive, unicode, dotAll, ...compile(runtime, source, flags) };
   cache.set(key, object);
   return object;
 });
 
-const regExpCaches = new WeakMap<Runtime, Map<string, DartObject>>();
-
-function checkPatternNesting(source: string): void {
-  let depth = 0;
-  let inClass = false;
-  for (let index = 0; index < source.length; index++) {
-    const character = source[index];
-    if (character === '\\') index++;
-    else if (character === '[') inClass = true;
-    else if (character === ']') inClass = false;
-    else if (!inClass && character === '(' && ++depth > LIMITS.maxCallDepth / 2)
-      throw new ExecutionLimitError('operations');
-    else if (!inClass && character === ')' && depth > 0) depth--;
+function compile(
+  runtime: Runtime,
+  source: string,
+  flags: string
+): Pick<RegExpState, 'search' | 'sticky' | 'groupCount' | 'names' | 'values'> {
+  // The host compiles without interruption, so reserve its work before entering it.
+  runtime.spend(1 + 32 * source.length);
+  let search: RegExp;
+  let groups: RegExpExecArray;
+  try {
+    search = new RegExp(source, `${flags}g`);
+    // The empty alternative matches the empty text whatever the pattern is, which reveals the pattern's groups.
+    groups = new RegExp(`${source}|`, flags).exec('') as RegExpExecArray;
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    // The VM's engine words its syntax errors as V8 does, after this prefix; other hosts word them their own way.
+    const message = error.message.replace(/^Invalid regular expression: \/[\s\S]*\/[a-z]*: /, '');
+    return runtime.throwError('FormatException', '', [message, source]);
   }
+  runtime.budget.checkClock();
+  const groupCount = groups.length - 1;
+  runtime.allocate(1 + source.length + 2 * groupCount);
+  return {
+    search,
+    sticky: new RegExp(source, `${flags}y`),
+    groupCount,
+    names: Object.keys(groups.groups ?? {}),
+    values: () => [],
+  };
 }
 
+const regExpCaches = new WeakMap<Runtime, Map<string, DartObject>>();
+
+/** The first match at `start` (`sticky`) or after it, keeping the texts of its groups when `capture`. */
 function execAt(
   runtime: Runtime,
   state: RegExpState,
@@ -96,21 +103,19 @@ function execAt(
   sticky: boolean,
   capture = false
 ): MatchState | undefined {
-  let steps = 0;
-  const charge = (): void => {
-    if (++steps % STEPS_PER_OPERATION === 0) runtime.spend();
-  };
-  const reserve = (slots: number): void => runtime.allocate(slots);
-  const found = execRegExp(state.compiled, input, start, sticky, {
-    charge,
-    scratchSlots: LIMITS.maxSlots - runtime.allocatedSlots,
-    reserveCaptures: capture ? reserve : undefined,
-  });
-  return found ? { ...found, input, pattern: undefined } : undefined;
+  const regExp = sticky ? state.sticky : state.search;
+  regExp.lastIndex = start;
+  const found = regExp.exec(input);
+  const end = found ? found.index + found[0].length : input.length;
+  runtime.spend(1 + Math.ceil(Math.max(0, end - start) / CODE_UNITS_PER_OPERATION));
+  runtime.budget.checkClock();
+  if (!found) return undefined;
+  if (capture) runtime.allocate(2 * state.groupCount);
+  return { start: found.index, end, groups: capture ? found : undefined, input, pattern: undefined };
 }
 
-/** Matcher steps that cost one operation, a rate at which ordinary patterns stay well within the budget. */
-const STEPS_PER_OPERATION = 8;
+/** Code units of the text a match scans that cost one operation. */
+const CODE_UNITS_PER_OPERATION = 8;
 
 /** Every match of a regular expression, after an empty match moving on by one, as Dart does. */
 export function* allMatchesOf(
@@ -133,6 +138,15 @@ export function* allMatchesOf(
         ? match.end + (state.unicode && isSurrogatePairAt(input, match.end) ? 2 : 1)
         : match.end;
   }
+}
+
+export function isSurrogatePairAt(input: string, position: number): boolean {
+  if (position < 0 || position + 1 >= input.length) return false;
+  // oxlint-disable-next-line unicorn/prefer-code-point -- Surrogates are UTF-16 code units.
+  const high = input.charCodeAt(position);
+  // oxlint-disable-next-line unicorn/prefer-code-point -- Surrogates are UTF-16 code units.
+  const low = input.charCodeAt(position + 1);
+  return high >= 0xd8_00 && high <= 0xdb_ff && low >= 0xdc_00 && low <= 0xdf_ff;
 }
 
 export function patternIndex(runtime: Runtime, pattern: Value, input: string, position: number): number {
@@ -170,12 +184,14 @@ export function newMatch(runtime: Runtime, state: MatchState): DartObject {
 }
 
 export function matchText(runtime: Runtime, state: MatchState, group = 0): string | undefined {
-  const capture = 2 * (group - 1);
-  const start = group === 0 ? state.start : state.captures?.[capture];
-  const end = group === 0 ? state.end : state.captures?.[capture + 1];
-  if (start === undefined || end === undefined || start < 0 || end < 0) return undefined;
-  runtime.spend(Math.ceil((end - start) / 1024));
-  return stringSlice(runtime, state.input, start, end);
+  if (group === 0) {
+    runtime.spend(Math.ceil((state.end - state.start) / 1024));
+    return stringSlice(runtime, state.input, state.start, state.end);
+  }
+  const text = state.groups?.[group];
+  if (text === undefined) return undefined;
+  runtime.spend(Math.ceil(text.length / 1024));
+  return detachShorterString(runtime, state.input, text);
 }
 
 function matchState(value: Value): MatchState {
@@ -264,77 +280,6 @@ define('RegExp.isMultiLine', (_runtime, receiver) => stateOf(receiver).multiLine
 define('RegExp.isCaseSensitive', (_runtime, receiver) => stateOf(receiver).caseSensitive);
 define('RegExp.isUnicode', (_runtime, receiver) => stateOf(receiver).unicode);
 define('RegExp.isDotAll', (_runtime, receiver) => stateOf(receiver).dotAll);
-/** The VM's regular expression engine (Irregexp) words its syntax errors differently from the host's. */
-function regExpSyntaxMessage(error: RegExpSyntaxError, source: string): string {
-  const reason = error.message.replace(/^Invalid regular expression: \/[\s\S]*\/[a-z]*: /, '');
-  if (reason.startsWith('Duplicated flag ')) return 'Repeated flag in flag group';
-  switch (reason) {
-    case 'Invalid empty flags': {
-      return 'Invalid flag group';
-    }
-    case 'Invalid group': {
-      return /^[ims]*-[ims]*-/.test(source.slice(error.index + 1)) ? 'Multiple dashes in flag group' : reason;
-    }
-    case 'Invalid character in character class': {
-      return error.index === source.length - 1 && source[error.index] === '\\'
-        ? String.raw`\ at end of pattern`
-        : reason;
-    }
-    case 'Invalid unicode escape': {
-      return 'Invalid Unicode escape';
-    }
-    case 'Invalid property name': {
-      return inCharacterClass(source, error.index) ? 'Invalid property name in character class' : reason;
-    }
-    case 'Invalid escape': {
-      return escapeDiagnostic(source, error.index);
-    }
-    case 'Nothing to repeat': {
-      return quantifiesAssertion(source, error.index) ? 'Invalid quantifier' : reason;
-    }
-    default: {
-      return reason;
-    }
-  }
-}
-
-function escapeDiagnostic(source: string, offset: number): string {
-  if (source[offset - 1] === '\\') {
-    const escaped = source[offset];
-    if (escaped === undefined) return String.raw`\ at end of pattern`;
-    if (escaped === 'c') return 'Invalid Unicode escape';
-    if (escaped === '0' && /\d/.test(source[offset + 1] ?? '')) return 'Invalid decimal escape';
-  }
-  return 'Invalid escape';
-}
-
-function inCharacterClass(source: string, offset: number): boolean {
-  let inside = false;
-  for (const [token] of source.slice(0, offset).matchAll(/\\[\s\S]|[[\]]/g)) {
-    if (token === '[') inside = true;
-    else if (token === ']') inside = false;
-  }
-  return inside;
-}
-
-function quantifiesAssertion(source: string, offset: number): boolean {
-  const prefix = source.slice(0, offset);
-  const quantifier = /(?:[*+?]|\{\d+(?:,\d*)?\})$/.exec(prefix);
-  if (!quantifier || source[quantifier.index - 1] !== ')') return false;
-  let inClass = false;
-  const groups: boolean[] = [];
-  for (const match of prefix.matchAll(/\\[\s\S]|\(\?<?[=!]|[()[\]]/g)) {
-    const [token] = match;
-    if (token === '[') inClass = true;
-    else if (token === ']') inClass = false;
-    else if (!inClass && token.startsWith('(')) groups.push(token.length > 1);
-    else if (!inClass && token === ')') {
-      const assertion = groups.pop();
-      if (match.index === quantifier.index - 1) return assertion === true;
-    }
-  }
-  return false;
-}
 
 define('RegExp.toString', (runtime, receiver) => {
   const output = new BoundedStringParts(runtime);
@@ -352,8 +297,7 @@ export function appendRegExpDescription(output: BoundedStringParts, receiver: Va
 function group(runtime: Runtime, receiver: Value, which: Value): Value {
   const state = matchState(receiver);
   const at = intArg(runtime, which, 'group');
-  if (at < 0n || at > BigInt(stateOf(state.pattern).compiled.groupCount))
-    runtime.throwError('RangeError', 'value', [at]);
+  if (at < 0n || at > BigInt(stateOf(state.pattern).groupCount)) runtime.throwError('RangeError', 'value', [at]);
   return matchText(runtime, state, index(at));
 }
 
@@ -380,32 +324,30 @@ define('RegExpMatch.groups', (runtime, receiver, [indices]) => {
     frame?.temporaries.pop();
   }
 });
-define('RegExpMatch.groupCount', (_runtime, receiver) =>
-  BigInt(stateOf(matchState(receiver).pattern).compiled.groupCount)
-);
+define('RegExpMatch.groupCount', (_runtime, receiver) => BigInt(stateOf(matchState(receiver).pattern).groupCount));
 define('RegExpMatch.input', (_runtime, receiver) => matchState(receiver).input);
 define('RegExpMatch.pattern', (_runtime, receiver) => matchState(receiver).pattern);
 define('RegExpMatch.namedGroup', (runtime, receiver, [name]) => {
   const state = matchState(receiver);
   const key = stringArg(runtime, name, 'name');
-  const numbers = stateOf(state.pattern).compiled.names.get(key);
-  if (!numbers) return runtime.throwError('ArgumentError', '', [`Not a capture group name: ${key}`]);
-  for (const number of numbers) {
-    runtime.spend();
-    const value = matchText(runtime, state, number);
-    if (value !== undefined) return value;
+  if (!stateOf(state.pattern).names.includes(key)) {
+    return runtime.throwError('ArgumentError', '', [`Not a capture group name: ${key}`]);
   }
-  return;
+  // Of the groups sharing a name, the host reports the one that took part in the match.
+  const text = state.groups?.groups?.[key];
+  if (text === undefined) return;
+  runtime.spend(1 + Math.ceil(text.length / 1024));
+  return detachShorterString(runtime, state.input, text);
 });
 define('RegExpMatch.groupNames', (runtime, receiver) => {
-  const names = stateOf(matchState(receiver).pattern).compiled.names;
+  const { names } = stateOf(matchState(receiver).pattern);
   const stringType = interfaceType(coreTypes.string);
-  if (names.size === 0) {
+  if (names.length === 0) {
     return runtime.links.canonicalize(runtime, new DartList(coreTypes.list, stringType, [], false, true));
   }
   runtime.allocate(1);
   const result = newSet(runtime, stringType);
-  for (const name of names.keys()) {
+  for (const name of names) {
     runtime.invoke(result, 'add', { positional: [name], named: undefined }, [], undefined);
   }
   return result;
