@@ -70,6 +70,8 @@ function rewrittenToken(source: string, token: RegexpToken, aliases: Map<string,
   if (token.name !== undefined)
     return { text: `(?<${aliases.get(token.name) ?? token.name}>`, length: token.raw.length };
   if (token.kind === 'escape') return rewrittenEscape(source, token, aliases);
+  // An extended-mode comment runs to the end of its line, so it would swallow a parenthesis generated after it.
+  if (token.kind === 'ignored' && token.raw.startsWith('#')) return { text: ' ', length: token.raw.length };
   if (token.kind !== 'char') return undefined;
   if (token.raw === '{' && !token.inClass) return rubyInterval(source, token.start);
   if (LITERAL_WHITESPACE.test(token.raw))
