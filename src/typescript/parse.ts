@@ -182,6 +182,11 @@ function withUnterminatedStrings(root: Node, source: string, parseErrors: Source
   for (const node of unreadNodes(root)) {
     // A string opening in the node may run past its end, which the parser can place before the line break.
     lexedUntil = lexCode(lexer, Math.max(node.startIndex, lexedUntil), node.endIndex);
+    if (lexedUntil > node.endIndex) {
+      // The parser tokenized the rest of that line from inside the string, so it is lexed here to stay aligned.
+      const lineEnd = source.indexOf('\n', lexedUntil);
+      lexedUntil = lexCode(lexer, lexedUntil, lineEnd === -1 ? source.length : lineEnd);
+    }
   }
   const { strings } = lexer;
   if (strings.length === 0) return [...parseErrors];
