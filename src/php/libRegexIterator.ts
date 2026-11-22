@@ -4,7 +4,8 @@ import { throwError } from './errors';
 import { constructDual, dualOf, type DualState } from './libIterators';
 import { defineClass } from './native';
 import { toStr } from './operators';
-import { PatternError, translate } from './pcrePattern';
+import { translate } from './pcrePattern';
+import { PatternError } from './pcrePatternSource';
 import { rt } from './runtime';
 import { deref, type NativeFunction, PhpArray, type PhpObject, Ref, type Value } from './values';
 

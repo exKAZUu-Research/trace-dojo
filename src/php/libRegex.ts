@@ -6,7 +6,8 @@ import { type CleanupException, throwError, warn, withCleanupExceptions } from '
 import { isCallable } from './libCore';
 import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
-import { type Compiled, groupName, PatternError, translate } from './pcrePattern';
+import { type Compiled, groupName, translate } from './pcrePattern';
+import { PatternError } from './pcrePatternSource';
 import { ExitSignal, PhpThrow, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import { copyValueSlot, deref, PhpArray, PhpObject, type Ref, type Value } from './values';

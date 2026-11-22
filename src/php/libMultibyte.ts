@@ -986,23 +986,21 @@ function encodingReader(name: string): EncodingReader {
     const unicode = CODECS.get(UNICODE_READERS[name]);
     const decoder = unicode ? undefined : legacyTextDecoder(DECODER_LABELS[name] ?? name);
     if (!unicode && !decoder) throw new UnsupportedFeatureError(`文字コード ${name} の判定（mb_detect_encoding）`);
-    const units = NARROW_UNITS[name];
-    // oxlint-disable-next-line no-control-regex -- The units are bytes, of which ASCII ones are valid in each encoding.
-    const runs = units === undefined ? undefined : new RegExp(String.raw`((?:[\x00-\x7f]|${units})+)|[\s\S]`, 'g');
-    reader = {
-      name,
-      decode:
-        unicode?.decode ??
-        ((text) =>
-          runs
-            ? Array.from(text.matchAll(runs), ([byte, run]) =>
-                run === undefined ? [BAD] : decodeLegacy(byte, decoder as TextDecoder)
-              ).flat()
-            : decodeLegacy(text, decoder as TextDecoder)),
-    };
+    reader = { name, decode: unicode?.decode ?? legacyDecoding(decoder as TextDecoder, NARROW_UNITS[name]) };
     detectionReaders.set(name, reader);
   }
   return reader;
+}
+
+/** Reads bytes with a host decoder, as invalid where `units` (an encoding narrower than the decoder's) lacks them. */
+function legacyDecoding(decoder: TextDecoder, units: string | undefined): Codec['decode'] {
+  if (units === undefined) return (text) => decodeLegacy(text, decoder);
+  // oxlint-disable-next-line no-control-regex -- The units are bytes, of which ASCII ones are valid in each encoding.
+  const runs = new RegExp(String.raw`((?:[\x00-\x7f]|${units})+)|[\s\S]`, 'g');
+  return (text) =>
+    Array.from(text.matchAll(runs), ([bytes, run]) =>
+      run === undefined ? [BAD] : decodeLegacy(bytes, decoder)
+    ).flat();
 }
 
 function legacyTextDecoder(label: string): TextDecoder | undefined {
