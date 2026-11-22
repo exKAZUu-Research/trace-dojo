@@ -13,9 +13,14 @@ export function detachShorterString(runtime: Runtime, source: string, text: stri
 export function copyString(runtime: Runtime, text: string): string {
   if (text.length === 0) return text;
   runtime.spendString(text.length);
-  // V8 may retain a slice's backing string even when the slice is small.
-  return Buffer.from(text, 'utf16le').toString('utf16le');
+  // V8 may retain a slice's backing string even when the slice is small, so the copy is decoded from fresh bytes.
+  // UTF-8 cannot carry a lone surrogate, so a text that has one is rebuilt from its code units instead.
+  return text.isWellFormed() ? utf8Decoder.decode(utf8Encoder.encode(text)) : text.split('').join('');
 }
+
+const utf8Encoder = new TextEncoder();
+// A decoder drops a leading U+FEFF unless told to keep it.
+const utf8Decoder = new TextDecoder('utf-8', { ignoreBOM: true });
 
 export class BoundedStringParts {
   private readonly parts = new StringParts();

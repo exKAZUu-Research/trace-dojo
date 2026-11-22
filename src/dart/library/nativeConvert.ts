@@ -695,7 +695,12 @@ define('_base64Encode', (runtime, _receiver, [bytes, urlSafe]) => {
   });
   if (hasInvalid) invalidBase64Byte(runtime, bytes, data.length);
   chargeCodecString(runtime, Math.ceil(data.length / 3) * 4);
-  const text = Buffer.from(data).toString('base64');
+  let binary = '';
+  for (let start = 0; start < data.length; start += 0x20_00) {
+    // oxlint-disable-next-line unicorn/prefer-code-point -- Each byte becomes one code unit for btoa.
+    binary += String.fromCharCode(...data.subarray(start, start + 0x20_00));
+  }
+  const text = btoa(binary);
   return urlSafe === true ? text.replaceAll('+', '-').replaceAll('/', '_') : text;
 });
 
@@ -738,7 +743,14 @@ define('_base64Decode', (runtime, _receiver, [source, start, end]) => {
   runtime.spend(1 + (to - from) / 64);
   const encodedLength = validatedBase64Length(input.slice(from, to), fail);
   runtime.allocate(Math.floor((encodedLength * 3) / 4) + 1);
-  const bytes = Buffer.from(input.slice(from, from + encodedLength), 'base64');
+  const binary = atob(
+    input
+      .slice(from, from + encodedLength)
+      .replaceAll('-', '+')
+      .replaceAll('_', '/')
+  );
+  // oxlint-disable-next-line unicorn/prefer-code-point -- atob returns each byte as one code unit.
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   return new DartPackedList(runtime.links.classNamed('_Uint8List'), bytes);
 });
 
