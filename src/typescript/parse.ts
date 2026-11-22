@@ -233,7 +233,7 @@ interface Lexer {
 }
 
 function validTokenEnds(root: Node): Map<number, number> {
-  const tokens = root.descendantsOfType(['comment', 'regex', 'string', 'template_string']);
+  const tokens = root.descendantsOfType(['comment', 'regex', 'regex_pattern', 'string', 'template_string']);
   return new Map(tokens.filter((token) => !token.hasError).map((token) => [token.startIndex, token.endIndex]));
 }
 
