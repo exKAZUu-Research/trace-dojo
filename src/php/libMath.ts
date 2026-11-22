@@ -1,6 +1,4 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { randomBytes } from 'node:crypto';
-
 import { platformBinary, platformUnary } from '../interpreter/platformMath';
 import { floatFitsInt, valueName } from './conversions';
 import { deprecated, throwError } from './errors';
@@ -382,9 +380,10 @@ defineFunction('random_int(int $min, int $max): int', ({ args }) => {
   const span = max - min;
   if (span === 0n) return min;
   const mask = (1n << BigInt(span.toString(2).length)) - 1n;
+  const random = new BigUint64Array(1);
   for (;;) {
     rt().spend();
-    const value = randomBytes(8).readBigUInt64LE() & mask;
+    const value = crypto.getRandomValues(random)[0] & mask;
     if (value <= span) return min + value;
   }
 });

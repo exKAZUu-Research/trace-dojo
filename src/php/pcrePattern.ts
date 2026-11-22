@@ -1,9 +1,17 @@
+// code-gauge-allow-file fileNcss 990 -- One converter class walks the pattern, and its cases share its cursor and result.
 // oxlint-disable unicorn/prefer-code-point -- PHP pattern strings contain bytes; UTF-8 validation reads each byte separately.
-import propertyAliases from 'unicode-property-value-aliases-ecmascript';
-
 import { dec, enc, utf8Length } from './bytes';
-import { analyzeRegex } from './regexAnalysis';
-import type { PcrePattern } from './regexExecution';
+import {
+  ANY,
+  BYTE_POSIX_CLASSES,
+  BYTE_SETS,
+  type CharacterSet,
+  UCP_NONPRINTING_FORMATS,
+  UCP_POSIX_CLASSES,
+  UCP_SETS,
+  unicodeBoundary,
+  unicodeProperty,
+} from './pcreCharacterSets';
 import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 
@@ -16,14 +24,11 @@ export interface Compiled {
   regex: RegExp;
   /** Matches only at `lastIndex` and only a match that does not end there, as PCRE retries after an empty match. */
   retry: RegExp;
-  emptyRegex?: RegExp;
   utf8: boolean;
   names: (string | undefined)[];
   groupCount: number;
   /** The capture names of the `\K` points, the last passed of which starts the reported match. */
   keeps: string[];
-  boundedPattern?: PcrePattern;
-  jitStackPattern?: PcrePattern;
 }
 
 export class PatternError extends Error {}
@@ -65,7 +70,6 @@ const MODIFIERS = new Map<string, PatternOption | undefined>([
 ]);
 
 // code-gauge-allow functionCognitiveComplexity 22 -- Threads pattern options, byte offsets and captures through both parsing passes.
-// code-gauge-allow functionNcss 32 -- Keeps validation and selection of the bounded PCRE2 path with pattern compilation.
 export function translate(pattern: string): Compiled {
   if (pattern.length > 32_768) throw new UnsupportedFeatureError('大きすぎる正規表現');
   const { body, modifiers } = splitDelimiters(pattern);
@@ -86,73 +90,37 @@ export function translate(pattern: string): Compiled {
   for (const modifier of modifiers) applyModifier(options, modifier);
   if (options.utf8) validatePatternUtf8(body);
   let source = options.utf8 ? dec(body) : body;
-  const matchLimit = /^\(\*LIMIT_MATCH=\d{1,10}\)/.exec(source)?.[0];
-  if (matchLimit) source = source.slice(matchLimit.length);
   const leadingFlags = /^\(\?([imsxU]+)\)/.exec(source);
   if (leadingFlags) {
     for (const flag of leadingFlags[1]) applyModifier(options, flag);
     options.extendedClass = leadingFlags[1].includes('xx');
     source = source.slice(leadingFlags[0].length);
   }
-  const offsetBase = (matchLimit?.length ?? 0) + (leadingFlags?.[0].length ?? 0);
+  const offsetBase = leadingFlags?.[0].length ?? 0;
   const layout = new PatternConverter(source, options, offsetBase).layout();
   if (layout.names.length > 256) throw new UnsupportedFeatureError('キャプチャが多すぎる正規表現');
   const converter = new PatternConverter(source, options, offsetBase, layout);
   const converted = converter.convert();
   if (converted.length > 65_536) throw new UnsupportedFeatureError('大きすぎる正規表現');
   const flags = `d${options.caseless ? 'i' : ''}${converter.unicode ? 'u' : ''}`;
-  const { emptySource, needsNative, hasQuantifiedGroup } = analyzeRegex(
-    converted,
-    converter.unicode,
-    options.utf8,
-    options.caseless,
-    (start, reason) => converter.invalidLookbehind(start, reason),
-    emptySubjectMarkers(layout.marked)
-  );
   if (converter.unavailable) unsupported(converter.unavailable);
   return {
-    regex: new RegExp(converted, `${options.anchored || converter.sticky ? 'y' : 'g'}${flags}`),
-    retry: new RegExp(String.raw`(?=(?<$r>[\s\S]*))(?:${converted})(?!\k<$r>(?![\s\S]))`, `y${flags}`),
-    emptyRegex: emptySource === undefined ? undefined : new RegExp(emptySource, `y${flags}`),
+    regex: hostRegex(converted, `${options.anchored || converter.sticky ? 'y' : 'g'}${flags}`),
+    retry: hostRegex(String.raw`(?=(?<$r>[\s\S]*))(?:${converted})(?!\k<$r>(?![\s\S]))`, `y${flags}`),
     utf8: options.utf8,
     names: options.utf8 ? converter.names.map((name) => (name === undefined ? undefined : enc(name))) : converter.names,
     groupCount: converter.names.length - 1,
     keeps: converter.keeps,
-    ...nativePatterns(body, modifiers, converter.needsNative || needsNative || Boolean(matchLimit), hasQuantifiedGroup),
   };
 }
 
-export function nativePatternFor(compiled: Compiled, subjectLength: number): PcrePattern | undefined {
-  return compiled.boundedPattern ?? (subjectLength >= 1024 ? compiled.jitStackPattern : undefined);
-}
-
-function nativePatterns(
-  body: string,
-  modifiers: string,
-  alwaysNative: boolean,
-  hasQuantifiedGroup: boolean
-): { boundedPattern?: PcrePattern; jitStackPattern?: PcrePattern } {
-  if (alwaysNative) return { boundedPattern: pcrePattern(body, modifiers) };
-  return hasQuantifiedGroup ? { jitStackPattern: pcrePattern(body, modifiers) } : {};
-}
-
-const PCRE_COMPILE_OPTIONS: Record<string, number> = {
-  A: 0x80_00_00_00, // PCRE2_ANCHORED
-  D: 0x00_00_00_10, // PCRE2_DOLLAR_ENDONLY
-  i: 0x00_00_00_08, // PCRE2_CASELESS
-  J: 0x00_00_00_40, // PCRE2_DUPNAMES
-  m: 0x00_00_04_00, // PCRE2_MULTILINE
-  n: 0x00_00_20_00, // PCRE2_NO_AUTO_CAPTURE
-  s: 0x00_00_00_20, // PCRE2_DOTALL
-  U: 0x00_04_00_00, // PCRE2_UNGREEDY
-  u: 0x00_1a_00_00, // PCRE2_UTF | PCRE2_UCP | PCRE2_NEVER_BACKSLASH_C
-  x: 0x00_00_00_80, // PCRE2_EXTENDED
-};
-
-function pcrePattern(source: string, modifiers: string): PcrePattern {
-  let options = 0;
-  for (const modifier of modifiers) options |= PCRE_COMPILE_OPTIONS[modifier] ?? 0;
-  return { source, options: options >>> 0, restrictCaseless: modifiers.includes('r') };
+function hostRegex(source: string, flags: string): RegExp {
+  try {
+    return new RegExp(source, flags);
+  } catch (error) {
+    if (error instanceof SyntaxError) unsupported('ホストエンジンで表せない書き方');
+    throw error;
+  }
 }
 
 /** The name under which the regexes capture a group of the pattern. */
@@ -192,15 +160,6 @@ function applyModifier(options: PatternOptions, modifier: string): void {
   if (option) options[option] = true;
 }
 
-/** Characters that a class matches: JavaScript class contents, which `negated` complements. */
-interface CharacterSet {
-  content: string;
-  negated: boolean;
-  excluded?: string;
-  /** Whether caseless matching leaves the class as it is, as it does PCRE's `[:upper:]` and `[:lower:]` under UCP. */
-  exact?: boolean;
-}
-
 /** A class member that a range can start or end with. */
 interface ClassCharacter {
   text: string;
@@ -227,7 +186,12 @@ interface Frame {
   close: string;
   /** The JavaScript modifier groups (`(?i:`) that option settings opened in the group, which `|` closes and reopens. */
   modifiers: string[];
-  lookaround: boolean;
+  lookaround?: 'ahead' | 'behind';
+  /** What a lookbehind holds so far, in itself or in the groups inside it. */
+  captures?: boolean;
+  quantified?: boolean;
+  /** Where the group starts in the pattern, which the error of an unlimited lookbehind reports. */
+  at: number;
 }
 
 /** What the first pass over a pattern finds that the second needs. */
@@ -250,53 +214,6 @@ const INLINE_OPTIONS = new Map<string, PatternOption>([
   ['J', 'duplicateNames'],
 ]);
 
-const ANY = String.raw`[\s\S]`;
-const BYTE_SETS = new Map([
-  ['d', '0-9'],
-  ['w', 'A-Za-z0-9_'],
-  ['s', String.raw`\t-\r `],
-  ['h', String.raw`\t \xa0`],
-  ['v', String.raw`\n-\r\x85`],
-]);
-const UCP_SETS = new Map([
-  ['d', String.raw`\p{Nd}`],
-  ['w', String.raw`\p{L}\p{N}\p{Mn}\p{Pc}`],
-  ['s', String.raw`\t-\r \x85\xa0 ᠎ - \u2028\u2029  　`],
-  ['h', String.raw`\t \xa0 ᠎ -   　`],
-  ['v', String.raw`\n-\r\x85\u2028\u2029`],
-]);
-const BYTE_POSIX_CLASSES = new Map([
-  ['alpha', 'A-Za-z'],
-  ['digit', '0-9'],
-  ['alnum', 'A-Za-z0-9'],
-  ['upper', 'A-Z'],
-  ['lower', 'a-z'],
-  ['space', String.raw`\t-\r `],
-  ['blank', String.raw` \t`],
-  ['punct', '!-\\/:-@\\[-`{-~'],
-  ['xdigit', '0-9A-Fa-f'],
-  ['word', 'A-Za-z0-9_'],
-  ['cntrl', String.raw`\x00-\x1f\x7f`],
-  ['print', ' -~'],
-  ['graph', '!-~'],
-]);
-const UCP_GRAPH = String.raw`\p{L}\p{M}\p{N}\p{P}\p{S}\p{Cf}`;
-const UCP_NONPRINTING_FORMATS = String.raw`\u061C\u2066-\u2069`;
-const UCP_POSIX_CLASSES = new Map([
-  ['alpha', String.raw`\p{L}`],
-  ['digit', String.raw`\p{Nd}`],
-  ['alnum', String.raw`\p{L}\p{N}`],
-  ['upper', String.raw`\p{Lu}`],
-  ['lower', String.raw`\p{Ll}`],
-  ['space', UCP_SETS.get('s') as string],
-  ['blank', UCP_SETS.get('h') as string],
-  ['punct', String.raw`\p{P}$+<=>^` + '`|~'],
-  ['xdigit', String.raw`0-9A-Fa-f０-９Ａ-Ｆａ-ｆ`],
-  ['word', UCP_SETS.get('w') as string],
-  ['cntrl', String.raw`\p{Cc}`],
-  ['print', String.raw`${UCP_GRAPH}\p{Zs}`],
-  ['graph', UCP_GRAPH],
-]);
 const SIMPLE_ESCAPES = new Map([
   ['a', 0x07],
   ['e', 0x1b],
@@ -337,7 +254,6 @@ class PatternConverter {
   readonly keeps: string[] = [];
   /** Whether the pattern starts with `\G`, so that it matches only where the search starts. */
   sticky = false;
-  needsNative = false;
   unavailable?: string;
   private index = 0;
   private result = '';
@@ -347,11 +263,6 @@ class PatternConverter {
   private itemStart = 0;
   private readonly frames: Frame[];
   private readonly references: { target: number | string; at: number }[] = [];
-  /** Where each group and `\K` point starts in the result, which possessive quantifiers shift. */
-  private readonly groupStarts: number[] = [-1];
-  private readonly keepStarts: number[] = [];
-  private readonly lookbehindStarts: number[] = [];
-  private readonly lookbehindOffsets: number[] = [];
   private hiddenGroups = 0;
   private alternation = false;
   private keepInLookaround = false;
@@ -368,7 +279,7 @@ class PatternConverter {
     this.unicode = options.utf8;
     this.checkCaselessRestriction(options);
     this.known = known;
-    this.frames = [{ start: 0, outer: this.options, close: '', modifiers: [], lookaround: false }];
+    this.frames = [{ start: 0, outer: this.options, close: '', modifiers: [], at: 0 }];
   }
 
   /** Converts the pattern to learn its layout, which a second converter needs for references to later groups. */
@@ -431,7 +342,7 @@ class PatternConverter {
       case '*':
       case '+':
       case '?': {
-        this.quantifier(char, this.index + 1, char !== '?');
+        this.quantifier(char, this.index + 1);
         return;
       }
       case '{': {
@@ -476,8 +387,8 @@ class PatternConverter {
     this.repeatable = repeatable;
   }
 
-  private openFrame(open: string, close: string, lookaround = false): void {
-    this.frames.push({ start: this.result.length, outer: this.options, close, modifiers: [], lookaround });
+  private openFrame(open: string, close: string, lookaround?: 'ahead' | 'behind', at = this.index): void {
+    this.frames.push({ start: this.result.length, outer: this.options, close, modifiers: [], lookaround, at });
     this.options = { ...this.options };
     this.emit(open, false);
   }
@@ -505,18 +416,12 @@ class PatternConverter {
     throw new PatternError(`Compilation failed: ${message} at offset ${this.offsetBase + offset}`);
   }
 
-  invalidLookbehind(start: number, reason: string): never {
-    const index = startIndex(this.lookbehindStarts, start);
-    if (this.lookbehindStarts[index] !== start) unsupported('長さの制限を超える後読み正規表現');
-    return this.fail(reason, this.lookbehindOffsets[index]);
-  }
-
   /** Emits a quantifier ending at `end`, with the lazy (`?`) or possessive (`+`) suffix that follows it. */
   // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
-  private quantifier(text: string, end: number, repeats: boolean): void {
+  private quantifier(text: string, end: number): void {
     if (!this.repeatable) this.fail('quantifier does not follow a repeatable item', end);
+    this.checkLookbehindQuantifier(text);
     this.index = end;
-    if (repeats) this.repeatItem();
     while (this.index < this.source.length) {
       if (this.source.startsWith('(?#', this.index)) this.skipGroupComment();
       else if (!this.options.extended || !this.skipExtended(this.source[this.index])) break;
@@ -537,19 +442,35 @@ class PatternConverter {
     else this.emit(greedy ? text : `${text}?`, false);
   }
 
-  private repeatItem(): void {
-    // JavaScript forgets captures inside an item at each repetition.
-    const first = startIndex(this.groupStarts, this.itemStart);
-    this.needsNative ||=
-      this.groupStarts.length - first > 1 ||
-      (first < this.groupStarts.length && this.groupStarts[first] > this.itemStart) ||
-      (this.keepStarts.at(-1) ?? -1) >= this.itemStart;
-  }
-
   /** Repeats the last item atomically, as a lookahead does, which JavaScript does not backtrack into. */
   private possessive(quantifier: string): void {
+    this.rejectInLookbehind('絶対最大量指定子');
     const name = `$a${this.hiddenGroups++}`;
     this.wrapItem(`(?:(?=(?<${name}>`, `${quantifier}))\\k<${name}>)`);
+  }
+
+  /** Rejects what a lookbehind would get wrong, because JavaScript matches a lookbehind from its end to its start. */
+  private rejectInLookbehind(what: string): void {
+    if (this.frames.some((frame) => frame.lookaround === 'behind')) this.unavailable ??= `後読みの中の${what}`;
+  }
+
+  private checkLookbehindQuantifier(quantifier: string): void {
+    this.noteInLookbehind('quantified');
+    if (!/^(?:[*+]|\{\d+,\})$/.test(quantifier)) return;
+    const lookbehind = this.frames.find((frame) => frame.lookaround === 'behind');
+    if (lookbehind) this.fail('length of lookbehind assertion is not limited', lookbehind.at);
+  }
+
+  /**
+   * Rejects a lookbehind that both captures and repeats: JavaScript repeats from the end to the start, so a capture
+   * would hold another repetition's text than PCRE's.
+   */
+  private noteInLookbehind(found: 'captures' | 'quantified'): void {
+    for (const frame of this.frames) {
+      if (frame.lookaround !== 'behind') continue;
+      frame[found] = true;
+      if (frame.captures && frame.quantified) this.unavailable ??= '後読みの中での繰り返しとキャプチャの併用';
+    }
   }
 
   private optionalItem(greedy: boolean): void {
@@ -558,12 +479,6 @@ class PatternConverter {
   }
 
   private wrapItem(open: string, close: string): void {
-    for (const starts of [this.groupStarts, this.keepStarts, this.lookbehindStarts]) {
-      for (let index = startIndex(starts, this.itemStart); index < starts.length; index++) {
-        rt().spend();
-        starts[index] += open.length;
-      }
-    }
     const before = this.result.slice(0, this.itemStart);
     this.result = `${before}${open}${this.result.slice(this.itemStart)}${close}`;
     this.repeatable = false;
@@ -580,7 +495,7 @@ class PatternConverter {
     const { min, max } = match;
     const close = this.index + match.length - 1;
     this.checkQuantifierRange(min, max, this.index + match.endOfMin, this.index + match.endOfDigits);
-    this.quantifier(max === min ? `{${min}}` : `{${min},${max ?? ''}}`, close + 1, max === undefined || max > 1);
+    this.quantifier(max === min ? `{${min}}` : `{${min},${max ?? ''}}`, close + 1);
   }
 
   private checkQuantifierRange(min: number, max: number | undefined, minAt: number, maxAt = minAt): void {
@@ -698,7 +613,6 @@ class PatternConverter {
     if (this.frames.some((frame) => frame.lookaround)) this.keepInLookaround = true;
     const name = `$k${this.keeps.length}`;
     this.keeps.push(name);
-    this.keepStarts.push(this.result.length);
     return `(?<${name}>)`;
   }
 
@@ -961,6 +875,7 @@ class PatternConverter {
   }
 
   private reference(target: number | string, at: number): void {
+    this.rejectInLookbehind('後方参照');
     this.references.push({ target, at });
     const group = typeof target === 'number' ? target : (this.known?.names.indexOf(target) ?? -1);
     if (!this.known || group < 0) {
@@ -989,9 +904,9 @@ class PatternConverter {
   }
 
   private captureGroup(name: string | undefined): void {
+    this.noteInLookbehind('captures');
     const group = this.names.length;
     this.names.push(name);
-    this.groupStarts.push(this.result.length);
     const open = `(?<${groupName(group)}>`;
     if (this.known?.marked.has(group)) this.openFrame(`${open}(?:`, `)${participationMarker(group)})`);
     else this.openFrame(open, ')');
@@ -1000,12 +915,9 @@ class PatternConverter {
   private specialGroup(rest: string): void {
     const opening = /^(?:[:=!>]|<[=!])/.exec(rest)?.[0];
     if (opening) {
-      if (opening.startsWith('<')) {
-        this.lookbehindStarts.push(this.result.length);
-        this.lookbehindOffsets.push(this.index);
-      }
+      const at = this.index;
       this.index += 2 + opening.length;
-      this.unnamedGroup(opening);
+      this.unnamedGroup(opening, at);
       return;
     }
     if (rest.startsWith('#')) {
@@ -1037,14 +949,15 @@ class PatternConverter {
   }
 
   /** Opens a group that `(?` and `opening` start: non-capturing, atomic, or a lookaround. */
-  private unnamedGroup(opening: string): void {
+  private unnamedGroup(opening: string, at: number): void {
     if (opening === ':') {
       this.openFrame('(?:', ')');
     } else if (opening === '>') {
       // An atomic group matches as a lookahead, which JavaScript does not backtrack into, then takes its text.
+      this.rejectInLookbehind('アトミックグループ');
       const name = `$a${this.hiddenGroups++}`;
       this.openFrame(`(?:(?=(?<${name}>`, `))\\k<${name}>)`);
-    } else this.openFrame(`(?${opening}`, ')', true);
+    } else this.openFrame(`(?${opening}`, ')', opening.startsWith('<') ? 'behind' : 'ahead', at);
   }
 
   /** Reads an option setting, `(?i)` for the rest of the group or `(?i:` for a group, at the index. */
@@ -1300,13 +1213,6 @@ function classText({ content, alternatives }: ClassMembers, negated: boolean): s
   return negated ? `(?:(?!${regex})${ANY})` : `(?:${regex})`;
 }
 
-/** `\b` or `\B` by PCRE's UCP word characters, which JavaScript's ASCII-only `\b` does not know. */
-function unicodeBoundary(negated: boolean): string {
-  const word = `[${UCP_SETS.get('w') as string}]`;
-  const [wordAfterWord, wordAfterOther] = negated ? ['=', '!'] : ['!', '='];
-  return `(?:(?<=${word})(?${wordAfterWord}${word})|(?<!${word})(?${wordAfterOther}${word}))`;
-}
-
 /** Rejects the groups that JavaScript cannot express, which start with `(?` followed by `rest`. */
 function unsupportedGroup(rest: string): void {
   if (rest.startsWith('(')) unsupported('条件分岐');
@@ -1322,73 +1228,6 @@ function participationMarker(group: number): string {
 function participated(group: number): string {
   const [after, before] = [String.raw`\k<$m${group}a>`, String.raw`\k<$m${group}b>`];
   return String.raw`(?=(?=${after}*(?!${after}))|(?=${before}*(?!${before}))|(?<![\s\S])(?![\s\S]))`;
-}
-
-function emptySubjectMarkers(groups: ReadonlySet<number>): Map<string, string> {
-  const markers = new Map<string, string>();
-  for (const group of groups) {
-    markers.set(participationMarker(group), String.raw`(?=(?<$m${group}a>\x00))`);
-    markers.set(participated(group), String.raw`(?=\k<$m${group}a>$)`);
-  }
-  return markers;
-}
-
-const SCRIPT_ALIASES = looseAliases('Script');
-const CATEGORY_ALIASES = new Map(
-  'C Cc Cf Cn Co Cs L Ll Lm Lo Lt Lu M Mc Me Mn N Nd Nl No P Pc Pd Pe Pf Pi Po Ps S Sc Sk Sm So Z Zl Zp Zs'
-    .split(' ')
-    .map((name) => [name.toLowerCase(), name])
-);
-
-function looseAliases(property: string): Map<string, string> {
-  const result = new Map<string, string>();
-  for (const [alias, canonical] of propertyAliases.get(property) ?? []) {
-    result.set(propertyKey(alias), canonical);
-    result.set(propertyKey(canonical), canonical);
-  }
-  return result;
-}
-
-function propertyKey(name: string): string {
-  return name.replaceAll(/[-_ \t-\r]/g, '').toLowerCase();
-}
-
-function unicodeProperty(name: string, negated: boolean): CharacterSet | undefined {
-  name = propertyKey(name);
-  const special = new Map([
-    ['any', String.raw`\s\S`],
-    ['l&', String.raw`\p{LC}`],
-    ['xan', String.raw`\p{L}\p{N}`],
-    ['xwd', UCP_SETS.get('w') as string],
-    ['xsp', UCP_SETS.get('s') as string],
-    ['xps', UCP_SETS.get('s') as string],
-  ]).get(name);
-  if (special !== undefined) return { content: special, negated };
-  const explicit = /^(sc|script|scx|scriptextensions)[:=](.+)$/.exec(name);
-  const script = explicit?.[1];
-  const value = explicit?.[2] ?? name;
-  const category = !explicit ? CATEGORY_ALIASES.get(value) : undefined;
-  const canonical = category ?? SCRIPT_ALIASES.get(value);
-  if (!canonical) return;
-  const property = script === 'sc' || script === 'script' ? 'Script' : 'Script_Extensions';
-  const content = category ? `\\p{${canonical}}` : `\\p{${property}=${canonical}}`;
-  try {
-    new RegExp(`[${content}]`, 'u');
-    return { content, negated };
-  } catch {
-    return undefined;
-  }
-}
-
-function startIndex(starts: number[], minimum: number): number {
-  let left = 0,
-    right = starts.length;
-  while (left < right) {
-    const mid = (left + right) >>> 1;
-    if (starts[mid] < minimum) left = mid + 1;
-    else right = mid;
-  }
-  return left;
 }
 
 function validatePatternUtf8(body: string): void {
