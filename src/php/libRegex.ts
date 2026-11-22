@@ -82,7 +82,7 @@ interface MatchOffsets {
 interface PreparedSubject {
   text: string;
   position: number;
-  byteOffset(index: number): number;
+  byteOffset: (index: number) => number;
 }
 
 type ProjectMatch<T> = (
