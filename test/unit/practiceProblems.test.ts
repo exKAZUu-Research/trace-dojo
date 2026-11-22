@@ -72,7 +72,10 @@ test('helper locals, parameters, and the turtle only they reach end with their c
         item.turtles.some((turtle) => turtle.x === 2 && turtle.y === 1 && turtle.dir === 'E')
     )
   ).toBe(true);
-  const parameter = await instantiatePracticeProblem('practiceEasyV1Beginner1L7CoordinateParameterV3', 'parameter-scope');
+  const parameter = await instantiatePracticeProblem(
+    'practiceEasyV1Beginner1L7CoordinateParameterV3',
+    'parameter-scope'
+  );
   expect(parameter.traceItems.some((item) => item.callLines.length === 1 && item.vars.x === 3)).toBe(true);
   expect(parameter.finalVars).not.toHaveProperty('x');
   expect(parameter.finalTurtles).toEqual([]);
@@ -133,18 +136,24 @@ test('a two-dimensional update reaches the indexed constructor argument', async 
   expect(problem.finalTurtles).toEqual([{ x: 3, y: 0, dir: 'N', color: '#' }]);
 });
 
-test.each([1, 2, 3])('direct expression variant %i reads the unchanged scalar at the expression step', async (initial) => {
-  const problem = await instantiatePracticeProblem(`practiceEasyV1Beginner1L2ReadExpressionV${initial}`, 'expression');
-  const scalarSteps = problem.traceItems.filter((item) => item.vars.value !== undefined);
-  expect(scalarSteps.length).toBeGreaterThan(0);
-  expect(scalarSteps.every((item) => item.vars.value === initial)).toBe(true);
-  expect(scalarSteps.some((item) => item.vars.next === undefined)).toBe(true);
-  expect(problem.finalVars).toEqual({ value: initial, next: initial + 1 });
-  expect(problem.finalTurtles).toEqual([{ x: initial, y: 1, dir: 'N', color: '#' }]);
-  const lines = problem.displayProgram.split('\n');
-  const expressionStep = problem.traceItems.find((item) => {
-    return lines[item.line - 1]?.includes('int next = value + 1;');
-  });
-  expect(expressionStep?.vars.value).toBe(initial);
-  expect(problem.displayProgram).not.toContain('value++');
-});
+test.each([1, 2, 3])(
+  'direct expression variant %i reads the unchanged scalar at the expression step',
+  async (initial) => {
+    const problem = await instantiatePracticeProblem(
+      `practiceEasyV1Beginner1L2ReadExpressionV${initial}`,
+      'expression'
+    );
+    const scalarSteps = problem.traceItems.filter((item) => item.vars.value !== undefined);
+    expect(scalarSteps.length).toBeGreaterThan(0);
+    expect(scalarSteps.every((item) => item.vars.value === initial)).toBe(true);
+    expect(scalarSteps.some((item) => item.vars.next === undefined)).toBe(true);
+    expect(problem.finalVars).toEqual({ value: initial, next: initial + 1 });
+    expect(problem.finalTurtles).toEqual([{ x: initial, y: 1, dir: 'N', color: '#' }]);
+    const lines = problem.displayProgram.split('\n');
+    const expressionStep = problem.traceItems.find((item) => {
+      return lines[item.line - 1]?.includes('int next = value + 1;');
+    });
+    expect(expressionStep?.vars.value).toBe(initial);
+    expect(problem.displayProgram).not.toContain('value++');
+  }
+);

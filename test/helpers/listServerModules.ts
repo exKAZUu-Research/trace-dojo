@@ -4,8 +4,7 @@ import path from 'node:path';
 // Prints, as a JSON array, the files under `src/` that the server evaluates: what the entry files of the app router
 // import, stopping at client components, since the server only refers to those.
 
-const entryPattern =
-  'src/app/**/{page,layout,route,error,global-error,not-found,loading,template,default}.{ts,tsx}';
+const entryPattern = 'src/app/**/{page,layout,route,error,global-error,not-found,loading,template,default}.{ts,tsx}';
 const entrypoints = [...new Bun.Glob(entryPattern).scanSync('.'), 'src/actions.ts'];
 const loaded = new Set<string>();
 

@@ -28,15 +28,15 @@ export function useInstantiatedProblem(template: ProblemTemplate | undefined): P
   useEffect(() => {
     if (programTemplate === undefined || seed === undefined) return;
     let cancelled = false;
-    void instantiateTemplate(getBrowserProblemRunner(), programTemplate, seed).then(
-      (problem) => {
-        if (!cancelled) setSettled({ key, problem });
-      },
-      (error: unknown) => {
+    void (async () => {
+      let problem: InstantiatedProblem | undefined;
+      try {
+        problem = await instantiateTemplate(getBrowserProblemRunner(), programTemplate, seed);
+      } catch (error) {
         console.error(error);
-        if (!cancelled) setSettled({ key });
       }
-    );
+      if (!cancelled) setSettled({ key, problem });
+    })();
     return () => {
       cancelled = true;
     };

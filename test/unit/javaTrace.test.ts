@@ -5,8 +5,8 @@ import {
   TURTLE_GRAPHICS_BOARD_ROWS as GRID_ROWS,
 } from '../../src/constants';
 import { traceProgram } from '../../src/interpreter/program';
-import { instantiateProblem } from '../helpers/nodeProblems';
 import type { TraceItem, TurtleTrace } from '../../src/problems/trace';
+import { instantiateProblem } from '../helpers/nodeProblems';
 
 const defaultBoard = ('.'.repeat(GRID_COLUMNS) + '\n').repeat(GRID_ROWS).trim();
 const sx = 0;

@@ -49,9 +49,11 @@ function productJobs(): ProblemJob[] {
     ...challengeBases.map(({ java }) => java),
   ];
   const jobs: ProblemJob[] = templates.flatMap((template) =>
-    (/<\d+-\d+>/.test(template) ? ['browser-seed-1', 'browser-seed-2'] : ['']).map(
-      (seed): ProblemJob => ({ kind: 'instantiate', template, seed })
-    )
+    (/<\d+-\d+>/.test(template) ? ['browser-seed-1', 'browser-seed-2'] : ['']).map((seed): ProblemJob => ({
+      kind: 'instantiate',
+      template,
+      seed,
+    }))
   );
   const sources = new Set(
     Object.entries(javaChallengeDefinitions).flatMap(([id, definition]) => [

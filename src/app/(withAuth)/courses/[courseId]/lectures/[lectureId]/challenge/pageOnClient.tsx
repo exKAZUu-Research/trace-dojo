@@ -6,13 +6,13 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuthContextSelector } from '@/contexts/AuthContext';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import { Center, Spinner, VStack } from '@/infrastructures/useClient/chakra';
-import { getBrowserProblemRunner } from '@/problems/browserProblemRunner';
 import type {
   ExerciseDisplay,
   JavaProblemPresentation,
   JavaProblemSource,
 } from '@/problems/fillInBlank/exerciseProblem';
-import { type FillInBlankVerdict, gradeFillInBlankCode } from '@/problems/fillInBlank/grade';
+import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
+import { gradeInBrowser } from '@/problems/fillInBlank/gradeInBrowser';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
 import { useInstantiatedProblem } from '@/problems/useInstantiatedProblem';
@@ -233,20 +233,19 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
   const gradeJava = async (problem: JavaProblemPresentation, code: string): Promise<FillInBlankVerdict> => {
     if (!exercise || exercise.problemFormat === 'regular') throw new Error('No active Java exercise');
     const isCurrent = currentAttempt(exercise.sessionId, exercise.problemFormat);
-    const verdict = await gradeFillInBlankCode(getBrowserProblemRunner(), problem, code);
-    if (verdict.status !== 'ungradable')
-      await detectStaleSession(
+    return await gradeInBrowser(problem, code, (status) =>
+      detectStaleSession(
         submitJava.mutateAsync({
           courseId,
           lectureId,
           sessionId: exercise.sessionId,
           code,
-          status: verdict.status,
+          status,
           ...(exercise.problemFormat === 'bugFix' ? { problemFormat: 'bugFix' as const } : {}),
         }),
         isCurrent
-      );
-    return verdict;
+      )
+    );
   };
 
   if (isSessionStale) {
@@ -336,6 +335,6 @@ const JavaProblem: React.FC<{
   return instantiation.status === 'ready' ? (
     children(instantiation.problem)
   ) : (
-    <ProblemPreparation status={instantiation.status === 'failed' ? 'failed' : 'loading'} />
+    <ProblemPreparation failed={instantiation.status === 'failed'} />
   );
 };

@@ -70,7 +70,11 @@ export function withBrowserSide(
 
 async function showProblem(display: unknown): Promise<unknown> {
   if (typeof display !== 'object' || display === null || !('programTemplate' in display)) return display;
-  const { programTemplate, seed, ...rest } = display as { programTemplate: string; seed: string; problemFormat: string };
+  const { programTemplate, seed, ...rest } = display as {
+    programTemplate: string;
+    seed: string;
+    problemFormat: string;
+  };
   // A regular exercise keeps its template, since its page shows the trace rather than a state to reach.
   if (rest.problemFormat === 'regular') return display;
   return { ...rest, ...toPresentation(await instantiateTemplate(nodeRunner, programTemplate, seed)) };

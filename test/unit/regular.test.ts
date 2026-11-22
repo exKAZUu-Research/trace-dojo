@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'vitest';
 
-import { instantiateProblem } from '../helpers/nodeProblems';
 import { gradeRegularAnswers } from '../../src/problems/regular/grade';
 import type { TraceItemVariable, TurtleTrace } from '../../src/problems/trace';
 import type { ColorChar } from '../../src/types';
+import { instantiateProblem } from '../helpers/nodeProblems';
 
 const problem = await instantiateProblem('test1', '');
 const finalTraceItem = problem.traceItems.at(-1);

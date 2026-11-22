@@ -8,8 +8,8 @@ import { MAX_ACTIVE_DURATION_MS_AFTER_LAST_EVENT, MIN_INTERVAL_MS_OF_ACTIVE_EVEN
 import { useAuthContextSelector } from '@/contexts/AuthContext';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import { Button, HStack, Tooltip, VStack } from '@/infrastructures/useClient/chakra';
-import { getBrowserProblemRunner } from '@/problems/browserProblemRunner';
-import { type FillInBlankVerdict, gradeFillInBlankCode } from '@/problems/fillInBlank/grade';
+import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
+import { gradeInBrowser } from '@/problems/fillInBlank/gradeInBrowser';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import { useInstantiatedProblem } from '@/problems/useInstantiatedProblem';
 import type { OrdinaryJavaProblemData } from '@/types';
@@ -105,15 +105,14 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
       incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
     });
     if (!isCurrentSession.current) return { status: 'ungradable', detail: 'The problem session changed.' };
-    const verdict = await gradeFillInBlankCode(getBrowserProblemRunner(), problem, code);
-    if (verdict.status !== 'ungradable')
-      await createFillInBlankSubmissionMutation.mutateAsync({
+    return await gradeInBrowser(problem, code, (status) =>
+      createFillInBlankSubmissionMutation.mutateAsync({
         sessionId: problemSession.id,
         code,
         elapsedMilliseconds: newProblemSession.elapsedMilliseconds,
-        isCorrect: verdict.status === 'correct',
-      });
-    return verdict;
+        isCorrect: status === 'correct',
+      })
+    );
   };
 
   const updateProblemSession = useCallback(
@@ -145,6 +144,7 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
   }
 
   const isJavaEditor = problemSession.problemType === 'fillInBlank' || problemSession.problemType === 'bugFix';
+  const javaFormat = props.javaProblem ? { problemFormat: props.javaProblem.problemFormat } : {};
 
   return (
     <VStack align="stretch" spacing={4}>
@@ -154,51 +154,25 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
         problemId={params.problemId}
         actions={
           !isJavaEditor && problem && 'traceItems' in problem ? (
-            <HStack spacing={2}>
-              <Tooltip
-                label={
-                  problemSession.problemType === 'executionResult'
-                    ? '減点になりますが、確実に問題を解けます。'
-                    : undefined
-                }
-              >
-                <Button
-                  colorScheme="blue"
-                  variant="outline"
-                  onClick={() => {
-                    void updateProblemSession('step', 1);
-                  }}
-                >
-                  {problemSession.problemType === 'executionResult'
-                    ? '諦めてステップ実行モードに移る'
-                    : 'ステップ実行モードで最初からやり直す'}
-                </Button>
-              </Tooltip>
-              {isAdmin && (
-                <Button
-                  colorScheme="blue"
-                  variant="outline"
-                  onClick={() =>
-                    updateProblemSession('step', Math.min(problemSession.traceItemIndex + 1, problem.traceItems.length))
-                  }
-                >
-                  次のステップに進む（管理者のみ）
-                </Button>
-              )}
-            </HStack>
+            <StepModeActions
+              isAdmin={isAdmin}
+              problemSession={problemSession}
+              traceItemCount={problem.traceItems.length}
+              updateProblemSession={updateProblemSession}
+            />
           ) : undefined
         }
       />
 
       {!problem ? (
-        <ProblemPreparation status={instantiation.status === 'failed' ? 'failed' : 'loading'} />
+        <ProblemPreparation failed={instantiation.status === 'failed'} />
       ) : isJavaEditor ? (
         <FillInBlankBody
           key={`${problemSession.id}:${problem.displayProgram}`}
           draftContext={{
             userId: props.userId,
             mode: 'ordinary',
-            ...(props.javaProblem ? { problemFormat: props.javaProblem.problemFormat } : {}),
+            ...javaFormat,
             courseId: params.courseId,
             lectureId: params.lectureId,
             problemId: params.problemId,
@@ -207,7 +181,7 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
           }}
           gradeCode={gradeCode}
           problem={{
-            ...(props.javaProblem ? { problemFormat: props.javaProblem.problemFormat } : {}),
+            ...javaFormat,
             displayProgram: problem.displayProgram,
             finalBoard: problem.finalBoard,
             finalTurtles: problem.finalTurtles,
@@ -222,6 +196,39 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
         />
       ) : undefined}
     </VStack>
+  );
+};
+
+const StepModeActions: React.FC<{
+  isAdmin: boolean;
+  problemSession: ProblemSession;
+  traceItemCount: number;
+  updateProblemSession: (problemType: string, traceItemIndex: number) => Promise<void>;
+}> = ({ isAdmin, problemSession, traceItemCount, updateProblemSession }) => {
+  const isExecutionResult = problemSession.problemType === 'executionResult';
+  return (
+    <HStack spacing={2}>
+      <Tooltip label={isExecutionResult ? '減点になりますが、確実に問題を解けます。' : undefined}>
+        <Button
+          colorScheme="blue"
+          variant="outline"
+          onClick={() => {
+            void updateProblemSession('step', 1);
+          }}
+        >
+          {isExecutionResult ? '諦めてステップ実行モードに移る' : 'ステップ実行モードで最初からやり直す'}
+        </Button>
+      </Tooltip>
+      {isAdmin && (
+        <Button
+          colorScheme="blue"
+          variant="outline"
+          onClick={() => updateProblemSession('step', Math.min(problemSession.traceItemIndex + 1, traceItemCount))}
+        >
+          次のステップに進む（管理者のみ）
+        </Button>
+      )}
+    </HStack>
   );
 };
 

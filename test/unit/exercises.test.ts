@@ -438,7 +438,9 @@ test('stores distinct concurrent incorrect submissions', async () => {
 
 test('keeps a completed session visible when Next configuration fails and creates one successor on retry', async () => {
   const exercise = await start();
-  expect(await caller.submitExercise(await submission(exercise.sessionId, await modelAnswers(exercise.sessionId)))).toMatchObject({
+  expect(
+    await caller.submitExercise(await submission(exercise.sessionId, await modelAnswers(exercise.sessionId)))
+  ).toMatchObject({
     status: 'correct',
   });
   const completed = await start();
@@ -464,12 +466,16 @@ test('keeps a completed session visible when Next configuration fails and create
 test('avoids the immediately previous candidate but keeps completed candidates eligible', async () => {
   challengeMap.test = [['fillInBlank1', 'fillInBlank2']];
   const first = await start();
-  expect(await caller.submitExercise(await submission(first.sessionId, await modelAnswers(first.sessionId)))).toMatchObject({
+  expect(
+    await caller.submitExercise(await submission(first.sessionId, await modelAnswers(first.sessionId)))
+  ).toMatchObject({
     status: 'correct',
   });
   const second = asExercise(await caller.nextExercise({ ...locationOnly(), sessionId: first.sessionId }));
   expect(second.problemId).not.toBe(first.problemId);
-  expect(await caller.submitExercise(await submission(second.sessionId, await modelAnswers(second.sessionId)))).toMatchObject({
+  expect(
+    await caller.submitExercise(await submission(second.sessionId, await modelAnswers(second.sessionId)))
+  ).toMatchObject({
     status: 'correct',
   });
   const third = asExercise(await caller.nextExercise({ ...locationOnly(), sessionId: second.sessionId }));
@@ -499,10 +505,11 @@ test('normal fill-in-the-blank submissions never create exercise history', async
     })
     .returning()
     .get()!;
+  const { displayProgramTemplate } = await instantiateProblem('fillInBlank2', 'normal-only');
   expect(
     await caller.createFillInBlankSubmission({
       sessionId: normal.id,
-      code: fillBlanks((await instantiateProblem('fillInBlank2', 'normal-only')).displayProgramTemplate, ['x + 1']),
+      code: fillBlanks(displayProgramTemplate, ['x + 1']),
       elapsedMilliseconds: 1,
     })
   ).toMatchObject({ status: 'correct' });
@@ -931,7 +938,7 @@ test('practice resumes independently, repeats through step mode, and leaves over
   const gradedBefore = normalRows();
   const challenge = await startRegular();
   expect(challenge.sessionId).not.toBe(practice.sessionId);
-  expect(Object.values(regularMap).flat(2)).not.toContain(practice.problemId);
+  expect(Object.values(regularMap).flat(Infinity)).not.toContain(practice.problemId);
   expect(await startPractice()).toEqual(practice);
   expect(await startRegular()).toEqual(challenge);
 
@@ -1106,9 +1113,15 @@ test('practice rejects unknown and inherited course or lecture names without cre
 
 test('practice rejects blank submission and Next even when given a valid challenge session', async () => {
   const blank = await start();
-  await runtimeCaller.mutation('submitExercise', await submission(blank.sessionId, await modelAnswers(blank.sessionId)));
+  await runtimeCaller.mutation(
+    'submitExercise',
+    await submission(blank.sessionId, await modelAnswers(blank.sessionId))
+  );
   const before = exerciseRows();
-  const submit = { ...(await submission(blank.sessionId, await modelAnswers(blank.sessionId))), learningMode: 'practice' as const };
+  const submit = {
+    ...(await submission(blank.sessionId, await modelAnswers(blank.sessionId))),
+    learningMode: 'practice' as const,
+  };
   await expect(runtimeCaller.mutation('submitExercise', submit)).rejects.toMatchObject({
     data: { code: 'BAD_REQUEST' },
   });
@@ -1522,7 +1535,9 @@ test.each<EndFormat>(['regular', 'fillInBlank'])(
         regularCaller().switchRegularExerciseToStep({ ...locationOnly(), sessionId: b.sessionId })
       ).rejects.toMatchObject({ code: 'CONFLICT' });
     } else {
-      await expect(caller.submitExercise(await submission(b.sessionId, await modelAnswers(b.sessionId)))).rejects.toMatchObject({
+      await expect(
+        caller.submitExercise(await submission(b.sessionId, await modelAnswers(b.sessionId)))
+      ).rejects.toMatchObject({
         code: 'CONFLICT',
       });
     }

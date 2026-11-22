@@ -261,7 +261,11 @@ test('ignores a deferred previous-location response after navigation', async () 
 
 test('a late practice Next response cannot replace the challenge page or its answer draft after mode navigation', async () => {
   let resolveNext!: (value: RegularExerciseDisplay) => void;
-  const challenge: RegularExerciseDisplay = { ...display, problemId: 'test3', programTemplate: getProgramTemplate('test3') };
+  const challenge: RegularExerciseDisplay = {
+    ...display,
+    problemId: 'test3',
+    programTemplate: getProgramTemplate('test3'),
+  };
   transport.start.mockResolvedValueOnce({ ...display, completed: true }).mockResolvedValueOnce(challenge);
   transport.next.mockReturnValue(
     new Promise<RegularExerciseDisplay>((resolve) => {

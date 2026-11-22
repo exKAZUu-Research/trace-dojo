@@ -161,19 +161,32 @@ test.each(['fillInBlank', 'bugFix'] as const)('annotation-free %s public source 
   expect(await gradeFillInBlankCode(nodeRunner, problem, repaired)).toEqual({ status: 'correct' });
 });
 
-test.each(independentCases)('grading agrees with hand-derived state: $name', async ({ body, classes, board, turtles }) => {
-  const source = `class Main { public static void main(String[] args) { ${body} } } ${classes ?? ''}`;
-  expect(await gradeFillInBlankCode(nodeRunner, { finalBoard: board, finalTurtles: turtles }, source)).toEqual({ status: 'correct' });
-});
+test.each(independentCases)(
+  'grading agrees with hand-derived state: $name',
+  async ({ body, classes, board, turtles }) => {
+    const source = `class Main { public static void main(String[] args) { ${body} } } ${classes ?? ''}`;
+    expect(await gradeFillInBlankCode(nodeRunner, { finalBoard: board, finalTurtles: turtles }, source)).toEqual({
+      status: 'correct',
+    });
+  }
+);
 
 test('legacy multiple holes all display and their repaired Java matches the existing target', async () => {
   const problem = await instantiateProblem('fillInBlank4', 'catalog-compatibility');
   expect(problem.blankAnswers.length).toBeGreaterThan(1);
   for (let i = 1; i <= problem.blankAnswers.length; i++) expect(problem.displayProgram).toContain(`【${i}】`);
-  expect(await gradeFillInBlankCode(nodeRunner, problem, fillBlanks(problem.displayProgramTemplate, problem.blankAnswers))).toEqual({
+  expect(
+    await gradeFillInBlankCode(nodeRunner, problem, fillBlanks(problem.displayProgramTemplate, problem.blankAnswers))
+  ).toEqual({
     status: 'correct',
   });
-  expect(await gradeFillInBlankCode(nodeRunner, problem, 'class Main { public static void main(String[] args) { if (1) {} } }')).toEqual({
+  expect(
+    await gradeFillInBlankCode(
+      nodeRunner,
+      problem,
+      'class Main { public static void main(String[] args) { if (1) {} } }'
+    )
+  ).toEqual({
     status: 'incorrect',
     detail: 'Compile error.',
     diagnostics: [expect.objectContaining({ line: 1, message: expect.any(String) })],

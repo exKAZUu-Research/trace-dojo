@@ -83,21 +83,12 @@ const RegularExerciseSession: React.FC<Props> = ({
     () => problem && deriveRegularProblemView(problem, display.problemType, display.traceItemIndex),
     [problem, display.problemType, display.traceItemIndex]
   );
-  const header = (actions?: React.ReactNode): React.ReactNode => (
-    <ProblemPageHeader
-      courseId={courseId as CourseId}
-      lectureId={lectureId}
-      {...(mode === 'practice'
-        ? { title: practiceIdToDefinition[display.problemId].title }
-        : { problemId: display.problemId as ProblemId })}
-      actions={actions}
-    />
-  );
+  const header = { mode, courseId, lectureId, problemId: display.problemId };
   if (!problem || !view)
     return (
       <>
-        {header()}
-        <ProblemPreparation status={instantiation.status === 'failed' ? 'failed' : 'loading'} />
+        <ExerciseHeader {...header} />
+        <ProblemPreparation failed={instantiation.status === 'failed'} />
       </>
     );
 
@@ -125,7 +116,7 @@ const RegularExerciseSession: React.FC<Props> = ({
         requestId: request.current.id,
         context: { problemType: display.problemType, traceItemIndex: display.traceItemIndex },
         isCorrect,
-        isLastStep: display.problemType === 'step' && display.traceItemIndex >= problem.traceItems.length - 1,
+        isLastStep: display.traceItemIndex >= problem.traceItems.length - 1,
       });
       request.current = undefined;
       if (!isCorrect) {
@@ -168,13 +159,16 @@ const RegularExerciseSession: React.FC<Props> = ({
   };
   return (
     <>
-      {header(
-        display.problemType === 'executionResult' && !display.completed ? (
-          <Button colorScheme="blue" variant="outline" onClick={() => setSwitchOpen(true)}>
-            ステップ実行モードに移る
-          </Button>
-        ) : undefined
-      )}
+      <ExerciseHeader
+        {...header}
+        actions={
+          display.problemType === 'executionResult' && !display.completed ? (
+            <Button colorScheme="blue" variant="outline" onClick={() => setSwitchOpen(true)}>
+              ステップ実行モードに移る
+            </Button>
+          ) : undefined
+        }
+      />
       {error && (
         <Text role="alert" color="red.600">
           {error}
@@ -238,3 +232,20 @@ const RegularExerciseSession: React.FC<Props> = ({
     </>
   );
 };
+
+const ExerciseHeader: React.FC<{
+  mode: ExerciseMode;
+  courseId: string;
+  lectureId: string;
+  problemId: string;
+  actions?: React.ReactNode;
+}> = ({ mode, courseId, lectureId, problemId, actions }) => (
+  <ProblemPageHeader
+    courseId={courseId as CourseId}
+    lectureId={lectureId}
+    {...(mode === 'practice'
+      ? { title: practiceIdToDefinition[problemId].title }
+      : { problemId: problemId as ProblemId })}
+    actions={actions}
+  />
+);

@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 
-import { instantiateProblem } from '../helpers/nodeProblems';
 import { problemIdToProgram } from '../../src/problems/problemData';
+import { instantiateProblem } from '../helpers/nodeProblems';
 
 /** Problems that show how an uncaught exception stops a program. */
 const problemsEndingWithException = new Set(['exception2', 'exception5']);

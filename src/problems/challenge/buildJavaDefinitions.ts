@@ -5,6 +5,7 @@ import type { JavaChallengeDefinition } from '../javaChallenges/types';
 import { challengeBases } from './definitions';
 import { applyChallengeEdit } from './edits';
 import { challengeBaseSchema } from './schema';
+import type { ChallengeEdit } from './types';
 
 /** The state in which a base's program ends, which every blank and bug of the base must reproduce. */
 export type ChallengeTarget = Pick<JavaChallengeDefinition, 'finalBoard' | 'finalTurtles'>;
@@ -29,25 +30,27 @@ export function buildIndependentJavaChallengeDefinitions(
       correctProgram: base.java.trim(),
       ...baseTarget,
     };
-    for (const format of ['fillInBlank', 'bugFix'] as const) {
-      for (const edit of format === 'fillInBlank' ? base.blanks : base.bugs) {
-        const id = `${base.id}${format === 'fillInBlank' ? 'Blank' : 'Bug'}${edit.id}`;
-        if (registeredIds.has(id)) throw new Error(`Duplicate challenge ID: ${id}`);
-        registeredIds.add(id);
-        const starterProgram = applyChallengeEdit(base.java, edit);
-        if (format === 'fillInBlank') {
-          const blanks = extractBlanks(starterProgram);
-          if (blanks.answers.length !== 1 || removeBlankMarkers(starterProgram).trim() !== target.correctProgram)
-            throw new Error(`Invalid challenge blank: ${id}`);
-        }
-        definitions[id] = {
-          ...target,
-          problemFormat: format,
-          starterProgram,
-          ...('kind' in edit ? { bugKind: z.enum(['logical', 'syntax']).parse(edit.kind) } : {}),
-        };
-      }
+    const variants = [
+      ...base.blanks.map((edit) => ({ id: `${base.id}Blank${edit.id}`, ...blankVariant(base.java, edit) })),
+      ...base.bugs.map((edit) => ({
+        id: `${base.id}Bug${edit.id}`,
+        problemFormat: 'bugFix' as const,
+        starterProgram: applyChallengeEdit(base.java, edit),
+        bugKind: edit.kind,
+      })),
+    ];
+    for (const { id, ...variant } of variants) {
+      if (registeredIds.has(id)) throw new Error(`Duplicate challenge ID: ${id}`);
+      registeredIds.add(id);
+      definitions[id] = { ...target, ...variant };
     }
   }
   return definitions;
+}
+
+function blankVariant(java: string, edit: ChallengeEdit): { problemFormat: 'fillInBlank'; starterProgram: string } {
+  const starterProgram = applyChallengeEdit(java, edit);
+  if (extractBlanks(starterProgram).answers.length !== 1 || removeBlankMarkers(starterProgram).trim() !== java.trim())
+    throw new Error(`Invalid challenge blank: ${edit.id}`);
+  return { problemFormat: 'fillInBlank', starterProgram };
 }

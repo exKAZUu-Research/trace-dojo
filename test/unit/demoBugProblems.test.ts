@@ -185,49 +185,52 @@ test.each(['regular', 'fillInBlank'] as const)(
   }
 );
 
-test.each(examples)('direct page $id resumes safely and stores verdicts through ordinary persistence', async (example) => {
-  const props = pageSchema.parse(await openPage({ ...location, problemId: example.id })).props;
-  const id = props.initialProblemSession.id;
-  expect(props.initialProblemSession).toMatchObject({ problemType: 'bugFix', traceItemIndex: 0 });
-  expect(props.javaProblem).toMatchObject({
-    problemId: example.id,
-    finalBoard: example.board,
-    finalTurtles: example.turtles,
-  });
-  expect(props.javaProblem.displayProgram).toBe(starter(example));
-  expect(pageSchema.parse(await openPage({ ...location, problemId: example.id })).props).toEqual(props);
-  assertWrong(
-    await gradeFillInBlankCode(nodeRunner, props.javaProblem, props.javaProblem.displayProgram),
-    example.defect
-  );
-  await caller.createFillInBlankSubmission({
-    sessionId: id,
-    code: props.javaProblem.displayProgram,
-    elapsedMilliseconds: 21,
-    isCorrect: false,
-  });
-  const afterWrong = await stored(id);
-  expect(afterWrong?.completedAt).toBeNull();
-  expect(await gradeFillInBlankCode(nodeRunner, props.javaProblem, example.correct)).toEqual({ status: 'correct' });
-  await caller.createFillInBlankSubmission({
-    sessionId: id,
-    code: example.correct,
-    elapsedMilliseconds: 42,
-    isCorrect: true,
-  });
-  const saved = await stored(id);
-  expect(saved?.completedAt).toEqual(new Date());
-  expect(saved?.problemType).toBe('bugFix');
-  expect(saved?.submissions).toEqual([
-    expect.objectContaining({
+test.each(examples)(
+  'direct page $id resumes safely and stores verdicts through ordinary persistence',
+  async (example) => {
+    const props = pageSchema.parse(await openPage({ ...location, problemId: example.id })).props;
+    const id = props.initialProblemSession.id;
+    expect(props.initialProblemSession).toMatchObject({ problemType: 'bugFix', traceItemIndex: 0 });
+    expect(props.javaProblem).toMatchObject({
+      problemId: example.id,
+      finalBoard: example.board,
+      finalTurtles: example.turtles,
+    });
+    expect(props.javaProblem.displayProgram).toBe(starter(example));
+    expect(pageSchema.parse(await openPage({ ...location, problemId: example.id })).props).toEqual(props);
+    assertWrong(
+      await gradeFillInBlankCode(nodeRunner, props.javaProblem, props.javaProblem.displayProgram),
+      example.defect
+    );
+    await caller.createFillInBlankSubmission({
+      sessionId: id,
       code: props.javaProblem.displayProgram,
-      isCorrect: false,
-      gradingStage: 6,
       elapsedMilliseconds: 21,
-    }),
-    expect.objectContaining({ code: example.correct, isCorrect: true, gradingStage: 6, elapsedMilliseconds: 42 }),
-  ]);
-});
+      isCorrect: false,
+    });
+    const afterWrong = await stored(id);
+    expect(afterWrong?.completedAt).toBeNull();
+    expect(await gradeFillInBlankCode(nodeRunner, props.javaProblem, example.correct)).toEqual({ status: 'correct' });
+    await caller.createFillInBlankSubmission({
+      sessionId: id,
+      code: example.correct,
+      elapsedMilliseconds: 42,
+      isCorrect: true,
+    });
+    const saved = await stored(id);
+    expect(saved?.completedAt).toEqual(new Date());
+    expect(saved?.problemType).toBe('bugFix');
+    expect(saved?.submissions).toEqual([
+      expect.objectContaining({
+        code: props.javaProblem.displayProgram,
+        isCorrect: false,
+        gradingStage: 6,
+        elapsedMilliseconds: 21,
+      }),
+      expect.objectContaining({ code: example.correct, isCorrect: true, gradingStage: 6, elapsedMilliseconds: 42 }),
+    ]);
+  }
+);
 
 test('direct page rejects wrong location before insertion', async () => {
   await expect(

@@ -46,7 +46,9 @@ class Helper { static int distance() { return Integer.MAX_VALUE + Integer.MAX_VA
     }
   }
 `;
-  expect(await gradeFillInBlankCode(nodeRunner, await instantiate('fillInBlank1'), code)).toEqual({ status: 'correct' });
+  expect(await gradeFillInBlankCode(nodeRunner, await instantiate('fillInBlank1'), code)).toEqual({
+    status: 'correct',
+  });
 });
 
 test('changing source outside the former blank changes the drawing', async () => {
