@@ -291,7 +291,6 @@ export function deprecateNative(fn: NativeFunction, deprecation: string): void {
   nativeDeprecations.set(fn, deprecation);
 }
 
-// code-gauge-allow functionNcss -- Reports the deprecation, binds, calls and finishes a native call in PHP's order in one frame.
 export function invokeNative(
   target: CallTarget,
   fn: NativeFunction,

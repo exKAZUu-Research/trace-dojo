@@ -9,6 +9,7 @@ export const browserReadyInterpreters = {
   cpp: () => import('./languages/cpp'),
   go: () => import('./languages/go'),
   java: () => import('./languages/java'),
+  php: () => import('./languages/php'),
   python: () => import('./languages/python'),
   rust: () => import('./languages/rust'),
 };
