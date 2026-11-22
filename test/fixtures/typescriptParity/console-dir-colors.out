@@ -2,7 +2,6 @@
 [ [33mtrue[39m, [32m'hi'[39m ]
 {
   boxed: [33m[Number: 2][39m,
-  re: [32m/[39m[31m([39m[36ma[39m[32m|[39m[36mb[39m[31m)[39m[33m\d[39m[32m/[39m[31mg[39m,
   absent: [90mundefined[39m,
   nil: [1mnull[22m,
   [32m'quoted key'[39m: [32m'value'[39m

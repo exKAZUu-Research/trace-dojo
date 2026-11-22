@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
-import assert from 'node:assert/strict';
+import { assert } from 'es-toolkit';
 
 import { createArgumentsObject, mapArguments } from './argumentsObject';
 import type {
@@ -886,7 +886,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
   private initializeAfterSuper(statements: Statement[] | undefined, frame: FunctionFrame): void {
     if (!statements) return;
     const scope = this.constructorScopes.get(frame);
-    assert.ok(scope);
+    assert(scope, 'The constructor has no scope for its initializers');
     this.inScope(scope, () => this.statements(statements));
   }
 }
