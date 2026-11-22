@@ -28,9 +28,13 @@ export function onigurumaSource(source: string, extended: boolean): string {
   const tokens = regexpTokens(source, extended);
   // Oniguruma restricts capture names to ASCII words, so any other name gets an alias.
   const aliases = new Map<string, string>();
-  for (const { name } of tokens)
-    if (name !== undefined && !ASCII_NAME.test(name) && !aliases.has(name))
-      aliases.set(name, `__capture${aliases.size}__`);
+  const names = new Set(tokens.map((token) => token.name));
+  let serial = 0;
+  for (const name of names) {
+    if (name === undefined || ASCII_NAME.test(name)) continue;
+    while (names.has(`__capture${serial}__`)) serial++;
+    aliases.set(name, `__capture${serial++}__`);
+  }
   let out = '';
   let consumed = 0;
   for (const token of tokens) {

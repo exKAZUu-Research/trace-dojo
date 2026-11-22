@@ -120,7 +120,8 @@ export function compileRegexp(source: string, flags: RegexpFlags): RegExp {
 
 /** The same expression matching only at `lastIndex`. */
 export function stickyRegexp(regexp: RegExp): RegExp {
-  const flags = regexp.flags.replace('g', 'y');
+  // The library already makes an expression that starts with `\G` sticky.
+  const flags = `${regexp.flags.replaceAll(/[gy]/g, '')}y`;
   return regexp instanceof EmulatedRegExp ? new EmulatedRegExp(regexp, flags) : new RegExp(regexp.source, flags);
 }
 

@@ -33,7 +33,8 @@ export const platformLogGamma = (value: number): [number, number] => {
   if (value <= 0 && Number.isInteger(value)) return [Number.POSITIVE_INFINITY, 1];
   if (value < 0.5) {
     const sine = Math.sin(Math.PI * value);
-    return [Math.log(Math.PI / Math.abs(sine)) - platformLogGamma(1 - value)[0], sine < 0 ? -1 : 1];
+    // The quotient of pi and a subnormal sine would overflow, so the logarithms are subtracted instead.
+    return [Math.log(Math.PI) - Math.log(Math.abs(sine)) - platformLogGamma(1 - value)[0], sine < 0 ? -1 : 1];
   }
   if (value < MAX_DIRECT_LOG_ARGUMENT) return [Math.log(platformGamma(value)), 1];
   const x = value - 1;

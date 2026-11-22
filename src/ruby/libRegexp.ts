@@ -1427,7 +1427,9 @@ for (const [name, last] of [
 function reverseRegexpSearch(regexp: RObject, source: RString, start: number): MatchState | undefined {
   const snapshot = matchSnapshot(source);
   validateRegexpSubject(regexp, source);
-  for (let position = start; position >= 0; position--) {
+  // An expression that starts with `\G` matches only where the search starts, which the library expresses as sticky.
+  const first = dataOf(regexp).js.sticky ? start : 0;
+  for (let position = start; position >= first; position--) {
     const state = execAt(regexp, source.s, position, source, snapshot, true, true);
     if (state) return state;
   }
