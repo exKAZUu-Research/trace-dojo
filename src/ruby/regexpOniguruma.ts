@@ -27,8 +27,30 @@ const ASCII_SHORTHANDS: Record<string, string> = {
 /** Rewrites the Ruby (Onigmo) forms whose Oniguruma meaning differs into Oniguruma forms with Ruby's meaning. */
 export function onigurumaSource(source: string, extended: boolean): string {
   const tokens = regexpTokens(source, extended);
-  // Oniguruma restricts capture names to ASCII words, so any other name gets an alias. An alias never occurs in the
-  // source, so it cannot equal a name that the source defines or refers to.
+  const aliases = captureAliases(source, tokens);
+  // Ruby applies an isolated option such as `(?i)` up to the end of the enclosing group, later alternatives included,
+  // where Oniguruma stops at the next `|`; so each one becomes an option group closed where its enclosing group ends.
+  const openOptionGroups = [0];
+  let out = '';
+  let consumed = 0;
+  for (const token of tokens) {
+    if (token.start < consumed) continue;
+    if (token.kind === 'groupOpen') openOptionGroups.push(0);
+    else if (token.kind === 'groupClose' && openOptionGroups.length > 1) out += ')'.repeat(openOptionGroups.pop()!);
+    const scoped = token.kind === 'directive' && token.raw.length > 3;
+    if (scoped) openOptionGroups[openOptionGroups.length - 1]++;
+    const rewrite = scoped ? undefined : rewrittenToken(source, token, aliases);
+    out += scoped ? `${token.raw.slice(0, -1)}:` : (rewrite?.text ?? token.raw);
+    consumed = token.start + (rewrite?.length ?? token.raw.length);
+  }
+  return out + ')'.repeat(openOptionGroups.reduce((sum, count) => sum + count, 0));
+}
+
+/**
+ * Aliases for the capture names that Oniguruma, which restricts names to ASCII words, cannot hold. An alias never
+ * occurs in the source, so it cannot equal a name that the source defines or refers to.
+ */
+function captureAliases(source: string, tokens: RegexpToken[]): Map<string, string> {
   const aliases = new Map<string, string>();
   let serial = 0;
   for (const { name } of tokens) {
@@ -37,15 +59,7 @@ export function onigurumaSource(source: string, extended: boolean): string {
     while (source.includes(`__capture${serial}__`)) serial++;
     aliases.set(name, `__capture${serial++}__`);
   }
-  let out = '';
-  let consumed = 0;
-  for (const token of tokens) {
-    if (token.start < consumed) continue;
-    const rewrite = rewrittenToken(source, token, aliases);
-    out += rewrite?.text ?? token.raw;
-    consumed = token.start + (rewrite?.length ?? token.raw.length);
-  }
-  return out;
+  return aliases;
 }
 
 function rewrittenToken(source: string, token: RegexpToken, aliases: Map<string, string>): Rewrite | undefined {
