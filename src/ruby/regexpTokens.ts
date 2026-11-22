@@ -17,8 +17,10 @@ interface RegexpFlags {
   extended: boolean;
 }
 
-// A reference is one token with its name, so that punctuation in the name cannot open a class or a group.
-const ESCAPE = /\\(?:[kg](?:<[^>]*>|'[^']*')|[\s\S])?/uy;
+const ESCAPE = /\\(?:[\s\S])?/uy;
+// Outside a class a reference is one token with its name, so that punctuation in the name cannot open a class or a
+// group; inside a class `\k` and `\g` are the letters.
+const ESCAPE_OR_REFERENCE = /\\(?:[kg](?:<[^>]*>|'[^']*')|[\s\S])?/uy;
 const POSIX_BRACKET = /\[:\^?\w*:\]/y;
 const CLASS_OPEN = /\[\^?/y;
 const COMMENT_GROUP = /\(\?#(?:\\[\s\S]|[^)\\])*\)?/y;
@@ -48,7 +50,7 @@ class RegexpLexer {
   read(): RegexpToken[] {
     while (this.index < this.source.length) {
       const char = this.source[this.index];
-      if (char === '\\') this.push('escape', this.at(ESCAPE)![0]);
+      if (char === '\\') this.push('escape', this.at(this.classDepth > 0 ? ESCAPE : ESCAPE_OR_REFERENCE)![0]);
       else if (this.classDepth > 0) this.readInClass(char);
       else if (char === '[') this.openClass();
       else if (char === '(') this.openGroup();
