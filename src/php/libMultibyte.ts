@@ -991,9 +991,17 @@ function legacyTextDecoder(label: string): TextDecoder | undefined {
 
 function decodeLegacy(text: string, decoder: TextDecoder): number[] {
   rt().spend(Math.ceil(text.length / 64));
-  return Array.from(decoder.decode(stringToBytes(text)), (char) =>
-    char === '\uFFFD' ? BAD : (char.codePointAt(0) as number)
-  );
+  const bytes = stringToBytes(text);
+  let decoded: string;
+  // Only a failed strict reading shows that U+FFFD stands for invalid bytes, as a legacy encoding can encode U+FFFD too.
+  let invalid = false;
+  try {
+    decoded = new TextDecoder(decoder.encoding, { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    invalid = true;
+    decoded = decoder.decode(bytes);
+  }
+  return Array.from(decoded, (char) => (invalid && char === '\uFFFD' ? BAD : (char.codePointAt(0) as number)));
 }
 
 /**
