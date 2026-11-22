@@ -64,17 +64,21 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
   const lastActionTimeRef = useRef(0);
   const isCurrentSession = useRef(false);
   useLayoutEffect(() => {
-    lastActionTimeRef.current = Date.now();
     isCurrentSession.current = true;
     return () => {
       isCurrentSession.current = false;
     };
   }, []);
+  const isProblemShown = problem !== undefined;
+  // The time a learner spends on a problem starts when it is shown, not while the browser prepares it.
+  useLayoutEffect(() => {
+    if (isProblemShown) lastActionTimeRef.current = Date.now();
+  }, [isProblemShown]);
   const [isSessionExpired, setIsSessionExpired] = useState(false);
   const onSessionError = (error: unknown): void => {
     if (isCurrentSession.current && isProblemSessionExpired(error)) setIsSessionExpired(true);
   };
-  useMonitorUserActivity(props, lastActionTimeRef, onSessionError, isSessionExpired);
+  useMonitorUserActivity(props, lastActionTimeRef, onSessionError, isSessionExpired || !isProblemShown);
 
   const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation({ onError: onSessionError });
   const createProblemSubmissionMutation = backendTrpcReact.createProblemSubmission.useMutation({
@@ -236,11 +240,11 @@ function useMonitorUserActivity(
   props: Props,
   lastActionTimeRef: React.RefObject<number>,
   onSessionError: (error: unknown) => void,
-  isSessionExpired: boolean
+  disabled: boolean
 ): void {
   const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation({ onError: onSessionError });
   useIdleTimer({
-    disabled: isSessionExpired,
+    disabled,
     onAction() {
       updateProblemSessionMutation.mutate({
         id: props.initialProblemSession.id,
