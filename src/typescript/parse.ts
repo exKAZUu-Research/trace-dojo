@@ -166,32 +166,24 @@ function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagno
     for (const child of node.children) if (child) visit(child);
   };
   visit(root);
-  return replaceUnterminatedStringErrors(root, source, errors).toSorted((left, right) => left.row - right.row);
+  return [...errors, ...unterminatedStringErrors(root, source)].toSorted((left, right) => left.row - right.row);
 }
 
 /**
- * Names the strings left open by a raw line break or the end of the program in the text the parser could not read,
- * as tsc does. Tree-sitter's recovery does not lex that text as tsc does, so it is lexed here instead.
+ * The strings left open by a raw line break or the end of the program in the text the parser could not read, as tsc
+ * reports them. Tree-sitter's recovery does not lex that text as tsc does, so it is lexed here instead.
  */
-function replaceUnterminatedStringErrors(root: Node, source: string, errors: SourceDiagnostic[]): SourceDiagnostic[] {
-  const remaining = [...errors];
-  const unterminated: SourceDiagnostic[] = [];
+function unterminatedStringErrors(root: Node, source: string): SourceDiagnostic[] {
+  const errors: SourceDiagnostic[] = [];
   let scannedUntil = 0;
   for (const node of outermostErrorNodes(root)) {
     const scan = unterminatedStringsIn(source, Math.max(lexingStart(root, source, node), scannedUntil), node.endIndex);
     scannedUntil = scan.end;
-    for (const { endIndex } of scan.strings) {
-      unterminated.push({ row: rowAt(source, endIndex), message: '文字列リテラルが閉じられていません。' });
+    for (const endIndex of scan.stringEnds) {
+      errors.push({ row: rowAt(source, endIndex), message: '文字列リテラルが閉じられていません。' });
     }
-    const first = scan.strings.find(({ startIndex }) => startIndex >= node.startIndex);
-    if (!first || hasErrorBefore(node, first.startIndex)) continue;
-    // Each outermost ERROR node reports one generic error at its start row.
-    const index = remaining.findIndex(
-      (error) => error.row === node.startPosition.row && error.message === '書き方に誤りがあります。'
-    );
-    if (index !== -1) remaining.splice(index, 1);
   }
-  return [...remaining, ...unterminated];
+  return errors;
 }
 
 function outermostErrorNodes(root: Node): Node[] {
@@ -218,22 +210,11 @@ function lexingStart(root: Node, source: string, node: Node): number {
   return lineStart;
 }
 
-/** Whether the parser failed on text in `node` before `index`, a mistake independent of a string opening there. */
-function hasErrorBefore(node: Node, index: number): boolean {
-  return node.children.some(
-    (child) => child.startIndex < index && (child.isError || child.isMissing || hasErrorBefore(child, index))
-  );
-}
-
 /** Lexes from `start` through the end of the line holding `end`, and on to the end of a string open there. */
-function unterminatedStringsIn(
-  source: string,
-  start: number,
-  end: number
-): { strings: { startIndex: number; endIndex: number }[]; end: number } {
+function unterminatedStringsIn(source: string, start: number, end: number): { stringEnds: number[]; end: number } {
   const lineEnd = source.indexOf('\n', Math.max(start, end - 1));
   const regionEnd = lineEnd === -1 ? source.length : lineEnd;
-  const strings: { startIndex: number; endIndex: number }[] = [];
+  const stringEnds: number[] = [];
   let index = start;
   while (index < regionEnd) {
     const char = source[index];
@@ -250,14 +231,14 @@ function unterminatedStringsIn(
       if (source[close] === char) {
         index = close + 1;
       } else {
-        strings.push({ startIndex: index, endIndex: close });
+        stringEnds.push(close);
         index = close;
       }
     } else {
       index++;
     }
   }
-  return { strings, end: index };
+  return { stringEnds, end: index };
 }
 
 /** The index of the quote closing the string opening at `opening`, or of the line break or end that leaves it open. */
