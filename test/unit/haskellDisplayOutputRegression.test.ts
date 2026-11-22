@@ -5,7 +5,7 @@ import { createNodeBundleRunner } from '../helpers/nodeBundleRunner';
 
 const runNodeBundle = createNodeBundleRunner();
 
-test('shared reference views serialize and render within a bounded heap', { timeout: 30_000 }, () => {
+test('shared reference views serialize and render within a bounded heap', () => {
   const output = runHelper('test/helpers/haskellDisplayOutput.ts', 512);
   const results = z
     .array(
@@ -63,7 +63,7 @@ test.each([
   'repeated',
   'aliases',
   'selfField',
-])('shared scalar answer arrays round-trip within a bounded heap: %s', { timeout: 30_000 }, (name) => {
+])('shared scalar answer arrays round-trip within a bounded heap: %s', (name) => {
   const [result] = z
     .tuple([
       z.object({
@@ -91,7 +91,7 @@ test.each([
   }
 });
 
-test('shared text stays bounded when a snapshot is expanded', { timeout: 30_000 }, () => {
+test('shared text stays bounded when a snapshot is expanded', () => {
   const [result] = z
     .tuple([
       z.object({
@@ -108,7 +108,7 @@ test('shared text stays bounded when a snapshot is expanded', { timeout: 30_000 
   expect(result.finalAnswers).toContain('cheap');
 });
 
-test('reference recordings and mandatory world snapshots stay bounded', { timeout: 30_000 }, () => {
+test('reference recordings and mandatory world snapshots stay bounded', () => {
   const output = runHelper('test/helpers/haskellRecordingOutput.ts', 256);
   const result = z.object({ transportBytes: z.number(), stateLimited: z.boolean() }).parse(output);
   expect(result.transportBytes).toBeLessThan(64 * 1024 * 1024);
@@ -131,7 +131,7 @@ test.each([
   'singletonStrings',
   'deepEmpty',
   'protectedName',
-])('transport graphs round-trip within a bounded heap: %s', { timeout: 30_000 }, (name) => {
+])('transport graphs round-trip within a bounded heap: %s', (name) => {
   const result = z
     .object({ bytes: z.number(), loops: z.number() })
     .parse(runHelper('test/helpers/haskellTransportOutput.ts', 256, [name]));
@@ -139,7 +139,7 @@ test.each([
   expect(result.loops).toBe(name === 'control' || name === 'equalityControl' ? 5 : 1200);
 });
 
-test('legal learner names round-trip through a fresh configured client', { timeout: 30_000 }, () => {
+test('legal learner names round-trip through a fresh configured client', () => {
   const encoded = runHelper('test/helpers/haskellReservedNamesEncode.ts', 256);
   const decoded = runHelper('test/helpers/haskellReservedNamesDecode.ts', 256, [JSON.stringify(encoded)]);
   expect(decoded).toHaveLength(8);
@@ -147,7 +147,6 @@ test('legal learner names round-trip through a fresh configured client', { timeo
 
 test.each(['records', 'reverseOrder', 'turtles', 'longNames', 'wideRecords', 'snapshot'])(
   'visible reference roots remain represented in long traces: %s',
-  { timeout: 30_000 },
   (name) => {
     const result = z
       .object({ bytes: z.number(), items: z.number() })
@@ -159,7 +158,6 @@ test.each(['records', 'reverseOrder', 'turtles', 'longNames', 'wideRecords', 'sn
 
 test.each(['fourTurtles', 'fiveTurtles', 'sevenLists', 'sixteenLists', 'records', 'tuples', 'growing'])(
   'optional output leaves capacity for complete traces and small roots: %s',
-  { timeout: 30_000 },
   (name) => {
     const result = z
       .object({ bytes: z.number(), items: z.number(), loops: z.number() })
@@ -169,7 +167,7 @@ test.each(['fourTurtles', 'fiveTurtles', 'sevenLists', 'sixteenLists', 'records'
   }
 );
 
-test('trace stops when visible-name metadata exceeds export capacity', { timeout: 30_000 }, () => {
+test('trace stops when visible-name metadata exceeds export capacity', () => {
   const result = z.object({ limited: z.boolean() }).parse(runHelper('test/helpers/haskellMinimumOutput.ts', 256));
   expect(result.limited).toBe(true);
 });

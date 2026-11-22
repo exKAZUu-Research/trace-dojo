@@ -7,7 +7,7 @@ import { createNodeBundleRunner } from '../helpers/nodeBundleRunner';
 
 const runNodeBundle = createNodeBundleRunner();
 
-test('immutable composite loops retain cheap answers within bounded transport output', { timeout: 30_000 }, () => {
+test('immutable composite loops retain cheap answers within bounded transport output', () => {
   const output = runNodeBundle('test/helpers/haskellCompositeTrace.ts', { heapMb: 256, timeout: 15_000 });
   const array = z.object({ kind: z.literal('array'), entries: z.record(z.string(), z.unknown()) });
   const display = z.union([array, z.object({ kind: z.literal('value'), value: z.unknown() })]).optional();
