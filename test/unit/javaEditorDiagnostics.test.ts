@@ -6,13 +6,12 @@ import { expect, test } from 'vitest';
 
 import { fillInBlankProblemDefinitions } from '../../src/problems/fillInBlank/definitions';
 import { javaEditorDiagnostics } from '../../src/problems/fillInBlank/javaEditorDiagnostics';
-import { instantiateProblem } from '../../src/problems/instantiateProblem';
+import { instantiateProblem } from '../helpers/nodeProblems';
 
 test.each(Object.keys(fillInBlankProblemDefinitions))(
   'the untouched %s starter shows no local syntax hint for its placeholders',
   async (id) => {
-    const problem = instantiateProblem(id, 'starter-hints');
-    if (!problem) throw new Error(`Unknown problem: ${id}`);
+    const problem = await instantiateProblem(id, 'starter-hints');
     const view = new EditorView({
       parent: document.body,
       doc: `${problem.displayProgram}\nclass Probe { int value = ; }`,

@@ -1,11 +1,15 @@
 import { builtinModules } from 'node:module';
 
-// Bundles the interpreter worker and the page that drives it for a browser, into the directory given as the argument.
+// Bundles the interpreter worker and the pages that drive it for a browser, into the directory given as the argument.
 
 const builtins = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]));
 
 const result = await Bun.build({
-  entrypoints: ['test/helpers/browserInterpreterPage.ts', 'src/interpreter/worker/interpreterWorker.ts'],
+  entrypoints: [
+    'test/helpers/browserInterpreterPage.ts',
+    'test/helpers/browserProblemPage.ts',
+    'src/interpreter/worker/interpreterWorker.ts',
+  ],
   outdir: process.argv[2],
   target: 'browser',
   splitting: true,
@@ -16,7 +20,9 @@ const result = await Bun.build({
       name: 'reject-node-builtins',
       setup(build) {
         build.onResolve({ filter: /^[\w:/]+$/ }, ({ path, importer }) => {
-          if (builtins.has(path)) throw new Error(`${importer} imports the Node.js builtin "${path}"`);
+          // A dependency may name a builtin that its `browser` field replaces, as seedrandom does with `crypto`.
+          if (builtins.has(path) && !importer.includes('/node_modules/'))
+            throw new Error(`${importer} imports the Node.js builtin "${path}"`);
           return;
         });
       },

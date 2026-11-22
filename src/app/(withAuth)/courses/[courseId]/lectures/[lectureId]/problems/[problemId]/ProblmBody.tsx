@@ -8,7 +8,7 @@ import { MAX_CHALLENGE_COUNT } from '@/constants';
 import { useAuthContextSelector } from '@/contexts/AuthContext';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import { useDisclosure } from '@/infrastructures/useClient/chakra';
-import type { InstantiatedProblem } from '@/problems/instantiateProblem';
+import type { InstantiatedProblem } from '@/problems/instantiateTemplate';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import type { ProblemType } from '@/types';
 
