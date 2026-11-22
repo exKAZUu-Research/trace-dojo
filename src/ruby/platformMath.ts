@@ -8,6 +8,7 @@ const LANCZOS_COEFFICIENTS = [
 const HALF_LOG_TWO_PI = Math.log(2 * Math.PI) / 2;
 /** Every larger argument has a gamma value beyond the largest double; the product below would yield NaN there. */
 const MAX_FINITE_GAMMA_ARGUMENT = 172;
+const TINY_ARGUMENT = 1e-17;
 /** Below this argument the logarithm of the gamma value is more accurate than the sum of its logarithmic terms. */
 const MAX_DIRECT_LOG_ARGUMENT = 16;
 
@@ -30,6 +31,8 @@ export const platformGamma = (value: number): number => {
 /** The logarithm of the absolute value of the gamma function, and the sign of the gamma function. */
 export const platformLogGamma = (value: number): [number, number] => {
   if (value <= 0 && Number.isInteger(value)) return [Number.POSITIVE_INFINITY, 1];
+  // Near zero the gamma function is 1/x to double precision, and the reflection below would round a subnormal product.
+  if (Math.abs(value) < TINY_ARGUMENT) return [-Math.log(Math.abs(value)), value < 0 ? -1 : 1];
   if (value < 0.5) {
     const sine = Math.sin(Math.PI * value);
     // The quotient of pi and a subnormal sine would overflow, so the logarithms are subtracted instead.
