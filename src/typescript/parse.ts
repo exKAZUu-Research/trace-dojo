@@ -177,12 +177,13 @@ function typeScriptSyntaxErrors(root: Node, source: string, parseErrors: SourceD
  * parsed again with each such string made valid, while every other mistake still shows there.
  */
 function withUnterminatedStrings(root: Node, source: string, parseErrors: SourceDiagnostic[]): SourceDiagnostic[] {
-  const strings: BrokenString[] = [];
+  const lexer: Lexer = { source, validTokenEnds: validTokenEnds(root), strings: [] };
   let lexedUntil = 0;
   for (const node of outermostErrorNodes(root)) {
     // A string opening in the node may run past its end, which the parser can place before the line break.
-    lexedUntil = lexCode(source, Math.max(node.startIndex, lexedUntil), node.endIndex, strings);
+    lexedUntil = lexCode(lexer, Math.max(node.startIndex, lexedUntil), node.endIndex);
   }
+  const { strings } = lexer;
   if (strings.length === 0) return [...parseErrors];
   let repaired = '';
   let copiedUntil = 0;
@@ -218,6 +219,18 @@ interface BrokenString {
   closed: boolean;
 }
 
+interface Lexer {
+  source: string;
+  /** The ends of the tokens with quote-like text that the parser read validly, keyed by their starts. */
+  validTokenEnds: Map<number, number>;
+  strings: BrokenString[];
+}
+
+function validTokenEnds(root: Node): Map<number, number> {
+  const tokens = root.descendantsOfType(['comment', 'regex', 'string', 'template_string']);
+  return new Map(tokens.filter((token) => !token.hasError).map((token) => [token.startIndex, token.endIndex]));
+}
+
 function outermostErrorNodes(root: Node): Node[] {
   const found: Node[] = [];
   const visit = (node: Node): void => {
@@ -232,18 +245,22 @@ function outermostErrorNodes(root: Node): Node[] {
  * Lexes code from `index` up to `end`, or with no `end` through the `}` closing a template substitution, recording the
  * quoted strings with a raw line break; returns where lexing stopped.
  */
-function lexCode(source: string, index: number, end: number | undefined, strings: BrokenString[]): number {
+function lexCode(lexer: Lexer, index: number, end: number | undefined): number {
+  const { source, validTokenEnds, strings } = lexer;
   let braceDepth = 0;
   while (index < (end ?? source.length)) {
     const char = source[index];
-    if (source.startsWith('//', index)) {
+    const validTokenEnd = validTokenEnds.get(index);
+    if (validTokenEnd !== undefined) {
+      index = validTokenEnd;
+    } else if (source.startsWith('//', index)) {
       const lineEnd = source.indexOf('\n', index);
       index = lineEnd === -1 ? source.length : lineEnd;
     } else if (source.startsWith('/*', index)) {
       const close = source.indexOf('*/', index + 2);
       index = close === -1 ? source.length : close + 2;
     } else if (char === '`') {
-      index = lexTemplate(source, index + 1, strings);
+      index = lexTemplate(lexer, index + 1);
     } else if (char === "'" || char === '"') {
       const { close, breakIndex } = scanQuotedString(source, index);
       const closed = source[close] === char;
@@ -263,10 +280,11 @@ function lexCode(source: string, index: number, end: number | undefined, strings
   return index;
 }
 
-function lexTemplate(source: string, index: number, strings: BrokenString[]): number {
+function lexTemplate(lexer: Lexer, index: number): number {
+  const { source } = lexer;
   while (index < source.length) {
     if (source[index] === '`') return index + 1;
-    if (source.startsWith('${', index)) index = lexCode(source, index + 2, undefined, strings);
+    if (source.startsWith('${', index)) index = lexCode(lexer, index + 2, undefined);
     else index += source[index] === '\\' ? 2 : 1;
   }
   return index;
