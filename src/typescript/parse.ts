@@ -210,8 +210,8 @@ function withUnterminatedStrings(root: Node, source: string, parseErrors: Source
 /**
  * A valid replacement for `text` keeping every index and row: for a closed string, the same quotes around blanks with
  * each line break escaped, so the token still ends on its last row, where a token missing after it is placed; failing
- * that, an empty string literal among blanks and the line breaks, or, where no two adjacent characters are not line
- * breaks, a template, which is invalid where only a string literal may appear, such as a module specifier.
+ * that, an empty string literal as late among blanks and the line breaks as fits, or, where no two adjacent characters
+ * are not line breaks, a template, which is invalid where only a string literal may appear, such as a module specifier.
  */
 function validStringOfSameShape(text: string, closed: boolean): string {
   if (!closed && text.length === 1) return '0';
@@ -221,7 +221,7 @@ function validStringOfSameShape(text: string, closed: boolean): string {
     // A line break right after the opening quote or another break has no room for its `\`.
     if (!/[\r\n]/.test(continued.replaceAll(/\\(?:\r\n|[\r\n])/g, ''))) return continued;
   }
-  const slot = blank.indexOf('  ');
+  const slot = blank.lastIndexOf('  ');
   return slot === -1 ? `\`${blank.slice(1, -1)}\`` : `${blank.slice(0, slot)}''${blank.slice(slot + 2)}`;
 }
 
