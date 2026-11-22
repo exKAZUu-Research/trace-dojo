@@ -1,4 +1,3 @@
-import { chromium, firefox, webkit } from 'playwright';
 import { describe, expect, test } from 'vitest';
 
 import { challengeBases } from '../../src/problems/challenge/definitions';
@@ -6,26 +5,19 @@ import { javaChallengeDefinitions } from '../../src/problems/javaChallenges/defi
 import { instantiateJavaChallenge } from '../../src/problems/javaChallenges/instantiate';
 import { practiceDefinitions } from '../../src/problems/practice/definitions';
 import { problemIdToProgram } from '../../src/problems/problemData';
-import { openBrowserInterpreterPage } from '../helpers/browserInterpreterSession';
+import { browserEngines, openBrowserInterpreterPage } from '../helpers/browserInterpreterSession';
 import { nodeRunner } from '../helpers/nodeProblems';
 import { type ProblemJob, runProblemJob } from '../helpers/problemJobs';
 
-const BROWSER_TYPES = { chromium, firefox, webkit };
-// CI installs Chromium alone; `BROWSER_ENGINES=chromium,firefox,webkit` compares the other engines where installed.
-const engines = (process.env.BROWSER_ENGINES ?? 'chromium').split(',') as (keyof typeof BROWSER_TYPES)[];
 const JOBS_PER_MESSAGE = 100;
 
-describe.each(engines)('%s', (engine) => {
+describe.each(browserEngines)('%s', (engine) => {
   test('generates every problem and runs every model program as Node.js does', async () => {
     const jobs = productJobs();
     const expected = [];
     for (const job of jobs) expected.push(await runProblemJob(nodeRunner, job));
 
-    const session = await openBrowserInterpreterPage(
-      'test/helpers/browserProblemPage.ts',
-      'runProblemJobs',
-      BROWSER_TYPES[engine]
-    );
+    const session = await openBrowserInterpreterPage('test/helpers/browserProblemPage.ts', 'runProblemJobs', engine);
     try {
       for (let start = 0; start < jobs.length; start += JOBS_PER_MESSAGE) {
         const actual = await session.page.evaluate(

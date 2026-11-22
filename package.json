@@ -65,7 +65,6 @@
     "@codemirror/view": "6.43.15",
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
-    "@eslint-community/regexpp": "4.12.3",
     "@lezer/highlight": "1.2.5",
     "@noble/hashes": "2.4.0",
     "@rvf/set-get": "7.0.4",
