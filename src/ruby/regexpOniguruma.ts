@@ -36,7 +36,11 @@ export function onigurumaSource(source: string, extended: boolean): string {
   for (const token of tokens) {
     if (token.start < consumed) continue;
     if (token.kind === 'groupOpen') openOptionGroups.push(0);
-    else if (token.kind === 'groupClose' && openOptionGroups.length > 1) out += ')'.repeat(openOptionGroups.pop()!);
+    else if (token.kind === 'groupClose') {
+      // Reported here, because in the output this parenthesis could close an option group that the source lacks.
+      if (openOptionGroups.length === 1) throw new RegexpSourceError('unmatched close parenthesis');
+      out += ')'.repeat(openOptionGroups.pop()!);
+    }
     const scoped = token.kind === 'directive' && token.raw.length > 3;
     if (scoped) openOptionGroups[openOptionGroups.length - 1]++;
     const rewrite = scoped ? undefined : rewrittenToken(source, token, aliases);
