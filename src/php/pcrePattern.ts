@@ -457,8 +457,9 @@ class PatternConverter {
   private checkLookbehindQuantifier(quantifier: string): void {
     this.noteInLookbehind('quantified');
     if (!/^(?:[*+]|\{\d+,\})$/.test(quantifier)) return;
-    const lookbehind = this.frames.find((frame) => frame.lookaround === 'behind');
-    if (lookbehind) this.fail('length of lookbehind assertion is not limited', lookbehind.at);
+    // A lookahead inside a lookbehind takes no length of it.
+    const lookaround = this.frames.findLast((frame) => frame.lookaround);
+    if (lookaround?.lookaround === 'behind') this.fail('length of lookbehind assertion is not limited', lookaround.at);
   }
 
   /**
