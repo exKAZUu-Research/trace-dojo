@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 /** The next string in PHP's alphanumeric increment (`"a"` → `"b"`, `"Az"` → `"Ba"`, `"zz"` → `"aaa"`). */
-// code-gauge-allow functionCognitiveComplexity 16 -- Propagates carry over ASCII character classes and handles a longer result.
+// code-gauge-allow functionCognitiveComplexity -- Propagates carry over ASCII character classes and handles a longer result.
 export function incrementString(text: string): string {
   const chars = [...text];
   let index = chars.length - 1;
@@ -49,7 +49,7 @@ export function exactDecimal(value: number): { digits: string; point: number } {
  * Rounds a decimal digit string to `keep` digits, half to even as zend_dtoa does on the exact value, returning the
  * rounded digits and whether rounding carried into a new leading digit.
  */
-// code-gauge-allow duplicateLines 15 -- Rounds exact digits as the formatters of the other languages do, each kept beside its own language.
+// code-gauge-allow duplicateLines -- Rounds exact digits as the formatters of the other languages do, each kept beside its own language.
 function roundDigits(digits: string, keep: number): { digits: string; carried: boolean } {
   if (keep < 0) return { digits: '', carried: false };
   if (keep >= digits.length) return { digits: digits + '0'.repeat(keep - digits.length), carried: false };
@@ -162,7 +162,7 @@ export function phpRound(value: number, places: number, mode: RoundMode = 'halfU
   return Number.isFinite(result) ? result : value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes PHP's php_round_helper, one case per rounding mode.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes PHP's php_round_helper, one case per rounding mode.
 function roundHelper(integral: number, value: number, exponent: number, places: number, mode: RoundMode): number {
   const valueAbs = Math.abs(value);
   const scale = (x: number): number => Math.abs(places > 0 ? x / exponent : x * exponent);

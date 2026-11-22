@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 888 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/text-encoding-identifier-case -- mbstring names its encodings in this case.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
@@ -113,7 +113,7 @@ function mbSearch(args: Value[], reverse: boolean, insensitive: boolean, name: s
   return found === false ? false : BigInt(charOffset(haystack, Number(found)));
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function utf8Offset(text: string, offset: number, start = 0): number | undefined {
   let position = offset < 0 ? text.length : start;
   while (offset !== 0) {
@@ -131,7 +131,7 @@ function utf8Offset(text: string, offset: number, start = 0): number | undefined
   return Math.min(position, text.length);
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function searchBytes(text: string, needle: string, start: number, limit: number, last: boolean): bigint | false {
   if (needle.length === 0) return BigInt(last ? limit : start);
   if (limit < start) return false;
@@ -282,7 +282,7 @@ const TITLE_EXCEPTIONS = new Map<string, string>([
   ['ῷ', 'Ω\u0342\u0345'],
 ]);
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function wordCase(text: string, mode: 'lower' | 'title' | 'title-simple'): string {
   const simple = mode === 'title-simple';
   const list = [...text];
@@ -641,8 +641,8 @@ function wordBytes(word: number, size: number, littleEndian: boolean): string {
 }
 
 /** Decodes UTF-16 as mb_utf16_to_wchar does; without a byte order, a BOM decides it, and big-endian is the default. */
-// code-gauge-allow functionNcss 38 -- Keeps pending high surrogates with byte-order and malformed-input checks.
-// code-gauge-allow functionCognitiveComplexity 25 -- Keeps pending high surrogates with byte-order and malformed-input checks.
+// code-gauge-allow functionNcss -- Keeps pending high surrogates with byte-order and malformed-input checks.
+// code-gauge-allow functionCognitiveComplexity -- Keeps pending high surrogates with byte-order and malformed-input checks.
 function decodeUtf16(bytes: string, littleEndian: boolean | undefined): number[] {
   let index = 0;
   let little = littleEndian ?? false;
@@ -867,7 +867,7 @@ const NON_ENCODINGS = new Set(
 );
 
 /** Resolves encoding lists before selecting a reader or a conversion codec. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Resolves supplied encoding names in order through one validation path.
+// code-gauge-allow functionCognitiveComplexity -- Resolves supplied encoding names in order through one validation path.
 function encodingList(
   value: Value,
   functionName: string,
@@ -978,7 +978,7 @@ function decodeLegacy(text: string, decoder: TextDecoder): number[] {
  * Picks the encoding that reads a string with the fewest demerits as mb_guess_encoding_for_strings does: invalid input
  * costs 1000 (or rules a candidate out when strict), and a rare code point costs more than a common one.
  */
-// code-gauge-allow functionCognitiveComplexity 22 -- Maintains candidate weighting, validation and strict rejection in one pass.
+// code-gauge-allow functionCognitiveComplexity -- Maintains candidate weighting, validation and strict rejection in one pass.
 function guessEncoding(text: string, candidates: EncodingReader[], strict: boolean): EncodingReader | undefined {
   if (candidates.length === 1) {
     const [codec] = candidates;
@@ -1099,7 +1099,7 @@ const KANA_ZEN2HAN_KATAKANA = 0x10_00;
 const KANA_ZEN2HAN_HIRAGANA = 0x20_00;
 const KANA_KATA2HIRA = 0x80_00;
 /** Reads the mode letters as PHP_FUNCTION(mb_convert_kana) does, refusing pairs of conversions that undo each other. */
-// code-gauge-allow functionCognitiveComplexity 29 -- Validates and combines conversion flags before their shared dispatch.
+// code-gauge-allow functionCognitiveComplexity -- Validates and combines conversion flags before their shared dispatch.
 function kanaMode(letters: string): number {
   let mode = 0;
   for (const letter of letters) {
@@ -1248,7 +1248,7 @@ const HAN_TO_ZEN_HIRAGANA = Buffer.from(
 );
 
 /** The halfwidth-to-fullwidth conversions of mb_convert_kana_codepoint, which come before the others. */
-// code-gauge-allow functionCognitiveComplexity 29 -- Returns the converted scalar together with whether the following mark was consumed.
+// code-gauge-allow functionCognitiveComplexity -- Returns the converted scalar together with whether the following mark was consumed.
 function halfToFull(code: number, next: number, mode: number): [number, boolean] | undefined {
   const ascii = code >= 0x21 && code <= 0x7d && code !== 0x22 && code !== 0x27 && code !== 0x5c;
   if (mode & KANA_HAN2ZEN_ALL && ascii) return [code + 0xfe_e0, false];
@@ -1268,7 +1268,7 @@ function halfToFull(code: number, next: number, mode: number): [number, boolean]
   return [0x30_00 + table[index], false];
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function defineUtf8Function(signature: string, impl: NativeFunction['impl']): void {
   const name = signature.slice(0, signature.indexOf('('));
   const parameters = signature.slice(signature.indexOf('(') + 1, signature.indexOf(')')).split(',');

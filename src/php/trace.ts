@@ -131,7 +131,7 @@ function addVariable(variables: TraceVariables, name: string, value: Value, comp
   define(variables.referenceVars, name, node);
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Visits each reachable array once and skips known object-free storage.
+// code-gauge-allow functionCognitiveComplexity -- Visits each reachable array once and skips known object-free storage.
 function arrayContainsObjects(array: PhpArray): boolean {
   const pending = new Set([array]);
   let scanned = 0;
@@ -264,8 +264,8 @@ const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 const TRUE_NODE: DisplayNode = { kind: 'value', value: true };
 const FALSE_NODE: DisplayNode = { kind: 'value', value: false };
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Each branch maps a PHP value shape to the shared trace display tree.
-// code-gauge-allow functionNcss 40 -- Each branch maps a PHP value shape to the shared trace display tree.
+// code-gauge-allow functionCognitiveComplexity -- Each branch maps a PHP value shape to the shared trace display tree.
+// code-gauge-allow functionNcss -- Each branch maps a PHP value shape to the shared trace display tree.
 function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: number }): DisplayNode | undefined {
   if (budget.remaining-- <= 0) return { kind: 'value', value: '…' };
   if (value === UNDEFINED_RESULT) return undefined;

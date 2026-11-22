@@ -21,7 +21,7 @@ type AdtLayout = Extract<Layout, { kind: 'adt' }>;
 
 export const NONE: Layout = { kind: 'none' };
 
-// code-gauge-allow functionNcss 31 -- Each Rust type contributes its own region layout.
+// code-gauge-allow functionNcss -- Each Rust type contributes its own region layout.
 export function layoutOf(type: Type | undefined, fresh: () => RVar, staticRegion = fresh): Layout {
   if (!type) return NONE;
   const t = normalize(shallow(type));
@@ -145,7 +145,7 @@ export type Outlives = (sup: RVar, sub: RVar) => void;
  * Relates the regions of a value flowing from a place of layout `sup` to one of layout `sub`: each region of `sup`
  * outlives the matching one of `sub`, and they are equal where the type is invariant (behind `&mut`).
  */
-// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of layout.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of layout.
 export function relate(outlives: Outlives, sup: Layout, sub: Layout, invariant = false): void {
   if (sup.kind === 'none' || sub.kind === 'none') return;
   const both = (a: RVar, b: RVar): void => {
@@ -251,7 +251,7 @@ function invarianceIn(group: InvarianceGroup, def: AdtDef): InvariantParams {
 }
 
 /** Marks the parameters of `member` that a part of one of its fields' types names where it is invariant. */
-// code-gauge-allow functionCognitiveComplexity 18 -- One rule per kind of type that can name a parameter.
+// code-gauge-allow functionCognitiveComplexity -- One rule per kind of type that can name a parameter.
 function markInvariant(
   type: Type,
   invariant: boolean,

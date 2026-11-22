@@ -168,7 +168,7 @@ export type Node =
   | TemplateNode;
 
 /** `Node.String`, which error messages show as the context of a failure. */
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per node type, as node.go's writeTo methods are.
+// code-gauge-allow functionCognitiveComplexity -- One case per node type, as node.go's writeTo methods are.
 export function nodeString(node: Node): string {
   const tr = node.tr as Tree;
   switch (node.type) {
@@ -521,7 +521,7 @@ export class Tree {
     return { type: name, tr: this, pos: keyword.pos };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- A transcription of Go's Tree.pipeline, whose declarations loop back with goto.
+  // code-gauge-allow functionCognitiveComplexity -- A transcription of Go's Tree.pipeline, whose declarations loop back with goto.
   private pipeline(context: string, end: number): PipeNode {
     const token = this.peekNonSpace();
     const pipe: PipeNode = {
@@ -782,7 +782,7 @@ export class Tree {
   }
 
   /** `Tree.newNumber`, whose error is the message of the error Go returns. */
-  // code-gauge-allow functionCognitiveComplexity 30 -- A transcription of Go's newNumber.
+  // code-gauge-allow functionCognitiveComplexity -- A transcription of Go's newNumber.
   private newNumber(pos: number, text: string, typ: number): [NumberNode, string | undefined] {
     const node: NumberNode = {
       type: 'number',
@@ -892,7 +892,7 @@ const UINT64_MAX = 2n ** 64n - 1n;
  * Sets the integer forms of a float that `int64(f)` and `uint64(f)` convert back exactly; out-of-range conversions
  * saturate as they do on arm64.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- The saturating conversions of arm64, one per bound.
+// code-gauge-allow functionCognitiveComplexity -- The saturating conversions of arm64, one per bound.
 function setIntegerForms(node: NumberNode, f: number): void {
   const truncated = Number.isNaN(f) ? 0n : Number.isFinite(f) ? BigInt(Math.trunc(f)) : f > 0 ? UINT64_MAX : INT64_MIN;
   const asInt = truncated < INT64_MIN ? INT64_MIN : truncated > INT64_MAX ? INT64_MAX : truncated;

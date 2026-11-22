@@ -48,7 +48,7 @@ export function regexpHasNumberedBackref(source: string, extended = false): bool
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- One token traversal resolves decimal references against preceding captures while excluding character classes.
+// code-gauge-allow functionCognitiveComplexity -- One token traversal resolves decimal references against preceding captures while excluding character classes.
 export function regexpNumericEscapes(
   source: string,
   extended = false

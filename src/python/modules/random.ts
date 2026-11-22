@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 476 -- The native random generator and the methods random.py's module functions run.
+// code-gauge-allow-file fileNcss -- The native random generator and the methods random.py's module functions run.
 import { setAttribute } from '../attributes';
 import { bytesClass, latin1Text, newBytes, PyBytes } from '../bytesValues';
 import { pyStr } from '../conversions';
@@ -178,7 +178,6 @@ export class MersenneTwister {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows random_seed and Random.seed, one case per seed type and version.
 export function seedOf(value: PyValue | undefined, version: PyValue = 2n): bigint {
   if (value === undefined || value === None) return bigintOfBytes(crypto.getRandomValues(new Uint8Array(32)));
   if (isInstanceOf(value, intClass)) return toIndex(value);
@@ -278,7 +277,7 @@ function isSequence(value: PyValue): boolean {
   return !(value instanceof PySet || value instanceof PyDict) && typeof value === 'object';
 }
 
-// code-gauge-allow functionNcss 33 -- Follows random.sample with and without counts.
+// code-gauge-allow functionNcss -- Follows random.sample with and without counts.
 function sample(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): PyValue {
   const population = argument(args, kwargs, 0, 'population') as PyValue;
   const kValue = argument(args, kwargs, 1, 'k') as PyValue;
@@ -348,8 +347,8 @@ function bisectRight(items: PyValue[], value: PyValue): number {
   return low;
 }
 
-// code-gauge-allow functionNcss 41 -- Follows random.choices with and without weights.
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows random.choices with and without weights.
+// code-gauge-allow functionNcss -- Follows random.choices with and without weights.
+// code-gauge-allow functionCognitiveComplexity -- Follows random.choices with and without weights.
 function choices(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): PyValue {
   const population = argument(args, kwargs, 0, 'population') as PyValue;
   const weights = argument(args, kwargs, 1, 'weights') ?? None;

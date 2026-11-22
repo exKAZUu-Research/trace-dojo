@@ -75,7 +75,7 @@ export function defineKeyComparators(
 }
 
 /** `nullsFirst`, `nullsLast`, and `Map.Entry.comparingByKey/comparingByValue` with a comparator. */
-// code-gauge-allow functionCognitiveComplexity 21 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionCognitiveComplexity -- One registration per builtin method, each a small native.
 function defineNullsAndEntryOrders(cls: ClassInfo, entryClass: ClassInfo, objectType: JavaType): void {
   const variable = (name: string): [TypeVariable, JavaType] => {
     const created: TypeVariable = { name, bounds: [objectType] };

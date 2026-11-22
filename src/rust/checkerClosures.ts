@@ -272,8 +272,8 @@ function mutatedPlace(expr: Expr, annotations: Annotations): Expr | undefined {
 }
 
 /** Which children of an expression it uses by value (moves), given whether the expression's own value is moved. */
-// code-gauge-allow functionCognitiveComplexity 28 -- One case per kind of expression.
-// code-gauge-allow functionNcss 36 -- Rust expressions pass ownership to different positions depending on their syntax.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of expression.
+// code-gauge-allow functionNcss -- Rust expressions pass ownership to different positions depending on their syntax.
 function consumedChildren(
   expr: Expr,
   annotations: Annotations,

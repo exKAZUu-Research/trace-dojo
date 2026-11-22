@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 534 -- Transcribes the methods of _pydecimal that belong together.
+// code-gauge-allow-file fileNcss -- Transcribes the methods of _pydecimal that belong together.
 import { repeatText } from '../stringBuilder';
 import { type DecimalContext, etiny, etop, type Rounding } from './decimalContext';
 import {
@@ -72,7 +72,7 @@ export function absolute(self: Dec, context: DecimalContext): Dec {
 }
 
 /** `Decimal.__add__`. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _pydecimal's algorithm of the same name.
 export function add(self: Dec, other: Dec, context: DecimalContext): Dec {
   if (isSpecial(self) || isSpecial(other)) {
     const nan = checkNans(self, other, context);
@@ -149,7 +149,7 @@ export function subtract(self: Dec, other: Dec, context: DecimalContext): Dec {
   return add(self, copyNegate(other), context);
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _pydecimal's algorithm of the same name.
 export function times(self: Dec, other: Dec, context: DecimalContext): Dec {
   const sign = self.sign ^ other.sign;
   if (isSpecial(self) || isSpecial(other)) {
@@ -168,8 +168,8 @@ export function times(self: Dec, other: Dec, context: DecimalContext): Dec {
 }
 
 /** `Decimal.__truediv__`. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes _pydecimal's algorithm of the same name.
-// code-gauge-allow functionNcss 36 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionNcss -- Transcribes _pydecimal's algorithm of the same name.
 export function divide(self: Dec, other: Dec, context: DecimalContext): Dec {
   const sign = self.sign ^ other.sign;
   if (isSpecial(self) || isSpecial(other)) {
@@ -276,7 +276,7 @@ export function floorDivide(self: Dec, other: Dec, context: DecimalContext): Dec
 }
 
 /** `Decimal.remainder_near`. */
-// code-gauge-allow functionNcss 33 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionNcss -- Transcribes _pydecimal's algorithm of the same name.
 export function remainderNear(self: Dec, other: Dec, context: DecimalContext): Dec {
   const nan = checkNans(self, other, context);
   if (nan) return nan;
@@ -305,7 +305,7 @@ export function remainderNear(self: Dec, other: Dec, context: DecimalContext): D
   return fix(dec(sign, digitsOf(rest), idealExp), context);
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _pydecimal's algorithm of the same name.
 export function fusedMultiplyAdd(self: Dec, other: Dec, third: Dec, context: DecimalContext): Dec {
   let product: Dec;
   if (isSpecial(self) || isSpecial(other)) {
@@ -351,7 +351,7 @@ export function normalizeValue(self: Dec, context: DecimalContext): Dec {
 }
 
 /** `Decimal.quantize`. */
-// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _pydecimal's algorithm of the same name.
 export function quantize(self: Dec, exp: Dec, rounding: Rounding, context: DecimalContext): Dec {
   if (isSpecial(self) || isSpecial(exp)) {
     const nan = checkNans(self, exp, context);
@@ -397,8 +397,8 @@ export function toIntegralValue(self: Dec, rounding: Rounding, context: DecimalC
 }
 
 /** `Decimal.sqrt`, correctly rounded with ROUND_HALF_EVEN. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes _pydecimal's algorithm of the same name.
-// code-gauge-allow functionNcss 45 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionNcss -- Transcribes _pydecimal's algorithm of the same name.
 export function squareRoot(self: Dec, context: DecimalContext): Dec {
   if (isSpecial(self)) {
     const nan = checkNans(self, undefined, context);
@@ -459,7 +459,7 @@ export function compareMethod(self: Dec, other: Dec, context: DecimalContext): D
 type Choice = (self: Dec, other: Dec) => number;
 
 /** `max`, `min`, `max_mag`, and `min_mag`, which differ in how they order and which operand wins. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _pydecimal's algorithm of the same name.
 export function choose(self: Dec, other: Dec, context: DecimalContext, order: Choice, wantLarger: boolean): Dec {
   if (isSpecial(self) || isSpecial(other)) {
     const selfNan = nanKind(self);

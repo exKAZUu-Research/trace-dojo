@@ -96,7 +96,7 @@ const PAIR_LEAD_RANGES = {
 } as const;
 type PairEncoding = keyof typeof PAIR_LEAD_RANGES;
 
-// code-gauge-allow functionCognitiveComplexity 16 -- The lead, trail and BIG-5 retry share one input cursor.
+// code-gauge-allow functionCognitiveComplexity -- The lead, trail and BIG-5 retry share one input cursor.
 function decodeMappedPairs(bytes: string, encoding: PairEncoding): number[] {
   const result: number[] = [];
   const traditionalChinese = encoding !== 'eucKr';
@@ -322,7 +322,7 @@ function directUtf7Code(char: string, imap: boolean, validating: boolean): numbe
   return code === 0 || (/[\t\r\n -\u007D]/.test(char) && char !== '\\') ? code : BAD;
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- The ending byte determines both the section validity and the next byte to decode.
+// code-gauge-allow functionCognitiveComplexity -- The ending byte determines both the section validity and the next byte to decode.
 function shiftedUtf16Section(
   bytes: string,
   start: number,
@@ -354,7 +354,7 @@ function shiftedUtf16Section(
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Maintains the escape and shifted-byte state of the two transport encodings.
+// code-gauge-allow functionCognitiveComplexity -- Maintains the escape and shifted-byte state of the two transport encodings.
 function decodeShiftedPairs(bytes: string, hz: boolean): number[] {
   const result: number[] = [];
   let shifted = false;

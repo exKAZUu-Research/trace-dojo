@@ -227,7 +227,7 @@ class Scanner {
     return ch;
   }
 
-  // code-gauge-allow duplicateLines 17 -- The tokenize module's tokenizer measures a line's indentation alike.
+  // code-gauge-allow duplicateLines -- The tokenize module's tokenizer measures a line's indentation alike.
   readIndent(): Indent {
     let column = 0;
     let altColumn = 0;
@@ -255,7 +255,7 @@ class Scanner {
   }
 
   /** Reads to the end of a logical line, describing its tokens outside comments. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Follows how CPython's tokenizer joins the physical lines of a logical line.
+  // code-gauge-allow functionCognitiveComplexity -- Follows how CPython's tokenizer joins the physical lines of a logical line.
   readLogicalLine(): LineTokens {
     this.bracketLevel = 0;
     const tokens: LineTokens = { lastToken: '', end: this.index, endRow: this.row, hasColon: false };
@@ -336,8 +336,8 @@ class Scanner {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- One case per escape and quote rule of string literals.
-  // code-gauge-allow functionNcss 32 -- One case per escape and quote rule of string literals.
+  // code-gauge-allow functionCognitiveComplexity -- One case per escape and quote rule of string literals.
+  // code-gauge-allow functionNcss -- One case per escape and quote rule of string literals.
   private readStringBody(isFormatted: boolean, isRaw: boolean): void {
     const quote = this.peek() as string;
     const isTriple = this.peek(1) === quote && this.peek(2) === quote;

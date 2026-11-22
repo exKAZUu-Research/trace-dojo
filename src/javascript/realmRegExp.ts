@@ -415,7 +415,7 @@ function groupLookup(runtime: Runtime, groups: Value): ((key: string) => string)
 }
 
 /** Expands a replacement template for one match as the spec's GetSubstitution does: `$&`, `$1`, `$<name>`, and so on. */
-// code-gauge-allow functionParameterCount 7 -- Takes each input of the spec's GetSubstitution, which a template may refer to.
+// code-gauge-allow functionParameterCount -- Takes each input of the spec's GetSubstitution, which a template may refer to.
 function substitution(
   runtime: Runtime,
   template: string,
@@ -447,7 +447,7 @@ function substitution(
   return result;
 }
 
-// code-gauge-allow functionParameterCount 7 -- Takes each input of the spec's GetSubstitution, which a template may refer to.
+// code-gauge-allow functionParameterCount -- Takes each input of the spec's GetSubstitution, which a template may refer to.
 function dollarExpansion(
   template: string,
   index: number,

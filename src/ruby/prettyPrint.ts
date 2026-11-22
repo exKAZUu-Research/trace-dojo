@@ -35,8 +35,8 @@ export function* prettyInspect(value: Value): Gen<string> {
   return `${layout(doc)}\n`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- The ordered cases for width-sensitive recursive object rendering share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 44 -- The ordered cases for width-sensitive recursive object rendering share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for width-sensitive recursive object rendering share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for width-sensitive recursive object rendering share state; splitting them solely for the metric would hide their sequencing.
 export function* writePretty(value: Value, write: (part: string) => Gen<void>): Gen<void> {
   const callbacks = inspectionCallbackCount(value, new Set(), { nodes: 0, textLength: 0 });
   if (callbacks === 0) {
@@ -352,8 +352,8 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
   return text(yield* inspect(value), budget);
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Callback counting follows each supported container's observable inspection order and stops after two callbacks.
-// code-gauge-allow functionNcss 31 -- Each container representation contributes its children through a distinct protocol.
+// code-gauge-allow functionCognitiveComplexity -- Callback counting follows each supported container's observable inspection order and stops after two callbacks.
+// code-gauge-allow functionNcss -- Each container representation contributes its children through a distinct protocol.
 function inspectionCallbackCount(value: Value, seen: Set<object>, budget: BuildBudget, depth = 0): number {
   rt().spend();
   if (depth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');

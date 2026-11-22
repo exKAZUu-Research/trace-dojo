@@ -170,8 +170,8 @@ function layoutOf(type: Type): Layout {
   return resolvedLayouts.get(type) ?? leafLayouts.get(type) ?? new LayoutQuery().layout(type);
 }
 
-// code-gauge-allow functionNcss 59 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
-// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionNcss -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
 function computeLayout(type: Type, query: LayoutQuery): Layout {
   switch (type.kind) {
     case 'int': {

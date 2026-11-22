@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 698 -- Memory adapters share typed slice access, comparison, and allocation helpers.
+// code-gauge-allow-file fileNcss -- Memory adapters share typed slice access, comparison, and allocation helpers.
 import { transferCost } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
@@ -213,7 +213,7 @@ function sliceSearch(
   });
 }
 
-// code-gauge-allow duplicateLines 17 -- Search adapters share typed argument setup while indexed searches retain their start argument.
+// code-gauge-allow duplicateLines -- Search adapters share typed argument setup while indexed searches retain their start argument.
 function positionSearch(
   name: string,
   second: 'slice' | 'scalar',
@@ -242,7 +242,7 @@ function searchOperand(sema: SemaApi, type: Type, arg: Expression, kind: 'slice'
   return kind === 'slice' ? constSlice(sema, arg, type) : sema.coerce(sema.compile(arg, type), type, arg);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the paired live trim bounds together.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the paired live trim bounds together.
 function trimmer(name: string, start: boolean, end: boolean): () => Member {
   return generic(name, 3, (sema, call, type, [sliceArg, stripArg]) => {
     const slice = constSlice(sema, sliceArg, type);
@@ -688,7 +688,7 @@ const MEMBERS: Record<string, () => Member> = {
       return replacementLength(source.length, pattern.length, (r as Slice).lengthValue, count);
     });
   }),
-  // code-gauge-allow functionNcss 50 -- Implements sequential replacement, overlap and capacity checks together.
+  // code-gauge-allow functionNcss -- Implements sequential replacement, overlap and capacity checks together.
   replace: generic('std.mem.replace', 5, (sema, call, type, [inputArg, needleArg, replacementArg, outputArg]) => {
     const [input, needle, replacement] = [inputArg, needleArg, replacementArg].map((arg) =>
       constSlice(sema, arg, type)
@@ -948,7 +948,7 @@ function extremeIndex(name: string, direction: number): () => Member {
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps exact bounds, copy direction and reference transfer in evaluation order.
+// code-gauge-allow functionCognitiveComplexity -- Keeps exact bounds, copy direction and reference transfer in evaluation order.
 function copier(name: string): () => Member {
   return generic(name, 3, (sema, call, type, [destinationArg, sourceArg]) => {
     const destination = mutableSlice(sema, destinationArg, type);
@@ -1023,7 +1023,7 @@ function emptySliceLiteral(sema: SemaApi, type: Type, span: Span, sentinel?: 0n)
   return new Slice(array, array.offset, 0);
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Plans exact lengths before traversing only stored data.
+// code-gauge-allow functionCognitiveComplexity -- Plans exact lengths before traversing only stored data.
 function joiningPlan(
   parts: Slice,
   separator: Slice | undefined,
@@ -1078,8 +1078,8 @@ function allocatingCall(
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Follows the reference zero-initialization rules for each supported type.
-// code-gauge-allow functionNcss 48 -- Keeps type validation with the corresponding zero representation.
+// code-gauge-allow functionCognitiveComplexity -- Follows the reference zero-initialization rules for each supported type.
+// code-gauge-allow functionNcss -- Keeps type validation with the corresponding zero representation.
 function zeroValue(type: Type, sema: SemaApi, span: Span): Value {
   sema.spendCompilation();
   const zero = (child: Type): Value => zeroValue(child, sema, span);

@@ -86,7 +86,7 @@ function signatureKey(signature: { params: Type[]; ret: Type }): string {
 }
 
 /** Matches a type pattern with type parameters against a concrete type, binding the parameters. */
-// code-gauge-allow functionNcss 42 -- One case per kind of type.
+// code-gauge-allow functionNcss -- One case per kind of type.
 export function matchConcrete(
   pattern: Type,
   concrete: Type,

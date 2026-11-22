@@ -345,7 +345,7 @@ function reducePi(x: number): number {
   return Math.PI * reduced;
 }
 
-// code-gauge-allow functionNcss 35 -- Transcribes Go's tanSeries loop step by step.
+// code-gauge-allow functionNcss -- Transcribes Go's tanSeries loop step by step.
 /** `tanSeries`: the Taylor series for cosh(2y) - cos(2x), where Go fuses x2*x into each sum. */
 function tanSeries(z: Complex): number {
   const MACHEP = 1 / 2 ** 53;

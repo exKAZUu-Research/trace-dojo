@@ -47,7 +47,7 @@ export class XmlUnmarshaler {
   }
 
   /** `unmarshal`: decodes the element that `start` begins, or the next one, into the value. */
-  // code-gauge-allow functionNcss 32 -- A transcription of Go's unmarshal, step by step.
+  // code-gauge-allow functionNcss -- A transcription of Go's unmarshal, step by step.
   private unmarshal(initial: XVal, startArg: StartToken | undefined): Value {
     currentRuntime().spend();
     if (this.d.stackDepth > 10_000) return plainError('exceeded max depth');
@@ -124,7 +124,7 @@ export class XmlUnmarshaler {
    * Reads the rest of the element: its child elements into the struct's fields, skipping the others, and its character
    * data, which it returns.
    */
-  // code-gauge-allow functionCognitiveComplexity 19 -- A transcription of Go's readElement, step by step.
+  // code-gauge-allow functionCognitiveComplexity -- A transcription of Go's readElement, step by step.
   private readElement(tinfo: TypeInfo | undefined, structVal: XVal | undefined): [string, Value] {
     let data = '';
     for (;;) {
@@ -256,7 +256,7 @@ export function trimSpace(s: string): string {
 }
 
 /** `copyValue`: parses character data into a basic value or byte slice. */
-// code-gauge-allow functionNcss 40 -- A transcription of Go's copyValue, step by step.
+// code-gauge-allow functionNcss -- A transcription of Go's copyValue, step by step.
 function copyValue(dst0: XVal, src: string): Value {
   let dst = dst0;
   if (typeKind(dst.type) === 'pointer') {

@@ -424,7 +424,7 @@ const FUNCTIONS: Record<string, (z: Complex) => Result> = {
 };
 
 /** Divides as `_Py_c_quot` does, reporting a zero divisor as EDOM. */
-// code-gauge-allow functionCognitiveComplexity 26 -- Transcribes _Py_c_quot with its recovery of infinities.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _Py_c_quot with its recovery of infinities.
 function quotient(a: Complex, b: Complex): Result {
   const absReal = Math.abs(b.real);
   const absImag = Math.abs(b.imag);

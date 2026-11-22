@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 704 -- Keeps byte codecs, typed views, alias-safe copying, and reference recovery together.
+// code-gauge-allow-file fileNcss -- Keeps byte codecs, typed views, alias-safe copying, and reference recovery together.
 import { transferCost } from './allocation';
 import { PANIC, panic } from './arith';
 import { enumLookup } from './enumLookup';
@@ -189,7 +189,7 @@ export function unionTagValue(value: ZUnion, tags: readonly { value: bigint }[])
   return value.rawTag?.() ?? tags[activeUnionIndex(value)].value;
 }
 
-// code-gauge-allow functionParameterCount 7 -- Binds typed storage, its byte region, work budget, and initialized prefix together.
+// code-gauge-allow functionParameterCount -- Binds typed storage, its byte region, work budget, and initialized prefix together.
 export function bindBufferMemory(
   memory: object,
   type: Type,
@@ -327,8 +327,8 @@ export class BufferMemory {
       registerPointerLocation(slots, (index) => this.pointerLocation!(offset(index), type(index)));
   }
 
-  // code-gauge-allow functionNcss 40 -- Decodes each scalar representation and transparent wrapper from shared bytes.
-  // code-gauge-allow functionCognitiveComplexity 22 -- Decodes each scalar representation and transparent wrapper from shared bytes.
+  // code-gauge-allow functionNcss -- Decodes each scalar representation and transparent wrapper from shared bytes.
+  // code-gauge-allow functionCognitiveComplexity -- Decodes each scalar representation and transparent wrapper from shared bytes.
   read(type: Type, offset: number, packed?: number): Value {
     if (type.kind === 'array' || type.kind === 'struct' || type.kind === 'union')
       return this.readAggregate(type, offset);
@@ -498,7 +498,7 @@ export class BufferMemory {
     union.copyBackingTo = (destination, start) => this.copyRegion(destination as BufferMemory, offset, start, bits);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Resolves typed projections and retains untyped roots in uncovered byte ranges.
+  // code-gauge-allow functionCognitiveComplexity -- Resolves typed projections and retains untyped roots in uncovered byte ranges.
   private *unionReferences(
     type: Extract<Type, { kind: 'union' }>,
     offset: number,
@@ -525,7 +525,7 @@ export class BufferMemory {
     for (const { offset: at, value } of known) if (!recovered.has(at)) yield { value };
   }
 
-  // code-gauge-allow functionNcss 31 -- Traverses the shared physical layout for each reference-bearing type.
+  // code-gauge-allow functionNcss -- Traverses the shared physical layout for each reference-bearing type.
   private *referenceLocations(type: Type, offset: number): IterableIterator<FieldLocation> {
     if (!encodesReferences(type, this.space.referenceTypes, this.spend)) return;
     this.spend();
@@ -630,8 +630,8 @@ export class BufferMemory {
     return new ZArray(slots, 0, length, hasSentinel);
   }
 
-  // code-gauge-allow functionNcss 45 -- Encodes each scalar representation and transparent wrapper into shared bytes.
-  // code-gauge-allow functionCognitiveComplexity 23 -- Encodes each scalar representation and transparent wrapper into shared bytes.
+  // code-gauge-allow functionNcss -- Encodes each scalar representation and transparent wrapper into shared bytes.
+  // code-gauge-allow functionCognitiveComplexity -- Encodes each scalar representation and transparent wrapper into shared bytes.
   write(type: Type, offset: number, value: Value, packed?: number): void {
     if (type.kind === 'array' || type.kind === 'struct' || type.kind === 'union') {
       this.writeAggregate(type, offset, value);
@@ -688,7 +688,7 @@ export class BufferMemory {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Writes aggregate contents using their physical layout without replacing interior views.
+  // code-gauge-allow functionCognitiveComplexity -- Writes aggregate contents using their physical layout without replacing interior views.
   private writeAggregate(
     type: Extract<Type, { kind: 'array' | 'struct' | 'union' }>,
     offset: number,

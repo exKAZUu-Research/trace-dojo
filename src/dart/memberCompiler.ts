@@ -155,7 +155,7 @@ export abstract class MemberCompiler extends MetadataCompiler {
     return type;
   }
 
-  // code-gauge-allow functionParameterCount 9 -- The parameters are the parts a caller already holds; grouping them would only rename them.
+  // code-gauge-allow functionParameterCount -- The parameters are the parts a caller already holds; grouping them would only rename them.
   protected compileMethodBody(
     cls: ClassInfo,
     owner: ClassInfo | ExtensionInfo,

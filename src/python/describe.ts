@@ -40,8 +40,8 @@ function safeStr(value: PyValue): string {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Follows traceback._compute_suggestion_error.
-// code-gauge-allow functionNcss 31 -- Follows traceback._compute_suggestion_error.
+// code-gauge-allow functionCognitiveComplexity -- Follows traceback._compute_suggestion_error.
+// code-gauge-allow functionNcss -- Follows traceback._compute_suggestion_error.
 function suggestionFor(exception: PyInstance): string | undefined {
   const state = exception.exception;
   if (!state) return undefined;
@@ -125,8 +125,8 @@ function substitutionCost(a: string, b: string): number {
   return MOVE_COST;
 }
 
-// code-gauge-allow functionNcss 40 -- Transcribes traceback._levenshtein_distance.
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes traceback._levenshtein_distance.
+// code-gauge-allow functionNcss -- Transcribes traceback._levenshtein_distance.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes traceback._levenshtein_distance.
 function levenshtein(left: string, right: string, maxCost: number): number {
   if (left === right) return 0;
   let a = iterStr(left);

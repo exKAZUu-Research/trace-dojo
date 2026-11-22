@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 429 -- Keeps the arithmetic algorithm and its operand-sized resource accounting together.
+// code-gauge-allow-file fileNcss -- Keeps the arithmetic algorithm and its operand-sized resource accounting together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import { rationalToFloat } from '../constants';
 import type { Entity } from '../entities';
@@ -72,8 +72,8 @@ function text(value: bigint, base: number): string {
 }
 
 /** Int.SetString: digits in the base, or with base 0 a prefix that chooses it, with `_` between digits. */
-// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the arithmetic algorithm and its operand-sized resource accounting together.
-// code-gauge-allow functionNcss 31 -- Keeps the arithmetic algorithm and its operand-sized resource accounting together.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the arithmetic algorithm and its operand-sized resource accounting together.
+// code-gauge-allow functionNcss -- Keeps the arithmetic algorithm and its operand-sized resource accounting together.
 function parseInt(source: string, givenBase: number | bigint): bigint | undefined {
   if (givenBase !== 0 && givenBase !== 0n && (givenBase < 2 || givenBase > 62))
     throw new GoPanic(new Iface(BASIC.string, `invalid number base ${givenBase}`));
@@ -120,7 +120,7 @@ function divMod(x: bigint, y: bigint): [bigint, bigint] {
   return [q, r];
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Keeps each arithmetic algorithm beside its execution checks and host-allocation guards.
+// code-gauge-allow functionCognitiveComplexity -- Keeps each arithmetic algorithm beside its execution checks and host-allocation guards.
 function power(base: bigint, exponent: bigint, modulus: bigint | undefined): bigint {
   if (exponent <= 0n) return modulus !== undefined && modulus !== 0n && (modulus === 1n || modulus === -1n) ? 0n : 1n;
   if ((modulus === undefined || modulus === 0n) && (base > 1n || base < -1n))
@@ -414,8 +414,8 @@ const stateFlag = (state: Value, flag: string): boolean =>
   stateCall(state, 'Flag', [BigInt(flag.codePointAt(0) as number)]) === true;
 
 /** Int.Format, as Go's intFormat: `[left pad][sign][prefix][zero pad][digits][right pad]`. */
-// code-gauge-allow functionCognitiveComplexity 30 -- Transcribes math/big's Int.Format.
-// code-gauge-allow functionNcss 44 -- Keeps each arithmetic algorithm beside its execution checks and host-allocation guards.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes math/big's Int.Format.
+// code-gauge-allow functionNcss -- Keeps each arithmetic algorithm beside its execution checks and host-allocation guards.
 function formatInt(x: Value, state: Value, verb: number): void {
   const write = (text: string): void => void stateCall(state, 'Write', [byteSlice(text)]);
   const char = String.fromCodePoint(verb);

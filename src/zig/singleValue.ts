@@ -26,8 +26,8 @@ function valueOf(type: Type, spend: () => void, seen: Set<Type>): Fact | undefin
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Keeps guarded metadata-only singleton construction together.
-// code-gauge-allow functionNcss 37 -- Dispatches the supported zero-bit value representations.
+// code-gauge-allow functionCognitiveComplexity -- Keeps guarded metadata-only singleton construction together.
+// code-gauge-allow functionNcss -- Dispatches the supported zero-bit value representations.
 function buildValue(type: Type, spend: () => void, seen: Set<Type>): Fact | undefined {
   switch (type.kind) {
     case 'void': {

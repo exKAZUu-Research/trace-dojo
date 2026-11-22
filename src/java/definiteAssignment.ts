@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 457 -- One checker for the definite assignment rules of JLS chapter 16, which share its scopes and states.
+// code-gauge-allow-file fileNcss -- One checker for the definite assignment rules of JLS chapter 16, which share its scopes and states.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   assign,
@@ -190,7 +190,7 @@ export class DefiniteAssignmentChecker {
     for (const scope of this.scopes) if (scope.get(variable.name) === variable) scope.delete(variable.name);
   }
 
-  // code-gauge-allow functionNcss 48 -- One case per statement kind, each delegating to its own rule.
+  // code-gauge-allow functionNcss -- One case per statement kind, each delegating to its own rule.
   private statementOfKind(statement: Statement, state: State): State {
     switch (statement.kind) {
       case 'block': {
@@ -547,8 +547,8 @@ export class DefiniteAssignmentChecker {
     return { whenTrue: after, whenFalse: after };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- One case per expression kind, most only visiting their operands.
-  // code-gauge-allow functionNcss 51 -- One case per expression kind, most only visiting their operands in order.
+  // code-gauge-allow functionCognitiveComplexity -- One case per expression kind, most only visiting their operands.
+  // code-gauge-allow functionNcss -- One case per expression kind, most only visiting their operands in order.
   private expression(expression: Expression, state: State): State {
     switch (expression.kind) {
       case 'name': {

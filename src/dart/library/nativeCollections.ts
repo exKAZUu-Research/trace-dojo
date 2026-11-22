@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 986 -- The native lists, sets, maps, and their iterators share collection helpers.
+// code-gauge-allow-file fileNcss -- The native lists, sets, maps, and their iterators share collection helpers.
 import type { TopLevelFunction } from '../environment';
 import { stringOf } from '../format';
 import { type HashPolicy, HashStore } from '../hashStore';
@@ -123,7 +123,7 @@ defineConstructor('List.of', (runtime, _instance, args, typeArgs) =>
   })
 );
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Apply the SDK copy paths and check both early and late length changes.
+// code-gauge-allow functionCognitiveComplexity -- Apply the SDK copy paths and check both early and late length changes.
 function copyIterableToList(
   runtime: Runtime,
   source: Value,
@@ -580,7 +580,7 @@ function copyListSlice(runtime: Runtime, source: DartList, start: number, end: n
   return new DartList(coreTypes.list, elementTypeOf(source), source.elements.slice(start, end), true);
 }
 
-// code-gauge-allow functionNcss 31 -- Each list kind needs a separate range-copy path.
+// code-gauge-allow functionNcss -- Each list kind needs a separate range-copy path.
 define('List.setRange', (runtime, receiver, [start, end, iterable, skip = 0n]) => {
   const target = list(receiver);
   checkElement(runtime, iterable, interfaceType(coreTypes.iterable, [elementTypeOf(target)]), 'iterable');

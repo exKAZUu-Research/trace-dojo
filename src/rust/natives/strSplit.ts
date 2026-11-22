@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 442 -- Ports std's searchers and splitters of `str` patterns.
+// code-gauge-allow-file fileNcss -- Ports std's searchers and splitters of `str` patterns.
 import type { DebugPart } from '../debugText';
 import { type DebugValue, described, fieldsPart, listPart, numberPart, tuplePart } from '../iterDebug';
 import { CHAR, REF_STR } from '../types';
@@ -325,7 +325,7 @@ class TwoWaySearcher implements Searcher {
   }
 
   /** `TwoWaySearcher::next` as std runs it to find the next match. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- Follows std's `TwoWaySearcher::next` step by step.
+  // code-gauge-allow functionCognitiveComplexity -- Follows std's `TwoWaySearcher::next` step by step.
   nextMatch(): [number, number] | undefined {
     const size = this.needleBytes.length;
     const longPeriod = this.memory === -1;
@@ -358,7 +358,7 @@ class TwoWaySearcher implements Searcher {
   }
 
   /** `TwoWaySearcher::next_back` as std runs it to find the previous match. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- Follows std's `TwoWaySearcher::next_back` step by step.
+  // code-gauge-allow functionCognitiveComplexity -- Follows std's `TwoWaySearcher::next_back` step by step.
   nextMatchBack(): [number, number] | undefined {
     const size = this.needleBytes.length;
     const longPeriod = this.memory === -1;
@@ -430,7 +430,7 @@ function bytesetOf(bytes: Uint8Array): bigint {
  * The critical position and period of the maximal suffix by one order of bytes or the other, as std's
  * `maximal_suffix` finds them, or as `reverse_maximal_suffix` does over the reversed bytes, stopping at a known period.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows std's `maximal_suffix`.
+// code-gauge-allow functionCognitiveComplexity -- Follows std's `maximal_suffix`.
 function maximalSuffix(arr: Uint8Array, orderGreater: boolean, reverse = false, knownPeriod = 0): [number, number] {
   const n = arr.length;
   const byteAt = (i: number): number => (reverse ? arr[n - 1 - i] : arr[i]);

@@ -36,7 +36,7 @@ function shiftJisCode(lead: number, byte: number): number {
   return PLANE_2 | (first << 8) | second;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows CPython's Shift_JIS-2004 decoder, one case per kind of byte.
+// code-gauge-allow functionCognitiveComplexity -- Follows CPython's Shift_JIS-2004 decoder, one case per kind of byte.
 function shiftJisStep(edition: Edition): Stepper {
   return (data, index) => {
     const lead = data[index];
@@ -97,7 +97,7 @@ function eucPlane2(first: number, last: number, edition: Edition): Step {
   return point === undefined ? 'illegal' : { text: String.fromCodePoint(point), length: 3 };
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows CPython's EUC-JIS-2004 decoder, one case per kind of lead byte.
+// code-gauge-allow functionCognitiveComplexity -- Follows CPython's EUC-JIS-2004 decoder, one case per kind of lead byte.
 function eucStep(edition: Edition): Stepper {
   return (data, index) => {
     const lead = data[index];
@@ -119,7 +119,7 @@ function eucStep(edition: Edition): Stepper {
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows CPython's EUC-JIS-2004 encoder, which tries each map in turn.
+// code-gauge-allow functionCognitiveComplexity -- Follows CPython's EUC-JIS-2004 encoder, which tries each map in turn.
 function eucEncoder(edition: Edition): Encoder {
   return (points, index, out) => {
     const point = points[index];

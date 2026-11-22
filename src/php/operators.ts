@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 537 -- PHP operators share coercion and comparison helpers.
+// code-gauge-allow-file fileNcss -- PHP operators share coercion and comparison helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { power as floatPower } from '../interpreter/power';
 import {
@@ -108,7 +108,7 @@ export function withStringConversionErrors(
 }
 
 /** Converts a value to an int as `(int)` and `intval` do. */
-// code-gauge-allow duplicateLines 22 -- Mirrors toFloat, as PHP converts each type to int and to float by separate rules.
+// code-gauge-allow duplicateLines -- Mirrors toFloat, as PHP converts each type to int and to float by separate rules.
 export function toInt(value: Value): bigint {
   if (value === null || value === UNDEFINED_RESULT) return 0n;
   switch (typeof value) {
@@ -161,7 +161,7 @@ function floatToIntCap(value: number): bigint {
 }
 
 /** Converts a value to a float as `(float)` and `floatval` do. */
-// code-gauge-allow duplicateLines 22 -- Mirrors toInt, as PHP converts each type to int and to float by separate rules.
+// code-gauge-allow duplicateLines -- Mirrors toInt, as PHP converts each type to int and to float by separate rules.
 export function toFloat(value: Value, reportWarning = warn): number {
   if (value === null) return 0;
   if (value === UNDEFINED_RESULT) return 1;
@@ -228,7 +228,6 @@ function operatorDiagnostic(
   else report(message);
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Applies operator-specific coercion and overflow rules before producing a result.
 export function arithmetic(op: string, left: Value, right: Value, pending?: PhpThrow): Value {
   if (op === '+' && left instanceof PhpArray && right instanceof PhpArray) return mergeArrayUnion(left.copy(), right);
   if (op === '%') return modulo(left, right, pending);
@@ -474,7 +473,7 @@ export function strictEquals(a: Value, b: Value): boolean {
   return walkComparison(a, b, 'strict') === 0;
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function walkComparison(
   a: ComparisonOperand,
   b: ComparisonOperand,
@@ -508,7 +507,7 @@ function walkComparison(
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function comparisonStep(
   left: ComparisonOperand,
   right: ComparisonOperand,
@@ -594,7 +593,7 @@ function hasDynamicProps(object: PhpObject): boolean {
   return [...object.props.keys()].some((key) => !key.startsWith('\0') && !object.cls.propByName.has(key));
 }
 
-// code-gauge-allow functionNcss 41 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function compareScalar(left: ComparisonOperand, right: ComparisonOperand, tryString?: ObjectString): number {
   const a = deref(left);
   const b = deref(right);

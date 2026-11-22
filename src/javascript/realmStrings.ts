@@ -15,8 +15,8 @@ import {
 /** One fixed locale, so that sorting with localeCompare gives the same order on every server. */
 const collator = new Intl.Collator('en');
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Lists the String builtins, each a small closure of its own.
-// code-gauge-allow functionNcss 42 -- Lists the String builtins, each a small closure of its own.
+// code-gauge-allow functionCognitiveComplexity -- Lists the String builtins, each a small closure of its own.
+// code-gauge-allow functionNcss -- Lists the String builtins, each a small closure of its own.
 export function defineStringBuiltins(builder: RealmBuilder): void {
   const { stringPrototype } = builder.realm;
   const stringConstructor = builder.defineClass('String', 1, stringPrototype, constructString);

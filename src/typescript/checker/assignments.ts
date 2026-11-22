@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 415 -- Assignment targets share write validation and updates to reference flow.
+// code-gauge-allow-file fileNcss -- Assignment targets share write validation and updates to reference flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -272,7 +272,7 @@ export class AssignmentChecker {
     }
   }
 
-  // code-gauge-allow functionNcss 34 -- Keeps object assignment targets with computed key evaluation, key transport, and rest flow typing.
+  // code-gauge-allow functionNcss -- Keeps object assignment targets with computed key evaluation, key transport, and rest flow typing.
   private destructuringObjectAssignment(
     pattern: TreeNode,
     type: Type,

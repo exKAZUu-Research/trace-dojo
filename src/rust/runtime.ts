@@ -313,8 +313,8 @@ function pushActiveBorrowChildren(item: object, pending: unknown[], roots: Value
   pushChildren(item, pending);
 }
 
-// code-gauge-allow functionNcss 42 -- One case per kind of value.
-// code-gauge-allow functionCognitiveComplexity 23 -- Each runtime value representation exposes its own reachable objects.
+// code-gauge-allow functionNcss -- One case per kind of value.
+// code-gauge-allow functionCognitiveComplexity -- Each runtime value representation exposes its own reachable objects.
 function pushChildren(item: object, stack: unknown[]): void {
   if (Array.isArray(item)) {
     pushAll(stack, item);

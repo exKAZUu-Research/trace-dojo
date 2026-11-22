@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 420 -- Evaluates typed Rust constants with shared projection and cycle state.
+// code-gauge-allow-file fileNcss -- Evaluates typed Rust constants with shared projection and cycle state.
 import type { Expr, PathAst, TypeAst } from './ast';
 import { FLOAT_LIMITS, floatConstant } from './floatLimits';
 import { Unifier } from './infer';
@@ -61,8 +61,8 @@ interface ConstEvaluation {
   projections: Set<Expr>;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Each scalar expression has its own constant evaluation rule.
-// code-gauge-allow functionNcss 32 -- Keep the scalar expression dispatch in one switch.
+// code-gauge-allow functionCognitiveComplexity -- Each scalar expression has its own constant evaluation rule.
+// code-gauge-allow functionNcss -- Keep the scalar expression dispatch in one switch.
 function constScalar(
   expr: Expr,
   scope: TypeScope,
@@ -404,7 +404,7 @@ function isStrType(type: TypeAst): boolean {
   return type.kind === 'path' && type.path.segments.length === 1 && type.path.segments[0].name === 'str';
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Signed literals, integer overflow and boolean negation follow different rules.
+// code-gauge-allow functionCognitiveComplexity -- Signed literals, integer overflow and boolean negation follow different rules.
 function constScalarUnary(
   expr: Extract<Expr, { kind: 'unary' }>,
   scope: TypeScope,
@@ -542,7 +542,7 @@ function scalarHint(expr: Expr, scope: TypeScope, state: ConstEvaluation): Type 
   return hint;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Literal suffixes and arithmetic operands contribute different type hints.
+// code-gauge-allow functionCognitiveComplexity -- Literal suffixes and arithmetic operands contribute different type hints.
 function inferScalarHint(expr: Expr, scope: TypeScope, state: ConstEvaluation): Type | undefined {
   switch (expr.kind) {
     case 'int': {

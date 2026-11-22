@@ -132,7 +132,7 @@ export class RangeEncoder {
   }
 
   /** `rc_encode`: true when the output ran out before all the queued symbols were written. */
-  // code-gauge-allow functionNcss 39 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   encode(out: Uint8Array, outPos: Pos, outSize: number): boolean {
     const { probs } = this;
     while (this.pos < this.count) {
@@ -317,8 +317,8 @@ export class LzmaEncoder {
   }
 
   /** `lzma_lzma_encode`; `limit` is `UINT32_MAX` for LZMA1. */
-  // code-gauge-allow functionNcss 31 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
-  // code-gauge-allow functionCognitiveComplexity 24 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   encode(mf: MatchFinder, out: Uint8Array, outPos: Pos, outSize: number, limit: number): number {
     if (!this.isInitialized && !this.encodeInit(mf)) return LZMA_OK;
     if (this.rc.encode(out, outPos, outSize)) return LZMA_OK;

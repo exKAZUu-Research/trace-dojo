@@ -41,7 +41,7 @@ export function instantiate(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyVa
 }
 
 /** `type.__call__`: creates an instance with the class's `__new__` and initializes it with its `__init__`. */
-// code-gauge-allow functionNcss 31 -- Follows type.__call__'s __new__ and __init__ dispatch.
+// code-gauge-allow functionNcss -- Follows type.__call__'s __new__ and __init__ dispatch.
 export function typeCall(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue {
   if (isEnumClass(cls)) return enumLookup(cls, args, kwargs);
   const { construct } = cls;

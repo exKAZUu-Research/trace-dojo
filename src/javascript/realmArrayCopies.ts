@@ -12,7 +12,7 @@ export function defineArrayCopies(builder: RealmBuilder): void {
   defineSplices(builder);
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function defineReorderedCopies(builder: RealmBuilder): void {
   arrayMethod(builder, 'toReversed', 0, ({ runtime }, ops) => {
     const { length } = ops;
@@ -46,8 +46,8 @@ function defineReorderedCopies(builder: RealmBuilder): void {
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
-// code-gauge-allow functionNcss 38 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionNcss -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function defineSplices(builder: RealmBuilder): void {
   arrayMethod(builder, 'toSpliced', 2, ({ runtime, args }, ops) => {
     const { length } = ops;
