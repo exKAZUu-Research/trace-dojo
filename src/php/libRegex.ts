@@ -39,7 +39,7 @@ defineConstant('PCRE_VERSION_MINOR', minor);
 defineConstant('PCRE_JIT_SUPPORT', REFERENCE_PCRE.jitSupport);
 
 /**
- * Translated patterns, shared by all runs in the server's process, so that a pattern in a loop is translated once. It
+ * Translated patterns, shared by all runs in the host's process, so that a pattern in a loop is translated once. It
  * keeps only the latest ones, as the patterns that programs build are unbounded.
  */
 const cache = new Map<string, Compiled | string>();
