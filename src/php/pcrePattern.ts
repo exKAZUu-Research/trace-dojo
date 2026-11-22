@@ -189,7 +189,7 @@ interface Frame {
   lookaround?: 'ahead' | 'behind';
   /** What a lookbehind holds so far, in itself or in the groups inside it. */
   captures?: boolean;
-  quantified?: boolean;
+  variable?: boolean;
   /** Where the group starts in the pattern, which the error of an unlimited lookbehind reports. */
   at: number;
 }
@@ -408,6 +408,7 @@ class PatternConverter {
     this.index++;
     const { modifiers } = this.frames.at(-1) as Frame;
     if (this.frames.length === 1) this.alternation = true;
+    this.noteInLookbehind('variable');
     this.emit(`${')'.repeat(modifiers.length)}|${modifiers.join('')}`, false);
   }
 
@@ -455,7 +456,7 @@ class PatternConverter {
   }
 
   private checkLookbehindQuantifier(quantifier: string): void {
-    this.noteInLookbehind('quantified');
+    this.noteInLookbehind('variable');
     if (!/^(?:[*+]|\{\d+,\})$/.test(quantifier)) return;
     // A lookahead inside a lookbehind takes no length of it.
     const lookaround = this.frames.findLast((frame) => frame.lookaround);
@@ -463,14 +464,14 @@ class PatternConverter {
   }
 
   /**
-   * Rejects a lookbehind that both captures and repeats: JavaScript repeats from the end to the start, so a capture
-   * would hold another repetition's text than PCRE's.
+   * Rejects a lookbehind that captures and also repeats or chooses: JavaScript matches it from the end to the start, so
+   * a capture could hold another repetition's or alternative's text than PCRE's.
    */
-  private noteInLookbehind(found: 'captures' | 'quantified'): void {
+  private noteInLookbehind(found: 'captures' | 'variable'): void {
     for (const frame of this.frames) {
       if (frame.lookaround !== 'behind') continue;
       frame[found] = true;
-      if (frame.captures && frame.quantified) this.unavailable ??= '後読みの中での繰り返しとキャプチャの併用';
+      if (frame.captures && frame.variable) this.unavailable ??= '後読みの中での繰り返しや選択とキャプチャの併用';
     }
   }
 
