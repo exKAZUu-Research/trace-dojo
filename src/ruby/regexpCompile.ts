@@ -68,7 +68,7 @@ const RUBY_REASONS: readonly (readonly [string, string | ((rejection: Rejection)
   ],
   [
     'Group name not defined to the left',
-    ({ quoted }) => `undefined name <${/^\\k[<'](.*)[>']$/.exec(quoted)?.[1] ?? ''}> reference`,
+    ({ source, extended }) => `undefined name <${earlyReferenceName(source, extended)}> reference`,
   ],
   [
     "Subroutine uses a group name that's not defined",
@@ -158,6 +158,17 @@ function quantifierLacksTarget(source: string, extended: boolean): boolean {
     previous = token;
   }
   return false;
+}
+
+/** The name of the first backreference that precedes every group of that name, as the source spells it. */
+function earlyReferenceName(source: string, extended: boolean): string {
+  const defined = new Set<string>();
+  for (const token of regexpTokens(source, extended)) {
+    if (token.name !== undefined) defined.add(token.name);
+    const name = /^\\k[<'](.*)[>']$/.exec(token.raw)?.[1];
+    if (name !== undefined && !defined.has(name)) return name;
+  }
+  return '';
 }
 
 function escapeReason({ quoted, source }: Rejection): string | undefined {
