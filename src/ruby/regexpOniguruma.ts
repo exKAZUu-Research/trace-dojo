@@ -25,6 +25,7 @@ const ASCII_SHORTHANDS: Record<string, string> = {
 };
 
 /** Rewrites the Ruby (Onigmo) forms whose Oniguruma meaning differs into Oniguruma forms with Ruby's meaning. */
+// code-gauge-allow functionCognitiveComplexity -- One pass keeps the option groups it opens in step with the source groups that close them.
 export function onigurumaSource(source: string, extended: boolean): string {
   const tokens = regexpTokens(source, extended);
   const aliases = captureAliases(source, tokens);
