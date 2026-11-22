@@ -28,7 +28,6 @@ const optionalAnnotationTypes = new Set([
   'adding_type_annotation',
 ]);
 
-const multilineTokenTypes = new Set(['comment', 'string', 'template_string']);
 const strictIdentifierTypes = new Set([
   'identifier',
   'type_identifier',
@@ -174,16 +173,13 @@ function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagno
  * reports them. Tree-sitter's recovery does not lex that text as tsc does, so it is lexed here instead.
  */
 function unterminatedStringErrors(root: Node, source: string): SourceDiagnostic[] {
-  const errors: SourceDiagnostic[] = [];
-  let scannedUntil = 0;
+  const stringEnds: number[] = [];
+  let lexedUntil = 0;
   for (const node of outermostErrorNodes(root)) {
-    const scan = unterminatedStringsIn(source, Math.max(lexingStart(root, source, node), scannedUntil), node.endIndex);
-    scannedUntil = scan.end;
-    for (const endIndex of scan.stringEnds) {
-      errors.push({ row: rowAt(source, endIndex), message: '文字列リテラルが閉じられていません。' });
-    }
+    // A string opening in the node may run past its end, which the parser can place before the line break.
+    lexedUntil = lexCode(source, Math.max(node.startIndex, lexedUntil), node.endIndex, stringEnds);
   }
-  return errors;
+  return stringEnds.map((index) => ({ row: rowAt(source, index), message: '文字列リテラルが閉じられていません。' }));
 }
 
 function outermostErrorNodes(root: Node): Node[] {
@@ -197,35 +193,21 @@ function outermostErrorNodes(root: Node): Node[] {
 }
 
 /**
- * Where to lex an ERROR node from: the start of its first line, where no string is open, since a quote the node
- * starts with may close a string; or, when a comment or template spans into that line, the end of that token.
+ * Lexes code from `index` up to `end`, or with no `end` through the `}` closing a template substitution, recording in
+ * `stringEnds` where each quoted string is left open; returns where lexing stopped.
  */
-function lexingStart(root: Node, source: string, node: Node): number {
-  const lineStart = source.lastIndexOf('\n', node.startIndex - 1) + 1;
-  for (let covering = root.descendantForIndex(lineStart); covering; covering = covering.parent) {
-    if (covering.startIndex < lineStart && multilineTokenTypes.has(covering.type)) {
-      return Math.min(covering.endIndex, node.startIndex);
-    }
-  }
-  return lineStart;
-}
-
-/** Lexes from `start` through the end of the line holding `end`, and on to the end of a string open there. */
-function unterminatedStringsIn(source: string, start: number, end: number): { stringEnds: number[]; end: number } {
-  const lineEnd = source.indexOf('\n', Math.max(start, end - 1));
-  const regionEnd = lineEnd === -1 ? source.length : lineEnd;
-  const stringEnds: number[] = [];
-  let index = start;
-  while (index < regionEnd) {
+function lexCode(source: string, index: number, end: number | undefined, stringEnds: number[]): number {
+  let braceDepth = 0;
+  while (index < (end ?? source.length)) {
     const char = source[index];
     if (source.startsWith('//', index)) {
-      index = regionEnd;
+      const lineEnd = source.indexOf('\n', index);
+      index = lineEnd === -1 ? source.length : lineEnd;
     } else if (source.startsWith('/*', index)) {
       const close = source.indexOf('*/', index + 2);
       index = close === -1 ? source.length : close + 2;
     } else if (char === '`') {
-      const close = source.indexOf('`', index + 1);
-      index = close === -1 ? source.length : close + 1;
+      index = lexTemplate(source, index + 1, stringEnds);
     } else if (char === "'" || char === '"') {
       const close = closingQuoteIndex(source, index);
       if (source[close] === char) {
@@ -234,11 +216,24 @@ function unterminatedStringsIn(source: string, start: number, end: number): { st
         stringEnds.push(close);
         index = close;
       }
+    } else if (end === undefined && char === '}' && braceDepth === 0) {
+      return index + 1;
     } else {
+      if (char === '{') braceDepth++;
+      if (char === '}') braceDepth--;
       index++;
     }
   }
-  return { stringEnds, end: index };
+  return index;
+}
+
+function lexTemplate(source: string, index: number, stringEnds: number[]): number {
+  while (index < source.length) {
+    if (source[index] === '`') return index + 1;
+    if (source.startsWith('${', index)) index = lexCode(source, index + 2, undefined, stringEnds);
+    else index += source[index] === '\\' ? 2 : 1;
+  }
+  return index;
 }
 
 /** The index of the quote closing the string opening at `opening`, or of the line break or end that leaves it open. */
