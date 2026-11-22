@@ -41,7 +41,7 @@ function usesNativeRecursiveIterator(cls: PhpClass): boolean {
   return direct;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Acquires nested iterators while keeping returned objects alive until the engine owns the last one.
+// code-gauge-allow functionCognitiveComplexity -- Acquires nested iterators while keeping returned objects alive until the engine owns the last one.
 export function acquireIterator(object: PhpObject, byRef = false): AcquiredIterator | undefined {
   const runtime = rt();
   const aggregate = runtime.classes.get('iteratoraggregate') as PhpClass;

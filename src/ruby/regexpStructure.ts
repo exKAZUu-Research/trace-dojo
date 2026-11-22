@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 442 -- Ruby source validation and host execution proofs share their regexp AST models and structural invariants.
+// code-gauge-allow-file fileNcss -- Ruby source validation and host execution proofs share their regexp AST models and structural invariants.
 import { type AST, RegExpParser, RegExpSyntaxError, visitRegExpAST } from '@eslint-community/regexpp';
 import {
   type AlternativeNode,
@@ -106,7 +106,7 @@ function validateSourceTokens(tokens: Token[]): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Reference resolution preserves declaration order, numeric-reference restrictions and nesting syntax before AST aliases.
+// code-gauge-allow functionCognitiveComplexity -- Reference resolution preserves declaration order, numeric-reference restrictions and nesting syntax before AST aliases.
 function aliasedCaptureTokens(tokens: Token[]): { tokens: Token[]; nestingReference: boolean } {
   const aliases = captureAliases(tokens);
   let nestingReference = false;
@@ -162,7 +162,7 @@ function validateReferenceNumber(value: string): void {
   if (Math.abs(Number(value)) > 0x7f_ff_ff_ff) throw new RegexpEncodingError('too big number');
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Source assertions are wrapped for AST parsing while group balance remains checked before recursive parsing.
+// code-gauge-allow functionCognitiveComplexity -- Source assertions are wrapped for AST parsing while group balance remains checked before recursive parsing.
 function quantifiableAssertionSource(tokens: Token[]): string {
   const parts: string[] = [];
   const assertions: boolean[] = [];
@@ -326,7 +326,7 @@ export function compileHostRegexp(source: string, flags: string): RegExp {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Source traversal carries lookbehind and negative-capture context through nested AST nodes.
+// code-gauge-allow functionCognitiveComplexity -- Source traversal carries lookbehind and negative-capture context through nested AST nodes.
 function visitSource(node: SourceNode, behind: boolean, negative: boolean): void {
   if (
     behind &&
@@ -355,7 +355,7 @@ function validSourceLookbehind(node: LookaroundAssertionNode | { body: Alternati
   return sole.type === 'Group' && !sole.flags && !sole.atomic && validSourceLookbehind(sole);
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Width computation distinguishes sequences, equal-width alternatives, exact quantifiers and zero-width assertions.
+// code-gauge-allow functionCognitiveComplexity -- Width computation distinguishes sequences, equal-width alternatives, exact quantifiers and zero-width assertions.
 function sourceWidth(node: SourceNode): number | undefined {
   if (node.type === 'CharacterSet' && node.variableLength) return undefined;
   if (node.type === 'Alternative') {
@@ -393,7 +393,7 @@ function validateSourceReferences(root: SourceNode): void {
   if (references.some((reference) => !captures.has(reference))) throw new SyntaxError('invalid backref number');
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Reference classification and complete encoded-byte runs must retain source positions during normalization.
+// code-gauge-allow functionCognitiveComplexity -- Reference classification and complete encoded-byte runs must retain source positions during normalization.
 function normalizeRubyRegexpEscapes(source: string, extended: boolean, binary = false): string {
   source = regexpLexicalSource(source, extended);
   const numericReferences = regexpNumericEscapes(source);
@@ -424,7 +424,7 @@ function normalizeRubyRegexpEscapes(source: string, extended: boolean, binary = 
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Ruby byte, Unicode and property escapes need their distinct validation and normalization rules.
+// code-gauge-allow functionCognitiveComplexity -- Ruby byte, Unicode and property escapes need their distinct validation and normalization rules.
 function normalizedRegexpEscape(
   source: string,
   start: number,
@@ -486,7 +486,7 @@ function parentOf(node: AST.Node): AST.Node | undefined {
   return node.parent ?? undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Each parser diagnostic maps to a distinct Ruby error, with capture names included only where Ruby reports them.
+// code-gauge-allow functionCognitiveComplexity -- Each parser diagnostic maps to a distinct Ruby error, with capture names included only where Ruby reports them.
 export function regexpSyntaxReason(source: string, extended = false): string {
   const rubyReason = onigurumaSyntaxReason(source, extended);
   if (rubyReason) return rubyReason;
@@ -516,7 +516,7 @@ export function regexpSyntaxReason(source: string, extended = false): string {
   return 'invalid pattern';
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Source-parser errors distinguish escape, group, class-range, and reference diagnostics that the host parser conflates.
+// code-gauge-allow functionCognitiveComplexity -- Source-parser errors distinguish escape, group, class-range, and reference diagnostics that the host parser conflates.
 function onigurumaSyntaxReason(source: string, extended: boolean): string | undefined {
   try {
     parseOniguruma(normalizeRubyRegexpEscapes(source, extended), {

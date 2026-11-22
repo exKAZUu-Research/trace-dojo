@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 568 -- The attribute lookup and the protocols every kind of object follows belong together.
+// code-gauge-allow-file fileNcss -- The attribute lookup and the protocols every kind of object follows belong together.
 import { moduleAnnotations } from './annotations';
 import { PyAttribute } from './attributeDescriptors';
 import { classAttribute, specialAttribute } from './attributes';
@@ -125,7 +125,7 @@ export function callSpecial(value: PyValue, name: string, args: PyValue[]): PyVa
 }
 
 /** Binds a class attribute to an instance, as a descriptor's `__get__` would. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of descriptor binding.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of descriptor binding.
 export function bindValue(attribute: PyValue, instance: PyValue, owner: PyClass = classOf(instance)): PyValue {
   if (attribute instanceof PyFunction) return new PyBoundMethod(methodClass, instance, attribute);
   if (attribute instanceof PyBuiltinFunction && attribute.self === undefined) {
@@ -242,7 +242,7 @@ export function genericGetAttribute(value: PyValue, nameValue: PyValue): PyValue
   return found;
 }
 
-// code-gauge-allow functionNcss 32 -- One step per place an attribute lookup may find a name.
+// code-gauge-allow functionNcss -- One step per place an attribute lookup may find a name.
 function findAttribute(value: PyValue, name: string, nameValue: PyValue = name): PyValue | undefined {
   const key = nameValue as string;
   if (value instanceof PyClass) return classAttribute(value, name, key);
@@ -473,7 +473,7 @@ export function remainingOf(next: NextFunction): number | undefined {
   return remainingCounts.get(next)?.();
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- The iterator, its reduction, and its __setstate__ share its position.
+// code-gauge-allow functionCognitiveComplexity -- The iterator, its reduction, and its __setstate__ share its position.
 function iterateItems(sequence: PyList | PyTuple): NextFunction {
   let index = 0;
   // As in CPython, an iterator that reached the end stays there, even if the sequence grows.
@@ -660,7 +660,7 @@ export function nextOf(iterator: PyValue): NextFunction {
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Indexing, terminal exceptions and cursor restoration share sequence iterator state.
+// code-gauge-allow functionCognitiveComplexity -- Indexing, terminal exceptions and cursor restoration share sequence iterator state.
 function iterateSequence(value: PyValue): NextFunction {
   let index = 0n;
   let finished = false;
@@ -688,7 +688,6 @@ function iterateSequence(value: PyValue): NextFunction {
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- The iterator, its size check, and its reduction share its position.
 function iterateDict(dict: PyDict, view: 'keys' | 'values' | 'items'): NextFunction {
   const { store } = dict;
   const { size, version } = store;
@@ -799,7 +798,7 @@ export function nativeIterator(cls: PyClass, next: NextFunction, fallback: () =>
   return new PyIterator(cls, advance, holds);
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per builtin iterable.
+// code-gauge-allow functionCognitiveComplexity -- One case per builtin iterable.
 function iteratorNameOf(value: PyValue): string {
   // oxlint-disable-next-line eslint/no-control-regex -- ASCII includes the control characters.
   if (typeof value === 'string') return /^[\u0000-\u007F]*$/.test(value) ? 'str_ascii_iterator' : 'str_iterator';

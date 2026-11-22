@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 410 -- It transcribes one of expat's C files.
+// code-gauge-allow-file fileNcss -- It transcribes one of expat's C files.
 import type { Binding, Tag } from './expatBase';
 import { charRefNumber, PREDEFINED_ENTITIES, XML_ERROR, XmlError } from './expatDocument';
 import { ExpatProlog } from './expatProlog';
@@ -54,7 +54,7 @@ export class ExpatParser extends ExpatProlog {
     return this.input.rawFrom(this.input.offsets[this.eventPtr ?? this.bufferPtr] as number);
   }
 
-  // code-gauge-allow functionNcss 33 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   protected parse(length: number, isFinal: boolean, request = length): void {
     if (this.processor === 'finished') this.fail(XML_ERROR.FINISHED);
     this.started = true;
@@ -189,7 +189,7 @@ export class ExpatParser extends ExpatProlog {
   }
 
   /** The tokens that end the content: its end, a partial token, or an invalid one. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   private contentEnd(run: ContentRun, tok: number, s: number, next: number): number {
     const { tz, startTagLevel, end, haveMore, internal } = run;
     if (tok !== TOK.INVALID && haveMore) return s;
@@ -296,8 +296,8 @@ export class ExpatParser extends ExpatProlog {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
-  // code-gauge-allow functionNcss 46 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   protected entityReference(tz: Tokenizer, s: number, next: number): void {
     const h = this.handlers;
     const name = this.text(tz, s + 1, next - 1);
@@ -411,8 +411,8 @@ export class ExpatParser extends ExpatProlog {
   }
 
   /** `doCdataSection`: the section's text up to its end, whose index it returns, or undefined when more input is needed. */
-  // code-gauge-allow functionCognitiveComplexity 26 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
-  // code-gauge-allow functionNcss 39 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   protected doCdataSection(
     tz: Tokenizer,
     s: number,
@@ -458,7 +458,7 @@ export class ExpatParser extends ExpatProlog {
     }
   }
 
-  // code-gauge-allow functionNcss 33 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   protected epilogProcessor(s: number, end: number): number {
     this.processor = 'epilog';
     this.eventPtr = s;

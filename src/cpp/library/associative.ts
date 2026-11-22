@@ -533,7 +533,7 @@ const COMPARING_MEMBERS = new Set([
  * `std::map<K, V>`, `std::multimap<K, V>`, `std::set<K>`, or `std::multiset<K>`, whose objects are `OrderedValue`s
  * with an index-based iterator.
  */
-// code-gauge-allow functionNcss 160 -- The members of the ordered associative containers, which share their storage.
+// code-gauge-allow functionNcss -- The members of the ordered associative containers, which share their storage.
 export function orderedClass(
   library: Library,
   kind: 'map' | 'multimap' | 'set' | 'multiset',

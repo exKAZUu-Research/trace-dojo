@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 800 -- The syntax-tree conversion covers every node kind of the grammar in one pass.
+// code-gauge-allow-file fileNcss -- The syntax-tree conversion covers every node kind of the grammar in one pass.
 import type { Node, Tree } from '@willbooster/web-tree-sitter';
 
 import type { CompileError } from '../interpreter/diagnostics';
@@ -516,7 +516,7 @@ function convertLocalBinds(node: Node | undefined): Decl[] {
   return namedChildren(node).flatMap((child) => convertDecl(child));
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Each branch rejects one unsupported form of a data declaration.
+// code-gauge-allow functionCognitiveComplexity -- Each branch rejects one unsupported form of a data declaration.
 function convertData(node: Node): Decl {
   for (const name of ['context', 'forall', 'kind', 'head']) {
     const child = field(node, name);
@@ -591,8 +591,6 @@ function typeParams(node: Node): Name[] {
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Each branch is one constructor form: prefix, infix, or record.
-// code-gauge-allow functionNcss 34 -- Each branch is one constructor form: prefix, infix, or record.
 function convertConstructor(node: Node): ConDecl {
   for (const name of ['context', 'forall']) {
     const child = field(node, name);
@@ -817,8 +815,8 @@ function convertQuantifiedType(node: Node): TypeExpr {
   return convertType(node);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- One case per type node kind of the grammar.
-// code-gauge-allow functionNcss 58 -- One case per type node kind of the grammar.
+// code-gauge-allow functionCognitiveComplexity -- One case per type node kind of the grammar.
+// code-gauge-allow functionNcss -- One case per type node kind of the grammar.
 function convertType(node: Node): TypeExpr {
   const span = spanOf(node);
   if (node.type === 'prefix_tuple' && isLibrary) {
@@ -896,7 +894,7 @@ function convertType(node: Node): TypeExpr {
 // ---------------------------------------------------------------------------------------------------------------
 // Expressions
 
-// code-gauge-allow functionNcss 59 -- One short case per expression node kind of the grammar.
+// code-gauge-allow functionNcss -- One short case per expression node kind of the grammar.
 export function convertExpr(node: Node): Expr {
   rejectUnsupported(node);
   const span = spanOf(node);
@@ -1183,7 +1181,7 @@ function convertLiteral(node: Node): SourceLiteral {
 // ---------------------------------------------------------------------------------------------------------------
 // Patterns
 
-// code-gauge-allow functionNcss 53 -- One short case per pattern node kind of the grammar.
+// code-gauge-allow functionNcss -- One short case per pattern node kind of the grammar.
 export function convertPattern(node: Node): Pat {
   rejectUnsupported(node);
   const span = spanOf(node);

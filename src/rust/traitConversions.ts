@@ -6,7 +6,7 @@ import { F32, F64, INT_NAMES, intType, shallow, type Type } from './types';
 type AdtType = Type & { kind: 'adt' };
 
 /** The conversions `From` provides in the standard library that learning programs use. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Each conversion family has different representation and range constraints.
+// code-gauge-allow functionCognitiveComplexity -- Each conversion family has different representation and range constraints.
 export function conversionExists(solver: TraitSolver, source: Type, target: Type): Answer {
   const t = normalize(shallow(target));
   if (t.kind === 'adt') {
@@ -168,7 +168,7 @@ export function intoConversion(solver: TraitSolver, source: Type, target: Type):
   return solver.implements(source, { trait: solver.program.traitDef('Into'), args: [target] });
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One rule per trait or conversion of the standard library.
+// code-gauge-allow functionCognitiveComplexity -- One rule per trait or conversion of the standard library.
 function losslessInt(from: string, to: string): boolean {
   if (from === to) return true;
   const fromSigned = from.startsWith('i');

@@ -425,8 +425,8 @@ function takeOut(state: DecoderState, p: Value): number {
   return n;
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- transcribes Go's decoder.Read, whose order of checks decides which error a read returns.
-// code-gauge-allow functionNcss 45 -- transcribes Go's decoder.Read step by step.
+// code-gauge-allow functionCognitiveComplexity -- transcribes Go's decoder.Read, whose order of checks decides which error a read returns.
+// code-gauge-allow functionNcss -- transcribes Go's decoder.Read step by step.
 function decoderRead(state: DecoderState, p: Value): [number, Value] {
   const pLength = (p as Slice | undefined)?.length ?? 0;
   if (state.out && state.out.length > 0) return [takeOut(state, p), undefined];

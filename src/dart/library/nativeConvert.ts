@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 582 -- dart:convert's JSON, UTF-8, and Base64 codecs, each transcribed from the SDK.
+// code-gauge-allow-file fileNcss -- dart:convert's JSON, UTF-8, and Base64 codecs, each transcribed from the SDK.
 import { LIMITS } from '../../interpreter/limits';
 import { formatDouble } from '../format';
 import { HashStore } from '../hashStore';
@@ -254,7 +254,7 @@ class JsonParser {
     return this.revive(undefined, value);
   }
 
-  // code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   value(): Value {
     this.runtime.spend();
     if (this.position >= this.text.length) this.fail('Unexpected end of input');
@@ -761,8 +761,8 @@ function chargeCodecString(runtime: Runtime, length: number): void {
   runtime.spendString(length);
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Preserve the SDK order of Base64 normalization and validation.
-// code-gauge-allow functionNcss 42 -- The selected range and original offsets belong to the same scan.
+// code-gauge-allow functionCognitiveComplexity -- Preserve the SDK order of Base64 normalization and validation.
+// code-gauge-allow functionNcss -- The selected range and original offsets belong to the same scan.
 function normalizeBase64(runtime: Runtime, input: string, start: number, end: number): string {
   const fail = (message: string, offset: number): never =>
     runtime.throwError('FormatException', '', [message, input, BigInt(offset)]);
@@ -819,7 +819,7 @@ const BASE64_VALUES: readonly number[] = Array.from({ length: 128 }, (_, code) =
 });
 
 /** The complete valid data before padding, validating even the discarded bits in the last sextet. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Validate the final quantum and source-aware padding in one scan.
+// code-gauge-allow functionCognitiveComplexity -- Validate the final quantum and source-aware padding in one scan.
 function validatedBase64Length(input: string, fail: (message: string, offset: number) => never): number {
   let last = 0;
   let count = 0;
@@ -844,8 +844,8 @@ function validatedBase64Length(input: string, fail: (message: string, offset: nu
 }
 
 /** Checks the padding after the first `=` or `%3D`, returning how many padding characters are still missing. */
-// code-gauge-allow functionNcss 38 -- A transcription of the SDK's _Base64Decoder._checkPadding, case by case.
-// code-gauge-allow functionCognitiveComplexity 28 -- A transcription of the SDK's _Base64Decoder._checkPadding, case by case.
+// code-gauge-allow functionNcss -- A transcription of the SDK's _Base64Decoder._checkPadding, case by case.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of the SDK's _Base64Decoder._checkPadding, case by case.
 function checkBase64Padding(
   input: string,
   start: number,

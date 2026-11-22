@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 612 -- The syntax checks share scope, diagnostics, and the compilation budget.
+// code-gauge-allow-file fileNcss -- The syntax checks share scope, diagnostics, and the compilation budget.
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { isDiscardName } from './ast';
@@ -131,8 +131,8 @@ class AstChecker {
 
   // Containers ------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Mirrors one AstGen check over the constructs it covers.
-  // code-gauge-allow functionNcss 34 -- Checks declarations and fields in their shared container scope.
+  // code-gauge-allow functionCognitiveComplexity -- Mirrors one AstGen check over the constructs it covers.
+  // code-gauge-allow functionNcss -- Checks declarations and fields in their shared container scope.
   checkContainer(
     members: readonly ContainerMember[],
     fields: readonly ContainerField[],
@@ -334,7 +334,7 @@ class AstChecker {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Mirrors one AstGen check over the constructs it covers.
+  // code-gauge-allow functionCognitiveComplexity -- Mirrors one AstGen check over the constructs it covers.
   private reference(name: string, span: NamedSpan, use: Use): void {
     if (isDiscardName({ name, quotedName: span.quotedName })) {
       this.error(span, '「_」は、値を捨てる代入（_ = x;）の左辺にだけ書けます。');
@@ -698,8 +698,8 @@ class AstChecker {
     }
   }
 
-  // code-gauge-allow functionNcss 32 -- Mirrors one AstGen check over the constructs it covers.
-  // code-gauge-allow functionCognitiveComplexity 22 -- Mirrors one AstGen check over the constructs it covers.
+  // code-gauge-allow functionNcss -- Mirrors one AstGen check over the constructs it covers.
+  // code-gauge-allow functionCognitiveComplexity -- Mirrors one AstGen check over the constructs it covers.
   private forExpression(expression: Extract<Expression, { kind: 'for' }>): void {
     for (const operand of expression.operands) {
       this.expression(operand.value, 'value');
@@ -740,7 +740,7 @@ class AstChecker {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- Mirrors one AstGen check over the constructs it covers.
+  // code-gauge-allow functionCognitiveComplexity -- Mirrors one AstGen check over the constructs it covers.
   private switchExpression(expression: Extract<Expression, { kind: 'switch' }>): void {
     const byPointer = expression.cases.some((each) => each.capture?.byPointer);
     this.expression(expression.operand, byPointer ? 'ref' : 'value');

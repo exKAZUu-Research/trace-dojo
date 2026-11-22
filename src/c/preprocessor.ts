@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 520 -- Directive handling and macro expansion share preprocessing state.
+// code-gauge-allow-file fileNcss -- Directive handling and macro expansion share preprocessing state.
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { type LogicalLine, type PPToken, spell, tokenize } from './lexer';
@@ -109,7 +109,7 @@ class Preprocessor {
     return { text: output.map((tokens) => tokens.join(' ')).join('\n'), includes: this.includes };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Directive processing and ordinary-token flushing share source order and conditional state.
+  // code-gauge-allow functionCognitiveComplexity -- Directive processing and ordinary-token flushing share source order and conditional state.
   private process(lines: LogicalLine[], emit: (tokens: PPToken[]) => void): void {
     const conditionals: Conditional[] = [];
     let pending: PPToken[] = [];
@@ -213,7 +213,7 @@ class Preprocessor {
     top.taken = value;
   }
 
-  // code-gauge-allow functionNcss 38 -- Each directive shares one source-row and macro context.
+  // code-gauge-allow functionNcss -- Each directive shares one source-row and macro context.
   private otherDirective(name: string, nameToken: PPToken | undefined, rest: PPToken[], row: number): void {
     switch (name) {
       case '': {
@@ -311,7 +311,7 @@ class Preprocessor {
     this.macros.set(name, { name, params, variadic, body, fromHeader: this.inHeader });
   }
 
-  // code-gauge-allow functionNcss 36 -- Include expansion, lookup, declarations, and source rows form one ordered header operation.
+  // code-gauge-allow functionNcss -- Include expansion, lookup, declarations, and source rows form one ordered header operation.
   private include(tokens: PPToken[], row: number): void {
     let target = tokens;
     if (target[0]?.kind !== 'string' && target[0]?.text !== '<') target = this.expand(target);
@@ -359,7 +359,7 @@ class Preprocessor {
 
   // Conditions ----------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- defined replacement and identifier normalization precede one shared integer-expression evaluator.
+  // code-gauge-allow functionCognitiveComplexity -- defined replacement and identifier normalization precede one shared integer-expression evaluator.
   private evaluateCondition(tokens: PPToken[], row: number): boolean {
     rejectTrigraphs(tokens);
     const replaced: PPToken[] = [];
@@ -407,7 +407,7 @@ class Preprocessor {
   }
 
   /** Expands the macros in a list of tokens, as C's rescanning with hide sets does. */
-  // code-gauge-allow functionCognitiveComplexity 23 -- Macro recursion, hide sets, and argument substitution share the token worklist.
+  // code-gauge-allow functionCognitiveComplexity -- Macro recursion, hide sets, and argument substitution share the token worklist.
   private expand(input: PPToken[]): PPToken[] {
     const output: PPToken[] = [];
     const queue = new TokenStream(input, this.budget);
@@ -444,8 +444,8 @@ class Preprocessor {
     return output;
   }
 
-  // code-gauge-allow functionNcss 31 -- Nested argument scanning and its final arity check share the macro invocation.
-  // code-gauge-allow functionCognitiveComplexity 23 -- Nested parentheses, separators, and the closing token share one argument cursor.
+  // code-gauge-allow functionNcss -- Nested argument scanning and its final arity check share the macro invocation.
+  // code-gauge-allow functionCognitiveComplexity -- Nested parentheses, separators, and the closing token share one argument cursor.
   private collectArguments(queue: TokenStream, macro: Macro, row: number): { args: PPToken[][]; closing: PPToken } {
     const params = macro.params as string[];
     const args: PPToken[][] = [[]];
@@ -482,8 +482,8 @@ class Preprocessor {
     return { args, closing };
   }
 
-  // code-gauge-allow functionNcss 34 -- Stringification, variadic substitution and token pasting form one ordered pass.
-  // code-gauge-allow functionCognitiveComplexity 29 -- Token pasting, variadic comma removal and argument expansion share replacement state.
+  // code-gauge-allow functionNcss -- Stringification, variadic substitution and token pasting form one ordered pass.
+  // code-gauge-allow functionCognitiveComplexity -- Token pasting, variadic comma removal and argument expansion share replacement state.
   private substitute(macro: Macro, args: PPToken[][], hide: ReadonlySet<string>, call: PPToken): PPToken[] {
     const params = macro.variadic ? [...(macro.params ?? []), '__VA_ARGS__'] : (macro.params ?? []);
     const argumentsByPosition = args.map((tokens) => macroArgument(tokens, (input) => this.expand(input)));
@@ -614,7 +614,6 @@ const IGNORED_ATTRIBUTES = new Set([
   'disable_sanitizer_instrumentation',
 ]);
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Attribute names are classified only at list depth, leaving argument identifiers and strings untouched.
 export function checkAttributes(text: string, row: number): void {
   let depth = 0;
   const tokens = tokenize(text).lines.flatMap((line) => line.tokens);
@@ -634,7 +633,7 @@ function checkPragma(text: string, row: number): void {
   unsupported(row, `#pragma ${text}`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Balanced parentheses and variadic presence determine replacement.
+// code-gauge-allow functionCognitiveComplexity -- Balanced parentheses and variadic presence determine replacement.
 function withVaOpt(body: PPToken[], hasExtra: boolean, row: number): PPToken[] {
   const result: PPToken[] = [];
   for (let index = 0; index < body.length; index++) {
@@ -674,7 +673,7 @@ function appendSubstitution(
   else for (const copy of copies) result.push(copy);
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Parameter names and variadic placement are validated in one sequential macro signature.
+// code-gauge-allow functionCognitiveComplexity -- Parameter names and variadic placement are validated in one sequential macro signature.
 function macroParameters(rest: PPToken[], row: number): { params: string[]; variadic: boolean; body: PPToken[] } {
   const params: string[] = [];
   let variadic = false;

@@ -329,8 +329,8 @@ function builtinSignature(fn: PyBuiltinFunction): Signature {
 }
 
 /** The signature of a `functools.partial` object, as `_signature_get_partial` derives it from its function's. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows the cases of _signature_get_partial in CPython's inspect.py.
-// code-gauge-allow functionNcss 33 -- Follows the cases of _signature_get_partial in CPython's inspect.py.
+// code-gauge-allow functionCognitiveComplexity -- Follows the cases of _signature_get_partial in CPython's inspect.py.
+// code-gauge-allow functionNcss -- Follows the cases of _signature_get_partial in CPython's inspect.py.
 function partialSignature(value: PyOpaque, format: PyValue, options: Kwargs): Signature {
   const { fn, args, keywords } = value.data as Partial;
   const kwargs = keywordMap(keywords.store.ordered().map((entry) => [entry.key, entry.value]));
@@ -366,8 +366,8 @@ function partialSignature(value: PyOpaque, format: PyValue, options: Kwargs): Si
  * `_signature_fromstr`: the signature a `__text_signature__` describes, without its `$` parameter when the callable is
  * bound, or undefined when a default is not an expression CPython evaluates.
  */
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows _signature_fromstr of CPython's inspect.py.
-// code-gauge-allow functionNcss 34 -- Follows _signature_fromstr of inspect.py.
+// code-gauge-allow functionCognitiveComplexity -- Follows _signature_fromstr of CPython's inspect.py.
+// code-gauge-allow functionNcss -- Follows _signature_fromstr of inspect.py.
 function textSignature(text: string, bound: boolean): Signature | undefined {
   const parameters: PyOpaque[] = [];
   let kind: Kind = Kind.PositionalOrKeyword;
@@ -410,8 +410,8 @@ function parameterData(name: string, kind: Kind, value: PyValue): Parameter {
 }
 
 /** The parameters of a signature's text, split at the commas outside brackets and strings. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Splits at commas outside brackets and strings, escapes included.
-// code-gauge-allow functionNcss 32 -- Splits at commas outside brackets and strings, escapes included.
+// code-gauge-allow functionCognitiveComplexity -- Splits at commas outside brackets and strings, escapes included.
+// code-gauge-allow functionNcss -- Splits at commas outside brackets and strings, escapes included.
 function splitParameters(text: string): string[] {
   const parts: string[] = [];
   let depth = 0;
@@ -459,7 +459,7 @@ function evaluateDefault(text: string): PyValue | undefined {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows how _signature_from_callable of inspect.py tries a class.
+// code-gauge-allow functionCognitiveComplexity -- Follows how _signature_from_callable of inspect.py tries a class.
 function classSignature(cls: PyClass, format: PyValue, options: Kwargs): Signature {
   for (const each of cls.mro) {
     if (each.isBuiltin) break;

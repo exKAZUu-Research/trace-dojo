@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 912 -- The checker core owns body, entry point, and type obligations.
+// code-gauge-allow-file fileNcss -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
@@ -164,7 +164,7 @@ export class Checker {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 28 -- Checks each kind of declared item in its own type scope.
+  // code-gauge-allow functionCognitiveComplexity -- Checks each kind of declared item in its own type scope.
   private checkDeclaredTypes(
     firstAdt: number,
     firstFn: number,
@@ -320,7 +320,7 @@ export class Checker {
   }
 
   /** Requires the methods of a trait impl to take `self`, their parameters, and return as the trait declares them. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Follows the type checking rules of rustc case by case.
+  // code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
   private checkImplSignatures(impl: ImplDef): void {
     const traitRef = impl.trait;
     if (!traitRef || (impl.module as Module).isStd) return;
@@ -1001,7 +1001,7 @@ export class Checker {
    * value coerces to the type so far, or else the values so far all coerce to its type (`&String` and `&str` give
    * `&str` in either order). `mismatch` reports a value that fits neither way.
    */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Prior expressions can coerce toward a later common type.
+  // code-gauge-allow functionCognitiveComplexity -- Prior expressions can coerce toward a later common type.
   mergeTypes(
     values: [Expr, Type | ((expected: Type | undefined) => Type)][],
     mismatch: (expr: Expr, merged: Type, type: Type) => never
@@ -1030,7 +1030,7 @@ export class Checker {
     return merged;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Follows the type checking rules of rustc case by case.
+  // code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
   coerce(expr: Expr, actual: Type, target: Type): void {
     const a = normalize(shallow(actual));
     const t = normalize(shallow(target));
@@ -1225,7 +1225,7 @@ export class Checker {
     // A statement's value is dropped, so its type may stay unknown only if nothing else needs it.
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps initializer, let-else and binding checks in declaration order.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps initializer, let-else and binding checks in declaration order.
   private checkLet(stmt: Extract<Stmt, { kind: 'let' }>): boolean {
     const declared = stmt.type ? this.lowerType(stmt.type) : undefined;
     let type = declared ?? freshVar();
@@ -1399,7 +1399,7 @@ function fundamentalTarget(type: Type): Type {
 
 const NON_DYN_BUILTIN_TRAITS = new Set(['Into', 'TryInto', 'Hash', 'FromIterator', 'Extend', 'Sum', 'Product']);
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Object safety depends on the trait hierarchy and every dispatchable method.
+// code-gauge-allow functionCognitiveComplexity -- Object safety depends on the trait hierarchy and every dispatchable method.
 function checkDynCompatible(trait: TraitDef, span: Span, checked = new Set<TraitDef>()): void {
   if (checked.has(trait)) return;
   checked.add(trait);

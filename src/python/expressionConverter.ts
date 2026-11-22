@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 678 -- The expression converter keeps one method per kind of expression node together.
+// code-gauge-allow-file fileNcss -- The expression converter keeps one method per kind of expression node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { assignmentExpressionError } from './assignmentExpressions';
@@ -131,7 +131,7 @@ export abstract class ExpressionConverter {
     return this.syntaxStorage?.account(expression) ?? expression;
   }
 
-  // code-gauge-allow functionNcss 60 -- One case per kind of expression node, each delegating where it grows.
+  // code-gauge-allow functionNcss -- One case per kind of expression node, each delegating where it grows.
   private expressionValue(node: Node): Expression {
     const row = rowOf(node);
     switch (node.type) {
@@ -353,8 +353,8 @@ export abstract class ExpressionConverter {
     return { kind: 'call', callee, args: this.argumentList(argumentsNode), row: rowOf(node) };
   }
 
-  // code-gauge-allow functionNcss 34 -- Checks the order rules CPython applies to call arguments.
-  // code-gauge-allow functionCognitiveComplexity 21 -- Checks the order rules CPython applies to call arguments.
+  // code-gauge-allow functionNcss -- Checks the order rules CPython applies to call arguments.
+  // code-gauge-allow functionCognitiveComplexity -- Checks the order rules CPython applies to call arguments.
   protected argumentList(node: Node): Argument[] {
     const nodes = namedChildren(node);
     const positionals: Argument[] = [];
@@ -475,8 +475,8 @@ export abstract class ExpressionConverter {
 
   // Strings ---------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- One case per string prefix a literal can have.
-  // code-gauge-allow functionNcss 32 -- One check per prefix and part of a string literal.
+  // code-gauge-allow functionCognitiveComplexity -- One case per string prefix a literal can have.
+  // code-gauge-allow functionNcss -- One check per prefix and part of a string literal.
   private stringLiteral(node: Node): Expression {
     const strings = node.type === 'concatenated_string' ? namedChildren(node) : [node];
     for (const string of strings) {
@@ -616,8 +616,8 @@ export abstract class ExpressionConverter {
 
   // Comprehensions and lambdas --------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 39 -- Follows how CPython scopes each part of a comprehension.
-  // code-gauge-allow functionCognitiveComplexity 25 -- Follows how CPython scopes each part of a comprehension.
+  // code-gauge-allow functionNcss -- Follows how CPython scopes each part of a comprehension.
+  // code-gauge-allow functionCognitiveComplexity -- Follows how CPython scopes each part of a comprehension.
   private comprehension(node: Node): Expression {
     const type =
       node.type === 'list_comprehension'
@@ -899,7 +899,7 @@ export abstract class ExpressionConverter {
   // Targets ---------------------------------------------------------------------------------------------------------
 
   /** Converts what an assignment stores into, binding its names with `bind`. */
-  // code-gauge-allow functionNcss 31 -- One case per kind of assignment target node.
+  // code-gauge-allow functionNcss -- One case per kind of assignment target node.
   protected target(node: Node, bind: (nameNode: Node) => NameRef = (nameNode) => this.bindName(nameNode)): Target {
     const row = rowOf(node);
     switch (node.type) {

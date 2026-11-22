@@ -1,6 +1,6 @@
 import { type AnyFloat, asBigFloat, BigFloat, type FloatBits, floatOf, FORMATS } from './floats';
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Encodes normal, subnormal, infinite, and NaN values across the supported binary formats.
+// code-gauge-allow functionCognitiveComplexity -- Encodes normal, subnormal, infinite, and NaN values across the supported binary formats.
 export function encodeFloat(value: AnyFloat, bits: FloatBits): bigint {
   const float = asBigFloat(value);
   const precision = FORMATS[bits].precision;

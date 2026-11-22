@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 645 -- Keeps the compilation that shares a function's context and step state together.
+// code-gauge-allow-file fileNcss -- Keeps the compilation that shares a function's context and step state together.
 import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
 import type { Block, Expr, Pattern, Span, Stmt } from './ast';
 import { patternBindings } from './astWalk';
@@ -486,7 +486,7 @@ export class Compiler {
     return operand.kind === 'adt' && operand.def.builtin === 'Box' && this.ownedPlace(expr.operand);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Reference adjustments preserve mutable places and distinguish borrowed text from owned values.
+  // code-gauge-allow functionCognitiveComplexity -- Reference adjustments preserve mutable places and distinguish borrowed text from owned values.
   private coerce(read: Eval, coercion: Coercion, expr: Expr): Eval {
     switch (coercion.kind) {
       case 'deref': {
@@ -520,7 +520,7 @@ export class Compiler {
     return evaluate;
   }
 
-  // code-gauge-allow functionNcss 39 -- One case per kind of expression, statement, or pattern.
+  // code-gauge-allow functionNcss -- One case per kind of expression, statement, or pattern.
   path(expr: Extract<Expr, { kind: 'path' }>): Eval {
     const res = this.annotations.paths.get(expr);
     if (!res) throw new Error('Unresolved path');

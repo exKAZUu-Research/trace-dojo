@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 989 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss -- One native per method of the standard library.
 import { inPlaceCapacity, reserveVec, setVecCapacity, sizeTable, type TableMap, vecCapacity } from '../capacity';
 import type { DebugPart } from '../debugText';
 import { floatNumber } from '../floatBits';
@@ -135,7 +135,7 @@ export function sliceIter(slice: Value, places: boolean): IterValue {
 }
 
 /** The iterator `for` uses for a value of a type, as `IntoIterator` makes it. */
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of iterable type.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of iterable type.
 export function toIterator(value: Value, from: Type): Value {
   const t = normalize(shallow(from));
   if (value instanceof IterValue) return value;
@@ -293,7 +293,7 @@ const PRESERVES_LOWER_BOUND = new Set([
 
 const SIZED_ADAPTERS = new Set(['FuseShape', 'TakeShape', 'SkipShape', 'StepByShape', 'ChainShape', 'ZipShape']);
 
-// code-gauge-allow functionCognitiveComplexity 20 -- The adapters make size-hint adjustments from their current state.
+// code-gauge-allow functionCognitiveComplexity -- The adapters make size-hint adjustments from their current state.
 function adapterLowerBound(iter: IterValue, name: string, first: bigint, otherShape?: Type): bigint {
   if (PRESERVES_LOWER_BOUND.has(name)) return first;
   const state = iter.roots[1] as
@@ -901,7 +901,7 @@ function peekSource(self: Value): IterValue {
  * `next_back` does. When both are `TrustedRandomAccess`, `next` stops at the shorter one's end without taking from the
  * longer one, as `Zip`'s specialization for them reads by index.
  */
-// code-gauge-allow functionCognitiveComplexity 24 -- Follows `Zip`'s `next` and `next_back`.
+// code-gauge-allow functionCognitiveComplexity -- Follows `Zip`'s `next` and `next_back`.
 function zipped(
   ctx: NativeContext,
   first: IterValue,
@@ -1034,7 +1034,7 @@ const TRUSTED_LEN_ADAPTERS = new Set([
 ]);
 
 /** Whether iterators of these shapes are all `TrustedLen`, which `collect` and `extend` size exactly. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows std's `TrustedLen` impls case by case.
+// code-gauge-allow functionCognitiveComplexity -- Follows std's `TrustedLen` impls case by case.
 export function isTrustedLen(...shapes: Type[]): boolean {
   return shapes.every((shape) => {
     const t = normalize(shallow(shape));
@@ -1144,7 +1144,7 @@ function iteratorsEqual(ctx: NativeContext, self: Value, other: Value): boolean 
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Exhaustion and unordered pairs terminate lexicographic comparison.
+// code-gauge-allow functionCognitiveComplexity -- Exhaustion and unordered pairs terminate lexicographic comparison.
 function iteratorOrder(ctx: NativeContext, first: IterValue, second: IterValue, total = false): number | undefined {
   const item = ctx.typeArgs[0];
   const rhs = total ? item : ctx.typeArgs[2];

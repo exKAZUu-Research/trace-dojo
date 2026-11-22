@@ -242,7 +242,7 @@ export class Binder {
       for (const identifier of patternIdentifiers(current)) this.assignedIdentifiers.push({ identifier, scope });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Declares each form of parameter a function-like node has.
+  // code-gauge-allow functionCognitiveComplexity -- Declares each form of parameter a function-like node has.
   private bindFunction(node: TreeNode, scope: Scope): void {
     const functionScope = this.newScope(node, 'function', scope);
     const signatureScope = new SignatureScope(functionScope);

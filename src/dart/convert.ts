@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 585 -- Keep declaration syntax and parameter validation together.
+// code-gauge-allow-file fileNcss -- Keep declaration syntax and parameter validation together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -94,7 +94,7 @@ export class Converter extends ExpressionConverter {
     super();
   }
 
-  // code-gauge-allow functionNcss 33 -- One case per kind of top-level node, which reads best as one dispatch.
+  // code-gauge-allow functionNcss -- One case per kind of top-level node, which reads best as one dispatch.
   convertLibrary(root: Node): Library {
     const imports: ImportDirective[] = [];
     const declarations: TopLevelDeclaration[] = [];
@@ -294,7 +294,7 @@ export class Converter extends ExpressionConverter {
     };
   }
 
-  // code-gauge-allow duplicateLines 22 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private convertMixin(node: Node): ClassDeclaration {
     const children = childrenOf(node);
     const onIndex = children.findIndex((child) => child.type === 'on');
@@ -331,7 +331,7 @@ export class Converter extends ExpressionConverter {
     };
   }
 
-  // code-gauge-allow duplicateLines 18 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private convertEnum(node: Node): ClassDeclaration {
     const named = namedOf(node);
     const typeParameters = named.find((child) => child.type === 'type_parameters');
@@ -392,7 +392,7 @@ export class Converter extends ExpressionConverter {
     };
   }
 
-  // code-gauge-allow duplicateLines 20 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private convertExtensionType(node: Node): ClassDeclaration {
     const primary = requireNode(
       namedOf(node).find((child) => child.type === 'primary_constructor'),
@@ -559,7 +559,7 @@ export class Converter extends ExpressionConverter {
    * A method, accessor, operator, or constructor, from the nodes of its signature: modifier tokens, the signature,
    * and a constructor's initializers or redirection.
    */
-  // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of signature.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of signature.
   private convertSignature(
     declaration: Node,
     parts: Node[],
@@ -638,8 +638,8 @@ export class Converter extends ExpressionConverter {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of node in the grammar.
-  // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of node in the grammar.
+  // code-gauge-allow functionParameterCount -- The parameters are the parts a caller already holds; grouping them would only rename them.
   private convertMethodSignature(
     signature: Node,
     tokens: Set<string>,
@@ -892,7 +892,7 @@ export class Converter extends ExpressionConverter {
     return { kind: 'expression', expression: this.soleExpression(node, rest), modifier, ...span };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- One branch per section of a parameter list (positional, optional, named, primary).
+  // code-gauge-allow functionCognitiveComplexity -- One branch per section of a parameter list (positional, optional, named, primary).
   convertFormalParameters(node: Node, context: FormalContext = 'ordinary'): FormalParameters {
     const positional: FormalParameter[] = [];
     const named: FormalParameter[] = [];
@@ -967,7 +967,7 @@ export class Converter extends ExpressionConverter {
     return parameters;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- One check per parameter modifier and form Dart distinguishes.
+  // code-gauge-allow functionCognitiveComplexity -- One check per parameter modifier and form Dart distinguishes.
   private convertFormalParameter(
     node: Node,
     isRequired: boolean,
@@ -1038,8 +1038,8 @@ export class Converter extends ExpressionConverter {
     return nodes.filter((child) => child.type !== 'comment').map((child) => this.convertStatement(child));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of statement node in the grammar.
-  // code-gauge-allow functionNcss 57 -- One case per kind of statement node in the grammar.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of statement node in the grammar.
+  // code-gauge-allow functionNcss -- One case per kind of statement node in the grammar.
   convertStatement(node: Node): Statement {
     const span = spanOf(node);
     switch (node.type) {

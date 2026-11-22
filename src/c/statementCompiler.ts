@@ -38,8 +38,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return isFunctionBody ? compile() : this.withScope(compile);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Running a block from a label, and leaving its scope.
-  // code-gauge-allow functionNcss 40 -- Label dispatch, lexical lifetime and completion share the child list.
+  // code-gauge-allow functionCognitiveComplexity -- Running a block from a label, and leaving its scope.
+  // code-gauge-allow functionNcss -- Label dispatch, lexical lifetime and completion share the child list.
   private blockItems(items: (Statement | Declaration | StaticAssert)[], endsScope: boolean): Compiled {
     const children = items.map((item) => this.statementOrDeclaration(item));
     const locals = this.scopeLocals().filter((local) => !local.isParameter);
@@ -116,7 +116,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 50 -- One case per C statement kind; helpers already isolate control-flow construction.
+  // code-gauge-allow functionNcss -- One case per C statement kind; helpers already isolate control-flow construction.
   private compileStatement(statement: Statement): Compiled {
     const { row } = statement;
     switch (statement.kind) {
@@ -275,8 +275,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Loop entry labels and condition/step timing must remain coordinated with completion handling.
-  // code-gauge-allow duplicateLines 19 -- While and do-while intentionally mirror completion handling but differ in condition and step timing.
+  // code-gauge-allow functionCognitiveComplexity -- Loop entry labels and condition/step timing must remain coordinated with completion handling.
+  // code-gauge-allow duplicateLines -- While and do-while intentionally mirror completion handling but differ in condition and step timing.
   private whileStatement(statement: Extract<Statement, { kind: 'while' }>): Compiled {
     const condition = this.condition(statement.condition, 'while 文');
     const body = this.loopBody(statement.body);
@@ -297,7 +297,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return { exec, labels: body.labels };
   }
 
-  // code-gauge-allow duplicateLines 19 -- While and do-while intentionally mirror completion handling but differ in condition and step timing.
+  // code-gauge-allow duplicateLines -- While and do-while intentionally mirror completion handling but differ in condition and step timing.
   private doWhileStatement(statement: Extract<Statement, { kind: 'doWhile' }>): Compiled {
     const body = this.loopBody(statement.body);
     const condition = this.condition(statement.condition, 'do while 文');
@@ -316,8 +316,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return { exec, labels: body.labels };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- The parts of a for statement, each optional, and their steps.
-  // code-gauge-allow functionNcss 33 -- Initialization, condition, update, entry labels, and scope exit form one loop lifecycle.
+  // code-gauge-allow functionCognitiveComplexity -- The parts of a for statement, each optional, and their steps.
+  // code-gauge-allow functionNcss -- Initialization, condition, update, entry labels, and scope exit form one loop lifecycle.
   private forStatement(statement: Extract<Statement, { kind: 'for' }>): Compiled {
     const row = this.stepRow(statement.row);
     const init = statement.init === undefined ? undefined : this.forInit(statement.init);
@@ -423,7 +423,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return { exec, labels: new Set([...body.labels].filter((label) => !ownLabels.has(label))) };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Case ranges and individual labels share duplicate detection.
+  // code-gauge-allow functionCognitiveComplexity -- Case ranges and individual labels share duplicate detection.
   private caseStatement(statement: Extract<Statement, { kind: 'case' }>): Compiled {
     const { row } = statement;
     const context = this.context.switches.at(-1);

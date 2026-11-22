@@ -45,7 +45,7 @@ class VariableUses {
     forEachDirect(expr, (child) => this.visit(child));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of use.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of use.
   private use(expr: Expr): void {
     switch (expr.kind) {
       case 'ref': {

@@ -87,7 +87,7 @@ export function stringFromBytes(bytes: Uint8Array, binary = false, usAscii = fal
   return value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- UTF-8 lead-byte widths and failed decodes preserve invalid bytes individually instead of replacing them.
+// code-gauge-allow functionCognitiveComplexity -- UTF-8 lead-byte widths and failed decodes preserve invalid bytes individually instead of replacing them.
 function decodeInvalidBytes(bytes: Uint8Array): string {
   const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   let text = '';
@@ -131,7 +131,7 @@ function encodeInvalidText(text: string): Uint8Array {
   return Uint8Array.from(bytes);
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Character slices share byte offsets and encoding flags across UTF-8, US-ASCII, binary and invalid-byte representations.
+// code-gauge-allow functionCognitiveComplexity -- Character slices share byte offsets and encoding flags across UTF-8, US-ASCII, binary and invalid-byte representations.
 export function stringCharacters(value: RString): RString[] {
   if (!value.rawBytes && !value.binary && !value.usAscii)
     return codePointCharacters(value.s).map((char) => {

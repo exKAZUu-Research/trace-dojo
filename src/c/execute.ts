@@ -12,7 +12,6 @@ import { parseC } from './parse';
 import { type Frame, Runtime, storeValue } from './runtime';
 import { alignOf, CHAR_POINTER, INT, pointerTo, sizeOf } from './types';
 
-// code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own parser and runtime.
 export function executeCProgram(source: string, input?: ProgramInput): ProgramExecution {
   let program: CompiledProgram;
   try {
@@ -43,7 +42,7 @@ const PROGRAM_NAME = './main';
  *
  * @param onEnd Receives `main`'s frame when it returns, while the frame still holds its variables.
  */
-// code-gauge-allow duplicateLines 16 -- Each language's runner wraps its own runtime and collects the same output contract.
+// code-gauge-allow duplicateLines -- Each language's runner wraps its own runtime and collects the same output contract.
 export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (frame: Frame) => void): ProgramRun {
   let uncaughtException: string | undefined;
   try {

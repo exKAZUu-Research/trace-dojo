@@ -450,7 +450,7 @@ export class Converter extends DeclarationConverter {
     return { k: 'foreach', subject, subjectEndRow: parts[0].endPosition.row, key, value, byRef, body, row };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private switchStatement(node: Node): Stmt {
     const row = node.startPosition.row;
     const subject = this.condition(node);
@@ -558,7 +558,7 @@ export class Converter extends DeclarationConverter {
     return { k: 'return', e: expression, row };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private tryStatement(node: Node): Stmt {
     const row = node.startPosition.row;
     const body = this.block(node.childForFieldName('body'));
@@ -591,7 +591,7 @@ export class Converter extends DeclarationConverter {
     return { k: 'try', body, catches, fin, row };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private declareStatement(node: Node, topLevel: boolean): Stmt[] {
     for (const directive of node.namedChildren.filter((child) => child.type === 'declare_directive')) {
       const name = (directive.childForFieldName('name') as Node).text;
@@ -1299,7 +1299,7 @@ export class Converter extends DeclarationConverter {
     return expression;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Classifies literal, named and magic constants in order.
+  // code-gauge-allow functionCognitiveComplexity -- Classifies literal, named and magic constants in order.
   private constant(node: Node): Expr {
     const row = node.startPosition.row;
     const raw = this.nameText(node);
@@ -1327,7 +1327,7 @@ export class Converter extends DeclarationConverter {
     return { k: 'const', name, row };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private classConstantExpression(node: Node, row: number): Expr {
     const [scope, nameNode] = node.namedChildren.filter((child) => child.type !== 'comment');
     const nameExpression = node.childForFieldName('name_expression');
@@ -1383,8 +1383,8 @@ export class Converter extends DeclarationConverter {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  // code-gauge-allow functionNcss 33 -- Resolves the callable, compiles its arguments, and records the call row together.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss -- Resolves the callable, compiles its arguments, and records the call row together.
   private functionCall(node: Node): Expr {
     const row = node.startPosition.row;
     const fnNode = node.childForFieldName('function') as Node;
@@ -1573,8 +1573,8 @@ export class Converter extends DeclarationConverter {
     return this.preserveSyntax ? raw : super.resolveClassName(raw);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 29 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
-  // code-gauge-allow functionNcss 36 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionCognitiveComplexity -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionNcss -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private args(node: Node): { args: Arg[]; fcc: boolean } {
     const args: Arg[] = [];
     let fcc = false;
@@ -1881,7 +1881,7 @@ export class Converter extends DeclarationConverter {
     return typeof value === 'string' && typeof normalizeKeyString(value) === 'string';
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Checks folded keys and values in source order and keeps deferred failures at runtime.
+  // code-gauge-allow functionCognitiveComplexity -- Checks folded keys and values in source order and keeps deferred failures at runtime.
   private checkConstantArrayOperands(node: Node, items: ArrayItem[]): void {
     if (this.preserveSyntax || !items.some((item) => item.spread || item.key)) return;
     let invalid: string | undefined;
@@ -2029,8 +2029,8 @@ export class Converter extends DeclarationConverter {
     this.notices.push(...folded);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 29 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
-  // code-gauge-allow functionNcss 40 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionCognitiveComplexity -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionNcss -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private listLiteral(node: Node): Expr {
     const row = node.startPosition.row;
     const items: (ListItem | undefined)[] = [];

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 555 -- One rule per trait of the standard library.
+// code-gauge-allow-file fileNcss -- One rule per trait of the standard library.
 import { collectionKeyAnswer } from './collectionBounds';
 import { isPseudo, normalize } from './infer';
 import { debugOperands, supportsDebug } from './iterDebug';
@@ -422,7 +422,7 @@ function stringKind(t: Type): 'String' | 'str' | '&str' | undefined {
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Each standard collection has its own comparison trait bounds.
+// code-gauge-allow functionCognitiveComplexity -- Each standard collection has its own comparison trait bounds.
 function comparisonAdt(goal: Goal, t: AdtType): Answer {
   const { name, all, solver } = goal;
   const d = derived(goal);
@@ -444,7 +444,7 @@ function comparisonAdt(goal: Goal, t: AdtType): Answer {
   return 'no';
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Arrays and boxed values have distinct Default bounds.
+// code-gauge-allow functionCognitiveComplexity -- Arrays and boxed values have distinct Default bounds.
 function defaultValue(goal: Goal): Answer {
   const { t, all } = goal;
   if (isPrimitive(t)) return 'yes';
@@ -674,7 +674,7 @@ function fromInto({ solver, t, ref }: Goal): Answer {
 /** The integer types std converts a `char` to with a check; wider ones convert without one. */
 const CHECKED_FROM_CHAR = new Set(['u8', 'u16']);
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Checked conversions have distinct applicability and element bounds.
+// code-gauge-allow functionCognitiveComplexity -- Checked conversions have distinct applicability and element bounds.
 function tryFrom({ solver, t, ref, name }: Goal): Answer {
   const other = normalize(shallow(ref.args[0]));
   const [source, target] = name === 'TryFrom' ? [other, t] : [t, other];

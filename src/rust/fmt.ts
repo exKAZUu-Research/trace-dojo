@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 432 -- Follows std::fmt's formatting rules case by case.
+// code-gauge-allow-file fileNcss -- Follows std::fmt's formatting rules case by case.
 import type { FormatPiece, FormatSpec } from './ast';
 import { type DebugPart, emit, list, rangeText, structText, tupleText, type WriteChunk } from './debugText';
 import { debugEscapesUnicode } from './debugUnicode';
@@ -123,7 +123,7 @@ export class Formatter {
     }
   }
 
-  // code-gauge-allow functionNcss 43 -- Follows std::fmt's formatting rules case by case.
+  // code-gauge-allow functionNcss -- Follows std::fmt's formatting rules case by case.
   display(value: Value, type: Type, spec: Spec, write?: WriteChunk): string {
     const t = this.concrete(type);
     const v = deref(value);
@@ -208,7 +208,7 @@ export class Formatter {
     return text;
   }
 
-  // code-gauge-allow functionNcss 41 -- Follows std::fmt's formatting rules case by case.
+  // code-gauge-allow functionNcss -- Follows std::fmt's formatting rules case by case.
   private debugOf(value: Value, type: Type, spec: Spec, indent: number | undefined, write?: WriteChunk): string {
     const t = this.concrete(type);
     const v = deref(value);
@@ -265,7 +265,7 @@ export class Formatter {
     }
   }
 
-  // code-gauge-allow functionNcss 58 -- Follows std::fmt's formatting rules case by case.
+  // code-gauge-allow functionNcss -- Follows std::fmt's formatting rules case by case.
   private debugAdt(
     v: Value,
     t: Type & { kind: 'adt' },
@@ -421,7 +421,7 @@ export class Formatter {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Follows std::fmt's formatting rules case by case.
+  // code-gauge-allow functionCognitiveComplexity -- Follows std::fmt's formatting rules case by case.
   private radix(trait: FormatSpec['trait'], value: Value, type: Type, spec: Spec, write?: WriteChunk): string {
     let t = this.concrete(type);
     while (t.kind === 'ref') t = this.concrete(t.target);
@@ -456,7 +456,7 @@ export class Formatter {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows std::fmt's formatting rules case by case.
+// code-gauge-allow functionCognitiveComplexity -- Follows std::fmt's formatting rules case by case.
 function intExp(value: bigint, precision: number | undefined, letter: string, plus: boolean): string {
   const negative = value < 0n;
   let digits = (negative ? -value : value).toString();

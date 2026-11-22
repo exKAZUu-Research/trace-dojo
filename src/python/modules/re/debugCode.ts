@@ -138,7 +138,7 @@ function compile(code: number[], items: Item[], flags: number): void {
   for (const item of items) compileItem(code, item, flags);
 }
 
-// code-gauge-allow functionNcss 56 -- Transcribes the opcode dispatch of re._compiler._compile.
+// code-gauge-allow functionNcss -- Transcribes the opcode dispatch of re._compiler._compile.
 function compileItem(code: number[], item: Item, flags: number): void {
   switch (item.op) {
     case 'LITERAL':
@@ -343,7 +343,7 @@ class CharsetOptimizer {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes the charmap compression of _optimize_charset.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the charmap compression of _optimize_charset.
 function compressCharmap(
   charset: SetItem[],
   charmap: Uint8Array,

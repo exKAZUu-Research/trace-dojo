@@ -41,7 +41,7 @@ export function roundDecimalToFloat(whole: string, fraction: string, exponent: n
     : roundBinary(coefficient * 10n ** BigInt(power), 1n, 0, true);
 }
 
-// code-gauge-allow duplicateLines 15 -- Quotient and square-root rounding share range guards but use different scaling and midpoint comparisons.
+// code-gauge-allow duplicateLines -- Quotient and square-root rounding share range guards but use different scaling and midpoint comparisons.
 export function roundBinary(numerator: bigint, denominator: bigint, exponent: number, isFloat = false): number {
   if (numerator === 0n) return 0;
   const { bits, minimum: minimumExponent, maximum: maximumExponent } = isFloat ? FLOAT_FORMAT : DOUBLE_FORMAT;
@@ -61,7 +61,6 @@ export function roundBinary(numerator: bigint, denominator: bigint, exponent: nu
   return isFloat ? Math.fround(result) : result;
 }
 
-// code-gauge-allow duplicateLines 15 -- Quotient and square-root rounding share range guards but use different scaling and midpoint comparisons.
 export function roundSquareRoot(numerator: bigint, denominator: bigint, exponent: number, isFloat = false): number {
   const { bits, minimum, maximum } = isFloat ? FLOAT_FORMAT : DOUBLE_FORMAT;
   const e = ratioExponent(numerator, denominator);

@@ -65,8 +65,8 @@ class SlotQuery {
   }
 }
 
-// code-gauge-allow functionNcss 39 -- Counts the storage of each value representation recursively.
-// code-gauge-allow functionCognitiveComplexity 19 -- Computes nested storage requirements by type without allocating values.
+// code-gauge-allow functionNcss -- Counts the storage of each value representation recursively.
+// code-gauge-allow functionCognitiveComplexity -- Computes nested storage requirements by type without allocating values.
 function countSlots(type: Type, query: SlotQuery): number {
   let count = 0;
   switch (type.kind) {

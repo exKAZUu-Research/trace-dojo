@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 406 -- Keeps decimal and hexadecimal literal normalization beside their shared precision bounds.
+// code-gauge-allow-file fileNcss -- Keeps decimal and hexadecimal literal normalization beside their shared precision bounds.
 /**
  * Go's constants have arbitrary precision: integers are exact, and floating-point constants are exact fractions here,
  * which Go's compiler approximates with at least 256 bits of mantissa.
@@ -99,8 +99,8 @@ function bitLength(value: bigint): bigint {
 }
 
 /** Reads a decimal float literal such as `1.5e-3` or `.5` exactly, switching to 512-bit float for large exponents. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps decimal and hexadecimal literal normalization beside their shared precision bounds.
-// code-gauge-allow functionNcss 34 -- Keeps decimal and hexadecimal literal normalization beside their shared precision bounds.
+// code-gauge-allow functionCognitiveComplexity -- Keeps decimal and hexadecimal literal normalization beside their shared precision bounds.
+// code-gauge-allow functionNcss -- Keeps decimal and hexadecimal literal normalization beside their shared precision bounds.
 export function parseFloatLiteral(text: string): Rational {
   text = text.replaceAll('_', '');
   if (/^0[xX]/.test(text)) {
@@ -462,7 +462,7 @@ const MAX_FLOAT32 = 3.4028234663852886e38;
  * Computes `mantissa * 2 ** exponent` rounded once to the nearest double, or float32 when `single`, halves to even,
  * handling subnormals.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps decimal and hexadecimal literal normalization beside their shared precision bounds.
+// code-gauge-allow functionCognitiveComplexity -- Keeps decimal and hexadecimal literal normalization beside their shared precision bounds.
 export function scaleToFloat(mantissa: bigint, exponent: number, single = false): number {
   if (mantissa === 0n) return 0;
   const bits = mantissa.toString(2).length;

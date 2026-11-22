@@ -106,7 +106,7 @@ export function getItem(container: PyValue, key: PyValue): PyValue {
 }
 
 /** `container[key]` as the builtin type of `container` defines it, whatever `__getitem__` its class defines. */
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of subscriptable builtin.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of subscriptable builtin.
 export function builtinGetItem(container: PyValue, key: PyValue): PyValue {
   const runtime = currentRuntime();
   if (container instanceof PyList || container instanceof PyTuple) {

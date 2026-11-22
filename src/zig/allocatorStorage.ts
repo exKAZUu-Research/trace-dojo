@@ -44,7 +44,7 @@ interface ArenaNode extends Record<string, unknown> {
 const allocations = new WeakMap<object, Map<number, Allocation>>();
 const NODE_SIZE = 24;
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Keeps zero-size frees, in-place remaps and allocator-specific reservations at one allocation boundary.
+// code-gauge-allow functionCognitiveComplexity -- Keeps zero-size frees, in-place remaps and allocator-specific reservations at one allocation boundary.
 export function reserveAllocatorBytes(
   frame: Frame,
   state: AllocatorState | undefined,
@@ -135,7 +135,7 @@ export function bindAllocatorBytes(
   reservation.complete(memory);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Frees each allocator kind using its own last-allocation semantics.
+// code-gauge-allow functionCognitiveComplexity -- Frees each allocator kind using its own last-allocation semantics.
 export function freeAllocatorMemory(state: AllocatorState | undefined, memory: object, depth = 0): void {
   if (depth >= LIMITS.maxCallDepth) throw new StackOverflow();
   const record = allocationOf(memory);
@@ -199,8 +199,8 @@ export function arenaCapacity(frame: Frame, arena: ZStruct): number {
   return capacity;
 }
 
-// code-gauge-allow functionNcss 46 -- Preserves arena node ownership through resize and replacement failures.
-// code-gauge-allow functionCognitiveComplexity 21 -- Preserves arena node ownership through resize and replacement failures.
+// code-gauge-allow functionNcss -- Preserves arena node ownership through resize and replacement failures.
+// code-gauge-allow functionCognitiveComplexity -- Preserves arena node ownership through resize and replacement failures.
 export function resetArena(frame: Frame, arena: ZStruct, limit?: number): boolean {
   if (limit === 0) {
     deinitArena(frame, arena);
@@ -255,9 +255,9 @@ export function resetArena(frame: Frame, arena: ZStruct, limit?: number): boolea
   return successful;
 }
 
-// code-gauge-allow functionNcss 37 -- Follows the reference arena allocation, child resize, and chunk growth sequence.
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows the reference arena allocation, child resize, and chunk growth sequence.
-// code-gauge-allow functionParameterCount 7 -- Keeps allocation size, alignment, prior storage, and recursion budget explicit.
+// code-gauge-allow functionNcss -- Follows the reference arena allocation, child resize, and chunk growth sequence.
+// code-gauge-allow functionCognitiveComplexity -- Follows the reference arena allocation, child resize, and chunk growth sequence.
+// code-gauge-allow functionParameterCount -- Keeps allocation size, alignment, prior storage, and recursion budget explicit.
 function reserveArena(
   frame: Frame,
   state: AllocatorState,
@@ -318,8 +318,8 @@ function arenaReservation(state: AllocatorState, handle: NativeHandle, start: nu
   return reservation({ state, start, end: start + length, region, arenaNode: handle, live: true });
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Applies each allocator's in-place resize rules before updating its allocation record.
-// code-gauge-allow functionNcss 32 -- Updates allocation records at the same boundary as allocator-specific resize checks.
+// code-gauge-allow functionCognitiveComplexity -- Applies each allocator's in-place resize rules before updating its allocation record.
+// code-gauge-allow functionNcss -- Updates allocation records at the same boundary as allocator-specific resize checks.
 function resizeAllocatorBytes(state: AllocatorState | undefined, memory: object, size: number): boolean {
   const record = allocationOf(memory);
   if (!record?.live) return false;

@@ -60,3 +60,11 @@
 - Use `autoFocus` only on the first field of a form or dialog whose main purpose is text entry.
 - This project uses the React Compiler, so `useCallback` and `useMemo` are unnecessary for performance.
 - Assume a single server instance, but never keep durable data only in memory.
+
+## Interpreters
+
+- `src/interpreter/` and the language directories beside it (`src/java/`, `src/python/`, ...) are a multi-language runtime for education that runs in learners' browsers and in Node.js: use only APIs common to both (e.g., `WebAssembly`, `TextEncoder`, typed arrays, `Math`, `Intl`, `RegExp`), and never import `node:*` modules or native addons there.
+- For leaf library features (e.g., regular expressions, math functions, Unicode data, compression, hashing), use host built-ins first, then a maintained npm library that runs in browsers; hand-write one only when neither exists.
+- Cover what most learners and educators use, and keep differences from the reference implementation as small as that allows. 100% compatibility is not a goal: never reproduce niche behavior that needs a hand-written engine, a data table, or platform-specific code. When unsupported input is detectable, reject it with the existing `〜は、この採点環境では使えません。` diagnostic instead of silently returning a different result.
+- When a review comment or an issue reports a difference from the reference implementation, fix it if mainstream learner programs would hit it or the fix is small adapter code; otherwise decline, citing this section.
+- A language whose interpreter meets the first rule is listed in `src/interpreter/browserReadyInterpreters.ts`, which enforces the rule by lint and a browser test; when making a language meet it, add the language there.

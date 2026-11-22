@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 806 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { isUnit } from './flow';
@@ -351,7 +351,7 @@ export class TypeInference {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Dispatches each target form to its inference rules.
+  // code-gauge-allow functionCognitiveComplexity -- Dispatches each target form to its inference rules.
   private inferDeeper(
     run: InferenceRun,
     source: Type,

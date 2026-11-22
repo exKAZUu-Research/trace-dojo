@@ -286,7 +286,7 @@ const BASIC_CODES = new Map([...BASIC_ENTITIES].map(([code, name]) => [name, cod
 /**
  * Escapes text in the selected encoding as `htmlspecialchars` (`all` false) or `htmlentities` (`all` true) does.
  */
-// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function escapeHtml(text: string, flags: bigint, all: boolean, doubleEncode: boolean, latin1 = false): string {
   const doctype = doctypeOf(flags);
   let result = '';
@@ -323,7 +323,7 @@ export function escapeHtml(text: string, flags: bigint, all: boolean, doubleEnco
 }
 
 /** Decodes the entities in the selected encoding as `html_entity_decode` (`all` true) or `htmlspecialchars_decode` does. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function decodeHtml(text: string, flags: bigint, all: boolean, latin1 = false): string {
   const doctype = doctypeOf(flags);
   let result = '';
@@ -362,7 +362,7 @@ export function decodeHtml(text: string, flags: bigint, all: boolean, latin1 = f
 const HTML5_CANONICAL = new Map(Object.entries(html5Entities.canonical).map(([text, entity]) => [enc(text), entity]));
 const HTML5_NAMES = new Map(Object.entries(html5Entities.names).map(([name, text]) => [name, enc(text)]));
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function translationTable(all: boolean, flags: bigint, latin1: boolean): [string, string][] {
   if (all && doctypeOf(flags) === Doctype.Html5) {
     return [...HTML5_CANONICAL]
@@ -389,7 +389,7 @@ function doctypeOf(flags: bigint): Doctype {
 }
 
 /** The length and code point of the UTF-8 character at `index`, without a code point when invalid, as PHP's get_next_char reads them. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Decodes PHP byte strings to Unicode scalars and advances past malformed bytes.
+// code-gauge-allow functionCognitiveComplexity -- Decodes PHP byte strings to Unicode scalars and advances past malformed bytes.
 export function nextChar(text: string, index: number): [number, number | undefined] {
   const lead = text.charCodeAt(index);
   if (lead < 0x80) return [1, lead];

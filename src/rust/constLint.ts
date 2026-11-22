@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 661 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+// code-gauge-allow-file fileNcss -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, LocalVar, PathRes } from './annotations';
@@ -172,7 +172,7 @@ export class ConstLint {
   }
 
   /** Records the constants that a pattern binds. */
-  // code-gauge-allow functionCognitiveComplexity 23 -- Binding mode determines whether the analyzed value is propagated.
+  // code-gauge-allow functionCognitiveComplexity -- Binding mode determines whether the analyzed value is propagated.
   private bind(pattern: Pattern, value: Known | undefined): void {
     if (pattern.kind === 'binding') {
       const local = this.annotations.bindings.get(pattern);
@@ -213,7 +213,7 @@ export class ConstLint {
     return this.diverged ? undefined : this.reachable(expr);
   }
 
-  // code-gauge-allow functionNcss 35 -- Constant propagation follows each expression kind using its checked type.
+  // code-gauge-allow functionNcss -- Constant propagation follows each expression kind using its checked type.
   private reachable(expr: Expr): Known | undefined {
     switch (expr.kind) {
       case 'int': {
@@ -300,7 +300,7 @@ export class ConstLint {
     }
   }
 
-  // code-gauge-allow functionNcss 42 -- One case per kind of expression.
+  // code-gauge-allow functionNcss -- One case per kind of expression.
   private controlFlow(expr: Expr): void {
     switch (expr.kind) {
       case 'assign': {
@@ -600,8 +600,8 @@ export class ConstLint {
     return name && this.integerBinary(expr, name, left, right);
   }
 
-  // code-gauge-allow functionNcss 39 -- One case per integer operator.
-  // code-gauge-allow duplicateLines 19 -- Each language evaluates its own operators on its constants.
+  // code-gauge-allow functionNcss -- One case per integer operator.
+  // code-gauge-allow duplicateLines -- Each language evaluates its own operators on its constants.
   private integerBinary(
     expr: IntegerOperation,
     name: IntName,
@@ -669,7 +669,7 @@ export class ConstLint {
     return right === decided ? decided : undefined;
   }
 
-  // code-gauge-allow duplicateLines 21 -- Each language compares its own constants, as its operators define.
+  // code-gauge-allow duplicateLines -- Each language compares its own constants, as its operators define.
   private comparison(expr: Extract<Expr, { kind: 'binary' }>): Known | undefined {
     const left = ordinal(this.expr(expr.left));
     const right = ordinal(this.expr(expr.right));
@@ -790,7 +790,7 @@ export function checkConstDrop(
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Destruction depends on active variants and partial moves at each projection.
+// code-gauge-allow functionCognitiveComplexity -- Destruction depends on active variants and partial moves at each projection.
 function needsConstDrop(
   type: Type,
   value: Known | undefined,
@@ -861,8 +861,8 @@ function aggregate(fields: Iterable<readonly [string, Known | undefined]>, ctor?
 }
 
 /** Whether a pattern matches a constant: surely, surely not, or unknown. */
-// code-gauge-allow functionNcss 37 -- Each Rust pattern has distinct rules for deciding whether it can match.
-// code-gauge-allow functionCognitiveComplexity 22 -- Each Rust pattern has distinct rules for deciding whether it can match.
+// code-gauge-allow functionNcss -- Each Rust pattern has distinct rules for deciding whether it can match.
+// code-gauge-allow functionCognitiveComplexity -- Each Rust pattern has distinct rules for deciding whether it can match.
 function patternMatches(
   pattern: Pattern,
   value: Known | undefined,

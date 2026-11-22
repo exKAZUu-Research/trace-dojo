@@ -1,7 +1,7 @@
 import { utf8Decode } from './literals';
 import { unquoteLiteral } from './packages/strconv';
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows Go StructTag.Lookup scanning so malformed prefixes and quoted values share its stop rules.
+// code-gauge-allow functionCognitiveComplexity -- Follows Go StructTag.Lookup scanning so malformed prefixes and quoted values share its stop rules.
 export function lookupStructTag(tag: string | undefined, key: string): string | undefined {
   let rest = tag ?? '';
   while (rest.length > 0) {

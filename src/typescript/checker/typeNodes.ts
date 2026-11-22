@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 700 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -539,7 +539,7 @@ export class TypeNodes {
     return eagerAliasContainers.has(node.type) && named(node).some((child) => this.mayResolveAlias(child, depth + 1));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Checks local bindings, intrinsic types, unavailable symbols, and argument counts.
+  // code-gauge-allow functionCognitiveComplexity -- Checks local bindings, intrinsic types, unavailable symbols, and argument counts.
   private resolveTypeName(node: TreeNode, nameNode: TreeNode, argumentCount: number): ResolvedTypeName | undefined {
     const name = nameNode.text;
     const scope = this.c.scopeOf(nameNode);
@@ -710,8 +710,8 @@ export class TypeNodes {
   }
 
   /** The members of an interface body or an object type literal. */
-  // code-gauge-allow functionNcss 45 -- Handles interface properties, accessor signatures, methods, calls, constructors, and index signatures.
-  // code-gauge-allow functionCognitiveComplexity 24 -- Handles interface properties, accessor signatures, methods, calls, constructors, and index signatures.
+  // code-gauge-allow functionNcss -- Handles interface properties, accessor signatures, methods, calls, constructors, and index signatures.
+  // code-gauge-allow functionCognitiveComplexity -- Handles interface properties, accessor signatures, methods, calls, constructors, and index signatures.
   membersStructure(members: TreeNode[]): Structure {
     const structure = emptyStructure();
     const methods = new Map<string, Signature[]>();

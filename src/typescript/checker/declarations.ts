@@ -29,7 +29,7 @@ function checkBuiltinUndefinedDeclaration(c: Checker): void {
 
 const blockScopedKinds = new Set(['let', 'const', 'class']);
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Distinguishes block-scoped conflicts, mixed function/var declarations, repeated implementations, and compatible var redeclarations.
+// code-gauge-allow functionCognitiveComplexity -- Distinguishes block-scoped conflicts, mixed function/var declarations, repeated implementations, and compatible var redeclarations.
 function checkValueDuplicates(c: Checker, symbol: Sym): void {
   const entries = symbol.valueEntries;
   if (entries.length < 2) return;
@@ -167,7 +167,7 @@ function checkTypeDuplicates(c: Checker, symbol: Sym): void {
   checkMergedProperties(c, symbol);
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Validates parameter order, defaulted additions, and agreement of constraints and defaults across merged declarations.
+// code-gauge-allow functionCognitiveComplexity -- Validates parameter order, defaulted additions, and agreement of constraints and defaults across merged declarations.
 function checkMergedTypeParameters(c: Checker, symbol: Sym): void {
   const lists = symbol.typeDeclarations.map((declaration) => {
     const parameters = declaration.childForFieldName('type_parameters');

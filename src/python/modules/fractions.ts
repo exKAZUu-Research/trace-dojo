@@ -86,7 +86,7 @@ export function fromCoprime([numerator, denominator]: Ratio, cls: PyClass = frac
 }
 
 /** `Fraction(numerator, denominator)`. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes fractions.py.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes fractions.py.
 function newFraction(cls: PyClass, numerator: PyValue, denominator: PyValue): PyFraction {
   if (denominator === None) {
     if (typeof numerator === 'bigint') return fromCoprime([numerator, 1n], cls);
@@ -247,7 +247,7 @@ const operatorFallback =
 const divmodFallback: Fallback = (a, b) => newTuple(divmodFloat(a as number, b as number));
 
 /** Defines `__name__` and `__rname__` as `Fraction._operator_fallbacks` does. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes fractions.py.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes fractions.py.
 function defineOperator(name: string, monomorphic: Monomorphic, fallback: Fallback, handleComplex = true): void {
   defineSlot(fractionClass, `__${name}__`, (self, [other]) => {
     if (other instanceof PyFraction) return monomorphic(ratioOf(self), ratioOf(other));

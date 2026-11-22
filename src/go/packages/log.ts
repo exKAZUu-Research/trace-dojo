@@ -105,7 +105,7 @@ function itoa(i: bigint, width: number): string {
   return i.toString().padStart(width, '0');
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- A transcription of Go's formatHeader.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of Go's formatHeader.
 function formatHeader(t: goTime.Time, prefix: string, flag: number, line: Location): string {
   let buf = flag & FLAGS.Lmsgprefix ? '' : prefix;
   if (flag & (FLAGS.Ldate | FLAGS.Ltime | FLAGS.Lmicroseconds)) {

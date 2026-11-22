@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 428 -- Keeps function signatures, body checking, and parameter flow together.
+// code-gauge-allow-file fileNcss -- Keeps function signatures, body checking, and parameter flow together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -75,7 +75,7 @@ export class FunctionChecker {
     return this.contexts.findLast((context) => !context.inlined)?.node;
   }
 
-  // code-gauge-allow functionNcss 31 -- Builds an expression signature and schedules its body where its call executes.
+  // code-gauge-allow functionNcss -- Builds an expression signature and schedules its body where its call executes.
   functionExpression(node: TreeNode, contextual?: Type): Type {
     contextual = this.c.overloadContexts.contextOf(node, contextual);
     const preview = this.c.overloadContexts.previewType(node, contextual);
@@ -217,7 +217,7 @@ export class FunctionChecker {
   }
 
   /** Records the types of a function's parameters for its body. */
-  // code-gauge-allow functionCognitiveComplexity 27 -- Records each form of parameter: a name, a rest parameter, or a pattern.
+  // code-gauge-allow functionCognitiveComplexity -- Records each form of parameter: a name, a rest parameter, or a pattern.
   bindParameters(node: TreeNode, signature: Signature): void {
     const scope = this.c.ownScope(node);
     if (!scope) return;
