@@ -27,14 +27,14 @@ const ASCII_SHORTHANDS: Record<string, string> = {
 /** Rewrites the Ruby (Onigmo) forms whose Oniguruma meaning differs into Oniguruma forms with Ruby's meaning. */
 export function onigurumaSource(source: string, extended: boolean): string {
   const tokens = regexpTokens(source, extended);
-  // Oniguruma restricts capture names to ASCII words, so any other name gets an alias.
+  // Oniguruma restricts capture names to ASCII words, so any other name gets an alias. An alias never occurs in the
+  // source, so it cannot equal a name that the source defines or refers to.
   const aliases = new Map<string, string>();
-  const names = new Set(tokens.map((token) => token.name));
   let serial = 0;
-  for (const name of names) {
+  for (const { name } of tokens) {
     // A name that starts with a digit stays, so that the library rejects it as Ruby does.
-    if (name === undefined || ASCII_NAME.test(name) || /^\d/.test(name)) continue;
-    while (names.has(`__capture${serial}__`)) serial++;
+    if (name === undefined || aliases.has(name) || ASCII_NAME.test(name) || /^\d/.test(name)) continue;
+    while (source.includes(`__capture${serial}__`)) serial++;
     aliases.set(name, `__capture${serial++}__`);
   }
   let out = '';
