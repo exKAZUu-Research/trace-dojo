@@ -22,6 +22,7 @@ interface Rejection {
 }
 
 const MAX_SUBROUTINE_EXPANSION = 100_000;
+const NUMBERED_REFERENCE_REASON = 'numbered backref/call is not allowed. (use name)';
 const UNSUPPORTED_PROPERTY = '正規表現のこの Unicode プロパティ';
 
 /**
@@ -36,7 +37,7 @@ const RUBY_REASONS: readonly (readonly [string, string | ((rejection: Rejection)
   ['Unclosed comment group', 'end pattern in group'],
   ['Character class range out of order', 'empty range in char class'],
   ['Quantifier value unsupported in Oniguruma', 'too big number for repeat range'],
-  ['Numbered backref/subroutine not allowed', 'numbered backref/call is not allowed. (use name)'],
+  ['Numbered backref/subroutine not allowed', NUMBERED_REFERENCE_REASON],
   ['Invalid POSIX class', 'invalid POSIX bracket type'],
   ['Invalid code point out of range', 'invalid Unicode range'],
   [
@@ -78,7 +79,8 @@ const RUBY_REASONS: readonly (readonly [string, string | ((rejection: Rejection)
   ],
   [
     'Not enough capturing groups defined to the left',
-    ({ quoted, source }) => {
+    ({ quoted, source, extended }) => {
+      if (regexpCaptureNames(source, extended).length > 0) return NUMBERED_REFERENCE_REASON;
       const captures = source.replaceAll(/\\[\s\S]/g, '').match(/\((?!\?)/g)?.length ?? 0;
       return Number(quoted.slice(1)) > captures ? 'invalid backref number/name' : undefined;
     },
