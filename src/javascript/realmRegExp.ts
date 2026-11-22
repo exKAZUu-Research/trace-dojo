@@ -131,6 +131,7 @@ function withHostRegExp<T>(runtime: Runtime, object: RegExpObject, run: (regexp:
   const lastIndex = runtime.toNumber(runtime.get(object, 'lastIndex'));
   regexp.lastIndex = Number.isNaN(lastIndex) ? 0 : Math.max(0, Math.trunc(lastIndex));
   const result = run(regexp);
+  runtime.budget.checkClock();
   if (regexp.global || regexp.sticky) runtime.set(object, 'lastIndex', regexp.lastIndex);
   return result;
 }
@@ -503,6 +504,7 @@ function splitMatcher(runtime: Runtime, { matcher: splitter, isPrivate }: RegExp
     return (position) => {
       matcher.lastIndex = position;
       const match = matcher.exec(text);
+      runtime.budget.checkClock();
       if (!match) return;
       return { end: Math.min(matcher.lastIndex, text.length), captures: match.slice(1) };
     };

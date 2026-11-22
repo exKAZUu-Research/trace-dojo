@@ -1,7 +1,6 @@
-// code-gauge-allow-file fileNcss 408 -- Binding declarations and assignments share property and rest type resolution.
-import assert from 'node:assert/strict';
-
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
+// code-gauge-allow-file fileNcss 408 -- Binding declarations and assignments share property and rest type resolution.
+import { assert } from 'es-toolkit';
 
 import { functionLikeTypes } from './binder';
 import {
@@ -470,7 +469,7 @@ export class BindingPatterns {
     const excluded = unionOf([...omitted, ...unspreadable]);
     if (isIntrinsic(excluded, 'never')) return source;
     const omit = this.c.libraryBinder.moduleScope.lookupType('Omit');
-    assert.ok(omit);
+    assert(omit, 'The library does not declare Omit');
     const parameters = this.c.signatures.typeParametersOfSymbol(omit);
     const arguments_ = [source, excluded];
     return this.c.instantiate(

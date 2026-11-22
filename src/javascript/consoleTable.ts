@@ -1,4 +1,4 @@
-import { stripVTControlCharacters } from 'node:util';
+import stripAnsi from 'strip-ansi';
 
 import { ArrayOps } from './arrayOps';
 import { inspectValue, OutputBudget, stringWidth } from './inspect';
@@ -148,7 +148,7 @@ function renderTable(runtime: Runtime, head: string[], columns: string[][]): str
 }
 
 function tableCell(text: string): { text: string; width: number } {
-  return { text, width: stringWidth(stripVTControlCharacters(text)) };
+  return { text, width: stringWidth(stripAnsi(text)) };
 }
 
 /** Fills a row's cells for the own enumerable properties of an object. */
