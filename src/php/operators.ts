@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss -- PHP operators share coercion and comparison helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { platformBinary } from '../interpreter/platformMath';
+import { power as floatPower } from '../interpreter/power';
 import {
   boolValue,
   compareBytes,
@@ -275,12 +275,12 @@ function power(a: bigint | number, b: bigint | number, pending?: PhpThrow): bigi
       if (exponent % 2n !== 0n) {
         exponent--;
         const product = signedArithmetic('*', result, factor);
-        if (typeof product === 'number') return product * platformBinary('pow', Number(factor), Number(exponent));
+        if (typeof product === 'number') return product * floatPower(Number(factor), Number(exponent));
         result = product;
       } else {
         exponent /= 2n;
         const square = signedArithmetic('*', factor, factor);
-        if (typeof square === 'number') return Number(result) * platformBinary('pow', square, Number(exponent));
+        if (typeof square === 'number') return Number(result) * floatPower(square, Number(exponent));
         factor = square;
       }
     }
@@ -289,7 +289,7 @@ function power(a: bigint | number, b: bigint | number, pending?: PhpThrow): bigi
   if (Number(a) === 0 && Number(b) < 0) {
     operatorDiagnostic(pending, deprecated, 'Power of base 0 and negative exponent is deprecated');
   }
-  return platformBinary('pow', Number(a), Number(b));
+  return floatPower(Number(a), Number(b));
 }
 
 /**
