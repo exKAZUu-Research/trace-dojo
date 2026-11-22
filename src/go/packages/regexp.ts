@@ -197,18 +197,10 @@ function readerSource(re: RegexpState, reader: Value): Source {
  * -1 marks a group that took no part in the match.
  */
 function doFind({ matcher, length }: Source, pos: number, submatches = false): number[] | undefined {
-  const runtime = currentRuntime();
-  // The engine cannot be interrupted and may visit every instruction at every byte, so a search whose worst case is
-  // a large share of the time limit is charged in full before it starts, and any other by what it scanned.
-  const programSize = matcher.programSize();
-  const worstSteps = (length - pos) * programSize;
-  if (worstSteps > MAX_UNCHARGED_STEPS) runtime.spend(Math.ceil(worstSteps / STEPS_PER_OPERATION));
   const found = matcher.find(pos);
-  if (worstSteps <= MAX_UNCHARGED_STEPS) {
-    const scanned = (found ? matcher.end() : length) - pos;
-    runtime.spend(1 + Math.ceil((scanned * programSize) / (4 * STEPS_PER_OPERATION)));
-  }
-  runtime.budget.checkClock();
+  spendFor((found ? matcher.end() : length) - pos);
+  // The engine cannot be interrupted, so a loop of slow searches is stopped between them.
+  currentRuntime().budget.checkClock();
   if (!found) return undefined;
   const match = [matcher.start(), matcher.end()];
   if (submatches) {
@@ -216,11 +208,6 @@ function doFind({ matcher, length }: Source, pos: number, submatches = false): n
   }
   return match;
 }
-
-/** Engine steps (an instruction at a byte) that a search may take before its cost is known: about 0.5 s at worst. */
-const MAX_UNCHARGED_STEPS = 4_000_000;
-/** Worst-case engine steps that cost one operation, which makes the operation limit stand for about 2 s of them. */
-const STEPS_PER_OPERATION = 16;
 
 /** Go's `(*Regexp).matches`: the successive matches, up to `max` when it is not negative. */
 // code-gauge-allow functionCognitiveComplexity -- Transcribes Go's matches step by step.

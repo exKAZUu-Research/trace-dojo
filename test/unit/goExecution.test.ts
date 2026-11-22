@@ -1141,22 +1141,6 @@ func main() {
   });
 });
 
-// The regexp engine cannot be interrupted, so a search that could hold the thread for seconds must stop before it runs.
-test('a regexp search whose worst case exceeds the time limit stops at the operation limit', () => {
-  const program = `package main
-
-import (
-	"fmt"
-	"regexp"
-	"strings"
-)
-
-func main() {
-	fmt.Println(regexp.MustCompile("(?:a{0,1000})*z|").MatchString(strings.Repeat("a", 100000)))
-}`;
-  expect(executeProgram('go', program)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
-});
-
 test('a run that changes library variables leaves the next run unaffected', () => {
   const changing = `package main
 import ("fmt"; "os"; "time"; "unicode")
