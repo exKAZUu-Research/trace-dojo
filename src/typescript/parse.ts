@@ -157,7 +157,6 @@ function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagno
     if (message) errors.push({ row: node.startPosition.row, message });
     checkMixedLogicalOperators(node, errors);
     const located =
-      stringLineBreakError(node) ??
       superTypeArgumentError(node) ??
       exponentiationBaseError(node) ??
       operandAssignmentError(node) ??
@@ -166,7 +165,19 @@ function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagno
     for (const child of node.children) if (child) visit(child);
   };
   visit(root);
-  return errors.toSorted((left, right) => left.row - right.row);
+  return replaceUnterminatedStringErrors(root, errors).toSorted((left, right) => left.row - right.row);
+}
+
+/** Names the unparsable text that a quoted string with a raw line break leaves, as tsc does. */
+function replaceUnterminatedStringErrors(root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] {
+  const unparsable = root.descendantsOfType('ERROR');
+  const unterminated = unparsable.map((node) => unterminatedStringError(node)).filter((error) => error !== undefined);
+  if (unterminated.length === 0) return errors;
+  const unparsableRows = new Set(unparsable.map((node) => node.startPosition.row));
+  return [
+    ...errors.filter((error) => error.message !== '書き方に誤りがあります。' || !unparsableRows.has(error.row)),
+    ...unterminated,
+  ];
 }
 
 function strictIdentifierError(node: Node): string | undefined {
@@ -175,10 +186,13 @@ function strictIdentifierError(node: Node): string | undefined {
   return strictReservedWords.has(name) ? `識別子が必要です。'${name}' は Strict モードでは予約語です。` : undefined;
 }
 
-function stringLineBreakError(node: Node): SourceDiagnostic | undefined {
-  if (node.type !== 'string') return undefined;
-  let row = node.startPosition.row;
-  for (const [token] of node.text.matchAll(/\\(?:\r\n|[\s\S])|[\r\n]/g)) {
+function unterminatedStringError(node: Node): SourceDiagnostic | undefined {
+  const opening = node.children.find((child) => child.type === "'" || child.type === '"');
+  if (!opening) return undefined;
+  const rest = node.text.slice(opening.endIndex - node.startIndex);
+  let row = opening.startPosition.row;
+  for (const [token] of rest.matchAll(/\\(?:\r\n|[\s\S])|[\r\n'"]/g)) {
+    if (token === opening.type) return undefined;
     if (token === '\r' || token === '\n') return { row, message: '文字列リテラルが閉じられていません。' };
     if (token === '\\\r\n' || token === '\\\r' || token === '\\\n') row++;
   }
