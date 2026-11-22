@@ -17,7 +17,8 @@ interface RegexpFlags {
   extended: boolean;
 }
 
-const ESCAPE = /\\(?:[\s\S])?/uy;
+// A reference is one token with its name, so that punctuation in the name cannot open a class or a group.
+const ESCAPE = /\\(?:[kg](?:<[^>]*>|'[^']*')|[\s\S])?/uy;
 const POSIX_BRACKET = /\[:\^?\w*:\]/y;
 const CLASS_OPEN = /\[\^?/y;
 const COMMENT_GROUP = /\(\?#(?:\\[\s\S]|[^)\\])*\)?/y;

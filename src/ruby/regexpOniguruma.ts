@@ -8,7 +8,7 @@ interface Rewrite {
   length: number;
 }
 
-const REFERENCE_NAME = /<([^>]*)>|'([^']*)'/y;
+const REFERENCE = /^\\[kg](?:<([^>]*)>|'([^']*)')$/;
 const INTERVAL = /\{(\d+)(?:,(\d*))?\}(\?)?/y;
 /** Whitespace that the library skips in extended mode although Ruby matches it literally. */
 const LITERAL_WHITESPACE = /^[^\S \t\n\f\r]$/;
@@ -62,7 +62,7 @@ function rewrittenToken(source: string, token: RegexpToken, aliases: Map<string,
 function rewrittenEscape(source: string, token: RegexpToken, aliases: Map<string, string>): Rewrite | undefined {
   const next = token.raw[1];
   const end = token.start + token.raw.length;
-  if (next === 'K' && !token.inClass) throw new UnsupportedFeatureError(String.raw`正規表現の\K`);
+  if (next === 'K' && !token.inClass) throw new UnsupportedFeatureError(`正規表現の${String.raw`\K`}`);
   // Oniguruma reads these two as character sets, while Ruby reads an unknown escape as the letter itself.
   if (next === 'N' || next === 'O') return { text: next, length: token.raw.length };
   if (next in ASCII_SHORTHANDS)
@@ -77,15 +77,10 @@ function rewrittenEscape(source: string, token: RegexpToken, aliases: Map<string
       }
     );
   }
-  return (next === 'k' || next === 'g') && !token.inClass ? rewrittenReference(source, token, aliases) : undefined;
-}
-
-function rewrittenReference(source: string, token: RegexpToken, aliases: Map<string, string>): Rewrite | undefined {
-  REFERENCE_NAME.lastIndex = token.start + token.raw.length;
-  const reference = REFERENCE_NAME.exec(source);
+  const reference = token.inClass ? undefined : REFERENCE.exec(token.raw);
   if (!reference) return undefined;
   const name = reference[1] ?? reference[2];
-  return { text: `${token.raw}<${aliases.get(name) ?? name}>`, length: token.raw.length + reference[0].length };
+  return { text: `${token.raw.slice(0, 2)}<${aliases.get(name) ?? name}>`, length: token.raw.length };
 }
 
 /** Whether a class shorthand stands where a range bound would; the unchanged shorthand lets the library reject it as Ruby does. */
