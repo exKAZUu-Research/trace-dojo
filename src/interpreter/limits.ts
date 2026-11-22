@@ -6,7 +6,7 @@ export class ExecutionLimitError extends Error {
   }
 }
 
-/** Bounds every run, since learners' programs run inside the web server's process. */
+/** Bounds every run, since a learner's program must not hang the page that grades it. */
 export const LIMITS = {
   maxOperations: 1_000_000,
   maxMilliseconds: 2000,
@@ -85,5 +85,5 @@ export class ExecutionBudget {
   }
 }
 
-/** Model programs are trusted but must not hang the server through an accidental unbounded loop. */
+/** Model programs are trusted but must not hang a page through an accidental unbounded loop. */
 export const MAX_TRACE_ITEMS = 10_000;

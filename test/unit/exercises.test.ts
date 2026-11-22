@@ -18,7 +18,9 @@ import type { db as databaseClient } from '../../src/infrastructures/database';
 import type { BackendRouter } from '../../src/infrastructures/trpcBackend/routers';
 import type { ChallengeMetadata } from '../../src/problems/challenge/metadata';
 import { fillBlanks } from '../../src/problems/fillInBlank/blanks';
-import type { instantiateProblem as instantiateProblemType } from '../../src/problems/instantiateProblem';
+import type { FillInBlankVerdict } from '../../src/problems/fillInBlank/grade';
+import type { StoredProblem } from '../helpers/browserSide';
+import type { instantiateProblem as instantiateProblemType } from '../helpers/nodeProblems';
 
 const auth = vi.hoisted(() => ({ userId: 'student' }));
 vi.mock('../../src/utils/sessionOnNode', () => ({
@@ -63,8 +65,19 @@ type Exercise = z.infer<typeof exerciseSchema>;
 let directory: string;
 let sqlite: DatabaseSync;
 let db: typeof databaseClient;
-let caller: ReturnType<BackendRouter['createCaller']>;
-let runtimeCaller: TRPCUntypedClient<BackendRouter>;
+type ServerCaller = ReturnType<BackendRouter['createCaller']>;
+/** Calls procedures as the pages do: see `withBrowserSide`. */
+type BrowserSideCaller = Omit<ServerCaller, 'submitExercise' | 'createFillInBlankSubmission'> & {
+  submitExercise: (
+    input: Omit<Parameters<ServerCaller['submitExercise']>[0], 'status'> & { status?: 'correct' | 'incorrect' }
+  ) => Promise<FillInBlankVerdict>;
+  createFillInBlankSubmission: (
+    input: Omit<Parameters<ServerCaller['createFillInBlankSubmission']>[0], 'isCorrect'>
+  ) => Promise<FillInBlankVerdict>;
+};
+let caller: BrowserSideCaller;
+let serverCaller: Record<string, (input: object) => Promise<unknown>>;
+let runtimeCaller: { mutation: (procedure: string, input: object) => Promise<unknown> };
 let instantiateProblem: typeof instantiateProblemType;
 let challengeMap: ChallengeMap;
 let originalChallengeTestLectures: string[][] | undefined;
@@ -81,11 +94,12 @@ beforeAll(async () => {
     'NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON',
     JSON.stringify({ test: ['test', 'other'], other: ['test'], tuBeginner1: ['lecture1'], tuBeginner2: ['lecture1'] })
   );
-  ({ instantiateProblem } = await import('../../src/problems/instantiateProblem'));
+  ({ instantiateProblem } = await import('../helpers/nodeProblems'));
+  const { withBrowserSide } = await import('../helpers/browserSide');
   ({ db } = await import('../../src/infrastructures/database'));
   migrate(db, { migrationsFolder: 'drizzle' });
   const { backendRouter } = await import('../../src/infrastructures/trpcBackend/routers');
-  runtimeCaller = createTRPCUntypedClient<BackendRouter>({
+  const runtimeClient: TRPCUntypedClient<BackendRouter> = createTRPCUntypedClient<BackendRouter>({
     links: [
       httpLink({
         url: 'http://localhost/api/trpc',
@@ -101,11 +115,19 @@ beforeAll(async () => {
       }),
     ],
   });
-  caller = backendRouter.createCaller({
+  runtimeCaller = {
+    mutation: withBrowserSide((procedure, input) => runtimeClient.mutation(procedure, input), findStoredProblem),
+  };
+  serverCaller = backendRouter.createCaller({
     req: new Request('http://localhost', { headers: { Cookie: 'sAccessToken=test' } }),
     resHeaders: new Headers(),
     info: {} as never,
-  });
+  }) as unknown as typeof serverCaller;
+  const invoke = withBrowserSide((procedure, input) => serverCaller[procedure](input), findStoredProblem);
+  caller = new Proxy(
+    {},
+    { get: (_, procedure: string) => (input: Record<string, unknown>) => invoke(procedure, input) }
+  ) as BrowserSideCaller;
   const problemData = (await import('../../src/problems/problemData')) as unknown as {
     courseIdToLectureIndexToExerciseProblemIds?: ChallengeMap;
     courseIdToLectureIndexToProblemIds: ChallengeMap;
@@ -146,6 +168,32 @@ afterAll(() => {
   sqlite?.close();
   if (directory) rmSync(directory, { recursive: true, force: true });
   vi.unstubAllEnvs();
+});
+
+test('a submission from a page opened before the browser graded asks that page to reload', async () => {
+  const blank = await start();
+  await expect(
+    serverCaller.submitExercise({ ...locationOnly(), sessionId: blank.sessionId, code: 'class Main {}' })
+  ).rejects.toMatchObject({ code: 'CONFLICT' });
+  const regular = await startRegular();
+  await expect(
+    serverCaller.submitRegularExercise({
+      ...locationOnly(),
+      sessionId: regular.sessionId,
+      requestId: 'pre-deployment',
+      context: { problemType: 'executionResult', traceItemIndex: 0 },
+      isCorrect: true,
+    })
+  ).rejects.toMatchObject({ code: 'CONFLICT' });
+  expect(exerciseRows().submissions).toEqual([]);
+  await submitRegular(regular, 'complete-before-deployment', true);
+  const sessions = exerciseRows().sessions;
+  for (const request of [
+    serverCaller.nextExercise({ ...locationOnly(), sessionId: regular.sessionId, problemFormat: 'regular' }),
+    serverCaller.startExercise({ ...locationOnly(), problemFormat: 'regular' }),
+  ])
+    await expect(request).rejects.toMatchObject({ code: 'CONFLICT' });
+  expect(exerciseRows().sessions).toEqual(sessions);
 });
 
 test('stores identity and seed without snapshots, then regenerates a safe DTO', async () => {
@@ -236,7 +284,7 @@ test('normal and challenge grade the full source by drawing and preserve it verb
     })
     .returning()
     .get()!;
-  const code = `  \n${source(exercise.sessionId, ['int extra = 99; t.右を向く();'])}\n  `;
+  const code = `  \n${await source(exercise.sessionId, ['int extra = 99; t.右を向く();'])}\n  `;
   const wrongCode = code.replace('new Turtle()', 'new Turtle(1, 0)');
   expect(
     await caller.submitExercise({
@@ -246,7 +294,7 @@ test('normal and challenge grade the full source by drawing and preserve it verb
     })
   ).toMatchObject({ status: 'incorrect' });
   expect(
-    await caller.gradeFillInBlankAnswers({
+    await caller.createFillInBlankSubmission({
       sessionId: normal.id,
       code: wrongCode,
       elapsedMilliseconds: 123,
@@ -256,7 +304,7 @@ test('normal and challenge grade the full source by drawing and preserve it verb
     status: 'correct',
   });
   expect(
-    await caller.gradeFillInBlankAnswers({
+    await caller.createFillInBlankSubmission({
       sessionId: normal.id,
       code,
       elapsedMilliseconds: 456,
@@ -277,7 +325,7 @@ test('normal and challenge grade the full source by drawing and preserve it verb
     completedAt: expect.any(Number),
   });
   expect(
-    await caller.gradeFillInBlankAnswers({
+    await caller.createFillInBlankSubmission({
       sessionId: normal.id,
       code,
       elapsedMilliseconds: 456,
@@ -292,7 +340,7 @@ test('normal and challenge grade the full source by drawing and preserve it verb
 
 test('keeps incorrect and time-limit attempts retryable on the same problem', async () => {
   const exercise = await start();
-  const wrong = submission(exercise.sessionId, ['x']);
+  const wrong = await submission(exercise.sessionId, ['x']);
   expect(await caller.submitExercise(wrong)).toMatchObject({ status: 'incorrect' });
   const endless = {
     ...locationOnly(),
@@ -311,7 +359,7 @@ test('rejects cross-user and location-mismatched access without mutation', async
   const exercise = await start();
   const before = exerciseRows();
   auth.userId = 'other';
-  await expect(caller.submitExercise(submission(exercise.sessionId, ['x + 1']))).rejects.toMatchObject({
+  await expect(caller.submitExercise(await submission(exercise.sessionId, ['x + 1']))).rejects.toMatchObject({
     code: 'UNAUTHORIZED',
   });
   auth.userId = 'student';
@@ -341,7 +389,7 @@ test('rolls back both sides of correct submission atomicity', async () => {
     "CREATE TRIGGER reject_exercise_submission BEFORE INSERT ON ExerciseSubmission BEGIN SELECT RAISE(ABORT, 'rejected'); END"
   );
   try {
-    await expect(caller.submitExercise(submission(exercise.sessionId, ['x + 1']))).rejects.toThrow();
+    await expect(caller.submitExercise(await submission(exercise.sessionId, ['x + 1']))).rejects.toThrow();
     expect(exerciseRows()).toMatchObject({ submissions: [], sessions: [expect.any(Object)] });
     expect(completion(exercise.sessionId)).toBeNull();
   } finally {
@@ -351,7 +399,7 @@ test('rolls back both sides of correct submission atomicity', async () => {
     "CREATE TRIGGER reject_exercise_completion BEFORE UPDATE OF completedAt ON ExerciseSession BEGIN SELECT RAISE(ABORT, 'rejected'); END"
   );
   try {
-    await expect(caller.submitExercise(submission(exercise.sessionId, ['x + 1']))).rejects.toThrow();
+    await expect(caller.submitExercise(await submission(exercise.sessionId, ['x + 1']))).rejects.toThrow();
     expect(exerciseRows()).toMatchObject({ submissions: [], sessions: [expect.any(Object)] });
     expect(completion(exercise.sessionId)).toBeNull();
   } finally {
@@ -386,11 +434,11 @@ test('deduplicates concurrent start, correct replay, and Next while isolating or
   const normalBefore = normalRows();
   const [exercise, duplicate] = await Promise.all([start(), start()]);
   expect(duplicate).toEqual(exercise);
-  const answer = submission(exercise.sessionId, ['x + 1']);
+  const answer = await submission(exercise.sessionId, ['x + 1']);
   const results = await Promise.all([caller.submitExercise(answer), caller.submitExercise(answer)]);
   expect(results.map(({ status }) => status)).toEqual(['correct', 'correct']);
   expect(await caller.submitExercise(answer)).toMatchObject({ status: 'correct' });
-  expect(await caller.submitExercise(submission(exercise.sessionId, ['x']))).toMatchObject({
+  expect(await caller.submitExercise(await submission(exercise.sessionId, ['x']))).toMatchObject({
     status: 'incorrect',
   });
   expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSubmission').count).toBe(1);
@@ -404,20 +452,22 @@ test('deduplicates concurrent start, correct replay, and Next while isolating or
 test('stores distinct concurrent incorrect submissions', async () => {
   const exercise = await start();
   const results = await Promise.all([
-    caller.submitExercise(submission(exercise.sessionId, ['x'])),
-    caller.submitExercise(submission(exercise.sessionId, ['x + 2'])),
+    caller.submitExercise(await submission(exercise.sessionId, ['x'])),
+    caller.submitExercise(await submission(exercise.sessionId, ['x + 2'])),
   ]);
   expect(results.map(({ status }) => status)).toEqual(['incorrect', 'incorrect']);
   expect(sqlite.prepare('SELECT code, status FROM ExerciseSubmission ORDER BY id').all()).toEqual([
-    { code: source(exercise.sessionId, ['x']), status: 'incorrect' },
-    { code: source(exercise.sessionId, ['x + 2']), status: 'incorrect' },
+    { code: await source(exercise.sessionId, ['x']), status: 'incorrect' },
+    { code: await source(exercise.sessionId, ['x + 2']), status: 'incorrect' },
   ]);
   expect(await start()).toMatchObject({ sessionId: exercise.sessionId, completed: false });
 });
 
 test('keeps a completed session visible when Next configuration fails and creates one successor on retry', async () => {
   const exercise = await start();
-  expect(await caller.submitExercise(submission(exercise.sessionId, modelAnswers(exercise.sessionId)))).toMatchObject({
+  expect(
+    await caller.submitExercise(await submission(exercise.sessionId, await modelAnswers(exercise.sessionId)))
+  ).toMatchObject({
     status: 'correct',
   });
   const completed = await start();
@@ -443,12 +493,16 @@ test('keeps a completed session visible when Next configuration fails and create
 test('avoids the immediately previous candidate but keeps completed candidates eligible', async () => {
   challengeMap.test = [['fillInBlank1', 'fillInBlank2']];
   const first = await start();
-  expect(await caller.submitExercise(submission(first.sessionId, modelAnswers(first.sessionId)))).toMatchObject({
+  expect(
+    await caller.submitExercise(await submission(first.sessionId, await modelAnswers(first.sessionId)))
+  ).toMatchObject({
     status: 'correct',
   });
   const second = asExercise(await caller.nextExercise({ ...locationOnly(), sessionId: first.sessionId }));
   expect(second.problemId).not.toBe(first.problemId);
-  expect(await caller.submitExercise(submission(second.sessionId, modelAnswers(second.sessionId)))).toMatchObject({
+  expect(
+    await caller.submitExercise(await submission(second.sessionId, await modelAnswers(second.sessionId)))
+  ).toMatchObject({
     status: 'correct',
   });
   const third = asExercise(await caller.nextExercise({ ...locationOnly(), sessionId: second.sessionId }));
@@ -478,10 +532,11 @@ test('normal fill-in-the-blank submissions never create exercise history', async
     })
     .returning()
     .get()!;
+  const { displayProgramTemplate } = await instantiateProblem('fillInBlank2', 'normal-only');
   expect(
-    await caller.gradeFillInBlankAnswers({
+    await caller.createFillInBlankSubmission({
       sessionId: normal.id,
-      code: fillBlanks(instantiateProblem('fillInBlank2', 'normal-only')!.displayProgramTemplate, ['x + 1']),
+      code: fillBlanks(displayProgramTemplate, ['x + 1']),
       elapsedMilliseconds: 1,
     })
   ).toMatchObject({ status: 'correct' });
@@ -596,14 +651,13 @@ test('switches regular exercise one way, resumes step 1, then advances and compl
       sessionId: regular.sessionId,
     })
   ).toEqual(switched);
-  expect(await startRegular()).toEqual({ ...switched, problem: expect.any(Object) });
+  expect(await startRegular()).toEqual({ ...switched, programTemplate: expect.any(String) });
 
   let current = switched;
   while (!current.completed) {
     current = await submitRegular(current, `step-${current.traceItemIndex}`, true);
   }
-  const instantiated = instantiateProblem(regular.problemId, regular.seed as string);
-  if (!instantiated) throw new Error('stored regular problem must instantiate');
+  const instantiated = await instantiateProblem(regular.problemId, regular.seed as string);
   expect(current.traceItemIndex).toBe(instantiated.traceItems.length - 1);
   await expect(
     regularCaller().switchRegularExerciseToStep({
@@ -688,7 +742,7 @@ test.each([{ problemType: 'step' }, { traceItemIndex: 1 }, { isCompleted: true }
 test('keeps omitted-format blank start/Next compatible while explicit regular Next is strict', async () => {
   const blank = await start();
   expect(blank.problemId).toBe('fillInBlank2');
-  await caller.submitExercise(submission(blank.sessionId, modelAnswers(blank.sessionId)));
+  await caller.submitExercise(await submission(blank.sessionId, await modelAnswers(blank.sessionId)));
   await expect(caller.nextExercise({ ...locationOnly(), sessionId: blank.sessionId })).resolves.toMatchObject({
     completed: false,
   });
@@ -783,8 +837,7 @@ test('rejects cross-format and expired regular access without mutation', async (
 
 test('completes a step session whose stored index is past the final trace item of the current definition', async () => {
   const regular = await startRegular();
-  const instantiated = instantiateProblem(regular.problemId, regular.seed as string);
-  if (!instantiated) throw new Error('stored regular problem must instantiate');
+  const instantiated = await instantiateProblem(regular.problemId, regular.seed as string);
   // A definition edited to have fewer steps leaves an active session beyond the regenerated trace.
   sqlite
     .prepare("UPDATE ExerciseSession SET problemType = 'step', traceItemIndex = ? WHERE id = ?")
@@ -912,7 +965,7 @@ test('practice resumes independently, repeats through step mode, and leaves over
   const gradedBefore = normalRows();
   const challenge = await startRegular();
   expect(challenge.sessionId).not.toBe(practice.sessionId);
-  expect(instantiateProblem(practice.problemId, practice.seed)).toBeUndefined();
+  expect(Object.values(regularMap).flat(Infinity)).not.toContain(practice.problemId);
   expect(await startPractice()).toEqual(practice);
   expect(await startRegular()).toEqual(challenge);
 
@@ -1087,9 +1140,15 @@ test('practice rejects unknown and inherited course or lecture names without cre
 
 test('practice rejects blank submission and Next even when given a valid challenge session', async () => {
   const blank = await start();
-  await runtimeCaller.mutation('submitExercise', submission(blank.sessionId, modelAnswers(blank.sessionId)));
+  await runtimeCaller.mutation(
+    'submitExercise',
+    await submission(blank.sessionId, await modelAnswers(blank.sessionId))
+  );
   const before = exerciseRows();
-  const submit = { ...submission(blank.sessionId, modelAnswers(blank.sessionId)), learningMode: 'practice' as const };
+  const submit = {
+    ...(await submission(blank.sessionId, await modelAnswers(blank.sessionId))),
+    learningMode: 'practice' as const,
+  };
   await expect(runtimeCaller.mutation('submitExercise', submit)).rejects.toMatchObject({
     data: { code: 'BAD_REQUEST' },
   });
@@ -1230,6 +1289,19 @@ const practiceSubmission = (
   isCorrect,
 });
 
+const storedProblemSchema = z.object({ problemId: z.string(), seed: z.string() });
+const findStoredProblem = (procedure: string, sessionId: number): StoredProblem | undefined =>
+  storedProblemSchema
+    .optional()
+    .parse(
+      sqlite
+        .prepare(
+          procedure === 'createFillInBlankSubmission'
+            ? 'SELECT problemId, problemVariablesSeed AS seed FROM ProblemSession WHERE id = ?'
+            : 'SELECT problemId, seed FROM ExerciseSession WHERE id = ?'
+        )
+        .get(sessionId)
+    );
 const start = async (): Promise<Exercise> => {
   const value = await caller.startExercise(locationOnly());
   return asExercise(value);
@@ -1272,17 +1344,16 @@ const submitRegular = async (
 ): Promise<RegularExercise> => regularCaller().submitRegularExercise(regularSubmission(exercise, requestId, isCorrect));
 const asExercise = (value: unknown): Exercise => exerciseSchema.parse(value);
 const locationOnly = (): Location => ({ courseId: 'test', lectureId: 'test' });
-const submission = (sessionId: number, answers: string[]): Submission => ({
+const submission = async (sessionId: number, answers: string[]): Promise<Submission> => ({
   ...locationOnly(),
   sessionId,
-  code: source(sessionId, answers),
+  code: await source(sessionId, answers),
 });
-const source = (sessionId: number, answers: string[]): string => {
+const source = async (sessionId: number, answers: string[]): Promise<string> => {
   const stored = z
     .object({ problemId: z.string(), seed: z.string() })
     .parse(sqlite.prepare('SELECT problemId, seed FROM ExerciseSession WHERE id = ?').get(sessionId));
-  const problem = instantiateProblem(stored.problemId, stored.seed);
-  if (!problem) throw new Error(`Unknown problem: ${stored.problemId}`);
+  const problem = await instantiateProblem(stored.problemId, stored.seed);
   return fillBlanks(problem.displayProgramTemplate, answers);
 };
 const one = <T>(schema: z.ZodType<T>, sql: string): T => schema.parse(sqlite.prepare(sql).get());
@@ -1290,12 +1361,11 @@ const completion = (sessionId: number): number | null =>
   z
     .object({ completedAt: z.number().nullable() })
     .parse(sqlite.prepare('SELECT completedAt FROM ExerciseSession WHERE id = ?').get(sessionId)).completedAt;
-const modelAnswers = (sessionId: number): string[] => {
+const modelAnswers = async (sessionId: number): Promise<string[]> => {
   const stored = z
     .object({ problemId: z.string(), seed: z.string() })
     .parse(sqlite.prepare('SELECT problemId, seed FROM ExerciseSession WHERE id = ?').get(sessionId));
-  const problem = instantiateProblem(stored.problemId, stored.seed);
-  if (!problem) throw new Error(`Unknown problem: ${stored.problemId}`);
+  const problem = await instantiateProblem(stored.problemId, stored.seed);
   return problem.blankAnswers;
 };
 const expectStartSkipsCorruptedRow = (
@@ -1320,8 +1390,8 @@ const normalRows = (): { sessions: unknown[]; submissions: unknown[] } => ({
 
 test('merges only identical in-flight source and grades settled retries again', async () => {
   const exercise = await start();
-  const input = submission(exercise.sessionId, ['x']);
-  const different = submission(exercise.sessionId, ['x + 2']);
+  const input = await submission(exercise.sessionId, ['x']);
+  const different = await submission(exercise.sessionId, ['x + 2']);
   const results = await Promise.all([
     caller.submitExercise(input),
     caller.submitExercise(input),
@@ -1364,7 +1434,7 @@ test.each(['ordinary', 'challenge'] as const)(
     const submit = async (): Promise<unknown> =>
       exercise
         ? caller.submitExercise({ ...locationOnly(), sessionId: exercise.sessionId, code })
-        : caller.gradeFillInBlankAnswers({ sessionId: normal!.id, code, elapsedMilliseconds: 12 });
+        : caller.createFillInBlankSubmission({ sessionId: normal!.id, code, elapsedMilliseconds: 12 });
     for (let attempt = 0; attempt < 2; attempt += 1) {
       expect(await submit()).toEqual({
         status: 'incorrect',
@@ -1412,7 +1482,7 @@ const completeFormat = async (exercise: EndExercise, format: EndFormat): Promise
         })
       ).resolves.toMatchObject({ completed: true })
     : expect(
-        caller.submitExercise(submission(exercise.sessionId, modelAnswers(exercise.sessionId)))
+        caller.submitExercise(await submission(exercise.sessionId, await modelAnswers(exercise.sessionId)))
       ).resolves.toMatchObject({ status: 'correct' }));
 };
 const nextFormat = async (exercise: EndExercise, format: EndFormat): Promise<EndExercise> =>
@@ -1435,10 +1505,9 @@ test.each<EndFormat>(['regular', 'fillInBlank'])(
       })
       .returning()
       .get()!;
-    const ordinaryProblem = instantiateProblem('fillInBlank2', 'ordinary-end-isolation');
-    if (!ordinaryProblem) throw new Error('Unknown problem: fillInBlank2');
+    const ordinaryProblem = await instantiateProblem('fillInBlank2', 'ordinary-end-isolation');
     const code = fillBlanks(ordinaryProblem.displayProgramTemplate, ['x + 1']);
-    await caller.gradeFillInBlankAnswers({ sessionId: normal.id, code, elapsedMilliseconds: 7 });
+    await caller.createFillInBlankSubmission({ sessionId: normal.id, code, elapsedMilliseconds: 7 });
     const ordinaryBefore = normalRows();
     const first = await startFormat(format);
     const otherFormat = format === 'regular' ? 'fillInBlank' : 'regular';
@@ -1493,7 +1562,9 @@ test.each<EndFormat>(['regular', 'fillInBlank'])(
         regularCaller().switchRegularExerciseToStep({ ...locationOnly(), sessionId: b.sessionId })
       ).rejects.toMatchObject({ code: 'CONFLICT' });
     } else {
-      await expect(caller.submitExercise(submission(b.sessionId, modelAnswers(b.sessionId)))).rejects.toMatchObject({
+      await expect(
+        caller.submitExercise(await submission(b.sessionId, await modelAnswers(b.sessionId)))
+      ).rejects.toMatchObject({
         code: 'CONFLICT',
       });
     }
@@ -1578,14 +1649,13 @@ test.each([
   'explicit End sent right after a submission waits for its $verdict verdict',
   async ({ verdict, answers }) => {
     const first = await start();
-    const [result, outcome] = await Promise.all([
-      caller.submitExercise(submission(first.sessionId, [...answers])),
+    const [, outcome] = await Promise.all([
+      caller.submitExercise({ ...(await submission(first.sessionId, [...answers])), status: verdict }),
       endExercise(first.sessionId, 'fillInBlank').then(
         (value) => ({ value }),
         (error: unknown) => ({ error })
       ),
     ]);
-    expect(result).toMatchObject({ status: verdict });
     if (verdict === 'correct') {
       expect(outcome).toEqual({ value: { status: 'ended' } });
       expect(endedRecord(first.sessionId)).toMatchObject({
@@ -1611,7 +1681,7 @@ test('explicit End refuses expired sessions and preserves unfinished step resume
   await expect(endExercise(regular.sessionId, 'regular')).rejects.toMatchObject({
     code: 'CONFLICT',
   });
-  expect(await startRegular()).toEqual({ ...stepped, problem: expect.any(Object) });
+  expect(await startRegular()).toEqual({ ...stepped, programTemplate: expect.any(String) });
   sqlite.prepare('UPDATE ExerciseSession SET createdAt = 0 WHERE id = ?').run(regular.sessionId);
   vi.setSystemTime(new Date('2026-07-15T12:00:00+09:00'));
   const expired = exerciseRows();

@@ -7,7 +7,7 @@ export default defineConfig({
     setupFiles: ['./test/helpers/setup.ts'],
     // Leave CPU capacity for native interpreter subprocesses within per-program deadlines.
     maxWorkers: '50%',
-    // As scripts/start-production.sh runs the server, so that deep recursion behaves as there.
+    // The interpreters recurse as deeply as the programs they run, up to their own call depth limit.
     execArgv: ['--stack-size=4000'],
   },
   resolve: {
