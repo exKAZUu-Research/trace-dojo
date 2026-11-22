@@ -173,10 +173,12 @@ function replaceUnterminatedStringErrors(root: Node, source: string, errors: Sou
   const replacedRows: number[] = [];
   const unterminated: SourceDiagnostic[] = [];
   for (const node of root.descendantsOfType('ERROR')) {
-    const error = unterminatedStringError(node, source);
+    const opening = node.children.find((child) => child.type === "'" || child.type === '"');
+    const error = opening && unterminatedStringError(opening, source);
     if (!error) continue;
-    replacedRows.push(node.startPosition.row);
     unterminated.push(error);
+    // An ERROR node starting on an earlier row also covers a mistake before the string, which keeps its own error.
+    if (opening.startPosition.row === node.startPosition.row) replacedRows.push(node.startPosition.row);
   }
   if (unterminated.length === 0) return errors;
   // Each ERROR node reports one generic error at its start row, so dropping one per replaced row keeps the others.
@@ -195,9 +197,7 @@ function strictIdentifierError(node: Node): string | undefined {
 }
 
 /** The ERROR node may end before the line break that leaves its string open, so the scan reads on into the source. */
-function unterminatedStringError(node: Node, source: string): SourceDiagnostic | undefined {
-  const opening = node.children.find((child) => child.type === "'" || child.type === '"');
-  if (!opening) return undefined;
+function unterminatedStringError(opening: Node, source: string): SourceDiagnostic | undefined {
   const rest = source.slice(opening.endIndex);
   let row = opening.startPosition.row;
   for (const [token] of rest.matchAll(/\\(?:\r\n|[\s\S])|[\r\n'"]/g)) {
