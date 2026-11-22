@@ -170,14 +170,22 @@ function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagno
 
 /** Names the unparsable text that a quoted string with a raw line break leaves, as tsc does. */
 function replaceUnterminatedStringErrors(root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] {
-  const unparsable = root.descendantsOfType('ERROR');
-  const unterminated = unparsable.map((node) => unterminatedStringError(node)).filter((error) => error !== undefined);
+  const replacedRows: number[] = [];
+  const unterminated: SourceDiagnostic[] = [];
+  for (const node of root.descendantsOfType('ERROR')) {
+    const error = unterminatedStringError(node);
+    if (!error) continue;
+    replacedRows.push(node.startPosition.row);
+    unterminated.push(error);
+  }
   if (unterminated.length === 0) return errors;
-  const unparsableRows = new Set(unparsable.map((node) => node.startPosition.row));
-  return [
-    ...errors.filter((error) => error.message !== '書き方に誤りがあります。' || !unparsableRows.has(error.row)),
-    ...unterminated,
-  ];
+  // Each ERROR node reports one generic error at its start row, so dropping one per replaced row keeps the others.
+  const remaining = [...errors];
+  for (const row of replacedRows) {
+    const index = remaining.findIndex((error) => error.row === row && error.message === '書き方に誤りがあります。');
+    if (index !== -1) remaining.splice(index, 1);
+  }
+  return [...remaining, ...unterminated];
 }
 
 function strictIdentifierError(node: Node): string | undefined {
