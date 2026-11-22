@@ -7,6 +7,7 @@
 export const browserReadyInterpreters = {
   c: () => import('./languages/c'),
   cpp: () => import('./languages/cpp'),
+  dart: () => import('./languages/dart'),
   go: () => import('./languages/go'),
   haskell: () => import('./languages/haskell'),
   java: () => import('./languages/java'),
