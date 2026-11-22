@@ -209,7 +209,7 @@ export function defineCollectionBuiltins(builder: RealmBuilder): void {
 }
 
 /** Defines a constructor whose instances carry a {@link CollectionState}, filled from an iterable through `adderName`. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function defineCollectionClass(
   builder: RealmBuilder,
   kind: CollectionKind,
@@ -339,7 +339,7 @@ function defineSizeAndClear(builder: RealmBuilder, prototype: JsObject, kind: 'M
   collectionMethod(builder, prototype, kind, 'forEach', 1, forEachEntry);
 }
 
-// code-gauge-allow functionNcss 35 -- Lists the builtin methods, each a small closure of its own.
+// code-gauge-allow functionNcss -- Lists the builtin methods, each a small closure of its own.
 function defineMap(builder: RealmBuilder): void {
   const { prototype, constructor } = defineCollectionClass(builder, 'Map', 'set', builder.realm.mapPrototype);
   collectionMethod(builder, prototype, 'Map', 'get', 1, ({ args }, state) => state.entryOf(args[0])?.value);
@@ -520,8 +520,8 @@ function defineSetAlgebra(builder: RealmBuilder, prototype: JsObject): void {
   defineSetComparisons(algebra);
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
-// code-gauge-allow functionNcss 34 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionNcss -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function defineSetCombinations(algebra: SetAlgebra, newSet: NewSet): void {
   algebra('union', (call, state, record) => {
     const result = newSet(call.runtime, state);

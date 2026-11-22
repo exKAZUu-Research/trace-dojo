@@ -22,7 +22,7 @@ export abstract class MacroConverter extends PatternConverter {
     return this.macroCall(name, tree, span);
   }
 
-  // code-gauge-allow functionNcss 38 -- One case per macro.
+  // code-gauge-allow functionNcss -- One case per macro.
   private macroCall(name: string, tree: Node, span: Span): MacroCall {
     switch (name) {
       case 'println':

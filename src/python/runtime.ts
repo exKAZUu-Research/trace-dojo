@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 497 -- The state of a run and the operations the interpreter reaches through it.
+// code-gauge-allow-file fileNcss -- The state of a run and the operations the interpreter reaches through it.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -351,7 +351,7 @@ export class Runtime {
     return new Frame('function', locals, cells, fn.globals, this.currentRow, def.isAtomic, def.scope, fn, fn.classCell);
   }
 
-  // code-gauge-allow duplicateLines 15 -- The synchronous and suspending calls of a function share entry and exit, not the body's run.
+  // code-gauge-allow duplicateLines -- The synchronous and suspending calls of a function share entry and exit, not the body's run.
   callFunction(fn: PyFunction, args: readonly PyValue[], kwargs: Kwargs): PyValue {
     const entry = this.enterFunction(fn, args, kwargs);
     if (!entry.frame) return entry.value;
@@ -431,8 +431,8 @@ export class Runtime {
   }
 
   /** A generator, coroutine, or async generator object that runs `body` in `frame` step by step. */
-  // code-gauge-allow functionNcss 35 -- Frame entry and exit must keep exception, trace, and ownership state in one try/finally.
-  // code-gauge-allow functionCognitiveComplexity 16 -- Frame entry and exit keep exception, trace and ownership state together.
+  // code-gauge-allow functionNcss -- Frame entry and exit must keep exception, trace, and ownership state in one try/finally.
+  // code-gauge-allow functionCognitiveComplexity -- Frame entry and exit keep exception, trace and ownership state together.
   frameGenerator(
     cls: PyClass,
     name: string,
@@ -800,7 +800,7 @@ const GENERATOR_ATTRIBUTES: Record<string, string[]> = {
 };
 
 /** The attribute names `dir()` lists for an object other than a module. */
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of object whose attributes dir() lists.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of object whose attributes dir() lists.
 function objectAttributeNames(value: PyValue): Set<string> {
   const names = new Set<string>();
   const add = (keys: Iterable<string>): void => {

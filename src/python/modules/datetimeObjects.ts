@@ -26,7 +26,7 @@ export interface TimeOfDay {
 }
 
 export class PyDateTime extends PyDate implements TimeOfDay {
-  // code-gauge-allow functionParameterCount 10 -- Mirrors the fields of a datetime.
+  // code-gauge-allow functionParameterCount -- Mirrors the fields of a datetime.
   constructor(
     cls: PyClass,
     year: number,
@@ -44,7 +44,7 @@ export class PyDateTime extends PyDate implements TimeOfDay {
 }
 
 export class PyTime extends PyInstance implements TimeOfDay {
-  // code-gauge-allow functionParameterCount 7 -- Mirrors the fields of a time.
+  // code-gauge-allow functionParameterCount -- Mirrors the fields of a time.
   constructor(
     cls: PyClass,
     readonly hour: number,

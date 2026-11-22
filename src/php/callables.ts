@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 757 -- Keeps implicit dispatch and native result ownership together.
+// code-gauge-allow-file fileNcss -- Keeps implicit dispatch and native result ownership together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
@@ -423,8 +423,8 @@ function readArrayKeyExistsWithMissingKey(
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Resolves each form of call and callable in PHP's order of checks.
-// code-gauge-allow functionNcss 48 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
+// code-gauge-allow functionCognitiveComplexity -- Resolves each form of call and callable in PHP's order of checks.
+// code-gauge-allow functionNcss -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardResult = false): Chain {
   const runtime = rt();
   const member = e.name;
@@ -573,8 +573,8 @@ function invokeMagic(
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
-// code-gauge-allow functionNcss 48 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
+// code-gauge-allow functionCognitiveComplexity -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
+// code-gauge-allow functionNcss -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardResult = false): Chain {
   const runtime = rt();
   const frame = runtime.frame;
@@ -800,7 +800,7 @@ export function explainCallable(value: Value): string {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function resolveCallable(value: Value, mode: 'direct' | 'callback', emitScopeWarning = false): CallTarget {
   const runtime = rt();
   const scope = runtime.frame.scope;
@@ -960,8 +960,8 @@ function magicTarget(receiver: PhpObject | undefined, calledClass: PhpClass, met
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function staticCallable(
   className: string,
   methodName: string,

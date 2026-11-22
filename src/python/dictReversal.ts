@@ -10,8 +10,8 @@ type DictView = 'keys' | 'values' | 'items';
 const ITERATOR_NAMES = { keys: 'key', values: 'value', items: 'item' } as const;
 
 /** `reversed()` of a dict or its view, which reads the entries lazily as CPython's dictreviter does. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Reverse traversal, reduction and cached tuple ownership share one state machine.
-// code-gauge-allow functionNcss 31 -- Reverse traversal, reduction and cached tuple ownership share one state machine.
+// code-gauge-allow functionCognitiveComplexity -- Reverse traversal, reduction and cached tuple ownership share one state machine.
+// code-gauge-allow functionNcss -- Reverse traversal, reduction and cached tuple ownership share one state machine.
 export function reversedDictIterator(dict: PyDict, view: DictView): PyIterator {
   const { store } = dict;
   const { size, version } = store;

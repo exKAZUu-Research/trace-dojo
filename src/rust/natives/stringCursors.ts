@@ -86,7 +86,7 @@ function utf8Cursor(chars: IterValue, state: ByteCursorState): IterValue {
   return iter;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- The two directions take from opposite pending byte buffers.
+// code-gauge-allow functionCognitiveComplexity -- The two directions take from opposite pending byte buffers.
 function takeByte(chars: IterValue, state: ByteCursorState, reverse: boolean): Next {
   const local = reverse ? state.back : state.front;
   if (local.length === 0) {

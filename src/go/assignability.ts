@@ -22,7 +22,7 @@ import { Complex, type Value } from './values';
 export type Representation = { constant: Constant } | { error: 'overflows' | 'truncated' | 'mismatch' };
 
 /** Converts a constant to a basic type, as an untyped constant converts implicitly or a typed one is checked. */
-// code-gauge-allow functionNcss 45 -- Applies Go assignment rules in their precedence order with one diagnostic result.
+// code-gauge-allow functionNcss -- Applies Go assignment rules in their precedence order with one diagnostic result.
 export function represent(constant: Constant, type: Type): Representation {
   const under = underlying(type);
   if (under.kind !== 'basic') return { error: 'mismatch' };
@@ -125,7 +125,7 @@ export type AssignFailure = { kind: 'mismatch' } | { kind: 'missingMethod'; miss
  * Whether a value of a typed type is assignable to another type, as the specification defines. Untyped constants
  * and nil are handled by the caller.
  */
-// code-gauge-allow functionCognitiveComplexity 26 -- Applies Go assignment rules in their precedence order with one diagnostic result.
+// code-gauge-allow functionCognitiveComplexity -- Applies Go assignment rules in their precedence order with one diagnostic result.
 export function assignFailure(from: Type, to: Type): AssignFailure | undefined {
   if (identical(from, to)) return undefined;
   const fromUnder = underlying(from);
@@ -178,7 +178,7 @@ function everyTerm(type: TypeParamType, predicate: (term: Type) => boolean): boo
 }
 
 /** Whether an explicit conversion `T(x)` from one non-constant type to another is allowed. */
-// code-gauge-allow functionCognitiveComplexity 20 -- The conversion rules of the specification, one per line.
+// code-gauge-allow functionCognitiveComplexity -- The conversion rules of the specification, one per line.
 export function convertible(from: Type, to: Type): boolean {
   if (!assignFailure(from, to)) return true;
   const fromUnder = underlying(from);

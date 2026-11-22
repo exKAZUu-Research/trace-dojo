@@ -6,8 +6,8 @@ import { UnsupportedFeatureError } from './unsupported';
 
 type Length = readonly [number, number];
 
-// code-gauge-allow functionNcss 53 -- Keeps scoped matching flags, engine selection and lookbehind validation in one traversal.
-// code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps scoped matching flags, engine selection and lookbehind validation in one traversal.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function analyzeRegex(
   source: string,
   unicode: boolean,
@@ -173,7 +173,7 @@ function alternativeLength(node: AST.Alternative, cache: Map<AST.Element, Length
   return [min, max];
 }
 
-// code-gauge-allow functionNcss 33 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function elementLength(node: AST.Element, cache: Map<AST.Element, Length>, active: Set<AST.Element>): Length {
   const cached = cache.get(node);
   if (cached) return cached;

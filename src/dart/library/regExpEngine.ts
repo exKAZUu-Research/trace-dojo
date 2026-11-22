@@ -495,7 +495,7 @@ class Machine {
   }
 
   /** Runs one instruction, giving the next pc or -1 to backtrack. */
-  // code-gauge-allow functionNcss 45 -- The machine's dispatch, one case per instruction.
+  // code-gauge-allow functionNcss -- The machine's dispatch, one case per instruction.
   private step(instruction: Exclude<Instruction, { op: 'succeed' }>, pc: number): number {
     const { registers, position } = this;
     switch (instruction.op) {

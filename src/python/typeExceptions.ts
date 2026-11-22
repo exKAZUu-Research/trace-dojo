@@ -131,7 +131,7 @@ method(baseExceptionClass, 'with_traceback', 'one', 1, 1, (self, [traceback]) =>
 });
 
 /** `str()` of an exception, as BaseException and the builtin exceptions that override it define it. */
-// code-gauge-allow functionCognitiveComplexity 19 -- One case per builtin exception type that overrides __str__.
+// code-gauge-allow functionCognitiveComplexity -- One case per builtin exception type that overrides __str__.
 export function exceptionStr(exception: PyInstance): string {
   const state = exception.exception;
   if (!state) return '';

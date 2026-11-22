@@ -123,7 +123,7 @@ function defineFunctional(
   return { cls, variables };
 }
 
-// code-gauge-allow functionNcss 39 -- One registration per builtin functional interface.
+// code-gauge-allow functionNcss -- One registration per builtin functional interface.
 export function defineFunctions(
   registry: Registry,
   objectClass: ClassInfo,
@@ -259,7 +259,7 @@ export function callFunction(frame: Frame, iface: ClassInfo, target: Value, args
   return frame.runtime.invokeVirtual(frame, method.owner, method.name, target, args);
 }
 
-// code-gauge-allow functionNcss 38 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss -- One registration per builtin method, each a small native.
 function defineComparator(
   context: Context,
   functions: { fn: ClassInfo; toInt: ClassInfo; toDouble: ClassInfo },
@@ -761,8 +761,7 @@ function forEachEntryOf(
 }
 
 /** `Map.forEach`, `Map.computeIfAbsent`, and `Map.merge`. */
-// code-gauge-allow functionCognitiveComplexity 16 -- One registration per default method, each a small native.
-// code-gauge-allow functionNcss 32 -- One registration per default method, each a small native.
+// code-gauge-allow functionCognitiveComplexity -- One registration per default method, each a small native.
 function defineMapDefaults(collections: Collections, functions: DefaultFunctions): void {
   const { mapClass } = collections;
   const [mapK, mapV] = mapClass.typeParameters.map((variable): JavaType => ({ kind: 'typeVar', variable }));

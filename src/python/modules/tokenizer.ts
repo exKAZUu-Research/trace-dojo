@@ -121,7 +121,7 @@ interface LiteralPart {
 }
 
 /** The indentation of a line: its column with tabs to multiples of 8, and with tabs as one column. */
-// code-gauge-allow duplicateLines 17 -- Measures as the indentation check of the parser does, over a line, not a scanner.
+// code-gauge-allow duplicateLines -- Measures as the indentation check of the parser does, over a line, not a scanner.
 function measureIndentation(line: string): { column: number; altColumn: number; index: number } {
   let column = 0;
   let altColumn = 0;
@@ -159,7 +159,7 @@ export class Tokenizer {
 
   constructor(private readonly readline: () => string | undefined) {}
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Follows tok_get's order of decisions at each position.
+  // code-gauge-allow functionCognitiveComplexity -- Follows tok_get's order of decisions at each position.
   *tokens(): Generator<Token, void, void> {
     for (;;) {
       if (!this.ensureLine()) {
@@ -224,8 +224,8 @@ export class Tokenizer {
   }
 
   /** Handles the indentation of a new logical line, returning whether the line is blank or only a comment. */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Follows tok_get's checks of indentation in their order.
-  // code-gauge-allow functionNcss 35 -- Follows tok_get's checks of indentation in their order.
+  // code-gauge-allow functionCognitiveComplexity -- Follows tok_get's checks of indentation in their order.
+  // code-gauge-allow functionNcss -- Follows tok_get's checks of indentation in their order.
   private *lineStart(): Generator<Token, boolean, void> {
     const line = this.lines[this.row];
     const { column, altColumn, index } = measureIndentation(line);
@@ -385,7 +385,7 @@ export class Tokenizer {
     yield this.plainString(quoteStart, quote, prefix);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Quote endings and escaped physical newlines share one lexical cursor and EOF handling.
+  // code-gauge-allow functionCognitiveComplexity -- Quote endings and escaped physical newlines share one lexical cursor and EOF handling.
   private plainString(quoteStart: number, quote: string, prefix: string): Token {
     const firstRow = this.row;
     const start = this.position();

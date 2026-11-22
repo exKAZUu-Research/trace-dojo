@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 492 -- Keeps type data, cache keys, and canonical type constructors together.
+// code-gauge-allow-file fileNcss -- Keeps type data, cache keys, and canonical type constructors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
@@ -470,7 +470,7 @@ export function typeMapperCacheKey(mapper: ReadonlyMap<number, Type> & Pick<Mapp
 }
 
 /** Flattens and canonicalizes unions, retaining covered literal alternatives in contextual types. */
-// code-gauge-allow functionCognitiveComplexity 30 -- Flattens, deduplicates, and reduces members as TypeScript's unions do.
+// code-gauge-allow functionCognitiveComplexity -- Flattens, deduplicates, and reduces members as TypeScript's unions do.
 export function unionOf(types: Type[], keepFresh = false, preserveLiterals = false): Type {
   const flat = flattenedMembers(types, 'union', keepFresh).filter((type) => !isIntrinsic(type, 'never'));
   if (flat.includes(permissiveAnyType)) return permissiveAnyType;
@@ -645,7 +645,7 @@ function hasDisjointIntersectionDomains(types: Type[]): boolean {
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Flattens type members and preserves inference boundaries.
+// code-gauge-allow functionCognitiveComplexity -- Flattens type members and preserves inference boundaries.
 function flattenedMembers(
   types: Type[],
   kind: 'union' | 'intersection',

@@ -103,7 +103,7 @@ export function mutableSlice(sema: SemaApi, arg: Expression, child: Type): TExpr
 
 export { scalarValuesEqual as equalValues } from '../values';
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Handles each kind of value the operation accepts.
+// code-gauge-allow functionCognitiveComplexity -- Handles each kind of value the operation accepts.
 export function compareScalars(a: Value, b: Value): number {
   if (a instanceof BigFloat && b instanceof BigFloat) return compareFloats(a, b) ?? Number.NaN;
   if (typeof a === 'bigint' && typeof b === 'bigint') {

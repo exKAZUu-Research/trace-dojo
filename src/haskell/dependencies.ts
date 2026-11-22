@@ -25,8 +25,8 @@ export function dependencyOrder(bindings: RBinding[]): RBinding[][] {
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Explicit DFS enter, edge and exit phases share Tarjan's low-link state.
-// code-gauge-allow functionNcss 45 -- The traversal and component completion keep one set of graph state.
+// code-gauge-allow functionCognitiveComplexity -- Explicit DFS enter, edge and exit phases share Tarjan's low-link state.
+// code-gauge-allow functionNcss -- The traversal and component completion keep one set of graph state.
 export function stronglyConnected(edges: readonly number[][]): number[][] {
   const indexOf = Array.from({ length: edges.length }, () => -1);
   const lowLink = Array.from({ length: edges.length }, () => 0);
@@ -103,7 +103,7 @@ export function collectExprRefs(expr: RExpr, visit: (key: Key) => void): void {
   for (const rhs of rhss) collectRhsRefs(rhs, visit);
 }
 
-// code-gauge-allow functionNcss 32 -- One case per expression kind that nests others.
+// code-gauge-allow functionNcss -- One case per expression kind that nests others.
 function childrenOf(expr: RExpr): { exprs: RExpr[]; bindings: RBinding[]; rhss: RRhs[] } {
   const none = { exprs: [] as RExpr[], bindings: [] as RBinding[], rhss: [] as RRhs[] };
   switch (expr.k) {

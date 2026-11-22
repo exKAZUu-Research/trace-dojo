@@ -23,7 +23,7 @@ const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/
 defineFunction('base64_encode(string $string): string', ({ args }) =>
   Buffer.from(s(args[0]), 'latin1').toString('base64')
 );
-// code-gauge-allow functionCognitiveComplexity 26 -- Applies strict padding and byte validation to the same decoding pass.
+// code-gauge-allow functionCognitiveComplexity -- Applies strict padding and byte validation to the same decoding pass.
 defineFunction('base64_decode(string $string, bool $strict = false): string|false', ({ args }) => {
   const strict = args[1] === true;
   const bytes: number[] = [];
@@ -109,7 +109,7 @@ defineFunction(
 );
 
 /** Appends the pairs of an array or an object's visible properties as php_url_encode_hash_ex does. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps cycle tracking and encoded parameter names in one recursive traversal.
+// code-gauge-allow functionCognitiveComplexity -- Keeps cycle tracking and encoded parameter names in one recursive traversal.
 function buildQuery(query: QueryBuild, data: PhpArray | PhpObject, prefix: string | undefined): void {
   if (query.visiting.has(data)) return;
   if (query.visiting.size >= 2048) throw rt().memoryExhausted(2 ** 31);
@@ -164,8 +164,8 @@ function untilNul(text: string): string {
 }
 
 /** Stores a value under a name such as `a[b][]` as php_register_variable_ex does. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Builds nested query variables while preserving key normalization and append behavior.
-// code-gauge-allow functionNcss 36 -- Builds nested query variables while preserving key normalization and append behavior.
+// code-gauge-allow functionCognitiveComplexity -- Builds nested query variables while preserving key normalization and append behavior.
+// code-gauge-allow functionNcss -- Builds nested query variables while preserving key normalization and append behavior.
 function registerVariable(target: PhpArray, rawName: string, value: string): void {
   const name = rawName.replace(/^ +/, '');
   const bracket = name.indexOf('[');
@@ -313,7 +313,7 @@ function firstOf(text: string, start: number, end: number, chars: string): numbe
   return first;
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Handles bracketed addresses and port parsing against the same host bounds.
+// code-gauge-allow functionCognitiveComplexity -- Handles bracketed addresses and port parsing against the same host bounds.
 function parseHost(text: string, url: ParsedUrl, from: number): ParsedUrl | undefined {
   let start = from;
   const hostEnd = firstOf(text, start, text.length, '/?#');
@@ -373,7 +373,7 @@ function controlsReplaced(text: string): string {
 defineFunction('quoted_printable_encode(string $string): string', ({ args }) => quotedPrintableEncode(s(args[0])));
 
 /** Encodes as php_quot_print_encode does, which keeps a line at most 75 characters and a UTF-8 sequence on one line. */
-// code-gauge-allow functionCognitiveComplexity 29 -- Keeps line width and pending whitespace across escaped byte sequences.
+// code-gauge-allow functionCognitiveComplexity -- Keeps line width and pending whitespace across escaped byte sequences.
 function quotedPrintableEncode(text: string): string {
   let result = '';
   let lineLength = 0;
@@ -463,7 +463,7 @@ defineFunction('convert_uudecode(string $string): string|false', ({ args }) => {
 });
 
 /** Decodes as php_uudecode does, which trusts each line's length character. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Validates each encoded line before decoding its bytes.
+// code-gauge-allow functionCognitiveComplexity -- Validates each encoded line before decoding its bytes.
 function uudecode(text: string): string | undefined {
   if (text === '') return undefined;
   const value = (index: number): number => ((index < text.length ? text.charCodeAt(index) : 0) - 32) & 0o77;

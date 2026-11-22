@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 401 -- Write places share container separation, reference binding and slot watching helpers.
+// code-gauge-allow-file fileNcss -- Write places share container separation, reference binding and slot watching helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   deprecated,

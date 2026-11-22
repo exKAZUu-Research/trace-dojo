@@ -167,8 +167,8 @@ function integerField(value: PyValue): bigint {
   throw typeError('an integer is required');
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- One case per context field and signal container, with the messages of the C module.
-// code-gauge-allow functionNcss 36 -- One case per context field and signal container, with the messages of the C module.
+// code-gauge-allow functionCognitiveComplexity -- One case per context field and signal container, with the messages of the C module.
+// code-gauge-allow functionNcss -- One case per context field and signal container, with the messages of the C module.
 function setContextField(context: PyContext, field: string, value: PyValue): void {
   const { state } = context;
   switch (field) {
@@ -216,7 +216,7 @@ function setContextField(context: PyContext, field: string, value: PyValue): voi
 const INVALID_SIGNAL =
   'valid values for signals are:\n  [InvalidOperation, FloatOperation, DivisionByZero,\n   Overflow, Underflow, Subnormal, Inexact, Rounded,\n   Clamped]';
 
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per context field and signal container, with the messages of the C module.
+// code-gauge-allow functionCognitiveComplexity -- One case per context field and signal container, with the messages of the C module.
 function setSignals(target: Set<Condition>, value: PyValue): void {
   if (value instanceof PyDict || isSignalDict(value)) {
     const entries =

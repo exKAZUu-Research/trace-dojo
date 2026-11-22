@@ -54,7 +54,7 @@ function rawCursor(values: Iterator<Value>): RawCursor {
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Advances across sources and applies their membership filters.
+// code-gauge-allow functionCognitiveComplexity -- Advances across sources and applies their membership filters.
 function hashSetCursor(
   sources: HashSetSource[],
   type: Type,
@@ -173,8 +173,8 @@ function iterPart(iter: SortedIter, show: DebugValue, item: Type): DebugPart {
 }
 
 /** `MergeIterInner`: both sets in order, keeping the greater of two heads (`peeked`) for the next step. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows std's `MergeIterInner::nexts`.
-// code-gauge-allow functionNcss 34 -- Follows std's `MergeIterInner::nexts`.
+// code-gauge-allow functionCognitiveComplexity -- Follows std's `MergeIterInner::nexts`.
+// code-gauge-allow functionNcss -- Follows std's `MergeIterInner::nexts`.
 function merged(
   op: SetOp,
   a: SortedIter,
@@ -218,7 +218,7 @@ function merged(
 }
 
 /** `intersection` and `difference`: by their sets' ends, an answer at once, or a search, or a stitch of both. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows std's choices for `intersection` and `difference`.
+// code-gauge-allow functionCognitiveComplexity -- Follows std's choices for `intersection` and `difference`.
 function searched(
   op: SetOp,
   [aSet, bSet]: [SetValue, SetValue],
@@ -299,7 +299,7 @@ function search(
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows std's `Intersection::next`.
+// code-gauge-allow functionCognitiveComplexity -- Follows std's `Intersection::next`.
 function stitchIntersection(a: SortedIter, b: SortedIter, cmp: Context['cmp']): Step {
   return {
     next: () => {
@@ -325,7 +325,7 @@ function stitchIntersection(a: SortedIter, b: SortedIter, cmp: Context['cmp']): 
 }
 
 /** `difference` of similar sets: the elements of `self` that `other`, walked alongside with `peek`, does not have. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Follows std's `Difference::next`.
+// code-gauge-allow functionCognitiveComplexity -- Follows std's `Difference::next`.
 function stitchDifference(self: SortedIter, other: SortedIter, cmp: Context['cmp'], peeked?: Next): Step {
   const peek = (): Next => (peeked ??= other.next());
   const advance = (): void => void (peeked === undefined ? other.next() : (peeked = undefined));

@@ -12,7 +12,7 @@ export interface RegexpOptions {
 }
 
 /** Ruby's message for a pattern whose bytes are invalid in its encoding, with those bytes shown as escapes. */
-// code-gauge-allow functionCognitiveComplexity 16 -- One pass copies verbatim bytes and escapes the others into a shared bounded buffer.
+// code-gauge-allow functionCognitiveComplexity -- One pass copies verbatim bytes and escapes the others into a shared bounded buffer.
 export function invalidPatternMessage(pattern: RString, options: RegexpOptions): RString {
   const source = stringBytes(pattern);
   const result = new Uint8Array(LIMITS.maxStringLength);

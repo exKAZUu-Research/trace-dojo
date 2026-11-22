@@ -135,8 +135,8 @@ export function setSingletonFactory(factory: (cls: RClass, exposed?: boolean) =>
   singletonOf = factory;
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- The ordered cases for native method registration share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 31 -- Native definitions, aliases and reflection snapshots must install in that order.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for native method registration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- Native definitions, aliases and reflection snapshots must install in that order.
 export function installNatives(runtime: Runtime): void {
   // Extensions apply after every definition, whatever order the modules that register them load in.
   for (const spec of [...specs.filter((each) => !each.wrap), ...specs.filter((each) => each.wrap)]) {

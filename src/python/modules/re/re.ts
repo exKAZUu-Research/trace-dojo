@@ -96,7 +96,7 @@ function searchFunction(runtime: Runtime, name: string): PyValue {
 }
 
 /** `sub`, `subn`, and `split`, whose last two parameters may still be passed by position. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes the argument handling of re.sub, re.subn, and re.split.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the argument handling of re.sub, re.subn, and re.split.
 function deprecatedPositionalFunction(runtime: Runtime, name: 'sub' | 'subn' | 'split'): PyValue {
   const leading = name === 'split' ? ['pattern', 'string'] : ['pattern', 'repl', 'string'];
   const optional = name === 'split' ? 'maxsplit' : 'count';

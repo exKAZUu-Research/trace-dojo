@@ -238,7 +238,7 @@ function nextSignificantSibling(node: Node): Node | undefined {
   return next ?? undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function recoveredNewName(root: Node, error: Node): SourceDiagnostic | undefined {
   const parts = error.children.filter((child) => child.type !== 'comment');
   if (

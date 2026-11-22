@@ -24,7 +24,7 @@ import {
   type Value,
 } from './values';
 
-// code-gauge-allow duplicateLines 17 -- Dart wires its runtime into the shared recorder.
+// code-gauge-allow duplicateLines -- Dart wires its runtime into the shared recorder.
 export function traceDartProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(parseDart(program), { atomicRows: new Set(trace.atomicAnnotations.keys()) });
   const runtime = newRuntime(input);
@@ -139,7 +139,7 @@ class Snapshotter {
     return snapshot(this.rootsOf(frame, withContext), includeReferences, this.lists);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of value a trace shows.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of value a trace shows.
   private *rootsOf(frame: Frame, withContext: boolean): Iterable<SnapshotRoot> {
     const shown = new Set<string>();
     const hidesArgs = frame.info.name === 'main' && this.program.mainTakesArguments;
@@ -318,8 +318,8 @@ const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 const TRUNCATED_NODE: DisplayNode = { kind: 'value', value: TRUNCATED, verbatim: true };
 const CYCLE_NODE: DisplayNode = { kind: 'value', value: CYCLE, verbatim: true };
 
-// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of value a trace shows.
-// code-gauge-allow functionNcss 45 -- One case per kind of value a trace shows.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of value a trace shows.
+// code-gauge-allow functionNcss -- One case per kind of value a trace shows.
 function displayNodeOf(value: Value, budget: SnapshotBudget, previous?: DisplayNode): DisplayNode | undefined {
   if (budget.remaining === 0) return TRUNCATED_NODE;
   budget.remaining--;

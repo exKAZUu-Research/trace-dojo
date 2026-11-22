@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 462 -- Keeps the wrappers with their shared iterator state and retirement phases.
+// code-gauge-allow-file fileNcss -- Keeps the wrappers with their shared iterator state and retirement phases.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callCallback, callMethod, consumeInvokedResult, discardInvokedResult } from './callables';
 import { createObject, findClass } from './classes';

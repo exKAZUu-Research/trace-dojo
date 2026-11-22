@@ -51,7 +51,7 @@ function blockOperands(block: Block): Expr[] {
   return block.tail ? [...statements, block.tail] : statements;
 }
 
-// code-gauge-allow functionNcss 40 -- One case per kind of expression.
+// code-gauge-allow functionNcss -- One case per kind of expression.
 function requiredOperands(expr: Expr): Expr[] {
   switch (expr.kind) {
     case 'unary':

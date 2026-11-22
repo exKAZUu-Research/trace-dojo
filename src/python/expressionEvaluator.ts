@@ -1,5 +1,5 @@
 import { functionAnnotationReferences } from './annotations';
-// code-gauge-allow-file fileNcss 794 -- The expression evaluator keeps one method per kind of expression together.
+// code-gauge-allow-file fileNcss -- The expression evaluator keeps one method per kind of expression together.
 import { pushAll } from './arrays';
 import type {
   Argument,
@@ -95,7 +95,7 @@ export class ExpressionEvaluator {
    * Evaluates an expression whose value the caller keeps in the frame, or reads without keeping, such as an operand,
    * so that a local object stays local.
    */
-  // code-gauge-allow functionNcss 49 -- One case per kind of expression.
+  // code-gauge-allow functionNcss -- One case per kind of expression.
   evaluateValue(expression: Expression, frame: Frame): PyValue {
     switch (expression.kind) {
       case 'name': {
@@ -229,7 +229,7 @@ export class ExpressionEvaluator {
    * constants, and each later element is added as it is evaluated. A display of more than 30 elements adds one by
    * one, and so does a display of constants that a `for` clause iterates, where the frozenset itself is iterated.
    */
-  // code-gauge-allow functionCognitiveComplexity 24 -- Follows the steps in which CPython's compiler builds a set display.
+  // code-gauge-allow functionCognitiveComplexity -- Follows the steps in which CPython's compiler builds a set display.
   private setDisplay(elements: Element[], frame: Frame, iterated: boolean): PySet {
     return this.withTemporaries(frame, () => {
       const starIndex = elements.findIndex((element) => element.kind === 'starred');
@@ -636,7 +636,7 @@ export class ExpressionEvaluator {
   // Calls -----------------------------------------------------------------------------------------------------------
 
   /** Evaluates a call, whose callee the caller may have evaluated already. */
-  // code-gauge-allow duplicateLines 15 -- Synchronous and suspending calls transfer the same arguments and result.
+  // code-gauge-allow duplicateLines -- Synchronous and suspending calls transfer the same arguments and result.
   protected call(
     expression: Extract<Expression, { kind: 'call' }>,
     frame: Frame,
@@ -723,8 +723,8 @@ export class ExpressionEvaluator {
    * evaluating the keywords and names the callee if it fails, such an argument is read last; any other starred
    * argument is read in order, as a list display reads it.
    */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Follows CPython's argument evaluation and CALL_FUNCTION_EX unpacking order.
-  // code-gauge-allow functionNcss 31 -- Follows CPython's argument evaluation and CALL_FUNCTION_EX unpacking order.
+  // code-gauge-allow functionCognitiveComplexity -- Follows CPython's argument evaluation and CALL_FUNCTION_EX unpacking order.
+  // code-gauge-allow functionNcss -- Follows CPython's argument evaluation and CALL_FUNCTION_EX unpacking order.
   arguments(argumentList: Argument[], frame: Frame, callee: PyValue, leading = 0): CallArguments {
     const positionals = argumentList.filter((argument) => argument.kind === 'positional' || argument.kind === 'star');
     const soleStar = leading + positionals.length === 1 && positionals[0].kind === 'star' ? positionals[0] : undefined;
@@ -832,7 +832,7 @@ export class ExpressionEvaluator {
   // Comprehensions --------------------------------------------------------------------------------------------------
 
   /** Runs a comprehension, whose first iterable `firstIterable` the enclosing frame evaluated when passed. */
-  // code-gauge-allow functionNcss 48 -- Follows how CPython runs each kind of comprehension in its own scope.
+  // code-gauge-allow functionNcss -- Follows how CPython runs each kind of comprehension in its own scope.
   protected comprehension(
     expression: Extract<Expression, { kind: 'comprehension' }>,
     frame: Frame,
@@ -916,7 +916,7 @@ export class ExpressionEvaluator {
   }
 
   /** Runs the clauses of a comprehension, yielding each element, or storing each pair through `store`. */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Nested clauses share their iterator lifetime and yield path.
+  // code-gauge-allow functionCognitiveComplexity -- Nested clauses share their iterator lifetime and yield path.
   private *comprehensionItems(
     expression: Extract<Expression, { kind: 'comprehension' }>,
     frame: Frame,
@@ -1017,8 +1017,8 @@ export interface CallSite {
 }
 
 /** Adds an argument's value to a call's arguments, raising CPython's errors for unpacking it. */
-// code-gauge-allow functionNcss 32 -- Adds each kind of argument, raising CPython's errors for unpacking.
-// code-gauge-allow functionCognitiveComplexity 22 -- Adds each kind of argument, raising CPython's errors for unpacking.
+// code-gauge-allow functionNcss -- Adds each kind of argument, raising CPython's errors for unpacking.
+// code-gauge-allow functionCognitiveComplexity -- Adds each kind of argument, raising CPython's errors for unpacking.
 export function addArgument(
   collected: CallArguments,
   argument: Argument,

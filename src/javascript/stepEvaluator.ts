@@ -22,7 +22,7 @@ import {
  * `yield` anywhere else.
  */
 export abstract class StepEvaluator extends ExpressionEvaluator {
-  // code-gauge-allow functionNcss 51 -- One case per kind of expression that a `yield` may sit in.
+  // code-gauge-allow functionNcss -- One case per kind of expression that a `yield` may sit in.
   *evaluateSteps(expression: Expression): Steps<Value> {
     if (!expression.suspends) return this.evaluate(expression);
     const { runtime } = this;
@@ -144,7 +144,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
   }
 
   /** Evaluates elements or arguments in order, holding the values so far; an elision leaves a hole. */
-  // code-gauge-allow duplicateLines 28 -- Mirrors the synchronous version in expressionEvaluator.ts, as a generator that suspends at yield and await.
+  // code-gauge-allow duplicateLines -- Mirrors the synchronous version in expressionEvaluator.ts, as a generator that suspends at yield and await.
   private *elementSteps(elements: (Argument | undefined)[], callArguments = false): Steps<Element[]> {
     const { runtime } = this;
     const callSpread =
@@ -290,7 +290,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     return (yield* this.referenceSteps(target)) as Reference;
   }
 
-  // code-gauge-allow duplicateLines 18 -- Mirrors the synchronous version in expressionEvaluator.ts, as a generator that suspends at yield and await.
+  // code-gauge-allow duplicateLines -- Mirrors the synchronous version in expressionEvaluator.ts, as a generator that suspends at yield and await.
   private *assignSteps(expression: Extract<Expression, { kind: 'assign' }>): Steps<Value> {
     const { runtime } = this;
     const { operator, target } = expression;

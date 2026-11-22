@@ -14,8 +14,8 @@ type Pat = { kind: 'any' } | { kind: 'ctor'; ctor: string; args: Pat[] } | { kin
 const ANY: Pat = { kind: 'any' };
 
 /** Lowers a checked pattern, using the paths the checker resolved to tell variants from bindings. */
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of pattern or type.
-// code-gauge-allow functionNcss 43 -- One case per kind of pattern or type.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of pattern or type.
+// code-gauge-allow functionNcss -- One case per kind of pattern or type.
 export function lowerPattern(pattern: Pattern, annotations: Annotations): Pat {
   switch (pattern.kind) {
     case 'wild': {
@@ -132,8 +132,8 @@ function expandRow(row: Pat[]): Pat[][] {
 }
 
 /** Whether a vector of patterns matches some value that no row matches (Maranget's usefulness). */
-// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of pattern or type.
-// code-gauge-allow functionNcss 36 -- One case per kind of pattern or type.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of pattern or type.
+// code-gauge-allow functionNcss -- One case per kind of pattern or type.
 function useful(rows: Pat[][], vector: Pat[], types: Type[], budget: ExecutionBudget, depth = 0): Pat[] | undefined {
   if (depth > 64) return undefined;
   // Or-patterns in several positions multiply the cases to try, so the search counts against the compile limits.

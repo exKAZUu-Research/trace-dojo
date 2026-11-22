@@ -30,7 +30,7 @@ export function parameterType(param: Param): TypeDecl | undefined {
 }
 
 /** Formats a type as PHP's messages do. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function typeToString(type: TypeDecl): string {
   if (type.k === 'named') {
     if (type.name === 'iterable') return `Traversable|array${type.nullable ? '|null' : ''}`;
@@ -105,7 +105,7 @@ const NO_MATCH = Symbol('noMatch');
  * Coerces a value to a declared type as PHP's coercive typing mode does, or returns NO_MATCH. `float` accepts an int
  * even in strict mode.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Collects exact, strict and pending property assignment modes.
+// code-gauge-allow functionCognitiveComplexity -- Collects exact, strict and pending property assignment modes.
 export function coerce(value: Value, type: TypeDecl, context: CoercionContext): Value | typeof NO_MATCH {
   if (context.internal && type.k === 'named' && type.name === 'resource') {
     return value instanceof PhpObject && value.isResource ? value : NO_MATCH;
@@ -235,7 +235,7 @@ function coerceScalar(value: Value, type: TypeDecl): Value | typeof NO_MATCH {
 }
 
 /** Whether a value has a declared type exactly, without coercion. */
-// code-gauge-allow functionNcss 46 -- Checks compound and scalar PHP types under the same coercion and class context.
+// code-gauge-allow functionNcss -- Checks compound and scalar PHP types under the same coercion and class context.
 export function matches(
   value: Value,
   type: TypeDecl,

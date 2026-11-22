@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 962 -- Regexp, MatchData and the regexp forms of String methods share match state and the helpers that slice it.
+// code-gauge-allow-file fileNcss -- Regexp, MatchData and the regexp forms of String methods share match state and the helpers that slice it.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
@@ -135,7 +135,7 @@ export interface MatchState {
   regexp: RObject;
 }
 
-// code-gauge-allow functionParameterCount 7 -- Search callers select shared subject state, validation and anchoring without rebuilding snapshots.
+// code-gauge-allow functionParameterCount -- Search callers select shared subject state, validation and anchoring without rebuilding snapshots.
 export function execAt(
   regexp: RObject,
   text: string,
@@ -417,7 +417,7 @@ function* checkRegexpKeywords(keywords: RHash | undefined): Gen<void> {
 sdef('Regexp', ['escape', 'quote'], 1, function* (_self, [value]) {
   return escapeRegexpPattern(value instanceof RSymbol ? symbolString(value) : yield* toStrValue(value));
 });
-// code-gauge-allow functionCognitiveComplexity 28 -- The ordered cases for Ruby regexp encoding and match state share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby regexp encoding and match state share state; splitting them solely for the metric would hide their sequencing.
 sdef('Regexp', 'union', [0, -1], function* (_self, args) {
   const items = args.length === 1 ? ((yield* tryAry(args[0]))?.items ?? args) : args;
   if (items.length === 1 && isRegexp(items[0])) return items[0];
@@ -898,8 +898,8 @@ def('MatchData', 'deconstruct_keys', 1, function* (self: RObject, [keys]) {
 // String's regular-expression forms ------------------------------------------------------------------------------------
 
 /** Expands capture references and match-context escapes in a replacement string. */
-// code-gauge-allow functionCognitiveComplexity 17 -- The literal buffer and both positions advance together across the escapes of one replacement.
-// code-gauge-allow functionNcss 39 -- The literal buffer and both positions advance together across the escapes of one replacement.
+// code-gauge-allow functionCognitiveComplexity -- The literal buffer and both positions advance together across the escapes of one replacement.
+// code-gauge-allow functionNcss -- The literal buffer and both positions advance together across the escapes of one replacement.
 function expand(replacement: RString, state: MatchState, limit: number): RString {
   const replacementBytes = stringBytes(replacement);
   const output = new EncodedStringBuilder(limit);
@@ -1177,8 +1177,8 @@ wrapFirst('split', function* (self, args, block) {
   return yield* splitRegexp(self, cursor, limit, block, !literalSeparator);
 });
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Native split sequencing shares the nullable-match state, field/capture emission, limit checks and terminal match state.
-// code-gauge-allow functionNcss 40 -- Native split sequencing keeps the ordered empty-match transitions, field/capture emissions and limit break in one loop.
+// code-gauge-allow functionCognitiveComplexity -- Native split sequencing shares the nullable-match state, field/capture emission, limit checks and terminal match state.
+// code-gauge-allow functionNcss -- Native split sequencing keeps the ordered empty-match transitions, field/capture emissions and limit break in one loop.
 function* splitRegexp(
   self: RString,
   cursor: RegexpCursor,
@@ -1334,7 +1334,7 @@ function* sliceCaptureRange(
   if (group < 0) group += state.groups.length;
   return group >= 0 && group < state.groups.length ? (ranges[group] ?? 'unmatched') : undefined;
 }
-// code-gauge-allow functionCognitiveComplexity 16 -- Regexp assignment distinguishes numeric and named captures and preserves Ruby's unmatched-group errors.
+// code-gauge-allow functionCognitiveComplexity -- Regexp assignment distinguishes numeric and named captures and preserves Ruby's unmatched-group errors.
 wrapFirst('[]=', function* (self, args) {
   const state = execAt(args[0] as RObject, self.s, 0, self);
   setLastMatch(state);

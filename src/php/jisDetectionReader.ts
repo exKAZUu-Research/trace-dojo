@@ -62,7 +62,7 @@ const EXTENDED_JIS = {
   },
 } satisfies Record<string, { escapes: ReadonlyMap<string, number>; lastLead: number; kanji?: LegacyDetectionTable }>;
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the cursor and designation shifts in one state machine.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the cursor and designation shifts in one state machine.
 export function readExtendedJisEncoding(bytes: string, kind: keyof typeof EXTENDED_JIS): number[] {
   const { escapes, lastLead, kanji } = EXTENDED_JIS[kind];
   const replayInvalid = kind === 'cp5022x';
@@ -103,7 +103,7 @@ const EUC_JP_PROFILES: Record<EucJpProfile, { first: EucJpPlane; second?: EucJpP
   '2004': { first: { state: JIS_0213_PLANE_1 }, second: { state: JIS_0213_PLANE_2 } },
 };
 
-// code-gauge-allow functionCognitiveComplexity 20 -- The lead byte and plane jointly determine how many bytes to consume.
+// code-gauge-allow functionCognitiveComplexity -- The lead byte and plane jointly determine how many bytes to consume.
 export function readEucJp(bytes: string, profile: EucJpProfile): number[] {
   const { first, second } = EUC_JP_PROFILES[profile];
   const codes: number[] = [];
@@ -198,8 +198,8 @@ function pushExtendedPair(
   codes.push(isGraphic(lead) ? jisPair(state === JIS_0212 ? JIS_0212 : JIS_0208, lead, trail) : BAD);
 }
 
-// code-gauge-allow functionNcss 34 -- Shares the byte cursor and shift state between scoring and validation.
-// code-gauge-allow functionCognitiveComplexity 28 -- Shares the byte cursor and shift state between scoring and validation.
+// code-gauge-allow functionNcss -- Shares the byte cursor and shift state between scoring and validation.
+// code-gauge-allow functionCognitiveComplexity -- Shares the byte cursor and shift state between scoring and validation.
 export function readJisEncoding(bytes: string, strictIso = false): { codes: number[]; valid: boolean } {
   const codes: number[] = [];
   let valid = true;

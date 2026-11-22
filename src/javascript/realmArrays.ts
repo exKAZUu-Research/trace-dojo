@@ -122,7 +122,7 @@ function buildWith(
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Transcribes the specification's Array.from step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's Array.from step by step, whose branches mirror its steps.
 function arrayFrom({ runtime, thisValue, args, callRow }: NativeCall): JsObject {
   const [source, mapper, thisArg] = args;
   if (mapper !== undefined && !isCallable(mapper)) {
@@ -175,8 +175,8 @@ export function relativeIndex(runtime: Runtime, value: Value, length: number, fa
   return index < 0 ? Math.max(length + index, 0) : Math.min(index, length);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
-// code-gauge-allow functionNcss 40 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionNcss -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function defineStackMethods(builder: RealmBuilder): void {
   arrayMethod(builder, 'push', 1, ({ runtime, args }, ops) => {
     let length = ops.length;
@@ -222,7 +222,7 @@ function defineStackMethods(builder: RealmBuilder): void {
   arrayMethod(builder, 'splice', 2, splice);
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function splice({ runtime, args }: NativeCall, ops: ArrayOps): JsObject {
   const { length } = ops;
   const start = relativeIndex(runtime, args[0], length, 0);
@@ -256,7 +256,7 @@ function splice({ runtime, args }: NativeCall, ops: ArrayOps): JsObject {
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function defineReorderings(builder: RealmBuilder): void {
   arrayMethod(builder, 'reverse', 0, ({ runtime }, ops) => {
     const { length } = ops;
@@ -324,7 +324,7 @@ export function sortComparison({ runtime, args, callRow }: NativeCall): (left: V
       };
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function defineCopies(builder: RealmBuilder): void {
   arrayMethod(builder, 'slice', 2, ({ runtime, args }, ops) => {
     const { length } = ops;

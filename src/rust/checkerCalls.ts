@@ -215,8 +215,8 @@ function coerceClosure(c: Checker, arg: Expr, type: Type, param: Type): void {
 }
 
 /** Calls a value: a closure, a function, or a value whose type is bounded by a closure trait. */
-// code-gauge-allow functionNcss 36 -- Call rules differ for concrete functions, closures and callable bounds.
-// code-gauge-allow functionCognitiveComplexity 20 -- Call rules differ for concrete functions, closures and callable bounds.
+// code-gauge-allow functionNcss -- Call rules differ for concrete functions, closures and callable bounds.
+// code-gauge-allow functionCognitiveComplexity -- Call rules differ for concrete functions, closures and callable bounds.
 function callValue(
   c: Checker,
   expr: Extract<Expr, { kind: 'call' }>,
@@ -298,7 +298,7 @@ function requireCallableMut(c: Checker, expr: Extract<Expr, { kind: 'call' }>, k
   });
 }
 
-// code-gauge-allow functionNcss 38 -- Follows rustc's method probe and its checks step by step.
+// code-gauge-allow functionNcss -- Follows rustc's method probe and its checks step by step.
 export function checkMethodCall(
   c: Checker,
   expr: Extract<Expr, { kind: 'methodCall' }>,

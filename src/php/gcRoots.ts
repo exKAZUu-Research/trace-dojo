@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 506 -- Holds GC root buffer simulation, ordering, and post-collection retirement helpers.
+// code-gauge-allow-file fileNcss -- Holds GC root buffer simulation, ordering, and post-collection retirement helpers.
 import { rt, type Runtime } from './runtime';
 import { PhpArray, PhpObject, Ref, type Value } from './values';
 
@@ -359,7 +359,7 @@ function recordRetiredSurvivor(value: unknown, state: RetireState): void {
   }
 }
 
-// code-gauge-allow functionParameterCount 7 -- Takes the collection graph's callbacks separately, as each caller supplies its own.
+// code-gauge-allow functionParameterCount -- Takes the collection graph's callbacks separately, as each caller supplies its own.
 export function orderDestructedCollection<N extends object, O extends N>(
   bufferedRoots: N[],
   destructible: Set<O>,

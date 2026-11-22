@@ -266,7 +266,7 @@ const validateRegularState = (session: ExerciseSession): void => {
   )
     throw new TRPCError({ code: 'CONFLICT' });
 };
-// code-gauge-allow functionParameterCount 7 -- Each parameter is part of the session identity checked on every call.
+// code-gauge-allow functionParameterCount -- Each parameter is part of the session identity checked on every call.
 const ownedSession = (
   id: number,
   userId: string,
@@ -297,7 +297,7 @@ const ownedSession = (
   }
   return session;
 };
-// code-gauge-allow functionCognitiveComplexity 24 -- The practice bank adds one branch to the existing validation of the configured challenge lists.
+// code-gauge-allow functionCognitiveComplexity -- The practice bank adds one branch to the existing validation of the configured challenge lists.
 const candidatesFor = (courseId: string, lectureId: string, format: ProblemFormat, mode: LearningMode): string[] => {
   if (mode === 'practice') return getPracticeProblemIds(courseId, lectureId);
   const lectureIndex = courseIdToLectureIds[courseId as CourseId].indexOf(lectureId);
@@ -460,7 +460,7 @@ const toDisplay = (
     completed: Boolean(row.completedAt),
   };
 };
-// code-gauge-allow functionCognitiveComplexity 18 -- The function predates this change, which only renames the value it returns.
+// code-gauge-allow functionCognitiveComplexity -- The function predates this change, which only renames the value it returns.
 const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmissionSchema>): RegularExerciseState =>
   db.transaction((tx) => {
     const current = ownedSession(
@@ -519,7 +519,7 @@ const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmiss
     if (!updated) throw new TRPCError({ code: 'CONFLICT' });
     return toRegularState(updated);
   });
-// code-gauge-allow functionParameterCount 7 -- The function predates this change, which only makes it synchronous.
+// code-gauge-allow functionParameterCount -- The function predates this change, which only makes it synchronous.
 const gradeAndSave = (
   id: number,
   userId: string,

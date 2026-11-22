@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 999 -- Holds assignment and offset access modes with their shared helpers.
+// code-gauge-allow-file fileNcss -- Holds assignment and offset access modes with their shared helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { arrayObjectProperty } from './arrayObjectProperties';
 import { withArrayReadView } from './arrayTable';
@@ -85,8 +85,8 @@ type WriteMode = 'write' | 'update' | 'incdec';
 type PlaceMode = WriteMode | 'deferred' | 'coalesce';
 
 /** The location a writable expression names, evaluating its keys and creating containers as PHP's writes do. */
-// code-gauge-allow functionNcss 52 -- Handles each kind of writable expression, whose write rules PHP defines separately.
-// code-gauge-allow functionCognitiveComplexity 30 -- Writable kinds share operand preparation and defer their writes through places.
+// code-gauge-allow functionNcss -- Handles each kind of writable expression, whose write rules PHP defines separately.
+// code-gauge-allow functionCognitiveComplexity -- Writable kinds share operand preparation and defer their writes through places.
 export function placeOf(e: Expr, mode: PlaceMode = 'write', through = false): Place {
   const runtime = rt();
   const frame = runtime.frame;
@@ -162,8 +162,8 @@ function staticPropertyPlace(e: Extract<Expr, { k: 'sprop' }>, mode: PlaceMode):
   return deferredPlace(resolve, () => withName((name) => classesModule.readStaticProp(cls, name, scope, true)));
 }
 
-// code-gauge-allow functionNcss 35 -- Shares operand evaluation and parent writes across assignment modes.
-// code-gauge-allow functionCognitiveComplexity 25 -- Shares operand evaluation and parent writes across assignment modes.
+// code-gauge-allow functionNcss -- Shares operand evaluation and parent writes across assignment modes.
+// code-gauge-allow functionCognitiveComplexity -- Shares operand evaluation and parent writes across assignment modes.
 function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode, through: boolean): Place {
   const parent = placeOf(e.base, mode, true);
   const readKey = e.index === undefined ? undefined : prepareOperand(e.index);
@@ -222,8 +222,8 @@ function readDimensionKey(
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Shares receiver resolution across the read and write phases.
-// code-gauge-allow functionNcss 36 -- Retains the same receiver and name across deferred property operations.
+// code-gauge-allow functionCognitiveComplexity -- Shares receiver resolution across the read and write phases.
+// code-gauge-allow functionNcss -- Retains the same receiver and name across deferred property operations.
 function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode, through: boolean): Place {
   const parent = placeOf(e.obj, mode, true);
   const property = e.name;
@@ -459,7 +459,7 @@ class StaticPlace implements Place {
   }
 }
 
-// code-gauge-allow functionNcss 38 -- Keeps the property lookup shared across all place operations.
+// code-gauge-allow functionNcss -- Keeps the property lookup shared across all place operations.
 function propPlace(object: PhpObject, name: string, unbound = false): Place {
   const scope = rt().frame.scope;
   const storage = arrayObjectProperty(object, name, scope, undefined, unbound);
@@ -577,7 +577,7 @@ function nestedPropertyPlace(
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function readPropertyPlace(
   object: PhpObject,
   name: string,
@@ -681,7 +681,7 @@ function writesOffsetWithException(object: PhpObject, key: Value | undefined): b
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function fetchCompoundDimension(
   object: PhpObject,
   key: Value | undefined,
@@ -769,7 +769,7 @@ function arrayAccessNestedPlace(
   return new RefPlace(Ref.temporary(value));
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Shares mode, key conversion and storage lifetime across nested offset access.
+// code-gauge-allow functionCognitiveComplexity -- Shares mode, key conversion and storage lifetime across nested offset access.
 function nativeArrayNestedPlace(
   object: PhpObject,
   storage: ArrayStorage,
@@ -1054,8 +1054,8 @@ export function destructureAssignment(target: Extract<Expr, { k: 'list' }>, expr
   return destructure(target, value, returned ? new RefPlace(returned) : call ? 'temporary' : undefined, row);
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Keeps the list's fetch line and lazy writable source in assignment order.
-// code-gauge-allow functionNcss 31 -- Keeps reference ownership and ordered target writes together.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the list's fetch line and lazy writable source in assignment order.
+// code-gauge-allow functionNcss -- Keeps reference ownership and ordered target writes together.
 export function destructure(
   target: Extract<Expr, { k: 'list' }>,
   value: Value,
@@ -1144,8 +1144,8 @@ function listElementReference(value: Value, key: Value, source: RefPlace | 'temp
   return Ref.temporary(null);
 }
 
-// code-gauge-allow functionNcss 31 -- Keeps the read and write phases of compound assignment together.
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the read and write phases of compound assignment together.
+// code-gauge-allow functionNcss -- Keeps the read and write phases of compound assignment together.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the read and write phases of compound assignment together.
 export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   const runtime = rt();
   if (e.op === '??') {
@@ -1235,7 +1235,7 @@ function storeCompoundResult(
   return fetched.write ? fetched.write(stored) : place.set(stored, 'assignOp');
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function finishFailedCompound(place: Place, fetched: CompoundRead, pending: PhpThrow): void {
   const runtime = rt();
   const sources = fetched.sources ?? [];
@@ -1314,7 +1314,7 @@ function incrementPlace(e: Extract<Expr, { k: 'incdec' }>, warning: UpdateWarnin
   return e.prefix ? stored : old;
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function incrementedValue(old: Value, increment: boolean, warning: UpdateWarning): Value | typeof INTERRUPTED_NULL {
   let updated: Value;
   if (typeof old === 'bigint') updated = increment ? arithmetic('+', old, 1n) : arithmetic('-', old, 1n);
@@ -1420,7 +1420,7 @@ function prepareUnset(e: Expr, nested?: UnsetBase): () => Place | undefined {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps ordinary, global and nested unset access on the same operand path.
+// code-gauge-allow functionCognitiveComplexity -- Keeps ordinary, global and nested unset access on the same operand path.
 function prepareUnsetOffset(e: Extract<Expr, { k: 'idx' }>, nested?: UnsetBase): () => Place | undefined {
   if (e.index === undefined) throwError('Error', 'Cannot use [] for unsetting');
   if (e.base.k === 'var' && e.base.name === 'GLOBALS') {

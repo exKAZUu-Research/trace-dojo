@@ -217,7 +217,7 @@ export function storeLocalMemory(fn: FunctionContext | undefined, variable: VarE
   for (const region of fn.ssa.regions) region.written.add(variable);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps reaching definitions, joins and lazy fact gates in one compiler analysis.
+// code-gauge-allow functionCognitiveComplexity -- Keeps reaching definitions, joins and lazy fact gates in one compiler analysis.
 export function reachingValue(fn: FunctionContext | undefined, variable: VarEntity): ReachingValue {
   const definition = fn?.ssa.definitions.get(variable);
   if (!fn || !definition) return {};

@@ -43,7 +43,7 @@ const NAMED_TUPLE_SPECIAL = new Set([
   '__static_attributes__',
 ]);
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows how NamedTupleMeta builds the namedtuple class from the class body.
+// code-gauge-allow functionCognitiveComplexity -- Follows how NamedTupleMeta builds the namedtuple class from the class body.
 namedTupleBase.classFactory = (def, namespace, annotations, keywords) => {
   if (keywords && keywords.size > 0) throw typeError('NamedTuple() takes no keyword arguments');
   const fields = annotations.map((annotation) => annotation.name);
@@ -180,8 +180,8 @@ const typedDicts = new WeakMap<
 
 typedDictBase.classFactory = createTypedDict;
 
-// code-gauge-allow functionNcss 45 -- Follows how typing._TypedDictMeta creates the class and merges the keys of its bases.
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows how typing._TypedDictMeta merges the keys of its bases.
+// code-gauge-allow functionNcss -- Follows how typing._TypedDictMeta creates the class and merges the keys of its bases.
+// code-gauge-allow functionCognitiveComplexity -- Follows how typing._TypedDictMeta merges the keys of its bases.
 function createTypedDict(
   def: ClassDef,
   namespace: Map<string, PyValue>,

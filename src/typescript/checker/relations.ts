@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 877 -- Keeps the relation modes and their recursive comparisons together.
+// code-gauge-allow-file fileNcss -- Keeps the relation modes and their recursive comparisons together.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -107,7 +107,7 @@ export class Relations {
    * With `INTERSECTION_TARGET` in `state`, as for a member of an intersection target, skips the check of a weak target
    * type; with `INTERSECTION_SOURCE`, as for a member of an intersection source, infers no index signature.
    */
-  // code-gauge-allow functionNcss 33 -- Keeps target normalization and the bounded relation-cache entry point together.
+  // code-gauge-allow functionNcss -- Keeps target normalization and the bounded relation-cache entry point together.
   isRelated(
     source: Type,
     target: Type,
@@ -214,8 +214,8 @@ export class Relations {
     return this.c.literals.isArrayOrTupleLiteral(type) ? type : recursionIdentity(type);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 29 -- Follows TypeScript's order of checks for each kind of type.
-  // code-gauge-allow functionNcss 40 -- Follows TypeScript's order of checks for each kind of type.
+  // code-gauge-allow functionCognitiveComplexity -- Follows TypeScript's order of checks for each kind of type.
+  // code-gauge-allow functionNcss -- Follows TypeScript's order of checks for each kind of type.
   private structuredRelated(source: Type, target: Type, relation: Relation, state: number): boolean {
     const s = this.c.reducedTypes.of(relation === 'strictSubtype' ? source : regularOf(source));
     const t = this.c.reducedTypes.of(relation === 'strictSubtype' ? target : regularOf(target));
@@ -864,7 +864,7 @@ export class Relations {
     return this.tupleElementRelated({ rest: true, optional: false, type: source }, expected, relation);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Checks declared and optional properties together with static private members and same-alias indexes.
+  // code-gauge-allow functionCognitiveComplexity -- Checks declared and optional properties together with static private members and same-alias indexes.
   private propertiesRelated(
     source: Type,
     sourceStructure: Structure,
@@ -1032,7 +1032,7 @@ export class Relations {
       : this.isRelated(constraint, target, relation, 0, EXPANDING_SOURCE);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Aligns fixed prefixes and suffixes while comparing the whole generic variadic middle.
+  // code-gauge-allow functionCognitiveComplexity -- Aligns fixed prefixes and suffixes while comparing the whole generic variadic middle.
   private tupleElementsRelated(source: ObjectType, target: ObjectType, relation: Relation): boolean {
     const sourceElements = source.tuple?.elements ?? [];
     const targetElements = target.tuple?.elements ?? [];

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 450 -- Keeps the reference random generators and their standard-library adapters together.
+// code-gauge-allow-file fileNcss -- Keeps the reference random generators and their standard-library adapters together.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { LIMITS } from '../../interpreter/limits';
 import type { Entity } from '../entities';

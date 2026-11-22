@@ -66,7 +66,7 @@ export function generatorNext(generator: PyGenerator, input: GeneratorInput): Py
  * Resumes a generator with the value its `yield` evaluates to or the exception it raises there, returning what it
  * yields next or, when it ends, what it returns.
  */
-// code-gauge-allow duplicateLines 19 -- The suspending variant passes the waits on where this one waits for them.
+// code-gauge-allow duplicateLines -- The suspending variant passes the waits on where this one waits for them.
 export function resumeGenerator(generator: PyGenerator, input: GeneratorInput): Step {
   const early = startResuming(generator, input);
   if (early) return early;
@@ -93,7 +93,7 @@ export function resumeGenerator(generator: PyGenerator, input: GeneratorInput): 
  * Resumes a generator as {@link resumeGenerator} does, but passes the waits of blocking operations in its frame on to
  * the code resuming it, so that a thread waiting there suspends instead of waiting on the host's stack.
  */
-// code-gauge-allow duplicateLines 20 -- It passes the waits on where resumeGenerator waits for them.
+// code-gauge-allow duplicateLines -- It passes the waits on where resumeGenerator waits for them.
 export function* resumeGeneratorSuspending(generator: PyGenerator, input: GeneratorInput): Suspension<Step> {
   const early = startResuming(generator, input);
   if (early) return early;
@@ -213,7 +213,7 @@ export function setDelegate(frame: Frame, iterator: PyValue | undefined): void {
 }
 
 /** Passes one input to the iterator a `yield from` or an `await` delegates to, returning what it yields or returns. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows how `yield from` passes each kind of input to a generator or another iterator.
+// code-gauge-allow functionCognitiveComplexity -- Follows how `yield from` passes each kind of input to a generator or another iterator.
 export function delegateStep(iterator: PyValue, input: GeneratorInput): Step {
   const target =
     iterator instanceof PyGenerator && iterator.cls.name === 'coroutine_wrapper'
@@ -257,7 +257,7 @@ function untilStopIteration(run: () => PyValue): Step {
 }
 
 /** The exception `generator.throw()` raises: a class, called with the value, or an instance. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Follows how `generator.throw()` normalizes each form of its arguments.
+// code-gauge-allow functionCognitiveComplexity -- Follows how `generator.throw()` normalizes each form of its arguments.
 export function thrownError([type, value, traceback]: PyValue[]): PyError {
   if (traceback !== undefined && traceback !== None && !(traceback instanceof PyTraceback)) {
     throw typeError('throw() third argument must be a traceback object');

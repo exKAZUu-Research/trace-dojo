@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 435 -- Transcribes zlib 1.2.12's trees.c, whose output depends on each of its branches.
+// code-gauge-allow-file fileNcss -- Transcribes zlib 1.2.12's trees.c, whose output depends on each of its branches.
 // zlib 1.2.12's trees.c: the Huffman coding of deflate's blocks, transcribed so that output matches zlib's byte for byte.
 
 export const LENGTH_CODES = 29;
@@ -453,8 +453,8 @@ export class TreeCoder {
     }
   }
 
-  // code-gauge-allow functionNcss 31 -- Transcribes zlib 1.2.12's trees.c, whose output depends on each of its branches.
-  // code-gauge-allow functionCognitiveComplexity 17 -- Transcribes zlib 1.2.12's trees.c, whose output depends on each of its branches.
+  // code-gauge-allow functionNcss -- Transcribes zlib 1.2.12's trees.c, whose output depends on each of its branches.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes zlib 1.2.12's trees.c, whose output depends on each of its branches.
   private sendTree(tree: Tree, maxCode: number): void {
     let prevlen = -1;
     let nextlen = tree[1];

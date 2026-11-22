@@ -163,7 +163,7 @@ export function parseEscape(s: string): { r: number; rest: string } {
 }
 
 /** Parses the hex digits of the escape `s` after its `\x`, which `text` starts at. */
-// code-gauge-allow functionNcss 32 -- Transcribes Go's parseHexEscape step by step.
+// code-gauge-allow functionNcss -- Transcribes Go's parseHexEscape step by step.
 export function parseHexEscape(s: string, text: string): { r: number; rest: string } {
   let t = text;
   const invalid = (): never => fail(ERR_INVALID_ESCAPE, s.slice(0, s.length - t.length));
@@ -212,8 +212,8 @@ export function repeatIsValid(re: Node, limit: number): boolean {
   return re.sub.every((sub) => repeatIsValid(sub, n));
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes Go's parseRepeat step by step.
-// code-gauge-allow functionNcss 31 -- Transcribes Go's parseRepeat step by step.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes Go's parseRepeat step by step.
+// code-gauge-allow functionNcss -- Transcribes Go's parseRepeat step by step.
 export function parseRepeat(text: string): { min: number; max: number; rest: string } | undefined {
   if (text === '' || text[0] !== '{') return undefined;
   let s = text.slice(1);

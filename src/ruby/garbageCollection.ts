@@ -3,8 +3,8 @@ import { RArray, RBasic, RClass, RHash, RObject, RProc, RRange, type Value } fro
 import type { Frame, Runtime, Scope } from './runtime';
 
 /** Removes the turtles that nothing the program can still reach refers to, as Java's garbage collection would. */
-// code-gauge-allow functionCognitiveComplexity 24 -- The root walker keeps live and suspended value/array lifecycles explicit; elementwise insertion avoids host argument limits.
-// code-gauge-allow functionNcss 35 -- Reachability traversal shares one pending stack and preserves roots for frames, handlers and suspended cursors.
+// code-gauge-allow functionCognitiveComplexity -- The root walker keeps live and suspended value/array lifecycles explicit; elementwise insertion avoids host argument limits.
+// code-gauge-allow functionNcss -- Reachability traversal shares one pending stack and preserves roots for frames, handlers and suspended cursors.
 export function collectGarbage(runtime: Runtime): void {
   if (!runtime.world.hasTurtles) return;
   const reached = new Set<TurtleState>();
@@ -46,7 +46,7 @@ export function pushFrameReferences(frame: Frame, pending: Value[]): void {
 }
 
 /** Pushes the values an object refers to. */
-// code-gauge-allow functionCognitiveComplexity 18 -- The walker visits each runtime value kind and its reachable fields.
+// code-gauge-allow functionCognitiveComplexity -- The walker visits each runtime value kind and its reachable fields.
 function pushReferences(value: RBasic, pending: Value[]): void {
   pending.push(value.cls);
   for (const fields of [value.ivars, value.internal]) for (const item of fields?.values() ?? []) pending.push(item);

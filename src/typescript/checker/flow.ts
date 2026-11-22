@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 453 -- Keeps flow state, joins, and reference narrowing together.
+// code-gauge-allow-file fileNcss -- Keeps flow state, joins, and reference narrowing together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -418,7 +418,7 @@ export class Flow {
       : nonPrimitiveType;
   }
 
-  // code-gauge-allow functionNcss 37 -- One case per `typeof` result.
+  // code-gauge-allow functionNcss -- One case per `typeof` result.
   /** Whether `typeof` a value of the type gives `name`: always, never, or maybe. */
   private typeofMatches(type: Type, name: string): boolean | 'maybe' {
     switch (type.kind) {
@@ -507,7 +507,7 @@ export class Flow {
     return name === 'object' && !isFunction;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's narrowing of each kind of type by truthiness.
+  // code-gauge-allow functionCognitiveComplexity -- Follows TypeScript's narrowing of each kind of type by truthiness.
   /** The part of a type that a truthy (or falsy) value has. */
   narrowByTruthiness(type: Type, assumeTrue: boolean): Type {
     if (assumeTrue)
@@ -554,7 +554,7 @@ export class Flow {
     return assumeTrue ? this.narrowToEqual(type, other, loose) : this.narrowToUnequal(type, other, loose);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Preserves generic identity while comparing unit types and resolving nullish bounds during equality narrowing.
+  // code-gauge-allow functionCognitiveComplexity -- Preserves generic identity while comparing unit types and resolving nullish bounds during equality narrowing.
   private narrowToEqual(type: Type, other: Type, loose: boolean): Type {
     const nullish = isIntrinsic(other, 'null') || isIntrinsic(other, 'undefined');
     if (loose && nullish) return this.nullishPart(type);
@@ -604,7 +604,7 @@ export class Flow {
     return intersectionOf([type, brand], this.c);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Preserves generic identity and filters concrete nominal alternatives.
+  // code-gauge-allow functionCognitiveComplexity -- Preserves generic identity and filters concrete nominal alternatives.
   /** The part of a type that `value instanceof C` keeps, given the instance type of `C`. */
   narrowByInstanceof(type: Type, instance: Type, assumeTrue: boolean): Type {
     if (assumeTrue) {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 833 -- C syntax conversion shares scoped names and tree-sitter recovery.
+// code-gauge-allow-file fileNcss -- C syntax conversion shares scoped names and tree-sitter recovery.
 import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -143,7 +143,7 @@ export class Converter {
     return items;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Header cursor, lexical names, and declarations must advance together in source order.
+  // code-gauge-allow functionCognitiveComplexity -- Header cursor, lexical names, and declarations must advance together in source order.
   private headersBefore(row: number, inBlock = false): Declaration[] {
     const declarations: Declaration[] = [];
     while (this.nextHeader < this.headers.length && this.headers[this.nextHeader].row <= row) {
@@ -338,8 +338,8 @@ export class Converter {
     return { kind: 'list', items, row: node.startPosition.row };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of declaration specifier.
-  // code-gauge-allow functionNcss 33 -- Storage, qualifiers, attributes and type nodes share one declaration specification.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of declaration specifier.
+  // code-gauge-allow functionNcss -- Storage, qualifiers, attributes and type nodes share one declaration specification.
   private specifiers(node: Node): Specifiers {
     const typeNodes = declarationTypeNodes(node);
     if (typeNodes.length === 0) throw new CSyntaxError(node, '型の指定が必要です。');
@@ -451,8 +451,8 @@ export class Converter {
     checkAttributes(node.text, node.startPosition.row);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Each C type specifier has a distinct AST form.
-  // code-gauge-allow functionNcss 33 -- Keep the type specifier dispatch together.
+  // code-gauge-allow functionCognitiveComplexity -- Each C type specifier has a distinct AST form.
+  // code-gauge-allow functionNcss -- Keep the type specifier dispatch together.
   private typeSpecifier(node: Node): TypeSpecifier {
     const row = node.startPosition.row;
     this.checkUnsupported(node);
@@ -558,7 +558,7 @@ export class Converter {
   }
 
   /** The declarators of a member declaration, each with the width after it when it is a bit-field. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keep named, unnamed, and bit-field declarators in the same field-list conversion.
+  // code-gauge-allow functionCognitiveComplexity -- Keep named, unnamed, and bit-field declarators in the same field-list conversion.
   private fieldDeclarators(node: Node): FieldDeclaration['declarators'] {
     const result: FieldDeclaration['declarators'] = [];
     let current: FieldDeclaration['declarators'][number] | undefined;
@@ -602,7 +602,7 @@ export class Converter {
       });
   }
 
-  // code-gauge-allow functionNcss 32 -- Each declarator shape has its own conversion.
+  // code-gauge-allow functionNcss -- Each declarator shape has its own conversion.
   private declarator(node: Node): Declarator {
     const row = node.startPosition.row;
     this.checkUnsupported(node);
@@ -740,7 +740,7 @@ export class Converter {
   }
 
   /** A block item, where a `case` label's statements become the statements after the label. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Case labels, static assertions and declaration recovery share block scope.
+  // code-gauge-allow functionCognitiveComplexity -- Case labels, static assertions and declaration recovery share block scope.
   private blockItem(node: Node): (Statement | Declaration | StaticAssert)[] {
     if (this.recovery) this.scanValueTypes(node);
     if (node.type === 'expression_statement') {
@@ -852,8 +852,8 @@ export class Converter {
     return [this.declaration(node)];
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of statement.
-  // code-gauge-allow functionNcss 48 -- Keep the statement shape dispatch together.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of statement.
+  // code-gauge-allow functionNcss -- Keep the statement shape dispatch together.
   private statement(node: Node): Statement {
     if (this.recovery && node.isError) this.scanValueTypes(node);
     const row = node.startPosition.row;
@@ -1009,7 +1009,7 @@ export class Converter {
 
   // Expressions -----------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 60 -- One case per C expression kind; helpers already isolate the nontrivial forms.
+  // code-gauge-allow functionNcss -- One case per C expression kind; helpers already isolate the nontrivial forms.
   private expression(node: Node): Expression {
     if (this.recovery) this.scanValueTypes(node);
     const row = node.startPosition.row;

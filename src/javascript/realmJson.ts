@@ -296,7 +296,7 @@ class JsonParser {
     return this.unexpected();
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Follows V8's JSON parser, whose error messages each branch reproduces.
+  // code-gauge-allow functionCognitiveComplexity -- Follows V8's JSON parser, whose error messages each branch reproduces.
   private parseObject(depth: number): JsObject {
     const object = this.runtime.newObject();
     return this.runtime.hold(object, () => {
@@ -405,8 +405,8 @@ class JsonParser {
     return String.fromCharCode(Number.parseInt(this.text.slice(this.position - 4, this.position), 16));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Follows V8's JSON parser, whose error messages each branch reproduces.
-  // code-gauge-allow functionNcss 31 -- Follows V8's JSON parser, whose error messages each branch reproduces.
+  // code-gauge-allow functionCognitiveComplexity -- Follows V8's JSON parser, whose error messages each branch reproduces.
+  // code-gauge-allow functionNcss -- Follows V8's JSON parser, whose error messages each branch reproduces.
   private parseNumber(): number {
     const { text } = this;
     const start = this.position;
