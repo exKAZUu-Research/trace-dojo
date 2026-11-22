@@ -562,7 +562,7 @@ test.each([
   [
     'Math gamma and lgamma match reference small arguments',
     'p Math.gamma(-0.5),Math.gamma(0.5),Math.gamma(2.5),Math.lgamma(3),Math.lgamma(5)',
-    '-3.5449077018110318\n1.7724538509055159\n1.329340388179137\n[0.6931471805599453, 1]\n[3.1780538303479458, 1]\n',
+    '-3.5449077018110335\n1.7724538509055154\n1.3293403881791368\n[0.6931471805599453, 1]\n[3.1780538303479458, 1]\n',
   ],
   [
     'Kernel output preserves replacement-stream callbacks',

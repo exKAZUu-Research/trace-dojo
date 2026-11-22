@@ -11,11 +11,12 @@ export interface RegexpOptions {
   fixedEncoding?: boolean;
 }
 
-// code-gauge-allow functionNcss 53 -- The ordered cases for Ruby regexp encoding and match state share state; splitting them solely for the metric would hide their sequencing.
+/** Ruby's message for a pattern whose bytes are invalid in its encoding, with those bytes shown as escapes. */
+// code-gauge-allow functionCognitiveComplexity 16 -- One pass copies verbatim bytes and escapes the others into a shared bounded buffer.
 export function invalidPatternMessage(pattern: RString, options: RegexpOptions): RString {
   const source = stringBytes(pattern);
   const result = new Uint8Array(LIMITS.maxStringLength);
-  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+  const decoder = pattern.usAscii ? undefined : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   let length = 0;
   const appendByte = (byte: number): void => {
     rt().checkStringLength(length + 1);
@@ -28,52 +29,15 @@ export function invalidPatternMessage(pattern: RString, options: RegexpOptions):
   rt().spend(Math.ceil(source.length / 256));
   for (let index = 0; index < source.length;) {
     const first = source[index];
-    if (first === 92) {
-      appendByte(first);
-      index++;
-      if (source[index] === 92) {
-        appendByte(92);
-        index++;
-        continue;
-      }
-      if ((source[index] ?? 0) < 0x80) continue;
-      const escaped = source[index];
-      let count = 1;
-      if (!pattern.usAscii) {
-        const width = escaped < 0xe0 ? 2 : escaped < 0xf0 ? 3 : 4;
-        if (index + width <= source.length)
-          try {
-            decoder.decode(source.subarray(index, index + width));
-            count = width;
-          } catch {}
-      }
+    if (first === 92 || first < 0x80) {
+      const count = first === 92 ? escapeLength(source, index, decoder) : 1;
       for (let offset = 0; offset < count; offset++) appendByte(source[index + offset]);
       index += count;
       continue;
     }
-    if (first < 0x80) {
-      appendByte(first);
-      index++;
-      continue;
-    }
-    if (!pattern.usAscii) {
-      const width = first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
-      try {
-        const character = decoder.decode(source.subarray(index, index + width));
-        const point = character.codePointAt(0);
-        if (point !== undefined) {
-          appendAscii(
-            point <= 0xff_ff
-              ? `\\u${point.toString(16).toUpperCase().padStart(4, '0')}`
-              : `\\u{${point.toString(16).toUpperCase()}}`
-          );
-          index += width;
-          continue;
-        }
-      } catch {}
-    }
-    appendAscii(`\\x${first.toString(16).toUpperCase().padStart(2, '0')}`);
-    index++;
+    const character = decoder && utf8CharacterAt(source, index, decoder);
+    appendAscii(character ? unicodeEscape(character.point) : `\\x${first.toString(16).toUpperCase().padStart(2, '0')}`);
+    index += character?.width ?? 1;
   }
   appendAscii(`/${regexpSuffix(options)}`);
   return stringFromBytes(result.subarray(0, length), false, pattern.usAscii);
@@ -81,4 +45,32 @@ export function invalidPatternMessage(pattern: RString, options: RegexpOptions):
 
 export function regexpSuffix(options: RegexpOptions): string {
   return `${options.multiline ? 'm' : ''}${options.ignoreCase ? 'i' : ''}${options.extended ? 'x' : ''}`;
+}
+
+/** The bytes that a backslash at `index` keeps verbatim: itself and an escaped backslash or non-ASCII character. */
+function escapeLength(source: Uint8Array, index: number, decoder: TextDecoder | undefined): number {
+  const escaped = source[index + 1] ?? 0;
+  if (escaped === 92) return 2;
+  if (escaped < 0x80) return 1;
+  return 1 + ((decoder && utf8CharacterAt(source, index + 1, decoder)?.width) ?? 1);
+}
+
+function utf8CharacterAt(
+  source: Uint8Array,
+  index: number,
+  decoder: TextDecoder
+): { point: number; width: number } | undefined {
+  const first = source[index];
+  const width = first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
+  try {
+    const point = decoder.decode(source.subarray(index, index + width)).codePointAt(0);
+    return point === undefined ? undefined : { point, width };
+  } catch {
+    return undefined;
+  }
+}
+
+function unicodeEscape(point: number): string {
+  const digits = point.toString(16).toUpperCase();
+  return point <= 0xff_ff ? `\\u${digits.padStart(4, '0')}` : `\\u{${digits}}`;
 }

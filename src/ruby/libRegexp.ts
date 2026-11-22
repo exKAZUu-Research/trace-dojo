@@ -898,6 +898,8 @@ def('MatchData', 'deconstruct_keys', 1, function* (self: RObject, [keys]) {
 // String's regular-expression forms ------------------------------------------------------------------------------------
 
 /** Expands capture references and match-context escapes in a replacement string. */
+// code-gauge-allow functionCognitiveComplexity 17 -- The literal buffer and both positions advance together across the escapes of one replacement.
+// code-gauge-allow functionNcss 39 -- The literal buffer and both positions advance together across the escapes of one replacement.
 function expand(replacement: RString, state: MatchState, limit: number): RString {
   const replacementBytes = stringBytes(replacement);
   const output = new EncodedStringBuilder(limit);
@@ -925,53 +927,9 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
       appendLiteral(bytePosition, byteEnd);
       bytePosition = byteEnd;
     }
-    const [, code, name, closing] = match;
-    let part: RString;
-    if (name !== undefined) {
-      if (closing === undefined)
-        throw rubyError(
-          rt().c.RuntimeError,
-          stringFromBytes(new TextEncoder().encode('invalid group name reference format'), true)
-        );
-      const group = namedCaptureGroup(
-        state,
-        sliceStringEncoding(replacement, match.index + 3, match.index + 3 + name.length)
-      );
-      const value = groupText(state, group);
-      part = value === NIL ? str('') : (value as RString);
-    } else {
-      switch (code) {
-        case '&': {
-          part = groupText(state, 0) as RString;
-          break;
-        }
-        case '+': {
-          const group = state.groups.findLastIndex((range, index) => index > 0 && range !== undefined);
-          const value = group > 0 ? groupText(state, group) : NIL;
-          part = value === NIL ? str('') : (value as RString);
-          break;
-        }
-        case '\\': {
-          appendLiteral(bytePosition + 1, bytePosition + 2);
-          position = match.index + match[0].length;
-          bytePosition += textByteLengthOf(replacement, match[0]);
-          continue;
-        }
-        case '`': {
-          part = matchPrefix(state);
-          break;
-        }
-        case "'": {
-          part = matchSuffix(state);
-          break;
-        }
-        default: {
-          const value = state.names.length > 0 && code !== '0' ? NIL : groupText(state, Number(code));
-          part = value === NIL ? str('') : (value as RString);
-        }
-      }
-    }
-    if (stringBytes(part).length > 0) {
+    const part = expandedReference(replacement, state, match);
+    if (part === undefined) appendLiteral(bytePosition + 1, bytePosition + 2);
+    else if (stringBytes(part).length > 0) {
       flushLiteral();
       output.append(part);
     }
@@ -983,6 +941,49 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
   }
   flushLiteral();
   return output.finish();
+}
+
+/** The text that one replacement escape stands for, or `undefined` for an escaped backslash. */
+function expandedReference(replacement: RString, state: MatchState, match: RegExpExecArray): RString | undefined {
+  const [, code, name, closing] = match;
+  if (name !== undefined) {
+    if (closing === undefined)
+      throw rubyError(
+        rt().c.RuntimeError,
+        stringFromBytes(new TextEncoder().encode('invalid group name reference format'), true)
+      );
+    const start = match.index + 3;
+    return capturedText(state, namedCaptureGroup(state, sliceStringEncoding(replacement, start, start + name.length)));
+  }
+  switch (code) {
+    case '&': {
+      return groupText(state, 0) as RString;
+    }
+    case '+': {
+      return capturedText(
+        state,
+        state.groups.findLastIndex((range, index) => index > 0 && range !== undefined)
+      );
+    }
+    case '\\': {
+      return undefined;
+    }
+    case '`': {
+      return matchPrefix(state);
+    }
+    case "'": {
+      return matchSuffix(state);
+    }
+    default: {
+      return state.names.length > 0 && code !== '0' ? str('') : capturedText(state, Number(code));
+    }
+  }
+}
+
+/** A group's text, empty when the group is absent or did not participate. */
+function capturedText(state: MatchState, group: number): RString {
+  const value = group >= 0 ? groupText(state, group) : NIL;
+  return value === NIL ? str('') : (value as RString);
 }
 
 function* substituteRegexp(

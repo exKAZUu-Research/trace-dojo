@@ -1074,11 +1074,6 @@ sdef('Math', 'gamma', 1, function* (_self, [value]) {
   if (number === Number.NEGATIVE_INFINITY) domainCheck('gamma', false);
   if (number < 0 && Number.isInteger(number)) domainCheck('gamma', false);
   if (number === 0) return Object.is(number, -0) ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
-  if (Number.isInteger(number) && number > 0 && number <= 23) {
-    let factorial = 1n;
-    for (let index = 2; index < number; index++) factorial *= BigInt(index);
-    return Number(factorial);
-  }
   return platformGamma(number);
 });
 sdef('Math', 'lgamma', 1, function* (_self, [value]) {
