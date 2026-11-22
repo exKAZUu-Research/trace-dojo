@@ -132,7 +132,7 @@ export class Checker {
 
   /**
    * The operations and the time checking may take, as running a program may: a program can make checking slow, and
-   * the server checks it in its own process.
+   * the host checks it on the thread that runs it.
    */
   constructor(
     readonly root: TreeNode,

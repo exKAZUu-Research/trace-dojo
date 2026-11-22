@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
   productionBrowserSourceMaps: true,
   reactCompiler: true,
   reactStrictMode: true,
-  serverExternalPackages: ['pino', 'koffi'],
+  serverExternalPackages: ['pino'],
   typescript: {
     ignoreBuildErrors: true,
   },

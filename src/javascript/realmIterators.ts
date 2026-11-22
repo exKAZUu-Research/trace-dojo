@@ -137,7 +137,7 @@ function defineSymbol(builder: RealmBuilder): void {
     false
   );
   for (const [name, symbol] of Object.entries(WELL_KNOWN_SYMBOLS)) builder.constant(symbolConstructor, name, symbol);
-  // A registry of the run's own, which the host's Symbol.for would keep for the life of the server.
+  // A registry of the run's own, which the host's Symbol.for would keep for the life of the host.
   const { symbolRegistry } = builder.realm;
   builder.method(symbolConstructor, 'for', 1, ({ runtime, args }) => {
     const key = runtime.toString(args[0]);

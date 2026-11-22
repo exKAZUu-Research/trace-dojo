@@ -23,7 +23,7 @@ import {
   IconButton,
   VStack,
 } from '@/infrastructures/useClient/chakra';
-import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
+import { type FillInBlankVerdict, INTERPRETER_FAILURE_DETAIL } from '@/problems/fillInBlank/grade';
 import { type JavaDiagnostic, javaFeedbackSummary, readJavaDiagnostics } from '@/problems/fillInBlank/javaDiagnostics';
 import {
   type JavaDraftContext,
@@ -179,8 +179,7 @@ const EditingBody: React.FC<Props & { baseline: string; draftKey: string; restor
         case 'ungradable': {
           setAlert({
             title: '採点できませんでした',
-            message:
-              '問題が切り替わったため、採点しませんでした。ページを再読み込みしてから、もう一度提出してください。',
+            message: toUngradableMessage(result.detail),
             isCompleted: false,
           });
           break;
@@ -359,6 +358,12 @@ const EditingBody: React.FC<Props & { baseline: string; draftKey: string; restor
     </>
   );
 };
+
+function toUngradableMessage(detail: string): string {
+  return detail === INTERPRETER_FAILURE_DETAIL
+    ? 'プログラムを実行する環境を読み込めませんでした。ページを再読み込みしてから、もう一度提出してください。'
+    : '問題が切り替わったため、採点しませんでした。ページを再読み込みしてから、もう一度提出してください。';
+}
 
 function toIncorrectMessage(detail: string): string {
   if (detail.startsWith('Compile error')) return `${javaFeedbackSummary}入力したコードを見直してください。`;

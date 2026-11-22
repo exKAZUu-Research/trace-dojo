@@ -35,7 +35,8 @@ export interface RunOptions {
 /** Rejects a run that the runner stopped, which leaves no result. */
 export class InterpreterStoppedError extends Error {
   constructor(
-    readonly reason: 'timeout' | 'terminated' | 'workerError',
+    /** `loadTimeout` when the interpreter did not load in time, and `timeout` when the program outlasted its limit. */
+    readonly reason: 'timeout' | 'loadTimeout' | 'terminated' | 'workerError',
     detail?: string
   ) {
     super(`The interpreter worker stopped: ${reason}${detail ? ` (${detail})` : ''}`);
@@ -44,6 +45,8 @@ export class InterpreterStoppedError extends Error {
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+/** Bounds the download of an interpreter and its grammar, which a stalled connection never finishes. */
+const LOAD_TIMEOUT_MS = 60_000;
 
 /** @param createWorker Starts a module worker whose entry is `./interpreterWorker.ts`. */
 export function createInterpreterRunner(createWorker: () => Worker): InterpreterRunner {
@@ -93,7 +96,7 @@ function runOn<T>(
   timeoutMs: number
 ): { finished: Promise<T>; stop: Stop } {
   const listening = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timer: ReturnType<typeof setTimeout>;
   const { promise, resolve, reject } = Promise.withResolvers<T>();
   const stop: Stop = (reason, detail) => {
     worker.terminate();
@@ -102,8 +105,10 @@ function runOn<T>(
   worker.addEventListener(
     'message',
     ({ data }: MessageEvent<InterpreterResponse>) => {
-      if (data.type === 'started') timer = setTimeout(stop, timeoutMs, 'timeout');
-      else if (data.type === 'finished') resolve(data.result as T);
+      if (data.type === 'started') {
+        clearTimeout(timer);
+        timer = setTimeout(stop, timeoutMs, 'timeout');
+      } else if (data.type === 'finished') resolve(data.result as T);
       else if (data.loaded) reject(errorOf(data.error));
       else stop('workerError', data.error.message);
     },
@@ -113,6 +118,7 @@ function runOn<T>(
     signal: listening.signal,
   });
   worker.postMessage(request);
+  timer = setTimeout(stop, LOAD_TIMEOUT_MS, 'loadTimeout');
   const finished = promise.finally(() => {
     clearTimeout(timer);
     listening.abort();

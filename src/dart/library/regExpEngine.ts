@@ -5,7 +5,7 @@ import { ExecutionLimitError } from '../../interpreter/limits';
 /**
  * A backtracking matcher of ECMAScript regular expressions, the syntax and semantics of the VM's Irregexp, which
  * charges every step to the run's budget: the host's RegExp cannot be interrupted, so a pattern that backtracks
- * exponentially would hold the server's process past every limit.
+ * exponentially would hold the host's thread past every limit.
  *
  * The pattern compiles to instructions whose choice points live on an explicit stack, so long inputs need no host
  * recursion; registers (captures and loop counters) change through an undo trail that backtracking unwinds. Each

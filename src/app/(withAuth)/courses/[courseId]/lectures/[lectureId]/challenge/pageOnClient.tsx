@@ -6,14 +6,21 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuthContextSelector } from '@/contexts/AuthContext';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import { Center, Spinner, VStack } from '@/infrastructures/useClient/chakra';
-import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
+import type {
+  ExerciseDisplay,
+  JavaProblemPresentation,
+  JavaProblemSource,
+} from '@/problems/fillInBlank/exerciseProblem';
 import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
+import { gradeInBrowser } from '@/problems/fillInBlank/gradeInBrowser';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
+import { useInstantiatedProblem } from '@/problems/useInstantiatedProblem';
 import { isChallengeSessionStale } from '@/utils/problemSessionError';
 
 import { FillInBlankBody } from '../problems/[problemId]/FillInBlankBody';
 import { ProblemPageHeader } from '../problems/[problemId]/ProblemPageHeader';
+import { ProblemPreparation } from '../problems/[problemId]/ProblemPreparation';
 import { ReloadNotice } from '../problems/[problemId]/ReloadNotice';
 import type { CompletionAction } from '../problems/[problemId]/ResultAlertDialog';
 import { type ChallengeProblemFormat } from './ChallengeSelection';
@@ -99,7 +106,7 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
     if (requestRef.current?.key !== key) {
       requestRef.current = {
         key,
-        promise: start({ courseId, lectureId, problemFormat: format }),
+        promise: start(exerciseRequest({ courseId, lectureId }, format)),
       };
     }
     pendingRef.current = true;
@@ -196,7 +203,7 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
     let display: Display | { status: 'noProblems' };
     try {
       display = await detectStaleSession(
-        next.mutateAsync({ courseId, lectureId, sessionId, problemFormat }),
+        next.mutateAsync(exerciseRequest({ courseId, lectureId, sessionId }, problemFormat)),
         isCurrent
       );
     } catch {
@@ -223,17 +230,21 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
     },
     { label: '次の問題へ', colorScheme: 'brand', onClick: nextJava },
   ];
-  const gradeJava = async (code: string): Promise<FillInBlankVerdict> => {
+  const gradeJava = async (problem: JavaProblemPresentation, code: string): Promise<FillInBlankVerdict> => {
     if (!exercise || exercise.problemFormat === 'regular') throw new Error('No active Java exercise');
-    return await detectStaleSession(
-      submitJava.mutateAsync({
-        courseId,
-        lectureId,
-        sessionId: exercise.sessionId,
-        code,
-        ...(exercise.problemFormat === 'bugFix' ? { problemFormat: 'bugFix' as const } : {}),
-      }),
-      currentAttempt(exercise.sessionId, exercise.problemFormat)
+    const isCurrent = currentAttempt(exercise.sessionId, exercise.problemFormat);
+    return await gradeInBrowser(problem, code, (status) =>
+      detectStaleSession(
+        submitJava.mutateAsync({
+          courseId,
+          lectureId,
+          sessionId: exercise.sessionId,
+          code,
+          status,
+          ...(exercise.problemFormat === 'bugFix' ? { problemFormat: 'bugFix' as const } : {}),
+        }),
+        isCurrent
+      )
     );
   };
 
@@ -288,24 +299,49 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
       {exercise && exercise.problemFormat !== 'regular' && exercise.problemFormat === format && (
         <VStack key={`${exercise.problemFormat}:${exercise.sessionId}`} align="stretch" spacing={4}>
           <ProblemPageHeader courseId={courseId} lectureId={lectureId} problemId={exercise.problemId as ProblemId} />
-          <FillInBlankBody
-            draftContext={{
-              userId,
-              mode: 'challenge',
-              ...(exercise.problemFormat === 'bugFix' ? { problemFormat: 'bugFix' as const } : {}),
-              courseId,
-              lectureId,
-              problemId: exercise.problemId,
-              sessionId: exercise.sessionId,
-            }}
-            problem={exercise}
-            gradeCode={gradeJava}
-            completionActions={actions}
-            completionMessage="正解です！次の問題へ進めます。"
-            isCompleted={exercise.completed}
-          />
+          <JavaProblem source={exercise}>
+            {(problem) => (
+              <FillInBlankBody
+                draftContext={{
+                  userId,
+                  mode: 'challenge',
+                  ...(exercise.problemFormat === 'bugFix' ? { problemFormat: 'bugFix' as const } : {}),
+                  courseId,
+                  lectureId,
+                  problemId: exercise.problemId,
+                  sessionId: exercise.sessionId,
+                }}
+                problem={{ ...problem, problemFormat: exercise.problemFormat }}
+                gradeCode={async (code) => await gradeJava(problem, code)}
+                completionActions={actions}
+                completionMessage="正解です！次の問題へ進めます。"
+                isCompleted={exercise.completed}
+              />
+            )}
+          </JavaProblem>
         </VStack>
       )}
     </VStack>
+  );
+};
+
+/** A regular exercise comes as a template, which this page says it traces itself. */
+const exerciseRequest = <T extends object>(
+  request: T,
+  problemFormat: ChallengeProblemFormat
+): T & ({ problemFormat: 'regular'; tracesInBrowser: true } | { problemFormat: 'fillInBlank' | 'bugFix' }) =>
+  problemFormat === 'regular' ? { ...request, problemFormat, tracesInBrowser: true } : { ...request, problemFormat };
+
+/** Shows a Java editing problem, after generating it in the browser when the server describes it by a template. */
+const JavaProblem: React.FC<{
+  source: JavaProblemSource;
+  children: (problem: JavaProblemPresentation) => React.ReactNode;
+}> = ({ source, children }) => {
+  const instantiation = useInstantiatedProblem('programTemplate' in source ? source : undefined);
+  if ('displayProgram' in source) return children(source);
+  return instantiation.status === 'ready' ? (
+    children(instantiation.problem)
+  ) : (
+    <ProblemPreparation failed={instantiation.status === 'failed'} />
   );
 };
