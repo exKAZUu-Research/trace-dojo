@@ -259,29 +259,17 @@ function unreadNodes(root: Node): Node[] {
  * quoted strings with a raw line break; returns where lexing stopped.
  */
 function lexCode(lexer: Lexer, index: number, end: number | undefined): number {
-  const { source, validTokenEnds, strings } = lexer;
+  const { source } = lexer;
   let braceDepth = 0;
   while (index < (end ?? source.length)) {
     const char = source[index];
-    const validTokenEnd = validTokenEnds.get(index);
-    if (validTokenEnd !== undefined) {
-      index = validTokenEnd;
-    } else if (source.startsWith('//', index)) {
-      const lineEnd = source.indexOf('\n', index);
-      index = lineEnd === -1 ? source.length : lineEnd;
-    } else if (source.startsWith('/*', index)) {
-      const close = source.indexOf('*/', index + 2);
-      index = close === -1 ? source.length : close + 2;
+    const skippedEnd = skippedTokenEnd(lexer, index);
+    if (skippedEnd !== undefined) {
+      index = skippedEnd;
     } else if (char === '`') {
       index = lexTemplate(lexer, index + 1);
     } else if (char === "'" || char === '"') {
-      const { close, breakIndex } = scanQuotedString(source, index);
-      const closed = source[close] === char;
-      const endIndex = closed ? close + 1 : (breakIndex ?? close);
-      if (breakIndex !== undefined || !closed) {
-        strings.push({ startIndex: index, endIndex, breakIndex: breakIndex ?? close, closed });
-      }
-      index = endIndex;
+      index = lexQuotedString(lexer, index);
     } else if (end === undefined && char === '}' && braceDepth === 0) {
       return index + 1;
     } else {
@@ -291,6 +279,31 @@ function lexCode(lexer: Lexer, index: number, end: number | undefined): number {
     }
   }
   return index;
+}
+
+/** The end of a token starting at `index` that holds no string to lex: one the parser read, or a comment. */
+function skippedTokenEnd({ source, validTokenEnds }: Lexer, index: number): number | undefined {
+  const validTokenEnd = validTokenEnds.get(index);
+  if (validTokenEnd !== undefined) return validTokenEnd;
+  if (source.startsWith('//', index)) {
+    const lineEnd = source.indexOf('\n', index);
+    return lineEnd === -1 ? source.length : lineEnd;
+  }
+  if (source.startsWith('/*', index)) {
+    const close = source.indexOf('*/', index + 2);
+    return close === -1 ? source.length : close + 2;
+  }
+  return undefined;
+}
+
+function lexQuotedString({ source, strings }: Lexer, opening: number): number {
+  const { close, breakIndex } = scanQuotedString(source, opening);
+  const closed = source[close] === source[opening];
+  const endIndex = closed ? close + 1 : (breakIndex ?? close);
+  if (breakIndex !== undefined || !closed) {
+    strings.push({ startIndex: opening, endIndex, breakIndex: breakIndex ?? close, closed });
+  }
+  return endIndex;
 }
 
 function lexTemplate(lexer: Lexer, index: number): number {
