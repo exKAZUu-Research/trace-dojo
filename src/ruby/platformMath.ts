@@ -19,7 +19,7 @@ export const platformGamma = (value: number): number => {
     for (let factor = 2n; factor < value; factor++) factorial *= factor;
     return Number(factorial);
   }
-  if (value < 0.5) return Math.PI / (Math.sin(Math.PI * value) * platformGamma(1 - value));
+  if (value < 0.5) return Math.PI / (sinePi(value) * platformGamma(1 - value));
   if (value > MAX_FINITE_GAMMA_ARGUMENT) return Number.POSITIVE_INFINITY;
   const x = value - 1;
   const t = x + LANCZOS_G + 0.5;
@@ -34,7 +34,7 @@ export const platformLogGamma = (value: number): [number, number] => {
   // Near zero the gamma function is 1/x to double precision, and the reflection below would round a subnormal product.
   if (Math.abs(value) < TINY_ARGUMENT) return [-Math.log(Math.abs(value)), value < 0 ? -1 : 1];
   if (value < 0.5) {
-    const sine = Math.sin(Math.PI * value);
+    const sine = sinePi(value);
     // The quotient of pi and a subnormal sine would overflow, so the logarithms are subtracted instead.
     return [Math.log(Math.PI) - Math.log(Math.abs(sine)) - platformLogGamma(1 - value)[0], sine < 0 ? -1 : 1];
   }
@@ -43,6 +43,13 @@ export const platformLogGamma = (value: number): [number, number] => {
   const t = x + LANCZOS_G + 0.5;
   return [HALF_LOG_TWO_PI + (x + 0.5) * Math.log(t) - t + Math.log(lanczosSeries(x)), 1];
 };
+
+/** sin(pi * x), reduced to the nearest integer first so that the distance from a pole keeps its precision. */
+function sinePi(x: number): number {
+  const nearest = Math.round(x);
+  const sine = Math.sin(Math.PI * (x - nearest));
+  return nearest % 2 === 0 ? sine : -sine;
+}
 
 function lanczosSeries(x: number): number {
   let sum = LANCZOS_COEFFICIENTS[0];
