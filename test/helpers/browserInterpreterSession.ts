@@ -4,7 +4,13 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 
-import { type BrowserServer, type BrowserType, chromium, type Page } from 'playwright';
+import { type BrowserServer, chromium, firefox, type Page, webkit } from 'playwright';
+
+const BROWSER_TYPES = { chromium, firefox, webkit };
+type BrowserEngine = keyof typeof BROWSER_TYPES;
+
+// CI installs Chromium alone; `BROWSER_ENGINES=chromium,firefox,webkit` compares the other engines where installed.
+export const browserEngines = (process.env.BROWSER_ENGINES ?? 'chromium').split(',') as BrowserEngine[];
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -25,7 +31,7 @@ export interface BrowserInterpreterSession {
 export async function openBrowserInterpreterPage(
   pageScript: string,
   readyGlobal: string,
-  browserType: BrowserType = chromium
+  engine: BrowserEngine = 'chromium'
 ): Promise<BrowserInterpreterSession> {
   mkdirSync('.tmp', { recursive: true });
   const bundleDirectory = mkdtempSync('.tmp/browser-interpreters-');
@@ -56,6 +62,7 @@ export async function openBrowserInterpreterPage(
   try {
     execFileSync('bun', ['test/helpers/buildBrowserInterpreters.ts', bundleDirectory], { stdio: 'inherit' });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const browserType = BROWSER_TYPES[engine];
     browserServer = await browserType.launchServer();
     const browser = await browserType.connect(browserServer.wsEndpoint());
     const page = await browser.newPage();
