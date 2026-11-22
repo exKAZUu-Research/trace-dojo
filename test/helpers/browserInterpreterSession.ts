@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 
-import { type BrowserType, chromium, type Page } from 'playwright';
+import { type BrowserServer, type BrowserType, chromium, type Page } from 'playwright';
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -29,7 +29,6 @@ export async function openBrowserInterpreterPage(
 ): Promise<BrowserInterpreterSession> {
   mkdirSync('.tmp', { recursive: true });
   const bundleDirectory = mkdtempSync('.tmp/browser-interpreters-');
-  execFileSync('bun', ['test/helpers/buildBrowserInterpreters.ts', bundleDirectory], { stdio: 'inherit' });
   const server = createServer((request, response) => {
     const { pathname } = new URL(request.url ?? '/', 'http://localhost');
     if (pathname === '/') {
@@ -47,19 +46,24 @@ export async function openBrowserInterpreterPage(
     response.setHeader('Content-Type', CONTENT_TYPES[path.extname(file)]);
     createReadStream(file).pipe(response);
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const browserServer = await browserType.launchServer();
-  const browser = await browserType.connect(browserServer.wsEndpoint());
-  const page = await browser.newPage();
-  await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/`);
-  await page.waitForFunction((name) => name in globalThis, readyGlobal);
-  return {
-    page,
-    close: async () => {
-      // Chromium takes 10 seconds to close after a page terminated a worker, and there is no state to save.
-      await browserServer.kill();
-      server.close();
-      rmSync(bundleDirectory, { recursive: true });
-    },
+  let browserServer: BrowserServer | undefined;
+  const close = async (): Promise<void> => {
+    // Chromium takes 10 seconds to close after a page terminated a worker, and there is no state to save.
+    await browserServer?.kill();
+    server.close();
+    rmSync(bundleDirectory, { recursive: true });
   };
+  try {
+    execFileSync('bun', ['test/helpers/buildBrowserInterpreters.ts', bundleDirectory], { stdio: 'inherit' });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    browserServer = await browserType.launchServer();
+    const browser = await browserType.connect(browserServer.wsEndpoint());
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/`);
+    await page.waitForFunction((name) => name in globalThis, readyGlobal);
+    return { page, close };
+  } catch (error) {
+    await close();
+    throw error;
+  }
 }
