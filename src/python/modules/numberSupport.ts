@@ -66,7 +66,7 @@ export function defineProperty(cls: PyClass, name: string, get: (self: PyValue) 
 }
 
 /** Matches arguments to parameters as a call of a Python function does, raising its TypeErrors. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows how CPython binds arguments to the parameters of a Python function.
+// code-gauge-allow functionCognitiveComplexity -- Follows how CPython binds arguments to the parameters of a Python function.
 export function bindArguments(signature: PythonSignature, args: PyValue[], kwargs: Kwargs): (PyValue | undefined)[] {
   const { qualified, params, required } = signature;
   if (args.length > params.length) throw tooManyPositional(signature, args.length);

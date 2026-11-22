@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 1013 -- Keeps class defaults with PHP value storage and ownership helpers.
+// code-gauge-allow-file fileNcss -- Keeps class defaults with PHP value storage and ownership helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';

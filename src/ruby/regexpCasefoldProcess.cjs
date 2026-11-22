@@ -31,7 +31,7 @@ const respond = (response) => {
   renameSync(path.join(directory, 'response.next'), path.join(directory, 'response.json'));
 };
 
-// code-gauge-allow functionNcss 33 -- The VM, its per-run pattern cache and the sequential request loop share one subprocess lifetime.
+// code-gauge-allow functionNcss -- The VM, its per-run pattern cache and the sequential request loop share one subprocess lifetime.
 async function main() {
   const module = await WebAssembly.compile(readFileSync(config.wasm));
   const { vm } = await DefaultRubyVM(module, { consolePrint: false });

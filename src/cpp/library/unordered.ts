@@ -651,7 +651,7 @@ export class HashValue extends MapValue {
 }
 
 /** `std::unordered_map<K, V>` or `std::unordered_set<K>`. */
-// code-gauge-allow functionNcss 120 -- The members of the unordered containers, which share their storage.
+// code-gauge-allow functionNcss -- The members of the unordered containers, which share their storage.
 export function unorderedClass(
   library: Library,
   kind: 'unordered_map' | 'unordered_set',

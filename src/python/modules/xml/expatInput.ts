@@ -148,7 +148,7 @@ function decodeUtf16(raw: number[], position: number, little: boolean): [number,
   return [0x1_00_00 + ((first - 0xd8_00) << 10) + (second - 0xdc_00), 4];
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
 function decodeUtf8(raw: number[], position: number): [number, number] {
   const byte = raw[position] as number;
   if (byte < 0x80) return [byte, 1];

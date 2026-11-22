@@ -408,7 +408,7 @@ export function translate(
   return out;
 }
 
-// code-gauge-allow functionParameterCount 8 -- The call boundary keeps receiver, positional/keyword arguments, block and evaluation context explicit.
+// code-gauge-allow functionParameterCount -- The call boundary keeps receiver, positional/keyword arguments, block and evaluation context explicit.
 function translateEscape(
   next: string,
   source: string,
@@ -552,7 +552,7 @@ function unsupportedClassEscape(escape: string): unknown {
   return unsupportedSyntax(`文字クラス内の${escape}`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Encoding checks, syntax diagnostics, and host compilation preserve distinct Ruby errors.
+// code-gauge-allow functionCognitiveComplexity -- Encoding checks, syntax diagnostics, and host compilation preserve distinct Ruby errors.
 export function makeRegexp(source: string, options: RegexpOptions): RObject {
   const display = `/${source}/${regexpSuffix(options)}`;
   rt().spend(Math.ceil(source.length / 64));
@@ -668,8 +668,8 @@ export interface MatchState {
   regexp: RObject;
 }
 
-// code-gauge-allow functionParameterCount 7 -- Search callers select shared subject state, validation and anchoring without rebuilding snapshots.
-// code-gauge-allow functionCognitiveComplexity 27 -- Match execution retains encoding, bounded forward/reverse searches and numbered/named capture state.
+// code-gauge-allow functionParameterCount -- Search callers select shared subject state, validation and anchoring without rebuilding snapshots.
+// code-gauge-allow functionCognitiveComplexity -- Match execution retains encoding, bounded forward/reverse searches and numbered/named capture state.
 export function execAt(
   regexp: RObject,
   text: string,
@@ -971,7 +971,7 @@ function* optionsOf(value: Value | undefined): Gen<RegexpOptions> {
   return { ignoreCase: true, multiline: false, extended: false };
 }
 
-// code-gauge-allow functionNcss 53 -- The ordered cases for Ruby regexp encoding and match state share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for Ruby regexp encoding and match state share state; splitting them solely for the metric would hide their sequencing.
 function invalidPatternMessage(pattern: RString, options: RegexpOptions): RString {
   const source = stringBytes(pattern);
   const result = new Uint8Array(LIMITS.maxStringLength);
@@ -1095,7 +1095,7 @@ function* checkRegexpKeywords(keywords: RHash | undefined): Gen<void> {
 sdef('Regexp', ['escape', 'quote'], 1, function* (_self, [value]) {
   return escapeRegexpPattern(value instanceof RSymbol ? symbolString(value) : yield* toStrValue(value));
 });
-// code-gauge-allow functionCognitiveComplexity 28 -- The ordered cases for Ruby regexp encoding and match state share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby regexp encoding and match state share state; splitting them solely for the metric would hide their sequencing.
 sdef('Regexp', 'union', [0, -1], function* (_self, args) {
   const items = args.length === 1 ? ((yield* tryAry(args[0]))?.items ?? args) : args;
   if (items.length === 1 && isRegexp(items[0])) return items[0];
@@ -1863,8 +1863,8 @@ wrapFirst('split', function* (self, args, block) {
   return yield* splitRegexp(self, cursor, limit, block, !literalSeparator);
 });
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Native split sequencing shares the nullable-match state, field/capture emission, limit checks and terminal match state.
-// code-gauge-allow functionNcss 40 -- Native split sequencing keeps the ordered empty-match transitions, field/capture emissions and limit break in one loop.
+// code-gauge-allow functionCognitiveComplexity -- Native split sequencing shares the nullable-match state, field/capture emission, limit checks and terminal match state.
+// code-gauge-allow functionNcss -- Native split sequencing keeps the ordered empty-match transitions, field/capture emissions and limit break in one loop.
 function* splitRegexp(
   self: RString,
   cursor: RegexpCursor,
@@ -2020,7 +2020,7 @@ function* sliceCaptureRange(
   if (group < 0) group += state.groups.length;
   return group >= 0 && group < state.groups.length ? (ranges[group] ?? 'unmatched') : undefined;
 }
-// code-gauge-allow functionCognitiveComplexity 16 -- Regexp assignment distinguishes numeric and named captures and preserves Ruby's unmatched-group errors.
+// code-gauge-allow functionCognitiveComplexity -- Regexp assignment distinguishes numeric and named captures and preserves Ruby's unmatched-group errors.
 wrapFirst('[]=', function* (self, args) {
   const state = execAt(args[0] as RObject, self.s, 0, self);
   setLastMatch(state);

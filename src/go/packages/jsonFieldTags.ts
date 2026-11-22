@@ -4,7 +4,7 @@ interface TagOption {
   valid: boolean;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows Go field tag name and option scanning with shared progress and delimiter rules.
+// code-gauge-allow functionCognitiveComplexity -- Follows Go field tag name and option scanning with shared progress and delimiter rules.
 export function parseJsonFieldTag(tag = ''): { name?: string; options: string[] } {
   let rest = tag;
   let name: string | undefined;

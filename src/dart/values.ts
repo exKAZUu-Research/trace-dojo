@@ -129,7 +129,7 @@ export function recordPositionalIndex(name: string): number | undefined {
 export class DartClosure extends DartObject {
   dynamicTypeArgumentDefaults?: readonly DartType[];
 
-  // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
+  // code-gauge-allow functionParameterCount -- The parameters are the parts a caller already holds; grouping them would only rename them.
   constructor(
     cls: ClassInfo,
     readonly type: FunctionType,

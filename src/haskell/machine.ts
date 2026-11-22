@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 528 -- Machine states and frames share one evaluator stack.
+// code-gauge-allow-file fileNcss -- Machine states and frames share one evaluator stack.
 import { CONS_CON, NIL_CON } from './builtinTypes';
 import type { CaseCore, Core, FunctionInfo } from './core';
 import type { TypeHint } from './displayTypeHints';
@@ -212,7 +212,7 @@ export class Machine {
     return this.nativeCalls.run(() => this.runCore(start));
   }
 
-  // code-gauge-allow functionNcss 35 -- The main loop dispatches on the machine mode and handles limits and exceptions in one place.
+  // code-gauge-allow functionNcss -- The main loop dispatches on the machine mode and handles limits and exceptions in one place.
   private runCore(start: RunStart): Slot {
     const { stack } = this;
     const base = stack.length;
@@ -258,7 +258,7 @@ export class Machine {
     }
   }
 
-  // code-gauge-allow functionNcss 57 -- One short case per kind of code node.
+  // code-gauge-allow functionNcss -- One short case per kind of code node.
   private stepEval(state: RunState): void {
     const { code, env } = state;
     switch (code.k) {
@@ -358,7 +358,7 @@ export class Machine {
     return false;
   }
 
-  // code-gauge-allow functionNcss 31 -- Keep thunk entry, its rollback frame and preview accounting in one transition.
+  // code-gauge-allow functionNcss -- Keep thunk entry, its rollback frame and preview accounting in one transition.
   private stepEnter(state: RunState): void {
     const entered = state.value;
     const slot = untypedSlot(entered);
@@ -414,7 +414,7 @@ export class Machine {
     this.runtime.endPreview(top.thunk);
   }
 
-  // code-gauge-allow functionNcss 36 -- Application dispatch keeps partial, primitive and closure entry on the same stack.
+  // code-gauge-allow functionNcss -- Application dispatch keeps partial, primitive and closure entry on the same stack.
   private stepApply(state: RunState): void {
     let { fn, args } = state;
     if (fn instanceof Partial) {
@@ -479,7 +479,7 @@ export class Machine {
     else state.enter(result);
   }
 
-  // code-gauge-allow functionNcss 47 -- One short case per kind of frame a value returns to.
+  // code-gauge-allow functionNcss -- One short case per kind of frame a value returns to.
   private stepReturn(state: RunState): boolean {
     const frame = this.stack.pop() as Frame;
     switch (frame.k) {
@@ -658,7 +658,7 @@ export class Machine {
     state.evaluate(core.default, env);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- One branch dispatches each IO representation and its call scope.
+  // code-gauge-allow functionCognitiveComplexity -- One branch dispatches each IO representation and its call scope.
   private stepIO(state: RunState): void {
     const action = state.value as Value;
     if (action instanceof IOCall) {

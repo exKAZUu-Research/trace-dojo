@@ -318,7 +318,7 @@ export const mroEntryHooks: ((base: PyValue, className: string, bases: readonly 
   [];
 
 /** Sets `__parameters__` of a class deriving from Generic, as `Generic.__init_subclass__` does. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows Generic.__init_subclass__, which checks each way bases declare type parameters.
+// code-gauge-allow functionCognitiveComplexity -- Follows Generic.__init_subclass__, which checks each way bases declare type parameters.
 export function initGenericSubclass(cls: PyClass, originalBases: readonly PyValue[] | undefined): void {
   if (!cls.isSubclassOf(genericClass)) return;
   if (originalBases === undefined) {

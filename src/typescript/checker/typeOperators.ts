@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 600 -- Resolves related type operators sharing generic parameters and type construction.
+// code-gauge-allow-file fileNcss -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';

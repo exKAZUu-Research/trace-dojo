@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 635 -- The enum machinery keeps the members, flags, and their boundaries together.
+// code-gauge-allow-file fileNcss -- The enum machinery keeps the members, flags, and their boundaries together.
 import { pyFormat, pyRepr, pyStr } from './conversions';
 import { pythonMethod } from './define';
 import { ownDict } from './descriptors';
@@ -114,7 +114,7 @@ function lookupEntries(cls: PyClass): [PyValue, PyInstance][] {
 const FUNCTIONAL_KEYWORDS = new Set(['value', 'names', 'module', 'qualname', 'type', 'start', 'boundary']);
 
 /** `Color(value)` or `Enum('Name', names, ...)`: `EnumType.__call__`. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Follows EnumType.__call__ and Enum.__new__.
+// code-gauge-allow functionCognitiveComplexity -- Follows EnumType.__call__ and Enum.__new__.
 export function enumLookup(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue {
   validateEnumCallArgs(args, kwargs);
   const firstValue = args.length > 0 ? args[0] : (kwargs?.get('value') as PyValue);
@@ -193,8 +193,8 @@ function callMissing(cls: PyClass, value: PyValue): PyValue {
  * `Enum('Name', names, *, module=None, qualname=None, type=None, start=1, boundary=None)`, the functional API of
  * EnumType.__call__, which creates a new Enum class as `_create_` does.
  */
-// code-gauge-allow functionCognitiveComplexity 28 -- Follows EnumType._create_, which accepts names in four forms.
-// code-gauge-allow functionNcss 42 -- Follows EnumType._create_, which accepts names in four forms.
+// code-gauge-allow functionCognitiveComplexity -- Follows EnumType._create_, which accepts names in four forms.
+// code-gauge-allow functionNcss -- Follows EnumType._create_, which accepts names in four forms.
 function createEnum(cls: PyClass, className: PyValue, rawNames: PyValue, kwargs: Kwargs): PyValue {
   let names = rawNames;
   const start = kwargs?.get('start') ?? 1n;
@@ -256,8 +256,8 @@ export function enumContains(cls: PyClass, value: PyValue): boolean {
 // Members -----------------------------------------------------------------------------------------------------------
 
 /** Replaces the plain attributes of an Enum class body with members, in definition order. */
-// code-gauge-allow functionCognitiveComplexity 29 -- Follows how EnumType turns a class body into members.
-// code-gauge-allow functionNcss 56 -- Follows how EnumType turns a class body into members.
+// code-gauge-allow functionCognitiveComplexity -- Follows how EnumType turns a class body into members.
+// code-gauge-allow functionNcss -- Follows how EnumType turns a class body into members.
 export function createEnumMembers(cls: PyClass, namespace?: Map<string, PyValue> | PyDict): void {
   cls.flags.isEnum = true;
   if (cls.bases.includes(reprEnumClass) && memberTypeOf(cls) === objectClass) {
@@ -587,7 +587,7 @@ export function flagMember(cls: PyClass, value: bigint): PyValue {
   return member;
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Follows Flag._missing_ for single-bit members, multi-bit aliases, and unknown bits.
+// code-gauge-allow functionCognitiveComplexity -- Follows Flag._missing_ for single-bit members, multi-bit aliases, and unknown bits.
 function pseudoFlagName(cls: PyClass, value: bigint, singles: bigint): string | typeof None {
   const aliases = value & ~singles;
   const memberBits = value & singles;
@@ -884,7 +884,7 @@ export function enumMemberDir(member: PyInstance, runtime: { dirNames: (value: P
 }
 
 /** The data of an Enum class that EnumType keeps: its members by name and by value, and the bits of a Flag's. */
-// code-gauge-allow functionNcss 31 -- One case per EnumType class attribute.
+// code-gauge-allow functionNcss -- One case per EnumType class attribute.
 export function enumClassData(cls: PyClass, name: string): PyValue | undefined {
   const runtime = currentRuntime();
   const named = membersByName(cls);

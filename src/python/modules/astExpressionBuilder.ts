@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 520 -- Builds every kind of CPython expression node, as ast.c and the parser's actions do.
+// code-gauge-allow-file fileNcss -- Builds every kind of CPython expression node, as ast.c and the parser's actions do.
 // Builds the expression nodes of CPython's `ast` module from the syntax tree, with CPython's fields and positions.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -126,7 +126,7 @@ export class AstExpressionBuilder {
 
   // Expressions ---------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 47 -- One case per kind of expression node, each delegating where it grows.
+  // code-gauge-allow functionNcss -- One case per kind of expression node, each delegating where it grows.
   expr(node: Node, ctx: Context = 'Load'): PyValue {
     const at = this.location(node);
     switch (node.type) {
@@ -199,7 +199,7 @@ export class AstExpressionBuilder {
   }
 
   /** The displays, comprehensions, and the other expressions that compose others. */
-  // code-gauge-allow functionNcss 46 -- One case per kind of expression node, each delegating where it grows.
+  // code-gauge-allow functionNcss -- One case per kind of expression node, each delegating where it grows.
   private displayOrOther(node: Node, ctx: Context, at: Location): PyValue {
     switch (node.type) {
       case 'list':
@@ -448,7 +448,7 @@ export class AstExpressionBuilder {
     });
   }
 
-  // code-gauge-allow functionNcss 32 -- Sorts each kind of parameter into CPython's lists.
+  // code-gauge-allow functionNcss -- Sorts each kind of parameter into CPython's lists.
   protected arguments(node: Node): PyValue {
     const positional: PyValue[] = [];
     const posonly: PyValue[] = [];

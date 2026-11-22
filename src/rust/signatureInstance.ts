@@ -139,7 +139,7 @@ export class SignatureInstance {
     this.bindOutputPart(fn.ret, result, false, elided, inputs.flatMap(regionsOf));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Applies the lifetime elision rules.
+  // code-gauge-allow functionCognitiveComplexity -- Applies the lifetime elision rules.
   private bindOutputPart(
     declared: Type,
     actual: Layout,

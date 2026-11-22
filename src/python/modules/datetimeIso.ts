@@ -38,8 +38,8 @@ export function parseIsoDate(text: string): [number, number, number] | undefined
   return parseDate(chars, chars.length);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows parse_isoformat_date of _datetimemodule.c.
-// code-gauge-allow functionNcss 32 -- Follows parse_isoformat_date of _datetimemodule.c.
+// code-gauge-allow functionCognitiveComplexity -- Follows parse_isoformat_date of _datetimemodule.c.
+// code-gauge-allow functionNcss -- Follows parse_isoformat_date of _datetimemodule.c.
 function parseDate(chars: Chars, length: number): [number, number, number] | undefined {
   const year = digits(chars, 0, 4);
   if (year === undefined) return undefined;
@@ -84,8 +84,8 @@ interface Clock {
   more: boolean;
 }
 
-// code-gauge-allow functionNcss 35 -- Follows parse_hh_mm_ss_ff of _datetimemodule.c.
-// code-gauge-allow functionCognitiveComplexity 23 -- Follows parse_hh_mm_ss_ff of _datetimemodule.c.
+// code-gauge-allow functionNcss -- Follows parse_hh_mm_ss_ff of _datetimemodule.c.
+// code-gauge-allow functionCognitiveComplexity -- Follows parse_hh_mm_ss_ff of _datetimemodule.c.
 function parseClock(chars: Chars, start: number, end: number): Clock | undefined {
   const values: Clock['values'] = [0, 0, 0, 0];
   let position = start;
@@ -144,7 +144,7 @@ export function parseIsoTimeOnly(text: string): IsoTime | undefined {
 }
 
 /** Where the time starts in a datetime's isoformat, as `_find_isoformat_datetime_separator` decides. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows _find_isoformat_datetime_separator of CPython.
+// code-gauge-allow functionCognitiveComplexity -- Follows _find_isoformat_datetime_separator of CPython.
 function separatorPosition(chars: Chars): number {
   const length = chars.length;
   if (length === 7) return 7;

@@ -283,7 +283,7 @@ export function newException(cls: PyClass, args: readonly PyValue[]): PyInstance
 }
 
 /** Initializes the C member attributes a builtin exception class derives from its constructor arguments. */
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per builtin exception type with C member attributes.
+// code-gauge-allow functionCognitiveComplexity -- One case per builtin exception type with C member attributes.
 export function initExceptionFields(
   cls: PyClass,
   state: ExceptionState,

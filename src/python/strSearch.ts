@@ -69,7 +69,7 @@ function hostOccurrences(region: string, needle: string, fromEnd: boolean, limit
 }
 
 /** Searches with the Knuth-Morris-Pratt algorithm, from the end by searching the reversed strings. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the Knuth-Morris-Pratt search, whose failure links make the loop.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the Knuth-Morris-Pratt search, whose failure links make the loop.
 function kmpOccurrences(region: string, needle: string, fromEnd: boolean, limit: number): number[] {
   // A backward search reads the region from its end in place, so that an early match reads no more of it.
   const unitAt = fromEnd

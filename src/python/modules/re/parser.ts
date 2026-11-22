@@ -127,8 +127,8 @@ export class SubPattern {
     return this.width;
   }
 
-  // code-gauge-allow functionNcss 41 -- Transcribes re._parser.SubPattern.getwidth, one case per opcode.
-  // code-gauge-allow functionCognitiveComplexity 21 -- Transcribes re._parser.SubPattern.getwidth, one case per opcode.
+  // code-gauge-allow functionNcss -- Transcribes re._parser.SubPattern.getwidth, one case per opcode.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes re._parser.SubPattern.getwidth, one case per opcode.
   private itemWidth(item: Item): [bigint, bigint] {
     switch (item.op) {
       case 'BRANCH': {
@@ -271,8 +271,8 @@ function uniqueSetItems(set: SetItem[]): SetItem[] {
   return [...seen.values()];
 }
 
-// code-gauge-allow functionNcss 39 -- Transcribes the main loop of re._parser._parse in its order.
-// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes the main loop of re._parser._parse in its order.
+// code-gauge-allow functionNcss -- Transcribes the main loop of re._parser._parse in its order.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the main loop of re._parser._parse in its order.
 export function parseSequence(
   source: Tokenizer,
   state: ParseState,
@@ -454,7 +454,7 @@ function parseRepeat(source: Tokenizer, subpattern: SubPattern, current: string)
 }
 
 /** The bounds of a repeat, or undefined when a `{` turns out to be a literal. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the `{m,n}` branch of re._parser._parse.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the `{m,n}` branch of re._parser._parse.
 function repeatBounds(source: Tokenizer, current: string, here: number): [number, number] | undefined {
   if (current === '?') return [0, 1];
   if (current === '*') return [0, MAXREPEAT];

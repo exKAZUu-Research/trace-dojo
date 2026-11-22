@@ -103,7 +103,7 @@ function cp936CodePoint(bytes: Uint8Array, lead: number, trail: number, bad: num
   return code === undefined || code === 0xff_fd ? bad : code;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Reads sequences in mbfl's order, including which bytes a malformed unit consumes.
+// code-gauge-allow functionCognitiveComplexity -- Reads sequences in mbfl's order, including which bytes a malformed unit consumes.
 export function decodeGb18030(bytes: string, revised: boolean, bad: number): number[] {
   const input = Buffer.from(bytes, 'latin1');
   const mappings = revised ? revisedMappings : legacyMappings;

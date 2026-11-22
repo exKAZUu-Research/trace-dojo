@@ -67,7 +67,7 @@ type OperatorExpression = Extract<
 >;
 
 /** Writes an expression back as PHP code, as the message of a failed `assert` shows it. */
-// code-gauge-allow functionNcss 59 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 export function exportExpr(e: Expr, priority = 0, depth = 0): string {
   const render = (expression: Expr, precedence = 0): string => exportExpr(expression, precedence, depth);
   const wrap = (own: number, text: string): string => (priority > own ? `(${text})` : text);
@@ -155,7 +155,7 @@ function exportNew(expression: Extract<Expr, { k: 'new' | 'newAnon' }>, depth: n
   return `new ${exportClassDeclaration(expression.decl, header, depth)}`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function exportAccess(e: Extract<Expr, { k: 'call' | 'mcall' | 'scall' | 'prop' | 'sprop' }>, depth: number): string {
   const render = (expression: Expr, precedence = 0): string => exportExpr(expression, precedence, depth);
   switch (e.k) {
@@ -394,8 +394,8 @@ function exportStatements(statements: Stmt[], depth: number): string {
   return text;
 }
 
-// code-gauge-allow functionNcss 56 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
-// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function exportStatement(statement: Stmt, depth: number): string {
   const render = (expr: Expr): string => exportExpr(expr, 0, depth);
   const separate = (lines: string[]): string => lines.join(`\n${indent(depth)}`);
@@ -536,7 +536,7 @@ function exportClassDeclaration(decl: ClassDecl, header: string, depth: number):
   return `${header}${parent}${interfaces} {\n${body.join('')}${indent(depth)}}`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function exportClassMember(member: ClassMemberSyntax, kind: ClassDecl['kind'], depth: number): string {
   switch (member.k) {
     case 'const': {

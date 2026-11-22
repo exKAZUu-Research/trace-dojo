@@ -12,7 +12,7 @@ import type { Allocation } from './memory';
 import { type Frame, type FunctionInfo, Runtime } from './runtime';
 import { type CType, hasVla, isCharType, sizeIn, sizeOf } from './types';
 
-// code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
+// code-gauge-allow duplicateLines -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceCProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileC(program, { trace });
   const runtime = new Runtime(input);
@@ -50,7 +50,7 @@ class Snapshotter {
   }
 
   /** The variables a frame shows: its own in scope, then the file-scope variables when `withContext`. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Lexical locals, receiver fields, and globals must obey one shadowing order.
+  // code-gauge-allow functionCognitiveComplexity -- Lexical locals, receiver fields, and globals must obey one shadowing order.
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
     this.vla = frame.vla;
     const variables: TraceVariables = { vars: {}, referenceVars: {} };

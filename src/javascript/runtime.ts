@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 892 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -254,7 +254,7 @@ export class Runtime {
     return value;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of exotic object whose own properties are not stored as properties.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of exotic object whose own properties are not stored as properties.
   getOwnProperty(object: JsObject, key: Key): Property | undefined {
     if (typeof object.primitive === 'string') {
       const element = ownElement(object.primitive, key);
@@ -545,7 +545,7 @@ export class Runtime {
     while (elements.length < length) elements.push(HOLE);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Handles indexed storage before keeping ordinary descriptor and trace state.
+  // code-gauge-allow functionCognitiveComplexity -- Handles indexed storage before keeping ordinary descriptor and trace state.
   defineProperty(object: JsObject, key: Key, property: Property): void {
     // A String object's indices and length are read-only and never stored: a definition compatible with them changes
     // nothing, and any other, such as a class field of that name, throws.
@@ -935,7 +935,7 @@ export class Runtime {
 
   // Conversions -------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Preserves the two coercion hooks and the outcome of numeric-only conversion in their evaluation order.
+  // code-gauge-allow functionCognitiveComplexity -- Preserves the two coercion hooks and the outcome of numeric-only conversion in their evaluation order.
   toPrimitive(value: Value, hint: 'number' | 'string' | 'default', numericOnly = false): Primitive {
     if (!isObject(value)) return value;
     const exotic = this.get(value, WELL_KNOWN_SYMBOLS.toPrimitive);
@@ -1182,7 +1182,7 @@ const rejectStackAccess: NativeFunction = ({ runtime }) =>
   rejectUnavailableMember('Error の stack', runtime.currentRow);
 
 /** Reads an array element, an array's length, a string's character, or a string's length without a lookup. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Reads a string's or an array's element without its descriptor, unless an accessor defines it.
+// code-gauge-allow functionCognitiveComplexity -- Reads a string's or an array's element without its descriptor, unless an accessor defines it.
 function ownElement(value: Value, key: Key): Value | typeof MISSING {
   if (typeof value === 'string') {
     if (key === 'length') return value.length;

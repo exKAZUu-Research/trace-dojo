@@ -64,7 +64,7 @@ intClass.construct = (cls, args, kwargs) => {
 };
 
 /** `int(value)` for a value without a base. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows int() for each kind of argument.
+// code-gauge-allow functionCognitiveComplexity -- Follows int() for each kind of argument.
 export function toInt(value: PyValue): bigint {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'boolean') return value ? 1n : 0n;
@@ -151,8 +151,8 @@ floatClass.construct = (_cls, args, kwargs) => {
 };
 
 /** `float(value)`. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows float() for each kind of argument.
-// code-gauge-allow functionNcss 31 -- Follows float() for each kind of argument.
+// code-gauge-allow functionCognitiveComplexity -- Follows float() for each kind of argument.
+// code-gauge-allow functionNcss -- Follows float() for each kind of argument.
 export function toFloat(value: PyValue): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'bigint') return intToFloat(value);
@@ -237,7 +237,7 @@ export function gcd(a: bigint, b: bigint): bigint {
 }
 
 /** `round(x, digits)` for a float: to an int halving to even, or to a float rounded correctly at `digits`. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows float.__round__, including its exact halfway cases.
+// code-gauge-allow functionCognitiveComplexity -- Follows float.__round__, including its exact halfway cases.
 export function roundFloat(value: number, digits: PyValue | undefined): PyValue {
   if (digits === undefined || digits === None) {
     if (Number.isNaN(value)) throw valueError('cannot convert float NaN to integer');

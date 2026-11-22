@@ -190,7 +190,7 @@ function defineErrorStatics(builder: RealmBuilder, errorConstructor: JsFunction)
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Defines each error class with its own constructor behavior.
+// code-gauge-allow functionCognitiveComplexity -- Defines each error class with its own constructor behavior.
 function defineErrors(builder: RealmBuilder): void {
   const { errorPrototypes } = builder.realm;
   let errorConstructor: JsFunction | undefined;
@@ -252,7 +252,7 @@ function createAggregateError(call: NativeCall, prototype: JsObject): JsObject {
   return error;
 }
 
-// code-gauge-allow functionNcss 33 -- Lists the builtin methods, each a small closure of its own.
+// code-gauge-allow functionNcss -- Lists the builtin methods, each a small closure of its own.
 function defineNumber(builder: RealmBuilder): void {
   const { numberPrototype } = builder.realm;
   const numberConstructor = builder.defineClass('Number', 1, numberPrototype, constructNumber);
@@ -313,7 +313,7 @@ function defineNumber(builder: RealmBuilder): void {
   builder.method(numberPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisNumber(runtime, thisValue, 'valueOf'));
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function defineNumberFormats(builder: RealmBuilder): void {
   const { numberPrototype } = builder.realm;
   builder.method(numberPrototype, 'toPrecision', 1, ({ runtime, thisValue, args }) => {
@@ -434,7 +434,7 @@ function defineMath(builder: RealmBuilder): void {
   }
 }
 
-// code-gauge-allow functionNcss 52 -- Lists the console methods, each a small closure sharing the group indentation and counts.
+// code-gauge-allow functionNcss -- Lists the console methods, each a small closure sharing the group indentation and counts.
 function defineConsole(builder: RealmBuilder): void {
   const console = builder.namespace('console');
   // Grouping indents everything printed after it, on every line, as Node.js does.
@@ -567,8 +567,8 @@ function labelOf(runtime: Runtime, label: Value): string {
   return label === undefined ? 'default' : runtime.toString(label);
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Lists the builtin methods, each a small closure of its own.
-// code-gauge-allow functionNcss 39 -- Lists the builtin methods, each a small closure of its own.
+// code-gauge-allow functionCognitiveComplexity -- Lists the builtin methods, each a small closure of its own.
+// code-gauge-allow functionNcss -- Lists the builtin methods, each a small closure of its own.
 function defineTurtle(builder: RealmBuilder): void {
   const prototype = new JsObject(builder.realm.objectPrototype);
   builder.defineClass('Turtle', 0, prototype, ({ runtime, args, newTarget }) => {

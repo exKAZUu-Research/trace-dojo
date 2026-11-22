@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 480 -- Preserves JSON field dominance, tags and typed value handling in the composite encoder.
+// code-gauge-allow-file fileNcss -- Preserves JSON field dominance, tags and typed value handling in the composite encoder.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { mapKeyOf } from '../equality';
 import { currentRuntime, fn, namedType } from '../native';
@@ -94,8 +94,8 @@ class MemberErrors {
 
 // Maps ----------------------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionNcss 38 -- A transcription of Go's makeMapArshaler, step by step.
-// code-gauge-allow functionCognitiveComplexity 26 -- A transcription of Go's makeMapArshaler, step by step.
+// code-gauge-allow functionNcss -- A transcription of Go's makeMapArshaler, step by step.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of Go's makeMapArshaler, step by step.
 export function makeMapArshaler(type: Type, lookup: Lookup): Arshaler {
   const mapType = underlying(type) as MapType;
   const keyFncs = lookup(mapType.key);
@@ -246,7 +246,7 @@ function makeStructFields(root: Type): StructFields {
 }
 
 /** Adds the fields of one struct, queueing its embedded structs to visit later, as breadth-first order requires. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Preserves JSON field dominance, tags and typed value handling in the composite encoder.
+// code-gauge-allow functionCognitiveComplexity -- Preserves JSON field dominance, tags and typed value handling in the composite encoder.
 function collectFields(entry: QueueEntry, queue: QueueEntry[], seen: Set<string>, allFields: StructField[]): void {
   const struct = structOf(entry.type);
   if (!struct) return;
@@ -329,7 +329,7 @@ export function makeStructArshaler(type: Type, lookup: Lookup): Arshaler {
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- A transcription of Go's unmarshalStruct, step by step.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of Go's unmarshalStruct, step by step.
 function unmarshalStruct(
   dec: DecoderState,
   ref: Ref,
@@ -681,7 +681,7 @@ function zeroJsonValue(ref: Ref, type: Type): boolean {
   return structuralZero(value, type);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Inspects native state in value arrays and structs without changing pointer or interface zero rules.
+// code-gauge-allow functionCognitiveComplexity -- Inspects native state in value arrays and structs without changing pointer or interface zero rules.
 function opaqueZeroType(value: Value, type: Type): Type | undefined {
   if (value === undefined) return undefined;
   const under = underlying(type);

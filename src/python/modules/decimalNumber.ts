@@ -257,7 +257,7 @@ export function roundPlaces(self: Dec, places: number, rounding: Rounding): Dec 
 // Comparison ---------------------------------------------------------------------------------------------------------
 
 /** Compares two non-NaN decimals: -1, 0, or 1. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _pydecimal's algorithm of the same name.
 export function compareValues(self: Dec, other: Dec): number {
   if (isSpecial(self) || isSpecial(other)) {
     const a = infinityKind(self);

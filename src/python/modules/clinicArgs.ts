@@ -39,8 +39,8 @@ export function clinicArgs(spec: ClinicSpec, args: readonly PyValue[], kwargs: K
   return unpackCArguments(spec, args, unicodeKeywords(kwargs, spec.name));
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps CPython's argument count, required parameter and keyword checks in precedence order.
-// code-gauge-allow functionNcss 31 -- Keeps CPython's argument count, required parameter and keyword checks in precedence order.
+// code-gauge-allow functionCognitiveComplexity -- Keeps CPython's argument count, required parameter and keyword checks in precedence order.
+// code-gauge-allow functionNcss -- Keeps CPython's argument count, required parameter and keyword checks in precedence order.
 export function unpackCArguments(
   spec: CKeywordSpec,
   args: readonly PyValue[],

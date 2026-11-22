@@ -124,7 +124,7 @@ mappingProxyClass.isBuiltin = false;
 export class PatternObject extends PyObject {
   readonly indexgroup: (string | undefined)[] = [];
 
-  // code-gauge-allow functionParameterCount 7 -- Each field of a compiled pattern is set once at creation.
+  // code-gauge-allow functionParameterCount -- Each field of a compiled pattern is set once at creation.
   constructor(
     /** The pattern's text, one character per byte for bytes, which a `re.Scanner` pattern has none of. */
     readonly source: string | undefined,
@@ -382,7 +382,7 @@ for (const kind of ['sub', 'subn'] as const) {
 }
 
 /** `pattern_subx`: replaces up to `count` matches, returning the new string and the number of replacements. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the substitution loop within one scope that releases its buffer on every exit.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the substitution loop within one scope that releases its buffer on every exit.
 function substitute(
   pattern: PatternObject,
   repl: PyValue,

@@ -62,8 +62,8 @@ export interface PrintfArgument {
 }
 
 /** Formats `printf`'s format string and arguments into bytes, as macOS's libc does. */
-// code-gauge-allow functionCognitiveComplexity 28 -- The parser advances a single cursor through flags, width, precision, and the conversion.
-// code-gauge-allow functionNcss 48 -- The parser and argument cursor share the loop that emits each formatted field.
+// code-gauge-allow functionCognitiveComplexity -- The parser advances a single cursor through flags, width, precision, and the conversion.
+// code-gauge-allow functionNcss -- The parser and argument cursor share the loop that emits each formatted field.
 export function formatPrintf(
   format: string,
   args: PrintfArgument[],
@@ -132,7 +132,7 @@ function integerOf(arg: PrintfArgument, expected: IntName, allowCorresponding = 
   throw new CppRuntimeError('formatArgumentType');
 }
 
-// code-gauge-allow functionNcss 44 -- A single dispatch shares conversion logic across specifiers with the same argument type.
+// code-gauge-allow functionNcss -- A single dispatch shares conversion logic across specifiers with the same argument type.
 function convert(
   spec: Spec,
   take: () => PrintfArgument,

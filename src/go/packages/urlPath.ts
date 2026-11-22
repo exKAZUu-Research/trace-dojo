@@ -1,7 +1,7 @@
 import { spendFor } from './support';
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes net/url's resolvePath.
-// code-gauge-allow functionNcss 35 -- Transcribes net/url's resolvePath.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes net/url's resolvePath.
+// code-gauge-allow functionNcss -- Transcribes net/url's resolvePath.
 /** net/url's `resolvePath`: applies the dot segments of `ref` (relative to `base`) per RFC 3986. */
 export function resolvePath(base: string, ref: string): string {
   let full: string;

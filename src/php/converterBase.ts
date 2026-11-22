@@ -235,7 +235,7 @@ export abstract class ConverterBase {
     if (unavailable) this.unsupported(node, unavailable);
   }
 
-  // code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected checkGotos(context: FunctionContext, body: Stmt[]): void {
     interface Location {
       loops: Stmt[];

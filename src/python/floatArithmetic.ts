@@ -39,7 +39,7 @@ function twoProduct(x: number, y: number): DoubleLength {
 }
 
 /** The Euclidean norm of non-negative finite-or-not coordinates, as `vector_norm` of mathmodule.c computes it. */
-// code-gauge-allow functionNcss 31 -- Transcribes the algorithm of mathmodule.c.
+// code-gauge-allow functionNcss -- Transcribes the algorithm of mathmodule.c.
 export function vectorNorm(values: number[]): number {
   const magnitudes = values.map(Math.abs);
   const max = Math.max(0, ...magnitudes.filter((value) => !Number.isNaN(value)));
@@ -116,7 +116,7 @@ interface SumprodState {
 }
 
 /** `math.sumprod`, with its exact int path and its triple-length float path before falling back to generic math. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes the algorithm of mathmodule.c.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the algorithm of mathmodule.c.
 export function sumOfProducts(nextP: () => PyValue | typeof DONE, nextQ: () => PyValue | typeof DONE): PyValue {
   const state: SumprodState = { total: 0n, intPath: true, floatPath: true };
   for (;;) {

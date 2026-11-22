@@ -109,7 +109,7 @@ function restrictedCallee(runtime: Runtime): JsFunction {
  * Links each parameter to its element of `arguments`, as a function that is not strict mode code with only simple
  * parameters does, until the element is deleted, becomes an accessor, or becomes read-only.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Tracks detachment and the independent parameter value after deletion, accessor conversion, or a read-only definition.
+// code-gauge-allow functionCognitiveComplexity -- Tracks detachment and the independent parameter value after deletion, accessor conversion, or a read-only definition.
 export function mapArguments(bindings: Map<string, Binding>, names: string[], argumentsObject: JsObject): void {
   for (const [index, name] of names.entries()) {
     const element = argumentsObject.properties.get(String(index));
