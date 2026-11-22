@@ -104,7 +104,8 @@ export function compileRegexp(source: string, flags: RegexpFlags): RegExp {
   const extended = flags.extended ?? false;
   if (((/\\+$/.exec(source)?.[0].length ?? 0) & 1) === 1) throw new RegexpSourceError('too short escape sequence');
   // The library inlines every subroutine call, so its work grows with the calls times the source they copy.
-  if ((source.match(/\\g[<']/g)?.length ?? 0) * source.length > MAX_SUBROUTINE_EXPANSION)
+  const calls = regexpTokens(source, extended).filter((token) => token.raw === String.raw`\g` && !token.inClass);
+  if (calls.length * source.length > MAX_SUBROUTINE_EXPANSION)
     throw new UnsupportedFeatureError('複雑な再帰構造の正規表現');
   const prepared = onigurumaSource(source, extended);
   try {

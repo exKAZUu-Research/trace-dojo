@@ -1427,11 +1427,14 @@ for (const [name, last] of [
 function reverseRegexpSearch(regexp: RObject, source: RString, start: number): MatchState | undefined {
   const snapshot = matchSnapshot(source);
   validateRegexpSubject(regexp, source);
+  const data = dataOf(regexp);
+  const sticky = (data.sticky ??= stickyRegexp(data.js));
   // An expression that starts with `\G` matches only where the search starts, which the library expresses as sticky.
-  const first = dataOf(regexp).js.sticky ? start : 0;
+  const first = data.js.sticky ? start : 0;
   for (let position = start; position >= first; position--) {
-    const state = execAt(regexp, source.s, position, source, snapshot, true, true);
-    if (state) return state;
+    if ((start - position) % 64 === 0) rt().spend();
+    sticky.lastIndex = unitIndex(source.s, position);
+    if (sticky.test(source.s)) return execAt(regexp, source.s, position, source, snapshot, true, true);
   }
   return undefined;
 }

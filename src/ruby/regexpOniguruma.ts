@@ -1,5 +1,6 @@
 import { RegexpSourceError } from './regexpEscapes';
 import { type RegexpToken, regexpTokens, unicodeEscapePoints } from './regexpTokens';
+import { UnsupportedFeatureError } from './runtime';
 
 interface Rewrite {
   text: string;
@@ -60,6 +61,9 @@ function rewrittenToken(source: string, token: RegexpToken, aliases: Map<string,
 function rewrittenEscape(source: string, token: RegexpToken, aliases: Map<string, string>): Rewrite | undefined {
   const next = token.raw[1];
   const end = token.start + token.raw.length;
+  if (next === 'K' && !token.inClass) throw new UnsupportedFeatureError(String.raw`正規表現の\K`);
+  // Oniguruma reads these two as character sets, while Ruby reads an unknown escape as the letter itself.
+  if (next === 'N' || next === 'O') return { text: next, length: token.raw.length };
   if (next in ASCII_SHORTHANDS)
     return boundsRange(source, token) ? undefined : { text: ASCII_SHORTHANDS[next], length: token.raw.length };
   if (next === 'u') {
@@ -72,8 +76,11 @@ function rewrittenEscape(source: string, token: RegexpToken, aliases: Map<string
       }
     );
   }
-  if ((next !== 'k' && next !== 'g') || token.inClass) return undefined;
-  REFERENCE_NAME.lastIndex = end;
+  return (next === 'k' || next === 'g') && !token.inClass ? rewrittenReference(source, token, aliases) : undefined;
+}
+
+function rewrittenReference(source: string, token: RegexpToken, aliases: Map<string, string>): Rewrite | undefined {
+  REFERENCE_NAME.lastIndex = token.start + token.raw.length;
   const reference = REFERENCE_NAME.exec(source);
   if (!reference) return undefined;
   const name = reference[1] ?? reference[2];

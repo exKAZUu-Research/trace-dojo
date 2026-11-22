@@ -6,18 +6,17 @@ const LANCZOS_COEFFICIENTS = [
   2.1743961811521265e-4, -1.643181065367639e-4, 8.441822398385274e-5, -2.619083840158141e-5, 3.689918265953162e-6,
 ];
 const HALF_LOG_TWO_PI = Math.log(2 * Math.PI) / 2;
-/** The largest argument whose gamma value, a factorial, a double represents exactly. */
-const MAX_EXACT_FACTORIAL_ARGUMENT = 23;
 /** Every larger argument has a gamma value beyond the largest double; the product below would yield NaN there. */
 const MAX_FINITE_GAMMA_ARGUMENT = 172;
 /** Below this argument the logarithm of the gamma value is more accurate than the sum of its logarithmic terms. */
 const MAX_DIRECT_LOG_ARGUMENT = 16;
 
 export const platformGamma = (value: number): number => {
-  if (Number.isInteger(value) && value > 0 && value <= MAX_EXACT_FACTORIAL_ARGUMENT) {
-    let factorial = 1;
-    for (let factor = 2; factor < value; factor++) factorial *= factor;
-    return factorial;
+  if (Number.isInteger(value) && value > 0 && value <= MAX_FINITE_GAMMA_ARGUMENT) {
+    // The exact factorial is rounded once, where the approximation below loses the last digits.
+    let factorial = 1n;
+    for (let factor = 2n; factor < value; factor++) factorial *= factor;
+    return Number(factorial);
   }
   if (value < 0.5) return Math.PI / (Math.sin(Math.PI * value) * platformGamma(1 - value));
   if (value > MAX_FINITE_GAMMA_ARGUMENT) return Number.POSITIVE_INFINITY;
