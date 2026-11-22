@@ -127,6 +127,9 @@ interface Frame {
   /** What a lookbehind holds so far, in itself or in the groups inside it. */
   captures?: boolean;
   variable?: boolean;
+  /** Whether the group holds a `\K`, and an alternative or optional item that lets a match pass through without one. */
+  keeps?: boolean;
+  passable?: boolean;
   /** Where the group starts in the pattern, which the error of an unlimited lookbehind reports. */
   at: number;
   /** The group that the frame captures, if any, and the groups opened inside it. */
@@ -221,6 +224,8 @@ class PatternConverter {
   /** The groups that the last repeatable item holds, and where it starts in the pattern if it is a group. */
   private itemGroups: number[] = [];
   private itemAt = 0;
+  /** Whether a repetition of the last item can pass a `\K` in one round and not in a later one. */
+  private itemCanLoseKeep = false;
   /** The parts that a match can pass without: an alternative, an optional item, or a lookaround. */
   private readonly skippable: SkippableScope[] = [];
   private keepInLookaround = false;
@@ -363,6 +368,7 @@ class PatternConverter {
     if (repeatable) {
       this.itemStart = this.result.length;
       this.itemGroups = [];
+      this.itemCanLoseKeep = false;
     }
     this.result += text;
     this.repeatable = repeatable;
@@ -396,6 +402,7 @@ class PatternConverter {
     this.endFrame(frame, this.index);
     this.itemGroups = frame.own === undefined ? frame.groups : [...frame.groups, frame.own];
     this.itemAt = frame.at;
+    this.itemCanLoseKeep = Boolean(frame.keeps && frame.passable);
   }
 
   private endFrame(frame: Frame, end: number): void {
@@ -418,6 +425,7 @@ class PatternConverter {
     const frame = this.frames.at(-1) as Frame;
     const { modifiers } = frame;
     this.endAlternative(frame, this.index);
+    for (const open of this.frames) open.passable = true;
     if (this.frames.length === 1) this.alternation = true;
     this.noteInLookbehind('variable');
     this.emit(`${')'.repeat(modifiers.length)}|${modifiers.join('')}`, false);
@@ -435,6 +443,11 @@ class PatternConverter {
     this.checkLookbehindQuantifier(text);
     if (/^(?:[*?]|\{0[,}])/.test(text)) {
       this.skippable.push({ groups: this.itemGroups, start: this.itemAt, end: this.index });
+      for (const open of this.frames) open.passable = true;
+    }
+    // JavaScript forgets the capture that marks a `\K` when a later round of a repetition does not pass it.
+    if (this.itemCanLoseKeep && text !== '?' && !/^\{[01](?:,1)?\}$/.test(text)) {
+      this.unavailable ??= String.raw`繰り返しの中での選択や省略と \K の併用`;
     }
     this.index = end;
     while (this.index < this.source.length) {
@@ -628,6 +641,7 @@ class PatternConverter {
   /** Marks where `\K` is passed with an empty capture, from which the reported match starts. */
   private keep(): string {
     if (this.frames.some((frame) => frame.lookaround)) this.keepInLookaround = true;
+    for (const open of this.frames) open.keeps = true;
     const name = `$k${this.keeps.length}`;
     this.keeps.push(name);
     return `(?<${name}>)`;
