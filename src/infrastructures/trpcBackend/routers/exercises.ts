@@ -35,8 +35,19 @@ type LearningMode = 'challenge' | 'practice';
 const learningModeSchema = z.enum(['challenge', 'practice']).default('challenge');
 const challengeModeSchema = z.literal('challenge').default('challenge');
 const locationSchema = z.object({ courseId: z.string(), lectureId: z.string() });
+/**
+ * Set by a page that traces the returned template itself. Optional only to tell a page opened before the browser
+ * generated traces, which expects a traced problem, to reload: see `assertSentByCurrentPage`.
+ */
+const tracesInBrowserSchema = z.literal(true).optional();
 const startSchema = z.union([
-  locationSchema.extend({ problemFormat: z.literal('regular'), learningMode: learningModeSchema }).strict(),
+  locationSchema
+    .extend({
+      problemFormat: z.literal('regular'),
+      learningMode: learningModeSchema,
+      tracesInBrowser: tracesInBrowserSchema,
+    })
+    .strict(),
   locationSchema.extend({
     problemFormat: z.enum(['fillInBlank', 'bugFix']).optional(),
     learningMode: challengeModeSchema,
@@ -48,6 +59,7 @@ const nextSchema = z.union([
       sessionId: z.number().int().positive(),
       problemFormat: z.literal('regular'),
       learningMode: learningModeSchema,
+      tracesInBrowser: tracesInBrowserSchema,
     })
     .strict(),
   locationSchema.extend({
@@ -110,6 +122,7 @@ export const exerciseProcedures = {
     .mutation(async ({ ctx, input }) => {
       checkedLecture(input.courseId, input.lectureId);
       const format = input.problemFormat ?? 'fillInBlank';
+      if (input.problemFormat === 'regular') assertSentByCurrentPage(input.tracesInBrowser);
       const userId = ctx.session.superTokensUserId;
       return await lockedStart(`${userId}:${input.courseId}:${input.lectureId}:${input.learningMode}:${format}`, () =>
         startOrResume(userId, input.courseId, input.lectureId, format, input.learningMode)
@@ -151,6 +164,7 @@ export const exerciseProcedures = {
       return await lockedStart(`${userId}:${input.courseId}:${input.lectureId}:${mode}:${format}`, () => {
         const start = periodStart();
         const previous = ownedSession(input.sessionId, userId, input.courseId, input.lectureId, format, mode);
+        if (input.problemFormat === 'regular') assertSentByCurrentPage(input.tracesInBrowser);
         assertNotEnded(previous);
         if (!previous.completedAt) throw new TRPCError({ code: 'CONFLICT' });
         const newer = db

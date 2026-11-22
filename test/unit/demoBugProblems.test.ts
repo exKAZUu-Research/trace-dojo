@@ -178,7 +178,11 @@ test('actual checking challenge starts, stores the verdicts of both starters and
 test.each(['regular', 'fillInBlank'] as const)(
   'actual checking membership still starts %s challenges',
   async (problemFormat) => {
-    expect(await caller.startExercise({ ...location, problemFormat })).toMatchObject({
+    const request =
+      problemFormat === 'regular'
+        ? { ...location, problemFormat, tracesInBrowser: true as const }
+        : { ...location, problemFormat };
+    expect(await caller.startExercise(request)).toMatchObject({
       problemFormat,
       sessionId: expect.any(Number),
     });

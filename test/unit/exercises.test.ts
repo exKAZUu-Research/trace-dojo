@@ -186,6 +186,14 @@ test('a submission from a page opened before the browser graded asks that page t
     })
   ).rejects.toMatchObject({ code: 'CONFLICT' });
   expect(exerciseRows().submissions).toEqual([]);
+  await submitRegular(regular, 'complete-before-deployment', true);
+  const sessions = exerciseRows().sessions;
+  for (const request of [
+    serverCaller.nextExercise({ ...locationOnly(), sessionId: regular.sessionId, problemFormat: 'regular' }),
+    serverCaller.startExercise({ ...locationOnly(), problemFormat: 'regular' }),
+  ])
+    await expect(request).rejects.toMatchObject({ code: 'CONFLICT' });
+  expect(exerciseRows().sessions).toEqual(sessions);
 });
 
 test('stores identity and seed without snapshots, then regenerates a safe DTO', async () => {

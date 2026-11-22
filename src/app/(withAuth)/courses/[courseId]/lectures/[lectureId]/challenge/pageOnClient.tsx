@@ -106,7 +106,7 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
     if (requestRef.current?.key !== key) {
       requestRef.current = {
         key,
-        promise: start({ courseId, lectureId, problemFormat: format }),
+        promise: start(exerciseRequest({ courseId, lectureId }, format)),
       };
     }
     pendingRef.current = true;
@@ -203,7 +203,7 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
     let display: Display | { status: 'noProblems' };
     try {
       display = await detectStaleSession(
-        next.mutateAsync({ courseId, lectureId, sessionId, problemFormat }),
+        next.mutateAsync(exerciseRequest({ courseId, lectureId, sessionId }, problemFormat)),
         isCurrent
       );
     } catch {
@@ -324,6 +324,13 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
     </VStack>
   );
 };
+
+/** A regular exercise comes as a template, which this page says it traces itself. */
+const exerciseRequest = <T extends object>(
+  request: T,
+  problemFormat: ChallengeProblemFormat
+): T & ({ problemFormat: 'regular'; tracesInBrowser: true } | { problemFormat: 'fillInBlank' | 'bugFix' }) =>
+  problemFormat === 'regular' ? { ...request, problemFormat, tracesInBrowser: true } : { ...request, problemFormat };
 
 /** Shows a Java editing problem, after generating it in the browser when the server describes it by a template. */
 const JavaProblem: React.FC<{

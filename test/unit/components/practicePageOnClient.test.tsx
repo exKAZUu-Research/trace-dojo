@@ -94,6 +94,7 @@ test('starts regular practice with the shared header first and opens syntax hint
     lectureId: navigation.lectureId,
     learningMode: 'practice',
     problemFormat: 'regular',
+    tracesInBrowser: true,
   });
   const code = container.querySelector('code');
   if (!code) throw new Error('Practice source must render');
@@ -215,6 +216,7 @@ test('resumes completion, requests the next practice source, and resumes that so
     learningMode: 'practice',
     problemFormat: 'regular',
     sessionId: 17,
+    tracesInBrowser: true,
   });
   expect(await screen.findByRole('heading', { level: 1, name: '値を一度更新する 2' })).toBeVisible();
   await waitForProblemPreparation();
@@ -256,6 +258,7 @@ test('ignores a deferred previous-location response after navigation', async () 
     lectureId: navigation.lectureId,
     learningMode: 'practice',
     problemFormat: 'regular',
+    tracesInBrowser: true,
   });
 });
 
@@ -304,6 +307,7 @@ test('a late practice Next response cannot replace the challenge page or its ans
     courseId: 'test',
     lectureId: navigation.lectureId,
     problemFormat: 'regular',
+    tracesInBrowser: true,
   });
   const code = rendered.container.querySelector('code');
   if (!code) throw new Error('Challenge source must render');

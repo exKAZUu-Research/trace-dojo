@@ -17,7 +17,7 @@ export interface StoredProblem {
 
 /**
  * Calls procedures as the pages do, which run the interpreter around the server: `startExercise` and `nextExercise`
- * return a Java problem generated from its template, `submitExercise` and `createFillInBlankSubmission` grade the code
+ * return a Java problem generated from its template (saying that the page traces regular ones itself), `submitExercise` and `createFillInBlankSubmission` grade the code
  * and resolve to the verdict they report unless the input states one, and `submitRegularExercise` tells whether the
  * step is the last one unless the input does.
  */
@@ -37,7 +37,8 @@ export function withBrowserSide(
     switch (procedure) {
       case 'startExercise':
       case 'nextExercise': {
-        return await showProblem(await invoke(procedure, input));
+        const request = input.problemFormat === 'regular' ? { tracesInBrowser: true, ...input } : input;
+        return await showProblem(await invoke(procedure, request));
       }
       case 'submitExercise': {
         if ('status' in input) return await invoke(procedure, input);

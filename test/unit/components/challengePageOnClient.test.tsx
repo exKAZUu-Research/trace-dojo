@@ -144,6 +144,7 @@ test('a regular URL format starts once and renders the regular exercise', async 
     courseId: 'test',
     lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
     problemFormat: 'regular',
+    tracesInBrowser: true,
   });
   expect(screen.getByRole('link', { name: '動作確認用' })).toBeVisible();
   expect(screen.getByRole('link', { name: '第1回' })).toBeVisible();
@@ -192,6 +193,7 @@ test('returning to the same valid format after a missing format drops the old ex
     courseId: 'test',
     lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
     problemFormat: 'regular',
+    tracesInBrowser: true,
   });
 });
 
