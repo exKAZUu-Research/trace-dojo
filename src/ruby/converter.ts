@@ -23,9 +23,10 @@ import type {
   Use,
 } from './ast';
 import { decodeDoubleQuoted, decodeSingleQuoted } from './escapes';
-import { translate } from './libRegexp';
-import { regexpCaptureNames, regexpHasNumberedBackref } from './regexpCaptureNames';
-import { regexpLiteralEncoding, validateRegexpLiteralEncoding } from './regexpLiteralEncoding';
+import { compileRegexp } from './regexpCompile';
+import { RegexpSourceError } from './regexpEscapes';
+import { validateRegexpLiteralEncoding } from './regexpLiteralEncoding';
+import { regexpCaptureNames } from './regexpTokens';
 import { UnsupportedFeatureError } from './runtime';
 
 /** The local variables of one scope; a block's scope sees its parents' variables. */
@@ -713,20 +714,18 @@ export class Converter {
   }
 
   private validateLiteralRegexp(node: Node, source: string, flags: string): void {
-    if (
-      regexpCaptureNames(source, flags.includes('x')).length > 0 &&
-      regexpHasNumberedBackref(source, flags.includes('x'))
-    )
-      this.fail(node, '名前付きキャプチャと番号付き後方参照は一緒に使えません。');
     try {
       validateRegexpLiteralEncoding(source, flags);
-      const encoding = regexpLiteralEncoding(flags);
-      translate(source, flags.includes('x'), flags.includes('m'), false, encoding !== undefined && encoding !== 'u');
+      compileRegexp(source, {
+        ignoreCase: flags.includes('i'),
+        multiline: flags.includes('m'),
+        extended: flags.includes('x'),
+      });
     } catch (error) {
-      if (error instanceof UnsupportedFeatureError) {
-        if (error.message.startsWith('重複する名前付きキャプチャ'))
-          this.unsupported(node, '重複する名前付きキャプチャ');
-      } else this.fail(node, '正規表現の書き方に誤りがあります。');
+      if (error instanceof UnsupportedFeatureError) return;
+      if (error instanceof RegexpSourceError && error.message.startsWith('numbered backref/call is not allowed'))
+        this.fail(node, '名前付きキャプチャと番号付き後方参照は一緒に使えません。');
+      this.fail(node, '正規表現の書き方に誤りがあります。');
     }
   }
 

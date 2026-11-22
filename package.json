@@ -61,9 +61,9 @@
     "@emotion/styled": "11.14.1",
     "@eslint-community/regexpp": "4.12.3",
     "@lezer/highlight": "1.2.5",
-    "@ruby/4.0-wasm-wasi": "2.10.1",
-    "@ruby/wasm-wasi": "2.10.1",
     "@rvf/set-get": "7.0.4",
+    "@stdlib/math-base-special-gamma": "0.3.1",
+    "@stdlib/math-base-special-gammaln": "0.3.1",
     "@tanstack/react-query": "5.107.1",
     "@trpc/client": "11.28.1",
     "@trpc/next": "11.28.1",
@@ -105,7 +105,7 @@
     "next": "16.4.6",
     "nextjs-cors": "2.2.1",
     "nextjs-toploader": "3.9.17",
-    "oniguruma-parser": "0.12.2",
+    "oniguruma-to-es": "4.3.6",
     "pino": "10.4.0",
     "pino-pretty": "13.2.0",
     "react": "19.3.1",
@@ -169,8 +169,7 @@
     "react-is": "19.3.1"
   },
   "patchedDependencies": {
-    "npm@11.21.1": "patches/npm@11.21.1.patch",
-    "oniguruma-parser@0.12.2": "patches/oniguruma-parser@0.12.2.patch"
+    "npm@11.21.1": "patches/npm@11.21.1.patch"
   },
   "trustedDependencies": [
     "@airbnb/node-memwatch",
