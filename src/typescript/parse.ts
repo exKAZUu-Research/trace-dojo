@@ -165,15 +165,15 @@ function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagno
     for (const child of node.children) if (child) visit(child);
   };
   visit(root);
-  return replaceUnterminatedStringErrors(root, errors).toSorted((left, right) => left.row - right.row);
+  return replaceUnterminatedStringErrors(root, source, errors).toSorted((left, right) => left.row - right.row);
 }
 
 /** Names the unparsable text that a quoted string with a raw line break leaves, as tsc does. */
-function replaceUnterminatedStringErrors(root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] {
+function replaceUnterminatedStringErrors(root: Node, source: string, errors: SourceDiagnostic[]): SourceDiagnostic[] {
   const replacedRows: number[] = [];
   const unterminated: SourceDiagnostic[] = [];
   for (const node of root.descendantsOfType('ERROR')) {
-    const error = unterminatedStringError(node);
+    const error = unterminatedStringError(node, source);
     if (!error) continue;
     replacedRows.push(node.startPosition.row);
     unterminated.push(error);
@@ -194,10 +194,11 @@ function strictIdentifierError(node: Node): string | undefined {
   return strictReservedWords.has(name) ? `識別子が必要です。'${name}' は Strict モードでは予約語です。` : undefined;
 }
 
-function unterminatedStringError(node: Node): SourceDiagnostic | undefined {
+/** The ERROR node may end before the line break that leaves its string open, so the scan reads on into the source. */
+function unterminatedStringError(node: Node, source: string): SourceDiagnostic | undefined {
   const opening = node.children.find((child) => child.type === "'" || child.type === '"');
   if (!opening) return undefined;
-  const rest = node.text.slice(opening.endIndex - node.startIndex);
+  const rest = source.slice(opening.endIndex);
   let row = opening.startPosition.row;
   for (const [token] of rest.matchAll(/\\(?:\r\n|[\s\S])|[\r\n'"]/g)) {
     if (token === opening.type) return undefined;
