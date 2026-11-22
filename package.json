@@ -90,7 +90,7 @@
     "@willbooster/tree-sitter-rust": "22.0.0",
     "@willbooster/tree-sitter-typescript": "33.0.1",
     "@willbooster/tree-sitter-zig": "14.0.2",
-    "@willbooster/wb": "23.4.3",
+    "@willbooster/wb": "23.6.1",
     "@willbooster/web-tree-sitter": "23.0.1",
     "at-decorators": "7.1.4",
     "codemirror": "6.0.2",

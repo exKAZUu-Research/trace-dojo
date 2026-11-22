@@ -69,8 +69,8 @@ interface Libraries {
 let loaded: Libraries | undefined;
 
 /** Compiles the interpreter's own libraries once per process; programs share them. */
-// code-gauge-allow functionNcss 36 -- The libraries load in their dependency order, each in three phases.
-// code-gauge-allow functionCognitiveComplexity 20 -- The libraries load in their dependency order, each in three phases.
+// code-gauge-allow functionNcss -- The libraries load in their dependency order, each in three phases.
+// code-gauge-allow functionCognitiveComplexity -- The libraries load in their dependency order, each in three phases.
 export function libraries(): Libraries {
   if (loaded) return loaded;
   const globals: GlobalVariable[] = [];

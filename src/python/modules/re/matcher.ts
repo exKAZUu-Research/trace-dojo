@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 553 -- Transcribes one C file of CPython, Modules/_sre/sre_lib.h.
+// code-gauge-allow-file fileNcss -- Transcribes one C file of CPython, Modules/_sre/sre_lib.h.
 // A transcription of CPython's `_sre` matcher (Modules/_sre/sre_lib.h): a backtracking machine whose contexts live on
 // an explicit stack, so that deep backtracking needs no host recursion. Each context is a generator that yields the
 // context it calls and receives whether that context matched.
@@ -173,7 +173,7 @@ export class Matcher {
   }
 
   /** A context of SRE(match): runs the code from `startPc` at `state.ptr` until it matches or fails. */
-  // code-gauge-allow functionNcss 36 -- Mirrors the opcode dispatch loop of SRE(match).
+  // code-gauge-allow functionNcss -- Mirrors the opcode dispatch loop of SRE(match).
   private *run(startPc: number, toplevel: boolean): Context {
     const { code } = this;
     let pc = startPc;
@@ -228,7 +228,7 @@ export class Matcher {
    * Runs an opcode that calls no other context: the position to continue at, or whether the context ends matched;
    * undefined for the opcodes that call other contexts.
    */
-  // code-gauge-allow functionNcss 31 -- One case per opcode, as the dispatch loop of SRE(match) has.
+  // code-gauge-allow functionNcss -- One case per opcode, as the dispatch loop of SRE(match) has.
   private step(op: number, pc: number, ptr: number, toplevel: boolean): Next | boolean | undefined {
     const { state, code } = this;
     switch (op) {
@@ -438,8 +438,8 @@ export class Matcher {
     return false;
   }
 
-  // code-gauge-allow functionNcss 32 -- Transcribes REPEAT_ONE of SRE(match) with its literal-tail shortcut.
-  // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes REPEAT_ONE of SRE(match) with its literal-tail shortcut.
+  // code-gauge-allow functionNcss -- Transcribes REPEAT_ONE of SRE(match) with its literal-tail shortcut.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes REPEAT_ONE of SRE(match) with its literal-tail shortcut.
   private *repeatOne(pc: number, start: number, toplevel: boolean): Context {
     const { state, code } = this;
     const [min, max] = [code[pc + 1], code[pc + 2]];
@@ -474,8 +474,8 @@ export class Matcher {
     }
   }
 
-  // code-gauge-allow functionNcss 33 -- Transcribes MIN_REPEAT_ONE of SRE(match).
-  // code-gauge-allow functionCognitiveComplexity 17 -- Transcribes MIN_REPEAT_ONE of SRE(match).
+  // code-gauge-allow functionNcss -- Transcribes MIN_REPEAT_ONE of SRE(match).
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes MIN_REPEAT_ONE of SRE(match).
   private *minRepeatOne(pc: number, start: number, toplevel: boolean): Context {
     const { state, code } = this;
     const [min, max] = [code[pc + 1], code[pc + 2]];
@@ -529,7 +529,7 @@ export class Matcher {
     return matched;
   }
 
-  // code-gauge-allow functionNcss 35 -- Transcribes MAX_UNTIL of SRE(match) with its zero-width match protection.
+  // code-gauge-allow functionNcss -- Transcribes MAX_UNTIL of SRE(match) with its zero-width match protection.
   private *maxUntil(pc: number, ptr: number, toplevel: boolean): Context {
     const { state, code } = this;
     const repeat = state.repeat as Repeat;
@@ -566,7 +566,7 @@ export class Matcher {
     return false;
   }
 
-  // code-gauge-allow functionNcss 38 -- Transcribes MIN_UNTIL of SRE(match) with its zero-width match protection.
+  // code-gauge-allow functionNcss -- Transcribes MIN_UNTIL of SRE(match) with its zero-width match protection.
   private *minUntil(pc: number, ptr: number, toplevel: boolean): Context {
     const { state, code } = this;
     const repeat = state.repeat as Repeat;

@@ -57,7 +57,7 @@ export class StatementFlow {
     return entry;
   }
 
-  // code-gauge-allow functionNcss 43 -- Links structured statements, labels and their normal or abrupt successors in one control-flow graph.
+  // code-gauge-allow functionNcss -- Links structured statements, labels and their normal or abrupt successors in one control-flow graph.
   private statement(statement: Statement, next: Node, targets: Targets, label = ''): Node {
     const after: Node = { next: [next] };
     const entry: Node = { next: [], statement };

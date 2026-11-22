@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 875 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
+// code-gauge-allow-file fileNcss -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import type { ArrayCursor } from './arrayOrder';
@@ -67,7 +67,7 @@ export function runStatements(program: Program, conversionError?: CompileError):
 
 const hoisted = new WeakSet<Stmt>();
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Hoists functions and classes in source order, as PHP's early binding declares them.
+// code-gauge-allow functionCognitiveComplexity -- Hoists functions and classes in source order, as PHP's early binding declares them.
 function hoist(body: Stmt[], conversionError?: CompileError): void {
   const runtime = rt();
   const declared = new Set<string>();
@@ -162,8 +162,8 @@ type BlockFrame =
     };
 
 /** Runs statements iteratively on a heap block stack so nested control flow does not grow the host stack. */
-// code-gauge-allow functionCognitiveComplexity 29 -- Keeps the active list/statement hot path in one JS frame so deep PHP recursion fits the host stack.
-// code-gauge-allow functionNcss 50 -- Keeps return and expr inline in the iterative block loop.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the active list/statement hot path in one JS frame so deep PHP recursion fits the host stack.
+// code-gauge-allow functionNcss -- Keeps return and expr inline in the iterative block loop.
 export function execList(statements: Stmt[], seek?: string): Completion {
   const runtime = rt();
   const frame = runtime.frame;
@@ -238,8 +238,8 @@ function pushListFrame(stack: BlockFrame[], statements: Stmt[], seek?: string): 
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Flat switch over non-list iterative block frame kinds.
-// code-gauge-allow functionNcss 55 -- One case per control-flow frame kind (while, do, for, switch, foreach, try).
+// code-gauge-allow functionCognitiveComplexity -- Flat switch over non-list iterative block frame kinds.
+// code-gauge-allow functionNcss -- One case per control-flow frame kind (while, do, for, switch, foreach, try).
 function stepNonListFrame(
   stack: BlockFrame[],
   top: Exclude<BlockFrame, { k: 'list' }>,
@@ -316,7 +316,7 @@ function stepNonListFrame(
   }
 }
 
-// code-gauge-allow functionNcss 47 -- Flat dispatch over non-hot PHP statement kinds.
+// code-gauge-allow functionNcss -- Flat dispatch over non-hot PHP statement kinds.
 function dispatchOtherStatement(
   stack: BlockFrame[],
   statement: Exclude<Stmt, { k: 'expr' }>,
@@ -382,8 +382,8 @@ function dispatchOtherStatement(
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Flat dispatch over leaf PHP statement kinds.
-// code-gauge-allow functionNcss 40 -- One case per leaf PHP statement kind.
+// code-gauge-allow functionCognitiveComplexity -- Flat dispatch over leaf PHP statement kinds.
+// code-gauge-allow functionNcss -- One case per leaf PHP statement kind.
 function dispatchSimpleStatement(
   statement: Extract<Stmt, { k: 'echo' | 'inline' | 'global' | 'static' | 'unset' | 'func' | 'class' | 'const' }>,
   runtime: Runtime,
@@ -768,7 +768,7 @@ interface TryThrowResult {
   fromExit: boolean;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Handles catch matching, finally transition, and exception chaining in one unwind step.
+// code-gauge-allow functionCognitiveComplexity -- Handles catch matching, finally transition, and exception chaining in one unwind step.
 function handleTryThrow(
   stack: BlockFrame[],
   top: Extract<BlockFrame, { k: 'try' }>,

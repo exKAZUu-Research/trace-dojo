@@ -121,7 +121,7 @@ function makeDefaultArshaler(type: Type): Arshaler {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes the typed Go arshalers so tagged and ordinary values share diagnostics.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the typed Go arshalers so tagged and ordinary values share diagnostics.
 function makeBoolArshaler(type: Type): Arshaler {
   return {
     nonDefault: false,
@@ -146,7 +146,7 @@ function makeBoolArshaler(type: Type): Arshaler {
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes the typed Go arshalers so tagged and ordinary values share diagnostics.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the typed Go arshalers so tagged and ordinary values share diagnostics.
 function makeStringArshaler(type: Type): Arshaler {
   return {
     nonDefault: false,
@@ -172,7 +172,7 @@ function makeStringArshaler(type: Type): Arshaler {
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes the typed Go arshalers so tagged and ordinary values share diagnostics.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the typed Go arshalers so tagged and ordinary values share diagnostics.
 function makeIntArshaler(type: Type): Arshaler {
   const bits = bitsOf(type);
   const signed = typeKind(type) === 'int';
@@ -289,7 +289,7 @@ function parseFloatText(text: string, bits: 32 | 64): [number, LibError | undefi
   return [value, errorText(err).endsWith('value out of range') ? STRCONV_RANGE : STRCONV_SYNTAX];
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- A transcription of Go's makeBytesArshaler, step by step.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of Go's makeBytesArshaler, step by step.
 function makeBytesArshaler(type: Type, list: Arshaler): Arshaler {
   const isArray = typeKind(type) === 'array';
   const element = (underlying(type) as SliceType).element;
@@ -323,8 +323,8 @@ function makeBytesArshaler(type: Type, list: Arshaler): Arshaler {
   };
 }
 
-// code-gauge-allow functionNcss 33 -- A transcription of Go's makeNumberArshaler, step by step.
-// code-gauge-allow functionCognitiveComplexity 20 -- A transcription of Go's makeNumberArshaler, step by step.
+// code-gauge-allow functionNcss -- A transcription of Go's makeNumberArshaler, step by step.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of Go's makeNumberArshaler, step by step.
 function makeNumberArshaler(type: NamedType): Arshaler {
   const string = makeStringArshaler(type);
   return {
@@ -390,7 +390,7 @@ function makeInvalidArshaler(type: Type): Arshaler {
 // Methods ---
 
 /** `makeMethodArshaler`: the program's MarshalJSON, MarshalText, UnmarshalJSON, and UnmarshalText methods. */
-// code-gauge-allow functionCognitiveComplexity 16 -- A transcription of Go's makeMethodArshaler, step by step.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of Go's makeMethodArshaler, step by step.
 function makeMethodArshaler(fncs: Arshaler, type: Type): Arshaler {
   const kind = typeKind(type);
   if (kind === 'pointer' || kind === 'interface' || type === NUMBER) return fncs;

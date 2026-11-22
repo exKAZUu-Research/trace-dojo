@@ -15,8 +15,8 @@ function digitValue(byte: number): number {
  * The integer prefix with its sign, magnitude and consumed length (0 when no digits follow the sign).
  * Magnitudes beyond uint64 retain only an overflow sentinel while scanning continues to the end of the prefix.
  */
-// code-gauge-allow functionCognitiveComplexity 23 -- Sign, base detection, bounded accumulation and digit consumption share one input cursor; separating branches would distribute that state.
-// code-gauge-allow functionNcss 31 -- Prefix classification and the consumed-length result share the same scan cursor.
+// code-gauge-allow functionCognitiveComplexity -- Sign, base detection, bounded accumulation and digit consumption share one input cursor; separating branches would distribute that state.
+// code-gauge-allow functionNcss -- Prefix classification and the consumed-length result share the same scan cursor.
 export function parseIntegerPrefix(
   bytes: Uint8Array,
   requestedBase: number,
@@ -58,8 +58,8 @@ export function parseIntegerPrefix(
 }
 
 /** The floating-point number at the start of a string as `strtod` reads it. */
-// code-gauge-allow functionCognitiveComplexity 30 -- The forms strtod accepts: decimal, hexadecimal, infinity, NaN.
-// code-gauge-allow functionNcss 35 -- Decimal, hexadecimal, infinity, and NaN prefixes share one consumed-length contract.
+// code-gauge-allow functionCognitiveComplexity -- The forms strtod accepts: decimal, hexadecimal, infinity, NaN.
+// code-gauge-allow functionNcss -- Decimal, hexadecimal, infinity, and NaN prefixes share one consumed-length contract.
 export function parseFloatPrefix(
   bytes: Uint8Array,
   maxLength = Number.POSITIVE_INFINITY,

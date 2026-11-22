@@ -163,7 +163,7 @@ function pushRoots(runtime: Runtime, push: Push): void {
   for (const frame of runtime.machine.stack) pushStackFrame(frame, scannedEnvs, push);
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- One branch per kind of live evaluator frame that holds values, including pending IO results.
+// code-gauge-allow functionCognitiveComplexity -- One branch per kind of live evaluator frame that holds values, including pending IO results.
 function pushStackFrame(frame: Frame, scannedEnvs: Set<Env>, push: Push): void {
   if (frame.k === 'update' && frame.code) pushRefs(freeVarsOf(frame.code), frame.env, push);
   else if (frame.k === 'apply' || frame.k === 'prim') for (const arg of frame.args) push(arg);
@@ -182,8 +182,8 @@ function pushStackFrame(frame: Frame, scannedEnvs: Set<Env>, push: Push): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- One branch per kind of runtime value.
-// code-gauge-allow functionNcss 45 -- One branch per kind of runtime value.
+// code-gauge-allow functionCognitiveComplexity -- One branch per kind of runtime value.
+// code-gauge-allow functionNcss -- One branch per kind of runtime value.
 function pushReferences(runtime: Runtime, value: object, push: Push): void {
   if (value instanceof ConValue) {
     for (const field of value.fields) push(field);

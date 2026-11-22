@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 1000 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -114,8 +114,8 @@ export function evReturn(e: Expr): Value | Ref {
   return value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Direct expression dispatch keeps hot PHP recursion within the host stack.
-// code-gauge-allow functionNcss 44 -- Direct expression dispatch avoids extra wrapper frames on hot expression kinds.
+// code-gauge-allow functionCognitiveComplexity -- Direct expression dispatch keeps hot PHP recursion within the host stack.
+// code-gauge-allow functionNcss -- Direct expression dispatch avoids extra wrapper frames on hot expression kinds.
 export function ev(e: Expr, discardResult = false): Value {
   const runtime = rt();
   if (runtime.frame.constantExpression && runtime.frame.scope && e.k !== 'const')
@@ -449,8 +449,8 @@ function evaluateRead(e: Expr, mode: ReadMode): Chain {
   return plan === SHORT ? SHORT : plan();
 }
 
-// code-gauge-allow functionNcss 37 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 27 -- Applies quiet, isset and value reads across the same expression forms.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Applies quiet, isset and value reads across the same expression forms.
 function prepareRead(e: Expr, mode: ReadMode): ReadPlan {
   const runtime = rt();
   switch (e.k) {
@@ -510,7 +510,7 @@ function variableRead(e: Extract<Expr, { k: 'var' }>, mode: ReadMode): Value {
   return definedOrNull(ref?.v);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps operand evaluation and mode-dependent offset fetches in opcode order.
+// code-gauge-allow functionCognitiveComplexity -- Keeps operand evaluation and mode-dependent offset fetches in opcode order.
 function prepareOffsetRead(e: Extract<Expr, { k: 'idx' }>, mode: ReadMode): ReadPlan {
   if (e.index === undefined) throwError('Error', 'Cannot use [] for reading');
   if (e.base.k === 'var' && e.base.name === 'GLOBALS') {
@@ -547,7 +547,7 @@ function globalOffsetRead(key: Value, row: number, mode: ReadMode): Value {
   return null;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Retains the nullsafe receiver across operand preparation and fetch.
+// code-gauge-allow functionCognitiveComplexity -- Retains the nullsafe receiver across operand preparation and fetch.
 function preparePropertyRead(e: Extract<Expr, { k: 'prop' }>, mode: ReadMode): ReadPlan {
   let receiver =
     mode === 'read' && !e.nullsafe && isCompiledVariable(e.obj)
@@ -641,7 +641,7 @@ export function stringOffset(text: string, index: Value, mode: OffsetRead = 'rea
   return offset === undefined ? undefined : stringOffsetPosition(text, offset);
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps type and mode decisions with their ordered offset diagnostics.
+// code-gauge-allow functionCognitiveComplexity -- Keeps type and mode decisions with their ordered offset diagnostics.
 export function stringOffsetIndex(index: Value, mode: OffsetRead = 'read'): bigint | undefined {
   const quiet = mode === 'isset' || mode === 'coalesce';
   if (typeof index === 'bigint') return index;
@@ -757,7 +757,7 @@ function readLiteralKey(expression: Expr, read: (row: number) => Value, row: num
   return undefinedVariable ? '' : toKey(value);
 }
 
-// code-gauge-allow functionNcss 46 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function compileTimeValue(e: Expr, context: ConstantContext = 'expression'): boolean {
   const cached = compileTimeValues[context].get(e);
   if (cached !== undefined) return cached;
@@ -876,7 +876,7 @@ export function* iterate(
   yield* iterateObject(acquired.iterator, acquired.handle, fetch, slots);
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Retains fetched references while the callback runs and releases the engine iterator on every exit.
+// code-gauge-allow functionCognitiveComplexity -- Retains fetched references while the callback runs and releases the engine iterator on every exit.
 function* iterateObject(
   iterator: PhpObject,
   handle: PhpObject,
@@ -959,7 +959,7 @@ export function deprecatedConstant(name: string, value: Value): Value {
   return value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionCognitiveComplexity -- One case per expression kind, as PHP evaluates each kind differently.
 function magicConstant(name: Extract<Expr, { k: 'magic' }>['name']): Value {
   const frame = rt().frame;
   const decl = frame.decl;
@@ -1127,7 +1127,7 @@ function cloneExpression(e: Extract<Expr, { k: 'clone' }>): Value {
   return cloneObject(value);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
   if (original.isResource)
     throwError('TypeError', 'clone(): Argument #1 ($object) must be of type object, resource given');
@@ -1195,7 +1195,7 @@ function cloneObjectContents(original: PhpObject, copy: PhpObject): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Replaces slots and transfers reference constraints in source member order.
+// code-gauge-allow functionCognitiveComplexity -- Replaces slots and transfers reference constraints in source member order.
 function copyCloneProperties(original: PhpObject, copy: PhpObject): void {
   for (const [key, slot] of original.props) {
     const previous = copy.props.get(key);
@@ -1335,8 +1335,8 @@ function operate(op: string, left: Value, right: Value, pending?: PhpThrow): Val
   return BINARY_OPS[op]?.(left, right) ?? applyOperator(op, left, right, pending);
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps conversion, warning and allocation order visible for each PHP cast.
-// code-gauge-allow functionNcss 35 -- Keeps conversion, warning and allocation order visible for each PHP cast.
+// code-gauge-allow functionCognitiveComplexity -- Keeps conversion, warning and allocation order visible for each PHP cast.
+// code-gauge-allow functionNcss -- Keeps conversion, warning and allocation order visible for each PHP cast.
 export function cast(type: string, value: Value): Value {
   switch (type) {
     case 'int': {

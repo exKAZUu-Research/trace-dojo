@@ -30,7 +30,7 @@ export function forEachResult(expr: Expr, visit: (expr: Expr) => void): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- The traversal keeps the active labels and evaluation order together.
+// code-gauge-allow functionCognitiveComplexity -- The traversal keeps the active labels and evaluation order together.
 function forEachLoopResult(loop: Extract<Expr, { kind: 'loop' }>, visit: (expr: Expr) => void): void {
   const labels = [loop.label];
   const walk = (expr: Expr): void => {
@@ -89,7 +89,7 @@ export function forEachDirect(expr: Expr, visit: (expr: Expr) => void, patternSo
   }
 }
 
-// code-gauge-allow functionNcss 35 -- One case per kind of expression.
+// code-gauge-allow functionNcss -- One case per kind of expression.
 function forEachDirectInCompound(expr: Expr, visit: (expr: Expr) => void, patternSource?: PatternSource): void {
   switch (expr.kind) {
     case 'call': {
@@ -128,7 +128,7 @@ function forEachDirectInCompound(expr: Expr, visit: (expr: Expr) => void, patter
   }
 }
 
-// code-gauge-allow functionNcss 40 -- One case per kind of expression.
+// code-gauge-allow functionNcss -- One case per kind of expression.
 function forEachDirectInControlFlow(expr: Expr, visit: (expr: Expr) => void, patternSource?: PatternSource): void {
   switch (expr.kind) {
     case 'block': {
@@ -242,8 +242,8 @@ export interface PatternBindingPart {
 }
 
 /** The variables a pattern binds, in order, each with the part it binds. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows rustc's binding modes case by case.
-// code-gauge-allow functionNcss 33 -- Follows rustc's binding modes case by case.
+// code-gauge-allow functionCognitiveComplexity -- Follows rustc's binding modes case by case.
+// code-gauge-allow functionNcss -- Follows rustc's binding modes case by case.
 export function patternBindingParts(pattern: Pattern, annotations: Annotations): PatternBindingPart[] {
   const parts: PatternBindingPart[] = [];
   const visit = (p: Pattern, path: string, throughRef: boolean): void => {

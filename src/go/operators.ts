@@ -25,7 +25,6 @@ export function integerWrapper(type: Type): (value: bigint) => bigint {
 }
 
 /** The runtime operation of an arithmetic or bitwise operator on two values of the same type. */
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per operator and kind of operand.
 export function arithmetic(operator: string, type: Type): Binary {
   if (isString(type)) return (a, b) => (a as string) + (b as string);
   if (isComplex(type)) return complexArithmetic(operator, isBasic(type, 'complex64'));

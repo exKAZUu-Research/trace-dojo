@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 662 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -143,7 +143,7 @@ function isMetaDataDescriptor(attribute: PyValue): boolean {
   return (attribute instanceof PyDescriptor && isPropertyKind(attribute.cls)) || isDataDescriptor(attribute);
 }
 
-// code-gauge-allow functionNcss 34 -- One case per attribute a class keeps outside its dictionary.
+// code-gauge-allow functionNcss -- One case per attribute a class keeps outside its dictionary.
 export function typeData(cls: PyClass, name: string): PyValue | undefined {
   switch (name) {
     case '__name__': {
@@ -208,8 +208,8 @@ function ownClassAttribute(value: PyValue): PyValue | undefined {
 }
 
 /** The attributes builtin objects have of their own, outside any class dictionary. */
-// code-gauge-allow functionCognitiveComplexity 26 -- One case per kind of builtin object with attributes of its own.
-// code-gauge-allow functionNcss 37 -- One case per kind of builtin object with attributes of its own.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of builtin object with attributes of its own.
+// code-gauge-allow functionNcss -- One case per kind of builtin object with attributes of its own.
 export function specialAttribute(value: PyValue, name: string): PyValue | undefined {
   if (name === '__class__') return ownClassAttribute(value);
   if (typeof value === 'bigint' || typeof value === 'boolean') return integerAttribute(BigInt(value), name);
@@ -328,7 +328,7 @@ function moduleOf(fn: PyBuiltinFunction): PyValue {
 /** The prefix of the attributes of each kind of generator object, such as `cr_running` of a coroutine. */
 const GENERATOR_PREFIXES: Record<string, string> = { coroutine: 'cr_', async_generator: 'ag_' };
 
-// code-gauge-allow functionCognitiveComplexity 19 -- One case per attribute of CPython's generator getset table.
+// code-gauge-allow functionCognitiveComplexity -- One case per attribute of CPython's generator getset table.
 function generatorAttribute(generator: PyGenerator, attribute: string): PyValue | undefined {
   if (attribute === '__name__') return generator.name;
   if (attribute === '__qualname__') return generator.qualifiedName;
@@ -389,7 +389,7 @@ function functionAttribute(fn: PyFunction, name: string): PyValue | undefined {
   }
 }
 
-// code-gauge-allow functionNcss 37 -- One case per attribute an instance of a builtin class keeps outside its dictionary.
+// code-gauge-allow functionNcss -- One case per attribute an instance of a builtin class keeps outside its dictionary.
 function instanceAttribute(instance: PyInstance, name: string): PyValue | undefined {
   if (name === '__dict__') return dictAttribute(instance);
   if (name === '__weakref__' && instance.cls.lookup('__weakref__') !== undefined)
@@ -442,8 +442,8 @@ function exceptionFieldOf(instance: PyInstance, name: string): PyValue | undefin
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- One case per writable attribute a function keeps outside its dictionary.
-// code-gauge-allow functionNcss 38 -- One case per writable attribute a function keeps outside its dictionary.
+// code-gauge-allow functionCognitiveComplexity -- One case per writable attribute a function keeps outside its dictionary.
+// code-gauge-allow functionNcss -- One case per writable attribute a function keeps outside its dictionary.
 function setFunctionAttribute(fn: PyFunction, name: string, value: PyValue, nameValue: PyValue = name): void {
   if (name === '__globals__' || name === '__closure__' || name === '__builtins__') {
     throw pyError('AttributeError', 'readonly attribute');
@@ -538,7 +538,7 @@ function userHook(target: PyObject, name: string): PyValue | undefined {
   return isNativeMethod(custom) ? undefined : custom;
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Class metadata keeps string data and original objects together; splitting these cases only moves their complexity.
+// code-gauge-allow functionCognitiveComplexity -- Class metadata keeps string data and original objects together; splitting these cases only moves their complexity.
 function setClassAttribute(
   target: PyClass,
   name: string,
@@ -837,7 +837,7 @@ function noDictError(target: PyValue, name: string, attribute?: PyValue): Error 
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows the order object.__delattr__ tries data descriptors, special stores, and the instance dict in.
+// code-gauge-allow functionCognitiveComplexity -- Follows the order object.__delattr__ tries data descriptors, special stores, and the instance dict in.
 export function deleteAttribute(target: PyValue, nameValue: PyValue): void {
   const name = attributeName(nameValue);
   currentRuntime().spend();
@@ -876,7 +876,7 @@ function deleteNamespaceEntry(target: PyFunction | PyModule, name: string, nameV
 }
 
 /** Deletes an instance attribute, honoring descriptors and slots, as `object.__delattr__` does. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Honors native descriptors, properties, user descriptors, enum members, and own dict.
+// code-gauge-allow functionCognitiveComplexity -- Honors native descriptors, properties, user descriptors, enum members, and own dict.
 export function deleteInstanceAttribute(target: PyObject, name: string, nameValue: PyValue = name): void {
   if (isThreadLocal(target)) {
     ensureThreadLocalDict(target);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 593 -- Pattern kinds share their type, rooting, and binding helpers.
+// code-gauge-allow-file fileNcss -- Pattern kinds share their type, rooting, and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import { CallCompiler } from './callCompiler';
@@ -168,8 +168,8 @@ export abstract class PatternCompiler extends CallCompiler {
   }
 
   /** The type a pattern expects of the value, which declarations use as the context of their initializer. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- One case per part of the pattern, matched in Dart's order.
-  // code-gauge-allow functionNcss 35 -- One case per kind of pattern, each giving its own context type.
+  // code-gauge-allow functionCognitiveComplexity -- One case per part of the pattern, matched in Dart's order.
+  // code-gauge-allow functionNcss -- One case per kind of pattern, each giving its own context type.
   patternContextType(pattern: Pattern): DartType | undefined {
     switch (pattern.kind) {
       case 'variable':
@@ -262,7 +262,7 @@ export abstract class PatternCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 43 -- One case per part of the pattern, matched in Dart's order.
+  // code-gauge-allow functionNcss -- One case per part of the pattern, matched in Dart's order.
   private compilePatternNode(
     pattern: Pattern,
     matchedType: DartType,
@@ -688,8 +688,8 @@ export abstract class PatternCompiler extends CallCompiler {
     return instance?.args[0] ?? DYNAMIC;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Type checks, lazy lookups, and subpatterns match in Dart's order.
-  // code-gauge-allow functionNcss 34 -- One case per part of the pattern, matched in Dart's order.
+  // code-gauge-allow functionCognitiveComplexity -- Type checks, lazy lookups, and subpatterns match in Dart's order.
+  // code-gauge-allow functionNcss -- One case per part of the pattern, matched in Dart's order.
   private mapPattern(
     pattern: Extract<Pattern, { kind: 'map' }>,
     matchedType: DartType,
@@ -817,7 +817,7 @@ export abstract class PatternCompiler extends CallCompiler {
     return names;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Resolve object properties and match their projected values.
+  // code-gauge-allow functionCognitiveComplexity -- Resolve object properties and match their projected values.
   private objectPattern(
     pattern: Extract<Pattern, { kind: 'object' }>,
     matchedType: DartType,
@@ -955,7 +955,7 @@ interface ListPatternParts {
 }
 
 /** Matches a list's length, the elements before and after the rest, and the rest as a new list. */
-// code-gauge-allow functionCognitiveComplexity 21 -- The pattern length and three subranges follow the specification.
+// code-gauge-allow functionCognitiveComplexity -- The pattern length and three subranges follow the specification.
 function matchListParts(frame: Frame, value: Value, parts: ListPatternParts, cache: PatternCache): boolean {
   const { head, rest, tail, hasRest } = parts;
   const { runtime } = frame;

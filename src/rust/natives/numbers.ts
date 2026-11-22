@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 491 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss -- One native per method of the standard library.
 import { floatBits, floatFromBits, floatNumber as float, signedFloat } from '../floatBits';
 import { debugFloat, decimalToF32 } from '../floatFormat';
 import { F64_CONSTS, FLOAT_LIMITS, floatConstant } from '../floatLimits';
@@ -91,7 +91,7 @@ function remEuclid(a: bigint, b: bigint): bigint {
 }
 
 /** Parses an integer as `str::parse` and `from_str_radix` do, with their errors. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows std's integer parsing step by step.
+// code-gauge-allow functionCognitiveComplexity -- Follows std's integer parsing step by step.
 export function parseInteger(ctx: NativeContext, text: string, name: IntName, radix: number): Value {
   const errorKind = (kind: string): Value =>
     err(ctx, new StructValue(ctx.interp.program.adtDef('ParseIntError'), [kind]));
@@ -636,8 +636,8 @@ function roundBinary(mantissa: bigint, exponent: number, f32: boolean): number {
   return negative ? -result : result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Each checked target has its own representation and error type.
-// code-gauge-allow functionNcss 31 -- Dispatches the supported TryFrom conversions.
+// code-gauge-allow functionCognitiveComplexity -- Each checked target has its own representation and error type.
+// code-gauge-allow functionNcss -- Dispatches the supported TryFrom conversions.
 function tryConvert(ctx: NativeContext, value: Value, from: Type, to: Type): Value {
   const { interp, span, frame } = ctx;
   if (intoConversion(interp.checker.solver, from, to) === 'yes') {

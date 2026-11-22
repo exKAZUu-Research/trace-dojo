@@ -40,7 +40,7 @@ export function onePassPrefix(prog: Prog): { prefix: string; complete: boolean; 
 }
 
 /** Go's `compileOnePass`: a program that needs no backtracking, or undefined when the regexp is not onepass. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes Go's compileOnePass step by step.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes Go's compileOnePass step by step.
 export function compileOnePass(prog: Prog): Prog | undefined {
   if (prog.start === 0) return undefined;
   const first = prog.inst[prog.start];
@@ -88,7 +88,7 @@ function isAlt(inst: Inst): boolean {
 
 type InstField = 'out' | 'arg';
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes Go's onePassCopy step by step.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes Go's onePassCopy step by step.
 function onePassCopy(prog: Prog): Prog {
   const p: Prog = { start: prog.start, numCap: prog.numCap, inst: prog.inst.map((inst) => ({ ...inst })) };
   for (const [pc, inst] of p.inst.entries()) {

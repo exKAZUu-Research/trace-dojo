@@ -39,7 +39,7 @@ function convertAttributes(cls: PyClass, layout: string): void {
 }
 
 /** Makes one attribute of a builtin class the kind of object CPython's type has under its name. */
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of attribute CPython's data names.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of attribute CPython's data names.
 function convertAttribute(cls: PyClass, name: string, kind: string): void {
   const value = cls.dict.get(name);
   // A C type's namespace holds its docstring, which this grader keeps in CPython's data.

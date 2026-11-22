@@ -46,8 +46,8 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   );
 };
 
-// code-gauge-allow functionCognitiveComplexity 28 -- The component predates this change, which only receives the problem as a prop.
-// code-gauge-allow functionNcss 40 -- The component predates this change, which only receives the problem as a prop.
+// code-gauge-allow functionCognitiveComplexity -- The component predates this change, which only receives the problem as a prop.
+// code-gauge-allow functionNcss -- The component predates this change, which only receives the problem as a prop.
 const ProblemSessionPage: React.FC<Props> = (props) => {
   const isAdmin = useAuthContextSelector((c) => c.isAdmin);
 

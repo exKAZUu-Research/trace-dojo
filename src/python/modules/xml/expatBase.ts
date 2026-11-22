@@ -229,7 +229,7 @@ export abstract class ExpatBase {
    * `storeAtts`: the attributes of a start tag as names and values, then the defaults its element type declares, with
    * namespaces applied; and the number of the specified ones' entries.
    */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   protected storeAtts(tz: Tokenizer, s: number, tag: Tag, internal: boolean): [string[], number] {
     const entries: { name: string; value: string; prefixed: boolean }[] = [];
     const seen = new Set<string>();
@@ -352,7 +352,7 @@ export abstract class ExpatBase {
     }
   }
 
-  // code-gauge-allow functionParameterCount 7 -- Transcribes expat's appendAttributeValue, whose parameters these are.
+  // code-gauge-allow functionParameterCount -- Transcribes expat's appendAttributeValue, whose parameters these are.
   protected appendAttributeValue(
     tz: Tokenizer,
     isCdata: boolean,
@@ -373,8 +373,8 @@ export abstract class ExpatBase {
   }
 
   /** One token of an attribute's value, added to its pool as `appendAttributeValue` adds it. */
-  // code-gauge-allow functionCognitiveComplexity 23 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
-  // code-gauge-allow functionNcss 34 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   private attributeValueToken(value: AttributeValue, tok: number, ptr: number, next: number): void {
     const { tz, isCdata, pool, internal } = value;
     switch (tok) {
@@ -413,8 +413,8 @@ export abstract class ExpatBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
-  // code-gauge-allow functionNcss 35 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   protected attributeEntity(value: AttributeValue, ptr: number, next: number): void {
     const { tz, isCdata, pool, internal, inProlog } = value;
     const name = this.text(tz, ptr + 1, next - 1);

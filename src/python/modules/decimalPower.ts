@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 508 -- Transcribes the methods of _pydecimal that belong together.
+// code-gauge-allow-file fileNcss -- Transcribes the methods of _pydecimal that belong together.
 import { currentRuntime } from '../runtimeContext';
 import { repeatText } from '../stringBuilder';
 import { times } from './decimalArithmetic';
@@ -203,7 +203,7 @@ function untilUnambiguous(
 
 // exp, ln, and log10 -------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionNcss 34 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionNcss -- Transcribes _pydecimal's algorithm of the same name.
 export function exponential(self: Dec, context: DecimalContext): Dec {
   const nan = checkNans(self, undefined, context);
   if (nan) return nan;
@@ -303,7 +303,7 @@ export function log10(self: Dec, context: DecimalContext): Dec {
 // Power --------------------------------------------------------------------------------------------------------------
 
 /** `Decimal.__pow__` without a modulus. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _pydecimal's algorithm of the same name.
 export function power(base: Dec, other: Dec, context: DecimalContext): Dec {
   const nan = checkNans(base, other, context);
   if (nan) return nan;
@@ -348,7 +348,7 @@ function powerOfOne(self: FiniteDec, other: Dec, resultSign: 0 | 1, context: Dec
   return dec(resultSign, `1${repeatText('0', -exp)}`, exp);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _pydecimal's algorithm of the same name.
 function powerFinite(self: FiniteDec, other: FiniteDec, resultSign: 0 | 1, context: DecimalContext): Dec {
   let result: Dec | undefined;
   let exact = false;
@@ -447,8 +447,8 @@ function lshiftExact(n: bigint, e: number): bigint | undefined {
 }
 
 /** The exact value of x ** y when it has at most p digits, or undefined, as `Decimal._power_exact` decides. */
-// code-gauge-allow functionCognitiveComplexity 27 -- Transcribes _pydecimal's algorithm of the same name.
-// code-gauge-allow functionNcss 50 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionNcss -- Transcribes _pydecimal's algorithm of the same name.
 function powerExact(self: FiniteDec, other: FiniteDec, p: number): Dec | undefined {
   let [xc, xe] = stripTens(BigInt(self.int), self.exp);
   const [yc, ye] = stripTens(BigInt(other.int), other.exp);
@@ -537,8 +537,8 @@ function powerOfTenExact(
   return dec(0, `1${repeatText('0', Math.max(zeros, 0))}`, exponent - zeros);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes _pydecimal's algorithm of the same name.
-// code-gauge-allow functionNcss 42 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionNcss -- Transcribes _pydecimal's algorithm of the same name.
 function negativePowerExact(base: bigint, baseExp: number, yc: bigint, ye: number, p: number): Dec | undefined {
   let xc = base;
   const lastDigit = Number(xc % 10n);
@@ -578,7 +578,7 @@ function negativePowerExact(base: bigint, baseExp: number, yc: bigint, ye: numbe
 }
 
 /** `pow(self, other, modulo)`. */
-// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _pydecimal's algorithm of the same name.
 export function powerModulo(self: Dec, other: Dec, modulo: Dec, context: DecimalContext): Dec {
   const kinds = [self, other, modulo].map((value) =>
     isSpecial(value) ? (value.exp === 'N' ? 2 : value.exp === 'n' ? 1 : 0) : 0

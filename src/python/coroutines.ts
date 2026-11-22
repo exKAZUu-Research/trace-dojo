@@ -280,7 +280,7 @@ export function awaitIterator(value: PyValue): PyValue {
  * `await value` at `row`: passes what the running coroutine receives to the awaitable's iterator until it ends, giving
  * what it returns. An awaited coroutine's frame reports `row` as its call line.
  */
-// code-gauge-allow functionNcss 31 -- Delegate lifetime spans resumption, completion and exceptions.
+// code-gauge-allow functionNcss -- Delegate lifetime spans resumption, completion and exceptions.
 export function* awaitValue(value: PyValue, frame: Frame, row: number | undefined): Suspension {
   const iterator = awaitIterator(value);
   const runtime = currentRuntime();
@@ -466,7 +466,7 @@ function asend(generator: PyGenerator, value: PyValue, name: string): PyValue {
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows the states of CPython's async_generator_athrow.
+// code-gauge-allow functionCognitiveComplexity -- Follows the states of CPython's async_generator_athrow.
 /** `agen.athrow(...)`, or `agen.aclose()` when `args` is undefined: an awaitable that raises in the generator. */
 function athrow(generator: PyGenerator, args: PyValue[] | undefined): PyValue {
   const state = initializeHooks(generator);

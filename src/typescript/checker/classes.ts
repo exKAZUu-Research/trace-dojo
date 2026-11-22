@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 764 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -807,7 +807,7 @@ export class ClassChecker {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Checks explicit, contextual, class, and script receivers in their source scopes.
+  // code-gauge-allow functionCognitiveComplexity -- Checks explicit, contextual, class, and script receivers in their source scopes.
   thisTypeOfExpression(node: TreeNode): Type {
     const owner = this.thisOwner(node);
     if (!owner) return this.globalThisType(node);

@@ -58,8 +58,8 @@ export const RegularExerciseBody: React.FC<Props> = (props) => (
   />
 );
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the shared session state and its rendering together; splitting it would only relocate complexity.
-// code-gauge-allow functionNcss 58 -- Keeps the shared session state and its rendering together; splitting it would only relocate complexity.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the shared session state and its rendering together; splitting it would only relocate complexity.
+// code-gauge-allow functionNcss -- Keeps the shared session state and its rendering together; splitting it would only relocate complexity.
 const RegularExerciseSession: React.FC<Props> = ({
   mode,
   courseId,

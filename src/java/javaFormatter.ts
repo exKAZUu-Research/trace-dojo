@@ -116,7 +116,7 @@ function formatArgument(
   return conversion === lower ? formatted : formatted.toUpperCase();
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One branch per conversion of Java's Formatter, before the numeric ones.
+// code-gauge-allow functionCognitiveComplexity -- One branch per conversion of Java's Formatter, before the numeric ones.
 function formatLower(
   frame: Frame,
   arg: Value,
@@ -204,8 +204,6 @@ function formatInteger(value: bigint, flags: string): string {
  * Formats a double with `%f` or `%e`, rounding half up from the shortest decimal digits that `Double.toString` gives,
  * as Java's Formatter does.
  */
-// code-gauge-allow functionCognitiveComplexity 18 -- Java's Formatter rounds half up from the shortest digits, which takes these cases.
-// code-gauge-allow functionNcss 32 -- Java's Formatter rounds half up from the shortest digits, which takes these cases.
 function formatDecimal(value: number, precision: number, conversion: string, flags: string): string {
   if (Number.isNaN(value)) return 'NaN';
   if (!Number.isFinite(value)) return withSign('Infinity', value < 0, flags);

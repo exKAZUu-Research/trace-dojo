@@ -72,8 +72,8 @@ export function simplify(re: Node): Node {
   return re;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the OpRepeat case of Go's Simplify.
-// code-gauge-allow functionNcss 31 -- Transcribes the OpRepeat case of Go's Simplify.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the OpRepeat case of Go's Simplify.
+// code-gauge-allow functionNcss -- Transcribes the OpRepeat case of Go's Simplify.
 function simplifyRepeat(re: Node): Node {
   if (re.min === 0 && re.max === 0) return newNode(Op.EmptyMatch);
   const sub = simplify(re.sub[0]);
@@ -184,7 +184,7 @@ class Compiler {
     this.inst(InstOp.Fail);
   }
 
-  // code-gauge-allow functionNcss 60 -- Transcribes Go's compile switch case by case.
+  // code-gauge-allow functionNcss -- Transcribes Go's compile switch case by case.
   compile(re: Node): Frag {
     switch (re.op) {
       case Op.NoMatch: {
@@ -422,8 +422,8 @@ export function startCond(prog: Prog): number {
 }
 
 /** Go's `(*Inst).MatchRunePos`: the index of the range containing the rune, or -1. */
-// code-gauge-allow functionCognitiveComplexity 30 -- Transcribes Go's matchRunePos step by step.
-// code-gauge-allow functionNcss 36 -- Transcribes Go's matchRunePos step by step.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes Go's matchRunePos step by step.
+// code-gauge-allow functionNcss -- Transcribes Go's matchRunePos step by step.
 export function matchRunePos(inst: Inst, r: number): number {
   const runes = inst.rune;
   switch (runes.length) {

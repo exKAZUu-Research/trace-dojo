@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 467 -- Defines Rust types, their substitutions and their shared structural operations.
+// code-gauge-allow-file fileNcss -- Defines Rust types, their substitutions and their shared structural operations.
 import type { ConstItem, FieldAst, FnItem, Span } from './ast';
 import type { Module } from './items';
 
@@ -569,7 +569,7 @@ export function hasParams(type: Type): boolean {
 }
 
 /** Whether two resolved types are the same type. */
-// code-gauge-allow functionNcss 42 -- One case per kind of type.
+// code-gauge-allow functionNcss -- One case per kind of type.
 export function sameType(a: Type, b: Type): boolean {
   const x = shallow(a);
   const y = shallow(b);
@@ -640,8 +640,8 @@ export function sameAutoTraits(a: Extract<Type, { kind: 'dyn' }>, b: Extract<Typ
 // Printing
 
 /** A type as rustc writes it in messages, with `{integer}` and `_` for variables. */
-// code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of type.
-// code-gauge-allow functionNcss 42 -- One case per kind of type.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
+// code-gauge-allow functionNcss -- One case per kind of type.
 export function typeToString(type: Type): string {
   const t = shallow(type);
   switch (t.kind) {

@@ -124,7 +124,7 @@ function ioResultIsDiscarded(machine: Machine): boolean {
   return false;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One stack walk checks tail statements through their owning call scope.
+// code-gauge-allow functionCognitiveComplexity -- One stack walk checks tail statements through their owning call scope.
 function tailSelfCallers(
   machine: Machine,
   frame: TraceFrame,

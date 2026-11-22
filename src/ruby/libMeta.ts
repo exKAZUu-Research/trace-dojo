@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 611 -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
 import type { Params } from './ast';
 import { prependHierarchy } from './classHierarchy';
 import { getClassVariable, hasClassVariable, setClassVariable } from './classVariables';
@@ -346,7 +346,7 @@ function* methodDescription(self: RObject): Gen<RString> {
   return builder.finish();
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Ruby renders named, anonymous, forwarding, destructured and no-keyword parameter kinds differently.
+// code-gauge-allow functionCognitiveComplexity -- Ruby renders named, anonymous, forwarding, destructured and no-keyword parameter kinds differently.
 function methodParameterSignature(params: Params): string {
   if (
     params.rest === '*' &&
@@ -453,7 +453,7 @@ function methodDescriptionText(text: string): RString {
 }
 
 /** What `parameters` lists for parameters a program wrote: each one's kind and, when it has one, its name. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity -- Ruby's method takes these argument forms, which the branches mirror.
 function parameterList(params: Params, isLambda: boolean): Value {
   const entries: Value[] = [];
   const add = (kind: string, name?: string): void => {
@@ -917,8 +917,8 @@ function reflectedConstant(module: RClass, name: string, inherit: boolean, neste
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- The ordered cases for reflection and encoded constant lookup share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow duplicateLines 22 -- Constant queries share path validation but differ in missing-constant hooks, fallback lookup and return behavior.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for reflection and encoded constant lookup share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow duplicateLines -- Constant queries share path validation but differ in missing-constant hooks, fallback lookup and return behavior.
 def('Module', 'const_get', [1, 2], function* (self: RClass, args) {
   const inherit = args.length < 2 || truthy(args[1]);
   const input = yield* symbolNameOf(args[0], true);
@@ -952,7 +952,7 @@ def('Module', 'const_set', 2, function* (self: RClass, [name, value]) {
   constSet(self, constant, value, row);
   return value;
 });
-// code-gauge-allow duplicateLines 23 -- Constant queries share path validation but differ in missing-constant hooks, fallback lookup and return behavior.
+// code-gauge-allow duplicateLines -- Constant queries share path validation but differ in missing-constant hooks, fallback lookup and return behavior.
 def('Module', 'const_defined?', [1, 2], function* (self: RClass, args) {
   const input = yield* symbolNameOf(args[0], true);
   const requested = input.name;

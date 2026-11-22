@@ -48,8 +48,8 @@ export class Unifier {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 28 -- One case per kind of type.
-  // code-gauge-allow functionNcss 59 -- One case per kind of type.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
+  // code-gauge-allow functionNcss -- One case per kind of type.
   unify(a: Type, b: Type): boolean {
     const x = normalize(shallow(a));
     const y = normalize(shallow(b));
@@ -167,7 +167,7 @@ export function setPseudoTypes(types: PseudoTypes): void {
  * Replaces `ParseError<F>`, `Unsigned<N>`, `Signed<N>`, `Indexed<I, T>`, and the pseudo-types of iterators with the
  * types they stand for when their first argument is known.
  */
-// code-gauge-allow functionCognitiveComplexity 19 -- Each pseudo-type has its own normalization rules.
+// code-gauge-allow functionCognitiveComplexity -- Each pseudo-type has its own normalization rules.
 export function normalize(type: Type): Type {
   if (type.kind !== 'adt' || !isPseudo(type.def)) return type;
   const arg = normalize(shallow(type.args[0]));

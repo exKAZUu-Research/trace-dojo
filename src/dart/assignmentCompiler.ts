@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 677 -- Assignment targets share read and write dispatch.
+// code-gauge-allow-file fileNcss -- Assignment targets share read and write dispatch.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import type { ClassInfo, Member } from './classes';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
@@ -103,7 +103,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     return this.assignTo(target, operator, value, span);
   }
 
-  // code-gauge-allow functionNcss 56 -- Simple, compound, and null-aware assignments.
+  // code-gauge-allow functionNcss -- Simple, compound, and null-aware assignments.
   private assignTo(target: AssignableTarget, operator: string, valueSyntax: Expression, span: Span): Compiled {
     const { read, write, variable, writeType } = target;
     if (operator === '=') {
@@ -279,8 +279,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     return this.error(span, `${prefix}.${name} には代入できません。`);
   }
 
-  // code-gauge-allow duplicateLines 29 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-  // code-gauge-allow functionNcss 31 -- Locals, members of this, statics, and globals.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow functionNcss -- Locals, members of this, statics, and globals.
   private nameTarget(name: string, span: Span, isPlainAssignment: boolean): AssignableTarget {
     const resolution = this.resolveName(name, span);
     if (!resolution) return this.undefinedName(span, name);
@@ -353,7 +353,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     };
   }
 
-  // code-gauge-allow duplicateLines 24 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private staticMemberTarget(member: Member, span: Span): AssignableTarget {
     this.checkUnavailableStaticMember(member.owner, member.name, span);
     if (member.kind === 'field') {
@@ -405,7 +405,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 31 -- Static and dynamic property targets share the prepared receiver.
+  // code-gauge-allow functionNcss -- Static and dynamic property targets share the prepared receiver.
   private memberTarget(receiver: Compiled, name: string, nullAware: boolean, span: Span): AssignableTarget {
     const receiverType = receiver.type;
     this.skipOnNull(receiver, nullAware);
@@ -455,8 +455,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Resolve static operators, then build the prepared read and write for any receiver.
-  // code-gauge-allow functionNcss 46 -- Resolve static operators, then build the prepared read and write for any receiver.
+  // code-gauge-allow functionCognitiveComplexity -- Resolve static operators, then build the prepared read and write for any receiver.
+  // code-gauge-allow functionNcss -- Resolve static operators, then build the prepared read and write for any receiver.
   private indexTarget(
     receiver: Compiled,
     indexSyntax: Expression,
@@ -681,7 +681,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Compile and run both holders of a conditional map entry in source order.
+  // code-gauge-allow functionCognitiveComplexity -- Compile and run both holders of a conditional map entry in source order.
   private compileMapEntryElement(
     element: Extract<CollectionElement, { kind: 'mapEntry' }>,
     kind: 'list' | 'set' | 'map',
@@ -784,7 +784,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     return { run, isConst: compiled.isConst };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Validate both map type arguments before configuring the spread.
+  // code-gauge-allow functionCognitiveComplexity -- Validate both map type arguments before configuring the spread.
   private compileMapSpread(
     element: Extract<CollectionElement, { kind: 'spread' }>,
     compiled: Compiled,
@@ -850,8 +850,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 40 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss -- One case per form of the construct, which reads best together.
   private compileIfElement(
     element: Extract<CollectionElement, { kind: 'ifElement' }>,
     kind: 'list' | 'set' | 'map',
@@ -995,7 +995,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     };
   }
 
-  // code-gauge-allow duplicateLines 18 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   protected buildSet(type: DartType, run: (frame: Frame, add: AddElement) => void, isConst: boolean): Compiled {
     const elementType = (type as InterfaceType).args[0];
     const resolve = this.runtimeType(elementType);
@@ -1016,7 +1016,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     return { type, run: isConst ? this.canonicalized(build) : build, isConst };
   }
 
-  // code-gauge-allow duplicateLines 18 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   protected buildMap(type: DartType, run: (frame: Frame, add: AddElement) => void, isConst: boolean): Compiled {
     const [keyType, valueType] = (type as InterfaceType).args;
     const resolveKey = this.runtimeType(keyType);
@@ -1040,8 +1040,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
 
   // Switch expressions
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 39 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss -- One case per form of the construct, which reads best together.
   compileSwitchExpression(
     subjectSyntax: Expression,
     cases: SwitchExpressionCase[],

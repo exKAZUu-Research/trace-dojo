@@ -109,8 +109,8 @@ function power(a: Parts, b: Parts): Parts {
 }
 
 /** Arithmetic with at least one complex operand, mixing in reals as CPython 3.14 does. */
-// code-gauge-allow functionNcss 43 -- One case per operator on complex numbers.
-// code-gauge-allow functionCognitiveComplexity 24 -- One case per operator on complex numbers.
+// code-gauge-allow functionNcss -- One case per operator on complex numbers.
+// code-gauge-allow functionCognitiveComplexity -- One case per operator on complex numbers.
 export function complexBinary(
   operator: BinaryOperator,
   left: PyComplex | bigint | number | boolean,

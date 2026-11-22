@@ -16,7 +16,7 @@ import {
 export type Template = (string | number)[];
 
 /** Parses a replacement template, as `re._parser.parse_template` does. */
-// code-gauge-allow functionNcss 34 -- Transcribes re._parser.parse_template.
+// code-gauge-allow functionNcss -- Transcribes re._parser.parse_template.
 export function parseTemplate(
   template: string,
   groups: number,

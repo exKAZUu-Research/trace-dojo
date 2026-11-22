@@ -112,8 +112,8 @@ export class LoanGraph {
    * The loans in scope on entry to each point: those created on a path to it, along which their regions contain every
    * point and nothing overwrote the borrowed place.
    */
-  // code-gauge-allow functionCognitiveComplexity 28 -- The forward dataflow of rustc's `Borrows` analysis.
-  // code-gauge-allow functionNcss 42 -- The forward dataflow of rustc's `Borrows` analysis.
+  // code-gauge-allow functionCognitiveComplexity -- The forward dataflow of rustc's `Borrows` analysis.
+  // code-gauge-allow functionNcss -- The forward dataflow of rustc's `Borrows` analysis.
   private loansInScope(loans: Loan[], reachable: boolean[]): BitSet[] {
     this.budget.spend(2 * loans.length * this.points.length);
     const preds = this.points.map((): number[] => []);
@@ -169,7 +169,7 @@ export class LoanGraph {
   }
 
   /** The points each region contains: where variables of types with it are live, and what it outlives. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Region liveness follows scope paths and the outlives relation.
+  // code-gauge-allow functionCognitiveComplexity -- Region liveness follows scope paths and the outlives relation.
   private regions(preds: number[][], reachable: boolean[]): BitSet[] {
     const liveIn = this.liveness();
     const words = Math.ceil(this.points.length / 32);
@@ -194,7 +194,7 @@ export class LoanGraph {
     return regions;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- The backwards transfer must preserve loans needed by later destructors.
+  // code-gauge-allow functionCognitiveComplexity -- The backwards transfer must preserve loans needed by later destructors.
   private dropLiveness(place: Place, definition: number, preds: number[][], reachable: boolean[]): Set<number> {
     const { definitions, deinitializes, drops } = this.dropEvents(place, reachable);
     const pending = [...this.points[definition].succ];
@@ -220,7 +220,7 @@ export class LoanGraph {
     return live;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Move, overwrite, and scope exit each change destruction liveness.
+  // code-gauge-allow functionCognitiveComplexity -- Move, overwrite, and scope exit each change destruction liveness.
   private dropEvents(
     place: Place,
     reachable: boolean[]

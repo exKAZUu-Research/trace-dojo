@@ -262,7 +262,7 @@ function edgeEntry(ctx: NativeContext, value: MapValue, first: boolean): Value {
   return some(ctx, new EntryValue(value, lookup, key));
 }
 
-// code-gauge-allow functionNcss 59 -- One native per method of std's sets.
+// code-gauge-allow functionNcss -- One native per method of std's sets.
 function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: NativeContext) => Value> {
   return {
     new: (_args, ctx) => withTable(new SetValue(sorted), sizeOf(ctx.typeArgs[0])),

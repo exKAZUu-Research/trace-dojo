@@ -111,7 +111,7 @@ function checkArrayRef(ctx: NativeContext, index: number, name: string, paramete
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function rebuild(
   entries: [Key, Value | Ref][],
   renumber: boolean,
@@ -381,7 +381,7 @@ class ArrayCombination {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private combineSlot(target: PhpArray, key: Key, slot: Value | Ref): void {
     if (this.mode === 'merge' && typeof key === 'bigint') {
       target.append(copyValueSlot(slot));
@@ -724,7 +724,7 @@ function numericOf(text: string): bigint | number | undefined {
 
 defineFunction(
   'compact($var_name, ...$var_names): array',
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   ({ args }) => {
     const frame = rt().frame;
     const result = new PhpArray();
@@ -755,8 +755,8 @@ defineFunction(
 );
 defineFunction(
   'extract(array &~$array, int $flags = EXTR_OVERWRITE, string $prefix = UNKNOWN): int',
-  // code-gauge-allow functionNcss 31 -- The extraction loop shares the source and bindings across modes.
-  // code-gauge-allow functionCognitiveComplexity 17 -- The extraction loop shares the source and bindings across modes.
+  // code-gauge-allow functionNcss -- The extraction loop shares the source and bindings across modes.
+  // code-gauge-allow functionCognitiveComplexity -- The extraction loop shares the source and bindings across modes.
   ({ args, refs, dynamic }) => {
     const flags = (args[1] as bigint | undefined) ?? 0n;
     const mode = Number(flags & 0xffn);
@@ -1308,7 +1308,7 @@ defineFunction('array_count_values(array $array): array', ({ args }) => {
 
 type SetCompare = (a: [Key, Value | Ref], b: [Key, Value | Ref]) => boolean;
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function setOperation(name: string, args: Value[], keep: boolean, same: SetCompare): PhpArray {
   checkSetArguments(name, args);
   const [first, ...others] = args as PhpArray[];

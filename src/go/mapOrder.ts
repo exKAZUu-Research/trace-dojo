@@ -2,7 +2,7 @@ import { identical, type Type, typeIdentityKey, typeString, underlying } from '.
 import type { Complex, GoArray, GoStruct, Iface, Value } from './values';
 
 /** Orders map keys as fmt prints them (internal/fmtsort): numbers and strings by value, NaN first, false first. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of key.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of key.
 export function compareMapKeys(a: Value, b: Value, type: Type): number {
   const under = underlying(type);
   switch (under.kind) {

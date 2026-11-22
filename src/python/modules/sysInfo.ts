@@ -249,7 +249,7 @@ function defineStructSeqCreation(
 }
 
 /** The values `structseq(sequence, dict=None)` gives a struct sequence, its hidden fields taken from the dict. */
-// code-gauge-allow functionCognitiveComplexity 16 -- One check per message of CPython's structseq_new.
+// code-gauge-allow functionCognitiveComplexity -- One check per message of CPython's structseq_new.
 function structSeqValues(
   name: string,
   visible: number,

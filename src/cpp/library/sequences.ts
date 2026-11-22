@@ -463,7 +463,7 @@ function addTemplateMethod(
   addMethod(cls, { ...native(name, [], VOID, () => {}), instantiate, isTemplate: true });
 }
 
-// code-gauge-allow functionNcss 150 -- The member functions of the sequence containers, which share their storage.
+// code-gauge-allow functionNcss -- The member functions of the sequence containers, which share their storage.
 function sequenceMethods(
   library: Library,
   cls: ClassInfo,

@@ -22,7 +22,7 @@ export function dumpPattern(pattern: SubPattern, level = 0): string {
 const indent = (level: number): string => '  '.repeat(level);
 const repeatBound = (value: number): string => (value === MAXREPEAT ? 'MAXREPEAT' : String(value));
 
-// code-gauge-allow functionNcss 32 -- One case per kind of argument, as SubPattern.dump has.
+// code-gauge-allow functionNcss -- One case per kind of argument, as SubPattern.dump has.
 function dumpItem(item: Item, level: number): string {
   const head = indent(level) + item.op;
   switch (item.op) {
@@ -167,7 +167,7 @@ class Disassembler {
   }
 
   /** Prints an instruction with a named argument, a skip, or a nested body. */
-  // code-gauge-allow functionNcss 48 -- One case per kind of opcode, as re._compiler.dis has.
+  // code-gauge-allow functionNcss -- One case per kind of opcode, as re._compiler.dis has.
   private structured(name: string, start: number): number {
     const { code } = this;
     const i = start + 1;

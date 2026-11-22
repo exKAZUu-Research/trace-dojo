@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 408 -- Binding declarations and assignments share property and rest type resolution.
+// code-gauge-allow-file fileNcss -- Binding declarations and assignments share property and rest type resolution.
 import assert from 'node:assert/strict';
 
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';

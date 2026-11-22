@@ -294,7 +294,7 @@ function addIoMembers(): void {
   addWriterMembers();
 }
 
-// code-gauge-allow functionNcss 60 -- Defines the methods of one library type, each a short closure over its state.
+// code-gauge-allow functionNcss -- Defines the methods of one library type, each a short closure over its state.
 function addWriterMembers(): void {
   addMembers(WRITER, {
     Error: typeMember(() => WRITE_ERROR),

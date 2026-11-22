@@ -63,7 +63,7 @@ function pdqContext(a: number, b: number, context: Context): void {
  * One pass of pdqsort's inner loop over a range: true when the range is sorted, false after it narrows the range to
  * the smaller part of a partition, pushing the larger part onto the stack.
  */
-// code-gauge-allow functionNcss 34 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionNcss -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function sortStep(range: Range, start: number, stack: Range[], context: Context): boolean {
   const length = range.b - range.a;
   if (length <= MAX_INSERTION) {
@@ -134,8 +134,8 @@ function partition(a: number, b: number, pivot: number, context: Context): { mid
 }
 
 /** The block loop of `partition` over `i..=j`: the index where the pivot at `a` belongs. */
-// code-gauge-allow functionNcss 46 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
-// code-gauge-allow functionCognitiveComplexity 29 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionNcss -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function blockPartition(a: number, start: number, end: number, context: Context): number {
   let i = start;
   let j = end;
@@ -199,7 +199,7 @@ function partitionEqual(a: number, b: number, pivot: number, context: Context): 
   return i;
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function partialInsertionSort(a: number, b: number, context: Context): boolean {
   const maxSteps = 5;
   const shortestShifting = 50;

@@ -29,7 +29,7 @@ export abstract class PatternConverter extends SyntaxConverter {
     return { kind: 'binding', name: this.identifier(name), mutable: true, sub: undefined, span };
   }
 
-  // code-gauge-allow functionNcss 39 -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss -- One case per kind of syntax node.
   pattern(node: Node): Pattern {
     const span = this.span(node);
     switch (node.type) {

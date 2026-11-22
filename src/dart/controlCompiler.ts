@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 597 -- Switches and loops share flow analysis with their generator forms.
+// code-gauge-allow-file fileNcss -- Switches and loops share flow analysis with their generator forms.
 import type { Block, CatchClause, Pattern, Span, Statement, SwitchCase } from './ast';
 import { localNamesIn } from './astWalk';
 import type { FunctionSpec } from './callCompiler';
@@ -190,9 +190,9 @@ export abstract class ControlCompiler extends StatementCompiler {
     return variables;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- on/catch clauses, rethrow, and finally.
-  // code-gauge-allow functionNcss 43 -- on/catch clauses, rethrow, and finally.
-  // code-gauge-allow duplicateLines 18 -- A synchronous finally and a yielding finally preserve the same pending completions.
+  // code-gauge-allow functionCognitiveComplexity -- on/catch clauses, rethrow, and finally.
+  // code-gauge-allow functionNcss -- on/catch clauses, rethrow, and finally.
+  // code-gauge-allow duplicateLines -- A synchronous finally and a yielding finally preserve the same pending completions.
   protected compileTry(statement: Extract<Statement, { kind: 'try' }>): Exec {
     const before = this.flow;
     const body = this.compileBlock(statement.body);
@@ -461,9 +461,9 @@ export abstract class ControlCompiler extends StatementCompiler {
   }
 
   /** try in a sync* body: a body that yields runs in the generator, and an abandoned iterator skips `finally`. */
-  // code-gauge-allow functionNcss 46 -- A try statement in a generator: its body, catch clauses, and finally, as compileTry.
-  // code-gauge-allow functionCognitiveComplexity 21 -- A try statement in a generator: its body, catch clauses, and finally, as compileTry.
-  // code-gauge-allow duplicateLines 18 -- A synchronous finally and a yielding finally preserve the same pending completions.
+  // code-gauge-allow functionNcss -- A try statement in a generator: its body, catch clauses, and finally, as compileTry.
+  // code-gauge-allow functionCognitiveComplexity -- A try statement in a generator: its body, catch clauses, and finally, as compileTry.
+  // code-gauge-allow duplicateLines -- A synchronous finally and a yielding finally preserve the same pending completions.
   private compileGenTry(statement: Extract<Statement, { kind: 'try' }>): GenExec {
     const before = this.flow;
     const body = this.compileGenBlock(statement.body);
@@ -569,7 +569,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     };
   }
 
-  // code-gauge-allow duplicateLines 21 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private compileGenWhile(statement: Extract<Statement, { kind: 'while' }>): GenExec {
     const labels = this.takeLoopLabels();
     this.enterLoop(statement);
@@ -591,7 +591,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     };
   }
 
-  // code-gauge-allow duplicateLines 15 -- The synchronous and yielding loops share flow analysis and differ in how the body resumes.
+  // code-gauge-allow duplicateLines -- The synchronous and yielding loops share flow analysis and differ in how the body resumes.
   private compileGenDo(statement: Extract<Statement, { kind: 'do' }>): GenExec {
     const { labels, body, test } = this.compileDoPlan(statement, (body, labels) =>
       this.compileGenLoopBody(body, labels)
@@ -615,7 +615,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     return clearingSlots(result, slots);
   }
 
-  // code-gauge-allow duplicateLines 26 -- A generator shares the loop header and suspends around the body.
+  // code-gauge-allow duplicateLines -- A generator shares the loop header and suspends around the body.
   private compileGenFor(statement: Extract<Statement, { kind: 'for' }>): GenExec {
     const labels = this.takeLoopLabels();
     const { result, slots } = this.withScope(() => {
@@ -643,9 +643,9 @@ export abstract class ControlCompiler extends StatementCompiler {
     return clearingSlots(result, slots);
   }
 
-  // code-gauge-allow duplicateLines 15 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 31 -- Iteration retains source state while its body suspends.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss -- Iteration retains source state while its body suspends.
   private compileGenForIn(statement: Extract<Statement, { kind: 'forIn' }>): GenExec {
     const labels = this.takeLoopLabels();
     const iterable = this.compileExpression(statement.iterable);
@@ -695,7 +695,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionNcss 37 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionNcss -- One case per form of the construct, which reads best together.
   private compileYield(statement: Extract<Statement, { kind: 'yield' }>): GenExec {
     if (!this.fn.kind.isGenerator) return this.error(statement, 'yield は sync* の関数の中にしか書けません。');
     const elementType = this.fn.yieldElement;
@@ -806,7 +806,7 @@ interface SwitchGroup<T> {
 type SwitchRoute = (completion: Completion | void) => number | Completion | undefined;
 
 /** The index of the first group with a case that matches, clearing the variables of the groups that do not. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Clear the failed matcher while keeping the selected body bindings live.
+// code-gauge-allow functionCognitiveComplexity -- Clear the failed matcher while keeping the selected body bindings live.
 function selectSwitchGroup(
   frame: Frame,
   value: Value,

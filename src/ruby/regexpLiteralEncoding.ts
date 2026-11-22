@@ -12,7 +12,7 @@ export function regexpLiteralEncoding(flags: string): string | undefined {
   return flags.match(/[unes]/g)?.at(-1);
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Source tokens, Unicode escapes and contiguous encoded-byte runs retain distinct native validity rules.
+// code-gauge-allow functionCognitiveComplexity -- Source tokens, Unicode escapes and contiguous encoded-byte runs retain distinct native validity rules.
 export function validateRegexpLiteralEncoding(source: string, flags: string): void {
   const encoding = regexpLiteralEncoding(flags);
   if (encoding === undefined || encoding === 'u') return;

@@ -108,7 +108,7 @@ function compileInit(sema: SemaApi, call: NativeCall): TExpr {
   );
 }
 
-// code-gauge-allow duplicateLines 18 -- Method registration repeats scaffolding while receiver and runtime state representations differ.
+// code-gauge-allow duplicateLines -- Method registration repeats scaffolding while receiver and runtime state representations differ.
 function method(
   name: string,
   returnType: Type,
