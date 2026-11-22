@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 722 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -81,8 +81,8 @@ export class Calls {
     this.unionSignatures = new UnionSignatures(c);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
-  // code-gauge-allow functionNcss 45 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
+  // code-gauge-allow functionCognitiveComplexity -- Follows TypeScript's checks of a call's callee in order, each with its own error.
+  // code-gauge-allow functionNcss -- Follows TypeScript's checks of a call's callee in order, each with its own error.
   call(node: TreeNode, contextual?: Type): Type {
     const callee = node.childForFieldName('function') as TreeNode;
     const argumentsNode = node.childForFieldName('arguments');
@@ -414,7 +414,7 @@ export class Calls {
     return this.resolve(node, callee, signatures, args, undefined, undefined)?.returnType ?? errorType;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Matches the direct String argument and literal console placeholders in order.
+  // code-gauge-allow functionCognitiveComplexity -- Matches the direct String argument and literal console placeholders in order.
   private textConversionArguments(callee: TreeNode, args: TreeNode[]): TreeNode[] {
     if (this.c.silent > 0 || args.length === 0) return [];
     const symbol = callee.type === 'identifier' ? this.c.scopeOf(callee).lookupValue(callee.text) : undefined;
@@ -519,7 +519,7 @@ export class Calls {
 
   // Resolution ---------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionParameterCount 7 -- Tries each overload as TypeScript does, then reports the failure as it does.
+  // code-gauge-allow functionParameterCount -- Tries each overload as TypeScript does, then reports the failure as it does.
   private resolve(
     node: TreeNode,
     callee: TreeNode,
@@ -884,8 +884,8 @@ export class Calls {
   // Inference ----------------------------------------------------------------------------------------------------
 
   /** A signature with its type parameters replaced by the given or inferred type arguments. */
-  // code-gauge-allow functionNcss 37 -- Keeps the contextual return, receiver, ordinary arguments, and callbacks in inference order.
-  // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's inference passes: the contextual return, context-insensitive arguments, then callbacks.
+  // code-gauge-allow functionNcss -- Keeps the contextual return, receiver, ordinary arguments, and callbacks in inference order.
+  // code-gauge-allow functionCognitiveComplexity -- Follows TypeScript's inference passes: the contextual return, context-insensitive arguments, then callbacks.
   private instantiateFor(
     signature: Signature,
     args: ExpressionListFlow,

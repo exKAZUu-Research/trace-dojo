@@ -131,6 +131,7 @@ function withHostRegExp<T>(runtime: Runtime, object: RegExpObject, run: (regexp:
   const lastIndex = runtime.toNumber(runtime.get(object, 'lastIndex'));
   regexp.lastIndex = Number.isNaN(lastIndex) ? 0 : Math.max(0, Math.trunc(lastIndex));
   const result = run(regexp);
+  runtime.budget.checkClock();
   if (regexp.global || regexp.sticky) runtime.set(object, 'lastIndex', regexp.lastIndex);
   return result;
 }
@@ -415,7 +416,7 @@ function groupLookup(runtime: Runtime, groups: Value): ((key: string) => string)
 }
 
 /** Expands a replacement template for one match as the spec's GetSubstitution does: `$&`, `$1`, `$<name>`, and so on. */
-// code-gauge-allow functionParameterCount 7 -- Takes each input of the spec's GetSubstitution, which a template may refer to.
+// code-gauge-allow functionParameterCount -- Takes each input of the spec's GetSubstitution, which a template may refer to.
 function substitution(
   runtime: Runtime,
   template: string,
@@ -447,7 +448,7 @@ function substitution(
   return result;
 }
 
-// code-gauge-allow functionParameterCount 7 -- Takes each input of the spec's GetSubstitution, which a template may refer to.
+// code-gauge-allow functionParameterCount -- Takes each input of the spec's GetSubstitution, which a template may refer to.
 function dollarExpansion(
   template: string,
   index: number,
@@ -503,6 +504,7 @@ function splitMatcher(runtime: Runtime, { matcher: splitter, isPrivate }: RegExp
     return (position) => {
       matcher.lastIndex = position;
       const match = matcher.exec(text);
+      runtime.budget.checkClock();
       if (!match) return;
       return { end: Math.min(matcher.lastIndex, text.length), captures: match.slice(1) };
     };

@@ -18,7 +18,7 @@ import {
   type ZUnion,
 } from './values';
 
-// code-gauge-allow functionNcss 41 -- Dispatches typed constants while aggregate and scalar renderers share the same recursion.
+// code-gauge-allow functionNcss -- Dispatches typed constants while aggregate and scalar renderers share the same recursion.
 export function constantText(value: Value, type: Type, nameOf: (type: Type) => string): string {
   if (isUndefinedMemory(value)) return 'undefined';
   if (value === NULL) return 'null';

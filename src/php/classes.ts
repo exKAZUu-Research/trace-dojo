@@ -287,7 +287,7 @@ function checkPropertyOverride(
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the shared PHP modifier diagnostics in precedence order.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the shared PHP modifier diagnostics in precedence order.
 function checkPropertyModifiers(
   cls: PhpClass,
   inherited: PropDecl,
@@ -326,7 +326,7 @@ function checkPropertyModifiers(
     );
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Populates property slots, defaults and hooks together.
+// code-gauge-allow functionCognitiveComplexity -- Populates property slots, defaults and hooks together.
 function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls): void {
   const inherited = cls.propByName.get(ast.name);
   if (ast.isFinal && ast.visibility === 'private' && !ast.promoted)
@@ -372,7 +372,7 @@ function isFinalProperty({ isFinal, setVisibility, visibility }: PropertyDeclAst
   return isFinal || (setVisibility === 'private' && visibility !== 'private');
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Links inherited hooks before validating the effective property.
+// code-gauge-allow functionCognitiveComplexity -- Links inherited hooks before validating the effective property.
 function linkPropertyHooks(decl: PropDecl, ast: PropertyDeclAst, parent: PropDecl | undefined): void {
   const own = ast.hooks;
   const inherited = parent?.hooks;
@@ -686,7 +686,7 @@ function usedTrait(cls: PhpClass, name: string, row: number): PhpClass {
   return trait;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Checks same-name properties before linking trait properties.
+// code-gauge-allow functionCognitiveComplexity -- Checks same-name properties before linking trait properties.
 function applyTraitProperties(cls: PhpClass, trait: PhpClass, origins: Map<string, string>, row: number): void {
   for (const source of trait.propByName.values()) {
     const prop = source.declarationAst;
@@ -947,7 +947,7 @@ function implementsPropertyHook(property: PropDecl, kind: 'get' | 'set'): boolea
   return !(kind === 'get' ? property.hooks?.abstractGet : property.hooks?.abstractSet);
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function checkOverride(cls: PhpClass, method: Method, parent: Method, reportTentative = true): void {
   const row = method.fn.kind === 'user' ? method.fn.decl.row : 0;
   if (method.cls === cls && !parent.cls.decl?.isAnonymous) checkFinalMethod(method, parent, row);
@@ -1042,7 +1042,7 @@ function signatureCompatible(child: Method, parent: Method, skipReturn = false):
   return result && (typeof params === 'string' ? params : result);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Checks parameters in PHP's order, keeping the first unresolved class it reports.
+// code-gauge-allow functionCognitiveComplexity -- Checks parameters in PHP's order, keeping the first unresolved class it reports.
 function parametersCompatible(child: Method, parent: Method): boolean | string {
   const childParams = child.fn.params;
   const parentParams = parent.fn.params;
@@ -1075,7 +1075,7 @@ function returnTypeOf(fn: Callable): TypeDecl | undefined {
   return fn.kind === 'user' ? fn.decl.returnType : fn.returnType;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionCognitiveComplexity -- Follows PHP's class linking and property access rules in their order of checks.
 function signatureText(method: Method, typeScope = method.scope): string {
   const fn = method.fn;
   const params = fn.params
@@ -1098,7 +1098,7 @@ function signatureText(method: Method, typeScope = method.scope): string {
   return `${fn.kind === 'user' && fn.decl.byRefReturn ? '& ' : ''}${method.scope.name}::${method.name}(${params})${returnType ? `: ${describeType(returnType, typeScope)}` : ''}`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function defaultText(expression: Expr, method: Method): string {
   const declaringName = method.fn.kind === 'user' ? method.fn.decl.className : undefined;
   const traitDeclaration =
@@ -1321,7 +1321,7 @@ function guarded<T>(object: PhpObject, key: string, run: () => T): T {
   }
 }
 
-// code-gauge-allow functionNcss 50 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function readProp(
   object: PhpObject,
   name: string,
@@ -1383,7 +1383,7 @@ export function readProp(
   return null;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the property probe guards tied to their result boundaries.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the property probe guards tied to their result boundaries.
 function readOverloadedProp(
   object: PhpObject,
   name: string,
@@ -1422,7 +1422,7 @@ function checkUnsetGetterValue(value: Value, unset: PropDecl | undefined, return
   return result;
 }
 
-// code-gauge-allow functionNcss 58 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function writeProp(
   object: PhpObject,
   name: string,
@@ -1547,7 +1547,7 @@ export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject,
 }
 
 /** Checks indirect writes and returns an object value that can be mutated without exposing its property slot. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function checkIndirectModification(
   object: PhpObject,
   name: string,
@@ -1608,7 +1608,7 @@ export function checkStaticInstanceAccess(
 }
 
 /** The reference a property holds, creating it, for `=&`, by-reference arguments, and nested writes. */
-// code-gauge-allow functionNcss 49 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss -- Follows PHP's class linking and property access rules in their order of checks.
 export function propRef(
   object: PhpObject,
   name: string,
@@ -1719,8 +1719,8 @@ function overloadedPropertyReference(object: PhpObject, name: string, decl?: Pro
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 46 -- Shares property lookup and validation across reference binding and value fallback.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Shares property lookup and validation across reference binding and value fallback.
 export function bindPropertyReference(
   object: PhpObject,
   name: string,
@@ -1827,8 +1827,8 @@ function checkReferenceValue(ref: Ref, value: Value): Value {
   return coerced;
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Follows PHP's class linking and property access rules in their order of checks.
-// code-gauge-allow functionNcss 41 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function unsetProp(object: PhpObject, name: string, scope: PhpClass | undefined): void {
   if (object.isResource) return;
   const decl = lookupProp(object.cls, name, scope);
@@ -1875,7 +1875,7 @@ export function unsetProp(object: PhpObject, name: string, scope: PhpClass | und
   if (magic && !object.guards?.has(`unset:${name}`)) discardMagicResult(object, magic, [name]);
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionCognitiveComplexity -- Follows PHP's class linking and property access rules in their order of checks.
 export function issetProp(object: PhpObject, name: string, scope: PhpClass | undefined, internal = false): boolean {
   if (object.isResource) return false;
   const decl = lookupProp(object.cls, name, scope);

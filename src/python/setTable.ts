@@ -80,7 +80,7 @@ export class SetTable {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- Transcribes CPython's set_add_entry.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes CPython's set_add_entry.
   add(key: PyValue, hash = keyHash(key, 'set element')): void {
     const { mask } = this;
     let perturb = hash & MASK64;

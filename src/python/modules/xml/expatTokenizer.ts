@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 664 -- It transcribes one of expat's C files.
+// code-gauge-allow-file fileNcss -- It transcribes one of expat's C files.
 import { NAME_RANGES, NAME_START_RANGES } from './expatNameData';
 
 // A transcription of expat's xmltok_impl.c over code points: each scanner returns a token and the index after it, or a
@@ -190,7 +190,7 @@ export class Tokenizer {
 
   // Content ---------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 35 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   contentTok(ptr: number, end: number): Scan {
     if (ptr >= end) return [TOK.NONE, ptr];
     switch (this.type(ptr)) {
@@ -231,7 +231,7 @@ export class Tokenizer {
     return this.dataChars(ptr, end);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   private dataChars(ptr: number, end: number): Scan {
     while (ptr < end) {
       const type = this.type(ptr);
@@ -357,7 +357,7 @@ export class Tokenizer {
   }
 
   /** A quoted value after `=` at `ptr`: the index after its closing quote, or how scanning ended. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   private scanAttributeValue(ptr: number, end: number): number | Scan {
     let open: number;
     for (;;) {
@@ -427,7 +427,7 @@ export class Tokenizer {
     return [TOK.PARTIAL, ptr];
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   private scanEndTag(ptr: number, end: number): Scan {
     if (ptr >= end) return [TOK.PARTIAL, ptr];
     if (!this.isNameStart(this.type(ptr))) return [TOK.INVALID, ptr];
@@ -516,8 +516,8 @@ export class Tokenizer {
   }
 
   /** Inside a CDATA section. */
-  // code-gauge-allow functionCognitiveComplexity 24 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
-  // code-gauge-allow functionNcss 35 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   cdataSectionTok(ptr: number, end: number): Scan {
     if (ptr >= end) return [TOK.NONE, ptr];
     const first = this.type(ptr);
@@ -550,8 +550,8 @@ export class Tokenizer {
 
   // Prolog ----------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
-  // code-gauge-allow functionNcss 54 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   prologTok(ptr: number, end: number): Scan {
     if (ptr >= end) return [TOK.NONE, ptr];
     const first = this.type(ptr);
@@ -656,8 +656,8 @@ export class Tokenizer {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
-  // code-gauge-allow functionNcss 50 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   private prologName(first: number, ptr: number, end: number): Scan {
     let token: number;
     if (this.isNameStart(first)) token = TOK.NAME;
@@ -725,7 +725,7 @@ export class Tokenizer {
   }
 
   /** After `<!`. */
-  // code-gauge-allow functionCognitiveComplexity 20 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   private scanDecl(ptr: number, end: number): Scan {
     if (ptr >= end) return [TOK.PARTIAL, ptr];
     const first = this.type(ptr);
@@ -784,7 +784,7 @@ export class Tokenizer {
   // Values ----------------------------------------------------------------------------------------------------------
 
   /** The text of an attribute value, or of an internal entity a value refers to. */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   attributeValueTok(ptr: number, end: number): Scan {
     if (ptr >= end) return [TOK.NONE, ptr];
     const start = ptr;
@@ -811,7 +811,7 @@ export class Tokenizer {
   }
 
   /** The text of an entity's literal value. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   entityValueTok(ptr: number, end: number): Scan {
     if (ptr >= end) return [TOK.NONE, ptr];
     const start = ptr;

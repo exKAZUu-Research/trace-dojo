@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 499 -- Hash lookup and mutation protocols share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss -- Hash lookup and mutation protocols share representation and state; splitting registration by size would scatter that concern.
 import {
   compareHashEntries,
   inspect,
@@ -99,7 +99,7 @@ function validateFloatCapacity(capacity: Value): void {
         : number.toPrecision(10).replace(/\.?0+(e[+-]\d+)$/, '$1');
   throw rangeError(`float ${formatted} out of range of integer`);
 }
-// code-gauge-allow functionCognitiveComplexity 21 -- Hash.[] accepts alternating key/value arguments or one pair collection and validates both forms.
+// code-gauge-allow functionCognitiveComplexity -- Hash.[] accepts alternating key/value arguments or one pair collection and validates both forms.
 sdef('Hash', '[]', [0, -1], function* (self, args) {
   const hash = new RHash(self);
   const held = rt().held.length;
@@ -414,7 +414,7 @@ def('Hash', 'to_proc', 0, (self: RHash) => {
   return proc;
 });
 
-// code-gauge-allow functionCognitiveComplexity 17 -- The ordered cases for Hash lookup and mutation protocols share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Hash lookup and mutation protocols share state; splitting them solely for the metric would hide their sequencing.
 function* merge(target: RHash, others: Value[], block: RProc | undefined): Gen<RHash> {
   return yield* whileHeld(target, function* () {
     for (const other of others) {
@@ -618,7 +618,7 @@ def('Hash', 'default_proc=', 1, function* (self: RHash, [proc]) {
   return proc;
 });
 
-// code-gauge-allow functionCognitiveComplexity 17 -- The ordered cases for Hash lookup and mutation protocols share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Hash lookup and mutation protocols share state; splitting them solely for the metric would hide their sequencing.
 function validateDefaultProc(proc: RProc): void {
   if (proc.isLambda) {
     const body = proc.body;

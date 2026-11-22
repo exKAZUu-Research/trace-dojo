@@ -1,7 +1,6 @@
-// code-gauge-allow-file fileNcss 644 -- Follows the flow of control through each kind of statement.
-import assert from 'node:assert/strict';
-
+// code-gauge-allow-file fileNcss -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
+import { assert } from 'es-toolkit';
 
 import type { Checker } from './checker';
 import { checkConstraintDeclarations } from './circularConstraints';
@@ -891,7 +890,7 @@ export class StatementChecker {
 
   private constructorInstanceType(node: TreeNode): Type {
     const classNode = node.parent?.parent;
-    assert.ok(classNode);
+    assert(classNode, 'The constructor is outside a class');
     return this.c.classes.classInfoOfNode(classNode).instanceType;
   }
 

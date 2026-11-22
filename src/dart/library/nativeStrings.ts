@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 412 -- String methods and buffers share bounds, matching, and formatting helpers.
+// code-gauge-allow-file fileNcss -- String methods and buffers share bounds, matching, and formatting helpers.
 import { LIMITS } from '../../interpreter/limits';
 import { stringOf } from '../format';
 import { concatenate } from '../operators';
@@ -464,7 +464,7 @@ function efficientCharacterCount(runtime: Runtime, codes: Value): bigint | undef
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- The VM distinguishes invalid codes in lists and iterators.
+// code-gauge-allow functionCognitiveComplexity -- The VM distinguishes invalid codes in lists and iterators.
 function stringFromCharCodes(runtime: Runtime, codes: Value, from: bigint, to: bigint | undefined): string {
   const parts = new StringParts();
   let length = 0;

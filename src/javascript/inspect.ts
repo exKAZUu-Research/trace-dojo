@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 755 -- Keeps the inspection dispatch with the constructor, property, and error metadata it shares.
-import { inspect as hostInspect, type InspectStyle, stripVTControlCharacters } from 'node:util';
-
+// code-gauge-allow-file fileNcss -- Keeps the inspection dispatch with the constructor, property, and error metadata it shares.
 import { eastAsianWidthType } from 'get-east-asian-width';
+import stripAnsi from 'strip-ansi';
 
+import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { closingOnThrow, DONE } from './iteration';
 import type { PromiseState } from './promises';
@@ -290,15 +290,35 @@ function formatPrimitive(ctx: Context, value: Exclude<Value, JsObject>): string 
   return stylize(ctx, String(value), value === null ? 'null' : typeof value);
 }
 
+/** The codes that start and end the color Node.js gives each kind of value. */
+const STYLE_CODES: Partial<Record<string, readonly [start: number, end: number]>> = {
+  special: [36, 39],
+  number: [33, 39],
+  bigint: [33, 39],
+  boolean: [33, 39],
+  undefined: [90, 39],
+  null: [1, 22],
+  string: [32, 39],
+  symbol: [32, 39],
+  date: [35, 39],
+};
+
 function stylize(ctx: Context, text: string, type: string): string {
-  const style = ctx.colors && hostInspect.styles[type as InspectStyle];
-  if (typeof style === 'function') return style(text);
-  const color = style ? hostInspect.colors[style] : undefined;
-  return color ? `\u001B[${color[0]}m${text}\u001B[${color[1]}m` : text;
+  if (!ctx.colors) return text;
+  if (type === 'regexp') {
+    throw new CompileError([
+      {
+        row: ctx.runtime.currentRow ?? 0,
+        message: '正規表現の色付き表示（colors: true）は、この採点環境では使えません。',
+      },
+    ]);
+  }
+  const codes = STYLE_CODES[type];
+  return codes ? `\u001B[${codes[0]}m${text}\u001B[${codes[1]}m` : text;
 }
 
 function unstyled(ctx: Context, text: string): string {
-  return ctx.colors ? stripVTControlCharacters(text) : text;
+  return ctx.colors ? stripAnsi(text) : text;
 }
 
 /** Formats `-0` as `-0`, which `String` does not. */
@@ -495,7 +515,7 @@ function sortOutput(ctx: Context, entries: string[]): void {
 /**
  * Node reads inherited descriptors before collecting the object's own keys, but prints them after its own properties.
  */
-// code-gauge-allow functionCognitiveComplexity 17 -- Visits each prototype and reads its eligible descriptors in order.
+// code-gauge-allow functionCognitiveComplexity -- Visits each prototype and reads its eligible descriptors in order.
 function inspectPrototype(
   ctx: Context,
   value: JsObject,
@@ -1200,7 +1220,7 @@ function formatIndented(ctx: Context, value: Value, recurseTimes: number, diff =
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionCognitiveComplexity -- Ports Node.js's util.inspect, so the two stay comparable.
 function reduceToSingleString(
   ctx: Context,
   output: string[],
@@ -1245,8 +1265,8 @@ function isBelowBreakLength(ctx: Context, output: string[], start: number, base:
 }
 
 /** Lays out the entries of a long array in aligned columns. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Ports Node.js's groupArrayElements as it is, so the two stay comparable.
-// code-gauge-allow functionNcss 41 -- Ports Node.js's groupArrayElements as it is, so the two stay comparable.
+// code-gauge-allow functionCognitiveComplexity -- Ports Node.js's groupArrayElements as it is, so the two stay comparable.
+// code-gauge-allow functionNcss -- Ports Node.js's groupArrayElements as it is, so the two stay comparable.
 function groupArrayElements(ctx: Context, output: string[], array: JsArray): string[] {
   let totalLength = 0;
   let maxLength = 0;

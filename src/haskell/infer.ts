@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 762 -- The type checker keeps its inference rules beside the substitution state they share.
+// code-gauge-allow-file fileNcss -- The type checker keeps its inference rules beside the substitution state they share.
 import { LIMITS } from '../interpreter/limits';
 import { CHAR_TYPE, FUNCTION_TYPE, LIST_TYPE, tupleCon } from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, isSubclassOf, predsEqual } from './classEnv';
@@ -157,8 +157,8 @@ export class Checker {
     return { kind: 'hole', hole };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 28 -- Context reduction follows the steps of the Haskell report in one loop.
-  // code-gauge-allow functionNcss 38 -- Reduction and its depth/work guards operate on the same constraint queue.
+  // code-gauge-allow functionCognitiveComplexity -- Context reduction follows the steps of the Haskell report in one loop.
+  // code-gauge-allow functionNcss -- Reduction and its depth/work guards operate on the same constraint queue.
   simplify(
     holes: EvidenceHole[],
     outerLevel: number,
@@ -341,7 +341,7 @@ export class Checker {
     this.unify(actual, expected, expr.span, context);
   }
 
-  // code-gauge-allow functionNcss 56 -- One short case per expression kind, each delegating to a helper.
+  // code-gauge-allow functionNcss -- One short case per expression kind, each delegating to a helper.
   private inferExprInner(expr: RExpr): Type {
     switch (expr.k) {
       case 'var': {
@@ -523,7 +523,7 @@ export class Checker {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- The statement kinds share the monad type threaded through the block.
+  // code-gauge-allow functionCognitiveComplexity -- The statement kinds share the monad type threaded through the block.
   private inferDo(expr: Extract<RExpr, { k: 'do' }>): Type {
     const needsMonad = expr.stmts.some(
       (stmt, index) => stmt.k === 'bind' || (stmt.k === 'exp' && index < expr.stmts.length - 1)
@@ -583,7 +583,7 @@ export class Checker {
     }
   }
 
-  // code-gauge-allow functionNcss 43 -- Iterative pattern typing preserves binder order and literal dictionaries in one dispatch.
+  // code-gauge-allow functionNcss -- Iterative pattern typing preserves binder order and literal dictionaries in one dispatch.
   inferPat(pattern: RPat, expected: Type): void {
     const pending = [{ pat: pattern, type: expected }];
     while (pending.length > 0) {

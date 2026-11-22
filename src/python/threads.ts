@@ -487,7 +487,7 @@ export function suspendingCall(callee: PyValue, args: PyValue[], kwargs: Kwargs)
   return undefined;
 }
 
-// code-gauge-allow duplicateLines 15 -- The synchronous and suspending calls of a function share entry and exit, not the body's run.
+// code-gauge-allow duplicateLines -- The synchronous and suspending calls of a function share entry and exit, not the body's run.
 function* callFunctionSuspending(fn: PyFunction, args: PyValue[], kwargs: Kwargs): Suspension {
   const runtime = currentRuntime();
   const entry = runtime.enterFunction(fn, args, kwargs);

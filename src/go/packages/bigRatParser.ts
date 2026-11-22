@@ -7,8 +7,8 @@ interface Fraction {
 type IntegerParser = (text: string, base: number) => bigint | undefined;
 type CheckBits = (bits: bigint) => void;
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps Go rational scanning and exponent validation beside the host allocation bounds.
-// code-gauge-allow functionNcss 37 -- Keeps Go rational scanning and exponent validation beside the host allocation bounds.
+// code-gauge-allow functionCognitiveComplexity -- Keeps Go rational scanning and exponent validation beside the host allocation bounds.
+// code-gauge-allow functionNcss -- Keeps Go rational scanning and exponent validation beside the host allocation bounds.
 export function parseRational(text: string, integer: IntegerParser, checkBits: CheckBits): Fraction | undefined {
   const slash = text.indexOf('/');
   if (slash !== -1) return parseFraction(text, slash, integer);
@@ -45,8 +45,8 @@ function parseFraction(text: string, slash: number, integer: IntegerParser): Fra
   return { num: numerator, den: denominator };
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Keeps Go rational scanning and exponent validation beside the host allocation bounds.
-// code-gauge-allow functionNcss 36 -- Keeps Go rational scanning and exponent validation beside the host allocation bounds.
+// code-gauge-allow functionCognitiveComplexity -- Keeps Go rational scanning and exponent validation beside the host allocation bounds.
+// code-gauge-allow functionNcss -- Keeps Go rational scanning and exponent validation beside the host allocation bounds.
 function scanMantissa(
   text: string,
   start: number,
@@ -93,7 +93,7 @@ function scanMantissa(
   return { value, base, fraction, end: position };
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps Go rational scanning and exponent validation beside the host allocation bounds.
+// code-gauge-allow functionCognitiveComplexity -- Keeps Go rational scanning and exponent validation beside the host allocation bounds.
 function scanExponent(text: string, start: number): { value: bigint; base: number } | undefined {
   if (start === text.length) return { value: 0n, base: 2 };
   const marker = text[start].toLowerCase();

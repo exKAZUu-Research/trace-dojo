@@ -51,8 +51,8 @@ class QuickSort {
     private readonly compare: (a: number, b: number) => number
   ) {}
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Preserve Apple qsort partition, fallback, and recursion order because comparator calls are observable.
-  // code-gauge-allow functionNcss 36 -- The sort loop keeps pivot, partition boundaries, fallback and tail recursion in one order.
+  // code-gauge-allow functionCognitiveComplexity -- Preserve Apple qsort partition, fallback, and recursion order because comparator calls are observable.
+  // code-gauge-allow functionNcss -- The sort loop keeps pivot, partition boundaries, fallback and tail recursion in one order.
   sort(start: number, n: number, depth = 2 * Math.floor(Math.log2(n))): void {
     const { size } = this;
     let a = start;
@@ -161,8 +161,8 @@ class QuickSort {
     return true;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Heap construction and bottom-up selection preserve the platform comparison order and displaced record.
-  // code-gauge-allow functionNcss 37 -- Build and extraction share the one-based address mapping and temporary allocation lifetime.
+  // code-gauge-allow functionCognitiveComplexity -- Heap construction and bottom-up selection preserve the platform comparison order and displaced record.
+  // code-gauge-allow functionNcss -- Build and extraction share the one-based address mapping and temporary allocation lifetime.
   private heapSort(start: number, n: number): void {
     if (n <= 1) return;
     const { size, compare, runtime } = this;

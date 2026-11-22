@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 542 -- Ruby format directives share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss -- Ruby format directives share representation and state; splitting registration by size would scatter that concern.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   combinedStringEncoding,
@@ -207,7 +207,7 @@ function* formatParts(formatValue: Value, args: Value[]): Gen<{ parts: RString[]
   return { parts, binary, usAscii };
 }
 
-// code-gauge-allow duplicateLines 16 -- Collection methods retain separate iteration, return-value and rooting lifecycles despite similar accumulation blocks.
+// code-gauge-allow duplicateLines -- Collection methods retain separate iteration, return-value and rooting lifecycles despite similar accumulation blocks.
 function encodeCodePoints(text: string): Uint8Array {
   const bytes: number[] = [];
   for (let index = 0; index < text.length; index++) {
@@ -227,8 +227,8 @@ function encodeCodePoints(text: string): Uint8Array {
   return Uint8Array.from(bytes);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- The ordered cases for Ruby format directives share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 39 -- Ruby's format directives and flags are dispatched together.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby format directives share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- Ruby's format directives and flags are dispatched together.
 function* directive(type: string, spec: Spec, arg: () => Value): Gen<string | RString> {
   switch (type) {
     case 'd':
@@ -347,7 +347,7 @@ function validStringBoundary(text: string, precision: number | undefined): { end
   return { end, count };
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Raw UTF-8 bytes need distinct valid and invalid character lengths.
+// code-gauge-allow functionCognitiveComplexity -- Raw UTF-8 bytes need distinct valid and invalid character lengths.
 function rawStringBoundary(bytes: Uint8Array, precision: number | undefined): { end: number; count: number } {
   const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   let end = 0;
@@ -433,7 +433,7 @@ function signOf(negative: boolean, spec: Spec): string {
   return '';
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Ruby's format directives and flags.
+// code-gauge-allow functionCognitiveComplexity -- Ruby's format directives and flags.
 function formatInteger(value: bigint, base: number, spec: Spec, prefix: string): string {
   const negative = value < 0n;
   let digits: string;
@@ -477,7 +477,7 @@ function twosComplement(value: bigint, base: number): string {
   return `..${text}`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- The ordered cases for Ruby format directives share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby format directives share state; splitting them solely for the metric would hide their sequencing.
 function formatFloatDirective(type: string, value: number, spec: Spec): string {
   const negative = value < 0 || Object.is(value, -0);
   const sign = signOf(negative, spec);
@@ -585,8 +585,8 @@ function fixedFromDigits(digits: string, decpt: number, decimals: number): strin
   return decimals > 0 ? `${integer}.${fraction}` : integer;
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- The ordered cases for Ruby format directives share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 33 -- The ordered cases for Ruby format directives share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby format directives share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for Ruby format directives share state; splitting them solely for the metric would hide their sequencing.
 function hexFloat(value: number, precision: number | undefined): string {
   if (value === 0) return `0x0${precision ? `.${'0'.repeat(precision)}` : ''}p+0`;
   let exponent = Math.min(1023, Math.floor(Math.log2(value)));

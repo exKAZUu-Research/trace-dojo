@@ -378,8 +378,8 @@ registerModule(
 // Formatter ---------------------------------------------------------------------------------------------------------
 
 /** `_string.formatter_parser`: the (literal, field name, format spec, conversion) tuples of a format string. */
-// code-gauge-allow functionCognitiveComplexity 25 -- Follows MarkupIterator_next of CPython's unicode_format.h.
-// code-gauge-allow functionNcss 35 -- Follows MarkupIterator_next of CPython's unicode_format.h.
+// code-gauge-allow functionCognitiveComplexity -- Follows MarkupIterator_next of CPython's unicode_format.h.
+// code-gauge-allow functionNcss -- Follows MarkupIterator_next of CPython's unicode_format.h.
 function formatterParser(value: PyValue): PyValue {
   value = stringValue(value) ?? value;
   if (typeof value !== 'string') throw typeError(`expected str, got ${typeName(value)}`);
@@ -444,7 +444,7 @@ function parseField(chars: string[], start: number): ParsedField {
   return { name, spec: '', end: position };
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows parse_field of CPython's unicode_format.h.
+// code-gauge-allow functionCognitiveComplexity -- Follows parse_field of CPython's unicode_format.h.
 /** Reads the conversion and the format spec of a field, up to the `}` that matches its `{`. */
 function parseSpec(chars: string[], start: number, name: string, hasConversion: boolean): ParsedField {
   let position = start;
@@ -471,8 +471,8 @@ function parseSpec(chars: string[], start: number, name: string, hasConversion: 
 }
 
 /** `_string.formatter_field_name_split`: the first part of a field name and the attributes and keys after it. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows FieldNameIterator of CPython's unicode_format.h.
-// code-gauge-allow functionNcss 32 -- Follows FieldNameIterator of CPython's unicode_format.h.
+// code-gauge-allow functionCognitiveComplexity -- Follows FieldNameIterator of CPython's unicode_format.h.
+// code-gauge-allow functionNcss -- Follows FieldNameIterator of CPython's unicode_format.h.
 function fieldNameSplit(value: PyValue): PyValue {
   value = stringValue(value) ?? value;
   if (typeof value !== 'string') throw typeError(`expected str, got ${typeName(value)}`);

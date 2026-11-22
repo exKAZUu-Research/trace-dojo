@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 477 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
+// code-gauge-allow-file fileNcss -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { BigFloat, compareFloats } from './floats';
@@ -64,7 +64,7 @@ export function registerStorageLocation(
   if (virtual) virtualStorage.add(storage);
 }
 
-// code-gauge-allow functionParameterCount 7 -- Compares typed storage ranges with independent starts and extents.
+// code-gauge-allow functionParameterCount -- Compares typed storage ranges with independent starts and extents.
 export function storageOverlaps(
   left: Slots,
   leftStart: number,
@@ -590,8 +590,8 @@ export function storeInto(target: Slots, index: number, value: Value): void {
   storeSnapshotInto(target, index, copyValue(value));
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Preserves existing aggregate locations when storing copied values.
-// code-gauge-allow functionNcss 34 -- Handles aggregate assignment and retained payloads at the storage boundary.
+// code-gauge-allow functionCognitiveComplexity -- Preserves existing aggregate locations when storing copied values.
+// code-gauge-allow functionNcss -- Handles aggregate assignment and retained payloads at the storage boundary.
 function storeSnapshotInto(target: Slots, index: number, value: Value): void {
   value = valueWithRetainedPayload(target, index, value);
   if (storageLocations.has(target.slots)) {

@@ -9,7 +9,7 @@ import { normalize } from './infer';
 import { compileError, resolveTypePath } from './items';
 import { BOOL, freshVar, NEVER, outputStream, resolve, shallow, type Type, typeToString, UNIT, USIZE } from './types';
 
-// code-gauge-allow functionNcss 34 -- One case per kind of macro.
+// code-gauge-allow functionNcss -- One case per kind of macro.
 export function checkMacro(c: Checker, macro: MacroCall, expected: Type | undefined): Type {
   switch (macro.kind) {
     case 'print': {

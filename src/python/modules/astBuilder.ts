@@ -63,7 +63,7 @@ export class AstBuilder extends AstPatternBuilder {
     return this.location(start, this.endOf(node));
   }
 
-  // code-gauge-allow functionNcss 60 -- One case per kind of statement node, each delegating where it grows.
+  // code-gauge-allow functionNcss -- One case per kind of statement node, each delegating where it grows.
   private statements(node: Node): PyValue[] {
     const at = this.location(node);
     switch (node.type) {

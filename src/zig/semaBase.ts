@@ -478,7 +478,7 @@ export abstract class SemaBase implements SemaApi {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps declaration state and its compilation-time storage transaction together.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps declaration state and its compilation-time storage transaction together.
   private resolveVariable(decl: Extract<Decl, { kind: 'const' | 'var' }>): void {
     if (decl.state === 'resolved') return;
     if (decl.state === 'resolving') {
@@ -537,8 +537,8 @@ export abstract class SemaBase implements SemaApi {
   // Container fields ------------------------------------------------------------------------------------------------
 
   /** The fields of a struct, resolving their types and default values on first use. */
-  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps field type, layout and default-value checks in one pass.
-  // code-gauge-allow functionNcss 31 -- Keeps field type, layout and default-value checks in one pass.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps field type, layout and default-value checks in one pass.
+  // code-gauge-allow functionNcss -- Keeps field type, layout and default-value checks in one pass.
   structFields(type: StructType, span: Span): StructField[] {
     if (type.fields) return type.fields;
     const syntax = type.namespace.syntax;
@@ -594,7 +594,7 @@ export abstract class SemaBase implements SemaApi {
   }
 
   /** Resolves the fields of the structs and unions a value of `type` holds in place, which its undefined value needs. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Resolves the by-value type graph before validating and caching layouts.
+  // code-gauge-allow functionCognitiveComplexity -- Resolves the by-value type graph before validating and caching layouts.
   private resolveLayout(type: Type, span: Span, seen: Set<Type>): void {
     if (seen.has(type) || hasResolvedLayout(type)) return;
     this.spendCompilation();
@@ -669,7 +669,7 @@ export abstract class SemaBase implements SemaApi {
   }
 
   /** Whether a value of `type` contains a `target` in place, not behind a pointer, which would have no size. */
-  // code-gauge-allow duplicateLines 23 -- By-value cycle detection and comptime classification traverse similar graphs with different leaf and field predicates.
+  // code-gauge-allow duplicateLines -- By-value cycle detection and comptime classification traverse similar graphs with different leaf and field predicates.
   private holdsByValue(type: Type, target: Type, seen: Set<Type>): boolean {
     this.spendCompilation();
     if (type === target) return true;
@@ -695,8 +695,8 @@ export abstract class SemaBase implements SemaApi {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Checks each rule of Zig's type coercion or container analysis in turn.
-  // code-gauge-allow functionNcss 35 -- Resolves enum tags, indexed uniqueness, and integer range checks in declaration order.
+  // code-gauge-allow functionCognitiveComplexity -- Checks each rule of Zig's type coercion or container analysis in turn.
+  // code-gauge-allow functionNcss -- Resolves enum tags, indexed uniqueness, and integer range checks in declaration order.
   enumFields(type: EnumType): NonNullable<EnumType['fields']> {
     if (type.fields) return type.fields;
     const syntax = type.namespace.syntax;
@@ -925,7 +925,7 @@ export abstract class SemaBase implements SemaApi {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Checks each rule of Zig's type coercion or container analysis in turn.
+  // code-gauge-allow functionCognitiveComplexity -- Checks each rule of Zig's type coercion or container analysis in turn.
   private coerceToInt(expression: TExpr, to: IntType, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'comptime_int' || (from.kind === 'int' && expression.known)) {
@@ -945,7 +945,7 @@ export abstract class SemaBase implements SemaApi {
     return undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Checks each rule of Zig's type coercion or container analysis in turn.
+  // code-gauge-allow functionCognitiveComplexity -- Checks each rule of Zig's type coercion or container analysis in turn.
   private coerceToFloat(expression: TExpr, to: Extract<Type, { kind: 'float' }>, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'comptime_float' && expression.known) {
@@ -1028,8 +1028,8 @@ export abstract class SemaBase implements SemaApi {
       : undefined;
   }
 
-  // code-gauge-allow functionNcss 31 -- Checks each rule of Zig's type coercion or container analysis in turn.
-  // code-gauge-allow functionCognitiveComplexity 27 -- Checks each rule of Zig's type coercion or container analysis in turn.
+  // code-gauge-allow functionNcss -- Checks each rule of Zig's type coercion or container analysis in turn.
+  // code-gauge-allow functionCognitiveComplexity -- Checks each rule of Zig's type coercion or container analysis in turn.
   private coerceToPointer(expression: TExpr, to: Extract<Type, { kind: 'pointer' }>, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'fn') {
@@ -1443,7 +1443,7 @@ export function intWidens(from: IntType, to: IntType): boolean {
 }
 
 /** Whether a value of one type is a value of another without conversion, as pointers' and optionals' children need. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Checks each rule of Zig's type coercion or container analysis in turn.
+// code-gauge-allow functionCognitiveComplexity -- Checks each rule of Zig's type coercion or container analysis in turn.
 export function inMemoryCoercible(from: Type, to: Type): boolean {
   if (from === to) return true;
   const sourcePointer = pointerRepresentation(from);
@@ -1500,7 +1500,7 @@ export function mergeErrorSets(a: ErrorSetType, b: ErrorSetType): ErrorSetType {
   return errorSetOf([...a.names, ...b.names]);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Intersects pointer qualifiers, array lengths and sentinel guarantees.
+// code-gauge-allow functionCognitiveComplexity -- Intersects pointer qualifiers, array lengths and sentinel guarantees.
 function peerPointers(a: Extract<Type, { kind: 'pointer' }>, b: Extract<Type, { kind: 'pointer' }>): Type | undefined {
   const isConst = a.isConst || b.isConst;
   const leftSentinel = pointerSentinel(a),
@@ -1649,7 +1649,7 @@ export function copyIntoReservedStorage(value: Value): Value {
   return copyStoredValue(value, spendMemory);
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Dispatches concrete value shapes while retaining type proofs and charging each mutable clone before allocation.
+// code-gauge-allow functionCognitiveComplexity -- Dispatches concrete value shapes while retaining type proofs and charging each mutable clone before allocation.
 function copyStoredValue(
   value: Value,
   reserve?: (slots: number) => void,
@@ -1710,7 +1710,7 @@ export function undefinedValue(type: Type): Value {
   return buildUndefinedValue(type);
 }
 
-// code-gauge-allow functionNcss 35 -- Mirrors the value shapes for every supported type.
+// code-gauge-allow functionNcss -- Mirrors the value shapes for every supported type.
 function buildUndefinedValue(type: Type): Value {
   switch (type.kind) {
     case 'int': {

@@ -49,8 +49,8 @@ function read(byteAt: (index: number) => number, offset: number, count: number):
 }
 
 /** `Wyhash.hash(seed, input)`. */
-// code-gauge-allow functionNcss 42 -- Keeps the reference Wyhash block order with its metered input reader.
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionNcss -- Keeps the reference Wyhash block order with its metered input reader.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 export function wyhash(
   seed: bigint,
   length: number,
@@ -117,8 +117,8 @@ export function autoHashBytes(
   return bytes;
 }
 
-// code-gauge-allow functionNcss 60 -- Serializes each key representation while charging work before materialization.
-// code-gauge-allow functionCognitiveComplexity 29 -- Serializes each key representation while charging work before materialization.
+// code-gauge-allow functionNcss -- Serializes each key representation while charging work before materialization.
+// code-gauge-allow functionCognitiveComplexity -- Serializes each key representation while charging work before materialization.
 function appendHashBytes(
   bytes: number[],
   value: Value,

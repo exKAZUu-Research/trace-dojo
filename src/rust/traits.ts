@@ -38,8 +38,8 @@ export class TraitSolver {
   ) {}
 
   /** Whether `type` implements the trait, binding variables of closure signatures as a side effect. */
-  // code-gauge-allow functionCognitiveComplexity 23 -- One rule per trait or conversion of the standard library.
-  // code-gauge-allow functionNcss 31 -- Routes Rust trait obligations by receiver type.
+  // code-gauge-allow functionCognitiveComplexity -- One rule per trait or conversion of the standard library.
+  // code-gauge-allow functionNcss -- Routes Rust trait obligations by receiver type.
   implements(type: Type, ref: TraitRef): Answer {
     const t = normalize(shallow(type));
     const { trait } = ref;
@@ -225,7 +225,7 @@ export class TraitSolver {
     return bound.item !== undefined && this.unifier.tryUnify(bound.item, ref.item);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- One rule per trait or conversion of the standard library.
+  // code-gauge-allow functionCognitiveComplexity -- One rule per trait or conversion of the standard library.
   private closureImplements(t: Type, ref: TraitRef): Answer {
     const sig = ref.fnSig!;
     if (t.kind === 'closure') {

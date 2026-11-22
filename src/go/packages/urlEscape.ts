@@ -41,7 +41,7 @@ function unhex(c: number): number {
   return 9 * (c >> 6) + (c & 15);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes net/url's shouldEscape.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes net/url's shouldEscape.
 /** `shouldEscape` of net/url's gen_encoding_table.go, from which Go generates its lookup table. */
 export function shouldEscape(c: number, mode: Encoding): boolean {
   if ((c >= 0x61 && c <= 0x7a) || (c >= 0x41 && c <= 0x5a) || (c >= 0x30 && c <= 0x39)) return false;
@@ -71,8 +71,8 @@ export function shouldEscape(c: number, mode: Encoding): boolean {
   return true;
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes net/url's unescape.
-// code-gauge-allow functionNcss 40 -- Transcribes net/url's unescape.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes net/url's unescape.
+// code-gauge-allow functionNcss -- Transcribes net/url's unescape.
 /** `unescape`: decodes %XX (and + in a query component), throwing Go's EscapeError or InvalidHostError. */
 export function unescape(s: string, mode: Encoding): string {
   spendFor(s.length);
@@ -193,7 +193,7 @@ function addrError(failure: AddrFailure): Value {
   return new Iface(PARSE_ADDR_ERROR, new GoStruct([failure.input, failure.msg, failure.at]));
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes netip.parseIPv4Fields.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes netip.parseIPv4Fields.
 function parseIPv4Fields(input: string, off: number, end: number): void {
   let val = 0;
   let pos = 0;
@@ -221,8 +221,8 @@ function parseIPv4Fields(input: string, off: number, end: number): void {
   if (pos < 3) throw new AddrFailure(input, 'IPv4 address too short');
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Transcribes netip.parseIPv6 step by step.
-// code-gauge-allow functionNcss 45 -- Transcribes netip.parseIPv6 step by step.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes netip.parseIPv6 step by step.
+// code-gauge-allow functionNcss -- Transcribes netip.parseIPv6 step by step.
 /** `netip.parseIPv6`, which only validates here since net/url needs no more than its error. */
 function parseIPv6(input: string): void {
   const zoneAt = input.indexOf('%');

@@ -774,7 +774,7 @@ function setErr(fields: Value[], error: Value): void {
   if (fields[S.Err] === undefined || sameError(fields[S.Err], EOF)) fields[S.Err] = error;
 }
 
-// code-gauge-allow functionCognitiveComplexity 40 -- A transcription of Go's Scanner.Scan.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of Go's Scanner.Scan.
 function scan(fields: Value[]): boolean {
   if (fields[S.Done]) return false;
   fields[S.ScanCalled] = true;

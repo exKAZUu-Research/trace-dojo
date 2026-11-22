@@ -201,7 +201,7 @@ function lzma2DictByte(dictSize: number): number {
 }
 
 /** `lzma_properties_decode`. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
 export function propertiesDecode(
   id: bigint,
   props: Uint8Array

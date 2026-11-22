@@ -157,7 +157,7 @@ export function keyHash(value: PyValue, role: KeyRole): bigint {
 }
 
 /** Python's `hash()`, raising TypeError for unhashable values. */
-// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of hashable value.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of hashable value.
 export function pyHash(value: PyValue): bigint {
   switch (typeof value) {
     case 'bigint': {

@@ -8,7 +8,7 @@ export type PointEncoder = (point: number, out: number[]) => boolean;
  * Encodes code points one at a time, giving the characters `encodePoint` refuses to the error handler: each run of
  * them at once when `groupErrors` is set, as CPython's single-byte and UTF-8 encoders do, or one by one.
  */
-// code-gauge-allow functionCognitiveComplexity 25 -- Follows how CPython's encoders hand errors to the handler.
+// code-gauge-allow functionCognitiveComplexity -- Follows how CPython's encoders hand errors to the handler.
 export function encodePoints(
   points: readonly number[],
   errors: ErrorHandling,
@@ -119,7 +119,7 @@ const invalid = (length: number): { reason: string; length: number } => ({
  * Classifies the sequence starting at a non-ASCII byte as CPython's UTF-8 decoder does: its length when valid, or
  * the error and how many bytes the error covers.
  */
-// code-gauge-allow functionCognitiveComplexity 30 -- Transcribes the checks of CPython's UTF-8 decoder.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the checks of CPython's UTF-8 decoder.
 function utf8Sequence(data: Uint8Array, index: number): { length: number } | { reason: string; length: number } {
   const lead = data[index];
   const available = data.length - index;

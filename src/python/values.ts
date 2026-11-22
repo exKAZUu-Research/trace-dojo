@@ -434,7 +434,7 @@ export class PyFunction extends PyObject {
   /** The `__builtins__` object captured from `globals` when the function was created, or `undefined` when absent. */
   builtins: PyValue | undefined;
 
-  // code-gauge-allow functionParameterCount 7 -- Each function field is set once at creation.
+  // code-gauge-allow functionParameterCount -- Each function field is set once at creation.
   constructor(
     cls: PyClass,
     readonly def: FunctionDef,

@@ -82,7 +82,7 @@ export class Frame implements TracedFrame {
     return this.home.kind === 'class' ? (this.home.self as RClass) : undefined;
   }
 
-  // code-gauge-allow functionParameterCount 8 -- A frame carries the call context needed by Ruby method, block, and class execution.
+  // code-gauge-allow functionParameterCount -- A frame carries the call context needed by Ruby method, block, and class execution.
   constructor(
     readonly kind: FrameKind,
     readonly self: Value,

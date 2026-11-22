@@ -25,8 +25,8 @@ function* writePuts(target: Value, args: Value[]): Gen<void> {
   yield* emitPuts(args, (part) => write(target, part));
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- The ordered cases for Ruby output and warning encoding share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 33 -- The ordered cases for Ruby output and warning encoding share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby output and warning encoding share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for Ruby output and warning encoding share state; splitting them solely for the metric would hide their sequencing.
 function* emitPuts(args: Value[], emit: (part: string | RString) => Gen<void>, includeEmpty = false): Gen<void> {
   if (args.length === 0) {
     yield* emit('\n');
@@ -241,7 +241,7 @@ interface WarningParts {
   started: boolean;
 }
 
-// code-gauge-allow duplicateLines 18 -- Collection methods retain separate iteration, return-value and rooting lifecycles despite similar accumulation blocks.
+// code-gauge-allow duplicateLines -- Collection methods retain separate iteration, return-value and rooting lifecycles despite similar accumulation blocks.
 function appendWarningPart(parts: WarningParts, part: RString): void {
   const bytes = stringBytes(part);
   const rightAscii = bytes.every((byte) => byte < 0x80);
@@ -283,7 +283,7 @@ function warnCategoryEnabled(keywords: RHash | undefined): boolean {
   return true;
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Warn validates names, categories, then bounded levels, skipping levels for empty calls.
+// code-gauge-allow functionCognitiveComplexity -- Warn validates names, categories, then bounded levels, skipping levels for empty calls.
 function* validateWarnKeywords(keywords: RHash | undefined, hasMessages: boolean): Gen<void> {
   if (!keywords) return;
   const entries = [...keywords.map.values()];

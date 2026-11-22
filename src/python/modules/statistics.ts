@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 522 -- Transcribes statistics.py, whose functions share its exact sums.
+// code-gauge-allow-file fileNcss -- Transcribes statistics.py, whose functions share its exact sums.
 import { pyRepr } from '../conversions';
 import { sumOfProducts } from '../floatArithmetic';
 import { registerModule } from '../modules';
@@ -144,7 +144,7 @@ interface SumOfSquares extends Sum {
 }
 
 /** `_ss`: the sum of squared deviations from the mean, or from `c` when it is given. */
-// code-gauge-allow functionNcss 31 -- Transcribes statistics.py.
+// code-gauge-allow functionNcss -- Transcribes statistics.py.
 function sumOfSquares(data: PyValue, c: PyValue | undefined): SumOfSquares {
   if (c !== undefined && c !== None) {
     const values = toArray(data).map((x) => {
@@ -254,8 +254,8 @@ function failNegative(value: PyValue): PyValue {
   return value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes statistics.py.
-// code-gauge-allow functionNcss 35 -- Transcribes statistics.py.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes statistics.py.
+// code-gauge-allow functionNcss -- Transcribes statistics.py.
 function harmonicMean(dataValue: PyValue, weightsValue: PyValue | undefined): PyValue {
   const data = toArray(dataValue);
   const n = data.length;
@@ -587,7 +587,7 @@ function linearRegression(xValue: PyValue, yValue: PyValue, proportional: PyValu
   return callValue(linearRegressionClass, [slope, intercept]);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes statistics.py.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes statistics.py.
 function quantiles(dataValue: PyValue, nValue: PyValue, method: PyValue): PyValue {
   if (isTruthy(compareOp('<', nValue, 1n))) throw statisticsError('n must be at least 1');
   const data = sortedData(dataValue);

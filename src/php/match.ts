@@ -8,7 +8,7 @@ import { strictEquals } from './operators';
 import { rt, type Runtime } from './runtime';
 import { deref, Ref, type Value } from './values';
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Evaluates match conditions in order while preserving the subject slot.
+// code-gauge-allow functionCognitiveComplexity -- Evaluates match conditions in order while preserving the subject slot.
 export function matchExpression(e: Extract<Expr, { k: 'match' }>): Value {
   const runtime = rt();
   const variable = e.subject.k === 'var' && isCompiledVariable(e.subject) ? e.subject : undefined;

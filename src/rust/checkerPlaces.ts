@@ -52,7 +52,7 @@ export function requireMutablePlace(
 }
 
 /** What a place expression is rooted in, looking through fields, indexes, and derefs. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows the type checking rules of rustc case by case.
+// code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
 function placeRoot(
   c: Checker,
   place: Expr
@@ -108,7 +108,7 @@ export function isPlaceExpr(c: Checker, expr: Expr): boolean {
   return expr.kind === 'unary' && expr.op === '*';
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows the type checking rules of rustc case by case.
+// code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
 export function checkField(c: Checker, expr: Extract<Expr, { kind: 'field' }>): Type {
   const operandType = c.settled(c.expr(expr.operand, undefined));
   for (const step of autoderefSteps(c.program, operandType)) {
@@ -200,7 +200,7 @@ function indexMap(
   return valueType;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows the type checking rules of rustc case by case.
+// code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
 function indexSequence(
   c: Checker,
   expr: Extract<Expr, { kind: 'index' }>,

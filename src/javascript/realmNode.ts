@@ -41,7 +41,7 @@ export function defineNodeBuiltins(builder: RealmBuilder): void {
   }
 }
 
-// code-gauge-allow functionNcss 40 -- Lists the builtin methods, each a small closure of its own.
+// code-gauge-allow functionNcss -- Lists the builtin methods, each a small closure of its own.
 function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
   builder.method(fs, 'readFileSync', 2, ({ runtime, args }) => {
     // File descriptor 0 is standard input.

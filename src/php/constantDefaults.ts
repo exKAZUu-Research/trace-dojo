@@ -42,7 +42,7 @@ export function foldedConstant(expression: Expr, context: FoldContext): Constant
   return value === UNKNOWN ? undefined : value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 export function selectConstantBranch(expression: Expr, context: FoldContext): Expr {
   const bounded = boundedContext(context);
   let current = expression;
@@ -165,8 +165,8 @@ function interpolatedConstant(parts: (string | Expr)[], context: BoundedFoldCont
   return result;
 }
 
-// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function arrayConstant(expression: Extract<Expr, { k: 'array' }>, context: BoundedFoldContext): Folded {
   const result = new Map<Key, Constant>();
   let next = INT_MIN;
@@ -212,7 +212,7 @@ function constantKey(value: Folded): Key | typeof UNKNOWN {
   return Number.isInteger(value) && floatFitsInt(value) ? BigInt(value) : UNKNOWN;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function unaryConstant(op: string, value: Folded): Folded {
   if (value === UNKNOWN) return UNKNOWN;
   if (op === '!') {
@@ -236,7 +236,7 @@ function unaryConstant(op: string, value: Folded): Folded {
   return typeof result === 'bigint' && (result < INT_MIN || result > INT_MAX) ? Number(result) : result;
 }
 
-// code-gauge-allow functionNcss 37 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function binaryConstant(op: string, left: Constant, right: Folded, budget: FoldBudget): Folded {
   if (right === UNKNOWN) return UNKNOWN;
   if (op === 'xor') {
@@ -312,7 +312,7 @@ interface ConstantComparison {
   keys: MapIterator<Key>;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function compareConstant(left: Constant, right: Constant, strict: boolean, budget: FoldBudget): number {
   const complete = new WeakMap<ConstantArray, WeakSet<ConstantArray>>();
   const stack: ConstantComparison[] = [];
@@ -343,7 +343,7 @@ function compareConstant(left: Constant, right: Constant, strict: boolean, budge
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function compareConstantPair(
   pair: [Constant, Constant],
   strict: boolean,
@@ -371,7 +371,7 @@ function compareConstantPair(
   return compareScalar(left, right);
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function castConstant(type: string, value: Folded): Folded {
   if (value === UNKNOWN) return UNKNOWN;
   if (type === 'array') return value instanceof Map ? value : value === null ? new Map() : new Map([[0n, value]]);

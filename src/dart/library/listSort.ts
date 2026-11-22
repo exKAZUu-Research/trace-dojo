@@ -128,8 +128,8 @@ function choosePivots(
 }
 
 /** Moves the elements less than the pivot to the left and the greater ones to the right, keeping equal ones between. */
-// code-gauge-allow functionCognitiveComplexity 17 -- A transcription of dart:_internal's dual-pivot quicksort, whose comparisons programs see.
-// code-gauge-allow functionNcss 31 -- Each move also preserves the displaced element during callbacks.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of dart:_internal's dual-pivot quicksort, whose comparisons programs see.
+// code-gauge-allow functionNcss -- Each move also preserves the displaced element during callbacks.
 function partitionAroundPivot(
   a: ListSortAccess,
   start: number,
@@ -175,9 +175,9 @@ function partitionAroundPivot(
 }
 
 /** Moves the elements that belong left to the left and those that belong right to the right. */
-// code-gauge-allow functionCognitiveComplexity 21 -- A transcription of dart:_internal's dual-pivot quicksort, whose comparisons programs see.
-// code-gauge-allow functionNcss 31 -- Each move also preserves the displaced element during callbacks.
-// code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of dart:_internal's dual-pivot quicksort, whose comparisons programs see.
+// code-gauge-allow functionNcss -- Each move also preserves the displaced element during callbacks.
+// code-gauge-allow functionParameterCount -- The parameters are the parts a caller already holds; grouping them would only rename them.
 function partitionThree(
   a: ListSortAccess,
   start: number,

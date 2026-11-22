@@ -11,7 +11,7 @@ interface Alphabets {
   readonly caseless: WeakSet<AST.Element>;
 }
 
-// code-gauge-allow functionNcss 36 -- Tracks scoped flags and repetition shapes in one AST traversal.
+// code-gauge-allow functionNcss -- Tracks scoped flags and repetition shapes in one AST traversal.
 export function hasAmbiguousRepetition(tree: AST.Pattern, unicode: boolean, ignoreCase: boolean): boolean {
   const baseIgnoreCase = ignoreCase;
   const cases: boolean[] = [];
@@ -132,7 +132,7 @@ function createAlphabets(unicode: boolean, caseless: WeakSet<AST.Element>): Alph
   return { cache: new WeakMap(), empty: CharSet.empty(maximum), any: CharSet.all(maximum), unicode, caseless };
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Tracks the overlapping character set and choice count in one pass.
+// code-gauge-allow functionCognitiveComplexity -- Tracks the overlapping character set and choice count in one pass.
 function overlapsInSequence(alternative: AST.Alternative, alphabets: Alphabets): boolean {
   let repeated = alphabets.empty;
   let choices = 1;

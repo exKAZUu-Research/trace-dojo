@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 546 -- Resolves each Go type form together with its scope and diagnostic context.
+// code-gauge-allow-file fileNcss -- Resolves each Go type form together with its scope and diagnostic context.
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Expression, Span, TypeElementSyntax, TypeExpression, TypeParameter } from './ast';
 import type { Entity, FunctionContext, PackageEntity, TypeEntity, VarEntity } from './entities';
@@ -309,7 +309,7 @@ export abstract class CompilerBase {
     return type;
   }
 
-  // code-gauge-allow functionNcss 36 -- Resolves each Go type form together with its scope and diagnostic context.
+  // code-gauge-allow functionNcss -- Resolves each Go type form together with its scope and diagnostic context.
   private resolveTypeSyntax(syntax: TypeExpression, direct: boolean): Type {
     switch (syntax.kind) {
       case 'name': {
@@ -451,8 +451,8 @@ export abstract class CompilerBase {
     return undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Resolves each Go type form together with its scope and diagnostic context.
-  // code-gauge-allow functionNcss 34 -- Resolves each Go type form together with its scope and diagnostic context.
+  // code-gauge-allow functionCognitiveComplexity -- Resolves each Go type form together with its scope and diagnostic context.
+  // code-gauge-allow functionNcss -- Resolves each Go type form together with its scope and diagnostic context.
   private resolveNamedType(syntax: Extract<TypeExpression, { kind: 'name' }>, direct: boolean): Type {
     let entity: Entity | undefined;
     if (syntax.package) {
@@ -547,7 +547,7 @@ export abstract class CompilerBase {
     }
   }
 
-  // code-gauge-allow functionNcss 35 -- Resolves each Go type form together with its scope and diagnostic context.
+  // code-gauge-allow functionNcss -- Resolves each Go type form together with its scope and diagnostic context.
   private resolveInterface(syntax: Extract<TypeExpression, { kind: 'interface' }>): InterfaceType {
     if (syntax.methods.length === 0 && syntax.elements.length === 0) return EMPTY_INTERFACE;
     const methods: InterfaceMethod[] = [];
@@ -585,7 +585,7 @@ export abstract class CompilerBase {
   }
 
   /** An element of an interface: an embedded interface, or a union of type terms, which may contain interfaces. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Resolves each Go type form together with its scope and diagnostic context.
+  // code-gauge-allow functionCognitiveComplexity -- Resolves each Go type form together with its scope and diagnostic context.
   private resolveTypeElement(
     element: TypeElementSyntax
   ): { embedded: InterfaceType } | { terms: TypeTerm[] } | undefined {
@@ -724,7 +724,7 @@ export abstract class CompilerBase {
   }
 
   /** Why a type does not satisfy a constraint, or undefined when it does. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Resolves each Go type form together with its scope and diagnostic context.
+  // code-gauge-allow functionCognitiveComplexity -- Resolves each Go type form together with its scope and diagnostic context.
   protected unsatisfied(type: Type, constraint: InterfaceType): string | undefined {
     const set = constraint.typeSet;
     if (set?.comparable && !isComparable(type)) return '比較できない型です';
@@ -784,8 +784,8 @@ function intersectTerms(a: TypeTerm[], b: TypeTerm[]): TypeTerm[] {
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Traverses all composite type constructors.
-// code-gauge-allow functionNcss 43 -- Resolves each Go type form together with its scope and diagnostic context.
+// code-gauge-allow functionCognitiveComplexity -- Traverses all composite type constructors.
+// code-gauge-allow functionNcss -- Resolves each Go type form together with its scope and diagnostic context.
 function collectTypeParams(type: Type, out: TypeParamType[], seen = new Set<Type>()): void {
   if (type.kind === 'typeParam') {
     out.push(type);

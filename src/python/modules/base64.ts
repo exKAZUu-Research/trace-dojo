@@ -86,7 +86,7 @@ function b32encode(alphabet: string, data: Uint8Array): Uint8Array {
   return latin1Bytes(text);
 }
 
-// code-gauge-allow functionNcss 31 -- Transcribes base64._b32decode.
+// code-gauge-allow functionNcss -- Transcribes base64._b32decode.
 function b32decode(alphabet: string, args: PyValue[], kwargs: Kwargs, withMap01: boolean): Uint8Array {
   let data = decodeData(args[0]);
   if (data.length % 8 !== 0) throw binasciiError('Incorrect padding');
@@ -193,8 +193,8 @@ function a85encode(args: PyValue[], kwargs: Kwargs): PyValue {
   return newBytes(latin1Bytes(result));
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Transcribes base64.a85decode.
-// code-gauge-allow functionNcss 34 -- Follows base64.a85decode while bounding string growth and packed output allocation.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes base64.a85decode.
+// code-gauge-allow functionNcss -- Follows base64.a85decode while bounding string growth and packed output allocation.
 function a85decode(args: PyValue[], kwargs: Kwargs): PyValue {
   let text = latin1Text(decodeData(args[0]));
   const ignore = kwargs?.has('ignorechars')

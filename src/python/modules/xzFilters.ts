@@ -29,7 +29,7 @@ export class DeltaCoder implements Coder {
     private readonly next: Coder | undefined
   ) {}
 
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
   code(
     input: Uint8Array,
     inPos: Pos,
@@ -106,9 +106,9 @@ export class SimpleCoder implements Coder {
     this.buffer = new Uint8Array(2 * kind.unfilteredMax);
   }
 
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
-  // code-gauge-allow functionNcss 46 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
-  // code-gauge-allow functionCognitiveComplexity 23 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   code(
     input: Uint8Array,
     inPos: Pos,
@@ -167,7 +167,7 @@ export class SimpleCoder implements Coder {
     this.pos = pos.value;
   }
 
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
   private copyOrCode(
     input: Uint8Array,
     inPos: Pos,

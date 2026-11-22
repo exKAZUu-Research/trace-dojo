@@ -1,4 +1,4 @@
-import { platformBinary, platformPower, platformUnary } from '../../interpreter/platformMath';
+import { power } from '../../interpreter/power';
 import type { OutputChannel } from '../../interpreter/programIo';
 import { encodableText, stringOf } from '../format';
 import { ProgramExit, type Runtime } from '../runtime';
@@ -41,11 +41,11 @@ function compareMathOperands(a: bigint | number, b: bigint | number): number {
   return x < y ? -1 : x > y ? 1 : 0;
 }
 
-for (const name of ['sin', 'cos', 'tan', 'acos', 'asin', 'atan', 'sqrt', 'exp', 'log']) {
-  define(name, (runtime, _receiver, [x]) => platformUnary(name, toDouble(numArg(runtime, x, 'x'))));
+for (const name of ['sin', 'cos', 'tan', 'acos', 'asin', 'atan', 'sqrt', 'exp', 'log'] as const) {
+  define(name, (runtime, _receiver, [x]) => Math[name](toDouble(numArg(runtime, x, 'x'))));
 }
 define('atan2', (runtime, _receiver, [a, b]) =>
-  platformBinary('atan2', toDouble(numArg(runtime, a, 'a')), toDouble(numArg(runtime, b, 'b')))
+  Math.atan2(toDouble(numArg(runtime, a, 'a')), toDouble(numArg(runtime, b, 'b')))
 );
 define('pow', (runtime, _receiver, [x, exponent]) => {
   const base = numArg(runtime, x, 'x');
@@ -71,7 +71,7 @@ function doublePower(base: number, exponent: number): number {
   if (exponent === 2) return base * base;
   if (exponent === 3) return base * base * base;
   if (exponent === 0.5 && base !== -Infinity) return base === 0 ? 0 : Math.sqrt(base);
-  return platformPower(base, exponent, false);
+  return power(base, exponent);
 }
 
 /** The VM's Random: multiply-with-carry with the seed mixed by Thomas Wang's 64-bit hash. */

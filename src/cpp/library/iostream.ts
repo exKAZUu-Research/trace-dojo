@@ -477,7 +477,7 @@ export class Streams {
   }
 
   /** Compiles `<<` and `>>` of streams, and a stream used as a condition. */
-  // code-gauge-allow functionCognitiveComplexity 20 -- The stream operators dispatch on what they read or write.
+  // code-gauge-allow functionCognitiveComplexity -- The stream operators dispatch on what they read or write.
   private operator(
     compiler: ExpressionCompiler,
     cls: ClassInfo,
@@ -572,7 +572,7 @@ export class Streams {
   }
 
   /** How `<<` writes a value of the right operand's type. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of value a stream writes.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of value a stream writes.
   private writer(compiler: ExpressionCompiler, right: Expr, row: number): (frame: Frame, stream: StreamValue) => void {
     if (right.functions)
       return compiler.error(row, `関数 ${right.functions.name} の後に (...) を書いて呼び出してください。`);

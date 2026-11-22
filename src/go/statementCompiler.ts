@@ -139,8 +139,8 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  // code-gauge-allow functionNcss 44 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   protected statements(statements: Statement[]): Exec {
     const labels = this.labelState();
     const list = labels.nextList++;
@@ -237,7 +237,7 @@ export abstract class StatementCompiler extends CallCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private branch(statement: Extract<Statement, { kind: 'break' | 'continue' }>): Exec {
     const fn = this.fn as FunctionContext;
     const { label } = statement;
@@ -314,7 +314,7 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 50 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private statementBody(statement: Statement): Exec {
     switch (statement.kind) {
       case 'expression':
@@ -507,8 +507,8 @@ export abstract class StatementCompiler extends CallCompiler {
     return target;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Plain, compound, multiple, and comma-ok assignments.
-  // code-gauge-allow functionNcss 41 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionCognitiveComplexity -- Plain, compound, multiple, and comma-ok assignments.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private assignment(statement: Extract<SimpleStatement, { kind: 'assign' }>, supplied?: Operand): Simple {
     const { operator, left, right } = statement;
     if (operator !== '=') return this.compoundAssignment(statement);
@@ -612,8 +612,8 @@ export abstract class StatementCompiler extends CallCompiler {
    * Compiles the right side of an assignment or declaration for `count` targets: one value per target, a call with
    * several results, or a comma-ok form. `typeOf` gives each target's type, or undefined for `_` and new variables.
    */
-  // code-gauge-allow functionParameterCount 8 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  // code-gauge-allow functionNcss 56 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionParameterCount -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   protected rightSide(
     span: Span,
     right: Expression[],
@@ -890,7 +890,7 @@ export abstract class StatementCompiler extends CallCompiler {
     });
   }
 
-  // code-gauge-allow functionNcss 44 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   protected varDeclaration(declaration: VarDeclaration): Exec {
     const parts: Exec[] = [];
     for (const spec of declaration.specs) {
@@ -1002,7 +1002,7 @@ export abstract class StatementCompiler extends CallCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private forStatement(statement: Extract<Statement, { kind: 'for' }>): Exec {
     const label = this.takeLabel();
     const row = this.stepRow(statement);
@@ -1057,9 +1057,9 @@ export abstract class StatementCompiler extends CallCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  // code-gauge-allow functionNcss 39 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  // code-gauge-allow duplicateLines 16 -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow duplicateLines -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
   private rangeStatement(statement: Extract<Statement, { kind: 'range' }>): Exec {
     const label = this.takeLabel();
     const { value: tracked, hoists } = this.part(() =>
@@ -1120,8 +1120,8 @@ export abstract class StatementCompiler extends CallCompiler {
    * `for k, v := range f`: calls the iterator f with a yield function that runs the loop's body once per call, and
    * returns false to stop f when the body leaves the loop by break, return, or goto, which the loop then completes.
    */
-  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  // code-gauge-allow functionNcss 45 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private rangeFunction(
     statement: Extract<Statement, { kind: 'range' }>,
     iterator: Part,
@@ -1188,7 +1188,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** What a range loop walks: the collection, the types of its keys and values, and how to visit them. */
-  // code-gauge-allow functionNcss 36 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private rangeSource(
     statement: Extract<Statement, { kind: 'range' }>,
     range: Operand,
@@ -1426,7 +1426,7 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 45 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private caseTest(
     expression: Expression,
     tag: Operand | undefined,
@@ -1521,8 +1521,8 @@ export abstract class StatementCompiler extends CallCompiler {
     return (a, b) => equal(a, box(b));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Type switches with their bound variable per clause.
-  // code-gauge-allow functionNcss 32 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionCognitiveComplexity -- Type switches with their bound variable per clause.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private typeSwitchStatement(statement: Extract<Statement, { kind: 'typeSwitch' }>): Exec {
     const label = this.takeLabel();
     const init = statement.init ? this.simpleStatement(statement.init) : undefined;
@@ -1566,7 +1566,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** One clause of a type switch, with the variable it binds to the value as its single type, or as the operand. */
-  // code-gauge-allow functionNcss 41 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private typeSwitchCase(
     statement: Extract<Statement, { kind: 'typeSwitch' }>,
     typeCase: Extract<Statement, { kind: 'typeSwitch' }>['cases'][number],
@@ -1640,7 +1640,7 @@ export abstract class StatementCompiler extends CallCompiler {
     return { matched, body, binding, extract, isDefault: !typeCase.types };
   }
 
-  // code-gauge-allow functionNcss 44 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private returnStatement(statement: Extract<Statement, { kind: 'return' }>): Exec {
     const fn = this.fn as FunctionContext;
     const { results } = fn;
@@ -1737,8 +1737,8 @@ export abstract class StatementCompiler extends CallCompiler {
     return execOf({ run, onlyCalls: false }, hoists);
   }
 
-  // code-gauge-allow functionNcss 53 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private launchedCall(statement: Extract<Statement, { kind: 'defer' | 'go' }>): Run {
     (this.fn as FunctionContext).notInlinable = true;
     const keyword = statement.kind;
@@ -1805,8 +1805,8 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  // code-gauge-allow functionNcss 42 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private launchedMethod(
     call: Extract<Expression, { kind: 'call' }>,
     callee: Operand,
@@ -1884,8 +1884,8 @@ export abstract class StatementCompiler extends CallCompiler {
     return (frame) => receiverFor(read(frame), path, POINTER_METHOD);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  // code-gauge-allow functionNcss 40 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private launchedBuiltin(
     statement: Extract<Statement, { kind: 'defer' | 'go' }>,
     call: Extract<Expression, { kind: 'call' }>,
@@ -1999,7 +1999,7 @@ export abstract class StatementCompiler extends CallCompiler {
   // Channels --------------------------------------------------------------------------------------------------------
 
   /** Compiles a channel that a send or `close` uses, which a receive-only channel cannot be. */
-  // code-gauge-allow duplicateLines 19 -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
+  // code-gauge-allow duplicateLines -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
   private sendableChannel(expression: Expression, use: 'send' | 'close'): { eval: Eval; element: Type } | undefined {
     const operand = this.value(expression);
     if (this.isInvalid(operand)) return undefined;
@@ -2044,12 +2044,12 @@ export abstract class StatementCompiler extends CallCompiler {
     return this.withStep(statement, (frame) => void sent(frame), false);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- The cases of select, with the variables a receive declares.
+  // code-gauge-allow functionCognitiveComplexity -- The cases of select, with the variables a receive declares.
   /**
    * `select`: evaluates every case's channel and value once in order, waits for a case that can proceed, then makes
    * that case's receive assignment and runs its statements.
    */
-  // code-gauge-allow functionNcss 60 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private selectStatement(statement: Extract<Statement, { kind: 'select' }>): Exec {
     const label = this.takeLabel();
     const defaults = statement.cases.filter((selectCase) => !selectCase.comm);
@@ -2197,7 +2197,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** `for v := range ch`: receives until the channel is closed and empty. */
-  // code-gauge-allow duplicateLines 16 -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
+  // code-gauge-allow duplicateLines -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
   private rangeChannel(
     statement: Extract<Statement, { kind: 'range' }>,
     channel: Part,
@@ -2241,7 +2241,7 @@ export abstract class StatementCompiler extends CallCompiler {
    * Compiles a function body in a new context: declares the receiver, parameters, and results, compiles the body,
    * and checks that it ends with a terminating statement when it has results.
    */
-  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   protected functionBody(
     name: string,
     signature: SignatureSyntax,

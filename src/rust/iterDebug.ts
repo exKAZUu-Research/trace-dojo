@@ -185,8 +185,8 @@ function patternHasDebug(pattern: Type): boolean {
 }
 
 /** `{:?}` of an iterator of `item`s of a shape, as std's `Debug` impls of its iterator types write it. */
-// code-gauge-allow functionCognitiveComplexity 24 -- One case per iterator type of std.
-// code-gauge-allow functionNcss 56 -- One case per iterator type of std.
+// code-gauge-allow functionCognitiveComplexity -- One case per iterator type of std.
+// code-gauge-allow functionNcss -- One case per iterator type of std.
 export function iteratorDebug(
   iter: IterValue,
   item: Type,

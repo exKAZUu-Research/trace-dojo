@@ -14,7 +14,6 @@ const RESTRICTED_OPERANDS: Record<string, readonly string[]> = {
   conditional_expression: ['condition', 'alternative'],
 };
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Grammar recovery forms need position-specific C17 checks during one syntax-tree walk.
 export function validateSyntax(root: Node, checkFeature: (node: Node) => void): void {
   const pending = [root];
   while (pending.length > 0) {

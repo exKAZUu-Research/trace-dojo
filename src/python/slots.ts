@@ -33,7 +33,7 @@ function slotMember(name: string, cls: PyClass): PyAttribute {
  * Reads a new class's `__slots__`, adding a descriptor to its namespace for each slot, and returns the names it
  * declares, or undefined when it declares none.
  */
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows the checks of CPython's type_new_slots.
+// code-gauge-allow functionCognitiveComplexity -- Follows the checks of CPython's type_new_slots.
 export function defineClassSlots(cls: PyClass, entries: Map<string, PyValue>): string[] | undefined {
   const declared = entries.get('__slots__');
   if (declared === undefined) return undefined;

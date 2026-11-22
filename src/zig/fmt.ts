@@ -1,5 +1,5 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 832 -- Keeps format parsing and rendering with their shared specifiers.
+// code-gauge-allow-file fileNcss -- Keeps format parsing and rendering with their shared specifiers.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -80,7 +80,7 @@ export interface FormatTemplate {
   readonly text: string;
 }
 
-// code-gauge-allow functionNcss 36 -- Binds placeholder selectors and options against one call’s arguments.
+// code-gauge-allow functionNcss -- Binds placeholder selectors and options against one call’s arguments.
 export function parseFormat(
   template: FormatTemplate,
   argNames: readonly string[],
@@ -132,8 +132,8 @@ export function parseFormat(
   return segments;
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Scans escaped braces and placeholders while preserving literal write boundaries.
-// code-gauge-allow functionNcss 37 -- Keeps the format lexer and its literal accumulation together.
+// code-gauge-allow functionCognitiveComplexity -- Scans escaped braces and placeholders while preserving literal write boundaries.
+// code-gauge-allow functionNcss -- Keeps the format lexer and its literal accumulation together.
 export function parseFormatTemplate(format: Uint8Array, spend: (cost?: number) => void): FormatTemplate {
   const segments: TemplateSegment[] = [];
   let literal: number[] = [];
@@ -817,7 +817,7 @@ export function stringBytes(value: Value): ByteView {
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Streams three input bytes per quartet with bounded lazy reads and explicit padding.
+// code-gauge-allow functionCognitiveComplexity -- Streams three input bytes per quartet with bounded lazy reads and explicit padding.
 function base64Bytes(source: ByteView): ByteView {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   let group = -1,
@@ -972,7 +972,7 @@ function isPowerOf10(value: bigint): boolean {
 }
 
 /** `std.fmt.float.round`, which rounds the shortest decimal's digits, half up. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function roundDecimal(decimal: Decimal, mode: 'decimal' | 'scientific', precision: bigint): Decimal {
   let roundDigit = 0n;
   let output = decimal.mantissa;
@@ -1056,7 +1056,7 @@ function formatDecimal(input: Decimal, requested: bigint | undefined, bufferSize
   return text;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Handles each of the native renderer's decimal point positions.
+// code-gauge-allow functionCognitiveComplexity -- Handles each of the native renderer's decimal point positions.
 function renderDecimal(decimal: Decimal, digits: string, requested: bigint | undefined): string {
   const precision = requested === undefined ? undefined : Number(requested);
   const olength = digits.length;
@@ -1087,7 +1087,7 @@ function renderDecimal(decimal: Decimal, digits: string, requested: bigint | und
 }
 
 /** `printFloatHex`: a float as `0x1.8p1`. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the fixed-buffer checks with finite and special encodings.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the fixed-buffer checks with finite and special encodings.
 function printFloatHex(out: FormatOutput, value: AnyFloat, bits: FloatBits, upper: boolean, options: Options): void {
   const big = asBigFloat(value);
   const bufferSize = 50;
@@ -1108,8 +1108,8 @@ function printFloatHex(out: FormatOutput, value: AnyFloat, bits: FloatBits, uppe
 }
 
 /** The digits and exponent of `Writer.printFloatHex` for a finite nonzero float, rounded to a precision if given. */
-// code-gauge-allow functionNcss 36 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionNcss -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function hexFloatDigits(big: BigFloat, bits: FloatBits, upper: boolean, precision: number | undefined): string {
   const format = FORMATS[bits];
   const fractionalBits = format.precision - 1;

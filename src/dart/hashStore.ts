@@ -239,7 +239,7 @@ export class HashStore implements NativeState {
   }
 
   /** The VM's `_findValueOrInsertPoint`: `==` runs only on entries whose stored hash pattern matches. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- A transcription of the VM's probe loop, whose `==` calls programs see.
+  // code-gauge-allow functionCognitiveComplexity -- A transcription of the VM's probe loop, whose `==` calls programs see.
   private probe(key: Value, hash: bigint): { found: number; insertAt: number; pattern: number; slot: number } {
     const size = this.index.length;
     const sizeMask = size - 1;

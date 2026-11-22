@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 825 -- Declaration and initializer compilation share symbol and type state.
+// code-gauge-allow-file fileNcss -- Declaration and initializer compilation share symbol and type state.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type { Value } from './arith';
 import type {
@@ -193,7 +193,7 @@ export class Compiler extends StatementCompiler {
 
   // File scope --------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- File declarations share type, linkage and initializer checks.
+  // code-gauge-allow functionCognitiveComplexity -- File declarations share type, linkage and initializer checks.
   private fileScopeDeclaration(declaration: Declaration): void {
     const { specifiers } = declaration;
     if (specifiers.storage === 'auto' || specifiers.storage === 'register') {
@@ -239,8 +239,8 @@ export class Compiler extends StatementCompiler {
     this.scope.ordinary.set(name, { kind: 'typedef', type });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Keep the compatible-declaration and builtin-replacement rules together; extracting branches would obscure their shared symbol state.
-  // code-gauge-allow functionNcss 37 -- All declarations must reuse one function identity and its composite type.
+  // code-gauge-allow functionCognitiveComplexity -- Keep the compatible-declaration and builtin-replacement rules together; extracting branches would obscure their shared symbol state.
+  // code-gauge-allow functionNcss -- All declarations must reuse one function identity and its composite type.
   protected declareFunction(
     name: string,
     type: FunctionType,
@@ -296,8 +296,8 @@ export class Compiler extends StatementCompiler {
     return scope;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- C's rules for tentative definitions and redeclarations.
-  // code-gauge-allow functionNcss 40 -- Tentative definitions, composite types, and initializers update one symbol; separating branches would split that invariant.
+  // code-gauge-allow functionCognitiveComplexity -- C's rules for tentative definitions and redeclarations.
+  // code-gauge-allow functionNcss -- Tentative definitions, composite types, and initializers update one symbol; separating branches would split that invariant.
   private declareGlobal(
     name: string,
     declaredType: CType,
@@ -372,8 +372,8 @@ export class Compiler extends StatementCompiler {
 
   // Functions ---------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Declaring a function's parameters, checking main's form.
-  // code-gauge-allow functionNcss 50 -- Function setup shares linkage, parameter lengths, trace annotations and body state.
+  // code-gauge-allow functionCognitiveComplexity -- Declaring a function's parameters, checking main's form.
+  // code-gauge-allow functionNcss -- Function setup shares linkage, parameter lengths, trace annotations and body state.
   private functionDefinition(definition: FunctionDefinition): void {
     const { specifiers, row } = definition;
     if (specifiers.storage === 'typedef' || specifiers.storage === 'auto' || specifiers.storage === 'register') {
@@ -528,8 +528,8 @@ export class Compiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Storage class and variably modified types determine one local declaration.
-  // code-gauge-allow functionNcss 43 -- Local declaration alternatives share storage and initializer state.
+  // code-gauge-allow functionCognitiveComplexity -- Storage class and variably modified types determine one local declaration.
+  // code-gauge-allow functionNcss -- Local declaration alternatives share storage and initializer state.
   private localDeclarator(
     storage: StorageClass | undefined,
     base: CType,
@@ -736,7 +736,7 @@ export class Compiler extends StatementCompiler {
     return object.operand;
   }
 
-  // code-gauge-allow functionNcss 31 -- Static and automatic literal storage share type resolution and initializer identity.
+  // code-gauge-allow functionNcss -- Static and automatic literal storage share type resolution and initializer identity.
   private compileCompoundLiteral(expression: Extract<Expression, { kind: 'compoundLiteral' }>): {
     operand: Operand;
     use: () => void;
@@ -923,7 +923,7 @@ export class Compiler extends StatementCompiler {
     return targets;
   }
 
-  // code-gauge-allow functionNcss 35 -- One range template, cursor continuation and byte or bitfield copies share the selected targets.
+  // code-gauge-allow functionNcss -- One range template, cursor continuation and byte or bitfield copies share the selected targets.
   private placeRange(
     targets: Cursor[][],
     item: Initializer,
@@ -1036,7 +1036,7 @@ export class Compiler extends StatementCompiler {
   }
 
   /** Initializes the current subobject with one item, entering nested aggregates whose braces the list leaves out. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- The cases of C's brace elision.
+  // code-gauge-allow functionCognitiveComplexity -- The cases of C's brace elision.
   private place(stack: Cursor[], item: Initializer, writes: Write[], isStatic: boolean): void {
     for (;;) {
       const cursor = stack.at(-1) as Cursor;
@@ -1202,7 +1202,7 @@ function functionBody(exec: Exec, isMain: boolean, prepare: ((frame: Frame) => v
 }
 
 /** The names whose addresses a function body takes with `&`, whose variables must live in memory. */
-// code-gauge-allow functionCognitiveComplexity 18 -- The recursive AST walk must visit every expression shape; splitting the visitor would only relocate its cases.
+// code-gauge-allow functionCognitiveComplexity -- The recursive AST walk must visit every expression shape; splitting the visitor would only relocate its cases.
 function addressTakenNames(body: Compound): Set<string> {
   const names = new Set<string>();
   const visit = (node: unknown): void => {

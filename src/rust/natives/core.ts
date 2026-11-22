@@ -146,7 +146,7 @@ export function defaultValue(ctx: NativeContext, type: Type): Value {
   return ctx.interp.callFn(method, [type], [], undefined, ctx.span, ctx.frame);
 }
 
-// code-gauge-allow functionNcss 57 -- One branch per type with a built-in default value.
+// code-gauge-allow functionNcss -- One branch per type with a built-in default value.
 function builtinDefaultValue(ctx: NativeContext, type: Type): Value {
   ctx.runtime.spend();
   const t = normalize(shallow(type));
@@ -435,7 +435,7 @@ function rangeContains(ctx: NativeContext, range: RangeValue, item: Value): bool
 }
 
 /** `T::from(value)` for the conversions of the standard library. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Rust conversions select different rules for each destination type.
+// code-gauge-allow functionCognitiveComplexity -- Rust conversions select different rules for each destination type.
 export function convert(ctx: NativeContext, value: Value, from: Type, to: Type): Value {
   const source = normalize(shallow(from));
   const target = normalize(shallow(to));

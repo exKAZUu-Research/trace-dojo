@@ -20,7 +20,7 @@ import {
 
 const validatedTypes = new WeakSet<Type>();
 
-// code-gauge-allow functionNcss 31 -- Keeps the recursive type-domain checks together before comparison.
+// code-gauge-allow functionNcss -- Keeps the recursive type-domain checks together before comparison.
 export function validateEquality(sema: SemaApi, type: Type, span: Span, seen = new Set<Type>()): void {
   if (validatedTypes.has(type) || seen.has(type)) return;
   sema.spendCompilation();
@@ -53,7 +53,7 @@ export function validateEquality(sema: SemaApi, type: Type, span: Span, seen = n
   validatedTypes.add(type);
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Dispatches each value representation through the same typed comparison budget.
+// code-gauge-allow functionCognitiveComplexity -- Dispatches each value representation through the same typed comparison budget.
 export function valuesEqual(type: Type | undefined, a: Value, b: Value, spend: (cost?: number) => void): boolean {
   spend();
   if ((type?.kind === 'struct' || type?.kind === 'union') && singleValueOf(type, spend)) return true;

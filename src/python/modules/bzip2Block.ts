@@ -23,7 +23,7 @@ interface Symbols {
 }
 
 /** `generateMTFValues` and `sendMTFValues`: writes the coded block of `block[0, nblock)` in the order `ptr` sorts. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows the steps of sendMTFValues of bzip2's compress.c.
+// code-gauge-allow functionCognitiveComplexity -- Follows the steps of sendMTFValues of bzip2's compress.c.
 export function writeBlock(
   out: BitWriter,
   block: Uint8Array,

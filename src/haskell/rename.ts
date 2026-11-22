@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 999 -- The renamer resolves every construct of the language against one scope structure.
+// code-gauge-allow-file fileNcss -- The renamer resolves every construct of the language against one scope structure.
 import { CONS_CON, FUNCTION_TYPE, LIST_TYPE, NIL_CON, tupleCon, tupleType, UNIT_CON, UNIT_TYPE } from './builtinTypes';
 import {
   type ClassEntity,
@@ -238,7 +238,7 @@ class Renamer {
     for (const imp of imports) this.importOne(imp);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Each branch is one form of an import declaration: qualified, aliased, listed, or hiding.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch is one form of an import declaration: qualified, aliased, listed, or hiding.
   private importOne(imp: Import): void {
     const exports = this.options.modules.get(imp.module);
     if (!exports) {
@@ -304,8 +304,8 @@ class Renamer {
     origins.add(source);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 28 -- Import items distinguish values, type children, unsupported entries and hiding.
-  // code-gauge-allow functionNcss 36 -- Import selection distinguishes names, children, hiding and unsupported APIs.
+  // code-gauge-allow functionCognitiveComplexity -- Import items distinguish values, type children, unsupported entries and hiding.
+  // code-gauge-allow functionNcss -- Import selection distinguishes names, children, hiding and unsupported APIs.
   private selectImportItem(exports: ExportTable, item: ImportItem, imp: Import, into: ExportTable): void {
     const { name } = item.name;
     if (item.kind === 'value') {
@@ -394,7 +394,7 @@ class Renamer {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Each branch is one kind of type declaration.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch is one kind of type declaration.
   private declareTypes(decls: Decl[]): void {
     for (const decl of decls) {
       if (decl.kind === 'data' || decl.kind === 'typeSyn') {
@@ -540,7 +540,7 @@ class Renamer {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- Fixity validation shares duplicate checks while keeping class method ownership explicit.
+  // code-gauge-allow functionCognitiveComplexity -- Fixity validation shares duplicate checks while keeping class method ownership explicit.
   private applyTopFixities(decls: Decl[]): void {
     const seen = new Set<string>();
     const apply = (
@@ -594,8 +594,8 @@ class Renamer {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Class declarations combine signatures, defaults, and fixities.
-  // code-gauge-allow functionNcss 37 -- Class declarations combine signatures, defaults, and fixities.
+  // code-gauge-allow functionCognitiveComplexity -- Class declarations combine signatures, defaults, and fixities.
+  // code-gauge-allow functionNcss -- Class declarations combine signatures, defaults, and fixities.
   private renameClass(decl: Extract<Decl, { kind: 'class' }>): void {
     const like = this.ownTypes.get(decl.name.name) as { kind: 'class'; entity: ClassEntity };
     const entity = like.entity;
@@ -739,8 +739,8 @@ class Renamer {
     return result;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 29 -- Local declarations combine signatures, fixities, and bindings in one scope.
-  // code-gauge-allow functionNcss 37 -- Local declarations combine signatures, fixities, and bindings in one scope.
+  // code-gauge-allow functionCognitiveComplexity -- Local declarations combine signatures, fixities, and bindings in one scope.
+  // code-gauge-allow functionNcss -- Local declarations combine signatures, fixities, and bindings in one scope.
   renameLocalDecls(decls: Decl[], parent: LocalScope): { group: RBindGroup; scope: LocalScope } {
     const scope = new LocalScope(parent);
     for (const decl of decls) {
@@ -805,7 +805,7 @@ class Renamer {
     return this.recursion.run(() => this.renameExprCore(expr, scope));
   }
 
-  // code-gauge-allow functionNcss 57 -- One short case per expression kind.
+  // code-gauge-allow functionNcss -- One short case per expression kind.
   private renameExprCore(expr: Expr, scope: LocalScope): RExpr {
     const { span } = expr;
     switch (expr.kind) {
@@ -1012,8 +1012,7 @@ class Renamer {
     return this.recursion.run(() => ({ ...this.renamePatCore(pat, binders), span: pat.span, surface: pat }));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- One short case per pattern kind.
-  // code-gauge-allow functionNcss 32 -- One short case per pattern kind.
+  // code-gauge-allow functionNcss -- One short case per pattern kind.
   private renamePatCore(pat: Pat, binders: Map<string, LocalVar>): RPat {
     const { span } = pat;
     switch (pat.kind) {
@@ -1188,7 +1187,7 @@ class Renamer {
     throw compileError(name.span, `${text} が、${sources} のどれを指すか決まりません。`);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Constructor lookup covers special syntax, qualification and unsupported library exports.
+  // code-gauge-allow functionCognitiveComplexity -- Constructor lookup covers special syntax, qualification and unsupported library exports.
   private lookupCon(name: QName): ConInfo {
     if (!name.qualifier) {
       if (name.name === '()') return UNIT_CON;
@@ -1303,8 +1302,8 @@ interface RawBinding {
   entities: ValueEntity[];
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Grouping clauses into bindings checks each of GHC's conditions on adjacent clauses.
-// code-gauge-allow functionNcss 35 -- Grouping clauses into bindings checks each of GHC's conditions on adjacent clauses.
+// code-gauge-allow functionCognitiveComplexity -- Grouping clauses into bindings checks each of GHC's conditions on adjacent clauses.
+// code-gauge-allow functionNcss -- Grouping clauses into bindings checks each of GHC's conditions on adjacent clauses.
 function groupBindings(decls: Decl[]): RawBinding[] {
   const bindings: RawBinding[] = [];
   const seen = new Set<string>();

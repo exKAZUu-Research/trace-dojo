@@ -60,8 +60,8 @@ function covers(prefix: string[], path: string[]): boolean {
   return prefix.length <= path.length && prefix.every((part, index) => path[index] === part);
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Expression projections and pattern projections share one checked walk.
-// code-gauge-allow functionNcss 31 -- Evaluates each source and its indexing expressions once.
+// code-gauge-allow functionCognitiveComplexity -- Expression projections and pattern projections share one checked walk.
+// code-gauge-allow functionNcss -- Evaluates each source and its indexing expressions once.
 function forEachCapture(
   annotations: Annotations,
   body: Expr,
