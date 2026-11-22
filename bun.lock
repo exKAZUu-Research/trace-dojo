@@ -27,21 +27,21 @@
         "@trpc/server": "11.28.1",
         "@willbooster/shared-lib": "11.2.1",
         "@willbooster/shared-lib-react": "6.3.0",
-        "@willbooster/tree-sitter-c": "40.0.2",
-        "@willbooster/tree-sitter-cpp": "34.0.1",
-        "@willbooster/tree-sitter-dart": "22.0.1",
-        "@willbooster/tree-sitter-go": "13.0.2",
-        "@willbooster/tree-sitter-haskell": "26.0.2",
-        "@willbooster/tree-sitter-java": "35.0.2",
-        "@willbooster/tree-sitter-javascript": "27.0.1",
-        "@willbooster/tree-sitter-php": "22.0.0",
-        "@willbooster/tree-sitter-python": "21.0.2",
-        "@willbooster/tree-sitter-ruby": "20.0.2",
-        "@willbooster/tree-sitter-rust": "22.0.0",
-        "@willbooster/tree-sitter-typescript": "33.0.1",
-        "@willbooster/tree-sitter-zig": "14.0.2",
+        "@willbooster/tree-sitter-c": "43.0.0",
+        "@willbooster/tree-sitter-cpp": "42.0.0",
+        "@willbooster/tree-sitter-dart": "22.0.4",
+        "@willbooster/tree-sitter-go": "13.0.4",
+        "@willbooster/tree-sitter-haskell": "26.0.4",
+        "@willbooster/tree-sitter-java": "35.0.4",
+        "@willbooster/tree-sitter-javascript": "27.0.3",
+        "@willbooster/tree-sitter-php": "22.0.2",
+        "@willbooster/tree-sitter-python": "21.0.4",
+        "@willbooster/tree-sitter-ruby": "20.0.4",
+        "@willbooster/tree-sitter-rust": "22.0.1",
+        "@willbooster/tree-sitter-typescript": "34.0.3",
+        "@willbooster/tree-sitter-zig": "14.0.4",
         "@willbooster/wb": "23.6.1",
-        "@willbooster/web-tree-sitter": "23.0.1",
+        "@willbooster/web-tree-sitter": "23.1.0",
         "at-decorators": "7.1.4",
         "codemirror": "6.0.2",
         "csv-parse": "7.0.3",
@@ -707,35 +707,35 @@
 
     "@willbooster/shared-lib-react": ["@willbooster/shared-lib-react@6.3.0", "", { "peerDependencies": { "react": "~19.2.0", "react-dom": "~19.2.0" } }, "sha512-Y1n2KYTb1vLRY/cTX0KlWRtCJ9KVqCVOoXY7maPriU20eVvCbXV9cu2ROi6Ds4Om8ZS+l37EZQuEDIzxvsC0Nw=="],
 
-    "@willbooster/tree-sitter-c": ["@willbooster/tree-sitter-c@40.0.2", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-649CTdwChG3bVnX5bC0LgHi0RDKNac7wwI90UwO5K+JIhKd8qDZ+a/LxBtr6CyQf3Ld7w0Zqro/vqmKeAMDTxA=="],
+    "@willbooster/tree-sitter-c": ["@willbooster/tree-sitter-c@43.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.1.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-nw0GTE4ydRLUEOiB2/IZBkZ+DuD4RHrpnCn8Ao24OhhBbOUypFymloBVmC1zvTUm5R+MJRZvSWIYUmO93glv1w=="],
 
-    "@willbooster/tree-sitter-cpp": ["@willbooster/tree-sitter-cpp@34.0.1", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-YOef4CBjkFPSA1ld3kX0r4vOUIhpmN9gK+LO4XBKr1dP1HkjdOZYGVV6nt140Se7AV4l/Tqhk4gL+bwADkHazA=="],
+    "@willbooster/tree-sitter-cpp": ["@willbooster/tree-sitter-cpp@42.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.1.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-afGEIjLjSuKLUu5p53Qpxoi0LYcPlL3PIYy8Kwxkf0TFZbCPehLicofwqpblxY35Y4F6Gekorr9gvOpJ0DsoPQ=="],
 
-    "@willbooster/tree-sitter-dart": ["@willbooster/tree-sitter-dart@22.0.1", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-rbCZRVK9NqSAvuHSqjqsVAWjcU1oYVvObv9NrCYxHb97POSG/LCZbOScoe1RuVb+YCsrBZZq1aWrjy52F6TmWg=="],
+    "@willbooster/tree-sitter-dart": ["@willbooster/tree-sitter-dart@22.0.4", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-OMY9F0d0hQbH+X6rdmb4pmDxcFHssmrSjl+TfOfkJ5KMLaNqEENbZ/wcPUPaiKii2v5FwFXG6oE/D6INLgH42g=="],
 
-    "@willbooster/tree-sitter-go": ["@willbooster/tree-sitter-go@13.0.2", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-iCMMpq7POkqyd5MdT/8857CcxevDMIsNexRbpmVijrIXlx8Ztrt4vqQZq6ej615WSi3268ar9vs2Oy0RGV2DRg=="],
+    "@willbooster/tree-sitter-go": ["@willbooster/tree-sitter-go@13.0.4", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-0YG5dzdUoQQJpp0fNYRivwWAygsRRJNWXJ7PeGyaTcCRtbhXpOmJvDLax/TCDcqaks0lbE6+Cn5sb80nBID3GQ=="],
 
-    "@willbooster/tree-sitter-haskell": ["@willbooster/tree-sitter-haskell@26.0.2", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-rkTjisPMgItNunTX+omQlOpAfkzEUnCxGyKwwlslMEYFBUL8uwJL7VF4KYYQ/dko+nPgBlmD9rooVBRJF5fjyw=="],
+    "@willbooster/tree-sitter-haskell": ["@willbooster/tree-sitter-haskell@26.0.4", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-niblZpN46yuwqUdwvhWvNYAem+ye3/qrt2o+//sUhkdAArf9t8iFEOA7Kw5sm5/MhPbRyvkBoT/TOmR+KTLUsg=="],
 
-    "@willbooster/tree-sitter-java": ["@willbooster/tree-sitter-java@35.0.2", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-l8Fq5kiD+vWrEZ4JUfwxW2LtFJzM9VhmcfyDlmv2ZZ/z8CApZWEo23+Xd45uSgcfXoXmC6cJFfQunZ91w4GW+A=="],
+    "@willbooster/tree-sitter-java": ["@willbooster/tree-sitter-java@35.0.4", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-idABQiSB63PCr/Uzs6p87vQQGHZY6eTjfxNf7r8floi9HPd1mjY3qW8G+klkp52h6eKqVqV6zur7EJU3DHd7bA=="],
 
-    "@willbooster/tree-sitter-javascript": ["@willbooster/tree-sitter-javascript@27.0.1", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-64Ovz23HEkA0l7Cxoh4aEqSTBaJUvQyNcsv51Jc2pWoEGuaXOlQx+R+NBdU8q/TqWJbE6NIreu/cM2NOA5ebzA=="],
+    "@willbooster/tree-sitter-javascript": ["@willbooster/tree-sitter-javascript@27.0.3", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-GMlMc+f+nskxoTmBlK2dL9RyuPms8W01j4dZXRQgJNcSl75ySnYgBVIazdN7B5iKfVeQL0g3Ca+n2WMCFavDEw=="],
 
-    "@willbooster/tree-sitter-php": ["@willbooster/tree-sitter-php@22.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-owx7gyljMAhJznBdpboWdTEeWz557ETdFdN3i5mOqROHcsPjAtIg8dQ5CDbDo05NdkdPibuu0xk8M6CfbbmTNw=="],
+    "@willbooster/tree-sitter-php": ["@willbooster/tree-sitter-php@22.0.2", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-vbjp7zDSW1QNnS0zphs3Tvog2dWFTpzuZRPM6k6Lw0EvOmMI8dr7U+k5DmLSw+kShsgXdaDEFuUYNMmnh74I1Q=="],
 
-    "@willbooster/tree-sitter-python": ["@willbooster/tree-sitter-python@21.0.2", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-O0CZUvt4W2yylUtaWxlYOTdtN6kTAQNHekU2DwyjNuHbtNXE68jzVvNqj36aMe74bqd+HtRG8e9G4SVXvLDUBA=="],
+    "@willbooster/tree-sitter-python": ["@willbooster/tree-sitter-python@21.0.4", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-3Gfzw70Q9kPR+t6LZIga+6Ko8NpruS6gYqXiCOWXTWh2ZYpi+oBjLpY3FRSpqeN6uCHSerB3JOz8Va8F+lCsqg=="],
 
-    "@willbooster/tree-sitter-ruby": ["@willbooster/tree-sitter-ruby@20.0.2", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-Knyz/uuZtINDLhcS32J+h7OSKADEobbg2TiZQkbx3Lhsv4tpHR6kFjX5XGplOuseHnprmZ86+OmCyTi+BXP2/A=="],
+    "@willbooster/tree-sitter-ruby": ["@willbooster/tree-sitter-ruby@20.0.4", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-SbuSqDkactAlglXPe1M45W9wpT7oTei6SRIfyTczBejrZ6S7BHZRn288nbZdx0RoT18ipoa2XSEPkM90zKqasw=="],
 
-    "@willbooster/tree-sitter-rust": ["@willbooster/tree-sitter-rust@22.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.2" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-MxRsHzDvkzb1t3zdLKm1/qpQnB4XEpzon1FbCt8AF6HzUh4KsW5Hc8tiiMSCuDVSlvME6eneoam+XIf+/32q/g=="],
+    "@willbooster/tree-sitter-rust": ["@willbooster/tree-sitter-rust@22.0.1", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.2" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-SaPGUd+g6J505sFaQaiIBjMAibvsA2/Sv5ePuD6mZMqd+5EeTY7BWPouDO5YpQ2XO/ISkHmPAGZNFKNeNYPW7Q=="],
 
-    "@willbooster/tree-sitter-typescript": ["@willbooster/tree-sitter-typescript@33.0.1", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-YEHvNovHuc1/0DaRsSTBe5y2kHfxumUobSG5AD0vN96JXxAmf8kf6JIl4l9gdI1q2T4JpJJyGs9xQot+88Spyg=="],
+    "@willbooster/tree-sitter-typescript": ["@willbooster/tree-sitter-typescript@34.0.3", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-y7cEahAse3wqC23u2LVMkdJ4f2YHY9u39l1Yy3AQj4UlaupK8qTfPVqE2VOpZWg2a4A74vHp/k7l7hEQNqwFGw=="],
 
-    "@willbooster/tree-sitter-zig": ["@willbooster/tree-sitter-zig@14.0.2", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-hvuFS2YmgKl6dn03gIdPoOzJlId+gG83e/OEJX6YN1ZkZEoOee/uQuT2rUzvTQYhmBJgRsBvswN4jSo6P7FUpw=="],
+    "@willbooster/tree-sitter-zig": ["@willbooster/tree-sitter-zig@14.0.4", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-EofzoTFhdo+Mfld4CaxTjE1ET47o0xOSBGMcxUYDpf9Q3533xllrPmEeAs0QNyK8d76z7Sgllnc78/4FNTNnbg=="],
 
     "@willbooster/wb": ["@willbooster/wb@23.6.1", "", { "dependencies": { "@textlint-rule/textlint-rule-no-invalid-control-character": "3.0.0", "@textlint/kernel": "15.8.0", "@textlint/module-interop": "15.8.0", "@textlint/textlint-plugin-markdown": "15.8.0", "chalk": "6.0.1", "code-gauge": "12.0.0", "dotenv": "18.0.10", "dotenv-expand": "13.0.0", "fast-glob": "3.3.3", "fastest-levenshtein": "1.0.16", "globby": "16.2.4", "jsonc-parser": "3.3.1", "semver": "7.8.6", "smol-toml": "1.9.1", "textlint-filter-rule-node-types": "1.1.0", "textlint-rule-ja-space-between-half-and-full-width": "3.0.4", "textlint-rule-no-zero-width-spaces": "1.0.1", "yaml": "2.9.1", "yargs": "18.2.0", "zod": "4.6.7" }, "bin": { "wb": "bin/index.js" } }, "sha512-IadS0yT9aD47UPdtPLvA9q09xmn2u5IaSEzXZkZmpHohwyjNMeX7AyYj3hH2/LZfaVLrVXiye+9MpDRmFEYUjA=="],
 
-    "@willbooster/web-tree-sitter": ["@willbooster/web-tree-sitter@23.0.1", "", { "dependencies": { "@types/emscripten": "^1.41.5" } }, "sha512-NOmljTdyGRf3CT3bT9jGR91ynliDJ4qoSpP6uLioXyXgS+Y9bTFLpazTu3eWpjVUxyoIegKAij+nK1GM8zZc9g=="],
+    "@willbooster/web-tree-sitter": ["@willbooster/web-tree-sitter@23.1.0", "", { "dependencies": { "@types/emscripten": "^1.41.5" } }, "sha512-2YH83rw16C2YfGkXqHZyn2gpzroaTkg2e30AjIQhA69FOzyPyd+0iV9Fjp8d9IVJ1KlesCLYoZXKWh+mayBHHg=="],
 
     "@zag-js/dom-query": ["@zag-js/dom-query@0.31.1", "", {}, "sha512-oiuohEXAXhBxpzzNm9k2VHGEOLC1SXlXSbRPcfBZ9so5NRQUA++zCE7cyQJqGLTZR0t3itFLlZqDbYEXRrefwg=="],
 

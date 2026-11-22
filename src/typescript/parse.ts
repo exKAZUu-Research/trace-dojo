@@ -3,7 +3,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import { CompileError, diagnosticIndex, type SourceDiagnostic, sourceDiagnostic } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
-import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
+import { commentTokens, findSyntaxErrors, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from '../javascript/ast';
 import { nameOf } from '../javascript/convertNodes';
 import { checkTypeScript } from './checker/checker';
@@ -47,6 +47,8 @@ const strictReservedWords = new Set([
   'yield',
 ]);
 
+const MISSING_TOKEN_NAMES = { identifier: '名前', type_identifier: '型の名前' };
+
 const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter-typescript.wasm');
 
 /**
@@ -59,7 +61,7 @@ export function parseTypeScript(source: string, trace?: TraceOptions): Program {
   return parseSource(
     parser,
     source,
-    { identifier: '名前', type_identifier: '型の名前' },
+    MISSING_TOKEN_NAMES,
     (root) => {
       const budget = new ExecutionBudget();
       rejectUnsupportedSyntax(root);
@@ -147,7 +149,8 @@ function decodedName(node: Node): string {
 }
 
 /** The syntax errors tsc's parser reports where the tree-sitter grammar accepts the program. */
-function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagnostic[]): SourceDiagnostic[] {
+function typeScriptSyntaxErrors(root: Node, source: string, parseErrors: SourceDiagnostic[]): SourceDiagnostic[] {
+  const errors = withUnterminatedStrings(root, source, parseErrors);
   const visit = (node: Node): void => {
     const message =
       numericEscapeError(node, source) ??
@@ -157,7 +160,6 @@ function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagno
     if (message) errors.push({ row: node.startPosition.row, message });
     checkMixedLogicalOperators(node, errors);
     const located =
-      stringLineBreakError(node) ??
       superTypeArgumentError(node) ??
       exponentiationBaseError(node) ??
       operandAssignmentError(node) ??
@@ -169,20 +171,186 @@ function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagno
   return errors.toSorted((left, right) => left.row - right.row);
 }
 
+/**
+ * Names each quoted string with a raw line break in the text the parser could not read, which tsc reports as
+ * unterminated, in place of the syntax errors it causes: those are the errors that disappear when the program is
+ * parsed again with each such string made valid, while every other mistake still shows there.
+ */
+function withUnterminatedStrings(root: Node, source: string, parseErrors: SourceDiagnostic[]): SourceDiagnostic[] {
+  const lexer: Lexer = { source, validTokenEnds: validTokenEnds(root), strings: [] };
+  let lexedUntil = 0;
+  for (const node of unreadNodes(root)) {
+    // A string opening in the node may run past its end, which the parser can place before the line break.
+    let end = node.endIndex;
+    lexedUntil = lexCode(lexer, Math.max(node.startIndex, lexedUntil), end);
+    // The parser tokenized the rest of the line a string ran into from inside it, so that is lexed here to stay aligned.
+    while (lexedUntil > end) {
+      const lineEnd = source.indexOf('\n', lexedUntil);
+      end = lineEnd === -1 ? source.length : lineEnd;
+      lexedUntil = lexCode(lexer, lexedUntil, end);
+    }
+  }
+  const { strings } = lexer;
+  if (strings.length === 0) return [...parseErrors];
+  let repaired = '';
+  let copiedUntil = 0;
+  for (const { startIndex, endIndex, closed } of strings) {
+    const text = source.slice(startIndex, endIndex);
+    repaired += source.slice(copiedUntil, startIndex) + validStringOfSameShape(text, closed);
+    copiedUntil = endIndex;
+  }
+  repaired += source.slice(copiedUntil);
+  return [
+    ...findSyntaxErrors(parser, repaired, MISSING_TOKEN_NAMES, false),
+    ...strings.map(({ breakIndex }) => ({
+      row: rowAt(source, breakIndex),
+      message: '文字列リテラルが閉じられていません。',
+    })),
+  ];
+}
+
+/**
+ * A valid replacement for `text` keeping every index and row, so the token still ends on its last row, where a token
+ * missing after it is placed: the same quotes around blanks with each line break escaped, or, where a line break
+ * follows the opening quote or another break with no room for its `\`, a template, which is invalid only where a
+ * string literal must appear, such as a module specifier. An unclosed string gives up its last character for its
+ * closing quote.
+ */
+function validStringOfSameShape(text: string, closed: boolean): string {
+  const blank = text.slice(1, closed ? -1 : undefined).replaceAll(/[^\r\n]/g, ' ');
+  if (!closed && !blank.endsWith(' ')) return `0${blank}`;
+  const inner = closed ? blank : blank.slice(0, -1);
+  const continued = inner.replaceAll(/ (?=\r\n|\r(?!\n)|(?<!\r)\n)/g, '\\');
+  const allEscaped = !/[\r\n]/.test(continued.replaceAll(/\\(?:\r\n|[\r\n])/g, ''));
+  return allEscaped ? `${text[0]}${continued}${text[0]}` : `\`${inner}\``;
+}
+
+/**
+ * A quoted string with a raw line break: `closed` when a matching quote follows, as in a string spanning lines, and
+ * otherwise ending at its first line break, as an unclosed one.
+ */
+interface BrokenString {
+  startIndex: number;
+  endIndex: number;
+  breakIndex: number;
+  closed: boolean;
+}
+
+interface Lexer {
+  source: string;
+  /** The ends of the tokens with quote-like text that the parser read validly, keyed by their starts. */
+  validTokenEnds: Map<number, number>;
+  strings: BrokenString[];
+}
+
+function validTokenEnds(root: Node): Map<number, number> {
+  const tokens = root.descendantsOfType(['comment', 'regex', 'regex_pattern', 'string', 'template_string']);
+  return new Map(tokens.filter((token) => !token.hasError).map((token) => [token.startIndex, token.endIndex]));
+}
+
+/** The outermost ERROR nodes, and the strings whose closing quote the parser inserted. */
+function unreadNodes(root: Node): Node[] {
+  const found: Node[] = [];
+  const visit = (node: Node): void => {
+    if (node.isError || (node.type === 'string' && node.hasError)) found.push(node);
+    else if (node.hasError) for (const child of node.children) visit(child);
+  };
+  visit(root);
+  return found;
+}
+
+/**
+ * Lexes code from `index` up to `end`, or with no `end` through the `}` closing a template substitution, recording the
+ * quoted strings with a raw line break; returns where lexing stopped.
+ */
+function lexCode(lexer: Lexer, index: number, end: number | undefined): number {
+  const { source } = lexer;
+  let braceDepth = 0;
+  while (index < (end ?? source.length)) {
+    const char = source[index];
+    const skippedEnd = skippedTokenEnd(lexer, index);
+    if (skippedEnd !== undefined) {
+      index = skippedEnd;
+    } else if (char === '`') {
+      index = lexTemplate(lexer, index + 1);
+    } else if (char === "'" || char === '"') {
+      index = lexQuotedString(lexer, index);
+    } else if (end === undefined && char === '}' && braceDepth === 0) {
+      return index + 1;
+    } else {
+      if (char === '{') braceDepth++;
+      if (char === '}') braceDepth--;
+      index++;
+    }
+  }
+  return index;
+}
+
+/** The end of a token starting at `index` that holds no string to lex: one the parser read, or a comment. */
+function skippedTokenEnd({ source, validTokenEnds }: Lexer, index: number): number | undefined {
+  const validTokenEnd = validTokenEnds.get(index);
+  if (validTokenEnd !== undefined) return validTokenEnd;
+  if (source.startsWith('//', index)) {
+    const lineEnd = source.indexOf('\n', index);
+    return lineEnd === -1 ? source.length : lineEnd;
+  }
+  if (source.startsWith('/*', index)) {
+    const close = source.indexOf('*/', index + 2);
+    return close === -1 ? source.length : close + 2;
+  }
+  return undefined;
+}
+
+function lexQuotedString({ source, strings }: Lexer, opening: number): number {
+  const { close, breakIndex } = scanQuotedString(source, opening);
+  const closed = source[close] === source[opening];
+  const endIndex = closed ? close + 1 : (breakIndex ?? close);
+  if (breakIndex !== undefined || !closed) {
+    strings.push({ startIndex: opening, endIndex, breakIndex: breakIndex ?? close, closed });
+  }
+  return endIndex;
+}
+
+function lexTemplate(lexer: Lexer, index: number): number {
+  const { source } = lexer;
+  while (index < source.length) {
+    if (source[index] === '`') return index + 1;
+    if (source.startsWith('${', index)) index = lexCode(lexer, index + 2, undefined);
+    else index += source[index] === '\\' ? 2 : 1;
+  }
+  // A backslash ending the program steps past its end.
+  return Math.min(index, source.length);
+}
+
+/** The index of the quote closing the string opening at `opening`, or the end, and of its first raw line break. */
+function scanQuotedString(source: string, opening: number): { close: number; breakIndex: number | undefined } {
+  let breakIndex: number | undefined;
+  let index = opening + 1;
+  while (index < source.length) {
+    const char = source[index];
+    if (char === source[opening]) return { close: index, breakIndex };
+    if ((char === '\r' || char === '\n') && breakIndex === undefined) breakIndex = index;
+    index += char === '\\' ? (source.startsWith('\r\n', index + 1) ? 3 : 2) : 1;
+  }
+  return { close: source.length, breakIndex };
+}
+
+function rowAt(source: string, index: number): number {
+  let row = 0;
+  for (
+    let position = source.indexOf('\n');
+    position !== -1 && position < index;
+    position = source.indexOf('\n', position + 1)
+  ) {
+    row++;
+  }
+  return row;
+}
+
 function strictIdentifierError(node: Node): string | undefined {
   if (!strictIdentifierTypes.has(node.type)) return undefined;
   const name = decodedName(node);
   return strictReservedWords.has(name) ? `識別子が必要です。'${name}' は Strict モードでは予約語です。` : undefined;
-}
-
-function stringLineBreakError(node: Node): SourceDiagnostic | undefined {
-  if (node.type !== 'string') return undefined;
-  let row = node.startPosition.row;
-  for (const [token] of node.text.matchAll(/\\(?:\r\n|[\s\S])|[\r\n]/g)) {
-    if (token === '\r' || token === '\n') return { row, message: '文字列リテラルが閉じられていません。' };
-    if (token === '\\\r\n' || token === '\\\r' || token === '\\\n') row++;
-  }
-  return undefined;
 }
 
 function checkMixedLogicalOperators(node: Node, errors: SourceDiagnostic[]): void {
