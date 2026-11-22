@@ -1005,9 +1005,7 @@ function legacyDecoding(decoder: TextDecoder, units: string | undefined): Codec[
 
 function legacyTextDecoder(label: string): TextDecoder | undefined {
   try {
-    const decoder = new TextDecoder(label, { ignoreBOM: true });
-    // The host reads names that only look like one of its labels (such as UCS-2) as UTF-8 or UTF-16.
-    return decoder.encoding.startsWith('utf-') ? undefined : decoder;
+    return new TextDecoder(label, { ignoreBOM: true });
   } catch {
     return undefined;
   }
