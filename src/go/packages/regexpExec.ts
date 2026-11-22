@@ -131,7 +131,7 @@ export class LazyFlag {
     readonly r2: number
   ) {}
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Transcribes Go's lazyFlag.match step by step.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes Go's lazyFlag.match step by step.
   allows(emptyOp: number): boolean {
     let op = emptyOp;
     if (op === 0) return true;
@@ -218,7 +218,7 @@ class Queue {
 }
 
 /** Go's `(*Regexp).find`: the capture positions of the leftmost match at or after `pos`, or undefined. */
-// code-gauge-allow functionParameterCount 7 -- Takes the parameters of Go's find.
+// code-gauge-allow functionParameterCount -- Takes the parameters of Go's find.
 export function find(
   re: Matcher,
   longest: boolean,
@@ -318,8 +318,8 @@ class Machine {
     this.matched = true;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Transcribes Go's machine.add step by step.
-  // code-gauge-allow functionNcss 50 -- Transcribes Go's machine.add step by step.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes Go's machine.add step by step.
+  // code-gauge-allow functionNcss -- Transcribes Go's machine.add step by step.
   private add(
     q: Queue,
     startPC: number,
@@ -405,8 +405,8 @@ function runeMatches(inst: Inst, c: number): boolean {
 }
 
 /** Go's `doOnePass`, which follows the single possible thread of a onepass program. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes Go's doOnePass step by step.
-// code-gauge-allow functionNcss 44 -- Transcribes Go's doOnePass step by step.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes Go's doOnePass step by step.
+// code-gauge-allow functionNcss -- Transcribes Go's doOnePass step by step.
 function doOnePass(
   re: Matcher,
   input: Input,

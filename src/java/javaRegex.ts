@@ -386,7 +386,7 @@ class Translator {
   }
 
   /** Translates the escape after a backslash outside a class. */
-  // code-gauge-allow functionNcss 31 -- One case per anchor or reference, which only exist outside classes.
+  // code-gauge-allow functionNcss -- One case per anchor or reference, which only exist outside classes.
   private escape(): string {
     const char = this.pattern[this.index];
     switch (char) {

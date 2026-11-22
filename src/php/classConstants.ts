@@ -55,7 +55,7 @@ function checkConstantOverride(cls: PhpClass, constant: ClassConst, inherited: C
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function linkInterfaceConstants(cls: PhpClass, row: number): void {
   for (const iface of cls.interfaces) {
     for (const [name, constant] of iface.consts) {
@@ -105,7 +105,7 @@ export function applyTraitConstants(cls: PhpClass, trait: PhpClass, origins: Map
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function checkTraitConstant(cls: PhpClass, conflict: TraitConstantConflict, row: number): void {
   const { existing, constant, first, trait } = conflict;
   const sameType =

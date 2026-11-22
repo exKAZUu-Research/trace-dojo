@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 709 -- Type inference, argument binding, and call dispatch share this compiler phase.
+// code-gauge-allow-file fileNcss -- Type inference, argument binding, and call dispatch share this compiler phase.
 import type {
   Arguments as ArgumentsSyntax,
   Expression,
@@ -254,8 +254,8 @@ export abstract class CallCompiler extends OperatorCompiler {
   }
 
   /** A call `a.b(...)`: a static member, a named constructor, a prefixed declaration, or a method. */
-  // code-gauge-allow functionCognitiveComplexity 24 -- Static, prefixed, extension and instance calls use distinct dispatch rules.
-  // code-gauge-allow functionNcss 32 -- Static, prefixed, extension and instance calls use distinct dispatch rules.
+  // code-gauge-allow functionCognitiveComplexity -- Static, prefixed, extension and instance calls use distinct dispatch rules.
+  // code-gauge-allow functionNcss -- Static, prefixed, extension and instance calls use distinct dispatch rules.
   private compileMemberCall(
     expression: Extract<Expression, { kind: 'call' }>,
     callee: Extract<Expression, { kind: 'member' }>,
@@ -407,8 +407,8 @@ export abstract class CallCompiler extends OperatorCompiler {
   }
 
   /** Calls a member found through a receiver's static type, dispatching on the receiver's class at runtime. */
-  // code-gauge-allow functionNcss 35 -- Methods, getters, extensions, records, and dynamic receivers.
-  // code-gauge-allow functionParameterCount 7 -- Methods, getters, extensions, records, and dynamic receivers.
+  // code-gauge-allow functionNcss -- Methods, getters, extensions, records, and dynamic receivers.
+  // code-gauge-allow functionParameterCount -- Methods, getters, extensions, records, and dynamic receivers.
   compileMethodCall(
     receiver: Compiled,
     name: string,
@@ -677,8 +677,8 @@ export abstract class CallCompiler extends OperatorCompiler {
    * Calls a constructor of a class, inferring the class's type arguments from the context and the arguments when they
    * are not written.
    */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Checks of what may be constructed.
-  // code-gauge-allow functionParameterCount 8 -- Checks of what may be constructed.
+  // code-gauge-allow functionCognitiveComplexity -- Checks of what may be constructed.
+  // code-gauge-allow functionParameterCount -- Checks of what may be constructed.
   compileConstructorCall(
     cls: ClassInfo,
     name: string | undefined,
@@ -889,7 +889,7 @@ export abstract class CallCompiler extends OperatorCompiler {
   }
 
   /** Evaluates arguments in source order, keeping those evaluated so far reachable while the rest evaluate. */
-  // code-gauge-allow functionNcss 36 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionNcss -- One case per form of the construct, which reads best together.
   protected argumentEvaluator(
     args: ArgumentsSyntax,
     positional: Eval[],
@@ -945,7 +945,7 @@ export abstract class CallCompiler extends OperatorCompiler {
 
   // Closures
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Inference of a function literal's types from its context.
+  // code-gauge-allow functionCognitiveComplexity -- Inference of a function literal's types from its context.
   compileFunctionExpression(
     expression: Extract<Expression, { kind: 'function' }>,
     context: DartType | undefined
@@ -1059,7 +1059,7 @@ export abstract class CallCompiler extends OperatorCompiler {
   }
 
   /** Runs a compiled function in a new frame. */
-  // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
+  // code-gauge-allow functionParameterCount -- The parameters are the parts a caller already holds; grouping them would only rename them.
   runFunction(
     compiled: CompiledFunction,
     runtime: Runtime,
@@ -1390,7 +1390,7 @@ function chooseTypeArguments(
  * A solution outside its bound moves up to the nearest supertype within it (an F-bounded `T extends Comparable<T>`
  * takes num for ints), and otherwise to the bound, which then fails the argument check.
  */
-// code-gauge-allow functionCognitiveComplexity 17 -- Each branch is one of the cases Dart distinguishes for this construct.
+// code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
 function fitToBounds(type: FunctionType, typeArgs: DartType[]): DartType[] {
   return typeArgs.map((argument, index) => {
     const param = type.typeParams[index];

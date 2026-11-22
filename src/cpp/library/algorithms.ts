@@ -284,7 +284,7 @@ const ARRAY_REFERENCE_FUNCTIONS = new Set([
 type TemplateParameterPositions = readonly (readonly number[])[];
 
 /** The function templates of `<algorithm>`, `<numeric>`, `<iterator>`, and `<utility>`. */
-// code-gauge-allow functionNcss 400 -- One definition per algorithm, each a few lines.
+// code-gauge-allow functionNcss -- One definition per algorithm, each a few lines.
 export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]> {
   const functions = new Map<string, FunctionInfo[]>();
   const compiler = (): ExpressionCompiler => library.compiler;

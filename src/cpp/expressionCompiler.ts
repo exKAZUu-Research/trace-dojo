@@ -979,7 +979,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return this.increment(target, operator, isPrefix, node.row);
   }
 
-  // code-gauge-allow functionNcss 34 -- The result category and shared update depend on the same operand.
+  // code-gauge-allow functionNcss -- The result category and shared update depend on the same operand.
   increment(target: Expr, operator: '++' | '--', isPrefix: boolean, row: number): Expr {
     const libraryResult = this.libraryOperator(isPrefix ? operator : `x${operator}`, [target], row);
     if (libraryResult) return libraryResult;
@@ -1103,7 +1103,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   /** Compiles `target = source` or a compound assignment. */
-  // code-gauge-allow functionNcss 36 -- Both assignments share storage tracking and preserve C++ operand order.
+  // code-gauge-allow functionNcss -- Both assignments share storage tracking and preserve C++ operand order.
   assign(operator: string, target: Expr, source: Expr, row: number): Expr {
     if (target.type.kind === 'class') {
       const libraryResult = this.libraryOperator(operator, [target, source], row);

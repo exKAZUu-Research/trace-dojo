@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 563 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr, pyStr } from './conversions';
 import { method } from './define';
 import { pyHash } from './hashing';
@@ -277,7 +277,7 @@ export function typeConvert(value: PyValue): PyValue {
 }
 
 /** `typing._type_check`, which rejects special forms and tuples that cannot be arguments. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows typing._type_check's rules for special forms.
+// code-gauge-allow functionCognitiveComplexity -- Follows typing._type_check's rules for special forms.
 function typeCheck(value: PyValue, message: string, allowSpecialForms = false, isArgument = true): PyValue {
   const arg = typeConvert(value);
   if (arg instanceof PyOpaque && arg.cls === typingAliasClass) {
@@ -618,7 +618,7 @@ for (const cls of [typingAliasClass, callableAliasClass, literalAliasClass, anno
   method(cls, '__hash__', 'none', 0, 0, (self) =>
     pyHash(newTuple([aliasOf(self).origin, newTuple(aliasOf(self).args)]))
   );
-  // code-gauge-allow functionCognitiveComplexity 20 -- Alias attributes share origin, arguments and unpack state; splitting only moves the cases.
+  // code-gauge-allow functionCognitiveComplexity -- Alias attributes share origin, arguments and unpack state; splitting only moves the cases.
   opaqueAttributes(cls, (self, name) => {
     const alias = aliasOf(self);
     const isAnnotated = self.cls === annotatedAliasClass;

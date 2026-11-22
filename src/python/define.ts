@@ -50,7 +50,7 @@ function hasSlot(qualified: string, name: string): boolean {
 }
 
 /** Defines a builtin method that checks its argument count as CPython's parser for `style` does. */
-// code-gauge-allow functionParameterCount 7 -- Mirrors the positional parameters of builtin, adding the owner class.
+// code-gauge-allow functionParameterCount -- Mirrors the positional parameters of builtin, adding the owner class.
 export function method(
   cls: PyClass,
   name: string,

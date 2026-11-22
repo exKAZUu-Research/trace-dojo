@@ -129,7 +129,7 @@ function intArithmetic(op: string, name: IntName, left: Eval, right: Eval, span:
   };
 }
 
-// code-gauge-allow functionNcss 33 -- One case per kind of expression, statement, or pattern.
+// code-gauge-allow functionNcss -- One case per kind of expression, statement, or pattern.
 export function compileCompoundAssign(c: Compiler, expr: ExprOf<'compoundAssign'>): Eval {
   const place = c.place(expr.target);
   const value = c.value(expr.value);

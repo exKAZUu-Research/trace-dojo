@@ -107,7 +107,7 @@ export class ArrayStorage {
     return copy;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Uses the fetched table and preserves key diagnostic ordering together.
+  // code-gauge-allow functionCognitiveComplexity -- Uses the fetched table and preserves key diagnostic ordering together.
   offsetValue(key: Value, className: string, warning?: UpdateWarning, hasPendingWarning = false): Value {
     const array = this.array;
     return withArrayReadView(array, (view) => {

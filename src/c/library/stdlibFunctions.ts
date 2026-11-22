@@ -70,7 +70,7 @@ function absolute(bits: 32 | 64): NativeFunction {
 }
 
 /** `strtol` and its relatives: the integer at the start of a string, clamped to the type with `errno` set. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Base errors, destination bounds, errno, and end pointers form one conversion result.
+// code-gauge-allow functionCognitiveComplexity -- Base errors, destination bounds, errno, and end pointers form one conversion result.
 function strtoInteger(bits: 32 | 64, signed: boolean, wide: boolean): NativeFunction {
   return (runtime, [text, end, base]) => {
     const bytes = readCString(runtime, asAddress(text));

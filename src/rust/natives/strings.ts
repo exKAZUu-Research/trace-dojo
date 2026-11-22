@@ -2,7 +2,7 @@ import { concatStrings, madeString, stringByteLength, stringCapacity, StringGrow
 import { charEscapeDebug, escapeDebug } from '../fmt';
 import { normalize } from '../infer';
 import { strSliceBytes } from '../interpreter';
-// code-gauge-allow-file fileNcss 488 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss -- One native per method of the standard library.
 import { described, tuplePart } from '../iterDebug';
 import { cloneValue } from '../ops';
 import { RustPanic } from '../runtime';
@@ -76,7 +76,7 @@ function charIndex(text: string, offset: number): number {
 }
 
 /** A matcher of the patterns `str` methods take: a char, a string, chars, or a closure over chars. */
-// code-gauge-allow functionCognitiveComplexity 23 -- One native per method of the standard library.
+// code-gauge-allow functionCognitiveComplexity -- One native per method of the standard library.
 function patternMatcher(
   ctx: NativeContext,
   pattern: Value
@@ -417,7 +417,7 @@ function splitOnce(ctx: NativeContext, text: string, pattern: Value, reverse: bo
   return some(ctx, [decodeUtf8(searcher.bytes.subarray(0, found[0])), decodeUtf8(searcher.bytes.subarray(found[1]))]);
 }
 
-// code-gauge-allow functionNcss 33 -- The search cursor and the copied suffix differ for empty matches.
+// code-gauge-allow functionNcss -- The search cursor and the copied suffix differ for empty matches.
 function replaceN(ctx: NativeContext, text: string, from: Value, to: string, count: number): StringValue {
   const pattern = patternValue(from);
   const fromBytes = typeof pattern === 'string' ? byteLength(pattern) : undefined;

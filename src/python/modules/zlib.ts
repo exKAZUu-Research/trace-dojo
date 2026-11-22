@@ -541,7 +541,7 @@ defineMethod(zlibDecompressorClass, 'decompress', (self, args, kwargs) => {
   return newBytes(buffer.finish());
 });
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Mirrors the loop of CPython's decompress_buf.
+// code-gauge-allow functionCognitiveComplexity -- Mirrors the loop of CPython's decompress_buf.
 function decompressBuffer(state: ZlibDecompressorState, buffer: OutputBuffer, maxLength: number): number {
   const { inflater } = state;
   const { strm } = inflater;
@@ -593,7 +593,7 @@ const CONSTANTS: [string, PyValue][] = [
   ['Z_TREES', 6n],
 ];
 
-// code-gauge-allow duplicateLines 16 -- zlib and binascii check their checksum arguments alike, each in its own words.
+// code-gauge-allow duplicateLines -- zlib and binascii check their checksum arguments alike, each in its own words.
 function checksumData(value: PyValue): Uint8Array {
   const data = bytesLikeData(value);
   if (data === undefined) throw typeError(`a bytes-like object is required, not '${typeName(value)}'`);

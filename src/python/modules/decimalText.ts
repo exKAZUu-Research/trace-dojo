@@ -33,8 +33,8 @@ function digits(text: string): string {
 }
 
 /** The scientific or engineering string of a decimal, as `Decimal.__str__` writes it. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes _pydecimal's algorithm of the same name.
-// code-gauge-allow functionNcss 34 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionNcss -- Transcribes _pydecimal's algorithm of the same name.
 export function decimalString(self: Dec, capitals: number, engineering = false): string {
   const sign = self.sign ? '-' : '';
   if (!isFinite(self)) {
@@ -111,8 +111,8 @@ function parseSpec(text: string): FormatSpec {
 }
 
 /** `Decimal.__format__`, as `_pydecimal` defines it. */
-// code-gauge-allow functionCognitiveComplexity 28 -- Transcribes _pydecimal's algorithm of the same name.
-// code-gauge-allow functionNcss 46 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionNcss -- Transcribes _pydecimal's algorithm of the same name.
 export function formatDecimal(value: Dec, text: string, context: DecimalContext): string {
   const spec = parseSpec(text);
   if (!isFinite(value)) {

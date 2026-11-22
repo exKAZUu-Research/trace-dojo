@@ -549,7 +549,7 @@ export class Converter {
     this.fail(node, '書き方に誤りがあります。');
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
+  // code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
   private identifier(node: Node, use: Use): Expr {
     const name = node.text;
     const depth = this.ctx.scope.depthOf(name);
@@ -730,7 +730,7 @@ export class Converter {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
   private stringParts(node: Node): StrPart[] {
     const parts: StrPart[] = [];
     let literal = '';
@@ -978,7 +978,7 @@ export class Converter {
     return { k: 'mlhs', items, splat };
   }
 
-  // code-gauge-allow functionNcss 44 -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss -- One case per kind of syntax node.
   private target(node: Node): Target {
     switch (node.type) {
       case 'identifier': {
@@ -1050,7 +1050,7 @@ export class Converter {
 
   // Calls -------------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
+  // code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
   private call(node: Node, use: Use): Expr {
     const receiverNode = node.childForFieldName('receiver');
     const methodNode = node.childForFieldName('method');
@@ -1111,8 +1111,8 @@ export class Converter {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
-  // code-gauge-allow functionNcss 43 -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
+  // code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
+  // code-gauge-allow functionNcss -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
   private argumentListFrom(nodes: Node[]): { args: Expr[]; blockArg?: Expr } {
     const args: Expr[] = [];
     const pairs: Node[] = [];
@@ -1249,8 +1249,8 @@ export class Converter {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of syntax node.
-  // code-gauge-allow functionNcss 37 -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
   private unary(node: Node): Expr {
     const operator = required(node.childForFieldName('operator')).text;
     const operandNode = required(node.childForFieldName('operand'));
@@ -1560,7 +1560,7 @@ export class Converter {
     return { k: 'mlhs', items, splat };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
+  // code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
   private block(node: Node, isLambdaLiteral: boolean): BlockDef {
     const outer = this.ctx;
     const scope = new LocalScope('block', outer.scope);
@@ -1818,8 +1818,8 @@ export class Converter {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of syntax node.
-  // code-gauge-allow functionNcss 33 -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
   private hashPattern(node: Node): Pattern {
     const cls = this.patternClass(node);
     const pairs: { key: string; pattern?: Pattern; target?: LocalRef }[] = [];
@@ -1888,8 +1888,8 @@ export class Converter {
   }
 
   /** A heredoc's text, from the body the tree placed after its line; `<<~` removes the common indentation. */
-  // code-gauge-allow functionCognitiveComplexity 29 -- One case per kind of syntax node.
-  // code-gauge-allow functionNcss 39 -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss -- One case per kind of syntax node.
   private heredoc(node: Node): Expr {
     const body = this.heredocBodies[this.heredocIndex++];
     if (!body) this.fail(node, 'ヒアドキュメントの終わりがありません。');
@@ -2017,7 +2017,7 @@ function stripIndent(line: string, indent: number): string {
 }
 
 /** How a statement records its step, from what it does. */
-// code-gauge-allow functionNcss 36 -- One case per kind of syntax node.
+// code-gauge-allow functionNcss -- One case per kind of syntax node.
 function stepKindOf(e: Expr): StepKind {
   switch (e.k) {
     case 'asgn':

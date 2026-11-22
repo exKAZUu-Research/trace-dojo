@@ -48,7 +48,7 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
     return value;
   }
 
-  // code-gauge-allow functionNcss 60 -- One case per kind of expression that may contain a suspending part.
+  // code-gauge-allow functionNcss -- One case per kind of expression that may contain a suspending part.
   private *suspendingValue(expression: Expression, frame: Frame): Suspension {
     switch (expression.kind) {
       case 'yield':
@@ -200,8 +200,8 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
    * Runs the clauses of a comprehension, yielding each element (a key and value pair for a dict comprehension) and
    * passing on the waits of the thread reading its iterables or evaluating its parts.
    */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Follows the clauses of a comprehension, as the synchronous one does.
-  // code-gauge-allow functionNcss 35 -- Follows the clauses of a comprehension, as the synchronous one does.
+  // code-gauge-allow functionCognitiveComplexity -- Follows the clauses of a comprehension, as the synchronous one does.
+  // code-gauge-allow functionNcss -- Follows the clauses of a comprehension, as the synchronous one does.
   private *itemsSuspending(
     expression: Extract<Expression, { kind: 'comprehension' }>,
     frame: Frame,

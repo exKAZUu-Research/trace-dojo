@@ -261,7 +261,7 @@ function escapeLength(config: Config, data: Uint8Array, index: number): number |
 }
 
 /** The character set and the G0 to G2 an escape sequence of `length` designates, or undefined for no designation. */
-// code-gauge-allow functionCognitiveComplexity 21 -- One case per form of designation iso2022processesc reads.
+// code-gauge-allow functionCognitiveComplexity -- One case per form of designation iso2022processesc reads.
 function designationOf(config: Config, at: (offset: number) => number, length: number): [number, number] | undefined {
   if (length === 3) {
     if (at(1) === 0x24) return [at(2) | DBCS, 0];
@@ -305,8 +305,8 @@ function iso8859_7(byte: number): number | undefined {
   return byte === 0xa1 ? 0x20_18 : byte === 0xa2 ? 0x20_19 : byte === 0xaf ? 0x20_15 : undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Transcribes CPython's ISO-2022 decoder, one case per control byte.
-// code-gauge-allow functionNcss 34 -- Transcribes CPython's ISO-2022 decoder, one case per control byte.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes CPython's ISO-2022 decoder, one case per control byte.
+// code-gauge-allow functionNcss -- Transcribes CPython's ISO-2022 decoder, one case per control byte.
 function decodeStep(config: Config, state: DecoderState, data: Uint8Array, index: number): Step {
   const byte = data[index];
   if (state.escapeThroughout) {

@@ -138,8 +138,8 @@ export function runToEnd<T>(generator: Generator<unknown, T, unknown>): T {
   return result.value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 31 -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
 export function* flattenGenerator<T>(generator: Generator<unknown, T, unknown>): Generator<unknown, T, unknown> {
   const stack: Generator<unknown, unknown, unknown>[] = [generator];
   let input: unknown;
@@ -686,7 +686,7 @@ function* copyHashSplat(hash: RHash, value: Value, frame: Frame, literal: boolea
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
 export function* makeRange(from: Value, to: Value, exclusive: boolean): Gen {
   if (from !== NIL && to !== NIL) {
     const comparable =
@@ -760,7 +760,7 @@ const UNSUPPORTED_GLOBALS: Record<string, string> = {
   '$;': '$;',
 };
 
-// code-gauge-allow functionCognitiveComplexity 18 -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
 function globalSet(name: string, value: Value): void {
   if (name === '$~') {
     if (value !== NIL && (!(value instanceof RObject) || realClassOf(value) !== rt().c.MatchData))
@@ -887,7 +887,7 @@ interface PreparedAssignment {
   write: (value: Value) => Gen<void>;
 }
 
-// code-gauge-allow functionNcss 34 -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
 function* prepareAssignment(target: Target, frame: Frame): Gen<PreparedAssignment> {
   if (target.k === 'index') {
     const recv = yield* ev(target.recv, frame);
@@ -989,7 +989,7 @@ function* assignPreparedMulti(target: MultiTarget, prepared: PreparedAssignment[
   }
 }
 
-// code-gauge-allow functionNcss 42 -- Assignment handles each target kind and its receiver/index evaluation order.
+// code-gauge-allow functionNcss -- Assignment handles each target kind and its receiver/index evaluation order.
 export function* assign(target: Target, value: Value, frame: Frame): Gen<void> {
   switch (target.k) {
     case 'lvar': {
@@ -1428,7 +1428,7 @@ export function storesAnswer(value: Value): boolean {
   return typeof value !== 'object' || value instanceof RFloat || value instanceof RString || value instanceof RSymbol;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Case evaluates optional subjects, when predicates, guards, and the else body in Ruby order.
+// code-gauge-allow functionCognitiveComplexity -- Case evaluates optional subjects, when predicates, guards, and the else body in Ruby order.
 function* evalCase(e: Extract<Expr, { k: 'case' }>, frame: Frame): Gen {
   const runtime = rt();
   const subject = e.subject ? yield* ev(e.subject, frame) : undefined;
@@ -1465,8 +1465,8 @@ function returnTarget(frame: Frame): Frame {
   return target;
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 45 -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
 function* evalBegin(e: Extract<Expr, { k: 'begin' }>, frame: Frame): Gen {
   const runtime = rt();
   const mark = frame.temporaries.length;
@@ -1585,7 +1585,7 @@ function* matchesRescueClass(expressions: Expr[], exception: Value, frame: Frame
 
 // Definitions ---------------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionNcss 34 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionNcss -- One case per kind of expression or Ruby rule.
 function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame): Gen {
   const runtime = rt();
   let owner: RClass;
@@ -1679,8 +1679,8 @@ function* moduleContainer(e: { scope?: Expr; top?: boolean }, frame: Frame): Gen
   return frame.cref[0];
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Class definition resolves its namespace, superclass, reopened class, and body frame.
-// code-gauge-allow functionNcss 32 -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- Class definition resolves its namespace, superclass, reopened class, and body frame.
+// code-gauge-allow functionNcss -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
 function* defineClass(e: Extract<Expr, { k: 'class' }>, frame: Frame): Gen {
   const runtime = rt();
   const container = yield* moduleContainer(e, frame);
@@ -1768,8 +1768,8 @@ export interface CallOptions {
   used?: boolean;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 45 -- Calls retain receiver and argument roots while forwarding blocks, keywords, and break signals.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- Calls retain receiver and argument roots while forwarding blocks, keywords, and break signals.
 function* evalCall(e: Call, frame: Frame): Gen {
   let recv: Value;
   if (e.recv) {
@@ -1893,7 +1893,7 @@ export function* callMethod(
 }
 
 /** Calls the program's `method_missing` for a method no class defines, or raises Ruby's error for it. */
-// code-gauge-allow functionParameterCount 7 -- The call boundary keeps receiver, positional/keyword arguments, block and evaluation context explicit.
+// code-gauge-allow functionParameterCount -- The call boundary keeps receiver, positional/keyword arguments, block and evaluation context explicit.
 function* callMethodMissing(
   recv: Value,
   name: string,
@@ -1947,7 +1947,7 @@ export function methodMissing(
 }
 
 /** Calls a method that lookup found. */
-// code-gauge-allow functionNcss 51 -- Invocation dispatches native, accessor, and user methods with their distinct arity and root rules.
+// code-gauge-allow functionNcss -- Invocation dispatches native, accessor, and user methods with their distinct arity and root rules.
 export function* invoke(
   method: RMethod,
   recv: Value,
@@ -2022,7 +2022,7 @@ export function* invoke(
   }
 }
 
-// code-gauge-allow functionParameterCount 8 -- User calls need method metadata, receiver, arguments, keywords, block, call row, and result usage to build a frame.
+// code-gauge-allow functionParameterCount -- User calls need method metadata, receiver, arguments, keywords, block, call row, and result usage to build a frame.
 function* invokeUser(
   method: RMethod,
   def: MethodDef,
@@ -2076,8 +2076,8 @@ function hostStackOverflow(error: unknown, depth: number): unknown {
 export const STACK_OVERFLOW = { stackOverflow: true };
 let overflowDepth: number | undefined;
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Super dispatches a found method or the shared missing-method handler while preserving lexical block control flow.
-// code-gauge-allow functionNcss 46 -- Super forwards explicit or implicit arguments and the active block to the next method owner.
+// code-gauge-allow functionCognitiveComplexity -- Super dispatches a found method or the shared missing-method handler while preserving lexical block control flow.
+// code-gauge-allow functionNcss -- Super forwards explicit or implicit arguments and the active block to the next method owner.
 function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
   const home = frame.home;
   const method = home.extra.method;
@@ -2132,8 +2132,8 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
 }
 
 /** The arguments `super` without parentheses passes: the method's parameters' current values. */
-// code-gauge-allow functionCognitiveComplexity 28 -- Implicit super converts current positional and keyword rests alongside declared parameters.
-// code-gauge-allow functionNcss 38 -- Implicit super roots reconstructed arguments while their conversions run.
+// code-gauge-allow functionCognitiveComplexity -- Implicit super converts current positional and keyword rests alongside declared parameters.
+// code-gauge-allow functionNcss -- Implicit super roots reconstructed arguments while their conversions run.
 function* implicitSuperArgs(frame: Frame): Gen<{ args: Value[]; keywords: RHash | undefined }> {
   const def = frame.extra.def as MethodDef;
   const { params } = def;
@@ -2243,7 +2243,7 @@ export interface ProcCallOptions {
   forbidSingletonDefinition?: boolean;
 }
 
-// code-gauge-allow functionNcss 41 -- Proc calls keep native/Ruby bodies, effective lambda mode, argument binding and control signals in one invocation lifecycle.
+// code-gauge-allow functionNcss -- Proc calls keep native/Ruby bodies, effective lambda mode, argument binding and control signals in one invocation lifecycle.
 export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions = {}): Gen {
   const runtime = rt();
   runtime.spend();

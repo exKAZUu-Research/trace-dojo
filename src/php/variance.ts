@@ -99,7 +99,7 @@ function expandIterable(nullable: boolean | undefined): TypeDecl {
   return { k: 'union', types };
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- One case per builtin type, as PHP relates each to the others.
+// code-gauge-allow functionCognitiveComplexity -- One case per builtin type, as PHP relates each to the others.
 function namedSubtype(
   sub: string,
   subScope: PhpClass | undefined,

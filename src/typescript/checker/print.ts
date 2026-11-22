@@ -46,8 +46,8 @@ export class Printer {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type.
-  // code-gauge-allow functionNcss 47 -- One case per kind of type.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
+  // code-gauge-allow functionNcss -- One case per kind of type.
   private printType(type: Type): string {
     switch (type.kind) {
       case 'intrinsic': {
@@ -138,7 +138,7 @@ export class Printer {
     return args.length > 0 ? `${name}<${boundedJoin(args, ', ', (argument) => this.print(argument))}>` : name;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of object type.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of object type.
   private printObject(type: ObjectType): string {
     if (type.aliasName) return this.printAlias(type.aliasName, type.aliasArguments);
     switch (type.objectKind) {

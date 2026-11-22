@@ -271,7 +271,7 @@ export function isCleanupException(error: unknown): error is CleanupException {
   return error instanceof PhpThrow || error instanceof ExitSignal;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Captures cleanup failures and their ownership in propagation order.
+// code-gauge-allow functionCognitiveComplexity -- Captures cleanup failures and their ownership in propagation order.
 export function withCleanupExceptions(
   runtime: Runtime,
   cleanup: (capture: (error: CleanupException, forceLatest?: boolean) => void) => void,

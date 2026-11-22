@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 660 -- Go's parser keeps its methods on one parser type, transcribed together.
+// code-gauge-allow-file fileNcss -- Go's parser keeps its methods on one parser type, transcribed together.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { decodeRune } from '../literals';
 import {
@@ -146,7 +146,7 @@ class Parser {
   }
 
   /** Parses anything but a repetition operator, returning the rest. */
-  // code-gauge-allow functionNcss 33 -- Transcribes the cases of Go's parse loop.
+  // code-gauge-allow functionNcss -- Transcribes the cases of Go's parse loop.
   private parseItem(t: string): string {
     switch (t[0]) {
       case '(': {
@@ -188,8 +188,8 @@ class Parser {
     return rest;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the backslash case of Go's parse loop.
-  // code-gauge-allow functionNcss 43 -- Transcribes the backslash case of Go's parse loop.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes the backslash case of Go's parse loop.
+  // code-gauge-allow functionNcss -- Transcribes the backslash case of Go's parse loop.
   private parseBackslash(text: string): string {
     let t = text;
     if (this.flags & Flag.PerlX && t.length >= 2) {
@@ -258,7 +258,7 @@ class Parser {
     this.checkHeight(re);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes Go's checkSize step by step.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes Go's checkSize step by step.
   private checkSize(re: Node): void {
     if (!this.size) {
       if (this.repeats === 0) this.repeats = 1;
@@ -274,7 +274,7 @@ class Parser {
     if (this.calcSize(re, true) > MAX_SIZE) throw new LimitError(ERR_LARGE);
   }
 
-  // code-gauge-allow functionNcss 36 -- Transcribes Go's calcSize step by step.
+  // code-gauge-allow functionNcss -- Transcribes Go's calcSize step by step.
   private calcSize(re: Node, force: boolean): number {
     const sizes = this.size as Map<Node, number>;
     if (!force) {
@@ -467,8 +467,8 @@ class Parser {
   }
 
   /** Round 1 of Go's `factor`: factors out common literal prefixes. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Transcribes the first round of Go's factor.
-  // code-gauge-allow functionNcss 35 -- Transcribes the first round of Go's factor.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes the first round of Go's factor.
+  // code-gauge-allow functionNcss -- Transcribes the first round of Go's factor.
   private factorLeadingStrings(sub: Node[]): Node[] {
     const out: Node[] = [];
     let str: number[] = [];
@@ -547,7 +547,7 @@ class Parser {
   }
 
   /** Round 3 of Go's `factor`: merges runs of literals and character classes into one class. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Transcribes the third round of Go's factor.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes the third round of Go's factor.
   private mergeCharClasses(sub: Node[]): Node[] {
     const out: Node[] = [];
     let start = 0;
@@ -674,8 +674,8 @@ class Parser {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Transcribes Go's parsePerlFlags step by step.
-  // code-gauge-allow functionNcss 50 -- Transcribes Go's parsePerlFlags step by step.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes Go's parsePerlFlags step by step.
+  // code-gauge-allow functionNcss -- Transcribes Go's parsePerlFlags step by step.
   private parsePerlFlags(s: string): string {
     const startsWithP = s.length > 4 && s[2] === 'P' && s[3] === '<';
     const startsWithName = s.length > 3 && s[2] === '<';
@@ -779,8 +779,8 @@ class Parser {
     return group.sign < 0 ? appendNegatedClass(r, tmp) : appendClass(r, tmp);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Transcribes Go's parseUnicodeClass step by step.
-  // code-gauge-allow functionNcss 32 -- Transcribes Go's parseUnicodeClass step by step.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes Go's parseUnicodeClass step by step.
+  // code-gauge-allow functionNcss -- Transcribes Go's parseUnicodeClass step by step.
   private parseUnicodeClass(s: string, r: RuneClass): { out: RuneClass; rest: string } | undefined {
     if (!(this.flags & Flag.UnicodeGroups) || s.length < 2 || s[0] !== '\\' || (s[1] !== 'p' && s[1] !== 'P')) {
       return undefined;
@@ -818,8 +818,8 @@ class Parser {
     return { out: sign > 0 ? appendClass(r, tmp) : appendNegatedClass(r, tmp), rest: t };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Transcribes Go's parseClass step by step.
-  // code-gauge-allow functionNcss 45 -- Transcribes Go's parseClass step by step.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes Go's parseClass step by step.
+  // code-gauge-allow functionNcss -- Transcribes Go's parseClass step by step.
   private parseClass(s: string): string {
     let t = s.slice(1);
     const re = this.newRegexp(Op.CharClass);

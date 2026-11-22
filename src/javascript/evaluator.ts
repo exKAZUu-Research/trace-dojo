@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 534 -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
+// code-gauge-allow-file fileNcss -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
 import assert from 'node:assert/strict';
 
 import { createArgumentsObject, mapArguments } from './argumentsObject';
@@ -78,8 +78,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
     return undefined;
   }
 
-  // code-gauge-allow functionNcss 54 -- One case per statement kind, each delegating where it grows.
-  // code-gauge-allow functionCognitiveComplexity 22 -- One case per statement kind, each delegating where it grows.
+  // code-gauge-allow functionNcss -- One case per statement kind, each delegating where it grows.
+  // code-gauge-allow functionCognitiveComplexity -- One case per statement kind, each delegating where it grows.
   private statement(statement: Statement, labels: string[]): Completion {
     const { runtime } = this;
     runtime.spend();
@@ -230,7 +230,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     return completion.kind === 'continue' ? 'next' : undefined;
   }
 
-  // code-gauge-allow duplicateLines 27 -- Mirrors the generator version in suspendableStatements.ts, kept apart so that code without yield or await runs without generator frames.
+  // code-gauge-allow duplicateLines -- Mirrors the generator version in suspendableStatements.ts, kept apart so that code without yield or await runs without generator frames.
   private forStatement(statement: Extract<Statement, { kind: 'for' }>, labels: string[]): Completion {
     const { runtime } = this;
     return this.scoped(statement.scope, () => {
@@ -283,8 +283,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
   }
 
   /** Runs the iterations of a `for...of` or `for...in` loop, holding the iterable meanwhile. */
-  // code-gauge-allow functionNcss 42 -- Inlines what a nested call in the loop body would otherwise pay host frames for.
-  // code-gauge-allow duplicateLines 17 -- Mirrors the generator version in suspendableStatements.ts, kept apart so that code without yield or await runs without generator frames.
+  // code-gauge-allow functionNcss -- Inlines what a nested call in the loop body would otherwise pay host frames for.
+  // code-gauge-allow duplicateLines -- Mirrors the generator version in suspendableStatements.ts, kept apart so that code without yield or await runs without generator frames.
   private forEachIterations(
     statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>,
     labels: string[],
@@ -566,7 +566,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
 
   // Classes -----------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the specification's ClassDefinitionEvaluation step by step, whose branches mirror its steps.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's ClassDefinitionEvaluation step by step, whose branches mirror its steps.
   evaluateClass(cls: ClassNode, inferredName?: Key, binding?: Binding): JsFunction {
     const { runtime } = this;
     const { prototypeParent, constructorParent } = this.classParents(cls);
@@ -664,7 +664,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
    * Defines the methods and accessors and collects the instance fields, returning what initializes the class itself:
    * its static fields and static blocks in source order.
    */
-  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps method definitions and deferred field/static-block initialization in class source order.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps method definitions and deferred field/static-block initialization in class source order.
   private defineMembers(cls: ClassNode, fn: JsFunction, prototype: JsObject, behavior: ClassBehavior): (() => void)[] {
     const { runtime } = this;
     const staticInitializers: (() => void)[] = [];
@@ -793,7 +793,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     });
   }
 
-  // code-gauge-allow functionNcss 33 -- Parameter binding, field initialization, and constructor returns share the constructing frame and its cleanup.
+  // code-gauge-allow functionNcss -- Parameter binding, field initialization, and constructor returns share the constructing frame and its cleanup.
   constructClass(
     fn: JsFunction,
     behavior: ClassBehavior,

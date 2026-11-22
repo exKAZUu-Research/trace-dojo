@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 453 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { byteAt, charAt, untilNul, utf8Length } from './bytes';
@@ -79,7 +79,7 @@ interface CsvCursor {
 }
 
 /** Splits a CSV line as php_fgetcsv does, which the C library's locale makes skip whole multibyte characters. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Tracks field text, enclosure state and escapes in a single forward scan.
+// code-gauge-allow functionCognitiveComplexity -- Tracks field text, enclosure state and escapes in a single forward scan.
 function parseCsv(text: string, delimiter: string, enclosure: string, escape: string | undefined): (string | null)[] {
   const limit = withoutLineBreak(text, text.length);
   const cursor: CsvCursor = { text, limit, delimiter, enclosure, escape, index: 0, charLength: 0 };
@@ -242,7 +242,7 @@ interface ScanTargets {
 }
 
 /** Checks a format as ValidateFormat of PHP's scanf.c does, returning how many values it assigns. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps format validation and destination-count diagnostics in field order.
+// code-gauge-allow functionCognitiveComplexity -- Keeps format validation and destination-count diagnostics in field order.
 function validateScanFormat(format: string, varCount: number): number {
   const targets: ScanTargets = { assigned: [], objIndex: 0, xpgSize: 0, gotXpg: false, gotSequential: false };
   for (let index = 0; index < format.length;) {
@@ -276,7 +276,7 @@ function validateScanFormat(format: string, varCount: number): number {
 }
 
 /** Checks which value a conversion assigns, refusing a mix of `%` and `%n$` and a value past the variables. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Validates positional and sequential destinations against the same output count.
+// code-gauge-allow functionCognitiveComplexity -- Validates positional and sequential destinations against the same output count.
 function noteScanTarget(targets: ScanTargets, spec: ScanSpec, varCount: number): void {
   const badIndex = (): never =>
     throwError(
@@ -383,7 +383,7 @@ interface ScanField {
   formatIndex: number;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Uses each conversion rule with the same input position and width limit.
+// code-gauge-allow functionCognitiveComplexity -- Uses each conversion rule with the same input position and width limit.
 function scanField(text: string, start: number, format: string, spec: ScanSpec): ScanField {
   const { char, width, next } = spec;
   if (char === 's' || char === 'c') {
@@ -442,7 +442,7 @@ function scanInteger(text: string, start: number, width: number, char: string): 
 const UINT_MAX = (1n << 64n) - 1n;
 
 /** Whether an integer goes on with `char`, which follows `length` characters of it. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Tests prefixes and digits against the accumulated radix and sign.
+// code-gauge-allow functionCognitiveComplexity -- Tests prefixes and digits against the accumulated radix and sign.
 function acceptsIntegerChar(scan: IntegerScan, char: string, length: number): boolean {
   if (char === '0') {
     if (scan.base === 16) scan.xOk = true;

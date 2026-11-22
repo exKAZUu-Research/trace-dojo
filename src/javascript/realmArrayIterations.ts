@@ -69,7 +69,7 @@ function defineMappings(builder: RealmBuilder): void {
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function defineFinders(builder: RealmBuilder): void {
   for (const [name, fromEnd, returnsIndex] of [
     ['find', false, false],

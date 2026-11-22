@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 494 -- It transcribes one of expat's C files.
+// code-gauge-allow-file fileNcss -- It transcribes one of expat's C files.
 import { ExpatBase } from './expatBase';
 import {
   badPublicIdChar,
@@ -37,7 +37,7 @@ export abstract class ExpatProlog extends ExpatBase {
     return this.doProlog(start, end, tok, next);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   protected doProlog(s: number, end: number, tok: number, next: number, inEntity = false): number {
     const haveMore = !this.finalBuffer && !inEntity;
     const tz = this.prologTz;
@@ -95,7 +95,7 @@ export abstract class ExpatProlog extends ExpatBase {
   }
 
   /** The actions of a role in the prolog, telling whether the token goes to the default handler. */
-  // code-gauge-allow functionNcss 31 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   protected prologRole(role: Role, tok: number, s: number, next: number): boolean {
     switch (role) {
       case 'XML_DECL': {
@@ -134,8 +134,8 @@ export abstract class ExpatProlog extends ExpatBase {
   }
 
   /** A parameter entity reference between declarations, which expat expands unless parameter entities are off. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
-  // code-gauge-allow functionNcss 39 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   protected paramEntityReference(s: number, next: number): boolean {
     const h = this.handlers;
     const dtd = this.dtd;
@@ -240,8 +240,8 @@ export abstract class ExpatProlog extends ExpatBase {
     if (encoding !== current) this.input.switchEncoding(encoding, next, this.finalBuffer);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
-  // code-gauge-allow functionNcss 48 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   protected doctypeRole(role: Role, s: number, next: number): boolean {
     const h = this.handlers;
     switch (role) {
@@ -312,8 +312,8 @@ export abstract class ExpatProlog extends ExpatBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
-  // code-gauge-allow functionNcss 41 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   protected entityRole(role: Role, s: number, next: number): boolean {
     const h = this.handlers;
     const dtd = this.dtd;
@@ -410,7 +410,7 @@ export abstract class ExpatProlog extends ExpatBase {
   }
 
   /** `storeEntityValue`: adds the replacement text of an entity's literal, with character references replaced. */
-  // code-gauge-allow functionNcss 31 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   protected storeEntityValue(start: number, end: number, text: number[]): void {
     const tz = this.prologTz;
     let ptr = start;
@@ -485,8 +485,8 @@ export abstract class ExpatProlog extends ExpatBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
-  // code-gauge-allow functionNcss 53 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   protected elementRole(role: Role, tok: number, s: number, next: number): boolean {
     const h = this.handlers;
     const decl = this.elementDecl;
@@ -577,8 +577,8 @@ export abstract class ExpatProlog extends ExpatBase {
     return !this.handlers.elementDecl;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
-  // code-gauge-allow functionNcss 45 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   protected attlistRole(role: Role, s: number, next: number): boolean {
     const h = this.handlers;
     const dtd = this.dtd;

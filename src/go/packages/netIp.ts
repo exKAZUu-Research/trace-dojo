@@ -391,7 +391,7 @@ function xtoi2(s: string, separator: string): number | undefined {
 
 const validMACLength = (n: number): boolean => n === 6 || n === 8 || n === 20;
 
-// code-gauge-allow functionCognitiveComplexity 19 -- follows Go's ParseMAC, which reads three layouts.
+// code-gauge-allow functionCognitiveComplexity -- follows Go's ParseMAC, which reads three layouts.
 /** `ParseMAC`'s three layouts: `xx:xx`/`xx-xx` one byte per group, `xxxx.xxxx` two, and plain hex digits. */
 function parseMACBytes(s: string): number[] | undefined {
   if (s.length < 12) return undefined;

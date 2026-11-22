@@ -151,8 +151,8 @@ function traceIntOf(value: bigint): number | bigint {
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 /** The node showing a value as learners see it, or `undefined` for a value the trace hides. */
-// code-gauge-allow functionCognitiveComplexity 30 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 51 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
 function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: number }): DisplayNode | undefined {
   if (budget.remaining-- <= 0) return { kind: 'value', value: '…' };
   rt().spend();
@@ -310,8 +310,8 @@ function keyLabels(keys: Value[]): string[] {
 }
 
 /** A hash key as text, quoting strings and marking symbols when `quoted`, without running the program's methods. */
-// code-gauge-allow functionCognitiveComplexity 28 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 32 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
 function keyText(key: Value, quoted: boolean, seen = new Set<RArray>(), memo = new WeakMap<RArray, string>()): string {
   rt().spend();
   if (key instanceof RString) return boundedKeyText(quoted ? strInspect(key.s) : key.s);

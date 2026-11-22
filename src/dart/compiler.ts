@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 1000 -- Keep declaration checks alongside the declarations and signatures they use.
+// code-gauge-allow-file fileNcss -- Keep declaration checks alongside the declarations and signatures they use.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDeclaration,
@@ -304,7 +304,7 @@ export class Compiler extends MemberCompiler {
     return cls.superclass ? [cls.superclass] : [];
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
   private resolveHeader(work: ClassWork): void {
     const { cls, declaration } = work;
     this.withTypeParams(cls.typeParams, () => {
@@ -396,7 +396,7 @@ export class Compiler extends MemberCompiler {
   }
 
   /** Rejects extending or implementing classes whose modifiers forbid it outside their library. */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Each class modifier restricts different subtype roles.
+  // code-gauge-allow functionCognitiveComplexity -- Each class modifier restricts different subtype roles.
   private checkSubtypeAllowed(cls: ClassInfo, supercls: ClassInfo, role: string, span: Span): void {
     const name = supercls.name;
     if (!this.isLibraryCode && (supercls.kind === 'enum' || supercls === coreTypes.enum) && role !== 'mixin の on の型')
@@ -494,7 +494,7 @@ export class Compiler extends MemberCompiler {
     for (const { cls, declaration } of this.classWork) visit(cls, declaration);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Each kind of member declares itself differently.
+  // code-gauge-allow functionCognitiveComplexity -- Each kind of member declares itself differently.
   private declareMembers({ cls, declaration }: ClassWork): void {
     this.currentClass = cls;
     try {
@@ -592,8 +592,8 @@ export class Compiler extends MemberCompiler {
    * A mixin application has a constructor for each generative constructor of its superclass, which initializes the
    * mixin's fields and passes its arguments on, as Dart's forwarding constructors do.
    */
-  // code-gauge-allow functionCognitiveComplexity 30 -- Constructor forwarding and mixin field initialization share the slot mapping.
-  // code-gauge-allow functionNcss 44 -- Constructor forwarding and mixin field initialization share the slot mapping.
+  // code-gauge-allow functionCognitiveComplexity -- Constructor forwarding and mixin field initialization share the slot mapping.
+  // code-gauge-allow functionNcss -- Constructor forwarding and mixin field initialization share the slot mapping.
   private declareForwardingConstructors(
     application: ClassInfo,
     mixin: ClassInfo,
@@ -707,7 +707,7 @@ export class Compiler extends MemberCompiler {
     return copy;
   }
 
-  // code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private declareRepresentation(cls: ClassInfo, declaration: ClassDeclaration): void {
     const name = cls.representationName as string;
     this.checkEnclosingMemberName(cls, name, declaration);
@@ -769,8 +769,8 @@ export class Compiler extends MemberCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Static, late, final, abstract, and external fields differ.
-  // code-gauge-allow functionNcss 33 -- Static, late, final, abstract, and external fields differ.
+  // code-gauge-allow functionCognitiveComplexity -- Static, late, final, abstract, and external fields differ.
+  // code-gauge-allow functionNcss -- Static, late, final, abstract, and external fields differ.
   private declareField(cls: ClassInfo, declaration: FieldDeclaration): void {
     const declaredType = declaration.type ? this.resolveType(declaration.type) : undefined;
     for (const variable of declaration.variables) {
@@ -978,7 +978,7 @@ export class Compiler extends MemberCompiler {
     }
   }
 
-  // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
+  // code-gauge-allow functionParameterCount -- The parameters are the parts a caller already holds; grouping them would only rename them.
   private newGlobal(
     name: string,
     displayName: string,
@@ -1082,7 +1082,7 @@ export class Compiler extends MemberCompiler {
     { field: FieldMember; bind: (field: FieldMember) => Callable }
   >();
 
-  // code-gauge-allow duplicateLines 16 -- Late and global initializers use different receiver environments.
+  // code-gauge-allow duplicateLines -- Late and global initializers use different receiver environments.
   private declareLateField(cls: ClassInfo, field: FieldMember, initializer: Expression | undefined): void {
     const { name } = field;
     let lateInit: ((runtime: Runtime, receiver: DartObject) => Value) | undefined;
@@ -1149,7 +1149,7 @@ export class Compiler extends MemberCompiler {
     this.lateFieldAccessors.set(member, { field, bind });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Methods, accessors, and operators, static or not.
+  // code-gauge-allow functionCognitiveComplexity -- Methods, accessors, and operators, static or not.
   private declareMethod(cls: ClassInfo, declaration: MethodDeclaration, owner: ClassInfo | ExtensionInfo = cls): void {
     const typeParams = this.withoutFunctionTypeAnnotations(() => this.declareTypeParams(declaration.typeParameters));
     const isExtension = !(owner instanceof ClassInfo);
@@ -1231,7 +1231,7 @@ export class Compiler extends MemberCompiler {
 
   // Enums
 
-  // code-gauge-allow functionNcss 31 -- Validate and register enum values in declaration order.
+  // code-gauge-allow functionNcss -- Validate and register enum values in declaration order.
   private declareEnumValues(cls: ClassInfo, declaration: ClassDeclaration): void {
     const valuesMember = cls.staticMembers.get('values') ?? cls.members.get('values') ?? cls.setters.get('values');
     if (valuesMember)
@@ -1393,7 +1393,7 @@ export class Compiler extends MemberCompiler {
    * An extension type must redeclare a member it would inherit from several supertypes when an extension type declares
    * one of them, even with identical signatures.
    */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Each supertype and each name it brings is checked against the extension types declaring it.
+  // code-gauge-allow functionCognitiveComplexity -- Each supertype and each name it brings is checked against the extension types declaring it.
   private checkInheritedExtensionMembers(cls: ClassInfo, declaration: ClassDeclaration): void {
     const parents = cls.directSupertypes.map((type) => type.cls);
     const extensionParents = parents.filter((parent) => parent.kind === 'extensionType');
@@ -1486,7 +1486,7 @@ export class Compiler extends MemberCompiler {
     return obligations;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
   private checkOverride(
     cls: ClassInfo,
     member: Member,
@@ -1552,7 +1552,7 @@ export class Compiler extends MemberCompiler {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- The relaxed comparison and the forwarding contract use the same parameter checks.
+  // code-gauge-allow functionCognitiveComplexity -- The relaxed comparison and the forwarding contract use the same parameter checks.
   private isValidOverride(
     cls: ClassInfo,
     member: MethodMember,
@@ -1659,7 +1659,7 @@ export class Compiler extends MemberCompiler {
     (fn as TopLevelFunction & { typeParams?: TypeParam[] }).typeParams = typeParams;
   }
 
-  // code-gauge-allow duplicateLines 24 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private compileTopLevelFunction(declaration: FunctionDeclaration): void {
     const entry = this.library.declarations.get(declaration.name);
     const fn =

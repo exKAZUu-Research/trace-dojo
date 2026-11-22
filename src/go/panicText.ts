@@ -70,7 +70,7 @@ function sharedData(value: Value, kind: string): boolean {
 const ONE_BYTE_KINDS = new Set(['bool', 'int8', 'uint8']);
 
 /** How the runtime prints a panic value: an error's message, a Stringer's text, or the value with its type. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Go's printpanicval, one case per kind.
+// code-gauge-allow functionCognitiveComplexity -- Go's printpanicval, one case per kind.
 export function panicValueText(value: Value): string {
   if (!(value instanceof Iface)) return 'nil';
   const { type } = value;

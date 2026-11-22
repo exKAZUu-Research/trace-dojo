@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 542 -- Keep runtime dispatch alongside reified types, call frames, and roots.
+// code-gauge-allow-file fileNcss -- Keep runtime dispatch alongside reified types, call frames, and roots.
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -77,7 +77,7 @@ export class Frame implements TracedFrame {
   /** Values a statement holds while it evaluates the rest of an expression, which garbage collection keeps. */
   readonly temporaries: Value[] = [];
 
-  // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
+  // code-gauge-allow functionParameterCount -- The parameters are the parts a caller already holds; grouping them would only rename them.
   constructor(
     readonly runtime: Runtime,
     readonly info: FunctionInfo,
@@ -821,8 +821,8 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   /** Removes the turtles that no variable, field, or value in flight still reaches. */
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of value garbage collection reaches.
-  // code-gauge-allow functionNcss 38 -- One case per kind of value garbage collection reaches.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of value garbage collection reaches.
+  // code-gauge-allow functionNcss -- One case per kind of value garbage collection reaches.
   collectGarbage(): void {
     if (!this.world.hasTurtles) return;
     const reached = new Set<DartObject>();

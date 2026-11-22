@@ -81,7 +81,7 @@ type ReportOutcome = { kind: 'handled' | 'exit'; failure?: never } | { kind: 'fa
 /** The runs that rejected an unsupported feature, wherever it was raised (including in an exception handler). */
 const rejectedRuns = new WeakSet<Runtime>();
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Dispatches uncaught outcomes before runtime shutdown.
+// code-gauge-allow functionCognitiveComplexity -- Dispatches uncaught outcomes before runtime shutdown.
 function report(runtime: Runtime, error: unknown, inShutdown = false): ReportOutcome {
   if (error instanceof ExitSignal) {
     if (inShutdown) runtime.shuttingDown = true;

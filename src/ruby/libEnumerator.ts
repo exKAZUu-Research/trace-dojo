@@ -82,7 +82,7 @@ export interface EnumeratorSource {
   copy?: () => EnumeratorSource;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 export function makeEnumerator(
   recv: Value,
   method: string,
@@ -134,7 +134,7 @@ export function makeEnumerator(
   return enumerator;
 }
 
-// code-gauge-allow functionNcss 36 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: RHash): Gen<Value> {
   if (method === 'step' || method === '%') return yield* stepSize(recv, args, keywords);
   if (NIL_SIZE_METHODS.has(method)) return NIL;
@@ -180,8 +180,8 @@ export function* receiverSize(recv: Value): Gen<Value> {
   return NIL;
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- The ordered cases for Enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 42 -- The ordered cases for Enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for Enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 function arraySelectionSize(length: number, method: string, requested: bigint | undefined): Value {
   if (length === 0 && requested !== undefined && requested > 0n) return 0n;
   if (requested !== undefined && requested >= 0n && length === 1 && method.startsWith('repeated_')) return 1n;
@@ -226,7 +226,7 @@ function arraySelectionSize(length: number, method: string, requested: bigint | 
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- The ordered cases for Enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 function* stepSize(recv: Value, args: Value[], keywords?: RHash): Gen<Value> {
   const { start, end: originalEnd, step, exclusive } = arithmeticSpec(recv, args, keywords);
   const end =
@@ -473,7 +473,7 @@ def('Enumerator::ArithmeticSequence', 'exclude_end?', 0, (self: RObject) => {
   const source = sourceOf(self);
   return arithmeticSpec(source.recv, source.iterationArgs ?? source.args, source.keywords).exclusive;
 });
-// code-gauge-allow functionCognitiveComplexity 27 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 def('Enumerator::ArithmeticSequence', 'first', [0, 1], function* (self: RObject, args) {
   const source = sourceOf(self);
   const { start, end, step } = arithmeticSpec(source.recv, source.iterationArgs ?? source.args, source.keywords);
@@ -518,7 +518,7 @@ function* arithmeticFirstOrder(
   return yield* spaceship(start, customFloatEnd ? yield* toStepFloat(end) : end);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, args) {
   const source = sourceOf(self);
   const { start, step, end, exclusive } = arithmeticSpec(
@@ -594,7 +594,7 @@ def('Enumerator::ArithmeticSequence', 'hash', 0, (self: RObject) => {
   return hash;
 });
 
-// code-gauge-allow functionCognitiveComplexity 18 -- The ordered cases for Enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 function arithmeticLastIndex(
   start: bigint | number,
   end: bigint | number,
@@ -654,8 +654,8 @@ for (const name of ['==', '===', 'eql?'])
       (yield* spaceship(a.step, b.step)) === 0
     );
   });
-// code-gauge-allow functionCognitiveComplexity 30 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 33 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 def('Enumerator', 'inspect', 0, function* (self: RObject) {
   if (self.data === undefined) return str(`#<${className(realClassOf(self))}: uninitialized>`);
   const source = sourceOf(self);
@@ -1323,8 +1323,8 @@ def('Enumerator::Lazy', 'each_with_index', 0, function* (self: RObject, _args, b
 });
 
 /** Runs a lazy chain: each element of the source passes the steps in turn, and `take` ends the iteration. */
-// code-gauge-allow functionCognitiveComplexity 26 -- Lazy transformations share one stopping, rooting and yielded-tuple lifecycle.
-// code-gauge-allow functionNcss 31 -- Lazy transformations share one stopping, rooting and yielded-tuple lifecycle.
+// code-gauge-allow functionCognitiveComplexity -- Lazy transformations share one stopping, rooting and yielded-tuple lifecycle.
+// code-gauge-allow functionNcss -- Lazy transformations share one stopping, rooting and yielded-tuple lifecycle.
 function* runLazy(
   self: RObject,
   visit: (value: Value, yielded?: Value[]) => Gen<IterationResult>,
@@ -1390,7 +1390,7 @@ interface LazyFeedback {
   value: Value;
 }
 
-// code-gauge-allow functionParameterCount 7 -- The traversal passes source tuples and their segment feedback independently.
+// code-gauge-allow functionParameterCount -- The traversal passes source tuples and their segment feedback independently.
 function* streamLazyStep(
   steps: LazyStep[],
   states: LazyState[],
@@ -1407,7 +1407,7 @@ function* streamLazyStep(
   return lazySegmentResult(outcome, memo);
 }
 
-// code-gauge-allow functionParameterCount 7 -- Each transformation uses the current tuple and the shared segment feedback.
+// code-gauge-allow functionParameterCount -- Each transformation uses the current tuple and the shared segment feedback.
 function* runLazyStep(
   steps: LazyStep[],
   states: LazyState[],
@@ -1543,7 +1543,7 @@ function* runLazyStep(
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Lazy flattening retains recursive roots and distinguishes arrays from user to_ary conversions.
+// code-gauge-allow functionCognitiveComplexity -- Lazy flattening retains recursive roots and distinguishes arrays from user to_ary conversions.
 function* streamFlattened(
   mapped: Value,
   next: (value: Value, yielded?: Value[]) => Gen<IterationResult>
@@ -1592,7 +1592,7 @@ def('Enumerator::Lazy', 'each', [0, -1], function* (self: RObject, args, block) 
   }
   return yield* runLazy(self, (value, yielded) => callProc(block, yielded ?? [value], { used: false }), args);
 });
-// code-gauge-allow duplicateLines 15 -- Collection methods retain separate iteration, return-value and rooting lifecycles despite similar accumulation blocks.
+// code-gauge-allow duplicateLines -- Collection methods retain separate iteration, return-value and rooting lifecycles despite similar accumulation blocks.
 def('Enumerator::Lazy', ['force', 'to_a'], [0, -1], function* (self: RObject, args) {
   const items: Value[] = [];
   rt().heldArrays.push(items);

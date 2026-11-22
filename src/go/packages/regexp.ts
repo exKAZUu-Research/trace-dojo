@@ -198,7 +198,7 @@ function pad(re: RegexpState, match: number[]): number[] {
 }
 
 /** Go's `(*Regexp).matches`: the successive matches, up to `max` when it is not negative. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes Go's matches step by step.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes Go's matches step by step.
 function allMatches(re: RegexpState, s: string, max: number, ncap: number): number[][] {
   const results: number[][] = [];
   if (max === 0) return results;
@@ -334,7 +334,7 @@ function appendPieces(dst: Value, pieces: string[]): Slice | undefined {
 }
 
 /** Go's `(*Regexp).expand`, returning the pieces it appends. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes Go's expand step by step.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes Go's expand step by step.
 function expand(re: RegexpState, templateText: string, src: string, match: number[]): string[] {
   const pieces: string[] = [];
   let template = templateText;
@@ -370,7 +370,7 @@ function expand(re: RegexpState, templateText: string, src: string, match: numbe
   return pieces;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes Go's extract step by step.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes Go's extract step by step.
 function extract(text: string): { name: string; num: number; rest: string } | undefined {
   if (text === '') return undefined;
   let str = text;

@@ -227,7 +227,7 @@ export interface StructField {
 }
 
 /** `Type.FieldByName`: the shallowest field of the name, which must be unique at its depth. */
-// code-gauge-allow functionCognitiveComplexity 28 -- reflect's breadth-first search of embedded structs.
+// code-gauge-allow functionCognitiveComplexity -- reflect's breadth-first search of embedded structs.
 export function fieldByName(type: Type, name: string): StructField | undefined {
   let current: { type: Type; index: number[] }[] = [{ type, index: [] }];
   const visited = new Set<Type>();

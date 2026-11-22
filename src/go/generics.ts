@@ -12,7 +12,7 @@ import {
 export type Substitution = Map<number, Type>;
 
 /** Replaces type parameters by their type arguments, instantiating generic named types through `instantiateNamed`. */
-// code-gauge-allow functionNcss 34 -- Visits the Go type shapes while retaining substitution and inference context.
+// code-gauge-allow functionNcss -- Visits the Go type shapes while retaining substitution and inference context.
 export function substitute(
   type: Type,
   mapping: Substitution,
@@ -88,8 +88,8 @@ export function substituteInterface(
  * Infers type arguments by unifying parameter types with argument types, as Go's function argument type inference
  * does; returns false when the types cannot match.
  */
-// code-gauge-allow functionNcss 51 -- Visits the Go type shapes while retaining substitution and inference context.
-// code-gauge-allow functionCognitiveComplexity 20 -- Visits the Go type shapes while retaining substitution and inference context.
+// code-gauge-allow functionNcss -- Visits the Go type shapes while retaining substitution and inference context.
+// code-gauge-allow functionCognitiveComplexity -- Visits the Go type shapes while retaining substitution and inference context.
 export function unify(param: Type, arg: Type, mapping: Substitution, params: readonly TypeParamType[]): boolean {
   if (param.kind === 'typeParam' && params.some((candidate) => candidate.id === param.id)) {
     return bindTypeArgument(param, arg, mapping);
@@ -184,7 +184,7 @@ function bindTypeArgument(param: TypeParamType, arg: Type, mapping: Substitution
 }
 
 /** Infers type parameters from the core types of the constraints of already-inferred ones, such as `S ~[]E`. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Visits the Go type shapes while retaining substitution and inference context.
+// code-gauge-allow functionCognitiveComplexity -- Visits the Go type shapes while retaining substitution and inference context.
 export function inferFromConstraints(
   params: readonly TypeParamType[],
   mapping: Substitution,
@@ -210,7 +210,7 @@ export function inferFromConstraints(
   }
 }
 
-// code-gauge-allow duplicateLines 29 -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
+// code-gauge-allow duplicateLines -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
 function containsUnbound(
   type: Type,
   params: readonly TypeParamType[],
@@ -246,7 +246,7 @@ function containsUnbound(
   }
 }
 
-// code-gauge-allow duplicateLines 29 -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
+// code-gauge-allow duplicateLines -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
 export function containsTypeParam(type: Type, seen = new Set<Type>()): boolean {
   if (seen.has(type)) return false;
   seen.add(type);

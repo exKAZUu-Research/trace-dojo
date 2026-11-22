@@ -145,8 +145,8 @@ function literalPrefix(items: Item[], flags: number): { found: boolean; all: boo
 }
 
 /** `_get_charset_prefix`: the characters the first item matches, when they are known without case folding. */
-// code-gauge-allow functionNcss 32 -- Transcribes re._compiler._get_charset_prefix.
-// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes re._compiler._get_charset_prefix.
+// code-gauge-allow functionNcss -- Transcribes re._compiler._get_charset_prefix.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes re._compiler._get_charset_prefix.
 function charsetPrefix(pattern: SubPattern, patternFlags: number): SetItem[] | undefined {
   let flags = patternFlags;
   let items = pattern.data;
@@ -207,7 +207,7 @@ function emitSkip(code: number[], extra = 0): () => void {
   };
 }
 
-// code-gauge-allow functionNcss 53 -- Transcribes the opcode dispatch of re._compiler._compile.
+// code-gauge-allow functionNcss -- Transcribes the opcode dispatch of re._compiler._compile.
 function compileItem(program: Program, item: Item, flags: number): void {
   const { code } = program;
   switch (item.op) {
@@ -312,8 +312,8 @@ function compileIn(program: Program, set: SetItem[], flags: number): void {
 }
 
 /** `re._compiler._optimize_charset` with the categories mapped as `_compile_charset` maps them. */
-// code-gauge-allow functionNcss 31 -- Transcribes re._compiler._optimize_charset item by item.
-// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes re._compiler._optimize_charset item by item.
+// code-gauge-allow functionNcss -- Transcribes re._compiler._optimize_charset item by item.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes re._compiler._optimize_charset item by item.
 function optimizeCharset(
   set: SetItem[],
   flags: number,

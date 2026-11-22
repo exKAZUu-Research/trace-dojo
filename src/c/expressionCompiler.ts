@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 925 -- Expression compilation shares lvalue, conversion and pointer metadata state.
+// code-gauge-allow-file fileNcss -- Expression compilation shares lvalue, conversion and pointer metadata state.
 import {
   binaryOperation,
   complement,
@@ -137,7 +137,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return { ...operand, type: rvalueType(operand) };
   }
 
-  // code-gauge-allow functionNcss 60 -- Each expression shape dispatches to its compiler.
+  // code-gauge-allow functionNcss -- Each expression shape dispatches to its compiler.
   expression(expression: Expression): Operand {
     const row = expression.operatorRow ?? expression.row;
     switch (expression.kind) {
@@ -331,8 +331,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return this.entityOperand(entity, name, row);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Storage classes require distinct load, address, provenance, and tracing contracts.
-  // code-gauge-allow functionNcss 43 -- Each symbol storage class has its own load/address contract; keep that dispatch together.
+  // code-gauge-allow functionCognitiveComplexity -- Storage classes require distinct load, address, provenance, and tracing contracts.
+  // code-gauge-allow functionNcss -- Each symbol storage class has its own load/address contract; keep that dispatch together.
   protected entityOperand(entity: Entity, name: string, row: number): Operand {
     switch (entity.kind) {
       case 'typedef': {
@@ -491,7 +491,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // Operators -------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- C's operand rules for each binary operator.
+  // code-gauge-allow functionCognitiveComplexity -- C's operand rules for each binary operator.
   binary(operator: BinaryOperator, left: Operand, right: Operand, row: number): Operand {
     const lt = left.type;
     const rt = right.type;
@@ -774,7 +774,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Updating one resolved location must preserve bit-field, pointer, and prefix/postfix result semantics.
+  // code-gauge-allow functionCognitiveComplexity -- Updating one resolved location must preserve bit-field, pointer, and prefix/postfix result semantics.
   private update(expression: Extract<Expression, { kind: 'update' }>): Operand {
     const row = expression.operatorRow ?? expression.row;
     const operand = this.expression(expression.operand);
@@ -811,7 +811,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return resultOperand(type, execute, expression.prefix ? operand.bitWidth : undefined);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- C pointer, boolean, and arithmetic updates have distinct conversion rules; splitting them only relocates the cases.
+  // code-gauge-allow functionCognitiveComplexity -- C pointer, boolean, and arithmetic updates have distinct conversion rules; splitting them only relocates the cases.
   private updateOperation(type: CType, operator: '++' | '--', row: number): (value: Scalar, frame: Frame) => Scalar {
     const sign = operator === '++' ? 1 : -1;
     if (type.kind === 'pointer') {
@@ -835,7 +835,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Assignment conversion, target resolution, and pointer provenance must share the cached right operand.
+  // code-gauge-allow functionCognitiveComplexity -- Assignment conversion, target resolution, and pointer provenance must share the cached right operand.
   private assignment(expression: Extract<Expression, { kind: 'assign' }>): Operand {
     const { row, operator } = expression;
     const target = this.expression(expression.left);
@@ -975,7 +975,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Conditional expressions share arithmetic, pointer, record and void type selection.
+  // code-gauge-allow functionCognitiveComplexity -- Conditional expressions share arithmetic, pointer, record and void type selection.
   private conditionalType(a: Operand, b: Operand, row: number): CType {
     const at = a.type;
     const bt = b.type;
@@ -996,7 +996,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // Calls -----------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Direct builtin handling and indirect calls converge on the same argument validation; keep that resolution together.
   private call(expression: Extract<Expression, { kind: 'call' }>): Operand {
     const { row } = expression;
     let direct: FunctionInfo | undefined;
@@ -1137,8 +1136,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Record values, lvalues, arrows, and bit-fields share one field lookup; keep those access alternatives together.
-  // code-gauge-allow functionNcss 47 -- Record values, lvalues, arrows, and bit-fields share one field lookup; keep those access alternatives together.
+  // code-gauge-allow functionCognitiveComplexity -- Record values, lvalues, arrows, and bit-fields share one field lookup; keep those access alternatives together.
+  // code-gauge-allow functionNcss -- Record values, lvalues, arrows, and bit-fields share one field lookup; keep those access alternatives together.
   private member(expression: Extract<Expression, { kind: 'member' }>): Operand {
     const { row, field: name, arrow } = expression;
     let recordType: RecordType;
@@ -1228,7 +1227,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   // Conversions -----------------------------------------------------------------------------------------------------
 
   /** Converts an rvalue to a type, which the caller has checked it may be converted to. */
-  // code-gauge-allow functionCognitiveComplexity 20 -- Scalar conversions preserve pointer origins and byte metadata alongside the converted value.
+  // code-gauge-allow functionCognitiveComplexity -- Scalar conversions preserve pointer origins and byte metadata alongside the converted value.
   converted(operand: Operand, type: CType): Evaluator {
     const from = operand.type;
     const original = evaluatorOf(operand);
@@ -1261,7 +1260,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** Converts a value as assignment does, rejecting the conversions clang rejects. */
-  // code-gauge-allow functionCognitiveComplexity 30 -- C's rules for simple assignment, with clang's errors.
+  // code-gauge-allow functionCognitiveComplexity -- C's rules for simple assignment, with clang's errors.
   convertForAssignment(operand: Operand, target: CType, context: ConversionContext, row: number): Evaluator {
     const source = operand.type;
     const type = unqualified(target);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 658 -- Switch coverage shares type partitions and pattern coverage rules.
+// code-gauge-allow-file fileNcss -- Switch coverage shares type partitions and pattern coverage rules.
 import type { Expression, Pattern, Span } from './ast';
 import { isNullConstantPattern } from './astWalk';
 import type { ClassInfo, FieldMember } from './classes';
@@ -57,7 +57,7 @@ const MAX_SPACES = 256;
  * statement on a type Dart requires to be covered (bool, enums, sealed classes, and records and nullable types of
  * them), is rejected when they do not.
  */
-// code-gauge-allow functionCognitiveComplexity 17 -- Report uncovered partitions now or after constant evaluation.
+// code-gauge-allow functionCognitiveComplexity -- Report uncovered partitions now or after constant evaluation.
 export function checkExhaustive(
   compiler: PatternCompiler,
   type: DartType,
@@ -230,7 +230,7 @@ class ObjectSpaces {
     return undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Check the known child spaces for each supported pattern shape.
+  // code-gauge-allow functionCognitiveComplexity -- Check the known child spaces for each supported pattern shape.
   private excludesFixedField(pattern: Pattern, field: Space): boolean {
     if (field.kind === 'constant' || field.kind === 'null') return covers(this.compiler, pattern, field) === false;
     const arms = coverageDisjuncts(this.compiler, pattern);
@@ -614,8 +614,8 @@ function subclassType(supertype: DartType & { kind: 'interface' }, subclass: Cla
 }
 
 /** Whether a pattern matches every value of a type. */
-// code-gauge-allow functionCognitiveComplexity 29 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
-// code-gauge-allow functionNcss 48 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of pattern and space, as Dart decides exhaustiveness.
+// code-gauge-allow functionNcss -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 export function coversAll(compiler: PatternCompiler, pattern: Pattern, type: DartType): boolean {
   // Relational patterns, `== null` and `!= null` included, cover nothing, as in the SDK.
   if (isNullConstantPattern(pattern)) return isSubtype(type, NULL);
@@ -709,7 +709,7 @@ function recordFieldsCover(
   );
 }
 
-// code-gauge-allow functionNcss 40 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
+// code-gauge-allow functionNcss -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 function covers(compiler: PatternCompiler, pattern: Pattern, space: Space): Coverage {
   if (isNullConstantPattern(pattern)) return space.kind === 'null';
   const arms = coverageDisjuncts(compiler, pattern);

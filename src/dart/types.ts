@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 631 -- The operations of Dart's types belong together; each is a short case analysis.
+// code-gauge-allow-file fileNcss -- The operations of Dart's types belong together; each is a short case analysis.
 import type { ClassInfo } from './classes';
 
 /** A type parameter of a class, a function type, or a generic function. */
@@ -199,8 +199,8 @@ export function nonNullable(type: DartType): DartType {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of type, in the order of Dart's rules.
-// code-gauge-allow functionNcss 33 -- Each kind compares its own structure.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of type, in the order of Dart's rules.
+// code-gauge-allow functionNcss -- Each kind compares its own structure.
 export function sameType(
   a: DartType,
   b: DartType,
@@ -286,7 +286,7 @@ function alignTypeParams(
   return [{ ...a, typeParams: [] }, renamed];
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of type, in the order of Dart's rules.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of type, in the order of Dart's rules.
 export function substitute(type: DartType, map: ReadonlyMap<TypeParam, DartType>): DartType {
   if (map.size === 0) return type;
   switch (type.kind) {
@@ -336,7 +336,7 @@ export function substitute(type: DartType, map: ReadonlyMap<TypeParam, DartType>
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Acyclic dependencies and recursive references use different substitutions.
+// code-gauge-allow functionCognitiveComplexity -- Acyclic dependencies and recursive references use different substitutions.
 export function instantiateToBounds(
   params: readonly TypeParam[],
   inferred?: ReadonlyMap<TypeParam, DartType>
@@ -407,7 +407,7 @@ export function isSubtype(s: DartType, t: DartType): boolean {
 }
 
 /** The rules for top and bottom types, Object, Null, and a nullable left side; undefined when none applies. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type, in the order of Dart's rules.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of type, in the order of Dart's rules.
 function topBottomSubtype(s: DartType, t: DartType): boolean | undefined {
   if (s === t) return true;
   if (isTop(t)) return true;
@@ -441,7 +441,7 @@ function isSubtypeOfObject(s: DartType, t: DartType): boolean {
 }
 
 /** The rules for type parameters and a nullable right side; undefined when none applies. */
-// code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of type, in the order of Dart's rules.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of type, in the order of Dart's rules.
 function typeParamSubtype(s: DartType, t: DartType): boolean | undefined {
   if (s.kind === 'typeParam' && t.kind === 'typeParam' && s.param === t.param && !t.promoted) return true;
   if (t.kind === 'typeParam' && t.nullable) {
@@ -465,7 +465,7 @@ function typeParamSubtype(s: DartType, t: DartType): boolean | undefined {
 }
 
 /** The rules for non-nullable functions, records, and interfaces. */
-// code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of type, in the order of Dart's rules.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of type, in the order of Dart's rules.
 function structuralSubtype(s: DartType, t: DartType): boolean {
   if (t.kind === 'never') return false;
   if (s.kind === 'function') {
@@ -491,7 +491,7 @@ function structuralSubtype(s: DartType, t: DartType): boolean {
   return false;
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of type, in the order of Dart's rules.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of type, in the order of Dart's rules.
 function isFunctionSubtype(s: FunctionType, t: FunctionType): boolean {
   const aligned = alignTypeParams(s, t, mutualSubtypes);
   if (!aligned) return false;
@@ -526,7 +526,7 @@ export function upperBound(a: DartType, b: DartType): DartType {
 }
 
 /** The bound when either type is a top, bottom, null, nullable, Object, or type parameter type. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type, in the order of Dart's rules.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of type, in the order of Dart's rules.
 function specialUpperBound(a: DartType, b: DartType): DartType | undefined {
   if (sameType(a, b)) return a;
   if (isTop(a) || isTop(b)) {
@@ -817,7 +817,7 @@ export function mentionsCovariantly(type: DartType, params: ReadonlySet<TypePara
 }
 
 /** A type as Dart writes it in messages and `runtimeType` (`List<int>`, `int Function(String)`, `(int, {String a})`). */
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of type.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
 export function typeToString(type: DartType): string {
   switch (type.kind) {
     case 'interface': {
@@ -853,7 +853,7 @@ export function typeToString(type: DartType): string {
   }
 }
 
-// code-gauge-allow duplicateLines 16 -- Dart's and the VM's notations of function types share their shape but differ in every part.
+// code-gauge-allow duplicateLines -- Dart's and the VM's notations of function types share their shape but differ in every part.
 function functionTypeToString(type: FunctionType): string {
   const typeParams =
     type.typeParams.length > 0

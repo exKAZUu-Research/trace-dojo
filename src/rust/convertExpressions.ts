@@ -27,8 +27,8 @@ const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
 
 /** Converts statements and expressions. */
 export abstract class ExpressionConverter extends MacroConverter {
-  // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of syntax node.
-  // code-gauge-allow functionNcss 45 -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss -- One case per kind of syntax node.
   block(node: Node): Block {
     const span = this.span(node);
     const stmts: Stmt[] = [];
@@ -93,7 +93,7 @@ export abstract class ExpressionConverter extends MacroConverter {
     };
   }
 
-  // code-gauge-allow functionNcss 46 -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss -- One case per kind of syntax node.
   expr(node: Node): Expr {
     const span = this.span(node);
     switch (node.type) {
@@ -507,7 +507,7 @@ export abstract class ExpressionConverter extends MacroConverter {
     return { kind: 'match', scrutinee: this.expr(this.field(node, 'value')), arms, endRow: node.endPosition.row, span };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
   private closure(node: Node): Expr {
     const span = this.span(node);
     if (/^\s*(static|async)\b/.test(node.text)) unavailable(span, `${node.text.split(/\s/)[0]} クロージャ`);

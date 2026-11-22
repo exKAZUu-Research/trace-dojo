@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 982 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
@@ -246,7 +246,7 @@ function offsetError(name: string, argument = 3, parameter = 'offset', haystack 
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Resolves back and forward byte searches with shared case folding and offset checks.
+// code-gauge-allow functionCognitiveComplexity -- Resolves back and forward byte searches with shared case folding and offset checks.
 function search(
   name: string,
   haystack: string,
@@ -481,7 +481,7 @@ function compareLeft(a: string, ap: number, b: string, bp: number): { result: nu
 }
 
 /** Compares two runs of digits as integers: the longer run wins, then the first different digit. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Compares an entire digit run while preserving first difference and run length.
+// code-gauge-allow functionCognitiveComplexity -- Compares an entire digit run while preserving first difference and run length.
 function compareRight(a: string, ap: number, b: string, bp: number): { result: number; ap: number; bp: number } {
   let bias = 0;
   for (; ; ap++, bp++) {
@@ -496,7 +496,7 @@ function compareRight(a: string, ap: number, b: string, bp: number): { result: n
 }
 
 /** Compares strings in natural order, as PHP's strnatcmp_ex does. */
-// code-gauge-allow functionNcss 51 -- Preserves the numeric and byte comparison order while advancing both cursors.
+// code-gauge-allow functionNcss -- Preserves the numeric and byte comparison order while advancing both cursors.
 export function naturalCompare(a: string, b: string, insensitive: boolean): number {
   if (a.length === 0 || b.length === 0) return a.length === b.length ? 0 : a.length > b.length ? 1 : -1;
   let ap = 0;
@@ -680,8 +680,8 @@ defineFunction(
     )
 );
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the last break and current column through each emitted segment.
-// code-gauge-allow functionNcss 44 -- Keeps the last break and current column through each emitted segment.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the last break and current column through each emitted segment.
+// code-gauge-allow functionNcss -- Keeps the last break and current column through each emitted segment.
 function wordwrap(text: string, width: number, breakText: string, cut: boolean): string {
   if (text === '') return '';
   if (breakText === '') throwError('ValueError', 'wordwrap(): Argument #3 ($break) must not be empty');
@@ -1010,7 +1010,7 @@ defineFunction(
     )
 );
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function levenshtein(a: string, b: string, insert: bigint, replace: bigint, remove: bigint): bigint {
   if (a.length === 0) return BigInt.asIntN(64, BigInt(b.length) * insert);
   if (b.length === 0) return BigInt.asIntN(64, BigInt(a.length) * remove);
@@ -1141,7 +1141,7 @@ defineFunction('soundex(string $string): string', ({ args }) => {
   }
   return result.padEnd(4, '0');
 });
-// code-gauge-allow functionCognitiveComplexity 17 -- Shares one byte histogram across modes that expose counts or character lists.
+// code-gauge-allow functionCognitiveComplexity -- Shares one byte histogram across modes that expose counts or character lists.
 defineFunction('count_chars(string $string, int $mode = 0): array|string', ({ args }) => {
   const text = s(args[0]);
   const mode = args[1] === undefined ? 0 : n(args[1]);
@@ -1195,7 +1195,7 @@ defineFunction('str_increment(string $string): string', ({ args }) => {
     );
   return incrementString(text);
 });
-// code-gauge-allow functionCognitiveComplexity 18 -- Propagates borrow over ASCII character classes and handles a shortened result.
+// code-gauge-allow functionCognitiveComplexity -- Propagates borrow over ASCII character classes and handles a shortened result.
 defineFunction('str_decrement(string $string): string', ({ args }) => {
   const text = s(args[0]);
   if (text === '') throwError('ValueError', 'str_decrement(): Argument #1 ($string) must not be empty');
@@ -1288,7 +1288,7 @@ defineFunction('basename(string $path, string $suffix = ""): string', ({ args })
   if (suffix !== '' && path.endsWith(suffix) && path !== suffix) path = path.slice(0, -suffix.length);
   return path;
 });
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 defineFunction('dirname(string $path, int $levels = 1): string', ({ args }) => {
   const path = s(args[0]);
   const levels = (args[1] as bigint | undefined) ?? 1n;

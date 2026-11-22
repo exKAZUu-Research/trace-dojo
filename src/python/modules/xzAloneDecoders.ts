@@ -49,7 +49,7 @@ export class AloneDecoder implements TopDecoder {
     this.memlimit = Math.max(1, memlimit);
   }
 
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
   code(
     input: Uint8Array,
     inPos: Pos,
@@ -76,7 +76,7 @@ export class AloneDecoder implements TopDecoder {
     return LZMA_OK;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   private headerByte(input: Uint8Array, inPos: Pos): number {
     const { options } = this;
     const byte = input[inPos.value];
@@ -159,9 +159,9 @@ class LzipDecoder implements TopDecoder {
     return LZMA_CHECK_CRC32;
   }
 
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
-  // code-gauge-allow functionNcss 58 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
-  // code-gauge-allow functionCognitiveComplexity 25 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
   code(
     input: Uint8Array,
     inPos: Pos,
@@ -257,7 +257,7 @@ export class AutoDecoder implements TopDecoder {
     return this.next?.getCheck?.() ?? LZMA_CHECK_NONE;
   }
 
-  // code-gauge-allow functionParameterCount 7 -- Takes the buffers and positions of a liblzma code function separately, as the C does.
+  // code-gauge-allow functionParameterCount -- Takes the buffers and positions of a liblzma code function separately, as the C does.
   code(
     input: Uint8Array,
     inPos: Pos,

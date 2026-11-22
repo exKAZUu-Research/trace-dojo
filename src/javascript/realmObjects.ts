@@ -122,7 +122,7 @@ function fromEntries(runtime: Runtime, args: Value[]): Value {
   return object;
 }
 
-// code-gauge-allow functionNcss 32 -- Lists the builtin methods, each a small closure of its own.
+// code-gauge-allow functionNcss -- Lists the builtin methods, each a small closure of its own.
 function defineReflection(method: ObjectMethod): void {
   method('getOwnPropertyNames', 1, (runtime, args) =>
     runtime.newArray(runtime.ownPropertyNames(runtime.toObject(args[0])))
@@ -273,7 +273,7 @@ interface Descriptor {
  * The spec's ToPropertyDescriptor. Each value and accessor stays in the frame's temporaries from when it is read, since
  * later fields' getters run the program's code; the caller releases them once the descriptor is applied.
  */
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function toPropertyDescriptor(runtime: Runtime, value: Value): Descriptor {
   if (!isObject(value))
     return runtime.throwError('TypeError', `Property description must be an object: ${runtime.describe(value)}`);

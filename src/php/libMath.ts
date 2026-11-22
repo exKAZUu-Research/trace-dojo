@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { platformBinary, platformUnary } from '../interpreter/platformMath';
+import { power } from '../interpreter/power';
 import { floatFitsInt, valueName } from './conversions';
 import { deprecated, throwError } from './errors';
 import { defineAlias, defineConstant, defineFunction, defineUnitEnum, markDeprecated } from './native';
@@ -93,9 +93,7 @@ defineFunction('sqrt(float $num): float', ({ args }) => Math.sqrt(args[0] as num
 defineFunction('pow(mixed $num, mixed $exponent): mixed', ({ args }) => {
   return arithmetic('**', args[0], args[1]);
 });
-defineFunction('fpow(float $num, float $exponent): float', ({ args }) =>
-  platformBinary('pow', args[0] as number, args[1] as number)
-);
+defineFunction('fpow(float $num, float $exponent): float', ({ args }) => power(args[0] as number, args[1] as number));
 defineFunction('intdiv(int $num1, int $num2): int', ({ args }) => {
   const [a, b] = args as [bigint, bigint];
   if (b === 0n) throwError('DivisionByZeroError', 'Division by zero');
@@ -189,23 +187,19 @@ for (const name of [
   'expm1',
   'log1p',
 ] as const) {
-  defineFunction(`${name}(float $num): float`, ({ args }) => platformUnary(name, args[0] as number));
+  defineFunction(`${name}(float $num): float`, ({ args }) => Math[name](args[0] as number));
 }
-defineFunction('atan2(float $y, float $x): float', ({ args }) =>
-  platformBinary('atan2', args[0] as number, args[1] as number)
-);
+defineFunction('atan2(float $y, float $x): float', ({ args }) => Math.atan2(args[0] as number, args[1] as number));
 defineFunction('log(float $num, float $base = M_E): float', ({ args }) => {
   const [value, base] = args as [number, number?];
-  if (base === undefined) return platformUnary('log', value);
+  if (base === undefined) return Math.log(value);
   if (base <= 0) throwError('ValueError', 'log(): Argument #2 ($base) must be greater than 0');
   if (base === 1) return Number.NaN;
-  if (base === 2) return platformUnary('log2', value);
-  if (base === 10) return platformUnary('log10', value);
-  return platformUnary('log', value) / platformUnary('log', base);
+  if (base === 2) return Math.log2(value);
+  if (base === 10) return Math.log10(value);
+  return Math.log(value) / Math.log(base);
 });
-defineFunction('hypot(float $x, float $y): float', ({ args }) =>
-  platformBinary('hypot', args[0] as number, args[1] as number)
-);
+defineFunction('hypot(float $x, float $y): float', ({ args }) => Math.hypot(args[0] as number, args[1] as number));
 defineFunction('deg2rad(float $num): float', ({ args }) => ((args[0] as number) / 180) * Math.PI);
 defineFunction('rad2deg(float $num): float', ({ args }) => ((args[0] as number) / Math.PI) * 180);
 defineFunction('is_nan(float $num): bool', ({ args }) => Number.isNaN(args[0]));

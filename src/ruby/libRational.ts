@@ -127,7 +127,7 @@ function* arithmetic(self: RObject, other: Value, op: string): Gen {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- The ordered cases for exact Rational coercion and rounding share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for exact Rational coercion and rounding share state; splitting them solely for the metric would hide their sequencing.
 function* coercePair(self: RObject, other: Value): Gen<[Value, Value]> {
   const pair = yield* tryImplicitConversion(other, 'coerce', [self]);
   if (pair === undefined) {
@@ -237,7 +237,7 @@ function exactPowerIdentity(numerator: bigint, denominator: bigint, power: bigin
 }
 
 def('Rational', '-@', 0, (self: RObject) => makeRational(-fractionOf(self).numerator, fractionOf(self).denominator));
-// code-gauge-allow functionCognitiveComplexity 18 -- The ordered cases for exact Rational coercion and rounding share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for exact Rational coercion and rounding share state; splitting them solely for the metric would hide their sequencing.
 def('Rational', '<=>', 1, function* (self: RObject, [other]) {
   const a = fractionOf(self);
   if (isRubyFloat(other)) {
@@ -325,7 +325,7 @@ function floorDivide(a: bigint, b: bigint): bigint {
   return a % b !== 0n && a < 0n !== b < 0n ? quotient - 1n : quotient;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- The ordered cases for exact Rational coercion and rounding share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for exact Rational coercion and rounding share state; splitting them solely for the metric would hide their sequencing.
 function* roundTo(self: RObject, args: Value[], mode: 'floor' | 'ceil' | 'round' | 'truncate'): Gen {
   const { numerator, denominator } = fractionOf(self);
   const digits = args.length > 0 ? yield* toInt(args[0]) : 0n;
@@ -387,7 +387,7 @@ function* convertRationalArguments(args: Value[], raise: boolean): Gen {
   return yield* convertRationalPair(first, second, raise);
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Native checked conversions, protected VM execution and numeric division share ordered operands.
+// code-gauge-allow functionCognitiveComplexity -- Native checked conversions, protected VM execution and numeric division share ordered operands.
 function* convertRationalPair(first: Value, second: Value, raise: boolean): Gen {
   if (!isA(first, rt().c.Numeric)) {
     const converted = raise

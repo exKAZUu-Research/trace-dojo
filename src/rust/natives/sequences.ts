@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 541 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss -- One native per method of the standard library.
 import {
   exactCapacity,
   keepVecCapacity,

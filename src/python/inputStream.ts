@@ -53,7 +53,7 @@ export function createInputStream(runtime: Runtime): PyValue {
   return text;
 }
 
-// code-gauge-allow functionNcss 39 -- Registers one native class's I/O operations and read-only attributes together.
+// code-gauge-allow functionNcss -- Registers one native class's I/O operations and read-only attributes together.
 export function createFileIOClass(runtime: Runtime, rawBase: PyClass): PyClass {
   const rawClass = builtinClass('FileIO', rawBase);
   rawClass.module = '_io';

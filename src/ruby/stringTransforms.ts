@@ -5,7 +5,7 @@ import { type RNil, RString } from './objects';
 import { rt } from './runtime';
 import { str, stringBytes, stringCharacters, stringFromBytes } from './values';
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Each transform retains the charset-specific validation and output metadata of the same byte sequence.
+// code-gauge-allow functionCognitiveComplexity -- Each transform retains the charset-specific validation and output metadata of the same byte sequence.
 export function transformEncodedBytes(self: RString, name: string): RString {
   if (['upcase', 'downcase', 'capitalize', 'swapcase'].includes(name)) {
     if (!self.usAscii) throw argumentError('input string invalid');
@@ -48,7 +48,7 @@ function chopInvalidBytes(self: RString, bytes: Uint8Array): RString {
   return stringFromBytes(bytes.slice(0, bytes.length - width), false, self.usAscii);
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Native paragraph, newline, length and encoding stages share ordered suffix boundaries.
+// code-gauge-allow functionCognitiveComplexity -- Native paragraph, newline, length and encoding stages share ordered suffix boundaries.
 export function chompByteLength(self: RString, separator: RString | RNil): number {
   const bytes = stringBytes(self);
   if (!(separator instanceof RString) || bytes.length === 0) return bytes.length;
