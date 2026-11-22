@@ -14,6 +14,7 @@ export const browserReadyInterpreters = {
   javascript: () => import('./languages/javascript'),
   php: () => import('./languages/php'),
   python: () => import('./languages/python'),
+  ruby: () => import('./languages/ruby'),
   rust: () => import('./languages/rust'),
   typescript: () => import('./languages/typescript'),
   zig: () => import('./languages/zig'),

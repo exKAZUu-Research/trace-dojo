@@ -46,7 +46,7 @@ import {
   RSymbol,
   type Value,
 } from './objects';
-import { platformGamma, platformLog2, platformLog10, platformLogGamma } from './platformMath';
+import { platformGamma, platformLogGamma } from './platformMath';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { codePointCharacters } from './unicodeText';
 import { arr, asciiString, realClassOf, str, truthy } from './values';
@@ -1074,11 +1074,6 @@ sdef('Math', 'gamma', 1, function* (_self, [value]) {
   if (number === Number.NEGATIVE_INFINITY) domainCheck('gamma', false);
   if (number < 0 && Number.isInteger(number)) domainCheck('gamma', false);
   if (number === 0) return Object.is(number, -0) ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
-  if (Number.isInteger(number) && number > 0 && number <= 23) {
-    let factorial = 1n;
-    for (let index = 2; index < number; index++) factorial *= BigInt(index);
-    return Number(factorial);
-  }
   return platformGamma(number);
 });
 sdef('Math', 'lgamma', 1, function* (_self, [value]) {
@@ -1115,9 +1110,7 @@ function largeIntegerLog(value: bigint, base: 'log2' | 'log10'): number {
   const bits = value.toString(2).length;
   const shift = bits - 53;
   const mantissa = Number(value >> BigInt(shift));
-  return base === 'log2'
-    ? platformLog2(mantissa) + shift
-    : fusedMultiplyAdd(shift, platformLog10(2), platformLog10(mantissa));
+  return base === 'log2' ? Math.log2(mantissa) + shift : fusedMultiplyAdd(shift, Math.log10(2), Math.log10(mantissa));
 }
 
 function erf(x: number): number {

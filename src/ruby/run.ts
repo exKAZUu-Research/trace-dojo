@@ -10,7 +10,6 @@ import { initializeInternedIds } from './internedIds';
 import { evalBody, runToEnd, STACK_OVERFLOW } from './interp';
 import { makeData } from './libData';
 import { parseRuby } from './parse';
-import { releaseNativeCasefold } from './regexpCasefoldParity';
 import {
   BreakSignal,
   ExitSignal,
@@ -94,12 +93,8 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: F
         ...runtime.io.output(),
       };
     } finally {
-      try {
-        releaseNativeCasefold(runtime);
-      } finally {
-        frame.extra.finished = true;
-        runtime.popFrame();
-      }
+      frame.extra.finished = true;
+      runtime.popFrame();
     }
   });
 }

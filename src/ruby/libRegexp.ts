@@ -1,8 +1,4 @@
-import vm from 'node:vm';
-
-import { slug } from 'oniguruma-parser/parser';
-import { OnigUnicodePropertyMap } from 'oniguruma-parser/unicode';
-
+// code-gauge-allow-file fileNcss -- Regexp, MatchData and the regexp forms of String methods share match state and the helpers that slice it.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
@@ -45,31 +41,20 @@ import {
   RSymbol,
   type Value,
 } from './objects';
-import {
-  hostRegexpCaptureNames,
-  regexpCaptureNames,
-  regexpHasNumberedBackref,
-  regexpNumericEscapes,
-} from './regexpCaptureNames';
-import { regexpNeedsCasefoldParity } from './regexpCasefold';
-import { assertCasefoldParity } from './regexpCasefoldParity';
+import { compileRegexp, stickyRegexp } from './regexpCompile';
 import { RegexpCursor } from './regexpCursor';
-import { decodeRegexpByteEscape, regexpByteEscape, RegexpEncodingError } from './regexpEscapes';
-import { regexpHasCharacterMode, regexpHasLiteralPosixBracket, regexpLexicalSource } from './regexpLexicalSource';
-import { regexpOuterOptions } from './regexpOuterOptions';
+import { RegexpSourceError } from './regexpEscapes';
+import { invalidPatternMessage, type RegexpOptions, regexpSuffix } from './regexpPatternMessage';
 import { charIndex, regexpByteIndex, unitIndex } from './regexpPositions';
 import {
-  compileHostRegexp,
+  hasNonAsciiRegexpEscape,
   hasRegexpProperty,
-  isLinearHostRegexp,
-  regexpSyntaxReason,
-  requiresNativeCaptureParity,
+  regexpCaptureNames,
+  regexpOuterOptions,
   supportsRegexpByteView,
-  validateRegexpSourceSyntax,
-  validateRegexpStructure,
-} from './regexpStructure';
+} from './regexpTokens';
 import { type Frame, rt, UnsupportedFeatureError } from './runtime';
-import { codePointCharacters, isAsciiText } from './unicodeText';
+import { isAsciiText } from './unicodeText';
 import { arr, asciiString, newHash, realClassOf, str, stringBytes, stringFromBytes, sym, truthy } from './values';
 
 // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby exposes the canonical name with a hyphen and uppercase letters.
@@ -77,567 +62,49 @@ const RUBY_UTF8 = 'UTF-8';
 
 export interface RegexpData {
   source: string;
-  translatedSource: string;
   encoding: 'US-ASCII' | typeof RUBY_UTF8 | 'BINARY (ASCII-8BIT)';
   ignoreCase: boolean;
   multiline: boolean;
   extended: boolean;
-  /** The translated expression; its `lastIndex` is set before each use. */
+  /** The compiled expression; its `lastIndex` is set before each use. */
   js: RegExp;
-  binaryJs?: RegExp;
+  sticky?: RegExp;
   byteViewSafe?: boolean;
-  safeNative: boolean;
-  captureNames?: string[];
-  foldCheck?: { text: string; needed: boolean };
-  captureParity?: boolean;
-  reverseSticky?: RegExp;
-  binaryReverseSticky?: RegExp;
-  context?: vm.Context;
-  binaryContext?: vm.Context;
-  reverseContext?: vm.Context;
-  binaryReverseContext?: vm.Context;
+  /** The name of each capture in group order; empty when the captures are numbered. */
+  captureNames: string[];
 }
 
-const MATCH_SCRIPT = new vm.Script('regexp.exec(input)');
-
-const POSIX_CLASSES: Record<string, string> = {
-  alpha: String.raw`\p{Alphabetic}`,
-  digit: String.raw`\p{Nd}`,
-  alnum: String.raw`\p{Alphabetic}\p{Nd}`,
-  upper: String.raw`\p{Uppercase}`,
-  lower: String.raw`\p{Lowercase}`,
-  space: String.raw`\p{White_Space}`,
-  punct: String.raw`\p{P}\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E`,
-  xdigit: '0-9A-Fa-f',
-  word: String.raw`\p{Alphabetic}\p{M}\p{Nd}\p{Pc}\u200C\u200D`,
-  cntrl: String.raw`\p{Cc}`,
-  print: String.raw`\p{L}\p{M}\p{N}\p{P}\p{S}\p{Cf}\p{Co}\p{Zs}`,
-  graph: String.raw`\p{L}\p{M}\p{N}\p{P}\p{S}\p{Cf}\p{Co}`,
-  blank: String.raw`\p{Zs}\t`,
-};
-
-const ASCII_POSIX_CLASSES: Record<string, string> = {
-  ascii: String.raw`\x00-\x7F`,
-  alpha: 'A-Za-z',
-  digit: '0-9',
-  alnum: 'A-Za-z0-9',
-  upper: 'A-Z',
-  lower: 'a-z',
-  space: String.raw` \t\n\v\f\r`,
-  punct: String.raw`\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E`,
-  xdigit: '0-9A-Fa-f',
-  word: 'A-Za-z0-9_',
-  cntrl: String.raw`\x00-\x1F\x7F`,
-  print: String.raw`\x20-\x7E`,
-  graph: String.raw`\x21-\x7E`,
-  blank: String.raw` \t`,
-};
-
-const UNICODE_BOUNDARY_WORD = String.raw`${POSIX_CLASSES.word}\u00B2\u00B3\u00B9\u00BC-\u00BE`;
-
-const PROPERTY_NAMES: Record<string, string> = {
-  hiragana: 'Script=Hiragana',
-  katakana: 'Script=Katakana',
-  han: 'Script=Han',
-  latin: 'Script=Latin',
-  greek: 'Script=Greek',
-  cyrillic: 'Script=Cyrillic',
-  alpha: 'Alphabetic',
-  digit: 'Nd',
-  upper: 'Uppercase',
-  lower: 'Lowercase',
-  space: 'White_Space',
-  word: 'Word',
-  punct: 'P',
-};
-
-interface RegexpOptions {
-  ignoreCase?: boolean;
-  multiline?: boolean;
-  extended?: boolean;
-  sourceBinary?: boolean;
-  fixedEncoding?: boolean;
-}
-
-const SYNTAX = String.raw`^$\.*+?()[]{}|/-`;
-
-function unicodeRegexpEscape(source: string): { points: string[]; length: number } | undefined {
-  const braced = /^\{[ \t\n\r\v\f]*([0-9a-fA-F]{1,6}(?:[ \t\n\r\v\f]+[0-9a-fA-F]{1,6})*)[ \t\n\r\v\f]*\}/.exec(source);
-  if (braced) {
-    const points = braced[1].split(/[ \t\n\r\v\f]+/);
-    if (
-      points.some((point) => {
-        const value = Number.parseInt(point, 16);
-        return value > 0x10_ff_ff || (value >= 0xd8_00 && value <= 0xdf_ff);
-      })
-    )
-      throw new SyntaxError('invalid Unicode codepoint');
-    return { points, length: braced[0].length };
-  }
-  const fixed = /^[0-9a-fA-F]{4}/.exec(source);
-  if (!fixed) return undefined;
-  const value = Number.parseInt(fixed[0], 16);
-  if (value >= 0xd8_00 && value <= 0xdf_ff) throw new SyntaxError('invalid Unicode codepoint');
-  return { points: [fixed[0]], length: fixed[0].length };
-}
-
-/** Translates a Ruby (Onigmo) expression into JavaScript's syntax, rejecting what has no counterpart. */
-export function translate(
-  source: string,
-  extended: boolean,
-  multiline = false,
-  dynamic = false,
-  ascii = false,
-  ignoreCase = false
-): string {
-  const characterMode = regexpHasCharacterMode(source, extended);
-  const literalPosix = regexpHasLiteralPosixBracket(source, extended);
-  source = regexpLexicalSource(source, extended);
-  validateRegexpSourceSyntax(source, false, ascii);
-  const numericReferences = regexpNumericEscapes(source);
-  if (characterMode) throw unsupportedSyntax('文字モード');
-  if (literalPosix) throw unsupportedSyntax('曖昧な POSIX 文字クラス');
-  const classes = ascii ? ASCII_POSIX_CLASSES : POSIX_CLASSES;
-  for (const name of regexpCaptureNames(source))
-    if (!/^[\p{ID_Start}_][\p{ID_Continue}_]*$/u.test(name)) throw unsupportedSyntax('特殊なキャプチャ名');
-  let out = '';
-  let inClass = 0;
-  let classStart = 0;
-  let classAlternatives: string[] = [];
-  let atomStart = 0;
-  const groupStarts: number[] = [];
-  const dotallStack: boolean[] = [];
-  const casefoldStack: boolean[] = [];
-  let dotall = multiline;
-  let casefold = ignoreCase;
-  const namedCaptures = regexpCaptureNames(source).length > 0;
-  for (let index = 0; index < source.length; index++) {
-    const char = source[index];
-    if (char === '\\') {
-      if (index === source.length - 1) throw new SyntaxError('trailing regexp escape');
-      if (inClass === 0) atomStart = out.length;
-      const numeric = numericReferences.get(index);
-      const reference =
-        numeric?.kind === 'character' && !ascii
-          ? { ...numeric, ...decodeRegexpByteEscape(source, index, numeric) }
-          : numeric;
-      if (reference) {
-        out += reference.kind === 'reference' ? `\\${reference.value}` : `\\u{${reference.value.toString(16)}}`;
-        index += reference.length - 1;
-        continue;
-      }
-      const next = source[++index] ?? '\\';
-      const byteEscape =
-        next === 'x' ||
-        (inClass > 0 && /^[0-7]$/.test(next)) ||
-        next === '0' ||
-        (/^[1-7]$/.test(next) && /^[0-7]/.test(source.slice(index + 1)))
-          ? regexpByteEscape(source, index - 1)
-          : undefined;
-      if (byteEscape) {
-        const decoded = ascii ? byteEscape : decodeRegexpByteEscape(source, index - 1, byteEscape);
-        out += `\\u{${decoded.value.toString(16)}}`;
-        index += decoded.length - 2;
-        continue;
-      }
-      if (inClass > 0 && /^[89]$/.test(next)) {
-        out += next;
-        continue;
-      }
-      if (next === 'u') {
-        const escape = unicodeRegexpEscape(source.slice(index + 1));
-        if (escape) {
-          for (const [position, point] of escape.points.entries()) {
-            if (inClass === 0 && position === escape.points.length - 1) atomStart = out.length;
-            out += `\\u{${point}}`;
-          }
-          index += escape.length;
-          continue;
-        }
-      }
-      if (next === 'c' && /^[A-Za-z]/.test(source[index + 1] ?? '')) {
-        out += `\\x${(source[index + 1].toUpperCase().codePointAt(0)! & 31).toString(16).padStart(2, '0')}`;
-        index++;
-        continue;
-      }
-      out += translateEscape(
-        next,
-        source,
-        index,
-        inClass > 0,
-        (count) => {
-          index += count;
-        },
-        (body, negate = true, noCasefold = false) => {
-          const atom = noCasefold ? `(?-i:[${body}])` : `[${body}]`;
-          classAlternatives.push(negate ? `(?:(?!${atom})[\\s\\S])` : atom);
-        },
-        classes,
-        casefold
-      );
-      continue;
-    }
-    if (char === '[') {
-      const posix = /^\[:(\^?)(\w+):\]/.exec(source.slice(index));
-      if (inClass > 0 && posix) {
-        const body = classes[posix[2]];
-        if (!body) throw unsupportedSyntax(`[:${posix[2]}:]`);
-        if (posix[1]) {
-          if (casefold && (posix[2] === 'lower' || posix[2] === 'upper'))
-            out += classes === ASCII_POSIX_CLASSES ? String.raw`\x00-\xFF` : String.raw`\s\S`;
-          else classAlternatives.push(`(?:(?![${body}])[\\s\\S])`);
-        } else out += body;
-        index += posix[0].length - 1;
-        continue;
-      }
-      if (inClass > 0) {
-        throw unsupportedSyntax('入れ子の文字クラス');
-      }
-      atomStart = out.length;
-      classStart = out.length;
-      classAlternatives = [];
-      inClass++;
-      out += char;
-      continue;
-    }
-    if (char === ']' && inClass > 0) {
-      if (out.length === classStart + 1 && classAlternatives.length === 0) {
-        if (dynamic && source.includes(']', index + 1)) {
-          out += String.raw`\]`;
-          continue;
-        }
-        throw new SyntaxError('empty char-class');
-      }
-      if (out.slice(classStart + 1) === '^' && classAlternatives.length === 0) {
-        out += String.raw`\]`;
-        continue;
-      }
-      inClass--;
-      if (classAlternatives.length > 0) {
-        const regularBody = out.slice(classStart + 1);
-        const outerNegated = regularBody.startsWith('^');
-        const literalBody = outerNegated ? regularBody.slice(1) : regularBody;
-        const alternatives = [...(literalBody ? [`[${literalBody}]`] : []), ...classAlternatives];
-        const union = alternatives.length === 1 ? alternatives[0] : `(?:${alternatives.join('|')})`;
-        out = out.slice(0, classStart) + (outerNegated ? `(?:(?!(?:${union}))[\\s\\S])` : union);
-      } else out += char;
-      continue;
-    }
-    if (inClass > 0 && char === '&' && source[index + 1] === '&') throw unsupportedSyntax('文字クラスの積集合（&&）');
-    if (inClass === 0 && char === '(' && source[index + 1] === '?') {
-      const rest = source.slice(index + 2);
-      if (rest.startsWith('>')) throw unsupportedSyntax('アトミックグループ（(?>)）');
-      if (rest.startsWith('~')) throw unsupportedSyntax('不在演算子（(?~...)）');
-      const scoped = /^([imx]*)(?:-([imx]*))?:/.exec(rest);
-      if (scoped) {
-        const enabled = scoped[1];
-        const disabled = scoped[2] ?? '';
-        const on = enabled.replaceAll('m', 's');
-        const off = disabled.replaceAll('m', 's');
-        groupStarts.push(out.length);
-        dotallStack.push(dotall);
-        casefoldStack.push(casefold);
-        if (enabled.includes('m')) dotall = true;
-        if (disabled.includes('m')) dotall = false;
-        if (enabled.includes('i')) casefold = true;
-        if (disabled.includes('i')) casefold = false;
-        out += on || off ? `(?${on}${off ? `-${off}` : ''}:` : '(?:';
-        index += scoped[0].length + 1;
-        continue;
-      }
-      if (/^[imx-]+[:)]/.test(rest)) throw unsupportedSyntax('中のオプションの指定（(?i) など）');
-    }
-    if (inClass === 0 && char === '(' && source[index + 1] !== '?' && namedCaptures) {
-      groupStarts.push(out.length);
-      dotallStack.push(dotall);
-      casefoldStack.push(casefold);
-      out += '(?:';
-      continue;
-    }
-    if (inClass === 0 && char === '(') {
-      groupStarts.push(out.length);
-      dotallStack.push(dotall);
-      casefoldStack.push(casefold);
-    }
-    if (inClass === 0 && char === ')') {
-      atomStart = groupStarts.pop() ?? out.length;
-      dotall = dotallStack.pop() ?? multiline;
-      casefold = casefoldStack.pop() ?? ignoreCase;
-    }
-    if (inClass === 0 && char === '{') {
-      const interval = /^\{(?:\d+(?:,\d*)?|,\d+)\}/.exec(source.slice(index));
-      if (interval) {
-        const reluctant = interval[0].includes(',') && source[index + interval[0].length] === '?';
-        const quantified = out.slice(atomStart) + interval[0].replace('{,', '{0,') + (reluctant ? '?' : '');
-        const length = interval[0].length + (reluctant ? 1 : 0);
-        const next = source[index + length];
-        const repeated = next !== undefined && '*+?{'.includes(next);
-        out = `${out.slice(0, atomStart)}${repeated ? `(?:${quantified})` : quantified}`;
-        index += length - 1;
-        continue;
-      }
-    }
-    if (inClass === 0 && (char === '{' || char === '}' || char === ']')) {
-      out += `\\${char}`;
-      continue;
-    }
-    if (inClass === 0 && char === '.') {
-      atomStart = out.length;
-      out += dotall ? String.raw`[\s\S]` : String.raw`[^\n]`;
-      continue;
-    }
-    if (inClass === 0 && char === '^') {
-      out += String.raw`(?:(?<![\s\S])|(?<=\n)(?=[\s\S]))`;
-      continue;
-    }
-    if (inClass === 0 && char === '$') {
-      out += String.raw`(?![^\n])`;
-      continue;
-    }
-    if (inClass === 0 && !'*+?)}|'.includes(char)) {
-      atomStart = out.length;
-    }
-    if (inClass === 0 && (source.codePointAt(index) ?? 0) > 0xff_ff) {
-      out += source.slice(index, index + 2);
-      index++;
-      continue;
-    }
-    out += char;
-  }
-  validateRegexpStructure(out);
-  return out;
-}
-
-// code-gauge-allow functionParameterCount -- The call boundary keeps receiver, positional/keyword arguments, block and evaluation context explicit.
-function translateEscape(
-  next: string,
-  source: string,
-  index: number,
-  inClass: boolean,
-  skip: (count: number) => void,
-  addNegatedClass: (body: string, negate?: boolean, noCasefold?: boolean) => void,
-  classes: Record<string, string>,
-  casefold: boolean
-): string {
-  if (inClass && 'AzZR'.includes(next)) return next;
-  switch (next) {
-    case 'A': {
-      return String.raw`(?<![\s\S])`;
-    }
-    case 'z': {
-      return String.raw`(?![\s\S])`;
-    }
-    case 'Z': {
-      return String.raw`(?=\n?(?![\s\S]))`;
-    }
-    case 'h': {
-      return inClass ? '0-9a-fA-F' : '[0-9a-fA-F]';
-    }
-    case 'H': {
-      if (inClass) {
-        addNegatedClass('0-9a-fA-F');
-        return '';
-      }
-      return '[^0-9a-fA-F]';
-    }
-    case 'w': {
-      if (inClass && casefold) {
-        addNegatedClass('A-Za-z0-9_', false, true);
-        return '';
-      }
-      return inClass ? 'A-Za-z0-9_' : casefold ? '(?-i:[A-Za-z0-9_])' : '[A-Za-z0-9_]';
-    }
-    case 'W': {
-      if (inClass && casefold) {
-        addNegatedClass('A-Za-z0-9_', true, true);
-        return '';
-      }
-      if (inClass) {
-        addNegatedClass('A-Za-z0-9_');
-        return '';
-      }
-      return casefold ? String.raw`(?:(?!(?-i:[A-Za-z0-9_]))[\s\S])` : '[^A-Za-z0-9_]';
-    }
-    case 'G': {
-      throw unsupportedSyntax(String.raw`\G`);
-    }
-    case 'b':
-    case 'B': {
-      if (inClass) {
-        if (next === 'b') return String.raw`\b`;
-        throw unsupportedClassEscape(String.raw`\B`);
-      }
-      const word = `[${classes === ASCII_POSIX_CLASSES ? classes.word : UNICODE_BOUNDARY_WORD}]`;
-      return next === 'b'
-        ? `(?:(?<=${word})(?!${word})|(?<!${word})(?=${word}))`
-        : `(?:(?<=${word})(?=${word})|(?<!${word})(?!${word}))`;
-    }
-    case 'R': {
-      return classes === ASCII_POSIX_CLASSES
-        ? String.raw`(?:\r\n|\r(?!\n)|[\n\v\f])`
-        : String.raw`(?:\r\n|\r(?!\n)|[\n\v\f\u0085  ])`;
-    }
-    case 'e': {
-      return String.raw`\x1B`;
-    }
-    case 'a': {
-      return String.raw`\x07`;
-    }
-    case 's': {
-      return inClass ? String.raw` \t\r\n\f\v` : String.raw`[ \t\r\n\f\v]`;
-    }
-    case 'S': {
-      if (inClass) {
-        addNegatedClass(String.raw` \t\r\n\f\v`);
-        return '';
-      }
-      return String.raw`[^ \t\r\n\f\v]`;
-    }
-    case 'p':
-    case 'P': {
-      const property = /^\{(\^?)([^}]+)\}/.exec(source.slice(index + 1));
-      if (!property) return `\\${next}`;
-      const rawName = property[2];
-      const key = slug(rawName);
-      skip(property[0].length);
-      const negated = (next === 'P') !== (property[1] === '^');
-      const body =
-        classes !== ASCII_POSIX_CLASSES && (key === 'punct' || key === 'upper' || key === 'lower')
-          ? undefined
-          : classes[key];
-      if (classes === ASCII_POSIX_CLASSES && body === undefined)
-        throw new RegexpEncodingError(`invalid character property name {${rawName}}`);
-      if (body !== undefined) {
-        if (inClass && negated) {
-          if (classes === ASCII_POSIX_CLASSES && casefold && (key === 'lower' || key === 'upper'))
-            return String.raw`\x00-\xFF`;
-          addNegatedClass(body);
-          return '';
-        }
-        return inClass ? body : `[${negated ? '^' : ''}${body}]`;
-      }
-      let name = PROPERTY_NAMES[key] ?? OnigUnicodePropertyMap.get(key) ?? rawName;
-      try {
-        new RegExp(`\\p{${name}}`, 'u');
-      } catch {
-        try {
-          new RegExp(`\\p{Script=${name}}`, 'u');
-          name = `Script=${name}`;
-        } catch {
-          throw unsupportedSyntax(`Unicode プロパティ ${rawName}`);
-        }
-      }
-      if (negated && !inClass) return `(?:(?!\\p{${name}})[\\s\\S])`;
-      return `\\${negated ? 'P' : 'p'}{${name}}`;
-    }
-    case 'k': {
-      if (inClass || !"<'".includes(source[index + 1] ?? '\0')) throw unsupportedSyntax(String.raw`括弧を伴わない\k`);
-      if (source[index + 1] === "'") throw unsupportedSyntax('引用符で囲んだ名前の後方参照');
-      if (/^<\d+>/.test(source.slice(index + 1))) throw unsupportedSyntax('番号付き後方参照');
-      return String.raw`\k`;
-    }
-    default: {
-      if (/[dDwWsSbBnrtfv0-9xuc]/.test(next)) return `\\${next}`;
-      if (/[A-Za-z0-9]/.test(next)) throw unsupportedSyntax(`\\${next}`);
-      return SYNTAX.includes(next) && (next !== '-' || inClass) ? `\\${next}` : next;
-    }
-  }
-}
-
-function unsupportedSyntax(feature: string): unknown {
-  return new UnsupportedFeatureError(`正規表現の${feature}`);
-}
-
-function unsupportedClassEscape(escape: string): unknown {
-  return unsupportedSyntax(`文字クラス内の${escape}`);
-}
-
-// code-gauge-allow functionCognitiveComplexity -- Encoding checks, syntax diagnostics, and host compilation preserve distinct Ruby errors.
 export function makeRegexp(source: string, options: RegexpOptions): RObject {
-  const display = `/${source}/${regexpSuffix(options)}`;
   rt().spend(Math.ceil(source.length / 64));
-  if (((/\\+$/.exec(source)?.[0].length ?? 0) & 1) === 1)
-    throw rubyError(rt().c.RegexpError, `too short escape sequence: ${display}`);
-  if (regexpCaptureNames(source, options.extended).length > 0 && regexpHasNumberedBackref(source, options.extended))
-    throw rubyError(rt().c.RegexpError, `numbered backref/call is not allowed. (use name): ${display}`);
-  const regexp = new RObject(rt().c.Regexp);
-  let translated: string;
-  let encoding: RegexpData['encoding'];
+  const extended = options.extended ?? false;
+  let js: RegExp;
   try {
-    encoding =
+    js = compileRegexp(source, options);
+  } catch (error) {
+    if (error instanceof RegexpSourceError)
+      throw rubyError(rt().c.RegexpError, `${error.message}: /${source}/${regexpSuffix(options)}`);
+    throw error;
+  }
+  const regexp = new RObject(rt().c.Regexp);
+  const data: RegexpData = {
+    source,
+    encoding:
       options.fixedEncoding ||
       !isAsciiText(source) ||
-      hasNonAsciiRegexpEscape(source, options.extended ?? false) ||
-      hasRegexpProperty(source, options.extended ?? false)
+      hasNonAsciiRegexpEscape(source, extended) ||
+      hasRegexpProperty(source, extended)
         ? options.sourceBinary
           ? 'BINARY (ASCII-8BIT)'
           : RUBY_UTF8
-        : 'US-ASCII';
-    translated = translate(
-      source,
-      options.extended ?? false,
-      options.multiline ?? false,
-      true,
-      encoding === 'BINARY (ASCII-8BIT)',
-      options.ignoreCase
-    );
-  } catch (error) {
-    if (error instanceof SyntaxError && error.message === 'invalid pattern in look-behind')
-      throw rubyError(rt().c.RegexpError, `${error.message}: ${display}`);
-    if (error instanceof RegexpEncodingError) throw rubyError(rt().c.RegexpError, `${error.message}: ${display}`);
-    if (error instanceof SyntaxError)
-      throw rubyError(
-        rt().c.RegexpError,
-        `${error.message === 'empty char-class' ? error.message : regexpSyntaxReason(source, options.extended)}: ${display}`
-      );
-    throw error;
-  }
-  const js = compileMatchingRegexp(translated, `dgmu${options.ignoreCase ? 'i' : ''}${options.multiline ? 's' : ''}`);
-  const data: RegexpData = {
-    source,
-    translatedSource: translated,
-    encoding,
+        : 'US-ASCII',
     ignoreCase: options.ignoreCase ?? false,
     multiline: options.multiline ?? false,
-    extended: options.extended ?? false,
+    extended,
     js,
-    safeNative: isLinearHostRegexp(translated),
+    captureNames: regexpCaptureNames(source, extended),
   };
   regexp.data = data;
   return regexp;
-}
-
-function compileMatchingRegexp(source: string, flags: string): RegExp {
-  return compileHostRegexp(String.raw`(?=[\s\S]|$)(?:${source})`, flags);
-}
-
-function hasNonAsciiRegexpEscape(source: string, extended: boolean): boolean {
-  source = regexpLexicalSource(source, extended);
-  let inClass = false;
-  for (let index = 0; index < source.length; index++) {
-    const posixLength = inClass ? (/^\[:\^?\w+:\]/.exec(source.slice(index))?.[0].length ?? 0) : 0;
-    if (posixLength > 0) {
-      index += posixLength - 1;
-      continue;
-    }
-    if (source[index] === '[') inClass = true;
-    if (source[index] === ']') inClass = false;
-
-    if (source[index] !== '\\') continue;
-    if (nonAsciiRegexpEscapeAt(source, index)) return true;
-    index++;
-  }
-  return false;
-}
-
-function nonAsciiRegexpEscapeAt(source: string, index: number): boolean {
-  const escape = source[index + 1];
-  if (escape === 'u') {
-    const unicode = unicodeRegexpEscape(source.slice(index + 2));
-    return unicode?.points.some((point) => Number.parseInt(point, 16) > 127) ?? false;
-  }
-  if ((escape === 'p' || escape === 'P') && /^\{\^?\w+\}/.test(source.slice(index + 2))) return true;
-  return (regexpByteEscape(source, index)?.value ?? 0) > 127;
 }
 
 export function normalizeSlashLiteralSource(source: string): string {
@@ -669,7 +136,6 @@ export interface MatchState {
 }
 
 // code-gauge-allow functionParameterCount -- Search callers select shared subject state, validation and anchoring without rebuilding snapshots.
-// code-gauge-allow functionCognitiveComplexity -- Match execution retains encoding, bounded forward/reverse searches and numbered/named capture state.
 export function execAt(
   regexp: RObject,
   text: string,
@@ -682,28 +148,17 @@ export function execAt(
   if (start < 0 || start > charIndex(text, text.length)) return undefined;
   const data = dataOf(regexp);
   if (source && !validated) validateRegexpSubject(regexp, source);
-  const binaryMatch = source?.binary === true && data.encoding === 'US-ASCII';
-  const js = regexpForMatch(data, source, anchored);
+  const js = anchored ? (data.sticky ??= stickyRegexp(data.js)) : data.js;
   rt().spend();
   const startUnit = unitIndex(text, start);
   js.lastIndex = startUnit;
-  const directWork = Math.max(1, data.translatedSource.length) * Math.max(1, text.length - startUnit);
-  const result =
-    data.safeNative && directWork <= LIMITS.maxOperations
-      ? js.exec(text)
-      : execWithinBudget(data, js, text, binaryMatch, anchored);
-  const work =
-    anchored && data.safeNative
-      ? Math.max(1, result ? (result.indices?.[0]?.[1] ?? startUnit) - startUnit : 1)
-      : (result?.index ?? text.length) - startUnit;
-  rt().spend(Math.ceil(work / 64));
-  assertHostMatchParity(data, text, start, result, { binary: source?.binary === true, anchored });
+  const result = js.exec(text);
+  rt().spend(anchored ? 1 : Math.ceil(((result?.index ?? text.length) - startUnit) / 64));
   if (!result?.indices) return undefined;
   rt().chargeSlots(result.indices.length * 3);
   const names: string[] = [];
   const namedGroups: Record<string, number> = Object.create(null) as Record<string, number>;
-  const nameOrder = (data.captureNames ??= hostRegexpCaptureNames(data.translatedSource));
-  for (const [position, name] of nameOrder.entries()) {
+  for (const [position, name] of data.captureNames.entries()) {
     if (!(name in namedGroups)) names.push(name);
     if (!(name in namedGroups) || result.indices[position + 1] !== undefined) namedGroups[name] = position + 1;
   }
@@ -715,67 +170,6 @@ export function execAt(
     namedGroups,
     regexp,
   };
-}
-
-function assertHostMatchParity(
-  data: RegexpData,
-  text: string,
-  start: number,
-  result: RegExpExecArray | null,
-  options: { binary: boolean; anchored: boolean }
-): void {
-  if (
-    !options.binary &&
-    (data.ignoreCase || /\(\?[ims]*i/.test(data.translatedSource)) &&
-    data.foldCheck?.text !== text
-  )
-    data.foldCheck = { text, needed: regexpNeedsCasefoldParity(data.translatedSource, text) };
-  const captureParity = (data.captureParity ??= requiresNativeCaptureParity(data.translatedSource));
-  const feature = captureParity ? '正規表現の繰り返し・後読みキャプチャ' : undefined;
-  if (captureParity && options.binary && /\P{ASCII}/u.test(text))
-    throw new UnsupportedFeatureError('正規表現の繰り返し・後読みキャプチャ');
-  if (captureParity || (!options.binary && data.foldCheck?.text === text && data.foldCheck.needed))
-    assertCasefoldParity(data, text, start, result, options.anchored, feature);
-}
-
-function execWithinBudget(
-  data: RegexpData,
-  js: RegExp,
-  text: string,
-  binaryMatch: boolean,
-  anchored: boolean
-): RegExpExecArray | null {
-  const remaining = rt().budget.remainingMilliseconds;
-  if (remaining === 0) throw new ExecutionLimitError('time');
-  const context = anchored
-    ? binaryMatch
-      ? (data.binaryReverseContext ??= vm.createContext({ regexp: js, input: text }))
-      : (data.reverseContext ??= vm.createContext({ regexp: js, input: text }))
-    : binaryMatch
-      ? (data.binaryContext ??= vm.createContext({ regexp: js, input: text }))
-      : (data.context ??= vm.createContext({ regexp: js, input: text }));
-  context.input = text;
-  try {
-    return MATCH_SCRIPT.runInContext(context, { timeout: remaining }) as RegExpExecArray | null;
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT')
-      throw new ExecutionLimitError('time');
-    throw error;
-  }
-}
-
-function regexpForMatch(data: RegexpData, source?: RString, anchored = false): RegExp {
-  const binary = source?.binary && data.encoding === 'US-ASCII';
-  const base = binary
-    ? (data.binaryJs ??= compileMatchingRegexp(
-        translate(data.source, data.extended, data.multiline, true, true, data.ignoreCase),
-        data.js.flags
-      ))
-    : data.js;
-  if (!anchored) return base;
-  return binary
-    ? (data.binaryReverseSticky ??= compileHostRegexp(base.source, base.flags.replace('g', 'y')))
-    : (data.reverseSticky ??= compileHostRegexp(base.source, base.flags.replace('g', 'y')));
 }
 
 export function validateRegexpByteView(regexp: RObject): void {
@@ -971,78 +365,6 @@ function* optionsOf(value: Value | undefined): Gen<RegexpOptions> {
   return { ignoreCase: true, multiline: false, extended: false };
 }
 
-// code-gauge-allow functionNcss -- The ordered cases for Ruby regexp encoding and match state share state; splitting them solely for the metric would hide their sequencing.
-function invalidPatternMessage(pattern: RString, options: RegexpOptions): RString {
-  const source = stringBytes(pattern);
-  const result = new Uint8Array(LIMITS.maxStringLength);
-  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
-  let length = 0;
-  const appendByte = (byte: number): void => {
-    rt().checkStringLength(length + 1);
-    result[length++] = byte;
-  };
-  const appendAscii = (text: string): void => {
-    for (const char of text) appendByte(char.codePointAt(0) ?? 0);
-  };
-  appendAscii('invalid multibyte character: /');
-  rt().spend(Math.ceil(source.length / 256));
-  for (let index = 0; index < source.length;) {
-    const first = source[index];
-    if (first === 92) {
-      appendByte(first);
-      index++;
-      if (source[index] === 92) {
-        appendByte(92);
-        index++;
-        continue;
-      }
-      if ((source[index] ?? 0) < 0x80) continue;
-      const escaped = source[index];
-      let count = 1;
-      if (!pattern.usAscii) {
-        const width = escaped < 0xe0 ? 2 : escaped < 0xf0 ? 3 : 4;
-        if (index + width <= source.length)
-          try {
-            decoder.decode(source.subarray(index, index + width));
-            count = width;
-          } catch {}
-      }
-      for (let offset = 0; offset < count; offset++) appendByte(source[index + offset]);
-      index += count;
-      continue;
-    }
-    if (first < 0x80) {
-      appendByte(first);
-      index++;
-      continue;
-    }
-    if (!pattern.usAscii) {
-      const width = first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
-      try {
-        const character = decoder.decode(source.subarray(index, index + width));
-        const point = character.codePointAt(0);
-        if (point !== undefined) {
-          appendAscii(
-            point <= 0xff_ff
-              ? `\\u${point.toString(16).toUpperCase().padStart(4, '0')}`
-              : `\\u{${point.toString(16).toUpperCase()}}`
-          );
-          index += width;
-          continue;
-        }
-      } catch {}
-    }
-    appendAscii(`\\x${first.toString(16).toUpperCase().padStart(2, '0')}`);
-    index++;
-  }
-  appendAscii(`/${regexpSuffix(options)}`);
-  return stringFromBytes(result.subarray(0, length), false, pattern.usAscii);
-}
-
-function regexpSuffix(options: RegexpOptions): string {
-  return `${options.multiline ? 'm' : ''}${options.ignoreCase ? 'i' : ''}${options.extended ? 'x' : ''}`;
-}
-
 sdef(
   'Regexp',
   ['new', 'compile'],
@@ -1236,14 +558,6 @@ function escapedRegexpSource(source: string): string {
   });
 }
 
-function literalRegexpText(regexp: RObject): string | undefined {
-  const data = dataOf(regexp);
-  if (data.ignoreCase || data.extended) return undefined;
-  const syntax = String.raw`\\^$.*+?()[]{}|`;
-  if (data.source.length === 2 && !syntax.includes(data.source[0]) && data.source[1] === '+') return data.source[0];
-  return codePointCharacters(data.source).some((char) => syntax.includes(char)) ? undefined : data.source;
-}
-
 export function regexpValueDisplayOf(value: RObject): string | undefined {
   if (value.cls.isSubclassOf(rt().c.Regexp)) return regexpInspect(value);
   if (value.cls === rt().c.MatchData) return matchDataInspect(value);
@@ -1290,7 +604,7 @@ def('Regexp', 'hash', 0, (self: RObject) =>
   )
 );
 def('Regexp', 'names', 0, (self: RObject) =>
-  arr([...new Set(hostRegexpCaptureNames(dataOf(self).js.source))].map((name) => captureNameString(self, name)))
+  arr([...new Set(dataOf(self).captureNames)].map((name) => captureNameString(self, name)))
 );
 
 function captureNameString(regexp: RObject, name: string): RString {
@@ -1558,8 +872,7 @@ function matchDataInspect(match: RObject): string {
   const parts = state.groups.map((range, group) => {
     const shown = range ? inspectStringEncoding(groupText(state, group) as RString) : 'nil';
     if (group === 0) return shown;
-    const data = dataOf(state.regexp);
-    const name = (data.captureNames ??= hostRegexpCaptureNames(data.translatedSource))[group - 1];
+    const name = dataOf(state.regexp).captureNames[group - 1];
     return `${name ?? group}:${shown}`;
   });
   return `#<MatchData ${parts.join(' ')}>`;
@@ -1585,6 +898,8 @@ def('MatchData', 'deconstruct_keys', 1, function* (self: RObject, [keys]) {
 // String's regular-expression forms ------------------------------------------------------------------------------------
 
 /** Expands capture references and match-context escapes in a replacement string. */
+// code-gauge-allow functionCognitiveComplexity -- The literal buffer and both positions advance together across the escapes of one replacement.
+// code-gauge-allow functionNcss -- The literal buffer and both positions advance together across the escapes of one replacement.
 function expand(replacement: RString, state: MatchState, limit: number): RString {
   const replacementBytes = stringBytes(replacement);
   const output = new EncodedStringBuilder(limit);
@@ -1612,53 +927,9 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
       appendLiteral(bytePosition, byteEnd);
       bytePosition = byteEnd;
     }
-    const [, code, name, closing] = match;
-    let part: RString;
-    if (name !== undefined) {
-      if (closing === undefined)
-        throw rubyError(
-          rt().c.RuntimeError,
-          stringFromBytes(new TextEncoder().encode('invalid group name reference format'), true)
-        );
-      const group = namedCaptureGroup(
-        state,
-        sliceStringEncoding(replacement, match.index + 3, match.index + 3 + name.length)
-      );
-      const value = groupText(state, group);
-      part = value === NIL ? str('') : (value as RString);
-    } else {
-      switch (code) {
-        case '&': {
-          part = groupText(state, 0) as RString;
-          break;
-        }
-        case '+': {
-          const group = state.groups.findLastIndex((range, index) => index > 0 && range !== undefined);
-          const value = group > 0 ? groupText(state, group) : NIL;
-          part = value === NIL ? str('') : (value as RString);
-          break;
-        }
-        case '\\': {
-          appendLiteral(bytePosition + 1, bytePosition + 2);
-          position = match.index + match[0].length;
-          bytePosition += textByteLengthOf(replacement, match[0]);
-          continue;
-        }
-        case '`': {
-          part = matchPrefix(state);
-          break;
-        }
-        case "'": {
-          part = matchSuffix(state);
-          break;
-        }
-        default: {
-          const value = state.names.length > 0 && code !== '0' ? NIL : groupText(state, Number(code));
-          part = value === NIL ? str('') : (value as RString);
-        }
-      }
-    }
-    if (stringBytes(part).length > 0) {
+    const part = expandedReference(replacement, state, match);
+    if (part === undefined) appendLiteral(bytePosition + 1, bytePosition + 2);
+    else if (stringBytes(part).length > 0) {
       flushLiteral();
       output.append(part);
     }
@@ -1670,6 +941,49 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
   }
   flushLiteral();
   return output.finish();
+}
+
+/** The text that one replacement escape stands for, or `undefined` for an escaped backslash. */
+function expandedReference(replacement: RString, state: MatchState, match: RegExpExecArray): RString | undefined {
+  const [, code, name, closing] = match;
+  if (name !== undefined) {
+    if (closing === undefined)
+      throw rubyError(
+        rt().c.RuntimeError,
+        stringFromBytes(new TextEncoder().encode('invalid group name reference format'), true)
+      );
+    const start = match.index + 3;
+    return capturedText(state, namedCaptureGroup(state, sliceStringEncoding(replacement, start, start + name.length)));
+  }
+  switch (code) {
+    case '&': {
+      return groupText(state, 0) as RString;
+    }
+    case '+': {
+      return capturedText(
+        state,
+        state.groups.findLastIndex((range, index) => index > 0 && range !== undefined)
+      );
+    }
+    case '\\': {
+      return undefined;
+    }
+    case '`': {
+      return matchPrefix(state);
+    }
+    case "'": {
+      return matchSuffix(state);
+    }
+    default: {
+      return state.names.length > 0 && code !== '0' ? str('') : capturedText(state, Number(code));
+    }
+  }
+}
+
+/** A group's text, empty when the group is absent or did not participate. */
+function capturedText(state: MatchState, group: number): RString {
+  const value = group >= 0 ? groupText(state, group) : NIL;
+  return value === NIL ? str('') : (value as RString);
 }
 
 function* substituteRegexp(
@@ -2113,32 +1427,16 @@ for (const [name, last] of [
 function reverseRegexpSearch(regexp: RObject, source: RString, start: number): MatchState | undefined {
   const snapshot = matchSnapshot(source);
   validateRegexpSubject(regexp, source);
-  const literal = literalRegexpText(regexp);
-  if (literal !== undefined) {
-    rt().spend(Math.ceil(source.s.length / 64));
-    const position = source.s.lastIndexOf(literal, unitIndex(source.s, start));
-    return position === -1
-      ? undefined
-      : execAt(regexp, source.s, charIndex(source.s, position), source, snapshot, true);
+  const data = dataOf(regexp);
+  const sticky = (data.sticky ??= stickyRegexp(data.js));
+  // An expression that starts with `\G` matches only where the search starts, which the library expresses as sticky.
+  const first = data.js.sticky ? start : 0;
+  for (let position = start; position >= first; position--) {
+    if ((start - position) % 64 === 0) rt().spend();
+    sticky.lastIndex = unitIndex(source.s, position);
+    if (sticky.test(source.s)) return execAt(regexp, source.s, position, source, snapshot, true, true);
   }
-  if (dataOf(regexp).safeNative) {
-    for (let position = start; position >= 0; position--) {
-      const state = execAt(regexp, source.s, position, source, snapshot, true, true);
-      if (state) return state;
-    }
-    return undefined;
-  }
-  let last: MatchState | undefined;
-  let position = 0;
-  while (position <= start) {
-    const state = execAt(regexp, source.s, position, source, snapshot, true);
-    if (!state) break;
-    const from = charIndex(source.s, state.groups[0]![0]);
-    if (from > start) break;
-    last = state;
-    position = from + 1;
-  }
-  return last;
+  return undefined;
 }
 
 function* asGen(value: Gen | Value): Gen {
