@@ -8,15 +8,17 @@ import { MAX_ACTIVE_DURATION_MS_AFTER_LAST_EVENT, MIN_INTERVAL_MS_OF_ACTIVE_EVEN
 import { useAuthContextSelector } from '@/contexts/AuthContext';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import { Button, HStack, Tooltip, VStack } from '@/infrastructures/useClient/chakra';
-import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
-import type { InstantiatedProblem } from '@/problems/instantiateProblem';
+import { getBrowserProblemRunner } from '@/problems/browserProblemRunner';
+import { type FillInBlankVerdict, gradeFillInBlankCode } from '@/problems/fillInBlank/grade';
 import type { CourseId, ProblemId } from '@/problems/problemData';
+import { useInstantiatedProblem } from '@/problems/useInstantiatedProblem';
 import type { OrdinaryJavaProblemData } from '@/types';
 import { isProblemSessionExpired } from '@/utils/problemSessionError';
 
 import type { ProblemSession } from '../../../../../../../../../db/schema';
 import { FillInBlankBody } from './FillInBlankBody';
 import { ProblemPageHeader } from './ProblemPageHeader';
+import { ProblemPreparation } from './ProblemPreparation';
 import { ProblemBody } from './ProblmBody';
 import { ReloadNotice } from './ReloadNotice';
 
@@ -24,8 +26,8 @@ interface Props {
   initialProblemSession: ProblemSession;
   userId: string;
   javaProblem?: OrdinaryJavaProblemData;
-  /** Generated on the server, where the Java interpreter runs. */
-  problem?: InstantiatedProblem;
+  /** The program of a problem other than `javaProblem`, which the session's seed instantiates. */
+  programTemplate?: string;
 }
 
 export const ProblemPageOnClient: React.FC<Props> = (props) => {
@@ -50,7 +52,12 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
   const isAdmin = useAuthContextSelector((c) => c.isAdmin);
 
   const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();
-  const problem = props.javaProblem ?? props.problem;
+  const instantiation = useInstantiatedProblem(
+    props.javaProblem || props.programTemplate === undefined
+      ? undefined
+      : { programTemplate: props.programTemplate, seed: props.initialProblemSession.problemVariablesSeed }
+  );
+  const problem = props.javaProblem ?? (instantiation.status === 'ready' ? instantiation.problem : undefined);
 
   const [problemSession, setProblemSession] = useState(props.initialProblemSession);
 
@@ -88,24 +95,26 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
     [problemSession, createProblemSubmissionMutation, lastActionTimeRef]
   );
 
-  const gradeFillInBlankAnswersMutation = backendTrpcReact.gradeFillInBlankAnswers.useMutation({
+  const createFillInBlankSubmissionMutation = backendTrpcReact.createFillInBlankSubmission.useMutation({
     onError: onSessionError,
   });
-  const gradeCode = useCallback(
-    async (code: string): Promise<FillInBlankVerdict> => {
-      const newProblemSession = await updateProblemSessionMutation.mutateAsync({
-        id: problemSession.id,
-        incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
-      });
-      if (!isCurrentSession.current) return { status: 'ungradable', detail: 'The problem session changed.' };
-      return await gradeFillInBlankAnswersMutation.mutateAsync({
+  const gradeCode = async (code: string): Promise<FillInBlankVerdict> => {
+    if (!problem) throw new Error('No problem to grade');
+    const newProblemSession = await updateProblemSessionMutation.mutateAsync({
+      id: problemSession.id,
+      incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
+    });
+    if (!isCurrentSession.current) return { status: 'ungradable', detail: 'The problem session changed.' };
+    const verdict = await gradeFillInBlankCode(getBrowserProblemRunner(), problem, code);
+    if (verdict.status !== 'ungradable')
+      await createFillInBlankSubmissionMutation.mutateAsync({
         sessionId: problemSession.id,
         code,
         elapsedMilliseconds: newProblemSession.elapsedMilliseconds,
+        isCorrect: verdict.status === 'correct',
       });
-    },
-    [problemSession.id, updateProblemSessionMutation, gradeFillInBlankAnswersMutation, lastActionTimeRef]
-  );
+    return verdict;
+  };
 
   const updateProblemSession = useCallback(
     async (newProblemType: string, newTraceItemIndex: number): Promise<void> => {
@@ -123,7 +132,8 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
     [problemSession.id, updateProblemSessionMutation]
   );
 
-  if (!problem || !matchesRoute(props, params.problemId, problemSession.problemType)) notFound();
+  if (instantiation.status === 'absent' && !props.javaProblem) notFound();
+  if (!matchesRoute(props, params.problemId, problemSession.problemType)) notFound();
 
   if (isSessionExpired) {
     return (
@@ -143,7 +153,7 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
         lectureId={params.lectureId}
         problemId={params.problemId}
         actions={
-          !isJavaEditor && 'traceItems' in problem ? (
+          !isJavaEditor && problem && 'traceItems' in problem ? (
             <HStack spacing={2}>
               <Tooltip
                 label={
@@ -180,7 +190,9 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
         }
       />
 
-      {isJavaEditor ? (
+      {!problem ? (
+        <ProblemPreparation status={instantiation.status === 'failed' ? 'failed' : 'loading'} />
+      ) : isJavaEditor ? (
         <FillInBlankBody
           key={`${problemSession.id}:${problem.displayProgram}`}
           draftContext={{

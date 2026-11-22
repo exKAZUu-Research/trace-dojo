@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
+import { useImmer } from 'use-immer';
 
 import {
   AlertDialog,
@@ -15,9 +16,11 @@ import {
 import { practiceIdToDefinition } from '@/problems/practice/definitions';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import type { RegularExerciseDisplay, RegularExerciseState } from '@/problems/regular/exerciseProblem';
+import { useInstantiatedProblem } from '@/problems/useInstantiatedProblem';
 
 import { BoardEditor, type TurtleGraphicsHandle } from './problems/[problemId]/BoardEditor';
 import { ProblemPageHeader } from './problems/[problemId]/ProblemPageHeader';
+import { ProblemPreparation } from './problems/[problemId]/ProblemPreparation';
 import {
   deriveRegularProblemView,
   RegularProblemPresentation,
@@ -32,6 +35,7 @@ interface SubmitInput {
   requestId: string;
   context: { problemType: 'executionResult' | 'step'; traceItemIndex: number };
   isCorrect: boolean;
+  isLastStep: boolean;
 }
 export interface RegularExerciseTransport {
   submit: (input: SubmitInput) => Promise<RegularExerciseState>;
@@ -71,19 +75,39 @@ const RegularExerciseSession: React.FC<Props> = ({
   const request = useRef<{ context: string; id: string } | undefined>(undefined);
   const editor = useRef<TurtleGraphicsHandle>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const { problem } = display;
+  const [viewing, setViewing] = useImmer<{ contextKey: string; index: number } | undefined>(undefined);
+  const instantiation = useInstantiatedProblem(display);
+  const problem = instantiation.status === 'ready' ? instantiation.problem : undefined;
+  // The editor resets its draft whenever the view's variables change identity.
   const view = useMemo(
-    () => deriveRegularProblemView(problem, display.problemType, display.traceItemIndex),
+    () => problem && deriveRegularProblemView(problem, display.problemType, display.traceItemIndex),
     [problem, display.problemType, display.traceItemIndex]
   );
+  const header = (actions?: React.ReactNode): React.ReactNode => (
+    <ProblemPageHeader
+      courseId={courseId as CourseId}
+      lectureId={lectureId}
+      {...(mode === 'practice'
+        ? { title: practiceIdToDefinition[display.problemId].title }
+        : { problemId: display.problemId as ProblemId })}
+      actions={actions}
+    />
+  );
+  if (!problem || !view)
+    return (
+      <>
+        {header()}
+        <ProblemPreparation status={instantiation.status === 'failed' ? 'failed' : 'loading'} />
+      </>
+    );
+
   const { currentTraceItemIndex: currentIndex, previousTraceItemIndex: previousIndex } = view;
   const contextKey = `${display.sessionId}:${display.problemId}:${display.seed}:${display.problemType}:${currentIndex}`;
   // A viewing position chosen for an earlier step or problem falls back to the current step's previous trace item.
-  const [viewing, setViewing] = useState({ contextKey, index: previousIndex });
-  const viewingIndex = viewing.contextKey === contextKey ? viewing.index : previousIndex;
+  const viewingIndex = viewing?.contextKey === contextKey ? viewing.index : previousIndex;
   const setViewingIndex: React.Dispatch<React.SetStateAction<number>> = (action) =>
     setViewing((prev) => {
-      const index = prev.contextKey === contextKey ? prev.index : previousIndex;
+      const index = prev?.contextKey === contextKey ? prev.index : previousIndex;
       return { contextKey, index: typeof action === 'function' ? action(index) : action };
     });
 
@@ -101,6 +125,7 @@ const RegularExerciseSession: React.FC<Props> = ({
         requestId: request.current.id,
         context: { problemType: display.problemType, traceItemIndex: display.traceItemIndex },
         isCorrect,
+        isLastStep: display.problemType === 'step' && display.traceItemIndex >= problem.traceItems.length - 1,
       });
       request.current = undefined;
       if (!isCorrect) {
@@ -110,7 +135,7 @@ const RegularExerciseSession: React.FC<Props> = ({
         });
         return;
       }
-      setDisplay({ ...result, problem });
+      setDisplay({ ...result, programTemplate: display.programTemplate });
       if (!result.completed) setAlert({ title: '正解', message: '正解です。次のステップに進みます。' });
     } catch {
       setAlert({ title: '提出できませんでした', message: '通信に失敗しました。もう一度提出してください。' });
@@ -122,7 +147,7 @@ const RegularExerciseSession: React.FC<Props> = ({
       const next = await transport.switchToStep({
         sessionId: display.sessionId,
       });
-      setDisplay({ ...next, problem });
+      setDisplay({ ...next, programTemplate: display.programTemplate });
       setSwitchOpen(false);
       setError('');
     } catch {
@@ -143,20 +168,13 @@ const RegularExerciseSession: React.FC<Props> = ({
   };
   return (
     <>
-      <ProblemPageHeader
-        courseId={courseId as CourseId}
-        lectureId={lectureId}
-        {...(mode === 'practice'
-          ? { title: practiceIdToDefinition[display.problemId].title }
-          : { problemId: display.problemId as ProblemId })}
-        actions={
-          display.problemType === 'executionResult' && !display.completed ? (
-            <Button colorScheme="blue" variant="outline" onClick={() => setSwitchOpen(true)}>
-              ステップ実行モードに移る
-            </Button>
-          ) : undefined
-        }
-      />
+      {header(
+        display.problemType === 'executionResult' && !display.completed ? (
+          <Button colorScheme="blue" variant="outline" onClick={() => setSwitchOpen(true)}>
+            ステップ実行モードに移る
+          </Button>
+        ) : undefined
+      )}
       {error && (
         <Text role="alert" color="red.600">
           {error}

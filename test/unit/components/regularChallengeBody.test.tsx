@@ -10,9 +10,14 @@ import {
   type RegularChallengeTransport,
 } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/RegularChallengeBody';
 import { challengeMetadata } from '../../../src/problems/challenge/metadata';
-import { instantiateRegularChallenge } from '../../../src/problems/challenge/regular';
-import { instantiateProblem } from '../../../src/problems/instantiateProblem';
 import type { RegularExerciseDisplay } from '../../../src/problems/regular/exerciseProblem';
+import { getProgramTemplate } from '../../helpers/nodeProblems';
+import { waitForProblemPreparation } from '../../helpers/problemPreparation';
+
+vi.mock('../../../src/problems/browserProblemRunner', async () => {
+  const { nodeRunner } = await import('../../helpers/nodeProblems');
+  return { getBrowserProblemRunner: () => nodeRunner };
+});
 
 const executionDisplay: RegularExerciseDisplay = {
   problemFormat: 'regular',
@@ -22,7 +27,7 @@ const executionDisplay: RegularExerciseDisplay = {
   problemType: 'executionResult',
   traceItemIndex: 0,
   completed: false,
-  problem: instantiateProblem('test3', 'component')!,
+  programTemplate: getProgramTemplate('test3'),
 };
 
 test.each(['executionResult', 'step'] as const)(
@@ -30,7 +35,7 @@ test.each(['executionResult', 'step'] as const)(
   async (problemType) => {
     const user = userEvent.setup();
     const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(executionDisplay);
-    const { container } = renderBody({
+    const { container } = await renderBody({
       submit,
       display: { ...executionDisplay, problemType, traceItemIndex: problemType === 'step' ? 1 : 0 },
     });
@@ -58,18 +63,18 @@ test.each(['executionResult', 'step'] as const)(
   }
 );
 
-test('renders the independent problem title from public metadata', () => {
+test('renders the independent problem title from public metadata', async () => {
   const entry = Object.entries(challengeMetadata).find(([, metadata]) => metadata.problemFormat === 'regular');
   if (!entry) throw new Error('Missing independent regular metadata');
   const [problemId, metadata] = entry;
-  renderBody({ display: { ...executionDisplay, problemId, problem: instantiateRegularChallenge(problemId)! } });
+  await renderBody({ display: { ...executionDisplay, problemId, programTemplate: getProgramTemplate(problemId) } });
   expect(screen.getByRole('heading', { name: metadata.title, level: 1 })).toBeVisible();
 });
 
 test('uses the real editor local grader and sends only verdict with stored context', async () => {
   const user = userEvent.setup();
   const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(executionDisplay);
-  renderBody({ submit });
+  await renderBody({ submit });
 
   const problemCard = getProblemCard();
   expect(problemCard).toHaveTextContent(
@@ -89,6 +94,7 @@ test('uses the real editor local grader and sends only verdict with stored conte
     context: { problemType: 'executionResult', traceItemIndex: 0 },
     requestId: expect.any(String),
     isCorrect: true,
+    isLastStep: false,
   });
   expect(payload).not.toHaveProperty('answers');
   expect(payload).not.toHaveProperty('board');
@@ -99,7 +105,7 @@ test('uses the real editor local grader and sends only verdict with stored conte
 test('Enter activates the focused completion action instead of being taken by the board shortcut', async () => {
   const back = vi.fn();
   const user = userEvent.setup();
-  renderBody({ display: { ...executionDisplay, completed: true }, back });
+  await renderBody({ display: { ...executionDisplay, completed: true }, back });
   await waitFor(() => expect(screen.getByRole('button', { name: '終わる' })).toHaveFocus());
   await user.keyboard('{Enter}');
   expect(back).toHaveBeenCalledTimes(1);
@@ -108,7 +114,7 @@ test('Enter activates the focused completion action instead of being taken by th
 test('does not resubmit on Enter while a result dialog is open', async () => {
   const user = userEvent.setup();
   const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(executionDisplay);
-  renderBody({ submit });
+  await renderBody({ submit });
   const inputs = screen.getAllByRole('textbox');
   for (const [input, value] of inputs.map((input, index) => [input, ['999', '2', '4'][index]] as const)) {
     await user.type(input, value);
@@ -126,7 +132,7 @@ test('keeps an incorrect draft mounted across repeated attempts and never switch
   const user = userEvent.setup();
   const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(executionDisplay);
   const switchToStep = vi.fn();
-  renderBody({ submit, switchToStep });
+  await renderBody({ submit, switchToStep });
   const inputs = screen.getAllByRole('textbox');
   await user.type(inputs[0], '999');
   await user.type(inputs[1], '4');
@@ -153,7 +159,7 @@ test('preserves the draft on switch cancel or failure and resets only after succ
     .fn<RegularChallengeTransport['switchToStep']>()
     .mockRejectedValueOnce(new Error('offline'))
     .mockResolvedValueOnce(stepDisplay);
-  renderBody({ switchToStep });
+  await renderBody({ switchToStep });
   const input = screen.getAllByRole('textbox')[0];
   await user.type(input, 'draft');
 
@@ -178,7 +184,7 @@ test('shows completion actions and delegates Next and lecture Back', async () =>
   const user = userEvent.setup();
   const next = vi.fn(async () => executionDisplay);
   const back = vi.fn();
-  const { container, unmount } = renderBody({ display: { ...executionDisplay, completed: true }, next, back });
+  const { container, unmount } = await renderBody({ display: { ...executionDisplay, completed: true }, next, back });
   expect(screen.getByText(/プログラムを実行した後/)).toBeVisible();
   expect(within(container).getAllByRole('textbox', { hidden: true }).length).toBeGreaterThan(0);
   expect(within(container).getByRole('button', { hidden: true, name: /提出/ })).toBeDisabled();
@@ -199,7 +205,7 @@ test('shows completion actions and delegates Next and lecture Back', async () =>
   expect(screen.getByRole('button', { name: /提出/ })).toBeVisible();
 
   unmount();
-  renderBody({ display: { ...executionDisplay, completed: true }, next, back });
+  await renderBody({ display: { ...executionDisplay, completed: true }, next, back });
   await user.click(screen.getByRole('button', { name: /終わる/ }));
   expect(back).toHaveBeenCalledTimes(1);
 });
@@ -209,13 +215,14 @@ test('locally grades a correct non-final step and resets to the authoritative ne
   const stepOne = { ...executionDisplay, problemType: 'step' as const, traceItemIndex: 1 };
   const stepTwo = { ...stepOne, traceItemIndex: 2 };
   const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(stepTwo);
-  renderBody({ display: stepOne, submit });
+  await renderBody({ display: stepOne, submit });
   await user.type(screen.getByRole('textbox'), '1');
   await user.click(screen.getByRole('button', { name: /提出/ }));
   await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
   expect(submit.mock.calls[0][0]).toMatchObject({
     context: { problemType: 'step', traceItemIndex: 1 },
     isCorrect: true,
+    isLastStep: false,
   });
   await user.click(await screen.findByRole('button', { name: /閉じる|次/ }));
   expect(await screen.findByText(/ステップ実行モード/)).toBeVisible();
@@ -227,7 +234,7 @@ test('locally grades the final step and exposes completion actions', async () =>
   const finalStep = { ...executionDisplay, problemType: 'step' as const, traceItemIndex: 5 };
   const completed = { ...finalStep, completed: true };
   const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(completed);
-  renderBody({ display: finalStep, submit });
+  await renderBody({ display: finalStep, submit });
   const problemCard = getProblemCard();
   expect(problemCard).toHaveTextContent(
     '画面下部にある6行目を実行した後の盤面と変数の一覧表を参考に、8行目を実行した後の盤面と、変数に記録されている値の一覧表を作成し、提出ボタンを押してください。'
@@ -240,6 +247,7 @@ test('locally grades the final step and exposes completion actions', async () =>
   expect(submit.mock.calls[0][0]).toMatchObject({
     context: { problemType: 'step', traceItemIndex: 5 },
     isCorrect: true,
+    isLastStep: true,
   });
   await waitFor(() => expect(screen.getByRole('button', { name: /次の問題/ })).toBeVisible());
   expect(screen.getByRole('button', { name: /終わる/ })).toBeVisible();
@@ -254,7 +262,7 @@ test('deduplicates a pending completion action and keeps its failure recoverable
     .mockImplementationOnce(() => new Promise<RegularExerciseDisplay>((_resolve, reject) => (rejectNext = reject)))
     .mockResolvedValueOnce(executionDisplay);
   const user = userEvent.setup();
-  renderBody({ display: { ...executionDisplay, completed: true }, next });
+  await renderBody({ display: { ...executionDisplay, completed: true }, next });
   const nextButton = await screen.findByRole('button', { name: /次の問題/ });
   await user.dblClick(nextButton);
   expect(next).toHaveBeenCalledTimes(1);
@@ -273,7 +281,7 @@ test('deduplicates synchronous Back and resets the action guard for a later comp
   const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(completedNextDisplay);
   const back = vi.fn();
   const user = userEvent.setup();
-  renderBody({ display: { ...executionDisplay, completed: true }, next, submit, back });
+  await renderBody({ display: { ...executionDisplay, completed: true }, next, submit, back });
 
   await user.click(screen.getByRole('button', { name: '次の問題へ' }));
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
@@ -294,7 +302,7 @@ test('keeps completion actions usable after advancing to an already completed se
     .mockResolvedValueOnce({ ...executionDisplay, sessionId: 18, completed: true })
     .mockResolvedValueOnce({ ...executionDisplay, sessionId: 19 });
   const user = userEvent.setup();
-  renderBody({ display: { ...executionDisplay, completed: true }, next });
+  await renderBody({ display: { ...executionDisplay, completed: true }, next });
 
   await user.click(screen.getByRole('button', { name: '次の問題へ' }));
   await waitFor(() => expect(screen.getByRole('button', { name: '次の問題へ' })).toBeEnabled());
@@ -303,16 +311,16 @@ test('keeps completion actions usable after advancing to an already completed se
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
 });
 
-const renderBody = (
+const renderBody = async (
   overrides: Partial<RegularChallengeTransport> & { display?: RegularExerciseDisplay; back?: () => void }
-): ReturnType<typeof render> => {
+): Promise<ReturnType<typeof render>> => {
   const transport: RegularChallengeTransport = {
     submit: async () => executionDisplay,
     switchToStep: async () => ({ ...executionDisplay, problemType: 'step', traceItemIndex: 1 }),
     next: async () => executionDisplay,
     ...overrides,
   };
-  return render(
+  const rendered = render(
     <ChakraProvider>
       <RegularChallengeBody
         courseId="test"
@@ -323,6 +331,8 @@ const renderBody = (
       />
     </ChakraProvider>
   );
+  await waitForProblemPreparation();
+  return rendered;
 };
 
 const getProblemCard = (): HTMLElement => {

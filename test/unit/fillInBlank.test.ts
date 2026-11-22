@@ -3,37 +3,37 @@ import { describe, expect, test } from 'vitest';
 import { fillBlanks } from '../../src/problems/fillInBlank/blanks';
 import { fillInBlankProblemDefinitions } from '../../src/problems/fillInBlank/definitions';
 import { gradeFillInBlankCode } from '../../src/problems/fillInBlank/grade';
-import type { InstantiatedProblem } from '../../src/problems/instantiateProblem';
-import { instantiateProblem } from '../../src/problems/instantiateProblem';
+import type { InstantiatedProblem } from '../../src/problems/instantiateTemplate';
+import { instantiateProblem, nodeRunner } from '../helpers/nodeProblems';
 
 const catalogIds = Object.keys(fillInBlankProblemDefinitions);
 
 describe('trusted model catalog', () => {
-  test.each(catalogIds)('%s contains blanks and instantiates a complete expected drawing', (id) => {
+  test.each(catalogIds)('%s contains blanks and instantiates a complete expected drawing', async (id) => {
     expect(fillInBlankProblemDefinitions[id as keyof typeof fillInBlankProblemDefinitions]).toContain('@[');
-    const problem = instantiate(id);
+    const problem = await instantiate(id);
     expect(problem.displayProgram).toMatch(/【\d+】/);
     expect(problem.displayProgram).not.toContain('@[');
     expect(problem.finalBoard.split('\n')).toHaveLength(7);
-    expect(instantiate(id)).toMatchObject({ finalBoard: problem.finalBoard, finalTurtles: problem.finalTurtles });
+    expect(await instantiate(id)).toMatchObject({ finalBoard: problem.finalBoard, finalTurtles: problem.finalTurtles });
   });
 
-  test.each(catalogIds)('%s Java model reaches its traced final state', (id) => {
-    const problem = instantiate(id);
-    expect(gradeFillInBlankCode(problem, modelCode(problem))).toEqual({ status: 'correct' });
+  test.each(catalogIds)('%s Java model reaches its traced final state', async (id) => {
+    const problem = await instantiate(id);
+    expect(await gradeFillInBlankCode(nodeRunner, problem, modelCode(problem))).toEqual({ status: 'correct' });
   });
 
   test.each([
     ['fillInBlank2', 'alternate-model-seed'],
     ['doubleLoop1Blank', 'second-random-seed'],
     ['while1Blank', 'third-random-seed'],
-  ])('%s model remains consistent at seed %s', (id, seed) => {
-    const problem = instantiate(id, seed);
-    expect(gradeFillInBlankCode(problem, modelCode(problem))).toEqual({ status: 'correct' });
+  ])('%s model remains consistent at seed %s', async (id, seed) => {
+    const problem = await instantiate(id, seed);
+    expect(await gradeFillInBlankCode(nodeRunner, problem, modelCode(problem))).toEqual({ status: 'correct' });
   });
 });
 
-test('accepts edited full source with renamed variables, extra locals, a helper and Java integer semantics', () => {
+test('accepts edited full source with renamed variables, extra locals, a helper and Java integer semantics', async () => {
   const code = `
 // public class Decoy { public static void main(String[] args) {} }
 class Helper { static int distance() { return Integer.MAX_VALUE + Integer.MAX_VALUE + 6; } }
@@ -46,22 +46,22 @@ class Helper { static int distance() { return Integer.MAX_VALUE + Integer.MAX_VA
     }
   }
 `;
-  expect(gradeFillInBlankCode(instantiate('fillInBlank1'), code)).toEqual({ status: 'correct' });
+  expect(await gradeFillInBlankCode(nodeRunner, await instantiate('fillInBlank1'), code)).toEqual({ status: 'correct' });
 });
 
-test('changing source outside the former blank changes the drawing', () => {
-  const problem = instantiate('fillInBlank1');
+test('changing source outside the former blank changes the drawing', async () => {
+  const problem = await instantiate('fillInBlank1');
   const code = modelCode(problem).replace('new Turtle()', 'new Turtle(1, 0)');
-  expect(gradeFillInBlankCode(problem, code)).toEqual({
+  expect(await gradeFillInBlankCode(nodeRunner, problem, code)).toEqual({
     status: 'incorrect',
     detail: 'The final state differs from the expected one.',
   });
 });
 
-test('an unchanged board with a different final turtle direction is incorrect', () => {
-  const problem = instantiate('fillInBlank3');
+test('an unchanged board with a different final turtle direction is incorrect', async () => {
+  const problem = await instantiate('fillInBlank3');
   const code = modelCode(problem).replace(/\n  }\n}/, '\n    t.右を向く();\n  }\n}');
-  expect(gradeFillInBlankCode(problem, code)).toEqual({
+  expect(await gradeFillInBlankCode(nodeRunner, problem, code)).toEqual({
     status: 'incorrect',
     detail: 'The final state differs from the expected one.',
   });
@@ -84,33 +84,34 @@ test.each([
     detail: 'The program threw an exception.',
   },
   { name: 'unbounded execution', body: 'while (true) {}', detail: 'Time limit exceeded.' },
-])('$name is incorrect with its own detail', ({ body, code, detail }) => {
-  const result = gradeFillInBlankCode(
-    instantiate('fillInBlank1'),
+])('$name is incorrect with its own detail', async ({ body, code, detail }) => {
+  const result = await gradeFillInBlankCode(
+    nodeRunner,
+    await instantiate('fillInBlank1'),
     code ?? `public class Main { public static void main(String[] args) { ${body} } }`
   );
   expect(result).toMatchObject({ status: 'incorrect', detail });
   expect((globalThis as { __fullJavaTestExecuted?: boolean }).__fullJavaTestExecuted).toBeUndefined();
 });
 
-test('excessive output is an output-limit verdict even when the drawing is correct', () => {
-  const problem = instantiate('fillInBlank1');
+test('excessive output is an output-limit verdict even when the drawing is correct', async () => {
+  const problem = await instantiate('fillInBlank1');
   const code = modelCode(problem).replace(
     'Turtle t =',
     `for (int line = 0; line < 60000; line++) System.out.println("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     Turtle t =`
   );
-  expect(gradeFillInBlankCode(problem, code)).toEqual({
+  expect(await gradeFillInBlankCode(nodeRunner, problem, code)).toEqual({
     status: 'incorrect',
     detail: 'The program printed too much output.',
   });
 });
 
-test('forged drawing JSON printed on stdout cannot determine the verdict', () => {
-  const problem = instantiate('fillInBlank1');
+test('forged drawing JSON printed on stdout cannot determine the verdict', async () => {
+  const problem = await instantiate('fillInBlank1');
   const printed = JSON.stringify(JSON.stringify({ board: problem.finalBoard, turtles: problem.finalTurtles }));
   const code = `public class Main { public static void main(String[] args) { System.out.println(${printed}); } }`;
-  expect(gradeFillInBlankCode(problem, code)).toMatchObject({ status: 'incorrect' });
+  expect(await gradeFillInBlankCode(nodeRunner, problem, code)).toMatchObject({ status: 'incorrect' });
 });
 
 test.each([
@@ -130,18 +131,16 @@ test.each([
     source: 'class Main {\n public static void main(String[] args) {\n  Turtle t = new Turtle(true);\n }\n}',
     line: 3,
   },
-])('compile errors report a Japanese diagnostic on the learner line: $name', ({ source, line }) => {
-  expect(gradeFillInBlankCode(instantiate('fillInBlank1'), source)).toEqual({
+])('compile errors report a Japanese diagnostic on the learner line: $name', async ({ source, line }) => {
+  expect(await gradeFillInBlankCode(nodeRunner, await instantiate('fillInBlank1'), source)).toEqual({
     status: 'incorrect',
     detail: 'Compile error.',
     diagnostics: [{ line, message: expect.stringMatching(/[ぁ-ん]/) }],
   });
 });
 
-function instantiate(id: string, seed = 'catalog-model-agreement'): InstantiatedProblem {
-  const problem = instantiateProblem(id, seed);
-  if (!problem) throw new Error(`Failed to instantiate ${id}`);
-  return problem;
+async function instantiate(id: string, seed = 'catalog-model-agreement'): Promise<InstantiatedProblem> {
+  return await instantiateProblem(id, seed);
 }
 
 function modelCode(problem: InstantiatedProblem): string {

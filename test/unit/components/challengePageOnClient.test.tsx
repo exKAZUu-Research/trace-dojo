@@ -6,13 +6,13 @@ import userEvent from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import { beforeEach, expect, test, vi } from 'vitest';
 
-import { instantiateProblem } from '../../../src/problems/instantiateProblem';
 import {
   composeWithoutSubmitting,
   expectJavaSource,
   readRenderedJavaSource,
   replaceJavaSource,
 } from '../../helpers/javaEditor';
+import { getProgramTemplate } from '../../helpers/nodeProblems';
 
 const transport = vi.hoisted(() => ({
   start: vi.fn(),
@@ -37,9 +37,20 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
     switchRegularExerciseToStep: { useMutation: () => ({ mutateAsync: transport.switchRegular }) },
   },
 }));
+vi.mock('../../../src/problems/browserProblemRunner', async () => {
+  const { nodeRunner } = await import('../../helpers/nodeProblems');
+  return { getBrowserProblemRunner: () => nodeRunner };
+});
+vi.mock(import('../../../src/problems/fillInBlank/grade'), async (importOriginal) => {
+  const original = await importOriginal();
+  return { ...original, gradeFillInBlankCode: vi.fn(original.gradeFillInBlankCode) };
+});
 
 import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
 import { AuthContextProvider } from '../../../src/contexts/AuthContext';
+import { gradeFillInBlankCode } from '../../../src/problems/fillInBlank/grade';
+
+const grade = vi.mocked(gradeFillInBlankCode);
 
 const blankDisplay = {
   problemFormat: 'fillInBlank' as const,
@@ -60,7 +71,7 @@ const regularDisplay = {
   problemType: 'executionResult' as const,
   traceItemIndex: 0,
   completed: false,
-  problem: instantiateProblem('test3', 'component')!,
+  programTemplate: getProgramTemplate('test3'),
 };
 const page = (
   initialFormat?: 'regular' | 'fillInBlank' | 'bugFix',
@@ -86,6 +97,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
   for (const mutation of Object.values(transport)) mutation.mockReset();
+  grade.mockReset();
   transport.end.mockResolvedValue({ status: 'ended' });
   localStorage.clear();
 });
@@ -175,7 +187,7 @@ test('returning to the same valid format after a missing format drops the old ex
   await waitFor(() => expect(transport.start).toHaveBeenCalledTimes(2));
   expect(rendered.container.querySelectorAll('input')).toHaveLength(0);
   await act(async () => resolveSecond({ ...regularDisplay, sessionId: 18 }));
-  expect(rendered.container.querySelectorAll('input').length).toBeGreaterThan(0);
+  await waitFor(() => expect(rendered.container.querySelectorAll('input').length).toBeGreaterThan(0));
   expect(transport.start).toHaveBeenNthCalledWith(2, {
     courseId: 'test',
     lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
@@ -304,7 +316,6 @@ test('completed fill-in-blank next keeps the active format and renders the retur
 test('a just-completed fill-in-blank keeps its answer, deduplicates Next, and resets for the fresh session', async () => {
   let resolveNext!: (display: typeof blankDisplay) => void;
   transport.start.mockResolvedValue(blankDisplay);
-  transport.submitBlank.mockResolvedValue({ status: 'correct' });
   transport.next.mockReturnValue(new Promise((resolve) => (resolveNext = resolve)));
   const user = userEvent.setup();
   renderPage('fillInBlank');
@@ -319,6 +330,7 @@ test('a just-completed fill-in-blank keeps its answer, deduplicates Next, and re
     lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
     sessionId: 23,
     code,
+    status: 'correct',
   });
   expect(input).toHaveAttribute('contenteditable', 'false');
   expect(screen.getByRole('button', { hidden: true, name: 'リセット' })).toBeDisabled();
@@ -442,10 +454,11 @@ test('a deferred result from before close does not replace the exercise started 
 });
 
 test('full-source edits, Enter/IME, and zoom do not execute, and pending submission locks editing but permits zoom', async () => {
-  let finish!: (result: { status: string; detail: string }) => void;
+  let finish!: () => void;
   transport.start.mockResolvedValue(blankDisplay);
+  grade.mockResolvedValue({ status: 'incorrect', detail: 'The final state differs from the expected one.' });
   transport.submitBlank.mockReturnValue(
-    new Promise((resolve) => {
+    new Promise<void>((resolve) => {
       finish = resolve;
     })
   );
@@ -467,12 +480,13 @@ test('full-source edits, Enter/IME, and zoom do not execute, and pending submiss
   expect(readRenderedJavaSource(editor)).toBe(code);
   expect(transport.submitBlank).not.toHaveBeenCalled();
   await user.dblClick(screen.getByRole('button', { name: '提出' }));
-  expect(transport.submitBlank).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(transport.submitBlank).toHaveBeenCalledTimes(1));
   expect(transport.submitBlank).toHaveBeenCalledWith({
     courseId: 'test',
     lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
     sessionId: 23,
     code,
+    status: 'incorrect',
   });
   expect(editor).toHaveAttribute('contenteditable', 'false');
   const reset = screen.getByRole('button', { name: 'リセット' });
@@ -495,7 +509,7 @@ test('full-source edits, Enter/IME, and zoom do not execute, and pending submiss
   await user.click(reset);
   expect(readRenderedJavaSource(editor)).toBe(code);
   expect(transport.submitBlank).toHaveBeenCalledTimes(1);
-  await act(async () => finish({ status: 'incorrect', detail: 'The final state differs from the expected one.' }));
+  await act(async () => finish());
   expect(await screen.findByRole('alertdialog')).toHaveTextContent('不正解');
   expect(readRenderedJavaSource(editor)).toBe(code);
   expect(screen.getByRole('button', { hidden: true, name: 'リセット' })).toBeDisabled();
@@ -554,7 +568,7 @@ test('challenge Reset restores the exact starter without submitting or changing 
 test('challenge compiler feedback reaches the editor and survives result dismissal', async () => {
   const message = '代入する値の種類を確認してください。';
   transport.start.mockResolvedValue(blankDisplay);
-  transport.submitBlank.mockResolvedValue({
+  grade.mockResolvedValue({
     status: 'incorrect',
     detail: 'Compile error.',
     diagnostics: [{ line: 2, message }],
@@ -654,7 +668,7 @@ test.each(['incorrect', 'ungradable', 'network failure'] as const)(
   async (outcome) => {
     transport.start.mockResolvedValue(blankDisplay);
     if (outcome === 'network failure') transport.submitBlank.mockRejectedValue(new Error('Offline'));
-    else transport.submitBlank.mockResolvedValue({ status: outcome, detail: 'Try again.' });
+    if (outcome === 'ungradable') grade.mockResolvedValue({ status: outcome, detail: 'Try again.' });
     const user = userEvent.setup();
     const rendered = renderPage('fillInBlank');
     const code = 'class UnfinishedAnswer {}';
@@ -665,13 +679,13 @@ test.each(['incorrect', 'ungradable', 'network failure'] as const)(
     renderPage('fillInBlank');
     expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(code);
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    expect(transport.submitBlank).toHaveBeenCalledTimes(1);
+    expect(transport.submitBlank).toHaveBeenCalledTimes(outcome === 'ungradable' ? 0 : 1);
   }
 );
 
 test('local challenge draft clears after correct grading and Next begins an independent attempt', async () => {
   transport.start.mockResolvedValue(blankDisplay);
-  transport.submitBlank.mockResolvedValue({ status: 'correct' });
+  grade.mockResolvedValue({ status: 'correct' });
   transport.next.mockResolvedValue({ ...blankDisplay, sessionId: 24 });
   const user = userEvent.setup();
   let rendered = renderPage('fillInBlank');
@@ -714,13 +728,11 @@ const syntaxBugDisplay = {
 test('bug repair selection supports compiler feedback, full-source repair, completion and Next', async () => {
   transport.start.mockResolvedValue(syntaxBugDisplay);
   const message = '繰り返しの条件を確認してください。';
-  transport.submitBlank
-    .mockResolvedValueOnce({
-      status: 'incorrect',
-      detail: 'Compile error.',
-      diagnostics: [{ line: 4, message }],
-    })
-    .mockResolvedValueOnce({ status: 'correct' });
+  grade.mockResolvedValueOnce({
+    status: 'incorrect',
+    detail: 'Compile error.',
+    diagnostics: [{ line: 4, message }],
+  });
   transport.next.mockResolvedValue({ ...syntaxBugDisplay, sessionId: 24 });
   const user = userEvent.setup();
   const rendered = renderPage();
@@ -732,14 +744,15 @@ test('bug repair selection supports compiler feedback, full-source repair, compl
   expect(readRenderedJavaSource(editor)).toBe(syntaxBugDisplay.displayProgram);
   expect(transport.submitBlank).not.toHaveBeenCalled();
   await user.click(screen.getByRole('button', { name: '提出' }));
+  expect(await screen.findByRole('alertdialog')).toHaveTextContent(message);
   expect(transport.submitBlank).toHaveBeenLastCalledWith({
     courseId: 'test',
     lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
     sessionId: 23,
     problemFormat: 'bugFix',
     code: syntaxBugDisplay.displayProgram,
+    status: 'incorrect',
   });
-  expect(await screen.findByRole('alertdialog')).toHaveTextContent(message);
   await user.keyboard('{Escape}');
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   expect(screen.getByText(message)).toBeVisible();
@@ -749,10 +762,10 @@ test('bug repair selection supports compiler feedback, full-source repair, compl
   const resumed = renderPage('bugFix');
   expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(repaired);
   await user.click(screen.getByRole('button', { name: '提出' }));
-  expect(transport.submitBlank).toHaveBeenLastCalledWith(
-    expect.objectContaining({ code: repaired, problemFormat: 'bugFix' })
-  );
   await screen.findByRole('alertdialog');
+  expect(transport.submitBlank).toHaveBeenLastCalledWith(
+    expect.objectContaining({ code: repaired, problemFormat: 'bugFix', status: 'correct' })
+  );
   await user.click(screen.getByRole('button', { name: '次の問題へ' }));
   expect(transport.next).toHaveBeenCalledWith({
     courseId: 'test',

@@ -23,7 +23,7 @@ import {
   IconButton,
   VStack,
 } from '@/infrastructures/useClient/chakra';
-import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
+import { type FillInBlankVerdict, INTERPRETER_FAILURE_DETAIL } from '@/problems/fillInBlank/grade';
 import { type JavaDiagnostic, javaFeedbackSummary, readJavaDiagnostics } from '@/problems/fillInBlank/javaDiagnostics';
 import {
   type JavaDraftContext,
@@ -180,7 +180,9 @@ const EditingBody: React.FC<Props & { baseline: string; draftKey: string; restor
           setAlert({
             title: '採点できませんでした',
             message:
-              '問題が切り替わったため、採点しませんでした。ページを再読み込みしてから、もう一度提出してください。',
+              result.detail === INTERPRETER_FAILURE_DETAIL
+                ? 'プログラムを実行する環境を読み込めませんでした。ページを再読み込みしてから、もう一度提出してください。'
+                : '問題が切り替わったため、採点しませんでした。ページを再読み込みしてから、もう一度提出してください。',
             isCompleted: false,
           });
           break;

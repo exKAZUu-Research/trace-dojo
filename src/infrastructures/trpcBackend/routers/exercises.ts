@@ -5,23 +5,23 @@ import { and, asc, desc, eq, gt, gte, isNotNull, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { getLearningPeriodFilter } from '@/learningPeriod';
+import { challengeBases } from '@/problems/challenge/definitions';
 import { challengeMetadata } from '@/problems/challenge/metadata';
-import { instantiateRegularChallenge } from '@/problems/challenge/regular';
-import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
-import { type FillInBlankVerdict, gradeFillInBlankCode, GRADING_STAGE } from '@/problems/fillInBlank/grade';
+import { extractBlanks } from '@/problems/fillInBlank/blanks';
+import type { ExerciseDisplay, JavaProblemSource } from '@/problems/fillInBlank/exerciseProblem';
+import { GRADING_STAGE } from '@/problems/fillInBlank/gradingStage';
 import { MAX_JAVA_PROGRAM_LENGTH } from '@/problems/fillInBlank/javaProgram';
-import { type InstantiatedProblem, instantiateProblem, isFillInBlankProblem } from '@/problems/instantiateProblem';
 import { javaChallengeDefinitions } from '@/problems/javaChallenges/definitions';
-import { type InstantiatedJavaChallenge, instantiateJavaChallenge } from '@/problems/javaChallenges/instantiate';
+import { instantiateJavaChallenge } from '@/problems/javaChallenges/instantiate';
 import type { JavaChallengeFormat } from '@/problems/javaChallenges/types';
-import { getPracticeProblemIds } from '@/problems/practice/definitions';
-import { instantiatePracticeProblem } from '@/problems/practice/instantiatePracticeProblem';
+import { getPracticeProblemIds, practiceIdToDefinition } from '@/problems/practice/definitions';
 import {
   type CourseId,
   courseIdToLectureIds,
   courseIdToLectureIndexToExerciseProblemIds,
   courseIdToLectureIndexToProblemIds,
   getProblemProgram,
+  isFillInBlankProblem,
 } from '@/problems/problemData';
 import type { RegularExerciseDisplay, RegularExerciseState } from '@/problems/regular/exerciseProblem';
 
@@ -61,7 +61,9 @@ const submissionSchema = locationSchema.extend({
   learningMode: challengeModeSchema,
   sessionId: z.number().int().positive(),
   code: z.string().min(1).max(MAX_JAVA_PROGRAM_LENGTH),
+  status: z.enum(['correct', 'incorrect']),
 });
+type JavaSubmission = z.infer<typeof submissionSchema>;
 const regularSubmissionSchema = locationSchema
   .extend({
     sessionId: z.number().int().positive(),
@@ -71,6 +73,8 @@ const regularSubmissionSchema = locationSchema
       .object({ problemType: z.enum(['executionResult', 'step']), traceItemIndex: z.number().int().nonnegative() })
       .strict(),
     isCorrect: z.boolean(),
+    /** Whether the answered step is the last one of the trace, which only the browser generates. */
+    isLastStep: z.boolean(),
   })
   .strict();
 const switchSchema = locationSchema
@@ -93,7 +97,7 @@ const endSchema = z.union([
     .strict(),
 ]);
 const queues = new Map<string, Promise<unknown>>();
-const gradingLocks = new Map<string, Promise<FillInBlankVerdict>>();
+const savingSubmissions = new Map<string, Promise<void>>();
 
 export const exerciseProcedures = {
   startExercise: procedure
@@ -174,17 +178,16 @@ export const exerciseProcedures = {
         ownedSession(input.sessionId, userId, input.courseId, input.lectureId, format, 'challenge', receivedAt),
         receivedAt
       );
-      const key = `${input.sessionId}:${input.code}`;
-      const existing = gradingLocks.get(key);
+      // A request repeated while its first copy is being saved must not store the submission twice.
+      const key = `${input.sessionId}:${input.status}:${input.code}`;
+      const existing = savingSubmissions.get(key);
       if (existing) return await existing;
-      const grading = enqueue(input.sessionId, () =>
-        gradeAndSave(input.sessionId, userId, input.courseId, input.lectureId, input.code, receivedAt, format)
-      );
-      gradingLocks.set(key, grading);
+      const saving = enqueue(input.sessionId, () => saveJavaSubmission(userId, input, receivedAt, format));
+      savingSubmissions.set(key, saving);
       try {
-        return await grading;
+        await saving;
       } finally {
-        gradingLocks.delete(key);
+        savingSubmissions.delete(key);
       }
     }),
   submitRegularExercise: procedure
@@ -293,7 +296,7 @@ const ownedSession = (
   if (format === 'regular') {
     validateRegularState(session);
     // Fails closed when the stored problem does not belong to the session's mode, e.g. a practice ID in a challenge.
-    instantiateRegular(session.problemId, session.seed, mode);
+    regularProgramTemplate(session.problemId, mode);
   }
   return session;
 };
@@ -379,9 +382,9 @@ const createFromCandidates = (
   const candidates = configured.length > 1 ? configured.filter((id) => id !== previousId) : configured;
   const problemId = candidates[Math.floor(Math.random() * candidates.length)];
   const seed = randomUUID();
-  // Generate before inserting: a session whose problem cannot be generated would be resumed and fail forever.
-  const problem =
-    format === 'regular' ? instantiateRegular(problemId, seed, mode) : instantiateChallenge(problemId, seed, format);
+  // Look up before inserting: a session whose problem does not exist would be resumed and fail forever.
+  if (format === 'regular') regularProgramTemplate(problemId, mode);
+  else javaProblemSource(problemId, seed, format);
   const row = db
     .insert(exerciseSessions)
     .values({
@@ -397,28 +400,26 @@ const createFromCandidates = (
     })
     .returning()
     .get();
-  return toDisplay(row, format, problem);
+  return toDisplay(row, format);
 };
-const instantiateRegular = (problemId: string, seed: string, mode: LearningMode): InstantiatedProblem => {
-  const problem =
+const regularProgramTemplate = (problemId: string, mode: LearningMode): string => {
+  const template =
     mode === 'practice'
-      ? instantiatePracticeProblem(problemId, seed)
-      : (instantiateRegularChallenge(problemId) ?? instantiateProblem(problemId, seed));
-  if (!problem || problem.blankAnswers.length > 0 || problem.traceItems.length <= 1)
+      ? Object.hasOwn(practiceIdToDefinition, problemId)
+        ? practiceIdToDefinition[problemId].program
+        : undefined
+      : (challengeBases.find(({ id }) => id === problemId)?.java ?? getProblemProgram(problemId));
+  if (!template || extractBlanks(template).answers.length > 0)
     throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Invalid regular problem: ${problemId}` });
-  return problem;
+  return template;
 };
-const instantiateChallenge = (
-  problemId: string,
-  seed: string,
-  format: JavaChallengeFormat
-): InstantiatedJavaChallenge => {
+const javaProblemSource = (problemId: string, seed: string, format: JavaChallengeFormat): JavaProblemSource => {
   try {
     if (javaChallengeDefinitions[problemId]) return instantiateJavaChallenge(problemId, format);
-    const problem = instantiateProblem(problemId, seed);
-    if (format !== 'fillInBlank' || !problem || problem.blankAnswers.length === 0)
+    const programTemplate = getProblemProgram(problemId);
+    if (format !== 'fillInBlank' || !programTemplate || !isFillInBlankProblem(problemId))
       throw new Error(`Invalid challenge problem: ${problemId}`);
-    return problem;
+    return { programTemplate, seed };
   } catch (error) {
     throw new TRPCError({
       code: 'INTERNAL_SERVER_ERROR',
@@ -436,27 +437,19 @@ const toRegularState = (row: ExerciseSession): RegularExerciseState => ({
   traceItemIndex: row.traceItemIndex,
   completed: Boolean(row.completedAt),
 });
-const toRegularDisplay = (row: ExerciseSession, problem?: InstantiatedProblem): RegularExerciseDisplay => ({
-  ...toRegularState(row),
-  problem: problem ?? instantiateRegular(row.problemId, row.seed, row.learningMode as LearningMode),
-});
-const toDisplay = (
-  row: ExerciseSession,
-  format: ProblemFormat,
-  problem?: InstantiatedJavaChallenge | InstantiatedProblem
-): ExerciseDisplay | RegularExerciseDisplay => {
+const toDisplay = (row: ExerciseSession, format: ProblemFormat): ExerciseDisplay | RegularExerciseDisplay => {
   if (format === 'regular') {
     validateRegularState(row);
-    return toRegularDisplay(row, problem && 'traceItems' in problem ? problem : undefined);
+    return {
+      ...toRegularState(row),
+      programTemplate: regularProgramTemplate(row.problemId, row.learningMode as LearningMode),
+    };
   }
-  const { displayProgram, finalBoard, finalTurtles } = problem ?? instantiateChallenge(row.problemId, row.seed, format);
   return {
     problemFormat: format,
     sessionId: row.id,
     problemId: row.problemId,
-    displayProgram,
-    finalBoard,
-    finalTurtles,
+    ...javaProblemSource(row.problemId, row.seed, format),
     completed: Boolean(row.completedAt),
   };
 };
@@ -505,11 +498,7 @@ const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmiss
       })
       .run();
     if (!input.isCorrect) return toRegularState(current);
-    // The trace comes from the current definition, as the client's does, so an edited definition moves the final step.
-    const completed =
-      current.problemType === 'executionResult' ||
-      current.traceItemIndex >=
-        instantiateRegular(current.problemId, current.seed, input.learningMode).traceItems.length - 1;
+    const completed = current.problemType === 'executionResult' || input.isLastStep;
     const updated = tx
       .update(exerciseSessions)
       .set(completed ? { completedAt: new Date() } : { traceItemIndex: current.traceItemIndex + 1 })
@@ -519,37 +508,24 @@ const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmiss
     if (!updated) throw new TRPCError({ code: 'CONFLICT' });
     return toRegularState(updated);
   });
-// code-gauge-allow functionParameterCount 7 -- The function predates this change, which only makes it synchronous.
-const gradeAndSave = (
-  id: number,
+const saveJavaSubmission = (
   userId: string,
-  courseId: string,
-  lectureId: string,
-  code: string,
+  { sessionId, courseId, lectureId, code, status }: JavaSubmission,
   receivedAt: Date,
   format: JavaChallengeFormat
-): FillInBlankVerdict => {
-  const session = ownedSession(id, userId, courseId, lectureId, format, 'challenge', receivedAt);
-  assertNotEnded(session, receivedAt);
-  const result = gradeFillInBlankCode(instantiateChallenge(session.problemId, session.seed, format), code);
+): void => {
+  assertNotEnded(ownedSession(sessionId, userId, courseId, lectureId, format, 'challenge', receivedAt), receivedAt);
   db.transaction((tx) => {
-    const current = tx.select().from(exerciseSessions).where(eq(exerciseSessions.id, id)).get();
+    const current = tx.select().from(exerciseSessions).where(eq(exerciseSessions.id, sessionId)).get();
     if (!current) throw new TRPCError({ code: 'NOT_FOUND' });
     assertNotEnded(current, receivedAt);
     if (current.completedAt) return;
     tx.insert(exerciseSubmissions)
-      .values({
-        createdAt: receivedAt,
-        sessionId: id,
-        code,
-        status: result.status,
-        gradingStage: GRADING_STAGE,
-      })
+      .values({ createdAt: receivedAt, sessionId, code, status, gradingStage: GRADING_STAGE })
       .run();
-    if (result.status === 'correct')
-      tx.update(exerciseSessions).set({ completedAt: receivedAt }).where(eq(exerciseSessions.id, id)).run();
+    if (status === 'correct')
+      tx.update(exerciseSessions).set({ completedAt: receivedAt }).where(eq(exerciseSessions.id, sessionId)).run();
   });
-  return result;
 };
 
 const assertNotEnded = (session: ExerciseSession, at = new Date()): void => {

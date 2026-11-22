@@ -4,11 +4,11 @@ import { type ChallengeMetadata, challengeMetadata } from '../../src/problems/ch
 import { extractBlanks, fillBlanks, removeBlankMarkers } from '../../src/problems/fillInBlank/blanks';
 import { gradeFillInBlankCode } from '../../src/problems/fillInBlank/grade';
 import { stripJavaTraceAnnotations } from '../../src/problems/fillInBlank/javaSource';
-import { instantiateProblem, isFillInBlankProblem } from '../../src/problems/instantiateProblem';
 import { javaChallengeDefinitions } from '../../src/problems/javaChallenges/definitions';
 import { instantiateJavaChallenge } from '../../src/problems/javaChallenges/instantiate';
 import type { JavaChallengeDefinition } from '../../src/problems/javaChallenges/types';
-import { courseIdToLectureIndexToExerciseProblemIds } from '../../src/problems/problemData';
+import { courseIdToLectureIndexToExerciseProblemIds, isFillInBlankProblem } from '../../src/problems/problemData';
+import { instantiateProblem, nodeRunner } from '../helpers/nodeProblems';
 
 const catalog = javaChallengeDefinitions;
 const definitionOf = (id: string): JavaChallengeDefinition | undefined => catalog[id];
@@ -105,7 +105,7 @@ const catalogLectures = [...lectures, { courseId: 'test' as const, lectureIndex:
 
 test.each(catalogLectures)(
   '$courseId lecture $lectureIndex: all fixed solutions pass grading and all starters fail it',
-  ({ courseId, lectureIndex }) => {
+  async ({ courseId, lectureIndex }) => {
     for (const [id, definition] of Object.entries(catalog).filter(
       ([, item]) => item.courseId === courseId && item.lectureIndex === lectureIndex
     )) {
@@ -116,7 +116,7 @@ test.each(catalogLectures)(
         finalTurtles: definition.finalTurtles,
       });
       expect(
-        gradeFillInBlankCode(definition, removeBlankMarkers(definition.correctProgram)),
+        await gradeFillInBlankCode(nodeRunner, definition, removeBlankMarkers(definition.correctProgram)),
         `${id}: intended repair must pass grading`
       ).toEqual({ status: 'correct' });
       if (definition.problemFormat === 'fillInBlank') {
@@ -130,7 +130,7 @@ test.each(catalogLectures)(
         );
       } else {
         expect(definition.bugKind, `${id}: missing defect classification`).toBeDefined();
-        const verdict = gradeFillInBlankCode(definition, definition.starterProgram);
+        const verdict = await gradeFillInBlankCode(nodeRunner, definition, definition.starterProgram);
         if (definition.bugKind === 'syntax') {
           expect(verdict, `${id}: syntax starter must fail compilation`).toEqual({
             status: 'incorrect',
@@ -148,7 +148,7 @@ test.each(catalogLectures)(
   }
 );
 
-test.each(['fillInBlank', 'bugFix'] as const)('annotation-free %s public source remains repairable', (format) => {
+test.each(['fillInBlank', 'bugFix'] as const)('annotation-free %s public source remains repairable', async (format) => {
   const id = `challengeI7ValueSnapshot${format === 'fillInBlank' ? 'Blank' : 'Bug'}Condition4`;
   const definition = catalog[id];
   const problem = instantiateJavaChallenge(id, format);
@@ -158,23 +158,22 @@ test.each(['fillInBlank', 'bugFix'] as const)('annotation-free %s public source 
     format === 'fillInBlank'
       ? problem.displayProgram.replaceAll(/【(\d+)】/g, (_, index: string) => answers[Number(index) - 1])
       : stripJavaTraceAnnotations(definition.correctProgram);
-  expect(gradeFillInBlankCode(problem, repaired)).toEqual({ status: 'correct' });
+  expect(await gradeFillInBlankCode(nodeRunner, problem, repaired)).toEqual({ status: 'correct' });
 });
 
-test.each(independentCases)('grading agrees with hand-derived state: $name', ({ body, classes, board, turtles }) => {
+test.each(independentCases)('grading agrees with hand-derived state: $name', async ({ body, classes, board, turtles }) => {
   const source = `class Main { public static void main(String[] args) { ${body} } } ${classes ?? ''}`;
-  expect(gradeFillInBlankCode({ finalBoard: board, finalTurtles: turtles }, source)).toEqual({ status: 'correct' });
+  expect(await gradeFillInBlankCode(nodeRunner, { finalBoard: board, finalTurtles: turtles }, source)).toEqual({ status: 'correct' });
 });
 
-test('legacy multiple holes all display and their repaired Java matches the existing target', () => {
-  const problem = instantiateProblem('fillInBlank4', 'catalog-compatibility');
-  if (!problem) throw new Error('Legacy blank problem unavailable');
+test('legacy multiple holes all display and their repaired Java matches the existing target', async () => {
+  const problem = await instantiateProblem('fillInBlank4', 'catalog-compatibility');
   expect(problem.blankAnswers.length).toBeGreaterThan(1);
   for (let i = 1; i <= problem.blankAnswers.length; i++) expect(problem.displayProgram).toContain(`【${i}】`);
-  expect(gradeFillInBlankCode(problem, fillBlanks(problem.displayProgramTemplate, problem.blankAnswers))).toEqual({
+  expect(await gradeFillInBlankCode(nodeRunner, problem, fillBlanks(problem.displayProgramTemplate, problem.blankAnswers))).toEqual({
     status: 'correct',
   });
-  expect(gradeFillInBlankCode(problem, 'class Main { public static void main(String[] args) { if (1) {} } }')).toEqual({
+  expect(await gradeFillInBlankCode(nodeRunner, problem, 'class Main { public static void main(String[] args) { if (1) {} } }')).toEqual({
     status: 'incorrect',
     detail: 'Compile error.',
     diagnostics: [expect.objectContaining({ line: 1, message: expect.any(String) })],

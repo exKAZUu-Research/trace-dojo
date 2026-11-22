@@ -4,7 +4,7 @@ import { httpBatchLink } from '@trpc/client';
 import { createTRPCReact } from '@trpc/react-query';
 import type { CreateTRPCReact } from '@trpc/react-query';
 
-import superjson from '../../interpreter/traceTransport';
+import superjson from 'superjson';
 import type { BackendRouter } from './routers';
 
 export const backendTrpcReact: CreateTRPCReact<BackendRouter, unknown> = createTRPCReact<BackendRouter>();
