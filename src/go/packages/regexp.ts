@@ -1,6 +1,8 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
+import { type Matcher, RE2JS, RE2JSSyntaxException } from 're2js';
+
 import type { Entity } from '../entities';
-import { decodeRune } from '../literals';
+import { decodeRune, encodeRune, RUNE_ERROR, utf8Decode, utf8Encode } from '../literals';
 import {
   addMethod,
   currentRuntime,
@@ -17,11 +19,6 @@ import { grownCapacity } from '../sliceOps';
 import { ERROR_TYPE, type FuncType, pointerTo, sliceOf, type Type, underlying } from '../types';
 import { Cell, GoStruct, Iface, type NativeState, Pointer, Slice, type Value } from '../values';
 import { IO_RUNE_READER } from './io';
-import { find, type Input, type Matcher, ReaderInput, StringInput } from './regexpExec';
-import { compileOnePass, onePassPrefix } from './regexpOnePass';
-import { parse } from './regexpParse';
-import { compileProg, minInputLen, progPrefix, simplify, startCond } from './regexpProg';
-import { capNames, maxCap, PERL_FLAGS, POSIX_FLAGS, RegexpSyntaxError } from './regexpSyntax';
 import {
   appendBytes,
   BOOL,
@@ -55,100 +52,101 @@ const SYNTAX_ERROR = namedType('regexp/syntax', 'Error', {
     { name: 'Expr', type: STRING, embedded: false },
   ],
 });
+
+interface SyntaxFailure {
+  code: string;
+  expr: string;
+}
+
 addMethod(
   SYNTAX_ERROR,
   'Error',
   fn([], [STRING]),
   (receiver) => {
     const [code, expr] = receiverStruct(receiver).fields as [string, string];
-    return new RegexpSyntaxError(code, expr).message();
+    return syntaxMessage({ code, expr });
   },
   true
 );
 
-function syntaxError(error: RegexpSyntaxError): Iface {
-  return new Iface(pointerTo(SYNTAX_ERROR), new Pointer(new Cell(new GoStruct([error.code, error.expr])), 'v'));
+function syntaxMessage({ code, expr }: SyntaxFailure): string {
+  return `error parsing regexp: ${code}: \`${expr}\``;
+}
+
+function syntaxError({ code, expr }: SyntaxFailure): Iface {
+  return new Iface(pointerTo(SYNTAX_ERROR), new Pointer(new Cell(new GoStruct([code, expr])), 'v'));
 }
 
 // Regexp ----------------------------------------------------------------------------------------------------------
-
-/** What Go's `compile` computes for a `*regexp.Regexp`, which never changes after compilation. */
-interface Compiled extends Matcher {
-  expr: string;
-  numSubexp: number;
-  subexpNames: Slice;
-  names: string[];
-  prefixComplete: boolean;
-}
 
 class RegexpState implements NativeState {
   [key: string]: unknown;
 
   constructor(
-    readonly compiled: Compiled,
-    public longest: boolean
+    /** The expression as the program wrote it, in UTF-8 bytes. */
+    readonly expr: string,
+    public engine: RE2JS,
+    /** The name of each group by its index, where the whole match and the unnamed groups have "". */
+    readonly names: string[],
+    readonly subexpNames: Slice
   ) {}
 
+  get numSubexp(): number {
+    return this.names.length - 1;
+  }
+
   clone(): RegexpState {
-    return new RegexpState(this.compiled, this.longest);
+    return new RegexpState(this.expr, this.engine, this.names, this.subexpNames);
   }
 }
 
 const REGEXP = opaqueType(namedType('regexp', 'Regexp', { kind: 'struct', fields: [] }));
+REGEXP.unsupported = new Set(['LiteralPrefix']);
 const REGEXP_POINTER = pointerTo(REGEXP);
 
-function compileRegexp(expr: string, mode: number, longest: boolean): RegexpState | RegexpSyntaxError {
-  const runtime = currentRuntime();
-  let tree;
-  try {
-    tree = parse(expr, mode, (cost) => runtime.spend(cost));
-  } catch (error) {
-    if (error instanceof RegexpSyntaxError) return error;
-    throw error;
-  }
-  const names = capNames(tree);
-  const numSubexp = maxCap(tree);
-  const simplified = simplify(tree);
-  const prog = compileProg(simplified, (count) => runtime.allocate(count));
-  const onepass = compileOnePass(prog);
-  const { prefix, complete, pc } = onepass ? onePassPrefix(prog) : { ...progPrefix(prog), pc: 0 };
-  const compiled: Compiled = {
-    expr,
-    prog,
-    onepass,
-    numSubexp,
-    names,
-    subexpNames: new Slice(names, 0, names.length, names.length),
-    cond: startCond(prog),
-    minInputLen: minInputLen(simplified),
-    prefix,
-    prefixComplete: complete,
-    prefixEnd: pc,
-    prefixRune: prefix === '' ? 0 : decodeRune(prefix, 0).rune,
-  };
-  return new RegexpState(compiled, longest);
-}
-
-function newRegexp(state: RegexpState): Pointer {
-  return new Pointer(new Cell(new GoStruct([], state)), 'v');
-}
-
-function compileFunction(name: string, mode: number, longest: boolean): Entity {
+function compileFunction(name: string): Entity {
   return nativeFunction(name, fn([STRING], [REGEXP_POINTER, ERROR_TYPE]), ([expr]) => {
-    const state = compileRegexp(expr as string, mode, longest);
+    const state = compileRegexp(expr as string);
     return state instanceof RegexpState ? [newRegexp(state), undefined] : [undefined, syntaxError(state)];
   });
 }
 
-function mustCompileFunction(name: string, compileName: string, mode: number, longest: boolean): Entity {
+function mustCompileFunction(name: string, compileName: string): Entity {
   return nativeFunction(name, fn([STRING], [REGEXP_POINTER]), ([expr]) => {
     const text = expr as string;
-    const state = compileRegexp(text, mode, longest);
+    const state = compileRegexp(text);
     if (state instanceof RegexpState) return newRegexp(state);
     return stringPanic(
-      `regexp: ${compileName}(${canBackquote(text) ? `\`${text}\`` : quote(text)}): ${state.message()}`
+      `regexp: ${compileName}(${canBackquote(text) ? `\`${text}\`` : quote(text)}): ${syntaxMessage(state)}`
     );
   });
+}
+
+function compileRegexp(expr: string): RegexpState | SyntaxFailure {
+  spendFor(expr.length);
+  for (let at = 0; at < expr.length;) {
+    const { rune, size } = decodeRune(expr, at);
+    if (rune === RUNE_ERROR && size === 1) return { code: 'invalid UTF-8', expr: expr.slice(at) };
+    at += size;
+  }
+  let engine;
+  try {
+    engine = RE2JS.compile(utf8Decode(expr));
+  } catch (error) {
+    if (!(error instanceof RE2JSSyntaxException)) throw error;
+    // Go accepts groups that share a name, which the engine refuses.
+    if (error.error === 'duplicate capture group name') {
+      stringPanic('正規表現の中で同じ名前を複数のグループに付けることは、この採点環境では使えません。');
+    }
+    return { code: error.error, expr: utf8Encode(error.input ?? '') };
+  }
+  const names = Array.from({ length: engine.groupCount() + 1 }, () => '');
+  for (const [name, index] of Object.entries(engine.namedGroups())) names[index] = utf8Encode(name);
+  return new RegexpState(expr, engine, names, new Slice(names, 0, names.length, names.length));
+}
+
+function newRegexp(state: RegexpState): Pointer {
+  return new Pointer(new Cell(new GoStruct([], state)), 'v');
 }
 
 function stateOf(receiver: Value): RegexpState {
@@ -164,48 +162,60 @@ function method(name: string, signature: FuncType, impl: (re: RegexpState, args:
 
 // Matching --------------------------------------------------------------------------------------------------------
 
-/** The text to match: a string, a []byte read as its bytes, or an `io.RuneReader`. */
+/** A text to match, whose matcher reports positions in the bytes of the text. */
 interface Source {
-  input: Input;
-  /** The length of a string or []byte, which a reader does not know. */
-  length?: number;
+  matcher: Matcher;
+  length: number;
 }
 
-function stringSource(s: string): Source {
-  return { input: new StringInput(s), length: s.length };
+function stringSource(re: RegexpState, s: string): Source {
+  const bytes = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
+  return { matcher: re.engine.matcher(bytes), length: s.length };
 }
 
-function readerSource(reader: Value): Source {
-  if (reader === undefined) return stringSource('');
-  return {
-    input: new ReaderInput(() => {
-      const [rune, size, error] = callMethod(reader, 'ReadRune') as [bigint, bigint, Value];
-      return error === undefined ? { rune: Number(rune), size: Number(size) } : undefined;
-    }),
-  };
-}
-
-function doFind(re: RegexpState, source: Source, pos: number, ncap: number): number[] | undefined {
+/** Reads the whole `io.RuneReader`, as Go permits: its matching may read arbitrarily far past a match. */
+function readerSource(re: RegexpState, reader: Value): Source {
   const runtime = currentRuntime();
-  return find(re.compiled, re.longest, source.input, source.length, pos, ncap, (cost) => runtime.spend(cost));
+  const chunks: string[] = [];
+  let length = 0;
+  while (reader !== undefined) {
+    const [rune, size, error] = callMethod(reader, 'ReadRune') as [bigint, bigint, Value];
+    if (error !== undefined) break;
+    // An invalid byte stays one byte, which the matcher decodes as U+FFFD of width 1 again.
+    const chunk = Number(rune) === RUNE_ERROR && size === 1n ? 'ÿ' : encodeRune(Number(rune));
+    chunks.push(chunk);
+    length += chunk.length;
+    runtime.checkStringLength(length);
+    runtime.spend();
+  }
+  return stringSource(re, chunks.join(''));
 }
 
-/** Go's `(*Regexp).pad`: fills the positions of the groups the program never reached with -1. */
-function pad(re: RegexpState, match: number[]): number[] {
-  const padded = [...match];
-  while (padded.length < (1 + re.compiled.numSubexp) * 2) padded.push(-1);
-  return padded;
+/**
+ * The byte positions of the leftmost match at or after `pos`, followed by those of each group when `submatches`;
+ * -1 marks a group that took no part in the match.
+ */
+function doFind({ matcher, length }: Source, pos: number, submatches = false): number[] | undefined {
+  const found = matcher.find(pos);
+  spendFor((found ? matcher.end() : length) - pos);
+  if (!found) return undefined;
+  const match = [matcher.start(), matcher.end()];
+  if (submatches) {
+    for (let group = 1; group <= matcher.groupCount(); group++) match.push(matcher.start(group), matcher.end(group));
+  }
+  return match;
 }
 
 /** Go's `(*Regexp).matches`: the successive matches, up to `max` when it is not negative. */
 // code-gauge-allow functionCognitiveComplexity 21 -- Transcribes Go's matches step by step.
-function allMatches(re: RegexpState, s: string, max: number, ncap: number): number[][] {
+function allMatches(re: RegexpState, s: string, max: number, submatches: boolean): number[][] {
   const results: number[][] = [];
   if (max === 0) return results;
   const end = s.length;
-  const source = stringSource(s);
+  const source = stringSource(re, s);
   for (let pos = 0, prevMatchEnd = -1; pos <= end;) {
-    const matches = doFind(re, source, pos, ncap);
+    const matches = doFind(source, pos, submatches);
     if (!matches) break;
     let accept = true;
     if (matches[1] === pos) {
@@ -217,7 +227,7 @@ function allMatches(re: RegexpState, s: string, max: number, ncap: number): numb
     }
     prevMatchEnd = matches[1];
     if (accept) {
-      results.push(pad(re, matches));
+      results.push(matches);
       if (results.length === max) break;
     }
   }
@@ -250,10 +260,9 @@ function collect(values: Value[], element: Type): Slice | undefined {
   return new Slice(array, 0, values.length, capacity);
 }
 
-/** An []int of capture positions as `append(dstCap, matchcap...)` and then `pad` build it. */
-function positions(match: number[], appended: number): Slice {
-  const chunks = [appended, ...Array.from<number>({ length: match.length - appended }).fill(1)];
-  const capacity = appendedCapacity(chunks, INT);
+/** An []int of capture positions as one `append` to a nil slice builds it. */
+function positions(match: number[]): Slice {
+  const capacity = appendedCapacity([match.length], INT);
   const array: Value[] = match.map(BigInt);
   while (array.length < capacity) array.push(0n);
   currentRuntime().allocate(capacity);
@@ -297,14 +306,13 @@ function submatchBytes(b: Value, match: number[]): Value[] {
  * Go's `(*Regexp).replaceAll`, returning the pieces in the order Go appends them to its buffer; `repl` returns the
  * pieces it appends for a match.
  */
-function replaceAll(re: RegexpState, src: string, ncap: number, repl: (match: number[]) => string[]): string[] {
+function replaceAll(re: RegexpState, src: string, submatches: boolean, repl: (match: number[]) => string[]): string[] {
   const pieces: string[] = [];
   let lastMatchEnd = 0;
   let searchPos = 0;
-  const nmatch = Math.min(ncap, re.compiled.prog.numCap);
-  const source = stringSource(src);
+  const source = stringSource(re, src);
   while (searchPos <= src.length) {
-    const a = doFind(re, source, searchPos, nmatch);
+    const a = doFind(source, searchPos, submatches);
     if (!a) break;
     pieces.push(src.slice(lastMatchEnd, a[0]));
     if (a[1] > lastMatchEnd || a[0] === 0) pieces.push(...repl(a));
@@ -360,7 +368,7 @@ function expand(re: RegexpState, templateText: string, src: string, match: numbe
     if (extracted.num >= 0) {
       group(extracted.num);
     } else {
-      const index = re.compiled.names.findIndex(
+      const index = re.names.findIndex(
         (name, i) => extracted.name === name && 2 * i + 1 < match.length && match[2 * i] >= 0
       );
       if (index !== -1) group(index);
@@ -411,60 +419,48 @@ function quoteMeta(s: string): string {
 
 // Methods ---------------------------------------------------------------------------------------------------------
 
-method('String', fn([], [STRING]), (re) => re.compiled.expr);
+method('String', fn([], [STRING]), (re) => re.expr);
 method('Copy', fn([], [REGEXP_POINTER]), (re) => newRegexp(re.clone()));
 method('Longest', fn([], []), (re) => {
-  re.longest = true;
+  re.engine = RE2JS.compile(re.engine.pattern(), RE2JS.LONGEST_MATCH);
   return;
 });
-method('NumSubexp', fn([], [INT]), (re) => BigInt(re.compiled.numSubexp));
-method('SubexpNames', fn([], [STRINGS]), (re) => re.compiled.subexpNames);
-method('SubexpIndex', fn([STRING], [INT]), (re, [name]) =>
-  BigInt(name === '' ? -1 : re.compiled.names.indexOf(name as string))
-);
-method('LiteralPrefix', fn([], [STRING, BOOL]), (re) => [re.compiled.prefix, re.compiled.prefixComplete]);
+method('NumSubexp', fn([], [INT]), (re) => BigInt(re.numSubexp));
+method('SubexpNames', fn([], [STRINGS]), (re) => re.subexpNames);
+method('SubexpIndex', fn([STRING], [INT]), (re, [name]) => BigInt(name === '' ? -1 : re.names.indexOf(name as string)));
 
-method('MatchString', fn([STRING], [BOOL]), (re, [s]) => doFind(re, stringSource(s as string), 0, 0) !== undefined);
-method('Match', fn([BYTES], [BOOL]), (re, [b]) => doFind(re, stringSource(bytesOf(b)), 0, 0) !== undefined);
-method('MatchReader', fn([IO_RUNE_READER], [BOOL]), (re, [r]) => doFind(re, readerSource(r), 0, 0) !== undefined);
+method('MatchString', fn([STRING], [BOOL]), (re, [s]) => doFind(stringSource(re, s as string), 0) !== undefined);
+method('Match', fn([BYTES], [BOOL]), (re, [b]) => doFind(stringSource(re, bytesOf(b)), 0) !== undefined);
+method('MatchReader', fn([IO_RUNE_READER], [BOOL]), (re, [r]) => doFind(readerSource(re, r), 0) !== undefined);
 
 method('FindString', fn([STRING], [STRING]), (re, [s]) => {
-  const a = doFind(re, stringSource(s as string), 0, 2);
+  const a = doFind(stringSource(re, s as string), 0);
   return a ? (s as string).slice(a[0], a[1]) : '';
 });
 method('Find', fn([BYTES], [BYTES]), (re, [b]) => {
-  const a = doFind(re, stringSource(bytesOf(b)), 0, 2);
+  const a = doFind(stringSource(re, bytesOf(b)), 0);
   return a ? subslice(b, a[0], a[1]) : undefined;
 });
-method('FindStringIndex', fn([STRING], [INTS]), (re, [s]) => {
-  const a = doFind(re, stringSource(s as string), 0, 2);
-  return a ? positions(a, 2) : undefined;
-});
-method('FindIndex', fn([BYTES], [INTS]), (re, [b]) => {
-  const a = doFind(re, stringSource(bytesOf(b)), 0, 2);
-  return a ? positions(a, 2) : undefined;
-});
-method('FindReaderIndex', fn([IO_RUNE_READER], [INTS]), (re, [r]) => {
-  const a = doFind(re, readerSource(r), 0, 2);
-  return a ? positions(a, 2) : undefined;
-});
-method('FindStringSubmatch', fn([STRING], [STRINGS]), (re, [s]) => {
-  const a = doFind(re, stringSource(s as string), 0, re.compiled.prog.numCap);
-  return a ? exactSlice(submatchStrings(s as string, pad(re, a))) : undefined;
-});
-method('FindSubmatch', fn([BYTES], [BYTES_LIST]), (re, [b]) => {
-  const a = doFind(re, stringSource(bytesOf(b)), 0, re.compiled.prog.numCap);
-  return a ? exactSlice(submatchBytes(b, pad(re, a))) : undefined;
-});
 
-function submatchIndex(re: RegexpState, source: Source): Slice | undefined {
-  const a = doFind(re, source, 0, re.compiled.prog.numCap);
-  return a ? positions(pad(re, a), a.length) : undefined;
+function findIndex(source: Source, submatches = false): Slice | undefined {
+  const a = doFind(source, 0, submatches);
+  return a ? positions(a) : undefined;
 }
 
-method('FindStringSubmatchIndex', fn([STRING], [INTS]), (re, [s]) => submatchIndex(re, stringSource(s as string)));
-method('FindSubmatchIndex', fn([BYTES], [INTS]), (re, [b]) => submatchIndex(re, stringSource(bytesOf(b))));
-method('FindReaderSubmatchIndex', fn([IO_RUNE_READER], [INTS]), (re, [r]) => submatchIndex(re, readerSource(r)));
+method('FindStringIndex', fn([STRING], [INTS]), (re, [s]) => findIndex(stringSource(re, s as string)));
+method('FindIndex', fn([BYTES], [INTS]), (re, [b]) => findIndex(stringSource(re, bytesOf(b))));
+method('FindReaderIndex', fn([IO_RUNE_READER], [INTS]), (re, [r]) => findIndex(readerSource(re, r)));
+method('FindStringSubmatchIndex', fn([STRING], [INTS]), (re, [s]) => findIndex(stringSource(re, s as string), true));
+method('FindSubmatchIndex', fn([BYTES], [INTS]), (re, [b]) => findIndex(stringSource(re, bytesOf(b)), true));
+method('FindReaderSubmatchIndex', fn([IO_RUNE_READER], [INTS]), (re, [r]) => findIndex(readerSource(re, r), true));
+method('FindStringSubmatch', fn([STRING], [STRINGS]), (re, [s]) => {
+  const a = doFind(stringSource(re, s as string), 0, true);
+  return a ? exactSlice(submatchStrings(s as string, a)) : undefined;
+});
+method('FindSubmatch', fn([BYTES], [BYTES_LIST]), (re, [b]) => {
+  const a = doFind(stringSource(re, bytesOf(b)), 0, true);
+  return a ? exactSlice(submatchBytes(b, a)) : undefined;
+});
 
 /** Adds a `FindAll...` method, which maps each match to an element of the result. */
 function findAllMethod(
@@ -476,8 +472,7 @@ function findAllMethod(
 ): void {
   method(name, fn([input, INT], [sliceOf(element)]), (re, [text, n]) => {
     const s = input === STRING ? (text as string) : bytesOf(text);
-    const ncap = submatches ? re.compiled.prog.numCap : 2;
-    const matches = allMatches(re, s, Number(n as bigint), ncap);
+    const matches = allMatches(re, s, Number(n as bigint), submatches);
     return collect(
       matches.map((match) => toElement(text, s, match)),
       element
@@ -491,43 +486,39 @@ findAllMethod('FindAllStringIndex', STRING, INTS, false, (_, __, m) => exactSlic
 findAllMethod('FindAllIndex', BYTES, INTS, false, (_, __, m) => exactSlice([BigInt(m[0]), BigInt(m[1])]));
 findAllMethod('FindAllStringSubmatch', STRING, STRINGS, true, (_, s, m) => exactSlice(submatchStrings(s, m)));
 findAllMethod('FindAllSubmatch', BYTES, BYTES_LIST, true, (b, _, m) => exactSlice(submatchBytes(b, m)));
-findAllMethod('FindAllStringSubmatchIndex', STRING, INTS, true, (_, __, m) => positions(m, m.length));
-findAllMethod('FindAllSubmatchIndex', BYTES, INTS, true, (_, __, m) => positions(m, m.length));
-
-function expandNcap(re: RegexpState, template: string): number {
-  return template.includes('$') ? 2 * (re.compiled.numSubexp + 1) : 2;
-}
+findAllMethod('FindAllStringSubmatchIndex', STRING, INTS, true, (_, __, m) => positions(m));
+findAllMethod('FindAllSubmatchIndex', BYTES, INTS, true, (_, __, m) => positions(m));
 
 method('ReplaceAllString', fn([STRING, STRING], [STRING]), (re, [src, repl]) => {
   const s = src as string;
   const template = repl as string;
-  return joinPieces(replaceAll(re, s, expandNcap(re, template), (m) => expand(re, template, s, m)));
+  return joinPieces(replaceAll(re, s, template.includes('$'), (m) => expand(re, template, s, m)));
 });
 method('ReplaceAllLiteralString', fn([STRING, STRING], [STRING]), (re, [src, repl]) =>
-  joinPieces(replaceAll(re, src as string, 2, () => [repl as string]))
+  joinPieces(replaceAll(re, src as string, false, () => [repl as string]))
 );
 method('ReplaceAllStringFunc', fn([STRING, fn([STRING], [STRING])], [STRING]), (re, [src, repl]) => {
   const s = src as string;
-  return joinPieces(replaceAll(re, s, 2, (m) => [callFunction(repl, [s.slice(m[0], m[1])]) as string]));
+  return joinPieces(replaceAll(re, s, false, (m) => [callFunction(repl, [s.slice(m[0], m[1])]) as string]));
 });
 method('ReplaceAll', fn([BYTES, BYTES], [BYTES]), (re, [src, repl]) => {
   const s = bytesOf(src);
   const template = bytesOf(repl);
   return appendPieces(
     undefined,
-    replaceAll(re, s, expandNcap(re, template), (m) => expand(re, template, s, m))
+    replaceAll(re, s, template.includes('$'), (m) => expand(re, template, s, m))
   );
 });
 method('ReplaceAllLiteral', fn([BYTES, BYTES], [BYTES]), (re, [src, repl]) =>
   appendPieces(
     undefined,
-    replaceAll(re, bytesOf(src), 2, () => [bytesOf(repl)])
+    replaceAll(re, bytesOf(src), false, () => [bytesOf(repl)])
   )
 );
 method('ReplaceAllFunc', fn([BYTES, fn([BYTES], [BYTES])], [BYTES]), (re, [src, repl]) =>
   appendPieces(
     undefined,
-    replaceAll(re, bytesOf(src), 2, (m) => [bytesOf(callFunction(repl, [subslice(src, m[0], m[1])]) as Value)])
+    replaceAll(re, bytesOf(src), false, (m) => [bytesOf(callFunction(repl, [subslice(src, m[0], m[1])]) as Value)])
   )
 );
 method('Expand', fn([BYTES, BYTES, BYTES, INTS], [BYTES]), (re, [dst, template, src, match]) =>
@@ -541,8 +532,8 @@ method('Split', fn([STRING, INT], [STRINGS]), (re, [text, count]) => {
   const s = text as string;
   const n = Number(count as bigint);
   if (n === 0) return;
-  if (re.compiled.expr.length > 0 && s.length === 0) return exactSlice(['']);
-  const matches = allMatches(re, s, n, 2);
+  if (re.expr.length > 0 && s.length === 0) return exactSlice(['']);
+  const matches = allMatches(re, s, n, false);
   const strings: string[] = [];
   let beg = 0;
   let end = 0;
@@ -561,15 +552,15 @@ method('Split', fn([STRING, INT], [STRINGS]), (re, [text, count]) => {
   return new Slice(array, 0, strings.length, capacity);
 });
 
-method('AppendText', fn([BYTES], [BYTES, ERROR_TYPE]), (re, [b]) => [appendBytes(b, re.compiled.expr), undefined]);
-method('MarshalText', fn([], [BYTES, ERROR_TYPE]), (re) => [appendBytes(undefined, re.compiled.expr), undefined]);
+method('AppendText', fn([BYTES], [BYTES, ERROR_TYPE]), (re, [b]) => [appendBytes(b, re.expr), undefined]);
+method('MarshalText', fn([], [BYTES, ERROR_TYPE]), (re) => [appendBytes(undefined, re.expr), undefined]);
 addMethod(
   REGEXP,
   'UnmarshalText',
   fn([BYTES], [ERROR_TYPE]),
   (receiver, [text]) => {
     const struct = receiverStruct(receiver);
-    const state = compileRegexp(bytesOf(text), PERL_FLAGS, false);
+    const state = compileRegexp(bytesOf(text));
     if (!(state instanceof RegexpState)) return syntaxError(state);
     struct.native = state;
     return;
@@ -579,22 +570,20 @@ addMethod(
 
 // Package ---------------------------------------------------------------------------------------------------------
 
-function matchFunction(name: string, input: Type, source: (value: Value) => Source): Entity {
+function matchFunction(name: string, input: Type, source: (re: RegexpState, value: Value) => Source): Entity {
   return nativeFunction(name, fn([STRING, input], [BOOL, ERROR_TYPE]), ([pattern, value]) => {
-    const state = compileRegexp(pattern as string, PERL_FLAGS, false);
+    const state = compileRegexp(pattern as string);
     if (!(state instanceof RegexpState)) return [false, syntaxError(state)];
-    return [doFind(state, source(value), 0, 0) !== undefined, undefined];
+    return [doFind(source(state, value), 0) !== undefined, undefined];
   });
 }
 
 const members: Record<string, Entity> = {
   Regexp: typeEntity(REGEXP),
-  Compile: compileFunction('Compile', PERL_FLAGS, false),
-  CompilePOSIX: compileFunction('CompilePOSIX', POSIX_FLAGS, true),
-  MustCompile: mustCompileFunction('MustCompile', 'Compile', PERL_FLAGS, false),
-  MustCompilePOSIX: mustCompileFunction('MustCompilePOSIX', 'CompilePOSIX', POSIX_FLAGS, true),
-  MatchString: matchFunction('MatchString', STRING, (s) => stringSource(s as string)),
-  Match: matchFunction('Match', BYTES, (b) => stringSource(bytesOf(b))),
+  Compile: compileFunction('Compile'),
+  MustCompile: mustCompileFunction('MustCompile', 'Compile'),
+  MatchString: matchFunction('MatchString', STRING, (re, s) => stringSource(re, s as string)),
+  Match: matchFunction('Match', BYTES, (re, b) => stringSource(re, bytesOf(b))),
   MatchReader: matchFunction('MatchReader', IO_RUNE_READER, readerSource),
   QuoteMeta: nativeFunction('QuoteMeta', fn([STRING], [STRING]), ([s]) => quoteMeta(s as string)),
 };

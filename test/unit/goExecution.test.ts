@@ -1082,7 +1082,7 @@ func main() {
 });
 
 // Go 1.27.3 prints these: Go by Example's regexp calls, named groups and templates, Split, simple case folding, Unicode
-// classes and \b, leftmost-first versus POSIX leftmost-longest, byte offsets over invalid UTF-8, and parse errors.
+// classes and \b, leftmost-first versus leftmost-longest, byte offsets over invalid UTF-8, and parse errors.
 test('regexp matches as the RE2 engine of Go does', () => {
   const program = String.raw`package main
 
@@ -1104,9 +1104,10 @@ func main() {
 	fmt.Printf("%q %q\n", regexp.MustCompile("a*").Split("baaaab", -1), regexp.MustCompile(",\\s*").Split("x, y,z", 2))
 	fmt.Println(regexp.MustCompile("(?i)straße|k").FindAllString("STRASSE Straſſe STRAßE K", -1))
 	fmt.Println(regexp.MustCompile("\\p{Greek}+|\\bgo\\b").FindAllStringIndex("αβγ go gopher", -1))
-	fmt.Println(regexp.MustCompile("a(|b)").FindString("ab"), regexp.MustCompilePOSIX("a(|b)").FindString("ab"))
-	pre, complete := regexp.MustCompile("^hello(?:x|y)").LiteralPrefix()
-	fmt.Println(pre, complete, regexp.MustCompile(".").FindAllStringIndex("é\xffz", -1))
+	longest := regexp.MustCompile("a(|b)")
+	longest.Longest()
+	fmt.Println(regexp.MustCompile("a(|b)").FindString("ab"), longest.FindString("ab"))
+	fmt.Println(regexp.MustCompile(".").FindAllStringIndex("é\xffz", -1))
 	fmt.Println(regexp.QuoteMeta("1+1=2? [yes]"), regexp.MustCompile("b+").MatchReader(strings.NewReader("abbc")))
 	for _, p := range []string{"a(b", "x**", "[z-a]", "\\pX", "a{1001}", "(?P<>x)"} {
 		_, err := regexp.Compile(p)
@@ -1128,7 +1129,7 @@ func main() {
       '[STRA\u00DFE \u212A]\n' +
       '[[0 6] [7 9]]\n' +
       'a ab\n' +
-      'hello false [[0 2] [2 3] [3 4]]\n' +
+      '[[0 2] [2 3] [3 4]]\n' +
       '1\\+1=2\\? \\[yes\\] true\n' +
       'error parsing regexp: missing closing ): `a(b`\n' +
       'error parsing regexp: invalid nested repetition operator: `**`\n' +
