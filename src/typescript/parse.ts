@@ -28,6 +28,7 @@ const optionalAnnotationTypes = new Set([
   'adding_type_annotation',
 ]);
 
+const multilineTokenTypes = new Set(['comment', 'string', 'template_string']);
 const strictIdentifierTypes = new Set([
   'identifier',
   'type_identifier',
@@ -177,14 +178,13 @@ function replaceUnterminatedStringErrors(root: Node, source: string, errors: Sou
   const unterminated: SourceDiagnostic[] = [];
   let scannedUntil = 0;
   for (const node of outermostErrorNodes(root)) {
-    const scan = unterminatedStringsIn(source, Math.max(node.startIndex, scannedUntil), node.endIndex);
+    const scan = unterminatedStringsIn(source, Math.max(lexingStart(root, source, node), scannedUntil), node.endIndex);
     scannedUntil = scan.end;
     for (const { endIndex } of scan.strings) {
       unterminated.push({ row: rowAt(source, endIndex), message: '文字列リテラルが閉じられていません。' });
     }
-    // A node starting before its first open string also covers an earlier mistake, which keeps its own error.
-    const first = scan.strings[0];
-    if (!first || rowAt(source, first.startIndex) !== node.startPosition.row) continue;
+    const first = scan.strings.find(({ startIndex }) => startIndex >= node.startIndex);
+    if (!first || hasErrorBefore(node, first.startIndex)) continue;
     // Each outermost ERROR node reports one generic error at its start row.
     const index = remaining.findIndex(
       (error) => error.row === node.startPosition.row && error.message === '書き方に誤りがあります。'
@@ -202,6 +202,27 @@ function outermostErrorNodes(root: Node): Node[] {
   };
   visit(root);
   return found;
+}
+
+/**
+ * Where to lex an ERROR node from: the start of its first line, where no string is open, since a quote the node
+ * starts with may close a string; or, when a comment or template spans into that line, the end of that token.
+ */
+function lexingStart(root: Node, source: string, node: Node): number {
+  const lineStart = source.lastIndexOf('\n', node.startIndex - 1) + 1;
+  for (let covering = root.descendantForIndex(lineStart); covering; covering = covering.parent) {
+    if (covering.startIndex < lineStart && multilineTokenTypes.has(covering.type)) {
+      return Math.min(covering.endIndex, node.startIndex);
+    }
+  }
+  return lineStart;
+}
+
+/** Whether the parser failed on text in `node` before `index`, a mistake independent of a string opening there. */
+function hasErrorBefore(node: Node, index: number): boolean {
+  return node.children.some(
+    (child) => child.startIndex < index && (child.isError || child.isMissing || hasErrorBefore(child, index))
+  );
 }
 
 /** Lexes from `start` through the end of the line holding `end`, and on to the end of a string open there. */
