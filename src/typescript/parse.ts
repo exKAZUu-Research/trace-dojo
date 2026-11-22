@@ -210,21 +210,18 @@ function withUnterminatedStrings(root: Node, source: string, parseErrors: Source
 }
 
 /**
- * A valid replacement for `text` keeping every index and row: for a closed string, the same quotes around blanks with
- * each line break escaped, so the token still ends on its last row, where a token missing after it is placed; failing
- * that, an empty string literal as late among blanks and the line breaks as fits, or, where no two adjacent characters
- * are not line breaks, a template, which is invalid where only a string literal may appear, such as a module specifier.
+ * A valid replacement for `text` keeping every index and row, so the token still ends on its last row, where a token
+ * missing after it is placed: an empty string literal for an unclosed string, which ends at its first line break; for
+ * a closed one, the same quotes around blanks with each line break escaped, or, where a line break follows the opening
+ * quote or another break with no room for its `\`, a template, which is invalid only where a string literal must
+ * appear, such as a module specifier.
  */
 function validStringOfSameShape(text: string, closed: boolean): string {
-  if (!closed && text.length === 1) return '0';
-  const blank = text.replaceAll(/[^\r\n]/g, ' ');
-  if (closed) {
-    const continued = `${text[0]}${blank.slice(1, -1).replaceAll(/ (?=\r\n|\r(?!\n)|(?<!\r)\n)/g, '\\')}${text[0]}`;
-    // A line break right after the opening quote or another break has no room for its `\`.
-    if (!/[\r\n]/.test(continued.replaceAll(/\\(?:\r\n|[\r\n])/g, ''))) return continued;
-  }
-  const slot = blank.lastIndexOf('  ');
-  return slot === -1 ? `\`${blank.slice(1, -1)}\`` : `${blank.slice(0, slot)}''${blank.slice(slot + 2)}`;
+  if (!closed) return text.length === 1 ? '0' : `''${' '.repeat(text.length - 2)}`;
+  const blank = text.slice(1, -1).replaceAll(/[^\r\n]/g, ' ');
+  const continued = blank.replaceAll(/ (?=\r\n|\r(?!\n)|(?<!\r)\n)/g, '\\');
+  const allEscaped = !/[\r\n]/.test(continued.replaceAll(/\\(?:\r\n|[\r\n])/g, ''));
+  return allEscaped ? `${text[0]}${continued}${text[0]}` : `\`${blank}\``;
 }
 
 /**
