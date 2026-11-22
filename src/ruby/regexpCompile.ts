@@ -68,10 +68,7 @@ const RUBY_REASONS: readonly (readonly [string, string | ((rejection: Rejection)
   ],
   [
     'Group name not defined to the left',
-    ({ quoted, source, extended }) => {
-      const name = /^\\k[<'](.*)[>']$/.exec(quoted)?.[1] ?? '';
-      return regexpCaptureNames(source, extended).includes(name) ? undefined : `undefined name <${name}> reference`;
-    },
+    ({ quoted }) => `undefined name <${/^\\k[<'](.*)[>']$/.exec(quoted)?.[1] ?? ''}> reference`,
   ],
   [
     "Subroutine uses a group name that's not defined",
@@ -93,7 +90,6 @@ const UNSUPPORTED_NAMES: readonly (readonly [string, string])[] = [
   ['Lookbehind includes a pattern not allowed', '正規表現の後読みの中のこの構文'],
   ['Unsupported conditional', '正規表現の条件分岐（(?(...)...)）'],
   ['Invalid or unsupported group option', '正規表現の文字モード（(?a) など）'],
-  ['Group name not defined to the left', '正規表現の前方への後方参照'],
   ['Not enough capturing groups', '正規表現の前方への後方参照'],
 ];
 
