@@ -189,13 +189,7 @@ function withUnterminatedStrings(root: Node, source: string, parseErrors: Source
   let copiedUntil = 0;
   for (const { startIndex, endIndex, closed } of strings) {
     const text = source.slice(startIndex, endIndex);
-    // Replacements keep every index and row: a closed string becomes a template, which may span lines.
-    const replacement = closed
-      ? `\`${text.slice(1, -1).replaceAll(/[^\r\n]/g, ' ')}\``
-      : text.length === 1
-        ? '0'
-        : `''${' '.repeat(text.length - 2)}`;
-    repaired += source.slice(copiedUntil, startIndex) + replacement;
+    repaired += source.slice(copiedUntil, startIndex) + validStringOfSameShape(text, closed);
     copiedUntil = endIndex;
   }
   repaired += source.slice(copiedUntil);
@@ -206,6 +200,18 @@ function withUnterminatedStrings(root: Node, source: string, parseErrors: Source
       message: '文字列リテラルが閉じられていません。',
     })),
   ];
+}
+
+/**
+ * A valid replacement for `text` keeping every index and row: an empty string literal among blanks and the line
+ * breaks, or, where no two adjacent characters are not line breaks, a template, which is invalid where only a string
+ * literal may appear, such as a module specifier.
+ */
+function validStringOfSameShape(text: string, closed: boolean): string {
+  if (!closed && text.length === 1) return '0';
+  const blank = text.replaceAll(/[^\r\n]/g, ' ');
+  const slot = blank.indexOf('  ');
+  return slot === -1 ? `\`${blank.slice(1, -1)}\`` : `${blank.slice(0, slot)}''${blank.slice(slot + 2)}`;
 }
 
 /**
