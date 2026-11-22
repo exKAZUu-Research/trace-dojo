@@ -195,16 +195,28 @@ interface Frame {
   /** The group that the frame captures, if any, and the groups opened inside it. */
   own?: number;
   groups: number[];
-  branches?: boolean;
+  /** The alternatives that have ended, and where the current one starts in the pattern with the groups opened in it. */
+  alternatives: SkippableScope[];
+  alternativeAt: number;
+  alternativeGroups: number[];
+}
+
+/** A part of the pattern that a match can pass without, and the groups opened in it. */
+interface SkippableScope {
+  groups: number[];
+  start: number;
+  end: number;
 }
 
 /** What the first pass over a pattern finds that the second needs. */
 interface Layout {
   names: (string | undefined)[];
   /**
-   * The groups that back references read and that a match can pass without, which get markers telling whether they
-   * took part: PCRE fails a reference to a group that did not, where JavaScript matches the empty string.
+   * The back references, by their order in the pattern, that a match can reach without their group, and the groups
+   * of those references, which get markers telling whether they took part: PCRE fails a reference to a group that did
+   * not, where JavaScript matches the empty string.
    */
+  checked: Set<number>;
   marked: Set<number>;
 }
 
@@ -266,14 +278,14 @@ class PatternConverter {
   /** Where the last repeatable item starts in the result. */
   private itemStart = 0;
   private readonly frames: Frame[];
-  private readonly references: { target: number | string; at: number }[] = [];
+  private readonly references: { target: number | string; at: number; position: number; early: boolean }[] = [];
   private hiddenGroups = 0;
   private alternation = false;
-  /** The groups that the last repeatable item holds. */
+  /** The groups that the last repeatable item holds, and where it starts in the pattern if it is a group. */
   private itemGroups: number[] = [];
-  /** The groups that a match can pass without: in an alternative, an optional item or a lookaround, or read before they end. */
-  private readonly skippable = new Set<number>();
-  private readonly forwardNames = new Set<string>();
+  private itemAt = 0;
+  /** The parts that a match can pass without: an alternative, an optional item, or a lookaround. */
+  private readonly skippable: SkippableScope[] = [];
   private keepInLookaround = false;
   private readonly source: string;
   private options: PatternOptions;
@@ -288,18 +300,37 @@ class PatternConverter {
     this.unicode = options.utf8;
     this.checkCaselessRestriction(options);
     this.known = known;
-    this.frames = [{ start: 0, outer: this.options, close: '', modifiers: [], at: 0, groups: [] }];
+    this.frames = [
+      {
+        start: 0,
+        outer: this.options,
+        close: '',
+        modifiers: [],
+        at: 0,
+        groups: [],
+        alternatives: [],
+        alternativeAt: 0,
+        alternativeGroups: [],
+      },
+    ];
   }
 
   /** Converts the pattern to learn its layout, which a second converter needs for references to later groups. */
   layout(): Layout {
     this.convert();
+    const checked = new Set<number>();
     const marked = new Set<number>();
-    for (const { target } of this.references) {
+    for (const [index, { target, position, early }] of this.references.entries()) {
       const group = typeof target === 'number' ? target : this.names.indexOf(target);
-      if (this.skippable.has(group) || (typeof target === 'string' && this.forwardNames.has(target))) marked.add(group);
+      // A reference inside the part that can be passed, after its group, is passed together with the group.
+      const passable = this.skippable.some(
+        (scope) => scope.groups.includes(group) && (position < scope.start || position >= scope.end)
+      );
+      if (!early && !passable) continue;
+      checked.add(index);
+      marked.add(group);
     }
-    return { names: this.names, marked };
+    return { names: this.names, checked, marked };
   }
 
   convert(): string {
@@ -308,7 +339,7 @@ class PatternConverter {
       this.item();
     }
     if (this.frames.length > 1) this.fail('missing closing parenthesis', this.source.length);
-    this.noteSkippable(this.frames[0]);
+    this.endFrame(this.frames[0], Infinity);
     this.result += ')'.repeat(this.frames[0].modifiers.length);
     for (const { target, at } of this.references) {
       const exists = typeof target === 'number' ? target < this.names.length : this.names.includes(target);
@@ -409,6 +440,9 @@ class PatternConverter {
       lookaround,
       at,
       groups: [],
+      alternatives: [],
+      alternativeAt: at,
+      alternativeGroups: [],
     });
     this.options = { ...this.options };
     this.emit(open, false);
@@ -422,12 +456,23 @@ class PatternConverter {
     this.options = frame.outer;
     this.repeatable = true;
     this.itemStart = frame.start;
-    this.noteSkippable(frame);
+    this.endFrame(frame, this.index);
     this.itemGroups = frame.own === undefined ? frame.groups : [...frame.groups, frame.own];
+    this.itemAt = frame.at;
   }
 
-  private noteSkippable(frame: Frame): void {
-    if (frame.branches || frame.lookaround) for (const group of frame.groups) this.skippable.add(group);
+  private endFrame(frame: Frame, end: number): void {
+    if (frame.alternatives.length > 0) {
+      this.endAlternative(frame, end);
+      this.skippable.push(...frame.alternatives);
+    }
+    if (frame.lookaround) this.skippable.push({ groups: frame.groups, start: frame.at, end });
+  }
+
+  private endAlternative(frame: Frame, end: number): void {
+    frame.alternatives.push({ groups: frame.alternativeGroups, start: frame.alternativeAt, end });
+    frame.alternativeAt = end;
+    frame.alternativeGroups = [];
   }
 
   /** Emits `|`, where the option settings so far in the group still apply. */
@@ -435,7 +480,7 @@ class PatternConverter {
     this.index++;
     const frame = this.frames.at(-1) as Frame;
     const { modifiers } = frame;
-    frame.branches = true;
+    this.endAlternative(frame, this.index);
     if (this.frames.length === 1) this.alternation = true;
     this.noteInLookbehind('variable');
     this.emit(`${')'.repeat(modifiers.length)}|${modifiers.join('')}`, false);
@@ -451,7 +496,9 @@ class PatternConverter {
   private quantifier(text: string, end: number): void {
     if (!this.repeatable) this.fail('quantifier does not follow a repeatable item', end);
     this.checkLookbehindQuantifier(text);
-    if (/^(?:[*?]|\{0[,}])/.test(text)) for (const group of this.itemGroups) this.skippable.add(group);
+    if (/^(?:[*?]|\{0[,}])/.test(text)) {
+      this.skippable.push({ groups: this.itemGroups, start: this.itemAt, end: this.index });
+    }
     this.index = end;
     while (this.index < this.source.length) {
       if (this.source.startsWith('(?#', this.index)) this.skipGroupComment();
@@ -890,11 +937,11 @@ class PatternConverter {
       if (digits) {
         const group = this.groupNumber(digits, this.index);
         if (group === 0) this.fail('reference to non-existent subpattern', this.index);
-        this.references.push({ target: group, at: start });
+        this.references.push({ target: group, at: start, position: this.index, early: true });
       } else if (opener === '<' || opener === "'") {
         this.index++;
         const { name, start: nameStart } = this.readGroupName(opener === '<' ? '>' : "'");
-        this.references.push({ target: name, at: nameStart });
+        this.references.push({ target: name, at: nameStart, position: this.index, early: true });
       } else this.fail('expected capture group number or name', start);
     } while (this.source[this.index] === ',');
     if (this.source[this.index] !== ')') this.fail('missing closing parenthesis for condition', this.index);
@@ -909,23 +956,22 @@ class PatternConverter {
 
   private reference(target: number | string, at: number): void {
     this.rejectInLookbehind('後方参照');
-    this.references.push({ target, at });
-    this.noteEarlyReference(target);
+    const index = this.references.length;
+    this.references.push({ target, at, position: this.index, early: this.isEarlyReference(target) });
     const group = typeof target === 'number' ? target : (this.known?.names.indexOf(target) ?? -1);
     if (!this.known || group < 0) {
       // The first pass and a reference that is a compilation error emit nothing that is used.
       this.emit('(?:)', true);
       return;
     }
-    const check = this.known.marked.has(group) ? participated(group) : '';
+    const check = this.known.checked.has(index) ? participated(group) : '';
     this.emit(`(?:${check}\\k<${groupName(group)}>)`, true);
   }
 
-  /** Notes a reference that is read before its group ends, where the group has not taken part yet. */
-  private noteEarlyReference(target: number | string): void {
+  /** Whether a reference is read before its group ends, where the group may not have taken part yet. */
+  private isEarlyReference(target: number | string): boolean {
     const group = typeof target === 'number' ? target : this.names.indexOf(target);
-    if (group < 0) this.forwardNames.add(target as string);
-    else if (group >= this.names.length || this.frames.some((frame) => frame.own === group)) this.skippable.add(group);
+    return group < 0 || group >= this.names.length || this.frames.some((frame) => frame.own === group);
   }
 
   private unknownEscape(letter: string): never {
@@ -948,7 +994,10 @@ class PatternConverter {
     this.noteInLookbehind('captures');
     const group = this.names.length;
     this.names.push(name);
-    for (const frame of this.frames) frame.groups.push(group);
+    for (const frame of this.frames) {
+      frame.groups.push(group);
+      frame.alternativeGroups.push(group);
+    }
     const open = `(?<${groupName(group)}>`;
     if (this.known?.marked.has(group)) this.openFrame(`${open}(?:`, `)${participationMarker(group)})`);
     else this.openFrame(open, ')');
