@@ -281,6 +281,7 @@ export abstract class MemberBinder extends CallBinder {
     }
     if (found?.local) return this.localReference(found.local, position, context);
     if (found?.localFunction) {
+      this.rejectStaticReference(found.localFunction, found.scope.owner, position, context);
       this.localFunctionUses.push({ fn: context.fn, callee: found.localFunction });
       return {
         kind: 'methodGroup',
@@ -364,6 +365,28 @@ export abstract class MemberBinder extends CallBinder {
     const thisType = context.fn.thisType;
     if (thisType && thisType.symbol === type) return thisType;
     return type.declaredType;
+  }
+
+  /**
+   * Rejects a reference from inside a static lambda or local function to a non-static local function declared outside
+   * it, as Roslyn does whether or not that function captures anything.
+   */
+  private rejectStaticReference(
+    callee: MethodSymbol,
+    declaringFn: FunctionScope,
+    position: Position,
+    context: BindContext
+  ): void {
+    // The callee's own static modifier, which its declaration has before its body is bound.
+    const declaration = callee.declaration as { modifiers?: { set: Set<string> } } | undefined;
+    if (declaration?.modifiers?.set.has('static')) return;
+    for (let fn: FunctionScope | undefined = context.fn; fn && fn !== declaringFn; fn = fn.outer) {
+      if (!(fn.method as { isStaticLambda?: boolean }).isStaticLambda) continue;
+      if (fn.kind === 'lambda')
+        this.error(position, 'CS8820', `静的な匿名関数に '${callee.name}' への参照を含めることはできません。`);
+      else this.error(position, 'CS8421', `静的なローカル関数に '${callee.name}' への参照を含めることはできません。`);
+      return;
+    }
   }
 
   /** A local variable, recording that a lambda or local function captures it from an enclosing function. */
