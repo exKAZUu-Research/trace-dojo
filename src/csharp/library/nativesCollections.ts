@@ -175,7 +175,10 @@ export function listOf(value: Value): ListState {
 export function newList(call: NativeCall, elementType: Type, items: Value[]): CsObject {
   call.frame.runtime.allocateSlots(items.length);
   const list = new CsObject(libraryType(call, 'System.Collections.Generic.List', [elementType]), []);
-  const state = new ListState(items, elementType);
+  const state = new ListState(
+    items.map((item) => copyValue(item)),
+    elementType
+  );
   state.capacity = items.length;
   list.native = state;
   return list;
@@ -347,7 +350,7 @@ const listNatives: Record<string, NativeMethod> = {
         "Destination array was not long enough. Check the destination index, length, and the array's lower bounds.",
         'destinationArray'
       );
-    for (const [offset, item] of items.entries()) target.values[(index as number) + offset] = item;
+    for (const [offset, item] of items.entries()) target.values[(index as number) + offset] = copyValue(item);
     return;
   },
   [`${LIST}.CopyTo(int, T[], int, int)`]: (call, receiver, [index, array, arrayIndex, count]) => {
@@ -374,7 +377,7 @@ const listNatives: Record<string, NativeMethod> = {
         "Destination array was not long enough. Check the destination index, length, and the array's lower bounds.",
         'destinationArray'
       );
-    for (let offset = 0; offset < length; offset++) target.values[to + offset] = items[from + offset];
+    for (let offset = 0; offset < length; offset++) target.values[to + offset] = copyValue(items[from + offset]);
     return;
   },
   [`${LIST}.Exists`]: (call, receiver, [match]) => listOf(receiver).items.some(predicateOf(call, match as Value)),
@@ -960,7 +963,7 @@ for (const name of ['KeyCollection', 'ValueCollection']) {
     [`${prefix}.CopyTo`]: (_call, receiver, [array, index]) => {
       let position = index as number;
       for (const item of ((receiver as CsObject).native as ViewState).enumerate())
-        (array as CsArray).values[position++] = item;
+        (array as CsArray).values[position++] = copyValue(item);
       return;
     },
     [`${prefix}.GetEnumerator`]: (call, receiver) =>
@@ -1065,7 +1068,7 @@ defineNatives({
   [`${HASH_SET}.Contains`]: (_call, receiver, [value]) => hashOfState(receiver).find(value as Value) >= 0,
   [`${HASH_SET}.CopyTo`]: (_call, receiver, [array, index = 0]) => {
     let position = index as number;
-    for (const item of hashOfState(receiver).enumerate()) (array as CsArray).values[position++] = item;
+    for (const item of hashOfState(receiver).enumerate()) (array as CsArray).values[position++] = copyValue(item);
     return;
   },
   [`${HASH_SET}.ExceptWith`]: (call, receiver, [other]) => {
@@ -1418,7 +1421,11 @@ defineNatives({
   [`${ARRAY}.Clone`]: (call, receiver) => {
     const array = arrayOf(receiver);
     call.frame.runtime.allocateSlots(array.values.length);
-    return new CsArray(array.type, [...array.lengths], [...array.values]);
+    return new CsArray(
+      array.type,
+      [...array.lengths],
+      array.values.map((value) => copyValue(value))
+    );
   },
   [`${ARRAY}.CopyTo`]: (_call, receiver, [target, index]) => {
     const source = arrayOf(receiver);
@@ -1429,7 +1436,8 @@ defineNatives({
         "Destination array was not long enough. Check the destination index, length, and the array's lower bounds.",
         'destinationArray'
       );
-    for (const [offset, value] of source.values.entries()) destination.values[(index as number) + offset] = value;
+    for (const [offset, value] of source.values.entries())
+      destination.values[(index as number) + offset] = copyValue(value);
     return;
   },
   [`${ARRAY}.GetEnumerator`]: (call, receiver) => {
@@ -1686,7 +1694,7 @@ function copyArray(
       'destinationArray'
     );
   const values = source.values.slice(sourceIndex, sourceIndex + length);
-  for (const [offset, value] of values.entries()) target.values[targetIndex + offset] = value;
+  for (const [offset, value] of values.entries()) target.values[targetIndex + offset] = copyValue(value);
   return undefined;
 }
 
@@ -1782,7 +1790,7 @@ defineNatives({
         'destinationArray'
       );
     }
-    for (const [offset, value] of values.entries()) destination[(start as number) + offset] = value;
+    for (const [offset, value] of values.entries()) destination[(start as number) + offset] = copyValue(value);
     return;
   },
   [`${ARRAY_HELPER}.GetEnumerator`]: (call, receiver) => {

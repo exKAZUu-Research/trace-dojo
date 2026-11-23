@@ -163,7 +163,8 @@ export class Evaluator extends StatementExecutor {
     if (captured) frame.captured = captured;
     for (const [index, local] of method.locals.entries()) {
       if (!local.isParameter || local.owner !== method) continue;
-      const arg = args[index];
+      // A value parameter receives a copy also when the library calls back with a struct it stores.
+      const arg = args[index] instanceof CsStruct ? copyValue(args[index]) : args[index];
       frame.slots[local.slot] = local.isCaptured ? new Cell(arg as Value) : arg;
     }
     this.runtime.pushFrame(frame);

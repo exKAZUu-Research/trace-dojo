@@ -3,7 +3,7 @@ import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import type { NativeState } from '../runtime';
 import type { Type } from '../types';
-import { type CsArray, CsObject, CsStruct, type Value } from '../values';
+import { copyValue, type CsArray, CsObject, CsStruct, type Value } from '../values';
 import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { type Comparison, comparisonOf, equalityOf } from './nativesCollections';
 import {
@@ -286,7 +286,7 @@ defineNatives({
   [`${SORTED_SET}.Contains`]: (_call, receiver, [value]) => sortedOf(receiver).position(value as Value).isFound,
   [`${SORTED_SET}.CopyTo`]: (_call, receiver, [array, index]) => {
     for (const [offset, key] of sortedOf(receiver).keys.entries())
-      (array as CsArray).values[(index as number) + offset] = key;
+      (array as CsArray).values[(index as number) + offset] = copyValue(key);
     return;
   },
   [`${SORTED_SET}.ExceptWith`]: (call, receiver, [other]) => {
@@ -531,7 +531,7 @@ defineNatives({
     findNode(call, linkedOf(receiver), value as Value, false) !== undefined,
   [`${LINKED}.CopyTo`]: (_call, receiver, [array, index]) => {
     let position = index as number;
-    for (const item of linkedOf(receiver).enumerate()) (array as CsArray).values[position++] = item;
+    for (const item of linkedOf(receiver).enumerate()) (array as CsArray).values[position++] = copyValue(item);
     return;
   },
   [`${LINKED}.Find`]: (call, receiver, [value]) => findNode(call, linkedOf(receiver), value as Value, false)?.object,

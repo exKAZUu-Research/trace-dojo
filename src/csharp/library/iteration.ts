@@ -4,7 +4,7 @@ import { PendingException } from '../numeric';
 import { environmentOf } from '../objects';
 import type { NativeState } from '../runtime';
 import { type MethodSymbol, substitute, substitutionOf, type Type } from '../types';
-import { CsArray, CsObject, CsStruct, isString, stringText, type Value } from '../values';
+import { copyValue, CsArray, CsObject, CsStruct, isString, stringText, type Value } from '../values';
 import { evaluatorOf, fail, failNull } from './support';
 
 /** The state of a library collection, which natives enumerate without calling the program back. */
@@ -33,7 +33,8 @@ export function* iterate(call: NativeCall, value: Value, parameterName = 'source
   let count = 0;
   for (const element of elementsOf(call, value, parameterName)) {
     if (++count % ELEMENTS_PER_OPERATION === 0) call.frame.runtime.spend();
-    yield element;
+    // An element leaves its collection's storage as a copy, as reading a struct does in .NET.
+    yield copyValue(element);
   }
 }
 

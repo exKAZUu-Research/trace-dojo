@@ -98,7 +98,7 @@ export abstract class StatementExecutor extends PatternMatcher {
         return CONTINUE;
       }
       case 'return': {
-        return { value: statement.value ? this.evaluate(statement.value, frame) : undefined };
+        return { value: statement.value ? copyValue(this.evaluate(statement.value, frame)) : undefined };
       }
       case 'throw': {
         return this.executeThrow(statement, frame);
