@@ -959,7 +959,10 @@ const linq: Record<string, NativeMethod> = {
     ]),
   [`${ENUMERABLE}.Join`]: (call, _receiver, args) =>
     joinQuery(call, args as Value[], generatedIterator(call, 'JoinIterator', 126), (item, group, resultOf) =>
-      (group ?? []).map((match) => resultOf(item, match))
+      // Each pair's result is selected as it is read, so a query that stops early selects no more.
+      (function* () {
+        for (const match of group ?? []) yield resultOf(item, match);
+      })()
     ),
   [`${ENUMERABLE}.Index`]: (call, _receiver, [items]) => {
     const all = source(call, items as Value);

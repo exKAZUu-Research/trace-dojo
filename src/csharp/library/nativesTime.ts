@@ -1,3 +1,4 @@
+import { MeteredText, type TextBudget } from '../meteredText';
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import { CsBox, CsStruct, type Value } from '../values';
@@ -76,7 +77,11 @@ function daysFromCivil(year: number, month: number, day: number): number {
   return era * 146_097 + dayOfEra - 719_468 + 719_162;
 }
 
-function civilFromDays(days: number): { year: number; month: number; day: number } {
+function civilFromDays(days: number): {
+  year: number;
+  month: number;
+  day: number;
+} {
   const z = days + 719_468 - 719_162;
   const era = Math.floor(z / 146_097);
   const dayOfEra = z - era * 146_097;
@@ -212,7 +217,7 @@ const STANDARD_DATE_FORMATS: Record<string, string> = {
 };
 
 /** Formats a DateTime with a standard or custom format string, with the ja-JP culture's names. */
-export function formatDateTime(value: CsStruct, format: string | undefined): string {
+export function formatDateTime(budget: TextBudget, value: CsStruct, format: string | undefined): string {
   const parts = partsOf(ticksOf(value));
   const pattern =
     format === undefined || format === ''
@@ -224,11 +229,10 @@ export function formatDateTime(value: CsStruct, format: string | undefined): str
     return `${ENGLISH_DAYS[parts.dayOfWeek].slice(0, 3)}, ${pad(parts.day, 2)} ${ENGLISH_MONTHS[parts.month - 1]} ${pad(parts.year, 4)} ${pad(parts.hour, 2)}:${pad(parts.minute, 2)}:${pad(parts.second, 2)} GMT`;
   if (pattern === undefined)
     throw new PendingException('System.FormatException', 'Input string was not in a correct format.');
-  return customDate(parts, pattern);
+  return customDate(parts, pattern, new MeteredText(budget));
 }
 
-function customDate(parts: DateParts, pattern: string): string {
-  let result = '';
+function customDate(parts: DateParts, pattern: string, result: MeteredText): string {
   let index = 0;
   // Where the run of equal characters at the index ends, kept while a literal consumes the run in parts.
   let runEnd = 0;
@@ -237,19 +241,21 @@ function customDate(parts: DateParts, pattern: string): string {
     if (index >= runEnd || pattern[runEnd - 1] !== char) {
       runEnd = index + 1;
       while (pattern[runEnd] === char) runEnd++;
+      result.read(runEnd - index);
     }
     const count = runEnd - index;
     const field = dateField(parts, char, count);
     if (field === undefined) {
       const literal = dateLiteral(pattern, index, count);
-      result += literal.text;
+      result.read(literal.length);
+      result.append(literal.text);
       index += literal.length;
     } else {
-      result += field;
+      result.append(field);
       index += count;
     }
   }
-  return result;
+  return result.toString();
 }
 
 /** The text of a run of `count` copies of a custom date format specifier, or undefined for a literal character. */
@@ -320,7 +326,7 @@ function dateLiteral(pattern: string, index: number, count: number): { text: str
 }
 
 /** Formats a TimeSpan: `[-][d.]hh:mm:ss[.fffffff]`, or with a custom format. */
-export function formatTimeSpan(value: CsStruct, format: string | undefined): string {
+export function formatTimeSpan(budget: TextBudget, value: CsStruct, format: string | undefined): string {
   const ticks = ticksOf(value);
   const negative = ticks < 0n;
   const magnitude = negative ? -ticks : ticks;
@@ -344,7 +350,7 @@ export function formatTimeSpan(value: CsStruct, format: string | undefined): str
     const { sign, days, hours, minutes, seconds, fraction } = span;
     return `${sign}${days}:${pad(hours, 2)}:${pad(minutes, 2)}:${pad(seconds, 2)}.${fraction.toString().padStart(7, '0')}`;
   }
-  return customTimeSpan(span, format);
+  return customTimeSpan(span, format, new MeteredText(budget));
 }
 
 interface TimeSpanParts {
@@ -356,29 +362,35 @@ interface TimeSpanParts {
   fraction: bigint;
 }
 
-function customTimeSpan(span: TimeSpanParts, format: string): string {
-  let result = '';
+function customTimeSpan(span: TimeSpanParts, format: string, result: MeteredText): string {
+  // Where the run of equal characters at the index ends, kept while a literal consumes the run in parts.
+  let runEnd = 0;
   for (let index = 0; index < format.length; index++) {
     const char = format[index];
-    let count = 1;
-    while (format[index + count] === char) count++;
+    if (index >= runEnd || format[runEnd - 1] !== char) {
+      runEnd = index + 1;
+      while (format[runEnd] === char) runEnd++;
+      result.read(runEnd - index);
+    }
+    const count = runEnd - index;
     const field = timeSpanField(span, char, count);
     if (field !== undefined) {
-      result += field;
+      result.append(field);
       index += count - 1;
     } else if (char === '\\') {
-      result += format[index + 1] ?? '';
+      result.append(format[index + 1] ?? '');
       index++;
     } else if (char === '%' && index + 1 < format.length) {
       // `%` marks the next character as a custom specifier, as in `%d`.
     } else if (char === "'") {
       const end = format.indexOf("'", index + 1);
       if (end === -1) throw new PendingException('System.FormatException', 'Input string was not in a correct format.');
-      result += format.slice(index + 1, end);
+      result.read(end - index);
+      result.append(format.slice(index + 1, end));
       index = end;
     } else throw new PendingException('System.FormatException', 'Input string was not in a correct format.');
   }
-  return result;
+  return result.toString();
 }
 
 function timeSpanField(span: TimeSpanParts, char: string, count: number): string | undefined {
@@ -445,8 +457,8 @@ defineNatives({
   'System.TimeSpan.Equals': (_call, receiver, [other]) => timeEquals(receiver, other as Value),
   'System.TimeSpan.GetHashCode': (_call, receiver) =>
     Number(BigInt.asIntN(32, ticksOf(receiver) ^ (ticksOf(receiver) >> 32n))),
-  'System.TimeSpan.ToString': (_call, receiver, [format]) =>
-    formatTimeSpan(receiver as CsStruct, (format as string | undefined) ?? undefined),
+  'System.TimeSpan.ToString': (call, receiver, [format]) =>
+    formatTimeSpan(call.frame.runtime, receiver as CsStruct, (format as string | undefined) ?? undefined),
   'System.TimeSpan.FromDays': fromUnit(TICKS_PER_DAY),
   'System.TimeSpan.FromHours': fromUnit(TICKS_PER_HOUR),
   'System.TimeSpan.FromMinutes': fromUnit(TICKS_PER_MINUTE),
@@ -547,12 +559,14 @@ defineNatives({
   'System.DateTime.Equals': (_call, receiver, [other]) => timeEquals(receiver, other as Value),
   'System.DateTime.GetHashCode': (_call, receiver) =>
     Number(BigInt.asIntN(32, ticksOf(receiver) ^ (ticksOf(receiver) >> 32n))),
-  'System.DateTime.ToString': (_call, receiver, [format]) =>
-    formatDateTime(receiver as CsStruct, (format as string | undefined) ?? undefined),
-  'System.DateTime.ToShortDateString': (_call, receiver) => formatDateTime(receiver as CsStruct, 'd'),
-  'System.DateTime.ToLongDateString': (_call, receiver) => formatDateTime(receiver as CsStruct, 'D'),
-  'System.DateTime.ToShortTimeString': (_call, receiver) => formatDateTime(receiver as CsStruct, 't'),
-  'System.DateTime.ToLongTimeString': (_call, receiver) => formatDateTime(receiver as CsStruct, 'T'),
+  'System.DateTime.ToString': (call, receiver, [format]) =>
+    formatDateTime(call.frame.runtime, receiver as CsStruct, (format as string | undefined) ?? undefined),
+  'System.DateTime.ToShortDateString': (call, receiver) =>
+    formatDateTime(call.frame.runtime, receiver as CsStruct, 'd'),
+  'System.DateTime.ToLongDateString': (call, receiver) => formatDateTime(call.frame.runtime, receiver as CsStruct, 'D'),
+  'System.DateTime.ToShortTimeString': (call, receiver) =>
+    formatDateTime(call.frame.runtime, receiver as CsStruct, 't'),
+  'System.DateTime.ToLongTimeString': (call, receiver) => formatDateTime(call.frame.runtime, receiver as CsStruct, 'T'),
   'System.DateTime.DaysInMonth': (_call, _receiver, [year, month]) => {
     if ((month as number) < 1 || (month as number) > 12)
       fail('System.ArgumentOutOfRangeException', 'Month must be between one and twelve.', 'month');

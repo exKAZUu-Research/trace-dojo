@@ -10,6 +10,7 @@ import {
   cultureStartsWith,
   equalsCulture,
 } from '../culture';
+import { MeteredText } from '../meteredText';
 import { defineNatives, defineNativesKeepingStrings, type NativeCall, type NativeMethod } from '../natives';
 import { primitiveHash, toStringValue, unboxed } from '../objects';
 import type { NativeState } from '../runtime';
@@ -1367,14 +1368,9 @@ function replaceIn(
   reserve(call, state, 0, count);
   const growth = occurrencesIn(state.text, from, start, count) * (to.length - from.length);
   reserve(call, state, Math.max(0, growth));
-  // Work is charged in characters, collected so that many small pieces of work cost little.
-  let pending = 0;
-  state.replace(from, to, start, count, (work) => {
-    pending += work;
-    if (pending < 1024) return;
-    call.frame.runtime.spend(Math.floor(pending / 16));
-    pending %= 16;
-  });
+  const meter = new MeteredText(call.frame.runtime);
+  state.replace(from, to, start, count, (work) => meter.read(work));
+  meter.settle();
 }
 
 function setBuilder(receiver: Value, text: string, capacity: number): Value {

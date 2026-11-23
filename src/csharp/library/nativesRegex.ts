@@ -1,8 +1,7 @@
 // code-gauge-allow-file fileNcss -- The nativesRegex module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
-import { LIMITS } from '../../interpreter/limits';
+import { MeteredText } from '../meteredText';
 import { defineNatives, defineNativesKeepingStrings, type NativeCall } from '../natives';
-import { PendingException } from '../numeric';
 import type { NativeState } from '../runtime';
 import { CsObject, type CsString, freshString, plainString, stringText, type Value } from '../values';
 import { type EnumerableState, LibraryEnumerator } from './iteration';
@@ -591,47 +590,47 @@ function missingGroup(call: NativeCall): CsObject {
   return object;
 }
 
-/** Expands a replacement pattern's substitutions (`$1`, `${name}`, `$&`, ...) for a match, as .NET does. */
+/** Expands a replacement pattern's substitutions (`$1`, `${name}`, `$&`, ...) for a match into the output, as .NET does. */
 // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
 // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
-function substitute(call: NativeCall, replacement: string, state: MatchState): string {
-  // Each match reads the whole replacement, even where its substitutions expand to nothing.
-  call.frame.runtime.spend(Math.ceil(replacement.length / 16));
+function substitute(output: MeteredText, replacement: string, state: MatchState): void {
   const groupValue = (number: number): string => state.groups[number]?.value ?? '';
   const whole = state.group;
-  let result = '';
   for (let index = 0; index < replacement.length; index++) {
     const char = replacement[index];
+    output.read(1);
     if (char !== '$' || index + 1 >= replacement.length) {
-      result += char;
+      output.append(char);
       continue;
     }
     const rest = replacement.slice(index + 1);
     const digits = /^\d+/.exec(rest)?.[0];
     if (digits) {
+      output.read(digits.length);
       // .NET takes the longest prefix of the digits that names a group, which has no more significant digits than the
       // group count.
       const zeros = /^0*/.exec(digits)?.[0].length ?? 0;
       let length = Math.min(digits.length, zeros + String(state.groups.length).length);
       while (length > 0 && Number(digits.slice(0, length)) >= state.groups.length) length--;
       if (length > 0) {
-        result = appended(result, groupValue(Number(digits.slice(0, length))));
+        output.append(groupValue(Number(digits.slice(0, length))));
         index += length;
         continue;
       }
-      result += char;
+      output.append(char);
       continue;
     }
     const braced = /^\{(\w+)\}/.exec(rest);
     if (braced) {
+      output.read(braced[0].length);
       const name = braced[1];
       const number = /^\d+$/.test(name) ? Number(name) : (state.compiled?.names.indexOf(name) ?? -1);
       if (number >= 0 && number < state.groups.length) {
-        result = appended(result, groupValue(number));
+        output.append(groupValue(number));
         index += braced[0].length;
         continue;
       }
-      result += char;
+      output.append(char);
       continue;
     }
     const special = rest[0];
@@ -645,11 +644,10 @@ function substitute(call: NativeCall, replacement: string, state: MatchState): s
     };
     const expand = replaced[special];
     if (expand) {
-      result = appended(result, expand());
+      output.append(expand());
       index++;
-    } else result += char;
+    } else output.append(char);
   }
-  return result;
 }
 
 /** `Replace`, which returns the input itself when it replaces nothing. */
@@ -657,36 +655,25 @@ function replaceMatches(
   call: NativeCall,
   compiled: CompiledPattern,
   source: string | CsString,
-  replace: (match: CsObject, state: MatchState) => string,
+  replace: (match: CsObject, state: MatchState, output: MeteredText) => void,
   count = -1
 ): string | CsString {
   if (count < -1) failOutOfRange(call, 'count', 'Count cannot be less than -1.', String(count));
   const matches = count === 0 ? [] : allMatches(call, compiled, source);
   if (matches.length === 0) return source;
   const input = stringText(source);
-  let result = '';
+  const output = new MeteredText(call.frame.runtime);
   let position = 0;
   let replaced = 0;
   for (const match of matches) {
     const state = match.native as MatchState;
-    result = appended(appended(result, input.slice(position, state.group.index)), replace(match, state));
+    output.append(input.slice(position, state.group.index));
+    replace(match, state, output);
     position = state.group.index + state.group.length;
     if (++replaced === count) break;
   }
-  return freshString(result + input.slice(position));
-}
-
-/**
- * A text with another appended, failing as .NET's string limit does before building one past it: a substitution can
- * repeat a long capture many times, which builds a huge host string before the native's result check sees it.
- */
-function appended(text: string, addition: string): string {
-  if (text.length + addition.length > LIMITS.maxStringLength)
-    throw new PendingException(
-      'System.OutOfMemoryException',
-      "Exception of type 'System.OutOfMemoryException' was thrown."
-    );
-  return text + addition;
+  output.append(input.slice(position));
+  return freshString(output.toString());
 }
 
 /** `Split`, whose only part is the input itself when nothing matches. */
@@ -755,8 +742,11 @@ defineNatives({
     if (!state.compiled || state.nextStart > state.input.length) return emptyMatch(call);
     return findMatch(call, state.compiled, state.source, state.nextStart);
   },
-  [`${NAMESPACE}.Match.Result`]: (call, receiver, [replacement]) =>
-    substitute(call, replacementOf(replacement as Value), matchStateOf(receiver)),
+  [`${NAMESPACE}.Match.Result`]: (call, receiver, [replacement]) => {
+    const output = new MeteredText(call.frame.runtime);
+    substitute(output, replacementOf(replacement as Value), matchStateOf(receiver));
+    return output.toString();
+  },
   [`${NAMESPACE}.MatchCollection.get_Count`]: (_call, receiver) => listOf(receiver).length,
   [`${NAMESPACE}.MatchCollection.get_IsReadOnly`]: () => true,
   [`${NAMESPACE}.MatchCollection.get_Item`]: (call, receiver, [index]) =>
@@ -799,8 +789,8 @@ defineNativesKeepingStrings({
     newMatchCollection(call, allMatches(call, regexOf(receiver), inputOf(input as Value))),
   [`${REGEX}.Replace(string, string)`]: (call, receiver, [input, replacement]) => {
     const text = replacementOf(replacement as Value);
-    return replaceMatches(call, regexOf(receiver), inputOf(input as Value), (_match, state) =>
-      substitute(call, text, state)
+    return replaceMatches(call, regexOf(receiver), inputOf(input as Value), (_match, state, output) =>
+      substitute(output, text, state)
     );
   },
   [`${REGEX}.Replace(string, string, int)`]: (call, receiver, [input, replacement, count]) => {
@@ -809,13 +799,13 @@ defineNativesKeepingStrings({
       call,
       regexOf(receiver),
       inputOf(input as Value),
-      (_match, state) => substitute(call, text, state),
+      (_match, state, output) => substitute(output, text, state),
       count as number
     );
   },
   [`${REGEX}.Replace(string, MatchEvaluator)`]: (call, receiver, [input, evaluator]) =>
-    replaceMatches(call, regexOf(receiver), inputOf(input as Value), (match) =>
-      evaluate(call, evaluator as Value, match)
+    replaceMatches(call, regexOf(receiver), inputOf(input as Value), (match, _state, output) =>
+      output.append(evaluate(call, evaluator as Value, match))
     ),
   [`${REGEX}.Split(string)`]: (call, receiver, [input]) => split(call, regexOf(receiver), inputOf(input as Value)),
   [`${REGEX}.Match(string, string)`]: (call, _receiver, [input, pattern]) =>
@@ -831,8 +821,8 @@ defineNativesKeepingStrings({
     ),
   [`${REGEX}.Replace(string, string, string)`]: (call, _receiver, [input, pattern, replacement]) => {
     const text = replacementOf(replacement as Value);
-    return replaceMatches(call, patternOf(call, pattern as Value), inputOf(input as Value), (_match, state) =>
-      substitute(call, text, state)
+    return replaceMatches(call, patternOf(call, pattern as Value), inputOf(input as Value), (_match, state, output) =>
+      substitute(output, text, state)
     );
   },
   [`${REGEX}.Replace(string, string, string, RegexOptions)`]: (
@@ -845,12 +835,12 @@ defineNativesKeepingStrings({
       call,
       patternOf(call, pattern as Value, options as Value),
       inputOf(input as Value),
-      (_match, state) => substitute(call, text, state)
+      (_match, state, output) => substitute(output, text, state)
     );
   },
   [`${REGEX}.Replace(string, string, MatchEvaluator)`]: (call, _receiver, [input, pattern, evaluator]) =>
-    replaceMatches(call, patternOf(call, pattern as Value), inputOf(input as Value), (match) =>
-      evaluate(call, evaluator as Value, match)
+    replaceMatches(call, patternOf(call, pattern as Value), inputOf(input as Value), (match, _state, output) =>
+      output.append(evaluate(call, evaluator as Value, match))
     ),
   [`${REGEX}.Split(string, string)`]: (call, _receiver, [input, pattern]) =>
     split(call, patternOf(call, pattern as Value), inputOf(input as Value)),

@@ -3,6 +3,7 @@
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
 import { CsDecimal } from '../decimal';
 import { combineDelegates } from '../delegates';
+import { MeteredText } from '../meteredText';
 import { defineNatives, defineNativesKeepingStrings, type NativeCall, type NativeMethod } from '../natives';
 import {
   arithmetic,
@@ -1071,7 +1072,12 @@ function parseRadix(text: string, base: number, target: SpecialType): Value {
     fail('System.ArgumentException', 'String cannot contain a minus sign if the base is not 10.');
   if (text[0] === '-' || text[0] === '+') index++;
   if (base === 16 && /^0[xX]/.test(text.slice(index))) index += 2;
-  const digitPattern = { 2: /^[01]+/, 8: /^[0-7]+/, 10: /^\d+/, 16: /^[\dA-Fa-f]+/ }[base as 2 | 8 | 10 | 16];
+  const digitPattern = {
+    2: /^[01]+/,
+    8: /^[0-7]+/,
+    10: /^\d+/,
+    16: /^[\dA-Fa-f]+/,
+  }[base as 2 | 8 | 10 | 16];
   const digits = digitPattern.exec(text.slice(index))?.[0];
   if (digits === undefined) fail('System.FormatException', 'Could not find any recognizable digits.');
   if (index + digits.length < text.length)
@@ -1148,20 +1154,18 @@ export function compositeFormat(
 ): string {
   if (format === undefined) failNull('format');
   const evaluator = evaluatorOf(call);
-  let text = '';
+  const text = new MeteredText(call.frame.runtime);
+  text.read(format.length);
   for (const part of parseFormat(format)) {
     if (typeof part === 'string') {
-      text += part;
+      text.append(part);
       continue;
     }
     const arg = args[part.index];
     if (!arg) throw FORMAT_INDEX();
-    const hole = evaluator.formatHole(arg.value, arg.type, part.format, part.alignment, call.frame);
-    // Each hole may repeat a long argument, so the text so far is checked against the string limit before it grows.
-    call.frame.runtime.allocateString(text.length + hole.length, hole.length);
-    text += hole;
+    text.append(evaluator.formatHole(arg.value, arg.type, part.format, part.alignment, call.frame));
   }
-  return text;
+  return text.toString();
 }
 
 import { FORMAT_INDEX_ERROR as FORMAT_INDEX, parseCompositeFormat as parseFormat } from '../format';
@@ -1220,7 +1224,11 @@ function textWriter(call: NativeCall, stream: 'stdout' | 'stderr'): CsObject {
 const exceptionConstructor: NativeMethod = (call, receiver, args) => {
   const exception = receiver as CsObject;
   const parameters = call.method.parameters.map((parameter) => parameter.name);
-  const state: ExceptionState = { message: undefined, inner: undefined, wasThrown: false };
+  const state: ExceptionState = {
+    message: undefined,
+    inner: undefined,
+    wasThrown: false,
+  };
   for (const [index, name] of parameters.entries()) {
     const value = args[index] as Value;
     if (name === 'message' && isString(value)) {

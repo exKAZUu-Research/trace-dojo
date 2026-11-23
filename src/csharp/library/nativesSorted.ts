@@ -534,7 +534,14 @@ defineNatives({
   },
   [`${LINKED}.Clear`]: (_call, receiver) => {
     const state = linkedOf(receiver);
-    for (const node of state.nodes()) node.list = undefined;
+    // Each node leaves detached, as a removal leaves it, so a node the program keeps reaches no other.
+    for (let node = state.first; node;) {
+      const next: LinkNode | undefined = node.next;
+      node.list = undefined;
+      node.previous = undefined;
+      node.next = undefined;
+      node = next;
+    }
     state.first = undefined;
     state.last = undefined;
     state.count = 0;

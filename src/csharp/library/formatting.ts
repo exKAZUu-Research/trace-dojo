@@ -54,8 +54,8 @@ export function formatValue(
     if (actualType.symbol.kind === 'enum') return formatEnum(actualType, inner, format);
     if (inner instanceof CsStruct) {
       const name = actualType.symbol.fullName;
-      if (name === 'System.DateTime') return formatDateTime(inner, format);
-      if (name === 'System.TimeSpan') return formatTimeSpan(inner, format);
+      if (name === 'System.DateTime') return formatDateTime(evaluator.runtime, inner, format);
+      if (name === 'System.TimeSpan') return formatTimeSpan(evaluator.runtime, inner, format);
     }
   }
   return stringOf(evaluator, value, type, frame);
