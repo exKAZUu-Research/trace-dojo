@@ -1053,27 +1053,22 @@ function rawStringValue(node: Node, content: string, text: string): string {
 function dedentRaw(node: Node, inner: string): string {
   const lines = inner.split('\n');
   const last = lines.at(-1) as string;
-  if (!/^[ \t]*$/.test(last) || lines[0].trim() !== '') {
-    throw new CompileError([
-      {
-        row: node.startPosition.row,
-        message: 'CS9000: 生文字列リテラルの区切り記号は、独自の行に置かれる必要があります。',
-      },
-    ]);
-  }
+  // Roslyn reports each error on the line it is about: the opening line, a content line, or the closing delimiter's.
+  const fail = (index: number, message: string): never => {
+    throw new CompileError([{ row: node.startPosition.row + index, message }]);
+  };
+  const delimiterMessage = 'CS9000: 生文字列リテラルの区切り記号は、独自の行に置かれる必要があります。';
+  if (lines[0].trim() !== '') fail(0, delimiterMessage);
+  if (!/^[ \t]*$/.test(last)) fail(lines.length - 1, delimiterMessage);
+  if (lines.length === 2)
+    fail(1, 'CS9002: 複数行の生文字列リテラルには、少なくとも 1 行のコンテンツが含まれている必要があります。');
   const indentation = last;
-  const body = lines.slice(1, -1).map((line) => {
+  const body = lines.slice(1, -1).map((line, index) => {
     // A whitespace-only line keeps what follows the delimiter's indentation, and may be shorter than it.
     if (line.trim() === '')
       return line.startsWith(indentation) ? line.slice(indentation.length) : line.replace(/^[ \t]*/, '');
-    if (!line.startsWith(indentation)) {
-      throw new CompileError([
-        {
-          row: node.startPosition.row,
-          message: 'CS8999: 行の先頭が生文字列リテラルの終了行と同じ空白ではありません。',
-        },
-      ]);
-    }
+    if (!line.startsWith(indentation))
+      fail(index + 1, 'CS8999: 行の先頭が生文字列リテラルの終了行と同じ空白ではありません。');
     return line.slice(indentation.length);
   });
   // The value keeps the source's line breaks, CRLF included, except the one before the closing delimiter.
