@@ -1084,7 +1084,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     expected: KType | undefined,
     row: number
   ): Compiled {
-    const enumCall = this.reifiedEnumCall(scope, context, name, args, typeArgs, row);
+    const enumCall = this.reifiedEnumCall(scope, context, name, { args, typeArgs, expected }, row);
     if (enumCall) return enumCall;
     const variable = this.findVariable(scope, name);
     const local =
@@ -1163,12 +1163,15 @@ export abstract class ExpressionCompiler extends CallCompiler {
     scope: Scope,
     context: FunctionContext,
     name: string,
-    args: ArgumentSyntax[],
-    typeArgs: KType[],
+    { args, typeArgs, expected }: { args: ArgumentSyntax[]; typeArgs: KType[]; expected: KType | undefined },
     row: number
   ): Compiled | undefined {
     if (name !== 'enumValues' && name !== 'enumValueOf') return undefined;
-    const argument = typeArgs.length === 1 ? resolved(typeArgs[0]) : undefined;
+    // Without a type argument, the expected result names the enum: `E` of enumValueOf, `Array<E>` of enumValues.
+    const fromExpected = expected && resolved(expected);
+    const element = fromExpected?.kind === 'class' ? fromExpected.args[0] : undefined;
+    const inferred = name === 'enumValueOf' ? fromExpected : element?.variance === 'star' ? undefined : element?.type;
+    const argument = typeArgs.length === 1 ? resolved(typeArgs[0]) : inferred && resolved(inferred);
     if (argument?.kind !== 'class' || argument.cls.kind !== 'enum') return undefined;
     // The type argument names the enum, so the call passes none to the function it means.
     return this.compileEnumFunction(scope, context, argument.cls, name, { args, typeArgs: [] }, row);
