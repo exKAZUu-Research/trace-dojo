@@ -625,7 +625,11 @@ function addMonths(call: NativeCall, receiver: Value, months: number): Value {
   return dateTime(call, BigInt(daysFromCivil(year, month, day)) * TICKS_PER_DAY + (ticks % TICKS_PER_DAY));
 }
 
-/** Parses the dates of the forms programs write: `2024/3/5`, `2024-03-05`, with an optional `H:m[:s[.fffffff]]`. */
+/**
+ * The one grammar of `DateTime.Parse` and `TryParse`: a date `2024/3/5`, `2024-03-05`, or ja-JP's `2024年3月5日`; then
+ * optionally a time `H:m[:s[.fffffff]]` (or `10時20分[30秒]`) after a space or `T`; then optionally `Z` or a UTC offset
+ * (`+09`, `+0900`, `+09:00`), converted to local time. A string outside it fails as .NET fails one it cannot read.
+ */
 function parseDate(text: string): bigint | undefined {
   // ja-JP also reads the long date, as `2024年3月5日 10時20分`.
   const normalized = text

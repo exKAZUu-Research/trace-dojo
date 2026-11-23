@@ -1034,6 +1034,11 @@ function rawStringValue(node: Node, content: string, text: string): string {
   return dedentRaw(node, inner);
 }
 
+/**
+ * The one dedenting of a multi-line raw string, plain or interpolated: the opening and closing lines are dropped, every
+ * line loses the closing delimiter's indentation, a whitespace-only line may be shorter, and the line breaks stay as
+ * the source has them, CRLF included, except the one before the closing delimiter.
+ */
 function dedentRaw(node: Node, inner: string): string {
   const lines = inner.split('\n');
   const last = lines.at(-1) as string;
@@ -1067,30 +1072,16 @@ function dedentRaw(node: Node, inner: string): string {
 
 /** Removes the indentation of a multi-line raw interpolated string from its literal parts. */
 function dedentRawParts(node: Node, parts: InterpolationPart[]): InterpolationPart[] {
+  // The holes stand in the text as NUL characters, so the literal's lines dedent by the same rules as a plain raw
+  // string's, with its error for a line less indented than the closing delimiter.
   const joined = parts.map((part) => part.text ?? '\0').join('');
   if (!joined.includes('\n')) return parts;
-  const lines = joined.split('\n');
-  const indentation = lines.at(-1) as string;
-  if (!/^[ \t]*$/.test(indentation)) {
-    throw new CompileError([
-      {
-        row: node.startPosition.row,
-        message: 'CS9000: 生文字列リテラルの区切り記号は、独自の行に置かれる必要があります。',
-      },
-    ]);
-  }
+  const dedented = dedentRaw(node, joined);
   const holes = parts.filter((part) => part.hole);
-  const joinedLines = lines
-    .slice(1, -1)
-    .map((line) => (line.startsWith(indentation) ? line.slice(indentation.length) : line.trimStart()))
-    .join('\n');
-  // As in a plain raw string, the line break before the closing delimiter, CR included, is not part of the value.
-  const dedented = joinedLines.endsWith('\r') ? joinedLines.slice(0, -1) : joinedLines;
   const result: InterpolationPart[] = [];
   let holeIndex = 0;
-  for (const piece of dedented.split('\0').entries()) {
-    const [index, text] = piece;
-    if (text !== '') result.push({ text });
+  for (const [index, piece] of dedented.split('\0').entries()) {
+    if (piece !== '') result.push({ text: piece });
     if (index < holes.length) result.push(holes[holeIndex++]);
   }
   return result;
