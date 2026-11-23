@@ -262,9 +262,10 @@ export abstract class StatementExecutor extends PatternMatcher {
 
   private executeSwitch(statement: Extract<BoundStatement, { kind: 'switch' }>, frame: Frame): Completion {
     const value = this.evaluate(statement.value, frame);
-    const chosen = this.chooseSection(statement.sections, value, frame);
-    if (!chosen) return undefined;
     try {
+      // Choosing the section binds the patterns' variables, which leave scope with the switch even if none matches.
+      const chosen = this.chooseSection(statement.sections, value, frame);
+      if (!chosen) return undefined;
       for (const inner of chosen.statements) {
         const completion = this.execute(inner, frame);
         if (completion === BREAK) return undefined;
