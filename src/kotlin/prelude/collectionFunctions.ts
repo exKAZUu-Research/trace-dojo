@@ -817,9 +817,7 @@ fun <T> MutableList<T>.shuffle(random: kotlin.random.Random) {
     var i = lastIndex
     while (i >= 1) {
         val j = random.nextInt(i + 1)
-        val copy = this[i]
-        this[i] = this[j]
-        this[j] = copy
+        this[j] = set(i, this[j])
         i--
     }
 }
