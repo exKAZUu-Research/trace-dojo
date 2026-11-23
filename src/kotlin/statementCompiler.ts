@@ -1399,9 +1399,15 @@ export abstract class StatementCompiler extends OperatorCompiler {
     row: number,
     covered: Set<string>
   ): { test: (frame: Frame) => boolean; whenTrue: Map<string, KType>; whenFalse: Map<string, KType> } {
-    // An Int literal does not become a Long here, as kotlinc rejects `6` among the branches of a Long subject.
-    const isLongSubject = this.primitiveOf(nonNull(subject.type)) === 'Long';
-    const value = this.compileExpression(scope, context, expression, isLongSubject ? undefined : nonNull(subject.type));
+    // An Int literal does not become a Long, Byte or Short here, as kotlinc rejects `6` among such a subject's branches.
+    const subjectKind = this.primitiveOf(nonNull(subject.type));
+    const keepsIntLiterals = subjectKind === 'Long' || subjectKind === 'Byte' || subjectKind === 'Short';
+    const value = this.compileExpression(
+      scope,
+      context,
+      expression,
+      keepsIntLiterals ? undefined : nonNull(subject.type)
+    );
     this.checkEqualityApplicable(subject, value, row, '==');
     this.recordCovered(value, expression, covered);
     const subjectEval = convertRepr(subject.eval, subject.repr, 'ref');
@@ -1412,10 +1418,10 @@ export abstract class StatementCompiler extends OperatorCompiler {
     );
     // Two primitive operands compare as numbers, as `0.0 == -0.0` does; an `Any` operand compares with `equals`.
     const comparesPrimitives =
-      this.primitiveOf(nonNull(subject.type)) !== undefined &&
+      subjectKind !== undefined &&
       (value.integerLiteral !== undefined || this.primitiveOf(nonNull(value.type)) !== undefined);
-    const isIntLiteralForLong = isLongSubject && value.integerLiteral !== undefined && !value.integerLiteral.isLong;
-    if (isIntLiteralForLong) {
+    const literal = value.integerLiteral;
+    if (keepsIntLiterals && literal && !(subjectKind === 'Long' && literal.isLong)) {
       this.error(
         row,
         `演算子 == は ${typeToString(resolved(subject.type))} と ${typeToString(resolved(value.type))} には使えません。`
