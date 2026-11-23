@@ -9,7 +9,17 @@ import { copyValue, CsArray, CsBox, CsObject, CsStruct, isString, stringText, ty
 import { isEnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { comparisonOf, type Equality, equalityOf, HashState, ListState, newList } from './nativesCollections';
 import { stableSort } from './sort';
-import { evaluatorOf, fail, failNull, failOutOfRange, libraryType, newArray, refOf, stepMeter } from './support';
+import {
+  bufferedElements,
+  evaluatorOf,
+  fail,
+  failNull,
+  failOutOfRange,
+  libraryType,
+  newArray,
+  refOf,
+  stepMeter,
+} from './support';
 
 /** The message of LINQ's argument errors, which name no value. */
 const OUT_OF_RANGE = 'Specified argument was out of the range of valid values.';
@@ -590,7 +600,7 @@ function ordered(call: NativeCall, args: Value[], descending: boolean, isThen: b
       : iteratorName('OrderedIterator', [elementType, keyType]),
     [root],
     () => {
-      const items = [...source(call, root)];
+      const items = bufferedElements(call, source(call, root));
       const keyed = keys.map((sortKey) => items.map((item) => sortKey.select(item)));
       const step = stepMeter(call);
       const indices = stableSort(
@@ -971,7 +981,7 @@ const linq: Record<string, NativeMethod> = {
   [`${ENUMERABLE}.Reverse`]: (call, _receiver, [items]) => {
     const all = source(call, items as Value);
     return query(call, call.typeArgs[0], iteratorName('ReverseIterator', [call.typeArgs[0]]), [items as Value], () =>
-      [...all].toReversed()
+      bufferedElements(call, all).toReversed()
     );
   },
   [`${ENUMERABLE}.Select`]: (call, _receiver, [items, selector]) => {
@@ -1020,8 +1030,8 @@ const linq: Record<string, NativeMethod> = {
   },
   [`${ENUMERABLE}.SequenceEqual`]: (call, _receiver, [first, second]) => {
     const equality = equalityOf(call, undefined);
-    const a = [...source(call, first as Value, 'first')];
-    const b = [...source(call, second as Value, 'second')];
+    const a = bufferedElements(call, source(call, first as Value, 'first'));
+    const b = bufferedElements(call, source(call, second as Value, 'second'));
     return (
       a.length === b.length &&
       a.every((item, index) =>
@@ -1039,7 +1049,7 @@ const linq: Record<string, NativeMethod> = {
       generatedIterator(call, 'TakeRangeFromEndIterator', 316),
       [items as Value],
       () => {
-        const buffered = [...all];
+        const buffered = bufferedElements(call, all);
         return buffered.slice(0, Math.max(0, buffered.length - Math.max(0, count as number)));
       }
     );
@@ -1076,7 +1086,7 @@ const linq: Record<string, NativeMethod> = {
       generatedIterator(call, 'TakeRangeFromEndIterator', 316),
       [items as Value],
       () => {
-        const buffered = [...all];
+        const buffered = bufferedElements(call, all);
         return (count as number) <= 0 ? [] : buffered.slice(-(count as number));
       }
     );
@@ -1094,11 +1104,11 @@ const linq: Record<string, NativeMethod> = {
       }
     ),
   [`${ENUMERABLE}.ToArray`]: (call, _receiver, [items]) => {
-    const values = [...source(call, items as Value)];
+    const values = bufferedElements(call, source(call, items as Value));
     return newArray(call, call.typeArgs[0], values);
   },
   [`${ENUMERABLE}.ToList`]: (call, _receiver, [items]) =>
-    newList(call, call.typeArgs[0], [...source(call, items as Value)]),
+    newList(call, call.typeArgs[0], bufferedElements(call, source(call, items as Value))),
   [`${ENUMERABLE}.ToHashSet`]: (call, _receiver, [items]) => {
     const set = new CsObject(libraryType(call, 'System.Collections.Generic.HashSet', [call.typeArgs[0]]), []);
     const state = new HashState(equalityOf(call, undefined), call.typeArgs[0], undefined, undefined);

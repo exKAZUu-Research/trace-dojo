@@ -136,6 +136,16 @@ export function copyToArray(call: NativeCall, items: Value[], array: Value, inde
   for (const [offset, item] of items.entries()) target[index + offset] = copyValue(item);
 }
 
+/** A sequence read into a host buffer, which stops once the buffer would hold more elements than the slots left. */
+export function bufferedElements(call: NativeCall, items: Iterable<Value>): Value[] {
+  const buffer: Value[] = [];
+  for (const item of items) {
+    buffer.push(item);
+    if (buffer.length % 64 === 0) call.frame.runtime.checkSlots(buffer.length);
+  }
+  return buffer;
+}
+
 /** Charges the work of a library loop over `count` elements, as iterating a sequence is charged. */
 export function chargeElements(call: NativeCall, count: number): void {
   call.frame.runtime.spend(Math.ceil(count / 16));

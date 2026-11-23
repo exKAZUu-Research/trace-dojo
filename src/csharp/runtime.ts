@@ -195,6 +195,15 @@ export class Runtime {
     return shared;
   }
 
+  /** Stops a library buffer that would hold more elements than the slots left, without charging the transient buffer. */
+  checkSlots(count: number): void {
+    if (this.allocatedSlots + count > LIMITS.maxSlots)
+      throw new PendingException(
+        'System.OutOfMemoryException',
+        "Exception of type 'System.OutOfMemoryException' was thrown."
+      );
+  }
+
   /** Charges for array elements or object fields before they are allocated. */
   allocateSlots(count: number): void {
     this.allocatedSlots += count;
