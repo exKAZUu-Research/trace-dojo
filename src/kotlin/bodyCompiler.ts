@@ -622,7 +622,11 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     );
   }
 
-  /** A default can read the earlier parameters. The body starts with every parameter assigned. */
+  /**
+   * A default can read the earlier parameters. A caller may pass the argument instead, so what a default's evaluation
+   * shows, such as a smart cast or a `Nothing` result, holds only merged with the path that skips it. The body starts
+   * with every parameter assigned.
+   */
   private compileParameterDefaults(
     declarations: ParameterDecl[],
     params: ParameterSymbol[],
@@ -633,8 +637,10 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     for (const variable of variables) this.flow.assigned.delete(variable);
     return params.map((param, index) => {
       const value = declarations[index]?.defaultValue;
+      const skipped = this.flow.copy();
       const evaluate =
         value && this.expectType(this.compileExpression(scope, context, value, param.type), param.type, value.row);
+      this.flow = Flow.merge([skipped, this.flow]);
       if (evaluate) param.defaultValue = evaluate;
       this.flow.assigned.add(variables[index]);
       return evaluate;
