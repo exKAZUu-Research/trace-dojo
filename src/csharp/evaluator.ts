@@ -650,13 +650,16 @@ export class Evaluator extends StatementExecutor {
     // A primitive struct, as in `5 with { }`, is its own copy.
     const copy =
       source instanceof CsStruct ? source.clone() : source instanceof CsObject ? this.cloneObject(source) : source;
-    this.storeLocal(frame, expression.temporary, copy);
-    for (const assignment of expression.assignments) {
-      if (assignment.target.kind === 'discard' || !assignment.value) continue;
-      const place = this.place(assignment.target, frame);
-      place.set(copyValue(this.evaluate(assignment.value, frame)));
-    }
-    return copy;
+    // The copy's hidden local leaves scope with the expression, so it holds nothing the program has let go.
+    return this.inScope(frame, [expression.temporary], [], () => {
+      this.storeLocal(frame, expression.temporary, copy);
+      for (const assignment of expression.assignments) {
+        if (assignment.target.kind === 'discard' || !assignment.value) continue;
+        const place = this.place(assignment.target, frame);
+        place.set(copyValue(this.evaluate(assignment.value, frame)));
+      }
+      return copy;
+    });
   }
 
   private evaluateAs(expression: Extract<BoundExpression, { kind: 'as' }>, frame: Frame): Value {

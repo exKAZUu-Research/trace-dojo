@@ -902,7 +902,8 @@ export abstract class StatementBinder extends PatternBinder {
     const enumeratorType = substitute(method.returnType, substitutionOf(owner as NamedType));
     const moveNext = lookup(enumeratorType, 'MoveNext');
     const current = lookup(enumeratorType, 'Current');
-    if (moveNext?.kind !== 'methods' || current?.kind !== 'property') {
+    // The pattern reads Current through a public getter, so a property without one is no Current for it.
+    if (moveNext?.kind !== 'methods' || current?.kind !== 'property' || current.property.getter?.access !== 'public') {
       this.error(position, 'CS0117', `'${displayType(enumeratorType)}' に 'Current' の定義がありません`);
       return undefined;
     }
