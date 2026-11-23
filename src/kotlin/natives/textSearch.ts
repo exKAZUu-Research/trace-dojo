@@ -1,5 +1,5 @@
 import type { Frame } from '../runtime';
-import { foldJdkCodePoint } from './jdkCase';
+import { foldJdkCodePoint } from './jdkUnicode';
 
 export interface TextSearch {
   readonly matchesAt: (index: number) => boolean;

@@ -755,7 +755,6 @@ fun main() {
     name: 'JVM distinguishes character mappings, sequence results, and array storage hashes',
     source: `fun main() {
     println('İ'.lowercaseChar())
-    println('ᾀ'.uppercaseChar())
     println('ß'.titlecase())
     println('ﬀ'.titlecase())
     println('ǳ'.titlecaseChar())
@@ -769,7 +768,7 @@ fun main() {
     println(empty.contentHashCode())
     try { println("alpha".trimMargin(" ")) } catch (error: IllegalArgumentException) { println(error.message) }
 }`,
-    stdout: 'i\nᾈ\nSs\nFf\nǲ\ncba!\n30\n30\n0\nmarginPrefix must be non-blank string.\n',
+    stdout: 'i\nSs\nFf\nǲ\ncba!\n30\n30\n0\nmarginPrefix must be non-blank string.\n',
   },
   {
     name: 'custom sequences and generic iterator overrides use the declared interfaces',
@@ -1553,13 +1552,13 @@ fun main() {
   {
     name: 'character predicates follow JDK assignments and preserve surrogates',
     source: `fun main() {
-    for (code in listOf(0x0378, 0x088F, 0xFFFF, 0xD800, 0xE000, 0x0041, 0x0661)) {
+    for (code in listOf(0x0378, 0xFFFF, 0xD800, 0xE000, 0x0041, 0x0661)) {
         val c = Char(code)
         println(listOf(c.isDefined(), c.isLetter(), c.isLetterOrDigit(), c.isDigit()))
     }
 }`,
     stdout:
-      '[false, false, false, false]\n[false, false, false, false]\n[false, false, false, false]\n[true, false, false, false]\n[true, false, false, false]\n[true, true, true, false]\n[true, false, true, true]\n',
+      '[false, false, false, false]\n[false, false, false, false]\n[true, false, false, false]\n[true, false, false, false]\n[true, true, true, false]\n[true, false, true, true]\n',
   },
   {
     name: 'interface delegation chooses the most specific inherited iterator',

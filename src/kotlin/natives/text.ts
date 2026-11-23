@@ -23,14 +23,17 @@ import { compareStrings, reverseKeepingPairs, stringRangeError, substring } from
 import {
   compareJdkCase,
   foldJdkCodePoint,
+  isJdkDefined,
+  isJdkDigit,
+  isJdkLetter,
+  isJdkLetterOrDigit,
   isJdkLowerCase,
   isJdkUpperCase,
   lowerJdkChar,
   titleJdkChar,
   titleJdkText,
   upperJdkChar,
-} from './jdkCase';
-import { isJdkDefined, isJdkDigit, isJdkLetter, isJdkLetterOrDigit } from './jdkCharacter';
+} from './jdkUnicode';
 import { defineNative, libraryClass, throwError } from './registry';
 import { defineStringBuilders } from './stringBuilders';
 import { textSearch } from './textSearch';

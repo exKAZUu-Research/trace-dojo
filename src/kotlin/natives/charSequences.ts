@@ -3,7 +3,7 @@ import { charToString, stringOf } from '../format';
 import type { Frame } from '../runtime';
 import { KObject, type Value } from '../values';
 import { builderSubstring, checkStringIndex } from './core';
-import { foldJdkCodePoint } from './jdkCase';
+import { foldJdkCodePoint } from './jdkUnicode';
 import { libraryClass, throwError } from './registry';
 import { textSearch } from './textSearch';
 
