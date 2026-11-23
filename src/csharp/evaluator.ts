@@ -585,7 +585,11 @@ export class Evaluator extends StatementExecutor {
       case 'eventAccessor': {
         const place = this.place(expression.target, frame);
         const value = this.evaluate(expression.value, frame);
-        place.set(expression.isAdd ? combineDelegates(place.get(), value) : removeDelegate(place.get(), value));
+        place.set(
+          expression.isAdd
+            ? combineDelegates(this.runtime, place.get(), value)
+            : removeDelegate(this.runtime, place.get(), value)
+        );
         return undefined;
       }
     }
@@ -1133,7 +1137,7 @@ export class Evaluator extends StatementExecutor {
     const right = this.evaluate(expression.right, frame);
     const { operator, operandKind } = expression;
     if (operandKind === 'object' || operandKind === 'delegate' || operandKind === 'string')
-      return referenceBinary(operator, operandKind, left, right);
+      return referenceBinary(this.runtime, operator, operandKind, left, right);
     if (left === undefined || right === undefined) {
       if (!expression.isLifted) throw NULL_REFERENCE();
       return liftedNullBinary(operator, operandKind, left, right);
@@ -1294,13 +1298,14 @@ const COMPARISONS = new Set<string>(['==', '!=', '<', '>', '<=', '>=']);
 
 /** A binary operator on references, strings, or delegates: equality, or combining and removing delegates. */
 function referenceBinary(
+  runtime: Runtime,
   operator: BinaryExpression['operator'],
   operandKind: BinaryExpression['operandKind'],
   left: Value,
   right: Value
 ): Value {
   if (operandKind === 'delegate' && (operator === '+' || operator === '-'))
-    return operator === '+' ? combineDelegates(left, right) : removeDelegate(left, right);
+    return operator === '+' ? combineDelegates(runtime, left, right) : removeDelegate(runtime, left, right);
   const equal =
     operandKind === 'string'
       ? plainString(left) === plainString(right)

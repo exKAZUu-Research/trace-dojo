@@ -183,8 +183,8 @@ export function listOf(value: Value): ListState {
 }
 
 /** Creates a `List<T>` with elements, as LINQ's `ToList` does. */
-export function newList(call: NativeCall, elementType: Type, items: Value[]): CsObject {
-  call.frame.runtime.allocateSlots(items.length);
+export function newList(call: NativeCall, elementType: Type, items: Value[], isCharged = false): CsObject {
+  if (!isCharged) call.frame.runtime.allocateSlots(items.length);
   const list = new CsObject(libraryType(call, 'System.Collections.Generic.List', [elementType]), []);
   const state = new ListState(
     items.map((item) => copyValue(item)),

@@ -136,14 +136,27 @@ export function copyToArray(call: NativeCall, items: Value[], array: Value, inde
   for (const [offset, item] of items.entries()) target[index + offset] = copyValue(item);
 }
 
-/** A sequence read into a host buffer, which stops once the buffer would hold more elements than the slots left. */
+/**
+ * A sequence read into a host buffer, charged against the slot limit as it fills, as every allocation is, so that
+ * buffers alive at once add up; a result built from the buffer itself is not charged again.
+ */
 export function bufferedElements(call: NativeCall, items: Iterable<Value>): Value[] {
   const buffer: Value[] = [];
   for (const item of items) {
     buffer.push(item);
-    if (buffer.length % 64 === 0) call.frame.runtime.checkSlots(buffer.length);
+    if (buffer.length % 64 === 0) call.frame.runtime.allocateSlots(64);
   }
+  call.frame.runtime.allocateSlots(buffer.length % 64);
   return buffer;
+}
+
+/** An array built from a buffer that bufferedElements already charged. */
+export function arrayOfBuffer(element: Type, buffer: Value[]): CsArray {
+  return new CsArray(
+    { kind: 'array', element, rank: 1 },
+    [buffer.length],
+    buffer.map((value) => copyValue(value))
+  );
 }
 
 /** Charges the work of a library loop over `count` elements, as iterating a sequence is charged. */

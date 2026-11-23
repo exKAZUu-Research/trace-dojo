@@ -1,21 +1,33 @@
+import type { Runtime } from './runtime';
 import { CsDelegate, type DelegateEntry, type Value } from './values';
 
-/** Combines two delegates into one that calls both, as `+` does. */
-export function combineDelegates(a: Value, b: Value): Value {
+/**
+ * Combines two delegates into one that calls both, as `+` does. The new invocation list is charged as an allocation,
+ * since `d += d` doubles it at each step.
+ */
+export function combineDelegates(runtime: Runtime, a: Value, b: Value): Value {
   if (a === undefined) return b;
   if (b === undefined) return a;
   const first = a as CsDelegate;
   const second = b as CsDelegate;
+  runtime.allocateSlots(first.entries.length + second.entries.length);
   return new CsDelegate(first.type, [...first.entries, ...second.entries]);
 }
 
-/** Removes the last occurrence of a delegate's invocation list from another's, as `-` does. */
-export function removeDelegate(a: Value, b: Value): Value {
+/** Removes the last occurrence of a delegate's invocation list from another's, as `-` does, charging its comparisons. */
+export function removeDelegate(runtime: Runtime, a: Value, b: Value): Value {
   if (a === undefined || b === undefined) return a;
   const source = (a as CsDelegate).entries;
   const removed = (b as CsDelegate).entries;
+  let compared = 0;
+  const equalAt =
+    (start: number) =>
+    (entry: DelegateEntry, index: number): boolean => {
+      if (++compared % 16 === 0) runtime.spend();
+      return entriesEqual(source[start + index], entry);
+    };
   for (let start = source.length - removed.length; start >= 0; start--) {
-    if (removed.every((entry, index) => entriesEqual(source[start + index], entry))) {
+    if (removed.every(equalAt(start))) {
       const remaining = [...source.slice(0, start), ...source.slice(start + removed.length)];
       return remaining.length === 0 ? undefined : new CsDelegate((a as CsDelegate).type, remaining);
     }

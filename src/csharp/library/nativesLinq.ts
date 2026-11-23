@@ -10,6 +10,7 @@ import { isEnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { comparisonOf, type Equality, equalityOf, HashState, ListState, newList } from './nativesCollections';
 import { stableSort } from './sort';
 import {
+  arrayOfBuffer,
   bufferedElements,
   evaluatorOf,
   fail,
@@ -1108,11 +1109,10 @@ const linq: Record<string, NativeMethod> = {
       }
     ),
   [`${ENUMERABLE}.ToArray`]: (call, _receiver, [items]) => {
-    const values = bufferedElements(call, source(call, items as Value));
-    return newArray(call, call.typeArgs[0], values);
+    return arrayOfBuffer(call.typeArgs[0], bufferedElements(call, source(call, items as Value)));
   },
   [`${ENUMERABLE}.ToList`]: (call, _receiver, [items]) =>
-    newList(call, call.typeArgs[0], bufferedElements(call, source(call, items as Value))),
+    newList(call, call.typeArgs[0], bufferedElements(call, source(call, items as Value)), true),
   [`${ENUMERABLE}.ToHashSet`]: (call, _receiver, [items]) => {
     const set = new CsObject(libraryType(call, 'System.Collections.Generic.HashSet', [call.typeArgs[0]]), []);
     const state = new HashState(equalityOf(call, undefined), call.typeArgs[0], undefined, undefined);

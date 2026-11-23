@@ -176,7 +176,11 @@ test('hostile programs stop within the limits, and runs share no state', () => {
     'Console.WriteLine(Enumerable.Range(0, int.MaxValue).Count());',
     'var s = new string(\'あ\', 999999); Console.WriteLine(s.IndexOf(s + "い"));',
   ]) {
-    expect(executeProgram('csharp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+    // Which limit stops the program first depends on the machine's speed.
+    expect(executeProgram('csharp', program)).toMatchObject({
+      kind: 'limitExceeded',
+      limit: expect.stringMatching(/^(operations|time)$/),
+    });
   }
   expect(
     executeProgram(
