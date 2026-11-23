@@ -535,20 +535,33 @@ class GroupingState implements NativeState {
 }
 
 /** A distinct set of keys, by the default equality or a comparer. */
-function seenSet(equality: Equality): { add(value: Value): boolean } {
+function seenSet(equality: Equality): { add(value: Value): boolean; remove(value: Value): boolean } {
   const buckets = new Map<number, Value[]>();
+  const indexIn = (bucket: Value[], value: Value): number =>
+    bucket.findIndex((existing) =>
+      existing === undefined ? value === undefined : value !== undefined && equality.equals(existing, value)
+    );
+  const bucketOf = (value: Value): Value[] => {
+    const hash = value === undefined ? 0 : equality.hash(value);
+    let bucket = buckets.get(hash);
+    if (!bucket) {
+      bucket = [];
+      buckets.set(hash, bucket);
+    }
+    return bucket;
+  };
   return {
     add(value) {
-      const hash = value === undefined ? 0 : equality.hash(value);
-      const bucket = buckets.get(hash) ?? [];
-      if (
-        bucket.some((existing) =>
-          existing === undefined ? value === undefined : value !== undefined && equality.equals(existing, value)
-        )
-      )
-        return false;
+      const bucket = bucketOf(value);
+      if (indexIn(bucket, value) >= 0) return false;
       bucket.push(value);
-      buckets.set(hash, bucket);
+      return true;
+    },
+    remove(value) {
+      const bucket = bucketOf(value);
+      const index = indexIn(bucket, value);
+      if (index < 0) return false;
+      bucket.splice(index, 1);
       return true;
     },
   };
@@ -1237,14 +1250,10 @@ function setOperation(
       for (const item of b) if (seen.add(item)) yield item;
       return;
     }
+    // As .NET's iterators do, Except yields what it can add to the second's set, and Intersect what it can remove.
     const others = seenSet(equality);
     for (const item of b) others.add(item);
-    for (const item of a) {
-      const isInSecond = !others.add(item);
-      if (operation === 'Except') {
-        if (!isInSecond && seen.add(item)) yield item;
-      } else if (isInSecond && seen.add(item)) yield item;
-    }
+    for (const item of a) if (operation === 'Except' ? others.add(item) : others.remove(item)) yield item;
   });
 }
 
@@ -1272,11 +1281,9 @@ function setOperationBy(
       const equality = equalityOf(call, undefined, call.typeArgs[1]);
       const keys = seenSet(equality);
       for (const key of b) keys.add(key);
-      const seen = seenSet(equality);
       for (const item of a) {
         const key = keyOf(item);
-        const isInSecond = !keys.add(key);
-        if (operation === 'Except' ? !isInSecond && seen.add(key) : isInSecond && seen.add(key)) yield item;
+        if (operation === 'Except' ? keys.add(key) : keys.remove(key)) yield item;
       }
     }
   );

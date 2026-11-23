@@ -236,7 +236,14 @@ function predicateOf(call: NativeCall, predicate: Value, name = 'match'): (value
   return (value) => evaluatorOf(call).invokeDelegate(call.frame, predicate, [value], undefined) as boolean;
 }
 
-function indexOfValue(call: NativeCall, items: Value[], value: Value, start = 0, fromEnd = false): number {
+function indexOfValue(
+  call: NativeCall,
+  items: Value[],
+  value: Value,
+  start = 0,
+  fromEnd = false,
+  end = items.length
+): number {
   const equality = equalityOf(call, undefined);
   // Each inspected element is charged as it is compared, so a search that stops early pays only for what it read.
   const step = stepMeter(call);
@@ -247,7 +254,7 @@ function indexOfValue(call: NativeCall, items: Value[], value: Value, start = 0,
     }
     return -1;
   }
-  for (let index = start; index < items.length; index++) {
+  for (let index = start; index < end; index++) {
     step();
     if (equality.equals(items[index], value)) return index;
   }
@@ -516,7 +523,7 @@ const listNatives: Record<string, NativeMethod> = {
         'count',
         'Count must be positive and count must refer to a location within the string/array/collection.'
       );
-    const index = indexOfValue(call, items.slice(0, from + length), value as Value, from);
+    const index = indexOfValue(call, items, value as Value, from, false, from + length);
     return index;
   },
   [`${LIST}.LastIndexOf(T)`]: (call, receiver, [value]) =>
@@ -1630,7 +1637,7 @@ defineNatives({
     const [from, length] = [start, count] as number[];
     if (from < 0 || from > values.length) failStartIndex(call);
     if (length < 0 || from + length > values.length) failCount(call);
-    return indexOfValue(call, values.slice(0, from + length), value as Value, from);
+    return indexOfValue(call, values, value as Value, from, false, from + length);
   },
   [`${ARRAY}.IndexOf(Array, object?)`]: (call, _receiver, [array, value]) =>
     indexOfValue(call, arrayOf(array as Value).values, value as Value),
@@ -1652,7 +1659,8 @@ defineNatives({
     );
     return;
   },
-  [`${ARRAY}.Reverse(Array)`]: (_call, _receiver, [array]) => {
+  [`${ARRAY}.Reverse(Array)`]: (call, _receiver, [array]) => {
+    chargeElements(call, arrayOf(array as Value).values.length);
     arrayOf(array as Value).values.reverse();
     return;
   },
