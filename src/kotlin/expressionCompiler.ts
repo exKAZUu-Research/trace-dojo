@@ -28,9 +28,14 @@ import {
   Scope,
   typeMismatchMessage,
 } from './compilerBase';
-import type { MemberRef } from './compilerCore';
+import { DEFAULT_IMPORTS, type MemberRef } from './compilerCore';
 import { getPropertyValue, propertyRepr, receiverRepr } from './dispatch';
-import { extensionPropertySpecificity, matchExtensionReceiver, mostSpecificReceivers } from './extensionResolution';
+import {
+  extensionPropertySpecificity,
+  importableExtension,
+  matchExtensionReceiver,
+  mostSpecificReceivers,
+} from './extensionResolution';
 import { keyOf } from './flowKeys';
 import { localRefinement, refineLocalType } from './flowWrites';
 import { formatPrimitive, stringOf } from './format';
@@ -1487,6 +1492,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   private reportMissingMember(type: KType, name: string, row: number): never {
+    const importable = importableExtension(this.packages, DEFAULT_IMPORTS, type, name);
+    if (importable)
+      this.error(row, `${typeToString(type)} の ${name} を使うには、import ${importable}.${name} を書いてください。`);
     const unavailable = unavailableLibraryMember(type, name);
     if (unavailable) this.unavailable(row, unavailable);
     const actual = resolved(type);

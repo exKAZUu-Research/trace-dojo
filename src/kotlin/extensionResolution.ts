@@ -1,3 +1,4 @@
+import type { PackageScope } from './compilerBase';
 import type { MemberRef } from './compilerCore';
 import type { PropertySymbol, TypeParameterSymbol } from './symbols';
 import { anyType, commonSupertype, isSubtype } from './typeRelations';
@@ -61,4 +62,37 @@ export function matchExtensionReceiver(
       return undefined;
   }
   return substitution;
+}
+
+/**
+ * The package outside `defaultImports` whose extension `name` the prelude declares for a receiver of `type`, as
+ * `kotlin.math` declares `Double.roundToInt`, which a program reaches by importing it.
+ */
+export function importableExtension(
+  packages: ReadonlyMap<string, PackageScope>,
+  defaultImports: readonly string[],
+  type: KType,
+  name: string
+): string | undefined {
+  const actual = resolved(type);
+  const receiver = actual.nullable ? { ...actual, nullable: false } : actual;
+  for (const [packageName, scope] of packages) {
+    if (defaultImports.includes(packageName)) continue;
+    const symbols = [...(scope.functions.get(name) ?? []), ...(scope.properties.get(name) ?? [])];
+    if (symbols.some((symbol) => symbol.isLibrary && acceptsReceiver(symbol.extensionReceiver, receiver)))
+      return packageName;
+  }
+  return undefined;
+}
+
+/** Whether an extension declared for `declared` applies to a receiver of `receiver`, whatever its type arguments. */
+function acceptsReceiver(declared: KType | undefined, receiver: KType): boolean {
+  if (!declared) return false;
+  const actual = resolved(declared);
+  if (actual.kind !== 'class') return true;
+  return isSubtype(receiver, {
+    ...actual,
+    args: actual.args.map(() => ({ variance: 'star' as const })),
+    nullable: true,
+  });
 }
