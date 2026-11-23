@@ -489,6 +489,8 @@ export abstract class MemberBinder extends CallBinder {
     if (target.kind === 'typeRef')
       return this.bindStaticMember(target.type, node.name, typeArgs, position, context, isCallee);
     const receiver = target.kind === 'methodGroup' ? this.toValue(target, node.target) : target;
+    // A property that a member is accessed on is read, as any value is.
+    this.checkReadable(receiver, node.target);
     if (receiver.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
     if (receiver.kind === 'unbound' || receiver.type.kind === 'null' || receiver.type.kind === 'void') {
       this.error(
@@ -934,6 +936,7 @@ export abstract class MemberBinder extends CallBinder {
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
     if (target.type.kind === 'error') return this.failedAccess(target, node);
+    this.checkReadable(target, node.target);
     const invoke = this.delegateInvokeOf(target.type);
     if (!invoke) {
       if (
