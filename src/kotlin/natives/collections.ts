@@ -429,7 +429,9 @@ function replaceListItems(frame: Frame, list: KObject, index: number, removed: n
   const oldSize = indexedSize(source);
   const from = index + (view?.from ?? 0);
   const growth = added.length - removed;
-  frame.runtime.spend(oldSize - from + added.length);
+  // An ArrayDeque moves the shorter side of its circular buffer, so removing or adding at either end costs nothing.
+  const moved = listKind(source) === 'ArrayDeque' ? Math.min(from, oldSize - from - removed) : oldSize - from;
+  frame.runtime.spend(moved + added.length);
   if (growth > 0) frame.runtime.allocate(frame, growth);
   const values = listStorageForSize(frame, source, oldSize + growth);
   replaceListRange(values, from, removed, added, oldSize);
@@ -695,6 +697,11 @@ function subList(frame: Frame, list: KObject, from: number, to: number): KObject
 }
 
 function replaceListRange(values: Value[], from: number, removed: number, added: Value[], size: number): void {
+  // Engines drop the front of an array without copying the rest, which keeps draining a queue linear.
+  if (from === 0 && added.length === 0) {
+    values.splice(0, removed);
+    return;
+  }
   const change = added.length - removed;
   if (change > 0 && size + change > values.length) values.length = size + change;
   if (change !== 0) values.copyWithin(from + added.length, from + removed, size);
