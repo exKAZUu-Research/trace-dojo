@@ -5,6 +5,7 @@ import type { MethodCandidate } from './lookup';
 import { OperatorBinder } from './operatorBinder';
 import {
   allInterfacesOf,
+  arrayType,
   baseTypeOf,
   displayMethod,
   displayType,
@@ -23,7 +24,7 @@ import {
   type TypeParameterSymbol,
   type TypeSymbol,
 } from './types';
-import { dotnetOverloadCount } from './unavailable';
+import { type DotnetOverload, dotnetOverloadsOf } from './unavailable';
 
 /** An argument as written, bound to its natural type or left unbound until its parameter's type is known. */
 export interface ArgumentInfo {
@@ -886,11 +887,13 @@ export abstract class CallBinder extends OperatorBinder {
   // code-gauge-allow functionNcss -- Each branch handles one case of the C# rule that the function applies.
   /**
    * Reports a call of a library method that no declared overload takes as unavailable, rather than as a wrong call,
-   * when .NET has more overloads of that many arguments than the library declares, as for `new HashSet<int>(100)`.
+   * when .NET has more overloads of that many arguments than the library declares and one of them could take the
+   * arguments, as for `new HashSet<int>(100)`. The count keeps a generic parameter, which takes any argument here, from
+   * covering a wrong argument to an overload the library does declare, as in `list.Add("x")`.
    */
   private rejectUnavailableOverload(
     candidates: MethodCandidate[],
-    argumentCount: number,
+    args: ArgumentInfo[],
     declaredCount: number,
     row: number
   ): void {
@@ -898,9 +901,52 @@ export abstract class CallBinder extends OperatorBinder {
     if (!method?.owner.isLibrary || method.kind === 'operator') return;
     const isConstructor = method.kind === 'constructor';
     const name = isConstructor ? '.ctor' : method.name;
-    if (dotnetOverloadCount(method.owner.fullName, name, argumentCount) <= declaredCount) return;
+    const overloads = dotnetOverloadsOf(method.owner.fullName, name).filter(
+      ({ required, takesMore, types }) => args.length >= required && (takesMore || args.length <= types.length)
+    );
+    if (overloads.length <= declaredCount || !overloads.some((overload) => this.dotnetOverloadTakes(overload, args)))
+      return;
     const owner = displayTypeSymbol(method.owner);
     this.unsupported(row, isConstructor ? `${owner} のこのコンストラクター` : `${owner}.${name} のこのオーバーロード`);
+  }
+
+  /**
+   * Whether each argument converts to its parameter of a .NET overload that takes that many arguments, as far as the
+   * library has the types.
+   */
+  private dotnetOverloadTakes({ takesMore, types }: DotnetOverload, args: ArgumentInfo[]): boolean {
+    const fixedCount = takesMore ? types.length - 1 : types.length;
+    return args.every((arg, index) => {
+      if (index < fixedCount) return this.dotnetParameterTakes(types[index], arg);
+      const array = types.at(-1) ?? '*';
+      // A params array takes its elements, or the array itself as the only argument in its place.
+      const element = array === '*' ? '*' : array.slice(0, -2);
+      return (
+        this.dotnetParameterTakes(element, arg) ||
+        (args.length === types.length && this.dotnetParameterTakes(array, arg))
+      );
+    });
+  }
+
+  private dotnetParameterTakes(typeText: string, arg: ArgumentInfo): boolean {
+    const { expression } = arg;
+    if (typeText === '*' || expression.kind === 'unbound' || expression.type.kind === 'error') return true;
+    const type = this.dotnetType(typeText);
+    return type !== undefined && this.implicitConversionOf(expression, type) !== undefined;
+  }
+
+  /** The library's type of a .NET metadata name, such as `System.Int32[]`, or undefined when the library lacks it. */
+  private dotnetType(typeText: string): Type | undefined {
+    const array = /^(.*)\[(,*)\]$/.exec(typeText);
+    if (array) {
+      const element = this.dotnetType(array[1]);
+      return element && arrayType(element, array[2].length + 1);
+    }
+    try {
+      return this.library.typeNamed(typeText).declaredType;
+    } catch {
+      return undefined;
+    }
   }
 
   private reportInapplicable(
@@ -916,7 +962,7 @@ export abstract class CallBinder extends OperatorBinder {
         this.mapArguments(candidate.method, args, false) !== undefined ||
         (candidate.method.parameters.at(-1)?.isParams && this.mapArguments(candidate.method, args, true))
     );
-    this.rejectUnavailableOverload(candidates, args.length, byArity.length, row);
+    this.rejectUnavailableOverload(candidates, args, byArity.length, row);
     if (byArity.length === 0) {
       this.reportArityMismatch(candidates, args, row, description);
       return;

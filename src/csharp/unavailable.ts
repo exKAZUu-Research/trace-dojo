@@ -51,17 +51,29 @@ export function isDotnetNamespace(name: string): boolean {
   return DOTNET_NAMESPACES.has(name);
 }
 
-/** How many of .NET's overloads of a type's method (or `.ctor`) take a number of arguments. */
-export function dotnetOverloadCount(fullName: string, member: string, argumentCount: number): number {
+/** A .NET overload by its parameters' metadata names, `*` for one involving generics. */
+export interface DotnetOverload {
+  required: number;
+  /** Whether the last parameter is a params array. */
+  takesMore: boolean;
+  types: string[];
+}
+
+/** .NET's overloads of a type's method (or `.ctor`), leaving out those that take a pointer or a span. */
+export function dotnetOverloadsOf(fullName: string, member: string): DotnetOverload[] {
   const entry = DOTNET_OVERLOADS[fullName]?.split(';').find((overloads) => overloads.startsWith(`${member}=`));
-  if (!entry) return 0;
+  if (!entry) return [];
   return entry
     .slice(member.length + 1)
     .split(',')
-    .filter((range) => {
-      const [min, max] = range.endsWith('+') ? [Number(range.slice(0, -1)), Infinity] : range.split('-').map(Number);
-      return argumentCount >= min && argumentCount <= max;
-    }).length;
+    .map((overload) => {
+      const [count, types] = overload.split(':');
+      return {
+        required: Number.parseInt(count, 10),
+        takesMore: count.endsWith('+'),
+        types: types ? types.split('|') : [],
+      };
+    });
 }
 
 /** Whether .NET's type of a full metadata name has a public member of the name. */
