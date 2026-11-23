@@ -248,14 +248,19 @@ function joinQuery(
     const keyType = call.typeArgs[2];
     const equality = equalityOf(call, undefined, keyType);
     // .NET reads the inner sequence only once the outer one has an element.
-    let groups: { key: Value; elements: Value[] }[] | undefined;
+    let groupsByHash: Map<number, { key: Value; elements: Value[] }[]> | undefined;
     for (const item of outers) {
-      groups ??= groupsOf(call, inners, innerKeyOf, (element) => element, undefined, keyType);
+      groupsByHash ??= Map.groupBy(
+        groupsOf(call, inners, innerKeyOf, (element) => element, undefined, keyType).filter(
+          (group) => group.key !== undefined
+        ),
+        (group) => equality.hash(group.key)
+      );
       const key = outerKeyOf(item);
       const group =
         key === undefined
           ? undefined
-          : groups.find((candidate) => candidate.key !== undefined && equality.equals(candidate.key, key));
+          : groupsByHash.get(equality.hash(key))?.find((candidate) => equality.equals(candidate.key, key));
       yield* results(item, group?.elements, resultOf);
     }
   });
@@ -1042,14 +1047,22 @@ const linq: Record<string, NativeMethod> = {
   },
   [`${ENUMERABLE}.SequenceEqual`]: (call, _receiver, [first, second]) => {
     const equality = equalityOf(call, undefined);
-    const a = bufferedElements(call, source(call, first as Value, 'first'));
-    const b = bufferedElements(call, source(call, second as Value, 'second'));
-    return (
-      a.length === b.length &&
-      a.every((item, index) =>
-        item === undefined ? b[index] === undefined : b[index] !== undefined && equality.equals(item, b[index])
-      )
-    );
+    // .NET reads both sequences in step and stops at the first difference.
+    const left = source(call, first as Value, 'first')[Symbol.iterator]();
+    const right = source(call, second as Value, 'second')[Symbol.iterator]();
+    try {
+      for (;;) {
+        const a = left.next();
+        const b = right.next();
+        if (a.done || b.done) return a.done === b.done;
+        const isEqual =
+          a.value === undefined ? b.value === undefined : b.value !== undefined && equality.equals(a.value, b.value);
+        if (!isEqual) return false;
+      }
+    } finally {
+      left.return?.();
+      right.return?.();
+    }
   },
   [`${ENUMERABLE}.Skip`]: (call, _receiver, [items, count]) => skip(call, items as Value, count as number),
   [`${ENUMERABLE}.SkipLast`]: (call, _receiver, [items, count]) => {

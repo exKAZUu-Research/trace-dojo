@@ -951,7 +951,9 @@ export class Evaluator extends StatementExecutor {
       const isVirtual =
         !isBase &&
         (accessor.isVirtual || accessor.isAbstract || accessor.isOverride || accessor.owner.kind === 'interface');
-      const implementation = isVirtual && receiver !== undefined ? this.runtime.dispatch(accessor, receiver) : accessor;
+      // The constructed owner picks a generic interface's overload by its substituted parameter types.
+      const implementation =
+        isVirtual && receiver !== undefined ? this.runtime.dispatch(accessor, receiver, owner) : accessor;
       const implementationOwner = isVirtual ? (this.ownerOfImplementation(implementation, receiver) ?? owner) : owner;
       const result = this.invoke(
         frame,
