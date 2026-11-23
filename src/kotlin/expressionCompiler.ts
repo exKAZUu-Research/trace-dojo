@@ -453,7 +453,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       repr: reprOf(this.core, receiver.type),
       eval: this.receiverAccess(context, receiver),
       stableKey: key,
-      isThis: true,
+      thisOf: receiver,
     };
   }
 
@@ -1113,6 +1113,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
           repr: reprOf(this.core, receiver.type),
           eval: this.receiverAccess(context, receiver),
           stableKey: keyOf(receiver),
+          thisOf: receiver,
         },
         name,
         row
@@ -1328,7 +1329,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const memberProperty = this.membersOf<PropertySymbol>(memberType, name, 'property')[0];
     const memberLevels: CallLevel[] = members.length === 0 ? [] : [{ candidates: members, receiver }];
     // Only the instance an initializer builds may be uninitialized: an implicit `this`, or an object, which is one.
-    const mayBeUninitialized = !explicit || receiver.isThis === true || memberProperty?.symbol.owner?.isObject === true;
+    const building = this.uninitializedProperties?.context;
+    const mayBeUninitialized = receiver.thisOf?.context === building || memberProperty?.symbol.owner?.isObject === true;
     const memberValue =
       memberProperty && this.propertyCallCandidate(scope, memberProperty, receiver, row, mayBeUninitialized);
     if (memberValue) memberLevels.push({ functionValues: [memberValue] });
@@ -1753,6 +1755,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const target = context.isLambda ? context.returnTarget : context;
     if (!target) this.error(expression.row, 'ここでは return を書けません。ラムダ式の値は、最後の式に書いてください。');
     if (target.forbidsReturn) this.error(expression.row, 'ここでは return を書けません。');
+    if (!context.isLambda) target.hasDirectReturn = true;
     const returnType = target.returnType;
     let evaluate: Eval = returnUnit;
     if (expression.value) {

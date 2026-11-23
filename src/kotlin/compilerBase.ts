@@ -36,8 +36,8 @@ export interface Compiled {
   constant?: Value;
   /** The key of the variable or property the expression reads, which smart casts narrow. */
   stableKey?: string;
-  /** Whether the expression is `this`, which in an initializer is the instance being built. */
-  isThis?: boolean;
+  /** The receiver an implicit or explicit `this` reads, which in its initializer is the instance being built. */
+  thisOf?: ReceiverSymbol;
   /** For a read that a smart cast narrows, the declared type, which a `var` that the read initializes takes. */
   unnarrowedType?: KType;
   /** For a safe call such as `s?.length`, the smart casts of its receivers that hold when its value is not null. */
@@ -132,6 +132,8 @@ export class FunctionContext {
   loops: LoopContext[] = [];
   /** Whether the context is a class or file initializer, which no `return` may leave. */
   forbidsReturn = false;
+  /** Whether a `return` written directly in the context, not in a lambda, leaves it. */
+  hasDirectReturn = false;
   inlineLambda = false;
   /** A discarded probe may retain open types until the enclosing argument reveals their positions. */
   allowOpenCallTypes: boolean;
