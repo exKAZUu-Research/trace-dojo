@@ -359,6 +359,32 @@ fun main() {
   );
 });
 
+test("lambda steps show the enclosing function's variables and this, as Java's loops do", () => {
+  const source = `fun main() {
+    val size = 3
+    var count = 0
+    repeat(2) {
+        count++
+    }
+    Robot().charge()
+}
+class Robot {
+    var energy = 0
+    fun charge() {
+        val step = 2
+        listOf(1).forEach {
+            energy += step
+        }
+    }
+}`;
+  const steps = traceProgram('kotlin', source, source).traceItems;
+  expect(steps.filter(({ line }) => line === 5).map(({ vars }) => vars)).toEqual([
+    { size: 3, count: 1, it: 0 },
+    { size: 3, count: 2, it: 1 },
+  ]);
+  expect(steps.find(({ line }) => line === 14)?.vars).toEqual({ step: 2, it: 1, 'this.energy': 2 });
+});
+
 test('a deferred val appears in the trace after its scope lambda assigns it', () => {
   const source = `fun main() {
     val answer: Int

@@ -31,7 +31,7 @@ export function lambdaValue(lambda: {
         const receiver = hasReceiver ? unboxedIf(receiverIsUnboxed, args[0]) : undefined;
         const values = hasReceiver ? args.slice(1) : args;
         const converted = values.map((arg, index) => unboxedIf(paramReprs[index] !== 'ref', arg));
-        return frame.runtime.call(info, caller, env, receiver, converted, undefined, resultEval);
+        return frame.runtime.call(info, caller, env, receiver, converted, undefined, resultEval, frame);
       },
     };
     return value;

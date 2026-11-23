@@ -46,6 +46,8 @@ export class Frame implements TracedFrame {
   readonly locals: Slot[];
   /** Values in use that no variable holds, such as evaluated arguments while the next one is evaluated. */
   readonly temporaries: Value[] = [];
+  /** For a lambda's call, the frame that created the lambda, whose variables its steps also show. */
+  enclosing: Frame | undefined;
 
   constructor(
     readonly runtime: Runtime,
@@ -218,10 +220,12 @@ export class Runtime implements TracedRuntime<Frame> {
     thisValue: Value,
     args: readonly Value[],
     callRow: number | undefined,
-    body: (frame: Frame) => Value
+    body: (frame: Frame) => Value,
+    enclosing?: Frame
   ): Value {
     this.spend();
     const frame = new Frame(this, info, captured, thisValue, info.isLibrary ? undefined : callRow);
+    frame.enclosing = enclosing;
     if (this.frames.length >= LIMITS.maxCallDepth) {
       this.throwError(caller ?? frame, 'java.lang.StackOverflowError');
     }

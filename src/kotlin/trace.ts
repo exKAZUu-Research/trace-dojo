@@ -45,11 +45,15 @@ class Snapshotter {
 
   /**
    * The variables a frame shows: its locals and what a lambda captured, then with `withContext` the properties of
-   * `this` as `this.x`, the program's top-level properties, and the properties of its objects as `Name.x`.
+   * `this` as `this.x`, the program's top-level properties, and the properties of its objects as `Name.x`. A lambda's
+   * steps also show the variables and `this` of the function that created it, as the JVM inlines `repeat` and `forEach`
+   * bodies into that function; the lambda's own variables shadow them.
    */
   // code-gauge-allow functionCognitiveComplexity -- builds one snapshot of a frame, whose kinds of variables are listed side by side as Java's trace does.
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
-    const variables: TraceVariables = { vars: {}, referenceVars: {} };
+    const variables: TraceVariables = frame.enclosing
+      ? this.variablesOf(frame.enclosing, false)
+      : { vars: {}, referenceVars: {} };
     const shown = new Set<string>();
     const hidesArgs = frame.info.name === this.program.main.name && this.program.mainTakesArgs;
     for (const local of frame.info.locals) {
@@ -78,7 +82,8 @@ class Snapshotter {
       );
     }
     if (!withContext) return variables;
-    if (frame.info.showsThis && frame.thisValue instanceof KObject) addThis(variables, frame.thisValue);
+    const thisFrame = enclosingFrames(frame).find((each) => each.info.showsThis);
+    if (thisFrame?.thisValue instanceof KObject) addThis(variables, thisFrame.thisValue);
     for (const global of this.program.globals) {
       if (shown.has(global.name) || global.isConstant) continue;
       addVariable(variables, global.name, this.runtime.globals[global.slot], global.type);
@@ -100,6 +105,12 @@ class Snapshotter {
       addVariable(variables, `${owner}.${property.name}`, value, property.type as KType);
     }
   }
+}
+
+function enclosingFrames(frame: Frame): Frame[] {
+  const frames: Frame[] = [];
+  for (let current: Frame | undefined = frame; current; current = current.enclosing) frames.push(current);
+  return frames;
 }
 
 function addVariable(variables: TraceVariables, name: string, value: Value, type: KType): void {
