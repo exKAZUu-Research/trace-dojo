@@ -292,12 +292,16 @@ export class Compiler extends BodyCompiler {
   protected nativeInvoker(symbol: FunctionSymbol, native: NativeFunction): NonNullable<FunctionSymbol['invoke']> {
     let nonNullParams: number[] | undefined;
     let checksReceiver: boolean | undefined;
-    return (caller, receiver, args) => {
+    // The JVM's wrapper for default arguments evaluates them before the method checks its parameters for null.
+    const call = (caller: Frame, receiver: Value, args: Value[]): Value => {
       nonNullParams ??= nonNullParameterIndexes(symbol);
       checksReceiver ??= hasNonNullReceiver(symbol);
       if (checksReceiver && receiver === NULL) caller.runtime.throwError(caller, 'java.lang.NullPointerException');
       rejectNullArguments(caller, nonNullParams, args);
-      if (!args.includes(MISSING)) return caller.runtime.checkBuiltString(caller, native(caller, receiver, args));
+      return caller.runtime.checkBuiltString(caller, native(caller, receiver, args));
+    };
+    return (caller, receiver, args) => {
+      if (!args.includes(MISSING)) return call(caller, receiver, args);
       // Default values may read the receiver and the earlier parameters, as `missingDelimiterValue: String = this` does.
       const info = symbol.defaultsInfo ?? ROOT_DEFAULTS_INFO;
       const frame = new Frame(caller.runtime, info, [], receiver, undefined);
@@ -305,7 +309,7 @@ export class Compiler extends BodyCompiler {
       for (const [index, arg] of args.entries()) {
         if (arg === MISSING) frame.locals[index] = symbol.params[index].defaultValue?.(frame);
       }
-      return caller.runtime.checkBuiltString(caller, native(caller, receiver, frame.locals as Value[]));
+      return call(caller, receiver, frame.locals as Value[]);
     };
   }
 
