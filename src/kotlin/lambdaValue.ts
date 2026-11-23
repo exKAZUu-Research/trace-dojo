@@ -40,6 +40,9 @@ export function lambdaValue(lambda: {
 
 /** Calls a function value with arguments held as references. */
 export function invokeFunctionValue(frame: Frame, fn: KObject, args: Value[]): Value {
+  // A function-valued property read before its initializer ran, as a superclass initializer may, holds null.
+  if ((fn as KObject | undefined) === undefined)
+    return frame.runtime.throwError(frame, 'java.lang.NullPointerException');
   const { function: callable } = fn;
   if (!callable) throw new Error('A function value without its function');
   return callable.call(frame, args);
