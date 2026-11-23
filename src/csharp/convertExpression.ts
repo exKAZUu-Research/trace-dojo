@@ -314,11 +314,12 @@ export class ExpressionConverter {
         return { kind: 'anonymousObject', members: this.convertAnonymousMembers(node), ...position };
       }
       case 'with_expression': {
-        const [value, initializer] = namedChildren(node);
+        // The grammar gives each `Name = value` of the braces its own initializer node after the receiver.
+        const [value, ...initializers] = namedChildren(node);
         return {
           kind: 'with',
           value: this.convertExpression(value),
-          members: initializer ? this.convertWithMembers(initializer) : [],
+          members: initializers.flatMap((initializer) => this.convertWithMembers(initializer)),
           ...position,
         };
       }
