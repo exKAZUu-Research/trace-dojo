@@ -1483,11 +1483,11 @@ export abstract class StatementCompiler extends OperatorCompiler {
       subject.stableKey && valueCase ? excludingCases(subject.stableKey, [valueCase.id]) : new Map<string, KType>();
     if (resolved(value.type).kind === 'nothing' && subject.stableKey)
       narrowing.set(subject.stableKey, nonNull(subject.type));
+    const equality = this.equalityNarrowing(subject, value, false, [undefined, expression]);
+    for (const [key, type] of equality.whenFalse) narrowing.set(key, type);
     return {
       test: whenValueTest(subjectEval, nullLiteral ? undefined : valueEval, comparesPrimitives),
-      whenTrue: nullLiteral
-        ? new Map()
-        : this.equalityNarrowing(subject, value, false, [undefined, expression]).whenTrue,
+      whenTrue: nullLiteral ? new Map() : equality.whenTrue,
       whenFalse: narrowing,
     };
   }
