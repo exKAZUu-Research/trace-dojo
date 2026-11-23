@@ -1119,13 +1119,14 @@ function writeText(call: NativeCall, args: Value[]): string {
   if (parameters[0].type.kind === 'array' && parameters.length === 3) {
     const buffer = args[0] as CsArray;
     const [index, count] = [args[1] as number, args[2] as number];
-    return String.fromCharCode(...buffer.values.slice(index, index + count).map((value) => value as number));
+    return textOfChars(buffer.values.slice(index, index + count));
   }
-  if (parameters[0].type.kind === 'array')
-    return args[0] === undefined
-      ? ''
-      : String.fromCharCode(...(args[0] as CsArray).values.map((value) => value as number));
+  if (parameters[0].type.kind === 'array') return args[0] === undefined ? '' : textOfChars((args[0] as CsArray).values);
   return textOf(call, args[0], parameterType(call, 0));
+}
+
+function textOfChars(chars: readonly Value[]): string {
+  return chars.map((char) => String.fromCharCode(char as number)).join('');
 }
 
 /** Formats a composite format string with its arguments, as `string.Format` and `Console.WriteLine` do. */

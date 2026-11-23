@@ -441,7 +441,7 @@ export class Runtime {
       seen.add(value);
       scanned++;
       if (value instanceof CsObject && value.turtle?.isAlive) reached.add(value.turtle);
-      pending.push(...referencesOf(value));
+      for (const reference of referencesOf(value)) pending.push(reference);
     }
     this.spend(Math.ceil(scanned / 64));
     this.world.retain((turtle) => reached.has(turtle));
@@ -450,9 +450,11 @@ export class Runtime {
   private garbageRoots(): unknown[] {
     const roots: unknown[] = [];
     for (const frame of this.frames) {
-      roots.push(frame.thisValue, ...frame.slots, ...frame.temporaries, ...frame.operands, ...frame.captured.values());
+      roots.push(frame.thisValue);
+      for (const values of [frame.slots, frame.temporaries, frame.operands, frame.captured.values()])
+        for (const value of values) roots.push(value);
     }
-    for (const storage of this.statics.values()) roots.push(...storage.values);
+    for (const storage of this.statics.values()) for (const value of storage.values) roots.push(value);
     return roots;
   }
 

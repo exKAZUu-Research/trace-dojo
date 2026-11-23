@@ -299,7 +299,7 @@ const listNatives: Record<string, NativeMethod> = {
     const added = [...iterate(call, source as Value, 'collection')];
     call.frame.runtime.allocateSlots(added.length);
     list.ensureCapacity(list.items.length + added.length);
-    list.items.push(...added);
+    for (const item of added) list.items.push(item);
     list.version++;
     return;
   },
@@ -476,7 +476,8 @@ const listNatives: Record<string, NativeMethod> = {
       );
     const added = [...iterate(call, source as Value, 'collection')];
     list.ensureCapacity(list.items.length + added.length);
-    list.items.splice(index as number, 0, ...added);
+    const tail = list.items.splice(index as number);
+    for (const item of [...added, ...tail]) list.items.push(item);
     list.version++;
     return;
   },
@@ -542,8 +543,7 @@ const listNatives: Record<string, NativeMethod> = {
   [`${LIST}.Reverse(int, int)`]: (call, receiver, [index, count]) => {
     const list = listOf(receiver);
     checkRange(call, index as number, count as number, list.items.length);
-    const part = list.items.slice(index as number, (index as number) + (count as number)).toReversed();
-    list.items.splice(index as number, count as number, ...part);
+    reverseRange(list.items, index as number, count as number);
     list.version++;
     return;
   },
@@ -1616,8 +1616,7 @@ defineNatives({
   [`${ARRAY}.Reverse(Array, int, int)`]: (call, _receiver, [array, index, length]) => {
     const values = arrayOf(array as Value).values;
     checkArrayRange(call, values.length, index as number, length as number);
-    const part = values.slice(index as number, (index as number) + (length as number)).toReversed();
-    values.splice(index as number, length as number, ...part);
+    reverseRange(values, index as number, length as number);
     return;
   },
   [`${ARRAY}.Sort(Array)`]: (call, _receiver, [array]) =>
@@ -1794,3 +1793,8 @@ defineNatives({
 });
 
 export { stringOf };
+
+function reverseRange(values: Value[], index: number, count: number): void {
+  for (let low = index, high = index + count - 1; low < high; low++, high--)
+    [values[low], values[high]] = [values[high], values[low]];
+}
