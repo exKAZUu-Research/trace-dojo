@@ -1811,7 +1811,10 @@ export abstract class ExpressionBinder extends MemberBinder {
     node: Extract<Expression, { kind: 'assign' }>,
     context: BindContext
   ): BoundExpression {
-    const value = this.deconstructedValue(node.value, context);
+    const targetTypes = (node.target as Extract<Expression, { kind: 'tuple' }>).elements.map((element) =>
+      this.quietly(() => this.deconstructTargetType(element.value, context))
+    );
+    const value = this.deconstructedValue(node.value, context, targetTypes);
     const targets = this.bindDeconstructTargets(
       node.target as Extract<Expression, { kind: 'tuple' }>,
       value.type,
@@ -1826,6 +1829,18 @@ export abstract class ExpressionBinder extends MemberBinder {
       type: value.type,
       row: node.row,
     };
+  }
+
+  /** The type a deconstruction target takes, or undefined for one that takes the value's (`var x`, `_`). */
+  private deconstructTargetType(syntax: Expression, context: BindContext): Type | undefined {
+    if (syntax.kind === 'tuple') {
+      const types = syntax.elements.map((element) => this.deconstructTargetType(element.value, context));
+      return types.every((type) => type !== undefined) ? this.tupleType(types) : undefined;
+    }
+    if (syntax.kind === 'declaration')
+      return syntax.type.kind === 'varType' ? undefined : this.resolveType(syntax.type, context.fn.typeContext);
+    if (syntax.kind === 'name' && syntax.name === '_' && !context.scope.lookup('_')) return undefined;
+    return this.bindLValue(syntax, context, 'assign').type;
   }
 
   private bindDeconstructTargets(
@@ -1848,8 +1863,10 @@ export abstract class ExpressionBinder extends MemberBinder {
           elementType,
           context
         );
-      if (syntax.kind === 'name' && syntax.name === '_' && !context.scope.lookup('_'))
+      if (syntax.kind === 'name' && syntax.name === '_' && !context.scope.lookup('_')) {
+        if (elementType.kind === 'null') this.error(syntax, 'CS8183', '暗黙的に型指定された破棄の型を推論できません。');
         return { kind: 'single', target: undefined, conversion: undefined };
+      }
       const target = this.bindLValue(syntax, context, 'assign');
       const conversion = this.convert(
         { kind: 'compoundOperand', type: elementType, row: syntax.row },
@@ -1868,6 +1885,13 @@ export abstract class ExpressionBinder extends MemberBinder {
     elementType: Type,
     context: BindContext
   ): BoundDeconstructTarget {
+    // A variable or discard that takes its type from the value cannot take `null`'s, as in `var (p, q) = (null, 1)`.
+    if (elementType.kind === 'null' && !declaredType && !(designation.kind === 'single' && designation.type)) {
+      if (designation.kind === 'single')
+        this.error(designation, 'CS8130', `暗黙的に型指定された分解変数 '${designation.name}' の型を推論できません。`);
+      if (designation.kind === 'discard')
+        this.error(designation, 'CS8183', '暗黙的に型指定された破棄の型を推論できません。');
+    }
     if (designation.kind === 'discard') return { kind: 'single', target: undefined, conversion: undefined };
     if (designation.kind === 'parenthesized') {
       const { elementTypes, deconstruct } = this.deconstructionOf(

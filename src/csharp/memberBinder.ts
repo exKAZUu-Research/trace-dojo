@@ -149,18 +149,26 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /**
-   * Binds the value a deconstruction takes apart, which gives it no target type: a tuple literal reports each element
-   * without a type of its own.
+   * Binds the value a deconstruction takes apart. A tuple literal's elements convert to the types of their targets
+   * where the targets have them, as in `(x, s) = (1, null)`, and otherwise need types of their own.
    */
-  protected deconstructedValue(node: Expression, context: BindContext): BoundExpression {
+  protected deconstructedValue(
+    node: Expression,
+    context: BindContext,
+    targetTypes: (Type | undefined)[] = []
+  ): BoundExpression {
     const value = this.bindValue(node, context);
     if (value.kind !== 'unbound') return value;
-    if (value.node.kind === 'tuple') {
-      const elements = value.node.elements.map((element) => this.bindTypedValue(element.value, context));
-      if (elements.some((element) => element.type.kind === 'error'))
-        return { kind: 'default', type: ERROR_TYPE, row: node.row };
-    }
-    return this.typedValue(value, node);
+    if (value.node.kind !== 'tuple') return this.typedValue(value, node);
+    const types = value.node.elements.map((element, index): Type => {
+      const target = targetTypes[index];
+      if (target && target.kind !== 'error') return target;
+      const typed = this.quietly(() => this.bindTypedValue(element.value, context));
+      if (typed && typed.type.kind !== 'error') return typed.type;
+      return this.bindTypedValue(element.value, context).type;
+    });
+    if (types.some((type) => type.kind === 'error')) return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    return this.convert(value, this.tupleType(types), node);
   }
 
   /** Binds an expression as a value. */

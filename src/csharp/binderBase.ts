@@ -139,6 +139,22 @@ export class BinderBase {
     if (this.diagnostics.length >= 200) throw new TooManyErrors();
   }
 
+  /**
+   * Runs a binding whose result only informs another binding, which reports the diagnostics itself: those of this one
+   * are dropped, and a binding that stops compiling gives undefined.
+   */
+  protected quietly<T>(bind: () => T): T | undefined {
+    const count = this.diagnostics.length;
+    try {
+      return bind();
+    } catch (error) {
+      if (error instanceof CompileError || error instanceof TooManyErrors) return undefined;
+      throw error;
+    } finally {
+      this.diagnostics.length = count;
+    }
+  }
+
   /** Rejects a feature this grader does not run, which stops compiling at once. */
   unsupported(position: Position | number, what: string): never {
     const row = typeof position === 'number' ? position : position.row;
