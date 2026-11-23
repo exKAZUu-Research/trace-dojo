@@ -544,9 +544,16 @@ function emptyMatch(call: NativeCall): CsObject {
   return match;
 }
 
-function allMatches(call: NativeCall, compiled: CompiledPattern, input: string | CsString, start = 0): CsObject[] {
+function allMatches(
+  call: NativeCall,
+  compiled: CompiledPattern,
+  input: string | CsString,
+  start = 0,
+  /** The most matches wanted, as Replace's count gives; -1 for all of them. */
+  limit = -1
+): CsObject[] {
   const matches: CsObject[] = [];
-  for (let position = start; position <= stringText(input).length;) {
+  for (let position = start; position <= stringText(input).length && matches.length !== limit;) {
     const match = findMatch(call, compiled, input, position);
     const state = match.native as MatchState;
     if (!state.group.success) break;
@@ -659,7 +666,7 @@ function replaceMatches(
   count = -1
 ): string | CsString {
   if (count < -1) failOutOfRange(call, 'count', 'Count cannot be less than -1.', String(count));
-  const matches = count === 0 ? [] : allMatches(call, compiled, source);
+  const matches = count === 0 ? [] : allMatches(call, compiled, source, 0, count);
   if (matches.length === 0) return source;
   const input = stringText(source);
   const output = new MeteredText(call.frame.runtime);
