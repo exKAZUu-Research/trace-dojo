@@ -629,7 +629,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
   ): { readType: KType | undefined; read: (frame: Frame) => Value } {
     const key = keyOf(variable);
     const readType = refineLocalType(localRefinement(scope, context, variable), variable, this.flow.narrowed.get(key));
-    return { readType, read: readType ? checkedRead(this.core, read, readType) : read };
+    const isReference = reprOf(this.core, variable.type) === 'ref';
+    return { readType, read: readType && isReference ? checkedRead(this.core, read, readType) : read };
   }
 
   private backingFieldPlace(

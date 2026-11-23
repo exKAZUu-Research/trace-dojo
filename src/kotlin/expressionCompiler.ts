@@ -601,7 +601,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return {
       type: narrowed ?? variable.type,
       repr,
-      eval: narrowed ? checkedRead(this.core, access.read, narrowed) : access.read,
+      // A local stored as a primitive always holds its type; only a reference can hold something else.
+      eval: narrowed && repr === 'ref' ? checkedRead(this.core, access.read, narrowed) : access.read,
       stableKey: refinement ? key : undefined,
       unnarrowedType: narrowed && variable.type,
     };

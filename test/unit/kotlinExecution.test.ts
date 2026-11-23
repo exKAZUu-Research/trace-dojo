@@ -3457,6 +3457,19 @@ fun main() {
       '{x=[], y=[c]}\n{y=[a, b], x=[]}\n{x=[z], y=[a, b]}\n[(1, []), (y, [c])]\n[(y, [c]), (1, [])]\n{1=[], y=[c]}\n{y=[c], 1=[]}\n{k=[], j=[1]}\nfirst\nsecond\n{first=[], second=[c]}\n',
   },
   {
+    name: 'type tests on primitive and boxed locals keep their smart casts',
+    source: `fun main() {
+    val n = 3
+    if (n is Int) println(n)
+    when (n) {
+        is Int -> println(n + 1)
+    }
+    val a: Any = 5
+    if (a is Int) println(a * 2)
+}`,
+    stdout: '3\n4\n10\n',
+  },
+  {
     name: 'enum constructor arguments leave the locals of the function that first reads the enum',
     source: `enum class Size(val n: Int) { S(when (1) { 1 -> 5; else -> 6 }) }
 
