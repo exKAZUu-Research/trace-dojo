@@ -1,6 +1,5 @@
 import type { Expression, Modifiers, Statement, TypeProjectionRef, TypeRef } from './ast';
 import {
-  type Compiled,
   compileError,
   type Core,
   type Eval,
@@ -597,10 +596,6 @@ export abstract class CompilerCore {
       }
     }
     return false;
-  }
-
-  protected compiledConstant(compiled: Compiled): Value | undefined {
-    return compiled.constant;
   }
 }
 
