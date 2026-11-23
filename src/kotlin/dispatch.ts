@@ -57,8 +57,8 @@ export function propertyRepr(symbol: PropertySymbol): Repr {
 }
 
 /** Converts one value between representations, outside a compiled expression. */
-function convertValue(value: Value, fromRepr: Repr, toRepr: Repr): Value {
-  return fromRepr === toRepr ? value : convertRepr(() => value, fromRepr, toRepr)(undefined as unknown as Frame);
+function convertValue(frame: Frame, value: Value, fromRepr: Repr, toRepr: Repr): Value {
+  return fromRepr === toRepr ? value : convertRepr(() => value, fromRepr, toRepr)(frame);
 }
 
 type Bridge = (frame: Frame, receiver: Value, args: Value[], callRow: number | undefined) => Value;
@@ -92,15 +92,17 @@ function bridge(symbol: FunctionSymbol, target: FunctionSymbol): Bridge {
   const created: Bridge = same
     ? (frame, receiver, args, callRow) => invokeFunction(target, frame, receiver, args, callRow)
     : (frame, receiver, args, callRow) => {
-        const convertedArgs = args.map((arg, index) => convertValue(arg, from[index] ?? 'ref', to[index] ?? 'ref'));
+        const convertedArgs = args.map((arg, index) =>
+          convertValue(frame, arg, from[index] ?? 'ref', to[index] ?? 'ref')
+        );
         const result = invokeFunction(
           target,
           frame,
-          convertValue(receiver, fromReceiver, toReceiver),
+          convertValue(frame, receiver, fromReceiver, toReceiver),
           convertedArgs,
           callRow
         );
-        return convertValue(result, fromResult, toResult);
+        return convertValue(frame, result, fromResult, toResult);
       };
   bySymbol.set(symbol, created);
   return created;
@@ -167,8 +169,8 @@ function evaluateDefault(symbol: FunctionSymbol, frame: Frame, receiver: Value, 
   if (!evaluate || !info) throw new Error(`Default value is unavailable for ${owner.name}`);
   const from = parameterReprs(symbol);
   const to = parameterReprs(owner);
-  const prior = args.slice(0, index).map((value, position) => convertValue(value, from[position], to[position]));
-  const target = convertValue(receiver, receiverRepr(symbol), receiverRepr(owner));
+  const prior = args.slice(0, index).map((value, position) => convertValue(frame, value, from[position], to[position]));
+  const target = convertValue(frame, receiver, receiverRepr(symbol), receiverRepr(owner));
   const resolved = frame.runtime.call(
     { ...info, isLibrary: true, isAtomic: false },
     frame,
@@ -178,7 +180,7 @@ function evaluateDefault(symbol: FunctionSymbol, frame: Frame, receiver: Value, 
     undefined,
     evaluate
   );
-  return convertValue(resolved, to[index], from[index]);
+  return convertValue(frame, resolved, to[index], from[index]);
 }
 
 export function getPropertyValue(symbol: PropertySymbol, frame: Frame, receiver: Value, virtual = true): Value {
