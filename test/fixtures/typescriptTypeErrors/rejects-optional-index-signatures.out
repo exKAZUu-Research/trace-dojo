@@ -1,0 +1,14 @@
+(1,28): error TS1005: ';' expected.
+(1,29): error TS1131: Property or signature expected.
+(3,16): error TS1005: ';' expected.
+(3,17): error TS1131: Property or signature expected.
+(6,16): error TS1005: ';' expected.
+(6,17): error TS1068: Unexpected token. A constructor, method, accessor, or property was expected.
+(8,29): error TS1005: ';' expected.
+(8,30): error TS1109: Expression expected.
+(8,31): error TS1109: Expression expected.
+(8,40): error TS1128: Declaration or statement expected.
+(9,27): error TS1005: ';' expected.
+(9,28): error TS1109: Expression expected.
+(9,29): error TS1109: Expression expected.
+(9,38): error TS1128: Declaration or statement expected.

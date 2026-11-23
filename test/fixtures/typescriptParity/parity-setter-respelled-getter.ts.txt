@@ -1,0 +1,59 @@
+const key = 'value';
+interface QuotedGetter {
+  get 'value'(): number;
+  set value(input);
+}
+type QuotedSetter = { get value(): number; set 'value'(input) };
+interface ComputedGetter {
+  get ['value'](): number;
+  set value(input);
+}
+interface ConstantGetter {
+  get [key](): number;
+  set value(input);
+  get 0x10(): number;
+  set 16(input);
+}
+class Counter {
+  #count = 1;
+  get 'value'(): number {
+    return this.#count;
+  }
+  set value(input) {
+    this.#count = input * 2;
+  }
+  get 1(): number {
+    return 1;
+  }
+  set '1'(input) {
+    console.log(input.toFixed(1));
+  }
+  get #label(): string {
+    return 'label';
+  }
+  set #label(input) {
+    console.log(input.length);
+  }
+  rename(): void {
+    this.#label = 'renamed';
+  }
+}
+const literal = {
+  get 'value'() {
+    return 2;
+  },
+  set value(input) {
+    console.log(input.toFixed(1));
+  },
+};
+const quotedGetter: QuotedGetter = { value: 3 };
+const quotedSetter: QuotedSetter = { value: 4 };
+const computedGetter: ComputedGetter = { value: 5 };
+const constantGetter: ConstantGetter = { value: 6, 16: 7 };
+const counter = new Counter();
+counter.value = 3;
+counter[1] = 2;
+counter.rename();
+literal.value = 4;
+console.log(quotedGetter.value, quotedSetter.value, computedGetter.value, constantGetter.value, constantGetter[16]);
+console.log(counter.value, counter[1], literal.value);

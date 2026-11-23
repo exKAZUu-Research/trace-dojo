@@ -275,7 +275,7 @@ export function exceptionText(evaluator: Evaluator, exception: CsObject): string
 // ---- Equality and hashing ----
 
 /** Whether two values are equal as `object.Equals` decides, calling the program's overrides. */
-// code-gauge-allow functionCognitiveComplexity 26 -- Each branch handles one case of the C# rule that the function applies.
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 export function valuesEqual(evaluator: Evaluator, first: Value, second: Value, frame: Frame): boolean {
   const a = plainString(first);
   const b = plainString(second);

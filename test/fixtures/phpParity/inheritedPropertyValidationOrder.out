@@ -1,0 +1,4 @@
+
+Fatal error: Type of InvalidProperties::$first must be int (as in class BaseProperties) in /main.php on line 6
+Stack trace:
+#0 {main}

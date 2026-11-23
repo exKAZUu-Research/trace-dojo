@@ -1,0 +1,26 @@
+bool(true)
+int(1)
+int(-1)
+bool(false)
+int(-1)
+bool(true)
+bool(false)
+bool(false)
+
+Notice: Object of class A could not be converted to int in /main.php on line 6
+
+Notice: Object of class A could not be converted to float in /main.php on line 6
+bool(true)
+bool(true)
+bool(true)
+bool(true)
+bool(false)
+
+Deprecated: Creation of dynamic property P::$extra is deprecated in /main.php on line 8
+int(-1)
+int(1)
+bool(false)
+bool(true)
+bool(true)
+bool(false)
+bool(true)

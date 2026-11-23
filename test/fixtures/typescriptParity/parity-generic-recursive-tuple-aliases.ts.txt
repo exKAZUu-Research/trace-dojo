@@ -1,0 +1,38 @@
+type Tree<T> = [T, Tree<T>[]];
+const leaf: Tree<number> = [3, []];
+const tree: Tree<number> = [1, [[2, []], leaf]];
+
+function sum(node: Tree<number>): number {
+  return node[0] + node[1].reduce((total, child) => total + sum(child), 0);
+}
+function mapTree<T, U>(node: Tree<T>, f: (value: T) => U): Tree<U> {
+  return [f(node[0]), node[1].map((child) => mapTree(child, f))];
+}
+const labels: Tree<string> = mapTree(tree, (value) => `n${value}`);
+console.log(sum(tree), JSON.stringify(labels));
+
+type Nest<T> = Nest<T>[];
+const nest: Nest<number> = [[], [[]]];
+console.log(nest.length, nest[1].length);
+
+type Grow<T> = [T, Grow<T[]>[]];
+const grow: Grow<number> = [1, [[[2], [[[[3]], []]]]]];
+console.log(JSON.stringify(grow[1][0][1][0][0]));
+
+type Pair<A, B> = [A, Pair<B, A>?];
+const pair: Pair<number, string> = [1, ["a", [2]]];
+const second = pair[1];
+console.log(second ? second[0].toUpperCase() : "none");
+
+type Chain<T> = readonly [T, ...Chain<T>[]];
+const chain: Chain<string> = ["a", ["b"], ["c", ["d"]]];
+console.log(chain.flat(3).join(""));
+
+function nestOnce<T>(value: T) {
+  type Local = [T, Local[]];
+  const local: Local = [value, [[value, []]]];
+  return local;
+}
+const nested = nestOnce(5);
+const inner: number = nested[1][0][0];
+console.log(inner * 2);

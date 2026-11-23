@@ -1,0 +1,14 @@
+class Optional {
+  #amount?: number;
+  #label?: string;
+  amount() { return this.#amount.toFixed(); }
+  label(): string { return this.#label; }
+}
+class Early {
+  #first = this.#second;
+  #second = 1;
+  static #firstStatic = Early.#secondStatic;
+  static #secondStatic = 2;
+}
+const independent = { add(this: void, number: number) { return number + 1; } };
+independent.add.call({}, 3);

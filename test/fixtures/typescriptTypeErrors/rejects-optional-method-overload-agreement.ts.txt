@@ -1,0 +1,25 @@
+class Task {
+  run?(): number;
+  run(): number {
+    return 1;
+  }
+}
+new Task().run();
+class Job {
+  start?(): void;
+  name = "job";
+  start?(): void;
+}
+class Hook {
+  before(): void;
+  before?(): void;
+}
+interface Plugin {
+  load?(): void;
+  load(path: string): void;
+}
+class Panel {
+  open?(): void;
+  static open?(): void;
+  close?(): void;
+}

@@ -222,7 +222,7 @@ addMethod(USERINFO, 'String', fn([], [STRING]), (receiver) => userString(receive
 
 // Parsing -----------------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes net/url's getScheme.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes net/url's getScheme.
 function getScheme(rawURL: string): [string, string] {
   for (let i = 0; i < rawURL.length; i++) {
     const c = rawURL[i];
@@ -250,8 +250,8 @@ function parseUrl(rawURL: string): Value[] {
   return [urlPointer(url), undefined];
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes net/url's parse step by step.
-// code-gauge-allow functionNcss 45 -- Transcribes net/url's parse step by step.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes net/url's parse step by step.
+// code-gauge-allow functionNcss -- Transcribes net/url's parse step by step.
 function parse(rawURL: string, viaRequest: boolean): Url {
   spendFor(rawURL.length);
   if (stringContainsCTLByte(rawURL)) fail('net/url: invalid control character in URL');

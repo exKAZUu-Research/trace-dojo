@@ -1,0 +1,156 @@
+int(1)
+Array
+(
+    [0] => 03-1234
+    [1] => 03
+    [2] => 1234
+)
+int(1)
+Array
+(
+    [0] => 2024-05
+    [year] => 2024
+    [1] => 2024
+    [month] => 05
+    [2] => 05
+)
+3
+Array
+(
+    [0] => Array
+        (
+            [0] => hello
+            [1] => big
+            [2] => world
+        )
+
+    [1] => Array
+        (
+            [0] => h
+            [1] => b
+            [2] => w
+        )
+
+    [2] => Array
+        (
+            [0] => ello
+            [1] => ig
+            [2] => orld
+        )
+
+)
+Array
+(
+    [0] => Array
+        (
+            [0] => 1x
+            [1] => 1
+            [2] => x
+        )
+
+    [1] => Array
+        (
+            [0] => 2
+            [1] => 2
+        )
+
+)
+a b c|world hello!
+a2 b44 c666
+Array
+(
+    [0] => a
+    [1] => b
+    [2] => c
+    [3] => d
+)
+Array
+(
+    [0] => a
+    [1] => b
+    [2] => c
+)
+Array
+(
+    [0] => 
+    [1] => a
+    [2] => b
+    [3] => c
+    [4] => 
+)
+Array
+(
+    [0] => a
+    [1] => -
+    [2] => b
+    [3] => -
+    [4] => c
+)
+Array
+(
+    [0] => a
+    [1] => b,c
+)
+Hello\.World\?\(1\+1\) a\/b\#c
+Array
+(
+    [0] => 1
+    [2] => 22
+)
+int(1)
+int(1)
+int(1)
+int(0)
+int(1)
+Array
+(
+    [0] => Array
+        (
+            [0] => 123
+            [1] => 4
+        )
+
+    [1] => Array
+        (
+            [0] => 123
+            [1] => 4
+        )
+
+)
+int(1)
+Array
+(
+    [0] => Array
+        (
+            [0] => 日本
+            [1] => 15
+        )
+
+)
+aX cb aX 1 Z
+bool(false)
+int(1)
+Array
+(
+    [0] => abc
+)
+cc
+int(1)
+array(4) {
+  [0]=>
+  string(2) "ac"
+  [1]=>
+  string(1) "a"
+  [2]=>
+  string(0) ""
+  [3]=>
+  string(1) "c"
+}
+int(1)
+array(2) {
+  [0]=>
+  string(1) "a"
+  [1]=>
+  string(1) "a"
+}
+ab,cd,ef O'neil Mc-donald

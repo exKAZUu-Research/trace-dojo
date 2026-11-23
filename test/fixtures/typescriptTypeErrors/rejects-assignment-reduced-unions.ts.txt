@@ -1,0 +1,15 @@
+const cond = Math.abs(1) > 0;
+let v: string | number | undefined;
+v = ["a"].find((s) => s === "a");
+if (v) console.log(v.length);
+let w: string | number | null = null;
+w = cond ? "a" : null;
+if (w) console.log(w.length);
+function g(p: string | undefined) { let x: string | number | undefined = 1; x = p; const k: string | undefined = x; return k; }
+console.log(g("z"));
+let y: string | number | boolean = 1;
+y = cond ? "a" : 2;
+const bad: string = y;
+let z: "a" | "b" | number = 1;
+z = cond ? "a" : 3;
+const zz: "a" | number = z;

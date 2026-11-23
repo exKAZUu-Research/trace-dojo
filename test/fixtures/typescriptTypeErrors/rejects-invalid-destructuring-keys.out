@@ -1,0 +1,4 @@
+(6,11): error TS2339: Property 'y' does not exist on type '{ x: number; }'.
+(10,10): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+(14,10): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+(18,10): error TS2536: Type 'K' cannot be used to index type '{ x: number; }'.

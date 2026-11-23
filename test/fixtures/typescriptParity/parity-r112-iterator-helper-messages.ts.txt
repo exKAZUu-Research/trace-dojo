@@ -1,0 +1,8 @@
+const it = (): any => [1, 2, 3].values();
+const tries: (() => unknown)[] = [
+  () => it().map(5), () => it().filter({}), () => it().take('x'), () => it().drop(-2), () => it().reduce((a: any, b: any) => a + b),
+  () => ([].values() as any).reduce((a: any, b: any) => a + b), () => it().flatMap((x: any) => x), () => it().toArray(), () => it().some(null),
+  () => Array.from([1], 5 as any), () => Object.groupBy([1], 5 as any), () => Map.groupBy([1], null as any),
+  () => it().forEach(), () => it().map((x: any) => x * 2).toArray(),
+];
+for (const t of tries) { try { console.log(t()); } catch (e: any) { console.log(e.constructor.name, e.message); } }

@@ -1,0 +1,27 @@
+type Boxes<T> = { [K in keyof T]: { value: T[K] } };
+type RequiredBoxes<T> = { [K in keyof T]-?: { value: T[K] } };
+function unbox<T>(input: Boxes<T>): T { return {} as T; }
+function required<T>(input: RequiredBoxes<T>): T { return {} as T; }
+const source: { value?: { value: string } } = { value: { value: 'hello' } };
+const result = unbox(source);
+const fromOrdinary: { value?: string } = {};
+const badShape: typeof result = fromOrdinary;
+const explicit: typeof result = { value: undefined };
+const indexed: typeof result['value'] = undefined;
+result.value = undefined;
+delete result.value;
+const maybeSource: { value?: { value: string | undefined } } = { value: { value: undefined } };
+const maybe = unbox(maybeSource);
+console.log(maybe.value.toUpperCase());
+const forced = required(source);
+console.log(forced.value.toUpperCase());
+type Copy<T> = { [P in keyof T]: T[P] };
+function copy<T>(value: Copy<T>): T { return value as T; }
+const copied = copy(fromOrdinary);
+const allowed: typeof copied = { value: undefined };
+const mustBePresent: string = copied.value;
+type OptionalBoxes<T> = { [P in keyof T]?: { value: T[P] } };
+function optionalBoxes<T>(value: OptionalBoxes<T>): T { return {} as T; }
+const nestedUndefined: { count?: { value: number | undefined } } = { count: { value: undefined } };
+const completed = optionalBoxes(nestedUndefined);
+const nestedValue: number = completed.count;

@@ -1,0 +1,6 @@
+(5,13): error TS2322: Type '"a" | "b"' is not assignable to type '"a"'.
+  Type '"b"' is not assignable to type '"a"'.
+(16,13): error TS2322: Type '"a" | "b"' is not assignable to type '"a"'.
+  Type '"b"' is not assignable to type '"a"'.
+(28,15): error TS2322: Type '"a" | "b"' is not assignable to type '"a"'.
+  Type '"b"' is not assignable to type '"a"'.

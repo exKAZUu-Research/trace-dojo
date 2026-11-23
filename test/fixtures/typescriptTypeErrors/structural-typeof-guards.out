@@ -1,0 +1,11 @@
+(2,47): error TS2339: Property 'toFixed' does not exist on type 'never'.
+(5,47): error TS2339: Property 'toFixed' does not exist on type 'never'.
+(8,47): error TS2339: Property 'toUpperCase' does not exist on type 'never'.
+(11,47): error TS2339: Property 'toUpperCase' does not exist on type 'never'.
+(13,16): error TS2339: Property 'toString' does not exist on type 'never'.
+(16,47): error TS2339: Property 'toString' does not exist on type 'never'.
+(20,47): error TS2339: Property 'toUpperCase' does not exist on type 'never'.
+(23,47): error TS2339: Property 'toFixed' does not exist on type 'never'.
+(26,43): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+(29,47): error TS2339: Property 'toUpperCase' does not exist on type 'never'.

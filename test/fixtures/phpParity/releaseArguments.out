@@ -1,0 +1,35 @@
+in take
+dtor arg1
+dtor arg2
+dtor loc
+7
+3
+2
+dtor concat
+xstrconcaty
+2
+dtor cast
+strcast2
+dtor cmp1
+dtor cmp2
+bool(false)
+1
+dtor it0
+dtor it1
+2
+dtor arr1
+2
+dtor arrow
+arrow!
+5
+dtor fac
+5
+8
+dtor e1
+5
+end
+dtor fac2
+dtor it2
+dtor passed
+dtor arr2
+dtor e2

@@ -124,7 +124,7 @@ export class PatternSpaces {
   }
 
   /** The intersection of two spaces of one type's value sets, or undefined when it is not one of those. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch handles one pair of value sets that intersect simply.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one pair of value sets that intersect simply.
   private intersect(left: Space, right: Space): Space | undefined {
     if (left.length === 1 && right.length === 1) {
       const [a, b] = [left[0], right[0]];

@@ -1,0 +1,3 @@
+(2,20): error TS2717: Subsequent property declarations must have the same type.  Property 'config' must be of type '{ readonly count: number; }', but here has type '{ count: number; }'.
+(4,22): error TS2717: Subsequent property declarations must have the same type.  Property 'config' must be of type '{ count?: number | undefined; }', but here has type '{}'.
+(6,22): error TS2717: Subsequent property declarations must have the same type.  Property 'callback' must be of type '(value: { readonly count: number; }) => void', but here has type '(value: { count: number; }) => void'.

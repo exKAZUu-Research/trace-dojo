@@ -1,0 +1,10 @@
+type UpperBound<T> = T extends infer U extends Uppercase<string> ? U : never;
+type TemplateBound<T> = T extends [infer U extends `key-${number}`, infer U] ? U : never;
+type Structural<T> = T extends infer U extends { text: U } ? U : never;
+type Arrays<T> = T extends [infer U extends U[], infer U] ? U : never;
+type Tuples<T> = T extends infer U extends [U] ? U : never;
+type KeyBound<T> = T extends infer U extends keyof U ? U : never;
+
+const upper: UpperBound<'OK'> = 'OK';
+const key: TemplateBound<['key-7', 'key-7']> = 'key-7';
+console.log(upper, key);

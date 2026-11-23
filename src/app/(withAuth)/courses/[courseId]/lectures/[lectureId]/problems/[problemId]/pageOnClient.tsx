@@ -9,14 +9,16 @@ import { useAuthContextSelector } from '@/contexts/AuthContext';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import { Button, HStack, Tooltip, VStack } from '@/infrastructures/useClient/chakra';
 import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
-import type { InstantiatedProblem } from '@/problems/instantiateProblem';
+import { gradeInBrowser } from '@/problems/fillInBlank/gradeInBrowser';
 import type { CourseId, ProblemId } from '@/problems/problemData';
+import { useInstantiatedProblem } from '@/problems/useInstantiatedProblem';
 import type { OrdinaryJavaProblemData } from '@/types';
 import { isProblemSessionExpired } from '@/utils/problemSessionError';
 
 import type { ProblemSession } from '../../../../../../../../../db/schema';
 import { FillInBlankBody } from './FillInBlankBody';
 import { ProblemPageHeader } from './ProblemPageHeader';
+import { ProblemPreparation } from './ProblemPreparation';
 import { ProblemBody } from './ProblmBody';
 import { ReloadNotice } from './ReloadNotice';
 
@@ -24,8 +26,8 @@ interface Props {
   initialProblemSession: ProblemSession;
   userId: string;
   javaProblem?: OrdinaryJavaProblemData;
-  /** Generated on the server, where the Java interpreter runs. */
-  problem?: InstantiatedProblem;
+  /** The program of a problem other than `javaProblem`, which the session's seed instantiates. */
+  programTemplate?: string;
 }
 
 export const ProblemPageOnClient: React.FC<Props> = (props) => {
@@ -44,30 +46,35 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   );
 };
 
-// code-gauge-allow functionCognitiveComplexity 28 -- The component predates this change, which only receives the problem as a prop.
-// code-gauge-allow functionNcss 40 -- The component predates this change, which only receives the problem as a prop.
+// code-gauge-allow functionCognitiveComplexity -- The component predates this change, which only receives the problem as a prop.
+// code-gauge-allow functionNcss -- The component predates this change, which only receives the problem as a prop.
 const ProblemSessionPage: React.FC<Props> = (props) => {
   const isAdmin = useAuthContextSelector((c) => c.isAdmin);
 
   const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();
-  const problem = props.javaProblem ?? props.problem;
+  const instantiation = useInstantiatedProblem(
+    props.javaProblem || props.programTemplate === undefined
+      ? undefined
+      : { programTemplate: props.programTemplate, seed: props.initialProblemSession.problemVariablesSeed }
+  );
+  const problem = props.javaProblem ?? (instantiation.status === 'ready' ? instantiation.problem : undefined);
 
   const [problemSession, setProblemSession] = useState(props.initialProblemSession);
 
   const lastActionTimeRef = useRef(0);
   const isCurrentSession = useRef(false);
   useLayoutEffect(() => {
-    lastActionTimeRef.current = Date.now();
     isCurrentSession.current = true;
     return () => {
       isCurrentSession.current = false;
     };
   }, []);
+
   const [isSessionExpired, setIsSessionExpired] = useState(false);
   const onSessionError = (error: unknown): void => {
     if (isCurrentSession.current && isProblemSessionExpired(error)) setIsSessionExpired(true);
   };
-  useMonitorUserActivity(props, lastActionTimeRef, onSessionError, isSessionExpired);
+  useMonitorUserActivity(props, lastActionTimeRef, onSessionError, isSessionExpired, problem !== undefined);
 
   const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation({ onError: onSessionError });
   const createProblemSubmissionMutation = backendTrpcReact.createProblemSubmission.useMutation({
@@ -88,24 +95,25 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
     [problemSession, createProblemSubmissionMutation, lastActionTimeRef]
   );
 
-  const gradeFillInBlankAnswersMutation = backendTrpcReact.gradeFillInBlankAnswers.useMutation({
+  const createFillInBlankSubmissionMutation = backendTrpcReact.createFillInBlankSubmission.useMutation({
     onError: onSessionError,
   });
-  const gradeCode = useCallback(
-    async (code: string): Promise<FillInBlankVerdict> => {
-      const newProblemSession = await updateProblemSessionMutation.mutateAsync({
-        id: problemSession.id,
-        incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
-      });
-      if (!isCurrentSession.current) return { status: 'ungradable', detail: 'The problem session changed.' };
-      return await gradeFillInBlankAnswersMutation.mutateAsync({
+  const gradeCode = async (code: string): Promise<FillInBlankVerdict> => {
+    if (!problem) throw new Error('No problem to grade');
+    const newProblemSession = await updateProblemSessionMutation.mutateAsync({
+      id: problemSession.id,
+      incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
+    });
+    if (!isCurrentSession.current) return { status: 'ungradable', detail: 'The problem session changed.' };
+    return await gradeInBrowser(problem, code, (status) =>
+      createFillInBlankSubmissionMutation.mutateAsync({
         sessionId: problemSession.id,
         code,
         elapsedMilliseconds: newProblemSession.elapsedMilliseconds,
-      });
-    },
-    [problemSession.id, updateProblemSessionMutation, gradeFillInBlankAnswersMutation, lastActionTimeRef]
-  );
+        isCorrect: status === 'correct',
+      })
+    );
+  };
 
   const updateProblemSession = useCallback(
     async (newProblemType: string, newTraceItemIndex: number): Promise<void> => {
@@ -123,7 +131,8 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
     [problemSession.id, updateProblemSessionMutation]
   );
 
-  if (!problem || !matchesRoute(props, params.problemId, problemSession.problemType)) notFound();
+  if (instantiation.status === 'absent' && !props.javaProblem) notFound();
+  if (!matchesRoute(props, params.problemId, problemSession.problemType)) notFound();
 
   if (isSessionExpired) {
     return (
@@ -135,6 +144,7 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
   }
 
   const isJavaEditor = problemSession.problemType === 'fillInBlank' || problemSession.problemType === 'bugFix';
+  const javaFormat = props.javaProblem ? { problemFormat: props.javaProblem.problemFormat } : {};
 
   return (
     <VStack align="stretch" spacing={4}>
@@ -143,50 +153,26 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
         lectureId={params.lectureId}
         problemId={params.problemId}
         actions={
-          !isJavaEditor && 'traceItems' in problem ? (
-            <HStack spacing={2}>
-              <Tooltip
-                label={
-                  problemSession.problemType === 'executionResult'
-                    ? '減点になりますが、確実に問題を解けます。'
-                    : undefined
-                }
-              >
-                <Button
-                  colorScheme="blue"
-                  variant="outline"
-                  onClick={() => {
-                    void updateProblemSession('step', 1);
-                  }}
-                >
-                  {problemSession.problemType === 'executionResult'
-                    ? '諦めてステップ実行モードに移る'
-                    : 'ステップ実行モードで最初からやり直す'}
-                </Button>
-              </Tooltip>
-              {isAdmin && (
-                <Button
-                  colorScheme="blue"
-                  variant="outline"
-                  onClick={() =>
-                    updateProblemSession('step', Math.min(problemSession.traceItemIndex + 1, problem.traceItems.length))
-                  }
-                >
-                  次のステップに進む（管理者のみ）
-                </Button>
-              )}
-            </HStack>
+          !isJavaEditor && problem && 'traceItems' in problem ? (
+            <StepModeActions
+              isAdmin={isAdmin}
+              problemSession={problemSession}
+              traceItemCount={problem.traceItems.length}
+              updateProblemSession={updateProblemSession}
+            />
           ) : undefined
         }
       />
 
-      {isJavaEditor ? (
+      {!problem ? (
+        <ProblemPreparation failed={instantiation.status === 'failed'} />
+      ) : isJavaEditor ? (
         <FillInBlankBody
           key={`${problemSession.id}:${problem.displayProgram}`}
           draftContext={{
             userId: props.userId,
             mode: 'ordinary',
-            ...(props.javaProblem ? { problemFormat: props.javaProblem.problemFormat } : {}),
+            ...javaFormat,
             courseId: params.courseId,
             lectureId: params.lectureId,
             problemId: params.problemId,
@@ -195,7 +181,7 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
           }}
           gradeCode={gradeCode}
           problem={{
-            ...(props.javaProblem ? { problemFormat: props.javaProblem.problemFormat } : {}),
+            ...javaFormat,
             displayProgram: problem.displayProgram,
             finalBoard: problem.finalBoard,
             finalTurtles: problem.finalTurtles,
@@ -213,15 +199,53 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
   );
 };
 
+const StepModeActions: React.FC<{
+  isAdmin: boolean;
+  problemSession: ProblemSession;
+  traceItemCount: number;
+  updateProblemSession: (problemType: string, traceItemIndex: number) => Promise<void>;
+}> = ({ isAdmin, problemSession, traceItemCount, updateProblemSession }) => {
+  const isExecutionResult = problemSession.problemType === 'executionResult';
+  return (
+    <HStack spacing={2}>
+      <Tooltip label={isExecutionResult ? '減点になりますが、確実に問題を解けます。' : undefined}>
+        <Button
+          colorScheme="blue"
+          variant="outline"
+          onClick={() => {
+            void updateProblemSession('step', 1);
+          }}
+        >
+          {isExecutionResult ? '諦めてステップ実行モードに移る' : 'ステップ実行モードで最初からやり直す'}
+        </Button>
+      </Tooltip>
+      {isAdmin && (
+        <Button
+          colorScheme="blue"
+          variant="outline"
+          onClick={() => updateProblemSession('step', Math.min(problemSession.traceItemIndex + 1, traceItemCount))}
+        >
+          次のステップに進む（管理者のみ）
+        </Button>
+      )}
+    </HStack>
+  );
+};
+
 function useMonitorUserActivity(
   props: Props,
   lastActionTimeRef: React.RefObject<number>,
   onSessionError: (error: unknown) => void,
-  isSessionExpired: boolean
+  isSessionExpired: boolean,
+  isProblemShown: boolean
 ): void {
+  // The time a learner spends on a problem starts when it is shown, not while the browser prepares it.
+  useLayoutEffect(() => {
+    if (isProblemShown) lastActionTimeRef.current = Date.now();
+  }, [isProblemShown, lastActionTimeRef]);
   const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation({ onError: onSessionError });
   useIdleTimer({
-    disabled: isSessionExpired,
+    disabled: isSessionExpired || !isProblemShown,
     onAction() {
       updateProblemSessionMutation.mutate({
         id: props.initialProblemSession.id,

@@ -1,0 +1,6 @@
+(6,25): error TS2560: Value of type 'typeof C' has no properties in common with type 'Weak'. Did you mean to call it?
+(7,26): error TS2560: Value of type 'typeof D' has no properties in common with type 'Weak'. Did you mean to call it?
+(8,7): error TS2559: Type '() => number' has no properties in common with type 'Weak'.
+(9,49): error TS2560: Value of type 'typeof C' has no properties in common with type 'Weak & { y?: string | undefined; }'. Did you mean to call it?
+(11,7): error TS2322: Type '{ x: number; }' is not assignable to type 'T'.
+  Type '{ x: number; }' provides no match for the signature 'new (): object'.

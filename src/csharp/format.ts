@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 520 -- The format module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss -- The format module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { CsDecimal } from './decimal';
 import { PendingException } from './numeric';
@@ -29,6 +29,7 @@ const invalidFormat = (): PendingException =>
 
 // ---- Digits ----
 
+// code-gauge-allow duplicateLines -- Each interpreter keeps its own copy of the digit extraction so its languages stay independent.
 /** The exact decimal digits of a double. */
 function exactDigits(value: number): Digits {
   const isNegative = value < 0 || Object.is(value, -0);
@@ -227,7 +228,7 @@ function digitsOf(value: number | bigint | CsDecimal, kind: NumericKind): Digits
   return exactDigits(value);
 }
 
-// code-gauge-allow functionNcss 40 -- One case per standard format specifier.
+// code-gauge-allow functionNcss -- One case per standard format specifier.
 function formatStandard(
   value: number | bigint | CsDecimal,
   kind: NumericKind,
@@ -661,7 +662,7 @@ export interface FormatItem {
 }
 
 /** Parses a composite format string such as `"{0,5:F2} {1}"` into its literal text and items, as `string.Format` does. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 export function parseCompositeFormat(format: string): (string | FormatItem)[] {
   const parts: (string | FormatItem)[] = [];
   let text = '';

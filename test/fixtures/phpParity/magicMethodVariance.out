@@ -1,0 +1,7 @@
+object(A)#1 (1) {
+  ["x"]=>
+  int(1)
+}
+bool(true)
+int(3)
+bool(true)

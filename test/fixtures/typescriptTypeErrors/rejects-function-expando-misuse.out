@@ -1,0 +1,9 @@
+(2,3): error TS2339: Property 'desc' does not exist on type '(a: number) => string'.
+(4,3): error TS2339: Property 'z' does not exist on type '() => number'.
+(6,3): error TS2339: Property 'w' does not exist on type '() => number'.
+(8,3): error TS2339: Property 'r' does not exist on type '(a: number) => number'.
+(10,15): error TS2565: Property 'u' is used before being assigned.
+(13,15): error TS2565: Property 'u' is used before being assigned.
+(17,15): error TS2565: Property 'u' is used before being assigned.
+(19,21): error TS2339: Property 'v' does not exist on type '() => number'.
+(23,15): error TS2565: Property 'w' is used before being assigned.

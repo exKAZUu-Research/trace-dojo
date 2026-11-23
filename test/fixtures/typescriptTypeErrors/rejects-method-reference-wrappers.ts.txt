@@ -1,0 +1,16 @@
+type Counter = { value: number; read(this: { value: number }): number };
+const counter: Counter = { value: 3, read() { return this.value; } };
+const detached = counter.read as Counter['read'];
+detached!();
+function read(value?: Counter): number {
+  return value?.read!();
+}
+type ExtraReceiver = (this: { value: number; extra: string }) => number;
+(counter.read as ExtraReceiver)();
+class Base {
+  read(this: Base & { extra: number }) { return this.extra; }
+}
+class Derived extends Base {
+  extra = 4;
+  readBase() { return (super.read as typeof this.read)(); }
+}

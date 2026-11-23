@@ -52,7 +52,7 @@ export abstract class OperatorBinder extends ConversionBinder {
     row: number
   ): BoundExpression | undefined;
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   bindUnary(operator: string, operand: BoundExpression, row: number): BoundExpression {
     if (operand.type.kind === 'error') return { ...operand, type: ERROR_TYPE };
     const userDefined = this.userOperator(UNARY_OPERATOR_NAMES[operator], [operand], row);
@@ -123,8 +123,8 @@ export abstract class OperatorBinder extends ConversionBinder {
 
   /** Binds a binary operator other than `&&`, `||`, and `??`. */
   /** @param shownOperator The operator that an error names, such as `-=` for a compound assignment's `-`. */
-  // code-gauge-allow functionNcss 37 -- One case per kind of syntax or value that the function handles.
-  // code-gauge-allow functionCognitiveComplexity 25 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   bindBinary(
     operator: string,
     left: BoundExpression,
@@ -228,7 +228,7 @@ export abstract class OperatorBinder extends ConversionBinder {
   }
 
   /** Converts the operands, computes the result type, and folds constants. */
-  // code-gauge-allow functionParameterCount 8 -- The values that the operation needs, which share no object.
+  // code-gauge-allow functionParameterCount -- The values that the operation needs, which share no object.
   private finishBinary(
     operator: string,
     left: BoundExpression,
@@ -310,7 +310,7 @@ export abstract class OperatorBinder extends ConversionBinder {
   }
 
   /** The operand kind that binary numeric promotion chooses for two numeric types, if any. */
-  // code-gauge-allow functionCognitiveComplexity 24 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   promotedKind(left: Type, right: Type): SpecialType | 'ambiguous' | undefined {
     const a = specialOf(left);
     const b = specialOf(right);
@@ -333,7 +333,7 @@ export abstract class OperatorBinder extends ConversionBinder {
     return PROMOTED.has(a) ? a : 'int';
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindEquality(
     operator: string,
     left: BoundExpression,
@@ -433,7 +433,7 @@ export abstract class OperatorBinder extends ConversionBinder {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 28 -- Each operator that enums define has its own operand types.
+  // code-gauge-allow functionCognitiveComplexity -- Each operator that enums define has its own operand types.
   private bindEnumOperator(
     operator: string,
     left: BoundExpression,

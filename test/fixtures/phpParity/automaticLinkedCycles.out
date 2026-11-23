@@ -1,0 +1,8 @@
+free 5000
+free -5000
+loop done
+object(stdClass)#4003 (0) {
+}
+free 10000
+free -10000
+6003

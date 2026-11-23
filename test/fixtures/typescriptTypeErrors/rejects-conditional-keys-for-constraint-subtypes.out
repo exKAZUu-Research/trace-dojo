@@ -1,0 +1,5 @@
+(1,49): error TS2536: Type 'K extends "b" ? K : "a"' cannot be used to index type 'T'.
+(2,50): error TS2536: Type 'K extends 1 ? K : 0' cannot be used to index type 'T'.
+(6,50): error TS2536: Type 'K extends "b" ? K : "a"' cannot be used to index type 'T'.
+(9,49): error TS2536: Type 'K extends "b" | "c" ? K : "a"' cannot be used to index type 'T'.
+(10,59): error TS2536: Type 'K extends "b" | "c" ? K : "a"' cannot be used to index type 'T'.

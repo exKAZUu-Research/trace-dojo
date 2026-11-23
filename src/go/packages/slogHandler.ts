@@ -332,7 +332,7 @@ export class HandleState {
     return nonEmpty;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- A transcription of Go's handleState.appendAttr.
+  // code-gauge-allow functionCognitiveComplexity -- A transcription of Go's handleState.appendAttr.
   appendAttr(original: SlogAttr): boolean {
     spendFor(1);
     let attr: SlogAttr = { key: original.key, value: resolve(original.value) };

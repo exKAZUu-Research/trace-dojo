@@ -1,0 +1,24 @@
+interface Ref<A> { value: A; }
+type Alias<A> = { value: A };
+function array<T>(value:T extends string ? T[] : never):T { return value[0]; }
+function arrayForm<T>(value:T extends string ? Array<T> : never):T { return value[0]; }
+function ro<T>(value:T extends string ? readonly T[] : never):T { return value[0]; }
+function tuple<T>(value:T extends string ? [T] : never):T { return value[0]; }
+function ref<T>(value:T extends string ? Ref<T> : never):T { return value.value; }
+function alias<T>(value:T extends string ? Alias<T> : never):T { return value.value; }
+function field<T>(value:T extends string ? { value:T } : never):T { return value.value; }
+function cb<T>(value:T extends string ? (()=>T) : never):T { return value(); }
+function fromArray<U>(value:U extends string ? U[] : never):string { return array(value); }
+function fromArrayForm<U>(value:U extends string ? Array<U> : never):string { return arrayForm(value); }
+function fromRo<U>(value:U extends string ? readonly U[] : never):string { return ro(value); }
+function fromTuple<U>(value:U extends string ? [U] : never):string { return tuple(value); }
+function fromRef<U>(value:U extends string ? Ref<U> : never):string { return ref(value); }
+function fromAlias<U>(value:U extends string ? Alias<U> : never):string { return alias(value); }
+function num<T>(value:T extends number ? T[] : T): T {
+  return (Array.isArray(value) ? value[0] : value) as T;
+}
+function fromNum<U>(value:U extends number ? U[] : U): number { return num(value); }
+function tag<T>(value:T extends {tag:string} ? T[] : never): T { return value[0]; }
+function fromTag<U>(value:U extends {tag:string} ? U[] : never): string { return tag(value).tag; }
+function lit<T>(value:T extends 'a' ? T[] : number): T { return (Array.isArray(value) ? value[0] : value) as T; }
+function fromLit<U>(value:U extends 'a' ? U[] : number): 'a' { const result = lit(value); return result; }

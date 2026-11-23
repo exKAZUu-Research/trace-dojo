@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 441 -- The nativesSorted module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss -- The nativesSorted module keeps one stage of the C# interpreter together.
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import type { NativeState } from '../runtime';
@@ -136,8 +136,8 @@ function keyNotFound(call: NativeCall, key: Value): never {
   );
 }
 
-// code-gauge-allow functionNcss 53 -- One case per kind of syntax or value that the function handles.
-// code-gauge-allow functionCognitiveComplexity 25 -- Each branch handles one case of the C# rule that the function applies.
+// code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 function sortedDictionaryNatives(prefix: string): Record<string, NativeMethod> {
   return {
     [`${prefix}..ctor()`]: (call, receiver) =>

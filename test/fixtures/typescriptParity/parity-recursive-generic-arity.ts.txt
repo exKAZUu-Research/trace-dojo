@@ -1,0 +1,9 @@
+interface Tree<T>{value:T;children:Tree<T>[];}
+class Box<T=number>{next?:Box;value?:T;}
+type List<T=number>={value:T;next?:List};
+interface Pair<A,B=number>{next?:Pair<A>;}
+const tree:Tree<number>={value:1,children:[]};
+const box=new Box();box.value=2;
+const list:List={value:3,next:{value:4}};
+const pair:Pair<string>={next:{}};
+console.log(tree.value,box.value,list.next?.value,!!pair.next);

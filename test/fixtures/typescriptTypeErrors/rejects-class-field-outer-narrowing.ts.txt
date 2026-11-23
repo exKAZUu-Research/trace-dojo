@@ -1,0 +1,8 @@
+let fieldGlobal: string | undefined="a";
+class FieldInstance { value=fieldGlobal.length; }
+class FieldStatic { static value=fieldGlobal.length; }
+const FieldExpression=class { value=fieldGlobal.length; };
+const fieldConstant: string | undefined="a";
+class ConstantField { value=fieldConstant.length; }
+function localField() { let local: string | undefined="a"; class Local { value=local.length; } return new Local(); }
+function capturedConstantField() { class Captured { value=fieldConstant.length; } return new Captured(); }

@@ -1,0 +1,17 @@
+(2,21): error TS2322: Type 'number' is not assignable to type 'Tree'.
+(3,6): error TS2456: Type alias 'Direct' circularly references itself.
+(4,6): error TS2456: Type alias 'InUnion' circularly references itself.
+(5,6): error TS2456: Type alias 'InRecord' circularly references itself.
+(6,6): error TS2456: Type alias 'InPartial' circularly references itself.
+(7,6): error TS2456: Type alias 'KeyOfArray' circularly references itself.
+(7,25): error TS4109: Type arguments for 'Array' circularly reference themselves.
+(8,6): error TS2456: Type alias 'ElementOfArray' circularly references itself.
+(8,23): error TS4109: Type arguments for 'Array' circularly reference themselves.
+(9,6): error TS2456: Type alias 'LengthOfArray' circularly references itself.
+(9,22): error TS4109: Type arguments for 'Array' circularly reference themselves.
+(10,6): error TS2456: Type alias 'FirstOfTuple' circularly references itself.
+(10,21): error TS4110: Tuple type arguments circularly reference themselves.
+(11,6): error TS2456: Type alias 'CheckedArray' circularly references itself.
+(11,21): error TS4109: Type arguments for 'Array' circularly reference themselves.
+(12,6): error TS2456: Type alias 'MappedArray' circularly references itself.
+(12,28): error TS4109: Type arguments for 'Array' circularly reference themselves.

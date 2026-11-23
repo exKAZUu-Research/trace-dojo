@@ -1,0 +1,3 @@
+class Safe { private secret = 42; }
+const s = new Safe();
+console.log(s["secret"]);

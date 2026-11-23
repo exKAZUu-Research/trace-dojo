@@ -1,0 +1,18 @@
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 2
+int(1)
+int(2)
+string(7) "1.0E+20"
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 2
+string(3) "NAN"
+string(3) "1.5"
+int(1)
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 4
+int(1)
+bool(true)
+float(5)
+float(1)
+string(3) "1.5"
+string(1) "5"

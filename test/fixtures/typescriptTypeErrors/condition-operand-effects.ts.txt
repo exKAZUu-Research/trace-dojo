@@ -1,0 +1,10 @@
+function show(x: string | number, y: string | number) {
+  if ((x = y) === (y = 3)) console.log(123);
+  else console.log(x.toFixed(1));
+}
+function showText(x: string | number, y: string | number) {
+  if ((x = y) === (y = "yes")) console.log(123);
+  else console.log(x.toUpperCase());
+}
+show(0, String(1));
+showText("", Number(1));

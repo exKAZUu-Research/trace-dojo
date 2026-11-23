@@ -1,0 +1,17 @@
+function f(t: [...string[], number], u: [boolean, ...string[], number, bigint]) {
+  const [a0, a1] = t;
+  const s0: string = a0;
+  const s1: string | number = a1;
+  const [b0, b1, b2] = u;
+  const k0: boolean = b0;
+  const k1: string = b1;
+  const k2: string | number | bigint = b2;
+  const [, ...tl] = t;
+  const n0: number = tl[0];
+  const [x, ...ul] = u;
+  const last: [...string[], number, bigint] = ul;
+  const [, , ...ul2] = u;
+  const m: (string | number | bigint)[] = ul2;
+  console.log(s0, s1, k0, k1, k2, n0, last, m, x);
+}
+f([1], [true, "s", 2, 3n]);

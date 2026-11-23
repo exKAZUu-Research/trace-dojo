@@ -1,0 +1,6 @@
+(2,5): error TS2839: This condition will always return 'false' since JavaScript compares objects by reference, not value.
+(4,5): error TS2839: This condition will always return 'false' since JavaScript compares objects by reference, not value.
+(5,5): error TS2839: This condition will always return 'true' since JavaScript compares objects by reference, not value.
+(7,5): error TS2845: This condition will always return 'false'.
+(11,5): error TS2367: This comparison appears to be unintentional because the types 'number' and 'string' have no overlap.
+(12,5): error TS2367: This comparison appears to be unintentional because the types 'string' and 'number' have no overlap.

@@ -1,0 +1,128 @@
+int(1)
+int(2)
+array(0) {
+}
+array(2) {
+  [0]=>
+  array(7) {
+    ["file"]=>
+    string(1) "F"
+    ["line"]=>
+    int(9)
+    ["function"]=>
+    string(1) "m"
+    ["class"]=>
+    string(1) "A"
+    ["object"]=>
+    object(A)#1 (1) {
+      ["p"]=>
+      int(1)
+    }
+    ["type"]=>
+    string(2) "->"
+    ["args"]=>
+    array(1) {
+      [0]=>
+      string(7) "changed"
+    }
+  }
+  [1]=>
+  array(4) {
+    ["file"]=>
+    string(1) "F"
+    ["line"]=>
+    int(12)
+    ["function"]=>
+    string(1) "f"
+    ["args"]=>
+    array(1) {
+      [0]=>
+      int(5)
+    }
+  }
+}
+array(1) {
+  [0]=>
+  array(5) {
+    ["file"]=>
+    string(1) "F"
+    ["line"]=>
+    int(13)
+    ["function"]=>
+    string(1) "s"
+    ["class"]=>
+    string(1) "A"
+    ["type"]=>
+    string(2) "::"
+  }
+}
+array(1) {
+  [0]=>
+  array(2) {
+    [0]=>
+    array(3) {
+      ["function"]=>
+      string(18) "{closure:A::n():7}"
+      ["class"]=>
+      string(1) "A"
+      ["type"]=>
+      string(2) "->"
+    }
+    [1]=>
+    array(3) {
+      ["file"]=>
+      string(1) "F"
+      ["line"]=>
+      int(7)
+      ["function"]=>
+      string(9) "array_map"
+    }
+  }
+}
+array(1) {
+  [0]=>
+  array(3) {
+    ["file"]=>
+    string(1) "F"
+    ["line"]=>
+    int(16)
+    ["function"]=>
+    string(1) "g"
+  }
+}
+array(1) {
+  [0]=>
+  array(4) {
+    ["file"]=>
+    string(1) "F"
+    ["line"]=>
+    int(18)
+    ["function"]=>
+    string(1) "h"
+    ["args"]=>
+    array(2) {
+      [0]=>
+      int(1)
+      ["x"]=>
+      int(2)
+    }
+  }
+}
+[{"file":"F","line":20,"function":"{closure:F:19}","args":[3]}]
+array(1) {
+  [0]=>
+  array(3) {
+    ["file"]=>
+    string(1) "F"
+    ["line"]=>
+    int(21)
+    ["function"]=>
+    string(1) "g"
+  }
+}
+
+Fatal error: Uncaught AssertionError in /main.php:23
+Stack trace:
+#0 /main.php(23): assert(false, NULL)
+#1 {main}
+  thrown in /main.php on line 23

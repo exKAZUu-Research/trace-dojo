@@ -1,0 +1,22 @@
+function wrapString<T extends string & {}>(value: T): T[] { return [value]; }
+function wrapNumber<T extends number & {}>(value: T): {value: T} { return {value}; }
+function wrapBigInt<T extends bigint & {}>(value: T): T[] { return [value]; }
+function wrapPattern<T extends `item-${string}` & {}>(value: T): {value: T} { return {value}; }
+function wrapMixed<T extends (string & {}) | number>(value: T): T[] { return [value]; }
+function wrapConditional<U, T extends U extends boolean ? string : number>(value: T, condition: U): {value: T} {
+  return {value};
+}
+
+const strings = wrapString('text');
+const numbers = wrapNumber(7);
+const bigInts = wrapBigInt(9n);
+const patterns = wrapPattern('item-a');
+const mixed = wrapMixed('mixed');
+const conditional = wrapConditional('literal', true);
+const text: 'text' = strings[0];
+const seven: 7 = numbers.value;
+const nine: 9n = bigInts[0];
+const pattern: 'item-a' = patterns.value;
+const keptMixed: 'mixed' = mixed[0];
+const keptConditional: 'literal' = conditional.value;
+console.log(text, seven, nine, pattern, keptMixed, keptConditional);

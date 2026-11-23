@@ -1,0 +1,14 @@
+const k = "hello";
+const n = 1;
+const o = { [k]() { return 42; }, get [`g${""}`]() { return 1; } };
+console.log(o.hello());
+const p = { get [k]() { return 42; }, set [k](v: number) {} };
+console.log(p.hello);
+p.hello = 3;
+const q = { [n]() { return "n"; } };
+console.log(q[1]());
+let s: string = "a" + "b";
+const r = { [s]() { return 1; } };
+console.log(r.ab());
+const u = { [k]: 1 };
+console.log(u.hello);

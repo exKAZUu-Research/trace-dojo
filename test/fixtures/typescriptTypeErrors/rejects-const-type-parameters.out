@@ -1,0 +1,7 @@
+(3,8): error TS2540: Cannot assign to 'kind' because it is a read-only property.
+(4,15): error TS2540: Cannot assign to 'count' because it is a read-only property.
+(6,7): error TS2339: Property 'push' does not exist on type 'readonly ["a", "b"]'.
+(7,7): error TS2322: Type '"a"' is not assignable to type '"b"'.
+(9,7): error TS2322: Type 'string' is not assignable to type '"a"'.
+(11,26): error TS2345: Argument of type '"c"' is not assignable to parameter of type '"a" | "b"'.
+(13,7): error TS2322: Type 'string' is not assignable to type '"a"'.

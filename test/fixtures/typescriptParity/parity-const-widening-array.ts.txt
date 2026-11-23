@@ -1,0 +1,6 @@
+const START = 0;
+const xs = [START];
+xs.push(5);
+const o = { v: START };
+o.v = 3;
+console.log(xs, o);

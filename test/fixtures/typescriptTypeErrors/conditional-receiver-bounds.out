@@ -1,0 +1,6 @@
+(2,10): error TS18047: 'value' is possibly 'null'.
+(5,10): error TS18047: 'value' is possibly 'null'.
+(8,10): error TS18047: 'value' is possibly 'null'.
+(11,10): error TS18047: 'value' is possibly 'null'.
+(14,10): error TS18047: 'value' is possibly 'null'.
+(17,10): error TS18048: 'value' is possibly 'undefined'.

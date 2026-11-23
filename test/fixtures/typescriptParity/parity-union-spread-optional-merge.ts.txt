@@ -1,0 +1,22 @@
+type Base = { a: number } | { a: number; b: boolean };
+
+function merge(x: Base, z: { a?: string }) {
+  const y = { ...x, ...z };
+  console.log(typeof y.a === "string" ? y.a.toUpperCase() : y.a.toFixed(1));
+}
+merge({ a: 1 }, {});
+merge({ a: 2, b: true }, { a: "s" });
+
+function mergeThree(x: Base, z: { a?: string }, w: { c: 1 } | { c: 2 }) {
+  const y = { ...x, ...z, ...w };
+  const a: number | string = y.a;
+  console.log(a, y.c);
+}
+mergeThree({ a: 3 }, {}, { c: 2 });
+
+function mergeAfterProperty(x: Base, z: { a?: string }) {
+  const y = { ...x, d: 1, ...z };
+  const a: number | string = y.a;
+  console.log(a, y.d);
+}
+mergeAfterProperty({ a: 4 }, { a: "t" });

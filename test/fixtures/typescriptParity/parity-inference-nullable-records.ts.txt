@@ -1,0 +1,8 @@
+function first<T>(xs: T[], fallback: T): T { return xs.length ? xs[0] : fallback; }
+function choose<T>(a: T, b: T): T { return a; }
+console.log(first([1, 2], null), first(["a"], undefined));
+console.log(first([], null), first([], undefined));
+console.log(choose({ x: 1 }, { y: 2 }));
+console.log(new Map([["a", 1], ["b", undefined]]));
+console.log(new Map([["a", { atk: 5 }], ["b", { heal: 3 }]]));
+console.log(choose([1], ["a"]));

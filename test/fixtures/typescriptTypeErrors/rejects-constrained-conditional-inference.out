@@ -1,0 +1,7 @@
+(2,7): error TS2322: Type '"str"' is not assignable to type '"not"'.
+(3,7): error TS2322: Type '"not"' is not assignable to type '"str"'.
+(6,7): error TS2322: Type '"one"' is not assignable to type '"other"'.
+(8,7): error TS2322: Type '3' is not assignable to type '"word"'.
+(10,7): error TS2322: Type '3' is not assignable to type '"fallback"'.
+(12,7): error TS2322: Type '(string | number)[]' is not assignable to type '"fallback"'.
+(14,7): error TS2322: Type '(string | boolean)[]' is not assignable to type '"fallback"'.

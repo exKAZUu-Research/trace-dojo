@@ -1,0 +1,8 @@
+class NormalExit {
+  value;
+  constructor(flag: boolean) {
+    if (flag) { this.value = 'thrown'; throw 0; }
+    this.value = 'returned';
+  }
+}
+new NormalExit(false).value.missing();

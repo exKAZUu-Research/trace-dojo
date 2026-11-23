@@ -1,0 +1,6 @@
+interface A { f?: (x: number) => number; b?: { c: number[] } }
+const a: A = {};
+const r = a.f?.(1);
+const n: number = r;
+const len = a.b?.c.length;
+console.log(len);

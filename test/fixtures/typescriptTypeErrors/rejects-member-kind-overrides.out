@@ -1,0 +1,7 @@
+(2,41): error TS2611: 'value' is defined as a property in class 'Field', but is overridden here in 'FieldToGetter' as an accessor.
+(4,38): error TS2610: 'value' is defined as an accessor in class 'Getter', but is overridden here in 'GetterToField' as an instance property.
+(5,41): error TS2611: 'value' is defined as a property in class 'Field', but is overridden here in 'FieldToSetter' as an accessor.
+(7,44): error TS2611: 'value' is defined as a property in class 'Param', but is overridden here in 'ParamToAccessors' as an accessor.
+(8,59): error TS2610: 'value' is defined as an accessor in class 'Getter', but is overridden here in 'AccessorToParam' as an instance property.
+(12,43): error TS2423: Class 'Method' defines instance member function 'run', but extended class 'MethodToGetter' defines it as instance member accessor.
+(14,34): error TS2612: Property 'value' will overwrite the base property in 'Field'. If this is intentional, add an initializer. Otherwise, add a 'declare' modifier or remove the redundant declaration.

@@ -1,0 +1,5 @@
+console.log("before");
+class Direct extends Direct {}
+class Conditional extends (true ? Conditional : Object) {}
+class First extends Second {}
+class Second extends First {}

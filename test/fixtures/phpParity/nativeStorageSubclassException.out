@@ -1,0 +1,12 @@
+
+Fatal error: Uncaught UnexpectedValueException: Object not found in /main.php:6
+Stack trace:
+#0 /main.php(6): SplObjectStorage->offsetGet(Object(stdClass))
+#1 /main.php(8): missingSubclassKey()
+#2 {main}
+
+Next Error: Cannot use object of type StorageGrandchild as array in /main.php:6
+Stack trace:
+#0 /main.php(8): missingSubclassKey()
+#1 {main}
+  thrown in /main.php on line 6

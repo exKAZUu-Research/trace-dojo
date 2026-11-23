@@ -1,0 +1,12 @@
+-1 -2 2|-4 held|-3 -5 5|-6 -7 5|-8 bool(true)
+
+Notice: Only variables should be passed by reference in /main.php on line 20
+in -9 call|
+Notice: Only variables should be passed by reference in /main.php on line 21
+in -10 method|
+Notice: Only variables should be passed by reference in /main.php on line 22
+in -11 static|
+Notice: Only variables should be passed by reference in /main.php on line 23
+in -12 new|
+Notice: Only variables should be passed by reference in /main.php on line 24
+in -13 anonymous|int(1)

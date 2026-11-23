@@ -1,0 +1,2 @@
+function distinct(a: 1 | null, b: 2 | undefined): boolean { return a === b; }
+function distinctLoose(a: 1 | null, b: 2 | undefined): boolean { return a == b; }

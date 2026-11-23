@@ -1,0 +1,8 @@
+type MapKeys<T> = { [K in keyof (T & string)]: number };
+type Property<V extends {a: MapKeys<U>}, U extends V['a']['length']> = U;
+type Tuple<V extends [MapKeys<U>], U extends V[0]['length']> = U;
+type ArrayWrapper<V extends Array<MapKeys<U>>, U extends V[number]['length']> = U;
+type ConditionalProperty<V, U extends (V extends true ? {a: MapKeys<U>} : {a: {length: number}})['a']['length']> = U;
+type ConditionalTuple<V, U extends (V extends true ? [MapKeys<U>] : [{length: number}])[0]['length']> = U;
+type Double<V extends {a: {middle: MapKeys<U>}}, U extends V['a']['middle']['length']> = U;
+type UnionContainer<V extends {a: MapKeys<U>} | {a: {length: number}}, U extends V['a']['length']> = U;

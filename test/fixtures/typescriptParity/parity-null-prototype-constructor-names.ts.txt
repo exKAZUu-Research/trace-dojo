@@ -1,0 +1,41 @@
+class Box { value = 1; }
+function showBox(box: object) {
+  Object.setPrototypeOf(box, null);
+  console.log(box);
+}
+const box = new Box();
+const alias = box;
+Object.defineProperty(Box, 'name', { value: 'Other' });
+showBox(box);
+Object.defineProperty(Box, 'name', { value: 'Third' });
+console.log(alias);
+Object.defineProperty(Box, 'name', { configurable: true, get() { throw new Error('name getter ran'); } });
+showBox(new Box());
+console.log(box);
+Object.defineProperty(Box, 'name', { value: 494 });
+console.log(box);
+Object.defineProperty(Box, 'name', { value: '' });
+console.log(box);
+delete (Box as { name?: string }).name;
+console.log(box);
+class Base { value = 2; }
+class Child extends Base { extra = 3; }
+const child = new Child();
+Object.defineProperty(Child, 'name', { value: 'RenamedChild' });
+showBox(child);
+Object.defineProperty(Box, 'name', { value: 'RestoredBox' });
+const asPrototype = new Box();
+showBox(asPrototype);
+Object.create(asPrototype);
+console.log(asPrototype);
+const assignedPrototype = new Box();
+Object.setPrototypeOf({}, assignedPrototype);
+showBox(assignedPrototype);
+delete (Box as { name?: string }).name;
+class NamedBase {}
+Object.setPrototypeOf(Box, NamedBase);
+console.log(box);
+Object.defineProperty(NamedBase, 'name', { value: 'InheritedName' });
+console.log(box);
+const nullDictionary = Object.create(null);
+console.log(nullDictionary);

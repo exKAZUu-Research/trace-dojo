@@ -104,7 +104,7 @@ function partsOf(ticks: bigint): DateParts {
   };
 }
 
-// code-gauge-allow functionParameterCount 7 -- The values that the operation needs, which share no object.
+// code-gauge-allow functionParameterCount -- The values that the operation needs, which share no object.
 function ticksFromParts(
   year: number,
   month: number,
@@ -211,8 +211,8 @@ function customDate(parts: DateParts, pattern: string): string {
 }
 
 /** The text of a run of `count` copies of a custom date format specifier, or undefined for a literal character. */
-// code-gauge-allow functionCognitiveComplexity 21 -- One case per custom date format specifier.
-// code-gauge-allow functionNcss 35 -- One case per custom date format specifier.
+// code-gauge-allow functionCognitiveComplexity -- One case per custom date format specifier.
+// code-gauge-allow functionNcss -- One case per custom date format specifier.
 function dateField(parts: DateParts, char: string, count: number): string | undefined {
   switch (char) {
     case 'y': {

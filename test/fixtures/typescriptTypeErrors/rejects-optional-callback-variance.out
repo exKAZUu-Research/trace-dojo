@@ -1,0 +1,12 @@
+(2,17): error TS2345: Argument of type '(value: number) => void' is not assignable to parameter of type '(value?: number | undefined) => void'.
+  Types of parameters 'value' and 'value' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+(3,7): error TS2322: Type '(value: number) => void' is not assignable to type '(value?: number | undefined) => void'.
+  Types of parameters 'value' and 'value' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+(4,65): error TS2322: Type '(value: number) => void' is not assignable to type '(value?: number | undefined) => void'.
+  Types of parameters 'value' and 'value' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.

@@ -1,0 +1,8 @@
+format warning
+
+Warning: Uncaught ErrorException in exception handling during call to BadStringifier::__toString() in warning.php on line 42
+
+Warning: Uncaught 
+  thrown in /main.php on line 9
+
+Fatal error: __debuginfo() must return an array in /main.php on line 11

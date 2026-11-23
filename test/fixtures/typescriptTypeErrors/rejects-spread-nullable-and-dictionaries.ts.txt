@@ -1,0 +1,11 @@
+function f(x: Record<string, number>, n: { [k: number]: string }, o: { a: number } | undefined, p: { a: number } | null, u: { a: number } | { b: string } | undefined) {
+  const y1 = { ...x }; y1.foo.toFixed();
+  const y2 = { ...x, b: 1 }; y2.foo.toFixed();
+  const y3 = { b: 1, ...x }; y3.foo.toFixed();
+  const y4 = { ...n }; y4[0].length;
+  const y5 = { ...o }; y5.a.toFixed();
+  const y6 = { ...p }; y6.a.toFixed();
+  const y7 = { c: 1, ...o }; const c: number = y7.c;
+  const y8 = { ...u }; y8.a;
+  const y9 = { ...o, a: 2 }; y9.a.toFixed();
+}

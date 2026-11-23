@@ -23,8 +23,8 @@ export interface GroupContext {
 }
 
 /** Parses what follows `(`, returning the new verbose mode when global flags changed it. */
-// code-gauge-allow functionNcss 33 -- Transcribes the group branch of re._parser._parse in its order.
-// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes the group branch of re._parser._parse in its order.
+// code-gauge-allow functionNcss -- Transcribes the group branch of re._parser._parse in its order.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the group branch of re._parser._parse in its order.
 export function parseGroup(
   source: Tokenizer,
   state: ParseState,
@@ -75,7 +75,7 @@ type Extension =
   | { capture: boolean; atomic?: boolean; name?: string; addFlags?: number; delFlags?: number };
 
 /** Parses the extension after `(?`: `done` when it added an item itself, or how to parse the group. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the `(?` branches of re._parser._parse in order.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the `(?` branches of re._parser._parse in order.
 function parseExtension(
   source: Tokenizer,
   state: ParseState,
@@ -200,7 +200,7 @@ function parseFlags(source: Tokenizer, state: ParseState, first: string): [numbe
 }
 
 /** Parses the flags before `-`, `:`, or `)`, returning them with the character that ends them. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes re._parser._parse_flags and its error order.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes re._parser._parse_flags and its error order.
 function parseAddedFlags(source: Tokenizer, first: string): [number, string] {
   let char = first;
   let addFlags = 0;
@@ -222,7 +222,7 @@ function parseAddedFlags(source: Tokenizer, first: string): [number, string] {
 }
 
 /** Parses the flags between `-` and `:`. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes re._parser._parse_flags and its error order.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes re._parser._parse_flags and its error order.
 function parseRemovedFlags(source: Tokenizer): number {
   let char = source.get();
   if (char === undefined) throw source.error('missing flag');

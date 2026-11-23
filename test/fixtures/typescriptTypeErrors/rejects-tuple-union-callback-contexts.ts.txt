@@ -1,0 +1,5 @@
+const first: [(x: number) => void] | [(x: string) => void] = [x => console.log(x)];
+const second: [(x: boolean) => void] | [(x: string) => void] = [x => console.log(x)];
+const tagged: ["number", (x: number) => void] | ["string", (x: string) => void] = ["number", x => console.log(x.toFixed())];
+const rest: [(x: number) => void, ...number[]] | [(x: string) => void, ...string[]] = [x => console.log(x), 1];
+const tail: [...number[], (x: number) => void] | [...string[], (x: string) => void] = [1, 2, x => console.log(x)];

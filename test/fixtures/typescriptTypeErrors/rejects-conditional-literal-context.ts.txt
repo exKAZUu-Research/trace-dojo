@@ -1,0 +1,23 @@
+type RequiredFields<T> = T extends string ? { first: T; second: T } : never;
+function first<T>(value: RequiredFields<T>): T {
+  return value.first;
+}
+function requiredFirst<T extends string>(value: RequiredFields<T>): T {
+  return value.first;
+}
+function fromArray<T>(value: T extends string ? T[] : T[][]): T {
+  return value[0] as T;
+}
+function fromTuple<T>(value: T extends number ? readonly [T, ...T[]] : T[][]): T {
+  return value[0] as T;
+}
+function accept<T>(value: (T extends string ? T[] : number) | Date): void {}
+function acceptOrAny<T>(value: T extends string ? { first: T; second: T } : any): void {}
+first({ first: 'left', second: 'right' });
+fromArray(['left', 'right']);
+fromTuple([1, 2]);
+accept(['left', 'right']);
+acceptOrAny({ first: 'left', second: 'right' });
+type BranchChoice<T> = T extends string ? { tag: 'a'; pair: [T, T] } | { tag: 'b'; pair: [T, T] } : never;
+function selectBranch<T>(value: BranchChoice<T>): void {}
+selectBranch({ tag: 'a', pair: ['left', 'right'] });

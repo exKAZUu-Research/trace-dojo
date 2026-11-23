@@ -92,7 +92,7 @@ export function annotationClosure(annotations: readonly Annotation[]): Map<strin
 }
 
 /** The values and cells that evaluating `annotations` reads from the enclosing frames, without keeping unused locals. */
-// code-gauge-allow functionCognitiveComplexity 27 -- One case per way a name an annotation reads is bound in its frame.
+// code-gauge-allow functionCognitiveComplexity -- One case per way a name an annotation reads is bound in its frame.
 export function annotationReferences(annotations: readonly Annotation[]): (PyValue | PyCell)[] {
   const refs: (PyValue | PyCell)[] = [];
   for (const { expression, frame, value } of annotations) {

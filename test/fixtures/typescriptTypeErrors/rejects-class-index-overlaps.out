@@ -1,0 +1,4 @@
+(1,54): error TS2413: 'number' index type 'string' is not assignable to 'string' index type 'number'.
+(2,54): error TS2413: '`data-${string}`' index type 'string' is not assignable to 'string' index type 'number'.
+(4,52): error TS2413: 'number' index type 'string' is not assignable to 'string' index type 'number'.
+(5,55): error TS2411: Property 'value' of type 'string' is not assignable to 'string' index type 'number'.

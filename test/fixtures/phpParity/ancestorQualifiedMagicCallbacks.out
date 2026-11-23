@@ -1,0 +1,8 @@
+child CallbackChild missing
+child CallbackChild missing
+child CallbackSibling missing
+child CallbackSibling missing
+base CallbackChild missing
+base CallbackChild missing
+call_user_func(): Argument #1 ($callback) must be a valid callback, class CallbackBase does not have a method "missing"
+StaticChild missing

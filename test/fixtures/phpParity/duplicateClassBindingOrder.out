@@ -1,0 +1,6 @@
+start
+middle
+
+Fatal error: Cannot redeclare class A (previously declared in /main.php:2) in /main.php on line 2
+Stack trace:
+#0 {main}

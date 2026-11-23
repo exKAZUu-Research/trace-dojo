@@ -16,8 +16,8 @@ export function defineStructuredClone(builder: RealmBuilder): void {
 }
 
 /** The structured clone of plain data: primitives, arrays, plain objects, Maps, Sets, and errors. */
-// code-gauge-allow functionCognitiveComplexity 28 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
-// code-gauge-allow functionNcss 39 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionNcss -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function structuredClone(runtime: Runtime, value: Value, memory: Map<JsObject, JsObject>): Value {
   runtime.spend();
   if (typeof value === 'symbol') return cloneError(runtime, value.toString());
@@ -115,29 +115,22 @@ function clonedErrorPrototype(runtime: Runtime, error: JsObject): JsObject {
 const CLONED_ERROR_NAMES = ['Error', 'RangeError', 'ReferenceError', 'SyntaxError', 'TypeError'] as const;
 
 function cloneArray(runtime: Runtime, source: JsArray, memory: Map<JsObject, JsObject>): JsArray {
-  const array = runtime.newArray([]);
+  const array = runtime.newArray(Array.from({ length: source.elements.length }, () => HOLE));
   memory.set(source, array);
   return runtime.hold(array, () => {
-    for (const element of source.elements) {
-      runtime.allocate(1);
-      array.elements.push(element === HOLE ? HOLE : structuredClone(runtime, element, memory));
-    }
     copyOwnProperties(runtime, source, array, memory);
     return array;
   });
 }
 
-/** Copies the own enumerable string-keyed properties, which for an array are those besides its elements. */
+/** Copies own enumerable string-keyed properties, reading each value after the key list is captured. */
 function copyOwnProperties(
   runtime: Runtime,
   source: JsObject,
   target: JsObject,
   memory: Map<JsObject, JsObject>
 ): void {
-  const keys =
-    source instanceof JsArray
-      ? [...source.properties.keys()].filter((key) => typeof key === 'string')
-      : runtime.ownKeys(source);
+  const keys = runtime.ownKeys(source);
   for (const key of keys) {
     if (!runtime.getOwnProperty(source, key)?.enumerable) continue;
     runtime.createDataProperty(target, key, structuredClone(runtime, runtime.get(source, key), memory));

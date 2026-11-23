@@ -1,0 +1,7 @@
+function copyGeneric<T>(value:T):T{const {...copy}=value;return copy;}
+function copyObject<T extends object>(value:T):T{const {...copy}=value;return copy;}
+function omitGeneric<T extends {x:number,y:number}>(value:T):Omit<T,'x'>{const {x,...copy}=value;return copy;}
+class RestMethodSource {x=4;method(){return this.x;}}
+function copyMethodSource<T extends RestMethodSource>(value:T){const {...copy}=value;return copy;}
+const copiedMethodSource=copyMethodSource(new RestMethodSource());
+console.log(copyGeneric({x:1}), copyObject({y:2}), omitGeneric({x:1,y:3,z:4}), copiedMethodSource, Object.keys(copiedMethodSource));

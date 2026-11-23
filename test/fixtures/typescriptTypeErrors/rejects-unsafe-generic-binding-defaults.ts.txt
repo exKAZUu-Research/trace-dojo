@@ -1,0 +1,48 @@
+function retainNull<K extends 'x' | 'y'>(key: K, obj: Partial<Record<K, string | null>>) {
+  const {[key]: value = 'fallback'} = obj;
+  return value.toUpperCase();
+}
+function canDefaultToUndefined<K extends 'x' | 'y'>(key: K, obj: Partial<Record<K, number>>, fallback: number | undefined) {
+  const {[key]: value = fallback} = obj;
+  return value.toFixed();
+}
+function assigned<K extends 'x' | 'y'>(key: K, obj: Partial<Record<K, number>>) {
+  let value: number;
+  ({[key]: value = 3} = obj);
+  return value.toFixed();
+}
+function mismatch<T extends string | undefined>([value = 1]: [T]) {
+  return value;
+}
+function nonNullable<T extends number>([value = 1]: [T]) {
+  return value;
+}
+function genericIdentity<T extends number | undefined>([value = 1]: [T]): T {
+  return value;
+}
+function fallbackStillGeneric<T extends number | undefined>(fallback: number | undefined, [value = fallback]: [T]) {
+  return value;
+}
+function genericNumber<T extends undefined>([value = 1]: [T]) { return value; }
+function genericNull<T extends undefined>({value = null}: {value: T}) { return value; }
+function genericUndefined<T extends undefined>([value = undefined]: [T]) { return value; }
+function concreteNumber([value = 1]: [undefined]) { return value; }
+function concreteOptional({value = 1}: {value?: undefined}) { return value; }
+function concreteNever([value = 1]: [never]) { return value; }
+function concreteOptionalNever({value = 1}: {value?: never}) { return value; }
+function absentProperty({value = 1}: {}) { return value; }
+function absentTuple([value = 1]: []) { return value; }
+function optionalTuple([value = 1]: [value?: undefined]) { return value; }
+function optionalGeneric<T extends undefined>([value = 1]: [value?: T]) { return value; }
+function genericVoid<T extends number | void>([value = 3]: [T]) {
+  return value.toFixed();
+}
+function voidOnly([value = 5]: [void]) {
+  return value;
+}
+function pureVoid<T extends void>([value = 6]: [T]) {
+  return value;
+}
+function fallbackVoid(fn: () => void, [value = fn()]: [number | void]) {
+  return value.toFixed();
+}

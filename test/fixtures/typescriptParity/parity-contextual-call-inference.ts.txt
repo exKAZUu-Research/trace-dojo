@@ -1,0 +1,29 @@
+function singleton<T>(value:T):T[]{return [value];}
+function optional<T>(value:T|undefined):T[]{return [];}
+function fixed<T>(value:T|string):T[]{return [];}
+function conditional<T>(value:T):T extends string ? T[] : never{return [value] as any;}
+function conditionalOptional<T>(value:T|undefined):T extends string ? T[] : never{return [] as any;}
+function conditionalFixed<T>(value:T|string):T extends string ? T[] : never{return [] as any;}
+function box<T>(input:{value:T}):T extends string ? T : never{return input.value as any;}
+function boxArray<T>(input:{value:T}):T extends string ? T[] : never{return [input.value] as any;}
+const a:'a'[]=singleton('a');
+const b:'a'[]=optional('a');
+const c:'a'[]=fixed('a');
+const d:'a'[]=conditional('a');
+const e:'a'[]=conditionalOptional('a');
+const f:'a'[]=conditionalFixed('a');
+const g:'a'=box({value:'a'});
+const h:'a'[]=boxArray({value:'a'});
+console.log(a,b,c,d,e,f,g,h);
+interface Options<T> { value: T | string; }
+type Pair<T> = [T | number];
+type Choice<T> = T | number;
+function fromOptions<T>(input: Options<T>): T[] { return [input.value as T]; }
+function fromPair<T>(input: Pair<T>): T[] { return [input[0] as T]; }
+function fromChoice<T>(input: {value:Choice<T>}): T[] { return [input.value as T]; }
+function falseArray<T>(input: {value:T}): T extends number ? never : T[] { return [input.value] as any; }
+const options: 'a'[] = fromOptions({value:'a'});
+const two: 2[] = fromPair([2]);
+const three: 3[] = fromChoice({value:3});
+const falseBranch: 'a'[] = falseArray({value:'a'});
+console.log(options, two, three, falseBranch);

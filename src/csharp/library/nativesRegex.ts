@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 504 -- The nativesRegex module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss -- The nativesRegex module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { defineNatives, defineNativesKeepingStrings, type NativeCall } from '../natives';
 import type { NativeState } from '../runtime';
@@ -544,8 +544,8 @@ function missingGroup(call: NativeCall): CsObject {
 }
 
 /** Expands a replacement pattern's substitutions (`$1`, `${name}`, `$&`, ...) for a match, as .NET does. */
-// code-gauge-allow functionNcss 40 -- One case per kind of syntax or value that the function handles.
-// code-gauge-allow functionCognitiveComplexity 25 -- Each branch handles one case of the C# rule that the function applies.
+// code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 function substitute(replacement: string, state: MatchState): string {
   const groupValue = (number: number): string => state.groups[number]?.value ?? '';
   const whole = state.group;

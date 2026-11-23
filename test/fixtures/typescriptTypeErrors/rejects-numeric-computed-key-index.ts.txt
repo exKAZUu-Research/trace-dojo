@@ -1,0 +1,24 @@
+function f(k: number) {
+  const o = { [k]: "hello" };
+  const s: string = o.foo;
+  console.log(s.toUpperCase());
+}
+f(1);
+function g(k: number) {
+  const o = { [k]: 42 } as const;
+  const n: number = o.foo;
+  console.log(n.toFixed());
+}
+g(0);
+function h(k: number, a: any) {
+  const named = { [k]: 1, x: "s", 2: true };
+  const fromNumber: number = named[k];
+  const fromAny = { [a.key]: 1 };
+  console.log(named.y, fromAny.y, fromNumber);
+  const methods = {
+    [k + 1]() {
+      return 1;
+    },
+  };
+  const m: () => string = methods[0];
+}

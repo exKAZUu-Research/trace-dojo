@@ -1,0 +1,200 @@
+Word=This
+Word=is
+Word=an
+Word=example
+Word=string
+bool(false)
+bool(false)
+string(9) "something"
+bool(false)
+string(1) "a"
+string(1) "b"
+bool(false)
+bool(false)
+
+Warning: strtok(): Both arguments must be provided when starting tokenization in /main.php on line 7
+bool(false)
+bool(false)
+bool(false)
+bool(false)
+string(3) "abc"
+bool(false)
+bool(false)
+string(1) "a"
+string(1) "b"
+bool(false)
+string(1) "x"
+bool(false)
+array(3) {
+  [0]=>
+  string(1) "a"
+  [1]=>
+  string(1) "b"
+  [2]=>
+  string(1) "c"
+}
+array(3) {
+  [0]=>
+  string(1) "a"
+  [1]=>
+  string(7) "b "c" d"
+  [2]=>
+  string(1) "e"
+}
+array(5) {
+  [0]=>
+  string(2) "a "
+  [1]=>
+  string(3) " b "
+  [2]=>
+  string(2) "cx"
+  [3]=>
+  string(2) "  "
+  [4]=>
+  string(1) "d"
+}
+array(2) {
+  [0]=>
+  string(1) "a"
+  [1]=>
+  string(1) "b"
+}
+array(2) {
+  [0]=>
+  string(1) "a"
+  [1]=>
+  string(1) "b"
+}
+array(1) {
+  [0]=>
+  NULL
+}
+array(1) {
+  [0]=>
+  NULL
+}
+array(2) {
+  [0]=>
+  string(0) ""
+  [1]=>
+  string(0) ""
+}
+array(2) {
+  [0]=>
+  string(4) "a\"b"
+  [1]=>
+  string(1) "c"
+}
+array(2) {
+  [0]=>
+  string(4) "a\b""
+  [1]=>
+  string(1) "c"
+}
+array(2) {
+  [0]=>
+  string(3) "x;y"
+  [1]=>
+  string(1) "z"
+}
+array(2) {
+  [0]=>
+  string(10) "multi
+line"
+  [1]=>
+  string(1) "x"
+}
+array(1) {
+  [0]=>
+  string(12) "unterminated"
+}
+array(1) {
+  [0]=>
+  string(12) "unterminated"
+}
+array(1) {
+  [0]=>
+  string(1) "a"
+}
+array(1) {
+  [0]=>
+  string(2) "a
+"
+}
+array(6) {
+  [0]=>
+  string(4) "c3a9"
+  [1]=>
+  string(4) "c3bc"
+  [2]=>
+  string(2) "ff"
+  [3]=>
+  string(8) "78ff2279"
+  [4]=>
+  string(10) "61ff62c322"
+  [5]=>
+  string(8) "c3a9c3a9"
+}
+array(2) {
+  [0]=>
+  string(1) "a"
+  [1]=>
+  string(1) "b"
+}
+
+Deprecated: str_getcsv(): the $escape parameter must be provided as its default value will change in /main.php on line 21
+array(2) {
+  [0]=>
+  string(1) "a"
+  [1]=>
+  string(1) "b"
+}
+str_getcsv(): Argument #2 ($separator) must be a single character
+str_getcsv(): Argument #3 ($enclosure) must be a single character
+str_getcsv(): Argument #4 ($escape) must be empty or a single character
+str_getcsv(): Argument #2 ($separator) must be a single character
+array(1) {
+  [0]=>
+  string(0) ""
+}
+array(1) {
+  [0]=>
+  string(1) "\"
+}
+array(1) {
+  [0]=>
+  string(1) "
+"
+}
+array(1) {
+  [0]=>
+  string(2) "a""
+}
+array(1) {
+  [0]=>
+  string(1) "a"
+}
+array(1) {
+  [0]=>
+  string(2) "  "
+}
+array(3) {
+  [0]=>
+  string(3) "x y"
+  [1]=>
+  string(0) ""
+  [2]=>
+  string(1) """
+}
+array(1) {
+  [0]=>
+  string(2) "x\"
+}
+array(1) {
+  [0]=>
+  string(4) "x\"y"
+}
+array(1) {
+  [0]=>
+  string(2) "\""
+}

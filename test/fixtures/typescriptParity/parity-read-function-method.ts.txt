@@ -1,0 +1,40 @@
+function inspectMethod(value: () => void) {
+  const { toString } = value;
+  const { toString: method = () => '' } = value;
+  const { ['toString']: computed } = value;
+  return [typeof toString, method === Function.prototype.toString, computed === toString];
+}
+console.log(...inspectMethod(() => {}));
+function nestedParameter({ holder: [{ toString: method }] }: { holder: [() => void] }) {
+  return typeof method;
+}
+function inspectNested(fn: () => void) {
+  const { holder: { toString: fromObject } } = { holder: fn };
+  const [{ toString: fromArray = () => '' }] = [fn];
+  var [{ toString: fromVar }] = [fn];
+  return [typeof fromObject, fromArray === fromVar, nestedParameter({ holder: [fn] })];
+}
+console.log(...inspectNested(() => {}));
+for (const [{ toString: method }] of [[() => {}]]) console.log(typeof method);
+function inspectVar(fn: () => void) {
+  var direct: () => string;
+  {
+    var direct = fn.toString;
+  }
+  var { toString: extracted } = fn;
+  return [typeof direct, extracted === direct];
+}
+console.log(...inspectVar(() => {}));
+function inspectQueried(fn: () => void) {
+  type Method = typeof fn.toString;
+  const { toString: method } = fn;
+  var direct = (fn.toString as Method);
+  type Extracted = typeof method;
+  type Direct = typeof direct;
+  interface Info { fromQuery: typeof direct }
+  function compare(arg: Extracted): boolean {
+    return (method as Extracted) === arg;
+  }
+  return [compare(() => ''), typeof method!, typeof (<Info["fromQuery"]>direct)];
+}
+console.log(...inspectQueried(() => {}));

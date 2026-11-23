@@ -1,98 +1,39 @@
-import { executeCProgram } from '../c/execute';
-import { findCTraceAnnotations } from '../c/parse';
-import { traceCProgram } from '../c/trace';
-import { executeCSharpProgram } from '../csharp/execute';
-import { findCSharpTraceAnnotations } from '../csharp/parse';
-import { traceCSharpProgram } from '../csharp/trace';
-import { executeGoProgram } from '../go/execute';
-import { findGoTraceAnnotations } from '../go/parse';
-import { traceGoProgram } from '../go/trace';
-import { findHaskellTraceAnnotations } from '../haskell/parse';
-import { executeHaskellProgram } from '../haskell/run';
-import { traceHaskellProgram } from '../haskell/trace';
-import { executeJavaProgram } from '../java/execute';
-import { traceJavaProgram } from '../java/trace';
-import { findJavaScriptTraceAnnotations } from '../javascript/parse';
-import { executeJavaScriptProgram } from '../javascript/run';
-import { traceJavaScriptProgram } from '../javascript/trace';
-import { findJavaTraceAnnotations } from '../problems/fillInBlank/javaSource';
-import type { TraceItem, TraceItemVariable, TurtleTrace } from '../problems/trace';
-import { findPythonTraceAnnotations } from '../python/parse';
-import { executePythonProgram } from '../python/run';
-import { tracePythonProgram } from '../python/trace';
-import { findRubyTraceAnnotations } from '../ruby/parse';
-import { executeRubyProgram } from '../ruby/run';
-import { traceRubyProgram } from '../ruby/trace';
-import type { SourceDiagnostic } from './diagnostics';
-import type { ExecutionLimitError } from './limits';
-import type { ProgramInput, ProgramOutput } from './programIo';
-import { atomicAnnotationsOf, removeAnnotations, type TraceAnnotation, type TraceOptions } from './traceAnnotations';
+import { type Interpreter, type ProgramExecution, type ProgramTrace, traceWith } from './interpreter';
+import { interpreter as c } from './languages/c';
+import { interpreter as cpp } from './languages/cpp';
+import { interpreter as csharp } from './languages/csharp';
+import { interpreter as dart } from './languages/dart';
+import { interpreter as go } from './languages/go';
+import { interpreter as haskell } from './languages/haskell';
+import { interpreter as java } from './languages/java';
+import { interpreter as javascript } from './languages/javascript';
+import { interpreter as php } from './languages/php';
+import { interpreter as python } from './languages/python';
+import { interpreter as ruby } from './languages/ruby';
+import { interpreter as rust } from './languages/rust';
+import { interpreter as typescript } from './languages/typescript';
+import { interpreter as zig } from './languages/zig';
+import type { ProgramInput } from './programIo';
+
+export type { ProgramExecution, ProgramRecording, ProgramRun, ProgramTrace } from './interpreter';
 
 export type ProgrammingLanguage = keyof typeof interpreters;
 
-export interface ProgramRun extends ProgramOutput {
-  finalBoard: string;
-  /** The turtles that the program's variables still reach when it ends. */
-  finalTurtles: TurtleTrace[];
-  /** The description of the exception that ended the program, if one escaped it. */
-  uncaughtException: string | undefined;
-}
-
-export type ProgramExecution =
-  | { kind: 'compileError'; diagnostics: SourceDiagnostic[] }
-  | { kind: 'limitExceeded'; limit: ExecutionLimitError['limit'] }
-  | ({ kind: 'executed' } & ProgramRun);
-
-/** What an interpreter records while running a model program. */
-export interface ProgramRecording extends ProgramRun {
-  traceItems: TraceItem[];
-  /** The variables of the program's entry point when it ends. */
-  finalVars: TraceItemVariable;
-}
-
-export interface ProgramTrace extends ProgramRecording {
-  /** The program without its atomic annotations (`// atomic`, `# atomic` in Python and Ruby, or `-- atomic` in Haskell), whose rows match the lines that trace items refer to. */
-  displayProgram: string;
-}
-
-interface Interpreter {
-  /** Finds the annotations in line comments, skipping look-alikes in literals and other comments. */
-  findTraceAnnotations: (source: string) => TraceAnnotation[];
-  /** Runs a model program, recording its steps outside the methods its annotations mark atomic. */
-  record: (program: string, trace: TraceOptions, input?: ProgramInput) => ProgramRecording;
-  /** Compiles and runs a learner's program, reporting how it ended. */
-  execute: (source: string, input?: ProgramInput) => ProgramExecution;
-}
-
 const interpreters = {
-  go: { findTraceAnnotations: findGoTraceAnnotations, record: traceGoProgram, execute: executeGoProgram },
-  java: { findTraceAnnotations: findJavaTraceAnnotations, record: traceJavaProgram, execute: executeJavaProgram },
-  javascript: {
-    findTraceAnnotations: findJavaScriptTraceAnnotations,
-    record: traceJavaScriptProgram,
-    execute: executeJavaScriptProgram,
-  },
-  python: {
-    findTraceAnnotations: findPythonTraceAnnotations,
-    record: tracePythonProgram,
-    execute: executePythonProgram,
-  },
-  ruby: {
-    findTraceAnnotations: findRubyTraceAnnotations,
-    record: traceRubyProgram,
-    execute: executeRubyProgram,
-  },
-  c: { findTraceAnnotations: findCTraceAnnotations, record: traceCProgram, execute: executeCProgram },
-  haskell: {
-    findTraceAnnotations: findHaskellTraceAnnotations,
-    record: traceHaskellProgram,
-    execute: executeHaskellProgram,
-  },
-  csharp: {
-    findTraceAnnotations: findCSharpTraceAnnotations,
-    record: traceCSharpProgram,
-    execute: executeCSharpProgram,
-  },
+  go,
+  java,
+  javascript,
+  python,
+  ruby,
+  c,
+  typescript,
+  cpp,
+  php,
+  rust,
+  zig,
+  dart,
+  haskell,
+  csharp,
 } satisfies Record<string, Interpreter>;
 
 /**
@@ -107,19 +48,10 @@ export function traceProgram(
   displayProgram: string,
   input?: ProgramInput
 ): ProgramTrace {
-  const interpreter: Interpreter = interpreters[language];
-  return {
-    ...interpreter.record(
-      program,
-      { atomicAnnotations: atomicAnnotationsOf(program, interpreter.findTraceAnnotations(program)) },
-      input
-    ),
-    displayProgram: removeAnnotations(displayProgram, interpreter.findTraceAnnotations(displayProgram)),
-  };
+  return traceWith(interpreters[language], program, displayProgram, input);
 }
 
 /** Compiles and runs a learner's program, reporting how it ended. */
 export function executeProgram(language: ProgrammingLanguage, source: string, input?: ProgramInput): ProgramExecution {
-  const interpreter: Interpreter = interpreters[language];
-  return interpreter.execute(source, input);
+  return interpreters[language].execute(source, input);
 }

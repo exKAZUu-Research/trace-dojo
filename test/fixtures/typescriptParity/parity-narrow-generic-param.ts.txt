@@ -1,0 +1,5 @@
+function f<T extends string | number>(x: T): string {
+  if (typeof x === "string") return x.toUpperCase();
+  return x.toFixed(1);
+}
+console.log(f("a"));

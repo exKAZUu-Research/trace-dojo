@@ -1,0 +1,1 @@
+function f(x: {a: number}|{b: string}) { const y = {...x,...x,...x,...x,...x,...x,...x,...x,...x,...x,...x,...x,...x,...x,...x,...x,...x}; console.log(y); }

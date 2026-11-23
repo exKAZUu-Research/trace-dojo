@@ -1,0 +1,31 @@
+const scores = [10, 20, 30];
+const point = { x: 1, y: 2 };
+for (const k in point) {
+  console.log(point[k]);
+}
+for (const i in scores) {
+  const copy = i;
+  console.log(scores[copy]);
+}
+for (const i in scores) {
+  console.log(scores[i + 1]);
+}
+for (const i in scores) {
+  const shadow = (i: string) => scores[i];
+  console.log(shadow(i));
+}
+const both: { [key: string]: number; [index: number]: number } = { 0: 1 };
+for (const i in both) {
+  console.log(scores[i]);
+}
+const loose: any = [1, 2];
+for (const i in loose) {
+  console.log(scores[i]);
+}
+for (const i in scores) {
+  console.log(i * 2);
+}
+let outer = "0";
+for (const i in scores) {
+  console.log(scores[outer]);
+}

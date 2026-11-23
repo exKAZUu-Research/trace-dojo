@@ -1,0 +1,8 @@
+(4,35): error TS2339: Property 'nmae' does not exist on type 'Person'.
+(6,34): error TS2551: Property 'agee' does not exist on type 'Person'. Did you mean 'age'?
+(9,38): error TS2304: Cannot find name 'twice'.
+(14,27): error TS2304: Cannot find name 'missing'.
+(17,49): error TS2551: Property 'agee' does not exist on type 'Person'. Did you mean 'age'?
+(18,7): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(19,41): error TS2304: Cannot find name 'unknownName'.
+(20,7): error TS2339: Property 'toUpperCase' does not exist on type 'number'.

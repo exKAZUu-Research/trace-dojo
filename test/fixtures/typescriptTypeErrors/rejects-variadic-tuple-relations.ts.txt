@@ -1,0 +1,43 @@
+function t_a(a: [...number[], string]) {
+  const b1: [...number[], boolean] = a;
+  const b2: [...number[], string] = a;
+  const b3: [...number[], number] = a;
+  const b4: (number | string)[] = a;
+}
+function t_c(c: [number, ...string[]]) {
+  const d1: [number, string, ...string[]] = c;
+  const d2: [number, ...string[]] = c;
+  const d3: [number, ...(string | number)[]] = c;
+  const d4: [number, string?] = c;
+}
+function t_e(e: [number, string, boolean]) {
+  const f1: [number, ...unknown[]] = e;
+  const f2: [...unknown[], boolean] = e;
+  const f3: [number, ...string[], boolean] = e;
+  const f4: [number, ...number[], boolean] = e;
+  const f5: [number, string?, boolean?] = e;
+  const f6: [number] = e;
+}
+function t_g(g: [number, string?]) {
+  const h1: [number, string] = g;
+  const h2: [number, ...string[]] = g;
+  const h3: [number, string | undefined] = g;
+}
+function t_i(i: [string, ...number[], boolean]) {
+  const j1: [string, ...number[], boolean] = i;
+  const j2: [string, ...(number | boolean)[]] = i;
+  const j3: [...unknown[]] = i;
+  const j4: [string, number, ...number[], boolean] = i;
+  const j5: [string, ...number[]] = i;
+}
+function t_k(k: readonly [number]) {
+  const l1: [number] = k;
+  const l2: readonly number[] = k;
+}
+function t(a: [...number[], string], g: [number, string?]) {
+  const b4: (number | string)[] = a;
+  const b5: (number | string)[] = g;
+  for (const x of g) { const y: number | string = x; }
+  for (const x of a) { const y: number | string = x; }
+  const z: number | string = g[1];
+}

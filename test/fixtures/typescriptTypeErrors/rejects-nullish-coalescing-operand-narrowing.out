@@ -1,0 +1,6 @@
+(6,26): error TS2345: Argument of type 'null | undefined' is not assignable to parameter of type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+(9,18): error TS18048: 'o' is possibly 'undefined'.
+(13,21): error TS2345: Argument of type 'number | null' is not assignable to parameter of type 'number'.
+  Type 'null' is not assignable to type 'number'.
+(18,10): error TS2454: Variable 'z' is used before being assigned.

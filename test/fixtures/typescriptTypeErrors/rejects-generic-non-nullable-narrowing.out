@@ -1,0 +1,14 @@
+(6,64): error TS2322: Type 'T & ({} | null)' is not assignable to type 'NonNullable<T>'.
+  Type 'T & null' is not assignable to type 'NonNullable<T>'.
+    Type 'T & null' is not assignable to type '{}'.
+(7,54): error TS2322: Type 'T & ({} | undefined)' is not assignable to type 'number'.
+  Type 'T & undefined' is not assignable to type 'number'.
+(8,80): error TS2322: Type 'T & ({} | null)' is not assignable to type 'NonNullable<T>'.
+  Type 'T & null' is not assignable to type 'NonNullable<T>'.
+    Type 'T & null' is not assignable to type '{}'.
+(9,70): error TS2322: Type '(T & {}) | null' is not assignable to type 'number'.
+  Type 'null' is not assignable to type 'number'.
+(10,37): error TS2322: Type 'NonNullable<T>' is not assignable to type 'string'.
+(11,43): error TS2322: Type 'T & null' is not assignable to type '{}'.
+(12,52): error TS2322: Type 'string | NonNullable<T>' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.

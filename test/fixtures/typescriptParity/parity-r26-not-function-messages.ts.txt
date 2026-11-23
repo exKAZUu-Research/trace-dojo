@@ -1,0 +1,12 @@
+const tries: (() => unknown)[] = [
+  () => [1].map(5 as any),
+  () => [1].map({} as any),
+  () => [1].map('abc' as any),
+  () => [1].forEach([1, 2] as any),
+  () => [1].map(null as any),
+  () => [1].filter(undefined as any),
+  () => [1].reduce(true as any),
+  () => [1].find(Symbol('q') as any),
+  () => [1].sort(3 as any),
+];
+for (const t of tries) { try { t(); } catch (e: any) { console.log(e.constructor.name, e.message); } }

@@ -1,0 +1,3 @@
+(2,33): error TS2353: Object literal may only specify known properties, and 'extra' does not exist in type '{ a: number; }'.
+(4,54): error TS2353: Object literal may only specify known properties, and 'age' does not exist in type '{ name: string; }'.
+(6,18): error TS2736: Operator '+' cannot be applied to type 'bigint'.

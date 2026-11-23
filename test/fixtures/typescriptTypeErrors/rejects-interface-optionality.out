@@ -1,0 +1,8 @@
+(2,11): error TS2430: Interface 'OptionalField' incorrectly extends interface 'RequiredMember'.
+  Types of property 'x' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+(3,11): error TS2430: Interface 'OptionalMethod' incorrectly extends interface 'RequiredMember'.
+  Types of property 'method' are incompatible.
+    Type '(() => number) | undefined' is not assignable to type '() => number'.
+      Type 'undefined' is not assignable to type '() => number'.

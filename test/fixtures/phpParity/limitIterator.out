@@ -1,0 +1,58 @@
+2=>c
+3=>d
+4=>e
+1=>b 1
+2=>c 2
+int(2)
+string(1) "c"
+int(2)
+Cannot seek to 0 which is below the offset 1
+Cannot seek to 5 which is behind offset 1 plus count 2
+LimitIterator::__construct(): Argument #2 ($offset) must be greater than or equal to 0
+LimitIterator::__construct(): Argument #3 ($limit) must be greater than or equal to -1
+4=>e
+5=>f
+OutOfBoundsException: Seek position 10 is out of range
+OutOfBoundsException: Cannot seek to 0 which is behind offset 0 plus count 0
+rewind
+valid
+next
+valid
+valid
+current
+key
+1=>2
+next
+valid
+current
+key
+2=>3
+next
+valid
+next
+valid
+next
+valid
+next
+valid
+valid
+current
+key
+3
+int(4)
+LimitIterator Object
+(
+)
+
+Array
+(
+    [0] => __construct
+    [1] => rewind
+    [2] => valid
+    [3] => next
+    [4] => seek
+    [5] => getPosition
+    [6] => getInnerIterator
+    [7] => key
+    [8] => current
+)

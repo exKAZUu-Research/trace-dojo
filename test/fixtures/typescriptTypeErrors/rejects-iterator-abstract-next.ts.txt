@@ -1,0 +1,10 @@
+class Numbers extends Iterator<number> {}
+abstract class Base extends Iterator<string> {}
+class Words extends Base {}
+abstract class Shape<T> {
+  abstract area(): T;
+}
+abstract class Middle extends Shape<number> {}
+class Square extends Middle {}
+new Iterator<number>();
+console.log(Numbers, Words, Square);

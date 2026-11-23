@@ -1,0 +1,38 @@
+
+Warning: compact(): Argument #1 must be string or array of strings, Name given in /main.php on line 4
+
+Warning: compact(): Argument #2 must be string or array of strings, int given in /main.php on line 4
+
+Warning: compact(): Argument #3 must be string or array of strings, false given in /main.php on line 4
+
+Warning: compact(): Argument #3 must be string or array of strings, null given in /main.php on line 4
+
+Warning: compact(): Argument #3 must be string or array of strings, stdClass given in /main.php on line 4
+array(1) {
+  ["x"]=>
+  int(42)
+}
+array(3) {
+  [0]=>
+  string(4) "abXd"
+  [1]=>
+  string(3) "Xcd"
+  [2]=>
+  string(5) "aXbcd"
+}
+substr_replace(): Argument #3 ($offset) cannot be an array when working on a single string
+substr_replace(): Argument #4 ($length) cannot be an array when working on a single string
+string(1) "0"
+int(0)
+int(0)
+int(0)
+Method name must be a string
+Method name must be a string
+Method name must be a string
+Method name must be a string
+Method name must be a string
+Method name must be a string
+Method name must be a string
+Method name must be a string
+Method name must be a string
+Method name must be a string

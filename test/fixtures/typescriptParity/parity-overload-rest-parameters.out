@@ -1,0 +1,13 @@
+spread undefined undefined
+spread 1 2
+prefixed x undefined
+prefixed x 2
+both [ 1, 2 ]
+optional undefined undefined
+optional 1 2
+wider [ 1, 'a' ]
+tupleRest 1 a undefined
+restTail a [ 1, 2 ]
+nullable 1 2
+union u
+3

@@ -74,7 +74,11 @@ function describeUncaught(runtime: Runtime, root: Frame, error: unknown): string
   }
 }
 
-/** The host's stack can run out before the Java call depth limit when each call nests many statements. */
+/**
+ * The host's stack can run out before the Java call depth limit when each call nests many statements. V8 and
+ * JavaScriptCore report it as a RangeError about the call stack, and SpiderMonkey as its own InternalError.
+ */
 function isHostStackOverflow(error: unknown): boolean {
-  return error instanceof RangeError && /call stack/i.test(error.message);
+  if (error instanceof RangeError) return /call stack/i.test(error.message);
+  return error instanceof Error && error.name === 'InternalError' && /too much recursion/i.test(error.message);
 }

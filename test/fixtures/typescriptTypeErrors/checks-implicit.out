@@ -1,0 +1,6 @@
+(1,12): error TS7006: Parameter 'a' implicitly has an 'any' type.
+(1,15): error TS7006: Parameter 'b' implicitly has an 'any' type.
+(4,12): error TS7006: Parameter 'x' implicitly has an 'any' type.
+(5,12): error TS7019: Rest parameter 'rest' implicitly has an 'any[]' type.
+(8,14): error TS7031: Binding element 'a' implicitly has an 'any' type.
+(8,17): error TS7031: Binding element 'b' implicitly has an 'any' type.

@@ -1,0 +1,6 @@
+interface Tree<T> {value:T;children:Tree[];}
+class Box<T> {next?:Box;value?:T;}
+type List<T>={value:T;next?:List};
+interface Pair<A,B>{next?:Pair<A>;}
+class One<T>{next?:One<T,string>;}
+type Two<A,B=number>={next?:Two};

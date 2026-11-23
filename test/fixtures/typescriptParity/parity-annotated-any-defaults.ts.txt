@@ -1,0 +1,4 @@
+const { x = JSON.parse('1') }: { x?: number } = {};
+console.log(x.toFixed(1));
+const [y = JSON.parse('2')]: [number?] = [];
+console.log(y.toFixed(1));

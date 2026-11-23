@@ -1,0 +1,4 @@
+(6,25): error TS2322: Type '[string]' is not assignable to type 'G<string>'.
+  Type '[string]' is not assignable to type 'G<string[]>[]'.
+    Type 'string' is not assignable to type 'G<string[]>'.
+(14,17): error TS2322: Type 'string' is not assignable to type 'T'.

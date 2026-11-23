@@ -1,0 +1,9 @@
+int(42)
+Cannot assign string to reference held by property T::$i of type int
+int(42)
+Cannot assign array to reference held by property T::$i of type int
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 10
+int(1)
+string(8) "anything"
+string(1) "5"

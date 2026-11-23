@@ -1,0 +1,4 @@
+(4,15): error TS18046: 'e' is of type 'unknown'.
+(7,13): error TS18046: 'v' is of type 'unknown'.
+(8,1): error TS18046: 'v' is of type 'unknown'.
+(9,7): error TS2322: Type 'unknown' is not assignable to type 'number'.

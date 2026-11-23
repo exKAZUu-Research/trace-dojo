@@ -1,0 +1,6 @@
+(1,40): error TS2339: Property 'toString' does not exist on type 'T'.
+(2,56): error TS2339: Property 'valueOf' does not exist on type 'T'.
+(3,56): error TS18047: 'value' is possibly 'null'.
+(4,65): error TS2536: Type '"value"' cannot be used to index type 'T'.
+(5,71): error TS2536: Type '"value"' cannot be used to index type 'T'.
+(6,48): error TS2574: A rest element type must be an array type.

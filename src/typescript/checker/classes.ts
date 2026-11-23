@@ -1,0 +1,1283 @@
+// code-gauge-allow-file fileNcss -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
+
+import { typesAtConstructorExit } from './assignmentFlow';
+import type { Checker } from './checker';
+import { FlowState, type State } from './flow';
+import { mergedPatternIndexes } from './indexInfos';
+import { isUsedBeforeInitialization } from './initializationOrder';
+import { isBaseTypeVariable } from './mixinConstructors';
+import type { Sym, ValueKind } from './scopes';
+import { declaredParameterType } from './signatures';
+import {
+  argumentParameters,
+  hasToken,
+  isClassConstructor,
+  isConstructorName,
+  isImmediatelyInvoked,
+  isWithin,
+  named,
+  propertyNameText,
+} from './syntax';
+import {
+  anonymousObject,
+  anyType,
+  type ClassInfo,
+  emptyStructure,
+  errorType,
+  intersectionOf,
+  isAnyLike,
+  isIntrinsic,
+  newTypeId,
+  type ObjectType,
+  type Property,
+  type Signature,
+  simpleProperty,
+  type Structure,
+  thisParameter,
+  type Type,
+  type TypeParameter,
+  undefinedType,
+  unionOf,
+  voidType,
+} from './types';
+
+/** The kinds of global declarations that become properties of `globalThis`, unlike `let`, `const`, and classes. */
+const globalThisValueKinds = new Set<ValueKind>(['var', 'function', 'declared']);
+
+/** A private or protected constructor, with the class declaring it. */
+interface RestrictedConstructor {
+  classNode: TreeNode;
+  visibility: 'private' | 'protected';
+}
+
+interface MethodEntry {
+  name: string;
+  nameType: Type;
+  signatures: TreeNode[];
+  implementation?: TreeNode;
+  abstract: boolean;
+  first: TreeNode;
+}
+
+interface AccessorEntry {
+  name: string;
+  nameType: Type;
+  getter?: TreeNode;
+  setter?: TreeNode;
+}
+
+/** The members of a class body collected so far, as one side, instance or static, declares them. */
+interface ClassMembers {
+  info: ClassInfo;
+  structure: Structure;
+  methods: Map<string, MethodEntry>;
+  accessors: Map<string, AccessorEntry>;
+}
+
+type HeritagePhase = 'expression' | 'constructors' | 'instance';
+
+const classTypes = new Set(['class_declaration', 'abstract_class_declaration', 'class']);
+
+/** A private name identifies a distinct member in each class declaring it. */
+function privateMemberKey(name: string, info: ClassInfo): string {
+  return `${name}@${info.declaration.id}`;
+}
+
+/** Classes: their instance and constructor types, `this` and `super`, and the checks of their declarations. */
+export class ClassChecker {
+  private readonly infos = new Map<number, ClassInfo>();
+  private readonly objectThis: Type[] = [];
+  private readonly fieldTypes = new Map<number, Type>();
+  private readonly resolvingFields: { member: TreeNode; nameNode: TreeNode }[] = [];
+  private readonly resolvingBases: { node: TreeNode; phase: HeritagePhase }[] = [];
+  private readonly circularBases = new Set<number>();
+  private globalThis?: ObjectType;
+
+  constructor(private readonly c: Checker) {}
+
+  classInfoOf(symbol: Sym): ClassInfo {
+    const declaration = symbol.typeDeclarations.find((node) => classTypes.has(node.type)) ?? symbol.valueDeclaration;
+    return this.classInfoOfNode(declaration as TreeNode);
+  }
+
+  classInfoOfNode(node: TreeNode): ClassInfo {
+    const cached = this.infos.get(node.id);
+    if (cached) return cached;
+    const name = node.childForFieldName('name')?.text ?? this.anonymousClassName(node);
+    const typeParameters = this.c.signatures.typeParametersOf(node);
+    const isAbstract = node.type === 'abstract_class_declaration' || hasToken(node, 'abstract');
+    const info = { name, declaration: node, isAbstract } as ClassInfo;
+    this.infos.set(node.id, info);
+    const instanceType = this.instanceTypeOf(node, info, typeParameters);
+    const staticType = this.staticTypeOf(node, info);
+    instanceType.thisType = thisParameter(instanceType);
+    info.instanceType = instanceType;
+    info.staticType = staticType;
+    return info;
+  }
+
+  private instanceTypeOf(node: TreeNode, info: ClassInfo, typeParameters: TypeParameter[]): ObjectType {
+    let structure: Structure | undefined;
+    const instanceType: ObjectType = {
+      kind: 'object',
+      id: newTypeId(),
+      objectKind: 'interface',
+      name: info.name,
+      typeParameters: typeParameters.length > 0 ? typeParameters : undefined,
+      classInfo: info,
+      outerTypeParameters: this.c.signatures.outerTypeParametersOf(node),
+      resolve: () => {
+        if (structure) return structure;
+        structure = emptyStructure();
+        const interfaces = this.c.typeNodes.interfaceMembers(this.mergedInterfaces(node));
+        const own = this.withInterfaceMembers(this.membersOf(node, info, false), interfaces.own);
+        const base = this.baseInstanceType(node);
+        structure = this.c.mergeBases(
+          base ? this.mergeBase(own, base, instanceType) : own,
+          interfaces.bases,
+          instanceType.thisType
+        );
+        return structure;
+      },
+    };
+    return instanceType;
+  }
+
+  /** The interfaces of the class's name, which merge their members into its instances. */
+  mergedInterfaces(node: TreeNode): TreeNode[] {
+    const name = node.type === 'class' ? undefined : node.childForFieldName('name')?.text;
+    const declarations = name ? this.c.scopeOf(node).lookupType(name)?.typeDeclarations : undefined;
+    return declarations?.filter((declaration) => declaration.type === 'interface_declaration') ?? [];
+  }
+
+  /**
+   * The class's members with its interfaces': a method both declare takes the signatures of each as overloads, and the
+   * declaration checks report any other member both declare differently.
+   */
+  private withInterfaceMembers(own: Structure, declared: Structure): Structure {
+    const properties = new Map(own.properties);
+    for (const [name, property] of declared.properties) {
+      const existing = properties.get(name);
+      if (!existing) properties.set(name, property);
+      else if (existing.isMethod && property.isMethod) {
+        const signatures = (method: Property): Signature[] => this.c.signaturesOf(method.type(), 'call');
+        let type: Type | undefined;
+        properties.set(name, {
+          ...existing,
+          type: () => (type ??= this.c.overloadedFunction([...signatures(existing), ...signatures(property)])),
+        });
+      }
+    }
+    return {
+      properties,
+      callSignatures: [...own.callSignatures, ...declared.callSignatures],
+      constructSignatures: [...own.constructSignatures, ...declared.constructSignatures],
+      stringIndex: own.stringIndex ?? declared.stringIndex,
+      numberIndex: own.numberIndex ?? declared.numberIndex,
+      symbolIndex: own.symbolIndex ?? declared.symbolIndex,
+      patternIndexes: mergedPatternIndexes(this.c, [own.patternIndexes, declared.patternIndexes]),
+    };
+  }
+
+  private staticTypeOf(node: TreeNode, info: ClassInfo): ObjectType {
+    let structure: Structure | undefined;
+    return {
+      kind: 'object',
+      id: newTypeId(),
+      objectKind: 'anonymous',
+      name: info.name,
+      classInfo: info,
+      isClassStatic: true,
+      resolve: () => {
+        if (structure) return structure;
+        structure = emptyStructure();
+        const own = this.membersOf(node, info, true);
+        own.properties.set(
+          'prototype',
+          simpleProperty('prototype', this.prototypeInstanceType(info.instanceType), { readonly: true })
+        );
+        const baseStatic = this.baseStaticType(node);
+        if (baseStatic) {
+          for (const [memberName, property] of this.c.structureOf(baseStatic).properties) {
+            if (!property.isPrivateName && !own.properties.has(memberName)) own.properties.set(memberName, property);
+          }
+        }
+        const resolveConstructors = (): Signature[] => this.constructSignatures(node, info);
+        let constructors: Signature[] | undefined;
+        structure = {
+          ...own,
+          get constructSignatures() {
+            return (constructors ??= resolveConstructors());
+          },
+        };
+        return structure;
+      },
+    };
+  }
+
+  private prototypeInstanceType(instance: ObjectType): Type {
+    const parameters = [...(instance.outerTypeParameters ?? []), ...(instance.typeParameters ?? [])];
+    return this.c.instantiate(instance, new Map(parameters.map((parameter) => [parameter.id, anyType])));
+  }
+
+  private anonymousClassName(node: TreeNode): string {
+    const parent = node.parent;
+    if (parent?.type === 'variable_declarator') return parent.childForFieldName('name')?.text ?? '(Anonymous class)';
+    return '(Anonymous class)';
+  }
+
+  /** The polymorphic `this` type inside the class, which stands for the type of the instance it is used on. */
+  selfType(info: ClassInfo): Type {
+    return info.instanceType.thisType ?? info.instanceType;
+  }
+
+  /** The members of a class with those it inherits, whose `this` type becomes the derived class's. */
+  private mergeBase(own: Structure, base: Type, instanceType: ObjectType): Structure {
+    if (base.kind !== 'object') return this.c.mergeBases(own, [base], instanceType.thisType);
+    const inherited = this.c.structureOf(base, instanceType.thisType);
+    const properties = new Map(own.properties);
+    for (const [name, property] of inherited.properties) if (!properties.has(name)) properties.set(name, property);
+    return {
+      ...own,
+      properties,
+      stringIndex: own.stringIndex ?? inherited.stringIndex,
+      numberIndex: own.numberIndex ?? inherited.numberIndex,
+      symbolIndex: own.symbolIndex ?? inherited.symbolIndex,
+      patternIndexes: mergedPatternIndexes(this.c, [own.patternIndexes, inherited.patternIndexes]),
+    };
+  }
+
+  extendsClause(node: TreeNode): TreeNode | undefined {
+    const heritage = node.namedChildren.find((child) => child?.type === 'class_heritage');
+    return heritage?.namedChildren.find((child) => child?.type === 'extends_clause') ?? undefined;
+  }
+
+  valueTypeOf(info: ClassInfo): Type {
+    const base = this.baseStaticType(info.declaration);
+    if (!base) return info.staticType;
+    const variable =
+      base.kind === 'intersection' ? base.types.find(isBaseTypeVariable) : isBaseTypeVariable(base) ? base : undefined;
+    return variable ? intersectionOf([info.staticType, variable], this.c) : info.staticType;
+  }
+
+  baseStaticType(node: TreeNode): Type | undefined {
+    const clause = this.extendsClause(node);
+    const value = clause?.childForFieldName('value');
+    if (!value) return undefined;
+    return (
+      this.resolveHeritage(node, 'expression', () =>
+        this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(value)))
+      ) ?? errorType
+    );
+  }
+
+  private resolveHeritage<T>(node: TreeNode, phase: HeritagePhase, resolve: () => T): T | undefined {
+    if (this.circularBases.has(node.id)) return undefined;
+    const cycle = this.resolvingBases.findIndex((entry) => entry.node.id === node.id && entry.phase === phase);
+    if (cycle !== -1) {
+      this.reportCircularBases(cycle);
+      return undefined;
+    }
+    this.resolvingBases.push({ node, phase });
+    try {
+      const result = resolve();
+      return this.circularBases.has(node.id) ? undefined : result;
+    } finally {
+      this.resolvingBases.pop();
+    }
+  }
+
+  private reportCircularBases(cycle: number): void {
+    for (const { node } of this.resolvingBases.slice(cycle)) {
+      if (this.circularBases.has(node.id)) continue;
+      this.circularBases.add(node.id);
+      const name = node.childForFieldName('name');
+      this.c.errorWhileResolving(
+        name ?? node,
+        `'${name?.text ?? this.anonymousClassName(node)}' は、直接または間接的に、それ自身の基底式から参照されています。`
+      );
+    }
+  }
+
+  /**
+   * Whether a type parameter of a class is referenced inside one of its static members, which all instantiations of the
+   * class share.
+   */
+  isClassTypeParameterInStaticMember(symbol: Sym, reference: TreeNode): boolean {
+    const classNode = symbol.typeKind === 'typeParameter' ? symbol.typeDeclarations[0]?.parent?.parent : undefined;
+    if (!classNode || !classTypes.has(classNode.type)) return false;
+    let member: TreeNode | null = reference;
+    while (member && member.parent?.parent?.id !== classNode.id) member = member.parent;
+    return (
+      member?.parent?.type === 'class_body' && (hasToken(member, 'static') || member.type === 'class_static_block')
+    );
+  }
+
+  /** Whether the class extends `null`, whose instances have no base class and whose constructor may not call `super`. */
+  extendsNull(node: TreeNode): boolean {
+    const baseStatic = this.baseStaticType(node);
+    return baseStatic !== undefined && isIntrinsic(baseStatic, 'null');
+  }
+
+  baseInstanceType(node: TreeNode): Type | undefined {
+    if (!this.extendsClause(node)?.childForFieldName('value')) return undefined;
+    const base = this.resolveHeritage(node, 'instance', () => this.resolveBaseInstance(node));
+    return this.circularBases.has(node.id) ? errorType : base;
+  }
+
+  private resolveBaseInstance(node: TreeNode): Type | undefined {
+    const staticType = this.baseStaticType(node);
+    if (!staticType || isAnyLike(staticType)) return staticType && anyType;
+    const instantiated = this.baseConstructSignatures(node)?.[0];
+    if (instantiated) return instantiated.returnType();
+    // The `extends` clause reports type arguments no base signature takes, and the base's members then read as `any`.
+    const returned = this.c.signaturesOf(staticType, 'construct')[0]?.returnType();
+    const target = returned?.kind === 'object' && returned.objectKind === 'reference' ? returned.target : returned;
+    return target?.kind === 'object' && target.typeParameters
+      ? this.c.reference(
+          target,
+          target.typeParameters.map(() => anyType)
+        )
+      : returned;
+  }
+
+  constructorNode(node: TreeNode): TreeNode | undefined {
+    const body = node.childForFieldName('body');
+    return body
+      ? named(body).find(
+          (member) =>
+            member.type === 'method_definition' &&
+            isConstructorName(member.childForFieldName('name')) &&
+            member.childForFieldName('body')
+        )
+      : undefined;
+  }
+
+  private constructSignatures(node: TreeNode, info: ClassInfo): Signature[] {
+    const typeParameters = info.instanceType.typeParameters ?? [];
+    const returnType =
+      typeParameters.length > 0 ? this.c.reference(info.instanceType, typeParameters) : info.instanceType;
+    const body = node.childForFieldName('body');
+    const overloads = body
+      ? named(body).filter(
+          (member) => member.type === 'method_signature' && isConstructorName(member.childForFieldName('name'))
+        )
+      : [];
+    const ctor = this.constructorNode(node);
+    const declarations = overloads.length > 0 ? overloads : ctor ? [ctor] : [];
+    if (declarations.length > 0) {
+      return declarations.map((declaration) => ({
+        ...this.c.signatures.signatureOf(declaration),
+        typeParameters,
+        returnType: () => returnType,
+        isAbstract: info.isAbstract,
+      }));
+    }
+    const inherited = this.baseConstructSignatures(node);
+    if (inherited) {
+      return inherited.map((signature) => ({
+        ...signature,
+        typeParameters,
+        returnType: () => returnType,
+        isAbstract: info.isAbstract,
+      }));
+    }
+    return [{ typeParameters, parameters: [], returnType: () => returnType, isAbstract: info.isAbstract }];
+  }
+
+  /**
+   * The base's construct signatures that take as many type arguments as the `extends` clause passes, instantiated with
+   * them: a class without a constructor inherits these, and `super(...)` calls them.
+   */
+  baseConstructSignatures(node: TreeNode): Signature[] | undefined {
+    if (!this.extendsClause(node)) return undefined;
+    return this.resolveHeritage(node, 'constructors', () => this.resolveBaseConstructSignatures(node));
+  }
+
+  private resolveBaseConstructSignatures(node: TreeNode): Signature[] | undefined {
+    const baseStatic = this.baseStaticType(node);
+    if (!baseStatic || isAnyLike(baseStatic) || isIntrinsic(baseStatic, 'null')) return undefined;
+    const typeArguments = this.baseTypeArguments(node);
+    return this.c.signaturesOf(baseStatic, 'construct').flatMap((signature) => {
+      const parameters = signature.typeParameters;
+      const required = parameters.filter((parameter) => !parameter.default).length;
+      if (typeArguments.length < required || typeArguments.length > parameters.length) return [];
+      const filled = this.c.fillTypeArguments(parameters, typeArguments);
+      const mapper = new Map(parameters.map((parameter, index) => [parameter.id, filled[index]]));
+      return [this.c.instantiateSignature({ ...signature, typeParameters: [] }, mapper)];
+    });
+  }
+
+  baseTypeArguments(node: TreeNode): Type[] {
+    const argumentsNode = this.extendsClause(node)?.childForFieldName('type_arguments');
+    return argumentsNode ? named(argumentsNode).map((argument) => this.c.typeNodes.typeFromNode(argument)) : [];
+  }
+
+  membersOf(node: TreeNode, info: ClassInfo, isStatic: boolean): Structure {
+    const structure = emptyStructure();
+    const body = node.childForFieldName('body');
+    if (!body) return structure;
+    const members: ClassMembers = { info, structure, methods: new Map(), accessors: new Map() };
+    for (const member of named(body)) {
+      if (hasToken(member, 'static') === isStatic) this.addMember(members, member);
+    }
+    for (const [key, entry] of members.methods)
+      structure.properties.set(key, this.methodProperty(entry.name, entry, info));
+    for (const [key, accessor] of members.accessors) {
+      structure.properties.set(key, this.accessorProperty(accessor.name, accessor, info));
+    }
+    if (!isStatic) {
+      const ctor = this.constructorNode(node);
+      if (ctor) this.addParameterProperties(ctor, info, structure);
+    }
+    return structure;
+  }
+
+  private addMember(members: ClassMembers, member: TreeNode): void {
+    const nameNode = member.childForFieldName('name');
+    const captured = nameNode && this.c.silently(() => this.c.patterns.capturePropertyKey(nameNode));
+    const names = captured?.names;
+    const name = names?.length === 1 ? names[0] : undefined;
+    const nameType = captured?.type;
+    if (name === undefined && nameNode) {
+      this.c.typeNodes.addComputedMemberIndex(members.structure, member, nameNode, () =>
+        this.computedMemberType(member, nameNode)
+      );
+      return;
+    }
+    const key =
+      nameNode?.type === 'private_property_identifier' && name !== undefined
+        ? privateMemberKey(name, members.info)
+        : name;
+    switch (member.type) {
+      case 'field_definition': {
+        if (name !== undefined && key !== undefined && nameNode && nameType)
+          members.structure.properties.set(key, this.fieldProperty(name, nameType, nameNode, member, members.info));
+        break;
+      }
+      case 'method_definition':
+      case 'method_signature':
+      case 'abstract_method_signature': {
+        if (name !== undefined && key !== undefined && nameType && !isConstructorName(nameNode))
+          this.addMethod(members, name, key, nameType, member);
+        break;
+      }
+      case 'index_signature': {
+        this.c.typeNodes.addIndexSignature(members.structure, member);
+        break;
+      }
+      default: {
+        break;
+      }
+    }
+  }
+
+  private fieldProperty(name: string, nameType: Type, nameNode: TreeNode, member: TreeNode, info: ClassInfo): Property {
+    return {
+      name,
+      nameType,
+      type: () => this.fieldType(member, nameNode),
+      optional: hasToken(member, '?'),
+      readonly: hasToken(member, 'readonly'),
+      isMethod: false,
+      visibility: this.visibilityOf(member),
+      declaringClass: info,
+      isPrivateName: nameNode.type === 'private_property_identifier',
+      declaration: member,
+      isAbstract: hasToken(member, 'abstract'),
+    };
+  }
+
+  /** Records a method's signature or implementation, or an accessor, under its name. */
+  private computedMemberType(member: TreeNode, nameNode: TreeNode): Type {
+    if (member.type === 'field_definition') return this.fieldType(member, nameNode);
+    const signature = this.c.signatures.signatureOf(member);
+    if (hasToken(member, 'get')) return signature.returnType();
+    if (hasToken(member, 'set')) return signature.parameters[0]?.type ?? anyType;
+    return this.c.overloadedFunction([signature]);
+  }
+
+  private addMethod(members: ClassMembers, name: string, key: string, nameType: Type, member: TreeNode): void {
+    if (hasToken(member, 'get') || hasToken(member, 'set')) {
+      const entry = members.accessors.get(key) ?? { name, nameType };
+      if (hasToken(member, 'get')) entry.getter = member;
+      else entry.setter = member;
+      members.accessors.set(key, entry);
+      return;
+    }
+    const entry = members.methods.get(key) ?? { name, nameType, signatures: [], abstract: false, first: member };
+    if (member.type === 'method_definition' && member.childForFieldName('body')) entry.implementation = member;
+    else entry.signatures.push(member);
+    if (member.type === 'abstract_method_signature' || hasToken(member, 'abstract')) entry.abstract = true;
+    members.methods.set(key, entry);
+  }
+
+  private methodProperty(name: string, entry: MethodEntry, info: ClassInfo): Property {
+    const declarations =
+      entry.signatures.length > 0 || !entry.implementation ? entry.signatures : [entry.implementation];
+    const declaration = entry.first;
+    let type: Type | undefined;
+    let resolving = false;
+    return {
+      name,
+      nameType: entry.nameType,
+      type: () => {
+        if (type) return type;
+        if (resolving)
+          return this.c.overloadedFunction(
+            declarations.map((member) => this.c.signatures.methodSignatureWhileResolving(member))
+          );
+        resolving = true;
+        try {
+          return (type = this.c.overloadedFunction(
+            declarations.map((member) => this.c.signatures.signatureOf(member))
+          ));
+        } finally {
+          resolving = false;
+        }
+      },
+      optional: hasToken(declaration, '?'),
+      readonly: false,
+      isMethod: true,
+      visibility: this.visibilityOf(declaration),
+      declaringClass: info,
+      isPrivateName: declaration.childForFieldName('name')?.type === 'private_property_identifier',
+      declaration,
+      isAbstract: entry.abstract,
+    };
+  }
+
+  private accessorProperty(name: string, { getter, nameType, setter }: AccessorEntry, info: ClassInfo): Property {
+    const declaration = (getter ?? setter) as TreeNode;
+    const visibility = this.visibilityOf(declaration);
+    const writeVisibility = setter ? this.visibilityOf(setter) : undefined;
+    if (
+      getter &&
+      setter &&
+      writeVisibility !== visibility &&
+      (visibility === 'private' || writeVisibility === 'public')
+    ) {
+      for (const accessor of [getter, setter])
+        this.c.error(
+          accessor.childForFieldName('name') ?? accessor,
+          'get アクセサーは、set アクセサーと同じか広いアクセス範囲を持つ必要があります。'
+        );
+    }
+    return {
+      name,
+      nameType,
+      type: () => this.accessorType(getter, setter),
+      writeType: setter ? () => this.c.signatures.signatureOf(setter).parameters[0]?.type ?? anyType : undefined,
+      optional: false,
+      readonly: !setter,
+      getterOnly: !setter,
+      setterOnly: !getter,
+      isMethod: false,
+      visibility,
+      writeVisibility,
+      declaringClass: info,
+      isPrivateName: declaration.childForFieldName('name')?.type === 'private_property_identifier',
+      declaration,
+      isAbstract: hasToken(declaration, 'abstract'),
+    };
+  }
+
+  private addParameterProperties(ctor: TreeNode, info: ClassInfo, structure: Structure): void {
+    const parameters = ctor.childForFieldName('parameters');
+    if (!parameters) return;
+    for (const [index, parameter] of argumentParameters(named(parameters)).entries()) {
+      const pattern = parameter.childForFieldName('pattern');
+      const modifier = parameter.namedChildren.find((child) => child?.type === 'accessibility_modifier');
+      const isReadonly = hasToken(parameter, 'readonly');
+      if ((modifier || isReadonly) && pattern?.type === 'identifier') {
+        structure.properties.set(pattern.text, {
+          name: pattern.text,
+          type: () => {
+            const type = declaredParameterType(this.c.signatures.signatureOf(ctor).parameters[index]) ?? anyType;
+            return parameter.type === 'optional_parameter' ? unionOf([type, undefinedType]) : type;
+          },
+          optional: parameter.type === 'optional_parameter',
+          readonly: isReadonly,
+          isMethod: false,
+          visibility: (modifier?.text as Property['visibility'] | undefined) ?? 'public',
+          declaringClass: info,
+          declaration: parameter,
+        });
+      }
+    }
+  }
+
+  private visibilityOf(member: TreeNode): Property['visibility'] {
+    const modifier = member.namedChildren.find((child) => child?.type === 'accessibility_modifier');
+    return (modifier?.text as Property['visibility'] | undefined) ?? 'public';
+  }
+
+  fieldType(member: TreeNode, nameNode: TreeNode): Type {
+    const annotation = this.c.typeNodes.annotationType(member.childForFieldName('type'));
+    if (annotation) return annotation;
+    const cached = this.fieldTypes.get(member.id);
+    if (cached) return cached;
+    const resolving = this.resolvingFields.findIndex((field) => field.member.id === member.id);
+    // Fields whose initializers read one another have no type to infer, as TypeScript reports for each of them.
+    if (resolving !== -1) {
+      this.c.functions.markCircularReturn();
+      for (const field of this.resolvingFields.slice(resolving)) {
+        if (this.fieldTypes.has(field.member.id)) continue;
+        this.fieldTypes.set(field.member.id, anyType);
+        this.c.errorWhileResolving(
+          field.nameNode,
+          `${field.nameNode.text} の型が、自分自身を参照しているため暗黙に any になります。`
+        );
+      }
+      return anyType;
+    }
+    this.resolvingFields.push({ member, nameNode });
+    try {
+      const type = this.inferredFieldType(member, nameNode);
+      if (!this.fieldTypes.has(member.id)) this.fieldTypes.set(member.id, type);
+      return this.fieldTypes.get(member.id) as Type;
+    } finally {
+      this.resolvingFields.pop();
+    }
+  }
+
+  private inferredFieldType(member: TreeNode, nameNode: TreeNode): Type {
+    const value = member.childForFieldName('value');
+    if (value) {
+      const valueType = this.c.silently(() => this.withFieldInitializer(member, () => this.c.expressions.check(value)));
+      return this.c.literals.widenDeclared(valueType, hasToken(member, 'readonly'));
+    }
+    const types = this.constructorExitTypes(member, nameNode);
+    // A field the constructor leaves `undefined` or `null` on every path has no type to infer.
+    if (!isIntrinsic(this.c.relations.removeNullish(unionOf(types)), 'never')) return unionOf(types);
+    if (!this.c.isLibrary(member)) this.c.error(nameNode, `メンバー ${nameNode.text} の型が暗黙に any になります。`);
+    return anyType;
+  }
+
+  withFieldInitializer<T>(member: TreeNode, run: () => T): T {
+    const owner = member.parent?.parent;
+    const info = owner ? this.classInfoOfNode(owner) : undefined;
+    const receiver = hasToken(member, 'static') ? info?.staticType : info?.instanceType;
+    return this.withThis(receiver, () => this.c.functions.withInitializerFlow(member, 'field', run));
+  }
+
+  /** The types an instance field holds where its class's constructor finishes. */
+  private constructorExitTypes(member: TreeNode, nameNode: TreeNode): Type[] {
+    const classNode = member.parent?.parent;
+    const body =
+      classNode && !hasToken(member, 'static') ? this.constructorNode(classNode)?.childForFieldName('body') : undefined;
+    // Names compare as property keys, as `["x"]` and `x`, or `1` and `this[1]`, name the same field.
+    const name = propertyNameText(nameNode);
+    return body && name !== undefined
+      ? typesAtConstructorExit(body, name, {
+          assignedType: (right) => this.c.widen(this.c.silently(() => this.c.assignments.assignmentValueType(right))),
+          keyName: (index) => {
+            const key = this.c.silently(() => this.c.expressions.check(index));
+            return key.kind === 'literal' && (typeof key.value === 'string' || typeof key.value === 'number')
+              ? String(key.value)
+              : undefined;
+          },
+          skippedBy: (operator, type) => skippedType(this.c, operator, type),
+          spend: () => this.c.budget.spend(),
+          iteration: (node, assign, evaluate) => {
+            const header = node.childForFieldName('header') ?? node;
+            const left = header.childForFieldName('left') as TreeNode;
+            const right = header.childForFieldName('right') as TreeNode;
+            this.c.silently(() =>
+              this.c.assignments.assignmentTargets(
+                left,
+                this.c.statements.loopElementType(node, this.c.expressions.check(right)),
+                (target, type) => assign(target, this.c.widen(type)),
+                { evaluate, inferField: true }
+              )
+            );
+          },
+          destructure: (pattern, right, assign, evaluate) =>
+            this.c.silently(() =>
+              this.c.assignments.assignmentTargets(
+                pattern,
+                this.c.assignments.assignmentValueType(right, pattern),
+                (target, type) => assign(target, this.c.widen(type)),
+                { evaluate, inferField: true }
+              )
+            ),
+        })
+      : [];
+  }
+
+  private accessorType(getter: TreeNode | undefined, setter: TreeNode | undefined): Type {
+    if (getter) {
+      const signature = this.c.signatures.signatureOf(getter);
+      return signature.returnType();
+    }
+    if (setter) {
+      const signature = this.c.signatures.signatureOf(setter);
+      return signature.parameters[0]?.type ?? anyType;
+    }
+    return anyType;
+  }
+
+  classExpression(node: TreeNode): Type {
+    const info = this.classInfoOfNode(node);
+    this.c.classDeclarations.checkClass(node);
+    return this.valueTypeOf(info);
+  }
+
+  // this ---------------------------------------------------------------------------------------------------------
+
+  private readonly thisStack: (Type | undefined)[] = [];
+
+  withThis<T>(type: Type | undefined, run: () => T): T {
+    this.thisStack.push(type);
+    try {
+      return run();
+    } finally {
+      this.thisStack.pop();
+    }
+  }
+
+  /** The `this` types of object literal methods, by method, for return types inferred later. */
+  private readonly objectThisByMethod = new Map<number, Type>();
+
+  withObjectThis<T>(object: Type, run: () => T, method?: TreeNode): T {
+    if (method) this.registerObjectThis(method, object);
+    this.objectThis.push(object);
+    try {
+      return run();
+    } finally {
+      this.objectThis.pop();
+    }
+  }
+
+  registerObjectThis(method: TreeNode, object: Type): void {
+    this.objectThisByMethod.set(method.id, object);
+  }
+
+  /** The `this` types functions take from their contextual signatures, by function. */
+  private readonly contextualThisByFunction = new Map<number, Type>();
+
+  registerContextualThis(node: TreeNode, type: Type | undefined): void {
+    if (type) this.contextualThisByFunction.set(node.id, type);
+    else this.contextualThisByFunction.delete(node.id);
+  }
+
+  thisContextId(node: TreeNode): number {
+    const owner = this.thisOwner(node);
+    const ownerThis = owner && (this.contextualThisByFunction.get(owner.id) ?? this.objectThisByMethod.get(owner.id));
+    return ownerThis?.id ?? this.thisStack.at(-1)?.id ?? 0;
+  }
+
+  /** The node that decides what `this` is at `node`: a class member, a function, or the program. */
+  private thisOwner(node: TreeNode): TreeNode | undefined {
+    for (let current = node.parent; current; current = current.parent) {
+      switch (current.type) {
+        case 'function_declaration':
+        case 'function_expression':
+        case 'method_definition':
+        case 'class_static_block': {
+          return current;
+        }
+        case 'field_definition': {
+          return current;
+        }
+        case 'class_heritage': {
+          // The heritage is evaluated outside the class.
+          current = current.parent ?? current;
+          break;
+        }
+        default: {
+          break;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  thisOwnerId(node: TreeNode): number {
+    return this.thisOwner(node)?.id ?? 0;
+  }
+
+  explicitThisType(node: TreeNode): Type | undefined {
+    const owner = this.thisOwner(node);
+    if (!owner) return undefined;
+    return (
+      this.thisParameterType(owner) ??
+      (owner.parent?.type === 'class_body' ? this.thisTypeOfExpression(node) : undefined)
+    );
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- Checks explicit, contextual, class, and script receivers in their source scopes.
+  thisTypeOfExpression(node: TreeNode): Type {
+    const owner = this.thisOwner(node);
+    if (!owner) return this.globalThisType(node);
+    const thisParameter = this.thisParameterType(owner);
+    if (thisParameter) return thisParameter;
+    const parent = owner.parent;
+    const objectMethod = owner.type === 'method_definition' && parent?.type === 'object';
+    if (!isInParameterInitializer(node, owner)) {
+      const inferred = this.contextualThisByFunction.get(owner.id) ?? this.objectThisByMethod.get(owner.id);
+      if (inferred) return inferred;
+      if (objectMethod) return this.objectThis.at(-1) ?? anyType;
+    }
+    if (
+      (owner.type === 'method_definition' ||
+        owner.type === 'field_definition' ||
+        owner.type === 'class_static_block') &&
+      parent?.type === 'class_body'
+    ) {
+      const classNode = parent.parent as TreeNode;
+      const info = this.classInfoOfNode(classNode);
+      const isStatic = owner.type === 'class_static_block' || hasToken(owner, 'static');
+      this.checkConstructorReceiver(node, owner, classNode, 'this');
+      return isStatic ? info.staticType : this.selfType(info);
+    }
+    if (objectMethod || owner.type === 'function_declaration' || owner.type === 'function_expression') {
+      this.c.error(node, "'this' の型が暗黙に any になります。型の注釈がないためです。");
+      return anyType;
+    }
+    return anyType;
+  }
+
+  /** TypeScript checks top-level `this` as `typeof globalThis`. CommonJS supplies `module.exports` at runtime. */
+  private globalThisType(node: TreeNode): Type {
+    for (let current = node.parent; current; current = current.parent) {
+      if (current.type !== 'arrow_function') continue;
+      this.c.error(node, "アロー関数が、グローバルの 'this' の値を取り込んでいます。");
+      break;
+    }
+    this.globalThis ??= anonymousObject(() => this.globalThisStructure(), { aliasName: 'typeof globalThis' });
+    return this.globalThis;
+  }
+
+  /** The members of `globalThis`: the global `var` declarations and functions, of the library and of the script. */
+  private globalThisStructure(): Structure {
+    const structure = emptyStructure();
+    for (const symbol of this.c.libraryBinder.moduleScope.values.values()) {
+      if (symbol.unsupported || !globalThisValueKinds.has(symbol.valueKind ?? 'let')) continue;
+      structure.properties.set(symbol.name, {
+        ...simpleProperty(symbol.name, anyType),
+        type: () => this.c.expressions.valueTypeOf(symbol),
+        declaration: symbol.valueDeclaration,
+      });
+    }
+    return structure;
+  }
+
+  private thisParameterType(owner: TreeNode): Type | undefined {
+    const parameters = owner.childForFieldName('parameters');
+    const first = parameters ? named(parameters)[0] : undefined;
+    if (first?.childForFieldName('pattern')?.type === 'this')
+      return this.c.typeNodes.annotationType(first.childForFieldName('type'));
+    return undefined;
+  }
+
+  private checkConstructorReceiver(
+    node: TreeNode,
+    owner: TreeNode,
+    classNode: TreeNode,
+    receiver: 'this' | 'super'
+  ): void {
+    if (!isClassConstructor(owner) || !this.extendsClause(classNode) || this.extendsNull(classNode)) return;
+    for (let current = node.parent; current && current.id !== owner.id; current = current.parent)
+      if (current.type === 'arrow_function') return;
+    const state = this.c.flow.current;
+    if (state && !state.dead && !state.superCalled)
+      this.c.error(
+        node,
+        receiver === 'this'
+          ? "派生クラスのコンストラクタでは、'this' を使う前に 'super' を呼び出してください。"
+          : "派生クラスのコンストラクタでは、'super' のプロパティを使う前に 'super' を呼び出してください。"
+      );
+  }
+
+  checkThisTypePlacements(root: TreeNode): void {
+    for (const node of root.descendantsOfType('this_type'))
+      if (!this.thisTypeContainer(node)) this.reportInvalidThisType(node);
+  }
+
+  thisTypeAt(node: TreeNode): Type {
+    const receiver = this.thisTypeInScope(node);
+    if (receiver) return receiver;
+    this.reportInvalidThisType(node);
+    return errorType;
+  }
+
+  thisTypeInScope(node: TreeNode): Type | undefined {
+    const container = this.thisTypeContainer(node);
+    if (container && classTypes.has(container.type)) return this.selfType(this.classInfoOfNode(container));
+    if (container?.type === 'interface_declaration') {
+      const name = container.childForFieldName('name')?.text;
+      const symbol = name ? this.c.scopeOf(container).lookupType(name) : undefined;
+      const type = symbol ? this.c.typeNodes.declaredTypeOf(symbol) : anyType;
+      return type.kind === 'object' ? (type.thisType ?? type) : type;
+    }
+    return undefined;
+  }
+
+  private thisTypeContainer(node: TreeNode): TreeNode | undefined {
+    for (let current = node.parent; current; current = current.parent) {
+      if (
+        this.blocksThisType(current, node) ||
+        classTypes.has(current.type) ||
+        current.type === 'interface_declaration'
+      )
+        return undefined;
+      const parent = current.parent;
+      if (parent?.type === 'class_body' || parent?.type === 'interface_body') return parent.parent ?? undefined;
+    }
+    return undefined;
+  }
+
+  private blocksThisType(container: TreeNode, node: TreeNode): boolean {
+    if (
+      ['function_declaration', 'function_expression', 'function_signature', 'class_static_block'].includes(
+        container.type
+      )
+    )
+      return true;
+    if (
+      ![
+        'field_definition',
+        'method_definition',
+        'method_signature',
+        'abstract_method_signature',
+        'property_signature',
+        'index_signature',
+      ].includes(container.type)
+    )
+      return false;
+    if (hasToken(container, 'static')) return true;
+    if (isClassConstructor(container)) {
+      const body = container.childForFieldName('body');
+      return !body || !isWithin(node, body);
+    }
+    return (
+      container.type !== 'index_signature' &&
+      (container.parent?.type === 'object' || container.parent?.type === 'object_type')
+    );
+  }
+
+  private reportInvalidThisType(node: TreeNode): void {
+    this.c.errorWhileResolving(node, "'this' 型は、クラスかインターフェースの非静的なメンバーの中でしか使えません。");
+  }
+
+  // super --------------------------------------------------------------------------------------------------------
+
+  private enclosingClass(node: TreeNode): TreeNode | undefined {
+    for (let current = node.parent; current; current = current.parent) {
+      if (current.type === 'class_body') return current.parent ?? undefined;
+    }
+    return undefined;
+  }
+
+  /** The base type for a `super` property or index access: the base instance type, or the base class in static code. */
+  superType(node: TreeNode): Type {
+    const classNode = this.enclosingClass(node);
+    const base = classNode ? this.baseInstanceType(classNode) : undefined;
+    if (!classNode || !base) {
+      this.c.error(node, "'super' は派生クラスの中でしか使えません。");
+      return errorType;
+    }
+    const owner = this.thisOwner(node);
+    if (!owner) return base;
+    if (isClassConstructor(owner) && this.inConstructorArguments(node, owner)) {
+      this.c.error(node, "コンストラクタの引数では 'super' を参照できません。");
+      return errorType;
+    }
+    this.checkConstructorReceiver(node, owner, classNode, 'super');
+    return owner.type === 'class_static_block' || hasToken(owner, 'static')
+      ? (this.baseStaticType(classNode) ?? anyType)
+      : base;
+  }
+
+  /** Reports, in a field initializer or a static block, a class member read before it is initialized. */
+  checkInitializedBefore(node: TreeNode, objectNode: TreeNode, property: Property): void {
+    if (isUsedBeforeInitialization(node, objectNode, property))
+      this.c.error(
+        node.childForFieldName('property') ?? node,
+        `プロパティ '${property.name}' は、初期化される前に使われています。`
+      );
+  }
+
+  superCall(node: TreeNode, args: TreeNode[]): Type {
+    const classNode = this.enclosingClass(node);
+    const baseStatic = classNode ? this.baseStaticType(classNode) : undefined;
+    const owner = this.c.functions.contexts.at(-1)?.node;
+    const isConstructor = !!owner && isClassConstructor(owner);
+    const inArguments = isConstructor && this.inConstructorArguments(node, owner);
+    if (!baseStatic || !isConstructor || inArguments) {
+      for (const arg of args) this.c.expressions.check(arg);
+      this.c.error(
+        node,
+        inArguments
+          ? "コンストラクタの引数では 'super' を参照できません。"
+          : "'super' の呼び出しは、派生クラスのコンストラクタの中でしか書けません。"
+      );
+      return voidType;
+    }
+    const signatures = (this.baseConstructSignatures(classNode as TreeNode) ?? []).map((signature) => ({
+      ...signature,
+      isAbstract: false,
+    }));
+    // An `any` base takes any arguments, and the `extends` clause reports type arguments no base signature takes.
+    if (signatures.length > 0)
+      this.c.expressions.calls.resolveWith(node, node.childForFieldName('function') as TreeNode, signatures, args);
+    else for (const arg of args) this.c.expressions.check(arg);
+    if (this.c.flow.current) this.c.flow.current.superCalled = true;
+    return voidType;
+  }
+
+  private inConstructorArguments(node: TreeNode, constructor: TreeNode): boolean {
+    for (let current = node.parent; current && current.id !== constructor.id; current = current.parent) {
+      if (current.type === 'arrow_function') return false;
+      if (current.type === 'formal_parameters') return current.parent?.id === constructor.id;
+    }
+    return false;
+  }
+
+  // Accessibility ------------------------------------------------------------------------------------------------
+
+  checkPropertyAccessibility(
+    node: TreeNode,
+    propertyNode: TreeNode,
+    receiver: { node: TreeNode; type: Type },
+    property: Property,
+    isWrite: boolean
+  ): void {
+    const objectNode = receiver.node;
+    if (!property.declaringClass || (objectNode.type === 'super' && this.reportSuperAccess(propertyNode, property)))
+      return;
+    const visibility = (isWrite ? property.writeVisibility : undefined) ?? property.visibility;
+    if (visibility === 'public') return;
+    const enclosingClasses: ClassInfo[] = [];
+    for (let enclosing = this.enclosingClass(node); enclosing; enclosing = this.enclosingClass(enclosing))
+      enclosingClasses.push(this.classInfoOfNode(enclosing));
+    const declaring = property.declaringClass;
+    if (visibility === 'private') {
+      if (!enclosingClasses.some((enclosing) => enclosing.declaration.id === declaring.declaration.id)) {
+        this.c.error(
+          propertyNode,
+          `プロパティ '${property.name}' は private なので、クラス '${declaring.name}' の中でしか使えません。`
+        );
+      }
+      return;
+    }
+    const enclosingInfo = enclosingClasses.find((enclosing) => this.derivesFrom(enclosing, declaring));
+    if (!enclosingInfo) {
+      this.c.error(
+        propertyNode,
+        `プロパティ '${property.name}' は protected なので、クラス '${declaring.name}' とその派生クラスの中でしか使えません。`
+      );
+      return;
+    }
+    if (
+      objectNode.type === 'super' ||
+      objectNode.type === 'this' ||
+      (property.declaration && hasToken(property.declaration, 'static'))
+    )
+      return;
+    if (!this.isReceiverDerivedFrom(receiver.type, enclosingInfo)) {
+      this.c.error(
+        propertyNode,
+        `プロパティ '${property.name}' は protected なので、クラス '${enclosingInfo.name}' のインスタンスからしか使えません。`
+      );
+    }
+  }
+
+  /**
+   * Whether a receiver of a protected instance member is an instance of the enclosing class, as TypeScript's
+   * `hasBaseType` decides: a type parameter by its constraint, an intersection by any member, and never a union.
+   */
+  private isReceiverDerivedFrom(type: Type, enclosing: ClassInfo): boolean {
+    const pending = [type];
+    const visited = new Set<number>();
+    while (pending.length > 0) {
+      const current = pending.pop() as Type;
+      if (visited.has(current.id)) continue;
+      visited.add(current.id);
+      this.c.budget.spend();
+      if (current.kind === 'intersection') pending.push(...current.types);
+      else if (current.kind === 'typeParameter') {
+        const constraint = this.c.constraintOf(current);
+        if (constraint) pending.push(constraint);
+      } else if (current.kind === 'object') {
+        const info = this.classInfoOfType(current);
+        if (!info) pending.push(...this.c.typeNodes.interfaceBases.ofType(current));
+        else if (this.derivesFrom(info, enclosing)) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Reports, through `super`, an abstract member or an instance field, which lives on the instance instead of the prototype. */
+  private reportSuperAccess(propertyNode: TreeNode, property: Property): boolean {
+    if (property.isAbstract) {
+      this.c.error(propertyNode, `抽象メソッド '${property.name}' は、'super' からは使えません。`);
+      return true;
+    }
+    const declaration = property.declaration;
+    if (declaration?.type !== 'field_definition' || hasToken(declaration, 'static')) return false;
+    this.c.error(propertyNode, `親クラスのフィールド '${property.name}' は、子クラスから 'super' では使えません。`);
+    return true;
+  }
+
+  private classInfoOfType(type: Type): ClassInfo | undefined {
+    if (type.kind !== 'object') return undefined;
+    return type.classInfo ?? type.target?.classInfo;
+  }
+
+  derivesFrom(info: ClassInfo, base: ClassInfo): boolean {
+    const pending = [info];
+    const visited = new Set<number>();
+    for (let current = pending.pop(); current; current = pending.pop()) {
+      if (current.declaration.id === base.declaration.id) return true;
+      if (visited.has(current.declaration.id)) continue;
+      visited.add(current.declaration.id);
+      this.c.budget.spend();
+      const inherited = this.baseStaticType(current.declaration);
+      if (inherited) pending.push(...this.baseClassConstituents(inherited));
+    }
+    return false;
+  }
+
+  private baseClassConstituents(type: Type): ClassInfo[] {
+    const apparent = this.c.apparentType(type);
+    if (apparent.kind === 'intersection') return apparent.types.flatMap((member) => this.baseClassConstituents(member));
+    const info = this.classInfoOfType(apparent);
+    return info ? [info] : [];
+  }
+
+  /**
+   * Reports `new` of a class whose constructor, its own or the one it inherits, is private or protected, outside the
+   * class declaring that constructor (or, for a protected one, the classes derived from it).
+   */
+  checkConstructorAccessibility(node: TreeNode, signature: Signature): void {
+    const ctor = this.restrictedDeclaration(signature.declaration);
+    if (!ctor || isWithin(node, ctor.classNode)) return;
+    const declaring = this.classInfoOfNode(ctor.classNode);
+    const enclosing = this.enclosingClass(node);
+    if (ctor.visibility === 'protected' && enclosing && this.derivesFrom(this.classInfoOfNode(enclosing), declaring))
+      return;
+    this.c.error(
+      node,
+      `クラス '${declaring.name}' のコンストラクタは ${ctor.visibility} なので、クラスの宣言の中でしか使えません。`
+    );
+  }
+
+  constructorVisibilitiesCompatible(source: Signature | undefined, target: Signature | undefined): boolean {
+    if (!source?.declaration || !target?.declaration) return true;
+    const actual = this.restrictedDeclaration(source.declaration)?.visibility;
+    const expected = this.restrictedDeclaration(target.declaration)?.visibility;
+    return expected === 'private' || (expected === 'protected' ? actual !== 'private' : actual === undefined);
+  }
+
+  /** The private or protected constructor of the first construct signature of `type`. */
+  restrictedConstructor(type: Type): RestrictedConstructor | undefined {
+    return this.restrictedDeclaration(this.c.signaturesOf(type, 'construct')[0]?.declaration);
+  }
+
+  private restrictedDeclaration(declaration: TreeNode | undefined): RestrictedConstructor | undefined {
+    const classNode = declaration?.parent?.parent;
+    if (!isConstructorName(declaration?.childForFieldName('name')) || !classNode || !classTypes.has(classNode.type))
+      return undefined;
+    const visibility = this.visibilityOf(declaration);
+    return visibility === 'public' ? undefined : { classNode, visibility };
+  }
+
+  /** Whether assigning to a property is an error: it is read-only, outside its class's constructor. */
+  isReadonlyFor(property: Property, expression: TreeNode, objectNode: TreeNode): boolean {
+    if (!property.readonly) return false;
+    if (objectNode.type !== 'this' || !property.declaringClass) return true;
+    const owner = this.thisOwner(expression);
+    if (!owner) return true;
+    // An arrow function that is not immediately invoked may run after construction.
+    for (let current = expression.parent; current && current.id !== owner.id; current = current.parent) {
+      if (current.type === 'arrow_function' && !isImmediatelyInvoked(current)) return true;
+    }
+    if (!isClassConstructor(owner)) return true;
+    const classNode = owner.parent?.parent;
+    return classNode?.id !== property.declaringClass.declaration.id;
+  }
+
+  privateProperty(node: TreeNode, propertyNode: TreeNode, objectType: Type): Property | undefined {
+    const name = propertyNode.text;
+    const declaring = this.privateNameDeclarer(node, name);
+    const property = declaring && this.c.propertyOf(objectType, privateMemberKey(name, declaring));
+    if (property) return property;
+    const declaredElsewhere = [...this.c.structureOf(objectType).properties.values()].some(
+      (member) => member.isPrivateName && member.name === name
+    );
+    this.c.error(
+      propertyNode,
+      declaredElsewhere || !declaring
+        ? `プロパティ '${name}' は、それを宣言したクラスの外では使えません。`
+        : `プロパティ '${name}' は型 '${this.c.print(objectType)}' にありません。`
+    );
+    return undefined;
+  }
+
+  /** The key a property access's name has in class structures, where a `#name` is the one its enclosing classes declare. */
+  propertyKey(node: TreeNode, propertyNode: TreeNode): string {
+    const name = propertyNode.text;
+    if (propertyNode.type === 'computed_property_name') {
+      const names = this.c.silently(() => this.c.patterns.propertyNames(propertyNode));
+      return names?.length === 1 ? names[0] : name;
+    }
+    if (propertyNode.type !== 'private_property_identifier') return propertyNameText(propertyNode) ?? name;
+    const declaring = this.privateNameDeclarer(node, name);
+    return declaring ? privateMemberKey(name, declaring) : name;
+  }
+
+  privateNameBrand(node: TreeNode): Type | undefined {
+    const declaration = this.privateNameDeclaration(node, node.text);
+    const classNode = declaration?.parent?.parent;
+    if (!declaration || !classNode) return undefined;
+    const info = this.classInfoOfNode(classNode);
+    return hasToken(declaration, 'static') ? info.staticType : info.instanceType;
+  }
+
+  private privateNameDeclarer(node: TreeNode, name: string): ClassInfo | undefined {
+    const classNode = this.privateNameDeclaration(node, name)?.parent?.parent;
+    return classNode ? this.classInfoOfNode(classNode) : undefined;
+  }
+
+  private privateNameDeclaration(node: TreeNode, name: string): TreeNode | undefined {
+    for (let classNode = this.enclosingClass(node); classNode; classNode = this.enclosingClass(classNode)) {
+      const body = classNode.childForFieldName('body');
+      const declaration =
+        body &&
+        named(body).find((member) => {
+          const property = member.childForFieldName('name');
+          return property?.type === 'private_property_identifier' && property.text === name;
+        });
+      if (declaration) return declaration;
+    }
+    return undefined;
+  }
+
+  // Flow ---------------------------------------------------------------------------------------------------------
+
+  /** The flow state at the start of a function's body: a constructor starts with its fields unassigned. */
+  initialFlow(node: TreeNode): State {
+    void node;
+    return new FlowState();
+  }
+}
+
+export { anonymousObject };
+
+function isInParameterInitializer(node: TreeNode, owner: TreeNode): boolean {
+  for (let parent = node.parent; parent && parent.id !== owner.id; parent = parent.parent) {
+    if (parent.type === 'arrow_function') return false;
+    if (parent.type === 'required_parameter' || parent.type === 'optional_parameter') return true;
+  }
+  return false;
+}
+
+/** The part of a field's type for which `&&=`, `||=`, or `??=` skips assigning it, or undefined for none. */
+function skippedType(c: Checker, operator: string, type: Type): Type | undefined {
+  const skipped =
+    operator === '??=' ? c.relations.removeNullish(type) : c.flow.narrowByTruthiness(type, operator === '||=');
+  return isIntrinsic(skipped, 'never') ? undefined : skipped;
+}

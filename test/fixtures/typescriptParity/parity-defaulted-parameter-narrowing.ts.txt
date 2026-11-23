@@ -1,0 +1,9 @@
+function f(x: number | undefined = 5) { return x.toFixed(); }
+const a = (s: string | undefined = "a") => s.length;
+class M { k(n: number | undefined = 1): number { return n; } }
+function m(x: number | undefined = 5) { const y: number = x; return y; }
+function n(x: number | undefined = 5) { return () => x.toFixed(); }
+const cb: (x: number | undefined) => string = (x = 5) => x.toFixed();
+function t(x: number | undefined = 5) { x = 3; x = undefined; return x; }
+function z(x: number | undefined = 5) { if (x === undefined) { return 0; } return x; }
+console.log(f(), f(undefined), f(2), a(), a("xyz"), new M().k(), m(), n()(), cb(undefined), t(), z());

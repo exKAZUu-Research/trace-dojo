@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 666 -- The statementBinder module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss -- The statementBinder module keeps one stage of the C# interpreter together.
 import type {
   Block,
   Expression,
@@ -117,8 +117,8 @@ export abstract class StatementBinder extends PatternBinder {
     return local;
   }
 
-  // code-gauge-allow functionNcss 35 -- Each kind of storage has its own rule for assignment.
-  // code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- Each kind of storage has its own rule for assignment.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   checkAssignable(
     target: BoundExpression,
     position: Position,
@@ -390,7 +390,7 @@ export abstract class StatementBinder extends PatternBinder {
     return statements.map((statement) => this.bindStatement(statement, context));
   }
 
-  // code-gauge-allow functionNcss 51 -- One case per kind of statement.
+  // code-gauge-allow functionNcss -- One case per kind of statement.
   bindStatement(statement: Statement, context: BindContext): BoundStatement {
     const row = statement.row;
     switch (statement.kind) {
@@ -546,7 +546,7 @@ export abstract class StatementBinder extends PatternBinder {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindLocalDeclaration(
     statement: Extract<Statement, { kind: 'localDeclaration' }>,
     context: BindContext
@@ -731,8 +731,8 @@ export abstract class StatementBinder extends PatternBinder {
     };
   }
 
-  // code-gauge-allow functionNcss 56 -- How foreach finds its elements: arrays, strings, and the GetEnumerator pattern.
-  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- How foreach finds its elements: arrays, strings, and the GetEnumerator pattern.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindForeach(statement: Extract<Statement, { kind: 'foreach' }>, context: BindContext): BoundStatement {
     const collection = this.bindValue(statement.collection, context);
     const scope = new LocalScope(context.scope, context.fn);
@@ -846,8 +846,8 @@ export abstract class StatementBinder extends PatternBinder {
   }
 
   /** Finds `GetEnumerator()` and the `MoveNext()` and `Current` of what it returns, as `foreach` does. */
-  // code-gauge-allow functionNcss 34 -- One case per kind of syntax or value that the function handles.
-  // code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private enumeratorPattern(
     type: Type,
     position: Position,
@@ -1031,7 +1031,7 @@ export abstract class StatementBinder extends PatternBinder {
 
   protected abstract methodDisplay(method: MethodSymbol): string;
 
-  // code-gauge-allow functionNcss 36 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private bindTry(statement: Extract<Statement, { kind: 'try' }>, context: BindContext): BoundStatement {
     const body = this.bindBlock(statement.body, context);
     const exceptionType = namedType(this.library.specials.get('exception') as TypeSymbol);

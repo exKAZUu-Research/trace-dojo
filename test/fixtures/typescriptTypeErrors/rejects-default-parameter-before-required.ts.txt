@@ -1,0 +1,17 @@
+class Greeter {
+  greet(name = "you") {
+    return `Hello, ${name}`;
+  }
+}
+class LoudGreeter extends Greeter {
+  greet(name = "you", times: number) {
+    return `HELLO, ${name}`.repeat(times);
+  }
+}
+const handler: (value?: number) => void = (value = 1, label: string) => {};
+function pad(width = 2, text: string) {
+  return text.padStart(width);
+}
+const formatter: (text: string) => string = pad;
+const strict: (width: number | undefined, text: string) => string = pad;
+console.log(strict(undefined, "a"));

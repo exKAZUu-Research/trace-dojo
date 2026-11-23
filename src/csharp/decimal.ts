@@ -151,7 +151,7 @@ export class CsDecimal {
   }
 
   /** Rounds to a number of decimal places, ties to even or away from zero, as `Math.Round` does. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   round(decimals: number, mode: 'even' | 'awayFromZero' | 'down' | 'floor' | 'ceiling'): CsDecimal {
     if (this.scale <= decimals) return this;
     const divisor = 10n ** BigInt(this.scale - decimals);

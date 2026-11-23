@@ -1,0 +1,69 @@
+(1,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type 'string' is not assignable to type 'number'.
+(2,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type 'string' is not assignable to type 'number'.
+(3,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type 'string' is not assignable to type 'number'.
+(4,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type 'string' is not assignable to type 'number'.
+(5,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '"invalid"' is not assignable to type 'keyof NumberFormatOptionsStyleRegistry | undefined'.
+(6,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '"invalid"' is not assignable to type 'keyof NumberFormatOptionsCurrencyDisplayRegistry | undefined'.
+(7,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '"invalid"' is not assignable to type '"accounting" | "standard" | undefined'.
+(8,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type 'number' is not assignable to type '"false" | "true" | boolean | keyof NumberFormatOptionsUseGroupingRegistry | undefined'.
+(9,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '"invalid"' is not assignable to type '"compact" | "engineering" | "scientific" | "standard" | undefined'.
+(10,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '"invalid"' is not assignable to type 'keyof NumberFormatOptionsSignDisplayRegistry | undefined'.
+(11,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '"invalid"' is not assignable to type '"long" | "short" | undefined'.
+(12,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '"invalid"' is not assignable to type '"auto" | "lessPrecision" | "morePrecision" | undefined'.
+(13,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '3' is not assignable to type '1 | 2 | 5 | 10 | 20 | 25 | 50 | 100 | 200 | 250 | 500 | 1000 | 2000 | 2500 | 5000 | undefined'.
+(14,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '"invalid"' is not assignable to type '"ceil" | "expand" | "floor" | "halfCeil" | "halfEven" | "halfExpand" | "halfFloor" | "halfTrunc" | "trunc" | undefined'.
+(15,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '"invalid"' is not assignable to type '"auto" | "stripIfInteger" | undefined'.
+(16,29): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type 'string' is not assignable to type 'boolean | undefined'.
+(17,29): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '"invalid"' is not assignable to type '"search" | "sort" | undefined'.
+(18,29): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '"invalid"' is not assignable to type '"false" | "lower" | "upper" | undefined'.
+(19,29): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '"invalid"' is not assignable to type '"accent" | "base" | "case" | "variant" | undefined'.
+(20,29): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type 'string' is not assignable to type 'boolean | undefined'.
+(21,29): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '"invalid"' is not assignable to type '"big5han" | "compat" | "default" | "dict" | "direct" | "ducet" | "emoji" | "eor" | "gb2312" | "phonebk" | "phonetic" | "pinyin" | "reformed" | "searchjl" | "stroke" | "trad" | "unihan" | "zhuyin" | undefined'.
+(22,26): error TS2322: Type 'string' is not assignable to type 'boolean | undefined'.
+(23,26): error TS2322: Type '"invalid"' is not assignable to type '"full" | "long" | "medium" | "short" | undefined'.
+(24,23): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type '1' is not assignable to parameter of type 'string | string[] | undefined'.
+(25,21): error TS2345: Argument of type '1' is not assignable to parameter of type 'LocalesArgument'.

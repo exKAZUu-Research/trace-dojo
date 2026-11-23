@@ -1,0 +1,10 @@
+type Digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
+type Letters = "a" | "b";
+type Wide<T extends string> = `${T}${T}${T}${T}${T}`;
+type Empty = `${never}${Digit}${Digit}${Digit}${Digit}${Digit}`;
+interface Container<T extends string> { text: Wide<T> }
+function read(item: Container<Letters>) { return item.text; }
+function empty(value: Empty): never { return value; }
+const valid: Wide<Letters> = "ababa";
+const small: Wide<"3"> = "33333";
+console.log(valid, small, read({ text: "aabba" }));

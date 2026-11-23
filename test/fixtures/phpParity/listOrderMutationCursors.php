@@ -1,0 +1,1 @@
+<?php $a=['a','b','c','d'];$n=0;foreach($a as $k=>&$v){echo $k,':',$v,';';array_shift($a);if(++$n===4)break;}unset($v);var_dump($a);$a=['a','b','c'];$n=0;foreach($a as $k=>&$v){echo $k,':',$v,';';array_unshift($a,'x');if(++$n===3)break;}unset($v);var_dump($a);$b=$a;array_shift($b);$b['z']=1;var_dump(array_keys($a),array_keys($b));

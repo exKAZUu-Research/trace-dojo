@@ -1,0 +1,21 @@
+const x = 2;
+let n: any = 3;
+console.log(-x ** 2);
+console.log(+x ** 2);
+console.log(~x ** 2);
+console.log(<number>x ** 2);
+console.log(!x ** 2);
+console.log(typeof x ** 2);
+console.log(void n ** 2);
+console.log(delete n.p ** 2);
+async function power() {
+  console.log(await n ** 2);
+}
+console.log(-x ** 2 ** 2);
+console.log(2 ** -x ** 2);
+console.log(1 + -x ** 2);
+const b = 4, a = 1, c = 2;
+console.log(-b ** 2 + 4 * a * c);
+console.log(-x
+  ** 2);
+console.log((-x) ** 2, x ** -2, -(x ** 2), 2 ** -x, ++n ** 2, n++ ** 2, (n as number) ** 2);

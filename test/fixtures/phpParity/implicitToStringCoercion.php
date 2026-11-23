@@ -1,0 +1,1 @@
+<?php class A{public $id=7;function __toString(){return $this->id;}}echo 'B'.new A,'|',strlen(new A),'|';class B{function __toString(){return 5.5;}}echo new B,'|',strlen(new B),'|';class C{function __toString(){return true;}}echo new C;

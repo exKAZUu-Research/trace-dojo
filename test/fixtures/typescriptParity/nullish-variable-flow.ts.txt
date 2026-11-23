@@ -1,0 +1,25 @@
+let first = null;
+console.log(first);
+first = String(1);
+console.log(first.toUpperCase());
+var second = undefined;
+second = Number(2);
+console.log(second.toFixed(1));
+function capture() {
+  let value = null;
+  value = "done";
+  return () => value.toUpperCase();
+}
+console.log(capture()());
+
+type GlobalUndefined = typeof undefined;
+const missing: GlobalUndefined = undefined;
+{
+  let undefined = 5;
+  undefined++;
+  console.log(undefined.toFixed(1));
+}
+function shadowedUndefined(undefined: number) {
+  return undefined.toFixed(1);
+}
+console.log(shadowedUndefined(7), missing);

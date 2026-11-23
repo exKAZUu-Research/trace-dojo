@@ -214,7 +214,7 @@ export function formatFloat(value: number, spec: Spec, original: PyValue): strin
 }
 
 /** The digits of a finite float in the presentation type of a specification, without a sign. */
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per float presentation type.
+// code-gauge-allow functionCognitiveComplexity -- One case per float presentation type.
 function finiteText(value: number, spec: Spec, upper: boolean): string {
   const { type, precision, alternate } = spec;
   const decimal = exactDecimal(value);
@@ -239,7 +239,7 @@ export function chargePrecision(precision: number | undefined): void {
 }
 
 /** The 'g' presentation, and the default one with a precision, which keeps at least one fractional digit. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows the rules of the g presentation type.
+// code-gauge-allow functionCognitiveComplexity -- Follows the rules of the g presentation type.
 function generalText(
   decimal: Decimal,
   precision: number,

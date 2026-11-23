@@ -1,0 +1,5 @@
+function make(flag: boolean) {
+  return flag ? { kind: "x", size: 1 } : { kind: "y" };
+}
+const m = make(true);
+console.log(m.size);

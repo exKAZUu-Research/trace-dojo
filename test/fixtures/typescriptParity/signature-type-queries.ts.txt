@@ -1,0 +1,82 @@
+let value: string | number = 'a';
+
+function declaration(argument: typeof value) { return argument; }
+function numberResult(): typeof value { return 1; }
+const arrow = (argument: typeof value) => argument;
+const expression = function(argument: typeof value) { return argument; };
+const object = {method(argument: typeof value) { return argument; }};
+const callback: (argument: typeof value) => void = (argument) => console.log(argument);
+interface Signature {
+  method(argument: typeof value): void;
+  (argument: typeof value): void;
+}
+function typeCheckSignature(signature: Signature) { signature(1); signature.method(1); }
+class Fields {
+  initialized: typeof value = 1;
+  method(argument: typeof value) { return argument; }
+}
+class Overloads {
+  method(argument: typeof value): typeof value;
+  method(argument: typeof value) { return argument; }
+}
+function local() {
+  let variable: string | number = 'local';
+  const closure = (argument: typeof variable) => argument;
+  function declared(argument: typeof variable) { return argument; }
+  const captured = function(argument: typeof variable) { return argument; };
+  const method = {invoke(argument: typeof variable) { return argument; }};
+  const expression = class {invoke(argument: typeof variable) {return argument;}};
+  class Field {value: typeof variable = 1;}
+  console.log(closure('a'), declared(1), captured('b'), method.invoke('c'), new expression().invoke('d'), new Field().value);
+}
+const record: {member: string | number} = {member: 'text'};
+if (typeof record.member === 'string') {
+  type Local = typeof record.member;
+  const text: Local = 'alias';
+  function read(argument: typeof record.member) { return argument; }
+  console.log(text, read(2));
+}
+value = 1;
+function afterAssignment(argument: typeof value): typeof value { return argument; }
+console.log(declaration(1), numberResult(), arrow(2), expression(3), object.method(4), new Fields().initialized,
+  new Fields().method(5), new Overloads().method(6), afterAssignment('text'));
+callback(7);
+local();
+const stable: string | number = 'module';
+var scriptVar: string | number = 'module';
+const arrowCapture = (argument: typeof stable, vari: typeof scriptVar) => [argument, vari];
+const withDefault = function(argument: typeof stable = 'default') { return argument; };
+const nestedMethod = {nested: {method(argument: typeof stable) { return argument; }}};
+const ClassExpression = class {method(argument: typeof stable) { return argument; }};
+const returnCapture = (): typeof stable => 'result';
+const chained = () => {
+  const inner = (argument: typeof stable) => argument;
+  return inner('inner');
+};
+function declarationBoundary() {
+  const inner = (argument: typeof stable) => argument;
+  return inner(8);
+}
+const arrowBoundary = () => {
+  function inner(argument: typeof stable) { return argument; }
+  return inner(9);
+};
+console.log(...arrowCapture('arrow', 1), withDefault(), nestedMethod.nested.method('method'),
+  new ClassExpression().method('class'), returnCapture(), chained(), declarationBoundary(), arrowBoundary());
+if (typeof record.member === 'string') {
+  const method = {call(argument: typeof record.member) { return argument; }};
+  record.member = 10;
+  console.log(method.call('captured'));
+}
+let scriptValue: string | number = 'text';
+const scriptArrow = (argument: typeof scriptValue) => argument;
+const scriptExpression = function(argument: typeof scriptValue) { return argument; };
+const scriptObject = {method(argument: typeof scriptValue) { return argument; }};
+const ScriptClass = class {method(argument: typeof scriptValue) { return argument; }};
+const scriptResult = (): typeof scriptValue => 10;
+const indirect = () => {
+  const inner = (argument: typeof scriptValue) => argument;
+  return inner(11);
+};
+console.log(scriptArrow(1), scriptExpression(2), scriptObject.method(3),
+  new ScriptClass().method(4), scriptResult(), indirect());

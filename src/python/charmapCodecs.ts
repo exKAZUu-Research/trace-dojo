@@ -60,7 +60,7 @@ export function charmapTable(module: string): string {
  * it gives each run of unencodable characters to the error handler at once and encodes the replacement through the
  * mapping, failing for the whole run when the mapping cannot encode it either.
  */
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows charmap_encoding_error, which encodes each replacement through the mapping.
+// code-gauge-allow functionCognitiveComplexity -- Follows charmap_encoding_error, which encodes each replacement through the mapping.
 function encodeCharmap(
   points: readonly number[],
   errors: ErrorHandling,
@@ -135,7 +135,7 @@ function charmapBuild(table: PyValue): PyValue {
 }
 
 /** The bytes a mapping gives a character: an EncodingMap's byte, or what `mapping[ord(char)]` gives. */
-// code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of value a mapping may give, as charmapencode_lookup checks them.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of value a mapping may give, as charmapencode_lookup checks them.
 function encodingLookup(mapping: PyValue): (point: number) => readonly number[] | undefined {
   if (mapping instanceof PyOpaque && mapping.cls === encodingMapClass) {
     const { bytes } = mapping.data as EncodingMap;
@@ -157,7 +157,7 @@ function encodingLookup(mapping: PyValue): (point: number) => readonly number[] 
 }
 
 /** The text a mapping gives a byte: the character of a table string, or what `mapping[byte]` gives. */
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of value a mapping may give, as charmap_decode_mapping checks them.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of value a mapping may give, as charmap_decode_mapping checks them.
 function decodingLookup(mapping: PyValue): (byte: number) => string | undefined {
   mapping = stringValue(mapping) ?? mapping;
   if (typeof mapping === 'string') {

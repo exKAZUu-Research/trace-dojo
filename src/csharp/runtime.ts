@@ -332,7 +332,7 @@ export class Runtime {
     return found;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private findImplementation(type: NamedType, method: MethodSymbol, face?: NamedType): MethodSymbol | undefined {
     const isInterface = method.owner.kind === 'interface';
     const exact = face && isInterface ? this.findExactImplementation(type, method, face) : undefined;

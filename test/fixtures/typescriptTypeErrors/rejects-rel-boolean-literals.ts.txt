@@ -1,0 +1,5 @@
+let t: true = true;
+const b: boolean = Math.floor(1.5) > 0;
+t = b;
+const f: false = !true;
+console.log(t, f);

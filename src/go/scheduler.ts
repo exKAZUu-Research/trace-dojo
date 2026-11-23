@@ -301,7 +301,7 @@ export function* receive(channel: Channel | undefined): Suspending<[Value, boole
 }
 
 /** `close(ch)`: wakes the goroutines waiting to receive with zero values and makes those waiting to send panic. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps channel registration and wakeup cleanup in the same select lifecycle.
+// code-gauge-allow functionCognitiveComplexity -- Keeps channel registration and wakeup cleanup in the same select lifecycle.
 export function closeChannel(channel: Channel | undefined): void {
   if (!channel) plainPanic('close of nil channel');
   if (channel.closed) plainPanic('close of closed channel');
@@ -341,7 +341,7 @@ export type SelectOp =
  * `select`: the index of the first case ready in the order written, with what a receive received, or -1 for the
  * default case when none is ready; without a default case, blocks until one is.
  */
-// code-gauge-allow functionNcss 37 -- Keeps channel registration and wakeup cleanup in the same select lifecycle.
+// code-gauge-allow functionNcss -- Keeps channel registration and wakeup cleanup in the same select lifecycle.
 export function* select(
   ops: SelectOp[],
   hasDefault: boolean

@@ -1,0 +1,8 @@
+(2,43): error TS18047: 'x' is possibly 'null'.
+(3,63): error TS18048: 'x' is possibly 'undefined'.
+(4,56): error TS18048: 'x' is possibly 'undefined'.
+(5,82): error TS18048: 'x' is possibly 'undefined'.
+(6,66): error TS18048: 'a' is possibly 'undefined'.
+(7,45): error TS18048: 'x' is possibly 'undefined'.
+(8,76): error TS18048: 'x' is possibly 'undefined'.
+(9,77): error TS18048: 'x' is possibly 'undefined'.

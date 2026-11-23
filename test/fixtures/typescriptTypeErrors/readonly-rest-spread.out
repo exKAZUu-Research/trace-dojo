@@ -1,0 +1,7 @@
+(2,6): error TS2345: Argument of type '[1, true]' is not assignable to parameter of type '[...number[], string]'.
+  Type at position 1 in source is not compatible with type at position 1 in target.
+    Type 'boolean' is not assignable to type 'string'.
+(3,1): error TS2345: Argument of type '[]' is not assignable to parameter of type '[...number[], string]'.
+  Source has 0 element(s) but target requires 1.
+(5,6): error TS2345: Argument of type '(string | number)[]' is not assignable to parameter of type '[...number[], string]'.
+  Source provides no match for required element at position 1 in target.

@@ -1,0 +1,36 @@
+class OptionalFields {
+  #amount?: number;
+  #required: number;
+  constructor(required: number, amount?: number) {
+    this.#required = required;
+    this.#amount = amount;
+  }
+  print() {
+    if (this.#amount !== undefined) console.log(this.#required.toFixed(1), this.#amount.toFixed(1));
+  }
+}
+new OptionalFields(1).print();
+new OptionalFields(2, 3).print();
+
+class Accessors {
+  get #text(): string { return "hello"; }
+  set #text(value: string | number) {}
+  static get #count(): number { return 7; }
+  static set #count(value: string | number) {}
+  print() {
+    this.#text = 1;
+    console.log(this.#text.toUpperCase());
+  }
+  static print() {
+    this.#count = "seven";
+    console.log(this.#count.toFixed(1));
+  }
+}
+new Accessors().print();
+Accessors.print();
+
+const independent = { add(this: void, number: number) { return number + 1; } };
+class Receiver {
+  add(this: void, number: number) { return number + 1; }
+}
+console.log(independent.add(2), new Receiver().add(2), independent.add.call(undefined, 2));

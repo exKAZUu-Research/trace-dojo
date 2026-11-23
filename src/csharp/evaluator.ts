@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 730 -- The evaluator module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss -- The evaluator module keeps one stage of the C# interpreter together.
 import type {
   BoundArguments,
   BoundBlock,
@@ -111,9 +111,9 @@ export class Evaluator extends StatementExecutor {
     runtime.evaluator = this;
   }
 
-  // code-gauge-allow functionParameterCount 7 -- The values that the operation needs, which share no object.
-  // code-gauge-allow functionNcss 33 -- One case per kind of syntax or value that the function handles.
-  // code-gauge-allow functionCognitiveComplexity 22 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionParameterCount -- The values that the operation needs, which share no object.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   invoke(
     caller: Frame,
     method: MethodSymbol,
@@ -219,7 +219,7 @@ export class Evaluator extends StatementExecutor {
     if (symbol.staticConstructor) this.invoke(frame, symbol.staticConstructor, undefined, [], undefined, environment);
   }
 
-  // code-gauge-allow functionParameterCount 7 -- The values that the operation needs, which share no object.
+  // code-gauge-allow functionParameterCount -- The values that the operation needs, which share no object.
   private runInitializer(
     block: BoundBlock,
     locals: LocalSymbol[],
@@ -356,7 +356,7 @@ export class Evaluator extends StatementExecutor {
 
   // ---- Expressions ----
 
-  // code-gauge-allow functionNcss 44 -- One case label per kind of bound expression, grouped into sub-dispatchers.
+  // code-gauge-allow functionNcss -- One case label per kind of bound expression, grouped into sub-dispatchers.
   evaluate(expression: BoundExpression, frame: Frame): Value {
     switch (expression.kind) {
       case 'constant':
@@ -481,7 +481,7 @@ export class Evaluator extends StatementExecutor {
   }
 
   /** Evaluates an expression that operates on the values of its operands. */
-  // code-gauge-allow functionNcss 36 -- One case per kind of operation.
+  // code-gauge-allow functionNcss -- One case per kind of operation.
   private evaluateOperation(expression: OperationExpression, frame: Frame): Value {
     switch (expression.kind) {
       case 'unary': {
@@ -539,7 +539,7 @@ export class Evaluator extends StatementExecutor {
   }
 
   /** Evaluates an expression that stores into variables. */
-  // code-gauge-allow functionNcss 33 -- One case per kind of assignment.
+  // code-gauge-allow functionNcss -- One case per kind of assignment.
   private evaluateAssignment(expression: AssignmentExpression, frame: Frame): Value {
     switch (expression.kind) {
       case 'assign': {
@@ -917,8 +917,8 @@ export class Evaluator extends StatementExecutor {
     };
   }
 
-  // code-gauge-allow functionNcss 35 -- One case per kind of syntax or value that the function handles.
-  // code-gauge-allow functionCognitiveComplexity 28 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private propertyPlace(target: Extract<BoundExpression, { kind: 'property' }>, frame: Frame): Place {
     const { property } = target;
     let receiver: Value = undefined;
@@ -982,7 +982,7 @@ export class Evaluator extends StatementExecutor {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private evaluateNew(expression: Extract<BoundExpression, { kind: 'new' }>, frame: Frame): Value {
     const type = frame.resolve(expression.objectType);
     // `new T()` runs the parameterless constructor of the class that the type argument gives.

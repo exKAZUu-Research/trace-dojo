@@ -1,6 +1,6 @@
 import type { RealmBuilder } from './realm';
 import { arrayMethod, buildArray, relativeIndex, sortComparison, toInteger } from './realmArrays';
-import type { Value } from './values';
+import type { JsArray, Value } from './values';
 
 /**
  * Defines the methods that change a copy of the array instead of the array (`toSorted`, `toReversed`, `toSpliced`, and
@@ -12,13 +12,13 @@ export function defineArrayCopies(builder: RealmBuilder): void {
   defineSplices(builder);
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function defineReorderedCopies(builder: RealmBuilder): void {
   arrayMethod(builder, 'toReversed', 0, ({ runtime }, ops) => {
     const { length } = ops;
     runtime.scan(length);
     return buildArray(runtime, (result) => {
-      for (let index = 0; index < length; index++) result.set(index, ops.get(length - index - 1));
+      for (let index = 0; index < length; index++) result.create(index, ops.get(length - index - 1));
     });
   });
   arrayMethod(builder, 'toSorted', 1, (call, ops) => {
@@ -26,11 +26,12 @@ function defineReorderedCopies(builder: RealmBuilder): void {
     const { runtime } = call;
     const { length } = ops;
     return buildArray(runtime, (result) => {
-      for (let index = 0; index < length; index++) result.set(index, ops.get(index));
+      for (let index = 0; index < length; index++) result.create(index, ops.get(index));
       runtime.scan(length * Math.ceil(Math.log2(length + 1)));
       // The host's sort places undefined last without calling the comparison, as SortCompare does.
-      const sorted = (result.array.elements as Value[]).toSorted(compare);
-      for (const [index, value] of sorted.entries()) result.set(index, value);
+      // buildArray's result is an array.
+      const sorted = ((result.array as JsArray).elements as Value[]).toSorted(compare);
+      for (const [index, value] of sorted.entries()) result.create(index, value);
     });
   });
   arrayMethod(builder, 'with', 2, ({ runtime, args }, ops) => {
@@ -40,13 +41,13 @@ function defineReorderedCopies(builder: RealmBuilder): void {
     if (actual >= length || actual < 0) runtime.throwError('RangeError', `Invalid index : ${String(relative)}`);
     runtime.scan(length);
     return buildArray(runtime, (result) => {
-      for (let index = 0; index < length; index++) result.set(index, index === actual ? args[1] : ops.get(index));
+      for (let index = 0; index < length; index++) result.create(index, index === actual ? args[1] : ops.get(index));
     });
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
-// code-gauge-allow functionNcss 38 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionNcss -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function defineSplices(builder: RealmBuilder): void {
   arrayMethod(builder, 'toSpliced', 2, ({ runtime, args }, ops) => {
     const { length } = ops;
@@ -60,9 +61,9 @@ function defineSplices(builder: RealmBuilder): void {
     runtime.scan(newLength);
     return buildArray(runtime, (result) => {
       let next = 0;
-      for (let index = 0; index < start; index++) result.set(next++, ops.get(index));
-      for (const item of items) result.set(next++, item);
-      for (let index = start + skipCount; index < length; index++) result.set(next++, ops.get(index));
+      for (let index = 0; index < start; index++) result.create(next++, ops.get(index));
+      for (const item of items) result.create(next++, item);
+      for (let index = start + skipCount; index < length; index++) result.create(next++, ops.get(index));
     });
   });
   arrayMethod(builder, 'copyWithin', 2, ({ runtime, args }, ops) => {

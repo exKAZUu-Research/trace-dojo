@@ -1,0 +1,12 @@
+(1,29): error TS2344: Type 'number' does not satisfy the constraint 'string'.
+(2,38): error TS2344: Type 'string' does not satisfy the constraint 'number'.
+(3,39): error TS2344: Type '{ a: string; }' does not satisfy the constraint '{ a: number; }'.
+  Types of property 'a' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+(4,31): error TS2344: Type 'string' does not satisfy the constraint 'unknown[]'.
+(6,43): error TS2344: Type 'number' does not satisfy the constraint 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'number'.
+(9,38): error TS2344: Type '"b"' does not satisfy the constraint '"a"'.
+(11,32): error TS2344: Type 'number' does not satisfy the constraint 'boolean'.
+(12,31): error TS2344: Type 'number' does not satisfy the constraint 'string'.
+(13,32): error TS2344: Type 'number' does not satisfy the constraint 'string'.

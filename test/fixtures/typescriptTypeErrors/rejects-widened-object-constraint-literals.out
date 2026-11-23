@@ -1,0 +1,2 @@
+(6,7): error TS2322: Type 'string' is not assignable to type '"first"'.
+(7,7): error TS2322: Type 'string' is not assignable to type '"second"'.

@@ -1,0 +1,23 @@
+function a() { return 1; return; }
+const na: number = a();
+function b2() { throw new Error(); return; }
+const nb: number = b2();
+function c(b: boolean) { if (b) return 1; return undefined; }
+const nc: number = c(true);
+function d(b: boolean): number | undefined { if (b) return 1; return; }
+function e(b: boolean) { if (b) { return; } else { return 2; } }
+const ne: number = e(true);
+const f = function (b: boolean) { while (b) { return; } return "s"; };
+const nf: string = f(true);
+function g(b: boolean) { if (b) return 1; }
+const ng: number = g(true);
+class K { m(b: boolean) { if (b) return; return 1; } }
+const nk: number = new K().m(true);
+function v(b: boolean) { if (b) return; console.log(); }
+const vv: undefined = v(true);
+function l(b: boolean) { if (b) return null; return; }
+const nl: null = l(true);
+function h() { if (false) return; return 1; }
+const nh: number = h();
+const arrow = (b: boolean) => { if (b) return "x"; return; };
+const na2: string = arrow(false);

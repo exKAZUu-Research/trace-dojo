@@ -1,0 +1,3 @@
+class A { static self = A.self; }
+class B { x = this.y; y = this.x; }
+console.log(A.self, new B().x);

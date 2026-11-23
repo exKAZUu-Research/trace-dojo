@@ -1,0 +1,7 @@
+(1,70): error TS2536: Type '"no"' cannot be used to index type 'Readonly<T[K]["a"]>'.
+(2,76): error TS2536: Type '"no"' cannot be used to index type 'Required<T[K]>'.
+(3,81): error TS2536: Type '"a"' cannot be used to index type 'Readonly<T[K]>'.
+(5,35): error TS2536: Type '"other"' cannot be used to index type '{ [P in keyof T[K]["a"] as "value"]: T[K]["a"][P]; }'.
+(7,41): error TS2536: Type 'Partial<T[P]>["selected"]' cannot be used to index type 'V[K]'.
+(9,38): error TS2536: Type 'Readonly<T[K]>["value"]' cannot be used to index type '{ [R in keyof U[P] as R]: R; }'.
+(11,36): error TS2536: Type 'Readonly<T[K]>["selected"]' cannot be used to index type '[string, ...U]'.

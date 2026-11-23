@@ -1,0 +1,3 @@
+const fp: any = Function.prototype;
+console.log(typeof Function.prototype, JSON.stringify(Function.prototype.name), Function.prototype.length, fp());
+console.log(Function.prototype, [Function.prototype]);

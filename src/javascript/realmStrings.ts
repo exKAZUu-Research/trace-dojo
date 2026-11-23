@@ -1,13 +1,22 @@
 import type { RealmBuilder } from './realm';
+import { hostLocales, hostOptions } from './realmDate';
 import { asRegExp, replaceWithRegExp, splitWithRegExp } from './realmRegExp';
 import type { Runtime } from './runtime';
-import { isCallable, JsObject, type NativeCall, type NativeFunction, unboxed, type Value } from './values';
+import {
+  isCallable,
+  JsObject,
+  type NativeCall,
+  type NativeFunction,
+  throwingHostErrors,
+  unboxed,
+  type Value,
+} from './values';
 
 /** One fixed locale, so that sorting with localeCompare gives the same order on every server. */
 const collator = new Intl.Collator('en');
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Lists the String builtins, each a small closure of its own.
-// code-gauge-allow functionNcss 38 -- Lists the String builtins, each a small closure of its own.
+// code-gauge-allow functionCognitiveComplexity -- Lists the String builtins, each a small closure of its own.
+// code-gauge-allow functionNcss -- Lists the String builtins, each a small closure of its own.
 export function defineStringBuiltins(builder: RealmBuilder): void {
   const { stringPrototype } = builder.realm;
   const stringConstructor = builder.defineClass('String', 1, stringPrototype, constructString);
@@ -18,13 +27,17 @@ export function defineStringBuiltins(builder: RealmBuilder): void {
   });
   builder.method(stringConstructor, 'fromCodePoint', 1, ({ runtime, args }) => {
     runtime.buildString(args.length * 2);
-    const codePoints = args.map((value) => runtime.toNumber(value));
-    if (codePoints.some((codePoint) => !Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10_ff_ff)) {
-      runtime.throwError('RangeError', 'Invalid code point');
-    }
-    return codePoints.map((codePoint) => String.fromCodePoint(codePoint)).join('');
+    // Each argument is checked before the next one converts, as a later conversion may have effects.
+    return args
+      .map((value) => {
+        const codePoint = runtime.toNumber(value);
+        if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10_ff_ff)
+          runtime.throwError('RangeError', `Invalid code point ${runtime.toString(codePoint)}`);
+        return String.fromCodePoint(codePoint);
+      })
+      .join('');
   });
-  builder.method(stringConstructor, 'raw', 1, ({ runtime, args }) => {
+  builder.realm.stringRaw = builder.method(stringConstructor, 'raw', 1, ({ runtime, args }) => {
     const raw = runtime.toObject(runtime.get(runtime.toObject(args[0]), 'raw'));
     const length = Math.max(0, Math.min(Math.trunc(runtime.toNumber(runtime.get(raw, 'length'))) || 0, 2 ** 53 - 1));
     let text = '';
@@ -52,7 +65,84 @@ export function defineStringBuiltins(builder: RealmBuilder): void {
   defineSearches(method);
   defineExtractions(method);
   defineBuilders(method);
+  defineLocaleAndLegacy(method);
+  // trimLeft and trimRight are the same functions as trimStart and trimEnd.
+  for (const [alias, name] of [
+    ['trimLeft', 'trimStart'],
+    ['trimRight', 'trimEnd'],
+  ] as const) {
+    const property = stringPrototype.properties.get(name);
+    if (property) stringPrototype.properties.set(alias, { ...property });
+  }
 }
+
+/** The locale-aware case conversions, the well-formedness checks, and the legacy `substr` and HTML methods. */
+function defineLocaleAndLegacy(method: StringMethod): void {
+  // Node.js formats for its default locale, en-US, when no locale is given.
+  method('toLocaleUpperCase', 0, ({ runtime, args }, text) =>
+    built(
+      runtime,
+      throwingHostErrors(runtime, () =>
+        text.toLocaleUpperCase((args[0] === undefined ? 'en-US' : hostLocales(runtime, args[0])) as string)
+      )
+    )
+  );
+  method('toLocaleLowerCase', 0, ({ runtime, args }, text) =>
+    built(
+      runtime,
+      throwingHostErrors(runtime, () =>
+        text.toLocaleLowerCase((args[0] === undefined ? 'en-US' : hostLocales(runtime, args[0])) as string)
+      )
+    )
+  );
+  method('isWellFormed', 0, (_, text) => text.isWellFormed());
+  method('toWellFormed', 0, (_, text) => text.toWellFormed());
+  method('substr', 2, ({ runtime, args }, text) => {
+    const relative = integerArgument(runtime, args[0], 0);
+    const start = relative < 0 ? Math.max(text.length + relative, 0) : Math.min(relative, text.length);
+    const length = args[1] === undefined ? text.length - start : integerArgument(runtime, args[1], 0);
+    return text.slice(start, start + Math.max(0, Math.min(length, text.length - start)));
+  });
+  for (const [name, tag, attribute] of htmlMethods) {
+    method(name, attribute ? 1 : 0, ({ runtime, args }, text) =>
+      buildLegacyHtml(runtime, text, tag, attribute, args[0])
+    );
+  }
+}
+
+function buildLegacyHtml(
+  runtime: Runtime,
+  text: string,
+  tag: string,
+  attribute: string | undefined,
+  argument: Value
+): string {
+  const input = attribute ? runtime.toString(argument) : '';
+  runtime.scan(input.length);
+  let quotes = 0;
+  for (const character of input) if (character === '"') quotes++;
+  const attributeLength = attribute ? attribute.length + 4 + input.length + quotes * 5 : 0;
+  runtime.buildString(text.length + tag.length * 2 + 5 + attributeLength);
+  const value = attribute ? ` ${attribute}="${input.replaceAll('"', '&quot;')}"` : '';
+  return `<${tag}${value}>${text}</${tag}>`;
+}
+
+/** The legacy HTML methods, by name: the element each wraps the string in, and the attribute its argument sets. */
+const htmlMethods: [string, string, string | undefined][] = [
+  ['anchor', 'a', 'name'],
+  ['big', 'big', undefined],
+  ['blink', 'blink', undefined],
+  ['bold', 'b', undefined],
+  ['fixed', 'tt', undefined],
+  ['fontcolor', 'font', 'color'],
+  ['fontsize', 'font', 'size'],
+  ['italics', 'i', undefined],
+  ['link', 'a', 'href'],
+  ['small', 'small', undefined],
+  ['strike', 'strike', undefined],
+  ['sub', 'sub', undefined],
+  ['sup', 'sup', undefined],
+];
 
 type StringMethod = (name: string, length: number, run: (call: NativeCall, text: string) => Value) => void;
 
@@ -82,7 +172,13 @@ function defineSearches(method: StringMethod): void {
         : text[name](search, integerArgument(runtime, args[1], 0));
     });
   }
-  method('localeCompare', 1, ({ runtime, args }, text) => collator.compare(text, runtime.toString(args[0])));
+  method('localeCompare', 1, ({ runtime, args }, text) => {
+    const that = runtime.toString(args[0]);
+    if (args[1] === undefined && args[2] === undefined) return collator.compare(text, that);
+    const locales = args[1] === undefined ? 'en' : (hostLocales(runtime, args[1]) as Intl.LocalesArgument);
+    const options = hostOptions(runtime, args[2]) as Intl.CollatorOptions;
+    return throwingHostErrors(runtime, () => text.localeCompare(that, locales, options));
+  });
 }
 
 function defineExtractions(method: StringMethod): void {
@@ -103,19 +199,20 @@ function defineExtractions(method: StringMethod): void {
   method('trim', 0, (_, text) => text.trim());
   method('trimStart', 0, (_, text) => text.trimStart());
   method('trimEnd', 0, (_, text) => text.trimEnd());
-  method('toUpperCase', 0, (_, text) => text.toUpperCase());
-  method('toLowerCase', 0, (_, text) => text.toLowerCase());
+  // A case mapping can lengthen a string, as `ß` becomes `SS`.
+  method('toUpperCase', 0, ({ runtime }, text) => built(runtime, text.toUpperCase()));
+  method('toLowerCase', 0, ({ runtime }, text) => built(runtime, text.toLowerCase()));
   method('normalize', 0, ({ runtime, args }, text) => {
     const form = args[0] === undefined ? 'NFC' : runtime.toString(args[0]);
     if (!['NFC', 'NFD', 'NFKC', 'NFKD'].includes(form)) {
       runtime.throwError('RangeError', 'The normalization form should be one of NFC, NFD, NFKC, NFKD.');
     }
-    return text.normalize(form);
+    return built(runtime, text.normalize(form));
   });
   method('split', 2, ({ runtime, args }, text) => {
-    const limit = args[1] === undefined ? 2 ** 32 - 1 : runtime.toNumber(args[1]) >>> 0;
     const regexp = asRegExp(args[0]);
-    if (regexp) return splitWithRegExp(runtime, text, regexp, limit);
+    if (regexp) return splitWithRegExp(runtime, text, regexp, args[1]);
+    const limit = args[1] === undefined ? 2 ** 32 - 1 : runtime.toNumber(args[1]) >>> 0;
     // The separator converts before a zero limit returns, as its conversion can throw.
     const separator = args[0] === undefined ? undefined : runtime.toString(args[0]);
     if (limit === 0) return runtime.newArray([]);
@@ -158,12 +255,7 @@ function defineBuilders(method: StringMethod): void {
     ['padStart', true],
     ['padEnd', false],
   ] as const) {
-    method(name, 2, ({ runtime, args }, text) => {
-      const length = integerArgument(runtime, args[0], 0);
-      const filler = args[1] === undefined ? ' ' : runtime.toString(args[1]);
-      runtime.buildString(Math.max(length, text.length));
-      return atStart ? text.padStart(length, filler) : text.padEnd(length, filler);
-    });
+    method(name, 1, (call, text) => padText(call, text, atStart));
   }
   for (const [name, all] of [
     ['replace', false],
@@ -171,6 +263,15 @@ function defineBuilders(method: StringMethod): void {
   ] as const) {
     method(name, 2, (call, text) => replaceText(call, text, all));
   }
+}
+
+function padText({ runtime, args }: NativeCall, text: string, atStart: boolean): string {
+  const length = integerArgument(runtime, args[0], 0);
+  if (length <= text.length) return text;
+  const filler = args[1] === undefined ? ' ' : runtime.toString(args[1]);
+  if (filler.length === 0) return text;
+  runtime.buildString(length);
+  return atStart ? text.padStart(length, filler) : text.padEnd(length, filler);
 }
 
 function replaceText(call: NativeCall, text: string, all: boolean): string {
@@ -217,4 +318,10 @@ function expandReplacement(replacement: string, matched: string, position: numbe
     if (symbol === '`') return text.slice(0, position);
     return text.slice(position + matched.length);
   });
+}
+
+/** Charges for a string a host method built, which may be longer than its input. */
+function built(runtime: Runtime, text: string): string {
+  runtime.buildString(text.length);
+  return text;
 }

@@ -1,0 +1,6 @@
+function pick9<T>(x: number): T { return x as T; }
+function withNum<T>(x: T): number { return Number(x as number); }
+class G<T = number> { parts: [T] = [0 as T]; }
+function isDefault<T>(v: T): boolean { return v === 'x'; }
+function ok<T>(v: T, w: T): boolean { return v === w || v !== undefined; }
+console.log(pick9(3), withNum(4), new G().parts, isDefault('x'));

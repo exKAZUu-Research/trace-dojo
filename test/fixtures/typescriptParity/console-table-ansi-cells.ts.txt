@@ -1,0 +1,4 @@
+const color = "\u001B[31ma\u001B[0m";
+const wide = "\u001B[32m幅\u001B[0m";
+console.table({ [color]: 1, [wide]: 2 });
+console.table([{ [color]: "long", [wide]: "猫" }], [color, wide]);

@@ -1,0 +1,37 @@
+function required<T>(value: T, name: string): NonNullable<T> {
+  if (value == null) throw new Error(`${name} is missing`);
+  return value;
+}
+
+function firstPresent<T>(values: T[]): NonNullable<T> | undefined {
+  for (const value of values) {
+    if (value !== undefined && value !== null) {
+      const present: NonNullable<T> = value;
+      return present;
+    }
+  }
+  return undefined;
+}
+
+function assumePresent<T>(value: T): NonNullable<T> {
+  return value!;
+}
+
+function truthyOnly<T>(value: T): NonNullable<T> | "falsy" {
+  if (value) {
+    const kept: NonNullable<T> = value;
+    return kept;
+  }
+  return "falsy";
+}
+
+console.log(required(3, "count"));
+try {
+  required<string | null>(null, "label");
+} catch (error) {
+  console.log((error as Error).message);
+}
+console.log(firstPresent([null, undefined, "b", "c"]));
+console.log(firstPresent<number | null>([null]));
+console.log(assumePresent("x"));
+console.log(truthyOnly(0), truthyOnly("y"));

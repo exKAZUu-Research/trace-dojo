@@ -1,0 +1,36 @@
+0=start 1=1 2=x 3=2 4=3 5=end 
+5=end 4=3 3=2 2=x 1=1 0=start 
+2
+0=start 0=1 0=x 0=2 0=3 0=end 
+0
+cb
+SplDoublyLinkedList::add(): Argument #1 ($index) is out of range
+Iterators' LIFO/FIFO modes for SplStack/SplQueue objects are frozen
+{"x":1,"y":[2]}
+array(2) {
+  ["x"]=>
+  int(1)
+  ["y"]=>
+  array(1) {
+    [0]=>
+    int(2)
+  }
+}
+\ArrayObject::__set_state(array(
+))
+{}
+array(0) {
+}
+int(2)
+object(ArrayObject)#2 (1) {
+  ["storage":"ArrayObject":private]=>
+  array(2) {
+    ["x"]=>
+    int(1)
+    ["y"]=>
+    array(1) {
+      [0]=>
+      int(2)
+    }
+  }
+}

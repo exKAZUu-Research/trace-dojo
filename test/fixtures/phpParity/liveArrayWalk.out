@@ -1,0 +1,5 @@
+a=1;b=2;c=3;a=4;
+a=1;b=2;c=3;
+1;9;8;
+1;TypeError:Iterated value is no longer an array or object
+1;3;2;

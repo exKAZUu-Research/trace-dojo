@@ -1,0 +1,2 @@
+const vals: any[] = [new Map(), new Set(), Math, JSON, Symbol('x'), 1n, [], function () {}, new Error(), new TypeError(), /x/, 'a', 1, true, null, undefined, Object.create(null), [1].values(), new Map().keys(), (function () { return arguments; })()];
+for (const v of vals) console.log(Object.prototype.toString.call(v));

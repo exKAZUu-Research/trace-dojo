@@ -1,0 +1,18 @@
+(4,12): error TS2345: Argument of type '3' is not assignable to parameter of type 'never'.
+(5,12): error TS2345: Argument of type 'true' is not assignable to parameter of type 'never'.
+(6,17): error TS2554: Expected 0-2 arguments, but got 3.
+(10,5): error TS2345: Argument of type '1' is not assignable to parameter of type 'never'.
+(11,5): error TS2345: Argument of type '"a"' is not assignable to parameter of type 'never'.
+(14,3): error TS2554: Expected 2 arguments, but got 0.
+(15,3): error TS2554: Expected 2 arguments, but got 1.
+(16,12): error TS2345: Argument of type '3' is not assignable to parameter of type 'never'.
+(19,3): error TS2554: Expected 1-2 arguments, but got 0.
+(21,12): error TS2345: Argument of type '3' is not assignable to parameter of type 'never'.
+(26,12): error TS2345: Argument of type '3' is not assignable to parameter of type 'never'.
+(27,14): error TS2345: Argument of type '"a"' is not assignable to parameter of type 'never'.
+(30,3): error TS2555: Expected at least 1 arguments, but got 0.
+(31,3): error TS2345: Argument of type '[]' is not assignable to parameter of type '[...number[], boolean]'.
+(32,12): error TS2345: Argument of type '[3]' is not assignable to parameter of type '[...number[], boolean]'.
+(34,14): error TS2345: Argument of type '[true, 3]' is not assignable to parameter of type '[...number[], boolean]'.
+(35,12): error TS2345: Argument of type '["a"]' is not assignable to parameter of type '[...number[], boolean]'.
+(46,8): error TS2345: Argument of type '1' is not assignable to parameter of type 'never'.

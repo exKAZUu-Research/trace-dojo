@@ -1,0 +1,77 @@
+UTF-8 48c3a96c6c6f20e697a5e69cac20f09f9880 48c3a96c6c6f20e697a5e69cac20f09f9880
+ASCII 483f6c6c6f203f3f203f 483f6c6c6f203f3f203f
+ISO-8859-1 48e96c6c6f203f3f203f 48c3a96c6c6f203f3f203f
+latin1 48e96c6c6f203f3f203f 48c3a96c6c6f203f3f203f
+UTF-16 004800e9006c006c006f002065e5672c0020d83dde00 48c3a96c6c6f20e697a5e69cac20f09f9880
+UTF-16BE 004800e9006c006c006f002065e5672c0020d83dde00 48c3a96c6c6f20e697a5e69cac20f09f9880
+UTF-16LE 4800e9006c006c006f002000e5652c6720003dd800de 48c3a96c6c6f20e697a5e69cac20f09f9880
+UTF-32 00000048000000e90000006c0000006c0000006f00000020000065e50000672c000000200001f600 48c3a96c6c6f20e697a5e69cac20f09f9880
+UTF-32LE 48000000e90000006c0000006c0000006f00000020000000e56500002c6700002000000000f60100 48c3a96c6c6f20e697a5e69cac20f09f9880
+utf32 00000048000000e90000006c0000006c0000006f00000020000065e50000672c000000200001f600 48c3a96c6c6f20e697a5e69cac20f09f9880
+US-ASCII 483f6c6c6f203f3f203f 483f6c6c6f203f3f203f
+c3a974c3a9
+4142 41 413f 3f413ff09f9880 3ff0908080 3f
+41 3f3f3f
+0061003f0062003f0063003f
+int(63)
+bool(true)
+string(2) "ab"
+string(4) "none"
+bool(true)
+string(16) "a?bU+65E5U+1F600"
+bool(true)
+string(11) "a?b&#x65E5;"
+bool(true)
+string(4) "a?b?"
+string(10) "61e3809362"
+int(12307)
+bool(true)
+string(4) "long"
+mb_substitute_character(): Argument #1 ($substitute_character) must be "none", "long", "entity" or a valid codepoint
+mb_substitute_character(): Argument #1 ($substitute_character) is not a valid codepoint
+mb_substitute_character(): Argument #1 ($substitute_character) is not a valid codepoint
+array(5) {
+  ["a"]=>
+  string(1) "?"
+  ["?"]=>
+  array(1) {
+    [0]=>
+    string(2) "x?"
+  }
+  [5]=>
+  float(1.5)
+  [6]=>
+  NULL
+  [7]=>
+  bool(true)
+}
+string(6) "日本"
+string(3) "abc"
+string(2) "é"
+string(4) "c3a9"
+mb_convert_encoding(): Argument #2 ($to_encoding) must be a valid encoding, "nope" given
+mb_convert_encoding(): Argument #3 ($from_encoding) contains invalid encoding "nope"
+mb_convert_encoding(): Argument #3 ($from_encoding) must specify at least one encoding
+string(1) "a"
+mb_convert_encoding(): Argument #3 ($from_encoding) must specify at least one encoding
+mb_convert_encoding(): Argument #3 ($from_encoding) contains invalid encoding "x"
+string(1) "a"
+string(10) "613f623f63"
+string(2) "ok"
+string(4) "613f"
+string(2) "é"
+bool(true)
+bool(false)
+bool(false)
+bool(true)
+bool(false)
+bool(true)
+bool(false)
+bool(false)
+bool(false)
+bool(false)
+bool(false)
+mb_check_encoding(): Argument #2 ($encoding) must be a valid encoding, "nope" given
+
+Deprecated: mb_check_encoding(): Calling mb_check_encoding() without argument is deprecated in /main.php on line 22
+bool(false)

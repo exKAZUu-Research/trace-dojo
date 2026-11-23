@@ -1,0 +1,77 @@
+
+Warning: Array to string conversion in /main.php on line 19
+
+Warning: Object of class stdClass could not be converted to int in /main.php on line 19
+
+Warning: Object of class stdClass could not be converted to float in /main.php on line 19
+|Array|1|1.000000
+caught: string conversion
+Object of class stdClass could not be converted to float
+
+Warning: Array to string conversion in /main.php on line 20
+
+Warning: Array to string conversion in /main.php on line 20
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 20
+Array|Array|NAN
+unexpected NAN value was coerced to string
+
+Warning: Array to string conversion in /main.php on line 23
+caught: string conversion
+Array to string conversion
+replacements: 2
+
+Warning: translateEmptyKey(): Ignoring replacement of empty string in /main.php on line 6
+caught: string conversion
+translateEmptyKey(): Ignoring replacement of empty string
+
+Warning: Array to string conversion in /main.php on line 19
+
+Warning: Object of class stdClass could not be converted to int in /main.php on line 19
+
+Warning: Object of class stdClass could not be converted to float in /main.php on line 19
+|Array|1|1.000000
+caught: string conversion
+Object of class stdClass could not be converted to float
+
+Warning: Array to string conversion in /main.php on line 20
+
+Warning: Array to string conversion in /main.php on line 20
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 20
+Array|Array|NAN
+unexpected NAN value was coerced to string
+
+Warning: Array to string conversion in /main.php on line 23
+caught: string conversion
+Array to string conversion
+replacements: 2
+
+Warning: translateEmptyKey(): Ignoring replacement of empty string in /main.php on line 6
+caught: string conversion
+translateEmptyKey(): Ignoring replacement of empty string
+|Array|1|1.000000
+caught: string conversion
+no last error
+handler
+Array|Array|NAN
+caught: warning conversion
+no last error
+caught: string conversion
+no last error
+replacements: 2
+caught: string conversion
+no last error
+
+Warning: main(): Ignoring replacement of empty string in /main.php on line 29
+Object of class stdClass could not be converted to string
+
+Warning: strtr(): Ignoring replacement of empty string in /main.php on line 31
+
+Warning: strtr(): Ignoring replacement of empty string in /main.php on line 34
+caught: string conversion
+strtr(): Ignoring replacement of empty string
+
+Warning: strtr(): Ignoring replacement of empty string in /main.php on line 35
+caught: string conversion
+strtr(): Ignoring replacement of empty string

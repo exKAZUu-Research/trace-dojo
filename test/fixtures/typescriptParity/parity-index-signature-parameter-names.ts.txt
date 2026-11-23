@@ -1,0 +1,4 @@
+type Dict = { [key: number]: string; [key: string]: string };
+const d: Dict = { 1: 'a', b: 'c' };
+const e: { [key: number]: number; [key: string]: number } = { 2: 3 };
+console.log(d[1], d.b, e[2]);

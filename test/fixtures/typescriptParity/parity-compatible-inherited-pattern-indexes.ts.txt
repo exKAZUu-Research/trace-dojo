@@ -1,0 +1,12 @@
+interface Box<T> { [k: string]: T }
+interface Named { [k: `n${string}`]: "n" | "m" }
+interface Ok extends Box<string>, Named {}
+const ok: Ok = { name: "n", other: "o" };
+interface Prefixed { [k: `a${string}`]: number }
+interface Longer { [k: `ab${string}`]: 1 | 2 }
+interface Merged extends Prefixed, Longer {}
+const merged: Merged = { a1: 5, ab1: 1 };
+interface Split extends Prefixed {}
+interface Split extends Longer { extra: number }
+const split: Split = { a1: 3, ab: 2, extra: 0 };
+console.log(ok.name, ok.other, merged.ab1, split.extra);

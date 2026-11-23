@@ -1,0 +1,7 @@
+(3,13): error TS2590: Expression produces a union type that is too complex to represent.
+(4,14): error TS2590: Expression produces a union type that is too complex to represent.
+(7,14): error TS2590: Expression produces a union type that is too complex to represent.
+(10,17): error TS2590: Expression produces a union type that is too complex to represent.
+(15,10): error TS2590: Expression produces a union type that is too complex to represent.
+(19,10): error TS2590: Expression produces a union type that is too complex to represent.
+(23,10): error TS2590: Expression produces a union type that is too complex to represent.

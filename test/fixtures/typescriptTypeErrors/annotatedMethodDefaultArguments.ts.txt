@@ -1,0 +1,7 @@
+class Defaults {
+  format(value = this.amount()) { return value.toFixed(); }
+  amount(label = this.format()): number { return label.length; }
+}
+new Defaults().format("wrong");
+new Defaults().amount(4);
+class Cycle { first(value = this.second()) { return value; } second(value = this.first()) { return value; } }

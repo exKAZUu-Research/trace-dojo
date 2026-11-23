@@ -1,0 +1,13 @@
+function mixedArgument(fn:Function|((x:number)=>number)){return fn('wrong');}
+function mixedArity(fn:Function|(()=>number)){return fn(1);}
+function genericMixed<T extends Function|((x:number)=>number)>(fn:T){return fn('wrong');}
+function intersectedMixed<T extends Function|((x:number)=>number)>(fn:T&Function){return fn('wrong');}
+function concreteIntersectionReturn(fn:Function&((x:number)=>number)){const result:string=fn(1);return result;}
+function genericIntersectionReturn<T extends Function>(fn:T&((x:number)=>number)){const result:string=fn(1);return result;}
+function mixedPredicate(fn:Function|((x:unknown)=>x is string),value:unknown){if(fn(value)){const result:string=value;return result;}}
+interface MixedOverloads {(x:number):number;(x:string):string;}
+function invalidMixedOverload(fn:Function|MixedOverloads){return fn(true);}
+class MixedConstructor {value=1;}
+function callConstructorUnion(fn:Function|typeof MixedConstructor){return fn();}
+function constructMixedUnion(fn:Function|(new()=>object)){return new fn();}
+function concreteUnionReturn(fn:(()=>number)|(()=>string)){const result:boolean=fn();return result;}

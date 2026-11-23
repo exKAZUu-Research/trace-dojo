@@ -1,0 +1,7 @@
+const k = "hello";
+const o = { [k]() { return 42; }, f() { return this.hello(); } };
+console.log(o.f());
+const p = { get [k]() { return 1; }, g() { return this.hello + 1; } };
+console.log(p.g());
+const q = { [k]: () => 7, h() { return this.hello(); } };
+console.log(q.h());

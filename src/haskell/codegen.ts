@@ -1,6 +1,6 @@
 import { OrderedMap } from 'immutable';
 
-// code-gauge-allow-file fileNcss 967 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   CONS_CON,
@@ -165,8 +165,7 @@ export class Codegen {
   }
 
   /** Registers how a module's instance's dictionary is built. */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch fills one part of a dictionary: methods, defaults, and superclasses.
-  // code-gauge-allow functionNcss 31 -- Method/default builders and superclass frames share the registered dictionary construction plan.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch fills one part of a dictionary: methods, defaults, and superclasses.
   compileInstance(info: InstanceInfo, bindings: RBinding[], sourceDefined = false): void {
     for (const binding of bindings) {
       const fun = binding as Extract<RBinding, { k: 'fun' }>;
@@ -393,8 +392,8 @@ export class Codegen {
     return type ? resultAfter(type, binding.clauses[0].pats.length) : undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Local functions and pattern bindings need separate slot set-ups in one recursive group.
-  // code-gauge-allow functionNcss 33 -- Recursive groups reserve caller slots before shared pattern matches or functions are compiled.
+  // code-gauge-allow functionCognitiveComplexity -- Local functions and pattern bindings need separate slot set-ups in one recursive group.
+  // code-gauge-allow functionNcss -- Recursive groups reserve caller slots before shared pattern matches or functions are compiled.
   private compileLocalGroup(group: RBindGroup): { index: number; expr: Core }[] {
     const binds: { index: number; expr: Core }[] = [];
     const slots = new Map<RBinding, number[]>();
@@ -494,8 +493,8 @@ export class Codegen {
     return next;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Pattern forms share ordered slot allocation and worklist state.
-  // code-gauge-allow functionNcss 35 -- The worklist handles each pattern form while preserving binder and field order.
+  // code-gauge-allow functionCognitiveComplexity -- Pattern forms share ordered slot allocation and worklist state.
+  // code-gauge-allow functionNcss -- The worklist handles each pattern form while preserving binder and field order.
   private planPattern(pat: RPat, slot: number, visible: boolean): Plan {
     const result: Plan[] = [];
     const pending = [{ pat, slot, target: result, index: 0 }];
@@ -662,7 +661,7 @@ export class Codegen {
     });
   }
 
-  // code-gauge-allow functionNcss 58 -- One short case per expression kind, each delegating to a helper.
+  // code-gauge-allow functionNcss -- One short case per expression kind, each delegating to a helper.
   private compileExprInner(expr: RExpr): Core {
     switch (expr.k) {
       case 'var': {
@@ -761,8 +760,8 @@ export class Codegen {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Each branch is one kind of variable reference: local, global, method, constructor, or primitive.
-  // code-gauge-allow functionNcss 31 -- Each branch is one kind of variable reference: local, global, method, constructor, or primitive.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch is one kind of variable reference: local, global, method, constructor, or primitive.
+  // code-gauge-allow functionNcss -- Each branch is one kind of variable reference: local, global, method, constructor, or primitive.
   private compileVar(expr: Extract<RExpr, { k: 'var' }>): Core {
     const { ref } = expr;
     let head: Core;
@@ -1088,7 +1087,7 @@ export class Codegen {
     return this.withIOFrame(() => this.compileIOStatements(expr, binding));
   }
 
-  // code-gauge-allow functionNcss 32 -- The statement kinds share the per-statement trace data computed here.
+  // code-gauge-allow functionNcss -- The statement kinds share the per-statement trace data computed here.
   private compileIOStatements(
     expr: Extract<RExpr, { k: 'do' }>,
     binding?: { row: number; names: string[] }
@@ -1158,7 +1157,7 @@ export class Codegen {
     return { k: 'iodo', stmts, bindingRow: binding?.row, bindingNames: binding?.names, entryVisible };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- IO statement lowering preserves dictionary scopes and dispatches each control form.
+  // code-gauge-allow functionCognitiveComplexity -- IO statement lowering preserves dictionary scopes and dispatches each control form.
   private compileStatementExpr(expr: RExpr): { code: Core; noStep: boolean } {
     if (expr.k === 'typed' && expr.dictParams?.length) return this.compileTypedStatement(expr);
     const inner = stripDollar(expr, this.options.support);
@@ -1345,8 +1344,8 @@ export class Codegen {
     return globalOf(entity, entity.name, entity);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Each branch is one literal kind with its overloaded or fixed type.
-  // code-gauge-allow functionNcss 32 -- Literal lowering keeps numeric precision and overloaded evidence together.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch is one literal kind with its overloaded or fixed type.
+  // code-gauge-allow functionNcss -- Literal lowering keeps numeric precision and overloaded evidence together.
   private literalCore(lit: Extract<RPat, { k: 'lit' }>['lit'], evidence: Evidence | undefined): Core {
     if (lit.kind === 'char') return { k: 'lit', value: lit.value };
     if (lit.kind === 'string') return { k: 'str', value: lit.value };

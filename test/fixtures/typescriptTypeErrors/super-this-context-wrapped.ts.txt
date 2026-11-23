@@ -1,0 +1,11 @@
+class Base {
+  read(this: { need: string }, value: number) { return this.need + value; }
+  typed<T>(this: T): T { return this; }
+}
+class Derived extends Base {
+  need = "yes";
+  local = 4;
+  wrapped() { return (super["read"])(1); }
+  wrong() { return super.read("wrong"); }
+  generic() { return super["typed"]().local; }
+}

@@ -1,0 +1,33 @@
+function hasAge(v: object): v is { age: number } {
+  return 'age' in v;
+}
+function hasTag(v: unknown): v is { tag: string } {
+  return typeof v === 'object' && v !== null && 'tag' in v;
+}
+function show(v: { name: string }): void {
+  if (hasAge(v)) console.log(v.name, v.age);
+  else console.log(v.name);
+}
+function showTagged(v: { id: number }): void {
+  if (hasTag(v)) console.log(v.id, v.tag);
+  else console.log(v.id);
+}
+class Animal {
+  name = 'a';
+}
+function isFlyer(v: unknown): v is { fly(): void } {
+  return typeof v === 'object' && v !== null && 'fly' in v;
+}
+function move(animal: Animal): void {
+  if (isFlyer(animal)) {
+    animal.fly();
+    console.log(animal.name);
+  }
+}
+
+const person = { name: 'a', age: 1 };
+show(person);
+show({ name: 'b' });
+showTagged({ id: 3 });
+showTagged(Object.assign({ id: 4 }, { tag: 't' }));
+move(Object.assign(new Animal(), { fly: () => console.log('flying') }));

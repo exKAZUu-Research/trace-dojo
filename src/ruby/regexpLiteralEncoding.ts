@@ -1,6 +1,5 @@
-import { decodeDoubleQuoted } from './escapes';
-import { regexpByteEscape, RegexpEncodingError } from './regexpEscapes';
-import { regexpSourceTokens } from './regexpLexicalSource';
+import { regexpByteEscape, RegexpSourceError } from './regexpEscapes';
+import { regexpTokens, unicodeEscapePoints } from './regexpTokens';
 import { isAsciiText } from './unicodeText';
 
 // oxlint-disable-next-line no-control-regex -- These ranges validate encoded bytes, including ASCII control bytes.
@@ -12,37 +11,32 @@ export function regexpLiteralEncoding(flags: string): string | undefined {
   return flags.match(/[unes]/g)?.at(-1);
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Source tokens, Unicode escapes and contiguous encoded-byte runs retain distinct native validity rules.
+// code-gauge-allow functionCognitiveComplexity -- Source tokens, Unicode escapes and contiguous encoded-byte runs retain distinct native validity rules.
 export function validateRegexpLiteralEncoding(source: string, flags: string): void {
   const encoding = regexpLiteralEncoding(flags);
   if (encoding === undefined || encoding === 'u') return;
-  if (!isAsciiText(source)) throw new RegexpEncodingError('incompatible character encoding');
+  if (!isAsciiText(source)) throw new RegexpSourceError('incompatible character encoding');
   let bytes = '';
   const flush = (): void => {
     const valid = encoding === 'n' || (encoding === 'e' ? eucJpBytes : windows31jBytes).test(bytes);
-    if (!valid) throw new RegexpEncodingError('invalid multibyte escape');
+    if (!valid) throw new RegexpSourceError('invalid multibyte escape');
     bytes = '';
   };
-  for (const token of regexpSourceTokens(source, flags.includes('x'))) {
-    if (token.type !== 'Character') {
-      flush();
+  let consumed = 0;
+  for (const token of regexpTokens(source, flags.includes('x'))) {
+    if (token.start < consumed) continue;
+    const byte = token.kind === 'escape' ? regexpByteEscape(source, token.start) : undefined;
+    if (byte) {
+      bytes += String.fromCodePoint(byte.value);
+      consumed = token.start + byte.length;
       continue;
     }
-    let index = 0;
-    while (index < token.raw.length) {
-      const byte = regexpByteEscape(token.raw, index);
-      if (byte) {
-        bytes += String.fromCodePoint(byte.value);
-        index += byte.length;
-        continue;
-      }
-      flush();
-      if (token.raw.startsWith(String.raw`\u`)) {
-        const decoded = decodeDoubleQuoted(token.raw);
-        if (decoded && !isAsciiText(decoded.text)) throw new RegexpEncodingError('incompatible character encoding');
-      }
-      break;
-    }
+    flush();
+    if (
+      token.raw === String.raw`\u` &&
+      unicodeEscapePoints(source, token.start + 2)?.points.some((point) => point > 127)
+    )
+      throw new RegexpSourceError('incompatible character encoding');
   }
   flush();
 }

@@ -1,0 +1,14 @@
+function laterParameter({value=later}={}, later=1) { return value; }
+function laterObjectSibling({first=second,second=1}={}) { return first; }
+function laterTupleSibling([first=second,second=1]=[]) { return first; }
+function typedObjectSibling({first=second,second=1}:{first?:number;second?:number}={}) { return first; }
+function typedTupleSibling([first=second,second=1]:[number?,number?]=[]) { return first; }
+function nestedSibling({nested:{first=second,second=1}={}}={}) { return first; }
+function selfObject({value=value}={}) { return value; }
+function immediateArrow(value=(()=>later)(),later=1) { return value; }
+function immediateFunction(value=(function(){return later;})(),later=1) { return value; }
+function wrongDefault({value="wrong"}:{value?:number}={}) { return value; }
+function optionalOverload(value?:string):void;
+function optionalOverload(value:string){}
+function nullableOverload(value:string|null):void;
+function nullableOverload(value:string){}

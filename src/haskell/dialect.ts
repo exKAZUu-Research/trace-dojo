@@ -39,7 +39,6 @@ class DialectValidator {
     this.visit(this.root);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Traversal tracks implicit layout and explicit brace contexts.
   private visit(node: Node, context?: Layout): void {
     if (isComment(node)) return;
     validateSyntaxNode(node);

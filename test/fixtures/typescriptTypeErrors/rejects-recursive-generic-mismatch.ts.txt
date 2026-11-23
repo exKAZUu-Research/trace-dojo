@@ -1,0 +1,30 @@
+type Deep<T> = { v: T; next?: Deep<T[]> };
+function fa(a: Deep<string>): void {
+  const b: Deep<number> = a;
+}
+interface Box<T> {
+  v: T;
+  wrap(): Box<Box<T>>;
+}
+function fb(bs: Box<string>): void {
+  const bn: Box<number> = bs;
+}
+type List<T> = { head: T; tail: List<T> | undefined };
+function fl(l: List<string>): void {
+  const ln: List<number> = l;
+}
+type Tree = { children: Tree[]; label: string };
+type Tree2 = { children: Tree2[]; label: number };
+function ft(t: Tree): void {
+  const t2: Tree2 = t;
+}
+type Nest<T> = { inner: Nest<{ x: T }> | T };
+function fn(ns: Nest<string>): void {
+  const nn: Nest<number> = ns;
+}
+type Grow<T> = { more: Grow<[T]>; last: T };
+function fg(g: Grow<string>): void {
+  const gn: Grow<number> = g;
+  const gu: Grow<string | number> = g;
+}
+console.log(fa, fb, fl, ft, fn, fg);

@@ -151,7 +151,7 @@ function hasErrorAncestor(node: Node): boolean {
   return false;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Each branch handles one case of the C# rule that the function applies.
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 function roslynErrorsOf(root: Node, error: Node): SourceDiagnostic[] {
   const tokens = leavesOf(error);
   // Roslyn reads on into a top-level declaration, expecting another declarator, where in a method it expects `;`.
@@ -209,7 +209,7 @@ function unterminatedQuote(tokens: Node[]): Node | undefined {
   return opening;
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Each branch handles one case of the C# rule that the function applies.
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 function roslynErrorOf(root: Node, error: Node, tokens: Node[], inDeclaration: boolean): SourceDiagnostic {
   const count = (text: string): number => tokens.filter((token) => token.type === text).length;
   // A `for` header with a comma for its second `;`, as `for (int i = 0; i < 3, i++)`.

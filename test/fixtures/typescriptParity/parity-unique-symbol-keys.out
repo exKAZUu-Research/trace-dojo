@@ -1,0 +1,7 @@
+7 { name: 'a', Symbol(id): 7 }
+9
+1 2 symbol
+3
+symbol Symbol(next) id
+true true
+8 [ 'name', 'extra' ]

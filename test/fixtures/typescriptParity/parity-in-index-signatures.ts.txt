@@ -1,0 +1,40 @@
+type Numeric = { [n: number]: string } | { other: number };
+function numberKey(x: Numeric): void {
+  if (0 in x) console.log(x[0].toUpperCase());
+  else console.log("no 0");
+}
+function stringKey(x: Numeric): void {
+  if ("0" in x) console.log(x[0].toUpperCase());
+}
+function fraction(x: Numeric): void {
+  if ("1.5" in x) console.log(x[1.5].toUpperCase());
+}
+function negative(x: Numeric): void {
+  if ("-1" in x) console.log(x[-1].toUpperCase());
+}
+function arrays(x: string[] | { other: number }): void {
+  if (0 in x) console.log(x[0].toUpperCase());
+}
+function dictionary(x: { [k: string]: number } | { other: string }): void {
+  if ("q" in x) console.log(x.q);
+}
+function unknownKey(x: { a: number } | { b: string }): void {
+  if ("c" in x) console.log(x.c);
+  else console.log("no c");
+}
+function inherited(x: { toString(): string } | { other: number }): void {
+  if ("toString" in x) console.log(x.toString());
+}
+function onlyIndex(x: { [n: number]: string }): void {
+  if (1 in x) console.log(x[1].length);
+}
+numberKey({ 0: "a" });
+numberKey({ other: 1 });
+stringKey({ 0: "b" });
+fraction({ 1.5: "c" });
+negative({ [-1]: "d" });
+arrays(["e"]);
+dictionary({ q: 2 });
+unknownKey({ a: 1 });
+inherited({ other: 3 });
+onlyIndex({ 1: "f" });

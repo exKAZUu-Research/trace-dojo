@@ -1,0 +1,13 @@
+get virtualProperty HookModes::$read is read-only
+get virtualProperty HookModes::$read is read-only
+get virtualProperty HookModes::$read is read-only
+Property HookModes::$write is write-only
+Property HookModes::$write is write-only
+Property HookModes::$write is write-only
+Property HookModes::$write is write-only
+set:5
+get virtualget-backed
+set-backed
+int(7)
+int(2)
+int(3)

@@ -191,7 +191,7 @@ function addrError(addr: string, why: string): Value[] {
   return ['', '', errorValue(ADDR_ERROR, [why, addr])];
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes net.SplitHostPort.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes net.SplitHostPort.
 /** `net.SplitHostPort`. */
 function splitHostPort(hostport: string): Value[] {
   const missingPort = 'missing port in address';

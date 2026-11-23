@@ -1,0 +1,42 @@
+let best: number | null = null;
+[3, 1, 2].forEach((value) => {
+  if (best === null || value > best) best = value;
+});
+if (best !== null) console.log(best + 1, best * 2, best - 1, best < 5, -best, +best);
+
+let count: number | null = null;
+function setCount(): void {
+  count = 3;
+}
+setCount();
+if (count !== null) {
+  let total = 10;
+  total += count;
+  console.log(total, count ** 2, count << 1, count & 1, ~count, count % 2);
+  count++;
+  console.log(count);
+}
+
+let big: bigint | null = null;
+function setBig(): void {
+  big = 5n;
+}
+setBig();
+if (big !== null) console.log(big + 1n, big * 2n, big > 1n);
+
+let label: string | null = null;
+function setLabel(): void {
+  label = "Ann";
+}
+setLabel();
+if (label !== null) console.log(label + "!", `${label}?`);
+
+let list: number[] | null = null;
+function setList(): void {
+  list = [4, 5];
+}
+setList();
+if (list !== null) {
+  const { length } = list;
+  console.log(list[0], [...list], length);
+}

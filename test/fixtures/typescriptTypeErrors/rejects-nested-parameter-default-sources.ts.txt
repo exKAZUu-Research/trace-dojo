@@ -1,0 +1,67 @@
+const stored = {};
+function nonliteral({ outer: { value = 1 } } = { outer: stored }) {
+  return value;
+}
+
+function pair({ outer: { first = 1, second = 2 } = {} } = { outer: { second: 4 } }) {
+  return first + second;
+}
+pair({ outer: { first: 1, second: 3 } });
+pair({ outer: {} });
+
+function tuple({ outer: [one = 1, two = 'ok'] = [] } = { outer: [] }) {
+  return [one, two];
+}
+tuple({ outer: [1, 'ok'] });
+
+const arrow = ({ outer: { value = 1 } = {} } = { outer: {} }) => value;
+const expression = function ({ outer: { value = 1 } = {} } = { outer: {} }) {
+  return value;
+};
+const method = {
+  read({ outer: { value = 1 } = {} } = { outer: {} }) {
+    return value;
+  },
+};
+console.log(arrow(), expression(), method.read());
+
+function missingTupleBinding([value] = []) { return value; }
+function missingFirstBinding([value, fallback = 1] = []) { return [value, fallback]; }
+function missingAfterValue([present, missing] = [1]) { return [present, missing]; }
+const tupleSource = [] as [];
+function missingFromStoredTuple([value] = tupleSource) { return value; }
+function missingNestedBinding({values: [value] = []} = {}) { return value; }
+function annotatedNestedTuple({values: [value] = []}: {values?: [number?]}) { return value; }
+function choose(callback: (value?: [number?]) => number | undefined) { return callback(); }
+choose(([value] = []) => value);
+function tupleWithValue([[value = 2]] = [[1]]) { return value; }
+tupleWithValue([[]]);
+function spreadObject({outer: {value = 2}} = {outer: {...{value: 1}}}) { return value; }
+spreadObject({outer: {}});
+function defaultedOuter({outer: {value = 2} = {}} = {outer: {value: 1}}) { return value; }
+defaultedOuter({outer: {}});
+
+function maybeValue({outer: {value} = {value: 1}} = {outer: {}}) {
+  const definitelyNumber: number = value;
+  return definitelyNumber;
+}
+function absentEverywhere({outer: {value, absent} = {value: 1}} = {outer: {}}) {
+  return [value, absent];
+}
+const storedEmptyForBinding = {};
+function storedDefault({outer: {value} = {value: 1}} = {outer: storedEmptyForBinding}) {
+  return value;
+}
+function spreadDefault({outer: {value} = {value: 1}} = {outer: {...{}}}) {
+  return value;
+}
+
+function extraAtRoot({outer: {value} = {value: 1}} = {outer: {value: 2}, extra: true}) {
+  return value;
+}
+function extraWithoutNestedDefault({outer: {value = 1}} = {outer: {value: 2, extra: true}}) {
+  return value;
+}
+function extraInNestedDefault({outer: {value} = {value: 1, extra: true}} = {outer: {value: 2}}) {
+  return value;
+}

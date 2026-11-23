@@ -1,0 +1,6 @@
+function conv(x: string): number;
+function conv(x: number): number;
+function conv(x: string | number): string {
+  return String(x);
+}
+console.log(conv(1));

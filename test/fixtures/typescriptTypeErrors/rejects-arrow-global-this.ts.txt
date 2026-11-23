@@ -1,0 +1,10 @@
+[1, 2].forEach(() => console.log(this));
+const obj = { name: "o", greet: () => { console.log(this === undefined); } };
+const g = () => this;
+const n = () => () => this;
+const p = () => this.name;
+console.log(this);
+function outer(this: { a: number }) { const a = () => this.a; return a(); }
+class C { x = 1; m() { return () => this.x; } f = () => this.x; }
+const o2 = { m() { return () => this; } };
+const t = () => typeof this;

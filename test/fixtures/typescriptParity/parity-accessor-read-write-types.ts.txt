@@ -1,0 +1,22 @@
+interface CoercingValue { get value(): number; set value(v: number | string); }
+class CoercingCounter implements CoercingValue {
+  private n = 0;
+  get value(): number { return this.n; }
+  set value(v: number | string) { this.n = Number(v); }
+}
+const counter = new CoercingCounter();
+counter.value = "3";
+const contract: CoercingValue = counter;
+contract.value = "4";
+const readNumber: number = counter.value;
+console.log(readNumber + 1);
+const object = { n: 0, get value(): number { return this.n; }, set value(v: number | string) { this.n = Number(v); } };
+object.value = "5";
+object["value"] = "6";
+console.log(object.value + 1);
+interface ReadValue { get value(): number; }
+const readonlyValue: ReadValue = { get value() { return 8; } };
+console.log(readonlyValue.value + 1);
+const receiver = { read() { return this.value + 1; }, n: 0, get value(): number { return this.n; }, set value(v: number | string) { this.n = Number(v); } };
+receiver.value = "9";
+console.log(receiver.read());

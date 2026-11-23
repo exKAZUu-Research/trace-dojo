@@ -48,7 +48,7 @@ export abstract class StatementExecutor extends PatternMatcher {
     }
   }
 
-  // code-gauge-allow functionNcss 42 -- One case per kind of statement.
+  // code-gauge-allow functionNcss -- One case per kind of statement.
   execute(statement: BoundStatement, frame: Frame): Completion {
     this.runtime.spend();
     switch (statement.kind) {
@@ -303,7 +303,7 @@ export abstract class StatementExecutor extends PatternMatcher {
     throw this.throwValue(this.evaluate(statement.value, frame));
   }
 
-  // code-gauge-allow functionNcss 31 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- Each branch handles one case of the C# rule that the function applies.
   private executeTry(statement: Extract<BoundStatement, { kind: 'try' }>, frame: Frame): Completion {
     let completion: Completion;
     let isExiting = false;

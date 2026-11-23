@@ -1,0 +1,11 @@
+(2,23): error TS2314: Generic type 'Box<T>' requires 1 type argument(s).
+(3,5): error TS2351: This expression is not constructable.
+  Type 'typeof Missing' has no construct signatures.
+(4,21): error TS2314: Generic type 'Box<T>' requires 1 type argument(s).
+(5,5): error TS2351: This expression is not constructable.
+  Type 'typeof Extra' has no construct signatures.
+(7,26): error TS2315: Type 'Plain' is not generic.
+(8,5): error TS2351: This expression is not constructable.
+  Type 'typeof NotGeneric' has no construct signatures.
+(10,30): error TS2344: Type 'number' does not satisfy the constraint 'string'.
+(11,21): error TS2314: Generic type 'Box<T>' requires 1 type argument(s).

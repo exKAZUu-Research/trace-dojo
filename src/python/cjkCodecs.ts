@@ -135,7 +135,7 @@ export function incompleteTail(data: Uint8Array, step: Stepper): number {
 export type Encoder = (points: readonly number[], index: number, out: number[]) => number;
 
 /** Encodes characters, giving each one the encoder refuses to the error handler, as CPython's multibyte codecs do. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Hands each character the encoder refuses to the error handler, which may give bytes or text.
+// code-gauge-allow functionCognitiveComplexity -- Hands each character the encoder refuses to the error handler, which may give bytes or text.
 export function encodeSteps(points: readonly number[], errors: ErrorHandling, encode: Encoder): number[] {
   const out: number[] = [];
   let index = 0;
@@ -213,8 +213,8 @@ function decodeIncrementally(
   return { text, consumed };
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- The codec factories retain shift state and pending characters together with CPython checkpoint packing.
-// code-gauge-allow functionNcss 34 -- The codec factories retain shift state and pending characters together with CPython checkpoint packing.
+// code-gauge-allow functionCognitiveComplexity -- The codec factories retain shift state and pending characters together with CPython checkpoint packing.
+// code-gauge-allow functionNcss -- The codec factories retain shift state and pending characters together with CPython checkpoint packing.
 export function registerStatefulCodec(name: string, parts: StatefulParts): void {
   registerCodec(name, () => ({
     name,
@@ -343,8 +343,8 @@ function findRun(runs: [number, number, number][], value: number, field: 0 | 1):
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Follows CPython's GB18030 codec, with its two- and four-byte sequences.
-// code-gauge-allow functionNcss 33 -- Follows CPython's GB18030 codec, with its two- and four-byte sequences.
+// code-gauge-allow functionCognitiveComplexity -- Follows CPython's GB18030 codec, with its two- and four-byte sequences.
+// code-gauge-allow functionNcss -- Follows CPython's GB18030 codec, with its two- and four-byte sequences.
 function gb18030Codec(): TextCodec {
   const { decode, encode } = tablesOf('gb18030');
   const runs = gb18030Runs();

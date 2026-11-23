@@ -1,0 +1,160 @@
+int(1)
+int(1)
+int(1)
+int(1)
+int(0)
+int(1)
+int(0)
+int(0)
+int(0)
+int(0)
+int(1)
+int(0)
+int(0)
+int(0)
+int(0)
+int(1)
+int(0)
+int(0)
+int(0)
+int(0)
+int(0)
+int(1)
+int(0)
+int(0)
+int(1)
+int(0)
+int(0)
+int(1)
+int(0)
+int(0)
+int(1)
+int(0)
+int(0)
+int(1)
+int(0)
+int(0)
+int(0)
+int(0)
+int(0)
+int(0)
+int(0)
+int(0)
+int(0)
+int(0)
+int(0)
+int(0)
+int(1)
+int(0)
+int(4)
+array(0) {
+}
+int(0)
+int(1)
+array(0) {
+}
+int(0)
+array(4) {
+  [0]=>
+  array(2) {
+    [0]=>
+    string(7) "α😀b"
+    [1]=>
+    int(1)
+  }
+  [1]=>
+  array(2) {
+    [0]=>
+    string(2) "α"
+    [1]=>
+    int(1)
+  }
+  [2]=>
+  array(2) {
+    [0]=>
+    string(4) "😀"
+    [1]=>
+    int(3)
+  }
+  [3]=>
+  array(2) {
+    [0]=>
+    string(1) "b"
+    [1]=>
+    int(7)
+  }
+}
+array(3) {
+  [0]=>
+  array(3) {
+    [0]=>
+    array(2) {
+      [0]=>
+      string(2) "α"
+      [1]=>
+      int(0)
+    }
+    [1]=>
+    array(2) {
+      [0]=>
+      string(4) "😀"
+      [1]=>
+      int(2)
+    }
+    [2]=>
+    array(2) {
+      [0]=>
+      string(2) "α"
+      [1]=>
+      int(6)
+    }
+  }
+  [1]=>
+  array(3) {
+    [0]=>
+    array(2) {
+      [0]=>
+      string(2) "α"
+      [1]=>
+      int(0)
+    }
+    [1]=>
+    array(2) {
+      [0]=>
+      NULL
+      [1]=>
+      int(-1)
+    }
+    [2]=>
+    array(2) {
+      [0]=>
+      string(2) "α"
+      [1]=>
+      int(6)
+    }
+  }
+  [2]=>
+  array(3) {
+    [0]=>
+    array(2) {
+      [0]=>
+      NULL
+      [1]=>
+      int(-1)
+    }
+    [1]=>
+    array(2) {
+      [0]=>
+      string(4) "😀"
+      [1]=>
+      int(2)
+    }
+    [2]=>
+    array(2) {
+      [0]=>
+      NULL
+      [1]=>
+      int(-1)
+    }
+  }
+}

@@ -1,0 +1,24 @@
+interface Config { verbose?: boolean; depth?: number }
+function run(opts: Config & { id: number }) { return opts.id; }
+console.log(run({ id: 1 }));
+interface Point { x: number; y: number }
+const a: Partial<Point> & { name: string } = { name: "z" };
+const b: { x?: number } & { name: string } = { name: "z" };
+const src = { name: "q", other: 1 };
+const c: { x?: number } & { name: string } = src;
+const d: { x?: number } & { y?: number } = { x: 1 };
+const e: Config & { label?: string } = { label: "l" };
+const wrong = { color: "red" };
+const f: Config & { label?: string } = wrong;
+const g: Config = wrong;
+const h: Config & {} = wrong;
+const i: (Config & { id: number }) | string = { id: 2 };
+const j: Config = 5;
+const k: { toFixed?: number } = 5;
+const l: Config = {} as object;
+const m: Config & { id: number } = { id: 3, depth: 2 };
+function gen<T extends object>(t: T): Partial<T> & { id: number } {
+  return { id: 1 };
+}
+const n: { a?: number }[] = [{ b: 1 }].map((v) => v);
+console.log(a, b, c, d, e, f, g, h, i, j, k, l, m, gen({ q: 1 }), n);

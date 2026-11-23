@@ -1,0 +1,28 @@
+(1,72): error TS2322: Type 'T extends string ? any : { a: number; }' is not assignable to type '{ a: string; }'.
+  Type '{ a: number; }' is not assignable to type '{ a: string; }'.
+    Types of property 'a' are incompatible.
+      Type 'number' is not assignable to type 'string'.
+(2,73): error TS2322: Type 'T extends string ? { a: number; } : any' is not assignable to type '{ a: string; }'.
+  Type '{ a: number; }' is not assignable to type '{ a: string; }'.
+    Types of property 'a' are incompatible.
+      Type 'number' is not assignable to type 'string'.
+(3,69): error TS2322: Type 'T extends string ? any : unknown' is not assignable to type '{ a: string; }'.
+  Type 'unknown' is not assignable to type '{ a: string; }'.
+(5,3): error TS2322: Type 'string' is not assignable to type 'number'.
+(6,5): error TS2339: Property 'missing' does not exist on type 'T extends string ? any : { a: number; }'.
+(7,21): error TS2488: Type 'T extends string ? any : { a: number; }' must have a '[Symbol.iterator]()' method that returns an iterator.
+(8,14): error TS2351: This expression is not constructable.
+  Type '{ a: number; }' has no construct signatures.
+(11,21): error TS2339: Property 'message' does not exist on type 'ReturnType<T>'.
+(12,22): error TS2488: Type 'ReturnType<T>' must have a '[Symbol.iterator]()' method that returns an iterator.
+(13,14): error TS2351: This expression is not constructable.
+  Type 'unknown' has no construct signatures.
+(16,10): error TS2347: Untyped function calls may not accept type arguments.
+(19,23): error TS2488: Type 'T extends string ? any : any' must have a '[Symbol.iterator]()' method that returns an iterator.
+(20,9): error TS2488: Type 'T extends string ? any : any' must have a '[Symbol.iterator]()' method that returns an iterator.
+(24,9): error TS2322: Type 'ReturnType<T>' is not assignable to type 'number'.
+  Type '{ text: string; }' is not assignable to type 'number'.
+(25,3): error TS2322: Type 'number' is not assignable to type 'string'.
+(26,9): error TS2339: Property 'missing' does not exist on type 'ReturnType<T>'.
+(27,14): error TS2351: This expression is not constructable.
+  Type '{ text: string; }' has no construct signatures.

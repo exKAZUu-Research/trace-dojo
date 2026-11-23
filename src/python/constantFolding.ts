@@ -25,8 +25,8 @@ export function foldConstants(expressions: Expression[]): PyValue[] | undefined 
   return values;
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of expression CPython's compiler folds.
-// code-gauge-allow functionNcss 35 -- One case per kind of expression CPython's compiler folds.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of expression CPython's compiler folds.
+// code-gauge-allow functionNcss -- One case per kind of expression CPython's compiler folds.
 function foldConstant(expression: Expression): PyValue | undefined {
   switch (expression.kind) {
     case 'constant': {
@@ -141,7 +141,7 @@ function isSafeToFold(operator: BinaryOperator, left: PyValue, right: PyValue): 
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- One limit per kind of operand a repetition may multiply.
+// code-gauge-allow functionCognitiveComplexity -- One limit per kind of operand a repetition may multiply.
 function isSafeProduct(left: PyValue, right: PyValue): boolean {
   const [a, b] = [intOf(left), intOf(right)];
   if (a !== undefined && b !== undefined) {

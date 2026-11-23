@@ -1,0 +1,5 @@
+Random\Engine\Xoshiro256StarStar::__construct(): Argument #1 ($seed) must not consist entirely of NUL bytes
+b4f275cb365fec99
+0000000000000000
+bool(true)
+Trying to clone an uncloneable object of class Random\Randomizer

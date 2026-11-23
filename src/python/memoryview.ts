@@ -92,7 +92,7 @@ function readItem(view: PyMemoryView, index: number): PyValue {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Checks each kind of item as memoryview's pack_single does.
+// code-gauge-allow functionCognitiveComplexity -- Checks each kind of item as memoryview's pack_single does.
 function writeItem(view: PyMemoryView, index: number, value: PyValue): void {
   const info = nativeCode(view);
   const out = view.source.data;
@@ -354,7 +354,7 @@ method(
   'takes',
   1,
   2,
-  // code-gauge-allow functionCognitiveComplexity 17 -- One check per argument of memoryview.cast, in CPython's order.
+  // code-gauge-allow functionCognitiveComplexity -- One check per argument of memoryview.cast, in CPython's order.
   (self, args, kwargs) => {
     const view = asView(self);
     const formatValue = argument(args, kwargs, 0, 'format');

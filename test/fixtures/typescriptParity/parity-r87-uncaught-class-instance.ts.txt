@@ -1,0 +1,2 @@
+class Problem { constructor(public code: number) {} toString() { return 'Problem#' + this.code; } }
+throw new Problem(7);

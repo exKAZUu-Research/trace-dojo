@@ -1,0 +1,13 @@
+(4,84): error TS2322: Type 'number' is not assignable to type 'T[K]'.
+  'number' is assignable to the constraint of type 'T[K]', but 'T[K]' could be instantiated with a different subtype of constraint 'number'.
+(5,49): error TS2322: Type 'number' is not assignable to type 'T["a"]'.
+  'T["a"]' could be instantiated with an arbitrary type which could be unrelated to 'number'.
+(6,88): error TS2322: Type 'string' is not assignable to type 'T[K]'.
+  'T[K]' could be instantiated with an arbitrary type which could be unrelated to 'string'.
+(8,90): error TS2322: Type 'string' is not assignable to type 'T[K]'.
+  'string' is assignable to the constraint of type 'T[K]', but 'T[K]' could be instantiated with a different subtype of constraint 'string | number'.
+    Type '"x"' is not assignable to type 'never'.
+(15,30): error TS2322: Type 'number' is not assignable to type 'T["n" & keyof T]'.
+  'T["n" & keyof T]' could be instantiated with an arbitrary type which could be unrelated to 'number'.
+(18,61): error TS2322: Type 'number' is not assignable to type 'T["a"]'.
+  'number' is assignable to the constraint of type 'T["a"]', but 'T["a"]' could be instantiated with a different subtype of constraint 'number'.

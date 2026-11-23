@@ -1,0 +1,13 @@
+(1,16): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+(2,16): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+(8,16): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+(9,19): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+(12,17): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+(13,17): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+(14,18): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+(15,15): error TS2378: A 'get' accessor must return a value.
+(15,20): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+(15,36): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+(16,20): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+(17,17): error TS2534: A function returning 'never' cannot have a reachable end point.
+(21,17): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.

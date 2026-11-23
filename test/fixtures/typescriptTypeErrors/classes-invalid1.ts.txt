@@ -1,0 +1,32 @@
+interface Comparable<T> {
+  compareTo(other: T): number;
+}
+class Version implements Comparable<Version> {
+  compareTo(other: number): number {
+    return other;
+  }
+}
+abstract class Account {
+  protected balance = 0;
+  abstract fee(): number;
+}
+class Savings extends Account {}
+const s = new Savings();
+console.log(s.balance);
+function maxOf<T extends Comparable<T>>(items: T[]): T {
+  return items[0];
+}
+maxOf([1, 2]);
+type Tree<T> = { value: T; children: Tree<T>[] };
+const t: Tree<number> = { value: "1", children: [] };
+const m = new Map([["a", 1]]);
+m.set("b", "2");
+let x: number = m.get("a");
+class P {
+  private constructor() {}
+}
+const p = new P();
+function f(this: { n: number }) {
+  return this.n;
+}
+f();

@@ -1,0 +1,20 @@
+let fieldMaybe: string | undefined = "field";
+class FieldFlow {
+  count = fieldMaybe === undefined ? 0 : fieldMaybe.length;
+  static count = fieldMaybe === undefined ? 0 : fieldMaybe.length;
+  assigned = (fieldMaybe = "assigned").length;
+}
+console.log(new FieldFlow().count, FieldFlow.count);
+const computedMethodKey = "method";
+const equalMethodKey = "method";
+const computedStaticKey = "staticMethod";
+class ComputedOverloads {
+  [computedMethodKey](value: number): number;
+  [equalMethodKey](value: number) { return value + 1; }
+  static [computedStaticKey](value: number): number;
+  static [computedStaticKey](value: number) { return value + 2; }
+}
+console.log(new ComputedOverloads().method(1), ComputedOverloads.staticMethod(1));
+const computedFieldKey = "value";
+class ComputedInitializedField { [computedFieldKey]: number; constructor() { this.value = 8; } }
+console.log(new ComputedInitializedField().value);

@@ -30,7 +30,7 @@ export type MemberLookup =
 /** Finds members by name in types and their bases, honoring hiding, overriding, and accessibility. */
 export class LookupBinder extends DeclarationBinder {
   /** The constructed types to search for a type's members: the type and its bases, or an interface's bases. */
-  // code-gauge-allow functionCognitiveComplexity 26 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   protected searchChain(type: Type): NamedType[] {
     if (type.kind === 'array') return this.chainOf(this.wellKnown.array);
     if (type.kind === 'typeParameter') {
@@ -151,7 +151,7 @@ export class LookupBinder extends DeclarationBinder {
   }
 
   /** The extension methods by name that the namespaces in scope declare in their static classes. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   lookupExtensionMethods(name: string, context: TypeContext): MethodCandidate[] {
     const result: MethodCandidate[] = [];
     const visit = (types: Map<string, TypeSymbol[]>): void => {
@@ -174,7 +174,7 @@ export class LookupBinder extends DeclarationBinder {
   }
 
   /** Whether code in the context may use a member with the access of its declaring type. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   isAccessible(access: string, declaringType: TypeSymbol, context: TypeContext, through?: Type): boolean {
     if (access === 'public' || access === 'internal' || access === 'protected internal') return true;
     const within = context.type;

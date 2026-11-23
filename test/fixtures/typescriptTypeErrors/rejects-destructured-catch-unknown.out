@@ -1,0 +1,7 @@
+(1,42): error TS2339: Property 'message' does not exist on type 'unknown'.
+(2,27): error TS2488: Type 'unknown' must have a '[Symbol.iterator]()' method that returns an iterator.
+(4,25): error TS2571: Object is of type 'unknown'.
+(5,25): error TS2488: Type 'unknown' must have a '[Symbol.iterator]()' method that returns an iterator.
+(6,30): error TS2700: Rest types may only be created from object types.
+(7,27): error TS2339: Property 'a' does not exist on type 'unknown'.
+(8,27): error TS2339: Property 'a' does not exist on type 'unknown'.

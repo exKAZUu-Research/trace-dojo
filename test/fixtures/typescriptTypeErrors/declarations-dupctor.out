@@ -1,0 +1,2 @@
+(2,3): error TS2392: Multiple constructor implementations are not allowed.
+(3,3): error TS2392: Multiple constructor implementations are not allowed.

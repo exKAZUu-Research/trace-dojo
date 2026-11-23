@@ -1,0 +1,4 @@
+type Pair = [number, string];
+type Missing = Pair[3];
+const n: Missing = 1; console.log(n);
+const pair: [number, string] = [1, 'two']; console.log(pair[-1], pair[0.5]);

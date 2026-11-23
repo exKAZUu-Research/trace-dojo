@@ -1,0 +1,36 @@
+(5,7): error TS2322: Type '"01"' is not assignable to type '`${bigint}`'.
+(6,7): error TS2322: Type '"00"' is not assignable to type '`${bigint}`'.
+(7,7): error TS2322: Type '"08"' is not assignable to type '`${bigint}`'.
+(8,7): error TS2322: Type '"-01"' is not assignable to type '`${bigint}`'.
+(16,7): error TS2322: Type '"0b2"' is not assignable to type '`${bigint}`'.
+(17,7): error TS2322: Type '"0o8"' is not assignable to type '`${bigint}`'.
+(18,7): error TS2322: Type '"0xg"' is not assignable to type '`${bigint}`'.
+(19,7): error TS2322: Type '"0x"' is not assignable to type '`${bigint}`'.
+(20,7): error TS2322: Type '"+1"' is not assignable to type '`${bigint}`'.
+(21,7): error TS2322: Type '"1e3"' is not assignable to type '`${bigint}`'.
+(22,7): error TS2322: Type '"1.0"' is not assignable to type '`${bigint}`'.
+(23,7): error TS2322: Type '"1_000"' is not assignable to type '`${bigint}`'.
+(24,7): error TS2322: Type '" 1"' is not assignable to type '`${bigint}`'.
+(25,7): error TS2322: Type '"1 "' is not assignable to type '`${bigint}`'.
+(26,7): error TS2322: Type '"--1"' is not assignable to type '`${bigint}`'.
+(27,7): error TS2322: Type '"- 1"' is not assignable to type '`${bigint}`'.
+(28,7): error TS2322: Type '"0n"' is not assignable to type '`${bigint}`'.
+(30,7): error TS2322: Type '""' is not assignable to type '`${bigint}`'.
+(31,7): error TS2322: Type '"-"' is not assignable to type '`${bigint}`'.
+(32,7): error TS2322: Type '"0x_1"' is not assignable to type '`${bigint}`'.
+(33,7): error TS2322: Type '"1."' is not assignable to type '`${bigint}`'.
+(34,7): error TS2322: Type '".1"' is not assignable to type '`${bigint}`'.
+(35,7): error TS2322: Type '"٣"' is not assignable to type '`${bigint}`'.
+(46,7): error TS2322: Type '"-0x12"' is not assignable to type '`${number}`'.
+(51,7): error TS2322: Type '"0b2"' is not assignable to type '`${number}`'.
+(52,7): error TS2322: Type '"0o8"' is not assignable to type '`${number}`'.
+(53,7): error TS2322: Type '"0xg"' is not assignable to type '`${number}`'.
+(54,7): error TS2322: Type '"0x"' is not assignable to type '`${number}`'.
+(58,7): error TS2322: Type '"1_000"' is not assignable to type '`${number}`'.
+(61,7): error TS2322: Type '"--1"' is not assignable to type '`${number}`'.
+(62,7): error TS2322: Type '"- 1"' is not assignable to type '`${number}`'.
+(63,7): error TS2322: Type '"0n"' is not assignable to type '`${number}`'.
+(65,7): error TS2322: Type '""' is not assignable to type '`${number}`'.
+(66,7): error TS2322: Type '"-"' is not assignable to type '`${number}`'.
+(67,7): error TS2322: Type '"0x_1"' is not assignable to type '`${number}`'.
+(70,7): error TS2322: Type '"٣"' is not assignable to type '`${number}`'.

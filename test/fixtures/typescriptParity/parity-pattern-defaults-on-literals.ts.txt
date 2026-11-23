@@ -1,0 +1,24 @@
+const { a = 1 } = {};
+console.log(a);
+let b: number;
+({ b = 2 } = {});
+console.log(b);
+const { c = 3, d: { e = 4 } = {} } = { d: {} };
+console.log(c, e);
+function f({ x = 5 } = {}) {
+  return x;
+}
+console.log(f(), f({ x: 6 }));
+const { g: renamed = 7 } = {};
+console.log(renamed);
+const [{ h = 8 }] = [{}];
+console.log(h);
+const { p: { q = 9 } } = { p: {} };
+console.log(q);
+for (const { k = 10 } of [{}]) console.log(k);
+const optional: { m?: number } = {};
+const { m = 11 } = optional;
+console.log(m);
+const record: Record<string, number> = {};
+const { n = 12 } = record;
+console.log(n);

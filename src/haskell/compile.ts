@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';
+import { assert } from 'es-toolkit';
 
 import { CompileError } from '../interpreter/diagnostics';
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
@@ -189,12 +189,12 @@ class LibraryCompiler {
     ];
     for (const [module, name, kind] of types) {
       const type = this.internal.get(module)?.types.get(name)?.entity;
-      assert.ok(type?.kind === 'type', `Missing library trace type ${module}.${name}`);
+      assert(type?.kind === 'type', `Missing library trace type ${module}.${name}`);
       type.entity.traceKind = kind;
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- The export pass combines explicit selections, implemented identities and unsupported API entries.
+  // code-gauge-allow functionCognitiveComplexity -- The export pass combines explicit selections, implemented identities and unsupported API entries.
   publicModules(): Map<string, ExportTable> {
     const modules = new Map<string, ExportTable>();
     for (const [name, spec] of Object.entries(PUBLIC_MODULES)) {
@@ -209,7 +209,7 @@ class LibraryCompiler {
             names.includes(value)
           );
           const shared = reexport && modules.get(reexport[0])?.values.get(value);
-          assert.ok(!reexport || shared, `Missing library re-export ${reexport?.[0]}.${value}`);
+          assert(!reexport || shared, `Missing library re-export ${reexport?.[0]}.${value}`);
           exports.values.set(
             value,
             shared ?? {
@@ -330,7 +330,7 @@ function exportType(
   for (const child of selected) exports.values.set(child.name, child);
 }
 
-// code-gauge-allow functionNcss 38 -- One lookup per built-in entity the checker needs.
+// code-gauge-allow functionNcss -- One lookup per built-in entity the checker needs.
 function makeBuiltins(type: (name: string) => TypeEntity, cls: (name: string) => ClassEntity): Builtins {
   const standard = [
     'Eq',
@@ -453,7 +453,7 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>,
     for (const binding of checked.defaults) codegen.compileDefault(binding);
     const misplaced = codegen.checkAtomicClaims();
     if (misplaced !== undefined) throw new CompileError([{ row: misplaced, message: misplacedHaskellAtomicMessage }]);
-    assert.ok(checked.main);
+    assert(checked.main, 'The checked program has no main');
     return { main: codegen.compileEntry(checked.main.entity, checked.main.evidence) };
   });
 }
@@ -462,6 +462,6 @@ function assertPublicExports(name: string, exports: ExportTable): void {
   const values = KNOWN_LIBRARY_VALUES[name];
   const types = KNOWN_LIBRARY_TYPES[name];
   for (const value of exports.values.keys())
-    assert.ok(!values || values.includes(value), `${name} does not export ${value}`);
-  for (const type of exports.types.keys()) assert.ok(!types || types.includes(type), `${name} does not export ${type}`);
+    assert(!values || values.includes(value), `${name} does not export ${value}`);
+  for (const type of exports.types.keys()) assert(!types || types.includes(type), `${name} does not export ${type}`);
 }

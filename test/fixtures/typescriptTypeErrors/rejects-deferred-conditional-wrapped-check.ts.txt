@@ -1,0 +1,23 @@
+type IsStr<T> = { v: T } extends { v: string } ? "str" : "other";
+function f<T>(x: T): IsStr<T> { return (typeof x === "string" ? "str" : "other") as IsStr<T>; }
+const a: "str" = f("x");
+type RetStr<T> = (() => T) extends () => string ? "yes" : "no";
+function k<T>(x: T): RetStr<T> { return (typeof x === "string" ? "yes" : "no") as RetStr<T>; }
+const c: "yes" = k("s");
+function g<T>(x: T) { const r: IsStr<T> = "other"; }
+type X<T> = [T] extends [string] ? 1 : 2;
+function g2<T>() { const r: X<T> = 2; }
+type Y<T> = { v: T } extends { v: string } ? 1 : 2;
+function h<T>() { const r: Y<T> = 2; }
+type Z<T> = { f: <U>(u: U) => U; v: T } extends { f: <U>(u: U) => U; v: string } ? 1 : 2;
+const z1: Z<string> = 1;
+const z2: Z<number> = 2;
+type M<T> = { v: Partial<T> } extends { v: {} } ? 1 : 2;
+function m<T>() { const r: M<T> = 2; const q: M<T> = 1; }
+type N<T> = { v: T[] } extends { v: unknown[] } ? 1 : 2;
+function n<T>() { const r: N<T> = 1; }
+type Fn<T> = ((x: T) => void) extends (x: string) => void ? "y" : "n";
+const f1: Fn<string> = "y";
+const f2: Fn<unknown> = "y";
+const f3: Fn<number> = "n";
+function k2<T>() { const r: Fn<T> = "n"; }

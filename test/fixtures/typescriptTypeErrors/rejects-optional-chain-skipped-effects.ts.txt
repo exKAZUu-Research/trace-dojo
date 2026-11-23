@@ -1,0 +1,40 @@
+type O = { f(n: number): number; c: number; arr: number[]; g(): O };
+
+function getArray(): number[] | undefined {
+  return undefined;
+}
+function getFunction(): ((n: number) => void) | undefined {
+  return undefined;
+}
+
+let index: number;
+getArray()?.[(index = 0)];
+console.log(index);
+
+let argument: number;
+getFunction()?.((argument = 1));
+console.log(argument);
+
+function laterLink(a: O | undefined) {
+  let x: number;
+  a?.g().f((x = 1));
+  return x;
+}
+function laterIndex(a: O | undefined) {
+  let x: number;
+  a?.arr[(x = 1)];
+  return x;
+}
+function nonNullable(a: O) {
+  let x: number;
+  a?.f((x = 1));
+  return x;
+}
+function comparedChain(a: O | undefined) {
+  let x: number;
+  if (a?.f((x = 1)) === 1) return x;
+  return 0;
+}
+function narrowedAfterward(a: O | undefined) {
+  return a?.f(a.c) ?? a.c;
+}

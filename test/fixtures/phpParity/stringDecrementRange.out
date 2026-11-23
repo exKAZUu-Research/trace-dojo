@@ -1,0 +1,12 @@
+00:str_decrement(): Argument #1 ($string) "00" is out of decrement range
+000:str_decrement(): Argument #1 ($string) "000" is out of decrement range
+0a:str_decrement(): Argument #1 ($string) "0a" is out of decrement range
+0b:str_decrement(): Argument #1 ($string) "0b" is out of decrement range
+01:str_decrement(): Argument #1 ($string) "01" is out of decrement range
+0Z:str_decrement(): Argument #1 ($string) "0Z" is out of decrement range
+a0:9
+A0:9
+10:9
+b0:a9
+100:99
+az:ay

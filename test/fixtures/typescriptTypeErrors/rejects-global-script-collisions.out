@@ -1,0 +1,6 @@
+(1,7): error TS2451: Cannot redeclare block-scoped variable 'name'.
+(2,5): error TS2451: Cannot redeclare block-scoped variable 'status'.
+(3,7): error TS2451: Cannot redeclare block-scoped variable 'top'.
+(4,5): error TS2451: Cannot redeclare block-scoped variable 'event'.
+(5,7): error TS2300: Duplicate identifier 'Plugin'.
+(7,7): error TS2397: Declaration name conflicts with built-in global identifier 'undefined'.

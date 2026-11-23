@@ -60,8 +60,8 @@ export class BuilderChunks {
   }
 
   /** `Remove` of `count` characters from an index, which drops the chunks wholly inside the range. */
-  // code-gauge-allow functionNcss 33 -- Each branch follows .NET's StringBuilder.Remove, transcribed to keep its capacity.
-  // code-gauge-allow functionCognitiveComplexity 16 -- Each branch follows .NET's StringBuilder.Remove, transcribed to keep its capacity.
+  // code-gauge-allow functionNcss -- Each branch follows .NET's StringBuilder.Remove, transcribed to keep its capacity.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch follows .NET's StringBuilder.Remove, transcribed to keep its capacity.
   remove(start: number, count: number): void {
     if (start === 0 && count === this.length) {
       this.setLength(0);

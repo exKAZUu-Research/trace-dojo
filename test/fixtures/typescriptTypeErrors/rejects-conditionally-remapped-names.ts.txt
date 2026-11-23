@@ -1,0 +1,10 @@
+type Missing<T,K extends keyof T> =
+  T[K] extends {key:'x'} ? {[P in 'a' as T[K]['key']]:number}['y'] : never;
+type MissingPrefix<T,K extends keyof T> =
+  T[K] extends {key:'x'} ? {[P in 'a' as `pre-${T[K]['key']}`]:number}['pre-y'] : never;
+type InvalidKey<T,K extends keyof T> =
+  T[K] extends {key:boolean} ? {[P in 'a' as T[K]['key']]:number} : never;
+type InvalidPrefix<T,K extends keyof T> =
+  T[K] extends {key: symbol} ? {[P in 'a' as `pre-${T[K]['key']}`]:number} : never;
+type Upper<T,K extends keyof T> =
+  T[K] extends {key:'x'} ? {[P in 'a' as Uppercase<T[K]['key']>]:number}['X'] : never;

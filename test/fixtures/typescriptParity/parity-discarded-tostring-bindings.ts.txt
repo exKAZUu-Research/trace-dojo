@@ -1,0 +1,5 @@
+const f20 = () => 1;
+const b_void = f20.toString;
+void b_void;
+let b_let = f20.toString;
+console.log(typeof b_let, void f20.toString);

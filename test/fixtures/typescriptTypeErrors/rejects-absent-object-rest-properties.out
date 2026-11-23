@@ -1,0 +1,10 @@
+(4,20): error TS2339: Property 'a' does not exist on type '{ a: string; } | { b: number; }'.
+(4,28): error TS2339: Property 'b' does not exist on type '{ a: string; } | { b: number; }'.
+(5,10): error TS2339: Property 'a' does not exist on type '{ a: string; } | { b: number; }'.
+(7,20): error TS2339: Property 'a' does not exist on type '{ a: string; } | { b: number; }'.
+(9,24): error TS2339: Property 'b' does not exist on type '{ a: string; } | { b: number; }'.
+(10,38): error TS2339: Property 'a' does not exist on type '{ a: string; } | { b: number; }'.
+(14,20): error TS2339: Property 'a' does not exist on type '{ a: string; } | { b: number; }'.
+(14,28): error TS2339: Property 'b' does not exist on type '{ a: string; } | { b: number; }'.
+(19,22): error TS2339: Property 'b' does not exist on type '{ a: string; } | { b: number; }'.
+(25,20): error TS2339: Property 'b' does not exist on type '{ a: string; } | { b: number; }'.

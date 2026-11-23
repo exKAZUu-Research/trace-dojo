@@ -1,0 +1,6 @@
+const key: symbol = Symbol("key");
+const original: { readonly [key: symbol]: number; label: string } = { [key]: 3, label: "x" };
+const { label, ...rest } = original;
+rest[key] = 4;
+const s: string = rest[key];
+console.log(label);

@@ -1,0 +1,9 @@
+(1,32): error TS1225: Cannot find parameter 'absent'.
+(2,48): error TS1230: A type predicate cannot reference element 'value' in a binding pattern.
+(3,39): error TS1229: A type predicate cannot reference a rest parameter.
+(4,37): error TS1230: A type predicate cannot reference element 'first' in a binding pattern.
+(5,30): error TS1225: Cannot find parameter 'other'.
+(6,29): error TS1225: Cannot find parameter 'missing'.
+(8,22): error TS1225: Cannot find parameter 'y'.
+(11,64): error TS1230: A type predicate cannot reference element 'inner' in a binding pattern.
+(13,34): error TS1225: Cannot find parameter 'w'.

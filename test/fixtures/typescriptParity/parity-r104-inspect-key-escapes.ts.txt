@@ -1,0 +1,4 @@
+console.log({ "it's": 1, 'say "x"': 2, 'nl\nkey': 3, 'tab\t': 4, '\u0000': 5 });
+console.log([Symbol('a\nb'), Symbol("q'uote")], { [Symbol('k\tey')]: 1 });
+console.log(['x'.repeat(10005)].map((s) => s.length), ['y'.repeat(10002)].toString().length);
+console.log(['z'.repeat(10003)]);

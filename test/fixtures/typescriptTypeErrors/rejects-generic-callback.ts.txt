@@ -1,0 +1,20 @@
+function identity<T>(value:T):T {return value;}
+[1, 2].map(identity)[0].toUpperCase();
+['a', 'b'].map(identity)[0].toFixed();
+function transform<A, B>(value:A,fn:(value:A)=>B):B {return fn(value);}
+function constrained<T extends {length:number}>(value:T):T {return value;}
+transform(3, constrained);
+const wrong: string = transform(3, identity);
+const numeric:3=transform(3,identity);
+const text:'a'=transform('a',identity);
+const object = transform({kind:'a'}, identity);
+const kind:'a'=object.kind;
+type GenericReturn = ReturnType<typeof identity>;
+const unknownValue = undefined as GenericReturn;
+unknownValue.toFixed();
+
+function objectCallback<A,B>(callbacks:{fn:(value:A)=>B},value:A):B {return callbacks.fn(value);}
+function arrayCallback<A,B>(callbacks:[(value:A)=>B],value:A):B {return callbacks[0](value);}
+objectCallback({fn:identity},3).toUpperCase();
+arrayCallback([identity],'hello').toFixed();
+const narrow:3=objectCallback({fn:identity},3);

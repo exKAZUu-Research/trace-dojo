@@ -1,0 +1,4 @@
+(2,2): error TS2322: Type 'string' is not assignable to type 'number'.
+(4,2): error TS2322: Type 'string' is not assignable to type 'number'.
+(6,3): error TS2322: Type 'string' is not assignable to type 'number'.
+(8,10): error TS2322: Type 'string' is not assignable to type 'number'.

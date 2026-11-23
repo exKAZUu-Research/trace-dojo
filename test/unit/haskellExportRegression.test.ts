@@ -24,7 +24,7 @@ test.each([
   });
 });
 
-test('large child lists resolve while repeated wildcard expansion stays bounded', { timeout: 30_000 }, () => {
+test('large child lists resolve while repeated wildcard expansion stays bounded', () => {
   const constructors = Array.from({ length: 6000 }, (_, index) => `C${index}`);
   const declarations = `data T=${constructors.join('|')}\nmain=print(1::Int)`;
   const named = `module Main(main,T(${constructors.join(',')})) where\n${declarations}`;

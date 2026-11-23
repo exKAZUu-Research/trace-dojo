@@ -1,0 +1,6 @@
+(1,7): error TS2322: Type 'typeof globalThis' is not assignable to type 'undefined'.
+(4,7): error TS2322: Type 'typeof globalThis' is not assignable to type 'number'.
+(5,21): error TS7041: The containing arrow function captures the global value of 'this'.
+(6,7): error TS2322: Type 'typeof globalThis' is not assignable to type 'undefined'.
+(9,16): error TS7017: Element implicitly has an 'any' type because type 'typeof globalThis' has no index signature.
+(10,6): error TS7017: Element implicitly has an 'any' type because type 'typeof globalThis' has no index signature.

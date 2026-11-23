@@ -1,0 +1,1 @@
+(2,27): error TS2353: Object literal may only specify known properties, and 'a' does not exist in type 'Omit<P, "a">'.

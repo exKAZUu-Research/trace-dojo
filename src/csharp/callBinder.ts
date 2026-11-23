@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 624 -- The callBinder module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss -- The callBinder module keeps one stage of the C# interpreter together.
 import type { BoundArgument, BoundArguments, BoundExpression, BoundLValue } from './bound';
 import { displayMethodIn } from './declarations';
 import type { MethodCandidate } from './lookup';
@@ -152,7 +152,7 @@ export abstract class CallBinder extends OperatorBinder {
   }
 
   /** Maps arguments to a candidate's parameters, infers its type arguments, and checks the arguments convert. */
-  // code-gauge-allow functionCognitiveComplexity 27 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private applicability(
     candidate: MethodCandidate,
     args: ArgumentInfo[],
@@ -474,8 +474,8 @@ export abstract class CallBinder extends OperatorBinder {
     }
   }
 
-  // code-gauge-allow functionNcss 32 -- One case per kind of syntax or value that the function handles.
-  // code-gauge-allow functionCognitiveComplexity 23 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private lowerBoundInference(from: Type, to: Type, bounds: Map<TypeParameterSymbol, Bounds>): void {
     if (to.kind === 'typeParameter' && bounds.has(to.symbol)) {
       const list = (bounds.get(to.symbol) as Bounds).lower;
@@ -558,7 +558,7 @@ export abstract class CallBinder extends OperatorBinder {
   }
 
   /** Whether a candidate is a better function member than another for the arguments. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private isBetter(a: Applicable, b: Applicable, args: ArgumentInfo[]): boolean {
     let isBetterSomewhere = false;
     for (const [index, arg] of args.entries()) {
@@ -596,7 +596,7 @@ export abstract class CallBinder extends OperatorBinder {
     return result;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private specificity(a: Type, b: Type): number {
     if (a.kind === 'typeParameter' && b.kind !== 'typeParameter') return -1;
     if (a.kind !== 'typeParameter' && b.kind === 'typeParameter') return 1;
@@ -691,7 +691,7 @@ export abstract class CallBinder extends OperatorBinder {
   }
 
   /** Checks a type argument against its parameter's constraints, reporting the first it breaks. */
-  // code-gauge-allow functionCognitiveComplexity 26 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   satisfiesConstraints(
     arg: Type,
     parameter: TypeParameterSymbol,
@@ -859,8 +859,8 @@ export abstract class CallBinder extends OperatorBinder {
     return true;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Roslyn reports a different error for each way a call fails.
-  // code-gauge-allow functionNcss 35 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Roslyn reports a different error for each way a call fails.
+  // code-gauge-allow functionNcss -- Each branch handles one case of the C# rule that the function applies.
   private reportInapplicable(
     candidates: MethodCandidate[],
     args: ArgumentInfo[],

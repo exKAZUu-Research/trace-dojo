@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 674 -- Ruby conversions, encoded inspection and internal equality share value representations; splitting by size would scatter those protocols.
+// code-gauge-allow-file fileNcss -- Ruby conversions, encoded inspection and internal equality share value representations; splitting by size would scatter those protocols.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { isCoreMethod } from './define';
 import { argumentError, implicitConversionError, rangeError, rubyError, typeError } from './errors';
@@ -39,7 +39,7 @@ import {
 // Numbers -------------------------------------------------------------------------------------------------------------
 
 /** Formats a Float as `Float#to_s` does: the shortest digits, in exponent form below 1e-4 or from 1e16. */
-// code-gauge-allow duplicateLines 15 -- Ruby numeric formatting shares the same exponent threshold as the other interpreters.
+// code-gauge-allow duplicateLines -- Ruby numeric formatting shares the same exponent threshold as the other interpreters.
 export function formatFloat(value: number): string {
   if (Number.isNaN(value)) return 'NaN';
   if (value === Number.POSITIVE_INFINITY) return 'Infinity';
@@ -371,7 +371,7 @@ export function* inspectArray(array: RArray): Gen<RString> {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- The ordered cases for Ruby value conversion and encoded inspection share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby value conversion and encoded inspection share state; splitting them solely for the metric would hide their sequencing.
 export function* inspectHash(hash: RHash): Gen<RString> {
   const inspecting = rt().recursionContext.inspecting;
   if (hash.map.size === 0) return asciiString('{}');
@@ -521,8 +521,8 @@ export function className(cls: RClass): string {
 }
 
 /** A String's inspect: double-quoted, escaping quotes, backslashes, `#{`, and characters that do not print. */
-// code-gauge-allow functionNcss 59 -- Ruby String inspection keeps its escape cases in one pass.
-// code-gauge-allow functionCognitiveComplexity 25 -- Ruby String inspection has distinct escapes for control, Unicode, and interpolation bytes.
+// code-gauge-allow functionNcss -- Ruby String inspection keeps its escape cases in one pass.
+// code-gauge-allow functionCognitiveComplexity -- Ruby String inspection has distinct escapes for control, Unicode, and interpolation bytes.
 export function strInspect(text: string, controlEscape: 'unicode' | 'hex' = 'unicode'): string {
   let result = '"';
   for (let index = 0; index < text.length; index++) {
@@ -747,7 +747,7 @@ export function numericEquals(a: bigint | number, b: bigint | number): boolean {
   return Number.isInteger(float) && Number.isFinite(float) && BigInt(float) === integer;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Identity and VM numeric fast paths must precede dynamic callbacks and recursion-aware container comparisons.
+// code-gauge-allow functionCognitiveComplexity -- Identity and VM numeric fast paths must precede dynamic callbacks and recursion-aware container comparisons.
 export function* rEql(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new Map()): Gen<boolean> {
   rt().spend();
   if (sameIdentity(a, b)) return true;
@@ -876,7 +876,7 @@ export function* searchNumericSign(value: Value): Gen<number> {
   return sign;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of value Ruby converts or compares.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of value Ruby converts or compares.
 export function numericCompare(a: bigint | number, b: bigint | number): number | undefined {
   if (typeof a === 'bigint' && typeof b === 'bigint') return a < b ? -1 : a > b ? 1 : 0;
   if (Number.isNaN(a) || Number.isNaN(b)) return undefined;

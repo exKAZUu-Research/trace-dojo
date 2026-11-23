@@ -1,0 +1,8 @@
+const source = { a: 1, b: 'text' };
+const descriptors = Object.getOwnPropertyDescriptors(source);
+const wrong: string = descriptors.a.value;
+const descriptor: TypedPropertyDescriptor<number> = { value: 'x' };
+const getter: TypedPropertyDescriptor<string> = { get: () => 1 };
+const key: WeakKey = 1;
+const marker: ThisType<number> = 2;
+console.log(wrong, descriptor, getter, key, marker);

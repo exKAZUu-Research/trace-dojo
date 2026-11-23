@@ -1,0 +1,10 @@
+(5,22): error TS2565: Property 'x' is used before being assigned.
+(6,22): error TS2565: Property 'x' is used before being assigned.
+(7,29): error TS2565: Property '#amount' is used before being assigned.
+(13,3): error TS2564: Property 'value' has no initializer and is not definitely assigned in the constructor.
+(15,10): error TS2565: Property 'value' is used before being assigned.
+(16,22): error TS2565: Property 'value' is used before being assigned.
+(20,3): error TS2564: Property 'value' has no initializer and is not definitely assigned in the constructor.
+(23,22): error TS2565: Property 'value' is used before being assigned.
+(27,3): error TS2564: Property 'value' has no initializer and is not definitely assigned in the constructor.
+(28,36): error TS2565: Property 'value' is used before being assigned.

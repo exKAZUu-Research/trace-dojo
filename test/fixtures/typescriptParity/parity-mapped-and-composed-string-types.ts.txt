@@ -1,0 +1,18 @@
+type Identity<T> = { [K in keyof T]: T[K] };
+const uppercase: Readonly<Uppercase<string>> = 'ABC';
+const plain: string = uppercase;
+const template: Identity<`id-${string}`> = 'id-one';
+const exact: `id-${string}` = template;
+const optional: Partial<`ref-${number}`> = 'ref-4';
+const capitalized: Capitalize<Lowercase<string>> = 'Hello';
+const recased: Uppercase<Lowercase<string>> = 'ABC';
+const uncapitalized: Uncapitalize<Uppercase<string>> = 'aBC';
+const inside: `id-${Capitalize<Lowercase<string>>}` = 'id-World';
+console.log(plain, exact, optional, capitalized, recased, uncapitalized, inside);
+
+function stringify<T>(value: { toString(): T }): T {
+  return value.toString();
+}
+const fromUppercase: string = stringify(uppercase);
+const fromTemplate: string = stringify(template);
+console.log(fromUppercase.toLowerCase(), fromTemplate.toUpperCase(), stringify('Plain').toLowerCase());

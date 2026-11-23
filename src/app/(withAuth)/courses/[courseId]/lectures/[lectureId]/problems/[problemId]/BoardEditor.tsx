@@ -31,7 +31,7 @@ import {
   Tr,
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
-import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
+import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateTemplate';
 import {
   gradeRegularAnswers,
   parseBoard,

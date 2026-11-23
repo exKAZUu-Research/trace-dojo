@@ -1,0 +1,2 @@
+type Decide<T> = { x: T extends string ? true : false } extends { x: true } ? "yes" : "no";
+const value: Decide<string> = "no";

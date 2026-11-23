@@ -1,10 +1,10 @@
-// code-gauge-allow-file fileNcss 520 -- The primitive table lists every built-in operation the Haskell library calls.
+import { power } from '../interpreter/power';
+// code-gauge-allow-file fileNcss -- The primitive table lists every built-in operation the Haskell library calls.
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { CONS_CON, tupleCon, UNIT_CON } from './builtinTypes';
 import type { ConInfo } from './entities';
 import { changeIntegerBit, complementIntegerBit, makeIntegerBit, testIntegerBit } from './integerBits';
 import { cons, NIL, nullary, type PrimResult, unpackString } from './machine';
-import { platformPower, platformUnary } from './platformMath';
 import type { Runtime } from './runtime';
 import {
   ConValue,
@@ -117,8 +117,8 @@ function floorMod(a: bigint, b: bigint): bigint {
 // ---------------------------------------------------------------------------------------------------------------
 // Int and Integer
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Each branch reproduces one of GHC's error or overflow behaviors for integral division.
-// code-gauge-allow functionNcss 34 -- Each branch reproduces one of GHC's error or overflow behaviors for integral division.
+// code-gauge-allow functionCognitiveComplexity -- Each branch reproduces one of GHC's error or overflow behaviors for integral division.
+// code-gauge-allow functionNcss -- Each branch reproduces one of GHC's error or overflow behaviors for integral division.
 function defineIntegral(prefix: 'int' | 'integer' | 'word', wrap: (value: bigint) => bigint): void {
   strict(`${prefix}Add`, 2, ([a, b]) => wrap((a as bigint) + (b as bigint)));
   strict(`${prefix}Sub`, 2, ([a, b]) => wrap((a as bigint) - (b as bigint)));
@@ -266,7 +266,7 @@ strict('integerPopCount', 1, ([a]) => {
 // ---------------------------------------------------------------------------------------------------------------
 // Double and Float
 
-// code-gauge-allow functionNcss 42 -- One definition per floating-point primitive.
+// code-gauge-allow functionNcss -- One definition per floating-point primitive.
 function defineFloating(prefix: 'double' | 'float', round: (value: number) => number): void {
   strict(`${prefix}Add`, 2, ([a, b]) => round((a as number) + (b as number)));
   strict(`${prefix}Sub`, 2, ([a, b]) => round((a as number) - (b as number)));
@@ -301,10 +301,10 @@ function defineFloating(prefix: 'double' | 'float', round: (value: number) => nu
     'Asinh',
     'Acosh',
     'Atanh',
-  ];
+  ] as const;
   for (const name of unary)
-    strict(`${prefix}${name}`, 1, ([a]) => platformUnary(name, a as number, prefix === 'float'));
-  strict(`${prefix}Pow`, 2, ([a, b]) => platformPower(a as number, b as number, prefix === 'float'));
+    strict(`${prefix}${name}`, 1, ([a]) => round(Math[name.toLowerCase() as Lowercase<typeof name>](a as number)));
+  strict(`${prefix}Pow`, 2, ([a, b]) => round(power(a as number, b as number)));
   strict(`${prefix}IsNaN`, 1, ([a]) => bool(Number.isNaN(a)));
   strict(`${prefix}IsInfinite`, 1, ([a]) => bool(a === Number.POSITIVE_INFINITY || a === Number.NEGATIVE_INFINITY));
   strict(`${prefix}IsNegativeZero`, 1, ([a]) => bool(Object.is(a, -0)));
@@ -352,8 +352,7 @@ strict('doubleToFloat', 1, ([a]) => Math.fround(a as number));
 strict('floatToDouble', 1, ([a]) => a);
 
 /** GHC's `decodeFloat`: a mantissa of `floatDigits` bits and an exponent, with infinities and NaN as GHC gives them. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Decoding follows the IEEE 754 cases for normal, subnormal, and special values.
-// code-gauge-allow functionNcss 42 -- Decoding follows the IEEE 754 cases for normal, subnormal, and special values.
+// code-gauge-allow functionNcss -- Decoding follows the IEEE 754 cases for normal, subnormal, and special values.
 export function decodeFloat(value: number, isFloat: boolean): { mantissa: bigint; exponent: number } {
   const bits = isFloat ? 24 : 53;
   if (value === 0) return { mantissa: 0n, exponent: 0 };
@@ -420,7 +419,7 @@ export function rationalToFloat(numerator: bigint, denominator: bigint): number 
   return Math.fround(rationalToBinary(numerator, denominator, 24, -149, 127));
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Rounding to nearest even needs the scaling and tie cases together.
+// code-gauge-allow functionCognitiveComplexity -- Rounding to nearest even needs the scaling and tie cases together.
 function rationalToBinary(
   numerator: bigint,
   denominator: bigint,

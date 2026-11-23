@@ -1,0 +1,14 @@
+AUnknown named parameter $unknown
+CDNamed parameter $first overwrites previous argument
+FUnknown named parameter $missing
+#0 {main}
+#0 {main}
+array(1) {
+  ["named"]=>
+  int(42)
+}
+#0 /main.php(22): call_user_func('strlen', str: 'invalid')
+#1 {main}
+#0 {main}
+#0 /main.php(26): call_user_func(Array, invalid: 1)
+#1 {main}

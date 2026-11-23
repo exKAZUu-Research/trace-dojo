@@ -1,0 +1,12 @@
+const property = 'raw';
+function value() {console.log('value'); return 3;}
+console.log(String . raw`a\nb${value()}`);
+console.log((String.raw)`a\nb`);
+console.log((String).raw`a\nb`);
+console.log(String['raw']`a\nb`);
+console.log((String['r\u0061w'])`a\nb`);
+console.log(String[`raw`]`a\nb`);
+console.log(String[property]`a\nb`);
+console.log(((String.raw) as typeof String.raw)`a\nb`);
+console.log((String as StringConstructor)['raw']`a\nb`);
+console.log(String.r\u0061w`a\nb`);

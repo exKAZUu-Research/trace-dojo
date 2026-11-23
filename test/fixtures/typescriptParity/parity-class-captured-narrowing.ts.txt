@@ -1,0 +1,6 @@
+const value:string|number='hello';
+const arrow=()=>value.toUpperCase();
+const object={text(){return value.toUpperCase();}};
+class C{method(){return typeof value==='string'?value.toUpperCase():'';}}
+function outer(){let local:string|number='world';return ()=>local.toUpperCase();}
+console.log(arrow(),object.text(),new C().method(),outer()());

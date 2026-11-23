@@ -1,0 +1,4 @@
+(2,7): error TS2322: Type 'string' is not assignable to type 'number'.
+(3,10): error TS2322: Type 'string' is not assignable to type 'number'.
+(5,7): error TS2588: Cannot assign to 'fixedValue' because it is a constant.
+(7,19): error TS2407: The right-hand side of a 'for...in' statement must be of type 'any', an object type or a type parameter, but here has type 'unknown'.

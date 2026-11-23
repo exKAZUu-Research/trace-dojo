@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 662 -- The nativesString module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss -- The nativesString module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import {
   compareCulture,

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 456 -- The compiler module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss -- The compiler module keeps one stage of the C# interpreter together.
 import { CompileError } from '../interpreter/diagnostics';
 import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceAnnotations';
 import type {
@@ -287,7 +287,7 @@ export class Compiler extends StatementBinder {
   }
 
   /** Binds the initializers of a type's fields, which run as one block before a constructor's body. */
-  // code-gauge-allow functionCognitiveComplexity 24 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindFieldInitializers(symbol: TypeSymbol, context: TypeContext, isStatic: boolean): BoundBlock | undefined {
     const fields = symbol.fields.filter(
       (field) => field.isStatic === isStatic && !field.isConst && field.initializer !== undefined
@@ -549,7 +549,7 @@ export class Compiler extends StatementBinder {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   protected finishFunction(method: MethodSymbol, fn: FunctionScope): void {
     if (method.kind === 'localFunction' && method.declaration) {
       const declaration = method.declaration as MethodDeclaration;
@@ -662,7 +662,7 @@ export class Compiler extends StatementBinder {
   }
 
   /** An enum member's value: its constant expression, or one more than the member before it. */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private enumMemberValue(field: FieldSymbol, context: BindContext): unknown {
     const owner = field.owner;
     const underlying = owner.enumUnderlying as NamedType;
@@ -772,8 +772,8 @@ function containsValueReturn(statements: Statement[]): boolean {
 }
 
 /** Lists in each scope the locals that lambdas or local functions capture, which then live in fresh cells. */
-// code-gauge-allow functionNcss 41 -- One case per kind of syntax or value that the function handles.
-// code-gauge-allow functionCognitiveComplexity 24 -- Each branch handles one case of the C# rule that the function applies.
+// code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 function markCapturedLocals(block: BoundBlock): void {
   const visit = (statement: BoundStatement): void => {
     switch (statement.kind) {

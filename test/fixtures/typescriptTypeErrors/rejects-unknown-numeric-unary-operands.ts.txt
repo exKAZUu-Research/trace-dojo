@@ -1,0 +1,17 @@
+function a(value: unknown) { return +value; }
+function b(value: unknown) { return -value; }
+function c(value: unknown) { return ~value; }
+function d<T>(value: T) { return +value; }
+function e<T extends unknown>(value: T) { return -value; }
+function f<T>(value: T) { return ~value; }
+function g(value: unknown[]) { return +value[0]; }
+function h(value: { x: unknown }) { return -value.x; }
+function i(value: number | undefined) { return +value; }
+function j() { return +null; }
+function k(value: string | null) { return +value; }
+function l(value: unknown) { return -(value); }
+function m(value: unknown) { if (typeof value === "number") return -value; return 0; }
+function n<T extends number | undefined>(value: T) { return +value; }
+function o<T extends number | undefined>(value: T) { return -value; }
+function p() { return +undefined; }
+function q(value: {} | null) { return ~value; }

@@ -1,0 +1,10 @@
+console.log(Math);
+console.log(JSON);
+console.log(Object.prototype);
+console.log(Array.prototype);
+console.log(String.prototype);
+console.log(Number.prototype);
+console.log(Error.prototype);
+console.log(Map.prototype);
+console.log(Object, Array, Map, Symbol, BigInt);
+console.log(console.log, Math.max, [].push);

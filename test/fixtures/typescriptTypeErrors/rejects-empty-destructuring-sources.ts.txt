@@ -1,0 +1,25 @@
+console.log("before"); const {} = null;
+const [] = 1;
+function optional(u: { a: number } | undefined) { const {} = u; }
+let x: number | null = null; const {} = x;
+const [] = [1];
+const {} = 1;
+const [] = "ab";
+function parameter({}: number | undefined) {}
+function iterable([]: number) {}
+({} = null);
+[] = 1;
+const [[]] = [1];
+const { a: {} } = { a: null };
+const [{}] = [undefined];
+function v(): void {}
+const {} = v();
+let q: unknown;
+({} = v());
+({} = q);
+const [] = v();
+function voided({}: void) {}
+for (const {} of [null]) {}
+for ({} of [undefined]) {}
+const { b: { /* c */ } } = { b: undefined };
+const [, ] = 2;

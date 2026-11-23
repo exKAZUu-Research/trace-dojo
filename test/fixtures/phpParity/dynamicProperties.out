@@ -1,0 +1,15 @@
+
+Deprecated: Creation of dynamic property ArrayObject::$x is deprecated in /main.php on line 2
+
+Deprecated: Creation of dynamic property MyAO::$y is deprecated in /main.php on line 3
+
+Deprecated: Creation of dynamic property SplStack::$z is deprecated in /main.php on line 4
+object(A)#4 (1) {
+  ["b"]=>
+  object(B)#5 (0) {
+  }
+}
+\ArrayObject::__set_state(array(
+   0 => 1,
+   'k' => 2,
+))

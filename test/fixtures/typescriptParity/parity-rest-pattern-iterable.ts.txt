@@ -1,0 +1,10 @@
+const [...letters] = 'ab';
+console.log(letters);
+for (const [...chars] of ['xy']) console.log(chars);
+let tail: string[];
+[...tail] = 'cd';
+console.log(tail);
+function spread([...items]: number[]): number[] {
+  return items;
+}
+console.log(spread([1, 2]));

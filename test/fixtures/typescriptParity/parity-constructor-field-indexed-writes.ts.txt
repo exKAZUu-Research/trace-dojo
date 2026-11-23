@@ -1,0 +1,6 @@
+const k = "x";
+class C { x; constructor() { this["x"] = 1; } }
+const n: number = new C().x;
+class D { x; constructor() { this[k] = "s"; } }
+const s: string = new D().x;
+console.log(n, s);

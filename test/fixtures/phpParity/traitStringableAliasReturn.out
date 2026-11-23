@@ -1,0 +1,4 @@
+
+Fatal error: Declaration of InvalidStringable::__tostring() must be compatible with Stringable::__toString(): string in /main.php on line 2
+Stack trace:
+#0 {main}

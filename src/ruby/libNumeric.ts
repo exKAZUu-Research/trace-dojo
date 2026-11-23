@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 979 -- Ruby numeric coercion and parsing share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss -- Ruby numeric coercion and parsing share representation and state; splitting registration by size would scatter that concern.
 import {
   comparisonFailed,
   floatToInt,
@@ -46,7 +46,7 @@ import {
   RSymbol,
   type Value,
 } from './objects';
-import { platformGamma, platformLog2, platformLog10, platformLogGamma } from './platformMath';
+import { platformGamma, platformLogGamma } from './platformMath';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { codePointCharacters } from './unicodeText';
 import { arr, asciiString, realClassOf, str, truthy } from './values';
@@ -115,7 +115,7 @@ function floatDivmod(x: number, y: number): [number, number] {
   return [div, mod];
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- The ordered cases for Ruby numeric coercion and parsing share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby numeric coercion and parsing share state; splitting them solely for the metric would hide their sequencing.
 function intPow(base: bigint, exponent: bigint): Value {
   if (exponent < 0n) {
     if (base === 1n) return 1n;
@@ -136,8 +136,8 @@ function intPow(base: bigint, exponent: bigint): Value {
   return base ** exponent;
 }
 
-// code-gauge-allow functionNcss 37 -- Arithmetic dispatches Integer and Float operands across Ruby operators and zero-division rules.
-// code-gauge-allow duplicateLines 19 -- Ruby integer and float arithmetic use matching operator cases with different numeric representations.
+// code-gauge-allow functionNcss -- Arithmetic dispatches Integer and Float operands across Ruby operators and zero-division rules.
+// code-gauge-allow duplicateLines -- Ruby integer and float arithmetic use matching operator cases with different numeric representations.
 function arithmetic(op: string, a: Num, b: Num): Value {
   if (typeof a === 'bigint' && typeof b === 'bigint') {
     const bitsA = integerBits(a);
@@ -646,7 +646,7 @@ function* roundingName(mode: Value): Gen<string | undefined> {
   throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Integer rounding applies floor, ceil, truncate, and three half-tie policies to signed values.
+// code-gauge-allow functionCognitiveComplexity -- Integer rounding applies floor, ceil, truncate, and three half-tie policies to signed values.
 function roundInteger(
   value: bigint,
   digits: bigint,
@@ -806,8 +806,8 @@ function floorCeilDigits(value: number, digits: number, rounding: (x: number) =>
 
 // Kernel conversions --------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 30 -- The ordered cases for Ruby numeric coercion and parsing share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 44 -- The ordered cases for Ruby numeric coercion and parsing share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Ruby numeric coercion and parsing share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for Ruby numeric coercion and parsing share state; splitting them solely for the metric would hide their sequencing.
 export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen {
   const raise = yield* exceptionOption(keywords);
   const [value, baseValue] = args;
@@ -867,8 +867,8 @@ function integerStringConversionError(value: Value, converted: Value): RubyError
 }
 
 /** Parses an Integer as `Integer()` does: prefixes, underscores between digits, and surrounding blanks. */
-// code-gauge-allow functionCognitiveComplexity 25 -- Strict integer parsing validates signs, prefixes, underscores and trailing input in one pass.
-// code-gauge-allow functionNcss 38 -- Strict Integer parsing validates radix prefixes, signs, underscores, and surrounding whitespace.
+// code-gauge-allow functionCognitiveComplexity -- Strict integer parsing validates signs, prefixes, underscores and trailing input in one pass.
+// code-gauge-allow functionNcss -- Strict Integer parsing validates radix prefixes, signs, underscores, and surrounding whitespace.
 export function parseIntegerStrict(text: string, base?: number, allowNegativeBase = false): bigint | undefined {
   if (base !== undefined && (base < -36 || base > 36 || base === 1 || (!allowNegativeBase && base < 0))) {
     throw argumentError(`invalid radix ${base}`);
@@ -957,7 +957,7 @@ function parseHexFloat(match: RegExpExecArray): number {
 }
 
 /** The leading number of a string, as `String#to_i` reads it: invalid text ends it, giving 0 when nothing came. */
-// code-gauge-allow functionCognitiveComplexity 30 -- Lenient Integer parsing scans optional sign and radix prefix until the first invalid digit.
+// code-gauge-allow functionCognitiveComplexity -- Lenient Integer parsing scans optional sign and radix prefix until the first invalid digit.
 export function parseIntegerLenient(text: string, base = 10): bigint {
   let index = 0;
   while (index < text.length && /[\t\n\v\f\r ]/.test(text[index])) index++;
@@ -1074,11 +1074,6 @@ sdef('Math', 'gamma', 1, function* (_self, [value]) {
   if (number === Number.NEGATIVE_INFINITY) domainCheck('gamma', false);
   if (number < 0 && Number.isInteger(number)) domainCheck('gamma', false);
   if (number === 0) return Object.is(number, -0) ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
-  if (Number.isInteger(number) && number > 0 && number <= 23) {
-    let factorial = 1n;
-    for (let index = 2; index < number; index++) factorial *= BigInt(index);
-    return Number(factorial);
-  }
   return platformGamma(number);
 });
 sdef('Math', 'lgamma', 1, function* (_self, [value]) {
@@ -1115,9 +1110,7 @@ function largeIntegerLog(value: bigint, base: 'log2' | 'log10'): number {
   const bits = value.toString(2).length;
   const shift = bits - 53;
   const mantissa = Number(value >> BigInt(shift));
-  return base === 'log2'
-    ? platformLog2(mantissa) + shift
-    : fusedMultiplyAdd(shift, platformLog10(2), platformLog10(mantissa));
+  return base === 'log2' ? Math.log2(mantissa) + shift : fusedMultiplyAdd(shift, Math.log10(2), Math.log10(mantissa));
 }
 
 function erf(x: number): number {

@@ -1,0 +1,10 @@
+ok;Typed property Aint::$x must not be accessed before initialization;rhs;Cannot indirectly modify readonly property Aint::$x;rhs;Cannot indirectly modify readonly property Aint::$x;
+ok;Typed property Astring::$x must not be accessed before initialization;rhs;Cannot indirectly modify readonly property Astring::$x;rhs;Cannot indirectly modify readonly property Astring::$x;
+ok;Typed property Aarray::$x must not be accessed before initialization;rhs;Cannot indirectly modify readonly property Aarray::$x;rhs;Cannot indirectly modify readonly property Aarray::$x;
+ok;Typed property ANint::$x must not be accessed before initialization;rhs;Cannot indirectly modify readonly property ANint::$x;rhs;Cannot indirectly modify readonly property ANint::$x;
+ok;Typed property ANarray::$x must not be accessed before initialization;rhs;Cannot indirectly modify readonly property ANarray::$x;rhs;Cannot indirectly modify readonly property ANarray::$x;
+ok;Typed property Amixed::$x must not be accessed before initialization;rhs;Cannot indirectly modify readonly property Amixed::$x;rhs;Cannot indirectly modify readonly property Amixed::$x;
+int(1)
+rhs;Cannot indirectly modify readonly property Arr::$x
+string(1) "f"
+rhs;Cannot indirectly modify readonly property Str::$x

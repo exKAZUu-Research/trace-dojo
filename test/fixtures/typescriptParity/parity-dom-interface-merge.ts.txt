@@ -1,0 +1,42 @@
+class Report {
+  constructor(public title: string) {}
+}
+console.log(new Report("monthly").title);
+
+class Algorithm {
+  constructor(public x: number) {}
+}
+function f(a: Algorithm) {
+  return a.x;
+}
+console.log(f(new Algorithm(2)));
+
+class Keyframe {
+  position = 1;
+}
+const k: Keyframe = new Keyframe();
+console.log(k.position);
+
+interface Transformer {
+  label: string;
+}
+interface AbortController {
+  note: string;
+}
+interface Storage {
+  size: number;
+}
+interface ShareData {
+  tag: string;
+}
+class ShareData {}
+const s = new ShareData();
+console.log(s.tag);
+
+const Body = "body as a value";
+console.log(Body);
+
+function read(b: Request) {
+  return b.url;
+}
+console.log(typeof read);

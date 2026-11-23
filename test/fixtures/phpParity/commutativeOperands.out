@@ -1,0 +1,11 @@
+Unsupported operand types: array * int
+Unsupported operand types: int * array
+Unsupported operand types: int * array
+Unsupported operand types: stdClass * int
+Unsupported operand types: int * array
+left;right;Unsupported operand types: array * stdClass
+Unsupported operand types: array & int
+Unsupported operand types: int | array
+right;Unsupported operand types: stdClass ^ array
+Unsupported operand types: int - array
+Unsupported operand types: int + array

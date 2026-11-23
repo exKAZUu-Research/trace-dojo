@@ -1,0 +1,9 @@
+function identity<T>(value: T): T { return value; }
+console.log(identity(identity(identity(identity(identity(identity(identity(identity(identity(identity(identity(identity(identity(identity(identity(identity(1)))))))))))))))));
+console.log([1].map(x => x + 1).map(x => x + 1).map(x => x + 1).map(x => x + 1).map(x => x + 1).map(x => x + 1).map(x => x + 1).map(x => x + 1).map(x => x + 1).map(x => x + 1).map(x => x + 1).map(x => x + 1).map(x => x + 1).map(x => x + 1).map(x => x + 1).map(x => x + 1));
+let changing: number | string = 1;
+for (let i = 0; i < 2; i++) {
+  if (typeof changing === "number") console.log(identity(changing) + 1);
+  else console.log(identity(changing).toUpperCase());
+  changing = "value";
+}

@@ -1,0 +1,15 @@
+interface P2 { x: number; y: number }
+interface P3 { x: number; y: number; z: number }
+const p3 = { x: 1, y: 2, z: 3 };
+const copy: P2 = { ...p3 };
+console.log(copy);
+function mk(): P3 { return { x: 1, y: 2, z: 3 }; }
+function show(p: P2) { console.log(p); }
+show({ ...mk() });
+const c: P2 = { ...{ x: 1, y: 2, z: 3 } };
+console.log(c);
+function pick(u: { x: number; y: number; k: 1 } | { x: number; y: number; k: 2 }) {
+  const e: P2 = { ...u, x: 0 };
+  console.log(e);
+}
+pick({ x: 5, y: 6, k: 2 });

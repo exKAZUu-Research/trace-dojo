@@ -1,0 +1,599 @@
+import { PANIC, panic } from './arith';
+import { isDiscardName } from './ast';
+import type { Expression, ExpressionOf, FunctionDeclaration, SourceFile, Span } from './ast';
+import { BuiltinCompiler } from './builtins';
+import { constantKey, unwrapResult } from './expressions';
+import { FunctionInstance } from './functions';
+import { callableNative } from './nativeAdapter';
+import { type Frame, Jump } from './runtime';
+import {
+  addDecls,
+  copyForFrame,
+  evaluateHeld,
+  FnRef,
+  isType,
+  known,
+  type LibraryFunctionOptions,
+  type LocalBinding,
+  NATIVE_FN_TYPE,
+  NativeFn,
+  runtime,
+  type Scope,
+  staticResultOf,
+  type TExpr,
+  valueEvaluators,
+} from './semaBase';
+import {
+  ANYTYPE,
+  type Decl,
+  type ErrorSetType,
+  errorUnionOf,
+  type FnType,
+  fnType,
+  type Namespace,
+  pointerTo,
+  TYPE,
+  type Type,
+  typeName,
+  VOID,
+} from './types';
+import { FnValue, Pointer, type Value } from './values';
+
+/** What a function body's compilation needs to know about the function. */
+export interface FunctionCompilation {
+  instance: FunctionInstance;
+  syntax: FunctionDeclaration;
+  namespace: Namespace;
+  paramTypes: readonly Type[];
+  comptimeArgs: readonly (TExpr | undefined)[];
+  returnType: Type;
+  inferredErrors?: ErrorSetType;
+  isMethod: boolean;
+}
+
+export abstract class CallCompiler extends BuiltinCompiler {
+  private readonly instances = new Map<string, FunctionInstance>();
+  private readonly parameterScopes = new Map<string, Scope>();
+  private readonly instanceIds = new WeakMap<object, number>();
+  private nextInstanceId = 1;
+
+  protected abstract compileFunctionBody(compilation: FunctionCompilation): void;
+  protected abstract atomicRow(fn: FunctionDeclaration): boolean;
+
+  // Calls -------------------------------------------------------------------------------------------------------------
+
+  protected compileCall(expression: ExpressionOf<'call'>, resultType: Type | undefined): TExpr {
+    const { callee } = expression;
+    if (callee.kind === 'field') {
+      const object = this.compileLocation(callee.object);
+      if (object.type.kind === 'type') {
+        const member = this.typeMember(this.knownValue(object, '型') as Type, callee.name, callee);
+        return this.callValue(member, undefined, expression, resultType);
+      }
+      const method = this.methodOf(object, callee.name, callee);
+      if (method) return this.callValue(method.callee, object, expression, resultType);
+      const field = this.fieldAccess(callee, true, object);
+      return this.callValue(field, undefined, expression, resultType);
+    }
+    if (callee.kind === 'enumLiteral' && resultType) {
+      // A decl literal such as `.init(42)` names a declaration of the result type, seen through `?` and `!`.
+      const namespace = unwrapResult(resultType);
+      const member = this.requireKnownDeclarationLiteral(this.typeMember(namespace, callee.name, callee), callee);
+      return this.callValue(member, undefined, expression, resultType);
+    }
+    const target = this.compile(callee);
+    return this.callValue(target, undefined, expression, resultType);
+  }
+
+  /** The declaration a value's type has for a method call `value.name(...)`, if it has one. */
+  private methodOf(object: TExpr, name: string, span: Span): { callee: TExpr } | undefined {
+    let type = object.type;
+    if (type.kind === 'pointer' && type.size === 'one') type = type.child;
+    if (type.kind !== 'struct' && type.kind !== 'enum' && type.kind !== 'union') return undefined;
+    if (type.kind === 'struct' && this.fieldIndexes(this.structFields(type, span)).has(name)) return undefined;
+    const decl = this.findDecl(type, name);
+    if (!decl) {
+      if (type.kind === 'union' && this.fieldIndexes(this.unionFields(type)).has(name)) return undefined;
+      return this.error(span, `${typeName(type)} 型には、メソッド「${name}」がありません。`);
+    }
+    return { callee: this.resolveDecl(decl, span) };
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- Preserves receiver and result contracts when dispatching direct and coerced function calls.
+  private callValue(
+    callee: TExpr,
+    receiver: TExpr | undefined,
+    expression: ExpressionOf<'call'>,
+    resultType: Type | undefined
+  ): TExpr {
+    const value = callee.value as unknown;
+    if (callee.known && value instanceof NativeFn) {
+      if (
+        value.signature &&
+        callee.type.kind === 'fn' &&
+        (callee.type !== value.signature.type || (value.signature.receiver && !receiver))
+      )
+        return this.callPointer(
+          known(callee.type, this.knownFunctionValue(callee, expression), expression),
+          callee.type,
+          expression,
+          receiver
+        );
+      const result = value.compileCall(this, {
+        span: expression,
+        args: expression.args,
+        receiver,
+        resultType,
+      });
+      if (result.known) return result;
+      return { ...result, eval: (frame) => copyForFrame(frame, result.eval(frame), result.type) };
+    }
+    if (callee.known && value instanceof FnRef) {
+      if (callee.type.kind === 'fn' && callee.type !== this.declarationType(value.decl, expression))
+        return this.callPointer(
+          known(callee.type, this.knownFunctionValue(callee, expression), expression),
+          callee.type,
+          expression,
+          receiver
+        );
+      return this.callDeclaration(value, receiver, expression, resultType);
+    }
+    const type = callee.type;
+    const fnType =
+      type.kind === 'fn' ? type : type.kind === 'pointer' && type.child.kind === 'fn' ? type.child : undefined;
+    if (!fnType) return this.error(expression, `${typeName(type)} 型の値は、呼び出せません。`);
+    return this.callPointer(callee, fnType, expression, receiver);
+  }
+
+  private callPointer(callee: TExpr, fnType: FnType, expression: ExpressionOf<'call'>, receiver?: TExpr): TExpr {
+    this.checkMemoryOperand(callee, expression);
+    this.analyzeFunction(callee, expression);
+    const argumentsOfCall = receiver ? [receiver, ...expression.args] : expression.args;
+    if (argumentsOfCall.length !== fnType.params.length) {
+      this.error(
+        expression,
+        `引数の数が合いません（${fnType.params.length} 個が必要ですが、${argumentsOfCall.length} 個です）。`
+      );
+    }
+    const args = argumentsOfCall.map((arg, index) => {
+      const compiled = isTExpr(arg) ? arg : this.compile(arg, fnType.params[index]);
+      return index === 0 && receiver
+        ? this.bindReceiver(compiled, fnType.params[index], expression)
+        : this.coerce(compiled, fnType.params[index], isTExpr(arg) ? arg.span : arg);
+    });
+    const evaluateCallee = callee.eval;
+    const evaluators = valueEvaluators(args);
+    const row = expression.row;
+    return runtime(
+      fnType.returnType,
+      (frame) => {
+        const fn = (evaluateCallee(frame) as FnValue).fn;
+        return this.invoke(fn, evaluateHeld(frame, evaluators), row, frame, true);
+      },
+      expression
+    );
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- Keeps one operation of the interpreter in one place.
+  private callDeclaration(
+    ref: FnRef,
+    receiver: TExpr | undefined,
+    expression: ExpressionOf<'call'>,
+    resultType: Type | undefined
+  ): TExpr {
+    const syntax = ref.decl.syntax;
+    const params = syntax.params;
+    const argExpressions: (Expression | TExpr)[] = receiver ? [receiver, ...expression.args] : [...expression.args];
+    if (argExpressions.length !== params.length) {
+      const offset = receiver ? 1 : 0;
+      this.error(
+        expression,
+        `引数の数が合いません（${params.length - offset} 個が必要ですが、${argExpressions.length - offset} 個です）。`
+      );
+    }
+    // A parameter's type may refer to earlier parameters, as `b: @TypeOf(a)` does.
+    const declaredTypes: (Type | undefined)[] = [];
+    const args: TExpr[] = [];
+    for (const [index, arg] of argExpressions.entries()) {
+      const declared = this.parameterType(
+        ref.decl,
+        index,
+        args.map((each) => each.type),
+        args.map((arg) => this.comptimeArgument(arg))
+      );
+      declaredTypes.push(declared);
+      const compiled = isTExpr(arg) ? arg : this.compile(arg, declared);
+      if (index === 0 && receiver) args.push(this.bindReceiver(compiled, declared, expression));
+      else if (declared) args.push(this.coerce(compiled, declared, isTExpr(arg) ? arg.span : arg));
+      else args.push(compiled);
+    }
+    const argTypes = args.map((arg) => arg.type);
+    void resultType;
+    for (const [index, arg] of args.entries()) {
+      if (declaredTypes[index] === undefined && this.requiresComptime(arg.type, arg.span) && !staticResultOf(arg)) {
+        this.error(
+          params[index],
+          'anytype のコンパイルのときだけの引数は、コンパイルのときに値が決まっていなければなりません。'
+        );
+      }
+    }
+    const instance = this.instantiate(ref, argTypes, expression, args);
+    const evaluators = valueEvaluators(args);
+    const row = expression.row;
+    const call = runtime(
+      instance.returnType,
+      (frame) => this.invoke(instance, evaluateHeld(frame, evaluators), row, frame, true),
+      expression
+    );
+    return this.requiresComptime(instance.returnType, expression) ? this.comptimeCall(ref, instance, args, call) : call;
+  }
+
+  private comptimeCall(ref: FnRef, instance: FunctionInstance, args: readonly TExpr[], call: TExpr): TExpr {
+    const syntax = ref.decl.syntax;
+    const parameters = new Set(syntax.params.map((param) => param.name));
+    if (!this.dependsOnParameters(syntax.returnType, parameters))
+      return known(instance.returnType, this.evaluateAtCompileTime(call), call.span);
+    const evaluators = args.map((arg) => {
+      const fact = staticResultOf(arg);
+      const value = fact ? known(arg.type, fact.value, arg.span) : arg;
+      return (frame: Frame) => copyForFrame(frame, value.eval(frame), value.type);
+    });
+    const body = runtime(
+      instance.returnType,
+      (frame) => this.invoke(instance, evaluateHeld(frame, evaluators), call.span.row, frame, true),
+      call.span
+    );
+    const result = this.evaluateAtCompileTime(body);
+    return this.combine(args, instance.returnType, () => result, call.span);
+  }
+
+  /** Passes a method's receiver, taking its address or dereferencing it to match the first parameter. */
+  private bindReceiver(receiver: TExpr, declared: Type | undefined, span: Span): TExpr {
+    if (!declared) return receiver;
+    const type = receiver.type;
+    if (declared.kind === 'pointer' && declared.size === 'one' && type === declared.child) {
+      const address = this.addressOf(receiver);
+      if (address.type.kind === 'pointer' && address.type.isConst && !declared.isConst) {
+        this.error(
+          span,
+          `定数の値に対して、ポインタを受け取るメソッドは呼び出せません（${typeName(declared)} 型が必要です）。`
+        );
+      }
+      return this.coerce(address, declared, span);
+    }
+    if (type.kind === 'pointer' && type.size === 'one' && type.child === declared) {
+      return this.dereferenced(receiver, span);
+    }
+    return this.coerce(receiver, declared, span);
+  }
+
+  private readonly declarationTypes = new WeakMap<Decl, FnType>();
+  private readonly resolvingSignatures = new Set<Decl>();
+
+  protected declarationType(decl: Extract<Decl, { kind: 'fn' }>, span: Span): FnType {
+    const cached = this.declarationTypes.get(decl);
+    if (cached) return cached;
+    if (this.resolvingSignatures.has(decl)) return this.error(span, '関数の型が、それ自身に依存しています。');
+    this.resolvingSignatures.add(decl);
+    try {
+      const unknown = new Set<string>();
+      const params: Type[] = [];
+      for (const [index, param] of decl.syntax.params.entries()) {
+        const generic = !param.type || this.dependsOnParameters(param.type, unknown);
+        params.push(generic ? ANYTYPE : (this.parameterType(decl, index, params) as Type));
+        if (generic) unknown.add(param.name);
+      }
+      let result = this.dependsOnParameters(decl.syntax.returnType, unknown)
+        ? ANYTYPE
+        : this.inParameterScope(decl, params, () => this.compileType(decl.syntax.returnType));
+      if (decl.syntax.inferredErrorSet && result !== ANYTYPE)
+        result = errorUnionOf(
+          {
+            kind: 'error_set',
+            names: new Set(),
+            inferredFrom: `${decl.namespace.name}.${decl.syntax.name}`,
+            resolved: false,
+          },
+          result
+        );
+      const type = fnType(params, result);
+      this.declarationTypes.set(decl, type);
+      return type;
+    } finally {
+      this.resolvingSignatures.delete(decl);
+    }
+  }
+
+  private dependsOnParameters(node: unknown, names: ReadonlySet<string>): boolean {
+    if (names.size === 0) return false;
+    this.spendCompilation();
+    if (!node || typeof node !== 'object') return false;
+    if ('kind' in node && node.kind === 'identifier' && 'name' in node && typeof node.name === 'string')
+      return names.has(node.name);
+    return Object.values(node).some((value) => this.dependsOnParameters(value, names));
+  }
+
+  /** The declared type of a parameter (undefined for `anytype`), seeing the earlier parameters' types. */
+  private parameterType(
+    decl: Extract<Decl, { kind: 'fn' }>,
+    index: number,
+    previous: readonly Type[],
+    values: readonly (TExpr | undefined)[] = []
+  ): Type | undefined {
+    const param = decl.syntax.params[index];
+    if (!param?.type) return undefined;
+    const fixed = this.declarationTypes.get(decl)?.params[index];
+    if (fixed && fixed !== ANYTYPE) return fixed;
+    const typeExpression = param.type;
+    return this.inParameterScope(decl, previous, () => this.compileType(typeExpression), values);
+  }
+
+  /** Runs code in a function's declaration scope with its first parameters bound, for types that refer to them. */
+  private inParameterScope<T>(
+    decl: Extract<Decl, { kind: 'fn' }>,
+    types: readonly Type[],
+    run: () => T,
+    values: readonly (TExpr | undefined)[] = []
+  ): T {
+    const key = this.specializationKey(decl, types, values);
+    const cached = this.parameterScopes.get(key);
+    if (cached) return this.withScope(cached, run);
+    const locals = new Map<string, LocalBinding>();
+    for (const [index, type] of types.entries()) {
+      const param = decl.syntax.params[index];
+      if (param && !isDiscardName(param)) {
+        const argument = values[index];
+        locals.set(param.name, {
+          kind: 'local',
+          name: param.name,
+          slot: -1,
+          type,
+          isConst: true,
+          known: argument?.known ?? false,
+          value: argument?.value,
+        });
+      }
+    }
+    const namespace = decl.namespace;
+    const scope: Scope = { locals, parent: { namespace, parent: namespace.scope as Scope | undefined } };
+    this.parameterScopes.set(key, scope);
+    return this.withScope(scope, run);
+  }
+
+  /** The instance of a function for argument types, compiling its body the first time. */
+  // code-gauge-allow functionCognitiveComplexity -- Resolves parameter and return types in the same specialization scope.
+  // code-gauge-allow functionNcss -- Keeps specialization identity and its compilation inputs together.
+  instantiate(ref: FnRef, argTypes: readonly Type[], span: Span, args: readonly TExpr[] = []): FunctionInstance {
+    const { decl } = ref;
+    const syntax = decl.syntax;
+    const paramTypes: Type[] = [];
+    const comptimeArgs = args.map((arg) => this.comptimeArgument(arg));
+    for (const [index, param] of syntax.params.entries()) {
+      const type = param.type ? this.parameterType(decl, index, paramTypes, comptimeArgs) : argTypes[index];
+      if (!type)
+        this.error(span, `関数「${syntax.name}」は anytype の引数を持つので、呼び出さずに値としては使えません。`);
+      paramTypes.push(type);
+    }
+    const key = this.specializationKey(decl, paramTypes, comptimeArgs);
+    const existing = this.instances.get(key);
+    if (existing) {
+      if (existing.state === 'pending' && this.resolvingFields === 0) this.compilePendingBodies();
+      return existing;
+    }
+    const { returnType, inferredErrors } = this.inParameterScope(
+      decl,
+      paramTypes,
+      () => {
+        const declared = this.declarationTypes.get(decl)?.returnType;
+        const payload =
+          declared && declared !== ANYTYPE
+            ? syntax.inferredErrorSet && declared.kind === 'error_union'
+              ? declared.payload
+              : declared
+            : this.compileType(syntax.returnType);
+        if (!syntax.inferredErrorSet) return { returnType: payload, inferredErrors: undefined };
+        const errors: ErrorSetType = {
+          kind: 'error_set',
+          names: new Set(),
+          inferredFrom: syntax.name,
+          resolved: false,
+        };
+        return { returnType: errorUnionOf(errors, payload), inferredErrors: errors };
+      },
+      comptimeArgs
+    );
+    const instance = new FunctionInstance(syntax.name, paramTypes, returnType);
+    if (syntax.params.every((param) => param.type !== undefined)) instance.identity = decl;
+    instance.internal = decl.namespace.internal ?? false;
+    instance.isAtomic = !instance.internal && this.atomicRow(syntax);
+    this.instances.set(key, instance);
+    const isMethod = decl.namespace !== this.root;
+    const compile = (): void =>
+      this.compileFunctionBody({
+        instance,
+        syntax,
+        namespace: decl.namespace,
+        paramTypes,
+        comptimeArgs,
+        returnType,
+        inferredErrors,
+        isMethod,
+      });
+    // A function that a struct's field defaults refer to compiles after the struct, as Zig analyzes it separately.
+    if (this.resolvingFields > 0) this.pendingBodies.push(compile);
+    else compile();
+    return instance;
+  }
+
+  private comptimeArgument(argument: TExpr): TExpr | undefined {
+    if (!this.requiresComptime(argument.type, argument.span)) return undefined;
+    const fact = staticResultOf(argument);
+    return fact ? known(argument.type, fact.value, argument.span) : undefined;
+  }
+
+  private readonly pendingBodies: (() => void)[] = [];
+
+  /** Compiles the bodies that waited for structs' fields. */
+  protected compilePendingBodies(): void {
+    while (this.pendingBodies.length > 0) (this.pendingBodies.shift() as () => void)();
+  }
+
+  private specializationKey(
+    decl: Extract<Decl, { kind: 'fn' }>,
+    types: readonly Type[],
+    values: readonly (TExpr | undefined)[]
+  ): string {
+    return JSON.stringify([
+      this.idOf(decl),
+      types.map((type, index) => [
+        this.idOf(type as object),
+        values[index]?.known ? constantKey(values[index].value, () => this.spendCompilation()) : undefined,
+      ]),
+    ]);
+  }
+
+  private idOf(object: object): number {
+    let id = this.instanceIds.get(object);
+    if (id === undefined) {
+      id = this.nextInstanceId++;
+      this.instanceIds.set(object, id);
+    }
+    return id;
+  }
+
+  functionSignature(value: TExpr, span: Span): FnType {
+    const type = value.type;
+    if (type.kind === 'fn') return type;
+    if (type.kind === 'pointer' && type.child.kind === 'fn') return type.child;
+    return this.error(span, `関数が必要ですが、${typeName(type)} 型の値です。`);
+  }
+
+  /** The function a value calls, for library functions that take a function, such as `std.mem.sort`'s comparator. */
+  functionOf(
+    value: TExpr,
+    span: Span
+  ): { call: (frame: Frame, args: Value[]) => Value; params: readonly Type[]; returnType: Type } {
+    this.checkMemoryOperand(value, span);
+    this.analyzeFunction(value, span);
+    const ref = value.value as unknown;
+    if (value.known && (ref instanceof FnRef || (ref instanceof NativeFn && ref.signature))) {
+      const instance = ref instanceof NativeFn ? callableNative(this, ref, span) : this.instantiate(ref, [], span);
+      const original = ref instanceof FnRef ? this.declarationType(ref.decl, span) : ref.signature?.type;
+      const signature = value.type === original ? instance : this.functionSignature(value, span);
+      return {
+        call: (frame, args) => this.invoke(instance, args, frame.nativeCallRow ?? span.row, frame),
+        params: signature.params,
+        returnType: signature.returnType,
+      };
+    }
+    const type = value.type;
+    const fnType =
+      type.kind === 'fn' ? type : type.kind === 'pointer' && type.child.kind === 'fn' ? type.child : undefined;
+    if (!fnType) return this.error(span, `関数が必要ですが、${typeName(type)} 型の値です。`);
+    const evaluate = value.eval;
+    return {
+      call: (frame, args) => this.invoke((evaluate(frame) as FnValue).fn, args, frame.nativeCallRow ?? span.row, frame),
+      params: fnType.params,
+      returnType: fnType.returnType,
+    };
+  }
+
+  private analyzeFunction(expression: TExpr, span: Span): void {
+    const value = staticResultOf(expression)?.value;
+    if (value instanceof FnValue) value.fn.analyze?.(this, span);
+  }
+
+  callFunction(fn: FunctionInstance, args: Value[], frame: Frame, callRow?: number): Value {
+    return this.invoke(fn, args, callRow, frame);
+  }
+
+  private readonly libraryNamespaces = new WeakMap<SourceFile, WeakMap<Type, Namespace>>();
+
+  libraryFunction(
+    file: SourceFile,
+    element: Type,
+    name: string,
+    params: readonly Type[],
+    span: Span,
+    options: LibraryFunctionOptions = {}
+  ): FunctionInstance {
+    let types = this.libraryNamespaces.get(file);
+    if (!types) {
+      types = new WeakMap();
+      this.libraryNamespaces.set(file, types);
+    }
+    let namespace = types.get(element);
+    if (!namespace) {
+      namespace = { name: options.namespaceName ?? 'std.sort.block', internal: true, decls: new Map() };
+      addDecls(namespace, file.members);
+      namespace.decls.set('T', { kind: 'native', name: 'T', resolve: () => ({ type: TYPE, value: element }) });
+      for (const [name, member] of Object.entries(options.members ?? {}))
+        namespace.decls.set(name, { kind: 'native', name, resolve: () => member });
+      types.set(element, namespace);
+    }
+    const decl = namespace.decls.get(name);
+    if (decl?.kind !== 'fn') throw new Error(`Missing library function ${name}`);
+    return this.instantiate(new FnRef(decl), params, span, options.args ?? []);
+  }
+
+  /** Runs a function in a new frame, as the call at `callRow` of the caller's frame. */
+  protected invoke(
+    fn: FunctionInstance,
+    args: Value[],
+    callRow: number | undefined,
+    caller: Frame,
+    argumentsHaveStorage = false
+  ): Value {
+    const { runtime: rt } = caller;
+    rt.spend();
+    if (fn.native) return copyForFrame(caller, fn.native(args, caller), fn.returnType);
+    const body = fn.body;
+    if (!body) return panic('関数がまだ準備できていません。');
+    const origin = caller.fn.internal ? caller.nativeCallRow : callRow;
+    const result = rt.withFrame(
+      fn,
+      fn.internal ? undefined : (origin ?? callRow),
+      fn.internal ? origin : undefined,
+      (frame) => {
+        for (const [index, slot] of fn.paramSlots.entries())
+          frame.slots[slot] = argumentsHaveStorage ? args[index] : copyForFrame(frame, args[index], fn.params[index]);
+        return body(frame);
+      }
+    );
+    if (fn.isAtomic) rt.steps.completeAtomicCall();
+    if (fn.returnType.kind === 'noreturn') panic(PANIC.noreturnReturned);
+    return result;
+  }
+
+  protected receiverLocal(binding: LocalBinding): boolean {
+    return binding.name === 'self';
+  }
+
+  protected jumpOut(kind: Jump['kind'], target: object, value: Value): never {
+    throw new Jump(kind, target, value);
+  }
+
+  protected fnPointerType(type: FnType): Type {
+    return pointerTo(type, true);
+  }
+
+  protected isTypeValue2(value: Value): boolean {
+    return isType(value);
+  }
+
+  protected voidValue(): TExpr {
+    return known(VOID, undefined, { row: 0, col: 0, endRow: 0 });
+  }
+
+  protected nativeFnType(): Type {
+    return NATIVE_FN_TYPE;
+  }
+
+  protected pointerValue(value: Value): value is Pointer {
+    return value instanceof Pointer;
+  }
+}
+
+function isTExpr(value: Expression | TExpr): value is TExpr {
+  return 'eval' in value;
+}

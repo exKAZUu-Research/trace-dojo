@@ -1,0 +1,18 @@
+(2,17): error TS2322: Type 'number' is not assignable to type 'string'.
+(6,17): error TS2322: Type 'number' is not assignable to type 'string'.
+(13,18): error TS2341: Property 'value' is private and only accessible within class 'Restricted'.
+(15,17): error TS2808: A get accessor must be at least as accessible as the setter
+(16,7): error TS2808: A get accessor must be at least as accessible as the setter
+(19,7): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+(19,7): error TS2378: A 'get' accessor must return a value.
+(20,29): error TS2408: Setters cannot return a value.
+(23,20): error TS1051: A 'set' accessor cannot have an optional parameter.
+(24,7): error TS1052: A 'set' accessor parameter cannot have an initializer.
+(24,7): error TS7032: Property 'defaulted' implicitly has type 'any', because its set accessor lacks a parameter type annotation.
+(25,12): error TS1053: A 'set' accessor cannot have rest parameter.
+(26,7): error TS1095: A 'set' accessor cannot have a return type annotation.
+(29,19): error TS1051: A 'set' accessor cannot have an optional parameter.
+(30,7): error TS1054: A 'get' accessor cannot have parameters.
+(34,3): error TS2783: 'color' is specified more than once, so this usage will be overwritten.
+(38,3): error TS7008: Member 'value' implicitly has an 'any' type.
+(44,3): error TS7008: Member 'value' implicitly has an 'any' type.

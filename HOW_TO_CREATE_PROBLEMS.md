@@ -10,7 +10,7 @@ Challenge sessions persist the problem ID and seed. Displays and grading regener
 
 For `tuBeginner1` and `tuBeginner2`, every challenge format comes from the independent bank, so ordinary lecture problems are never offered as challenges. Each lecture file under `src/problems/challenge/tuBeginner*/lecture*.ts` lists base programs (`id`, `title`, `courseId`, `lectureIndex`, the `java` program, and three `blanks` and three `bugs` edits). Each edit replaces one exact `before` snippet of the Java program with `after`: a blank wraps the answer in `@[...]@`, and a bug introduces a `logical` or `syntax` defect. The three blanks, and likewise the three bugs, must edit distinct positions. A base yields one regular challenge plus one fill-in-the-blank and one bug-fix challenge per edit.
 
-After editing the bank, run `bun run gen-code` to regenerate `src/problems/challenge/metadata.ts`; unit tests fail when it is stale.
+After editing the bank, run `bun run gen-code` to regenerate `src/problems/challenge/metadata.ts` and `src/problems/challenge/targets.ts` (the final state of each base program); unit tests fail when either is stale.
 
 ## 新問題の作問手順
 
@@ -90,6 +90,6 @@ public class Main {
 
 `@[...]@` が含まれる問題は自動的に穴埋め問題として扱われる。学習者には空欄を `【1】` などに置き換えたJavaプログラム全体が編集可能な状態で表示され、模範解答を埋めたプログラムを実行した後の盤面と亀を見せた上で、プログラムを書き換えて提出させる。
 
-採点では、提出されたJavaプログラム全体を、トレースを作るのと同じJavaインタプリタ（`src/java/`）でサーバー上で実行する。実行後の最終的な盤面と、`main` の終了時に変数から参照されている亀だけを模範解答の実行結果と比較し、変数の値は比較しない。
+採点では、提出されたJavaプログラム全体を、トレースを作るのと同じJavaインタプリタ（`src/java/`）で学習者のブラウザ上で実行し、サーバーはその判定結果を保存する。実行後の最終的な盤面と、`main` の終了時に変数から参照されている亀だけを模範解答の実行結果と比較し、変数の値は比較しない。
 
 穴埋め問題も他の問題と同様に必ず亀を使うこと。最終的な盤面と亀の状態で採点するため、亀のいないプログラムは採点できない。

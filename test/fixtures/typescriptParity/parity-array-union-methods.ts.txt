@@ -1,0 +1,31 @@
+function summarize(xs: string[] | number[]): void {
+  const truthy = xs.filter((x) => !!x);
+  const found = xs.find((x) => typeof x === 'number');
+  const foundIndex = xs.findIndex((x) => x === 'b');
+  const joined = xs.reduce((text: string, x) => text + String(x), '');
+  const copy = xs.concat();
+  const doubled = xs.map((x) => (typeof x === 'number' ? x * 2 : x + x));
+  let count = 0;
+  xs.forEach(() => count++);
+  console.log(truthy, found, foundIndex, joined, copy, doubled, count);
+  console.log(xs.some((x) => x === 0), xs.every((x) => !!x), xs.join('-'), xs.slice(1));
+}
+
+function overlapping(ys: number[] | (1 | 2)[], zs: readonly string[] | number[], ts: [1, 2] | string[]): void {
+  const big = ys.filter((y) => y > 1);
+  const sum = ys.reduce((total, y) => total + y, 0);
+  console.log(big, sum, ys.indexOf(2), ys.includes(1));
+  console.log(zs.filter((z) => z !== 'a'), zs.find((z) => z === 3), zs.concat());
+  console.log(ts.filter((t) => t !== 1), ts.reduce((n: number) => n + 1, 0));
+}
+
+summarize(['a', '', 'b']);
+summarize([0, 1, 2]);
+overlapping([1, 2, 3], ['a', 'b'], [1, 2]);
+overlapping([1, 2], [3, 4], ['x', 'y']);
+function simple(values: number[] | string[]) { return values.flat(); }
+function nested(values: number[][] | string[][]) { return values.flat(); }
+function readonlyFlat(values: readonly number[] | readonly string[]) { return values.flat(); }
+function deep(values: number[][][] | string[][][]) { return values.flat(2); }
+const output: (number | string)[] = simple([1, 2]);
+console.log(output, nested([['text']]), readonlyFlat([3, 4]), deep([[[5]]]));

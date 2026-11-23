@@ -1,0 +1,6 @@
+interface U { profile?: { email: string } }
+function mail(u: U): string {
+  if (u.profile?.email !== undefined) return u.profile.email;
+  return "";
+}
+console.log(mail({}));

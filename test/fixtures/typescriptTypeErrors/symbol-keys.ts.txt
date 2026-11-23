@@ -1,0 +1,8 @@
+type IteratorKey = typeof Symbol.iterator;
+type UnscopablesKey = typeof Symbol.unscopables;
+type Extracted = Extract<keyof number[], symbol>;
+const ordinary: Extracted = '__@iterator';
+const local = Symbol('local');
+const wrongIdentity: IteratorKey = local;
+const wrongProtocol: IteratorKey = undefined as unknown as UnscopablesKey;
+const invalidFlags: number[][UnscopablesKey] = { entries: 4 };

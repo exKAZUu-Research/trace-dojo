@@ -1,0 +1,65 @@
+array(1) {
+  ["y"]=>
+  int(2)
+}
+int(1)
+array(3) {
+  [0]=>
+  array(0) {
+  }
+  [1]=>
+  array(1) {
+    [0]=>
+    int(2)
+  }
+  [2]=>
+  array(1) {
+    [0]=>
+    int(3)
+  }
+}
+Cannot modify readonly property A::$y
+Cannot unset readonly property A::$y
+Cannot acquire reference to readonly property A::$y
+array(1) {
+  ["nested"]=>
+  array(1) {
+    ["y"]=>
+    int(2)
+  }
+}
+array(1) {
+  ["nested"]=>
+  array(2) {
+    ["x"]=>
+    int(1)
+    ["y"]=>
+    int(2)
+  }
+}
+bool(false)
+array(0) {
+}
+int(1)
+array(2) {
+  [0]=>
+  array(0) {
+  }
+  [1]=>
+  array(1) {
+    [0]=>
+    int(2)
+  }
+}
+get
+int(1)
+array(2) {
+  [0]=>
+  array(0) {
+  }
+  [1]=>
+  array(1) {
+    [0]=>
+    int(2)
+  }
+}

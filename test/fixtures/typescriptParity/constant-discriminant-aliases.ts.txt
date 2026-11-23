@@ -1,0 +1,19 @@
+type Choice = { kind: "a"; a: number } | { kind: "b"; b: string };
+function direct(value: Choice) {
+  const kind = value.kind;
+  if (kind === "a") return value.a;
+  return value.b;
+}
+function indexed<T extends Choice>(value: T) {
+  const kind = (value["kind"]);
+  return kind === "a" ? value.a : value.b;
+}
+function selected(value: { item: Choice }) {
+  const kind = value.item.kind;
+  switch (kind) {
+    case "a": return value.item.a;
+    case "b": return value.item.b;
+  }
+}
+console.log(direct({ kind: "a", a: 1 }), direct({ kind: "b", b: "b" }));
+console.log(indexed({ kind: "a", a: 2 }), selected({ item: { kind: "b", b: "done" } }));

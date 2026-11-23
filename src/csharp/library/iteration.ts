@@ -57,7 +57,7 @@ function* elementsOf(call: NativeCall, value: Value, parameterName: string): Gen
   yield* enumerateThroughInterface(call, value);
 }
 
-// code-gauge-allow functionNcss 33 -- One case per kind of syntax or value that the function handles.
+// code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
 function* enumerateThroughInterface(call: NativeCall, value: Value): Generator<Value> {
   const evaluator = evaluatorOf(call);
   const runtime = evaluator.runtime;

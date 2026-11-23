@@ -1,0 +1,15 @@
+TypeError #<A> is not extensible
+TypeError Cannot redefine property: a
+TypeError Cannot define property q, object is not extensible
+TypeError Invalid property descriptor. Cannot both specify accessors and a value or writable attribute, #<Object>
+TypeError Property description must be an object: 5
+TypeError Getter must be a function: 5
+TypeError Object prototype may only be an Object or null: 5
+TypeError Object prototype may only be an Object or null: 5
+TypeError Cannot convert undefined or null to object
+TypeError Cannot convert undefined or null to object
+TypeError Iterator value 1 is not an entry object
+TypeError number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError Cannot convert undefined or null to object
+TypeError Cyclic __proto__ value
+TypeError Cyclic __proto__ value

@@ -1,0 +1,8 @@
+
+Warning: The magic method WithMagic::__toString() must have public visibility in /main.php on line 6
+int(4)
+bool(false)
+
+Fatal error: Access level to WithMagic::__toString() must be public (as in class Stringable) in /main.php on line 6
+Stack trace:
+#0 {main}

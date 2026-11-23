@@ -1,0 +1,5 @@
+(6,13): error TS2446: Property 'value' is protected and only accessible through an instance of class 'Derived'. This is an instance of class 'Source'.
+(7,13): error TS2446: Property 'value' is protected and only accessible through an instance of class 'Derived'. This is an instance of class 'Source'.
+(8,22): error TS2446: Property 'value' is protected and only accessible through an instance of class 'Derived'. This is an instance of class 'Source'.
+(10,13): error TS2446: Property 'value' is protected and only accessible through an instance of class 'Derived'. This is an instance of class 'Source'.
+(12,8): error TS2446: Property 'value' is protected and only accessible through an instance of class 'Derived'. This is an instance of class 'Source'.

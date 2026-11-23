@@ -1,0 +1,32 @@
+type Id = `id-${number}`;
+const id: Id = "id-1";
+const k2: `id-${number}` = `${id}`;
+function cell(r: number, c: number): `${number},${number}` {
+  return `${r},${c}`;
+}
+const label: `cell(${number},${number})` = `cell(${cell(1, 2)})`;
+const k4: `user:id-${number}` = `user:${id}`;
+const k5 = "id-3" as `${Id}`;
+const k6: Id = k5;
+console.log(k2, label, k4, k6);
+
+type A = `${"a"}${number}`;
+const a: A = "a1";
+const a2: `a${number}` = a;
+type B = `x${`${"p" | "q"}-${number}`}y`;
+const b: B = "xp-1y";
+const b2: `x${string}y` = b;
+type W<T extends string> = `${`<${T}>`}!`;
+const w: W<"k"> = "<k>!";
+type IsA = `${`a${string}`}` extends `a${string}` ? "yes" : "no";
+const isA: IsA = "yes";
+type K = keyof { [k: `${`on${string}`}`]: 1 };
+const key: K = "onX";
+const spelled: `${true}-${null}-${undefined}-${1n}` = "true-null-undefined-1";
+console.log(a, a2, b, b2, w, isA, key, spelled);
+
+type Upper = `${Uppercase<string>}`;
+const upper: Uppercase<string> = "AB" as Uppercase<string>;
+const upper2: Upper = upper;
+const upper3: Uppercase<string> = upper2;
+console.log(upper, upper2, upper3);

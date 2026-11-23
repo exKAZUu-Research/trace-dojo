@@ -166,8 +166,8 @@ export class Bzip2Decompressor {
   }
 
   /** Decodes the block's move-to-front symbols into `tt`, returning its length. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Transcribes the symbol loop of BZ2_decompress of bzip2's decompress.c.
-  // code-gauge-allow functionNcss 33 -- Transcribes the symbol loop of BZ2_decompress of bzip2's decompress.c.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes the symbol loop of BZ2_decompress of bzip2's decompress.c.
+  // code-gauge-allow functionNcss -- Transcribes the symbol loop of BZ2_decompress of bzip2's decompress.c.
   private *decodeSymbols(symbols: SymbolDecoder, seqToUnseq: number[]): Decoding<number> {
     let { tt } = this;
     const eob = seqToUnseq.length + 1;
@@ -262,7 +262,7 @@ export class Bzip2Decompressor {
   }
 
   /** `unRLE_obuf_to_output_FAST` without randomisation; returns whether the stream is corrupt. */
-  // code-gauge-allow functionCognitiveComplexity 23 -- Transcribes unRLE_obuf_to_output_FAST of bzip2's bzlib.c, whose gotos the flag follows.
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes unRLE_obuf_to_output_FAST of bzip2's bzlib.c, whose gotos the flag follows.
   private unRLEFast(): boolean {
     let one = false;
     for (;;) {

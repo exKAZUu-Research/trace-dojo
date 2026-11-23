@@ -84,8 +84,8 @@ function roundToFigures(numerator: bigint, denominator: bigint, figures: number)
   return rounded;
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Transcribes fractions.py.
-// code-gauge-allow functionNcss 45 -- Transcribes fractions.py.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes fractions.py.
+// code-gauge-allow functionNcss -- Transcribes fractions.py.
 function formatFloatStyle([numerator, denominator]: Ratio, match: RegExpExecArray): string {
   const [, fill = ' ', align = '>', signFlag, noNegZero, alternate, zeroPadFlag, width = '0', thousands] = match;
   const precision = Number(match[9] ?? '6');

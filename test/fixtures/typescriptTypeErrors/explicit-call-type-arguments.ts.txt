@@ -1,0 +1,39 @@
+function single<T extends string>(value: T): void {}
+single<
+  number
+>(
+  'text'
+);
+class Box<T extends string> { constructor(value: T) {} }
+new Box<
+  number
+>(
+  'text'
+);
+function multiple<T extends number>(value: T): 'num';
+function multiple<T extends string>(value: T): 'str';
+function multiple(value: number | string): string { return typeof value === 'number' ? 'num' : 'str'; }
+const selection: 'str' = multiple<string>('okay');
+multiple<
+  number
+>(
+  'text'
+);
+multiple<
+  boolean
+>(
+  'text'
+);
+single<
+  number
+>(
+  'text',
+  'unexpected'
+);
+console.log(String.raw<
+  number
+>`hello`);
+console.log(String['raw']<
+  string
+>`hello2`);
+const raw: string = String.raw`hello3`;

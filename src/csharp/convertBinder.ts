@@ -212,7 +212,7 @@ export abstract class ConversionBinder extends LookupBinder {
   }
 
   /** Folds the conversion of a constant, reporting a constant that does not fit an explicit target. */
-  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private foldConversion(
     expression: Extract<BoundExpression, { kind: 'constant' }>,
     target: Type,

@@ -1,0 +1,4 @@
+let x;
+function f() { return x; }
+x = 1;
+console.log(f());

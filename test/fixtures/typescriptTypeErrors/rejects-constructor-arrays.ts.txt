@@ -1,0 +1,13 @@
+class PublicConstructor { constructor() {} }
+class PrivateConstructor { private constructor() {} }
+class ProtectedConstructor { protected constructor() {} }
+
+const privateLast = [PublicConstructor, PrivateConstructor];
+const privateFirst = [PrivateConstructor, PublicConstructor];
+const protectedLast = [PublicConstructor, ProtectedConstructor];
+const protectedFirst = [ProtectedConstructor, PublicConstructor];
+
+new privateLast[1]();
+new privateFirst[1]();
+new protectedLast[1]();
+new protectedFirst[1]();

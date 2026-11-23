@@ -56,8 +56,8 @@ export function unparseAnnotation(expression: Expression): string {
   return unparse(expression, Level.Test);
 }
 
-// code-gauge-allow functionNcss 58 -- One case per kind of expression, as ast_unparse.c writes it.
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of expression, as ast_unparse.c writes it.
+// code-gauge-allow functionNcss -- One case per kind of expression, as ast_unparse.c writes it.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of expression, as ast_unparse.c writes it.
 function unparse(expression: Expression, level: Level): string {
   switch (expression.kind) {
     case 'name': {

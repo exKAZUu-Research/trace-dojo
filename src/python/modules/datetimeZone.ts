@@ -117,8 +117,8 @@ function checkDatetimeArgument(name: string, value: PyValue, isDatetime: (value:
 }
 
 /** Defines the methods that need the datetime class, which is defined after this module. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Defines the methods of timezone and tzinfo that need datetime.
-// code-gauge-allow functionNcss 35 -- Defines the methods of timezone and tzinfo that need datetime.
+// code-gauge-allow functionCognitiveComplexity -- Defines the methods of timezone and tzinfo that need datetime.
+// code-gauge-allow functionNcss -- Defines the methods of timezone and tzinfo that need datetime.
 export function defineTimezoneMethods(
   isDatetime: (value: PyValue) => boolean,
   addOffset: (dt: PyValue, microseconds: bigint) => PyValue,

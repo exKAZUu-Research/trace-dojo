@@ -1,0 +1,6 @@
+(5,27): error TS7008: Member 'x' implicitly has an 'any' type.
+(7,30): error TS7008: Member 'x' implicitly has an 'any' type.
+(9,7): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+(11,7): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.

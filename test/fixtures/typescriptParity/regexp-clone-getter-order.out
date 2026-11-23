@@ -1,0 +1,14 @@
+flags
+constructor
+flags
+matchAll 2
+constructor
+flags
+split [ '', 'b', '' ]
+flags
+TypeError: String.prototype.matchAll called with a non-global RegExp argument
+flags
+constructor
+TypeError: The .constructor property is not an object
+constructor
+TypeError: The .constructor property is not an object

@@ -1,0 +1,14 @@
+const object = {
+  1n: 'direct',
+  2n() { return 'method'; },
+};
+const ok = { 1: 1n, '1n': 'string' };
+class Counter {
+  0x1an = 1;
+  static 26n() { return 1; }
+}
+interface State {
+  1_000n: string;
+  3n(): number;
+}
+type Other = { 4n?: string };

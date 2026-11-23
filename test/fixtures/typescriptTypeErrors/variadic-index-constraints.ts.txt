@@ -1,0 +1,8 @@
+function wrongFixedLength<T extends [string]>(value: number): [...T]["length"] { return value; }
+function wrongLiteralPosition<T extends [number, string]>(value: [...T][0]): number { return value; }
+function wrongNumericIndex<T extends [number, string]>(value: [...T][number]): number { return value; }
+function wrongSuffix<T extends string[]>(value: [boolean, ...T, number][1]): string { return value; }
+function wrongKey<T extends string[]>(value: [...T]["missing"]) { return value; }
+function wrongSymbol<T extends string[]>(value: [...T][symbol]) { return value; }
+function wrongGenericKey<T extends string[], K extends "missing">(value: [...T][K]) { return value; }
+function wrongMethod<T extends string[]>(value: [...T]["push"]): (item: number) => number { return value; }

@@ -1,0 +1,7 @@
+Leaf@anonymous|/main.php:8$1
+Branch@anonymous|/main.php:9$2
+class@anonymous|/main.php:19$8
+ChildAfterParent@anonymous|/main.php:21$9
+string(10) "BracedName"
+Undefined constant BracedName::class
+Undefined constant self::class

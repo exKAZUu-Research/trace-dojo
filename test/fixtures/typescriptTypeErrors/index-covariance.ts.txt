@@ -1,0 +1,8 @@
+function select<T extends { x: number; y: string }>(value: T['x']): T['x' | 'y'] { return value; }
+function narrow<T extends { x: number; y: string }>(value: T[keyof T]): T['x'] { return value; }
+function wrong<T extends { x: number; y: string }>(value: T['y']): T['x'] { return value; }
+function pick<T extends {x: number, y: string}, K extends keyof T, L extends K>(value: T[L]): T['x' | 'y'] { return value; }
+function derivedLookup<T extends {x: number, y: string}, U extends T, K extends keyof T, L extends K & keyof U>(value: U[L]): T['x' | 'y'] { return value; }
+function only<T extends {x: number, y: number}, K extends keyof T, L extends K>(value: T[L]): T['x'] { return value; }
+function pickGeneric<A, B, T extends {x: A, y: B}, K extends keyof T, L extends K>(v: T[L]): T['x' | 'y'] { return v; }
+function subclass<A, B, T extends {x: A, y: B}, U extends T, K extends keyof T, L extends K & keyof U>(v: U[L]): T['x' | 'y'] { return v; }

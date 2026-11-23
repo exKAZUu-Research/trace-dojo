@@ -1,0 +1,20 @@
+type MapKeys<T> = { [K in keyof (T & string)]: number };
+type RequiredKeys<T> = { [K in keyof (T & string)]-?: number };
+type ReadonlyKeys<T> = { readonly [K in keyof (T & string)]: number };
+type RemappedKeys<T> = { [K in keyof (T & string) as K]: number };
+type OptionalKeys<T> = { [K in keyof (T & string)]?: number };
+type Alias<T> = MapKeys<T>;
+type Ordinary<U extends (MapKeys<U> | {length: number})['length']> = U;
+type Inferred<T> = T extends infer U extends (MapKeys<U> | {length: number})['length'] ? U : never;
+type RequiredProjection<U extends (RequiredKeys<U> | {length: number})['length']> = U;
+type ReadonlyProjection<U extends ({length: number} | ReadonlyKeys<U>)['length']> = U;
+type RemappedProjection<U extends (RemappedKeys<U> | {length: number})['length']> = U;
+type AliasProjection<U extends (Alias<U> | {length: number})['length']> = U;
+type Intersect<U extends (MapKeys<U> & {length: number})['length']> = U;
+type Composite<U extends ((MapKeys<U> & {length: number}) | {length: number})['length']> = U;
+
+type NestedMap<T> = { [K in keyof (T & string)]: {size: number} };
+type Chained<U extends (NestedMap<U> | {length: {size: number}})['length']['size']> = U;
+type Conditional<V, U extends (V extends true ? MapKeys<U> : {length: number})['length']> = U;
+type OnlyTrue<V extends true, U extends (V extends true ? MapKeys<U> : {length: number})['length']> = U;
+type GenericReceiver<V extends MapKeys<U> | {length: number}, U extends V['length']> = U;

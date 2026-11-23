@@ -1,0 +1,9 @@
+class A{p=1;}
+class Other{r=2;}
+function constrained<T extends A>(x:T&{q:number}){if(x instanceof A)return;const unreachable:never=x;return unreachable;}
+function concrete(x:A&{q:number}){if(x instanceof A)return;const unreachable:never=x;return unreachable;}
+function indexed<T extends {a:A},K extends 'a'>(x:T[K]){if(x instanceof A)return;const unreachable:never=x;return unreachable;}
+function unconstrained<T>(x:T&{q:number}){if(!(x instanceof A)){const same:T=x;console.log(same);return x.q;}return 0;}
+function mixed<T extends A|Other>(x:T&{q:number}){if(!(x instanceof A)){const same:T=x;console.log(same);return x.q;}return 0;}
+console.log(constrained(new class extends A{q=2}()),concrete(Object.assign(new A(),{q:2})),indexed<{a:A},'a'>(new A()));
+console.log(unconstrained({q:3}),mixed({r:2,q:4}),mixed(Object.assign(new A(),{q:5})));

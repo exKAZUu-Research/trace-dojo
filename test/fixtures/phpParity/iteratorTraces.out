@@ -1,0 +1,140 @@
+== caching
+T.rewind
+T.valid
+T.current
+T.key
+T.next
+got 1 T.valid
+true
+T.valid
+T.current
+T.key
+T.next
+got 2 T.valid
+false
+T.valid
+== norewind
+T.current
+T.key
+int(1)
+int(1)
+int(0)
+T.valid
+got 1
+T.next
+T.valid
+T.current
+got 2
+T.next
+T.valid
+== append
+A.rewind
+A.valid
+A.current
+A.key
+A.valid
+A.valid
+A.rewind
+A.valid
+A.current
+A.key
+A.valid
+A.current
+A.key
+got 0 1
+A.valid
+A.next
+A.valid
+B.rewind
+B.valid
+B.current
+B.key
+B.valid
+B.current
+B.key
+got 0 2
+B.valid
+B.next
+B.valid
+== filter
+T.rewind
+T.valid
+T.current
+T.key
+got 1
+T.next
+T.valid
+T.current
+T.key
+T.next
+T.valid
+T.current
+T.key
+got 3
+T.next
+T.valid
+== limit seekable
+T.rewind
+seek 2
+T.rewind
+T.next
+T.next
+T.valid
+T.current
+T.key
+got 3
+T.next
+== infinite
+T.rewind
+T.valid
+T.current
+T.key
+got 1
+T.next
+T.valid
+T.current
+T.key
+got 2
+T.next
+T.valid
+T.rewind
+T.valid
+T.current
+T.key
+got 1
+== multiple
+A.rewind
+B.rewind
+A.valid
+A.valid
+A.current
+B.valid
+B.current
+A.valid
+A.key
+B.valid
+B.key
+got [0,0][1,1]
+A.next
+B.next
+A.valid
+B.valid
+A.valid
+B.valid
+B.current
+A.valid
+B.valid
+B.key
+got [null,1][null,2]
+A.next
+B.next
+A.valid
+B.valid
+== to_array
+Array
+(
+    [1] => 2
+    [2] => 3
+    [3] => 4
+)
+5

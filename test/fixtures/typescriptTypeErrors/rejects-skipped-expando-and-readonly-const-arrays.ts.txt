@@ -1,0 +1,9 @@
+function skipped() {}
+false && (skipped.label = 'never');
+console.log(skipped.label);
+
+function onlyReadonly<const T extends readonly string[] | undefined>(value: T): T {
+  return value;
+}
+const readonlyResult = onlyReadonly(['a']);
+const mutable: ['a'] = readonlyResult;

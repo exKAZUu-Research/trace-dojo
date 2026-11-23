@@ -9,8 +9,8 @@ const SRE_INFO_LITERAL = 2;
 const SRE_INFO_CHARSET = 4;
 
 /** `_compile_info`: the widths and the literal prefix or the set of first characters that searching uses. */
-// code-gauge-allow functionCognitiveComplexity 26 -- Transcribes re._compiler._compile_info.
-// code-gauge-allow functionNcss 38 -- Transcribes re._compiler._compile_info.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes re._compiler._compile_info.
+// code-gauge-allow functionNcss -- Transcribes re._compiler._compile_info.
 export function compileInfo(code: number[], pattern: SubPattern, flags: number): void {
   const [lo, hiWidth] = pattern.getwidth();
   const hi = hiWidth > BigInt(MAXCODE) ? MAXCODE : Number(hiWidth);
@@ -57,7 +57,7 @@ function casedFor(flags: number): ((code: number) => boolean) | undefined {
 }
 
 /** `_get_literal_prefix`. */
-// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes re._compiler._get_literal_prefix.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes re._compiler._get_literal_prefix.
 function literalPrefix(items: Item[], flags: number): { prefix: number[]; prefixSkip?: number; gotAll: boolean } {
   const prefix: number[] = [];
   let prefixSkip: number | undefined;
@@ -82,7 +82,7 @@ function literalPrefix(items: Item[], flags: number): { prefix: number[]; prefix
 }
 
 /** `_get_charset_prefix`. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes re._compiler._get_charset_prefix.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes re._compiler._get_charset_prefix.
 function charsetPrefix(pattern: SubPattern, patternFlags: number): SetItem[] | undefined {
   let flags = patternFlags;
   let items = pattern.data;

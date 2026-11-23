@@ -1,0 +1,12 @@
+type F = ((...x: number[]) => void) | ((...x: string[]) => void);
+function f(g: F) { g(1); }
+type G = ((...x: number[]) => number) | ((...x: number[]) => string);
+function h(g: G) { const n: number = g(1, 2); return n; }
+type H = ((a: number, ...r: string[]) => void) | ((a: number) => void);
+function k(g: H) { g(1); g(1, "s"); }
+type I = ((a: number) => void) | ((a: number, b?: string) => void);
+function m(g: I) { g(1); g(1, "x"); }
+type J = ((a: string | number) => string) | ((a: string) => string);
+function p(g: J) { return g("s").length; }
+type K = ((...x: (string | number)[]) => void) | ((a: string, b: string) => void);
+function q(g: K) { g("a", "b"); g("a"); }

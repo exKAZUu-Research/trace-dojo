@@ -1,0 +1,20 @@
+function objectDefault({a = 1, b = (() => a)()}: {a?: number; b?: number} = {}) {
+  return b;
+}
+function tupleDefault([a = 2, b = (() => a)()]: [number?, number?] = []) {
+  return b;
+}
+function nestedDefault({nested: [a = 3, b = (() => a)()]}: {nested: [number?, number?]} = {nested: []}) {
+  return b;
+}
+const bindingKey = 'a';
+function computedKey({[bindingKey]: a = 4, b = (() => a)()}: {a?: number; b?: number} = {}) {
+  return b;
+}
+function restDefault({['a']: a = 1, ...rest}: {a?: number; b: number}, result = (() => rest.b)()) {
+  return result;
+}
+function fromTupleRest([a, ...rest]: [number, ...number[]], result = (() => rest[0])()) {
+  return result;
+}
+console.log(objectDefault(), tupleDefault(), nestedDefault(), computedKey(), restDefault({b: 5}), fromTupleRest([0, 6]));

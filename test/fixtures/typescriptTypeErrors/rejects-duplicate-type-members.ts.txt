@@ -1,0 +1,10 @@
+interface I { x: number; x: number }
+type T = { y: string; y: string };
+interface M { m(): void; m(a: number): void }
+interface P { p: number; p(): void }
+interface G { get g(): number; set g(v: number) }
+interface J { z: number }
+interface J { z: number }
+interface K { w: number; "w": number }
+interface L { 1: string; "1": string }
+const v: I = { x: 1 };

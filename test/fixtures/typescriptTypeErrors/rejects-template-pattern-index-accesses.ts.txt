@@ -1,0 +1,52 @@
+interface I { [k: `a${string}`]: number; [k: `b${string}`]: string }
+interface J { [k: `a${string}`]: number; [k: `ab${string}`]: 1 | 2 | "x" }
+interface R { readonly [k: `a${string}`]: number; [k: `ab${string}`]: number }
+interface S { [k: string]: number | string; [k: `a${string}`]: number }
+function f(x: I, j: J, r: R, s: S, k: string) {
+  const a: number = x.a1;
+  const b: string = x.b1;
+  const c = x.c1;
+  const d = x["c1"];
+  const e: number = x["a1"];
+  const g: string = x["b1"];
+  x.a1 = 1;
+  x.a1 = "s";
+  x.c1 = 1;
+  x["c1"] = 1;
+  const h: 1 | 2 = j.ab1;
+  const h2: "x" = j.ab1;
+  r.a1 = 1;
+  r.ab1 = 1;
+  r.ax = 1;
+  const t: number = s.a1;
+  const u: number = s.c1;
+  s.a1 = "q";
+  s.c1 = "q";
+  const v = x[k];
+  x.b1.toFixed();
+  x["a1"].toUpperCase();
+}
+type V<T extends I> = T["a1"];
+const n: V<I> = 1;
+type W<T extends I> = T["b1"];
+const w: W<I> = 1;
+type K = keyof I;
+const k1: K = "c";
+const k2: K = "a";
+type JJ = J["ab1"];
+const jj: JJ = 1;
+const jj2: JJ = "x";
+const o1: I = { a1: 1, b1: "s" };
+const o2: I = { a1: "s" };
+const o3: I = { c1: 1 };
+const o4: I = { ab: 1, b: 2 };
+const sp = { ...o1 };
+const sp1: number = sp.a1;
+const sp2 = sp.c1;
+const { a1, ...rest } = o1;
+const rr = rest.c1;
+const rr2: string = rest.a2;
+function g1(str: { [k: string]: number }) { const asg: I = str; }
+function g2(pat: { [k: `a${string}`]: number }) { const asg2: { [k: string]: number } = pat; }
+const asg3: { [k: `a${string}`]: number } = {} as J;
+const asg4: { [k: `ab${string}`]: number } = {} as I;

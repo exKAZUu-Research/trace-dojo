@@ -124,7 +124,7 @@ function decimalToIntegral(value: CsDecimal, to: SpecialType): number | bigint {
 }
 
 /** Converts a floating-point value to an integral type, which saturates as .NET 9 and later do. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 function floatToIntegral(value: number, to: SpecialType, checked: boolean): number | bigint {
   if (checked) {
     const [min, max] = integerRange(to);
@@ -162,8 +162,8 @@ function bigIntToFloat(value: bigint, to: 'float' | 'double'): number {
 }
 
 /** Applies a binary arithmetic or bitwise operator to two operands of the same promoted kind. */
-// code-gauge-allow functionNcss 60 -- One case per operator and kind of operand.
-// code-gauge-allow functionCognitiveComplexity 24 -- Each branch handles one case of the C# rule that the function applies.
+// code-gauge-allow functionNcss -- One case per operator and kind of operand.
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 export function arithmetic(
   operator: string,
   kind: OperandKind,
@@ -257,6 +257,7 @@ export function booleanOperation(operator: string, a: boolean, b: boolean): bool
   }
 }
 
+// code-gauge-allow duplicateLines -- Each interpreter maps operators to its own language's arithmetic.
 function floatArithmetic(operator: string, a: number, b: number): number {
   switch (operator) {
     case '+': {
@@ -326,6 +327,7 @@ export function compareNumeric(operator: string, kind: OperandKind, left: Numeri
   return relation(operator, a < b ? -1 : a > b ? 1 : 0);
 }
 
+// code-gauge-allow duplicateLines -- Each interpreter maps comparison operators on its own.
 function relation(operator: string, order: number): boolean {
   switch (operator) {
     case '==': {

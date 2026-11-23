@@ -1,0 +1,5 @@
+const [a = 1, b = "x"] = [undefined, "y"];
+const n: number = a;
+const s: string = b;
+function f([x, y]: [number, number] = [0, 0]) { return x + y; }
+console.log(n, s, f());

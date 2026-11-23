@@ -1,0 +1,47 @@
+function tuple(f: ((...args: [string, number]) => void) | ((...args: [string, boolean]) => void)) {
+  f();
+  f('one');
+  f('two', 3);
+  f('two', true);
+  f('three', 3, 4);
+}
+function one(f: ((...args: [number]) => void) | ((...args: [string]) => void)) {
+  f();
+  f(1);
+  f('a');
+}
+function mixed(f: ((...args: [string, number]) => void) | ((x: string, y: boolean) => void)) {
+  f();
+  f('one');
+  f('two', 3);
+}
+function required(f: ((prefix: string, ...args: [number]) => void) | ((prefix: string, ...args: [boolean]) => void)) {
+  f();
+  f('one');
+  f('two', 3);
+}
+function variadic(f: ((...args: [string, number, ...boolean[]]) => void) | ((...args: [string, string, ...number[]]) => void)) {
+  f();
+  f('one');
+  f('two', 3);
+  f('three', 'a', true);
+}
+function trailing(f: ((...args: [string, ...number[], boolean]) => void) | ((...args: [string, ...boolean[], number]) => void)) {
+  f();
+  f('one');
+  f('two', 3);
+  f('two', true);
+  f('three', true, 3);
+  f('bad', 'a');
+}
+function shaped(f: ((...args: [string, number?]) => void) | ((...args: [string, boolean?]) => void)) {
+  f();
+  f('one');
+  f('two', undefined);
+}
+function defaults(f: ((x: number | void, ...args: [number]) => void) | ((x: number | void, ...args: [string]) => void)) {
+  f();
+  f(1);
+  f(undefined);
+  f(1, 1);
+}

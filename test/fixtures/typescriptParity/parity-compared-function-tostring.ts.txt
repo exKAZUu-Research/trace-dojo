@@ -1,0 +1,61 @@
+const f30 = () => 1;
+console.log(typeof f30.toString, typeof (f30.toString));
+console.log(Function.prototype.toString === Object.prototype.toString, f30.toString !== undefined);
+
+function sourceMetadata() {}
+const nameOfSourceMethod = sourceMetadata.toString.name;
+const sourceMethod = sourceMetadata['toString'];
+const { toString: extractedMethod } = sourceMetadata;
+const { name: aliasName } = sourceMethod;
+const { name: destructuredName, length: destructuredLength } = sourceMetadata.toString;
+const { toString: { name: nestedName } } = sourceMetadata;
+console.log(nameOfSourceMethod, (sourceMetadata.toString)['length'], Function.prototype.toString.name);
+console.log(sourceMethod?.name, extractedMethod['length'], destructuredName, destructuredLength, nestedName, aliasName);
+
+const byName = 'name';
+const byLength = 'length' as const;
+const keys = { methodLength: byLength } as const;
+function metadataKey(flag: boolean): 'name' | 'length' {
+  return flag ? byName : byLength;
+}
+const { [byName]: computedAliasName } = sourceMethod;
+const { toString: { [byLength]: computedNestedLength } } = sourceMetadata;
+console.log(sourceMetadata.toString[`name`], sourceMethod[byName], sourceMetadata.toString[keys.methodLength]);
+console.log(computedAliasName, computedNestedLength, sourceMethod[metadataKey(true)], sourceMethod[metadataKey(false)]);
+
+const alias = sourceMethod;
+const nextAlias = alias;
+let assignedAlias: typeof nextAlias;
+assignedAlias = extractedMethod;
+function inspectSourceMethod() {
+  const nameOnly = nextAlias;
+  console.log(nameOnly.name, assignedAlias[byLength]);
+}
+inspectSourceMethod();
+sourceMetadata.toString;
+
+let changingKey: 'call' | 'name' = 'call';
+const methodForChangingKey = sourceMetadata.toString;
+changingKey = 'name';
+console.log(methodForChangingKey[changingKey]);
+changingKey = Boolean(console.log) ? 'name' : 'call';
+if (changingKey === 'name') {
+  console.log(methodForChangingKey[changingKey]);
+}
+let destructuredKey: 'bind' | 'length' = 'bind';
+const methodForDestructuring = sourceMetadata.toString;
+destructuredKey = 'length';
+const { [destructuredKey]: lengthAfterAssignment } = methodForDestructuring;
+console.log(lengthAfterAssignment);
+
+console.log(Boolean(sourceMetadata.toString), new Boolean(sourceMethod).valueOf(), [sourceMethod].length);
+console.log(sourceMethod.bind(sourceMetadata).name);
+const boxedMethod = { method: sourceMethod };
+function exposeMethod({ target: { toString: method } }: { target: () => void }) {
+  return method;
+}
+console.log(typeof boxedMethod.method, exposeMethod({ target: sourceMetadata }).name);
+for (const key of ['name', 'call'] as const) console.log(typeof sourceMethod[key]);
+let replacedMethod = sourceMetadata.toString;
+replacedMethod = () => 'replacement';
+console.log(replacedMethod());

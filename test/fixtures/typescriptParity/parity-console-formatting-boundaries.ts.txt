@@ -1,0 +1,7 @@
+function formatterArgument() {}
+console.dir("%s", formatterArgument);
+try { console.table("%s", formatterArgument as any); } catch (error) { console.log((error as Error).name); }
+console.assert(true, "%s", "unused");
+console.log("%d %s", 1, "ok");
+function shadowedFormatter() { const console = {log(_format: string, _value: () => void) { return "custom"; }}; return console.log("%s", formatterArgument); }
+console.log(shadowedFormatter());

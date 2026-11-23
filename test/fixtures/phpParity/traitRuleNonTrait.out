@@ -1,0 +1,4 @@
+
+Fatal error: Class Foreign is not a trait, Only traits may be used in 'as' and 'insteadof' statements in /main.php on line 4
+Stack trace:
+#0 {main}

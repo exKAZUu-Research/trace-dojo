@@ -1,0 +1,2 @@
+(2,13): error TS2454: Variable 'x' is used before being assigned.
+(5,13): error TS2454: Variable 'y' is used before being assigned.

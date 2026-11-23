@@ -1,0 +1,43 @@
+
+Warning: preg_match(): Compilation failed: disallowed Unicode code point (>= 0xd800 && <= 0xdfff) at offset 7 in /main.php on line 8
+bool(false)
+NULL
+
+Warning: preg_match(): Compilation failed: disallowed Unicode code point (>= 0xd800 && <= 0xdfff) at offset 7 in /main.php on line 8
+bool(false)
+NULL
+
+Warning: preg_match(): Compilation failed: disallowed Unicode code point (>= 0xd800 && <= 0xdfff) at offset 9 in /main.php on line 8
+bool(false)
+NULL
+
+Warning: preg_match(): Compilation failed: disallowed Unicode code point (>= 0xd800 && <= 0xdfff) at offset 9 in /main.php on line 8
+bool(false)
+NULL
+
+Warning: preg_match(): Compilation failed: disallowed Unicode code point (>= 0xd800 && <= 0xdfff) at offset 10 in /main.php on line 8
+bool(false)
+NULL
+
+Warning: preg_match(): Compilation failed: character code point value in \x{} or \o{} is too large at offset 11 in /main.php on line 8
+bool(false)
+NULL
+
+Warning: preg_match(): Compilation failed: character code point value in \x{} or \o{} is too large at offset 13 in /main.php on line 8
+bool(false)
+NULL
+
+Warning: preg_match(): Compilation failed: disallowed Unicode code point (>= 0xd800 && <= 0xdfff) at offset 9 in /main.php on line 8
+bool(false)
+NULL
+
+Warning: preg_match(): Compilation failed: character code point value in \x{} or \o{} is too large at offset 7 in /main.php on line 8
+bool(false)
+NULL
+
+Warning: preg_match(): Compilation failed: \N{U+dddd} is supported only in Unicode (UTF) mode at offset 10 in /main.php on line 8
+bool(false)
+NULL
+int(0)
+array(0) {
+}

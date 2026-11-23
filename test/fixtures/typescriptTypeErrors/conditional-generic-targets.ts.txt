@@ -1,0 +1,10 @@
+type Universal<T> = T extends unknown ? number : never;
+type WithAny<T> = T extends any ? number : never;
+type Related<T> = T extends unknown ? T : never;
+type Disjoint<T> = T extends string ? 5 : 6;
+function wrongUniversal<T>(): Universal<T> { return "wrong"; }
+function wrongAny<T>(): WithAny<T> { return "wrong"; }
+function wrongDependent<T>(): Related<T> { return "wrong"; }
+function wrongBranch<T>(): Disjoint<T> { return 5; }
+const neverUnknown: Universal<never> = 3;
+const neverAny: WithAny<never> = 3;

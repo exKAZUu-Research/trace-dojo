@@ -1,0 +1,4 @@
+const items = [{ name: "a" }, { name: "b", price: 3 }];
+for (const it of items) {
+  console.log(it.name, it.price);
+}

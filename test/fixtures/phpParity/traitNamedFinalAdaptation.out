@@ -1,0 +1,5 @@
+override,trait,trait
+
+Fatal error: Cannot override final method Base::saved() in /main.php on line 18
+Stack trace:
+#0 {main}

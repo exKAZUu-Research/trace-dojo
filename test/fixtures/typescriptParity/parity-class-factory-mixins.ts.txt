@@ -1,0 +1,29 @@
+function label<T extends new (...args: any[]) => any>(Base: T) {
+  return class extends Base { label = "item"; };
+}
+class Item { value = 1; }
+const LabeledItem = label(Item);
+const item = new LabeledItem();
+console.log(item.value.toFixed(1), item.label);
+
+function fromNumber<T extends new (...args: any[]) => { value: number }>(Base: T) {
+  return class NamedMixin extends Base {
+    get doubled(): number { return this.value * 2; }
+  };
+}
+class Named {
+  static prefix = "entry";
+  value = 3;
+  name = "named";
+}
+const LabeledNamed = fromNumber(Named);
+console.log(LabeledNamed.prefix, new LabeledNamed().name, new LabeledNamed().doubled);
+
+function addCount<T extends new (...args: any[]) => object>(Base: T) {
+  class Counted extends label(Base) { count = 2; }
+  return Counted;
+}
+class Box<T> { constructor(public value: T) {} }
+const CountedBox = addCount(Box);
+const box = new CountedBox("text");
+console.log(box.value.toUpperCase(), box.label, box.count.toFixed(1));

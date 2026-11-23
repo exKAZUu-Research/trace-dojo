@@ -1,0 +1,43 @@
+type Choice = { x: number } | { y: string };
+interface Combined extends Choice { label: string; }
+interface G<T> extends T { label: string; }
+type Prim = string;
+interface P extends Prim {}
+type Inter = { a: number } & { b: string };
+interface OK extends Inter { c: boolean }
+type Arr = number[];
+interface OK2 extends Arr { extra: string }
+type Fn = () => void;
+interface OK3 extends Fn {}
+type Tup = [number, string];
+interface OK4 extends Tup {}
+type Keyed<K extends string> = { [P in K]: number };
+interface OK5 extends Keyed<'a' | 'b'> {}
+interface Bad6<K extends string> extends Keyed<K> {}
+type IU = { a: number } & ({ b: string } | { c: string });
+interface Bad7 extends IU {}
+interface AnyBase extends Record<string, any> {}
+type Nv = never;
+interface Bad8 extends Nv {}
+type Ob = object;
+interface Bad9 extends Ob {}
+type Alias<T> = T;
+interface H extends Alias<{ a: number }> {}
+interface U extends Unknown {}
+type S = { [k: string]: number };
+interface I extends S {}
+interface J extends Partial<{ a: number }> {}
+interface K<T> extends Partial<T> {}
+type Lit = 'a';
+interface L extends Lit {}
+type An = any;
+interface M extends An {}
+type Un = unknown;
+interface N extends Un {}
+interface O extends Array<number> {}
+interface P extends Function {}
+interface Q extends Object {}
+type Cond<T> = T extends string ? { s: T } : { n: T };
+interface R extends Cond<'x'> {}
+interface V<T> extends Cond<T> {}
+console.log('runs');

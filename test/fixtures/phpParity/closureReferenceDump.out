@@ -1,0 +1,87 @@
+object(Closure)#1 (4) {
+  ["name"]=>
+  string(21) "{closure:/main.php:3}"
+  ["file"]=>
+  string(9) "/main.php"
+  ["line"]=>
+  int(3)
+  ["static"]=>
+  array(1) {
+    ["value"]=>
+    &int(1)
+  }
+}
+object(Closure)#1 (4) {
+  ["name"]=>
+  string(21) "{closure:/main.php:3}"
+  ["file"]=>
+  string(9) "/main.php"
+  ["line"]=>
+  int(3)
+  ["static"]=>
+  array(1) {
+    ["value"]=>
+    &int(2)
+  }
+}
+object(Closure)#1 (4) {
+  ["name"]=>
+  string(21) "{closure:/main.php:3}"
+  ["file"]=>
+  string(9) "/main.php"
+  ["line"]=>
+  int(3)
+  ["static"]=>
+  array(1) {
+    ["value"]=>
+    int(2)
+  }
+}
+object(Closure)#2 (4) {
+  ["name"]=>
+  string(22) "{closure:/main.php:10}"
+  ["file"]=>
+  string(9) "/main.php"
+  ["line"]=>
+  int(10)
+  ["static"]=>
+  array(4) {
+    ["count"]=>
+    int(5)
+    ["items"]=>
+    array(2) {
+      [0]=>
+      int(1)
+      [1]=>
+      int(2)
+    }
+    ["pending"]=>
+    NULL
+    ["other"]=>
+    int(8)
+  }
+}
+object(Closure)#2 (4) {
+  ["name"]=>
+  string(22) "{closure:/main.php:10}"
+  ["file"]=>
+  string(9) "/main.php"
+  ["line"]=>
+  int(10)
+  ["static"]=>
+  array(4) {
+    ["count"]=>
+    int(6)
+    ["items"]=>
+    array(2) {
+      [0]=>
+      int(1)
+      [1]=>
+      int(2)
+    }
+    ["pending"]=>
+    int(7)
+    ["other"]=>
+    int(8)
+  }
+}

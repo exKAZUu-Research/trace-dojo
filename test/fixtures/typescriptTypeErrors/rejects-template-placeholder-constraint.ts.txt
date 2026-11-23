@@ -1,0 +1,18 @@
+type T = `${{x:1}}`;
+type Prefix<U> = `a${U}`;
+type P2<U extends string> = `a${U}`;
+type P3<U extends object> = `a${U}`;
+type P4 = `a${symbol}`;
+type P5 = `a${unknown}`;
+type P6 = `a${any}`;
+type P7 = `a${never}`;
+type P8 = `a${string | {}}`;
+type P9 = `a${boolean | null | undefined | bigint | number}`;
+type P10<U extends string | number> = `a${U}`;
+type P11 = `a${void}`;
+type P12 = `a${string[]}`;
+type P13<U extends string> = `a${Uppercase<U>}`;
+type P14<O> = `a${keyof O}`;
+type P15<O> = `a${keyof O & string}`;
+console.log(1);
+type Bad<T> = { [K in keyof T as `get${K}`]: () => T[K] };

@@ -1,0 +1,13 @@
+(2,12): error TS2339: Property 'b' does not exist on type '{ a: number; b: 1; } | { a: string; }'.
+  Property 'b' does not exist on type '{ a: string; }'.
+(5,12): error TS2339: Property 'toFixed' does not exist on type 'string | number'.
+  Property 'toFixed' does not exist on type 'string'.
+(8,12): error TS2339: Property 'lenght' does not exist on type 'string | number'.
+  Property 'lenght' does not exist on type 'string'.
+(11,5): error TS2540: Cannot assign to 'a' because it is a read-only property.
+(14,9): error TS2322: Type 'string | number | undefined' is not assignable to type 'string | number'.
+  Type 'undefined' is not assignable to type 'string | number'.
+(18,9): error TS2322: Type 'string | number' is not assignable to type 'string'.
+  Type 'number' is not assignable to type 'string'.
+(22,5): error TS2554: Expected 1 arguments, but got 0.
+(25,10): error TS2554: Expected 1 arguments, but got 0.

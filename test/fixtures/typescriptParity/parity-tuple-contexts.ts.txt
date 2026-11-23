@@ -1,0 +1,11 @@
+const pair: [number, string] = [1, 'hi'];
+const tuple: [number, string, 'ok'] = [...pair, 'ok'];
+const callback: [number, string, (x: number) => number] = [...pair, x => x + 1];
+const values: number[] = [1, 2];
+const trailing: [...number[], (x: string) => string] = [...values, x => x.toUpperCase()];
+const leading: [(x: number) => number, ...number[]] = [x => x + 2, ...values];
+const empty: [] = [];
+const emptySpread: [(x: number) => number] = [...empty, x => x + 3];
+const multi: [number, string, number, string, (x: number) => number] = [...pair, ...pair, x => x + 4];
+const final = trailing[2];
+console.log(tuple[2], callback[2](3), typeof final === 'function' ? final('yes') : 'no', leading[0](3), emptySpread[0](3), multi[4](3));

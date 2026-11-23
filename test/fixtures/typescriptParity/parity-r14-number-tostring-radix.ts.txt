@@ -1,0 +1,7 @@
+const tries: (() => unknown)[] = [
+  () => (10).toString(2.5 as any), () => (255).toString(16.9 as any), () => (1.5).toFixed(NaN as any), () => (1.5).toFixed(undefined),
+  () => (1234.5678).toFixed(2.9 as any), () => (25).toString(undefined), () => (25).toString(36.5 as any), () => (25).toString('16' as any),
+  () => (25).toString(NaN as any), () => (10n).toString(2.7 as any), () => (1.25).toPrecision(2.9 as any), () => (1.25).toExponential(1.9 as any),
+  () => (5).toString(1), () => (5).toFixed(101), () => (5).toFixed(-1), () => (5).toPrecision(0), () => (5).toExponential(-1), () => (Infinity).toFixed(200),
+];
+for (const t of tries) { try { console.log(t()); } catch (e: any) { console.log(e.constructor.name, e.message); } }

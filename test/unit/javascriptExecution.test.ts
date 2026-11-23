@@ -28,6 +28,51 @@ keep.forward();`
   });
 });
 
+test('inspection uses the prototype of boxed native values', () => {
+  const result = executeProgram(
+    'javascript',
+    `for (const value of [new Date(0), Promise.resolve(7), new WeakSet(), new WeakMap()]) {
+  Object.setPrototypeOf(value, {});
+  console.log(value);
+}
+for (const value of [new Date(0), Promise.resolve(7), new WeakSet(), new WeakMap()]) {
+  Object.setPrototypeOf(value, null);
+  console.log(value);
+}
+const error = new Error('example');
+Object.setPrototypeOf(error, {});
+Object.defineProperty(error, 'message', {enumerable: true});
+console.log(error);`
+  );
+  expect(result).toMatchObject({
+    kind: 'executed',
+    stdout: `{}
+{}
+{}
+{}
+[Date: null prototype] 1970-01-01T00:00:00.000Z
+[Promise: null prototype] { 7 }
+[WeakSet: null prototype] { <items unknown> }
+[WeakMap: null prototype] { <items unknown> }
+{ message: 'example' }
+`,
+  });
+});
+
+test('JavaScript can read and define legacy RegExp static names', () => {
+  const result = executeProgram(
+    'javascript',
+    `console.log(RegExp.$1, RegExp.input, Object.hasOwn(RegExp, '$1'));
+console.log(/(a)/.exec('a')[1], RegExp.$1);
+RegExp.input = 'learner value';
+console.log(RegExp.input, Object.hasOwn(RegExp, 'input'));`
+  );
+  expect(result).toMatchObject({
+    kind: 'executed',
+    stdout: 'undefined undefined false\na undefined\nlearner value true\n',
+  });
+});
+
 test.each([
   ['a duplicate declaration', 'let a = 1;\nlet a = 2;', 1, 'a はすでに宣言されています。'],
   ['a let that redeclares a var in its block', '{\n  var a = 1;\n  let a = 2;\n}', 2, 'a はすでに宣言されています。'],
@@ -94,6 +139,12 @@ test.each([
     'フィールドの初期値や static ブロックの中では arguments を使えません。',
   ],
   ['new.target outside functions', 'console.log(new.target);', 0, 'new.target は関数の中にしか書けません。'],
+  [
+    'unary bases of exponentiation',
+    'let x = 2;\nconsole.log(-x ** 2);',
+    1,
+    '** の左辺に - 演算子を使った式を書くときは、括弧で囲んでください。',
+  ],
   ['a legacy octal number', 'const n = 017;', 0, '数値「017」は、この採点環境では使えません。'],
   [
     'an async getter',
@@ -185,7 +236,45 @@ test.each([
   ['a turtle with an invalid color', "new Turtle(0, 0, 'Z');", 'Error: Invalid color: Z'],
   ['a turtle leaving the board', 'const t = new Turtle(0, 6);\nt.forward();', 'Error: Out of bounds: (0, 7)'],
   ['a thrown value', "throw 'stop';", 'stop'],
-  ['a custom error', "class Oops extends Error {}\nthrow new Oops('bad');", 'Error: bad'],
+  ['a thrown bigint, converted to a string', 'throw 5n;', '5'],
+  ['a thrown negative zero, converted to a string', 'throw -0;', '0'],
+  ['a thrown symbol, which cannot be converted to a string', "throw Symbol('s');", ''],
+  [
+    'a thrown error whose prototype is a plain object',
+    "throw Object.setPrototypeOf(new Error('y'), { marker: 1 });",
+    '{}',
+  ],
+  [
+    'a thrown error without a prototype',
+    "throw Object.setPrototypeOf(new Error('x'), null);",
+    '[Error: null prototype]: x',
+  ],
+  ['a custom error', "class Oops extends Error {}\nthrow new Oops('bad');", 'Oops [Error]: bad'],
+  [
+    'a named TypeError subclass',
+    "class MyTypeError extends TypeError {}\nthrow new MyTypeError('special');",
+    'MyTypeError: special',
+  ],
+  [
+    'an error with a custom error name',
+    "const error = new Error('bad');\nerror.name = 'MyError';\nthrow error;",
+    'Error [MyError]: bad',
+  ],
+  [
+    'an error with a name that does not end in Error',
+    "const error = new Error('bad');\nerror.name = 'Zed';\nthrow error;",
+    'Zed: bad',
+  ],
+  [
+    'an error with a numeric name',
+    "const error = new Error('bad');\nerror.name = 42;\nthrow error;",
+    '42 [Error]: bad',
+  ],
+  [
+    'an error renamed after its first inspection',
+    "const error = new Error('bad');\nconsole.log(error);\nerror.name = 'MyError';\nerror.message = 'new';\nthrow error;",
+    'Error: bad',
+  ],
   ['infinite recursion', 'function f() { return f(); }\nf();', 'RangeError: Maximum call stack size exceeded'],
   ['constructing a generator', 'function* f() {}\nnew f();', 'TypeError: f is not a constructor'],
   [
@@ -368,6 +457,11 @@ test.each([
     "'x'.repeat(2 ** 28);",
     { kind: 'executed', uncaughtException: 'RangeError: Invalid string length' },
   ],
+  [
+    'a case conversion lengthening a string past the limit',
+    "'ß'.repeat(600000).toLocaleUpperCase();",
+    { kind: 'executed', uncaughtException: 'RangeError: Invalid string length' },
+  ],
   ['many objects', 'const a = [];\nwhile (true) a.push({ x: 1 });', { kind: 'limitExceeded' }],
   [
     'concatenating an array with itself many times',
@@ -442,7 +536,10 @@ test.each([
   [
     'Array.from(null)',
     'Array.from(null);',
-    { kind: 'executed', uncaughtException: 'TypeError: Cannot convert undefined or null to object' },
+    {
+      kind: 'executed',
+      uncaughtException: 'TypeError: object null is not iterable (cannot read property Symbol(Symbol.iterator))',
+    },
   ],
   ['deeply nested blocks', `${'{'.repeat(9000)}${'}'.repeat(9000)}`, { kind: 'compileError' }],
   ['deeply nested negations', `const b = ${'!'.repeat(19_000)}true;`, { kind: 'compileError' }],
@@ -563,6 +660,45 @@ test.each([
   [
     'class instances and functions',
     'class A { x = 1; } class B extends A {} console.log(new B(), B, Object.create(null), () => 1);',
+  ],
+  [
+    'instances after prototype changes',
+    `function Example() { this.value = 1; }
+const value = new Example();
+Object.setPrototypeOf(value, null);
+Object.defineProperty(Example, 'name', { value: 'Renamed' });
+console.log(value);
+const other = { __proto__: value };
+console.log(value, Object.getPrototypeOf(other) === value);`,
+  ],
+  [
+    'collection iterators and reflection',
+    `function attempt(value, options) {
+  try { console.dir(value, options); } catch (error) { console.log(error.name + ': ' + error.message); }
+}
+for (const value of [new Map([[1, 2], [3, 4]]), new Set([1, 2])]) {
+  Object.setPrototypeOf(value, Object.create(Array.prototype));
+  attempt(value, { showHidden: true });
+  Object.defineProperty(value, Symbol.iterator, { configurable: true, value: undefined });
+  attempt(value);
+  Object.defineProperty(value, Symbol.iterator, { get() { throw new Error('iterator getter'); } });
+  attempt(value);
+  Object.setPrototypeOf(value, null);
+  attempt(value, { maxArrayLength: 1, showHidden: true });
+}
+const set = new Set([1, 2, 3]);
+set[Symbol.iterator] = function* () {
+  try { yield 7; yield 8; yield 9; } finally { console.log('set iterator closed'); }
+};
+attempt(set, { maxArrayLength: 1 });
+const map = new Map([[1, 2]]);
+map[Symbol.iterator] = function* () {
+  try { yield ['a', 1]; yield null; } finally { console.log('map iterator closed'); }
+};
+attempt(map, { maxArrayLength: 1 });
+const entries = new Map([[1, 2], [3, 4]]).entries();
+console.log(entries);
+console.log(entries.next().value);`,
   ],
   ['quoted strings and keys', String.raw`console.log(["it's", 'say "hi"\n', '\x01'], { 'a-b': 1, 2: 'two', $c: 3 });`],
   ['circular references', 'const a = { b: {} }; a.b.a = a; a.self = a; console.log(a);'],
@@ -1466,23 +1602,762 @@ const g = function* inner() { yield inner === g; }; console.log(g().next());
 const a = async function* ai() { yield typeof ai; }; a().next().then(console.log);`,
   ],
   [
+    'Array.from reading iterator and length getters once before construction',
+    `let reads = 0;
+const iterable = { get [Symbol.iterator]() {
+  console.log('iterator', ++reads);
+  return reads === 1 ? function* () { yield 1; yield 2; } : undefined;
+} };
+console.log(Array.from(iterable), reads);
+let lengths = 0;
+const arrayLike = { 0: 'a', 1: 'b', get length() { return ++lengths; }, [Symbol.iterator]: null };
+class List extends Array { constructor(...args) { super(...args); console.log('construct', args); } }
+console.log(List.from(arrayLike), lengths);
+let constructed = 0;
+class Result extends Array { constructor(...args) { super(...args); constructed++; } }
+try { Result.from({ [Symbol.iterator]: 1 }); } catch (e) { console.log(e.name, constructed); }`,
+  ],
+  [
+    'lowered call spreads retain call and constructor names',
+    `const f=(...args)=>args; const g=()=>5; const h=()=>null; const o={m(){}}; class C {}
+for (const run of [()=>f(...g(),1),()=>f(1,...o.m(),2),()=>f(...g(),...g()),()=>Math.max(...g(),1),
+  ()=>new C(...h(),1),()=>f(...g?.(),1),()=>f(...(g()),1),()=>f(...new Number(5),1),()=>f(...g())]) {
+  try {run();} catch(e) {console.log(e.message);}
+}
+function* beforeYield(){f(...g(),yield 1);}
+try{beforeYield().next();}catch(e){console.log(e.message);}
+function* afterYield(){f(yield 1,...g());}
+const iterator=afterYield();iterator.next();try{iterator.next(1);}catch(e){console.log(e.message);}`,
+  ],
+  [
+    'legacy accessor definitions on frozen, sealed, and non-extensible objects',
+    `const cases = [
+  ['frozen get', () => { const x = Object.freeze({ a: 1 }); x.__defineGetter__('a', () => 42); return x.a; }],
+  ['nonext set', () => { const x = Object.preventExtensions({}); x.__defineSetter__('a', (v) => {}); return Object.keys(x); }],
+  ['plain', () => { const x = { a: 1 }; x.__defineGetter__('a', () => 42); return [x.a, Object.getOwnPropertyDescriptor(x, 'a').enumerable]; }],
+  ['half kept', () => { const x = {}; x.__defineGetter__('a', () => 1); x.__defineSetter__('a', (v) => { console.log('set', v); }); x.a = 5; return x.a; }],
+  ['sealed existing accessor', () => { const x = {}; x.__defineGetter__('a', () => 1); Object.seal(x); x.__defineSetter__('a', () => {}); return 'no'; }],
+  ['not callable', () => ({}).__defineGetter__('a', 1)],
+  ['array index', () => { const a = [1]; a.__defineGetter__('0', () => 9); return a[0]; }],
+];
+for (const [n, f] of cases) { try { console.log(n, f()); } catch (e) { console.log(n, e.name, e.message); } }`,
+  ],
+  [
+    'array lengths converted twice, as ToUint32 and as ToNumber',
+    `for (const [name, run] of [
+  ['define ro', (v) => { const a = [1]; Object.defineProperty(a, 'length', { writable: false }); Object.defineProperty(a, 'length', { value: v }); return a.length; }],
+  ['define', (v) => { const a = [1]; Object.defineProperty(a, 'length', { value: v }); return a.length; }],
+  ['assign', (v) => { const a = [1]; a.length = v; return a.length; }],
+]) {
+  for (const make of [() => { let n = 0; return { valueOf() { return ++n; } }; }, () => ({ valueOf() { console.log('called'); return 1; } }), () => -0, () => 1.5, () => '2', () => 2 ** 32, () => NaN]) {
+    try { console.log(name, run(make())); } catch (e) { console.log(name, e.name, e.message); }
+  }
+}`,
+  ],
+  [
+    'operator expressions named in error messages and numeric separators in fractions',
+    `const a = 1, b = 2, o = { x: 1 }; let c = 1, i = 0; const fns = [() => 1];
+function main() {
+  for (const run of [() => fns[i + 1](), () => fns[(i * 2) % 2 + 1](), () => fns[-i - 1](), () => fns[i++ + 1](), () => fns[a ? 1 : 2](),
+    () => (1 + 2 * 3)(), () => ('s' + 't' + a)(), () => (a != b)(), () => (!!a)(), () => (typeof a === 'x')(), () => (a, b, c)(),
+    () => (o.x = 1)(), () => (c += 1)(), () => (\`x\${a}\${b}\`)(), () => (a + 1 + 2)(), () => ((a + b) + c)(), () => (a && b || c)(),
+    () => ((-a) ** 2)(), () => (~1 + a)(), () => fns[(\`plain\`)](),
+    () => { for (const x of (a + b)); }, () => { for (const x of (a + b + c)); }, () => { for (const x of (a && b)); },
+    () => { for (const x of (a ? b : c)); }, () => { for (const x of !(a + b)); }, () => { for (const x of !a); }, () => [...(a ? b : c)]]) {
+    try { run(); } catch (e) { console.log(e.message); }
+  }
+}
+main();
+for (const n of [1234.123456789, -1234.5678, 0.0001234, 1e21, -0.12345, 1.123, 1234n]) console.dir({ n }, { numericSeparator: true });`,
+  ],
+  [
+    'for-of over nullish coalescing with parenthesized and optional-chain operands',
+    `const o = { a: 1, b: null, f: null }; let x = 5; let nul = null;
+function main() {
+  for (const run of [() => { for (const v of (x) ?? o.a); }, () => { for (const v of o.a ?? (x)); }, () => { for (const v of o.f?.() ?? x); }, () => { for (const v of o.f?.() ?? 3); }, () => { for (const v of (o.a) ?? x); }, () => { for (const v of o.a ?? o.b.c); }, () => { for (const v of (nul) ?? (x)); }]) {
+    try { run(); } catch (e) { console.log(e.message); }
+  }
+}
+main();`,
+  ],
+  [
+    'callee member errors preserve temporary receivers and canonical regular expression flags',
+    `class Point {}
+const key = 'missing';
+const cases = [
+  () => new Point().missing(),
+  () => ((x) => x).missing(),
+  () => (function () {}).missing(),
+  () => (class {}).missing(),
+  () => (/a/gi).missing(),
+  () => (/a/ig).missing(),
+  () => (/a\\/b/gi).missing(),
+  () => (123n).missing(),
+  () => new Point()['missing'](),
+  () => ((x) => x)[key](),
+  () => (function () {})[0](),
+  () => (class {})[123n](),
+  () => (/a/gi)[key](),
+  () => (123n)[key](),
+  () => new Point()?.missing(),
+  () => ((x) => x)?.missing(),
+  () => (class {})?.['missing'](),
+  () => (/a/ig)?.[key](),
+  () => (123n)?.missing(),
+  () => new Point().missing?.(),
+];
+for (const run of cases) { try { run(); } catch (e) { console.log(e.message); } }
+`,
+  ],
+  [
+    'callees with escaped names in errors',
+    `const o = {};
+for (const f of [() => o.a(), () => o.b(), () => o.\\u{63}(), () => o?.d(), () => o.e.f()]) {
+  try { f(); } catch (e) { console.log(e.message); }
+}`,
+  ],
+  [
+    'collection tables ignore the selection',
+    `console.table(new Map([["a", 1]]), [{ toString() { console.log("side effect"); return "x"; } }]);
+console.table(new Set([1]), [{ toString() { console.log("side effect"); return "x"; } }]);
+console.table(new Map([["a", 1]]).entries(), [{ toString() { console.log("side effect"); return "x"; } }]);`,
+  ],
+  [
+    'console.table selections converted at each use',
+    `const s = Symbol("x");
+console.table([{ a: 1, [s]: 2 }], [s, "a"]);
+console.table([{ a: 1 }], [{ [Symbol.toPrimitive]() { return s; } }, "a"]);
+console.table([{ a: 1, b: 2 }], [1, "b"]);
+console.table([{ a: 1 }], ["a", "a"]);
+console.table([{ a: 1 }, 5, { a: 3 }], [{ toString() { console.log("conv"); return "a"; } }]);
+try { console.table([{ a: 1 }], [{ toString() { throw new Error("boom"); } }]); } catch (e) { console.log("caught", e.message); }
+console.table([{ b: 1, 2: 3, a: 4 }], ["b", "a", "2"]);
+console.table({ r: { a: 1 } }, ["a", undefined]);`,
+  ],
+  [
+    'bound functions inherit the target prototype and delegate custom instance checks',
+    `class Base { static label = "base"; }
+class Derived extends Base {
+  static [Symbol.hasInstance](value) { return value === 7; }
+}
+const Bound = Derived.bind(null);
+const Rebound = Bound.bind(null);
+console.log(Object.getPrototypeOf(Bound) === Base, Bound.label, 7 instanceof Rebound, 8 instanceof Rebound);
+Object.setPrototypeOf(Derived, null);
+const Detached = Function.prototype.bind.call(Derived, null);
+console.log(Object.getPrototypeOf(Detached), 7 instanceof Detached);`,
+  ],
+  [
+    'string conversions stop at the first failure',
+    `try { String.fromCodePoint(-1, { valueOf() { console.log("side effect"); return 0; } }); } catch (e) { console.log(e.message); }
+try { String.fromCodePoint(65, 1.5, { valueOf() { throw new Error("later"); } }); } catch (e) { console.log(e.message); }
+try { String.fromCodePoint(NaN); } catch (e) { console.log(e.message); }
+try { String.fromCodePoint(-0, 0x10ffff + 1); } catch (e) { console.log(e.message); }
+try { String.fromCodePoint(Infinity); } catch (e) { console.log(e.message); }
+console.log(String.fromCodePoint(65, { valueOf() { return 66; } }));
+console.log("abc".padStart(2, { toString() { console.log("side effect"); return "x"; } }));
+console.log("abc".padEnd(3, { toString() { console.log("side effect"); return "x"; } }));
+console.log("abc".padEnd(5, { toString() { console.log("converted"); return "xy"; } }));
+console.log("abc".padStart(-1, Symbol()));`,
+  ],
+  [
+    'parameter defaults do not see body declarations',
+    `function lazy(read = () => helper()) { function helper() { return "inner"; } try { return read(); } catch (e) { return e.constructor.name; } }
+console.log(lazy());
+function helper() { return "outer"; }
+function lazy2(read = () => helper()) { function helper() { return "inner"; } return read(); }
+console.log(lazy2());
+function v(a = 1, get = () => a) { var a; console.log(a); a = 2; console.log(a, get()); }
+v();
+function w(a = 1, get = () => a) { a = 3; var a = 5; return [a, get()]; }
+console.log(w());
+function x({ p }, q = p) { var p = 9; let r = q; return [p, q, r]; }
+console.log(x({ p: 4 }));
+function y(n = 1) { function n() {} return typeof n; }
+console.log(y());
+async function z(a = () => b) { var b = 2; try { return a(); } catch (e) { return e.constructor.name; } }
+z().then(console.log);
+function* g(a = 1) { var a; yield a; }
+console.log([...g()]);`,
+  ],
+  [
+    'callees with escaped string keys in errors',
+    `const o = {};
+for (const f of [() => o["a"](), () => o["a\\nb"](), () => o[\`\\x62\`](), () => o.c(), () => o.d(), () => o["\\u{1F600}"](), () => o['q"r'](), () => ("a" + "b")()]) {
+  try { f(); } catch (e) { console.log(JSON.stringify(e.message)); }
+}`,
+  ],
+  [
+    'console.dir sorted with a comparator',
+    `console.dir({ b: 2, a: 1 }, { sorted: (a, b) => b.localeCompare(a) });
+console.dir(new Map([["a", 1], ["b", 2]]), { sorted: (a, b) => { console.log("cmp", a, b); return b.localeCompare(a); } });
+console.dir([3, 1, 2], { sorted: () => 0 });
+try { console.dir({ a: 1, b: 2 }, { sorted: () => { throw new Error("boom"); } }); } catch (e) { console.log("caught", e.message); }
+try { console.dir({ b: 1, a: 2 }, { sorted: 1 }); } catch (e) { console.log(e.constructor.name, e.message); }
+console.dir({ b: 1, a: 2 }, { sorted: true });
+console.dir({ b: 1, a: 2 }, { sorted: () => "x" });`,
+  ],
+  [
+    'inherited getters run on the inspected instance',
+    `class C { #s = 7; v = 3; get double() { return this.v * 2; } get secret() { return this.#s; } }
+console.dir(new C(), { showHidden: true, getters: true });
+console.dir(new C(), { getters: true });`,
+  ],
+  [
+    'inherited properties under showHidden and sorted collections',
+    `const proto = {}; Object.defineProperty(proto, "hidden", { value: 3 });
+console.dir(Object.create(proto), { showHidden: true });
+console.log("%o", Object.create({ inherited: 4 }));
+class C { get value() { return 1; } m() {} }
+console.dir(new C(), { showHidden: true });
+class D extends C { x = 1; get extra() { return 2; } }
+console.dir(new D(), { showHidden: true });
+console.dir({ a: 1 }, { showHidden: true });
+console.dir(new Map([["b", 2], ["a", 1]]), { sorted: true });
+console.dir(new Set([3, 1, 2]), { sorted: true });
+console.dir([3, 1, 2], { sorted: true });
+const s = new Set([2, 1]); s.z = 1; s.a = 2; console.dir(s, { sorted: true });`,
+  ],
+  [
+    'console.table columns in the order an object lists its keys',
+    `console.table([{ a: 1 }, { 0: 2 }]);
+console.table({ x: { y: 1 }, z: [1, 2] });
+console.table([{ b: 1, 10: 2, 2: 3, a: 4 }]);
+console.table([{ a: 1, 1: 2 }], ["a", "1"]);
+console.table([[1], [2]]);
+console.table([{ a: 1 }, 5]);`,
+  ],
+  [
+    'console.table of Set and Map iterators',
+    `const s = new Set([1, 2, 3]);
+console.table(s.entries());
+console.table(new Set([{ a: 1 }, { b: 2 }]).entries());
+console.table(s.values());
+console.table(s);
+const m = new Map([["a", 1]]);
+console.table(m.entries()); console.table(m.keys()); console.table(m.values());`,
+  ],
+  [
+    'apply checking its receiver first, and receivers named as V8 names them',
+    `const apply = Function.prototype.apply;
+for (const recv of [{}, 1, "s", null, undefined, [1], Symbol("q")]) {
+  try { apply.call(recv, null, { get length() { console.log("read"); return 0; } }); } catch (e) { console.log(e.constructor.name, e.message); }
+}
+try { apply.call(() => 1, null, { get length() { throw "custom"; } }); } catch (e) { console.log("caught", e); }
+try { Math.max.apply(null, 5); } catch (e) { console.log(e.message); }
+for (const r of [new Map(), Object.create(null), new (class Foo {})(), new Date(0), /x/, 1n, true]) try { apply.call(r, null, []); } catch (e) { console.log(e.message); }
+for (const r of [new Error("x"), new TypeError(""), new Boolean(true), new Number(1), new String("s"), Object(Symbol("z")), Object(2n)]) try { apply.call(r, null, []); } catch (e) { console.log(e.message); }
+const m = new Map(); try { Map.prototype.get.call(new Date(0), 1); } catch (e) { console.log(e.message); }
+try { Set.prototype.has.call(new Error("boom"), 1); } catch (e) { console.log(e.message); }`,
+  ],
+  [
+    'iterator error receivers ignore accessors and retain their built-in identity',
+    `'use strict';
+const tag = Symbol.toStringTag;
+function errors(receiver) {
+  Object.defineProperty(receiver, 'locked', { value: 1 });
+  Object.defineProperty(receiver, 'onlyGet', { get() { return 1; } });
+  for (const operation of [
+    () => { receiver.locked = 2; },
+    () => { delete receiver.locked; },
+    () => { receiver.onlyGet = 2; },
+  ]) {
+    try { operation(); } catch (error) { console.log(error.message); }
+  }
+}
+const array = [1].values();
+const string = 's'[Symbol.iterator]();
+for (const iterator of [array, string, new Set().values()]) {
+  Object.defineProperty(Object.getPrototypeOf(iterator), tag, {
+    get() { console.log('unexpected getter'); throw 'tag'; },
+  });
+  errors(iterator);
+}
+errors(Object.setPrototypeOf(new Map().entries(), {}));
+errors(Object.setPrototypeOf([1].values(), null));
+errors(Object.defineProperty([1].values(), tag, { value: 'Custom' }));
+errors(Object.defineProperty([1].values(), tag, { value: { toString() { throw 'coercion'; } } }));
+const wrapped = Iterator.from({ next() { return { done: true }; } });
+errors(wrapped);
+const descendant = Object.create(Iterator.prototype);
+descendant[tag] = 'Writable tag';
+descendant.constructor = function Replacement() {};
+console.log(descendant[tag], descendant.constructor.name);
+class Stable {}
+Object.defineProperty(Stable, 'name', { get() { throw 'name'; } });
+errors(Object.setPrototypeOf([1].values(), Stable.prototype));`,
+  ],
+  [
+    'locale options of objects converted only where the option is a string',
+    `const numeric = { toString() { console.log("toString"); return ""; } };
+console.log("2".localeCompare("10", undefined, { numeric }));
+console.log("a".localeCompare("A", undefined, { sensitivity: { toString() { console.log("sens"); return "base"; } } }));
+try { "2".localeCompare("10", undefined, { numeric: { toString() { throw "boom"; } } }); console.log("ok"); } catch (e) { console.log("caught", e); }
+console.log(new Date(0).toLocaleString("en-US", { timeZone: { toString() { return "UTC"; } }, hour12: {} }));`,
+  ],
+  [
+    'localeCompare with locales and options',
+    `console.log(["file10", "file9", "File2"].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })));
+console.log("a".localeCompare("A", undefined, { sensitivity: "base" }), "10".localeCompare("9", undefined, { numeric: true }), "ä".localeCompare("z", "sv"), "ä".localeCompare("z"));
+console.log("a".localeCompare("B"), "a".localeCompare("b", "en", { caseFirst: "upper" }), ["b", "a", "C"].sort((x, y) => x.localeCompare(y, ["de", "en"])));
+try { "a".localeCompare("b", "not a locale!"); } catch (e) { console.log(e.name, e.message); }
+try { "a".localeCompare("b", undefined, { sensitivity: "bogus" }); } catch (e) { console.log(e.name, e.message); }
+try { "a".localeCompare("b", null); } catch (e) { console.log(e.name, e.message); }
+const opts = { get numeric() { console.log("read numeric"); return true; } };
+console.log("2".localeCompare("10", undefined, opts));`,
+  ],
+  [
+    'integrity of arrays whose elements have their own descriptors',
+    `function main() {
+  const a = [0]; Object.defineProperty(a, "0", { get: () => 42, configurable: false }); Object.preventExtensions(a); Object.defineProperty(a, "length", { writable: false });
+  console.log(Object.isFrozen(a), Object.isSealed(a));
+  const b = [1]; Object.defineProperty(b, "0", { configurable: false, writable: false }); Object.preventExtensions(b); Object.defineProperty(b, "length", { writable: false });
+  console.log(Object.isFrozen(b), Object.isSealed(b));
+  const c = [1, 2]; Object.seal(c); console.log(Object.isFrozen(c), Object.isSealed(c));
+  const d = [1, 2]; Object.freeze(d); console.log(Object.isFrozen(d), Object.isSealed(d));
+  const e = []; Object.preventExtensions(e); console.log(Object.isFrozen(e), Object.isSealed(e));
+  const f = [1]; Object.preventExtensions(f); console.log(Object.isFrozen(f), Object.isSealed(f));
+  const g = [, 1]; Object.seal(g); console.log(Object.isFrozen(g), Object.isSealed(g));
+  const h = [1]; Object.defineProperty(h, "0", { configurable: false }); Object.preventExtensions(h); console.log(Object.isFrozen(h), Object.isSealed(h));
+  const o = { p: 1 }; Object.seal(o); console.log(Object.isFrozen(o), Object.isSealed(o), Object.isFrozen(Object.freeze({ q: 1 })), Object.isFrozen(1));
+  const s = { [Symbol.iterator]: 1 }; Object.preventExtensions(s); console.log(Object.isSealed(s));
+}
+main();
+function more() {
+  const x = [1]; Object.defineProperty(x, "0", { writable: false, configurable: false }); Object.preventExtensions(x); console.log(Object.isFrozen(x));
+  const y = [1]; Object.defineProperty(y, "0", { get() { return 1; }, configurable: false }); Object.preventExtensions(y); console.log(Object.isFrozen(y), Object.isSealed(y));
+  const z = [, 1]; Object.defineProperty(z, "1", { writable: false, configurable: false }); Object.preventExtensions(z); console.log(Object.isFrozen(z));
+  const e2 = [1]; e2.length = 0; Object.preventExtensions(e2); console.log(Object.isFrozen(e2));
+  const e4 = []; e4.p = 1; Object.preventExtensions(e4); console.log(Object.isFrozen(e4));
+}
+more();`,
+  ],
+  [
+    'Function.prototype as a callable function and functions printed with their constructors',
+    `console.log(typeof Function.prototype, JSON.stringify(Function.prototype.name), Function.prototype.length, Function.prototype());
+console.log(Function.prototype, [Function.prototype], Object.getPrototypeOf(() => 1) === Function.prototype);
+console.log(Object.prototype.toString.call(Function.prototype), String(Object.getPrototypeOf(class {})));
+try { new Function.prototype(); } catch (e) { console.log(e.message); }
+console.log(Function.prototype.call(), Function.prototype.bind(null).name);
+function f() {} Object.setPrototypeOf(f, Object.prototype); console.log(f);
+const g = () => 1; Object.setPrototypeOf(g, null); console.log(g);
+const h = function () {}; Object.setPrototypeOf(h, {}); console.log(h, [h]);
+async function af() {} function* gf() {} console.log(af, gf, Math.max, class A {});`,
+  ],
+  [
+    'object literals with accessors and spreads named in iteration errors',
+    `const o = { a: 1 }, k = "z";
+function main() {
+  for (const run of [() => { for (const v of { get g() { return 1; } }); }, () => { for (const v of { get g() { return 1; }, set g(v) {} }); },
+    () => { for (const v of { get 'g'() { return 1; }, p: 1 }); }, () => { for (const v of { ...o, get g() { return 1; } }); },
+    () => { for (const v of { get g() { return 1; }, ...o }); }, () => { for (const v of { get g() { return 1; }, m() {} }); },
+    () => { for (const v of { get [k]() { return 1; } }); }, () => { for (const v of { p: 1, ...o }); }, () => { for (const v of { ...o, p: 1 }); },
+    () => { for (const v of { ...o }); }, () => { for (const v of { ...o, ...o }); }, () => { for (const v of { p: 1, q: 2, ...o }); },
+    () => { for (const v of { set s(v) {} }); }, () => { for (const v of { p: 1, get g() { return 1; } }); }, () => { for (const v of { ...o, get g() { return 1; }, p: 1 }); },
+    () => { for (const v of { 'p': 1, 2: 3 }); }, () => { for (const v of { __proto__: null }); }, () => { for (const v of { p: 1, __proto__: null }); }]) {
+    try { run(); } catch (e) { console.log(e.message); }
+  }
+}
+main();`,
+  ],
+  [
+    'object literals and conditionals named in iteration and call errors',
+    `const x = 5, o1 = { p: 1 }, k = "z";
+function main() {
+  for (const run of [() => { for (const v of { p: 1 }); }, () => { for (const v of { p: 1, q: 2, r: 3 }); }, () => { for (const v of {}); }, () => { for (const v of { [1]: 2 }); },
+    () => { for (const v of { p: 1, [k]: 2 }); }, () => { for (const v of { x }); }, () => { for (const v of { ...o1 }); }, () => { for (const v of { m() {} }); },
+    () => { for (const v of (true ? x : x)); }, () => { for (const v of (o1.p ? x : x)); }, () => { for (const v of (0 ? x : x)); }, () => { for (const v of ("s" ? x : x)); },
+    () => ({ p: 1, q: 2 })(), () => [...{ p: 1, q: 2 }], () => { const [a] = { p: 1, q: 2 }; }, () => (true ? x : x)()]) {
+    try { run(); } catch (e) { console.log(e.message); }
+  }
+}
+main();`,
+  ],
+  [
+    'for-of over every operand kind of nullish coalescing',
+    `const o = { a: 1, b: null }; let x = 5; let n = null; const g = () => 1; const h = () => null;
+function main() {
+  try { for (const v of x ?? x); } catch (e) { console.log("id1      id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of x ?? n); } catch (e) { console.log("id1      idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of x ?? 5); } catch (e) { console.log("id1      lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of x ?? null); } catch (e) { console.log("id1      litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of x ?? o.a); } catch (e) { console.log("id1      mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of x ?? o.b); } catch (e) { console.log("id1      memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of x ?? g()); } catch (e) { console.log("id1      call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of x ?? h()); } catch (e) { console.log("id1      callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? x); } catch (e) { console.log("idNull   id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? n); } catch (e) { console.log("idNull   idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? 5); } catch (e) { console.log("idNull   lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? null); } catch (e) { console.log("idNull   litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? o.a); } catch (e) { console.log("idNull   mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? o.b); } catch (e) { console.log("idNull   memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? g()); } catch (e) { console.log("idNull   call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? h()); } catch (e) { console.log("idNull   callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? x); } catch (e) { console.log("lit      id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? n); } catch (e) { console.log("lit      idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? 5); } catch (e) { console.log("lit      lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? null); } catch (e) { console.log("lit      litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? o.a); } catch (e) { console.log("lit      mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? o.b); } catch (e) { console.log("lit      memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? g()); } catch (e) { console.log("lit      call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? h()); } catch (e) { console.log("lit      callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? x); } catch (e) { console.log("litNull  id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? n); } catch (e) { console.log("litNull  idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? 5); } catch (e) { console.log("litNull  lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? null); } catch (e) { console.log("litNull  litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? o.a); } catch (e) { console.log("litNull  mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? o.b); } catch (e) { console.log("litNull  memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? g()); } catch (e) { console.log("litNull  call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? h()); } catch (e) { console.log("litNull  callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? x); } catch (e) { console.log("mem      id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? n); } catch (e) { console.log("mem      idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? 5); } catch (e) { console.log("mem      lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? null); } catch (e) { console.log("mem      litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? o.a); } catch (e) { console.log("mem      mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? o.b); } catch (e) { console.log("mem      memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? g()); } catch (e) { console.log("mem      call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? h()); } catch (e) { console.log("mem      callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? x); } catch (e) { console.log("memNull  id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? n); } catch (e) { console.log("memNull  idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? 5); } catch (e) { console.log("memNull  lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? null); } catch (e) { console.log("memNull  litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? o.a); } catch (e) { console.log("memNull  mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? o.b); } catch (e) { console.log("memNull  memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? g()); } catch (e) { console.log("memNull  call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? h()); } catch (e) { console.log("memNull  callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? x); } catch (e) { console.log("call     id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? n); } catch (e) { console.log("call     idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? 5); } catch (e) { console.log("call     lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? null); } catch (e) { console.log("call     litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? o.a); } catch (e) { console.log("call     mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? o.b); } catch (e) { console.log("call     memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? g()); } catch (e) { console.log("call     call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? h()); } catch (e) { console.log("call     callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? x); } catch (e) { console.log("callNull id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? n); } catch (e) { console.log("callNull idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? 5); } catch (e) { console.log("callNull lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? null); } catch (e) { console.log("callNull litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? o.a); } catch (e) { console.log("callNull mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? o.b); } catch (e) { console.log("callNull memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? g()); } catch (e) { console.log("callNull call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? h()); } catch (e) { console.log("callNull callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+}
+main();`,
+  ],
+  [
+    'for-of over nullish coalescing named by value or by operand',
+    `const o = { a: 1, b: null, c: 0 }; const a = 1, b = 2;
+function main() {
+  for (const run of [() => { for (const v of o.a ?? o.b); }, () => { for (const v of (o.b ?? o.a)); }, () => { for (const v of o.c ?? 2); },
+    () => { for (const v of a ?? b); }, () => { for (const v of null ?? 1); }, () => [...(o.a ?? o.b)]]) {
+    try { run(); } catch (e) { console.log(e.message); }
+  }
+}
+main();`,
+  ],
+  [
+    'definitions restating or changing a read-only array length',
+    `for (const descriptor of [{writable:false},{value:1},{value:'1'},{value:2},{value:0},{writable:true},{enumerable:true},{},{value:-1}]) {
+  const a = [1]; Object.defineProperty(a, 'length', { writable: false });
+  try { Object.defineProperty(a, 'length', descriptor); console.log('ok', a.length); } catch (e) { console.log(e.name, e.message); }
+}
+const b = [1, 2]; Object.defineProperty(b, 1, { value: 2, configurable: false });
+try { Object.defineProperty(b, 'length', { value: 0 }); } catch (e) { console.log(e.message, b.length); }`,
+  ],
+  [
+    'iteration and destructuring errors naming optional chains, constructors, and hidden variables',
+    `const g=()=>5; const h=()=>null; const o={g,h,x:5,n:null}; class C {} let a, b;
+function p({a}) {} function q({a}={}) {} const v={a:5}, n={a:null};
+function main() {
+  for (const run of [()=>{for (const x of g?.());},()=>{for (const x of o?.x);},()=>{const [x]=h?.();},()=>{const {x}=o?.n;},
+    ()=>[...new C()],()=>{for (const x of new C);},()=>{const [x]=new C();},()=>({a}=o.n),()=>({a}=h()),()=>p(null),()=>q(null),
+    ()=>{try {throw null;} catch ({a}) {}},()=>{for (const {a} of [null]);},()=>{for (const [a] of [5]);},()=>{for ({a} of [null]);},
+    ()=>{const {a:[b]}=v;},()=>{const {a:[b]}=n;},()=>{const {a:{b:[c]}}={a:{b:5}};},()=>{const [x]={x:1};},()=>(()=>1)()()]) {
+    try {run();} catch(e) {console.log(e.message);}
+  }
+}
+main();`,
+  ],
+  [
+    'console.table validating properties before formatting primitive and function data',
+    `function f() {} class Foo {}
+for (const data of [undefined,null,1,'%s',f]) {
+  for (const properties of [null,1,'x',{},f,Symbol('x'),new Foo(),Object.create(null)]) {
+    try {console.table(data,properties);} catch(e) {console.log(e.name,e.message,e.code);}
+  }
+}
+console.table(f); console.table('%s',[]);
+const columns=[]; Object.defineProperty(columns,'0',{get(){throw 'not read';}});
+console.table('data',columns);`,
+  ],
+  [
+    'failed length truncation preserving requested writability',
+    `for (const accessor of [false, true]) {
+  const a = [0, 1, 2, 3];
+  Object.defineProperty(a, '1', accessor ? {get() {return 1;}, configurable:false} : {value:1, configurable:false});
+  try {Object.defineProperty(a, 'length', {value:0, writable:false});} catch(e) {console.log(e.message);}
+  console.log(a.length, Object.getOwnPropertyDescriptor(a, 'length').writable, Object.hasOwn(a, '2'));
+  try {a.push(4);} catch(e) {console.log(e.message);}
+  console.log(a.length);
+}
+for (const length of [-1, 1.5, NaN, 2 ** 32]) {
+  const a = [1, 2];
+  try {Object.defineProperty(a, 'length', {value:length, writable:false});} catch(e) {console.log(e.name);}
+  console.log(a.length, Object.getOwnPropertyDescriptor(a, 'length').writable);
+}
+for (const length of [0, 2, 4]) {
+  const a = [1, 2]; Object.defineProperty(a, 'length', {value:length, writable:false});
+  console.log(a.length, Object.getOwnPropertyDescriptor(a, 'length').writable);
+}`,
+  ],
+  [
+    'inspection of values thrown by indexed and named getters',
+    `for (const value of ['boom', 17, null, undefined, {a:1}, {message:'m'}]) {
+  for (const object of [[0], {}]) {
+    Object.defineProperty(object, '0', {get() {throw value;}, enumerable:true});
+    console.dir(object, {getters:true});
+  }
+}`,
+  ],
+  [
+    'call spread errors determined by argument position in normal and suspended calls',
+    `const o = {n:5, z:null, u:undefined, a:{b:1}, s:'ab'};
+const f = (...args) => args; class C {constructor(...args) {this.args=args;}}
+for (const value of [o.n, o.z, o.u, o.a]) {
+  for (const run of [() => f(...value, 1), () => f(1,...value,2), () => f(...value,...o.s),
+    () => new C(...value,1), () => Math.max(...value,1), () => f(1,...value)]) {
+    try {run();} catch(e) {console.log(e.message);}
+  }
+  function* beforeYield() {f(...value, yield 1);}
+  try {beforeYield().next();} catch(e) {console.log(e.message);}
+  function* afterYield() {f(yield 1, ...value);}
+  const iterator = afterYield(); iterator.next();
+  try {iterator.next(1);} catch(e) {console.log(e.message);}
+}
+console.log(f(...o.s,1),f(1,...o.s));`,
+  ],
+  [
+    'array species lookup and default constructors across result-producing methods',
+    `class B extends Array {}
+class A extends Array {static get [Symbol.species]() {console.log('species',this===A); return B;}}
+for (const method of ['map','filter','flatMap','flat','slice','splice','concat']) {
+  const a = new A(1,2);
+  const args = method==='map'||method==='flatMap' ? [x=>x] : method==='filter' ? [()=>true] : method==='splice' ? [0,1] : [];
+  console.log(method,a[method](...args));
+}
+for (const species of [undefined,null,1,()=>{}]) {
+  const a = [1,2]; a.constructor = {[Symbol.species]:species};
+  try {const result=a.map(x=>x); console.log(result,result.constructor===Array);} catch(e) {console.log(e.message);}
+}
+for (const constructor of [undefined,1,null,{},function Custom(){}]) {
+  const a = [1,2]; a.constructor=constructor;
+  try {console.log(a.filter(()=>true));} catch(e) {console.log(e.message);}
+}
+class Result {constructor(length) {console.log('construct',length); this.length=50;} set 0(value) {console.log('setter');}}
+const source=[1,2]; source.constructor={[Symbol.species]:Result};
+console.log(source.map(x=>x),source.filter(()=>true));
+console.log(Array.prototype.map.call({0:1,length:1,get constructor(){throw 'not read';}},x=>x));
+const modern=new A(2,1); console.log(modern.toReversed(),modern.toSorted(),modern.toSpliced(0,1),modern.with(0,3));`,
+  ],
+  [
+    'constructed array results creating own elements and setting their final length',
+    `class C { constructor() { this.length = 100; } set 0(value) { console.log('setter', value); } }
+for (const source of [[7, 8], {0: 9, length: 1}]) {
+  const result = Array.from.call(C, source);
+  console.log(result.length, Object.hasOwn(result, '0'), result[0], result[1]);
+}
+console.log(Array.of.call(C, 4, 5));
+class Protected { constructor() { Object.defineProperty(this, '0', {value: 1}); } }
+try { Array.from.call(Protected, [2]); } catch(e) { console.log(e.message); }
+class Seeded extends Array { constructor(...args) { super(...args); if (args[0] === 0) this.push(99, 98, 97); } }
+const seeded = new Seeded(1, 2);
+console.log(seeded.filter(() => true), seeded.flatMap(x => [x, x + 10]));
+console.log(new Seeded([1], [2]).flat());
+let active = false;
+let input;
+class Changing extends Array { constructor(...args) { super(...args); if (active) input.push(3); } }
+for (const method of ['map', 'filter', 'flatMap', 'flat']) {
+  active = false;
+  input = new Changing(1, 2);
+  active = true;
+  const args = method === 'flat' ? [] : [method === 'filter' ? () => true : x => x];
+  console.log(method, input[method](...args));
+}`,
+  ],
+  [
+    'saved iterator next methods surviving prototype changes',
+    `for (const iterator of [[1, 2].values(), 'ab'[Symbol.iterator](), new Map([['a', 1]]).values()]) {
+  const next = iterator.next;
+  Object.setPrototypeOf(iterator, null);
+  console.log(next.call(iterator), next.call(iterator));
+}`,
+  ],
+  [
     'failing disposers after null await using resources',
     `async function f() { try { { await using a = null; await using b = { async [Symbol.asyncDispose]() { console.log('dispose'); throw 'err'; } }; } } catch (e) { console.log('caught', e); } }
 async function g() { try { { await using a = null; await using b = { [Symbol.dispose]() { console.log('sdispose'); throw 'serr'; } }; } } catch (e) { console.log('caught', e); } }
 f(); queueMicrotask(() => console.log('micro'));
 setTimeout(() => { g(); queueMicrotask(() => console.log('micro2')); }, 0);`,
   ],
-])(
-  'a program using %s runs as Node.js runs it',
-  (_, source) => {
-    expect(executeProgram('javascript', source)).toMatchObject({
-      kind: 'executed',
-      uncaughtException: undefined,
-      ...runOnNode(source),
-    });
-  },
-  30_000
-);
+  [
+    'array-like lengths read before callbacks are validated',
+    `function run() {
+  for (const name of ['forEach', 'map', 'filter', 'flatMap', 'find', 'findLastIndex', 'some', 'every', 'reduce', 'reduceRight']) {
+    const log = [];
+    const o = { get length() { log.push('length'); return { valueOf() { log.push('valueOf'); return 0; } }; } };
+    try { Array.prototype[name].call(o, null); } catch (e) { log.push(e.name + ': ' + e.message); }
+    console.log(name, log.join(' | '));
+  }
+  try { Array.prototype.map.call({ get length() { throw new RangeError('len'); } }, 3); } catch (e) { console.log(e.name, e.message); }
+  for (const name of ['map', 'join', 'toString', 'concat', 'at']) {
+    try { Array.prototype[name].call(null, () => 1); } catch (e) { console.log(name, e.name, e.message); }
+  }
+}
+run();`,
+  ],
+  [
+    'array toString dispatching to the receiver join and joins stopping on cycles',
+    `function run() {
+  const show = (f) => { try { console.log(JSON.stringify(f())); } catch (e) { console.log(e.name, e.message); } };
+  show(() => Array.prototype.toString.call({ join() { return 'custom:' + arguments.length; } }));
+  show(() => Array.prototype.toString.call({ join: 3 }));
+  show(() => Array.prototype.toString.call({ get join() { console.log('get join'); return () => 'g'; } }));
+  show(() => Array.prototype.toString.call({ [Symbol.toStringTag]: 'Tag', join: null }));
+  show(() => Array.prototype.toString.call(5));
+  const a = [1, 2];
+  a.join = function () { return 'own:' + Array.prototype.join.call(this, '-'); };
+  show(() => [String(a), \`\${[a, [3, 4]]}\`, [a, 5].join(';')]);
+  const b = [1, [2, 3]];
+  b[1].toString = () => 'inner';
+  show(() => [String(b), b.join('+')]);
+  const c = [1];
+  c.join = 'x';
+  show(() => String(c));
+  const d = [];
+  d.push({ toString() { return 'obj[' + d.join('-') + ']'; } }, 2);
+  show(() => [d.join(), String(d)]);
+  const e = [1, 2];
+  e.push(e);
+  show(() => [e.join('-'), String([e, e])]);
+  let separators = 0;
+  show(() => e.join({ toString() { separators++; return '|'; } }));
+  console.log(separators);
+}
+run();`,
+  ],
+  [
+    'array toLocaleString on cyclic arrays and its element calls',
+    `function run() {
+  const show = (f) => { try { console.log(JSON.stringify(f())); } catch (e) { console.log(e.name, e.message); } };
+  const a = [];
+  a.push(a);
+  const b = [1, 2];
+  b.push(b, 3);
+  const x = [1];
+  const y = [2, x];
+  x.push(y);
+  show(() => [a.toLocaleString(), b.toLocaleString(), x.toLocaleString(), y.toLocaleString(), [b, b].toLocaleString()]);
+  const n = [];
+  n.push({ toLocaleString() { return 'L' + n.toLocaleString() + n.join() + String(n); } });
+  show(() => [n.toLocaleString(), n.join()]);
+  const counts = [];
+  const q = [{ toLocaleString() { counts.push(arguments.length); return 'q'; } }];
+  q.toLocaleString();
+  q.toLocaleString('en');
+  q.toLocaleString('en', {});
+  console.log(counts.join());
+  show(() => [{ toLocaleString: 3 }].toLocaleString());
+  show(() => [Object.create(null)].toLocaleString());
+  show(() => [{ toLocaleString: {} }].toLocaleString());
+  show(() => [1234.5, null, undefined, 'x', [6, 7]].toLocaleString());
+  show(() => Array.prototype.toLocaleString.call({ length: 3, 0: 1, 2: [2, 3] }));
+  const r = [1];
+  r.push({ toLocaleString() { throw new Error('boom'); } });
+  show(() => r.toLocaleString());
+  show(() => r.join());
+}
+run();`,
+  ],
+  [
+    'array element assignments meeting inherited setters and read-only elements',
+    `function run() {
+  'use strict';
+  const log = [];
+  const attempt = (label, f) => { try { f(); log.push(label + ' ok'); } catch (e) { log.push(label + ' ' + e.name + ': ' + e.message); } };
+  let n = 0;
+  const p = [];
+  Object.defineProperty(p, '0', { set(v) { n = v; log.push('set this is a: ' + (this === a)); }, configurable: true });
+  Object.defineProperty(p, '1', { get() { return 'g'; }, configurable: true });
+  Object.defineProperty(p, '2', { value: 'ro', writable: false, configurable: true });
+  p[3] = 'w';
+  const a = [];
+  Object.setPrototypeOf(a, p);
+  attempt('setter', () => { a[0] = 4; });
+  log.push(n + ' ' + a.length + ' ' + Object.keys(a));
+  attempt('getter-only', () => { a[1] = 5; });
+  attempt('read-only', () => { a[2] = 6; });
+  attempt('writable', () => { a[3] = 7; });
+  log.push(a.length + ' ' + JSON.stringify(Object.getOwnPropertyDescriptor(a, '3')));
+  const holey = [, , , 9];
+  Object.setPrototypeOf(holey, p);
+  attempt('hole setter', () => { holey[0] = 1; });
+  attempt('hole read-only', () => { holey[2] = 1; });
+  log.push(holey.length + ' ' + Object.keys(holey));
+  Object.defineProperty(Array.prototype, '5', { set(v) { log.push('proto set ' + v); }, configurable: true });
+  const b = [1];
+  attempt('Array.prototype setter', () => { b[5] = 'x'; });
+  attempt('push past', () => { b.push(2, 3, 4, 5, 6); });
+  log.push(b.length + ' ' + JSON.stringify(b));
+  delete Array.prototype[5];
+  Object.defineProperty(Object.prototype, '0', { value: 'op', writable: false, configurable: true });
+  const c = [];
+  attempt('Object.prototype read-only', () => { c[0] = 1; });
+  attempt('unshift', () => { c.unshift(1); });
+  log.push(c.length);
+  delete Object.prototype[0];
+  const ne = Object.preventExtensions(Object.setPrototypeOf([], p));
+  attempt('non-extensible setter', () => { ne[0] = 8; });
+  attempt('non-extensible writable', () => { ne[3] = 8; });
+  const rl = Object.defineProperty(Object.setPrototypeOf([], p), 'length', { writable: false });
+  attempt('read-only length setter', () => { rl[0] = 8; });
+  attempt('read-only length writable', () => { rl[3] = 8; });
+  attempt('object with an array prototype', () => { Object.create(a)[0] = 11; });
+  class Stack extends Array {}
+  Object.defineProperty(Stack.prototype, '0', { set(v) { log.push('class set ' + v); }, configurable: true });
+  const s = new Stack();
+  attempt('subclass', () => { s[0] = 1; });
+  log.push(s.length);
+  console.log(log.join('\\n'));
+}
+run();`,
+  ],
+  [
+    'read-only array lengths refusing assignments before converting them',
+    `function run() {
+  'use strict';
+  const log = [];
+  const a = [1];
+  Object.defineProperty(a, 'length', { writable: false });
+  const v = { valueOf() { log.push('valueOf'); return 1; } };
+  for (const value of [v, 5, -1, 1.5, 'x', { valueOf() { throw new Error('conv'); } }]) {
+    try { a.length = value; } catch (e) { log.push(e.name + ': ' + e.message); }
+  }
+  try { Object.freeze([1, 2]).length = v; } catch (e) { log.push(e.name + ': ' + e.message); }
+  const b = [1, 2, 3];
+  try { b.length = v; log.push('b ' + b.length); } catch (e) { log.push(e.name + ': ' + e.message); }
+  try { b.length = { valueOf() { return -1; } }; } catch (e) { log.push(e.name + ': ' + e.message); }
+  try { Object.defineProperty(a, 'length', { value: v }); log.push('restated'); } catch (e) { log.push(e.name + ': ' + e.message); }
+  console.log(log.join('\\n'));
+}
+run();`,
+  ],
+])('a program using %s runs as Node.js runs it', (_, source) => {
+  expect(executeProgram('javascript', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    ...runOnNode(source),
+  });
+});
 
 describe('busy waits', () => {
   // A busy wait runs a quarter of the operation budget before it polls the clock, which under machine load can take
@@ -1597,6 +2472,135 @@ I 50
 K 50
 M 50
 Q 50
+`,
+    });
+  });
+
+  test('an error keeps the first line it was first printed with, as V8 caches its stack', () => {
+    // Node.js prints each error's stack trace after its first line, which the interpreter leaves out.
+    const source = `const e = new Error("a"); e.message = "b"; console.log(String(e).length, e);
+const f = new Error("a"); console.log(f); f.message = "b"; console.log(f);
+const g = new Error("a"); console.log([g].length); g.name = "X"; console.log(g);
+const p = new Error("p"); try { throw p; } catch {} p.message = "q"; console.log(p);
+let n = 0; const k = new Error("z"); Object.defineProperty(k, "message", { get: () => "m" + ++n, configurable: true });
+console.log(k); console.log(n); console.log(k); console.log(n);
+let c = 0; const j = new Error("z"); Object.defineProperty(j, "name", { get: () => "N" + ++c, configurable: true });
+console.log(j); console.log(c); console.log(j); console.log(c);`;
+    expect(executeProgram('javascript', source)).toMatchObject({
+      kind: 'executed',
+      stdout: `8 Error: b
+Error: a
+Error: a
+1
+X: a
+Error: q
+Error: m1
+2
+Error: m1
+3
+N1: z
+2
+N1: z
+3
+`,
+    });
+  });
+
+  test('an error whose name or message throws prints as [object Error] until they stop throwing', () => {
+    // Node.js prints each error's stack trace after its first line, which the interpreter leaves out.
+    const source = `function main() {
+  const e = new Error("bad"); Object.defineProperty(e, "message", { get() { throw "oops"; } });
+  try { console.log(e); } catch (x) { console.log("caught", x); }
+  let n = 0; const f = new Error("bad"); Object.defineProperty(f, "name", { get() { n++; throw new Error("nm"); } });
+  try { console.log(f); console.log(n); } catch (x) { console.log("caught", String(x)); }
+  try { console.log([f]); console.log(n); } catch (x) { console.log("caught", String(x)); }
+  let m = 0; const g = new Error("ok"); Object.defineProperty(g, "message", { get() { if (++m > 1) throw "late"; return "fine"; } });
+  try { console.log(g); console.log(m); console.log(g); console.log(m); } catch (x) { console.log("caught", x); }
+  const h = new Error("x"); Object.defineProperty(h, "message", { get() { return { toString() { throw "ts"; } }; } });
+  try { console.log(h); } catch (x) { console.log("caught", x); }
+  const k = new TypeError("t"); Object.defineProperty(k, "message", { get() { throw 1; } }); k.code = 5;
+  try { console.log(k); } catch (x) { console.log("caught", x); }
+}
+main();`;
+    expect(executeProgram('javascript', source)).toMatchObject({
+      kind: 'executed',
+      stdout: `[object Error]
+[object Error]
+2
+[ [object Error] ]
+4
+Error: fine
+2
+Error: fine
+3
+[object Error]
+[object Error] { code: 5 }
+`,
+    });
+  });
+
+  test('an error that cannot be formatted falls back to Error.prototype.toString, then to its object tag', () => {
+    // Node.js prints each error's stack trace after its first line, which the interpreter leaves out.
+    const source = `let m = 0; const g = new Error("bad"); Object.defineProperty(g, "name", { get() { m++; if (m === 1) throw 1; return "Custom"; } });
+console.log(g); console.log(m);
+const t = new TypeError("x"); Object.defineProperty(t, Symbol.toStringTag, { value: "Oops" }); Object.defineProperty(t, "name", { get() { throw 1; } });
+console.log(t);
+let n = 0; const f = new Error("bad"); Object.defineProperty(f, "name", { get() { n++; throw new Error("nm"); } });
+console.log(f); console.log(n); console.log([f]); console.log(n);
+const e = new Error("bad"); Object.defineProperty(e, "message", { get() { throw "oops"; } }); console.log(e);`;
+    expect(executeProgram('javascript', source)).toMatchObject({
+      kind: 'executed',
+      stdout: `[Custom: bad]
+3
+[object Oops]
+[object Error]
+2
+[ [object Error] ]
+4
+[object Error]
+`,
+    });
+  });
+
+  test('an error is formatted once per print, with the tag Node.js reads beside its class', () => {
+    // Node.js prints each error's stack trace after its first line, which the interpreter leaves out.
+    const source = `let n = 0; const e = new Error(); e.name = "Custom"; Object.defineProperty(e, "message", { get() { if (n++ === 0) throw 1; return "m" + n; } });
+console.log(e); console.log(e); console.log(n);
+let t = 0; const f = new Error(); Object.defineProperty(f, Symbol.toStringTag, { get() { return ++t === 1 ? "First" : "Second"; } }); Object.defineProperty(f, "message", { get() { throw 1; } });
+console.log(f); console.log(t);
+let u = 0; const g = new Error("ok"); Object.defineProperty(g, Symbol.toStringTag, { get() { u++; return "Tagged"; } });
+console.log(g); console.log(u);`;
+    expect(executeProgram('javascript', source)).toMatchObject({
+      kind: 'executed',
+      stdout: `[Custom: m2]
+Custom: m4
+5
+[object Second]
+2
+Error [Tagged]: ok
+1
+`,
+    });
+  });
+
+  test('an error tag getter that throws on the first read of a print is ignored, as Node.js ignores it', () => {
+    const source = `let n = 0; const e = new Error(); Object.defineProperty(e, Symbol.toStringTag, { get() { if (n++ === 0) throw 7; return "Tag"; } }); Object.defineProperty(e, "message", { get() { throw 1; } });
+try { console.log(e); } catch (x) { console.log("caught", x); } console.log(n);`;
+    expect(executeProgram('javascript', source)).toMatchObject({ kind: 'executed', stdout: '[object Tag]\n2\n' });
+  });
+
+  test('errors without a prototype print as Node.js improves their stacks', () => {
+    // Node.js prints each error's stack trace after its first line, which the interpreter leaves out.
+    const source = `const a = Object.setPrototypeOf(new Error("x"), null); console.log(a);
+const b = Object.setPrototypeOf(new TypeError("y"), null); console.log(b);
+const c = new Error("z"); c.name = "Custom"; Object.setPrototypeOf(c, null); console.log(c);
+const d = new Error(""); Object.setPrototypeOf(d, null); console.log(d);`;
+    expect(executeProgram('javascript', source)).toMatchObject({
+      kind: 'executed',
+      stdout: `[Error: null prototype]: x
+[Error: null prototype]: y
+[Custom: null prototype]: z
+[Error: null prototype]
 `,
     });
   });

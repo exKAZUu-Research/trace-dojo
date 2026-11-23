@@ -216,7 +216,7 @@ const constructStringIO: NonNullable<PyClass['construct']> = (cls, args, kwargs)
 };
 
 /** The index after the line starting at `from`, which ends as the stream's newline mode reads lines. */
-// code-gauge-allow functionCognitiveComplexity 19 -- One case per newline mode of StringIO.
+// code-gauge-allow functionCognitiveComplexity -- One case per newline mode of StringIO.
 function textLineEnd(stream: TextStream, from: number): number {
   const { chars, newline } = stream;
   for (let index = from; index < chars.length; index++) {
@@ -258,8 +258,8 @@ function writeText(stream: TextStream, text: string): number {
 
 const textStream = (self: PyValue): TextStream => streamOf(self) as TextStream;
 
-// code-gauge-allow functionNcss 50 -- One small method per StringIO operation.
-// code-gauge-allow functionCognitiveComplexity 25 -- One small method per StringIO operation.
+// code-gauge-allow functionNcss -- One small method per StringIO operation.
+// code-gauge-allow functionCognitiveComplexity -- One small method per StringIO operation.
 function defineStringIO(cls: PyClass): void {
   cls.module = '_io';
   cls.construct = constructStringIO;
@@ -335,8 +335,8 @@ const constructBytesIO: NonNullable<PyClass['construct']> = (cls, args, kwargs) 
 
 const binaryStream = (self: PyValue): BinaryStream => streamOf(self) as BinaryStream;
 
-// code-gauge-allow functionNcss 60 -- One small method per BytesIO operation.
-// code-gauge-allow functionCognitiveComplexity 24 -- One small method per BytesIO operation.
+// code-gauge-allow functionNcss -- One small method per BytesIO operation.
+// code-gauge-allow functionCognitiveComplexity -- One small method per BytesIO operation.
 function defineBytesIO(cls: PyClass): void {
   cls.module = '_io';
   cls.construct = constructBytesIO;

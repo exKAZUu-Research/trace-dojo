@@ -65,8 +65,8 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
   }
 
   /** `async with`: awaits the manager's `__aenter__` before the body and its `__aexit__` after it. */
-  // code-gauge-allow functionNcss 45 -- Follows the protocol of the async with statement.
-  // code-gauge-allow functionCognitiveComplexity 16 -- Enter, exit and exception suppression must share the manager lifetime.
+  // code-gauge-allow functionNcss -- Follows the protocol of the async with statement.
+  // code-gauge-allow functionCognitiveComplexity -- Enter, exit and exception suppression must share the manager lifetime.
   protected *asyncWithStatement(
     statement: Extract<Statement, { kind: 'with' }>,
     frame: Frame,
@@ -211,9 +211,9 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
   }
 
   /** Runs the clauses of a comprehension from the one at `index`, passing each element to `emit`. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- Follows how a comprehension runs its clauses, each sync or async.
-  // code-gauge-allow functionNcss 39 -- Follows how a comprehension runs its clauses, each sync or async.
-  // code-gauge-allow duplicateLines 16 -- Async and threaded clauses use the same explicit ownership scope around their different iteration protocols.
+  // code-gauge-allow functionCognitiveComplexity -- Follows how a comprehension runs its clauses, each sync or async.
+  // code-gauge-allow functionNcss -- Follows how a comprehension runs its clauses, each sync or async.
+  // code-gauge-allow duplicateLines -- Async and threaded clauses use the same explicit ownership scope around their different iteration protocols.
   private *comprehensionLevel(
     expression: ComprehensionExpression,
     frame: Frame,

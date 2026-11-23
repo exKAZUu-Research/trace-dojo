@@ -1,0 +1,11 @@
+const noObject: undefined = this;
+console.log(noObject);
+const t = this;
+const n: number = t;
+const arrow = () => this;
+const u: undefined = arrow();
+function f(this: void) { return 1; }
+console.log(this === undefined, typeof this);
+const p = this.foo;
+this.bar = 1;
+console.log(Object.keys(this).length, f());

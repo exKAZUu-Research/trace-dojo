@@ -1,0 +1,29 @@
+string(4) "SJIS"
+string(4) "SJIS"
+string(5) "ASCII"
+string(6) "EUC-JP"
+string(4) "SJIS"
+string(6) "EUC-JP"
+string(5) "BIG-5"
+bool(false)
+string(4) "SJIS"
+string(5) "UTF-8"
+string(11) "ISO-2022-KR"
+bool(false)
+mb_detect_encoding(): Argument #2 ($encodings) contains invalid encoding "bogus"
+string(7) "UCS-2BE"
+string(7) "UCS-2LE"
+string(7) "UCS-4BE"
+string(7) "UCS-4LE"
+string(5) "UCS-2"
+bool(false)
+string(4) "SJIS"
+string(4) "SJIS"
+bool(false)
+string(5) "CP932"
+string(5) "CP932"
+bool(false)
+string(3) "JIS"
+string(3) "JIS"
+string(11) "ISO-2022-JP"
+string(11) "ISO-2022-JP"

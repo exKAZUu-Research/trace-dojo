@@ -1,0 +1,9 @@
+type Narrow<T extends { a: number }, K extends string> = T[K];
+type Unknown<T extends { a: number }> = T[unknown];
+type Unconstrained<T extends { a: number }, K> = T[K];
+type Outside<T extends { a: number }, K extends "a" | "b"> = T[K];
+type Other<T, U, K extends keyof U> = T[K];
+type Own<T extends { a: number }, K extends keyof T, J extends K> = T[J];
+type Narrowed<T extends { a: number }, K> = K extends "a" ? T[K] : never;
+type Super<S, T extends S, K extends keyof S> = T[K];
+console.log("done");

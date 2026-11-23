@@ -1,0 +1,16 @@
+class Box<T> { v!: T; self(): this { return this; } }
+function un<T>(b: Box<T>): T { return b.v; }
+class NB extends Box<number> { z = 1 }
+const n: number = un(new NB());
+const s: string = un(new NB());
+class A { add(): this { return this; } }
+class B extends A { y = 2; }
+const b: B = new A();
+interface Fluent { set(k: string): this; }
+const fl: Fluent = { set(k: string) { return this; } };
+const wrong: Fluent = { set(k: string) { return 1; } };
+class P { cmp(o: this): boolean { return true; } }
+class Q { cmp(o: Q): boolean { return true; } }
+const p: P = new Q();
+const q: Q = new P();
+console.log(n, s, b, fl, wrong, p, q);

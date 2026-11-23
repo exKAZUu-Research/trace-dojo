@@ -3,7 +3,7 @@ import { CRuntimeError, ProgramAbort, ProgramExit } from '../errors';
 import type { NativeFunction, Runtime } from '../runtime';
 import { type CType, pointerTo, VOID } from '../types';
 import { ERROR_NUMBERS } from './appleErrno';
-import { isExactFloatPrefix, parseFloatPrefix, parseIntegerPrefix } from './numberParsing';
+import { isFloatUnderflow, parseFloatPrefix, parseIntegerPrefix } from './numberParsing';
 import { qsort } from './sorting';
 import { asAddress, asNumber, asSize, readCString, readRaw, writeBytes } from './support';
 
@@ -70,7 +70,7 @@ function absolute(bits: 32 | 64): NativeFunction {
 }
 
 /** `strtol` and its relatives: the integer at the start of a string, clamped to the type with `errno` set. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Base errors, destination bounds, errno, and end pointers form one conversion result.
+// code-gauge-allow functionCognitiveComplexity -- Base errors, destination bounds, errno, and end pointers form one conversion result.
 function strtoInteger(bits: 32 | 64, signed: boolean, wide: boolean): NativeFunction {
   return (runtime, [text, end, base]) => {
     const bytes = readCString(runtime, asAddress(text));
@@ -108,13 +108,7 @@ function strtoFloat(isFloat: boolean): NativeFunction {
     if (parsed.length > 0 && Number.isFinite(value) === false && !parsed.isInfinityText && !Number.isNaN(value)) {
       setErrno(runtime, ERANGE);
     }
-    if (
-      parsed.length > 0 &&
-      parsed.isNonzeroText &&
-      Math.abs(value) < (isFloat ? 2 ** -126 : 2 ** -1022) &&
-      !isExactFloatPrefix(bytes, parsed.length, value)
-    )
-      setErrno(runtime, ERANGE);
+    if (parsed.length > 0 && isFloatUnderflow(bytes, parsed, value, isFloat)) setErrno(runtime, ERANGE);
     if (asAddress(end) !== 0) storePointer(runtime, asAddress(end), asAddress(text) + parsed.length);
     return value;
   };

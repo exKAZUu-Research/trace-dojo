@@ -20,7 +20,7 @@ export function sizeWithoutHeader(value: PyValue): bigint {
   return BigInt(value instanceof PyTuple ? size - GC_HEADER : size);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of object of a fixed layout.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of object of a fixed layout.
 function fixedSize(value: PyValue): number | undefined {
   if (typeof value === 'bigint' || typeof value === 'boolean') return intSize(BigInt(value));
   if (typeof value === 'number') return 24;

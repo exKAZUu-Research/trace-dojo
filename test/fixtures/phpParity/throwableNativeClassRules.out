@@ -1,0 +1,6 @@
+Trying to clone an uncloneable object of class Exception
+Trying to clone an uncloneable object of class Error
+Trying to clone an uncloneable object of class TypeError
+Trying to clone an uncloneable object of class UserFailure
+Exception::__construct(): Argument #3 ($previous) must be of type ?Throwable, int given
+ErrorException::__construct(): Argument #6 ($previous) must be of type ?Throwable, string given

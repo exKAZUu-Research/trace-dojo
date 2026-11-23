@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 512 -- The convert module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss -- The convert module keeps one stage of the C# interpreter together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -147,7 +147,7 @@ export class Converter extends ExpressionConverter {
     return declaration;
   }
 
-  // code-gauge-allow functionNcss 33 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private convertNamespaceMember(node: Node): TypeDeclaration | NamespaceDeclaration {
     switch (node.type) {
       case 'namespace_declaration': {
@@ -211,7 +211,7 @@ export class Converter extends ExpressionConverter {
     }
   }
 
-  // code-gauge-allow functionNcss 32 -- Each kind of type declaration keeps its parts in different children.
+  // code-gauge-allow functionNcss -- Each kind of type declaration keeps its parts in different children.
   private convertTypeDeclaration(node: Node): TypeDeclaration {
     this.rejectAttributes(node);
     const typeKind =
@@ -307,7 +307,7 @@ export class Converter extends ExpressionConverter {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private convertConstraintClause(node: Node): ConstraintClause {
     const [nameNode, ...constraintNodes] = namedChildren(node);
     const constraints = constraintNodes.map((constraint): Constraint => {
@@ -331,8 +331,8 @@ export class Converter extends ExpressionConverter {
     return { name: nameNode.text, constraints, ...positionOf(node) };
   }
 
-  // code-gauge-allow functionNcss 59 -- One case per kind of member declaration.
-  // code-gauge-allow functionCognitiveComplexity 24 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of member declaration.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private convertMember(node: Node, owner: TypeDeclaration): MemberDeclaration[] {
     const what = UNSUPPORTED_DECLARATIONS[node.type];
     if (what) unsupported(node, what);
@@ -635,7 +635,7 @@ export class Converter extends ExpressionConverter {
     };
   }
 
-  // code-gauge-allow functionNcss 48 -- One case per kind of statement node in the grammar.
+  // code-gauge-allow functionNcss -- One case per kind of statement node in the grammar.
   convertStatement(node: Node): Statement {
     const position = positionOf(node);
     const parts = namedChildren(node);

@@ -1,0 +1,22 @@
+Only arrays and Traversables can be unpacked, stdClass given
+Only arrays and Traversables can be unpacked, stdClass given
+Only arrays and Traversables can be unpacked, stdClass given
+Only arrays and Traversables can be unpacked, stdClass given
+Only arrays and Traversables can be unpacked, int given
+Only arrays and Traversables can be unpacked, int given
+Only arrays and Traversables can be unpacked, null given
+Only arrays and Traversables can be unpacked, null given
+Only arrays and Traversables can be unpacked, false given
+Only arrays and Traversables can be unpacked, false given
+array(2) {
+  [0]=>
+  int(1)
+  ["a"]=>
+  int(2)
+}
+array(2) {
+  [0]=>
+  int(1)
+  ["a"]=>
+  int(2)
+}

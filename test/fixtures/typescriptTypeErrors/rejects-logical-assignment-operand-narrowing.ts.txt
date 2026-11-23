@@ -1,0 +1,16 @@
+function onlyNull(x: null) {
+  return 'none';
+}
+
+function falsyNumber(x: number | string) {
+  x ||= x.toFixed();
+  return x;
+}
+function falsyText(o: { p: string | null }) {
+  o.p ||= onlyNull(o.p);
+  return o.p;
+}
+function truthyFlag(x: boolean | string) {
+  x &&= x.length > 0;
+  return x;
+}

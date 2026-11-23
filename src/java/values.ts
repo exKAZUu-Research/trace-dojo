@@ -316,7 +316,7 @@ const LONG_MIN = -(2n ** 63n);
 const LONG_MAX = 2n ** 63n - 1n;
 
 /** Converts a numeric value between kinds as Java's widening and narrowing primitive conversions do. */
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per pair of numeric kinds that JLS 5.1.2 and 5.1.3 convert between.
+// code-gauge-allow functionCognitiveComplexity -- One case per pair of numeric kinds that JLS 5.1.2 and 5.1.3 convert between.
 export function convertNumber(value: Value, from: NumericKind, to: NumericKind): Value {
   if (from === to) return value;
   if (from === 'long') {

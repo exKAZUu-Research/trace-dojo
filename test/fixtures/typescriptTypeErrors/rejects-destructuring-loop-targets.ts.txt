@@ -1,0 +1,7 @@
+let loopValue: number = 0;
+for ([loopValue] of [["bad"]]) console.log(loopValue);
+for ({x: loopValue} of [{x: "bad"}]) console.log(loopValue);
+const fixedValue = 1;
+for ([fixedValue] of [[2]]) console.log(fixedValue);
+const unknownValue: unknown = 42;
+for (const key in unknownValue) console.log(key);

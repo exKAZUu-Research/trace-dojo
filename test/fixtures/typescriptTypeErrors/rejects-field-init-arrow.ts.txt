@@ -1,0 +1,10 @@
+class A {
+  f = () => this.x + this.y;
+  g = [() => this.x][0];
+  h = this.y;
+  x = 1;
+  y: number;
+  constructor(readonly z: number) { this.y = 2; }
+  w = (() => this.z)();
+}
+console.log(new A(3).f());

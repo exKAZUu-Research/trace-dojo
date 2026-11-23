@@ -1,0 +1,26 @@
+type Labels = Readonly<[string, ...number[]]>;
+const labels: Labels = ["total", 1, 2];
+console.log(labels[1].toFixed(1), labels.length);
+
+type Draft = Partial<[number, ...string[]]>;
+const draft: Draft = [1, "a", undefined];
+console.log(draft.map((item) => item ?? "none").join(","));
+
+type Boxed<T> = { [K in keyof T]: { value: T[K] } };
+const row: Boxed<[string, ...number[], boolean]> = [{ value: "id" }, { value: 2 }, { value: 3 }, { value: true }];
+const middle = row[1] as { value: number };
+console.log(middle.value.toFixed(2));
+
+function freeze<U extends unknown[]>(items: Readonly<[string, ...U]>): Readonly<[string, ...U]> {
+  return items;
+}
+const frozen = freeze(["head", 1, true]);
+const second: number = frozen[1];
+const third: boolean = frozen[2];
+console.log(second + 1, third);
+
+function boxAll<T extends unknown[]>(items: T): Boxed<T> {
+  return items.map((value) => ({ value })) as unknown as Boxed<T>;
+}
+const boxed = boxAll<[string, ...number[]]>(["a", 1, 2]);
+console.log(boxed.length, boxed[0].value.toUpperCase());

@@ -1,0 +1,8 @@
+const array: readonly number[] = [1, 2];
+array["toString"] = () => "hello";
+
+const tuple: readonly [number] = [1];
+const key = "join";
+tuple[key] = () => "joined";
+
+console.log(array.toString(), tuple.join());

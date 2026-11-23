@@ -1,0 +1,2 @@
+(2,33): error TS2445: Property 'value' is protected and only accessible within class 'ProtectedStaticBase' and its subclasses.
+(3,67): error TS2445: Property 'value' is protected and only accessible within class 'ProtectedStaticBase' and its subclasses.

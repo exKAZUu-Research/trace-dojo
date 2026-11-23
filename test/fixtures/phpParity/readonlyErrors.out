@@ -1,0 +1,9 @@
+Cannot modify protected(set) readonly property R::$u from global scope
+Cannot indirectly modify readonly property R::$a
+Cannot indirectly modify private(set) property U::$tags from global scope
+Cannot modify protected(set) property U::$n from global scope
+Cannot modify private(set) property U::$tags from global scope
+Cannot modify protected(set) readonly property P::$x from global scope
+Cannot modify readonly property P::$x
+Cannot unset readonly property P::$x
+Cannot indirectly modify readonly property P::$x

@@ -1,0 +1,30 @@
+type Tree<T> = { value: T; children: Tree<T>[] };
+function mapTree<T, U>(t: Tree<T>, f: (x: T) => U): Tree<U> {
+  return { value: f(t.value), children: t.children.map((c) => mapTree(c, f)) };
+}
+const tr: Tree<number> = { value: 1, children: [{ value: 2, children: [] }] };
+console.log(JSON.stringify(mapTree(tr, (x) => String(x))));
+type List<T> = null | { head: T; tail: List<T> };
+function toArray<T>(l: List<T>): T[] { return l === null ? [] : [l.head, ...toArray(l.tail)]; }
+console.log(toArray<number>({ head: 1, tail: { head: 2, tail: null } }));
+type A = string | B[];
+type B = number | A[];
+const ab: A = [1, ["x", [2]]];
+console.log(JSON.stringify(ab));
+type Nested<T> = T | Nested<T>[];
+function flat<T>(x: Nested<T>): T[] { return Array.isArray(x) ? x.flatMap((y) => flat(y)) : [x]; }
+console.log(flat<number>([1, [2, [3]]]));
+const nn: Nested<string>[] = ["a", ["b"]];
+console.log(nn.map((v) => v), nn.filter((v) => typeof v === "string"));
+function wrap<T>(x: Nested<T>): Nested<T>[] { return Array.isArray(x) ? x.map((y) => y) : [x]; }
+console.log(wrap<number>([1, [2]]).length);
+type P<X, Y> = X | Y | P<Y, X>[];
+const p: P<number, string> = [1, ["a", [2]]];
+console.log(p);
+type G<T> = T | G<T[]>[];
+const g: G<number> = [[1], [[[2]]]];
+console.log(JSON.stringify(g));
+type J = string | number | J[] | { [k: string]: J };
+const record: Record<string, J> = { a: [1, { b: "c" }] };
+const m = new Map<string, J[]>([["a", [[1], { x: [2] }]]]);
+console.log(Object.entries(record).length, JSON.stringify([...m]));

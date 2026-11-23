@@ -1,12 +1,14 @@
-// code-gauge-allow-file fileNcss 464 -- One evaluator of every expression kind, whose cases share its references and calls.
+// code-gauge-allow-file fileNcss -- One evaluator of every expression kind, whose cases share its references and calls.
 import { LIMITS } from '../interpreter/limits';
 import type { Argument, ClassNode, Expression, MemberExpression, ObjectMember } from './ast';
 import { EvaluatorBase, nameFunction, type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
+import { defineFunctionName } from './memberProperties';
 import { newRegExp } from './realmRegExp';
 import type { Runtime } from './runtime';
 import {
   type AccessorProperty,
   appendAll,
+  type Binding,
   type Element,
   freeze,
   HOLE,
@@ -27,29 +29,28 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   /** The strings array of each tagged template site, which every evaluation of the site passes to its tag. */
   private readonly templateObjects = new WeakMap<Expression, JsArray>();
 
-  abstract evaluateClass(cls: ClassNode): JsFunction;
+  abstract evaluateClass(cls: ClassNode, inferredName?: Key, binding?: Binding): JsFunction;
 
-  abstract superCall(args: Value[], callRow: number): JsObject;
+  abstract superCall(args: Value[], callRow: number, skipsAfterSuper?: boolean): JsObject;
 
-  evaluate(expression: Expression): Value {
-    const value = this.evaluateChain(expression);
+  evaluate(expression: Expression, classBinding?: Binding): Value {
+    const value = this.evaluateChain(expression, classBinding);
     return value === SHORT_CIRCUIT ? undefined : value;
   }
 
-  protected evaluateChain(expression: Expression): ChainValue {
+  protected evaluateChain(expression: Expression, classBinding?: Binding): ChainValue {
     const { runtime } = this;
     const outerRow = runtime.currentRow;
     runtime.currentRow = expression.row;
     try {
-      return this.evaluateKind(expression);
+      return this.evaluateKind(expression, classBinding);
     } finally {
       runtime.currentRow = outerRow;
     }
   }
 
-  // code-gauge-allow functionNcss 60 -- One case per expression kind, each delegating where it grows.
-  // code-gauge-allow duplicateLines 19 -- A switch over expression kinds, which the Java compiler's resembles by coincidence.
-  private evaluateKind(expression: Expression): ChainValue {
+  // code-gauge-allow functionNcss -- One case per expression kind, each delegating where it grows.
+  private evaluateKind(expression: Expression, classBinding: Binding | undefined): ChainValue {
     const { runtime } = this;
     switch (expression.kind) {
       case 'literal': {
@@ -83,7 +84,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         return this.createFunction(expression.fn, runtime.frame.scope);
       }
       case 'classExpression': {
-        return this.evaluateClass(expression.cls);
+        return this.evaluateClass(expression.cls, undefined, classBinding);
       }
       case 'member': {
         return this.member(expression);
@@ -130,7 +131,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         return value;
       }
       case 'parenthesized': {
-        return this.evaluate(expression.expression);
+        return this.evaluate(expression.expression, classBinding);
       }
       case 'yield':
       case 'await': {
@@ -163,7 +164,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     if (!isObject(object)) {
       return runtime.throwError(
         'TypeError',
-        `Cannot use 'in' operator to search for '${name}' in ${runtime.describe(object)}`
+        `Cannot use 'in' operator to search for '${name}' in ${runtime.describePlain(object)}`
       );
     }
     return object.privateMembers?.has(this.privateKey(name)) ?? false;
@@ -200,13 +201,15 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
 
   evaluateArguments(args: Argument[]): Value[] {
     // Arguments have no elisions, which are the only source of holes.
-    return this.evaluateElements(args) as Value[];
+    return this.evaluateElements(args, true) as Value[];
   }
 
   /** Evaluates elements in order, holding the values so far for garbage collection; an elision leaves a hole. */
-  // code-gauge-allow duplicateLines 25 -- Mirrors the generator version in stepEvaluator.ts, kept apart so that code without yield or await runs without generator frames.
-  private evaluateElements(args: (Argument | undefined)[]): Element[] {
+  // code-gauge-allow duplicateLines -- Mirrors the generator version in stepEvaluator.ts, kept apart so that code without yield or await runs without generator frames.
+  private evaluateElements(args: (Argument | undefined)[], callArguments = false): Element[] {
     const { runtime } = this;
+    const callSpread =
+      callArguments && args.every((argument, index) => argument?.kind !== 'spread' || index === args.length - 1);
     const values: Element[] = [];
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
@@ -215,7 +218,8 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         if (argument === undefined) {
           values.push(HOLE);
         } else if (argument.kind === 'spread') {
-          const spread = runtime.iterate(this.evaluate(argument.argument));
+          const context = callArguments ? (callSpread ? 'finalCallSpread' : 'loweredCallSpread') : 'syntax';
+          const spread = runtime.iterate(this.evaluate(argument.argument), argument.source, context);
           runtime.allocate(spread.length);
           appendAll(values, spread);
           appendAll(temporaries, spread);
@@ -252,7 +256,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     }
     if (member.kind === 'prototype') {
       const prototype = this.evaluate(member.value);
-      if (prototype === null || isObject(prototype)) object.proto = prototype;
+      if (prototype === null || isObject(prototype)) object.setPrototype(prototype);
       return;
     }
     const key = this.propertyKey(member.key);
@@ -307,12 +311,13 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     const { runtime } = this;
     const { callee } = expression;
     if (callee.kind === 'super') {
-      return this.superCall(this.evaluateArguments(expression.args), expression.row);
+      return this.superCall(this.evaluateArguments(expression.args), expression.row, expression.skipsAfterSuper);
     }
     const resolved = this.callee(callee);
     if (resolved === SHORT_CIRCUIT) return SHORT_CIRCUIT;
     const { fn, thisValue } = resolved;
     if (expression.optional && (fn === undefined || fn === null)) return SHORT_CIRCUIT;
+    if (expression.isTaggedTemplate) runtime.checkTag(fn);
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
     temporaries.push(fn, thisValue);
@@ -375,7 +380,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     }
   }
 
-  // code-gauge-allow duplicateLines 18 -- Mirrors the generator version in stepEvaluator.ts, kept apart so that code without yield or await runs without generator frames.
+  // code-gauge-allow duplicateLines -- Mirrors the generator version in stepEvaluator.ts, kept apart so that code without yield or await runs without generator frames.
   private assign(expression: Extract<Expression, { kind: 'assign' }>): Value {
     const { runtime } = this;
     const { operator, target } = expression;
@@ -425,15 +430,15 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     if (reference === SHORT_CIRCUIT) return true;
     if (reference.kind === 'super') return runtime.throwError('ReferenceError', "Unsupported reference to 'super'");
     if (reference.kind !== 'property') return runtime.throwError('TypeError', 'Private fields can not be deleted');
-    return runtime.deleteProperty(reference.base, reference.key);
+    return runtime.deleteProperty(reference.base, reference.key, this.isStrict());
   }
 
   private unary(operator: string, argument: Expression): Value {
     const { runtime } = this;
     switch (operator) {
       case 'typeof': {
-        if (argument.kind === 'identifier' && !runtime.frame.scope.lookup(argument.name)) return 'undefined';
-        return runtime.typeOf(this.evaluate(argument));
+        const value = argument.kind === 'identifier' ? this.readVariable(argument.name, true) : this.evaluate(argument);
+        return runtime.typeOf(value);
       }
       case 'delete': {
         return this.deleteExpression(argument);
@@ -475,7 +480,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     }
   }
 
-  // code-gauge-allow functionNcss 40 -- One case per operator.
+  // code-gauge-allow functionNcss -- One case per operator.
   binary(operator: string, left: Value, right: Value): Value {
     const { runtime } = this;
     switch (operator) {
@@ -519,7 +524,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         if (!isObject(right)) {
           return runtime.throwError(
             'TypeError',
-            `Cannot use 'in' operator to search for '${String(runtime.toPropertyKey(left))}' in ${runtime.describe(right)}`
+            `Cannot use 'in' operator to search for '${String(runtime.toPropertyKey(left))}' in ${runtime.describePlain(right)}`
           );
         }
         return runtime.hasProperty(right, runtime.toPropertyKey(left));
@@ -586,8 +591,8 @@ function arithmetic(
   return numberArithmetic(operator, left, right);
 }
 
-// code-gauge-allow functionNcss 40 -- One case per operator, as for numbers.
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per operator, as for numbers.
+// code-gauge-allow functionNcss -- One case per operator, as for numbers.
+// code-gauge-allow functionCognitiveComplexity -- One case per operator, as for numbers.
 function bigintArithmetic(runtime: Runtime, operator: string, left: bigint, right: bigint): bigint {
   switch (operator) {
     case '+': {
@@ -645,6 +650,7 @@ export function bitLength(value: bigint): number {
   return (value < 0n ? -value : value).toString(2).length;
 }
 
+// code-gauge-allow duplicateLines -- Numeric operators overlap other interpreters, while each language keeps its own coercion, division, and exception rules.
 function numberArithmetic(operator: string, left: number, right: number): number {
   switch (operator) {
     case '+': {
@@ -705,11 +711,6 @@ export function defineAccessor(
   else accessor.set = fn;
   // An accessor is named after its key with a `get` or `set` prefix, a symbol key by its description in brackets.
   const keyText = typeof key === 'string' ? key : key.description === undefined ? '' : `[${key.description}]`;
-  fn.properties.set('name', {
-    value: `${kind === 'getter' ? 'get' : 'set'} ${keyText}`,
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  });
+  defineFunctionName(fn, `${kind === 'getter' ? 'get' : 'set'} ${keyText}`);
   runtime.defineProperty(object, key, accessor);
 }

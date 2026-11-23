@@ -1,0 +1,10 @@
+const x: any = 5; const o: any = { a: 1, f: null }; const k: any = "z";
+for (const run of [
+  () => { for (const v of (x ?? (x))); }, () => { for (const v of (o.a ?? ((x)))); }, () => { for (const v of (o.a ?? (o.a))); },
+  () => { for (const v of (o.a ?? (3))); }, () => { for (const v of ((o.f)?.())); }, () => { for (const v of ((x as any) ?? (x as any))); },
+  () => { for (const v of ({ get g(): number { return 1; } } as any)); }, () => { for (const v of ({ get g() { return 1; }, set g(v: number) {} } as any)); },
+  () => { for (const v of ({ get 'g'() { return 1; }, p: 1 } as any)); }, () => { for (const v of ({ ...o, get g() { return 1; } } as any)); },
+  () => { for (const v of ({ get g() { return 1; }, ...o } as any)); }, () => { for (const v of ({ get g() { return 1; }, m() {} } as any)); },
+  () => { for (const v of ({ get [k]() { return 1; } } as any)); }, () => { for (const v of ({ p: 1, ...o } as any)); }, () => { for (const v of ({ ...o, p: 1 } as any)); },
+  () => (x as any)(), () => ((x))(), () => { for (const v of (x)); },
+]) { try { run(); } catch (e) { console.log((e as Error).message); } }

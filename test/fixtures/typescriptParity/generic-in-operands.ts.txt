@@ -1,0 +1,30 @@
+function has<T extends object>(value: T) { return "id" in value; }
+function chain<T extends U, U extends { id?: number }>(value: T, base: U) { return "id" in value; }
+function nullable<T extends object | null>(value: T) {
+  return value === null ? false : "id" in value;
+}
+function key<K extends string | symbol>(name: K, value: object) { return name in value; }
+function flexible(value: any) { return "id" in value; }
+function emptyBound<T extends {}>(value: T) { return "id" in value; }
+function checked(value: unknown) { return typeof value === "object" && value !== null && "id" in value; }
+console.log(has({ id: 1 }), chain({ id: 2 }, {}), nullable(null), nullable({}), key(Symbol(), {}));
+console.log(flexible({ id: 3 }), emptyBound({ id: 4 }), checked({ id: 5 }), checked(5));
+function nonNullFirst(value: unknown) {
+  return value !== null && typeof value === "object" && "id" in value;
+}
+function truthyFirst<T>(value: T) {
+  if (value && typeof value === "object") return "id" in value;
+  return false;
+}
+function primitiveAfterNull(value: unknown) {
+  if (value != null && typeof value === "string") return value.toUpperCase();
+}
+function primitiveAfterTruth(value: unknown) {
+  if (value && typeof value === "number") return value.toFixed();
+}
+function emptyObject(value: {}) {
+  if (typeof value === "object") return "id" in value;
+  if (typeof value === "string") return value.toUpperCase();
+}
+console.log(nonNullFirst({ id: 6 }), nonNullFirst(null), truthyFirst({ id: 7 }), truthyFirst(5));
+console.log(primitiveAfterNull("text"), primitiveAfterTruth(2), emptyObject("plain"), emptyObject({ id: 8 }));

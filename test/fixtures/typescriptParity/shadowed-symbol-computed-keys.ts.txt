@@ -1,0 +1,13 @@
+function show(): void {
+  const Symbol = { name: "value" as const, method: "read" as const };
+  const original = { [Symbol.name]: 1, [Symbol.method]() { return 2; } };
+  const typed: { [Symbol.name]: number; [Symbol.method](): number } = original;
+  class Example {
+    [Symbol.name] = 3;
+    [Symbol.method]() { return 4; }
+  }
+  const instance = new Example();
+  console.log(original.value, typed.read(), instance.value, instance.read());
+}
+show();
+console.log([...new Set([1, 2])]);

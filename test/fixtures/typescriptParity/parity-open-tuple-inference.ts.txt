@@ -1,0 +1,31 @@
+function roOne<T>(input: T | readonly [T]): T[] { return []; }
+function roOpt<T>(input: T | readonly [T,T?]): T[] { return []; }
+function mutOne<T>(input: T | [T]): T[] { return []; }
+function mutOpt<T>(input: T | [T,T?]): T[] { return []; }
+function starts<T>(input: T | [T, ...T[]]): T[] { return []; }
+function ends<T>(input: T | [...T[], T]): T[] { return []; }
+function middle<T>(input: T | [T,...T[],T]): T[] { return []; }
+function shape<T>(input: readonly [T]): T { return input[0]; }
+const array: number[] = [1,2];
+const readonlyArray: readonly number[] = [1,2];
+const prefix: [number,...number[]] = [1,2];
+const suffix: [...number[],number] = [1,2];
+const both: [number,...number[],number] = [1,2];
+const a: number[][] = roOne(array);
+const b: number[][] = roOpt(array);
+const g: [number,...number[]][] = ends(prefix);
+const h: [...number[],number][] = starts(suffix);
+const i: [number,...number[]][] = middle(prefix);
+const j: [...number[],number][] = middle(suffix);
+const k: number[] = starts(prefix);
+const l: number[] = ends(suffix);
+const m: number[] = middle(both);
+const p: number[] = ends([1,2]);
+const q: number[] = starts([1,2]);
+console.log(a,b,g,h,i,j,k,l,m,p,q);
+function viaShape<T>(input: T | { value: T; kind: 'structured' }): T[] { return []; }
+const rec = { value: 1, label: "record" };
+const right = { value: 1, kind: 'structured' as const, label: 'right' };
+const disjoint: (typeof rec)[] = viaShape(rec);
+const matching: number[] = viaShape(right);
+console.log(disjoint, matching);

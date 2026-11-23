@@ -1,0 +1,12 @@
+class Base<T> {
+  constructor(protected value: T) {}
+}
+class Derived<T> extends Base<T> {
+  read(other: DerivedView<T>): T { return other.value; }
+  readGeneric<U extends IndirectView<T>>(other: U): T { return other.value; }
+  readIntersection(other: DerivedView<T> & object): T { return other.value; }
+}
+interface DerivedView<T> extends Derived<T> {}
+interface IndirectView<T> extends DerivedView<T> {}
+const derived = new Derived(3);
+console.log(derived.read(derived), derived.readGeneric(derived), derived.readIntersection(derived));

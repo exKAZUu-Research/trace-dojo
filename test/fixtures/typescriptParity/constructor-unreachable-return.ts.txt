@@ -1,0 +1,26 @@
+class NeverEarly {
+  value: number;
+  constructor() {
+    if (false) return;
+    this.value = 1;
+  }
+}
+class ExtraReturn {
+  value: number;
+  constructor() {
+    this.value = 2;
+    return;
+    return;
+  }
+}
+class Finalizer {
+  value: number;
+  constructor() {
+    try { return; }
+    finally {
+      if (false) return;
+      this.value = 3;
+    }
+  }
+}
+console.log(new NeverEarly().value, new ExtraReturn().value, new Finalizer().value);

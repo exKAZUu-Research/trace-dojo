@@ -1,0 +1,16 @@
+class NumberDefaults {
+  format(value = this.amount()) { return value.toFixed(); }
+  amount(label = this.format()): number { return label.length; }
+}
+
+class StringDefaults {
+  message(value = this.text()): string { return value.toUpperCase(); }
+  text(value = this.message()) { return value.trim(); }
+}
+
+function describe(value = count()) { return value.toFixed(); }
+function count(label = describe()): number { return label.length; }
+
+console.log(new NumberDefaults().format(42), new NumberDefaults().amount("three"));
+console.log(new StringDefaults().message("hey"), new StringDefaults().text(" chapter "));
+console.log(describe(7), count("four"));

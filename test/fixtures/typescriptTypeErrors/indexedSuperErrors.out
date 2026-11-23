@@ -1,0 +1,5 @@
+(8,36): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(9,22): error TS7053: Element implicitly has an 'any' type because expression of type '"missing"' can't be used to index type 'Base'.
+  Property 'missing' does not exist on type 'Base'.
+(10,13): error TS2322: Type 'string' is not assignable to type 'number'.
+(11,45): error TS2339: Property 'toUpperCase' does not exist on type 'number'.

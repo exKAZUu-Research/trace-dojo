@@ -1,0 +1,5 @@
+class A { abstract m(): void; }
+class B { abstract x: number; }
+class C { x = 1; get x() { return 2; } }
+class D { x() { return 1; } get x() { return 2; } }
+class E { get x() { return 1; } get x() { return 2; } }

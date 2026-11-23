@@ -1,0 +1,22 @@
+type IdentityMap<T> = { [K in keyof T]: <K>(value: K) => K };
+const functions: IdentityMap<{ a: number }> = { a: value => value };
+type Identity<T> = T extends infer U ? <U>(value: U) => U : never;
+const identity: Identity<number> = value => value;
+type Pair<T> = [T] extends [{ x: number }] ? T["x"] : never;
+const result: Pair<{ x: number }> = 4;
+function optional<T>(value: T) { return value?.toString(); }
+function assertPresent<T>(value: T) { return value!.toString(); }
+function refined<T>(value: T) { return value == null ? "empty" : value.toString(); }
+type Data = { kind: "a"; a: number } | { kind: "b"; b: string };
+function summarize<T extends Data>(item: T) {
+  return item.kind === "a" ? item.a.toFixed() : item.b.toUpperCase();
+}
+type Choice = { ok: true; value: number } | { ok: false; error: string };
+function display<T extends Choice>(item: T) {
+  if (item.ok) return item.value.toFixed();
+  return item.error.toUpperCase();
+}
+console.log(functions.a(3).toFixed(1), identity("hi").toUpperCase(), result);
+console.log(optional(null), optional(5), assertPresent(6), refined(undefined), refined(7));
+console.log(summarize({ kind: "a", a: 8 }), summarize({ kind: "b", b: "eight" }));
+console.log(display({ ok: true, value: 9 }), display({ ok: false, error: "nine" }));

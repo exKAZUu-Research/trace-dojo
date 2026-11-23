@@ -1,0 +1,6 @@
+interface Opt { x?: number; }
+function f(p: Opt): number {
+  const r: { x: number } = { x: 1, ...p };
+  return r.x;
+}
+console.log(f({}));

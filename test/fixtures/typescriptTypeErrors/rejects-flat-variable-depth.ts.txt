@@ -1,0 +1,2 @@
+const values: number[][] = [[1]];
+const flattened: number[] = values.flat(Infinity);

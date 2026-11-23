@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 847 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+// code-gauge-allow-file fileNcss -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
 // oxlint-disable require-yield -- Statements that never block are generators like the others, so that all run alike.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { assignFailure, represent } from './assignability';
@@ -159,8 +159,8 @@ export class ProgramCompiler extends StatementCompiler {
 
   // Imports -------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
-  // code-gauge-allow functionNcss 33 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionNcss -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private declareImports(): void {
     for (const spec of this.file.imports) {
       const pkg = lookupPackage(spec.path);
@@ -288,7 +288,7 @@ export class ProgramCompiler extends StatementCompiler {
   private readonly invalidAliases = new Set<TypeEntity>();
   private readonly pendingAliases: { entity: TypeEntity; state: { spec: TypeSpec; scope: Scope } }[] = [];
 
-  // code-gauge-allow functionNcss 40 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionNcss -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   protected useType(entity: TypeEntity): void {
     const state = this.typeStates.get(entity);
     if (!state) return;
@@ -330,7 +330,7 @@ export class ProgramCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionNcss 35 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionNcss -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private resolveAlias(entity: TypeEntity, state: { spec: TypeSpec; scope: Scope }): void {
     const outerBinding = this.bindingAliases;
     const outerReporting = this.reporting;
@@ -368,8 +368,8 @@ export class ProgramCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
-  // code-gauge-allow functionNcss 33 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionNcss -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private finishResolvedTypes(): void {
     const batch = this.newlyResolvedTypes.splice(0);
     const cyclic = new Set<TypeEntity>();
@@ -409,7 +409,7 @@ export class ProgramCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private reachesDirectly(start: NamedType): boolean {
     const seen = new Set<Type>();
     const stack: Type[] = [];
@@ -549,7 +549,7 @@ export class ProgramCompiler extends StatementCompiler {
 
   private readonly genericMethodDeclarations = new Map<Method, FunctionDeclaration>();
 
-  // code-gauge-allow functionNcss 50 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionNcss -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private attachMethods(): void {
     for (const [typeName, declarations] of this.methodSpecs) {
       const entity = this.packageScope.entities.get(typeName);
@@ -695,8 +695,8 @@ export class ProgramCompiler extends StatementCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
-  // code-gauge-allow functionNcss 33 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionNcss -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private compileMethod(
     declaration: FunctionDeclaration,
     owner: NamedType,
@@ -895,7 +895,7 @@ export class ProgramCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionNcss 40 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionNcss -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private declareGenericFunction(declaration: FunctionDeclaration): void {
     const { name } = declaration;
     const cache = new Map<string, GoFunc>();
@@ -1053,8 +1053,8 @@ export class ProgramCompiler extends StatementCompiler {
     for (const variable of variables) variable.pending = resolve;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
-  // code-gauge-allow functionNcss 56 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionNcss -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private compileGlobal(spec: VarSpec, variables: VarEntity[]): void {
     const outerScope = this.scope;
     const outerFn = this.fn;
@@ -1255,7 +1255,7 @@ export class ProgramCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private constantValues(spec: ConstDeclaration['specs'][number], entities: ConstEntity[]): void {
     if (spec.values.length !== spec.names.length) {
       this.error(spec, spec.values.length < spec.names.length ? '定数の値が足りません。' : '定数の値が多すぎます。');
@@ -1339,7 +1339,7 @@ const BLOCKING_PACKAGES = new Set(['sync', 'time', 'iter', 'runtime']);
  * Whether a program uses goroutines, channels, or packages that block, which compiles its statements so that they can
  * wait; other programs run their calls directly.
  */
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+// code-gauge-allow functionCognitiveComplexity -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
 function usesConcurrency(file: File): boolean {
   if (file.imports.some((spec) => BLOCKING_PACKAGES.has(spec.path))) return true;
   const pending: unknown[] = [file.declarations];

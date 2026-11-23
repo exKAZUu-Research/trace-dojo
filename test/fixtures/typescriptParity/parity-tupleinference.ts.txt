@@ -1,0 +1,18 @@
+function echo<T>(input: T | [T]): T | [T] { return input; }
+function toList<T>(input: T | [T]): T[] { return []; }
+function optionalTuple<T>(input: T | [T, T?]): T[] { return []; }
+function rest<T>(input: T | [T, ...T[]]): T[] { return []; }
+function suffix<T>(input: T | [...T[], T]): T[] { return []; }
+function variant<T, A extends T[]>(input: T | [T, ...A]): T[] { return []; }
+console.log(echo([1,2]));
+console.log(echo([1,undefined]));
+const one: number[] = toList([1]);
+const pair: number[][] = toList([1,2]);
+const uncertain: (number | undefined)[][] = toList([1,undefined]);
+const tooShort: never[][] = toList([]);
+const two: number[] = optionalTuple([1,2]);
+const three: number[][] = optionalTuple([1,2,3]);
+const long: number[] = rest([1,2,3]);
+const end: number[] = suffix([1,2,3]);
+const tail: number[] = variant([1,2,3]);
+console.log(one,pair,uncertain,tooShort,two,three,long,end,tail);

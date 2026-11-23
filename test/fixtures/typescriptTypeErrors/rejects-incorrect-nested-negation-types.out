@@ -1,0 +1,6 @@
+(1,7): error TS2322: Type 'false' is not assignable to type 'true'.
+(2,22): error TS2872: This kind of expression is always truthy.
+(3,26): error TS2873: This kind of expression is always falsy.
+(4,25): error TS2873: This kind of expression is always falsy.
+(5,44): error TS2322: Type 'boolean' is not assignable to type 'true'.
+(6,43): error TS2322: Type 'boolean' is not assignable to type 'false'.

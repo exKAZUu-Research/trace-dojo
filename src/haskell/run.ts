@@ -6,7 +6,6 @@ import { type CompiledProgram, compileProgram } from './compile';
 import { Runtime, type TraceFrame } from './runtime';
 import { HaskellException } from './values';
 
-// code-gauge-allow duplicateLines 15 -- The interpreter entry points mirror the other languages so callers use one contract.
 export function executeHaskellProgram(source: string, input?: ProgramInput): ProgramExecution {
   let compiled: CompiledProgram;
   try {

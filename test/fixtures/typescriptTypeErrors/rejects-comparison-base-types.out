@@ -1,0 +1,10 @@
+(2,13): error TS2367: This comparison appears to be unintentional because the types 'string' and 'number' have no overlap.
+(6,13): error TS2367: This comparison appears to be unintentional because the types '1' and '3' have no overlap.
+(8,13): error TS2367: This comparison appears to be unintentional because the types 'number' and 'string' have no overlap.
+(9,13): error TS2367: This comparison appears to be unintentional because the types 'string' and 'boolean' have no overlap.
+(11,13): error TS2367: This comparison appears to be unintentional because the types 'string' and 'number' have no overlap.
+(12,13): error TS2367: This comparison appears to be unintentional because the types 'number' and 'string' have no overlap.
+(14,13): error TS2367: This comparison appears to be unintentional because the types 'boolean' and 'number' have no overlap.
+(15,13): error TS2367: This comparison appears to be unintentional because the types 'number' and 'string' have no overlap.
+(16,13): error TS2367: This comparison appears to be unintentional because the types 'number' and 'string' have no overlap.
+(17,13): error TS2367: This comparison appears to be unintentional because the types 'string' and 'bigint' have no overlap.

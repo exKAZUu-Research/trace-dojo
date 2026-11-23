@@ -1,0 +1,1 @@
+(4,3): error TS2540: Cannot assign to 'age' because it is a read-only property.

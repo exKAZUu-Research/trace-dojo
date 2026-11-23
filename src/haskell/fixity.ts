@@ -33,8 +33,8 @@ export function sectionOperand(
 }
 
 /** Resolves an operator chain by the Haskell report's algorithm, which also places prefix minus. */
-// code-gauge-allow functionCognitiveComplexity 30 -- The operator precedence algorithm of the Haskell report, including negation, reads best as one routine.
-// code-gauge-allow functionNcss 40 -- The operator precedence algorithm of the Haskell report, including negation, reads best as one routine.
+// code-gauge-allow functionCognitiveComplexity -- The operator precedence algorithm of the Haskell report, including negation, reads best as one routine.
+// code-gauge-allow functionNcss -- The operator precedence algorithm of the Haskell report, including negation, reads best as one routine.
 export function resolveExprChain(items: ChainItem<Expr>[], span: Span, fixityOf: (op: Operator) => Fixity): Expr {
   const recursion = new RecursionBudget();
   const tokens = items;
@@ -90,8 +90,8 @@ export function resolveExprChain(items: ChainItem<Expr>[], span: Span, fixityOf:
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- The operator precedence algorithm of the Haskell report reads best as one routine.
-// code-gauge-allow functionNcss 33 -- The operator precedence algorithm of the Haskell report reads best as one routine.
+// code-gauge-allow functionCognitiveComplexity -- The operator precedence algorithm of the Haskell report reads best as one routine.
+// code-gauge-allow functionNcss -- The operator precedence algorithm of the Haskell report reads best as one routine.
 export function resolvePatChain(items: ChainItem<Pat>[], span: Span, conFixity: (op: Operator) => Fixity): Pat {
   const recursion = new RecursionBudget();
   let position = 0;

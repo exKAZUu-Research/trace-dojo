@@ -1,0 +1,3 @@
+const m = new Map<string, string[]>();
+const n = m.get("a")?.map((s) => s.length).length;
+console.log(n);

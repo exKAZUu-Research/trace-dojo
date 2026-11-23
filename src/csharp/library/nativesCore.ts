@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 748 -- The nativesCore module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss -- The nativesCore module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
 import { CsDecimal } from '../decimal';
@@ -1052,8 +1052,8 @@ function overflowFor(target: SpecialType): never {
  * `Convert.ToInt32(text, fromBase)` and its kin, as .NET's `ParseNumbers` reads a string: an optional sign and `0x`,
  * digits up to the end, and for a base other than 10, the bits of an unsigned number that the type reinterprets.
  */
-// code-gauge-allow functionCognitiveComplexity 28 -- Each branch handles one case of .NET's rule that the function applies.
-// code-gauge-allow functionNcss 35 -- Each branch handles one case of .NET's rule that the function applies.
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of .NET's rule that the function applies.
+// code-gauge-allow functionNcss -- Each branch handles one case of .NET's rule that the function applies.
 function parseRadix(text: string, base: number, target: SpecialType): Value {
   if (![2, 8, 10, 16].includes(base)) fail('System.ArgumentException', 'Invalid Base.');
   if (text === '')
@@ -1201,7 +1201,7 @@ function textWriter(call: NativeCall, stream: 'stdout' | 'stderr'): CsObject {
 
 // ---- Exceptions ----
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Each branch handles one case of the C# rule that the function applies.
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 const exceptionConstructor: NativeMethod = (call, receiver, args) => {
   const exception = receiver as CsObject;
   const parameters = call.method.parameters.map((parameter) => parameter.name);

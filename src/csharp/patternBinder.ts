@@ -41,7 +41,7 @@ export abstract class PatternBinder extends ExpressionBinder {
     if (!arm.guard) handled.push(...this.patternSpaces.under(arm.pattern));
   }
 
-  // code-gauge-allow functionNcss 40 -- One case per kind of pattern.
+  // code-gauge-allow functionNcss -- One case per kind of pattern.
   bindPattern(pattern: Pattern, inputType: Type, context: BindContext): BoundPattern {
     switch (pattern.kind) {
       case 'constantPattern': {

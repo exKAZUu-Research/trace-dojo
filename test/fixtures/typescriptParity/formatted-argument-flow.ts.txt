@@ -1,0 +1,6 @@
+let value: number | (() => void) = 1;
+console.log("%s", value, value = () => {});
+value = 2;
+console.log("%% %d %s", 0, value, value = function named() {});
+value = 3;
+console.log("%d %s", ...([0, value, value = () => {}] as const));

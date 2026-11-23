@@ -1,0 +1,2 @@
+(1,13): error TS1277: 'const' modifier can only appear on a type parameter of a function, method or class
+(2,12): error TS1277: 'const' modifier can only appear on a type parameter of a function, method or class

@@ -1,0 +1,10 @@
+const a = "a" - 1;
+const b = {} * 2;
+const c = [1] + 1;
+const d = "a" < 1;
+const e = 1 === "1";
+const f = true + 1;
+let n: number | undefined;
+const g = n + 1;
+const h = null + 1;
+const i = 1n + 1;

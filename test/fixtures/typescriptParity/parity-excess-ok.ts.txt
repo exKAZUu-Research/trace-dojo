@@ -1,0 +1,9 @@
+interface P { x: number }
+const extra = { x: 1, y: 2 };
+const ps: P[] = [extra];
+const qs: P[] = [{ x: 1 }, ...[{ x: 2 }]];
+type S = { kind: "a"; a: number } | { kind: "b"; b: number };
+const k: "a" | "b" = Math.floor(1.5) > 0 ? "a" : "b";
+const s: S[] = [{ kind: "a", a: 1 }, { kind: "b", b: 2 }];
+const m = new Map<string, P>([["a", { x: 1 }]]);
+console.log(ps, qs, s, k, m);

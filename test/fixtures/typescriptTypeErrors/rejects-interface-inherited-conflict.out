@@ -1,0 +1,12 @@
+(3,11): error TS2320: Interface 'Both' cannot simultaneously extend types 'Left' and 'Right'.
+  Named property 'value' of types 'Left' and 'Right' are not identical.
+(6,11): error TS2320: Interface 'Both2' cannot simultaneously extend types 'L2' and 'R2'.
+  Named property 'value' of types 'L2' and 'R2' are not identical.
+(9,11): error TS2320: Interface 'Both3' cannot simultaneously extend types 'L3' and 'R3'.
+  Named property 'v' of types 'L3' and 'R3' are not identical.
+(23,11): error TS2320: Interface 'Both7' cannot simultaneously extend types 'L7' and 'R7'.
+  Named property 'a' of types 'L7' and 'R7' are not identical.
+(25,11): error TS2320: Interface 'Both8' cannot simultaneously extend types 'G<number>' and 'G<string>'.
+  Named property 'g' of types 'G<number>' and 'G<string>' are not identical.
+(30,11): error TS2320: Interface 'Both11' cannot simultaneously extend types 'Left' and 'Right'.
+  Named property 'value' of types 'Left' and 'Right' are not identical.

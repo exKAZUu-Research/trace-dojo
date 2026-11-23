@@ -1,0 +1,22 @@
+function first<T>(map: { [key: symbol]: T }): T {
+  return map[Symbol.for('x')];
+}
+console.log(first({ [Symbol.for('x')]: 2 }).toFixed(1));
+
+const entries: { [key: symbol]: string } = { [Symbol.for('x')]: 'abc' };
+console.log(first(entries).toUpperCase());
+
+function values<T>(map: { [key: string]: T }): T[] {
+  return Object.values(map);
+}
+const tag = Symbol('tag');
+const total = values({ a: 1, b: 2, [tag]: 'ignored' }).reduce((sum, value) => sum + value, 0);
+console.log(total);
+
+function atOne<T>(map: { [key: number]: T }): T {
+  return map[1];
+}
+console.log(atOne({ 1: 'one', 2: 'two' }).length);
+
+const typed: { a: number; b: number } = { a: 3, b: 4 };
+console.log(values(typed).map((value) => value * 2));

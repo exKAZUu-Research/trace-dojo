@@ -1,0 +1,7 @@
+function g(...args: [...unknown[], (x: string) => number]) { return args.length; }
+const ns: number[] = [1, 2];
+const pair: [number, number] = [1, 2];
+console.log(g(...ns, (x) => x.length), g(...pair, (x) => x.length), g(...[1, 2], (x) => x.length));
+function h(...args: [(s: string) => void, ...number[], (b: boolean) => string]) { return args.length; }
+console.log(h((s) => s.length, ...ns, (b) => String(b)));
+console.log(g((x: string) => 1, (x) => x.length));

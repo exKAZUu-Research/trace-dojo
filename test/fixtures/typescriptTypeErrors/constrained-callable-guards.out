@@ -1,0 +1,9 @@
+(2,43): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+(5,49): error TS2339: Property 'apply' does not exist on type 'never'.
+(8,43): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+(11,43): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+(14,43): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.

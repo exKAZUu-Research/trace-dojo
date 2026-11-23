@@ -1,0 +1,48 @@
+function inactive() {}
+console.log(inactive.caller, inactive.arguments);
+console.log(Object.getOwnPropertyNames(Function.prototype).join(','));
+console.log(Object.getOwnPropertyNames(inactive).join(','));
+for (const name of ['caller', 'arguments']) {
+  const descriptor = Object.getOwnPropertyDescriptor(Function.prototype, name)!;
+  console.log(name, descriptor.configurable, descriptor.enumerable, descriptor.get!.name, descriptor.set!.name);
+  descriptor.set!.call(inactive, 42);
+  console.log(descriptor.get!.call(inactive), Object.hasOwn(inactive, name));
+}
+function active(first: string, second?: string) {
+  const before = active.arguments;
+  const caller = active.caller;
+  console.log(caller?.name ?? null, before, before === active.arguments, before.callee === active);
+  first = 'changed';
+  if (second !== undefined) arguments[1] = 'changed';
+  console.log(active.arguments, arguments);
+}
+function direct() { active('a', 'b'); }
+function byCall() { active.call(undefined, 'c'); }
+function byApply() { active.apply(undefined, ['d']); }
+function byBind() { active.bind(undefined, 'e')(); }
+function strictCaller() { 'use strict'; active('f'); }
+function callbackBoundary() { ['g'].forEach((value, index) => active(value + String(index))); }
+function builtinBoundary() { ['h'].forEach(active as (value: string) => void); }
+direct();
+byCall();
+byApply();
+byBind();
+strictCaller();
+callbackBoundary();
+builtinBoundary();
+function defaults(value = 1, ...rest: number[]) {
+  console.log(defaults.arguments, Object.getOwnPropertyDescriptor(defaults.arguments, 'callee')!.configurable);
+}
+defaults(undefined, 2, 3);
+const method = { run() {} }.run;
+function strict() { 'use strict'; }
+for (const value of [strict, () => {}, method, inactive.bind(undefined), Object, Function.prototype]) {
+  for (const name of ['caller', 'arguments']) {
+    const descriptor = Object.getOwnPropertyDescriptor(Function.prototype, name)!;
+    try {
+      descriptor.get!.call(value);
+    } catch (error) {
+      console.log((error as TypeError).message);
+    }
+  }
+}

@@ -1,0 +1,17 @@
+const a: [undefined] = [undefined];
+const t: [number?] = a;
+const t2: [number?] = [undefined];
+function f(p: [number?]): number {
+  return p[0] ?? -1;
+}
+console.log(f([undefined]), f(a), t, t2);
+const t3: [string, number?, boolean?] = ["x", undefined, undefined];
+const b: [string, undefined] = ["y", undefined];
+const t4: [string, number?] = b;
+const t5: [number?, ...string[]] = [undefined, "s"];
+const r: readonly [number?] = [undefined];
+const u: [number | undefined] = [undefined];
+const t6: [number?] = u;
+let opt: [number?] = [];
+opt = [undefined];
+console.log(t3, t4, t5, r, t6, opt);

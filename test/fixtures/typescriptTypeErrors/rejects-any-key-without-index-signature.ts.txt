@@ -1,0 +1,30 @@
+const key: any = JSON.parse('1');
+class Point { x = 1; }
+interface Shape { kind: string }
+const tuple: [number, string] = [1, 'a'];
+const arr = [1, 2];
+const dict: Record<string, number> = {};
+const s = 'abc';
+const fn = () => 1;
+const shape: Shape = { kind: 'a' };
+const u: { a: number } | { b: string } = { a: 1 };
+const empty = {};
+const n = 5;
+const sym = Symbol();
+let a1 = new Point()[key];
+let a2 = shape[key];
+let a4 = tuple[key];
+let a5 = arr[key];
+let a6 = dict[key];
+let a7 = s[key];
+let a8 = fn[key];
+let a9 = u[key];
+let a10 = empty[key];
+let a11 = n[key];
+let a12 = globalThis[key];
+let a13 = Math[key];
+let a14 = new Map<string, number>()[key];
+new Point()[key] = 1;
+shape[key] = 'b';
+let a15 = sym[key];
+let a16 = (true as boolean)[key];

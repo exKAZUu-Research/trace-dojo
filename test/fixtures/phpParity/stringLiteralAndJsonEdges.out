@@ -1,0 +1,36 @@
+
+Deprecated: Non-canonical cast (binary) is deprecated, use the (string) cast instead in /main.php on line 4
+string(6) "binary"
+string(9) "hello PHP"
+string(0) ""
+string(5) "bytes"
+string(1) "A"
+string(25) "literal \u{not an escape}"
+string(10) "unknown \u"
+string(3) "123"
+bool(false)
+bool(true)
+string(3) "yes"
+NULL
+int(3)
+string(53) "Control character error, possibly incorrectly encoded"
+3: Control character error, possibly incorrectly encoded
+NULL
+int(3)
+string(53) "Control character error, possibly incorrectly encoded"
+3: Control character error, possibly incorrectly encoded
+NULL
+int(3)
+string(53) "Control character error, possibly incorrectly encoded"
+3: Control character error, possibly incorrectly encoded
+NULL
+int(4)
+string(12) "Syntax error"
+4: Syntax error
+NULL
+int(4)
+string(12) "Syntax error"
+4: Syntax error
+string(6) "closed"
+int(0)
+string(8) "No error"

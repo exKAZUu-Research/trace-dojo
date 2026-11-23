@@ -1,0 +1,29 @@
+object(stdClass)#3 (2) {
+  ["a"]=>
+  object(stdClass)#2 (1) {
+    ["b"]=>
+    object(stdClass)#1 (0) {
+    }
+  }
+  ["c"]=>
+  object(stdClass)#4 (2) {
+    ["d"]=>
+    int(1)
+    ["e"]=>
+    object(stdClass)#5 (0) {
+    }
+  }
+}
+array(2) {
+  [0]=>
+  object(stdClass)#6 (1) {
+    ["p"]=>
+    int(1)
+  }
+  [1]=>
+  object(stdClass)#8 (1) {
+    ["q"]=>
+    object(stdClass)#7 (0) {
+    }
+  }
+}

@@ -1,0 +1,5 @@
+interface User { name: string; age: number; }
+function update(u: User, patch: Partial<User>): User { return { ...u, ...patch }; }
+const r: Readonly<User> = update({ name: "a", age: 1 }, { age: 2 });
+r.age = 3;
+console.log(r);

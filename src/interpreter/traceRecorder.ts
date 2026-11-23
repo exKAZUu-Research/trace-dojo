@@ -1,4 +1,4 @@
-import fastDeepEqual from 'fast-deep-equal';
+import { isEqual } from 'es-toolkit/predicate';
 
 import type { TraceItem } from '../problems/trace';
 import { ExecutionLimitError, MAX_TRACE_ITEMS } from './limits';
@@ -6,6 +6,7 @@ import type { StepRecorder } from './stepTracker';
 import type { TurtleWorld } from './turtleWorld';
 
 export type TraceVariables = Pick<TraceItem, 'vars' | 'referenceVars'>;
+type IgnoreStateVariable = (value: unknown, otherValue: unknown) => boolean;
 
 /** What the recorder reads from a language's runtime while it runs a model program. */
 export interface TracedRuntime<F extends TracedFrame> {
@@ -23,7 +24,11 @@ export interface TracedFrame {
 
 export interface FrameReader<F extends TracedFrame> {
   isAtomic(frame: F): boolean;
+  hidesCallRow?(frame: F): boolean;
   variablesOf(frame: F): TraceVariables;
+  stateVariables?(variables: TraceVariables): Record<string, unknown>;
+  ignoreStateVariable?: IgnoreStateVariable;
+  scalarVarsOf?(frame: F): TraceVariables['vars'];
   recordItem?(item: TraceItem): TraceItem;
 }
 
@@ -31,7 +36,7 @@ export interface FrameReader<F extends TracedFrame> {
 export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
   readonly traceItems: TraceItem[];
   /** The variables each frame on the stack showed when the last step was recorded. */
-  private readonly varsAtLastStep = new WeakMap<F, TraceItem['vars']>();
+  private readonly varsAtLastStep = new WeakMap<F, Record<string, unknown>>();
 
   constructor(
     private readonly runtime: TracedRuntime<F>,
@@ -48,15 +53,25 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     if (frames.some((frame) => this.frames.isAtomic(frame))) return false;
     if (this.traceItems.length >= MAX_TRACE_ITEMS) throw new ExecutionLimitError('trace');
     this.runtime.collectGarbage();
+    const current = frames.at(-1) as F;
+    const variables = this.frames.variablesOf(current);
     const item: TraceItem = {
       line: row + 1,
-      callLines: frames.slice(1).flatMap(({ callRow }) => (callRow === undefined ? [] : [callRow + 1])),
-      ...this.frames.variablesOf(frames.at(-1) as F),
+      callLines: frames
+        .slice(1)
+        .flatMap((frame) =>
+          frame.callRow === undefined || this.frames.hidesCallRow?.(frame) ? [] : [frame.callRow + 1]
+        ),
+      ...variables,
       turtles: world.turtleTraces(),
       board: world.boardText(),
     };
     this.traceItems.push(this.frames.recordItem?.(item) ?? item);
-    for (const frame of frames) this.varsAtLastStep.set(frame, this.frames.variablesOf(frame).vars);
+    const reuseCurrent = !this.frames.recordItem || this.frames.scalarVarsOf !== undefined;
+    for (const frame of frames) {
+      const vars = frame === current && reuseCurrent ? this.stateVariables(variables) : this.stateOf(frame);
+      this.varsAtLastStep.set(frame, vars);
+    }
     return true;
   }
 
@@ -72,16 +87,33 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     const shownVars = this.varsAtLastStep.get(frame);
     return (
       last.board === world.boardText() &&
-      fastDeepEqual(last.turtles, world.turtleTraces()) &&
-      (shownVars === undefined || sameVariables(shownVars, this.frames.variablesOf(frame).vars))
+      isEqual(last.turtles, world.turtleTraces()) &&
+      (shownVars === undefined || sameVariables(shownVars, this.stateOf(frame), this.frames.ignoreStateVariable))
     );
+  }
+
+  private stateVariables(variables: TraceVariables): Record<string, unknown> {
+    return this.frames.stateVariables?.(variables) ?? variables.vars;
+  }
+
+  private stateOf(frame: F): Record<string, unknown> {
+    return this.frames.scalarVarsOf?.(frame) ?? this.stateVariables(this.frames.variablesOf(frame));
   }
 }
 
-function sameVariables(a: TraceItem['vars'], b: TraceItem['vars']): boolean {
-  const names = Object.keys(a);
-  return (
-    names.length === Object.keys(b).length &&
-    names.every((name) => Object.hasOwn(b, name) && fastDeepEqual(a[name], b[name]))
-  );
+function sameVariables(a: Record<string, unknown>, b: Record<string, unknown>, ignore?: IgnoreStateVariable): boolean {
+  const aNames = comparableNames(a, b, ignore);
+  const bNames = comparableNames(b, a, ignore);
+  return aNames.length === bNames.length && aNames.every((name) => Object.hasOwn(b, name) && isEqual(a[name], b[name]));
+}
+
+function comparableNames(
+  variables: Record<string, unknown>,
+  other: Record<string, unknown>,
+  ignore: IgnoreStateVariable | undefined
+): string[] {
+  const names = Object.keys(variables);
+  return ignore
+    ? names.filter((name) => !ignore(variables[name], Object.hasOwn(other, name) ? other[name] : undefined))
+    : names;
 }

@@ -1,0 +1,9 @@
+function f(a: number) { arguments[0] = 9; return a; }
+function g(a: number) { a = 7; return arguments[0]; }
+function h(a: number, b = 2) { arguments[0] = 9; return a + b; }
+function k(a: number) { delete arguments[0]; arguments[0] = 5; return a; }
+function len(...xs: any[]) { return arguments.length; }
+console.log(f(1), g(1), h(1), k(1), len(1, 2, 3));
+function ins(a: any) { return arguments; }
+const args = (ins as any)(1, 2);
+console.log(Array.isArray(args), args.length, Object.keys(args), JSON.stringify(args), [...args]);

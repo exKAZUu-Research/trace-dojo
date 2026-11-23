@@ -1,8 +1,12 @@
-// code-gauge-allow-file fileNcss 486 -- One executor of every statement kind and of functions and classes, which share its scopes.
+// code-gauge-allow-file fileNcss -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
+import { assert } from 'es-toolkit';
+
+import { createArgumentsObject, mapArguments } from './argumentsObject';
 import type {
   Block,
   ClassMember,
   ClassNode,
+  Expression,
   FunctionNode,
   Program,
   ScopeDeclarations,
@@ -21,7 +25,7 @@ import {
   privateMethodProperty,
 } from './memberProperties';
 import { startAsyncFunction } from './promises';
-import { isObjectCreation, onlyCalls, onlyCreates } from './stepRules';
+import { isObjectCreation, onlyCalls, onlyCreates, withoutParentheses } from './stepRules';
 import {
   type Completion,
   type Outcome,
@@ -31,9 +35,11 @@ import {
 } from './suspendableStatements';
 import {
   appendAll,
+  type Binding,
   type ClassField,
   type FunctionBehavior,
   type FunctionFrame,
+  isAccessor,
   isObject,
   JsFunction,
   type JsObject,
@@ -51,6 +57,10 @@ type UserBehavior = Extract<FunctionBehavior, { kind: 'user' }>;
 type ClassBehavior = Extract<FunctionBehavior, { kind: 'class' }>;
 
 export class Evaluator extends SuspendableStatementEvaluator {
+  private readonly constructorScopes = new WeakMap<FunctionFrame, Scope>();
+  /** What `this` is for a plain call of a function that is not strict mode code, created when first needed. */
+  implicitReceiver: JsObject | undefined;
+
   /** Runs a program in the frame the caller pushed, whose scope becomes the program's own. */
   runProgram(program: Program): void {
     this.instantiate(this.runtime.frame.scope, program.scope);
@@ -68,8 +78,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
     return undefined;
   }
 
-  // code-gauge-allow functionNcss 54 -- One case per statement kind, each delegating where it grows.
-  // code-gauge-allow functionCognitiveComplexity 22 -- One case per statement kind, each delegating where it grows.
+  // code-gauge-allow functionNcss -- One case per statement kind, each delegating where it grows.
+  // code-gauge-allow functionCognitiveComplexity -- One case per statement kind, each delegating where it grows.
   private statement(statement: Statement, labels: string[]): Completion {
     const { runtime } = this;
     runtime.spend();
@@ -89,7 +99,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
         return undefined;
       }
       case 'class': {
-        this.writeVariable(statement.cls.name, this.evaluateClass(statement.cls), 'initialize');
+        this.declareClass(statement.cls);
         return undefined;
       }
       case 'return': {
@@ -206,7 +216,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
         else if (target.kind === 'identifier') this.revealVar(target.name);
         continue;
       }
-      this.bindDeclared(target, this.evaluate(init), declaration.declarationKind);
+      this.bindDeclared(target, this.evaluate(init, this.classBinding(target)), declaration.declarationKind);
     }
   }
 
@@ -220,7 +230,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     return completion.kind === 'continue' ? 'next' : undefined;
   }
 
-  // code-gauge-allow duplicateLines 27 -- Mirrors the generator version in suspendableStatements.ts, kept apart so that code without yield or await runs without generator frames.
+  // code-gauge-allow duplicateLines -- Mirrors the generator version in suspendableStatements.ts, kept apart so that code without yield or await runs without generator frames.
   private forStatement(statement: Extract<Statement, { kind: 'for' }>, labels: string[]): Completion {
     const { runtime } = this;
     return this.scoped(statement.scope, () => {
@@ -266,13 +276,15 @@ export class Evaluator extends SuspendableStatementEvaluator {
         ? this.withScope(statement.scope, () => this.evaluate(statement.iterable))
         : this.evaluate(statement.iterable);
     const iterator =
-      statement.kind === 'forIn' ? new ValueIterator(this.enumerableKeys(iterable)) : runtime.iterator(iterable);
+      statement.kind === 'forIn'
+        ? new ValueIterator(this.forInKeys(iterable))
+        : runtime.iterator(iterable, undefined, statement.iterableSource, 'forOf');
     return this.forEachIterations(statement, labels, iterable, iterator);
   }
 
   /** Runs the iterations of a `for...of` or `for...in` loop, holding the iterable meanwhile. */
-  // code-gauge-allow functionNcss 42 -- Inlines what a nested call in the loop body would otherwise pay host frames for.
-  // code-gauge-allow duplicateLines 17 -- Mirrors the generator version in suspendableStatements.ts, kept apart so that code without yield or await runs without generator frames.
+  // code-gauge-allow functionNcss -- Inlines what a nested call in the loop body would otherwise pay host frames for.
+  // code-gauge-allow duplicateLines -- Mirrors the generator version in suspendableStatements.ts, kept apart so that code without yield or await runs without generator frames.
   private forEachIterations(
     statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>,
     labels: string[],
@@ -455,16 +467,24 @@ export class Evaluator extends SuspendableStatementEvaluator {
       behavior.scope,
       node.kind === 'arrow'
         ? undefined
-        : { thisValue, homeObject: behavior.homeObject, constructing: undefined, newTarget },
+        : {
+            thisValue: node.isStrict ? thisValue : this.sloppyThis(thisValue),
+            homeObject: behavior.homeObject,
+            constructing: undefined,
+            newTarget,
+            isStrict: node.isStrict,
+            hasImplicitThis: !node.isStrict && (thisValue === undefined || thisValue === null),
+          },
       true
     );
-    runtime.pushFrame(scope, callRow, node.isAtomic);
+    if (node.kind === 'arrow') scope.arrowIsStrict = node.isStrict;
+    runtime.pushFrame(scope, callRow, node.isAtomic, fn, args);
     try {
       if (node.isAsync && !node.isGenerator)
-        return startAsyncFunction(runtime, runtime.frame, this.asyncBody(node, args));
-      this.bindParameters(node, args);
+        return startAsyncFunction(runtime, runtime.frame, this.asyncBody(fn, node, args));
+      this.bindParameters(fn, node, args);
       if (!Array.isArray(node.body)) return this.evaluate(node.body);
-      this.instantiate(scope, node.scope);
+      this.instantiate(this.enterBodyScope(node), node.scope);
       if (node.isGenerator) {
         const create = node.isAsync ? createAsyncGeneratorObject : createGeneratorObject;
         return create(runtime, runtime.get(fn, 'prototype'), runtime.frame, this.bodySteps(node.body, node.scope));
@@ -479,36 +499,75 @@ export class Evaluator extends SuspendableStatementEvaluator {
     }
   }
 
+  /**
+   * `this` of a call of a function that is not strict mode code, which sees the global object for null or undefined and
+   * a box for a primitive.
+   */
+  private sloppyThis(thisValue: Value): Value {
+    if (thisValue !== undefined && thisValue !== null) return this.runtime.toObject(thisValue);
+    return this.globalReceiver();
+  }
+
+  globalReceiverFor(name: string): JsObject | undefined {
+    const { runtime } = this;
+    return runtime.hasProperty(this.implicitReceiver ?? runtime.realm.objectPrototype, name)
+      ? this.globalReceiver()
+      : undefined;
+  }
+
+  private globalReceiver(): JsObject {
+    return (this.implicitReceiver ??= this.runtime.newObject());
+  }
+
   /** Runs an async function's body, whose parameters' errors reject its promise as the body's own errors do. */
-  private *asyncBody(node: FunctionNode, args: Value[]): Steps<Completion> {
-    this.bindParameters(node, args);
+  private *asyncBody(fn: JsFunction, node: FunctionNode, args: Value[]): Steps<Completion> {
+    this.bindParameters(fn, node, args);
     if (!Array.isArray(node.body)) return { kind: 'return', value: yield* this.valueSteps(node.body) };
-    this.instantiate(this.runtime.frame.scope, node.scope);
+    this.instantiate(this.enterBodyScope(node), node.scope);
     return yield* this.bodySteps(node.body, node.scope);
   }
 
-  /** Binds parameters in order after creating them all, so a default reading a later parameter throws as in JavaScript. */
-  private bindParameters(node: FunctionNode, args: Value[]): void {
-    const { runtime } = this;
-    if (node.usesArguments) {
-      runtime.frame.scope.bindings.set('arguments', {
-        value: runtime.newArray([...args]),
-        isMutable: false,
-      });
+  /**
+   * The scope a function body declares its names in: the parameters' own one, or, when parameters are patterns or have
+   * defaults whose closures must not see the body's declarations, a new one inside it, where a `var` named as a
+   * parameter starts with the parameter's value.
+   */
+  private enterBodyScope(node: FunctionNode): Scope {
+    const { frame } = this.runtime;
+    const parameters = frame.scope;
+    if (node.params.every((param) => param.kind === 'identifier') && (!node.rest || node.rest.kind === 'identifier'))
+      return parameters;
+    const body = new Scope(parameters);
+    for (const name of node.scope.order) {
+      const binding = parameters.bindings.get(name);
+      if (binding) body.bindings.set(name, { value: binding.value, isMutable: true });
     }
+    frame.scope = body;
+    return body;
+  }
+
+  /** Binds parameters in order after creating them all, so a default reading a later parameter throws as in JavaScript. */
+  private bindParameters(fn: JsFunction, node: FunctionNode, args: Value[]): void {
+    const { runtime } = this;
     const params = node.rest ? [...node.params, node.rest] : node.params;
     const { bindings } = runtime.frame.scope;
     const names = params.flatMap((param) => patternNames(param));
     runtime.allocate(names.length);
     for (const name of names) bindings.set(name, { value: UNINITIALIZED, isMutable: true });
+    if (node.usesArguments) {
+      const mapped = !node.isStrict && !node.rest && params.every((param) => param.kind === 'identifier');
+      const argumentsObject = createArgumentsObject(runtime, fn, args, mapped);
+      bindings.set('arguments', { value: argumentsObject, isMutable: false });
+      if (mapped) mapArguments(bindings, names, argumentsObject);
+    }
     for (const [index, param] of node.params.entries()) this.bindPattern(param, args[index], 'initialize');
     if (node.rest) this.bindPattern(node.rest, runtime.newArray(args.slice(node.params.length)), 'initialize');
   }
 
   // Classes -----------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Transcribes the specification's ClassDefinitionEvaluation step by step, whose branches mirror its steps.
-  evaluateClass(cls: ClassNode): JsFunction {
+  // code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's ClassDefinitionEvaluation step by step, whose branches mirror its steps.
+  evaluateClass(cls: ClassNode, inferredName?: Key, binding?: Binding): JsFunction {
     const { runtime } = this;
     const { prototypeParent, constructorParent } = this.classParents(cls);
     const classScope = new Scope(runtime.frame.scope);
@@ -532,10 +591,12 @@ export class Evaluator extends SuspendableStatementEvaluator {
       homeObject: prototype,
       isDerived: cls.superClass !== undefined,
       fields: [],
+      traceBinding: binding,
     };
     const fn = new JsFunction(constructorParent, behavior);
     runtime.allocate(3);
     defineFunctionProperties(fn, cls.name, cls.ctor ? expectedArgumentCount(cls.ctor) : 0);
+    if (inferredName !== undefined) nameFunction(runtime, fn, inferredName);
     fn.properties.set('prototype', {
       value: prototype,
       writable: false,
@@ -548,12 +609,28 @@ export class Evaluator extends SuspendableStatementEvaluator {
       enumerable: false,
       configurable: true,
     });
-    const staticInitializers = this.inScope(classScope, () => this.defineMembers(cls, fn, prototype, behavior.fields));
+    const staticInitializers = this.inScope(classScope, () => this.defineMembers(cls, fn, prototype, behavior));
     if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
-    this.inScope(classScope, () => {
-      for (const initialize of staticInitializers) initialize();
-    });
+    this.initializeStaticMembers(classScope, fn, staticInitializers, binding);
     return fn;
+  }
+
+  private initializeStaticMembers(
+    classScope: Scope,
+    fn: JsFunction,
+    initializers: (() => void)[],
+    binding: Binding | undefined
+  ): void {
+    if (binding) binding.initializingClass = fn;
+    try {
+      this.runtime.hold(fn, () =>
+        this.inScope(classScope, () => {
+          for (const initialize of initializers) initialize();
+        })
+      );
+    } finally {
+      if (binding) binding.initializingClass = undefined;
+    }
   }
 
   /** The prototypes of a class's prototype object and of the class itself, which `extends` decides. */
@@ -570,12 +647,15 @@ export class Evaluator extends SuspendableStatementEvaluator {
     if (!(superClass instanceof JsFunction) || !superClass.isConstructor) {
       return runtime.throwError(
         'TypeError',
-        `Class extends value ${runtime.describe(superClass)} is not a constructor or null`
+        () => `Class extends value ${runtime.describePlain(superClass)} is not a constructor or null`
       );
     }
     const parentPrototype = runtime.get(superClass, 'prototype');
     if (parentPrototype !== null && !isObject(parentPrototype)) {
-      return runtime.throwError('TypeError', 'Class extends value does not have valid prototype property');
+      return runtime.throwError(
+        'TypeError',
+        `Class extends value does not have valid prototype property ${runtime.describePlain(parentPrototype)}`
+      );
     }
     return { prototypeParent: parentPrototype, constructorParent: superClass };
   }
@@ -584,12 +664,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
    * Defines the methods and accessors and collects the instance fields, returning what initializes the class itself:
    * its static fields and static blocks in source order.
    */
-  private defineMembers(
-    cls: ClassNode,
-    fn: JsFunction,
-    prototype: JsObject,
-    instanceFields: ClassField[]
-  ): (() => void)[] {
+  // code-gauge-allow functionCognitiveComplexity -- Keeps method definitions and deferred field/static-block initialization in class source order.
+  private defineMembers(cls: ClassNode, fn: JsFunction, prototype: JsObject, behavior: ClassBehavior): (() => void)[] {
     const { runtime } = this;
     const staticInitializers: (() => void)[] = [];
     const classScope = runtime.frame.scope;
@@ -604,8 +680,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       if (member.kind === 'field') {
         const { value } = member;
         const initialize = value
-          ? (thisValue: JsObject): Value =>
-              this.inScope(this.methodScope(classScope, thisValue, target), () => this.evaluate(value))
+          ? this.fieldInitializer(value, classScope, target, member.key.kind === 'private' ? member.key.name : key)
           : undefined;
         const field: ClassField = {
           key,
@@ -614,13 +689,31 @@ export class Evaluator extends SuspendableStatementEvaluator {
           stepRow: member.stepRow,
           onlyCalls: value !== undefined && isObjectCreation(value),
         };
-        if (member.isStatic) staticInitializers.push(() => this.initializeField(fn, field));
-        else instanceFields.push(field);
+        if (member.isStatic) {
+          staticInitializers.push(() => this.initializeField(fn, field, member.isTraceConstant));
+        } else behavior.fields.push(field);
         continue;
       }
-      this.defineMethod(member, key, target, classScope, instanceFields);
+      this.defineMethod(member, key, target, classScope, behavior.fields);
     }
     return staticInitializers;
+  }
+
+  private fieldInitializer(
+    value: Expression,
+    classScope: Scope,
+    target: JsObject,
+    name: Key
+  ): (thisValue: JsObject) => Value {
+    const inner = withoutParentheses(value);
+    return (thisValue) =>
+      this.inScope(this.methodScope(classScope, thisValue, target), () => {
+        if (inner.kind === 'classExpression') return this.evaluateClass(inner.cls, name);
+        const initialized = this.evaluate(value);
+        if (inner.kind === 'functionExpression' && initialized instanceof JsFunction)
+          nameFunction(this.runtime, initialized, name);
+        return initialized;
+      });
   }
 
   private runStaticBlock(block: Extract<ClassMember, { kind: 'staticBlock' }>, scope: Scope): void {
@@ -671,10 +764,11 @@ export class Evaluator extends SuspendableStatementEvaluator {
       homeObject,
       constructing: undefined,
       newTarget: undefined,
+      isStrict: true,
     });
   }
 
-  private initializeField(target: JsObject, field: ClassField): void {
+  private initializeField(target: JsObject, field: ClassField, traceConstant?: true): void {
     const { runtime } = this;
     if (field.property) {
       mergePrivate(runtime, target, privateIdentity(field.key), field.property);
@@ -682,17 +776,24 @@ export class Evaluator extends SuspendableStatementEvaluator {
     }
     this.runtime.steps.runStatement(field.stepRow, field.onlyCalls, () => {
       const value = field.initialize ? field.initialize(target) : undefined;
+      const hiddenTraceConstant = value !== undefined && value !== null ? traceConstant : undefined;
       if (field.isPrivate)
         runtime.definePrivate(target, privateIdentity(field.key), {
           value,
           writable: true,
           enumerable: false,
           configurable: false,
+          hiddenTraceConstant,
         });
-      else runtime.createDataProperty(target, field.key, value);
+      else {
+        runtime.createDataProperty(target, field.key, value);
+        const property = hiddenTraceConstant && target.properties.get(field.key);
+        if (property && !isAccessor(property)) property.hiddenTraceConstant = true;
+      }
     });
   }
 
+  // code-gauge-allow functionNcss -- Parameter binding, field initialization, and constructor returns share the constructing frame and its cleanup.
   constructClass(
     fn: JsFunction,
     behavior: ClassBehavior,
@@ -701,17 +802,17 @@ export class Evaluator extends SuspendableStatementEvaluator {
     callRow: number | undefined
   ): JsObject {
     const { runtime } = this;
-    const thisValue = behavior.isDerived
-      ? UNINITIALIZED
-      : runtime.newObject(runtime.prototypeFor(newTarget, runtime.realm.objectPrototype));
+    const thisValue = behavior.isDerived ? UNINITIALIZED : runtime.newInstance(fn, newTarget);
     const functionFrame: FunctionFrame = {
       thisValue,
       homeObject: behavior.homeObject,
       constructing: fn,
       newTarget,
+      isStrict: true,
     };
     const scope = new Scope(behavior.scope, functionFrame);
-    runtime.pushFrame(scope, callRow, behavior.ctor?.isAtomic ?? false);
+    this.constructorScopes.set(functionFrame, scope);
+    runtime.pushFrame(scope, callRow, behavior.ctor?.isAtomic ?? false, fn);
     try {
       if (thisValue !== UNINITIALIZED) {
         for (const field of behavior.fields) this.initializeField(thisValue, field);
@@ -719,8 +820,10 @@ export class Evaluator extends SuspendableStatementEvaluator {
       let result: Value;
       const { ctor } = behavior;
       if (ctor) {
-        this.bindParameters(ctor, args);
-        this.instantiate(scope, ctor.scope);
+        this.bindParameters(fn, ctor, args);
+        const bodyScope = this.enterBodyScope(ctor);
+        this.constructorScopes.set(functionFrame, bodyScope);
+        this.instantiate(bodyScope, ctor.scope);
         const completion = ctor.scope.disposes
           ? this.disposing(() => this.statements(ctor.body as Statement[]))
           : this.statements(ctor.body as Statement[]);
@@ -746,7 +849,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     }
   }
 
-  superCall(args: Value[], callRow: number | undefined): JsObject {
+  superCall(args: Value[], callRow: number | undefined, skipsAfterSuper = false): JsObject {
     const { runtime } = this;
     const frame = this.functionFrame();
     const constructing = frame?.constructing;
@@ -775,8 +878,16 @@ export class Evaluator extends SuspendableStatementEvaluator {
     const { behavior } = constructing;
     if (behavior.kind === 'class') {
       for (const field of behavior.fields) this.initializeField(constructed, field);
+      if (!skipsAfterSuper) this.initializeAfterSuper(behavior.node.afterSuper, frame);
     }
     return constructed;
+  }
+
+  private initializeAfterSuper(statements: Statement[] | undefined, frame: FunctionFrame): void {
+    if (!statements) return;
+    const scope = this.constructorScopes.get(frame);
+    assert(scope, 'The constructor has no scope for its initializers');
+    this.inScope(scope, () => this.statements(statements));
   }
 }
 

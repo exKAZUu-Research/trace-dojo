@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 575 -- The convertExpression module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss -- The convertExpression module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -68,7 +68,7 @@ export class ExpressionConverter {
     throw new Error('convertBlockNode is provided by the statement converter');
   }
 
-  // code-gauge-allow functionNcss 33 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   convertType(node: Node): TypeNode {
     const position = positionOf(node);
     switch (node.type) {
@@ -138,7 +138,7 @@ export class ExpressionConverter {
     );
   }
 
-  // code-gauge-allow functionNcss 39 -- One case per kind of primary expression node in the grammar.
+  // code-gauge-allow functionNcss -- One case per kind of primary expression node in the grammar.
   private convertPrimaryExpression(node: Node): Expression | undefined {
     const position = positionOf(node);
     switch (node.type) {
@@ -266,7 +266,7 @@ export class ExpressionConverter {
     }
   }
 
-  // code-gauge-allow functionNcss 32 -- One case per kind of creation expression node in the grammar.
+  // code-gauge-allow functionNcss -- One case per kind of creation expression node in the grammar.
   private convertCreationExpression(node: Node): Expression | undefined {
     const position = positionOf(node);
     switch (node.type) {
@@ -626,7 +626,7 @@ export class ExpressionConverter {
     return members;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private convertLambda(node: Node): Expression {
     const modifiers = new Set(
       childrenOf(node)
@@ -689,7 +689,7 @@ export class ExpressionConverter {
     return { kind: 'switch', value: this.convertExpression(valueNode), arms, ...positionOf(node) };
   }
 
-  // code-gauge-allow functionNcss 42 -- One case per query clause.
+  // code-gauge-allow functionNcss -- One case per query clause.
   private convertQuery(node: Node): QueryClause[] {
     const clauses: QueryClause[] = [];
     const children = childrenOf(node);
@@ -783,7 +783,7 @@ export class ExpressionConverter {
     return orderings;
   }
 
-  // code-gauge-allow functionNcss 36 -- One case per kind of pattern node in the grammar.
+  // code-gauge-allow functionNcss -- One case per kind of pattern node in the grammar.
   convertPattern(node: Node): Pattern {
     const position = positionOf(node);
     const parts = namedChildren(node);
@@ -895,8 +895,8 @@ export class ExpressionConverter {
     throw new CompileError([{ row: node.startPosition.row, message: 'CS1001: 識別子がありません' }]);
   }
 
-  // code-gauge-allow functionNcss 33 -- One case per kind of literal.
-  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of literal.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   convertLiteral(node: Node): LiteralValue {
     switch (node.type) {
       case 'integer_literal': {

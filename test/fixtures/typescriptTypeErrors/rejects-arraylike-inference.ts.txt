@@ -1,0 +1,10 @@
+function first<T>(value:ArrayLike<T>):T {return value[0];}
+first({0:'hi',length:1}).toFixed();
+Array.from({0:3,length:1},value=>value.toUpperCase());
+first({length:1}).toFixed();
+const mixed = Array.from({0:3,1:'hi',length:2});
+mixed[0].toFixed();
+first(3);
+interface MissingIndex {0:number;length:number}
+const invalid:MissingIndex={0:3,length:1};
+first(invalid);

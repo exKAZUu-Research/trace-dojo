@@ -1,0 +1,68 @@
+function takeText(a: string, b: number) { console.log(a, b); }
+function generic<T>(a: string, b: T) { console.log(a, b); }
+let plain: string | number = "plain";
+takeText(plain, plain = 1);
+let inferred: string | number = "inferred";
+generic(inferred, inferred = 2);
+let immediate: string | number = "immediate";
+((a: string, b: number) => console.log(a, b))(immediate, immediate = 3);
+let spread: string | number = "spread";
+takeText(spread.toUpperCase(), ...([spread = 4] as [number]));
+let deleted: { p?: number } | string;
+let deleteSelector: { p?: number } | string = { p: 1 };
+delete (deleted = deleteSelector)[deleteSelector = "p"];
+console.log(deleted.p);
+type Method = { label: string; m(this: Method): void };
+let receiver: Method | string;
+let selected: Method | string = { label: "method", m() { console.log(this.label); } };
+(receiver = selected)[selected = "m"]();
+receiver.m();
+function values(message: string): number[] { console.log(message); return []; }
+let index: string | number = "indexed";
+values(index.toUpperCase())[index = 5] = 1;
+console.log(index.toFixed(1));
+let body: string | number = 0;
+console.log(((ignored) => body.toUpperCase())(body = "after"));
+((ignored) => { body = 0; })(body = "new");
+console.log(body.toFixed(1));
+let spreadState: string | number = "before";
+console.log(((first, second) => second.toFixed(1))(...([spreadState = 3] as [number]), spreadState));
+spreadState = 4;
+console.log(((first, second) => second.toUpperCase())(...([spreadState = "after"] as [string]), spreadState));
+let compound: string | number = 0;
+const valuesToWrite = [0];
+valuesToWrite[compound = 0] += (compound = "numeric").length;
+console.log(compound.toUpperCase(), valuesToWrite[0]);
+
+let logical: string | number = 0;
+const logicalTargets = [0];
+logicalTargets[logical = 0] ||= (logical = "logical").length;
+if (typeof logical === "string") console.log(logical.toUpperCase(), logicalTargets[0]);
+
+let update: string | number = "before";
+const updateTargets = [1];
+updateTargets[update = 0]++;
+console.log(update.toFixed(1), updateTargets[0]);
+
+let savedKey: string | number = "before";
+const patternValues = [0];
+[patternValues[savedKey = 0]] = [(savedKey = "last").length];
+if (typeof savedKey === "string") console.log(savedKey.toUpperCase());
+console.log(patternValues[0], savedKey);
+
+function pickValue<T>(count: number, value: T): T { return value; }
+let changingTuple: [number] | [string] = ["initial"];
+console.log(pickValue((changingTuple = [2]).length, ...changingTuple).toFixed(1));
+console.log(pickValue((changingTuple = ["string"]).length, ...changingTuple).toUpperCase());
+
+function collectPair<T>(count: number, first: T, second: T): T[] { return [first, second]; }
+let changingArity: [number] | [string, string] = [0];
+console.log(collectPair((changingArity = ["a", "b"]).length, ...changingArity));
+
+function saveTuple<T extends unknown[]>(count: number, ...values: T): T { return values; }
+let beforeRest: [number] | [string, string] = [1];
+const inferredRest = saveTuple((beforeRest = ["a", "b"]).length, ...beforeRest);
+console.log(inferredRest[1].toUpperCase());
+
+let beforePlain: string | number = "text";
+console.log(pickValue((beforePlain = 3).toFixed().length, beforePlain).toFixed(1));

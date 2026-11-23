@@ -1,0 +1,33 @@
+Attempt to assign property "x" on resource
+Attempt to modify property "x" on resource
+Attempt to modify property "x" on resource
+Attempt to modify property "x" on resource
+Attempt to assign property "x" on resource
+bool(false)
+string(6) "absent"
+
+Warning: Attempt to read property "x" on resource in /main.php on line 9
+NULL
+Call to a member function f() on resource
+Attempt to assign property "x" on resource
+Attempt to modify property "x" on resource
+Attempt to modify property "x" on resource
+Attempt to modify property "x" on resource
+Attempt to assign property "x" on resource
+bool(false)
+string(6) "absent"
+
+Warning: Attempt to read property "x" on resource in /main.php on line 9
+NULL
+Call to a member function f() on resource
+Attempt to assign property "x" on resource
+Attempt to modify property "x" on resource
+Attempt to modify property "x" on resource
+Attempt to modify property "x" on resource
+Attempt to assign property "x" on resource
+bool(false)
+string(6) "absent"
+
+Warning: Attempt to read property "x" on resource in /main.php on line 9
+NULL
+Call to a member function f() on resource

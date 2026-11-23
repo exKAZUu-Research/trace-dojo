@@ -1,0 +1,18 @@
+const f = () => 1;
+if (Math.abs(1) > 0) { f.tag = "a"; } else { throw new Error("x"); }
+console.log(f.tag);
+const g = () => 2;
+switch (Math.abs(1)) { case 1: g.tag = "a"; break; default: g.tag = "b"; }
+console.log(g.tag);
+const h = () => 3;
+do { h.tag = "d"; } while (false);
+console.log(h.tag);
+const k = () => 4;
+switch (Math.abs(1)) { case 1: k.tag = "a"; break; case 2: break; default: k.tag = "b"; }
+console.log(k.tag);
+const m = () => 5;
+switch (Math.abs(1)) { case 1: m.tag = "a"; break; }
+console.log(m.tag);
+const n = () => 6;
+switch (Math.abs(1)) { case 1: case 2: n.tag = "a"; break; default: throw new Error("y"); }
+console.log(n.tag);

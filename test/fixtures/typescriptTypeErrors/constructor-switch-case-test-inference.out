@@ -1,0 +1,2 @@
+(2,3): error TS7008: Member 'value' implicitly has an 'any' type.
+(11,3): error TS7008: Member 'value' implicitly has an 'any' type.

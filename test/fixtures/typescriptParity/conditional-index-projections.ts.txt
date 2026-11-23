@@ -1,0 +1,15 @@
+type NestedValue<T, K extends keyof T> =
+  T[K] extends {value: {text: string}} ? T[K]['value']['text'] : never;
+type Selected<V, K extends keyof V, T, P extends keyof T> =
+  T[P] extends {selected: keyof V[K]} ? V[K][T[P]['selected']] : never;
+type Three<T, K extends keyof T> =
+  T[K] extends {a: {b: {c: string}}} ? T[K]['a']['b']['c'] : never;
+type ArrayItem<T, K extends keyof T> =
+  T[K] extends {value: {text: string}[]} ? T[K]['value'][number]['text'] : never;
+type Optional<T, K extends keyof T> =
+  T[K] extends {value: {text: string} | undefined} ? NonNullable<T[K]['value']>['text'] : never;
+type Branch<N, T, K extends keyof T> =
+  T[K] extends {value: {text: string}} ? (N extends true ? T[K]['value'] : {text: string})['text'] : never;
+const value: NestedValue<{a: {value: {text: string}}}, 'a'> = 'ok';
+const selected: Selected<{a: {name: string}}, 'a', {p: {selected: 'name'}}, 'p'> = 'selected';
+console.log(value, selected);

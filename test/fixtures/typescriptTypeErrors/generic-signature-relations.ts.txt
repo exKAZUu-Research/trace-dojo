@@ -1,0 +1,7 @@
+function invalidForward<A extends readonly unknown[]>(args: A): [...A] { return args; }
+function reverse<A extends unknown[]>(args: readonly [...A]): A { return args; }
+function id<T>(x: T): T { return x; }
+const wrong: (x: number) => string = id;
+function limited<T extends string>(): T[] { return []; }
+const result: () => number[] = limited;
+function unrelated<A extends unknown[], B extends unknown[]>(args: [...A]): B { return args; }

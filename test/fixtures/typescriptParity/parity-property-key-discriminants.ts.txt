@@ -1,0 +1,64 @@
+const key = Symbol('key');
+function inspectObject(value: object) {
+  if (key in value) console.log(value[key]);
+}
+function inspectSymbol(value: {[key]: number} | {other: string}) {
+  if (key in value) console.log(value[key].toFixed(1));
+  else console.log(value.other.toUpperCase());
+}
+function inspectOptional(value: {[key]?: number} | {other: string}) {
+  if (key in value && value[key] !== undefined) console.log(value[key].toFixed(1));
+}
+type Result = {kind: 'ok'; value: string} | {kind: 'error'; value: Error};
+const kind = 'kind';
+function brackets(value: Result) {
+  if (value['kind'] === 'ok') console.log(value.value.toUpperCase());
+  else console.log(value.value.message);
+  if (value[kind] !== 'error') console.log(value.value.toUpperCase());
+  switch (value['kind']) {
+    case 'ok': console.log(value.value.toLowerCase()); break;
+    case 'error': console.log(value.value.message); break;
+  }
+}
+const zero = 0;
+function tuple(value: ['ok', string] | ['error', Error]) {
+  if (value[0] === 'ok') console.log(value[1].toUpperCase());
+  if (value[zero] === 'error') console.log(value[1].message);
+}
+type Combined = {id: number} & ({kind: 'ok'; value: string} | {kind: 'error'; value: Error});
+function combined(value: Combined) {
+  if (value.kind === 'ok') console.log(value.id, value.value.toUpperCase());
+  else console.log(value.value.message);
+}
+type Separate = ({kind: 'ok'} & {value: string}) | ({kind: 'error'} & {value: Error});
+function separate(value: Separate) {
+  if (value['kind'] === 'ok') console.log(value.value.toUpperCase());
+}
+type SymbolTagged = ({[key]: 'ok'} & {value: string}) | ({[key]: 'error'} & {value: Error});
+function symbolTagged(value: SymbolTagged) {
+  if (value[key] === 'ok') console.log(value.value.toUpperCase());
+}
+inspectObject({[key]: 3});
+inspectSymbol({[key]: 2});
+inspectSymbol({other: 'other'});
+inspectOptional({[key]: 4});
+brackets({kind: 'ok', value: 'hello'});
+tuple(['ok', 'tuple']);
+tuple(['error', new Error('bad')]);
+combined({id: 1, kind: 'ok', value: 'combined'});
+separate({kind: 'ok', value: 'separate'});
+symbolTagged({[key]: 'ok', value: 'symbol'});
+
+function indexed(value: {[k: symbol]: number} | {other: string}) {
+  if(key in value) console.log(value[key].toFixed(1));
+}
+indexed({[key]: 5});
+function optionalReceiver(value: Result | undefined) {
+  if (value?.['kind'] === 'ok') console.log(value.value.toUpperCase());
+}
+optionalReceiver({kind: 'ok', value: 'optional'});
+function templateKeys(value: Result) {
+  if (value[`kind`] === 'ok') console.log(value.value.toUpperCase());
+  if (value[`ki\u006ed`] === 'ok') console.log(value.value.toLowerCase());
+}
+templateKeys({kind: 'ok', value: 'template'});

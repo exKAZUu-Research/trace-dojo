@@ -1,0 +1,3 @@
+(10,1): error TS2322: Type 'string' is not assignable to type 'number'.
+(13,3): error TS2540: Cannot assign to 'x' because it is a read-only property.
+(15,3): error TS2540: Cannot assign to 'x' because it is a read-only property.

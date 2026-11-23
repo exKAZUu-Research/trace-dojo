@@ -1,0 +1,23 @@
+class Gauge {
+  private measured = 'low';
+  get value() { return this.measured; }
+  private set value(level: string) { this.measured = level; }
+  update(level: string) { this.value = level; }
+}
+class RecordValue {
+  get value(): number { return 2; }
+  set value(_value: string) { return; }
+}
+class Initialized {
+  value;
+  constructor() {
+    do { this.value = 4; } while (false);
+  }
+}
+const gauge = new Gauge();
+gauge.update('high');
+console.log(gauge.value, new RecordValue().value, new Initialized().value);
+function printOptions(options: { color?: string }, value: number | undefined, backup: number) {
+  console.log({ color: 'red', ...options }.color, (value ?? backup) || 3, (value || backup) ?? 2);
+}
+printOptions({}, undefined, 1);

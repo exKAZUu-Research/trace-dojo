@@ -1,0 +1,46 @@
+function total(price = discount()) {
+  function discount() {
+    return 10;
+  }
+  return price;
+}
+function area(size: Side) {
+  type Side = number;
+  return size * size;
+}
+function scaled(value = factor) {
+  var factor = 2;
+  return value * factor;
+}
+function greet(name = fallback) {
+  const fallback = "guest";
+  return name;
+}
+interface Item {
+  id: number;
+}
+function show(item: Item) {
+  interface Item {
+    name: string;
+  }
+  return item.id;
+}
+function delayed(read = () => later) {
+  let later = 1;
+  return read();
+}
+function twice(count: number) {
+  function count() {}
+  return count;
+}
+function retyped(count: number) {
+  var count = "many";
+  return count;
+}
+const later = (step = () => inner()) => {
+  function inner() {
+    return 1;
+  }
+  return step();
+};
+console.log(total, area, scaled, greet, show, delayed, twice, retyped, later);

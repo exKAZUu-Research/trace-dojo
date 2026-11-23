@@ -18,7 +18,7 @@ export class FunctionScope {
   /** How many finally blocks enclose the statement being bound, which control may not leave. */
   finallyDepth = 0;
 
-  // code-gauge-allow functionParameterCount 7 -- The values that the operation needs, which share no object.
+  // code-gauge-allow functionParameterCount -- The values that the operation needs, which share no object.
   constructor(
     readonly method: MethodSymbol,
     readonly outer: FunctionScope | undefined,

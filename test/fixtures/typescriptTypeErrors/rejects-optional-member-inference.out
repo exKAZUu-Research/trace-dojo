@@ -1,0 +1,8 @@
+(3,7): error TS2322: Type '(number | undefined)[]' is not assignable to type 'number[]'.
+  Type 'number | undefined' is not assignable to type 'number'.
+    Type 'undefined' is not assignable to type 'number'.
+(6,18): error TS2345: Argument of type '{ value: number; kind?: string | undefined; extra: boolean; }' is not assignable to parameter of type 'number | { value: number; kind: string; }'.
+  Type '{ value: number; kind?: string | undefined; extra: boolean; }' is not assignable to type '{ value: number; kind: string; }'.
+    Types of property 'kind' are incompatible.
+      Type 'string | undefined' is not assignable to type 'string'.
+        Type 'undefined' is not assignable to type 'string'.

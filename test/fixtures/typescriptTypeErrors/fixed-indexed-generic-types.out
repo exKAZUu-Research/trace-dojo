@@ -1,0 +1,5 @@
+(2,29): error TS2339: Property 'missing' does not exist on type 'Box<T>'.
+(3,25): error TS2493: Tuple type '[T, T]' of length '2' has no element at index '2'.
+(4,49): error TS2322: Type 'T | undefined' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'T | undefined'.
+(5,44): error TS2322: Type 'T' is not assignable to type 'string'.

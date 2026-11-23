@@ -1,0 +1,6 @@
+function f(s?: string): number {
+  s ||= "x";
+  s ??= "y";
+  return s.length;
+}
+console.log(f());

@@ -1,0 +1,7 @@
+(1,5): error TS2300: Duplicate identifier 'firstConflict'.
+(2,10): error TS2300: Duplicate identifier 'firstConflict'.
+(3,10): error TS2300: Duplicate identifier 'secondConflict'.
+(4,5): error TS2300: Duplicate identifier 'secondConflict'.
+(5,5): error TS2300: Duplicate identifier 'secondConflict'.
+(6,5): error TS2300: Duplicate identifier 'uninitializedConflict'.
+(7,10): error TS2300: Duplicate identifier 'uninitializedConflict'.

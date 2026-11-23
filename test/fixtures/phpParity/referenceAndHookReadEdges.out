@@ -1,0 +1,57 @@
+bool(false)
+string(5) "Array"
+bool(false)
+string(5) "Array"
+bool(false)
+string(5) "Array"
+string(10) "61efbfbd62"
+object(stdClass)#1 (1) {
+  ["a�b"]=>
+  int(1)
+}
+int(9)
+int(8)
+array(2) {
+  ["b"]=>
+  int(9)
+  ["c"]=>
+  int(8)
+}
+unset
+int(7)
+int(7)
+[] operator not supported for strings
+array(1) {
+  ["k"]=>
+  &int(3)
+}
+array(1) {
+  ["k"]=>
+  &int(3)
+}
+array(1) {
+  ["k"]=>
+  &int(3)
+}
+string(2) "ff"
+int(0)
+string(2) "ff"
+int(0)
+
+Deprecated: Return type of It::current() should either be compatible with Iterator::current(): mixed, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 12
+
+Deprecated: Return type of It::next() should either be compatible with Iterator::next(): void, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 12
+
+Deprecated: Return type of It::key() should either be compatible with Iterator::key(): mixed, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 12
+
+Deprecated: Return type of It::valid() should either be compatible with Iterator::valid(): bool, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 12
+
+Deprecated: Return type of It::rewind() should either be compatible with Iterator::rewind(): void, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 12
+1.0000000000000E+14 1.0000000000000e+14
+1.2345678901230E+14 1.2345678901230e+14
+1.0E+15 1.0e+15
+1.0E+14 1.0e+14
+1.234567890124E+14 1.234567890124e+14
+1.3E+14 1.3e+14
+-1.0E+15 -1.0e+15
+unionType(): Argument #1 ($x) must be of type Traversable|F|array|int|null, stdClass given, called in /main.php on line 15

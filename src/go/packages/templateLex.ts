@@ -345,7 +345,7 @@ function lexRightDelim(l: Lexer): StateFn {
   return l.emitItem(item);
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- A transcription of Go's lexInsideAction, one case per character class.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of Go's lexInsideAction, one case per character class.
 function lexInsideAction(l: Lexer): StateFn {
   const [delim] = l.atRightDelim();
   if (delim) {
@@ -423,7 +423,7 @@ function lexSpace(l: Lexer): StateFn {
   return l.emit(ITEM_SPACE);
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- A transcription of Go's lexIdentifier.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of Go's lexIdentifier.
 function lexIdentifier(l: Lexer): StateFn {
   for (;;) {
     const r = l.next();

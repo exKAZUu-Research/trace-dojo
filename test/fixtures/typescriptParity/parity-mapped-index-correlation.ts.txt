@@ -1,0 +1,14 @@
+type StringKeys<T> = { [K in keyof T]: T[K] extends string ? K : never }[keyof T];
+type CallKeys<T> = { [K in keyof T]: T[K] extends () => void ? K : never }[keyof T];
+type RequiredValues<T> = { [K in keyof T]-?: T[K] }[keyof T];
+type Slice<T, K extends keyof T> = { [P in keyof T]: T[P] extends string ? P : never }[K];
+type Concrete<T> = { [K in 'a' | 'b']: K extends 'a' ? T : boolean }['a' | 'b'];
+const text: StringKeys<{ name: string; age: number }> = 'name';
+const call: CallKeys<{ count: number; f(): void }> = 'f';
+const absent: StringKeys<{ label?: string; name: string }> = undefined;
+const required: RequiredValues<{ count?: number; name: string }> = 2;
+const filtered: Slice<{ name: string; age: number; city: string }, 'age' | 'city'> = 'city';
+const numeric: Concrete<number> = 3;
+const empty: Partial<unknown> = 4;
+const nullablePrimitive: Readonly<number | null> = null;
+console.log(text, call, absent, required, filtered, numeric, empty, nullablePrimitive);

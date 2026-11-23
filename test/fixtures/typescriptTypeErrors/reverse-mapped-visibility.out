@@ -1,0 +1,6 @@
+(8,17): error TS2345: Argument of type 'PrivateBoxes' is not assignable to parameter of type '{ x: { value: number; }; y: { value: string; }; }'.
+  Property 'y' is private in type 'PrivateBoxes' but not in type '{ x: { value: number; }; y: { value: string; }; }'.
+(9,17): error TS2345: Argument of type 'ProtectedBoxes' is not assignable to parameter of type '{ x: { value: number; }; y: { value: string; }; }'.
+  Property 'y' is protected in type 'ProtectedBoxes' but public in type '{ x: { value: number; }; y: { value: string; }; }'.
+(12,7): error TS2322: Type '"#y"' is not assignable to type '"x" | "\uFFFD#1@#y"'.
+(14,8): error TS2540: Cannot assign to 'y' because it is a read-only property.

@@ -1,0 +1,20 @@
+function identity<const T>(value: T): T { return value; }
+const object = identity({ kind: 'a', nested: { count: 1 }, items: ['a', 'b'] });
+const kind: 'a' = object.kind;
+const count: 1 = object.nested.count;
+const tuple: readonly ['a', 'b'] = object.items;
+const direct: readonly ['a', 'b'] = identity(['a', 'b']);
+function mutable<const T extends string[]>(value: T): T { return value; }
+const fallback = mutable(['a', 'b']);
+const mutableTuple: ['a', 'b'] = fallback;
+fallback.push('a');
+function readonlyArray<const T extends readonly string[]>(value: T): T { return value; }
+const constrained: readonly ['a', 'b'] = readonlyArray(['a', 'b']);
+const input = { kind: 'a' };
+const existing: string = identity(input).kind;
+function ordinary<T>(value: T): T { return value; }
+ordinary({ kind: 'a' }).kind = 'b';
+console.log(kind, count, tuple.join(','), direct.join(','), fallback.join(','), constrained.join(','), existing);
+function rest<const T extends unknown[]>(...args: T): T { return args; }
+const restResult: [{readonly kind: 'a'}, readonly ['b']] = rest({kind: 'a'}, ['b']);
+console.log(restResult[0].kind, restResult[1][0]);
