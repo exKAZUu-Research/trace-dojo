@@ -18,6 +18,7 @@ import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } 
 import { introSort } from './sort';
 import {
   chargeElements,
+  copyToArray,
   evaluatorOf,
   fail,
   failIndex,
@@ -972,10 +973,8 @@ for (const name of ['KeyCollection', 'ValueCollection']) {
       for (const item of view.enumerate()) if (equality.equals(item, value as Value)) return true;
       return false;
     },
-    [`${prefix}.CopyTo`]: (_call, receiver, [array, index]) => {
-      let position = index as number;
-      for (const item of ((receiver as CsObject).native as ViewState).enumerate())
-        (array as CsArray).values[position++] = copyValue(item);
+    [`${prefix}.CopyTo`]: (call, receiver, [array, index]) => {
+      copyToArray(call, [...((receiver as CsObject).native as ViewState).enumerate()], array as Value, index as number);
       return;
     },
     [`${prefix}.GetEnumerator`]: (call, receiver) =>
@@ -1078,9 +1077,8 @@ defineNatives({
     return;
   },
   [`${HASH_SET}.Contains`]: (_call, receiver, [value]) => hashOfState(receiver).find(value as Value) >= 0,
-  [`${HASH_SET}.CopyTo`]: (_call, receiver, [array, index = 0]) => {
-    let position = index as number;
-    for (const item of hashOfState(receiver).enumerate()) (array as CsArray).values[position++] = copyValue(item);
+  [`${HASH_SET}.CopyTo`]: (call, receiver, [array, index = 0]) => {
+    copyToArray(call, [...hashOfState(receiver).enumerate()], array as Value, index as number);
     return;
   },
   [`${HASH_SET}.ExceptWith`]: (call, receiver, [other]) => {

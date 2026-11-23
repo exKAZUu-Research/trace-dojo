@@ -122,6 +122,20 @@ export function newArray(call: NativeCall, element: Type, values: Value[]): CsAr
   return newArrayOf(call, element, values.length, (index) => values[index]);
 }
 
+/** `ICollection<T>.CopyTo` of a collection's elements into an array from an index, checked as .NET's collections do. */
+export function copyToArray(call: NativeCall, items: Value[], array: Value, index: number): void {
+  if (array === undefined) failNull('array');
+  if (index < 0) failNegative(call, 'arrayIndex', index);
+  const target = (array as CsArray).values;
+  if (index > target.length || target.length - index < items.length)
+    fail(
+      'System.ArgumentException',
+      'Destination array is not long enough to copy all the items in the collection. Check array index and length.'
+    );
+  chargeElements(call, items.length);
+  for (const [offset, item] of items.entries()) target[index + offset] = copyValue(item);
+}
+
 /** Charges the work of a library loop over `count` elements, as iterating a sequence is charged. */
 export function chargeElements(call: NativeCall, count: number): void {
   call.frame.runtime.spend(Math.ceil(count / 16));

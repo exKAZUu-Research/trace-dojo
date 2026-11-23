@@ -3,10 +3,11 @@ import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import type { NativeState } from '../runtime';
 import type { Type } from '../types';
-import { copyValue, type CsArray, CsObject, CsStruct, type Value } from '../values';
+import { CsObject, CsStruct, type Value } from '../values';
 import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { type Comparison, comparisonOf, equalityOf } from './nativesCollections';
 import {
+  copyToArray,
   evaluatorOf,
   fail,
   failNull,
@@ -284,9 +285,8 @@ defineNatives({
     return;
   },
   [`${SORTED_SET}.Contains`]: (_call, receiver, [value]) => sortedOf(receiver).position(value as Value).isFound,
-  [`${SORTED_SET}.CopyTo`]: (_call, receiver, [array, index]) => {
-    for (const [offset, key] of sortedOf(receiver).keys.entries())
-      (array as CsArray).values[(index as number) + offset] = copyValue(key);
+  [`${SORTED_SET}.CopyTo`]: (call, receiver, [array, index]) => {
+    copyToArray(call, sortedOf(receiver).keys, array as Value, index as number);
     return;
   },
   [`${SORTED_SET}.ExceptWith`]: (call, receiver, [other]) => {
@@ -319,9 +319,10 @@ defineNatives({
     return;
   },
   [`${SORTED_SET}.IsSubsetOf`]: (call, receiver, [other]) => {
-    const others = setElements(call, other as Value);
     const state = sortedOf(receiver);
-    return state.keys.every((key) => others.some((item) => state.compare(item, key) === 0));
+    const others = newSorted(call, undefined, state.keyType, undefined);
+    for (const item of setElements(call, other as Value)) others.insert(item, undefined, false);
+    return state.keys.every((key) => others.position(key).isFound);
   },
   [`${SORTED_SET}.IsSupersetOf`]: (call, receiver, [other]) =>
     setElements(call, other as Value).every((item) => sortedOf(receiver).position(item).isFound),
@@ -529,9 +530,8 @@ defineNatives({
   },
   [`${LINKED}.Contains`]: (call, receiver, [value]) =>
     findNode(call, linkedOf(receiver), value as Value, false) !== undefined,
-  [`${LINKED}.CopyTo`]: (_call, receiver, [array, index]) => {
-    let position = index as number;
-    for (const item of linkedOf(receiver).enumerate()) (array as CsArray).values[position++] = copyValue(item);
+  [`${LINKED}.CopyTo`]: (call, receiver, [array, index]) => {
+    copyToArray(call, [...linkedOf(receiver).enumerate()], array as Value, index as number);
     return;
   },
   [`${LINKED}.Find`]: (call, receiver, [value]) => findNode(call, linkedOf(receiver), value as Value, false)?.object,
