@@ -178,7 +178,9 @@ function ticksFromDouble(value: number, unit: bigint, parameter: string): bigint
   if (!Number.isFinite(ticks) || Math.abs(ticks) > 9.223372036854776e18)
     fail('System.OverflowException', 'TimeSpan overflowed because the duration is too long.');
   void parameter;
-  return BigInt(Math.round(ticks));
+  // .NET truncates toward zero: the whole units are exact, and the fraction's ticks drop what is below one tick.
+  const whole = Math.trunc(value);
+  return BigInt(whole) * unit + BigInt(Math.trunc((value - whole) * Number(unit)));
 }
 
 /** TimeSpan's `*` and `/` by a double: .NET rejects a NaN operand, and a NaN or infinite result as an overflow. */
