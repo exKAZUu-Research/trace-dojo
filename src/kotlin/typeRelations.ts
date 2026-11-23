@@ -274,18 +274,32 @@ function nonNullCommonSupertype(types: KType[]): KType {
   return anyType();
 }
 
-/** Function types with the same parameters, whose results merge as `out` arguments do: `(Int) -> Int` and `(Int) -> String` make `(Int) -> Any`. */
+/**
+ * Function types of one arity, whose results merge as `out` arguments do and whose parameters take the most specific
+ * one, as `in` arguments do: `(Any) -> String` and `(String) -> Int` make `(String) -> Any`.
+ */
 function commonFunctionType(types: KType[]): FunctionType | undefined {
   const [first] = types;
   if (first.kind !== 'function') return undefined;
-  const sameShape = (type: KType): type is FunctionType =>
-    type.kind === 'function' &&
-    (type.receiver === undefined) === (first.receiver === undefined) &&
-    (!type.receiver || !first.receiver || isSameType(type.receiver, first.receiver)) &&
-    type.params.length === first.params.length &&
-    type.params.every((param, index) => isSameType(param, first.params[index]));
-  if (!types.every(sameShape)) return undefined;
-  return { ...first, nullable: false, returnType: commonSupertype(types.map((type) => type.returnType)) };
+  const functions = types.filter((type): type is FunctionType => type.kind === 'function');
+  const sameArity = (type: FunctionType): boolean =>
+    (type.receiver === undefined) === (first.receiver === undefined) && type.params.length === first.params.length;
+  if (functions.length < types.length || !functions.every(sameArity)) return undefined;
+  const receiver = first.receiver && mostSpecific(functions.map((type) => type.receiver as KType));
+  const params = first.params.map((_, index) => mostSpecific(functions.map((type) => type.params[index])));
+  if ((first.receiver && !receiver) || params.some((param) => !param)) return undefined;
+  return {
+    kind: 'function',
+    receiver,
+    params: params as KType[],
+    returnType: commonSupertype(functions.map((type) => type.returnType)),
+    nullable: false,
+  };
+}
+
+/** The type among `types` that is a subtype of all the others, if one is. */
+function mostSpecific(types: KType[]): KType | undefined {
+  return types.find((candidate) => types.every((type) => isSubtype(candidate, type)));
 }
 
 function mergeArguments(candidate: ClassType, types: KType[]): ClassType | undefined {
