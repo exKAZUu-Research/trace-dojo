@@ -35,7 +35,6 @@ import { type BoundPlace, type Place } from './expressionCompiler';
 import { caseOf, keyOf } from './flowKeys';
 import { assignedNames, localRefinement, refineLocalType, remainingWrites } from './flowWrites';
 import { valueEquals } from './format';
-import type { IntegerLiteral } from './literals';
 import { isExclusion, OperatorCompiler } from './operatorCompiler';
 import { NUMBER_OPERATOR_NAMES } from './operators';
 import { needsSiblingHint, siblingResultType } from './resultInference';
@@ -1421,7 +1420,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const comparesPrimitives =
       subjectKind !== undefined &&
       (value.integerLiteral !== undefined || this.primitiveOf(nonNull(value.type)) !== undefined);
-    if (keepsIntLiterals && value.integerLiteral && !isLiteralOfKind(value.integerLiteral, subjectKind)) {
+    // Compiled on its own, a literal has the type its suffixes and magnitude give it, as `2147483648` is a Long.
+    if (keepsIntLiterals && value.integerLiteral && this.primitiveOf(value.type) !== subjectKind) {
       this.error(
         row,
         `演算子 == は ${typeToString(resolved(subject.type))} と ${typeToString(resolved(value.type))} には使えません。`
@@ -1741,11 +1741,6 @@ function whenValueTest(
     if (a instanceof Boxed && b instanceof Boxed && comparesPrimitives) return a.value === b.value;
     return valueEquals(frame, a, b);
   };
-}
-
-/** Whether a literal is of an integer kind by its own suffixes, as `6L` is a Long and `6uL` a ULong. */
-function isLiteralOfKind(literal: IntegerLiteral, kind: string): boolean {
-  return literal.isLong && (kind === 'Long' ? !literal.isUnsigned : kind === 'ULong' && literal.isUnsigned);
 }
 
 /** The integer kinds that an integer literal does not convert to among a `when` subject's branches. */
