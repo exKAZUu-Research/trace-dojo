@@ -11,6 +11,7 @@ import {
   copyToArray,
   evaluatorOf,
   fail,
+  failNegative,
   failNull,
   failOutOfRange,
   libraryType,
@@ -691,6 +692,13 @@ const PRIORITY_QUEUE = 'System.Collections.Generic.PriorityQueue`2';
 defineNatives({
   [`${PRIORITY_QUEUE}..ctor()`]: (call, receiver) =>
     setNative(receiver, new HeapState(comparisonOf(call, undefined), typeArgument(call, 0), typeArgument(call, 1))),
+  [`${PRIORITY_QUEUE}..ctor(int)`]: (call, receiver, [capacity]) => {
+    if ((capacity as number) < 0) failNegative(call, 'initialCapacity', capacity as number);
+    return setNative(
+      receiver,
+      new HeapState(comparisonOf(call, undefined), typeArgument(call, 0), typeArgument(call, 1))
+    );
+  },
   [`${PRIORITY_QUEUE}..ctor(IComparer<TPriority>?)`]: (call, receiver, [comparer]) =>
     setNative(
       receiver,

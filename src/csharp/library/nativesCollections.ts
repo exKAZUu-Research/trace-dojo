@@ -877,6 +877,12 @@ const dictionaryNatives: Record<string, NativeMethod> = {
     setNative(receiver, newHashState(call, comparer as Value, typeArgument(call, 0), typeArgument(call, 1))),
   [`${DICTIONARY}..ctor(IDictionary<TKey, TValue>)`]: (call, receiver, [source]) =>
     fillDictionary(call, receiver, source as Value),
+  [`${DICTIONARY}..ctor(int, IEqualityComparer<TKey>?)`]: (call, receiver, [capacity, comparer]) => {
+    if ((capacity as number) < 0) failNegative(call, 'capacity', capacity as number);
+    return setNative(receiver, newHashState(call, comparer as Value, typeArgument(call, 0), typeArgument(call, 1)));
+  },
+  [`${DICTIONARY}..ctor(IDictionary<TKey, TValue>, IEqualityComparer<TKey>?)`]: (call, receiver, [source, comparer]) =>
+    fillDictionary(call, receiver, source as Value, comparer as Value),
   [`${DICTIONARY}..ctor(IEnumerable<KeyValuePair<TKey, TValue>>)`]: (call, receiver, [source]) =>
     fillDictionary(call, receiver, source as Value),
   [`${DICTIONARY}.get_Count`]: (_call, receiver) => hashOfState(receiver).count,
@@ -972,9 +978,9 @@ const dictionaryNatives: Record<string, NativeMethod> = {
 };
 defineNatives(dictionaryNatives);
 
-function fillDictionary(call: NativeCall, receiver: Value, source: Value): Value {
+function fillDictionary(call: NativeCall, receiver: Value, source: Value, comparer: Value = undefined): Value {
   if (source === undefined) failNull('dictionary');
-  const state = newHashState(call, undefined, typeArgument(call, 0), typeArgument(call, 1));
+  const state = newHashState(call, comparer, typeArgument(call, 0), typeArgument(call, 1));
   setNative(receiver, state);
   for (const pair of iterate(call, source, 'collection')) {
     const [key, value] = (pair as CsStruct).fields;
@@ -1131,6 +1137,14 @@ defineNatives({
     setNative(receiver, newHashState(call, undefined, typeArgument(call), undefined)),
   [`${HASH_SET}..ctor(IEnumerable<T>)`]: (call, receiver, [source]) =>
     fillSet(call, receiver, source as Value, undefined),
+  [`${HASH_SET}..ctor(int)`]: (call, receiver, [capacity]) => {
+    if ((capacity as number) < 0) failNegative(call, 'capacity', capacity as number);
+    return setNative(receiver, newHashState(call, undefined, typeArgument(call), undefined));
+  },
+  [`${HASH_SET}..ctor(int, IEqualityComparer<T>?)`]: (call, receiver, [capacity, comparer]) => {
+    if ((capacity as number) < 0) failNegative(call, 'capacity', capacity as number);
+    return setNative(receiver, newHashState(call, comparer as Value, typeArgument(call), undefined));
+  },
   [`${HASH_SET}..ctor(IEqualityComparer<T>?)`]: (call, receiver, [comparer]) =>
     setNative(receiver, newHashState(call, comparer as Value, typeArgument(call), undefined)),
   [`${HASH_SET}..ctor(IEnumerable<T>, IEqualityComparer<T>?)`]: (call, receiver, [source, comparer]) =>

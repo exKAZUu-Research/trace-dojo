@@ -149,6 +149,8 @@ namespace System.Collections.Generic {
     public Dictionary(int capacity);
     public Dictionary(IEqualityComparer<TKey>? comparer);
     public Dictionary(IDictionary<TKey, TValue> dictionary);
+    public Dictionary(int capacity, IEqualityComparer<TKey>? comparer);
+    public Dictionary(IDictionary<TKey, TValue> dictionary, IEqualityComparer<TKey>? comparer);
     public Dictionary(IEnumerable<KeyValuePair<TKey, TValue>> collection);
     public int Count { get; }
     public bool IsReadOnly { get; }
@@ -238,6 +240,8 @@ namespace System.Collections.Generic {
   public class HashSet<T> : ISet<T>, IReadOnlySet<T> {
     public HashSet();
     public HashSet(IEnumerable<T> collection);
+    public HashSet(int capacity);
+    public HashSet(int capacity, IEqualityComparer<T>? comparer);
     public HashSet(IEqualityComparer<T>? comparer);
     public HashSet(IEnumerable<T> collection, IEqualityComparer<T>? comparer);
     public int Count { get; }
@@ -369,6 +373,7 @@ namespace System.Collections.Generic {
   public class PriorityQueue<TElement, TPriority> {
     public PriorityQueue();
     public PriorityQueue(IComparer<TPriority>? comparer);
+    public PriorityQueue(int initialCapacity);
     public int Count { get; }
     public void Clear();
     public TElement Dequeue();
