@@ -35,6 +35,7 @@ import { type BoundPlace, type Place } from './expressionCompiler';
 import { caseOf, keyOf } from './flowKeys';
 import { assignedNames, localRefinement, refineLocalType, remainingWrites } from './flowWrites';
 import { valueEquals } from './format';
+import type { IntegerLiteral } from './literals';
 import { isExclusion, OperatorCompiler } from './operatorCompiler';
 import { NUMBER_OPERATOR_NAMES } from './operators';
 import { needsSiblingHint, siblingResultType } from './resultInference';
@@ -1399,9 +1400,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
     row: number,
     covered: Set<string>
   ): { test: (frame: Frame) => boolean; whenTrue: Map<string, KType>; whenFalse: Map<string, KType> } {
-    // An Int literal does not become a Long, Byte or Short here, as kotlinc rejects `6` among such a subject's branches.
+    // A literal keeps its own type here, as kotlinc rejects `6` among a Long subject's branches and `6u` among a ULong's.
     const subjectKind = this.primitiveOf(nonNull(subject.type));
-    const keepsIntLiterals = subjectKind === 'Long' || subjectKind === 'Byte' || subjectKind === 'Short';
+    const keepsIntLiterals = subjectKind !== undefined && LITERAL_KEEPING_KINDS.has(subjectKind);
     const value = this.compileExpression(
       scope,
       context,
@@ -1420,8 +1421,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const comparesPrimitives =
       subjectKind !== undefined &&
       (value.integerLiteral !== undefined || this.primitiveOf(nonNull(value.type)) !== undefined);
-    const literal = value.integerLiteral;
-    if (keepsIntLiterals && literal && !(subjectKind === 'Long' && literal.isLong)) {
+    if (keepsIntLiterals && value.integerLiteral && !isLiteralOfKind(value.integerLiteral, subjectKind)) {
       this.error(
         row,
         `演算子 == は ${typeToString(resolved(subject.type))} と ${typeToString(resolved(value.type))} には使えません。`
@@ -1742,3 +1742,11 @@ function whenValueTest(
     return valueEquals(frame, a, b);
   };
 }
+
+/** Whether a literal is of an integer kind by its own suffixes, as `6L` is a Long and `6uL` a ULong. */
+function isLiteralOfKind(literal: IntegerLiteral, kind: string): boolean {
+  return literal.isLong && (kind === 'Long' ? !literal.isUnsigned : kind === 'ULong' && literal.isUnsigned);
+}
+
+/** The integer kinds that an integer literal does not convert to among a `when` subject's branches. */
+const LITERAL_KEEPING_KINDS: ReadonlySet<string> = new Set(['Long', 'Byte', 'Short', 'ULong', 'UByte', 'UShort']);
