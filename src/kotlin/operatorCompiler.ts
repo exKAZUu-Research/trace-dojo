@@ -794,11 +794,13 @@ export function isExclusion(key: string | undefined, type: KType): Map<string, K
   return key && actual.kind === 'class' ? excludingCases(key, [`class:${keyOf(actual.cls)}`]) : new Map();
 }
 
+/** The facts that hold on either of two paths: a value narrowed on both is their common supertype, as `Animal` for `Cat` or `Dog`. */
 function intersectNarrowing(a: Map<string, KType>, b: Map<string, KType>): Map<string, KType> {
   const result = new Map<string, KType>();
   for (const [key, type] of a) {
     const other = b.get(key);
-    if (other && isSubtype(type, other) && isSubtype(other, type)) result.set(key, type);
+    if (other)
+      result.set(key, isSubtype(type, other) && isSubtype(other, type) ? type : commonSupertype([type, other]));
   }
   return result;
 }
