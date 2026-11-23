@@ -82,12 +82,22 @@ export function importableExtension(
   for (const [packageName, scope] of packages) {
     const topLevel = [...(scope.functions.get(name) ?? []), ...(scope.properties.get(name) ?? [])];
     if (!defaultImports.includes(packageName) && declares(topLevel)) return packageName;
-    for (const cls of scope.classes.values()) {
-      for (const holder of [cls, cls.companion]) {
-        if (holder?.isObject && declares(holder.members.get(name) ?? []))
-          return holder === cls ? `${packageName}.${cls.name}` : `${packageName}.${cls.name}.Companion`;
-      }
-    }
+    const object = objectDeclaring(scope, name, declares);
+    if (object) return `${packageName}.${object}`;
+  }
+  return undefined;
+}
+
+/** The library object or companion of a package that declares a matching member `name`, as `Duration.Companion`. */
+function objectDeclaring(
+  scope: PackageScope,
+  name: string,
+  declares: (symbols: readonly MemberSymbol[]) => boolean
+): string | undefined {
+  for (const cls of scope.classes.values()) {
+    if (cls.isObject && declares(cls.members.get(name) ?? [])) return cls.name;
+    const { companion } = cls;
+    if (companion && declares(companion.members.get(name) ?? [])) return `${cls.name}.Companion`;
   }
   return undefined;
 }
