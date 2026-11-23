@@ -151,7 +151,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
 
   /** Whether an expression statement records a step: `if`, `when`, `try`, and jumps record none, as Java's do not. */
   private recordsStepOf(expression: Expression): boolean {
-    return !['if', 'when', 'try', 'return', 'throw', 'break', 'continue', 'lambda'].includes(expression.kind);
+    return !['if', 'when', 'try', 'return', 'throw', 'break', 'continue', 'lambda'].includes(
+      unparenthesized(expression).kind
+    );
   }
 
   protected compileStatement(scope: Scope, context: FunctionContext, statement: Statement): Exec {
@@ -1016,7 +1018,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return {
       elementType: this.primitiveType(progression),
       elementRepr: progression,
-      start: (_, value) => {
+      start: (frame, value) => {
+        // An overridden range property read by a superclass initializer is still null.
+        if (value === undefined) return frame.runtime.throwError(frame, 'java.lang.NullPointerException');
         const [first, last, stepValue] = (value as KObject).fields as (number | bigint)[];
         return {
           current: first,
