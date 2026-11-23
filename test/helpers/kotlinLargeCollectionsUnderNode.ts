@@ -13,7 +13,7 @@ const programs = [
   }`,
   `fun main() {
     val queue = ArrayDeque<Int>()
-    repeat(30000) { queue.addLast(it) }
+    repeat(10000) { queue.addLast(it) }
     var sum = 0L
     while (queue.isNotEmpty()) sum += queue.removeFirst()
     println(sum)

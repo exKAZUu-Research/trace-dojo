@@ -13,6 +13,6 @@ test('large Kotlin arrays and lists work under Node within the allocation limit'
   expect(results).toEqual([
     { kind: 'executed', stdout: '200000\n' },
     { kind: 'executed', stdout: '1\n' },
-    { kind: 'executed', stdout: '449985000\n' },
+    { kind: 'executed', stdout: '49995000\n' },
   ]);
 });

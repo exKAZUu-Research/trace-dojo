@@ -696,10 +696,14 @@ function subList(frame: Frame, list: KObject, from: number, to: number): KObject
   return view;
 }
 
+const MAX_SPLICED_ELEMENTS = 1024;
+
 function replaceListRange(values: Value[], from: number, removed: number, added: Value[], size: number): void {
-  // Engines drop the front of an array without copying the rest, which keeps draining a queue linear.
-  if (from === 0 && added.length === 0) {
-    values.splice(0, removed);
+  // V8 moves the elements after a splice with a memmove, where its copyWithin copies one element at a time; spreading
+  // many added elements would exceed the engine's argument limit.
+  if (added.length <= MAX_SPLICED_ELEMENTS) {
+    if (from > values.length) values.length = from;
+    values.splice(from, removed, ...added);
     return;
   }
   const change = added.length - removed;
