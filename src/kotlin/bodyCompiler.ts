@@ -619,11 +619,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         (frame.thisValue as KObject).fields[slot] = evaluate(frame);
       });
     }
-    for (const { symbol: property, index } of entry.parameterProperties) {
+    // Each property the primary constructor declares is set in a step of its own, as Java's `this.x = x;` is.
+    for (const { param, symbol: property, index } of entry.parameterProperties) {
       const slot = property.slot as number;
-      steps.push((frame) => {
+      const store = (frame: Frame): void => {
         (frame.thisValue as KObject).fields[slot] = frame.locals[index] as Value;
-      });
+      };
+      steps.push(this.withStep(param.row, store, false));
     }
     return steps;
   }
