@@ -1056,7 +1056,7 @@ export abstract class MemberBinder extends CallBinder {
     const method =
       group.isBaseAccess && group.receiver ? this.implementationIn(group.receiver.type, declared) : declared;
     const substitution = this.callSubstitution(resolved.candidate, resolved.typeArgs);
-    const returnType = substitute(method.returnType, substitution);
+    const returnType = this.covariantReturn(group, method) ?? substitute(method.returnType, substitution);
     let receiver = method.isStatic ? undefined : group.receiver;
     if (!method.isStatic && !receiver && method.kind !== 'localFunction') {
       this.error(
@@ -1115,6 +1115,18 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** The override of a virtual method that a type or its nearest base declares, for a non-virtual `base` call. */
+  /**
+   * The return type of the most derived override that the receiver's static type has, which a call gets when an
+   * override returns a more derived reference type (C# 9 covariant returns); undefined to use the method's own.
+   */
+  private covariantReturn(group: Extract<NonValue, { kind: 'methodGroup' }>, method: MethodSymbol): Type | undefined {
+    if (!group.receiver || method.isStatic || !(method.isVirtual || method.isOverride)) return undefined;
+    const override = this.implementationIn(group.receiver.type, method);
+    // A generic class's override would need its own type arguments, which introductory programs do not combine with this.
+    if (override === method || override.owner.typeParameters.length > 0) return undefined;
+    return sameType(override.returnType, method.returnType) ? undefined : override.returnType;
+  }
+
   protected implementationIn(type: Type, method: MethodSymbol): MethodSymbol {
     if (!(method.isVirtual || method.isAbstract || method.isOverride)) return method;
     for (const owner of this.searchChain(type)) {

@@ -1413,8 +1413,13 @@ export class DeclarationBinder extends BinderBase {
         return;
       }
       const expectedReturn = substitute(candidate.returnType, substitutionOf(current));
+      // An override may return a type with an implicit reference conversion to the base's return type (C# 9).
       if (
         !sameType(expectedReturn, method.returnType) &&
+        !(
+          isReferenceType(method.returnType) &&
+          this.conversions.isReferenceConvertible(method.returnType, expectedReturn)
+        ) &&
         method.returnType.kind !== 'error' &&
         expectedReturn.kind !== 'error'
       ) {
