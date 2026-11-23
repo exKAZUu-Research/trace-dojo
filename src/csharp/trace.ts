@@ -225,7 +225,6 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
   if (value === undefined) return NOT_SCALAR;
   if (underlying.kind === 'array') {
     if (!(value instanceof CsArray) || !hasScalarElements(underlying)) return NOT_SCALAR;
-    chargeSnapshot?.(NODE_COST * value.values.length);
     return byDimensions(
       value,
       (item) => {
@@ -281,14 +280,19 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
 
 /** An array's elements nested by its dimensions, as a rectangular array `int[2, 3]` shows two rows of three. */
 function byDimensions<T>(array: CsArray, leaf: (item: Value) => T, nest: (items: T[]) => T): T {
+  // The whole shape is charged before any of it is built: every row container, an empty dimension's included, and
+  // every element, so no host array of the snapshot is allocated before its size is paid for.
+  let containers = 0;
+  let rows = 1;
+  for (const length of array.lengths) {
+    containers += rows;
+    rows *= length;
+  }
+  chargeSnapshot?.(NODE_COST * (containers + array.values.length));
   const build = (dimension: number, offset: number): T => {
-    // Each row is a node of its own, which an empty dimension makes without any element to charge.
-    chargeSnapshot?.(NODE_COST);
     const length = array.lengths[dimension];
     if (dimension === array.lengths.length - 1)
       return nest(array.values.slice(offset, offset + length).map((item) => leaf(item)));
-    // The rows are charged before the host array holding them is allocated.
-    chargeSnapshot?.(NODE_COST * length);
     const stride = array.lengths.slice(dimension + 1).reduce((product, size) => product * size, 1);
     return nest(Array.from({ length }, (_unused, index) => build(dimension + 1, offset + index * stride)));
   };

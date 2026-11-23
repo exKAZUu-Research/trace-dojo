@@ -1004,9 +1004,11 @@ export abstract class ExpressionBinder extends MemberBinder {
     );
     const scope = new LocalScope(outer.scope, fn);
     const context: BindContext = { scope, fn };
+    const hasDiscards = node.parameters.filter((other) => other.name === '_').length > 1;
     for (const [index, parameter] of node.parameters.entries()) {
-      if (parameter.name === '_' && node.parameters.filter((other) => other.name === '_').length > 1) continue;
-      this.declareParameterLocal(parameter, parameterTypes[index] ?? ERROR_TYPE, context);
+      // Repeated `_` are discards, which still take their argument's position under a name no code can use.
+      const declared = hasDiscards && parameter.name === '_' ? { ...parameter, name: `\0discard${index}` } : parameter;
+      this.declareParameterLocal(declared, parameterTypes[index] ?? ERROR_TYPE, context);
     }
     return context;
   }
