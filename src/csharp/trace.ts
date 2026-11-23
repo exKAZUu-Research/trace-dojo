@@ -226,11 +226,15 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
   if (underlying.kind === 'array') {
     if (!(value instanceof CsArray) || !hasScalarElements(underlying)) return NOT_SCALAR;
     chargeSnapshot?.(NODE_COST * value.values.length);
-    return value.values.map((item) => {
-      const scalar = scalarOf(item, underlying.element);
-      // oxlint-disable-next-line unicorn/no-null -- The trace format shows C# null as null.
-      return scalar === NOT_SCALAR ? null : scalar;
-    }) as TraceItemVariable[string];
+    return byDimensions(
+      value,
+      (item) => {
+        const scalar = scalarOf(item, underlying.element);
+        // oxlint-disable-next-line unicorn/no-null -- The trace format shows C# null as null.
+        return scalar === NOT_SCALAR ? null : scalar;
+      },
+      (items) => items
+    ) as TraceItemVariable[string];
   }
   if (underlying.kind !== 'named') return NOT_SCALAR;
   if (underlying.symbol.kind === 'enum') return enumText(underlying, value);
@@ -275,6 +279,18 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
   }
 }
 
+/** An array's elements nested by its dimensions, as a rectangular array `int[2, 3]` shows two rows of three. */
+function byDimensions<T>(array: CsArray, leaf: (item: Value) => T, nest: (items: T[]) => T): T {
+  const build = (dimension: number, offset: number): T => {
+    const length = array.lengths[dimension];
+    if (dimension === array.lengths.length - 1)
+      return nest(array.values.slice(offset, offset + length).map((item) => leaf(item)));
+    const stride = array.lengths.slice(dimension + 1).reduce((product, size) => product * size, 1);
+    return nest(Array.from({ length }, (_unused, index) => build(dimension + 1, offset + index * stride)));
+  };
+  return build(0, 0);
+}
+
 function hasScalarElements(type: ArrayType): boolean {
   const element = nullableUnderlying(type.element) ?? type.element;
   if (element.kind === 'array') return hasScalarElements(element);
@@ -314,10 +330,11 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
   seen.add(value);
   try {
     if (value instanceof CsArray) {
-      const entries: Record<string, DisplayNode> = {};
-      for (const [index, item] of value.values.entries())
-        entries[index] = displayNodeOf(item, value.type.element, seen) ?? NULL_NODE;
-      return { kind: 'array', entries };
+      return byDimensions<DisplayNode>(
+        value,
+        (item) => displayNodeOf(item, value.type.element, seen) ?? NULL_NODE,
+        (items) => ({ kind: 'array', entries: Object.fromEntries(items.entries()) })
+      );
     }
     if (value instanceof CsBox) return displayNodeOf(value.value, value.type, seen);
     const collection = collectionNodeOf(value, seen);

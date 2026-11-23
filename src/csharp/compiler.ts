@@ -545,7 +545,7 @@ export class Compiler extends StatementBinder {
     const annotations = this.options.trace?.atomicAnnotations;
     if (!annotations) return;
     for (const row of annotations.keys()) {
-      if (!this.claimedAtomicRows.has(row)) this.error(row, 'atomic', misplacedAtomicMessage);
+      if (!this.claimedAtomicRows.has(row)) this.diagnostics.push({ row, message: misplacedAtomicMessage });
     }
   }
 

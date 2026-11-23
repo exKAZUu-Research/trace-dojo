@@ -497,6 +497,7 @@ function groupsOf(
       index.set(hash, bucket);
       groups.push(group);
     }
+    call.frame.runtime.allocateSlots(1);
     group.elements.push(elementOf(item));
   }
   return groups;
