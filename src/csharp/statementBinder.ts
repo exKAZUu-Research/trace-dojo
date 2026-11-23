@@ -399,8 +399,7 @@ export abstract class StatementBinder extends PatternBinder {
   /** Makes a block's names known from its start: local functions to call, and locals that may not be used before their declarations. */
   protected predeclare(statements: Statement[], context: BindContext): void {
     for (const statement of statements) {
-      if (statement.kind === 'localDeclaration')
-        for (const declarator of statement.declarators) context.scope.declaredLater.add(declarator.name);
+      for (const name of namesDeclaredInBlock(statement)) context.scope.declaredLater.add(name);
       if (statement.kind === 'localFunction') this.declareLocalFunction(statement.declaration, context);
     }
   }
@@ -1289,4 +1288,55 @@ function blockOf(statement: BoundStatement, row: number): BoundBlock {
 function isStatementSyntax(node: Expression): boolean {
   if (node.kind === 'conditionalAccess') return isStatementSyntax(node.access);
   return ['invocation', 'new', 'implicitNew', 'increment', 'assign', 'throw'].includes(node.kind);
+}
+
+/**
+ * The names a statement declares in its enclosing block: its declarators and deconstruction, and the `out` variables
+ * and pattern variables of the expressions whose variables C# scopes to that block (an expression statement, a
+ * declaration's initializers, and the expression of an `if`, a `switch`, a `return`, or a `throw`).
+ */
+function namesDeclaredInBlock(statement: Statement): string[] {
+  const names: string[] = [];
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const element of node) visit(element);
+      return;
+    }
+    if (typeof node !== 'object' || node === null) return;
+    const kind = (node as { kind?: unknown }).kind;
+    // A lambda, a query, and a switch expression's arms scope their own variables.
+    if (kind === 'lambda' || kind === 'query') return;
+    if (kind === 'switch' && 'arms' in node && 'value' in node) {
+      visit(node.value);
+      return;
+    }
+    if (kind === 'single' && 'name' in node) names.push((node as { name: string }).name);
+    for (const value of Object.values(node)) visit(value);
+  };
+  switch (statement.kind) {
+    case 'localDeclaration': {
+      for (const declarator of statement.declarators) names.push(declarator.name);
+      visit(statement.declarators.map((declarator) => declarator.initializer));
+      break;
+    }
+    case 'deconstruction': {
+      visit(statement);
+      break;
+    }
+    case 'expression': {
+      visit(statement.expression);
+      break;
+    }
+    case 'if': {
+      visit(statement.condition);
+      break;
+    }
+    case 'switch':
+    case 'return':
+    case 'throw': {
+      visit(statement.value);
+      break;
+    }
+  }
+  return names;
 }
