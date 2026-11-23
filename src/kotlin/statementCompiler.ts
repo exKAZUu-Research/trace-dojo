@@ -24,6 +24,7 @@ import {
   type FunctionContext,
   Handoff,
   isBareCall,
+  isKeyOf,
   type LoopContext,
   type Repr,
   reprOf,
@@ -1722,7 +1723,7 @@ function throughFinally(flow: Flow, afterFinally: Flow, atEntry: Map<string, KTy
   for (const key of assignedKeys) completed.forget(key);
   for (const [key, type] of afterFinally.narrowed) {
     const entered = atEntry.get(key);
-    if (assignedKeys.includes(key)) completed.narrowed.set(key, type);
+    if (assignedKeys.some((assigned) => isKeyOf(key, assigned))) completed.narrowed.set(key, type);
     else if (entered && isSameType(entered, type)) continue;
     else {
       const known = completed.narrowed.get(key);

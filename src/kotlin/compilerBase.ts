@@ -246,11 +246,7 @@ export class Flow {
 
   /** Forgets the smart casts of a stable value, with the cases it was known not to be and those of its properties. */
   forget(key: string): void {
-    this.narrowed.delete(key);
-    for (const narrowedKey of this.narrowed.keys()) {
-      if (narrowedKey.startsWith(`${key}${CASE_SEPARATOR}`) || narrowedKey.startsWith(`${key}.`))
-        this.narrowed.delete(narrowedKey);
-    }
+    for (const narrowedKey of this.narrowed.keys()) if (isKeyOf(narrowedKey, key)) this.narrowed.delete(narrowedKey);
   }
 
   /** Records what a non-null result of the expression shows: it and the receivers of its safe calls are not null. */
@@ -299,6 +295,11 @@ export class Flow {
  * calls it was read through, as `x` and `x.s` of `x?.s?.length` are not. Every condition that implies a non-null
  * value, such as `!= null`, `is T`, `?: return`, `!!` or `isNullOrEmpty()`, applies these facts.
  */
+/** Whether a smart cast's key is about the value of `key`: itself, its properties, or the cases it is known not to be. */
+export function isKeyOf(narrowedKey: string, key: string): boolean {
+  return narrowedKey === key || narrowedKey.startsWith(`${key}.`) || narrowedKey.startsWith(`${key}${CASE_SEPARATOR}`);
+}
+
 export function nonNullFacts(compiled: Compiled): Map<string, KType> {
   const facts = new Map(compiled.whenNonNull);
   if (compiled.stableKey && resolved(compiled.type).nullable) facts.set(compiled.stableKey, nonNull(compiled.type));

@@ -4394,7 +4394,11 @@ fun main() {
   },
   {
     name: 'smart casts from try survive finally unless finally changes them',
-    source: `fun main() {
+    source: `class Box(val text: String?)
+fun main() {
+    var box = Box(null)
+    try { println(0) } finally { box = Box("abc"); requireNotNull(box.text) }
+    println(box.text.length)
     var x: Any = 0
     x = 1
     try { x = "a".repeat(2) } finally { if (x is String) println(x.length) }
@@ -4407,7 +4411,7 @@ fun main() {
     try { y = "hello" } finally { y = 5 }
     println(y + 1)
 }`,
-    stdout: '2\n2\n[2, 3]\n6\n',
+    stdout: '0\n3\n2\n2\n[2, 3]\n6\n',
   },
   {
     name: 'finally sees assignments before a pending jump',
