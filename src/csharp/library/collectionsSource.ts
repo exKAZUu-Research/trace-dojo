@@ -656,6 +656,7 @@ namespace System.Text {
     public StringBuilder Insert(int index, int value);
     public StringBuilder Insert(int index, long value);
     public StringBuilder Insert(int index, object? value);
+    public StringBuilder Insert(int index, char[]? value);
     public StringBuilder Insert(int index, string? value);
     public StringBuilder Insert(int index, string? value, int count);
     public StringBuilder Remove(int startIndex, int length);

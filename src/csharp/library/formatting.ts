@@ -124,7 +124,16 @@ function flagsText(type: NamedType, value: Value): string {
  * space, not the other Unicode spaces such as U+3000, with trailing NUL characters too.
  */
 export function trimNumberText(text: string): string {
-  return text.replace(/^[\t-\r ]+/, '').replace(/[\t-\r \0]+$/, '');
+  // Scanning from both ends keeps a long run of spaces linear, which an unanchored regex retries at every position.
+  let start = 0;
+  let end = text.length;
+  while (start < end && isSpace(text[start], false)) start++;
+  while (end > start && isSpace(text[end - 1], true)) end--;
+  return text.slice(start, end);
+}
+
+function isSpace(char: string, isTrailing: boolean): boolean {
+  return char === ' ' || (char >= '\t' && char <= '\r') || (isTrailing && char === '\0');
 }
 
 /** Parses a floating-point number as `double.Parse` does with the culture's symbols, or returns undefined. */

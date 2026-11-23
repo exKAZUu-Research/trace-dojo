@@ -1223,6 +1223,8 @@ defineNatives({
       specialOf(call.method.parameters[1].type) === 'char'
     ) {
       text = String.fromCodePoint(args[1] as number);
+    } else if (call.method.parameters[1].type.kind === 'array') {
+      text = charsOf(args[1] as Value).join('');
     } else {
       text = textOf(call, args[1] as Value, parameterType(call, 1));
     }
