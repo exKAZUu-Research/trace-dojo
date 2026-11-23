@@ -580,7 +580,7 @@ export type { Eval };
 function enumValuesArray(frame: Frame, cls: ClassSymbol, arrayClass: ClassSymbol): Value {
   const state = frame.runtime.enumEntries.get(cls);
   // The JVM's array of the constants is null until the class has created them all.
-  if (state && !state.entries) return frame.runtime.throwError(frame, 'java.lang.NullPointerException');
+  if (!state?.entries) return frame.runtime.throwError(frame, 'java.lang.NullPointerException');
   const values = state?.values ?? [];
   frame.runtime.allocate(frame, values.length + 1);
   const array = new KObject(arrayClass, 0);
