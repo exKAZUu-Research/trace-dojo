@@ -158,8 +158,6 @@ export class MethodSymbol {
   constructorInitializer: BoundExpression | undefined;
   /** Whether a model program marked the method `// atomic`. */
   isAtomic = false;
-  /** For a local function, the enclosing function whose locals it reads. */
-  enclosing: MethodSymbol | undefined;
   /** For a local function, the captured locals of enclosing functions that it reads. */
   captures: LocalSymbol[] = [];
   /**

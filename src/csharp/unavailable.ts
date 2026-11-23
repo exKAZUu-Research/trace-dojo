@@ -1,4 +1,5 @@
 import { DOTNET_MEMBERS, DOTNET_TYPES } from './library/dotnetNames';
+import { DOTNET_OVERLOADS } from './library/dotnetOverloads';
 
 /** What learners call the .NET features this grader rejects, by the namespace of their types. */
 const FEATURES_BY_NAMESPACE: Record<string, string> = {
@@ -48,6 +49,19 @@ const DOTNET_NAMESPACES = new Set(
 /** Whether .NET has a namespace of a dotted name. */
 export function isDotnetNamespace(name: string): boolean {
   return DOTNET_NAMESPACES.has(name);
+}
+
+/** How many of .NET's overloads of a type's method (or `.ctor`) take a number of arguments. */
+export function dotnetOverloadCount(fullName: string, member: string, argumentCount: number): number {
+  const entry = DOTNET_OVERLOADS[fullName]?.split(';').find((overloads) => overloads.startsWith(`${member}=`));
+  if (!entry) return 0;
+  return entry
+    .slice(member.length + 1)
+    .split(',')
+    .filter((range) => {
+      const [min, max] = range.endsWith('+') ? [Number(range.slice(0, -1)), Infinity] : range.split('-').map(Number);
+      return argumentCount >= min && argumentCount <= max;
+    }).length;
 }
 
 /** Whether .NET's type of a full metadata name has a public member of the name. */

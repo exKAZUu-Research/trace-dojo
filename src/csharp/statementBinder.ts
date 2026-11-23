@@ -1147,7 +1147,6 @@ export abstract class StatementBinder extends PatternBinder {
         this.error(declaration.row, 'CS0106', `修飾子 '${modifier}' がこの項目に対して有効ではありません`);
     }
     method.isStatic = declaration.modifiers.set.has('static') || context.fn.isStatic;
-    method.enclosing = context.fn.method;
     method.row = declaration.row;
     method.declaration = declaration;
     method.typeParameters = declaration.typeParameters.map(

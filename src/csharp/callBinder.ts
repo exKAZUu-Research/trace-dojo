@@ -8,6 +8,7 @@ import {
   baseTypeOf,
   displayMethod,
   displayType,
+  displayTypeSymbol,
   ERROR_TYPE,
   isReferenceType,
   type MethodSymbol,
@@ -21,6 +22,7 @@ import {
   type Type,
   type TypeParameterSymbol,
 } from './types';
+import { dotnetOverloadCount } from './unavailable';
 
 /** An argument as written, bound to its natural type or left unbound until its parameter's type is known. */
 export interface ArgumentInfo {
@@ -873,6 +875,25 @@ export abstract class CallBinder extends OperatorBinder {
 
   // code-gauge-allow functionCognitiveComplexity -- Roslyn reports a different error for each way a call fails.
   // code-gauge-allow functionNcss -- Each branch handles one case of the C# rule that the function applies.
+  /**
+   * Reports a call of a library method that no declared overload takes as unavailable, rather than as a wrong call,
+   * when .NET has more overloads of that many arguments than the library declares, as for `new HashSet<int>(100)`.
+   */
+  private rejectUnavailableOverload(
+    candidates: MethodCandidate[],
+    argumentCount: number,
+    declaredCount: number,
+    row: number
+  ): void {
+    const method = candidates[0]?.method;
+    if (!method?.owner.isLibrary || method.kind === 'operator') return;
+    const isConstructor = method.kind === 'constructor';
+    const name = isConstructor ? '.ctor' : method.name;
+    if (dotnetOverloadCount(method.owner.fullName, name, argumentCount) <= declaredCount) return;
+    const owner = displayTypeSymbol(method.owner);
+    this.unsupported(row, isConstructor ? `${owner} のこのコンストラクター` : `${owner}.${name} のこのオーバーロード`);
+  }
+
   private reportInapplicable(
     candidates: MethodCandidate[],
     args: ArgumentInfo[],
@@ -886,6 +907,7 @@ export abstract class CallBinder extends OperatorBinder {
         this.mapArguments(candidate.method, args, false) !== undefined ||
         (candidate.method.parameters.at(-1)?.isParams && this.mapArguments(candidate.method, args, true))
     );
+    this.rejectUnavailableOverload(candidates, args.length, byArity.length, row);
     if (byArity.length === 0) {
       this.reportArityMismatch(candidates, args, row, description);
       return;
