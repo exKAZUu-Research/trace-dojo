@@ -1071,7 +1071,9 @@ export class Evaluator extends StatementExecutor {
     return new CsObject(type, fields);
   }
 
-  private cloneObject(source: CsObject): CsObject {
+  /** A shallow copy of an object, as `with` and `MemberwiseClone` make, charged as an allocation like `new`. */
+  cloneObject(source: CsObject): CsObject {
+    this.runtime.allocateSlots(source.fields.length + 1);
     const copy = new CsObject(
       source.type,
       source.fields.map((field) => copyValue(field))

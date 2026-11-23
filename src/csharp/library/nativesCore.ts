@@ -132,15 +132,7 @@ defineNatives({
     if (a === undefined || b === undefined) return false;
     return valuesEqual(evaluatorOf(call), a as Value, b as Value, call.frame);
   },
-  'System.Object.MemberwiseClone': (_call, receiver) => {
-    const object = receiver as CsObject;
-    const copy = new CsObject(
-      object.type,
-      object.fields.map((field) => copyValue(field))
-    );
-    copy.native = object.native;
-    return copy;
-  },
+  'System.Object.MemberwiseClone': (call, receiver) => evaluatorOf(call).cloneObject(receiver as CsObject),
   // A call through `object` passes the struct in its box, since ValueType is a class.
   // An enum reaches it in a box, which compares as Object.Equals does a boxed value.
   'System.ValueType.Equals': (call, receiver, [other]) => {
