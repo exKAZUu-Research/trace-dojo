@@ -185,7 +185,7 @@ function splitParts(
     start = index;
   }
   // .NET skips the entries the options remove before it takes the rest as the last part.
-  while (removeEmpty && parts.length === count - 1) {
+  while (removeEmpty && count > 1 && parts.length === count - 1) {
     let next = start;
     while (next < text.length && separatorLengthAt(next) === 0) next++;
     if (next >= text.length) break;
