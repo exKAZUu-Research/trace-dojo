@@ -457,8 +457,13 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       this.error(entry.decl.row, 'value class には、プロパティを1つだけ持つコンストラクタが要ります。');
     if (stored.param.binding === 'var') this.error(stored.param.row, 'value class のプロパティは val にしてください。');
     for (const member of entry.decl.members) {
-      if (member.kind === 'property' && (member.initializer || member.delegate))
-        this.error(member.row, 'value class には、値を保持するプロパティを追加できません。');
+      // A property without a getter, or with an initializer or delegate, stores a value of its own.
+      const isStored =
+        member.kind === 'property' &&
+        !member.receiver &&
+        !member.modifiers.keywords.has('abstract') &&
+        (!member.getter || member.initializer !== undefined || member.delegate !== undefined);
+      if (isStored) this.error(member.row, 'value class には、値を保持するプロパティを追加できません。');
     }
   }
 
