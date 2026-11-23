@@ -4405,9 +4405,9 @@ fun main() {
     println("$counts $total \${counts.getOrPut("b") { 0 } + 1L}")
     println(scores.map { if (it > 1) it.toLong() else 0 })
     val fallback: Long = counts.getOrElse("z") { if (scores.size > 1) 5 else 0 }
-    println(fallback)
+    println(fallback * 3000000000)
 }`,
-    stdout: '2\n10\n6\n{a=1} 1 1\n[0, 2, 3]\n5\n',
+    stdout: '2\n10\n6\n{a=1} 1 1\n[0, 2, 3]\n15000000000\n',
   },
   {
     name: 'fun-interface constructors take their type arguments from the call or the expected type',
