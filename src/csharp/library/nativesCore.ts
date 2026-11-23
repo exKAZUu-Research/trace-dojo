@@ -62,6 +62,7 @@ import {
   arrayValues,
   evaluatorOf,
   fail,
+  failNegative,
   failNull,
   failOutOfRange,
   libraryType,
@@ -1119,6 +1120,14 @@ function writeText(call: NativeCall, args: Value[]): string {
   if (parameters[0].type.kind === 'array' && parameters.length === 3) {
     const buffer = args[0] as CsArray;
     const [index, count] = [args[1] as number, args[2] as number];
+    if (buffer === undefined) failNull('buffer');
+    if (index < 0) failNegative(call, 'index', index);
+    if (count < 0) failNegative(call, 'count', count);
+    if (buffer.values.length - index < count)
+      fail(
+        'System.ArgumentException',
+        'Offset and length were out of bounds for the array or count is greater than the number of elements from index to the end of the source collection.'
+      );
     return textOfChars(buffer.values.slice(index, index + count));
   }
   if (parameters[0].type.kind === 'array') return args[0] === undefined ? '' : textOfChars((args[0] as CsArray).values);

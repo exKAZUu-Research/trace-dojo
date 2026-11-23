@@ -251,10 +251,20 @@ const stringNatives: Record<string, NativeMethod> = {
     return String.fromCodePoint(char as number).repeat(count as number);
   },
   [`${STRING}..ctor(char[]?)`]: (_call, _receiver, [chars]) => charsOf(chars as Value).join(''),
-  [`${STRING}..ctor(char[], int, int)`]: (_call, _receiver, [chars, start, length]) =>
-    charsOf(chars as Value)
-      .slice(start as number, (start as number) + (length as number))
-      .join(''),
+  [`${STRING}..ctor(char[], int, int)`]: (call, _receiver, [chars, start, length]) => {
+    if (chars === undefined) failNull('value');
+    if ((start as number) < 0) failNegative(call, 'startIndex', start as number);
+    if ((length as number) < 0) failNegative(call, 'length', length as number);
+    const all = charsOf(chars as Value);
+    if ((start as number) > all.length - (length as number))
+      failOutOfRange(
+        call,
+        'startIndex',
+        'Index was out of range. Must be non-negative and less than or equal to the size of the collection.'
+      );
+    call.frame.runtime.allocateString(length as number);
+    return all.slice(start as number, (start as number) + (length as number)).join('');
+  },
   [`${STRING}.get_Length`]: (_call, receiver) => receiverText(receiver).length,
   [`${STRING}.get_Item`]: (_call, receiver, [index]) => {
     const text = receiverText(receiver);
@@ -1119,12 +1129,20 @@ defineNatives({
       reserve(call, builder(receiver), count, 0);
       return append(call, receiver, String.fromCodePoint(args[0] as number).repeat(count));
     }
-    if (parameters.length === 3)
-      return append(
-        call,
-        receiver,
-        ((args[0] as string | undefined) ?? '').slice(args[1] as number, (args[1] as number) + (args[2] as number))
-      );
+    if (parameters.length === 3) {
+      const [start, count] = [args[1] as number, args[2] as number];
+      if (start < 0) failNegative(call, 'startIndex', start);
+      if (count < 0) failNegative(call, 'count', count);
+      if (args[0] === undefined) {
+        if (start === 0 && count === 0) return receiver;
+        failNull('value');
+      }
+      const value = args[0] as string;
+      if (count === 0) return receiver;
+      if (start > value.length - count)
+        failOutOfRange(call, 'startIndex', 'Index and length must refer to a location within the string.');
+      return append(call, receiver, value.slice(start, start + count));
+    }
     const value = args[0] as Value;
     if (parameters[0].type.kind === 'array') return append(call, receiver, charsOf(value).join(''));
     if (value instanceof CsObject && value.native instanceof BuilderState)
