@@ -132,7 +132,7 @@ export abstract class ExpressionBinder extends MemberBinder {
         return this.bindInvocation(node, context);
       }
       case 'elementAccess': {
-        const target = this.bindValue(node.target, context);
+        const target = this.bindTypedValue(node.target, context);
         return this.bindElementAccess(target, node.args, node, context);
       }
       case 'tuple': {
@@ -235,7 +235,7 @@ export abstract class ExpressionBinder extends MemberBinder {
         return this.bindAs2(node, context);
       }
       case 'is': {
-        const operand = this.bindValue(node.operand, context);
+        const operand = this.isOrAsOperand(node.operand, context);
         if (operand.kind === 'unbound' || operand.type.kind === 'void') {
           this.error(
             node,
@@ -464,7 +464,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     node: Extract<Expression, { kind: 'conditionalAccess' }>,
     context: BindContext
   ): BoundExpression {
-    const receiver = this.bindValue(node.target, context);
+    const receiver = this.bindTypedValue(node.target, context);
     if (receiver.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
     const underlying = nullableUnderlying(receiver.type);
     if (!underlying && isValueType(receiver.type)) {
@@ -626,7 +626,7 @@ export abstract class ExpressionBinder extends MemberBinder {
   }
 
   private bindCoalesce(node: Extract<Expression, { kind: 'binary' }>, context: BindContext): BoundExpression {
-    const left = this.bindValue(node.left, context);
+    const left = this.bindTypedValue(node.left, context);
     const right = this.bindAllowingThrow(node.right, context);
     if (left.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
     const underlying = nullableUnderlying(left.type);
@@ -784,8 +784,16 @@ export abstract class ExpressionBinder extends MemberBinder {
   }
 
   private bindAs2(node: Extract<Expression, { kind: 'as' }>, context: BindContext): BoundExpression {
-    const operand = this.bindValue(node.operand, context);
+    const operand = this.isOrAsOperand(node.operand, context);
     const type = this.resolveType(node.type, context.fn.typeContext);
+    if (operand.kind === 'unbound') {
+      this.error(
+        node,
+        'CS0837',
+        "'is' または 'as' 演算子の最初のオペランドとして、ラムダ式、匿名メソッド、またはメソッド グループを使用することはできません"
+      );
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
     if (type.kind === 'error' || operand.type.kind === 'error') return { kind: 'default', type, row: node.row };
     if (isValueType(type) && !nullableUnderlying(type)) {
       this.error(
@@ -1616,9 +1624,19 @@ export abstract class ExpressionBinder extends MemberBinder {
     return symbol;
   }
 
+  /**
+   * Binds the operand of `is` or `as`, leaving a lambda or a method group unbound for the operator's CS0837 and giving
+   * any other value its natural type.
+   */
+  private isOrAsOperand(node: Expression, context: BindContext): BoundExpression {
+    const operand = this.bindValue(node, context);
+    if (operand.kind === 'unbound' && (operand.node.kind === 'lambda' || operand.methodGroup)) return operand;
+    return this.typedValue(operand, node);
+  }
+
   /** Binds `x with { P = v }`, which copies a record or struct and assigns members of the copy. */
   private bindWith(node: Extract<Expression, { kind: 'with' }>, context: BindContext): BoundExpression {
-    const value = this.bindValue(node.value, context);
+    const value = this.bindTypedValue(node.value, context);
     const type = value.type;
     if (type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
     const isRecord =
@@ -1793,7 +1811,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     node: Extract<Expression, { kind: 'assign' }>,
     context: BindContext
   ): BoundExpression {
-    const value = this.bindValue(node.value, context);
+    const value = this.deconstructedValue(node.value, context);
     const targets = this.bindDeconstructTargets(
       node.target as Extract<Expression, { kind: 'tuple' }>,
       value.type,
@@ -1963,7 +1981,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     // its patterns declare are declared once (see bindConditional).
     let parts = this.switchParts.get(node);
     if (parts?.scope !== context.scope) {
-      const value = this.bindValue(node.value, context);
+      const value = this.bindTypedValue(node.value, context);
       const handled: Space = [];
       const arms = node.arms.map((arm) => {
         const scope = new LocalScope(context.scope, context.fn);

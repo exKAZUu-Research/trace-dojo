@@ -490,6 +490,12 @@ export abstract class StatementBinder extends PatternBinder {
     context: BindContext
   ): BoundStatement {
     const expression = this.bindValue(statement.expression, context);
+    // `new();` creates an object, which a statement may do, of no type that Roslyn can find (CS8754); any other value
+    // without a type is no statement (CS0201).
+    if (expression.kind === 'unbound' && expression.node.kind === 'implicitNew') {
+      const created = this.typedValue(expression, statement.expression);
+      return { kind: 'expression', expression: created, row: statement.row, step: 'none' };
+    }
     const resolved =
       expression.kind === 'unbound'
         ? this.convert(expression, this.naturalTypeOf(expression) ?? ERROR_TYPE, statement)
@@ -503,11 +509,7 @@ export abstract class StatementBinder extends PatternBinder {
     context: BindContext
   ): BoundStatement {
     const { row } = statement;
-    const value = this.bindValue(statement.value, context);
-    if (value.kind === 'unbound' && value.node.kind === 'tuple') {
-      const elements = value.node.elements.map((element) => this.bindValue(element.value, context));
-      void elements;
-    }
+    const value = this.deconstructedValue(statement.value, context);
     const target = this.declareDeconstructed(statement.designation, undefined, value.type, context);
     const expression: BoundExpression = { kind: 'deconstructAssign', targets: target, value, type: VOID_TYPE, row };
     return { kind: 'expression', expression, row, step: 'step' };
@@ -666,16 +668,13 @@ export abstract class StatementBinder extends PatternBinder {
     if (bound.kind !== 'unbound') return { type: bound.type, value: bound };
     const natural = this.naturalTypeOf(bound);
     if (!natural) {
-      this.reportNoNaturalType(declarator, bound);
+      this.reportWithoutNaturalType(bound, declarator);
       return { type: ERROR_TYPE };
     }
     return { type: natural, value: this.convert(bound, natural, declarator) };
   }
 
-  private reportNoNaturalType(
-    declarator: VariableDeclarator,
-    bound: Extract<BoundExpression, { kind: 'unbound' }>
-  ): void {
+  protected reportWithoutNaturalType(bound: Extract<BoundExpression, { kind: 'unbound' }>, declarator: Position): void {
     const what = bound.node.kind === 'lambda' || bound.methodGroup ? undefined : bound.node.kind;
     if (what === 'default') this.error(declarator, 'CS8716', "'default' リテラルにターゲット型がありません。");
     else if (what === 'implicitNew') this.error(declarator, 'CS8754', "'new()' のターゲット型がありません");
@@ -758,7 +757,7 @@ export abstract class StatementBinder extends PatternBinder {
   // code-gauge-allow functionNcss -- How foreach finds its elements: arrays, strings, and the GetEnumerator pattern.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindForeach(statement: Extract<Statement, { kind: 'foreach' }>, context: BindContext): BoundStatement {
-    const collection = this.bindValue(statement.collection, context);
+    const collection = this.bindTypedValue(statement.collection, context);
     const scope = new LocalScope(context.scope, context.fn);
     const inner: BindContext = { scope, fn: context.fn };
     let iteration: ForeachKind;
@@ -965,7 +964,7 @@ export abstract class StatementBinder extends PatternBinder {
   }
 
   private bindSwitch(statement: Extract<Statement, { kind: 'switch' }>, context: BindContext): BoundStatement {
-    const value = this.bindValue(statement.value, context);
+    const value = this.bindTypedValue(statement.value, context);
     const scope = new LocalScope(context.scope, context.fn);
     const temporary = new LocalSymbol('\0switch', value.type, statement.row, statement.column);
     temporary.isHidden = true;

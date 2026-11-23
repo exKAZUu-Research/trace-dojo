@@ -124,6 +124,45 @@ export abstract class MemberBinder extends CallBinder {
   /** Binds an expression to its natural type, leaving target-typed expressions unbound. */
   abstract bindExpression(node: Expression, context: BindContext): BindResult;
 
+  /** Reports a value without a type of its own whose consumer gives it no target type either. */
+  protected abstract reportWithoutNaturalType(
+    value: Extract<BoundExpression, { kind: 'unbound' }>,
+    position: Expression
+  ): void;
+
+  /**
+   * Binds a value whose consumer gives it no target type, such as a `switch` or `foreach` operand: one without a type
+   * of its own (a lambda, `default`, `new()`, or a conditional without a common type) takes its natural type, or gets
+   * its kind's diagnostic and the error type, so that no unbound value reaches the evaluator.
+   */
+  protected bindTypedValue(node: Expression, context: BindContext): BoundExpression {
+    return this.typedValue(this.bindValue(node, context), node);
+  }
+
+  /** Gives a bound value its natural type as bindTypedValue does. */
+  protected typedValue(value: BoundExpression, node: Expression): BoundExpression {
+    if (value.kind !== 'unbound') return value;
+    const natural = this.naturalTypeOf(value);
+    if (natural) return this.convert(value, natural, node);
+    this.reportWithoutNaturalType(value, node);
+    return { kind: 'default', type: ERROR_TYPE, row: node.row };
+  }
+
+  /**
+   * Binds the value a deconstruction takes apart, which gives it no target type: a tuple literal reports each element
+   * without a type of its own.
+   */
+  protected deconstructedValue(node: Expression, context: BindContext): BoundExpression {
+    const value = this.bindValue(node, context);
+    if (value.kind !== 'unbound') return value;
+    if (value.node.kind === 'tuple') {
+      const elements = value.node.elements.map((element) => this.bindTypedValue(element.value, context));
+      if (elements.some((element) => element.type.kind === 'error'))
+        return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
+    return this.typedValue(value, node);
+  }
+
   /** Binds an expression as a value. */
   bindValue(node: Expression, context: BindContext): BoundExpression {
     const value = this.toValue(this.bindExpression(node, context), node);
