@@ -17,6 +17,7 @@ import {
 import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { introSort } from './sort';
 import {
+  chargeElements,
   evaluatorOf,
   fail,
   failIndex,
@@ -235,6 +236,7 @@ function predicateOf(call: NativeCall, predicate: Value, name = 'match'): (value
 }
 
 function indexOfValue(call: NativeCall, items: Value[], value: Value, start = 0, fromEnd = false): number {
+  chargeElements(call, items.length - start);
   const equality = equalityOf(call, undefined);
   if (fromEnd) {
     for (let index = items.length - 1; index >= 0; index--) if (equality.equals(items[index], value)) return index;
@@ -546,8 +548,9 @@ const listNatives: Record<string, NativeMethod> = {
     list.version++;
     return;
   },
-  [`${LIST}.Reverse()`]: (_call, receiver) => {
+  [`${LIST}.Reverse()`]: (call, receiver) => {
     const list = listOf(receiver);
+    chargeElements(call, list.items.length);
     list.items.reverse();
     list.version++;
     return;
@@ -555,6 +558,7 @@ const listNatives: Record<string, NativeMethod> = {
   [`${LIST}.Reverse(int, int)`]: (call, receiver, [index, count]) => {
     const list = listOf(receiver);
     checkRange(call, index as number, count as number, list.items.length);
+    chargeElements(call, count as number);
     reverseRange(list.items, index as number, count as number);
     list.version++;
     return;
@@ -1412,6 +1416,7 @@ function checkValueIndex(array: CsArray, index: number): void {
 
 /** Resets elements to their default, a value of its own in each slot, since a struct default is mutable storage. */
 function clearRange(call: NativeCall, array: CsArray, index: number, length: number): void {
+  chargeElements(call, length);
   const evaluator = evaluatorOf(call);
   const type = elementTypeOf(array);
   for (let offset = index; offset < index + length; offset++) array.values[offset] = evaluator.defaultOf(type);
@@ -1555,8 +1560,9 @@ defineNatives({
   [`${ARRAY}.Empty`]: (call) => newArray(call, call.typeArgs[0], []),
   [`${ARRAY}.Exists`]: (call, _receiver, [array, match]) =>
     arrayOf(array as Value).values.some(predicateOf(call, match as Value)),
-  [`${ARRAY}.Fill(T[], T)`]: (_call, _receiver, [array, value]) => {
+  [`${ARRAY}.Fill(T[], T)`]: (call, _receiver, [array, value]) => {
     const values = arrayOf(array as Value).values;
+    chargeElements(call, values.length);
     for (let index = 0; index < values.length; index++) values[index] = copyValue(value as Value);
     return;
   },
@@ -1571,6 +1577,7 @@ defineNatives({
       );
     }
     const values = arrayOf(array as Value).values;
+    chargeElements(call, count as number);
     for (let index = start as number; index < (start as number) + (count as number); index++)
       values[index] = copyValue(value as Value);
     return;
@@ -1644,13 +1651,15 @@ defineNatives({
     arrayOf(array as Value).values.reverse();
     return;
   },
-  [`${ARRAY}.Reverse(T[])`]: (_call, _receiver, [array]) => {
+  [`${ARRAY}.Reverse(T[])`]: (call, _receiver, [array]) => {
+    chargeElements(call, arrayOf(array as Value).values.length);
     arrayOf(array as Value).values.reverse();
     return;
   },
   [`${ARRAY}.Reverse(Array, int, int)`]: (call, _receiver, [array, index, length]) => {
     const values = arrayOf(array as Value).values;
     checkArrayRange(call, values.length, index as number, length as number);
+    chargeElements(call, length as number);
     reverseRange(values, index as number, length as number);
     return;
   },

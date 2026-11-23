@@ -1,6 +1,6 @@
 import { defineNatives, type NativeCall } from '../natives';
 import { type CsArray, CsObject, type Value } from '../values';
-import { fail, failNull, failOutOfRange, libraryType, newArrayOf, typeArgument } from './support';
+import { chargeElements, fail, failNull, failOutOfRange, libraryType, newArrayOf, typeArgument } from './support';
 
 const INT_MAX = 2_147_483_647;
 
@@ -163,14 +163,16 @@ defineNatives({
   },
   'System.Random.NextDouble': (_call, receiver) => toDouble(sourceOf(receiver)),
   'System.Random.NextSingle': (_call, receiver) => Math.fround(toDouble(sourceOf(receiver))),
-  'System.Random.NextBytes': (_call, receiver, [buffer]) => {
+  'System.Random.NextBytes': (call, receiver, [buffer]) => {
     if (buffer === undefined) failNull('buffer');
+    chargeElements(call, (buffer as CsArray).values.length);
     nextBytes(sourceOf(receiver), (buffer as CsArray).values);
     return;
   },
-  'System.Random.Shuffle': (_call, receiver, [values]) => {
+  'System.Random.Shuffle': (call, receiver, [values]) => {
     if (values === undefined) failNull('values');
     const items = (values as CsArray).values;
+    chargeElements(call, items.length);
     const source = sourceOf(receiver);
     for (let index = 0; index < items.length - 1; index++) {
       const other = nextBetween(source, index, items.length);

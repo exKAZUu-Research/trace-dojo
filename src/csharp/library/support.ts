@@ -122,6 +122,11 @@ export function newArray(call: NativeCall, element: Type, values: Value[]): CsAr
   return newArrayOf(call, element, values.length, (index) => values[index]);
 }
 
+/** Charges the work of a library loop over `count` elements, as iterating a sequence is charged. */
+export function chargeElements(call: NativeCall, count: number): void {
+  call.frame.runtime.spend(Math.ceil(count / 16));
+}
+
 /** A new array of a length, checked against the slot limit before any element is made, as `new T[n]` is. */
 export function newArrayOf(
   call: NativeCall,
