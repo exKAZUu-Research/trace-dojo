@@ -819,7 +819,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
     }
   }
 
-  /** Forgets the smart casts of the variables a loop assigns, since another iteration may have changed them. */
   private runLoopBody(loop: LoopContext, body: Exec, frame: Frame): 'break' | undefined {
     try {
       body(frame);
