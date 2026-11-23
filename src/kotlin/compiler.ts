@@ -394,7 +394,8 @@ export class Compiler extends BodyCompiler {
       repr: 'ref',
       eval: (frame) => {
         // The JVM evaluates the argument of the static valueOf before it initializes the enum class.
-        const entryName = evaluate(frame) as string;
+        const entryName = evaluate(frame) as string | undefined;
+        if (entryName === undefined) frame.runtime.throwError(frame, 'java.lang.NullPointerException');
         instance(frame);
         const found = frame.runtime.enumEntries
           .get(cls)
