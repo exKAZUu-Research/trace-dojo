@@ -62,15 +62,16 @@ export function nativeOf(method: MethodSymbol): NativeMethod | undefined {
 
 /**
  * A native whose result crosses into the program as C# requires: a struct as a copy, so that no library storage shares
- * it with a variable, and a string checked against the string length limit, whichever native built it.
+ * it with a variable, and a string checked against the string length limit and charged, whichever native built it.
  */
 function withCheckedResult(method: MethodSymbol, native: NativeMethod): NativeMethod {
   const hasString = resultStrings(method) === 'string';
   return (call, receiver, args) => {
     const value = native(call, receiver, args);
     if (value instanceof CsStruct) return copyValue(value);
+    // Building the text took work in proportion to its length, which the natives that scan or map text do not charge.
     if (hasString && (typeof value === 'string' || value instanceof CsString))
-      call.frame.runtime.allocateString(stringText(value).length, 0);
+      call.frame.runtime.allocateString(stringText(value).length);
     return value;
   };
 }

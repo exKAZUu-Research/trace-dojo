@@ -1232,8 +1232,9 @@ defineNatives({
     state.remove(start as number, length as number);
     return receiver;
   },
-  [`${BUILDER}.Replace(char, char)`]: (_call, receiver, [from, to]) => {
+  [`${BUILDER}.Replace(char, char)`]: (call, receiver, [from, to]) => {
     const state = builder(receiver);
+    reserve(call, state, 0, state.text.length);
     state.text = state.text.replaceAll(String.fromCodePoint(from as number), String.fromCodePoint(to as number));
     return receiver;
   },
@@ -1247,6 +1248,7 @@ defineNatives({
   [`${BUILDER}.Replace(char, char, int, int)`]: (call, receiver, [from, to, start, count]) => {
     const state = builder(receiver);
     const [before, middle, after] = builderRange(call, state.text, start as number, count as number);
+    reserve(call, state, 0, middle.length);
     state.text = `${before}${middle.replaceAll(String.fromCodePoint(from as number), String.fromCodePoint(to as number))}${after}`;
     return receiver;
   },

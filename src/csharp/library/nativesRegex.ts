@@ -49,15 +49,20 @@ function compilePattern(pattern: string, options: number): CompiledPattern {
   const translator = new PatternTranslator(pattern, options);
   const output = translator.translate();
   const numbered = numberGroups(translator.groups);
+  // Lookup tables keep a pattern with many groups and backreferences linear in its length.
+  const jsIndexOfNumber = new Map(numbered.numberOfIndex.map((number, jsIndex) => [number, jsIndex]));
+  const jsIndexOfName = new Map<string, number>();
+  for (const [index, group] of translator.groups.entries())
+    if (group.name !== undefined) jsIndexOfName.set(group.name, index + 1);
   const finalPattern = output
     .replaceAll(/(\d+)/g, (_match, number: string) => {
-      const jsIndex = numbered.numberOfIndex.indexOf(Number(number));
-      if (jsIndex === -1) throw new UnsupportedPattern();
+      const jsIndex = jsIndexOfNumber.get(Number(number));
+      if (jsIndex === undefined) throw new UnsupportedPattern();
       return `\\${jsIndex}`;
     })
     .replaceAll(/(\w+)/g, (_match, name: string) => {
-      const jsIndex = translator.groups.findIndex((group) => group.name === name) + 1;
-      if (jsIndex === 0) throw new UnsupportedPattern();
+      const jsIndex = jsIndexOfName.get(name);
+      if (jsIndex === undefined) throw new UnsupportedPattern();
       return `\\${jsIndex}`;
     });
   const ignoreCase = (options & OPTION.ignoreCase) !== 0;
