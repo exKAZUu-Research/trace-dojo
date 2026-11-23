@@ -193,7 +193,8 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
     }
     case 'long':
     case 'ulong': {
-      return Number(value as bigint);
+      const number = Number(value as bigint);
+      return Number.isSafeInteger(number) ? number : (value as bigint);
     }
     case 'decimal': {
       return (value as CsDecimal).toDouble();
