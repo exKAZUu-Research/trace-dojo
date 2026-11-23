@@ -256,7 +256,15 @@ export abstract class StatementBinder extends PatternBinder {
         `init 専用プロパティまたはインデクサー '${display}' を割り当てることができるのは、オブジェクト初期化子の中か、インスタンス コンストラクターまたは 'init' アクセサーの 'this' か 'base' 上のみです。`
       );
     }
-    if (!this.isAccessible(setter.access, property.owner, context.fn.typeContext, target.receiver?.type)) {
+    const isBase = (target.receiver as { isBase?: boolean } | undefined)?.isBase === true;
+    if (
+      !this.isAccessible(
+        setter.access,
+        property.owner,
+        context.fn.typeContext,
+        isBase ? undefined : target.receiver?.type
+      )
+    ) {
       this.error(
         position,
         'CS0272',

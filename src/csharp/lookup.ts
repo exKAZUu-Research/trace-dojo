@@ -75,7 +75,9 @@ export class LookupBinder extends DeclarationBinder {
     context: TypeContext,
     arity = 0,
     /** Whether the member is being called, which leaves out members that are not invocable (C# spec §12.5). */
-    isInvoked = false
+    isInvoked = false,
+    /** The type of the instance the access goes through, for protected access: `base` goes through the class's own. */
+    through: Type = type
   ): { found: MemberLookup | undefined; inaccessible: FieldSymbol | PropertySymbol | MethodSymbol | undefined } {
     const candidates: MethodCandidate[] = [];
     let inaccessible: FieldSymbol | PropertySymbol | MethodSymbol | undefined;
@@ -84,11 +86,11 @@ export class LookupBinder extends DeclarationBinder {
     // A tuple's element names stand for its `Item1`, `Item2`, ... fields.
     const element = type.kind === 'named' ? (type.tupleNames?.indexOf(name) ?? -1) : -1;
     if (element >= 0 && name !== `Item${element + 1}`)
-      return this.lookupMember(type, `Item${element + 1}`, context, arity, isInvoked);
+      return this.lookupMember(type, `Item${element + 1}`, context, arity, isInvoked, through);
     for (const owner of this.searchChain(type)) {
       const symbol = owner.symbol;
       const member = memberNamed(owner, name, isInvoked);
-      const isAccessibleMember = member !== undefined && this.isAccessible(member.access, symbol, context, type);
+      const isAccessibleMember = member !== undefined && this.isAccessible(member.access, symbol, context, through);
       if (isAccessibleMember && candidates.length > 0) break;
       if (isAccessibleMember) return { found: memberLookupOf(member, owner), inaccessible };
       inaccessible ??= member;
@@ -97,7 +99,7 @@ export class LookupBinder extends DeclarationBinder {
         if (nestedLookup.nested) return { found: { kind: 'type', ...nestedLookup.nested }, inaccessible };
         if (nestedLookup.inaccessible) inaccessibleType ??= { kind: 'type', ...nestedLookup.inaccessible };
       }
-      const inaccessibleMethod = this.gatherMethods(owner, name, context, type, candidates);
+      const inaccessibleMethod = this.gatherMethods(owner, name, context, through, candidates);
       inaccessible ??= inaccessibleMethod;
     }
     if (candidates.length > 0) return { found: { kind: 'methods', candidates }, inaccessible };

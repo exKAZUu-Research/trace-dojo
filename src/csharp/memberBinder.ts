@@ -546,10 +546,10 @@ export abstract class MemberBinder extends CallBinder {
     const baseType = thisType.symbol.baseType
       ? (substitute(thisType.symbol.baseType, substitutionOf(thisType)) as NamedType)
       : this.objectType;
-    const receiver: BoundExpression = { kind: 'this', type: baseType, row: position.row };
+    // The receiver is the class's own instance seen as its base, which protected members of the base allow.
+    const receiver = { kind: 'this', type: baseType, row: position.row, isBase: true } as BoundExpression;
     const result = this.bindInstanceMember(receiver, name, typeArgs, position, context, isCallee);
     if (result.kind === 'methodGroup') return { ...result, isBaseAccess: true };
-    if (result.kind === 'property') return { ...result, receiver: { ...receiver, isBase: true } as BoundExpression };
     return result;
   }
 
@@ -672,12 +672,14 @@ export abstract class MemberBinder extends CallBinder {
     isCallee = false
   ): BindResult {
     const type = receiver.type;
+    const isBase = (receiver as { isBase?: boolean }).isBase === true;
     const { found, inaccessible } = this.lookupMember(
       type,
       name,
       context.fn.typeContext,
       typeArgs?.length ?? 0,
-      isCallee
+      isCallee,
+      isBase && context.fn.thisType ? context.fn.thisType : type
     );
     const extensions = this.lookupExtensionMethods(name, context.fn.typeContext);
     if (!found) {
