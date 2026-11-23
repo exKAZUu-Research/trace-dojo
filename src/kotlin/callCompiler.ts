@@ -165,8 +165,7 @@ function hasTypedParameters(expression: Expression | undefined): boolean {
     expression !== undefined &&
     isLambdaArgument(expression) &&
     expression.params !== undefined &&
-    expression.params.length > 0 &&
-    expression.params.every((param) => param.type !== undefined)
+    expression.params.some((param) => param.type !== undefined)
   );
 }
 
@@ -862,7 +861,7 @@ export abstract class CallCompiler extends CompilerCore {
     for (const [index, compiled] of compiledArgs.entries()) {
       const aType = parameterTypeOf(a, index);
       const bType = parameterTypeOf(b, index);
-      // A lambda that declares its parameters' types compares as a value of either function type would, as
+      // A lambda that declares a parameter's type compares as a value of either function type would, as
       // `(Number) -> Unit` is more specific than `(Int) -> Unit`; an untyped one is ranked by its result later.
       if (!aType || !bType || (!compiled && !hasTypedParameters(args[index]?.value))) continue;
       // An integer literal is an Int unless only another integer type fits, as `1..4` calls `rangeTo(Int)`; a type
