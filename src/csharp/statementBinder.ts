@@ -23,6 +23,7 @@ import type {
 import type { BindContext } from './convertBinder';
 import { constantText } from './convertBinder';
 import type { MemberLookup } from './lookup';
+import { propertyDisplay } from './memberBinder';
 import { PatternBinder } from './patternBinder';
 import type { Space } from './patternSpace';
 import { TRANSPARENT_PREFIX } from './queries';
@@ -214,10 +215,7 @@ export abstract class StatementBinder extends PatternBinder {
   ): BoundLValue {
     const { property } = target;
     const setter = this.setterOf(property);
-    if (setter) this.rejectUnimplementedAccessor(property, setter, position);
-    const display = property.isIndexer
-      ? `${displayTypeSymbol(target.owner.symbol, target.owner.args)}.this[${property.parameters.map((parameter) => displayType(substitute(parameter.type, substitutionOf(target.owner)))).join(', ')}]`
-      : `${displayTypeSymbol(target.owner.symbol, target.owner.args)}.${property.name}`;
+    const display = propertyDisplay(target);
     if (!setter) {
       if (property.backingField && !property.isStatic && this.isInConstructorOf(property, context)) {
         return {
@@ -256,21 +254,7 @@ export abstract class StatementBinder extends PatternBinder {
         `init 専用プロパティまたはインデクサー '${display}' を割り当てることができるのは、オブジェクト初期化子の中か、インスタンス コンストラクターまたは 'init' アクセサーの 'this' か 'base' 上のみです。`
       );
     }
-    const isBase = (target.receiver as { isBase?: boolean } | undefined)?.isBase === true;
-    if (
-      !this.isAccessible(
-        setter.access,
-        property.owner,
-        context.fn.typeContext,
-        isBase ? undefined : target.receiver?.type
-      )
-    ) {
-      this.error(
-        position,
-        'CS0272',
-        `set アクセサーにアクセスできないため、プロパティまたはインデクサー '${display}' はこのコンテキストでは使用できません`
-      );
-    }
+    this.checkAccessorUse(target, property, setter, 'set', position, context);
     if (target.receiver && this.reportsReadonlyLocalMember(target.receiver, position)) return target as BoundLValue;
     if (
       target.receiver &&

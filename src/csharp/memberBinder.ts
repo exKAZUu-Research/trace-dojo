@@ -90,16 +90,7 @@ export abstract class MemberBinder extends CallBinder {
     if (value.kind !== 'property') return;
     for (let current: PropertySymbol | undefined = value.property; current; current = current.overridden) {
       if (current.getter) {
-        this.rejectUnimplementedAccessor(current, current.getter, position);
-        // `base.P` reads through the class's own instance, which a protected getter allows, unlike another object.
-        const isBase = (value.receiver as { isBase?: boolean } | undefined)?.isBase === true;
-        const through = isBase ? undefined : value.receiver?.type;
-        if (!this.isAccessible(current.getter.access, current.owner, context.fn.typeContext, through))
-          this.error(
-            position,
-            'CS0271',
-            `get アクセサーにアクセスできないため、プロパティまたはインデクサー '${displayTypeSymbol(value.owner.symbol, value.owner.args)}.${value.property.isIndexer ? `this[${value.property.parameters.map((parameter) => displayType(substitute(parameter.type, substitutionOf(value.owner)))).join(', ')}]` : value.property.name}' はこのコンテキストでは使用できません`
-          );
+        this.checkAccessorUse(value, current, current.getter, 'get', position, context);
         return;
       }
     }
@@ -110,8 +101,32 @@ export abstract class MemberBinder extends CallBinder {
     );
   }
 
+  /**
+   * The one check of the accessor that a property or indexer read or write uses, which every binding site that reads
+   * or writes one goes through: the library must implement it, and the code must be able to use it on the receiver,
+   * where `base` goes through the class's own instance, which a protected accessor allows, unlike another object.
+   */
+  protected checkAccessorUse(
+    target: Extract<BoundExpression, { kind: 'property' }>,
+    property: PropertySymbol,
+    accessor: MethodSymbol,
+    kind: 'get' | 'set',
+    position: Position,
+    context: BindContext
+  ): void {
+    this.rejectUnimplementedAccessor(property, accessor, position);
+    const isBase = (target.receiver as { isBase?: boolean } | undefined)?.isBase === true;
+    const through = isBase ? undefined : target.receiver?.type;
+    if (this.isAccessible(accessor.access, property.owner, context.fn.typeContext, through)) return;
+    this.error(
+      position,
+      kind === 'get' ? 'CS0271' : 'CS0272',
+      `${kind} アクセサーにアクセスできないため、プロパティまたはインデクサー '${propertyDisplay(target)}' はこのコンテキストでは使用できません`
+    );
+  }
+
   /** Rejects a library property's accessor that the library declares without implementing, as calls reject methods. */
-  protected rejectUnimplementedAccessor(property: PropertySymbol, accessor: MethodSymbol, position: Position): void {
+  private rejectUnimplementedAccessor(property: PropertySymbol, accessor: MethodSymbol, position: Position): void {
     if (
       !property.owner.isLibrary ||
       property.owner.kind === 'interface' ||
@@ -1559,3 +1574,12 @@ function typeParameterNamed(name: string, typeContext: TypeContext): Type | unde
 
 export { LocalSymbol, PropertySymbol, FieldSymbol };
 export type { BoundArgument };
+
+/** A property or indexer as Roslyn names it in diagnostics, as `C.P` or `C.this[int]`. */
+export function propertyDisplay(target: Extract<BoundExpression, { kind: 'property' }>): string {
+  const { property, owner } = target;
+  const name = property.isIndexer
+    ? `this[${property.parameters.map((parameter) => displayType(substitute(parameter.type, substitutionOf(owner)))).join(', ')}]`
+    : property.name;
+  return `${displayTypeSymbol(owner.symbol, owner.args)}.${name}`;
+}

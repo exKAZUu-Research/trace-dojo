@@ -38,11 +38,14 @@ import { CsThrow, type ExceptionState, ProgramExit } from '../runtime';
 import {
   type FieldSymbol,
   MAX_TUPLE_ARITY,
+  type MethodSymbol,
   type NamedType,
   namedType,
   sameType,
   specialOf,
   type SpecialType,
+  substitute,
+  substitutionOf,
   type Type,
 } from '../types';
 import {
@@ -1464,8 +1467,22 @@ defineNatives({
       source.entries.map((entry) => new CsDelegate(source.type, [entry]))
     );
   },
-  'System.Delegate.DynamicInvoke': (call, receiver, [args]) =>
-    evaluatorOf(call).invokeDelegate(call.frame, receiver, arrayValues(args as Value), undefined),
+  // The arguments come as objects and the result goes back as one, so value types are unboxed and boxed across it.
+  'System.Delegate.DynamicInvoke': (call, receiver, [args]) => {
+    if (!(receiver instanceof CsDelegate)) return nullReference();
+    const evaluator = evaluatorOf(call);
+    const invoke = receiver.type.symbol.methods.find((method) => method.name === 'Invoke') as MethodSymbol;
+    const substitution = substitutionOf(receiver.type);
+    const values = args === undefined ? [] : arrayValues(args as Value);
+    if (values.length !== invoke.parameters.length) fail('System.ArgumentException', 'Parameter count mismatch.');
+    const adapted = values.map((value, index) =>
+      evaluator.unbox(value, substitute(invoke.parameters[index].type, substitution))
+    );
+    const result = evaluator.invokeDelegate(call.frame, receiver, adapted, undefined);
+    return invoke.returnType.kind === 'void'
+      ? undefined
+      : evaluator.box(result, substitute(invoke.returnType, substitution));
+  },
   'System.Delegate.Equals': (_call, receiver, [other]) => receiver === other,
   'System.Delegate.GetHashCode': (call, receiver) => identityHash(call.frame.runtime, receiver),
 });
