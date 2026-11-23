@@ -576,7 +576,9 @@ function seenSet(call: NativeCall, equality: Equality): { add(value: Value): boo
       return true;
     },
     remove(value) {
-      const bucket = bucketOf(value);
+      // A removal looks a bucket up without creating one, so a missing value adds nothing to the set.
+      const bucket = buckets.get(value === undefined ? 0 : equality.hash(value));
+      if (!bucket) return false;
       const index = indexIn(bucket, value);
       if (index < 0) return false;
       bucket.splice(index, 1);
