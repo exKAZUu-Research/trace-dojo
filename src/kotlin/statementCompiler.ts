@@ -580,7 +580,12 @@ export abstract class StatementCompiler extends OperatorCompiler {
     isCompound: boolean
   ): Place {
     if (isCompound) this.checkGlobalInitialized(context, property, row);
-    return this.propertyPlace({ symbol: property, substitution: new Map() }, undefined, row, scope);
+    // A property imported from an object, such as `Config.count`, is stored on that object.
+    const { owner } = property;
+    const holder: Compiled | undefined = owner?.isObject
+      ? { type: owner.type, repr: 'ref', eval: this.objectInstance(owner) }
+      : undefined;
+    return this.propertyPlace({ symbol: property, substitution: new Map() }, holder, row, scope);
   }
 
   private variablePlace(
