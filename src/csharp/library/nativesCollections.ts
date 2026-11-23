@@ -3,7 +3,7 @@ import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import { defaultCompare, environmentOf, hashOf, stringOf, valuesEqual } from '../objects';
 import { CsThrow } from '../runtime';
-import { type MethodSymbol, sameType, substitute, substitutionOf, type Type } from '../types';
+import { type MethodSymbol, nullableUnderlying, sameType, substitute, substitutionOf, type Type } from '../types';
 import {
   copyValue,
   CsArray,
@@ -1746,8 +1746,10 @@ defineNatives({
   // The value comes boxed, while an array of a value type holds its elements unboxed.
   [`${ARRAY}.IndexOf(Array, object?)`]: (call, _receiver, [array, value]) => {
     const target = arrayOf(array as Value);
+    // A non-null nullable boxes as its underlying type, which a nullable element type compares by.
     const element = elementTypeOf(target);
-    const sought = value instanceof CsBox && sameType(value.type, element) ? value.value : value;
+    const valueType = nullableUnderlying(element) ?? element;
+    const sought = value instanceof CsBox && sameType(value.type, valueType) ? value.value : value;
     return indexOfValue(call, target.values, sought as Value);
   },
   [`${ARRAY}.LastIndexOf(T[], T)`]: (call, _receiver, [array, value]) =>
