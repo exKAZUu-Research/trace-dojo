@@ -285,10 +285,7 @@ function arrayUtilities(kind: ArrayKind): string[] {
       `fun ${g}${receiver}.asIterable(): Iterable<${element}> = if (isEmpty()) emptyList() else ArrayElements(asList())`
     );
   if (!unsigned && (isComparable || typeParameters)) {
-    // The JVM's natural order throws NullPointerException for a null element or key it compares.
-    const comparison = typeParameters
-      ? '(this[it] as Comparable<T>).compareTo(element!!)'
-      : 'this[it].compareTo(element)';
+    const comparison = typeParameters ? 'naturalCompare(this[it], element)' : 'this[it].compareTo(element)';
     lines.push(`fun ${g}${receiver}.binarySearch(element: ${element}, fromIndex: Int = 0, toIndex: Int = size): Int =
         binarySearchArray(size, fromIndex, toIndex) { ${comparison} }`);
   }
@@ -296,6 +293,13 @@ function arrayUtilities(kind: ArrayKind): string[] {
 }
 
 const GENERIC_ARRAY_SOURCE = `
+// The library's compareTo takes no null on the JVM, which throws NullPointerException for it; a class's own
+// compareTo may accept one.
+fun <T> naturalCompare(value: T, key: T): Int {
+    if (key == null && (value is Number || value is String || value is Char || value is Boolean || value is Enum<*>))
+        throw NullPointerException()
+    return (value as Comparable<T>).compareTo(key)
+}
 fun <T : Any> Array<out T?>.filterNotNull(): List<T> = asList().filterNotNull()
 fun <T : Comparable<T>> Array<out T>.max(): T = asList().max()
 fun <T : Comparable<T>> Array<out T>.min(): T = asList().min()
