@@ -280,7 +280,7 @@ export type BinaryOperator =
   | '..<';
 
 export type Expression =
-  | { kind: 'integer'; row: number; text: string; value: bigint; suffix: '' | 'L' | 'u' | 'uL'; isHex: boolean }
+  | { kind: 'integer'; row: number; text: string; value: bigint; suffix: '' | 'L' | 'u' | 'uL' }
   | { kind: 'real'; row: number; text: string; value: number; isFloat: boolean }
   | { kind: 'char'; row: number; value: number }
   | { kind: 'string'; row: number; parts: (string | Expression)[] }

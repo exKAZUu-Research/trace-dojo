@@ -77,7 +77,7 @@ export abstract class ExpressionConverter {
     const row = rowOf(node);
     switch (node.type) {
       case 'number_literal': {
-        return { row, ...parseIntegerLiteral(node.text, (message) => syntaxError(node, message), this.isLibrary) };
+        return { row, ...parseIntegerLiteral(node.text, (message) => syntaxError(node, message)) };
       }
       case 'float_literal': {
         return { row, ...parseRealLiteral(node.text, (message) => syntaxError(node, message)) };

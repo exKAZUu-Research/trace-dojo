@@ -7,17 +7,14 @@ const LONG_MAX = 2n ** 63n - 1n;
 const ULONG_MAX = 2n ** 64n - 1n;
 
 /** Reads an integer literal such as `1_000`, `0xFF`, `3L`, or `2u`, whose type the compiler decides from its value. */
-// code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
 export function parseIntegerLiteral(
   text: string,
-  fail: Fail,
-  allowsBinary: boolean
-): { kind: 'integer'; text: string; value: bigint; suffix: '' | 'L' | 'u' | 'uL'; isHex: boolean } {
+  fail: Fail
+): { kind: 'integer'; text: string; value: bigint; suffix: '' | 'L' | 'u' | 'uL' } {
   const match = /^(0[xX][\dA-Fa-f_]+|0[bB][01_]+|[\d_]+)([uU]?L?|l)?$/.exec(text);
   if (!match) throw fail('数の書き方に誤りがあります。');
   const [, digitsText, suffixText = ''] = match;
   if (suffixText === 'l') throw fail('Long の数には、小文字の l ではなく大文字の L を付けてください。');
-  if (/^0[bB]/.test(digitsText) && !allowsBinary) throw fail('2進数のリテラルは、この採点環境では使えません。');
   const body = digitsText.replace(/^0[xXbB]/, '');
   if (body.startsWith('_') || body.endsWith('_') || body === '') throw fail('数の書き方に誤りがあります。');
   if (/^0\d/.test(digitsText)) throw fail('0 で始まる10進数は書けません。');
@@ -25,7 +22,7 @@ export function parseIntegerLiteral(
   const suffix =
     suffixText.toLowerCase() === 'ul' ? 'uL' : suffixText.toLowerCase() === 'u' ? 'u' : suffixText === 'L' ? 'L' : '';
   if (value > (suffix === 'u' || suffix === 'uL' ? ULONG_MAX : LONG_MAX)) throw fail('数が大きすぎます。');
-  return { kind: 'integer', text, value, suffix, isHex: /^0[xX]/.test(digitsText) };
+  return { kind: 'integer', text, value, suffix };
 }
 
 /** Reads a floating-point literal such as `1.5`, `.5`, `1e3`, or `2.5f`. */
