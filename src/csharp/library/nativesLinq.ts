@@ -683,10 +683,11 @@ const linq: Record<string, NativeMethod> = {
     // A sequence of a value type has no nulls to drop, so .NET returns it as it is.
     const isValueType = target.kind === 'named' && target.symbol.isValueType && !nullableUnderlying(target);
     if (isValueType && isEnumerableOf(call, items as Value, target)) return items as Value;
+    const isValueTypeOrNullable = target.kind === 'named' && target.symbol.isValueType;
     return query(call, target, iteratorName('OfTypeIterator', [target]), [items as Value], function* () {
       for (const item of all)
         if (item !== undefined && evaluator.isInstanceOf(item, target))
-          yield isValueType && item instanceof CsBox ? copyValue(item.value) : item;
+          yield item instanceof CsBox && isValueTypeOrNullable ? copyValue(item.value) : item;
     });
   },
   [`${ENUMERABLE}.Chunk`]: (call, _receiver, [items, size]) => {
