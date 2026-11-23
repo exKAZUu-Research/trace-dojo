@@ -456,7 +456,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const isIdentity = operator === '===' || operator === '!==';
     const comparesNullLiteral = isNullLiteral(expression.left) || isNullLiteral(expression.right);
     this.checkEqualityApplicable(left, right, row, operator);
-    if (isIdentity && (isValueClassType(left.type) || isValueClassType(right.type)))
+    if (isIdentity && !comparesNullLiteral && (isValueClassType(left.type) || isValueClassType(right.type)))
       this.error(row, `値クラスの値には ${operator} を使えません。`);
     const leftKind = this.primitiveOf(nonNull(left.type));
     const rightKind = this.primitiveOf(nonNull(right.type));
