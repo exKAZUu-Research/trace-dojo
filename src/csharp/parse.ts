@@ -239,6 +239,9 @@ function roslynErrorOf(root: Node, error: Node, tokens: Node[], inDeclaration: b
     const before = stop ? tokens.findLast((token) => token.endIndex <= stop.startIndex) : open;
     return { row: (before ?? open).endPosition.row, message: MISSING_TOKENS[')'] };
   }
+  // A whole declaration whose `;` is missing, as the field `int x` that tree-sitter wraps in an ERROR node of its own.
+  if (children.length === 1 && children[0].endIndex === error.endIndex && children[0].type === 'variable_declaration')
+    return { row: error.endPosition.row, message: MISSING_TOKENS[';'] };
   const previous = previousLeafOf(root, error);
   const first = tokens[0] ?? error;
   if (previous && first.startPosition.row > previous.endPosition.row) {
