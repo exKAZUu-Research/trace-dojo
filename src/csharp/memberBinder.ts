@@ -865,7 +865,9 @@ export abstract class MemberBinder extends CallBinder {
       return undefined;
     }
     const method = resolved.candidate.method;
-    const returnType = substitute(method.returnType, this.callSubstitution(resolved.candidate, resolved.typeArgs));
+    const returnType =
+      this.covariantReturn(group, method) ??
+      substitute(method.returnType, this.callSubstitution(resolved.candidate, resolved.typeArgs));
     const returnsMatch =
       (returnType.kind === 'void' && invoke.returnType.kind === 'void') ||
       (returnType.kind !== 'void' &&
@@ -1120,7 +1122,8 @@ export abstract class MemberBinder extends CallBinder {
    * override returns a more derived reference type (C# 9 covariant returns); undefined to use the method's own.
    */
   private covariantReturn(group: Extract<NonValue, { kind: 'methodGroup' }>, method: MethodSymbol): Type | undefined {
-    if (!group.receiver || method.isStatic || !(method.isVirtual || method.isOverride)) return undefined;
+    if (!group.receiver || method.isStatic || !(method.isVirtual || method.isAbstract || method.isOverride))
+      return undefined;
     const override = this.implementationIn(group.receiver.type, method);
     // A generic class's override would need its own type arguments, which introductory programs do not combine with this.
     if (override === method || override.owner.typeParameters.length > 0) return undefined;
