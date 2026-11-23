@@ -497,6 +497,8 @@ function findMatch(call: NativeCall, compiled: CompiledPattern, source: string |
     if (++steps % STEPS_PER_OPERATION === 0) call.frame.runtime.spend();
   });
   if (!found) return emptyMatch(call);
+  // A match keeps its groups for as long as the program holds it, so they are charged as an allocation.
+  call.frame.runtime.allocateSlots(compiled.names.length);
   const groups: GroupResult[] = Array.from({ length: compiled.names.length });
   for (const [jsIndex, number] of compiled.numberOfIndex.entries()) {
     const span = found.spans[jsIndex];
