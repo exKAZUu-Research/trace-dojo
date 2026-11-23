@@ -934,12 +934,14 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     arrays: (DataArrayField | undefined)[]
   ): string {
     if (symbol.isObject) return symbol.name;
+    // Checking the length as fields render stops a rendering beyond the limit before it is built.
+    let length = symbol.name.length;
     const fields = properties.map((property, index) => {
-      const text = dataFieldString(frame, this.boxedField(receiver, property), arrays[index]);
-      return `${property.name}=${text}`;
+      const field = `${property.name}=${dataFieldString(frame, this.boxedField(receiver, property), arrays[index])}`;
+      length += field.length + 2;
+      frame.runtime.checkStringLength(frame, length);
+      return field;
     });
-    // Checking the length first keeps a rendering beyond the limit from being built.
-    const length = fields.reduce((total, field) => total + field.length + 2, symbol.name.length);
     frame.runtime.allocateString(frame, length);
     return `${symbol.name}(${fields.join(', ')})`;
   }

@@ -196,8 +196,13 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** Rejects a string that a library function or a generated member built beyond the limit, after building it. */
   checkBuiltString<T extends Value>(frame: Frame, value: T): T {
-    if (typeof value === 'string' && value.length > LIMITS.maxStringLength) this.allocateString(frame, value.length);
+    if (typeof value === 'string') this.checkStringLength(frame, value.length);
     return value;
+  }
+
+  /** Rejects a string length beyond the limit without charging for it, as a string grows before it is charged. */
+  checkStringLength(frame: Frame, length: number): void {
+    if (length > LIMITS.maxStringLength) this.allocateString(frame, length);
   }
 
   throwError(frame: Frame, qualifiedName: string, message?: string): never {
