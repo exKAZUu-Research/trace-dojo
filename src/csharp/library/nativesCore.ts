@@ -40,6 +40,7 @@ import {
   MAX_TUPLE_ARITY,
   type NamedType,
   namedType,
+  sameType,
   specialOf,
   type SpecialType,
   type Type,
@@ -224,14 +225,30 @@ defineNatives({
       ? text
       : call.frame.runtime.enumString(box.type as NamedType, text);
   },
-  'System.Enum.HasFlag': (_call, receiver, [flag]) => {
+  'System.Enum.HasFlag': (call, receiver, [flag]) => {
+    if (flag === undefined) failNull('flag');
+    const enumType = (receiver as CsBox).type;
+    const flagType = evaluatorOf(call).runtime.runtimeTypeOf(flag as Value);
+    if (!flagType || !sameType(flagType, enumType))
+      fail(
+        'System.ArgumentException',
+        `The argument type, '${flagType ? runtimeTypeName(flagType) : 'null'}', is not the same as the enum type '${runtimeTypeName(enumType)}'.`
+      );
     const value = BigInt(unboxed(receiver) as number | bigint);
     const mask = BigInt(unboxed(flag as Value) as number | bigint);
     return (value & mask) === mask;
   },
-  'System.Enum.CompareTo': (_call, receiver, [other]) => {
-    const a = BigInt(unboxed(receiver) as number);
-    const b = BigInt(unboxed(other as Value) as number);
+  'System.Enum.CompareTo': (call, receiver, [other]) => {
+    if (other === undefined) return 1;
+    const enumType = (receiver as CsBox).type;
+    const otherType = evaluatorOf(call).runtime.runtimeTypeOf(other as Value);
+    if (!otherType || !sameType(otherType, enumType))
+      fail(
+        'System.ArgumentException',
+        `Object must be the same type as the enum. The type passed in was '${otherType ? runtimeTypeName(otherType) : 'null'}'; the enum type was '${runtimeTypeName(enumType)}'.`
+      );
+    const a = BigInt(unboxed(receiver) as number | bigint);
+    const b = BigInt(unboxed(other as Value) as number | bigint);
     return a < b ? -1 : a > b ? 1 : 0;
   },
   'System.Enum.GetName': (call, _receiver, [value]) => {
