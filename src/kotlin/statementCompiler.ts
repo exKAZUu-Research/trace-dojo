@@ -1418,7 +1418,10 @@ export abstract class StatementCompiler extends OperatorCompiler {
       reprOf(this.core, value.integerLiteral ? nonNull(subject.type) : value.type),
       'ref'
     );
-    const subjectKind = this.primitiveOf(nonNull(subject.type));
+    // Two primitive operands compare as numbers, as `0.0 == -0.0` does; an `Any` operand compares with `equals`.
+    const comparesPrimitives =
+      this.primitiveOf(nonNull(subject.type)) !== undefined &&
+      (value.integerLiteral !== undefined || this.primitiveOf(nonNull(value.type)) !== undefined);
     const isIntLiteralForLong = isLongSubject && value.integerLiteral !== undefined && !value.integerLiteral.isLong;
     if (isIntLiteralForLong) {
       this.error(
@@ -1433,13 +1436,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     if (resolved(value.type).kind === 'nothing' && subject.stableKey)
       narrowing.set(subject.stableKey, nonNull(subject.type));
     return {
-      test: (frame) => {
-        const a = subjectEval(frame);
-        if (nullLiteral) return a === NULL;
-        const b = valueEval(frame);
-        if (a instanceof Boxed && b instanceof Boxed && subjectKind) return a.value === b.value;
-        return valueEquals(frame, a, b);
-      },
+      test: whenValueTest(subjectEval, nullLiteral ? undefined : valueEval, comparesPrimitives),
       whenTrue: new Map(),
       whenFalse: narrowing,
     };
@@ -1728,4 +1725,19 @@ interface LoopStepping {
 
 function isEmptyProgression(first: number | bigint, last: number | bigint, step: number | bigint): boolean {
   return step > 0 ? first > last : first < last;
+}
+
+/** @param valueEval The branch value, or `undefined` for the `null` literal. */
+function whenValueTest(
+  subjectEval: Eval,
+  valueEval: Eval | undefined,
+  comparesPrimitives: boolean
+): (frame: Frame) => boolean {
+  return (frame) => {
+    const a = subjectEval(frame);
+    if (!valueEval) return a === NULL;
+    const b = valueEval(frame);
+    if (a instanceof Boxed && b instanceof Boxed && comparesPrimitives) return a.value === b.value;
+    return valueEquals(frame, a, b);
+  };
 }
