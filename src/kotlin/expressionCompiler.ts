@@ -181,7 +181,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
       if (kind && kind !== this.primitiveOf(compiled.type) && literalFits(literal, kind)) {
         const value = kind === 'Long' || kind === 'ULong' ? literal.value : Number(literal.value);
         const constant = target.nullable ? box(kind, value) : value;
-        return () => constant;
+        // A block ending in the literal, as `{ println("side"); 5 }`, still runs its statements.
+        const evaluate = compiled.eval;
+        return (frame) => {
+          evaluate(frame);
+          return constant;
+        };
       }
     }
     return convertRepr(compiled.eval, compiled.repr, reprOf(this.core, target));
