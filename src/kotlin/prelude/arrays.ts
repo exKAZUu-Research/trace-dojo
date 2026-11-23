@@ -296,7 +296,8 @@ const GENERIC_ARRAY_SOURCE = `
 // The library's compareTo takes no null on the JVM, which throws NullPointerException for it; a class's own
 // compareTo may accept one.
 fun <T> naturalCompare(value: T, key: T): Int {
-    if (key == null && (value is Number || value is String || value is Char || value is Boolean || value is Enum<*>))
+    if (key == null && (value is Number || value is String || value is Char || value is Boolean || value is Enum<*> ||
+            value is UByte || value is UShort || value is UInt || value is ULong))
         throw NullPointerException()
     return (value as Comparable<T>).compareTo(key)
 }
