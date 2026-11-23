@@ -146,6 +146,8 @@ for ((kotlinName, javaType) in mapOf(
     "kotlin.collections.LinkedHashMap" to java.util.LinkedHashMap::class.java,
     "kotlin.collections.HashSet" to java.util.HashSet::class.java,
     "kotlin.collections.LinkedHashSet" to java.util.LinkedHashSet::class.java,
+    // The prelude declares System.out's class beside System, in java.lang.
+    "java.lang.PrintStream" to java.io.PrintStream::class.java,
 )) {
     val names = members.getOrPut(kotlinName) { sortedSetOf() }
     for (method in javaType.methods) {

@@ -11,6 +11,7 @@ export const libraryMemberNames: Readonly<Record<string, string>> = {
   'java.io.Writer': 'buffered',
   'java.lang.Appendable': 'append appendLine appendRange appendln',
   'java.lang.Class': 'kotlin',
+  'java.lang.PrintStream': 'append charset checkError close flush format print printf println write writeBytes',
   'java.lang.StringBuilder':
     'append appendLine appendRange appendln clear deleteAt deleteRange insert insertRange set setRange toCharArray',
   'java.lang.System':
