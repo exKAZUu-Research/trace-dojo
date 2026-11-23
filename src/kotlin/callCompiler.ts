@@ -416,6 +416,28 @@ export abstract class CallCompiler extends CompilerCore {
     return attempt;
   }
 
+  /**
+   * An argument of an overloaded call takes its candidates' agreed type only as a hint: one that the argument cannot
+   * meet, such as `Char.plus(Int)` for `listOf("b").first()`, leaves the argument to infer its own type for the
+   * candidates of later levels.
+   */
+  private compileArgument(
+    scope: Scope,
+    context: FunctionContext,
+    value: Expression,
+    expected: KType | undefined,
+    isOverloaded: boolean
+  ): Compiled {
+    if (
+      isOverloaded &&
+      expected &&
+      this.probeApplicability(context, (probe) => this.compileExpression(scope, probe, value, expected))
+    ) {
+      return this.compileExpression(scope, context, value, undefined);
+    }
+    return this.compileExpression(scope, context, value, expected);
+  }
+
   /** The arguments other than lambdas, which compile against the parameter types the attempts agree on. */
   private compileArguments(
     scope: Scope,
@@ -448,7 +470,7 @@ export abstract class CallCompiler extends CompilerCore {
         (containsBareCall(argument.value)
           ? this.checkBareArgumentHints(scope, context, argument.value, argumentTypeHints(viable, index))
           : undefined);
-      const compiled = this.compileExpression(scope, context, argument.value, expected);
+      const compiled = this.compileArgument(scope, context, argument.value, expected, isOverloaded);
       compiledArgs.push(compiled);
       if (!argument.isSpread && !compiled.integerLiteral)
         viable = viable.filter((attempt) => this.constrainArgumentHint(attempt, index, compiled));

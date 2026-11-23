@@ -274,6 +274,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       };
     }
     if (leftKind) {
+      const beforeRight = this.flow.copy();
       const right = this.compileExpression(scope, context, rightExpression);
       const rightKind = this.primitiveOf(right.type);
       const result = rightKind ? arithmeticResult(leftKind, rightKind, operator) : undefined;
@@ -284,8 +285,6 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         const leftTo: PrimitiveKind = result === 'Char' ? 'Char' : result;
         const rightTo: PrimitiveKind =
           result === 'Char' ? 'Int' : leftKind === 'Char' && rightKind === 'Char' ? 'Int' : result;
-        const leftFrom = leftKind;
-        const rightFrom = rightKind;
         const leftFinal: PrimitiveKind = leftKind === 'Char' && rightKind === 'Char' ? 'Int' : leftTo;
         return {
           type: this.primitiveType(result),
@@ -293,8 +292,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
           eval: (frame) =>
             operation(
               frame,
-              widen(leftEval(frame) as number | bigint, leftFrom, leftFinal),
-              widen(rightEval(frame) as number | bigint, rightFrom, rightTo)
+              widen(leftEval(frame) as number | bigint, leftKind, leftFinal),
+              widen(rightEval(frame) as number | bigint, rightKind, rightTo)
             ),
         };
       }
@@ -305,6 +304,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
           `演算子 ${operator} は ${typeToString(resolved(left.type))} と ${typeToString(resolved(right.type))} には使えません。`
         );
       }
+      // The operator call compiles the right operand again, whose writes the flow must see once.
+      this.flow = beforeRight;
     }
     const args: ArgumentSyntax[] = [{ row: rightExpression.row, name: undefined, value: rightExpression }];
     return this.compileOperatorCall(scope, context, left, NUMBER_OPERATOR_NAMES[operator], args, row, operator);
