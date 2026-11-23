@@ -3,6 +3,7 @@ import { isNullLiteral } from './ast';
 import type { CallExpression, Expression, TypeRef } from './ast';
 import { type ArgumentSyntax } from './callCompiler';
 import {
+  checkedBoolean,
   commonNarrowing,
   type Compiled,
   convertRepr,
@@ -34,7 +35,7 @@ import { type ClassSymbol, type TypeParameterSymbol } from './symbols';
 import { instanceTest, throwCastFailure } from './typeChecks';
 import { branchHint, commonSupertype, isSubtype } from './typeRelations';
 import { isNullable, type KType, nonNull, nullable, resolved, substitute, typeToString } from './types';
-import { box, Boxed, NULL, type PrimitiveKind, type Value } from './values';
+import { box, Boxed, type PrimitiveKind, type Value } from './values';
 
 /** Compiles the operators, the conditions, and the `in`, `is`, and `as` tests. */
 export abstract class OperatorCompiler extends ExpressionCompiler {
@@ -882,17 +883,4 @@ function isSameCachedBox(a: Value, b: Value): boolean {
 }
 function unboxNumber(value: Value): number | bigint {
   return value instanceof Boxed ? value.value : (value as number | bigint);
-}
-
-/**
- * Reads a Boolean that is non-null by its type, though a write inside its own test may have nulled a smart-cast value
- * since, however it is forwarded; the JVM's unboxing throws for it instead of treating it as false.
- */
-function checkedBoolean(compiled: Compiled, evaluate: Eval): Eval {
-  if (compiled.constant !== undefined) return evaluate;
-  return (frame) => {
-    const value = evaluate(frame);
-    if (value === NULL) frame.runtime.throwError(frame, 'java.lang.NullPointerException');
-    return value;
-  };
 }

@@ -417,3 +417,16 @@ export function isBareCallExpression(expression: Expression): boolean {
     expression.typeArgs.length === 0
   );
 }
+
+/**
+ * Reads a Boolean that is non-null by its type, though a write inside its own test may have nulled a smart-cast value
+ * since, however it is forwarded; the JVM's unboxing throws for it instead of treating it as false.
+ */
+export function checkedBoolean(compiled: Compiled, evaluate: Eval): Eval {
+  if (compiled.constant !== undefined) return evaluate;
+  return (frame) => {
+    const value = evaluate(frame);
+    if (value === NULL) frame.runtime.throwError(frame, 'java.lang.NullPointerException');
+    return value;
+  };
+}

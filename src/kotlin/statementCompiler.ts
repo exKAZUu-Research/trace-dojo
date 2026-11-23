@@ -14,6 +14,7 @@ import type {
 import { isNullLiteral } from './ast';
 import type { ArgumentSyntax } from './callCompiler';
 import {
+  checkedBoolean,
   commonNarrowing,
   type Compiled,
   convertRepr,
@@ -1035,7 +1036,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const hasNext = callOnIterator('hasNext');
     const nextCall = callOnIterator('next');
     const iteratorEval = iteratorCall.eval;
-    const hasNextEval = convertRepr(hasNext.eval, hasNext.repr, 'ref');
+    const hasNextEval = checkedBoolean(hasNext, convertRepr(hasNext.eval, hasNext.repr, 'ref'));
     const nextEval = nextCall.eval;
     return {
       elementType: nextCall.type,
@@ -1294,7 +1295,14 @@ export abstract class StatementCompiler extends OperatorCompiler {
       type,
       repr,
       inferredUnit: inferredUnit || undefined,
-      eval: whenEval(subject?.eval, subjectSlot, compiledEntries),
+      // A non-null Boolean subject is consumed as a condition is.
+      eval: whenEval(
+        subject && isNonNullClass(subject.type, this.core.boolean)
+          ? checkedBoolean(subject, subject.eval)
+          : subject?.eval,
+        subjectSlot,
+        compiledEntries
+      ),
     };
   }
 
