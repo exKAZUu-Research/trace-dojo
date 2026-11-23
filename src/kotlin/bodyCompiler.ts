@@ -73,7 +73,12 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   }
 
   /** Runs a compilation of another declaration in the middle of one, restoring what the current one had. */
-  private withSavedState<T>(file: FileContext, compile: () => T): T {
+  /**
+   * Compiles an entry in its own file and flow. A failure leaves the entry pending, as a probe that swallows the
+   * error, such as one choosing an overload, must not make a later compilation of it look recursive.
+   */
+  private withSavedState<T>(entry: FunctionEntry | PropertyEntry, compile: () => T): T {
+    const { file } = entry;
     const savedFile = this.file;
     const savedFlow = this.flow;
     const savedInitialization = this.uninitializedProperties;
@@ -83,6 +88,9 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
     try {
       return compile();
+    } catch (error) {
+      entry.state = 'pending';
+      throw error;
     } finally {
       this.file = savedFile;
       this.flow = savedFlow;
@@ -94,7 +102,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   private ensureFunctionCompiled(entry: FunctionEntry): void {
     if (entry.state !== 'pending') return;
     entry.state = 'compiling';
-    this.withSavedState(entry.file, () => {
+    this.withSavedState(entry, () => {
       const { decl, symbol } = entry;
       const context = new FunctionContext(undefined, false, symbol.name, entry.file.isLibrary, undefined);
       Object.defineProperty(context, 'returnTarget', { value: context });
@@ -212,7 +220,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   private ensurePropertyCompiled(entry: PropertyEntry): void {
     if (entry.state !== 'pending') return;
     entry.state = 'compiling';
-    this.withSavedState(entry.file, () => {
+    this.withSavedState(entry, () => {
       const { decl, symbol } = entry;
       // Initializers run in the class's initializer, whose scope sees the primary constructor's parameters.
       if (decl.initializer && !symbol.type) {
@@ -228,8 +236,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       else if (!symbol.type && decl.getter?.body) {
         symbol.type = this.compileAccessorType(entry);
       }
-      if (decl.getter?.body) this.withSavedState(entry.file, () => this.compileGetter(entry));
-      if (decl.setter?.body) this.withSavedState(entry.file, () => this.compileSetter(entry));
+      if (decl.getter?.body) this.withSavedState(entry, () => this.compileGetter(entry));
+      if (decl.setter?.body) this.withSavedState(entry, () => this.compileSetter(entry));
       this.validatePropertyStorage(entry);
       entry.state = 'done';
     });
@@ -317,6 +325,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
 
   private validatePropertyStorage(entry: PropertyEntry): void {
     const { decl, symbol } = entry;
+    if (entry.cls?.symbol.isValue && !entry.file.isLibrary && this.hasBackingField(decl, symbol))
+      this.error(decl.row, 'value class には、値を保持するプロパティを追加できません。');
     if (!this.hasBackingField(decl, symbol)) {
       if (decl.initializer && !decl.modifiers.keywords.has('external'))
         this.error(decl.row, `バッキングフィールドを持たないプロパティ ${decl.name} には初期値を書けません。`);
