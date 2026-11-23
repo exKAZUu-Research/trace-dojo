@@ -4906,6 +4906,25 @@ fun main() { show("abc", "do") }`,
     stdout: '3\n2\na\n',
   },
   {
+    name: 'conditions implying a non-null safe-call result smart-cast its receivers',
+    source: `class Box(val text: String?)
+fun show(x: String?, box: Box?, any: Any?) {
+    val n = x?.length ?: return
+    println(x.length + n)
+    if (x?.length is Int) println(x.length)
+    if (x?.isNotEmpty() ?: false) println(x.length)
+    if (x?.isEmpty() == false) println(x.length)
+    if (!box?.text.isNullOrEmpty()) println(box.text.length)
+    when (box?.text?.length) { 3 -> println(box.text.length); else -> println(0) }
+    requireNotNull(box?.text)
+    println(box.text.length)
+    val s = any as? String ?: return
+    println(any.length + s.length)
+}
+fun main() { show("ab", Box("xyz"), "q") }`,
+    stdout: '4\n2\n2\n2\n3\n3\n3\n2\n',
+  },
+  {
     name: 'resized copies of primitive and reference arrays',
     source: `fun main() {
     val source = intArrayOf(1, 2, 3)

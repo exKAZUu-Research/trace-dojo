@@ -181,7 +181,11 @@ export class FunctionContext {
     this.captures.push(source);
     this.captureIndexes.set(source, index);
     if (source instanceof VariableSymbol && !source.name.startsWith('\0') && !this.info.isLibrary) {
-      const info: LocalInfo = { name: source.name, slot: index, type: source.type };
+      const info: LocalInfo = {
+        name: source.name,
+        slot: index,
+        type: source.type,
+      };
       this.info.captures.push(info);
     }
     return index;
@@ -251,8 +255,7 @@ export class Flow {
 
   /** Records what a non-null result of the expression shows: it and the receivers of its safe calls are not null. */
   assumeNonNull(compiled: Compiled): void {
-    if (compiled.stableKey) this.narrowed.set(compiled.stableKey, nonNull(compiled.type));
-    for (const [key, type] of compiled.whenNonNull ?? []) this.narrowed.set(key, type);
+    for (const [key, type] of nonNullFacts(compiled)) this.narrowed.set(key, type);
   }
 
   /** Takes the smart casts of another flow in place of this one's, keeping what this one knows is assigned. */
@@ -289,6 +292,17 @@ export class Flow {
     const maybeAssigned = new Set(live.flatMap((flow) => [...flow.maybeAssigned]));
     return new Flow(narrowed, assigned, maybeAssigned, false);
   }
+}
+
+/**
+ * What a non-null value of an expression shows: a stable value is not null, and neither is any receiver of the safe
+ * calls it was read through, as `x` and `x.s` of `x?.s?.length` are not. Every condition that implies a non-null
+ * value, such as `!= null`, `is T`, `?: return`, `!!` or `isNullOrEmpty()`, applies these facts.
+ */
+export function nonNullFacts(compiled: Compiled): Map<string, KType> {
+  const facts = new Map(compiled.whenNonNull);
+  if (compiled.stableKey && resolved(compiled.type).nullable) facts.set(compiled.stableKey, nonNull(compiled.type));
+  return facts;
 }
 
 /**

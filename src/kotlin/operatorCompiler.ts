@@ -12,6 +12,7 @@ import {
   Flow,
   type FunctionContext,
   isBareCallExpression,
+  nonNullFacts,
   reprOf,
   type Scope,
   typeMismatchMessage,
@@ -513,9 +514,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       const isNull = otherType.kind === 'nothing';
       const nonNullWhen = isNull ? whenUnequal : isNullable(otherType) ? undefined : whenEqual;
       if (!nonNullWhen) continue;
-      if (operand.stableKey && isNullable(resolved(operand.type)))
-        nonNullWhen.set(operand.stableKey, nonNull(operand.type));
-      for (const [key, type] of operand.whenNonNull ?? []) nonNullWhen.set(key, type);
+      for (const [key, type] of nonNullFacts(operand)) nonNullWhen.set(key, type);
     }
     addCaseNarrowing(left, right, whenEqual, whenUnequal);
     addCaseNarrowing(right, left, whenEqual, whenUnequal);
@@ -745,8 +744,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
 
   /** What passing `is type` shows: the value's type, and for a non-null type, that its safe calls' receivers are not null. */
   protected typeTestNarrowing(operand: Compiled, type: KType): Map<string, KType> {
-    const narrowing = new Map<string, KType>();
-    if (!isNullable(type)) for (const [key, known] of operand.whenNonNull ?? []) narrowing.set(key, known);
+    const narrowing = isNullable(type) ? new Map<string, KType>() : nonNullFacts(operand);
     if (operand.stableKey) narrowing.set(operand.stableKey, this.narrowedType(operand.type, type));
     return narrowing;
   }
@@ -791,7 +789,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         };
     if (!expression.isSafe) return { type: resultType, repr, eval: convertRepr(cast, 'ref', repr) };
     // A non-null result of `x as? T` shows that `x` is a `T`.
-    const whenNonNull = new Map(operand.whenNonNull);
+    const whenNonNull = nonNullFacts(operand);
     if (operand.stableKey) whenNonNull.set(operand.stableKey, typeAfterCast(operand.type, nonNull(type)));
     return {
       type: resultType,
@@ -808,8 +806,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
  */
 function booleanElvisNarrowing(left: Compiled, fallback: Expression): Compiled['narrowing'] {
   if (fallback.kind !== 'boolean') return undefined;
-  const nonNullOutcome = new Map(left.whenNonNull);
-  if (left.stableKey) nonNullOutcome.set(left.stableKey, nonNull(left.type));
+  const nonNullOutcome = nonNullFacts(left);
   const outcome = fallback.value ? left.narrowing?.whenFalse : left.narrowing?.whenTrue;
   for (const [key, type] of outcome ?? []) nonNullOutcome.set(key, type);
   return fallback.value

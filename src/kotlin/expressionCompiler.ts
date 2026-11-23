@@ -19,6 +19,7 @@ import {
   Flow,
   FunctionContext,
   Handoff,
+  nonNullFacts,
   nullableReceiverMessage,
   type PackageScope,
   ReceiverSymbol,
@@ -951,8 +952,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     void row;
     const resultEval = convertRepr(result.eval, result.repr, 'ref');
     const receiverEval = receiver.eval;
-    const whenNonNull = new Map(receiver.whenNonNull);
-    if (receiver.stableKey) whenNonNull.set(receiver.stableKey, nonNull(receiver.type));
+    const whenNonNull = nonNullFacts(receiver);
     return {
       type: nullable(result.type),
       repr: 'ref',
@@ -2066,10 +2066,7 @@ function nullOrEmptyNarrowing(call: ResolvedCall, receiver: Compiled | undefined
   const { symbol } = call;
   const isNullCheck = symbol.isLibrary && (symbol.name === 'isNullOrEmpty' || symbol.name === 'isNullOrBlank');
   if (!isNullCheck || !receiver) return undefined;
-  // The receivers of the receiver's safe calls, as `x` of `x?.s`, are not null either.
-  const whenFalse = new Map(receiver.whenNonNull);
-  if (receiver.stableKey) whenFalse.set(receiver.stableKey, nonNull(receiver.type));
-  return { whenTrue: new Map(), whenFalse };
+  return { whenTrue: new Map(), whenFalse: nonNullFacts(receiver) };
 }
 
 /** A class or a package that a qualifier names. */
