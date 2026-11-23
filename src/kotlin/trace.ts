@@ -49,12 +49,25 @@ class Snapshotter {
    * steps also show the variables and `this` of the function that created it, as the JVM inlines `repeat` and `forEach`
    * bodies into that function; the lambda's own variables shadow them.
    */
-  // code-gauge-allow functionCognitiveComplexity -- builds one snapshot of a frame, whose kinds of variables are listed side by side as Java's trace does.
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
-    const variables: TraceVariables = frame.enclosing
-      ? this.variablesOf(frame.enclosing, false)
-      : { vars: {}, referenceVars: {} };
-    const shown = new Set<string>();
+    const { variables, shown } = this.frameVariables(frame);
+    if (!withContext) return variables;
+    const thisFrame = enclosingFrames(frame).find((each) => each.info.showsThis);
+    if (thisFrame?.thisValue instanceof KObject) addThis(variables, thisFrame.thisValue);
+    for (const global of this.program.globals) {
+      if (shown.has(global.name) || global.isConstant) continue;
+      addVariable(variables, global.name, this.runtime.globals[global.slot], global.type);
+    }
+    for (const object of this.program.objects) this.addObject(variables, object);
+    return variables;
+  }
+
+  /** A frame's locals and captures over those of the frames enclosing a lambda, with the names they show. */
+  // code-gauge-allow functionCognitiveComplexity -- lists the kinds of variables a frame holds side by side, as Java's trace does.
+  private frameVariables(frame: Frame): { variables: TraceVariables; shown: Set<string> } {
+    const { variables, shown } = frame.enclosing
+      ? this.frameVariables(frame.enclosing)
+      : { variables: { vars: {}, referenceVars: {} }, shown: new Set<string>() };
     const hidesArgs = frame.info.name === this.program.main.name && this.program.mainTakesArgs;
     for (const local of frame.info.locals) {
       const slot = frame.locals[local.slot];
@@ -81,15 +94,7 @@ class Snapshotter {
         capture.type
       );
     }
-    if (!withContext) return variables;
-    const thisFrame = enclosingFrames(frame).find((each) => each.info.showsThis);
-    if (thisFrame?.thisValue instanceof KObject) addThis(variables, thisFrame.thisValue);
-    for (const global of this.program.globals) {
-      if (shown.has(global.name) || global.isConstant) continue;
-      addVariable(variables, global.name, this.runtime.globals[global.slot], global.type);
-    }
-    for (const object of this.program.objects) this.addObject(variables, object);
-    return variables;
+    return { variables, shown };
   }
 
   /**
@@ -114,6 +119,9 @@ function enclosingFrames(frame: Frame): Frame[] {
 }
 
 function addVariable(variables: TraceVariables, name: string, value: Value, type: KType): void {
+  // A lambda's variable replaces both entries of an enclosing one of the same name.
+  delete variables.vars[name];
+  delete variables.referenceVars[name];
   if (resolved(type).kind === 'function') return;
   if (value instanceof KObject && value.function) return;
   const scalar = typedScalar(value, type);
