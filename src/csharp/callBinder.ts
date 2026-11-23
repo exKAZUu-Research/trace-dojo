@@ -122,13 +122,22 @@ export abstract class CallBinder extends OperatorBinder {
       this.reportInapplicable(candidates, args, explicitTypeArgs, row, description);
       return undefined;
     }
-    const best = this.bestOf(applicable, args) ?? this.libraryTieBreak(applicable, args);
+    // A base class's candidates drop out once one declared in a more derived class applies (C# spec §12.6.4.1),
+    // whichever converts better.
+    const mostDerived = applicable.filter(
+      (candidate) =>
+        !applicable.some(
+          (other) =>
+            other !== candidate && this.derivesFrom(other.candidate.owner.symbol, candidate.candidate.owner.symbol)
+        )
+    );
+    const best = this.bestOf(mostDerived, args) ?? this.libraryTieBreak(mostDerived, args);
     if (!best) {
       // An argument whose binding already failed fits every overload, which Roslyn does not report again; a
       // target-typed one (a lambda, a method group, `default`) has the error type only until its target is known.
       if (args.some((arg) => arg.expression.type.kind === 'error' && arg.expression.kind !== 'unbound'))
         return undefined;
-      const [first, second] = this.tiedCandidates(applicable, args);
+      const [first, second] = this.tiedCandidates(mostDerived, args);
       this.error(
         row,
         'CS0121',
