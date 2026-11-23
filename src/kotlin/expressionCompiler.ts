@@ -1136,7 +1136,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return levels;
   }
 
-  /** @param constructors A class's constructors, which come before the functions of the class's own level. */
+  /** @param constructors A class's constructors, which join the functions of the class's own level as one overload set. */
   private topLevelCallLevels(
     name: string,
     row: number,
