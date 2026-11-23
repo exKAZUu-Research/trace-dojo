@@ -119,12 +119,20 @@ export function libraryType(call: NativeCall, fullName: string, args: Type[] = [
 
 /** Creates an array of a type with elements. */
 export function newArray(call: NativeCall, element: Type, values: Value[]): CsArray {
-  call.frame.runtime.allocateSlots(values.length);
-  return new CsArray(
-    { kind: 'array', element, rank: 1 },
-    [values.length],
-    values.map((value) => copyValue(value))
-  );
+  return newArrayOf(call, element, values.length, (index) => values[index]);
+}
+
+/** A new array of a length, checked against the slot limit before any element is made, as `new T[n]` is. */
+export function newArrayOf(
+  call: NativeCall,
+  element: Type,
+  length: number,
+  valueAt: (index: number) => Value
+): CsArray {
+  call.frame.runtime.allocateSlots(length);
+  const values: Value[] = [];
+  for (let index = 0; index < length; index++) values.push(copyValue(valueAt(index)));
+  return new CsArray({ kind: 'array', element, rank: 1 }, [length], values);
 }
 
 /** The elements of a `params` array argument, which may be null. */

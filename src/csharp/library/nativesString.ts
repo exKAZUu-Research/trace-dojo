@@ -189,11 +189,11 @@ function splitParts(
 }
 
 function joinValues(call: NativeCall, separator: string, args: Value[], startIndex = 1): string {
-  const text = elementStrings(call, args, startIndex)
-    .map((item) => stringText(item))
-    .join(separator);
-  call.frame.runtime.allocateString(text.length);
-  return text;
+  return joinedText(
+    call,
+    elementStrings(call, args, startIndex).map((item) => stringText(item)),
+    separator
+  );
 }
 
 /**
@@ -239,9 +239,21 @@ function combinedString(call: NativeCall, strings: (string | CsString)[], separa
     (parameter) => !parameter.isParams && ['object', 'string'].includes(specialOf(parameter.type) ?? '')
   );
   if (call.method.name === 'Concat' && isSeparateArguments && nonEmpty.length === 1) return nonEmpty[0];
-  const text = strings.map((item) => stringText(item)).join(separator);
-  call.frame.runtime.allocateString(text.length);
-  return freshString(text);
+  return freshString(
+    joinedText(
+      call,
+      strings.map((item) => stringText(item)),
+      separator
+    )
+  );
+}
+
+/** Joins texts after checking the length of the result, which repeated references to one string can make huge. */
+function joinedText(call: NativeCall, texts: string[], separator: string): string {
+  let length = Math.max(0, texts.length - 1) * separator.length;
+  for (const text of texts) length += text.length;
+  call.frame.runtime.allocateString(length);
+  return texts.join(separator);
 }
 
 const stringNatives: Record<string, NativeMethod> = {
@@ -343,14 +355,17 @@ const stringNatives: Record<string, NativeMethod> = {
     // .NET compares the index as an unsigned number, so a negative one shows as a large one.
     if ((index as number) < 0 || (index as number) > text.length)
       failGreater(call, 'startIndex', (index as number) >>> 0, text.length);
+    call.frame.runtime.allocateString(text.length + (value as string).length);
     return text.slice(0, index as number) + (value as string) + text.slice(index as number);
   },
   [`${STRING}.PadLeft`]: (call, receiver, [width, char = 32]) => {
     if ((width as number) < 0) failNegative(call, 'totalWidth', width as number);
+    call.frame.runtime.allocateString(width as number);
     return receiverText(receiver).padStart(width as number, String.fromCodePoint(char as number));
   },
   [`${STRING}.PadRight`]: (call, receiver, [width, char = 32]) => {
     if ((width as number) < 0) failNegative(call, 'totalWidth', width as number);
+    call.frame.runtime.allocateString(width as number);
     return receiverText(receiver).padEnd(width as number, String.fromCodePoint(char as number));
   },
   [`${STRING}.Remove(int)`]: (call, receiver, [start]) => {

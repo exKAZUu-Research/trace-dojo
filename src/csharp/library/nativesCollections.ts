@@ -25,6 +25,7 @@ import {
   failOutOfRange,
   libraryType,
   newArray,
+  newArrayOf,
   refOf,
   stepMeter,
   textOf,
@@ -1607,10 +1608,11 @@ defineNatives({
     const ref = refOf(reference);
     const array = ref.get() as CsArray | undefined;
     const elementType = array ? elementTypeOf(array) : call.typeArgs[0];
-    const values = Array.from({ length: size as number }, (_unused, index) =>
-      array && index < array.values.length ? array.values[index] : evaluatorOf(call).defaultOf(elementType)
+    ref.set(
+      newArrayOf(call, elementType, size as number, (index) =>
+        array && index < array.values.length ? array.values[index] : evaluatorOf(call).defaultOf(elementType)
+      )
     );
-    ref.set(newArray(call, elementType, values));
     return;
   },
   [`${ARRAY}.Reverse(Array)`]: (_call, _receiver, [array]) => {

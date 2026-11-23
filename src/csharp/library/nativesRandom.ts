@@ -1,6 +1,6 @@
 import { defineNatives, type NativeCall } from '../natives';
 import { type CsArray, CsObject, type Value } from '../values';
-import { fail, failNull, failOutOfRange, libraryType, newArray, typeArgument } from './support';
+import { fail, failNull, failOutOfRange, libraryType, newArrayOf, typeArgument } from './support';
 
 const INT_MAX = 2_147_483_647;
 
@@ -185,8 +185,6 @@ defineNatives({
     const options = (choices as CsArray).values;
     if (options.length === 0) fail('System.ArgumentException', 'Span may not be empty.', 'choices');
     const source = sourceOf(receiver);
-    const result = Array.from<Value>({ length: length as number });
-    for (let index = 0; index < result.length; index++) result[index] = options[nextBelow(source, options.length)];
-    return newArray(call, typeArgument(call), result);
+    return newArrayOf(call, typeArgument(call), length as number, () => options[nextBelow(source, options.length)]);
   },
 });

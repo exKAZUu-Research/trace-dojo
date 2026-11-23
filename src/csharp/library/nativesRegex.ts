@@ -49,11 +49,17 @@ function compilePattern(pattern: string, options: number): CompiledPattern {
   const translator = new PatternTranslator(pattern, options);
   const output = translator.translate();
   const numbered = numberGroups(translator.groups);
-  const finalPattern = output.replaceAll(/(\d+)/g, (_match, number: string) => {
-    const jsIndex = numbered.numberOfIndex.indexOf(Number(number));
-    if (jsIndex === -1) throw new UnsupportedPattern();
-    return `\\${jsIndex}`;
-  });
+  const finalPattern = output
+    .replaceAll(/(\d+)/g, (_match, number: string) => {
+      const jsIndex = numbered.numberOfIndex.indexOf(Number(number));
+      if (jsIndex === -1) throw new UnsupportedPattern();
+      return `\\${jsIndex}`;
+    })
+    .replaceAll(/(\w+)/g, (_match, name: string) => {
+      const jsIndex = translator.groups.findIndex((group) => group.name === name) + 1;
+      if (jsIndex === 0) throw new UnsupportedPattern();
+      return `\\${jsIndex}`;
+    });
   const ignoreCase = (options & OPTION.ignoreCase) !== 0;
   try {
     // The host's parser accepts or rejects the rewritten pattern first, as the matcher's parser expects.
@@ -74,6 +80,7 @@ function compilePattern(pattern: string, options: number): CompiledPattern {
 /** Translates a .NET pattern into JavaScript's syntax one construct at a time, recording its capture groups. */
 class PatternTranslator {
   readonly groups: { name: string | undefined }[] = [];
+  private readonly names = new Set<string>();
   private index = 0;
   private inClass = false;
 
@@ -171,14 +178,17 @@ class PatternTranslator {
       this.groups.push({ name: undefined });
       return '(';
     }
-    const rest = pattern.slice(this.index + 1);
-    const named = /^(?:<([A-Za-z_]\w*)>|'([A-Za-z_]\w*)')/.exec(rest);
+    // Sticky searches read the pattern in place, since slicing its rest at every group takes quadratic time.
+    NAMED_GROUP.lastIndex = this.index + 1;
+    const named = NAMED_GROUP.exec(pattern);
     if (named) {
       const name = named[1] ?? named[2];
-      if (this.groups.some((group) => group.name === name)) throw new UnsupportedPattern();
+      if (this.names.has(name)) throw new UnsupportedPattern();
+      this.names.add(name);
       this.groups.push({ name });
       this.index += 1 + named[0].length;
-      return `(?<${name}>`;
+      // JavaScriptCore parses named groups in quadratic time, so the host sees only numbered ones.
+      return '(';
     }
     for (const opening of ['?:', '?=', '?!', '?<=', '?<!']) {
       if (pattern.startsWith(opening, this.index)) {
@@ -197,7 +207,8 @@ class PatternTranslator {
   }
 
   private quantifierOpening(): string {
-    const quantifier = /^\d+(?:,\d*)?\}/.exec(this.pattern.slice(this.index));
+    QUANTIFIER.lastIndex = this.index;
+    const quantifier = QUANTIFIER.exec(this.pattern);
     if (!quantifier) return String.raw`\{`;
     this.index += quantifier[0].length;
     return `{${quantifier[0]}`;
@@ -207,6 +218,9 @@ class PatternTranslator {
     return this.pattern[this.index++] ?? '';
   }
 }
+
+const NAMED_GROUP = /<([A-Za-z_]\w*)>|'([A-Za-z_]\w*)'/y;
+const QUANTIFIER = /\d+(?:,\d*)?\}/y;
 
 function numberGroups(groups: { name: string | undefined }[]): Pick<CompiledPattern, 'numberOfIndex' | 'names'> {
   const unnamedCount = groups.filter((group) => group.name === undefined).length;
@@ -253,7 +267,7 @@ function escapeOf(
       const name = /^<([A-Za-z_]\w*)>/.exec(pattern.slice(position()));
       if (!name) throw new UnsupportedPattern();
       move(position() + name[0].length);
-      return String.raw`\k${name[0]}`;
+      return `${name[1]}`;
     }
     case 'p':
     case 'P': {
@@ -440,6 +454,7 @@ function patternOf(call: NativeCall, patternString: Value, options: Value = 0): 
   }
   let compiled = patterns.get(key);
   if (!compiled) {
+    call.frame.runtime.spend(Math.ceil((pattern as string).length / 16));
     const invalid = patternError(pattern as string);
     if (invalid) {
       fail(
