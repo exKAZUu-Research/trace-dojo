@@ -819,6 +819,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   // Objects and enums.
 
   objectInstance(cls: ClassSymbol): (frame: Frame) => Value {
+    // Unit-returning code yields UNIT, which the Unit object must be for equality to hold.
+    if (cls === this.core.unit) return () => UNIT;
     const owner = cls.kind === 'companion' ? (cls.outer ?? cls) : cls;
     return (frame) => {
       this.ensureClassInitialized(frame, owner);
