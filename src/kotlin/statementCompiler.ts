@@ -1680,7 +1680,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return { scope: catchScope, test: instanceTest(this.core, type), write, slot: variable.slot };
   }
 
-  // code-gauge-allow functionNcss -- compiles the body and transfers its result to each kind of incoming path.
   private compileFinally(
     scope: Scope,
     context: FunctionContext,
@@ -1693,6 +1692,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     this.flow = Flow.merge([afterTry, ...throws, ...loopExits.flatMap(({ pending }) => pending)]);
     keepAssignedBefore(this.flow, beforeTry);
     restrictFieldReads(this.flow, beforeTry);
+    const atEntry = new Map(this.flow.narrowed);
     const exitStarts = loopExits.map(({ exits }) => exits.length);
     const evaluate = this.compileBlockValue(scope, context, block, undefined, true).eval;
     const afterFinally = this.flow;
@@ -1702,15 +1702,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       const variable = this.findVariable(scope, name);
       return variable ? [keyOf(variable)] : [];
     });
-    const transfer = (flow: Flow): Flow => {
-      const completed = flow.copy();
-      completed.isDead ||= afterFinally.isDead;
-      for (const key of assignedKeys) completed.forget(key);
-      for (const [key, type] of afterFinally.narrowed) completed.narrowed.set(key, type);
-      for (const variable of afterFinally.assigned) completed.assigned.add(variable);
-      for (const variable of afterFinally.maybeAssigned) completed.maybeAssigned.add(variable);
-      return completed;
-    };
+    const transfer = (flow: Flow): Flow => throughFinally(flow, afterFinally, atEntry, assignedKeys);
     this.flow = transfer(afterTry);
     if (afterFinally.isDead) return evaluate;
     for (const { exits, pending } of loopExits) {
@@ -1718,6 +1710,22 @@ export abstract class StatementCompiler extends OperatorCompiler {
     }
     return evaluate;
   }
+}
+
+/**
+ * A path that ran finally: it keeps what it knew, but loses what finally assigned and takes what finally established,
+ * so each path keeps the sharper smart casts it entered with.
+ */
+function throughFinally(flow: Flow, afterFinally: Flow, atEntry: Map<string, KType>, assignedKeys: string[]): Flow {
+  const completed = flow.copy();
+  completed.isDead ||= afterFinally.isDead;
+  for (const key of assignedKeys) completed.forget(key);
+  for (const [key, type] of afterFinally.narrowed) {
+    if (atEntry.get(key) !== type || assignedKeys.includes(key)) completed.narrowed.set(key, type);
+  }
+  for (const variable of afterFinally.assigned) completed.assigned.add(variable);
+  for (const variable of afterFinally.maybeAssigned) completed.maybeAssigned.add(variable);
+  return completed;
 }
 
 function applyFinallyJumpFields(jumps: Flow[], beforeTry: Flow, afterTry: Flow): void {
