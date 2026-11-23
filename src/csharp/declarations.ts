@@ -896,6 +896,18 @@ export class DeclarationBinder extends BinderBase {
       accessModifierCount(accessor.modifiers) > 0
         ? accessibilityOf(accessor.modifiers, property.access)
         : property.access;
+    if (
+      accessModifierCount(accessor.modifiers) > 0 &&
+      !this.isLibraryUnit &&
+      (method.access === property.access || ACCESS_RANKS[method.access] > ACCESS_RANKS[property.access])
+    ) {
+      const shown = `${displayTypeSymbol(symbol)}.${property.isIndexer ? 'this' : property.name}`;
+      this.error(
+        accessor,
+        'CS0273',
+        `'${shown}.${isGetter ? 'get' : 'set'}' アクセサーのアクセシビリティ修飾子は、プロパティまたはインデクサー '${shown}' よりも制限されていなければなりません`
+      );
+    }
     method.row = accessor.row;
     method.returnType = isGetter ? property.type : VOID_TYPE;
     method.parameters = [...property.parameters];
