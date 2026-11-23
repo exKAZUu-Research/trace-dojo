@@ -66,7 +66,9 @@ function samImplementation(core: Core, cls: ClassSymbol, method: FunctionSymbol)
   });
   call.invoke = (caller, receiver, args) => {
     const boxedArgs = args.map((arg, index) => convertRepr(() => arg, reprs[index], 'ref')(caller));
-    const result = ((receiver as KObject).function as NonNullable<KObject['function']>).call(caller, boxedArgs);
+    const { function: wrapped } = receiver as KObject;
+    if (!wrapped) return caller.runtime.throwError(caller, 'java.lang.NullPointerException');
+    const result = wrapped.call(caller, boxedArgs);
     return convertRepr(() => result, 'ref', resultRepr)(caller);
   };
   implementation.vtable.set(method.root, call);
@@ -399,10 +401,11 @@ export class Compiler extends BodyCompiler {
       type,
       repr: 'ref',
       eval: (frame) => {
-        const fn = evaluate(frame) as KObject;
+        // A function-valued property read before its initializer ran is null, which only calling the method rejects.
+        const fn = evaluate(frame) as KObject | undefined;
         const object = new KObject(implementation, 0);
-        object.function = fn.function;
-        object.env = fn.env;
+        object.function = fn?.function;
+        object.env = fn?.env;
         return object;
       },
     };
