@@ -127,8 +127,11 @@ export class BuilderChunks {
     while (remaining > 0) {
       const position = chunk.offset + indexInChunk;
       if (next === undefined || (next !== -1 && next < position)) {
-        next = current.indexOf(oldValue, position);
-        charge((next === -1 ? current.length : next + oldValue.length) - position + 1);
+        // The search reads only the range left, as text past it holds no occurrence the call replaces.
+        const end = position + remaining;
+        const found = current.slice(position, end).indexOf(oldValue);
+        next = found === -1 ? -1 : position + found;
+        charge((found === -1 ? end - position : found + oldValue.length) + 1);
       }
       const isMatch =
         next !== -1 && next < chunk.offset + chunk.length && next + oldValue.length <= position + remaining;

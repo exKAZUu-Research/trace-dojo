@@ -201,3 +201,17 @@ Console.WriteLine(xs.Count + names.Count + pair.Count);
     pair: { kind: 'object', entries: { Item1: { kind: 'value', value: 2 }, Item2: { kind: 'value', value: 'x' } } },
   });
 });
+
+test('locals leave the trace when control leaves their scopes, whichever way it leaves', () => {
+  const program = `int a = 1;
+try { throw new Exception("x"); } catch (Exception e) when (int.TryParse("bad", out int parsed)) { } catch (Exception f) { Console.WriteLine(f.Message); }
+try { throw new ArgumentException("m"); } catch (Exception e) when (e is ArgumentException arg) { Console.WriteLine(arg.Message); }
+switch (1) { case var x when x > 5: break; }
+for (int i = 0; i < 2; i++) { int inner = i; if (i == 1) break; }
+{ int blockLocal = 3; }
+int b = 2;
+`;
+  const { finalVars, stdout } = traceProgram('csharp', program, program);
+  expect(finalVars).toEqual({ a: 1, b: 2 });
+  expect(stdout).toBe('x\nm\n');
+});

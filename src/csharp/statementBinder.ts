@@ -1081,7 +1081,7 @@ export abstract class StatementBinder extends PatternBinder {
       } finally {
         context.fn.catchDepth--;
       }
-      return { type, local, filter, body: catchBody, row: clause.row };
+      return { type, local, locals: scope.locals, filter, body: catchBody, row: clause.row };
     });
     let finallyBlock: BoundBlock | undefined;
     if (statement.finally) {

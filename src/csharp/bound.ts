@@ -256,6 +256,8 @@ export interface BoundBlock extends StatementBase {
 export interface BoundCatch {
   type: Type;
   local: LocalSymbol | undefined;
+  /** The exception variable and the locals the filter declares, which leave scope with the clause. */
+  locals: LocalSymbol[];
   filter: BoundExpression | undefined;
   body: BoundBlock;
   row: number;

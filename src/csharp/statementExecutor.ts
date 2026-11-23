@@ -364,13 +364,15 @@ export abstract class StatementExecutor extends PatternMatcher {
     for (const { statement, frame } of this.handlers.slice(this.filterFloor).toReversed()) {
       for (const clause of statement.catches) {
         if (!this.isInstanceOf(thrown.exception, clause.type)) continue;
-        const { filter, local } = clause;
-        const passes =
-          !filter ||
-          this.inScope(frame, local ? [local] : [], [], () => {
-            if (local) this.storeLocal(frame, local, thrown.exception, true);
-            return this.passesFilter(filter, frame);
-          });
+        if (!clause.filter) return { statement, clause };
+        // A passing filter's locals stay in scope for the clause's body, which handle drops on its way out.
+        let passes = false;
+        try {
+          if (clause.local) this.storeLocal(frame, clause.local, thrown.exception, true);
+          passes = this.passesFilter(clause.filter, frame);
+        } finally {
+          if (!passes) this.dropLocals(frame, clause.locals);
+        }
         if (passes) return { statement, clause };
       }
     }
@@ -403,7 +405,7 @@ export abstract class StatementExecutor extends PatternMatcher {
     const { local } = clause;
     this.currentExceptions.push(thrown);
     try {
-      return this.inScope(frame, local ? [local] : [], [], () => {
+      return this.inScope(frame, clause.locals, [], () => {
         if (local) this.storeLocal(frame, local, thrown.exception, true);
         return this.executeBlock(clause.body, frame);
       });
@@ -421,8 +423,12 @@ export abstract class StatementExecutor extends PatternMatcher {
     try {
       return run();
     } finally {
-      for (const local of locals) frame.slots[local.slot] = UNASSIGNED;
+      this.dropLocals(frame, locals);
     }
+  }
+
+  private dropLocals(frame: Frame, locals: readonly LocalSymbol[]): void {
+    for (const local of locals) frame.slots[local.slot] = UNASSIGNED;
   }
 
   /** The C# exception that a host error stands for, if the program can catch it. */
