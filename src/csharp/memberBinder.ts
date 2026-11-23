@@ -838,9 +838,13 @@ export abstract class MemberBinder extends CallBinder {
       target: undefined,
     }));
     const saved = this.diagnostics.length;
+    // A delegate passes exactly its own arguments: no optional parameter is left out and no params array expands.
+    const candidates = group.candidates.filter(
+      (candidate) => candidate.method.parameters.length === invoke.parameterTypes.length
+    );
     let resolved =
-      group.candidates.length > 0
-        ? this.resolveCall(group.candidates, args, group.typeArgs, row, { name: group.name, kind: 'method' })
+      candidates.length > 0
+        ? this.resolveCall(candidates, args, group.typeArgs, row, { name: group.name, kind: 'method' })
         : undefined;
     let receiver = group.receiver;
     if (!resolved && group.extensions.length > 0 && group.receiver) {
@@ -855,6 +859,7 @@ export abstract class MemberBinder extends CallBinder {
       receiver = group.receiver;
     }
     this.diagnostics.length = saved;
+    if (resolved && !this.takesDelegateArguments(resolved, invoke.parameterTypes)) resolved = undefined;
     if (!resolved) {
       if (report)
         this.error(
@@ -1117,6 +1122,25 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** The override of a virtual method that a type or its nearest base declares, for a non-virtual `base` call. */
+  /**
+   * Whether a method takes a delegate's arguments as they are: each converts to its parameter by identity or an
+   * implicit reference conversion, as the delegate passes them unconverted (C# spec §10.8).
+   */
+  private takesDelegateArguments(resolved: ResolvedCall, argumentTypes: Type[]): boolean {
+    const { method } = resolved.candidate;
+    const parameters = method.isExtension ? method.parameters.slice(1) : method.parameters;
+    if (parameters.length !== argumentTypes.length) return false;
+    const substitution = this.callSubstitution(resolved.candidate, resolved.typeArgs);
+    return parameters.every((parameter, index) => {
+      const parameterType = substitute(parameter.type, substitution);
+      const argumentType = argumentTypes[index];
+      return (
+        sameType(parameterType, argumentType) ||
+        (isReferenceType(argumentType) && this.conversions.isReferenceConvertible(argumentType, parameterType))
+      );
+    });
+  }
+
   /**
    * The return type of the most derived override that the receiver's static type has, which a call gets when an
    * override returns a more derived reference type (C# 9 covariant returns); undefined to use the method's own.
