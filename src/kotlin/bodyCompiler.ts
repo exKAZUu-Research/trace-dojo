@@ -216,6 +216,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     context: FunctionContext
   ): Eval {
     // A declared result type also checks the returns inside the body, as `= if (c) return x else 0` has.
+    const declared = symbol.returnType !== undefined;
     if (symbol.returnType) {
       context.returnType = symbol.returnType;
       context.returnRepr = returnRepr(symbol);
@@ -226,6 +227,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const returnType = symbol.returnType;
     const misfit = context.returnedTypes.find((type) => !isSubtype(type, returnType));
     if (misfit) this.error(expression.row, typeMismatchMessage(returnType, misfit));
+    if (!declared && context.hasDirectReturn)
+      this.error(expression.row, '= の後の式で return を使うときは、関数の戻り値の型を書いてください。');
     context.returnType = symbol.returnType;
     return convertRepr(
       this.expectType(compiled, symbol.returnType, expression.row),
