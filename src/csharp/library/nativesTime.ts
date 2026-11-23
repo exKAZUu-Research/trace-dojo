@@ -399,6 +399,8 @@ function timeSpanField(span: TimeSpanParts, char: string, count: number): string
   if (char === 'm') return pad(span.minutes, count);
   if (char === 's') return pad(span.seconds, count);
   if (char === 'f') return span.fraction.toString().padStart(7, '0').slice(0, count);
+  // `F` shows the same digits without their trailing zeros.
+  if (char === 'F') return span.fraction.toString().padStart(7, '0').slice(0, count).replace(/0+$/, '');
   return undefined;
 }
 
