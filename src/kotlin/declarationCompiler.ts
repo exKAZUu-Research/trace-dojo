@@ -781,7 +781,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const scope = new Scope(ownerScope, undefined);
     symbol.typeParameters = this.declareTypeParameters(scope, decl.typeParameters);
     this.applyMemberModifiers(symbol, decl.modifiers, cls?.symbol);
-    symbol.isLateinit = decl.modifiers.keywords.has('lateinit');
     if (decl.receiver) symbol.extensionReceiver = this.resolveType(scope, decl.receiver);
     if (decl.type) symbol.type = this.resolveType(scope, decl.type);
     symbol.hasCustomGetter = decl.getter?.body !== undefined || decl.delegate !== undefined;
@@ -1056,18 +1055,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   /** Reads and writes a property's backing field directly, as its default accessors do. */
   protected bindFieldAccessors(property: PropertySymbol): void {
     const slot = property.slot as number;
-    const isLateinit = property.isLateinit;
-    property.get ??= (frame, receiver) => {
-      const value = (receiver as KObject).fields[slot];
-      if (isLateinit && value === undefined) {
-        return frame.runtime.throwError(
-          frame,
-          'kotlin.UninitializedPropertyAccessException',
-          `lateinit property ${property.name} has not been initialized`
-        );
-      }
-      return value;
-    };
+    property.get ??= (_frame, receiver) => (receiver as KObject).fields[slot];
     property.set ??= (_frame, receiver, value) => {
       (receiver as KObject).fields[slot] = value;
     };

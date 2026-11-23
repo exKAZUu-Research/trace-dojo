@@ -126,8 +126,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   protected checkInitialized(context: FunctionContext, property: PropertySymbol, name: string, row: number): void {
     const pending = this.uninitializedProperties;
     if (pending?.context !== context.directExecutionContext()) return;
-    const awaitsAssignment =
-      !property.isLateinit && this.mayInitializeVal(pending.context, property) && !this.flow.assigned.has(property);
+    const awaitsAssignment = this.mayInitializeVal(pending.context, property) && !this.flow.assigned.has(property);
     if (awaitsAssignment || pending.properties.has(property))
       this.error(row, `プロパティ ${name} には、まだ値が入っていません。`);
   }

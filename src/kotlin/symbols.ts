@@ -199,7 +199,6 @@ export class PropertySymbol implements MemberBase {
   isAbstract = false;
   isOpen = false;
   isOverride = false;
-  isLateinit = false;
   overridden: MemberSymbol[] = [];
   root: MemberSymbol = this;
   row = 0;

@@ -262,7 +262,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const entry = this.entryOfProperty.get(property);
     if (!initializer || !entry || initializer.file !== entry.file) return;
     const { decl } = entry;
-    if (decl.modifiers.keywords.has('const') || property.isLateinit || (!decl.delegate && !decl.initializer)) return;
+    if (decl.modifiers.keywords.has('const') || (!decl.delegate && !decl.initializer)) return;
     if (initializer.declarationIndex <= entry.declarationIndex)
       this.error(row, `プロパティ ${property.name} には、まだ値が入っていません。`);
   }
@@ -733,7 +733,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       // A property with accessors needs a value only when they use its backing field, which then has a slot.
       if (member.kind !== 'property' || member.initializer || member.delegate) continue;
       const property = this.findOwnProperty(entry.symbol, member.name);
-      if (property.isAbstract || property.slot === undefined || property.isLateinit) continue;
+      if (property.isAbstract || property.slot === undefined) continue;
       if (!this.flow.assigned.has(property)) {
         this.error(member.row, `プロパティ ${member.name} には初期値を書くか、init で値を入れてください。`);
       }
