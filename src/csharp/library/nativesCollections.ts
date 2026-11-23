@@ -3,7 +3,7 @@ import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import { defaultCompare, environmentOf, hashOf, stringOf, valuesEqual } from '../objects';
 import { CsThrow } from '../runtime';
-import { type MethodSymbol, sameType, type Type } from '../types';
+import { type MethodSymbol, sameType, substitute, substitutionOf, type Type } from '../types';
 import {
   copyValue,
   CsArray,
@@ -30,6 +30,7 @@ import {
   libraryType,
   newArray,
   newArrayOf,
+  nullReference,
   refOf,
   stepMeter,
   storeInArray,
@@ -237,10 +238,18 @@ function enumeratorStruct(
   return enumerator;
 }
 
+// A default enumerator (`default(List<int>.Enumerator)`) has no collection, which MoveNext reads as .NET's does.
 const enumeratorNatives = (typeName: string): Record<string, NativeMethod> => ({
-  [`${typeName}.MoveNext`]: (_call, receiver) => ((receiver as CsStruct).native as LibraryEnumerator).next(),
-  [`${typeName}.get_Current`]: (call, receiver) =>
-    ((receiver as CsStruct).native as LibraryEnumerator).currentValue(call),
+  [`${typeName}.MoveNext`]: (_call, receiver) => {
+    const enumerator = (receiver as CsStruct).native as LibraryEnumerator | undefined;
+    return enumerator ? enumerator.next() : nullReference();
+  },
+  [`${typeName}.get_Current`]: (call, receiver) => {
+    const enumerator = (receiver as CsStruct).native as LibraryEnumerator | undefined;
+    if (enumerator) return enumerator.currentValue(call);
+    const type = (receiver as CsStruct).type;
+    return evaluatorOf(call).defaultOf(substitute(call.method.returnType, substitutionOf(type)));
+  },
   [`${typeName}.Dispose`]: () => {},
 });
 
