@@ -1,4 +1,4 @@
-import type { KotlinFile } from './ast';
+import type { KotlinFile, LambdaExpression } from './ast';
 import { BodyCompiler } from './bodyCompiler';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
@@ -11,6 +11,7 @@ import {
   type PackageScope,
   reprOf,
   type Scope,
+  typeMismatchMessage,
 } from './compilerBase';
 import { type FileContext, TURTLE_PACKAGE } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
@@ -18,10 +19,11 @@ import { callFunction, parameterReprs, receiverRepr } from './dispatch';
 import { jvmParameterDescriptor } from './jvmSignatures';
 import { libraryClass } from './natives/registry';
 import type { NativeFunction, NativeProperty } from './nativeTypes';
+import { hasNonNullReceiver, nonNullParameterIndexes, rejectNullArguments } from './nullArguments';
 import { Frame, type FunctionInfo, MISSING } from './runtime';
 import { ClassSymbol, FunctionSymbol, type MemberSymbol, VariableSymbol } from './symbols';
-import { isSubtype } from './typeRelations';
-import { type ClassType, isNonNullClass, type KType, resolved } from './types';
+import { anyType, fixVariable, isSubtype } from './typeRelations';
+import { type ClassType, classType, type FunctionType, isNonNullClass, type KType, resolved } from './types';
 import { KObject, NULL, type Value } from './values';
 
 /** Adds a symbol to the imports of a name, once, since a file's imports are resolved before and after its headers. */
@@ -289,8 +291,11 @@ export class Compiler extends BodyCompiler {
 
   protected nativeInvoker(symbol: FunctionSymbol, native: NativeFunction): NonNullable<FunctionSymbol['invoke']> {
     let nonNullParams: number[] | undefined;
+    let checksReceiver: boolean | undefined;
     return (caller, receiver, args) => {
       nonNullParams ??= nonNullParameterIndexes(symbol);
+      checksReceiver ??= hasNonNullReceiver(symbol);
+      if (checksReceiver && receiver === NULL) caller.runtime.throwError(caller, 'java.lang.NullPointerException');
       rejectNullArguments(caller, nonNullParams, args);
       if (!args.includes(MISSING)) return caller.runtime.checkBuiltString(caller, native(caller, receiver, args));
       // Default values may read the receiver and the earlier parameters, as `missingDelimiterValue: String = this` does.
@@ -302,6 +307,68 @@ export class Compiler extends BodyCompiler {
       }
       return caller.runtime.checkBuiltString(caller, native(caller, receiver, frame.locals as Value[]));
     };
+  }
+
+  /** `Comparator { a, b -> ... }`: a lambda converted to a `fun interface`, whose type arguments it may infer. */
+  protected samConstructorCall(
+    scope: Scope,
+    context: FunctionContext,
+    cls: ClassSymbol,
+    args: ArgumentSyntax[],
+    typeArgs: KType[],
+    expected: KType | undefined
+  ): Compiled | undefined {
+    const [lambda] = args;
+    if (!cls.isFunInterface || args.length !== 1 || lambda.value.kind !== 'lambda') return undefined;
+    if (typeArgs.length > cls.typeParameters.length) return undefined;
+    return this.compileSamConstructor(scope, context, cls, lambda.value, typeArgs, expected);
+  }
+
+  private compileSamConstructor(
+    scope: Scope,
+    context: FunctionContext,
+    cls: ClassSymbol,
+    lambda: LambdaExpression,
+    typeArgs: KType[],
+    expected: KType | undefined
+  ): Compiled {
+    let type: KType;
+    const expectedType = expected ? resolved(expected) : undefined;
+    if (typeArgs.length === cls.typeParameters.length) type = classType(cls, typeArgs);
+    else if (expectedType?.kind === 'class' && expectedType.cls === cls) type = { ...expectedType, nullable: false };
+    else
+      type = classType(
+        cls,
+        cls.typeParameters.map(
+          (param) =>
+            ({
+              kind: 'variable',
+              variable: { param, lower: [], upper: [], fixed: undefined },
+              nullable: false,
+            }) as KType
+        )
+      );
+    const sam = this.samOf(type) as NonNullable<ReturnType<Compiler['samOf']>>;
+    // The lambda's parameters need their types, which variables of an expected type such as `Comparator<in T>` give.
+    for (const param of sam.functionType.params) {
+      const actual = resolved(param);
+      if (actual.kind === 'variable' && !actual.variable.fixed) fixVariable(actual.variable);
+    }
+    const compiled = this.compileLambda(scope, context, lambda, resolved(sam.functionType) as FunctionType, false);
+    const bodyType = (resolved(compiled.type) as FunctionType).returnType;
+    if (
+      !isSubtype(bodyType, sam.functionType.returnType) &&
+      !isNonNullClass(sam.functionType.returnType, this.core.unit)
+    ) {
+      this.error(lambda.row, typeMismatchMessage(sam.functionType.returnType, bodyType));
+    }
+    for (const argument of (resolved(type) as ClassType).args) {
+      if (argument.variance !== 'star' && argument.type.kind === 'variable' && !argument.type.variable.fixed) {
+        argument.type.variable.fixed =
+          argument.type.variable.lower[0] ?? argument.type.variable.upper[0] ?? anyType(true);
+      }
+    }
+    return { ...this.samWrap(compiled, sam, resolved(type)), isCreation: true };
   }
 
   protected samWrap(lambda: Compiled, sam: NonNullable<ReturnType<Compiler['samOf']>>, type: KType): Compiled {
@@ -513,23 +580,6 @@ export class Compiler extends BodyCompiler {
 
 export { TURTLE_PACKAGE, callFunction, parameterReprs, receiverRepr };
 export type { Eval };
-
-function nonNullParameterIndexes(symbol: FunctionSymbol): number[] {
-  return symbol.params.flatMap(({ type }, index) => {
-    const actual = resolved(type);
-    return actual.kind === 'class' && !actual.nullable ? [index] : [];
-  });
-}
-
-/**
- * Erased generic code, such as a Comparable's compareTo, can pass null where the library declares a non-null
- * parameter, which the JVM's library methods reject.
- */
-function rejectNullArguments(caller: Frame, nonNullParams: number[], args: Value[]): void {
-  for (const index of nonNullParams) {
-    if (args[index] === NULL) caller.runtime.throwError(caller, 'java.lang.NullPointerException');
-  }
-}
 
 function enumEntryNamed(frame: Frame, cls: ClassSymbol, entryName: Value): Value {
   if (entryName === undefined) return frame.runtime.throwError(frame, 'java.lang.NullPointerException');

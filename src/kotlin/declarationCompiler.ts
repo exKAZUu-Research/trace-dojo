@@ -33,6 +33,7 @@ import { jvmSignatures, overriddenMembers } from './jvmSignatures';
 import { isKnownLibraryAnnotation, isKnownLibraryPackage } from './libraryApi';
 import { arrayContentHash } from './natives/arrays';
 import { type NativeFunction, type NativeProperty, typeRefText } from './nativeTypes';
+import { nonNullParameterIndexes, rejectNullArguments } from './nullArguments';
 import { toInt32 } from './operators';
 import { type Frame, MISSING } from './runtime';
 import { StatementCompiler } from './statementCompiler';
@@ -586,7 +587,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       return this.expectType(compiled, ctor.params[index].type, value.row);
     });
     for (const [index, evaluate] of defaults.entries()) if (evaluate) ctor.params[index].defaultValue = evaluate;
+    const nonNullParams = nonNullParameterIndexes(ctor);
     ctor.initialize = (caller, instance, args) => {
+      rejectNullArguments(caller, nonNullParams, args);
       const filled = args.map((arg, index) => (arg === MISSING ? ctor.params[index].defaultValue?.(caller) : arg));
       native(caller, instance, filled);
     };
