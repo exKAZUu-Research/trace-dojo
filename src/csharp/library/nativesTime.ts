@@ -171,14 +171,20 @@ function nowTicks(): bigint {
 }
 
 /** Rounds a double number of a unit to ticks as .NET's `TimeSpan.From*` and `DateTime.Add*` do. */
-function ticksFromDouble(value: number, unit: bigint, parameter: string): bigint {
+function ticksFromDouble(
+  value: number,
+  unit: bigint,
+  parameter: string,
+  /** How .NET truncates: TimeSpan's factories the whole product, DateTime's Add* the whole units and fraction apart. */
+  truncation: 'product' | 'parts'
+): bigint {
   if (Number.isNaN(value))
     fail('System.ArgumentException', 'TimeSpan does not accept floating point Not-a-Number values.');
   const ticks = value * Number(unit);
   if (!Number.isFinite(ticks) || Math.abs(ticks) > 9.223372036854776e18)
     fail('System.OverflowException', 'TimeSpan overflowed because the duration is too long.');
   void parameter;
-  // .NET truncates toward zero: the whole units are exact, and the fraction's ticks drop what is below one tick.
+  if (truncation === 'product') return BigInt(Math.trunc(ticks));
   const whole = Math.trunc(value);
   return BigInt(whole) * unit + BigInt(Math.trunc((value - whole) * Number(unit)));
 }
@@ -424,7 +430,7 @@ function timeSpanField(span: TimeSpanParts, char: string, count: number): string
 const fromUnit =
   (unit: bigint): NativeMethod =>
   (call, _receiver, [value]) =>
-    timeSpan(call, ticksFromDouble(value as number, unit, 'value'));
+    timeSpan(call, ticksFromDouble(value as number, unit, 'value', 'product'));
 
 defineNatives({
   'System.TimeSpan..ctor(long)': (_call, receiver, [ticks]) => setTicks(receiver, ticks as bigint),
@@ -530,7 +536,7 @@ function comparisons(type: string): Record<string, NativeMethod> {
 const addUnit =
   (unit: bigint): NativeMethod =>
   (call, receiver, [value]) =>
-    dateTime(call, ticksOf(receiver) + ticksFromDouble(value as number, unit, 'value'));
+    dateTime(call, ticksOf(receiver) + ticksFromDouble(value as number, unit, 'value', 'parts'));
 
 defineNatives({
   'System.DateTime..ctor(long)': (call, receiver, [ticks]) => {

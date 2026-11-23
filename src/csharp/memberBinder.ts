@@ -281,7 +281,8 @@ export abstract class MemberBinder extends CallBinder {
     }
     if (found?.local) return this.localReference(found.local, position, context);
     if (found?.localFunction) {
-      this.rejectStaticReference(found.localFunction, found.scope.owner, position, context);
+      // A name in nameof calls nothing, so it crosses no static boundary.
+      if (!this.isBindingName) this.rejectStaticReference(found.localFunction, found.scope.owner, position, context);
       this.localFunctionUses.push({ fn: context.fn, callee: found.localFunction });
       return {
         kind: 'methodGroup',
