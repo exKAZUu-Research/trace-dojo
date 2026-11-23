@@ -449,8 +449,10 @@ export class Evaluator extends StatementExecutor {
       case 'conditionalAccess': {
         const receiver = this.evaluate(expression.receiver, frame);
         if (receiver === undefined) return undefined;
-        this.storeLocal(frame, expression.temporary, receiver);
-        return this.evaluate(expression.access, frame);
+        return this.inScope(frame, [expression.temporary], [], () => {
+          this.storeLocal(frame, expression.temporary, receiver);
+          return this.evaluate(expression.access, frame);
+        });
       }
     }
   }
@@ -542,8 +544,11 @@ export class Evaluator extends StatementExecutor {
         throw this.throwValue(this.evaluate(expression.value, frame));
       }
       case 'sequence': {
-        for (const effect of expression.sideEffects) this.evaluate(effect, frame);
-        return this.evaluate(expression.value, frame);
+        // The sequence's hidden locals leave scope with it, so they hold no object the program has let go.
+        return this.inScope(frame, expression.locals, [], () => {
+          for (const effect of expression.sideEffects) this.evaluate(effect, frame);
+          return this.evaluate(expression.value, frame);
+        });
       }
     }
   }
