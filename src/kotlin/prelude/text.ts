@@ -644,5 +644,22 @@ fun Int.digitToChar(radix: Int): Char {
 }
 external fun Int.toString(radix: Int): String
 external fun Long.toString(radix: Int): String
+fun Byte.toString(radix: Int): String = toInt().toString(radix)
+fun Short.toString(radix: Int): String = toInt().toString(radix)
+fun UByte.toString(radix: Int): String = toInt().toString(radix)
+fun UShort.toString(radix: Int): String = toInt().toString(radix)
+fun UInt.toString(radix: Int): String = toLong().toString(radix)
+fun ULong.toString(radix: Int): String {
+    val value = toLong()
+    if (value >= 0) return value.toString(radix)
+    // The stdlib's ulongToString halves the value to divide it as a signed Long.
+    var quotient = ((value ushr 1) / radix) shl 1
+    var remainder = value - quotient * radix
+    if (remainder >= radix) {
+        remainder -= radix
+        quotient += 1
+    }
+    return quotient.toString(radix) + remainder.toString(radix)
+}
 external fun Char(code: Int): Char
 `;
