@@ -892,7 +892,17 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         true
       );
     }
-    if (!declaredFunction(symbol, 'hashCode', 0)) {
+    const definesHash = declaredFunction(symbol, 'hashCode', 0);
+    const equalityParameter = anyType(true);
+    const definesEquality = symbol.members.get('equals')?.some((member) => {
+      if (member.kind !== 'function' || member.extensionReceiver || member.params.length !== 1) return false;
+      const [parameter] = member.params;
+      return !parameter.isVararg && isSameType(parameter.type, equalityParameter);
+    });
+    if (symbol.isObject && !symbol.isLibrary && (definesHash || definesEquality)) {
+      this.error(symbol.row, 'data object では、equals や hashCode を独自に定義できません。');
+    }
+    if (!definesHash) {
       addGenerated(
         symbol,
         'hashCode',
@@ -902,12 +912,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         true
       );
     }
-    const equalityParameter = anyType(true);
-    const definesEquality = symbol.members.get('equals')?.some((member) => {
-      if (member.kind !== 'function' || member.extensionReceiver || member.params.length !== 1) return false;
-      const [parameter] = member.params;
-      return !parameter.isVararg && isSameType(parameter.type, equalityParameter);
-    });
     if (!definesEquality) {
       addGenerated(
         symbol,
