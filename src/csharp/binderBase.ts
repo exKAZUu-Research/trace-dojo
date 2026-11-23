@@ -341,6 +341,8 @@ export class BinderBase {
     if (left.kind === 'error') return ERROR_TYPE;
     if (left.kind === 'named') {
       const nested = this.findNestedType(left, node.name, args.length);
+      if (nested && !this.canUseNestedType(nested.symbol, context))
+        this.error(node, 'CS0122', `'${displayTypeSymbol(nested.symbol)}' はアクセスできない保護レベルになっています`);
       if (nested) return this.construct(node, nested.symbol, [...nested.outerArgs, ...args]);
       this.error(node, 'CS0426', `型名 '${node.name}' が型 '${displayType(left)}' に存在しません`);
     }
@@ -412,6 +414,11 @@ export class BinderBase {
       }
     }
     return undefined;
+  }
+
+  /** Whether code in the context may name a nested type, which the binder that knows accessibility decides. */
+  protected canUseNestedType(_nested: TypeSymbol, _context: TypeContext): boolean {
+    return true;
   }
 
   /** A nested type of a type or of its bases, with the outer type arguments it takes from the type it is found in. */

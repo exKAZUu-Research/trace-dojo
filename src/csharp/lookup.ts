@@ -173,6 +173,10 @@ export class LookupBinder extends DeclarationBinder {
     );
   }
 
+  protected override canUseNestedType(nested: TypeSymbol, context: TypeContext): boolean {
+    return !nested.containing || this.isAccessible(nested.access, nested.containing, context);
+  }
+
   /** Whether code in the context may use a member with the access of its declaring type. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   isAccessible(access: string, declaringType: TypeSymbol, context: TypeContext, through?: Type): boolean {
