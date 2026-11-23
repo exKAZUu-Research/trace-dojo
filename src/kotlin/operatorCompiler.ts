@@ -456,6 +456,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const isIdentity = operator === '===' || operator === '!==';
     const comparesNullLiteral = isNullLiteral(expression.left) || isNullLiteral(expression.right);
     this.checkEqualityApplicable(left, right, row, operator);
+    if (isIdentity && (isValueClassType(left.type) || isValueClassType(right.type)))
+      this.error(row, `値クラスの値には ${operator} を使えません。`);
     const leftKind = this.primitiveOf(nonNull(left.type));
     const rightKind = this.primitiveOf(nonNull(right.type));
     let test: (frame: Frame) => boolean;
@@ -836,6 +838,14 @@ function booleanElvisNarrowing(left: Compiled, fallback: Expression): Compiled['
     ? { whenTrue: new Map(), whenFalse: nonNullOutcome }
     : { whenTrue: nonNullOutcome, whenFalse: new Map() };
 }
+
+/** Whether values of the type have no identity, as a value class's and the unsigned integers' do. */
+function isValueClassType(type: KType): boolean {
+  const actual = resolved(type);
+  return actual.kind === 'class' && (actual.cls.isValue || UNSIGNED_CLASSES.has(actual.cls.qualifiedName));
+}
+
+const UNSIGNED_CLASSES = new Set(['kotlin.UByte', 'kotlin.UShort', 'kotlin.UInt', 'kotlin.ULong']);
 
 function typeAfterCast(operand: KType, target: KType): KType {
   const nonNullOperand = nonNull(operand);
