@@ -1484,7 +1484,8 @@ export abstract class MemberBinder extends CallBinder {
     } else {
       const access = this.bindElementAccess(placeholder, member.args, member, context);
       if (isNested) this.checkReadable(access, member, context);
-      target = access as BoundLValue;
+      // An indexer assigned in an initializer is written, so it goes through the assignment's accessor checks.
+      target = isNested ? (access as BoundLValue) : this.checkAssignable(access, member, context, 'initializer');
     }
     if (isNested) {
       return {
