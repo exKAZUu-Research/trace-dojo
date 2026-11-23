@@ -287,6 +287,8 @@ function byDimensions<T>(array: CsArray, leaf: (item: Value) => T, nest: (items:
     const length = array.lengths[dimension];
     if (dimension === array.lengths.length - 1)
       return nest(array.values.slice(offset, offset + length).map((item) => leaf(item)));
+    // The rows are charged before the host array holding them is allocated.
+    chargeSnapshot?.(NODE_COST * length);
     const stride = array.lengths.slice(dimension + 1).reduce((product, size) => product * size, 1);
     return nest(Array.from({ length }, (_unused, index) => build(dimension + 1, offset + index * stride)));
   };
