@@ -1077,10 +1077,12 @@ function dedentRawParts(node: Node, parts: InterpolationPart[]): InterpolationPa
     ]);
   }
   const holes = parts.filter((part) => part.hole);
-  const dedented = lines
+  const joinedLines = lines
     .slice(1, -1)
     .map((line) => (line.startsWith(indentation) ? line.slice(indentation.length) : line.trimStart()))
     .join('\n');
+  // As in a plain raw string, the line break before the closing delimiter, CR included, is not part of the value.
+  const dedented = joinedLines.endsWith('\r') ? joinedLines.slice(0, -1) : joinedLines;
   const result: InterpolationPart[] = [];
   let holeIndex = 0;
   for (const piece of dedented.split('\0').entries()) {

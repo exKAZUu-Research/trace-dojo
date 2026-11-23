@@ -127,7 +127,13 @@ function split(call: NativeCall, text: string, args: Value[]): CsArray {
     // A single string separator, null or empty, splits nothing; whitespace splitting is for empty separator arrays.
     !(call.method.parameters.some((parameter) => specialOf(parameter.type) === 'string') && !args[0]);
   if (count === 0) return newArray(call, libraryType(call, STRING), []);
-  if (separators.length === 0 && !isWhitespaceSplit) return newArray(call, libraryType(call, STRING), [text]);
+  // With nothing to split on, the text is the one part, which the options still trim or remove.
+  if (separators.length === 0 && !isWhitespaceSplit)
+    return newArray(
+      call,
+      libraryType(call, STRING),
+      splitParts(text, count, options, () => 0)
+    );
   // Separators grouped by their first character, in their order, so each position tries only those that may match;
   // the comparisons left are charged, since many separators sharing a first character multiply the work.
   const byFirst = new Map<string, string[]>();
