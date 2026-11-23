@@ -48,7 +48,7 @@ import {
 } from './symbols';
 import { anyType, isSameType, isSubtype, substitutionOf } from './typeRelations';
 import { type ClassType, type KType, NOTHING, resolved, substitute, type Substitution, typeToString } from './types';
-import { Boxed, KObject, type Value } from './values';
+import { KObject, type Value } from './values';
 
 export interface ClassEntry {
   decl: ClassDecl;
@@ -1392,16 +1392,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     };
   }
 
-  protected unboxed(value: Value): Value {
-    return value instanceof Boxed ? value.value : value;
-  }
-
   protected nothing(): KType {
     return NOTHING;
-  }
-
-  protected describe(type: KType): string {
-    return typeToString(type);
   }
 }
 
