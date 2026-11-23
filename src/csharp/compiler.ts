@@ -598,7 +598,8 @@ export class Compiler extends StatementBinder {
     });
     const parameters = method.locals.filter((local) => local.isParameter && local.owner === method);
     const returnsValue = method.returnType.kind !== 'void' && method.returnType.kind !== 'error';
-    analyzer.analyzeFunction(method, body, parameters, returnsValue, body.row);
+    const assignedAtExit = analyzer.analyzeFunction(method, body, parameters, returnsValue, body.row);
+    if (method.kind === 'localFunction') method.assignedAtExit = assignedAtExit;
   }
 
   protected methodDisplay(method: MethodSymbol): string {

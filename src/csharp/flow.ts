@@ -110,14 +110,17 @@ export class FlowAnalyzer {
 
   constructor(private readonly diagnostics: FlowDiagnostics) {}
 
-  /** Analyzes a method body that starts with its parameters, except `out` ones, assigned. */
+  /**
+   * Analyzes a method body that starts with its parameters, except `out` ones, assigned, and tells which locals are
+   * definitely assigned at every way it returns, or 'never' when it cannot return.
+   */
   analyzeFunction(
     method: MethodSymbol,
     body: BoundBlock,
     initiallyAssigned: Iterable<LocalSymbol>,
     returnsValue: boolean,
     endRow: number
-  ): void {
+  ): ((local: LocalSymbol) => boolean) | 'never' {
     this.outParameters = method.locals.filter((local) => local.isParameter && local.refKind === 'out');
     const start: State = new Set([...initiallyAssigned].filter((local) => local.refKind !== 'out'));
     const saved = this.jumps;
@@ -127,7 +130,9 @@ export class FlowAnalyzer {
       if (returnsValue) this.diagnostics.notAllPathsReturn(method.row);
       else this.checkOutParameters(end, endRow);
     }
+    const exit = intersectAll(end, this.jumps.returns);
     this.jumps = saved;
+    return exit === 'unreachable' ? 'never' : (local) => isAssigned(exit, local);
   }
 
   private checkOutParameters(state: State, row: number): void {
@@ -486,11 +491,15 @@ export class FlowAnalyzer {
       case 'property': {
         const current = expression.receiver ? this.receiver(expression.receiver, state) : state;
         const after = this.arguments(expression.args, current);
-        // A local function may assign the locals it captures, as `void Init() => y = 0;` does, so after a call they
-        // count as assigned; a capture it only reads is accepted too, which leaves Roslyn's check at the call out.
+        // A call of a local function assigns the captured locals it definitely assigns, as `void Init() => y = 0;`
+        // does, and one that cannot return leaves what follows unreachable, as Roslyn reads both; one not analyzed yet
+        // (declared later) counts as assigning all, so no valid program is rejected.
         if (expression.kind !== 'call' || expression.method.kind !== 'localFunction') return after;
+        const assignedAtExit = expression.method.assignedAtExit;
+        if (assignedAtExit === 'never') return 'unreachable';
         let assigned = after;
-        for (const local of expression.method.captures) assigned = assign(assigned, local);
+        for (const local of expression.method.captures)
+          if (!assignedAtExit || assignedAtExit(local)) assigned = assign(assigned, local);
         return assigned;
       }
       case 'invokeDelegate': {

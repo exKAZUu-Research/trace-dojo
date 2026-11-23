@@ -162,6 +162,11 @@ export class MethodSymbol {
   enclosing: MethodSymbol | undefined;
   /** For a local function, the captured locals of enclosing functions that it reads. */
   captures: LocalSymbol[] = [];
+  /**
+   * For a local function, which locals are definitely assigned when it returns, or 'never' when it cannot return, which
+   * a call of it gives its caller's flow analysis; undefined until the function's own body is analyzed.
+   */
+  assignedAtExit?: ((local: LocalSymbol) => boolean) | 'never';
   /** The row of the method's declaration, for diagnostics and the trace. */
   row = 0;
   /** For an operator, its token (`+`, `==`). */
