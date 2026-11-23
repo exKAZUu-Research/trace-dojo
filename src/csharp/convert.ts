@@ -88,7 +88,6 @@ const UNSUPPORTED_MODIFIERS: Record<string, string> = {
   scoped: '`scoped`',
 };
 
-/** Converts tree-sitter's C# tree into the program's syntax tree. */
 /** C#'s reserved keywords, which are identifiers only with an `@` prefix. */
 const RESERVED_KEYWORDS = new Set([
   'abstract',
@@ -170,8 +169,21 @@ const RESERVED_KEYWORDS = new Set([
   'while',
 ]);
 
+/**
+ * Rejects a reserved keyword where the grammar reads it as an identifier, as in `int class = 1;` or `class => 1`,
+ * where Roslyn expects an identifier and C# needs `@class`.
+ */
+function rejectKeywordIdentifiers(root: Node): void {
+  for (const node of root.descendantsOfType('identifier')) {
+    if (node && RESERVED_KEYWORDS.has(node.text))
+      throw new CompileError([{ row: node.startPosition.row, message: 'CS1001: 識別子がありません' }]);
+  }
+}
+
+/** Converts tree-sitter's C# tree into the program's syntax tree. */
 export class Converter extends ExpressionConverter {
   convertCompilationUnit(root: Node): CompilationUnit {
+    if (!this.isLibrary) rejectKeywordIdentifiers(root);
     const unit: CompilationUnit = { usings: [], statements: [], members: [], sourceRows: root.endPosition.row + 1 };
     for (const child of namedChildren(root)) {
       switch (child.type) {
@@ -854,8 +866,7 @@ export class Converter extends ExpressionConverter {
       .filter((child) => child.type === 'variable_declarator')
       .map((declarator) => {
         const nameNode = field(declarator, 'name');
-        // The grammar accepts a reserved keyword as a local's name, where Roslyn expects an identifier.
-        if (!nameNode || RESERVED_KEYWORDS.has(nameNode.text))
+        if (!nameNode)
           throw new CompileError([{ row: declarator.startPosition.row, message: 'CS1001: 識別子がありません' }]);
         const parts = namedChildren(declarator).filter((part) => !sameNode(part, nameNode));
         const bracketed = parts.find((part) => part.type === 'bracketed_argument_list');
