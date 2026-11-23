@@ -589,7 +589,7 @@ function addMonths(call: NativeCall, receiver: Value, months: number): Value {
   return dateTime(call, BigInt(daysFromCivil(year, month, day)) * TICKS_PER_DAY + (ticks % TICKS_PER_DAY));
 }
 
-/** Parses the dates of the forms programs write: `2024/3/5`, `2024-03-05`, with an optional `H:mm[:ss]`. */
+/** Parses the dates of the forms programs write: `2024/3/5`, `2024-03-05`, with an optional `H:m[:s[.fffffff]]`. */
 function parseDate(text: string): bigint | undefined {
   // ja-JP also reads the long date, as `2024年3月5日 10時20分`.
   const normalized = text
@@ -599,11 +599,23 @@ function parseDate(text: string): bigint | undefined {
       (_match, hour: string, minute: string, second: string | undefined, rest: string) =>
         `${hour}:${minute.padStart(2, '0')}${second === undefined ? '' : `:${second.padStart(2, '0')}`}${rest}`
     );
-  const match = /^\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?\s*$/.exec(normalized);
+  const match =
+    /^\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,7}))?)?)?\s*$/.exec(
+      normalized
+    );
   if (!match) return undefined;
-  const [, year, month, day, hour = '0', minute = '0', second = '0'] = match;
+  const [, year, month, day, hour = '0', minute = '0', second = '0', fraction = ''] = match;
   try {
-    return ticksFromParts(Number(year), Number(month), Number(day), Number(hour), Number(minute), Number(second));
+    const whole = ticksFromParts(
+      Number(year),
+      Number(month),
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second)
+    );
+    // A fraction of a second has up to seven digits, one per tick (100 ns).
+    return whole + BigInt(fraction.padEnd(7, '0') || '0');
   } catch {
     return undefined;
   }
