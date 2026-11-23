@@ -290,7 +290,7 @@ const listNatives: Record<string, NativeMethod> = {
     return setNative(receiver, list);
   },
   [`${LIST}..ctor(IEnumerable<T>)`]: (call, receiver, [source]) => {
-    const list = new ListState(allocated(call, [...iterate(call, source as Value, 'collection')]), typeArgument(call));
+    const list = new ListState(chargedElements(call, source as Value), typeArgument(call));
     list.capacity = list.items.length;
     return setNative(receiver, list);
   },
@@ -325,8 +325,7 @@ const listNatives: Record<string, NativeMethod> = {
   },
   [`${LIST}.AddRange`]: (call, receiver, [source]) => {
     const list = listOf(receiver);
-    const added = [...iterate(call, source as Value, 'collection')];
-    call.frame.runtime.allocateSlots(added.length);
+    const added = chargedElements(call, source as Value);
     list.ensureCapacity(list.items.length + added.length);
     for (const item of added) list.items.push(item);
     list.version++;
@@ -505,7 +504,7 @@ const listNatives: Record<string, NativeMethod> = {
         'index',
         'Index was out of range. Must be non-negative and less than or equal to the size of the collection.'
       );
-    const added = allocated(call, [...iterate(call, source as Value, 'collection')]);
+    const added = chargedElements(call, source as Value);
     list.ensureCapacity(list.items.length + added.length);
     const tail = list.items.splice(index as number);
     for (const item of [...added, ...tail]) list.items.push(item);
@@ -1296,14 +1295,7 @@ for (const [name, isStack] of [
     [`${prefix}..ctor(int)`]: (call, receiver) =>
       setNative(receiver, new SequenceState([], isStack, typeArgument(call))),
     [`${prefix}..ctor(IEnumerable<T>)`]: (call, receiver, [source]) =>
-      setNative(
-        receiver,
-        new SequenceState(
-          allocated(call, [...iterate(call, source as Value, 'collection')]),
-          isStack,
-          typeArgument(call)
-        )
-      ),
+      setNative(receiver, new SequenceState(chargedElements(call, source as Value), isStack, typeArgument(call))),
     [`${prefix}.get_Count`]: (_call, receiver) => sequenceOf(receiver).items.length,
     [`${prefix}.Clear`]: (_call, receiver) => {
       const state = sequenceOf(receiver);
@@ -1443,11 +1435,18 @@ function failDestinationIndex(call: NativeCall, index: number): never {
   );
 }
 
-/** Elements a collection takes, charged against the run's slot limit. */
-function allocated(call: NativeCall, items: Value[]): Value[] {
-  call.frame.runtime.allocateSlots(items.length);
+/** The elements of a sequence a collection takes, charged against the slot limit as they are read, before they pile up. */
+function chargedElements(call: NativeCall, source: Value): Value[] {
+  const items: Value[] = [];
+  for (const item of iterate(call, source, 'collection')) {
+    items.push(item);
+    if (items.length % SLOTS_PER_CHARGE === 0) call.frame.runtime.allocateSlots(SLOTS_PER_CHARGE);
+  }
+  call.frame.runtime.allocateSlots(items.length % SLOTS_PER_CHARGE);
   return items;
 }
+
+const SLOTS_PER_CHARGE = 64;
 
 /** Resets elements to their default, a value of its own in each slot, since a struct default is mutable storage. */
 function clearRange(call: NativeCall, array: CsArray, index: number, length: number): void {
