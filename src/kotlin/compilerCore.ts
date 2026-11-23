@@ -1,4 +1,4 @@
-import type { Modifiers, TypeProjectionRef, TypeRef } from './ast';
+import type { Expression, Modifiers, Statement, TypeProjectionRef, TypeRef } from './ast';
 import {
   type Compiled,
   compileError,
@@ -14,6 +14,8 @@ import {
   typeMismatchMessage,
 } from './compilerBase';
 import { unavailableJavaFeature, unavailableMessage } from './convertSupport';
+import { keyOf } from './flowKeys';
+import { assignedNames } from './flowWrites';
 import { isJavaTypeAlias, isKnownLibraryAnnotation, knownLibraryDeclaration } from './libraryApi';
 import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, MemberSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
@@ -416,6 +418,17 @@ export abstract class CompilerCore {
       if (current.receiver) receivers.push(current.receiver);
     }
     return receivers;
+  }
+
+  /**
+   * Drops the smart casts of the variables that code assigns, for code that may run again after its own writes (a
+   * loop body, a lambda that may be invoked again) or that an exception may enter after any of them (a catch clause).
+   */
+  protected forgetAssignedIn(scope: Scope, code: Statement[] | Expression): void {
+    for (const name of assignedNames(code)) {
+      const variable = this.findVariable(scope, name);
+      if (variable) this.flow.forget(keyOf(variable));
+    }
   }
 
   protected findVariable(scope: Scope, name: string): VariableSymbol | undefined {

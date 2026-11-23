@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss -- expression compilation shares name resolution, call dispatch, and type inference.
 import { CompileError } from '../interpreter/diagnostics';
-import type { Block, Expression, LambdaExpression, Statement } from './ast';
+import type { Block, Expression, LambdaExpression } from './ast';
 import {
   type ArgumentSyntax,
   CallCompiler,
@@ -30,7 +30,7 @@ import type { MemberRef } from './compilerCore';
 import { getPropertyValue, propertyRepr, receiverRepr } from './dispatch';
 import { extensionPropertySpecificity, matchExtensionReceiver, mostSpecificReceivers } from './extensionResolution';
 import { keyOf } from './flowKeys';
-import { assignedNames, localRefinement, refineLocalType } from './flowWrites';
+import { localRefinement, refineLocalType } from './flowWrites';
 import { formatPrimitive, stringOf } from './format';
 import { mostSpecificProperties } from './inheritedMembers';
 import { invokeFunctionValue, lambdaValue } from './lambdaValue';
@@ -997,7 +997,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
-  // code-gauge-allow functionCognitiveComplexity -- callable values, receiver members, and constructors follow Kotlin resolution levels.
   private compileNamedCall(
     scope: Scope,
     context: FunctionContext,
@@ -1032,8 +1031,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
     const instantiable = cls !== undefined && !cls.isInterface && !cls.isAbstract && cls.kind !== 'enum';
     if (cls && (instantiable || receiverLevels.length + packageLevels.length === 0)) {
-      const constructors = this.constructorCandidates(cls, row);
-      if (constructors.length > 0) packageLevels.push({ candidates: constructors, receiver: undefined });
+      this.addConstructorLevel(packageLevels, cls, name, row);
     }
     const levels = [...receiverLevels, ...packageLevels];
     if (levels.length === 0) {
@@ -1041,6 +1039,15 @@ export abstract class ExpressionCompiler extends CallCompiler {
       return this.compileUnresolvedCall(scope, context, name, args, variable !== undefined, row);
     }
     return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name, local);
+  }
+
+  /** An explicitly imported class comes before the functions of the current package, as its import does. */
+  private addConstructorLevel(packageLevels: CallLevel[], cls: ClassSymbol, name: string, row: number): void {
+    const constructors = this.constructorCandidates(cls, row);
+    if (constructors.length === 0) return;
+    const level = { candidates: constructors, receiver: undefined };
+    if (this.file.importedClasses.get(name) === cls) packageLevels.unshift(level);
+    else packageLevels.push(level);
   }
 
   private tryLocalFunction(
@@ -1104,7 +1111,11 @@ export abstract class ExpressionCompiler extends CallCompiler {
       const compiled: Compiled = {
         type: this.receiverTypeOf(receiver),
         repr: reprOf(this.core, receiver.type),
-        eval: this.receiverAccess(context, receiver),
+        // Reading the instance would make a lambda capture it, so only a call that resolves to it, which the
+        // resolver rejects, reaches this reader.
+        eval: uninitialized
+          ? () => this.rejectUninitialized(uninitialized.row)
+          : this.receiverAccess(context, receiver),
         stableKey: keyOf(receiver),
       };
       const receiverLevels = this.memberCallLevels(scope, compiled, name, row);
@@ -1778,17 +1789,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
         throw signal;
       },
     };
-  }
-
-  /**
-   * Drops the smart casts of the variables that code assigns, for code that may run again after its own writes (a
-   * loop body, a lambda that may be invoked again) or that an exception may enter after any of them (a catch clause).
-   */
-  protected forgetAssignedIn(scope: Scope, code: Statement[] | Expression): void {
-    for (const name of assignedNames(code)) {
-      const variable = this.findVariable(scope, name);
-      if (variable) this.flow.forget(keyOf(variable));
-    }
   }
 
   // Lambdas.
