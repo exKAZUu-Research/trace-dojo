@@ -47,7 +47,8 @@ export function traceCSharpProgram(program: string, trace: TraceOptions, input?:
   const evaluator = new Evaluator(runtime, compiled);
   evaluator.tracing = true;
   const snapshotter = new Snapshotter(runtime, compiled);
-  // The trace keeps every step's snapshot, so a large array shown at each step adds up past what the run allocates.
+  // The trace keeps every step's snapshot, so a large array shown at each step adds up past what the run allocates:
+  // each recorded item is charged once for all it stores.
   let remaining = LIMITS.maxCSharpTraceSize;
   const charge = (cost: number): void => {
     remaining -= cost;
@@ -55,32 +56,53 @@ export function traceCSharpProgram(program: string, trace: TraceOptions, input?:
   };
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.method?.isAtomic === true,
-    variablesOf: (frame) => snapshotter.variablesOf(frame, true),
+    variablesOf: (frame) => guardedSnapshot(() => snapshotter.variablesOf(frame, true)),
     recordItem: (item) => {
       charge(item.board.length + NODE_COST * (item.callLines.length + item.turtles.length * 4 + 1));
+      charge(traceCost(item.vars) + traceCost(item.referenceVars));
       return item;
     },
   });
   runtime.steps.recorder = recorder;
   let finalVars: TraceItemVariable = {};
-  // Snapshots charge each node as they build it: an array shared by many rows expands into far more nodes than the run
-  // allocates, so the budget must stop a snapshot before it is built in full.
-  chargeSnapshot = charge;
+  // A model program may end with an uncaught exception to show how one stops the program.
+  const run = runProgram(evaluator, (frame) => {
+    finalVars = guardedSnapshot(() => snapshotter.variablesOf(frame, false)).vars;
+  });
+  charge(traceCost(finalVars));
+  return { traceItems: recorder.traceItems, finalVars, ...run };
+}
+
+/**
+ * Builds one snapshot under its own budget: an array shared by many rows expands into far more nodes than the run
+ * allocates, so the snapshot must stop before it is built in full, ahead of the charge for what the trace stores.
+ */
+function guardedSnapshot<T>(build: () => T): T {
+  // One snapshot gets the budget the C++ and Rust recorders give a whole trace, far more than a model program shows.
+  let remaining = LIMITS.maxTraceSize;
+  chargeSnapshot = (cost) => {
+    remaining -= cost;
+    if (remaining < 0) throw new ExecutionLimitError('trace');
+  };
   try {
-    // A model program may end with an uncaught exception to show how one stops the program.
-    const run = runProgram(evaluator, (frame) => {
-      finalVars = snapshotter.variablesOf(frame, false).vars;
-    });
-    return { traceItems: recorder.traceItems, finalVars, ...run };
+    return build();
   } finally {
     chargeSnapshot = undefined;
   }
 }
 
+/** The cost of trace data, in the units of {@link LIMITS.maxCSharpTraceSize}: its text, plus a node's cost per object. */
+function traceCost(data: unknown): number {
+  if (typeof data !== 'object' || data === null) return String(data).length;
+  let cost = NODE_COST;
+  for (const [key, child] of Object.entries(data)) cost += key.length + traceCost(child);
+  return cost;
+}
+
 /** The cost of a node in the trace, as the C++ and Rust recorders count it. */
 const NODE_COST = 32;
 
-/** What building a snapshot spends of the trace's budget; set only while a program is traced. */
+/** What building the current snapshot spends of its budget; set only while a snapshot is being built. */
 let chargeSnapshot: ((cost: number) => void) | undefined;
 
 /** A text a snapshot shows, charged by its length whatever the static type that shows it. */
