@@ -31,6 +31,7 @@ import {
   asSuper,
   checkVariableBounds,
   commonGenericHint,
+  commonSupertype,
   constrainThroughBounds,
   determinedType,
   fillOpenTypeArguments,
@@ -160,6 +161,17 @@ function mapArguments(
 
 function parameterOf(symbol: FunctionSymbol, mapping: number[][], argumentIndex: number): ParameterSymbol | undefined {
   return symbol.params[mapping.findIndex((indexes) => indexes.includes(argumentIndex))];
+}
+
+/**
+ * A lambda's probed result that is still a variable, as `if (c) 1 else 2` leaves one with an Int lower bound, is the
+ * type inference would fix it to, so it matches the overload a lone literal does.
+ */
+function settledResult(result: KType | undefined): KType | undefined {
+  const actual = result && resolved(result);
+  if (actual?.kind !== 'variable' || actual.variable.fixed) return result;
+  const lower = actual.variable.lower.map(resolved).filter((type) => !hasOpenVariables(type));
+  return lower.length > 0 ? commonSupertype(lower) : result;
 }
 
 function isLambdaArgument(expression: Expression): expression is LambdaExpression {
@@ -933,7 +945,7 @@ export abstract class CallCompiler extends CompilerCore {
       const param = candidate.symbol.params[mapping.findIndex((indexes) => indexes.includes(lambdaIndex))];
       return candidate.symbol.isInline && param?.blocksNonlocalControl !== true;
     });
-    const probe = this.compileLambdaProbe(scope, context, lambda, first, { isInline });
+    const probe = settledResult(this.compileLambdaProbe(scope, context, lambda, first, { isInline }));
     const matching =
       probe === undefined || hasOpenVariables(probe)
         ? []

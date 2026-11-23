@@ -4393,6 +4393,16 @@ fun main() {
     stdout: '1\n2\n3\n0\n0\n0\n',
   },
   {
+    name: 'sumOf and maxOf pick the Int overload for branches of integer literals',
+    source: `fun main() {
+    val scores = listOf(1, 2, 3)
+    println(scores.sumOf { if (it > 1) 1 else 0 })
+    println(scores.maxOf { when (it) { 1 -> 10; else -> 1 } })
+    println(scores.sumOf { it.toLong() })
+}`,
+    stdout: '2\n10\n6\n',
+  },
+  {
     name: 'fun-interface delegates infer their types from the property and the lambda',
     source: `import kotlin.properties.ReadOnlyProperty
 class A(val n: String) {
