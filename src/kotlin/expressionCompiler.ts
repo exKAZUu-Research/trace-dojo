@@ -1420,9 +1420,13 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return this.error(row, `${cls.name}.${name} が見つかりません。`);
   }
 
-  /** The prelude declares a few JDK classes, such as `java.util.Locale`, with only the members Kotlin programs need. */
+  /**
+   * The prelude declares `java.util.Locale` only as a type, so every member of it is unavailable. A JDK class it
+   * declares members of, such as `PrintStream`, keeps the not-found diagnostic, which a misspelled `println` needs.
+   */
   private rejectJavaStubMember(cls: ClassSymbol, name: string, row: number): void {
-    if (cls.isLibrary && /^javax?\./.test(cls.kotlinName)) this.unavailable(row, `Java の ${cls.name}.${name}`);
+    if (cls.isLibrary && /^javax?\./.test(cls.kotlinName) && cls.members.size === 0)
+      this.unavailable(row, `Java の ${cls.name}.${name}`);
   }
 
   // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
