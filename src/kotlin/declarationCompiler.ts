@@ -190,12 +190,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
-  /**
-   * Resolves a file's imports, which name classes, top-level functions and properties, and members of objects.
-   *
-   * @param beforeHeaders Whether the program's own classes have no members yet, which a later pass imports.
-   */
-  protected resolveImports(file: KotlinFile, context: FileContext, beforeHeaders: boolean): void {
+  /** Resolves a file's imports, which name classes, top-level functions and properties, and members of objects. */
+  protected resolveImports(file: KotlinFile, context: FileContext): void {
     for (const declaration of file.imports) {
       const { path, row } = declaration;
       if (declaration.isWildcard) {
@@ -212,7 +208,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       }
       const packageScope = this.packages.get(path.slice(0, -1).join('.'));
       if (packageScope) this.importFromPackage(context, packageScope, name, declaration);
-      else this.importFromClass(context, name, declaration, beforeHeaders);
+      else this.importFromClass(context, name, declaration);
     }
   }
 
@@ -237,7 +233,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** Imports a nested class or the members of an object, or a class by its qualified name. */
-  private importFromClass(context: FileContext, name: string, { path, row }: Import, beforeHeaders: boolean): void {
+  private importFromClass(context: FileContext, name: string, { path, row }: Import): void {
     const owner = this.findQualifiedClass(path.slice(0, -1));
     const nested = owner?.nested.get(name);
     if (nested) {
@@ -245,11 +241,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       return;
     }
     if (owner) {
+      // The program's own objects reach their members as `Obj.member`; importing them is left to a later change.
+      if (!owner.isLibrary) this.unavailable(row, 'オブジェクトのメンバーのインポート');
       const members = owner.members.get(name) ?? [];
-      if (beforeHeaders && !owner.isLibrary) return;
       if (members.length === 0 || !owner.isObject) this.rejectImport(row, path.join('.'));
-      if (members.every((member) => member.visibility === 'private'))
-        this.error(row, `${name} は private なので、${owner.name} の外からは使えません。`);
       this.importObjectMembers(context, name, members);
       return;
     }
