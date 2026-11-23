@@ -414,6 +414,8 @@ export function cultureLastIndexOf(
   options: CultureComparison = {}
 ): number {
   if (!options.ignoreCase && PLAIN.test(text) && PLAIN.test(value)) {
+    // A window shorter than the value holds no match; JavaScript would clamp the negative position to 0 instead.
+    if (end - value.length < start) return value === '' ? end : -1;
     const found = text.lastIndexOf(value, end - value.length);
     return found >= start ? found : -1;
   }

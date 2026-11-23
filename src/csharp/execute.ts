@@ -59,6 +59,8 @@ function runEntry(evaluator: Evaluator): string | undefined {
   const stringSymbol = runtime.library.specials.get('string') as TypeSymbol;
   const args: Value[] = entry.parameters.length === 0 ? [] : [new CsArray(arrayType(namedType(stringSymbol)), [0], [])];
   try {
+    // .NET initializes a type with a static constructor before any of its members runs, so before Main is called.
+    runtime.ensureInitialized(entry.owner.declaredType);
     evaluator.invoke(root, entry, undefined, args, undefined, new Map());
     return undefined;
   } catch (error) {

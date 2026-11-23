@@ -83,12 +83,17 @@ function compilePattern(pattern: string, options: number): CompiledPattern {
   return { pattern, options, matcher, ...numbered };
 }
 
+/** The escapes that stand for a set of characters rather than one, after `\\`. */
+const SET_ESCAPES = new Set(['w', 'W', 'd', 'D', 's', 'S', 'p', 'P']);
+
 /** Translates a .NET pattern into JavaScript's syntax one construct at a time, recording its capture groups. */
 class PatternTranslator {
   readonly groups: { name: string | undefined }[] = [];
   private readonly names = new Set<string>();
   private index = 0;
   private inClass = false;
+  /** Whether the class item just translated is a set (`\w`, `\d`, `\s`, `\p{..}`), which a `-` cannot end a range at. */
+  private isAfterClassSet = false;
 
   constructor(
     private readonly pattern: string,
@@ -118,6 +123,10 @@ class PatternTranslator {
     if (char === ']') this.inClass = false;
     if (char === '[' && this.pattern[this.index] === ':') throw new UnsupportedPattern();
     if (char === '-' && this.pattern[this.index] === '[') throw new UnsupportedPattern();
+    const isAfterSet = this.isAfterClassSet;
+    this.isAfterClassSet = char === '\\' && SET_ESCAPES.has(this.pattern[this.index] ?? '');
+    // .NET reads a `-` after a set as a literal, where JavaScript's `u` flag would reject the range.
+    if (char === '-' && isAfterSet) return String.raw`\-`;
     return char === '\\' ? this.escape(true) : char;
   }
 
@@ -167,6 +176,7 @@ class PatternTranslator {
 
   private openClass(): string {
     this.inClass = true;
+    this.isAfterClassSet = false;
     let output = '[';
     if (this.pattern[this.index] === '^') output += this.next();
     // A `]` that opens a class is a member of it in .NET.
