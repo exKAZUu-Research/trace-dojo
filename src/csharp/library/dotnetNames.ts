@@ -1188,6 +1188,7 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
     'BeginInvoke,Clone,Combine,CreateDelegate,DynamicInvoke,EndInvoke,EnumerateInvocationList,Equals,GetHashCode,GetInvocationList,GetObjectData,GetType,Invoke,Method,op_Equality,op_Inequality,ReferenceEquals,Remove,RemoveAll,Target,ToString',
   'System.Func`9':
     'BeginInvoke,Clone,Combine,CreateDelegate,DynamicInvoke,EndInvoke,EnumerateInvocationList,Equals,GetHashCode,GetInvocationList,GetObjectData,GetType,Invoke,Method,op_Equality,op_Inequality,ReferenceEquals,Remove,RemoveAll,Target,ToString',
+  'System.HashCode': 'Add,AddBytes,Combine,Equals,GetHashCode,GetType,ToHashCode,ToString',
   'System.ICloneable': 'Clone',
   'System.IComparable': 'CompareTo',
   'System.IComparable`1': 'CompareTo',
