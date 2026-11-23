@@ -4,7 +4,7 @@ import type { CsDecimal } from './decimal';
 import type { ArrayType, MethodSymbol, NamedType, Type } from './types';
 
 /**
- * A C# value. `null` is `null`; `bool` is a boolean; integral types up to 32 bits and `char` are numbers, `long` and
+ * A C# value. `null` is `undefined`; `bool` is a boolean; integral types up to 32 bits and `char` are numbers, `long` and
  * `ulong` bigints; `float` and `double` numbers; `decimal` a {@link CsDecimal}; `string` a string when .NET interns it
  * and a {@link CsString} otherwise; enums their underlying values. Objects, structs, boxes, arrays, and delegates are
  * the classes below.

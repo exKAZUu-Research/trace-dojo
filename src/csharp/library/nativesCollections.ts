@@ -370,6 +370,7 @@ const listNatives: Record<string, NativeMethod> = {
     const items = listOf(receiver).items;
     const target = array as CsArray;
     if (target === undefined) failNull('array');
+    if ((index as number) < 0) failDestinationIndex(call, index as number);
     if ((index as number) + items.length > target.values.length)
       fail(
         'System.ArgumentException',
@@ -391,6 +392,7 @@ const listNatives: Record<string, NativeMethod> = {
         `sourceIndex ('${from}') must be greater than or equal to '0'.`,
         String(from)
       );
+    if (to < 0) failDestinationIndex(call, to);
     if (length < 0) failNegative(call, 'length', length);
     if (from + length > items.length)
       fail(
@@ -503,7 +505,7 @@ const listNatives: Record<string, NativeMethod> = {
         'index',
         'Index was out of range. Must be non-negative and less than or equal to the size of the collection.'
       );
-    const added = [...iterate(call, source as Value, 'collection')];
+    const added = allocated(call, [...iterate(call, source as Value, 'collection')]);
     list.ensureCapacity(list.items.length + added.length);
     const tail = list.items.splice(index as number);
     for (const item of [...added, ...tail]) list.items.push(item);
@@ -1431,7 +1433,17 @@ function checkValueIndex(array: CsArray, index: number): void {
     fail('System.IndexOutOfRangeException', 'Index was outside the bounds of the array.');
 }
 
-/** Elements a new collection takes, charged against the run's slot limit. */
+/** The ArgumentOutOfRangeException that .NET's Array.Copy throws for a negative destination index. */
+function failDestinationIndex(call: NativeCall, index: number): never {
+  return failOutOfRange(
+    call,
+    'destinationIndex',
+    `destinationIndex ('${index}') must be greater than or equal to '0'.`,
+    String(index)
+  );
+}
+
+/** Elements a collection takes, charged against the run's slot limit. */
 function allocated(call: NativeCall, items: Value[]): Value[] {
   call.frame.runtime.allocateSlots(items.length);
   return items;
@@ -1482,9 +1494,10 @@ defineNatives({
       array.values.map((value) => copyValue(value))
     );
   },
-  [`${ARRAY}.CopyTo`]: (_call, receiver, [target, index]) => {
+  [`${ARRAY}.CopyTo`]: (call, receiver, [target, index]) => {
     const source = arrayOf(receiver);
     const destination = arrayOf(target as Value);
+    if ((index as number) < 0) failDestinationIndex(call, index as number);
     if ((index as number) + source.values.length > destination.values.length)
       fail(
         'System.ArgumentException',
