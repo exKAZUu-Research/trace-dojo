@@ -1,7 +1,7 @@
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import { CsBox, CsStruct, type Value } from '../values';
-import { fail, libraryType, refOf } from './support';
+import { fail, failNull, libraryType, refOf } from './support';
 
 /** DateTime and TimeSpan keep their ticks (100 ns) in their one field. */
 const TICKS_PER_MILLISECOND = 10_000n;
@@ -553,6 +553,7 @@ defineNatives({
   },
   'System.DateTime.IsLeapYear': (_call, _receiver, [year]) => isLeapYear(year as number),
   'System.DateTime.Parse': (call, _receiver, [text]) => {
+    if (text === undefined) failNull('s');
     const ticks = parseDate(text as string);
     if (ticks === undefined) fail('System.FormatException', dateTimeParseError(text as string));
     return dateTime(call, ticks);
