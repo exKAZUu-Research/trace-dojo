@@ -559,10 +559,9 @@ function parseBool(text: string): boolean | undefined {
 }
 
 defineNatives({
-  'System.Decimal..ctor': (_call, _receiver, [value]) => {
-    if (typeof value === 'number' && !Number.isInteger(value)) return CsDecimal.fromDouble(value);
-    return CsDecimal.fromBigInt(BigInt(value as number | bigint));
-  },
+  // The numeric conversion to decimal raises .NET's OverflowException for NaN, infinities, and values out of range.
+  'System.Decimal..ctor': (call, _receiver, [value]) =>
+    convertNumeric(value as NumericValue, specialOf(call.method.parameters[0].type) as SpecialType, 'decimal'),
   'System.Decimal.ToString()': (_call, receiver) => (unboxed(receiver) as CsDecimal).toString(),
   'System.Decimal.ToString(string?)': (call, receiver, [format]) =>
     formatValue(
