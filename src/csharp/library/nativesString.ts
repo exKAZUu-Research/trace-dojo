@@ -39,6 +39,7 @@ import {
   libraryType,
   newArray,
   parameterType,
+  stepMeter,
   textOf,
 } from './support';
 
@@ -125,9 +126,23 @@ function split(call: NativeCall, text: string, args: Value[]): CsArray {
     !(call.method.parameters.some((parameter) => specialOf(parameter.type) === 'string') && args[0] === '');
   if (count === 0) return newArray(call, libraryType(call, STRING), []);
   if (separators.length === 0 && !isWhitespaceSplit) return newArray(call, libraryType(call, STRING), [text]);
+  // Separators grouped by their first character, in their order, so each position tries only those that may match;
+  // the comparisons left are charged, since many separators sharing a first character multiply the work.
+  const byFirst = new Map<string, string[]>();
+  for (const separator of separators) {
+    if (separator === '') continue;
+    const group = byFirst.get(separator[0]) ?? [];
+    group.push(separator);
+    byFirst.set(separator[0], group);
+  }
+  const step = stepMeter(call);
   const separatorLengthAt = (index: number): number => {
     if (isWhitespaceSplit) return WHITESPACE.test(text[index] ?? '') ? 1 : 0;
-    return separators.find((separator) => separator !== '' && text.startsWith(separator, index))?.length ?? 0;
+    for (const separator of byFirst.get(text[index]) ?? []) {
+      step();
+      if (text.startsWith(separator, index)) return separator.length;
+    }
+    return 0;
   };
   return newArray(call, libraryType(call, STRING), splitParts(text, count, options, separatorLengthAt));
 }
