@@ -841,12 +841,15 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const initialize = ctor.initialize as NonNullable<FunctionSymbol['initialize']>;
     // The arguments' temporaries live in slots of their own context, apart from the locals of the function running.
     const argumentFrame = new Frame(frame.runtime, evaluators.info, [], undefined, undefined);
-    for (const [ordinal, enumEntry] of cls.enumEntries.entries()) {
-      const instance = new KObject(cls);
-      instance.native = { name: enumEntry.name, ordinal };
-      state.values.push(instance);
-      initialize(frame, instance, evaluators.evaluate[ordinal](argumentFrame), undefined);
-    }
+    const roots = [state.values, argumentFrame.locals as Value[], argumentFrame.temporaries];
+    frame.runtime.withNativeRoots(roots, () => {
+      for (const [ordinal, enumEntry] of cls.enumEntries.entries()) {
+        const instance = new KObject(cls);
+        instance.native = { name: enumEntry.name, ordinal };
+        state.values.push(instance);
+        initialize(frame, instance, evaluators.evaluate[ordinal](argumentFrame), undefined);
+      }
+    });
     state.entries = createList(state.values);
   }
 
