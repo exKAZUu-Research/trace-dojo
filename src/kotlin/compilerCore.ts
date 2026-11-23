@@ -285,7 +285,8 @@ export abstract class CompilerCore {
 
   /** The class a fully qualified name such as `kotlin.collections.List` stands for. */
   protected findQualifiedClass(path: string[]): ClassSymbol | undefined {
-    for (let split = path.length - 1; split >= 1; split--) {
+    // A split of 0 looks the path up in the default package, as `Config.Companion` names a class there.
+    for (let split = path.length - 1; split >= 0; split--) {
       const scope = this.packages.get(path.slice(0, split).join('.'));
       let cls = scope?.classes.get(path[split]);
       if (!cls) continue;
