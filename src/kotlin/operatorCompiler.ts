@@ -487,6 +487,18 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     }
     // The right operand runs after the left one is read, so its writes undo what comparing the left one shows.
     const { whenTrue, whenFalse } = this.equalityNarrowing(left, right, negated);
+    addBooleanComparisonNarrowing(
+      left,
+      expression.right,
+      negated ? whenFalse : whenTrue,
+      negated ? whenTrue : whenFalse
+    );
+    addBooleanComparisonNarrowing(
+      right,
+      expression.left,
+      negated ? whenFalse : whenTrue,
+      negated ? whenTrue : whenFalse
+    );
     const narrowing = {
       whenTrue: this.withoutWritten(scope, whenTrue, expression.right),
       whenFalse: this.withoutWritten(scope, whenFalse, expression.right),
@@ -798,6 +810,25 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       whenNonNull,
     };
   }
+}
+
+/**
+ * `c == true` holds where `c` does and `c == false` where it does not, so they show what `c`'s branches show, as
+ * `(x != null) == true` shows that `x` is not null; a non-null `c` also fails the comparison only in its other branch.
+ */
+function addBooleanComparisonNarrowing(
+  operand: Compiled,
+  other: Expression,
+  whenEqual: Map<string, KType>,
+  whenUnequal: Map<string, KType>
+): void {
+  const literal = unparenthesized(other);
+  if (literal.kind !== 'boolean' || !operand.narrowing) return;
+  const { whenTrue, whenFalse } = operand.narrowing;
+  const [onEqual, onUnequal] = literal.value ? [whenTrue, whenFalse] : [whenFalse, whenTrue];
+  for (const [key, type] of onEqual) whenEqual.set(key, type);
+  if (isNullable(resolved(operand.type))) return;
+  for (const [key, type] of onUnequal) whenUnequal.set(key, type);
 }
 
 /**
