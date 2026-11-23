@@ -1568,7 +1568,8 @@ export function displayMethodIn(method: MethodSymbol, owner: NamedType, isFull =
         `${parameter.refKind ? `${parameter.refKind} ` : ''}${isFull && parameter.isParams ? 'params ' : ''}${displayType(substitute(parameter.type, substitution), isFull)}`
     )
     .join(', ');
-  if (method.kind === 'getter' || method.kind === 'setter') return displayMethod(method);
+  if (method.kind === 'getter' || method.kind === 'setter' || method.kind === 'localFunction')
+    return displayMethod(method);
   // Roslyn names a constructor after its type, as `A.A(int)`.
   const name = method.kind === 'constructor' ? owner.symbol.name : method.name;
   return `${displayTypeSymbol(owner.symbol, owner.args)}.${name}${method.typeParameters.length > 0 ? `<${method.typeParameters.map((parameter) => parameter.name).join(', ')}>` : ''}(${parameters})`;
