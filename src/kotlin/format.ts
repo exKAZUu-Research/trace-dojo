@@ -98,6 +98,10 @@ export function stringHash(text: string, frame?: Frame): number {
 }
 
 const hashView = new DataView(new ArrayBuffer(8));
+// `Double.hashCode` and `Float.hashCode` hash every NaN as the canonical one, whose bits are 0x7ff8000000000000 and
+// 0x7fc00000; a host's NaN bit pattern is not specified.
+const CANONICAL_DOUBLE_NAN_HASH = 0x7f_f8_00_00;
+const CANONICAL_FLOAT_NAN_HASH = 0x7f_c0_00_00;
 
 function boxedHash(value: Boxed): number {
   switch (value.kind) {
@@ -108,11 +112,14 @@ function boxedHash(value: Boxed): number {
     }
     case 'Double': {
       const number = value.value as number;
-      hashView.setFloat64(0, Number.isNaN(number) ? Number.NaN : number);
+      if (Number.isNaN(number)) return CANONICAL_DOUBLE_NAN_HASH;
+      hashView.setFloat64(0, number);
       return toInt32(hashView.getInt32(0) ^ hashView.getInt32(4));
     }
     case 'Float': {
-      hashView.setFloat32(0, value.value as number);
+      const number = value.value as number;
+      if (Number.isNaN(number)) return CANONICAL_FLOAT_NAN_HASH;
+      hashView.setFloat32(0, number);
       return hashView.getInt32(0);
     }
     case 'UByte': {
