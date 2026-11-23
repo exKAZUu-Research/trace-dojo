@@ -282,6 +282,8 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
 /** An array's elements nested by its dimensions, as a rectangular array `int[2, 3]` shows two rows of three. */
 function byDimensions<T>(array: CsArray, leaf: (item: Value) => T, nest: (items: T[]) => T): T {
   const build = (dimension: number, offset: number): T => {
+    // Each row is a node of its own, which an empty dimension makes without any element to charge.
+    chargeSnapshot?.(NODE_COST);
     const length = array.lengths[dimension];
     if (dimension === array.lengths.length - 1)
       return nest(array.values.slice(offset, offset + length).map((item) => leaf(item)));

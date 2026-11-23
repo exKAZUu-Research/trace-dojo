@@ -16,6 +16,7 @@ import type {
   LiteralValue,
   MemberInitializer,
   Pattern,
+  Position,
   QueryClause,
   Subpattern,
   TypeNode,
@@ -814,7 +815,7 @@ export class ExpressionConverter {
         return { kind: 'relationalPattern', operator, value: this.convertExpression(parts[0]), ...position };
       }
       case 'negated_pattern': {
-        return { kind: 'notPattern', pattern: this.convertPattern(parts[0]), ...position };
+        return this.negatedPattern(parts[0], position);
       }
       case 'and_pattern':
       case 'or_pattern': {
@@ -840,6 +841,22 @@ export class ExpressionConverter {
         return { kind: 'constantPattern', value: this.convertExpression(node), ...position };
       }
     }
+  }
+
+  /**
+   * `not` applied to a pattern. The grammar lets `not` take a whole `and` or `or` chain, as `not (a and b)`, where C#
+   * binds `not` tighter than both, as `(not a) and b`, so the negation moves to the chain's leftmost operand.
+   */
+  private negatedPattern(operand: Node, position: Position): Pattern {
+    if (operand.type === 'and_pattern' || operand.type === 'or_pattern') {
+      return {
+        kind: operand.type === 'and_pattern' ? 'andPattern' : 'orPattern',
+        left: this.negatedPattern(requiredField(operand, 'left'), position),
+        right: this.convertPattern(requiredField(operand, 'right')),
+        ...positionOf(operand),
+      };
+    }
+    return { kind: 'notPattern', pattern: this.convertPattern(operand), ...position };
   }
 
   private convertRecursivePattern(node: Node): Pattern {

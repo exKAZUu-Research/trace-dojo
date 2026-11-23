@@ -124,6 +124,8 @@ export abstract class PatternBinder extends ExpressionBinder {
   private narrowedType(pattern: BoundPattern, inputType: Type): Type {
     if (pattern.kind === 'type') return pattern.testType;
     if (pattern.kind === 'recursive') return pattern.narrowedType;
+    // `a and b` narrows to what `b` narrows its input to, which `a` has already narrowed.
+    if (pattern.kind === 'and') return this.narrowedType(pattern.right, pattern.right.inputType);
     return inputType;
   }
 
