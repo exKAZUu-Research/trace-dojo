@@ -471,14 +471,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (staticMember) return staticMember;
     const property = this.topLevelPlainProperty(name);
     if (property) return this.readTopLevelProperty(context, property, row);
-    this.rejectHeaderMember(name, row);
     const cls = this.findClass(scope, name);
     if (cls) this.checkNestedAccessible(scope, cls, row);
-    if (cls) {
-      const value = this.classAsValue(cls, row);
-      if (value) return value;
-      this.error(row, `${name} はクラスなので、値としては使えません。`);
-    }
+    const value = cls && this.classAsValue(cls, row);
+    if (value) return value;
+    this.rejectHeaderMember(name, row);
+    if (cls) this.error(row, `${name} はクラスなので、値としては使えません。`);
     this.rejectUnavailableLibraryReference(name, row);
     return this.error(row, `${name} が見つかりません。`);
   }
