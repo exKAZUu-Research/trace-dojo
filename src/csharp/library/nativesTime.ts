@@ -2,7 +2,7 @@ import { MeteredText, type TextBudget } from '../meteredText';
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import { CsBox, CsStruct, type Value } from '../values';
-import { fail, failNull, libraryType, refOf } from './support';
+import { fail, failNull, failOutOfRange, libraryType, refOf } from './support';
 
 /** DateTime and TimeSpan keep their ticks (100 ns) in their one field. */
 const TICKS_PER_MILLISECOND = 10_000n;
@@ -527,7 +527,11 @@ const addUnit =
     dateTime(call, ticksOf(receiver) + ticksFromDouble(value as number, unit, 'value'));
 
 defineNatives({
-  'System.DateTime..ctor(long)': (_call, receiver, [ticks]) => setTicks(receiver, ticks as bigint),
+  'System.DateTime..ctor(long)': (call, receiver, [ticks]) => {
+    if ((ticks as bigint) < 0n || (ticks as bigint) > MAX_DATE_TICKS)
+      failOutOfRange(call, 'ticks', 'Ticks must be between DateTime.MinValue.Ticks and DateTime.MaxValue.Ticks.');
+    return setTicks(receiver, ticks as bigint);
+  },
   'System.DateTime..ctor(int, int, int)': (_call, receiver, [y, m, d]) =>
     setTicks(receiver, ticksFromParts(y as number, m as number, d as number)),
   'System.DateTime..ctor(int, int, int, int, int, int)': (_call, receiver, [y, mo, d, h, mi, s]) =>
