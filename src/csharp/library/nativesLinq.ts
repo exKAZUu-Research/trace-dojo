@@ -606,6 +606,8 @@ function ordered(call: NativeCall, args: Value[], descending: boolean, isThen: b
     [root],
     () => {
       const items = bufferedElements(call, source(call, root));
+      // The keys of each level, the index array, and the sorted result are buffers of the same length, charged too.
+      call.frame.runtime.allocateSlots(items.length * (keys.length + 2));
       const keyed = keys.map((sortKey) => items.map((item) => sortKey.select(item)));
       const step = stepMeter(call);
       const indices = stableSort(
@@ -986,7 +988,8 @@ const linq: Record<string, NativeMethod> = {
   [`${ENUMERABLE}.Reverse`]: (call, _receiver, [items]) => {
     const all = source(call, items as Value);
     return query(call, call.typeArgs[0], iteratorName('ReverseIterator', [call.typeArgs[0]]), [items as Value], () =>
-      bufferedElements(call, all).toReversed()
+      // oxlint-disable-next-line unicorn/no-array-reverse -- The charged buffer is reversed in place, so no uncharged copy is made.
+      bufferedElements(call, all).reverse()
     );
   },
   [`${ENUMERABLE}.Select`]: (call, _receiver, [items, selector]) => {
@@ -1055,7 +1058,8 @@ const linq: Record<string, NativeMethod> = {
       [items as Value],
       () => {
         const buffered = bufferedElements(call, all);
-        return buffered.slice(0, Math.max(0, buffered.length - Math.max(0, count as number)));
+        buffered.length = Math.max(0, buffered.length - Math.max(0, count as number));
+        return buffered;
       }
     );
   },
@@ -1092,7 +1096,9 @@ const linq: Record<string, NativeMethod> = {
       [items as Value],
       () => {
         const buffered = bufferedElements(call, all);
-        return (count as number) <= 0 ? [] : buffered.slice(-(count as number));
+        if ((count as number) <= 0) return [];
+        buffered.splice(0, Math.max(0, buffered.length - (count as number)));
+        return buffered;
       }
     );
   },
