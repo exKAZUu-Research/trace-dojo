@@ -577,6 +577,11 @@ export abstract class MemberBinder extends CallBinder {
     const receiver = target.kind === 'methodGroup' ? this.toValue(target, node.target) : target;
     // A property that a member is accessed on is read, as any value is, except in a name.
     if (!this.isBindingName) this.checkReadable(receiver, node.target, context);
+    // A member is looked up on the receiver's own type, which a conditional without a common type lacks.
+    if (receiver.kind === 'unbound' && receiver.node.kind === 'conditional') {
+      this.reportConditionalWithoutType(receiver.node);
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
     if (receiver.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
     if (receiver.kind === 'unbound' || receiver.type.kind === 'null' || receiver.type.kind === 'void') {
       this.error(

@@ -80,6 +80,9 @@ const LITERAL_TYPES = new Set<string>([
 ]);
 
 /** Binds statements and the storage that assignments write. */
+/** The modifiers a local function may have. */
+const LOCAL_FUNCTION_MODIFIERS = new Set(['static', 'async', 'unsafe', 'extern']);
+
 export abstract class StatementBinder extends PatternBinder {
   /** Binds a constant field's initializer once, detecting constants that depend on themselves. */
   protected abstract constantValueOf(field: FieldSymbol): unknown;
@@ -679,6 +682,7 @@ export abstract class StatementBinder extends PatternBinder {
     else if (what === 'implicitNew') this.error(declarator, 'CS8754', "'new()' のターゲット型がありません");
     else if (what === 'collection') this.error(declarator, 'CS9176', 'コレクション式のターゲット型がありません。');
     else if (what === 'switch') this.error(bound.node, 'CS8506', 'switch 式に最適な型が見つかりませんでした。');
+    else if (what === 'conditional') this.reportConditionalWithoutType(bound.node);
     else if (what === 'tuple')
       this.error(declarator, 'CS0815', `(${'?'}) を暗黙的に型指定された変数に割り当てることはできません`);
     else this.error(declarator, 'CS8917', 'デリゲート型を推論できませんでした。');
@@ -1137,6 +1141,11 @@ export abstract class StatementBinder extends PatternBinder {
   protected declareLocalFunction(declaration: MethodDeclaration, context: BindContext): MethodSymbol {
     const owner = context.fn.method.owner;
     const method = new MethodSymbol(declaration.name, owner, 'localFunction');
+    // A local function takes only these modifiers; an access modifier, as on a method, is an error.
+    for (const modifier of declaration.modifiers.set) {
+      if (!LOCAL_FUNCTION_MODIFIERS.has(modifier))
+        this.error(declaration.row, 'CS0106', `修飾子 '${modifier}' がこの項目に対して有効ではありません`);
+    }
     method.isStatic = declaration.modifiers.set.has('static') || context.fn.isStatic;
     method.enclosing = context.fn.method;
     method.row = declaration.row;

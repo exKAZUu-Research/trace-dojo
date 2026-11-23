@@ -1,3 +1,4 @@
+import type { Expression } from './ast';
 import type { BoundExpression, OperandKind } from './bound';
 import { isEnum, isIntegral, isNumeric } from './conversions';
 import { ConversionBinder } from './convertBinder';
@@ -222,7 +223,18 @@ export abstract class OperatorBinder extends ConversionBinder {
     };
   }
 
+  /** Reports a conditional whose branches have no common type and that no target type gives one either. */
+  protected abstract reportConditionalWithoutType(node: Expression): void;
+
   protected reportBinary(operator: string, left: BoundExpression, right: BoundExpression, row: number): void {
+    // An operand that is a conditional without a common type has no type for an operator to take, as Roslyn reports.
+    const conditional = [left, right].find(
+      (operand) => operand.kind === 'unbound' && operand.node.kind === 'conditional'
+    );
+    if (conditional?.kind === 'unbound') {
+      this.reportConditionalWithoutType(conditional.node);
+      return;
+    }
     this.error(
       row,
       'CS0019',

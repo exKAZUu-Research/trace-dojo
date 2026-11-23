@@ -715,24 +715,9 @@ export abstract class ExpressionBinder extends MemberBinder {
     }
     const { condition, whenTrue, whenFalse } = parts;
     const type = target ?? this.bestCommonType([whenTrue, whenFalse]);
-    if (!type) {
-      if (
-        whenTrue.kind !== 'unbound' &&
-        whenFalse.kind !== 'unbound' &&
-        whenTrue.type.kind !== 'null' &&
-        whenFalse.type.kind !== 'null' &&
-        whenTrue.kind !== 'throw' &&
-        whenFalse.kind !== 'throw'
-      ) {
-        this.error(
-          node,
-          'CS0173',
-          `'${displayType(whenTrue.type)}' と '${displayType(whenFalse.type)}' の間に暗黙的な変換がないため、条件式の型がわかりません`
-        );
-        return { kind: 'default', type: ERROR_TYPE, row: node.row };
-      }
-      return undefined;
-    }
+    // Without a common type the conditional takes its target's (C# 9), so it waits for one; CS0173 is reported if
+    // none comes.
+    if (!type) return undefined;
     const convert = (branch: BoundExpression, syntax: Expression): BoundExpression =>
       branch.kind === 'throw' ? branch : this.convert(branch, type, syntax);
     const result: BoundExpression = {
@@ -747,6 +732,15 @@ export abstract class ExpressionBinder extends MemberBinder {
       return condition.value ? result.whenTrue : result.whenFalse;
     }
     return result;
+  }
+
+  protected reportConditionalWithoutType(node: Expression): void {
+    const parts = this.conditionalParts.get(node);
+    this.error(
+      node,
+      'CS0173',
+      `'${branchTypeText(parts?.whenTrue)}' と '${branchTypeText(parts?.whenFalse)}' の間に暗黙的な変換がないため、条件式の型がわかりません`
+    );
   }
 
   /** The type that every expression converts to among their own types, as `?:`, `switch`, and `new[]` choose. */
@@ -2037,4 +2031,9 @@ export { isNonValue };
  */
 function typeIdentityKey(type: Type): string {
   return `${typeKey(type)}:${displayType(type)}`;
+}
+
+/** A conditional branch's type as Roslyn names it in CS0173, `<null>` for one without a type. */
+function branchTypeText(branch: BoundExpression | undefined): string {
+  return !branch || branch.kind === 'unbound' || branch.type.kind === 'null' ? '<null>' : displayType(branch.type);
 }
