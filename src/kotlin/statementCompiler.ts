@@ -1342,19 +1342,18 @@ export abstract class StatementCompiler extends OperatorCompiler {
     covered: WhenCoverage
   ): { tests: ((frame: Frame) => boolean)[]; flow: Flow } {
     if (entry.conditions.length === 0) return { tests: [], flow: this.flow.copy() };
+    if (!subject && entry.conditions.length > 1)
+      this.error(entry.conditions[1].row, '主語のない when では、条件をカンマで区切らずに || でつないでください。');
     const tests: ((frame: Frame) => boolean)[] = [];
-    // Any of the conditions may have matched, skipping the later ones, so the branch starts from the merge of each match.
+    // A condition runs only after the earlier ones failed, and any may match, skipping the later ones.
     const matches: Flow[] = [];
-    let whenFalse = new Map<string, KType>();
     for (const condition of entry.conditions) {
       const compiled = this.compileWhenCondition(scope, context, subject, condition, covered);
       tests.push(compiled.test);
       matches.push(this.withNarrowing(this.flow, compiled.whenTrue));
-      whenFalse = new Map([...whenFalse, ...compiled.whenFalse]);
+      this.flow = this.withNarrowing(this.flow, compiled.whenFalse);
     }
-    const flow = Flow.merge(matches);
-    this.flow = this.withNarrowing(this.flow, entry.conditions.length === 1 ? whenFalse : new Map());
-    return { tests, flow };
+    return { tests, flow: Flow.merge(matches) };
   }
 
   /** Rejects a `when` that misses cases, where an expression or a statement over a sealed type must cover all. */
