@@ -101,7 +101,9 @@ function hintSubstitution(substitution: Substitution): Substitution {
   const inferred = new Map(substitution);
   for (const [param, type] of inferred) {
     const actual = resolved(type);
-    const hint = actual.kind === 'variable' ? (determinedType(actual) ?? soleLowerBound(actual)) : actual;
+    // kotlinc fixes a variable to its lowest proper bound, so `T` of `words.maxWith(...)` takes the receiver's element
+    // type rather than an upper bound, such as `String?`, that the expected result type gives.
+    const hint = actual.kind === 'variable' ? (soleLowerBound(actual) ?? determinedType(actual)) : actual;
     if (hint) inferred.set(param, hint);
   }
   for (const [param, type] of inferred) {
