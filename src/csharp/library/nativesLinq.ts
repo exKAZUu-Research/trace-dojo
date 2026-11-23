@@ -1292,6 +1292,14 @@ function setOperationBy(
   );
 }
 
+/** The index of a lookup's group of a key, where a null key has its own group. */
+function groupIndexOf(call: NativeCall, state: LookupState, key: Value): number {
+  const equality = equalityOf(call, undefined);
+  return state.groups.findIndex((group) =>
+    group.key === undefined ? key === undefined : key !== undefined && equality.equals(group.key, key)
+  );
+}
+
 class LookupState implements NativeState {
   constructor(
     readonly groupings: CsObject[],
@@ -1334,20 +1342,12 @@ defineNatives({
     ((receiver as CsObject).native as LookupState).groupings.length,
   'System.Linq.Internal.Lookup`2.get_Item': (call, receiver, [key]) => {
     const state = (receiver as CsObject).native as LookupState;
-    const equality = equalityOf(call, undefined);
-    const index = state.groups.findIndex((group) =>
-      group.key === undefined ? key === undefined : key !== undefined && equality.equals(group.key, key as Value)
-    );
+    const index = groupIndexOf(call, state, key as Value);
     if (index === -1) return newArray(call, state.elementType, []);
     return state.groupings[index];
   },
-  'System.Linq.Internal.Lookup`2.Contains': (call, receiver, [key]) => {
-    const state = (receiver as CsObject).native as LookupState;
-    const equality = equalityOf(call, undefined);
-    return state.groups.some(
-      (group) => group.key !== undefined && key !== undefined && equality.equals(group.key, key as Value)
-    );
-  },
+  'System.Linq.Internal.Lookup`2.Contains': (call, receiver, [key]) =>
+    groupIndexOf(call, (receiver as CsObject).native as LookupState, key as Value) !== -1,
   'System.Linq.Internal.Lookup`2.GetEnumerator': (call, receiver) => {
     const state = (receiver as CsObject).native as LookupState;
     const enumerator = new CsObject(
