@@ -1228,9 +1228,13 @@ function setRelation(
 
 // ---- Queue and Stack ----
 
-/** A queue's or stack's elements, oldest first for a queue and in push order for a stack. */
+/**
+ * A queue's or stack's elements from `head` on, oldest first for a queue and in push order for a stack. A dequeue
+ * advances the head instead of shifting the array, which takes time in the queue's length.
+ */
 class SequenceState implements EnumerableState {
   version = 0;
+  head = 0;
 
   constructor(
     public items: Value[],
@@ -1240,7 +1244,7 @@ class SequenceState implements EnumerableState {
 
   *enumerate(): Generator<Value> {
     const version = this.version;
-    const order = this.isStack ? this.items.toReversed() : this.items;
+    const order = this.isStack ? this.items.toReversed() : this.items.slice(this.head);
     // Stack's enumerator words the error differently from the other collections'.
     const modified = (): PendingException =>
       this.isStack
@@ -1254,6 +1258,22 @@ class SequenceState implements EnumerableState {
       yield item;
     }
     if (this.version !== version) throw modified();
+  }
+
+  get count(): number {
+    return this.items.length - this.head;
+  }
+
+  /** Takes the oldest element of a queue, dropping the elements before the head once they are half of the array. */
+  dequeue(): Value {
+    const value = this.items[this.head];
+    this.items[this.head] = undefined;
+    this.head++;
+    if (this.head * 2 >= this.items.length) {
+      this.items = this.items.slice(this.head);
+      this.head = 0;
+    }
+    return value;
   }
 
   references(): Value[] {
@@ -1281,14 +1301,10 @@ for (const [name, isStack] of [
   const prefix = `System.Collections.Generic.${name}\`1`;
   const emptyMessage = `${name} empty.`;
   const take = (state: SequenceState, remove: boolean): Value => {
-    if (state.items.length === 0) fail('System.InvalidOperationException', emptyMessage);
-    const value = isStack ? state.items.at(-1) : state.items[0];
-    if (remove) {
-      if (isStack) state.items.pop();
-      else state.items.shift();
-      state.version++;
-    }
-    return value as Value;
+    if (state.count === 0) fail('System.InvalidOperationException', emptyMessage);
+    if (!remove) return (isStack ? state.items.at(-1) : state.items[state.head]) as Value;
+    state.version++;
+    return (isStack ? state.items.pop() : state.dequeue()) as Value;
   };
   const tryTake = (
     state: SequenceState,
@@ -1296,7 +1312,7 @@ for (const [name, isStack] of [
     remove: boolean,
     call: NativeCall
   ): boolean => {
-    if (state.items.length === 0) {
+    if (state.count === 0) {
       refOf(result).set(evaluatorOf(call).defaultOf(state.elementType));
       return false;
     }
@@ -1311,15 +1327,16 @@ for (const [name, isStack] of [
     },
     [`${prefix}..ctor(IEnumerable<T>)`]: (call, receiver, [source]) =>
       setNative(receiver, new SequenceState(chargedElements(call, source as Value), isStack, typeArgument(call))),
-    [`${prefix}.get_Count`]: (_call, receiver) => sequenceOf(receiver).items.length,
+    [`${prefix}.get_Count`]: (_call, receiver) => sequenceOf(receiver).count,
     [`${prefix}.Clear`]: (_call, receiver) => {
       const state = sequenceOf(receiver);
       state.items = [];
+      state.head = 0;
       state.version++;
       return;
     },
     [`${prefix}.Contains`]: (call, receiver, [value]) =>
-      indexOfValue(call, sequenceOf(receiver).items, value as Value) >= 0,
+      indexOfValue(call, sequenceOf(receiver).items, value as Value, sequenceOf(receiver).head) >= 0,
     [`${prefix}.${isStack ? 'Push' : 'Enqueue'}`]: (call, receiver, [value]) => {
       const state = sequenceOf(receiver);
       call.frame.runtime.allocateSlots(1);

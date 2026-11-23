@@ -85,13 +85,30 @@ export abstract class MemberBinder extends CallBinder {
   /** Reports a read of a property that has no getter. */
   protected checkReadable(value: BoundExpression, position: Position): void {
     if (value.kind !== 'property') return;
-    for (let current: PropertySymbol | undefined = value.property; current; current = current.overridden)
-      if (current.getter) return;
+    for (let current: PropertySymbol | undefined = value.property; current; current = current.overridden) {
+      if (current.getter) {
+        this.rejectUnimplementedAccessor(current, current.getter, position);
+        return;
+      }
+    }
     this.error(
       position,
       'CS0154',
       `get アクセサーがないため、プロパティまたはインデクサー '${displayTypeSymbol(value.owner.symbol)}.${value.property.name}' をこのコンテキストで使用することはできません`
     );
+  }
+
+  /** Rejects a library property's accessor that the library declares without implementing, as calls reject methods. */
+  protected rejectUnimplementedAccessor(property: PropertySymbol, accessor: MethodSymbol, position: Position): void {
+    if (
+      !property.owner.isLibrary ||
+      property.owner.kind === 'interface' ||
+      property.backingField ||
+      property.isAbstract ||
+      accessor.native
+    )
+      return;
+    this.unsupported(position, `${displayTypeSymbol(property.owner)}.${property.name}`);
   }
 
   /** Binds an expression and converts it to a type. */

@@ -214,6 +214,7 @@ export abstract class StatementBinder extends PatternBinder {
   ): BoundLValue {
     const { property } = target;
     const setter = this.setterOf(property);
+    if (setter) this.rejectUnimplementedAccessor(property, setter, position);
     const display = property.isIndexer
       ? `${displayTypeSymbol(target.owner.symbol, target.owner.args)}.this[${property.parameters.map((parameter) => displayType(substitute(parameter.type, substitutionOf(target.owner)))).join(', ')}]`
       : `${displayTypeSymbol(target.owner.symbol, target.owner.args)}.${property.name}`;
