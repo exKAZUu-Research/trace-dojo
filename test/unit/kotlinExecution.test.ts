@@ -4393,6 +4393,23 @@ fun main() {
     stdout: '1\n2\n3\n0\n0\n0\n',
   },
   {
+    name: 'smart casts from try survive finally unless finally changes them',
+    source: `fun main() {
+    var x: Any = 0
+    x = 1
+    try { x = "a".repeat(2) } finally { if (x is String) println(x.length) }
+    println(x.length)
+    var items: Collection<Int> = listOf(1)
+    try { items = mutableListOf(2) } finally {}
+    items.add(3)
+    println(items)
+    var y: Any = 0
+    try { y = "hello" } finally { y = 5 }
+    println(y + 1)
+}`,
+    stdout: '2\n2\n[2, 3]\n6\n',
+  },
+  {
     name: 'finally sees assignments before a pending jump',
     source: `fun main() {
     var count = 0

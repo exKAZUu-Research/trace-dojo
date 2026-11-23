@@ -42,7 +42,7 @@ import { needsSiblingHint, siblingResultType } from './resultInference';
 import { type Frame, LoopSignal, UNASSIGNED } from './runtime';
 import { type ClassSymbol, PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
 import { checkedRead, instanceTest } from './typeChecks';
-import { commonSupertype, isSubtype } from './typeRelations';
+import { commonSupertype, isSameType, isSubtype } from './typeRelations';
 import { type ClassType, isNonNullClass, type KType, nonNull, resolved, substitute, typeToString } from './types';
 import { Boxed, Cell, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
 import { WhenCoverage } from './whenCoverage';
@@ -1721,7 +1721,13 @@ function throughFinally(flow: Flow, afterFinally: Flow, atEntry: Map<string, KTy
   completed.isDead ||= afterFinally.isDead;
   for (const key of assignedKeys) completed.forget(key);
   for (const [key, type] of afterFinally.narrowed) {
-    if (atEntry.get(key) !== type || assignedKeys.includes(key)) completed.narrowed.set(key, type);
+    const entered = atEntry.get(key);
+    if (assignedKeys.includes(key)) completed.narrowed.set(key, type);
+    else if (entered && isSameType(entered, type)) continue;
+    else {
+      const known = completed.narrowed.get(key);
+      if (!known || !isSubtype(known, type)) completed.narrowed.set(key, type);
+    }
   }
   for (const variable of afterFinally.assigned) completed.assigned.add(variable);
   for (const variable of afterFinally.maybeAssigned) completed.maybeAssigned.add(variable);
