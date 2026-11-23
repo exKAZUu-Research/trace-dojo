@@ -41,7 +41,7 @@ import { needsSiblingHint, siblingResultType } from './resultInference';
 import { type Frame, LoopSignal, UNASSIGNED } from './runtime';
 import { type ClassSymbol, PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
 import { instanceTest } from './typeChecks';
-import { commonSupertype, isSubtype } from './typeRelations';
+import { commonSupertype, isSameType, isSubtype } from './typeRelations';
 import { type ClassType, isNonNullClass, type KType, nonNull, resolved, substitute, typeToString } from './types';
 import { Boxed, Cell, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
 import { WhenCoverage } from './whenCoverage';
@@ -1300,15 +1300,16 @@ export abstract class StatementCompiler extends OperatorCompiler {
   ): { tests: ((frame: Frame) => boolean)[]; flow: Flow } {
     if (entry.conditions.length === 0) return { tests: [], flow: this.flow.copy() };
     const tests: ((frame: Frame) => boolean)[] = [];
-    let whenTrue = new Map<string, KType>();
+    let whenTrue: Map<string, KType> | undefined;
     let whenFalse = new Map<string, KType>();
     for (const condition of entry.conditions) {
       const compiled = this.compileWhenCondition(scope, context, subject, condition, covered);
       tests.push(compiled.test);
-      whenTrue = entry.conditions.length === 1 ? compiled.whenTrue : new Map();
+      // Any of the conditions may have matched, so only a narrowing that all of them give holds.
+      whenTrue = whenTrue ? commonNarrowing(whenTrue, compiled.whenTrue) : compiled.whenTrue;
       whenFalse = new Map([...whenFalse, ...compiled.whenFalse]);
     }
-    const flow = this.withNarrowing(this.flow, whenTrue);
+    const flow = this.withNarrowing(this.flow, whenTrue ?? new Map());
     this.flow = this.withNarrowing(this.flow, entry.conditions.length === 1 ? whenFalse : new Map());
     return { tests, flow };
   }
@@ -1435,7 +1436,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       narrowing.set(subject.stableKey, nonNull(subject.type));
     return {
       test: whenValueTest(subjectEval, nullLiteral ? undefined : valueEval, comparesPrimitives),
-      whenTrue: new Map(),
+      whenTrue: nullLiteral ? new Map() : this.equalityNarrowing(subject, value, false).whenTrue,
       whenFalse: narrowing,
     };
   }
@@ -1745,3 +1746,12 @@ function whenValueTest(
 
 /** The integer kinds that an integer literal does not convert to among a `when` subject's branches. */
 const LITERAL_KEEPING_KINDS: ReadonlySet<string> = new Set(['Long', 'Byte', 'Short', 'ULong', 'UByte', 'UShort']);
+
+function commonNarrowing(a: ReadonlyMap<string, KType>, b: ReadonlyMap<string, KType>): Map<string, KType> {
+  return new Map(
+    [...a].filter(([key, type]) => {
+      const other = b.get(key);
+      return other !== undefined && isSameType(type, other);
+    })
+  );
+}
