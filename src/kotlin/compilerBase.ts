@@ -230,11 +230,13 @@ export class Flow {
     public isDead = false
   ) {}
 
-  /** Forgets the smart casts of a stable value, with the cases it was known not to be. */
+  /** Forgets the smart casts of a stable value, with the cases it was known not to be and those of its properties. */
   forget(key: string): void {
     this.narrowed.delete(key);
-    for (const narrowedKey of this.narrowed.keys())
-      if (narrowedKey.startsWith(`${key}${CASE_SEPARATOR}`)) this.narrowed.delete(narrowedKey);
+    for (const narrowedKey of this.narrowed.keys()) {
+      if (narrowedKey.startsWith(`${key}${CASE_SEPARATOR}`) || narrowedKey.startsWith(`${key}.`))
+        this.narrowed.delete(narrowedKey);
+    }
   }
 
   /** The cases of an enum or sealed type that a stable value is known not to be, as a `when` on it need not cover them. */
