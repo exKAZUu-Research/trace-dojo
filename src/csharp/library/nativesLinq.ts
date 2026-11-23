@@ -1101,6 +1101,7 @@ const linq: Record<string, NativeMethod> = {
   [`${ENUMERABLE}.ToHashSet`]: (call, _receiver, [items]) => {
     const set = new CsObject(libraryType(call, 'System.Collections.Generic.HashSet', [call.typeArgs[0]]), []);
     const state = new HashState(equalityOf(call, undefined), call.typeArgs[0], undefined, undefined);
+    state.allocate = (count) => call.frame.runtime.allocateSlots(count);
     for (const item of source(call, items as Value)) state.insert(item, undefined, false);
     set.native = state;
     return set;
@@ -1123,6 +1124,7 @@ const linq: Record<string, NativeMethod> = {
       []
     );
     const state = new HashState(equalityOf(call, undefined, keyType), keyType, valueType, undefined);
+    state.allocate = (count) => call.frame.runtime.allocateSlots(count);
     const pairType = libraryType(call, 'System.Collections.Generic.KeyValuePair', [keyType, valueType]);
     state.pairOf = (key, value) => new CsStruct(pairType, [key, value]);
     for (const item of source(call, items)) {

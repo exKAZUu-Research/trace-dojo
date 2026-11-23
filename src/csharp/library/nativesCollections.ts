@@ -290,7 +290,7 @@ const listNatives: Record<string, NativeMethod> = {
     return setNative(receiver, list);
   },
   [`${LIST}..ctor(IEnumerable<T>)`]: (call, receiver, [source]) => {
-    const list = new ListState([...iterate(call, source as Value, 'collection')], typeArgument(call));
+    const list = new ListState(allocated(call, [...iterate(call, source as Value, 'collection')]), typeArgument(call));
     list.capacity = list.items.length;
     return setNative(receiver, list);
   },
@@ -685,6 +685,9 @@ export class HashState implements EnumerableState {
     readonly comparer: Value
   ) {}
 
+  /** Charges a new entry against the run's slot limit, set where the collection is created. */
+  allocate: (count: number) => void = () => {};
+
   /** The type of a set's elements, which it holds unboxed; a dictionary's pairs carry their own type. */
   get elementType(): Type | undefined {
     return this.valueType ? undefined : this.keyType;
@@ -712,6 +715,7 @@ export class HashState implements EnumerableState {
       this.entries[existing].value = value;
       return true;
     }
+    this.allocate(1);
     const hash = this.equality.hash(key);
     const entry: Entry = { hash, key, value, isFree: false };
     let index: number;
@@ -794,6 +798,7 @@ function hashOfState(value: Value): HashState {
 
 function newHashState(call: NativeCall, comparer: Value, keyType: Type, valueType: Type | undefined): HashState {
   const state = new HashState(equalityOf(call, comparer), keyType, valueType, comparer);
+  state.allocate = (count) => call.frame.runtime.allocateSlots(count);
   if (valueType) {
     const pairType = libraryType(call, 'System.Collections.Generic.KeyValuePair', [keyType, valueType]);
     state.pairOf = (key, value) => new CsStruct(pairType, [key, value]);
@@ -839,7 +844,6 @@ const dictionaryNatives: Record<string, NativeMethod> = {
   },
   [`${DICTIONARY}.set_Item`]: (call, receiver, [key, value]) => {
     checkKey(key as Value);
-    call.frame.runtime.allocateSlots(1);
     hashOfState(receiver).insert(key as Value, value as Value, true);
     return;
   },
@@ -849,7 +853,6 @@ const dictionaryNatives: Record<string, NativeMethod> = {
     viewOf(call, receiver, 'ValueCollection', typeArgument(call, 1), (entry) => entry.value),
   [`${DICTIONARY}.Add`]: (call, receiver, [key, value]) => {
     checkKey(key as Value);
-    call.frame.runtime.allocateSlots(1);
     if (!hashOfState(receiver).insert(key as Value, value as Value, false)) {
       fail(
         'System.ArgumentException',
@@ -891,7 +894,6 @@ const dictionaryNatives: Record<string, NativeMethod> = {
   },
   [`${DICTIONARY}.TryAdd`]: (call, receiver, [key, value]) => {
     checkKey(key as Value);
-    call.frame.runtime.allocateSlots(1);
     return hashOfState(receiver).insert(key as Value, value as Value, false);
   },
   [`${DICTIONARY}.TryGetValue`]: (call, receiver, [key, value]) => {
@@ -1082,8 +1084,7 @@ defineNatives({
     fillSet(call, receiver, source as Value, comparer as Value),
   [`${HASH_SET}.get_Count`]: (_call, receiver) => hashOfState(receiver).count,
   [`${HASH_SET}.get_IsReadOnly`]: () => false,
-  [`${HASH_SET}.Add`]: (call, receiver, [value]) => {
-    call.frame.runtime.allocateSlots(1);
+  [`${HASH_SET}.Add`]: (_call, receiver, [value]) => {
     return hashOfState(receiver).insert(value as Value, undefined, false);
   },
   [`${HASH_SET}.Clear`]: (_call, receiver) => {
@@ -1295,7 +1296,11 @@ for (const [name, isStack] of [
     [`${prefix}..ctor(IEnumerable<T>)`]: (call, receiver, [source]) =>
       setNative(
         receiver,
-        new SequenceState([...iterate(call, source as Value, 'collection')], isStack, typeArgument(call))
+        new SequenceState(
+          allocated(call, [...iterate(call, source as Value, 'collection')]),
+          isStack,
+          typeArgument(call)
+        )
       ),
     [`${prefix}.get_Count`]: (_call, receiver) => sequenceOf(receiver).items.length,
     [`${prefix}.Clear`]: (_call, receiver) => {
@@ -1424,6 +1429,12 @@ function arrayOf(value: Value, name = 'array'): CsArray {
 function checkValueIndex(array: CsArray, index: number): void {
   if (index < 0 || index >= array.values.length)
     fail('System.IndexOutOfRangeException', 'Index was outside the bounds of the array.');
+}
+
+/** Elements a new collection takes, charged against the run's slot limit. */
+function allocated(call: NativeCall, items: Value[]): Value[] {
+  call.frame.runtime.allocateSlots(items.length);
+  return items;
 }
 
 /** Resets elements to their default, a value of its own in each slot, since a struct default is mutable storage. */

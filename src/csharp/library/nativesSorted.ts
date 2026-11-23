@@ -68,6 +68,9 @@ class SortedState implements EnumerableState {
     return { index: low, isFound: false };
   }
 
+  /** Charges a new entry against the run's slot limit, set where the collection is created. */
+  allocate: (count: number) => void = () => {};
+
   insert(key: Value, value: Value, replace: boolean): boolean {
     const { index, isFound } = this.position(key);
     if (isFound) {
@@ -76,6 +79,7 @@ class SortedState implements EnumerableState {
       this.version++;
       return true;
     }
+    this.allocate(1);
     this.keys.splice(index, 0, key);
     this.values.splice(index, 0, value);
     this.version++;
@@ -121,13 +125,15 @@ function newSorted(call: NativeCall, comparer: Value, keyType: Type, valueType: 
   const pairType = valueType
     ? libraryType(call, 'System.Collections.Generic.KeyValuePair', [keyType, valueType])
     : undefined;
-  return new SortedState(
+  const state = new SortedState(
     comparisonOf(call, comparer),
     keyType,
     valueType,
     pairType ? (key, value) => new CsStruct(pairType, [key, value]) : undefined,
     (key) => textOf(call, key, keyType)
   );
+  state.allocate = (count) => call.frame.runtime.allocateSlots(count);
+  return state;
 }
 
 /** An empty sorted state ordered as another is, for looking up a sequence's elements by the set's own comparer. */
@@ -464,6 +470,7 @@ function nodeOf(value: Value, name = 'node'): LinkNode {
 }
 
 function newNode(call: NativeCall, elementType: Type, value: Value): LinkNode {
+  call.frame.runtime.allocateSlots(1);
   const object = new CsObject(libraryType(call, 'System.Collections.Generic.LinkedListNode', [elementType]), []);
   const node: LinkNode = { value, previous: undefined, next: undefined, list: undefined, object };
   object.native = new LinkNodeState(node);
