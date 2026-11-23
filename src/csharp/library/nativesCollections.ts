@@ -825,8 +825,10 @@ function checkKey(key: Value): void {
 const dictionaryNatives: Record<string, NativeMethod> = {
   [`${DICTIONARY}..ctor()`]: (call, receiver) =>
     setNative(receiver, newHashState(call, undefined, typeArgument(call, 0), typeArgument(call, 1))),
-  [`${DICTIONARY}..ctor(int)`]: (call, receiver) =>
-    setNative(receiver, newHashState(call, undefined, typeArgument(call, 0), typeArgument(call, 1))),
+  [`${DICTIONARY}..ctor(int)`]: (call, receiver, [capacity]) => {
+    if ((capacity as number) < 0) failNegative(call, 'capacity', capacity as number);
+    return setNative(receiver, newHashState(call, undefined, typeArgument(call, 0), typeArgument(call, 1)));
+  },
   [`${DICTIONARY}..ctor(IEqualityComparer<TKey>?)`]: (call, receiver, [comparer]) =>
     setNative(receiver, newHashState(call, comparer as Value, typeArgument(call, 0), typeArgument(call, 1))),
   [`${DICTIONARY}..ctor(IDictionary<TKey, TValue>)`]: (call, receiver, [source]) =>
@@ -916,7 +918,10 @@ const dictionaryNatives: Record<string, NativeMethod> = {
     return index >= 0 ? state.entries[index].value : (fallback as Value);
   },
   [`${DICTIONARY}.TrimExcess`]: () => {},
-  [`${DICTIONARY}.EnsureCapacity`]: (_call, _receiver, [capacity]) => capacity as number,
+  [`${DICTIONARY}.EnsureCapacity`]: (call, _receiver, [capacity]) => {
+    if ((capacity as number) < 0) failNegative(call, 'capacity', capacity as number);
+    return capacity as number;
+  },
   ...enumeratorNatives('System.Collections.Generic.Dictionary`2+Enumerator'),
   ...enumeratorNatives('System.Collections.Generic.Dictionary`2+KeyCollection+Enumerator'),
   ...enumeratorNatives('System.Collections.Generic.Dictionary`2+ValueCollection+Enumerator'),
@@ -1293,8 +1298,10 @@ for (const [name, isStack] of [
   };
   defineNatives({
     [`${prefix}..ctor()`]: (call, receiver) => setNative(receiver, new SequenceState([], isStack, typeArgument(call))),
-    [`${prefix}..ctor(int)`]: (call, receiver) =>
-      setNative(receiver, new SequenceState([], isStack, typeArgument(call))),
+    [`${prefix}..ctor(int)`]: (call, receiver, [capacity]) => {
+      if ((capacity as number) < 0) failNegative(call, 'capacity', capacity as number);
+      return setNative(receiver, new SequenceState([], isStack, typeArgument(call)));
+    },
     [`${prefix}..ctor(IEnumerable<T>)`]: (call, receiver, [source]) =>
       setNative(receiver, new SequenceState(chargedElements(call, source as Value), isStack, typeArgument(call))),
     [`${prefix}.get_Count`]: (_call, receiver) => sequenceOf(receiver).items.length,
@@ -1517,10 +1524,12 @@ defineNatives({
     // The non-generic enumerator returns `object`, so it boxes the elements of a value type.
     const element = array.type.element;
     const isValueType = element.kind === 'named' && element.symbol.isValueType;
-    const boxed = array.values.map((value) =>
-      isValueType && value !== undefined ? new CsBox(element, copyValue(value)) : value
-    );
-    enumerator.native = new LibraryEnumerator(boxed[Symbol.iterator](), [receiver]);
+    // Each element is boxed as the enumerator reaches it, so the enumerator keeps no copy of the array.
+    const boxed = function* (): Generator<Value> {
+      for (const value of array.values)
+        yield isValueType && value !== undefined ? new CsBox(element, copyValue(value)) : value;
+    };
+    enumerator.native = new LibraryEnumerator(boxed(), [receiver]);
     return enumerator;
   },
   [`${ARRAY}.BinarySearch(T[], T)`]: (call, _receiver, [array, value]) =>
