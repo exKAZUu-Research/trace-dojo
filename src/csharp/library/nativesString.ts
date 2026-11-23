@@ -198,6 +198,21 @@ function splitParts(
   return parts;
 }
 
+/**
+ * A text with every occurrence replaced literally, which a callback keeps from JavaScript's `$&` substitutions; the
+ * growth is checked against the string limit as each occurrence is replaced, before the result can grow past it.
+ */
+function replacedText(call: NativeCall, text: string, from: string, to: string, ignoreCase: boolean): string {
+  let length = text.length;
+  const replace = (): string => {
+    length += to.length - from.length;
+    call.frame.runtime.allocateString(length, 0);
+    return to;
+  };
+  if (!ignoreCase) return text.replaceAll(from, replace);
+  return text.replaceAll(new RegExp(from.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`), 'gi'), replace);
+}
+
 function joinValues(call: NativeCall, separator: string, args: Value[], startIndex = 1): string {
   return joinedText(
     call,
@@ -398,20 +413,16 @@ const stringNatives: Record<string, NativeMethod> = {
   [`${STRING}.Replace(string, string?)`]: (call, receiver, [from, to]) => {
     if (from === undefined) failNull('oldValue');
     if (from === '') fail('System.ArgumentException', 'The value cannot be an empty string.', 'oldValue');
-    // A callback keeps the replacement literal, which JavaScript would read for `$&` and other substitutions.
-    const text = receiverText(receiver).replaceAll(from as string, () => (to as string | undefined) ?? '');
-    call.frame.runtime.allocateString(text.length);
-    return text;
+    return replacedText(call, receiverText(receiver), from as string, (to as string | undefined) ?? '', false);
   },
-  [`${STRING}.Replace(string, string?, StringComparison)`]: (_call, receiver, [from, to, comparison]) => {
-    const text = receiverText(receiver);
-    if ((comparison as number) % 2 === 0)
-      return text.replaceAll(from as string, () => (to as string | undefined) ?? '');
-    return text.replaceAll(
-      new RegExp((from as string).replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`), 'gi'),
-      () => (to as string | undefined) ?? ''
-    );
-  },
+  [`${STRING}.Replace(string, string?, StringComparison)`]: (call, receiver, [from, to, comparison]) =>
+    replacedText(
+      call,
+      receiverText(receiver),
+      from as string,
+      (to as string | undefined) ?? '',
+      (comparison as number) % 2 !== 0
+    ),
   [`${STRING}.Split`]: (call, receiver, args) => split(call, receiverText(receiver), args as Value[]),
   [`${STRING}.Substring(int)`]: (call, receiver, [start]) => {
     const text = receiverText(receiver);

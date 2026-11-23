@@ -155,8 +155,10 @@ export abstract class MemberBinder extends CallBinder {
     const typeContext = context.fn.typeContext;
     const isCallee = this.takeCallee();
     const resolvedTypeArgs = typeArgs?.map((arg) => this.resolveType(arg, typeContext));
+    this.inaccessibleNestedType = undefined;
     const member = this.bindEnclosingMember(name, typeArgs, resolvedTypeArgs, isCallee, position, context);
     if (member) return member;
+    const inaccessibleType = this.inaccessibleNestedType;
     const parameter = typeArgs ? undefined : typeParameterNamed(name, typeContext);
     if (parameter) return { kind: 'typeRef', type: parameter, row: position.row };
     const symbol = this.findTypeInScope(name, resolvedTypeArgs?.length ?? 0, typeContext);
@@ -166,6 +168,14 @@ export abstract class MemberBinder extends CallBinder {
     if (namespaces.length > 0 && !typeArgs)
       return { kind: 'namespaceRef', path: [name], namespaces, row: position.row };
     if (name === '_' && !typeArgs) return { kind: 'discard', row: position.row };
+    if (inaccessibleType) {
+      this.error(
+        position,
+        'CS0122',
+        `'${displayTypeSymbol(inaccessibleType)}' はアクセスできない保護レベルになっています`
+      );
+      return { kind: 'default', type: ERROR_TYPE, row: position.row };
+    }
     this.reportUndefinedName(name, position);
     return { kind: 'default', type: ERROR_TYPE, row: position.row };
   }
@@ -202,6 +212,9 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Binds a member of the enclosing types, from the innermost out, or a primary constructor's parameter. */
+  /** A nested type that a simple name found but may not use, reported only when nothing else gives the name. */
+  private inaccessibleNestedType: TypeSymbol | undefined;
+
   private bindEnclosingMember(
     name: string,
     typeArgs: TypeNode[] | undefined,
@@ -221,6 +234,11 @@ export abstract class MemberBinder extends CallBinder {
         resolvedTypeArgs?.length ?? 0,
         isCallee
       );
+      // An inaccessible nested type is left out, so that an enclosing scope or a type in scope may still give the name.
+      if (lookup.found?.kind === 'type' && !this.canUseNestedType(lookup.found.symbol, typeContext)) {
+        this.inaccessibleNestedType ??= lookup.found.symbol;
+        continue;
+      }
       if (lookup.found) return this.memberOfEnclosing(lookup.found, type, resolvedTypeArgs, name, position, context);
       if (primary) return this.primaryParameterAccess(primary, position, context);
       if (lookup.inaccessible) {

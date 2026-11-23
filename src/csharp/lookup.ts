@@ -79,6 +79,8 @@ export class LookupBinder extends DeclarationBinder {
   ): { found: MemberLookup | undefined; inaccessible: FieldSymbol | PropertySymbol | MethodSymbol | undefined } {
     const candidates: MethodCandidate[] = [];
     let inaccessible: FieldSymbol | PropertySymbol | MethodSymbol | undefined;
+    // An inaccessible nested type is left out of the lookup, as C#'s name lookup leaves it out, unless nothing else is found.
+    let inaccessibleType: { kind: 'type'; symbol: TypeSymbol; outerArgs: Type[] } | undefined;
     // A tuple's element names stand for its `Item1`, `Item2`, ... fields.
     const element = type.kind === 'named' ? (type.tupleNames?.indexOf(name) ?? -1) : -1;
     if (element >= 0 && name !== `Item${element + 1}`)
@@ -93,13 +95,16 @@ export class LookupBinder extends DeclarationBinder {
       const nested = symbol.nestedTypes.find(
         (candidate) => candidate.name === name && candidate.typeParameters.length === arity
       );
-      if (nested && candidates.length === 0)
-        return { found: { kind: 'type', symbol: nested, outerArgs: owner.args }, inaccessible };
+      if (nested && candidates.length === 0) {
+        const found = { kind: 'type' as const, symbol: nested, outerArgs: owner.args };
+        if (this.canUseNestedType(nested, context)) return { found, inaccessible };
+        inaccessibleType ??= found;
+      }
       const inaccessibleMethod = this.gatherMethods(owner, name, context, type, candidates);
       inaccessible ??= inaccessibleMethod;
     }
     if (candidates.length > 0) return { found: { kind: 'methods', candidates }, inaccessible };
-    return { found: undefined, inaccessible };
+    return { found: inaccessibleType, inaccessible };
   }
 
   /**
