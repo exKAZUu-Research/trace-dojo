@@ -694,8 +694,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const type = this.checkableType(scope, expression.type, expression.row, operand.type);
     const test = instanceTest(this.core, type);
     const evaluate = convertRepr(operand.eval, operand.repr, 'ref');
-    const narrowing = new Map<string, KType>();
-    if (operand.stableKey) narrowing.set(operand.stableKey, this.narrowedType(operand.type, type));
+    const narrowing = this.typeTestNarrowing(operand, type);
     const exclusion = isExclusion(operand.stableKey, type);
     return {
       type: this.booleanType,
@@ -705,6 +704,14 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         ? { whenTrue: exclusion, whenFalse: narrowing }
         : { whenTrue: narrowing, whenFalse: exclusion },
     };
+  }
+
+  /** What passing `is type` shows: the value's type, and for a non-null type, that its safe calls' receivers are not null. */
+  protected typeTestNarrowing(operand: Compiled, type: KType): Map<string, KType> {
+    const narrowing = new Map<string, KType>();
+    if (!isNullable(type)) for (const [key, known] of operand.whenNonNull ?? []) narrowing.set(key, known);
+    if (operand.stableKey) narrowing.set(operand.stableKey, this.narrowedType(operand.type, type));
+    return narrowing;
   }
 
   // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
@@ -742,7 +749,11 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
           if (!test(value)) throwCastFailure(frame, value, type);
           return value;
         };
-    return { type: resultType, repr, eval: convertRepr(cast, 'ref', repr) };
+    if (!expression.isSafe) return { type: resultType, repr, eval: convertRepr(cast, 'ref', repr) };
+    // A non-null result of `x as? T` shows that `x` is a `T`.
+    const whenNonNull = new Map(operand.whenNonNull);
+    if (operand.stableKey) whenNonNull.set(operand.stableKey, typeAfterCast(operand.type, nonNull(type)));
+    return { type: resultType, repr, eval: convertRepr(cast, 'ref', repr), whenNonNull };
   }
 }
 
