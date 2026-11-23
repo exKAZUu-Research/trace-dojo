@@ -1171,6 +1171,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     row: number
   ): Compiled | undefined {
     if (name !== 'enumValues' && name !== 'enumValueOf') return undefined;
+    if (typeArgs.length > 1) this.error(row, `${name} の型引数の数が違います。`);
     // Without a type argument, the expected result names the enum: `E` of enumValueOf, `Array<E>` of enumValues.
     const fromExpected = expected && resolved(expected);
     const element = fromExpected?.kind === 'class' ? fromExpected.args[0] : undefined;
