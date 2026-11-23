@@ -122,6 +122,8 @@ interface Attempt {
   substitution: Map<TypeParameterSymbol, KType>;
   /** The arguments of each parameter, by their indexes among the call's arguments. */
   mapping: number[][];
+  /** Whether a lambda argument declares a parameter type that the candidate's function type cannot pass. */
+  hasMismatchedLambda?: boolean;
 }
 
 /** The indexes of the arguments assigned to each parameter. */
@@ -230,7 +232,13 @@ export abstract class CallCompiler extends CompilerCore {
     name: string,
     fallbackError?: CompileError
   ): Compiled {
-    const call: CallSyntax = { args, hasTrailingLambda, explicitTypeArgs, row, name };
+    const call: CallSyntax = {
+      args,
+      hasTrailingLambda,
+      explicitTypeArgs,
+      row,
+      name,
+    };
     const declared: DeclaredCallLevel[] = [];
     for (const level of levels) {
       if ('candidates' in level) {
@@ -315,7 +323,11 @@ export abstract class CallCompiler extends CompilerCore {
         const owner = candidate.symbol.owner;
         const receiver =
           !level.receiver && owner?.isObject && candidate.kind !== 'constructor'
-            ? { type: owner.type, repr: 'ref' as const, eval: this.objectInstance(owner) }
+            ? {
+                type: owner.type,
+                repr: 'ref' as const,
+                eval: this.objectInstance(owner),
+              }
             : level.receiver;
         receivers.set(candidate, receiver);
       }
@@ -342,7 +354,13 @@ export abstract class CallCompiler extends CompilerCore {
   ): ResolvedCall {
     const receiverOf = (candidate: Candidate): Compiled | undefined =>
       typeof receiver === 'function' ? receiver(candidate) : receiver;
-    const call: CallSyntax = { args, hasTrailingLambda, explicitTypeArgs, row, name };
+    const call: CallSyntax = {
+      args,
+      hasTrailingLambda,
+      explicitTypeArgs,
+      row,
+      name,
+    };
     const { all, compiledArgs, chosen } = this.selectCall(scope, context, levels, call, receiverOf, expected);
     if (!chosen) {
       if (fallbackError) throw fallbackError;
@@ -370,7 +388,11 @@ export abstract class CallCompiler extends CompilerCore {
     call: CallSyntax,
     receiverOf: (candidate: Candidate) => Compiled | undefined,
     expected: KType | undefined
-  ): { all: Candidate[]; compiledArgs: (Compiled | undefined)[]; chosen: Attempt | undefined } {
+  ): {
+    all: Candidate[];
+    compiledArgs: (Compiled | undefined)[];
+    chosen: Attempt | undefined;
+  } {
     const all = levels.flat();
     const { args, hasTrailingLambda, explicitTypeArgs, row, name } = call;
     if (all.length === 0) this.error(row, `${name} が見つかりません。`);
@@ -525,7 +547,8 @@ export abstract class CallCompiler extends CompilerCore {
       if (callable.kind !== 'function') continue;
       for (const [position, param] of value.params.entries()) {
         const input = callable.params[position];
-        if (input && param.type) isSubtype(input, this.resolveType(scope, param.type));
+        if (input && param.type && !isSubtype(input, this.resolveType(scope, param.type)))
+          attempt.hasMismatchedLambda = true;
       }
     }
   }
@@ -576,19 +599,17 @@ export abstract class CallCompiler extends CompilerCore {
     scope: Scope,
     context: FunctionContext,
     levels: Candidate[][],
-    { args, hasTrailingLambda, explicitTypeArgs, row, name, checkingApplicability }: CallSyntax,
+    call: CallSyntax,
     compiledArgs: (Compiled | undefined)[],
     loneAttempt: Attempt | undefined,
     receiverOf: (candidate: Candidate) => Compiled | undefined
   ): Attempt | undefined {
+    const { args, row, name, checkingApplicability } = call;
     for (const level of levels) {
       const applicable = level.flatMap((candidate) => {
         const attempt =
-          loneAttempt?.candidate === candidate
-            ? loneAttempt
-            : this.startAttempt(candidate, args, hasTrailingLambda, explicitTypeArgs);
-        if (!attempt) return [];
-        return this.isApplicable(attempt, args, compiledArgs, receiverOf(candidate)) ? [attempt] : [];
+          loneAttempt?.candidate === candidate ? loneAttempt : this.startChoiceAttempt(scope, candidate, call);
+        return attempt && this.isApplicable(attempt, args, compiledArgs, receiverOf(candidate)) ? [attempt] : [];
       });
       if (applicable.length === 0) continue;
       return checkingApplicability || applicable.length === 1
@@ -617,9 +638,18 @@ export abstract class CallCompiler extends CompilerCore {
       for (const [index, param] of typeParameters.entries()) substitution.set(param, explicitTypeArgs[index]);
     } else {
       for (const param of typeParameters) {
-        const variable: InferenceVariable = { param, lower: [], upper: [], fixed: undefined };
+        const variable: InferenceVariable = {
+          param,
+          lower: [],
+          upper: [],
+          fixed: undefined,
+        };
         variables.push(variable);
-        substitution.set(param, { kind: 'variable', variable, nullable: false });
+        substitution.set(param, {
+          kind: 'variable',
+          variable,
+          nullable: false,
+        });
       }
       // A bound that names another type parameter, as `T : S` in `reduce`, relates the two variables.
       for (const variable of variables) {
@@ -671,6 +701,17 @@ export abstract class CallCompiler extends CompilerCore {
     return symbol.typeParameters;
   }
 
+  /** A candidate's attempt, which a lambda declaring a parameter type it cannot pass rules out. */
+  private startChoiceAttempt(
+    scope: Scope,
+    candidate: Candidate,
+    { args, hasTrailingLambda, explicitTypeArgs }: CallSyntax
+  ): Attempt | undefined {
+    const attempt = this.startAttempt(candidate, args, hasTrailingLambda, explicitTypeArgs);
+    if (attempt) this.constrainFromLambdaParameters(scope, attempt, args);
+    return attempt;
+  }
+
   // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private isApplicable(
     attempt: Attempt,
@@ -679,6 +720,7 @@ export abstract class CallCompiler extends CompilerCore {
     receiver: Compiled | undefined
   ): boolean {
     const { symbol } = attempt.candidate;
+    if (attempt.hasMismatchedLambda) return false;
     if (symbol.extensionReceiver && receiver) {
       const receiverType = substitute(symbol.extensionReceiver, attempt.substitution);
       if (!isSubtype(receiver.type, receiverType)) return false;
@@ -828,7 +870,12 @@ export abstract class CallCompiler extends CompilerCore {
   private freshSubstitution(attempt: Attempt): Substitution {
     const substitution = new Map(attempt.candidate.substitution);
     for (const param of this.inferredTypeParameters(attempt.candidate)) {
-      const variable: InferenceVariable = { param, lower: [], upper: [], fixed: undefined };
+      const variable: InferenceVariable = {
+        param,
+        lower: [],
+        upper: [],
+        fixed: undefined,
+      };
       substitution.set(param, { kind: 'variable', variable, nullable: false });
     }
     return substitution;
@@ -969,7 +1016,11 @@ export abstract class CallCompiler extends CompilerCore {
     const saved = new Map<InferenceVariable, { lower: KType[]; upper: KType[] }>();
     for (const type of [result, expected]) {
       mentionsVariable(type, (variable) => {
-        if (!saved.has(variable)) saved.set(variable, { lower: [...variable.lower], upper: [...variable.upper] });
+        if (!saved.has(variable))
+          saved.set(variable, {
+            lower: [...variable.lower],
+            upper: [...variable.upper],
+          });
         return false;
       });
     }
@@ -1149,7 +1200,12 @@ export abstract class CallCompiler extends CompilerCore {
         const converted = this.convertTo(compiled, elementType, args[index].row);
         const declaredRepr = param.isVararg ? reprOf(this.core, param.type) : reprs[paramIndex];
         const fromRepr = reprOf(this.core, elementType);
-        return { index, paramIndex, eval: this.reprConvert(converted, fromRepr, declaredRepr), isSpread };
+        return {
+          index,
+          paramIndex,
+          eval: this.reprConvert(converted, fromRepr, declaredRepr),
+          isSpread,
+        };
       })
     );
     return evaluations.toSorted((a, b) => a.index - b.index);
@@ -1291,7 +1347,12 @@ export abstract class CallCompiler extends CompilerCore {
     const returnTarget = context.isLambda ? context.returnTarget : context;
     const probe = new FunctionContext(context, true, '<probe>', context.info.isLibrary, returnTarget, true);
     probe.inlineLambda = inline;
-    probe.loops = context.loops.map((loop) => ({ ...loop, breaks: [], continues: [], valWrites: new Map() }));
+    probe.loops = context.loops.map((loop) => ({
+      ...loop,
+      breaks: [],
+      continues: [],
+      valWrites: new Map(),
+    }));
     this.flow = savedFlow.copy();
     try {
       check(probe);
