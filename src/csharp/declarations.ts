@@ -1447,8 +1447,16 @@ export class DeclarationBinder extends BinderBase {
   private resolvePropertyOverride(property: PropertySymbol, symbol: TypeSymbol): void {
     if (!property.isOverride) return;
     for (let current = symbol.baseType; current; current = baseTypeOf(current)) {
+      const substitution = substitutionOf(current);
+      // An indexer overrides the base indexer of the same parameter types, among the base's overloads.
       const candidate = current.symbol.properties.find(
-        (other) => other.name === property.name && other.isIndexer === property.isIndexer
+        (other) =>
+          other.name === property.name &&
+          other.isIndexer === property.isIndexer &&
+          other.parameters.length === property.parameters.length &&
+          other.parameters.every((parameter, index) =>
+            sameType(substitute(parameter.type, substitution), property.parameters[index].type)
+          )
       );
       if (!candidate) continue;
       if (!candidate.isVirtual && !candidate.isAbstract && !candidate.isOverride) {
@@ -1459,10 +1467,12 @@ export class DeclarationBinder extends BinderBase {
         );
         return;
       }
-      const baseType = substitute(candidate.type, substitutionOf(current));
-      // A get-only property may override with a more derived reference type (covariant return); any other must match.
+      const baseType = substitute(candidate.type, substitution);
+      // A get-only property may override a get-only one with a more derived reference type (covariant return); any
+      // other must match.
       const isCovariant =
         !property.setter &&
+        !this.accessorOf(candidate, 'setter') &&
         isReferenceType(property.type) &&
         isReferenceType(baseType) &&
         this.conversions.isReferenceConvertible(property.type, baseType);

@@ -350,7 +350,7 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
     const entries: Record<string, DisplayNode> = {};
     // An exception keeps its message in the library's state rather than in a field, as Java's Throwable does.
     if (value instanceof CsObject && isExceptionState(value.native))
-      entries.Message = { kind: 'value', value: exceptionMessage(value) };
+      entries.Message = { kind: 'value', value: shownText(exceptionMessage(value)) };
     for (const [field, fieldType] of instanceFields(value)) {
       const node = displayNodeOf(value.fields[field.slot], fieldType, seen);
       if (node) entries[field.property?.name ?? field.name] = node;
