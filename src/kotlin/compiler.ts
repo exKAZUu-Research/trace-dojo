@@ -200,6 +200,8 @@ export class Compiler extends BodyCompiler {
       const { initializer } = entry.decl;
       if (entry.cls || !initializer || entry.symbol.slot === undefined) continue;
       this.file = entry.file;
+      // Each initializer starts reachable, whatever the code compiled before it, as a class's throwing `init`, left.
+      this.startFlow();
       const context = this.initializerContext(entry);
       const scope = this.initializerScope(entry, context);
       const type = entry.symbol.type as KType;
