@@ -542,6 +542,12 @@ export abstract class MemberBinder extends CallBinder {
       return { kind: 'default', type: ERROR_TYPE, row: position.row };
     }
     if (found.kind === 'type') {
+      if (!this.canUseNestedType(found.symbol, context.fn.typeContext))
+        this.error(
+          position,
+          'CS0122',
+          `'${displayTypeSymbol(found.symbol)}' はアクセスできない保護レベルになっています`
+        );
       return {
         kind: 'typeRef',
         type: this.construct(position, found.symbol, [...found.outerArgs, ...(typeArgs ?? [])]),

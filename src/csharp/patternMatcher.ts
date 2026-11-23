@@ -1,4 +1,5 @@
 import type { BoundDeconstructTarget, BoundExpression, BoundLValue, BoundPattern } from './bound';
+import { CsDecimal } from './decimal';
 import type { Evaluator } from './evaluator';
 import { EvaluatorBase, NULL_REFERENCE, type Place, Reference } from './evaluatorBase';
 import { compareNumeric, type NumericValue } from './numeric';
@@ -106,6 +107,8 @@ export abstract class PatternMatcher extends EvaluatorBase {
     if (value === undefined) return false;
     const inner = value instanceof CsBox ? value.value : value;
     if (value instanceof CsBox && !sameType(value.type, pattern.value.type)) return false;
+    // An input of another type, such as a string an object holds, is never in a numeric range.
+    if (typeof inner !== 'number' && typeof inner !== 'bigint' && !(inner instanceof CsDecimal)) return false;
     const constant = this.evaluate(pattern.value, frame);
     if (typeof inner === 'number' && Number.isNaN(inner)) return false;
     return compareNumeric(

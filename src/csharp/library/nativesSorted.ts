@@ -693,7 +693,8 @@ defineNatives({
     heapOf(receiver).nodes = [];
     return;
   },
-  [`${PRIORITY_QUEUE}.Enqueue`]: (_call, receiver, [element, priority]) => {
+  [`${PRIORITY_QUEUE}.Enqueue`]: (call, receiver, [element, priority]) => {
+    call.frame.runtime.allocateSlots(2);
     heapOf(receiver).enqueue(element as Value, priority as Value);
     return;
   },
