@@ -1,0 +1,20 @@
+let { missing = true }: {missing?: boolean} = {};
+const notNarrowed: true = missing;
+let [defined = true]: [boolean?] = [false];
+const notFalse: false = defined;
+let { assigned = true }: {assigned?: boolean} = {assigned: false};
+const alsoNotFalse: false = assigned;
+function wrongDefault({ flag = false }: {flag?: true}) { const valid: true = flag; }
+function includesUndefined({ flag = undefined }: {flag?: true}) { const invalid: true = flag; }
+let { widened = 2 } = {} as {widened?: 1};
+const invalidUnit: 1 | 2 = widened;
+let { different = 'a' } = {different: 'b' as const};
+const invalidText: 'a' | 'b' = different;
+function generic<K extends 'active'>(key: K) {
+  let {[key]: value = true}: {active?: boolean} = {active: undefined};
+  const unresolved: true = value;
+}
+function union(key: 'a' | 'b') {
+  let {[key]: value = true}: {a?: boolean; b?: boolean} = {a: undefined, b: undefined};
+  const unresolved: true = value;
+}

@@ -1,0 +1,22 @@
+function fromObject<T extends number | undefined>(fallback: T) {
+  const { x = fallback }: { x?: number } = {};
+  const y: number | undefined = x;
+  return y;
+}
+function fromTuple<T extends number | undefined>(fallback: T) {
+  const [x = fallback]: [number?] = [];
+  return x;
+}
+function fromParameter<T extends string | undefined>(fallback: T, x: string | undefined = fallback) {
+  return x;
+}
+function fromNumber<T extends number>(fallback: T) {
+  const { x = fallback }: { x?: number } = {};
+  const y: number = x;
+  return y;
+}
+function fromAny(fallback: any, x: number | undefined = fallback) {
+  const y: number = x;
+  return y;
+}
+console.log(fromObject(1), fromTuple(2), fromParameter("p"), fromNumber(3), fromAny(4));

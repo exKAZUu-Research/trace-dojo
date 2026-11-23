@@ -1,0 +1,5 @@
+(2,7): error TS2506: 'Direct' is referenced directly or indirectly in its own base expression.
+(3,7): error TS2506: 'Conditional' is referenced directly or indirectly in its own base expression.
+(4,7): error TS2506: 'First' is referenced directly or indirectly in its own base expression.
+(4,21): error TS2449: Class 'Second' used before its declaration.
+(5,7): error TS2506: 'Second' is referenced directly or indirectly in its own base expression.

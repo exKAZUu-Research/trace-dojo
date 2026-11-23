@@ -1,0 +1,11 @@
+#0 {main}
+#0 {main}
+#0 {main}
+#0 /main.php(7): A->offsetExists(1)
+#1 {main}
+#0 /main.php(8): A->offsetGet(1)
+#1 {main}
+#0 /main.php(9): A->offsetSet(1, 2)
+#1 {main}
+#0 /main.php(10): A->offsetUnset(1)
+#1 {main}

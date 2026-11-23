@@ -1,0 +1,12 @@
+(4,9): error TS2322: Type 'T' is not assignable to type '{} | undefined'.
+(5,9): error TS2322: Type 'T' is not assignable to type '{} | null'.
+(6,9): error TS2322: Type 'T' is not assignable to type 'void | {} | null'.
+(7,9): error TS2322: Type 'T' is not assignable to type 'EmptyInterface | null | undefined'.
+(8,9): error TS2322: Type 'T' is not assignable to type 'EmptyMapped | null | undefined'.
+(9,9): error TS2322: Type 'T' is not assignable to type 'object | null | undefined'.
+(10,9): error TS2322: Type 'T' is not assignable to type '{ x?: number | undefined; } | null | undefined'.
+(13,9): error TS2322: Type 'unknown' is not assignable to type 'Object | null | undefined'.
+(14,9): error TS2322: Type 'unknown' is not assignable to type '(() => void) | null | undefined'.
+(15,9): error TS2322: Type 'unknown' is not assignable to type '{ [key: string]: string; } | null | undefined'.
+(20,9): error TS2322: Type 'unknown' is not assignable to type 'EmptyClass | null | undefined'.
+(21,9): error TS2322: Type 'unknown' is not assignable to type 'Remapped | null | undefined'.

@@ -226,7 +226,7 @@ const BLAKE2_KEYWORDS = [
   'string',
 ];
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Checks each of BLAKE2's parameters as _blake2 does.
+// code-gauge-allow functionCognitiveComplexity -- Checks each of BLAKE2's parameters as _blake2 does.
 function blake2Class(name: 'blake2b' | 'blake2s', wide: boolean): PyClass {
   const cls = builtinClass(name);
   cls.module = '_blake2';

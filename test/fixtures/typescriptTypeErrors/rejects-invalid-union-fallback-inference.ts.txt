@@ -1,0 +1,21 @@
+function first<T>(input: [T?]): T { return input[0]!; }
+function firstRest<T>(input: [T?, ...T[]]): T { return input[0]!; }
+function firstObject<T>(input: {value?:T}): T { return input.value!; }
+function list<T = string>(input: [T?]): T[] { return []; }
+function head<A extends unknown[], T = string>(input: [...A,T?]): T[] { return []; }
+function union<T>(input: string | T): T[] { return []; }
+function literalUnion<T>(input: 'first' | T): T[] { return []; }
+const value: string = first([undefined]);
+const restValue: string = firstRest([undefined]);
+const objectValue: string = firstObject({value:undefined});
+const listWrong: string[] = list([undefined]);
+const tupleWrong: string[] = head([1, undefined]);
+const suffixWrong: number[] = head([undefined]);
+const unionWrong: number[] = union('a');
+const literalWrong: number[] = literalUnion('first');
+console.log(value.toUpperCase());
+const w=union('a');
+const bad:'a'[]=w;
+function read<T>(box: {a: T | undefined}): T { return box.a!; }
+const explicitValue: number = read({a: undefined});
+console.log(explicitValue.toFixed(2));

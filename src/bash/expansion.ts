@@ -223,7 +223,7 @@ export class Expander {
     return this.expandSubscriptString(subscript);
   }
 
-  // code-gauge-allow functionNcss 33 -- One case per special parameter, as Bash's param_expand.
+  // code-gauge-allow functionNcss -- One case per special parameter, as Bash's param_expand.
   parameterValue(name: string, subscript: string | undefined, expansion?: ParameterExpansion): ParameterValue {
     const { shell } = this;
     if (subscript !== undefined) {
@@ -276,7 +276,7 @@ export class Expander {
   }
 
   /** `${!name}`, `${!name[@]}`, and `${!prefix*}`. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Bash's indirection forms: keys, names by prefix, name references, and indirect values.
+  // code-gauge-allow functionCognitiveComplexity -- Bash's indirection forms: keys, names by prefix, name references, and indirect values.
   private expandIndirect(expansion: ParameterExpansion, subscript: string | undefined, inDouble: boolean): Piece[] {
     const { shell } = this;
     const { name } = expansion;
@@ -342,7 +342,7 @@ export class Expander {
   }
 
   /** The names of the variables starting with a prefix, in byte order, as `${!prefix*}` lists them. */
-  // code-gauge-allow functionCognitiveComplexity 20 -- Collects user variables while rejecting the shell's own, whose list depends on the environment.
+  // code-gauge-allow functionCognitiveComplexity -- Collects user variables while rejecting the shell's own, whose list depends on the environment.
   private namesWithPrefix(prefix: string): string[] {
     const names = new Set<string>();
     for (const scope of this.shell.state.scopes) {
@@ -359,7 +359,7 @@ export class Expander {
   }
 
   /** The pieces of a value: one fragment, or one per element with breaks between them. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Bash's rules for scalars, "$*", and "$@"-like lists, inside and outside quotes.
+  // code-gauge-allow functionCognitiveComplexity -- Bash's rules for scalars, "$*", and "$@"-like lists, inside and outside quotes.
   valuePieces(value: ParameterValue, inDouble: boolean): Piece[] {
     if (value.kind === 'scalar') {
       return value.value === undefined || value.value === ''
@@ -489,7 +489,7 @@ function lengthOf(value: ParameterValue): ParameterValue {
 }
 
 /** The fragments of unquoted literal text: a backslash quotes the character after it. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Bash's quote removal of backslashes, including the one that ends a word.
+// code-gauge-allow functionCognitiveComplexity -- Bash's quote removal of backslashes, including the one that ends a word.
 function literalFragments(text: string): Fragment[] {
   const fragments: Fragment[] = [];
   let plain = '';
@@ -522,7 +522,7 @@ export function unescapeDoubleQuoted(text: string): string {
 }
 
 /** Splits an array element written `[key]=value` or `[key]+=value` into its parts. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Splits a word at its [key]= prefix across literal and expanded parts, as Bash scans the unexpanded word.
+// code-gauge-allow functionCognitiveComplexity -- Splits a word at its [key]= prefix across literal and expanded parts, as Bash scans the unexpanded word.
 function splitKeyedElement(word: Word): { key: WordPart[]; value: WordPart[]; append: boolean } | undefined {
   const [first] = word.parts;
   if (first?.kind !== 'literal' || !first.text.startsWith('[')) return undefined;

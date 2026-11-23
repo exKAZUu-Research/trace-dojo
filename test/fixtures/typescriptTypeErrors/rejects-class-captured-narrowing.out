@@ -1,0 +1,7 @@
+(2,34): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+(3,51): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+(4,38): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+(5,84): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+(5,131): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+(6,26): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+(6,56): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.

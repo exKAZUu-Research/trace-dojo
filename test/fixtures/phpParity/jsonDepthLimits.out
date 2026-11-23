@@ -1,0 +1,14 @@
+json_decode(): Argument #3 ($depth) must be greater than 0
+json_validate(): Argument #2 ($depth) must be greater than 0
+array(0) {
+}
+bool(true)
+json_decode(): Argument #3 ($depth) must be less than 2147483647
+json_validate(): Argument #2 ($depth) must be less than 2147483647
+json_decode(): Argument #3 ($depth) must be less than 2147483647
+json_validate(): Argument #2 ($depth) must be less than 2147483647
+NULL
+int(4)
+bool(false)
+int(4)
+json_validate(): Argument #3 ($flags) must be a valid flag (allowed flags: JSON_INVALID_UTF8_IGNORE)

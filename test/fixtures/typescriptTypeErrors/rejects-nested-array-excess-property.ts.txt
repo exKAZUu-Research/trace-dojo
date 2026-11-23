@@ -1,0 +1,23 @@
+type V = { v: number };
+type P = { xs: V[] };
+const p: { xs: { v: number }[] } = { xs: [{ v: 1, w: 2 }] };
+function f(p: { xs: { v: number }[] }): number { return p.xs.length; }
+f({ xs: [{ v: 1 }, { v: 2, w: 3 }] });
+const q: { xs: { ys: { v: number }[] } } = { xs: { ys: [{ v: 1, w: 2 }] } };
+const a = [{ v: 1, w: 2 }];
+const r: { xs: { v: number }[] } = { xs: a };
+const t: { xs: [{ v: number }, string] } = { xs: [{ v: 1, w: 2 }, "s"] };
+const u: { xs: { v: number }[][] } = { xs: [[{ v: 1, w: 2 }]] };
+console.log(({ v: 1, w: 2 }) as V);
+console.log(({ x: { v: 1, w: 2 } }) as { x: V });
+console.log(({ xs: [{ v: 1, w: 2 }] }) as P);
+console.log([{ v: 1, w: 2 }] as V[]);
+console.log(({ xs: [{ v: 1, w: 2 }, { v: 3 }] }) as P);
+console.log(({ xs: [{ w: 2 }] }) as P);
+console.log(({ x: { ys: [{ v: 1, w: 2 }] } }) as { x: { ys: V[] } });
+console.log(({ xs: [{ v: "s", w: 2 }] }) as { xs: V[] });
+console.log([
+  { v: 1, w: 2 },
+  { v: 1, w: 3 },
+] as V[]);
+console.log(p, q, r, t, u);

@@ -1,0 +1,36 @@
+interface Settings {
+  title?: string;
+  count?: number;
+  enabled?: boolean;
+  onChange?(): void;
+}
+
+class Defaults implements Settings {
+  title: string | undefined = undefined;
+  count: number | undefined;
+  enabled?: boolean | undefined;
+  onChange: (() => void) | undefined = undefined;
+
+  constructor() {
+    this.count = 3;
+  }
+}
+
+class Explicit implements Settings {
+  constructor(public title: string | undefined) {}
+}
+
+interface Reading {
+  get value(): number | undefined;
+}
+
+class Sensor implements Reading {
+  get value(): number | undefined {
+    return 42;
+  }
+}
+
+const defaults = new Defaults();
+console.log(defaults.title, defaults.count, defaults.enabled, defaults.onChange);
+console.log(new Explicit("hello").title, new Explicit(undefined).title);
+console.log(new Sensor().value);

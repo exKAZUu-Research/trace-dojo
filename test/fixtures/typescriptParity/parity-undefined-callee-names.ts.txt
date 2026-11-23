@@ -1,0 +1,5 @@
+const a1: any[] = [1];
+try { (undefined as any)(1); } catch (e) { console.log((e as Error).message); }
+try { new (undefined as any)(); } catch (e) { console.log((e as Error).message); }
+try { (null as any)(1); } catch (e) { console.log((e as Error).message); }
+console.log(undefined, [undefined], typeof undefined);

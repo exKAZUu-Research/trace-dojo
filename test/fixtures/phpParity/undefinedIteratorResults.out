@@ -1,0 +1,108 @@
+getSubIterator:
+bool(true)
+bool(false)
+int(1)
+array(1) {
+}
+bool(true)
+array(0) {
+}
+array(0) {
+}
+bool(true)
+bool(false)
+int(1)
+array(1) {
+}
+bool(true)
+array(0) {
+}
+array(0) {
+}
+NULL
+NULL
+bool(true)
+bool(true)
+bool(true)
+bool(false)
+int(42)
+int(42)
+int(0)
+int(0)
+float(1)
+float(1)
+int(0)
+string(0) ""
+string(0) ""
+int(0)
+count(): Argument #1 ($value) must be of type Countable|array, null given
+
+Warning: Undefined variable $value in /main.php on line 2
+NULL
+int(0)
+int(0)
+float(0)
+string(0) ""
+
+Warning: compact(): Undefined variable $bound in /main.php on line 43
+array(0) {
+}
+int(1)
+string(5) "taken"
+
+Warning: foreach() argument must be of type array|object, null given in /main.php on line 45
+complete
+getInnerIterator:
+bool(true)
+bool(false)
+int(1)
+array(1) {
+}
+bool(true)
+array(0) {
+}
+array(0) {
+}
+bool(true)
+bool(false)
+int(1)
+array(1) {
+}
+bool(true)
+array(0) {
+}
+array(0) {
+}
+NULL
+NULL
+bool(true)
+bool(true)
+bool(true)
+bool(false)
+int(42)
+int(42)
+int(0)
+int(0)
+float(1)
+float(1)
+int(0)
+string(0) ""
+string(0) ""
+int(0)
+count(): Argument #1 ($value) must be of type Countable|array, null given
+
+Warning: Undefined variable $value in /main.php on line 2
+NULL
+int(0)
+int(0)
+float(0)
+string(0) ""
+
+Warning: compact(): Undefined variable $bound in /main.php on line 43
+array(0) {
+}
+int(1)
+string(5) "taken"
+
+Warning: foreach() argument must be of type array|object, null given in /main.php on line 45
+complete

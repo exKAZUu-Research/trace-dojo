@@ -1,0 +1,13 @@
+type Dict = { [key: string]?: number };
+interface Table {
+  [key: string]?: number;
+}
+class Store {
+  [key: string]?: number;
+}
+type Removed = { [k: string]-?: number };
+type Added = { [k: number]+?: number };
+type Mapped = { [K in 'a']?: number };
+type Required = { [K in 'a']-?: number };
+const d: Dict = {};
+console.log(d);

@@ -30,7 +30,7 @@ export interface CollectorFunctions {
 
 export const collectors = new WeakMap<JavaObject, CollectorFunctions>();
 
-// code-gauge-allow functionNcss 35 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss -- One registration per builtin method, each a small native.
 export function defineCollectors(context: Context): ClassInfo {
   const { registry, objectType, collections } = context;
   const collector = defineInterface(registry, 'Collector', 'java.util.stream');

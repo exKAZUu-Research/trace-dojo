@@ -1,0 +1,32 @@
+class Plain {
+  value = 1;
+}
+class Hidden {
+  private value = 2;
+}
+class Guarded {
+  protected value = 3;
+}
+class Other {
+  private value = 4;
+}
+interface Shape {
+  value: number;
+}
+function readHidden<T extends Plain | Hidden>(x: T) {
+  return x.value;
+}
+function readGuarded<T extends Plain | Guarded>(x: T) {
+  return x.value;
+}
+function readBothPrivate<T extends Hidden | Other>(x: T) {
+  return x.value;
+}
+function writeHidden<T extends Plain | Hidden>(x: T) {
+  x.value = 5;
+}
+function readInterface<T extends Shape | Hidden>(x: T) {
+  return x.value;
+}
+console.log(readHidden(new Hidden()), readGuarded(new Guarded()), readBothPrivate(new Other()), readInterface(new Hidden()));
+writeHidden(new Plain());

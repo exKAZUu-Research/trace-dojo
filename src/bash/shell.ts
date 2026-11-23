@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 918 -- Bash's execution, variables, and scopes share the shell state that subshells copy, so they stay in one class.
+// code-gauge-allow-file fileNcss -- Bash's execution, variables, and scopes share the shell state that subshells copy, so they stay in one class.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { ArithmeticError, type ArithmeticHost, evaluateArithmetic, skipSubscript } from './arithmetic';
 import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word } from './ast';
@@ -234,7 +234,7 @@ export class Shell implements ArithmeticHost {
     }
   }
 
-  // code-gauge-allow functionNcss 54 -- One case per statement kind, each delegating to its own runner.
+  // code-gauge-allow functionNcss -- One case per statement kind, each delegating to its own runner.
   execute(statement: Statement): number {
     this.runtime.spend();
     this.currentRow = statement.lineRow - this.lineShift;
@@ -407,7 +407,7 @@ export class Shell implements ArithmeticHost {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Bash's for: its words, which leave the line counter, and its loop, which restores it.
+  // code-gauge-allow functionCognitiveComplexity -- Bash's for: its words, which leave the line counter, and its loop, which restores it.
   private executeFor(statement: Extract<Statement, { kind: 'for' }>): number {
     if (!isIdentifier(statement.variable)) {
       this.reportError(`\`${statement.variable}': not a valid identifier`);
@@ -519,8 +519,8 @@ export class Shell implements ArithmeticHost {
 
   // ---------------------------------------------------------------- simple commands
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Bash's order of expansion, assignment, and lookup of functions, builtins, and external commands.
-  // code-gauge-allow functionNcss 37 -- Bash's order of expansion, assignment, and lookup of functions, builtins, and external commands.
+  // code-gauge-allow functionCognitiveComplexity -- Bash's order of expansion, assignment, and lookup of functions, builtins, and external commands.
+  // code-gauge-allow functionNcss -- Bash's order of expansion, assignment, and lookup of functions, builtins, and external commands.
   private executeCommand(statement: Extract<Statement, { kind: 'command' }>): number {
     const argv = this.expander.expandWords(statement.words);
     if (argv.length === 0) {
@@ -615,7 +615,7 @@ export class Shell implements ArithmeticHost {
 
   // ---------------------------------------------------------------- functions
 
-  // code-gauge-allow functionNcss 40 -- Sets up and restores every part of the shell state a function call changes.
+  // code-gauge-allow functionNcss -- Sets up and restores every part of the shell state a function call changes.
   callFunction(fn: FunctionDefinition, args: string[], callRow: number, temporary?: Scope): number {
     if (this.runtime.frames.length >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
     const { state } = this;
@@ -678,7 +678,7 @@ export class Shell implements ArithmeticHost {
   // ---------------------------------------------------------------- subshells
 
   /** Runs statements in a copy of the shell, capturing what they write to standard output. */
-  // code-gauge-allow functionNcss 33 -- Copies and restores every part of the shell state a command substitution changes.
+  // code-gauge-allow functionNcss -- Copies and restores every part of the shell state a command substitution changes.
   captureSubshell(body: Statement[]): { output: string; status: number } {
     let output = '';
     const capture: OutputTarget = {
@@ -959,7 +959,7 @@ export class Shell implements ArithmeticHost {
   }
 
   /** The value of `${name[subscript]}`, where the subscript is already expanded text. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Bash's element reads for dynamic, environment, associative, scalar, and indexed variables.
+  // code-gauge-allow functionCognitiveComplexity -- Bash's element reads for dynamic, environment, associative, scalar, and indexed variables.
   elementValue(name: string, subscript: string): string | undefined {
     const variable = this.findVariable(name);
     if (!variable?.value) {
@@ -1095,8 +1095,8 @@ export class Shell implements ArithmeticHost {
    * Assigns `name[subscript]=value`, making `name` an indexed array unless it is an associative one. The subscript
    * is expanded text, which an indexed array evaluates as arithmetic.
    */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
-  // code-gauge-allow functionNcss 40 -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
+  // code-gauge-allow functionCognitiveComplexity -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
+  // code-gauge-allow functionNcss -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
   assignElement(name: string, subscript: string, value: string, append: boolean, evaluated = false): boolean {
     if (this.isDynamic(name)) return this.assignDynamic(name, value);
     let variable = this.findVariable(name);
@@ -1159,8 +1159,8 @@ export class Shell implements ArithmeticHost {
   }
 
   /** Assigns the words of `name=(...)` or `name+=(...)`, already expanded into keyed and plain elements. */
-  // code-gauge-allow functionCognitiveComplexity 24 -- Bash's compound assignments for associative and indexed arrays, keyed and plain elements.
-  // code-gauge-allow functionNcss 35 -- Bash's compound assignments for associative and indexed arrays, keyed and plain elements.
+  // code-gauge-allow functionCognitiveComplexity -- Bash's compound assignments for associative and indexed arrays, keyed and plain elements.
+  // code-gauge-allow functionNcss -- Bash's compound assignments for associative and indexed arrays, keyed and plain elements.
   assignCompound(name: string, elements: CompoundElement[], append: boolean): boolean {
     if (this.isDynamic(name)) return true;
     let variable = this.findVariable(name);
@@ -1287,7 +1287,7 @@ export class Shell implements ArithmeticHost {
     return result.toSorted((a, b) => scopeRank(scopes, b) - scopeRank(scopes, a));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Walks every value kind of every scope of the running and suspended shells.
+  // code-gauge-allow functionCognitiveComplexity -- Walks every value kind of every scope of the running and suspended shells.
   private *reachableStrings(): Iterable<string> {
     for (const state of [...this.suspended, this.state]) {
       for (const scope of state.scopes) {

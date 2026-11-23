@@ -1,0 +1,17 @@
+function wrap<T,U>(fn: (value:T) => U): (value:T) => U { return value => fn(value); }
+function id<T>(value: T): T { return value; }
+const generic = wrap(id);
+const wrong: number = generic('text');
+const keyed = wrap(<T extends { key: string }>(value:T) => value);
+keyed({ count: 1 });
+function tagged<T, U>(fn: (value:T) => U): { (value:T): U; tag: string } {
+  return Object.assign((value:T) => fn(value), { tag: 'token' });
+}
+const stillUnknown: number = tagged(id)(1);
+function fixed<T>(fixedValue:T, callback: (value:T) => T): (value:T) => T { return callback; }
+const onlyNumbers = fixed(1, id);
+onlyNumbers('text');
+function overloaded(value: number): number;
+function overloaded<T>(value: T): T;
+function overloaded(value: unknown) { return value; }
+const stillOverloaded: number = wrap(overloaded)(1);

@@ -1,0 +1,18 @@
+const it = Iterator.from({
+  next(): IteratorResult<number, undefined> {
+    return { done: true, value: undefined };
+  },
+});
+console.log(it.toArray());
+abstract class Base extends Iterator<number> {}
+class Numbers extends Base {
+  #count = 0;
+  next(): IteratorResult<number, undefined> {
+    this.#count += 1;
+    return this.#count > 3 ? { done: true, value: undefined } : { done: false, value: this.#count };
+  }
+}
+const n: Iterator<number> = new Numbers();
+console.log(n.next(), new Numbers().map((x) => x * 2).toArray());
+let ctor: IteratorConstructor = Iterator;
+console.log(typeof ctor);

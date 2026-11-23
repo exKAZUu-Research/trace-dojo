@@ -1,23 +1,16 @@
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import path from 'node:path';
-
 import { Language, type Node, Parser } from '@willbooster/web-tree-sitter';
+
+import { readWasm } from '#interpreterWasm';
 
 import { CompileError, type SourceDiagnostic } from './diagnostics';
 
-// Resolving from the working directory keeps the lookup independent of how Next.js bundles this module.
-const requireFromRoot = createRequire(path.join(process.cwd(), 'package.json'));
-// Copying into this realm's Uint8Array passes the runtime's `instanceof` check, which a Buffer from another realm
-// (as under jsdom) fails.
-const readWasm = (specifier: string): Uint8Array => new Uint8Array(readFileSync(requireFromRoot.resolve(specifier)));
-await Parser.init({
-  wasmBinary: readWasm('@willbooster/web-tree-sitter/web-tree-sitter.wasm').buffer as ArrayBuffer,
-});
+const runtimeWasm = await readWasm('@willbooster/web-tree-sitter/web-tree-sitter.wasm');
+await Parser.init({ wasmBinary: runtimeWasm.buffer });
 
+/** @param languageWasmSpecifier One of the grammars that `#interpreterWasm` resolves. */
 export async function loadParser(languageWasmSpecifier: string): Promise<Parser> {
   const parser = new Parser();
-  parser.setLanguage(await Language.load(readWasm(languageWasmSpecifier)));
+  parser.setLanguage(await Language.load(await readWasm(languageWasmSpecifier)));
   return parser;
 }
 
@@ -35,26 +28,50 @@ export function parseSource<T>(
   convert: (root: Node) => T,
   {
     maxNestingDepth = MAX_NESTING_DEPTH,
-    tooDeepMessage = '括弧やブロックなどの入れ子が深すぎます。',
+    tooDeepMessage = NESTING_TOO_DEEP,
     locateErrors = (_root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] => errors,
     isBenignError = (_node: Node): boolean => false,
+    progress,
+  }: {
+    maxNestingDepth?: number;
+    tooDeepMessage?: string;
+    locateErrors?: (root: Node, errors: SourceDiagnostic[]) => SourceDiagnostic[];
+    isBenignError?: (node: Node) => boolean;
+    progress?: (cost?: number) => void;
   } = {}
 ): T {
-  const tree = parser.parse(source);
-  if (!tree) throw new Error('The parser returned no tree');
+  let parsingFailure: { error: unknown } | undefined;
+  const tree = parser.parse(
+    source,
+    progress
+      ? {
+          progressCallback: () => {
+            try {
+              progress();
+            } catch (error) {
+              parsingFailure = { error };
+              return true;
+            }
+          },
+        }
+      : undefined
+  );
+  if (!tree) {
+    // A cancelled parse retains resumable state, which must not be reused for another program.
+    parser.reset();
+    if (parsingFailure) throw parsingFailure.error;
+    throw new Error('The parser returned no tree');
+  }
   try {
-    const tooDeep = findTooDeepNode(tree.rootNode, maxNestingDepth);
-    if (tooDeep) {
-      throw new CompileError([{ row: tooDeep.startPosition.row, message: tooDeepMessage }]);
-    }
+    assertNestingDepth(tree.rootNode, maxNestingDepth, tooDeepMessage, progress);
     const syntaxErrors = locateErrors(
       tree.rootNode,
-      collectSyntaxErrors(tree.rootNode, missingTokenNames, false, isBenignError)
+      collectSyntaxErrors(tree.rootNode, missingTokenNames, false, isBenignError, progress)
     );
     if (syntaxErrors.length > 0) throw new CompileError(syntaxErrors);
     const converted = convert(tree.rootNode);
     // The converter's own checks name the errors it recognizes better than an error only the tree's flags show.
-    const hiddenErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames, true, isBenignError);
+    const hiddenErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames, true, isBenignError, progress);
     if (hiddenErrors.length > 0) throw new CompileError(hiddenErrors);
     return converted;
   } finally {
@@ -62,16 +79,22 @@ export function parseSource<T>(
   }
 }
 
-/** The syntax errors of a text that is not a whole program, such as the part of one before another error. */
+/**
+ * The syntax errors of a text that is not a whole program, such as the part of one before another error.
+ *
+ * @param includeHidden Whether to also report errors only a node's error flag shows, as {@link parseSource} does
+ * after converting.
+ */
 export function findSyntaxErrors(
   parser: Parser,
   source: string,
-  missingTokenNames: Record<string, string>
+  missingTokenNames: Record<string, string>,
+  includeHidden = true
 ): SourceDiagnostic[] {
   const tree = parser.parse(source);
   if (!tree) throw new Error('The parser returned no tree');
   try {
-    return collectSyntaxErrors(tree.rootNode, missingTokenNames, true);
+    return collectSyntaxErrors(tree.rootNode, missingTokenNames, includeHidden);
   } finally {
     tree.delete();
   }
@@ -91,13 +114,26 @@ export function commentTokens(parser: Parser, source: string): { index: number; 
 /** Converting, compiling, and running recurse into nested constructs, so deeper nesting would exhaust the stack. */
 const MAX_NESTING_DEPTH = 300;
 
-function findTooDeepNode(root: Node, maxDepth: number): Node | undefined {
+export const NESTING_TOO_DEEP = '括弧やブロックなどの入れ子が深すぎます。';
+
+export function assertNestingDepth(
+  root: Node,
+  maxDepth = MAX_NESTING_DEPTH,
+  message = NESTING_TOO_DEEP,
+  progress?: () => void
+): void {
+  const tooDeep = findTooDeepNode(root, maxDepth, progress);
+  if (tooDeep) throw new CompileError([{ row: tooDeep.startPosition.row, message }]);
+}
+
+function findTooDeepNode(root: Node, maxDepth: number, progress?: () => void): Node | undefined {
   if (maxDepth === Number.POSITIVE_INFINITY) return;
   const cursor = root.walk();
   // The cursor's own `currentDepth` takes time in proportion to the depth, which deep nesting makes quadratic.
   let depth = 0;
   try {
     for (;;) {
+      progress?.();
       if (depth > maxDepth) return cursor.currentNode;
       if (cursor.gotoFirstChild()) {
         depth++;
@@ -117,12 +153,13 @@ function findTooDeepNode(root: Node, maxDepth: number): Node | undefined {
  * The syntax errors a tree shows, and with `includeHidden` also where only a node's error flag shows one: a token the
  * parser inserted to recover is invisible when its grammar rule is hidden, like Python's newline and dedent.
  */
-// code-gauge-allow functionCognitiveComplexity 17 -- Collects visible and hidden errors in one walk, skipping those a language reports only when it runs.
+// code-gauge-allow functionCognitiveComplexity -- Collects visible and hidden errors in one walk, skipping those a language reports only when it runs.
 function collectSyntaxErrors(
   root: Node,
   missingTokenNames: Record<string, string>,
   includeHidden: boolean,
-  isBenignError: (node: Node) => boolean = () => false
+  isBenignError: (node: Node) => boolean = () => false,
+  progress?: (cost?: number) => void
 ): SourceDiagnostic[] {
   const errors: SourceDiagnostic[] = [];
   // Whether a node's errors all lie in benign descendants; a hidden token missing in the node itself is not benign.
@@ -142,6 +179,7 @@ function collectSyntaxErrors(
     }
     if (!node.hasError || isExplained(node)) return;
     const found = errors.length;
+    progress?.(node.childCount);
     for (const child of node.children) visit(child);
     if (includeHidden && errors.length === found) {
       errors.push({ row: hiddenErrorRow(node), message: '書き方に誤りがあります。' });

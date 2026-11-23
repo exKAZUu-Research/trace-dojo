@@ -1,0 +1,8 @@
+const x: { readonly a: number; b: string } = { a: 1, b: "s" };
+const { ...y } = x;
+y.a = 2;
+const { b, ...z } = x;
+z.a = 3;
+class G { get g() { return 1; } h = 2; }
+const { ...w } = new G();
+console.log(y.a, z.a, w.h, b);

@@ -1,0 +1,16 @@
+(1,32): error TS2373: Parameter 'value' cannot reference identifier 'later' declared after it.
+(2,36): error TS2373: Parameter 'first' cannot reference identifier 'second' declared after it.
+(2,43): error TS7022: 'second' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+(3,35): error TS2373: Parameter 'first' cannot reference identifier 'second' declared after it.
+(3,42): error TS7022: 'second' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+(4,36): error TS2373: Parameter 'first' cannot reference identifier 'second' declared after it.
+(5,35): error TS2373: Parameter 'first' cannot reference identifier 'second' declared after it.
+(6,39): error TS2373: Parameter 'first' cannot reference identifier 'second' declared after it.
+(6,46): error TS7022: 'second' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+(7,22): error TS7022: 'value' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+(7,28): error TS2372: Parameter 'value' cannot reference itself.
+(8,36): error TS2373: Parameter 'value' cannot reference identifier 'later' declared after it.
+(9,53): error TS2373: Parameter 'value' cannot reference identifier 'later' declared after it.
+(10,24): error TS2322: Type 'string' is not assignable to type 'number'.
+(11,10): error TS2394: This overload signature is not compatible with its implementation signature.
+(13,10): error TS2394: This overload signature is not compatible with its implementation signature.

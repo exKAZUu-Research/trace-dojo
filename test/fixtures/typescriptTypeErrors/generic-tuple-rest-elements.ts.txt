@@ -1,0 +1,14 @@
+function read<T extends string[]>(values: [...T]) {
+  for (const value of values) value.toFixed();
+}
+function destructure<T extends string[]>(values: readonly [...T]) {
+  const [value] = values;
+  return value.toFixed();
+}
+function index<T extends string[]>(values: [...T]) {
+  return values[0].toFixed();
+}
+function call<T extends string[]>(values: [...T]) {
+  const accept = (value: number) => value;
+  accept(values[0]);
+}

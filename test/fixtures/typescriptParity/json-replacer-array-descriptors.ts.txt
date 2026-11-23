@@ -1,0 +1,9 @@
+const keys = ["foo"];
+Object.defineProperty(keys, 0, {get() {console.log("get"); return "bar";}});
+console.log(JSON.stringify({foo: 1, bar: 2}, keys));
+const inheritedKeys = new Array(1);
+Object.setPrototypeOf(inheritedKeys, Object.create(Array.prototype, {0: {value: "bar"}}));
+console.log(JSON.stringify({foo: 1, bar: 2}, inheritedKeys));
+const growing = ["first"];
+Object.defineProperty(growing, 0, {get() {growing.push("second"); return "first";}});
+console.log(JSON.stringify({first: 1, second: 2}, growing));

@@ -1,0 +1,4 @@
+
+Fatal error: Type of Changed::$count must be omitted to match the parent definition in class Original in /main.php on line 3
+Stack trace:
+#0 {main}

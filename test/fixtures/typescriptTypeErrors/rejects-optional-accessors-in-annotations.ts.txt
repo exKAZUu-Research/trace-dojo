@@ -1,0 +1,7 @@
+function f13(o: { get v?(): number }): void { console.log("x"); }
+function f14(): { set v?(n: number) } { return {}; }
+class O2 { m(o: { get v?(): number }): void {} }
+let y: Array<{ get v?(): number }> = [];
+const o = { get w?() { return 1; } };
+let ok: { get v(): number } = { v: 1 };
+console.log(f13, f14, O2, y, o, ok);

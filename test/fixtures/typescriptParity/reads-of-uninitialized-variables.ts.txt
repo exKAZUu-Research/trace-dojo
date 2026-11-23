@@ -1,0 +1,22 @@
+let scriptValue;
+console.log(scriptValue);
+function localRead() {
+  let local;
+  console.log(local);
+  local = 4;
+  console.log(local.toFixed());
+}
+function assignedByCallback() {
+  let total;
+  [1, 2, 3].forEach((value) => { total = value; });
+  console.log(total);
+}
+function assignedByCall() {
+  let value;
+  const update = () => { value = 5; };
+  update();
+  console.log(value);
+}
+localRead();
+assignedByCallback();
+assignedByCall();

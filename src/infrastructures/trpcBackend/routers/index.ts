@@ -4,24 +4,16 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { getLearningPeriodFilter } from '@/learningPeriod';
-import { type FillInBlankGradingResult, gradeFillInBlankCode, GRADING_STAGE } from '@/problems/fillInBlank/grade';
+import { GRADING_STAGE } from '@/problems/fillInBlank/gradingStage';
 import { MAX_JAVA_PROGRAM_LENGTH } from '@/problems/fillInBlank/javaProgram';
-import { instantiateProblem } from '@/problems/instantiateProblem';
 import { getOrdinaryJavaProblem, isOrdinaryBugProblem } from '@/problems/javaChallenges/ordinaryProblem';
-import type { OrdinaryJavaProblemData } from '@/types';
+import { isFillInBlankProblem } from '@/problems/problemData';
 
 import { type ProblemSession, problemSessions, problemSubmissions } from '../../../../db/schema';
 import { db } from '../../database';
 import { authorize } from '../middlewares';
 import { procedure, router } from '../trpc';
 import { exerciseProcedures } from './exercises';
-
-const problemSubmissionSchema = z.object({
-  sessionId: z.number().int().positive(),
-  problemType: z.string(),
-  traceItemIndex: z.number().int().nonnegative(),
-  isCorrect: z.boolean(),
-});
 
 export const backendRouter = router({
   ...exerciseProcedures,
@@ -85,14 +77,14 @@ export const backendRouter = router({
   createProblemSubmission: procedure
     .use(authorize)
     .input(
-      z.union([
-        problemSubmissionSchema.extend({
-          incrementalElapsedMilliseconds: z.number().nonnegative(),
-          isCompleted: z.boolean(),
-        }),
-        // Pages opened before deployment send the total after a separate activity update.
-        problemSubmissionSchema.extend({ elapsedMilliseconds: z.number().nonnegative() }),
-      ])
+      z.object({
+        sessionId: z.number().int().positive(),
+        problemType: z.string(),
+        traceItemIndex: z.number().int().nonnegative(),
+        isCorrect: z.boolean(),
+        incrementalElapsedMilliseconds: z.number().nonnegative(),
+        isCompleted: z.boolean(),
+      })
     )
     .mutation(async ({ ctx, input }) => {
       const receivedAt = new Date();
@@ -108,16 +100,12 @@ export const backendRouter = router({
         if (isOrdinaryBugProblem(session.problemId) || session.problemType === 'bugFix')
           throw new TRPCError({ code: 'BAD_REQUEST' });
 
-        const isCompleted = 'isCompleted' in input ? input.isCompleted : isLegacySubmissionComplete(input, session);
         const updatedSession = tx
           .update(problemSessions)
           .set({
             updatedAt: receivedAt,
-            elapsedMilliseconds:
-              'incrementalElapsedMilliseconds' in input
-                ? sql`${problemSessions.elapsedMilliseconds} + ${input.incrementalElapsedMilliseconds}`
-                : undefined,
-            completedAt: isCompleted ? receivedAt : undefined,
+            elapsedMilliseconds: sql`${problemSessions.elapsedMilliseconds} + ${input.incrementalElapsedMilliseconds}`,
+            completedAt: input.isCompleted ? receivedAt : undefined,
           })
           .where(eq(problemSessions.id, session.id))
           .returning()
@@ -128,21 +116,21 @@ export const backendRouter = router({
             problemType: input.problemType,
             traceItemIndex: input.traceItemIndex,
             isCorrect: input.isCorrect,
-            elapsedMilliseconds:
-              'elapsedMilliseconds' in input ? input.elapsedMilliseconds : updatedSession.elapsedMilliseconds,
+            elapsedMilliseconds: updatedSession.elapsedMilliseconds,
           })
           .run();
       });
       revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
     }),
 
-  gradeFillInBlankAnswers: procedure
+  createFillInBlankSubmission: procedure
     .use(authorize)
     .input(
       z.object({
         sessionId: z.number().int().positive(),
         code: z.string().min(1).max(MAX_JAVA_PROGRAM_LENGTH),
         elapsedMilliseconds: z.number().nonnegative(),
+        isCorrect: z.boolean(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -152,19 +140,27 @@ export const backendRouter = router({
       });
       if (!session) throw new TRPCError({ code: 'NOT_FOUND' });
       if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
-      const bugProblem = isOrdinaryBugProblem(session.problemId) || session.problemType === 'bugFix';
-      const problem = bugProblem
-        ? validateOrdinaryBugSession(session)
-        : instantiateProblem(session.problemId, session.problemVariablesSeed);
-      if (!problem || (!bugProblem && (!('blankAnswers' in problem) || problem.blankAnswers.length === 0)))
-        throw new TRPCError({ code: 'BAD_REQUEST' });
+      if (isOrdinaryBugProblem(session.problemId) || session.problemType === 'bugFix')
+        validateOrdinaryBugSession(session);
+      else if (!isFillInBlankProblem(session.problemId)) throw new TRPCError({ code: 'BAD_REQUEST' });
 
-      const result = gradeFillInBlankCode(problem, input.code);
-      saveFillInBlankSubmission(session, input.code, input.elapsedMilliseconds, result, receivedAt);
-      if (result.status === 'correct') {
-        revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
-      }
-      return result;
+      db.transaction((tx) => {
+        tx.insert(problemSubmissions)
+          .values({
+            sessionId: session.id,
+            problemType: session.problemType,
+            traceItemIndex: session.traceItemIndex,
+            elapsedMilliseconds: input.elapsedMilliseconds,
+            isCorrect: input.isCorrect,
+            code: input.code,
+            gradingStage: GRADING_STAGE,
+          })
+          .run();
+        if (input.isCorrect) {
+          tx.update(problemSessions).set({ completedAt: receivedAt }).where(eq(problemSessions.id, session.id)).run();
+        }
+      });
+      if (input.isCorrect) revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
     }),
 
   countIncorrectSubmissions: procedure
@@ -189,44 +185,10 @@ export const backendRouter = router({
 
 export type BackendRouter = typeof backendRouter;
 
-const saveFillInBlankSubmission = (
-  session: ProblemSession,
-  code: string,
-  elapsedMilliseconds: number,
-  result: FillInBlankGradingResult,
-  receivedAt: Date
-): void => {
-  db.transaction((tx) => {
-    tx.insert(problemSubmissions)
-      .values({
-        sessionId: session.id,
-        problemType: session.problemType,
-        traceItemIndex: session.traceItemIndex,
-        elapsedMilliseconds,
-        isCorrect: result.status === 'correct',
-        code,
-        gradingStage: GRADING_STAGE,
-      })
-      .run();
-    if (result.status === 'correct') {
-      tx.update(problemSessions).set({ completedAt: receivedAt }).where(eq(problemSessions.id, session.id)).run();
-    }
-  });
-};
-
-function isLegacySubmissionComplete(input: z.infer<typeof problemSubmissionSchema>, session: ProblemSession): boolean {
-  if (!input.isCorrect) return false;
-  if (input.problemType === 'executionResult') return true;
-  if (input.problemType !== 'step') return false;
-  const problem = instantiateProblem(session.problemId, session.problemVariablesSeed);
-  if (!problem) throw new TRPCError({ code: 'BAD_REQUEST' });
-  return input.traceItemIndex >= problem.traceItems.length - 1;
-}
-
-const validateOrdinaryBugSession = (session: ProblemSession): OrdinaryJavaProblemData => {
+const validateOrdinaryBugSession = (session: ProblemSession): void => {
   if (session.problemType !== 'bugFix' || session.traceItemIndex !== 0) throw new TRPCError({ code: 'BAD_REQUEST' });
   try {
-    return getOrdinaryJavaProblem(session.problemId, session.courseId, session.lectureId);
+    getOrdinaryJavaProblem(session.problemId, session.courseId, session.lectureId);
   } catch {
     throw new TRPCError({ code: 'BAD_REQUEST' });
   }

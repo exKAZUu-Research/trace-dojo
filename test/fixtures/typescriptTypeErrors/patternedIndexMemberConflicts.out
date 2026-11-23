@@ -1,0 +1,4 @@
+(6,3): error TS2411: Property '"__@written"' of type 'boolean' is not assignable to '`__@${string}`' index type 'number'.
+(7,3): error TS2411: Property '[key]' of type 'boolean' is not assignable to '`__@${string}`' index type 'number'.
+(8,3): error TS2411: Property '[token]' of type 'boolean' is not assignable to 'symbol' index type 'string'.
+(10,74): error TS2418: Type of computed property's value is 'boolean', which is not assignable to type 'number'.

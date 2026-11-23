@@ -1,0 +1,8 @@
+const a: any = new Set([1, 2, 3]);
+console.log(a.union(new Set([4])), a.intersection(new Set([2, 9])), a.difference(new Set([1])), a.symmetricDifference(new Set([3, 5])));
+console.log(a.isSubsetOf(new Set([1, 2, 3, 4])), a.isDisjointFrom(new Set([7])));
+const tries: (() => unknown)[] = [
+  () => a.union([1] as any), () => a.union(5 as any), () => a.union({ size: 1, has: 5, keys() {} } as any),
+  () => a.union({ size: -1, has() {}, keys() {} } as any), () => (Map as any)(), () => new Map().forEach(5 as any),
+];
+for (const t of tries) { try { console.log(t()); } catch (e: any) { console.log(e.constructor.name, e.message); } }

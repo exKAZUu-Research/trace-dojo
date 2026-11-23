@@ -20,7 +20,7 @@ function operands(args: string[]): string[] {
   return args[0] === '--' ? args.slice(1) : args;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Bash's echo option scan, which stops at the first word that is not wholly options.
+// code-gauge-allow functionCognitiveComplexity -- Bash's echo option scan, which stops at the first word that is not wholly options.
 function echo(shell: Shell, args: string[]): number {
   let newline = true;
   let escapes = false;
@@ -72,7 +72,7 @@ function echoEscapes(text: string): { out: number[]; stop: boolean } {
 const ECHO_ESCAPES: Record<string, number> = { a: 7, b: 8, e: 27, E: 27, f: 12, n: 10, r: 13, t: 9, v: 11, '\\': 92 };
 
 /** One escape of `echo -e` whose letter `c` is at `index`, giving its bytes and the index of its last character. */
-// code-gauge-allow functionCognitiveComplexity 16 -- One case per escape that echo -e reads, as Bash's ansicstr.
+// code-gauge-allow functionCognitiveComplexity -- One case per escape that echo -e reads, as Bash's ansicstr.
 function echoEscape(bytes: number[], index: number, c: string): { out: number[]; last: number } {
   if (c in ECHO_ESCAPES) return { out: [ECHO_ESCAPES[c]], last: index };
   if (c === '0') {
@@ -102,8 +102,8 @@ function readDigits(bytes: number[], index: number, max: number, radix: number):
   return { value, last };
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Bash's printf option and operand checks, each with its own usage error.
-// code-gauge-allow functionNcss 34 -- Bash's printf option and operand checks, each with its own usage error.
+// code-gauge-allow functionCognitiveComplexity -- Bash's printf option and operand checks, each with its own usage error.
+// code-gauge-allow functionNcss -- Bash's printf option and operand checks, each with its own usage error.
 function printf(shell: Shell, args: string[]): number {
   let list = args;
   let target: string | undefined;

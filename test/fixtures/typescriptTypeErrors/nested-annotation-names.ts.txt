@@ -1,0 +1,17 @@
+function unused(
+  value: { name: Strng }
+): { body: { id: DoesNotExist } } { return { body: { id: 1 } }; }
+class Sample {
+  field!: { x: MissingField };
+  constructor(public arg: { y: MissingArg }) {}
+  get result(): { code: MissingResult } { return { code: 0 }; }
+}
+const fn = (value: { items: Array }) => 0;
+const ghost = 1;
+const method = { get(): { value: ghost } { return { value: 1 }; } };
+type Good<T extends object> = { [K in keyof T]: T[K] extends infer U ? U : never };
+interface Tree<T> { child?: Tree<T>; value: Good<{ label: T }> }
+function read(input: { child?: Tree<string>; value: string }): string {
+  return input.child?.value.label ?? input.value;
+}
+function invalid(input: { fields: Record<false, number>; status: readonly string }) {}

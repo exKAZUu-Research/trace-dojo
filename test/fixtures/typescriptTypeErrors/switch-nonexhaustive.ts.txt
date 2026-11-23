@@ -1,0 +1,33 @@
+let b: number;
+switch (1 + 0) { case 1: b = 1; break; }
+console.log(b);
+function uncertain(which: 'a' | 'b') {
+  let result: number;
+  switch ('a') { case which: result = 1; break; }
+  return result;
+}
+function hasDefault() {
+  let result: number;
+  switch (1) { case 1: result = 1; break; default: break; }
+  return result;
+}
+function nonmatchingCase() {
+  let result: number;
+  switch (1) { case 1: result = 1; break; case 2: break; }
+  return result;
+}
+function nonmatchingBefore() {
+  let result: number;
+  switch (1) { case 2: break; case 1: result = 1; }
+  return result;
+}
+function falseBranch(flag: boolean) {
+  let result: number;
+  switch (false) { case flag: result = 1; }
+  return result;
+}
+function noMatch() {
+  let result: number;
+  switch (1) { case 2: result = 1; break; }
+  return result;
+}

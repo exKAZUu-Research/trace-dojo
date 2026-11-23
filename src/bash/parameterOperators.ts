@@ -13,9 +13,9 @@ import { UnsupportedFeatureError } from './unsupported';
 import { ATTRIBUTE_ORDER } from './variables';
 
 /** Applies the operator of `${name<operator>argument}` to the parameter's value. */
-// code-gauge-allow functionCognitiveComplexity 16 -- One case per operator family of Bash's parameter expansion, each needing the expansion's context.
-// code-gauge-allow functionNcss 49 -- One case per operator family of Bash's parameter expansion, each needing the expansion's context.
-// code-gauge-allow functionParameterCount 7 -- One case per operator family of Bash's parameter expansion, each needing the expansion's context.
+// code-gauge-allow functionCognitiveComplexity -- One case per operator family of Bash's parameter expansion, each needing the expansion's context.
+// code-gauge-allow functionNcss -- One case per operator family of Bash's parameter expansion, each needing the expansion's context.
+// code-gauge-allow functionParameterCount -- One case per operator family of Bash's parameter expansion, each needing the expansion's context.
 export function applyOperator(
   expander: Expander,
   shell: Shell,
@@ -104,7 +104,7 @@ function expandArgument(expander: Expander, parts: WordPart[], inDouble: boolean
   return pieces;
 }
 
-// code-gauge-allow functionParameterCount 8 -- The default and assignment operators need the expansion, the parameter, and how it is quoted.
+// code-gauge-allow functionParameterCount -- The default and assignment operators need the expansion, the parameter, and how it is quoted.
 function defaultValue(
   expander: Expander,
   shell: Shell,
@@ -171,7 +171,7 @@ function range(from: number, to: number): number[] {
 }
 
 /** Splits the argument of `${x/pattern/replacement}` at its first unquoted `/`. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Finds the first unquoted slash across the argument's parts, as Bash splits ${x/p/r}.
+// code-gauge-allow functionCognitiveComplexity -- Finds the first unquoted slash across the argument's parts, as Bash splits ${x/p/r}.
 function splitReplacement(parts: WordPart[]): { pattern: WordPart[]; replacement: WordPart[] | undefined } {
   for (const [index, part] of parts.entries()) {
     if (part.kind !== 'literal') continue;
@@ -217,7 +217,7 @@ function replacementFor(replacement: Piece[], matched: string): string {
 }
 
 /** `${x/p/r}`, `${x//p/r}`, `${x/#p/r}`, and `${x/%p/r}`, replacing the longest match at each position. */
-// code-gauge-allow functionCognitiveComplexity 23 -- Bash's four replacement operators share the match search and the empty-match rule.
+// code-gauge-allow functionCognitiveComplexity -- Bash's four replacement operators share the match search and the empty-match rule.
 function substitute(text: string, pattern: string, replacement: Piece[], operator: string, shell: Shell): string {
   if (pattern === '') return text;
   const chars = charactersOf(text);
@@ -355,7 +355,7 @@ function arrayEntries(
 }
 
 /** Splits `offset:length` at the first `:` outside parentheses and conditional expressions, as Bash's `skiparith`. */
-// code-gauge-allow functionCognitiveComplexity 25 -- A port of Bash's skiparith, which counts parentheses and conditional colons across parts.
+// code-gauge-allow functionCognitiveComplexity -- A port of Bash's skiparith, which counts parentheses and conditional colons across parts.
 function splitSubstring(parts: WordPart[]): {
   offset: (string | WordPart)[];
   length: (string | WordPart)[] | undefined;
@@ -406,8 +406,8 @@ function changeCase(text: string, pattern: string, operator: string, shell: Shel
 }
 
 /** `${x@Q}` and the other transformations. */
-// code-gauge-allow functionParameterCount 7 -- The transformations need the expansion, the parameter, and how it is quoted, as the other operators do.
-// code-gauge-allow functionNcss 35 -- One case per transformation letter of Bash's parameter expansion.
+// code-gauge-allow functionParameterCount -- The transformations need the expansion, the parameter, and how it is quoted, as the other operators do.
+// code-gauge-allow functionNcss -- One case per transformation letter of Bash's parameter expansion.
 function transform(
   expander: Expander,
   shell: Shell,

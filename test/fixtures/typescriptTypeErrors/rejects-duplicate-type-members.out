@@ -1,0 +1,10 @@
+(1,15): error TS2300: Duplicate identifier 'x'.
+(1,26): error TS2300: Duplicate identifier 'x'.
+(2,12): error TS2300: Duplicate identifier 'y'.
+(2,23): error TS2300: Duplicate identifier 'y'.
+(4,15): error TS2300: Duplicate identifier 'p'.
+(4,26): error TS2300: Duplicate identifier 'p'.
+(8,15): error TS2300: Duplicate identifier 'w'.
+(8,26): error TS2300: Duplicate identifier 'w'.
+(9,15): error TS2300: Duplicate identifier '1'.
+(9,26): error TS2300: Duplicate identifier '1'.

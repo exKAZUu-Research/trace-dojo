@@ -1,0 +1,4 @@
+
+Fatal error: Declaration of J::$x::get(): string must be compatible with I::$x::get(): I|int in /main.php on line 1
+Stack trace:
+#0 {main}

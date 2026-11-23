@@ -1,0 +1,35 @@
+interface A {[k: `a${string}`]: number}
+interface B {[k: `ab${string}`]: string}
+interface C extends A, B {}
+interface A2 {[k: string]: number}
+interface B2 {[k: `a${string}`]: string}
+interface C2 extends A2, B2 {}
+interface A3 {[k: `a${string}`]: string}
+interface C3 extends A3 {[k: string]: number}
+interface A4 {[k: string]: number}
+interface C4 extends A4 {[k: `a${string}`]: string}
+interface P1 { a1: string }
+interface Q1 { [k: `a${string}`]: number }
+interface R1 extends P1, Q1 {}
+interface P2 { [k: string]: number; x: string }
+interface R2 extends P2 {}
+interface P3 { [k: number]: string }
+interface Q3 { [k: string]: number }
+interface R3 extends P3, Q3 {}
+interface R3 { extra: boolean }
+interface P4 { [k: `a${string}`]: number; [k: `ab${string}`]: string }
+interface R4 extends P4 {}
+type T5 = { [k: string]: number; [k: number]: string };
+interface M6 extends A {}
+interface M6 extends B {}
+interface Box2<T> { [k: string]: T }
+interface Named2 { [k: `n${string}`]: string }
+interface G5 extends Box2<number>, Named2 {}
+interface G6 extends Box2<string>, Named2 {}
+interface G3 extends Box2<number> { y: string }
+class K { [k: string]: number; z = 1 }
+interface G4 extends K, Named2 {}
+interface J1 { a: string }
+interface J2 { [k: string]: number }
+interface J3 extends J1 {}
+interface J3 extends J2 {}

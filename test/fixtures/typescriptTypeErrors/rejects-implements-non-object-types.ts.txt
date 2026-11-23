@@ -1,0 +1,21 @@
+type Shape = { x: number } | { y: number };
+class Point implements Shape {
+  x = 1;
+  y = 2;
+}
+
+type Named = { name: string } & { age: number };
+class Person implements Named {
+  name = "Ann";
+  age = 30;
+}
+
+class Count implements number {
+  value = 0;
+}
+
+class Box<T> implements T {
+  value = 0;
+}
+
+console.log(new Point(), new Person(), new Count(), new Box());

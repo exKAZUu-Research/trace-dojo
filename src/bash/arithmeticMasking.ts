@@ -45,7 +45,7 @@ interface Region {
 }
 
 /** The text of the first arithmetic opener whose expression holds an error of the tree. */
-// code-gauge-allow functionCognitiveComplexity 23 -- Pairs the tree's errors with the arithmetic openers around them in one walk of the error nodes.
+// code-gauge-allow functionCognitiveComplexity -- Pairs the tree's errors with the arithmetic openers around them in one walk of the error nodes.
 function firstFailingRegion(root: Node, text: string): Region | undefined {
   const errors: Node[] = [];
   const openers: Node[] = [];
@@ -70,7 +70,7 @@ function firstFailingRegion(root: Node, text: string): Region | undefined {
 }
 
 /** The offset of the `))` that closes arithmetic text starting at `start`, as Bash counts the parentheses. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Bash's scan for the end of arithmetic text, which quotes, escapes, and nesting all decide.
+// code-gauge-allow functionCognitiveComplexity -- Bash's scan for the end of arithmetic text, which quotes, escapes, and nesting all decide.
 function matchingParentheses(text: string, start: number): number | undefined {
   let depth = 0;
   for (let i = start; i < text.length; i++) {

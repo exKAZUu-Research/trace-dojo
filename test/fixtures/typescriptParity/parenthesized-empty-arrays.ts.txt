@@ -1,0 +1,9 @@
+const direct = /* Starts with no inferred element type. */ [];
+direct.push(1);
+const numberValue: number = direct[0];
+let annotated: number[] = (([]));
+annotated.push(2);
+var automatic = [];
+automatic[0] = 3;
+const parenthesized = ([]);
+console.log(numberValue, annotated, automatic, parenthesized);

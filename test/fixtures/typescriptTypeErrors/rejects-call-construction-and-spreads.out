@@ -1,0 +1,3 @@
+(2,21): error TS2348: Value of type 'typeof NeedsNew' is not callable. Did you mean to include 'new'?
+(5,15): error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+(7,15): error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.

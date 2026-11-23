@@ -135,7 +135,7 @@ function inlinedComprehensions(scope: ScopeBuilder): ScopeBuilder[] {
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows CPython's rules for resolving a name to local, cell, free, or global.
+// code-gauge-allow functionCognitiveComplexity -- Follows CPython's rules for resolving a name to local, cell, free, or global.
 function accessOf(scope: ScopeBuilder, name: string): NameRef['access'] {
   const declaration = scope.declarations.get(name);
   if (declaration === 'global') return 'global';

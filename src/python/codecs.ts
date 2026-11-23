@@ -406,7 +406,7 @@ export class ErrorHandling {
    * The text in place of the undecodable bytes from `start` up to `end`, and where decoding resumes. `passSurrogate`
    * decodes an encoded surrogate at `start` in a UTF codec, for the surrogatepass handler.
    */
-  // code-gauge-allow functionNcss 32 -- One case per builtin error handler.
+  // code-gauge-allow functionNcss -- One case per builtin error handler.
   decodeError(
     start: number,
     end: number,

@@ -1,0 +1,40 @@
+const predicateValues: (string | number)[] = ['a', 2];
+function annotatedBoolean(value: unknown): boolean { return typeof value === 'string'; }
+predicateValues.filter(annotatedBoolean).map(value => value.toUpperCase());
+function multipleReturns(value: unknown) {
+  if (typeof value === 'string') return true;
+  return false;
+}
+predicateValues.filter(multipleReturns).map(value => value.toUpperCase());
+function rewrittenParameter(value: unknown) {
+  value = 'changed';
+  return typeof value === 'string';
+}
+predicateValues.filter(rewrittenParameter).map(value => value.toUpperCase());
+function booleanOverload(value: unknown): boolean;
+function booleanOverload(value: unknown) { return typeof value === 'string'; }
+predicateValues.filter(booleanOverload).map(value => value.toUpperCase());
+class BooleanMethodOverload {
+  string(value: unknown): boolean;
+  string(value: unknown) { return typeof value === 'string'; }
+}
+predicateValues.filter(new BooleanMethodOverload().string).map(value => value.toUpperCase());
+function maybePositive(value: number | undefined) { return !!value; }
+const maybeNumbers: (number | undefined)[] = [0, 1, undefined];
+maybeNumbers.filter(maybePositive).map(value => value.toFixed());
+function isDeclaredString(value: unknown) { return typeof value === 'string'; }
+const rejectedString: unknown = 'a';
+if (isDeclaredString(rejectedString)) rejectedString.toFixed();
+const rejectedNumber: string | number = 1 as string | number;
+if (!isDeclaredString(rejectedNumber)) rejectedNumber.toUpperCase();
+function genericBoolean<T>(value: T): boolean { return value !== null && value !== undefined; }
+maybeNumbers.filter(genericBoolean).map(value => value.toFixed());
+function writesNested(value: unknown) {
+  function mutate() { value = 'changed'; }
+  return typeof value === 'string';
+}
+predicateValues.filter(writesNested).map(value => value.toUpperCase());
+class RewrittenMethod {
+  string(value: unknown) { value = 'changed'; return typeof value === 'string'; }
+}
+predicateValues.filter(new RewrittenMethod().string).map(value => value.toUpperCase());

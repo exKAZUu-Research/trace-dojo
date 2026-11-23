@@ -1,0 +1,2 @@
+const set = (o: any) => { o.x = 1; return o.x; };
+console.log(set(Object.freeze({ x: 0 })));

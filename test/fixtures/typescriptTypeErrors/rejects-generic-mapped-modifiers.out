@@ -1,0 +1,9 @@
+(2,3): error TS2322: Type 'Partial<T>' is not assignable to type 'Required<T>'.
+(7,3): error TS2322: Type 'Prefixed<T>' is not assignable to type 'Suffixed<T>'.
+(12,3): error TS2322: Type 'Opt<T>' is not assignable to type 'Plain<T>'.
+(16,3): error TS2322: Type 'Plain<T>' is not assignable to type 'Renamed<T>'.
+(19,3): error TS2322: Type 'Partial<T>' is not assignable to type 'Plain<T>'.
+(24,3): error TS2322: Type 'Some<T>' is not assignable to type 'Keys<T>'.
+  Type 'keyof T' is not assignable to type 'Exclude<keyof T, "a">'.
+    Type 'string | number | symbol' is not assignable to type 'Exclude<keyof T, "a">'.
+      Type 'string' is not assignable to type 'Exclude<keyof T, "a">'.

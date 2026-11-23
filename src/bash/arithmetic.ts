@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 566 -- A port of Bash's expr.c, whose recursive-descent levels and token reader share one evaluator's state.
+// code-gauge-allow-file fileNcss -- A port of Bash's expr.c, whose recursive-descent levels and token reader share one evaluator's state.
 /**
  * Bash's arithmetic evaluator, ported from `expr.c` of Bash 5.3 so that its results, its order of side effects, and
  * its error messages (which quote the remaining text as the "error token") match.
@@ -221,8 +221,8 @@ class Evaluator {
     return value;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- A port of Bash's expassign, whose compound operators share the token state of the assignment.
-  // code-gauge-allow functionNcss 31 -- A port of Bash's expassign, whose compound operators share the token state of the assignment.
+  // code-gauge-allow functionCognitiveComplexity -- A port of Bash's expassign, whose compound operators share the token state of the assignment.
+  // code-gauge-allow functionNcss -- A port of Bash's expassign, whose compound operators share the token state of the assignment.
   private expassign(): bigint {
     let value = this.expcond();
     if (this.curtok !== EQ && this.curtok !== Token.OP_ASSIGN) return value;
@@ -355,7 +355,7 @@ class Evaluator {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- A port of Bash's expcompare, one comparison per operator token.
+  // code-gauge-allow functionCognitiveComplexity -- A port of Bash's expcompare, one comparison per operator token.
   private expcompare(): bigint {
     return this.binaryLevel(
       [Token.LEQ, Token.GEQ, LT, GT],
@@ -385,7 +385,7 @@ class Evaluator {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- A port of Bash's expmuldiv, whose division checks follow its order of errors and overflow.
+  // code-gauge-allow functionCognitiveComplexity -- A port of Bash's expmuldiv, whose division checks follow its order of errors and overflow.
   private expmuldiv(): bigint {
     let val1 = this.exppower();
     while (this.curtok === MUL || this.curtok === DIV || this.curtok === MOD) {
@@ -632,8 +632,8 @@ class Evaluator {
     throw new ArithmeticError(`${name}${expression.slice(t)}: ${message} (error token is "${token}")`);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- A port of Bash's strlong, whose base prefixes, base#digits, and digit values share one scan.
-  // code-gauge-allow functionNcss 36 -- A port of Bash's strlong, whose base prefixes, base#digits, and digit values share one scan.
+  // code-gauge-allow functionCognitiveComplexity -- A port of Bash's strlong, whose base prefixes, base#digits, and digit values share one scan.
+  // code-gauge-allow functionNcss -- A port of Bash's strlong, whose base prefixes, base#digits, and digit values share one scan.
   private strlong(num: string): bigint {
     let s = 0;
     let base = 10n;

@@ -4,6 +4,9 @@ import { expect, test } from 'vitest';
 import { z } from 'zod';
 
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
+import { createNodeBundleRunner } from '../helpers/nodeBundleRunner';
+
+const runNodeBundle = createNodeBundleRunner();
 
 test.each([
   [
@@ -435,21 +438,17 @@ test.each(['Text.Read (Read(readsPrec))', 'Text.Printf (PrintfArg)', 'Text.Read 
   }
 );
 
-test.each([false, true])(
-  'long binding chains compile without host recursion (cyclic=%s)',
-  { timeout: 30_000 },
-  (cyclic) => {
-    const count = 30_000;
-    const source =
-      Array.from({ length: count }, (_, index) => `x${index}=x${index + 1}`).join('\n') +
-      `\nx${count}=${cyclic ? 'x0' : '1'}\nmain=print(1::Int)`;
-    expect(executeProgram('haskell', source)).toMatchObject({
-      kind: 'executed',
-      stdout: '1\n',
-      uncaughtException: undefined,
-    });
-  }
-);
+test.each([false, true])('long binding chains compile without host recursion (cyclic=%s)', (cyclic) => {
+  const count = 30_000;
+  const source =
+    Array.from({ length: count }, (_, index) => `x${index}=x${index + 1}`).join('\n') +
+    `\nx${count}=${cyclic ? 'x0' : '1'}\nmain=print(1::Int)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+});
 
 test.each([
   '  import Data.List\n  main=print(1::Int)',
@@ -639,7 +638,7 @@ test.each(['T', 't'])('record braces require continuation indentation: %s', (rec
   });
 });
 
-test.each([2000, 3000])('large pattern bindings share their match (%i variables)', { timeout: 30_000 }, (count) => {
+test.each([2000, 3000])('large pattern bindings share their match (%i variables)', (count) => {
   const pattern = `[${Array.from({ length: count }, (_, index) => `x${index}`).join(',')}]=[1..${count}::Int]`;
   const result = `(x0,x${count - 1},x0)`;
   for (const source of [`${pattern}\nmain=print${result}`, `main=print(let ${pattern} in ${result})`]) {
@@ -687,20 +686,16 @@ test('a non-child hiding name leaves its independent value imported', () => {
   ).toMatchObject({ kind: 'executed', stdout: 'EQ\n', uncaughtException: undefined });
 });
 
-test.each(['types', 'classes'])(
-  'compact shared %s compile without exponential memory growth',
-  { timeout: 30_000 },
-  (graph) => {
-    const output = execFileSync('bun', ['run', 'test/helpers/haskellCompilerMemory.ts', graph], {
-      encoding: 'utf8',
-      timeout: 30_000,
-    });
-    const result = z
-      .object({ kind: z.literal('executed'), stdout: z.literal('1\n'), peakRatio: z.number() })
-      .parse(JSON.parse(output));
-    expect(result.peakRatio).toBeLessThan(1.5);
-  }
-);
+test.each(['types', 'classes'])('compact shared %s compile without exponential memory growth', (graph) => {
+  const output = execFileSync('bun', ['run', 'test/helpers/haskellCompilerMemory.ts', graph], {
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  const result = z
+    .object({ kind: z.literal('executed'), stdout: z.literal('1\n'), peakRatio: z.number() })
+    .parse(JSON.parse(output));
+  expect(result.peakRatio).toBeLessThan(1.5);
+});
 
 test('shared superclass paths retain runtime evidence and remove redundant constraints', () => {
   const count = 8;
@@ -779,7 +774,7 @@ main=print(f N)`;
   });
 });
 
-test.each([2, 3])('shared %i-way types remain bounded while recording', { timeout: 30_000 }, (branches) => {
+test.each([2, 3])('shared %i-way types remain bounded while recording', (branches) => {
   const output = execFileSync('bun', ['run', 'test/helpers/haskellCompilerMemory.ts', 'trace', String(branches)], {
     encoding: 'utf8',
     timeout: 30_000,
@@ -817,17 +812,8 @@ test('compiler work limits contain expanding diagnostics and constraints and res
   }
 });
 
-test('compiler and native evaluation recursion remain bounded under Node', { timeout: 30_000 }, () => {
-  const bundle = execFileSync(
-    'bun',
-    ['build', 'test/helpers/haskellCompilerNode.ts', '--target=node', '--packages=external'],
-    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
-  );
-  const output = execFileSync('node', ['--input-type=module'], {
-    input: bundle,
-    encoding: 'utf8',
-    timeout: 30_000,
-  });
+test('compiler and native evaluation recursion remain bounded under Node', () => {
+  const output = runNodeBundle('test/helpers/haskellCompilerNode.ts');
   const resultSchema = z.object({ kind: z.string() }).passthrough();
   const {
     synonyms: results,
@@ -940,17 +926,8 @@ test.each(['main=print("hello"#)', "main=print('a'#)", 'main=print(1#)', 'main=p
   }
 );
 
-test('large IO scopes execute and record within a bounded Node heap', { timeout: 30_000 }, () => {
-  const bundle = execFileSync(
-    'bun',
-    ['build', 'test/helpers/haskellScopeMemory.ts', '--target=node', '--packages=external'],
-    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
-  );
-  const output = execFileSync('node', ['--max-old-space-size=192', '--input-type=module'], {
-    input: bundle,
-    encoding: 'utf8',
-    timeout: 30_000,
-  });
+test('large IO scopes execute and record within a bounded Node heap', () => {
+  const output = runNodeBundle('test/helpers/haskellScopeMemory.ts', { heapMb: 192 });
   const result = z
     .object({
       execution: z.object({ kind: z.literal('executed'), stdout: z.string(), finalTurtles: z.array(z.unknown()) }),
@@ -987,17 +964,8 @@ test.each([' ', '\t', '\n', '\v', '\f', '\r', ' \t\r\n\v\f '])('ASCII source str
   });
 });
 
-test('bulk allocations stop at execution limits within a bounded Node heap', { timeout: 30_000 }, () => {
-  const bundle = execFileSync(
-    'bun',
-    ['build', 'test/helpers/haskellAllocationMemory.ts', '--target=node', '--packages=external'],
-    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
-  );
-  const output = execFileSync('node', ['--max-old-space-size=512', '--input-type=module'], {
-    input: bundle,
-    encoding: 'utf8',
-    timeout: 30_000,
-  });
+test('bulk allocations stop at execution limits within a bounded Node heap', () => {
+  const output = runNodeBundle('test/helpers/haskellAllocationMemory.ts', { heapMb: 512 });
   const results = z
     .array(
       z.object({

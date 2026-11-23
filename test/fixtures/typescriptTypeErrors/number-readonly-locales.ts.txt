@@ -1,0 +1,4 @@
+(1234).toLocaleString([1] as const);
+new Number(5).toLocaleString(null);
+(1234).toLocaleString(["en-US", false] as const);
+(1234).toLocaleString("en-US", { maximumFractionDigits: "2" });

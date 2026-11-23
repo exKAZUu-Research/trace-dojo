@@ -1,0 +1,26 @@
+IteratorIterator: OuterIterator,Traversable,Iterator | __construct,getInnerIterator,rewind,valid,key,current,next | 
+FilterIterator: Iterator,Traversable,OuterIterator | accept,__construct,rewind,next,getInnerIterator,valid,key,current | IteratorIterator
+CallbackFilterIterator: OuterIterator,Traversable,Iterator | __construct,accept,rewind,next,getInnerIterator,valid,key,current | FilterIterator,IteratorIterator
+LimitIterator: Iterator,Traversable,OuterIterator | __construct,rewind,valid,next,seek,getPosition,getInnerIterator,key,current | IteratorIterator
+CachingIterator: Stringable,Iterator,Traversable,OuterIterator,ArrayAccess,Countable | __construct,rewind,valid,next,hasNext,__toString,getFlags,setFlags,offsetGet,offsetSet,offsetUnset,offsetExists,getCache,count,getInnerIterator,key,current | IteratorIterator
+NoRewindIterator: Iterator,Traversable,OuterIterator | __construct,rewind,valid,key,current,next,getInnerIterator | IteratorIterator
+AppendIterator: Iterator,Traversable,OuterIterator | __construct,append,rewind,valid,current,next,getIteratorIndex,getArrayIterator,getInnerIterator,key | IteratorIterator
+InfiniteIterator: Iterator,Traversable,OuterIterator | __construct,next,getInnerIterator,rewind,valid,key,current | IteratorIterator
+RegexIterator: OuterIterator,Traversable,Iterator | __construct,accept,getMode,setMode,getFlags,setFlags,getRegex,getPregFlags,setPregFlags,rewind,next,getInnerIterator,valid,key,current | FilterIterator,IteratorIterator
+EmptyIterator: Iterator,Traversable | current,next,key,valid,rewind | 
+RecursiveArrayIterator: Countable,Serializable,ArrayAccess,Iterator,Traversable,SeekableIterator,RecursiveIterator | hasChildren,getChildren,__construct,offsetExists,offsetGet,offsetSet,offsetUnset,append,getArrayCopy,count,getFlags,setFlags,asort,ksort,uasort,uksort,natsort,natcasesort,unserialize,serialize,__serialize,__unserialize,rewind,current,key,next,valid,seek | ArrayIterator
+RecursiveIteratorIterator: OuterIterator,Traversable,Iterator | __construct,rewind,valid,key,current,next,getDepth,getSubIterator,getInnerIterator,beginIteration,endIteration,callHasChildren,callGetChildren,beginChildren,endChildren,nextElement,setMaxDepth,getMaxDepth | 
+MultipleIterator: Iterator,Traversable | __construct,getFlags,setFlags,attachIterator,detachIterator,containsIterator,countIterators,rewind,valid,key,current,next | 
+ArrayIterator: SeekableIterator,Traversable,Iterator,ArrayAccess,Serializable,Countable | __construct,offsetExists,offsetGet,offsetSet,offsetUnset,append,getArrayCopy,count,getFlags,setFlags,asort,ksort,uasort,uksort,natsort,natcasesort,unserialize,serialize,__serialize,__unserialize,rewind,current,key,next,valid,seek | 
+ArrayObject: IteratorAggregate,Traversable,ArrayAccess,Serializable,Countable | __construct,offsetExists,offsetGet,offsetSet,offsetUnset,append,getArrayCopy,count,getFlags,setFlags,asort,ksort,uasort,uksort,natsort,natcasesort,unserialize,serialize,__serialize,__unserialize,getIterator,exchangeArray,setIteratorClass,getIteratorClass | 
+SplObjectStorage: Countable,SeekableIterator,Traversable,Iterator,Serializable,ArrayAccess | attach,detach,contains,addAll,removeAll,removeAllExcept,getInfo,setInfo,count,rewind,valid,key,current,next,seek,unserialize,serialize,offsetExists,offsetGet,offsetSet,offsetUnset,getHash,__serialize,__unserialize | 
+SplObserver:  | update | 
+SplSubject:  | attach,detach,notify | 
+OuterIterator: Iterator,Traversable | getInnerIterator,current,next,key,valid,rewind | 
+RecursiveIterator: Iterator,Traversable | hasChildren,getChildren,current,next,key,valid,rewind | 
+SplDoublyLinkedList: Iterator,Traversable,Countable,ArrayAccess,Serializable | add,pop,shift,push,unshift,top,bottom,count,isEmpty,setIteratorMode,getIteratorMode,offsetExists,offsetGet,offsetSet,offsetUnset,rewind,current,key,prev,next,valid,unserialize,serialize,__serialize,__unserialize | 
+SplQueue: Serializable,ArrayAccess,Countable,Traversable,Iterator | enqueue,dequeue,add,pop,shift,push,unshift,top,bottom,count,isEmpty,setIteratorMode,getIteratorMode,offsetExists,offsetGet,offsetSet,offsetUnset,rewind,current,key,prev,next,valid,unserialize,serialize,__serialize,__unserialize | SplDoublyLinkedList
+SplStack: Serializable,ArrayAccess,Countable,Traversable,Iterator | add,pop,shift,push,unshift,top,bottom,count,isEmpty,setIteratorMode,getIteratorMode,offsetExists,offsetGet,offsetSet,offsetUnset,rewind,current,key,prev,next,valid,unserialize,serialize,__serialize,__unserialize | SplDoublyLinkedList
+SplFixedArray: IteratorAggregate,Traversable,ArrayAccess,Countable,JsonSerializable | __construct,__wakeup,__serialize,__unserialize,count,toArray,fromArray,getSize,setSize,offsetExists,offsetGet,offsetSet,offsetUnset,getIterator,jsonSerialize | 
+SplMinHeap: Countable,Traversable,Iterator | extract,insert,top,count,isEmpty,rewind,current,key,next,valid,recoverFromCorruption,isCorrupted,__serialize,__unserialize | SplHeap
+SplPriorityQueue: Iterator,Traversable,Countable | compare,insert,setExtractFlags,top,extract,count,isEmpty,rewind,current,key,next,valid,recoverFromCorruption,isCorrupted,getExtractFlags,__serialize,__unserialize | 

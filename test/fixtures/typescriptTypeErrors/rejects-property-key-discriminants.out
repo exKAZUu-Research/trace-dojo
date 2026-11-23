@@ -1,0 +1,20 @@
+(4,27): error TS2339: Property 'other' does not exist on type '{ [key]: number; }'.
+(5,8): error TS7053: Element implicitly has an 'any' type because expression of type 'unique symbol' can't be used to index type '{ other: string; }'.
+  Property '[key]' does not exist on type '{ other: string; }'.
+(8,33): error TS7053: Element implicitly has an 'any' type because expression of type 'unique symbol' can't be used to index type 'Record<unique symbol, unknown>'.
+  Property '[otherKey]' does not exist on type 'Record<unique symbol, unknown>'.
+(11,21): error TS2532: Object is possibly 'undefined'.
+(15,43): error TS2339: Property 'message' does not exist on type 'string'.
+(16,20): error TS2339: Property 'toUpperCase' does not exist on type 'Error'.
+(19,45): error TS2339: Property 'toUpperCase' does not exist on type 'string | Error'.
+  Property 'toUpperCase' does not exist on type 'Error'.
+(23,45): error TS2339: Property 'toUpperCase' does not exist on type 'string | Error'.
+  Property 'toUpperCase' does not exist on type 'Error'.
+(26,35): error TS2339: Property 'message' does not exist on type 'string'.
+(27,17): error TS2339: Property 'toUpperCase' does not exist on type 'Error'.
+(31,40): error TS2339: Property 'message' does not exist on type 'string'.
+(32,20): error TS2339: Property 'toUpperCase' does not exist on type 'Error'.
+(36,40): error TS2339: Property 'message' does not exist on type 'string'.
+(39,43): error TS2339: Property 'message' does not exist on type 'string'.
+(40,48): error TS2339: Property 'toUpperCase' does not exist on type 'string | Error'.
+  Property 'toUpperCase' does not exist on type 'Error'.

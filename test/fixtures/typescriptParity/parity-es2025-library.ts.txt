@@ -1,0 +1,8 @@
+const a = new Set([1, 2]);
+const b = new Set([2, 3]);
+console.log(a.union(b), a.intersection(b), a.difference(b), a.symmetricDifference(b));
+console.log(a.isSubsetOf(b), a.isSupersetOf(b), a.isDisjointFrom(b));
+console.log([1, 2].values().map(x => x * 2).toArray());
+console.log(Iterator.from([1, 2, 3]).drop(1).take(1).toArray());
+console.log([1, 2, 3].values().filter(x => x > 1).reduce((sum, x) => sum + x, 0));
+console.log(Math.f16round(1.337), RegExp.escape("a.b"));

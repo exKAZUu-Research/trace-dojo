@@ -1,0 +1,9 @@
+[
+  [ 1, 'value' ],
+  [ 2, 'literal' ],
+  [ 3, 'generic' ],
+  [ 4, 'relay' ],
+  [ 5, 'readonly' ],
+  [ 6, 7, 'union' ],
+  [ 8, 'variadic' ]
+]

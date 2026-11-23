@@ -1,0 +1,21 @@
+type Json = string | number | boolean | null | JsonArray | JsonObject;
+interface JsonArray extends Array<Json> {}
+interface JsonObject { [k: string]: Json }
+const bad1: Json = { a: [1, () => 1] };
+interface NumArr extends Array<number> {}
+const bad2: NumArr = ["a"];
+const s: string[] = ["a"];
+const bad3: NumArr = s;
+interface RTree extends ReadonlyArray<RTree | number> {}
+const rt: RTree = [1, [2, [3]]];
+interface MTree extends Map<string, MTree> {}
+const mt: MTree = new Map<string, MTree>();
+const bad4: RTree = ["x"];
+const ok5: ReadonlyArray<Json> = [1, "a", [null]];
+const nums: number[] = [1];
+const ok6: JsonArray = nums;
+const bad7: JsonArray = [undefined];
+type Fn = { <T>(x: T): T; (x: number): string };
+const fn1: Fn = (x: any) => x;
+const fn2: { <T>(x: T): T[] } = <U>(x: U) => x;
+console.log(rt, mt, ok5, ok6, fn1, fn2);

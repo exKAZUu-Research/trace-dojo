@@ -3,7 +3,6 @@ import type { RealmBuilder } from './realm';
 import { groupBy } from './realmCollections';
 import type { Runtime } from './runtime';
 import {
-  HOLE,
   isAccessor,
   isCallable,
   isObject,
@@ -52,6 +51,41 @@ export function defineObjectBuiltins(builder: RealmBuilder): void {
     const key = runtime.toPropertyKey(args[0]);
     return runtime.getOwnProperty(runtime.toObject(thisValue), key)?.enumerable ?? false;
   });
+  defineLegacyAccessorMethods(builder);
+}
+
+/** `__defineGetter__` and its relatives, which define and look up accessors by name. */
+function defineLegacyAccessorMethods(builder: RealmBuilder): void {
+  const { objectPrototype } = builder.realm;
+  for (const kind of ['get', 'set'] as const) {
+    const name = kind === 'get' ? 'Getter' : 'Setter';
+    builder.method(objectPrototype, `__define${name}__`, 2, ({ runtime, thisValue, args }) => {
+      const [key, accessor] = args;
+      if (!(accessor instanceof JsFunction)) {
+        return runtime.throwError('TypeError', `Object.prototype.__define${name}__: Expecting function`);
+      }
+      const object = runtime.toObject(thisValue);
+      // An accessor defined over the other half of one keeps that half, as `Object.defineProperty` does.
+      definePropertyOrThrow(runtime, object, runtime.toPropertyKey(key), {
+        [kind]: accessor,
+        enumerable: true,
+        configurable: true,
+      });
+      return;
+    });
+    builder.method(objectPrototype, `__lookup${name}__`, 1, ({ runtime, thisValue, args }) =>
+      lookupAccessor(runtime, runtime.toObject(thisValue), runtime.toPropertyKey(args[0]), kind)
+    );
+  }
+}
+
+/** The getter or the setter of the nearest property of the name, if it is an accessor. */
+function lookupAccessor(runtime: Runtime, object: JsObject, key: Key, kind: 'get' | 'set'): Value {
+  for (let current: JsObject | null = object; current; current = current.proto) {
+    const property = runtime.getOwnProperty(current, key);
+    if (property) return isAccessor(property) ? property[kind] : undefined;
+  }
+  return undefined;
 }
 
 function defineEntries(method: ObjectMethod): void {
@@ -78,7 +112,7 @@ function fromEntries(runtime: Runtime, args: Value[]): Value {
     closingOnThrow(iterator, () => {
       for (let entry = iterator.next(); entry !== DONE; entry = iterator.next()) {
         if (!isObject(entry)) {
-          runtime.throwError('TypeError', `Iterator value ${primitiveText(entry)} is not an entry object`);
+          runtime.throwError('TypeError', `Iterator value ${runtime.describePlain(entry)} is not an entry object`);
         }
         const key = runtime.toPropertyKey(runtime.get(entry, '0'));
         runtime.createDataProperty(object, key, runtime.get(entry, '1'));
@@ -88,24 +122,24 @@ function fromEntries(runtime: Runtime, args: Value[]): Value {
   return object;
 }
 
-// code-gauge-allow functionNcss 32 -- Lists the builtin methods, each a small closure of its own.
+// code-gauge-allow functionNcss -- Lists the builtin methods, each a small closure of its own.
 function defineReflection(method: ObjectMethod): void {
   method('getOwnPropertyNames', 1, (runtime, args) =>
     runtime.newArray(runtime.ownPropertyNames(runtime.toObject(args[0])))
   );
   method('getOwnPropertySymbols', 1, (runtime, args) =>
-    runtime.newArray(runtime.ownSymbols(runtime.toObject(args[0])))
+    runtime.newArray(runtime.reflectOwnSymbols(runtime.toObject(args[0])))
   );
   method('getOwnPropertyDescriptor', 2, (runtime, args) => {
     const object = runtime.toObject(args[0]);
-    return descriptorObject(runtime, runtime.getOwnProperty(object, runtime.toPropertyKey(args[1])));
+    return descriptorObject(runtime, runtime.reflectedOwnProperty(object, runtime.toPropertyKey(args[1])));
   });
   method('getOwnPropertyDescriptors', 1, (runtime, args) => {
     const object = runtime.toObject(args[0]);
     const result = runtime.newObject();
     return runtime.hold(result, () => {
       for (const key of [...runtime.ownPropertyNames(object), ...runtime.ownSymbols(object)]) {
-        runtime.createDataProperty(result, key, descriptorObject(runtime, runtime.getOwnProperty(object, key)));
+        runtime.createDataProperty(result, key, descriptorObject(runtime, runtime.reflectedOwnProperty(object, key)));
       }
       return result;
     });
@@ -127,7 +161,10 @@ function defineReflection(method: ObjectMethod): void {
   method('create', 2, (runtime, args) => {
     const [proto, properties] = args;
     if (proto !== null && !isObject(proto)) {
-      return runtime.throwError('TypeError', `Object prototype may only be an Object or null: ${primitiveText(proto)}`);
+      return runtime.throwError(
+        'TypeError',
+        `Object prototype may only be an Object or null: ${runtime.describePlain(proto)}`
+      );
     }
     const object = runtime.newObject(proto);
     return properties === undefined
@@ -150,8 +187,8 @@ function defineIntegrity(method: ObjectMethod): void {
     for (const property of object.properties.values()) property.configurable = false;
     return object;
   });
-  method('isSealed', 1, (_, args) => isLocked(args[0], false));
-  method('isFrozen', 1, (_, args) => isLocked(args[0], true));
+  method('isSealed', 1, (runtime, args) => isLocked(runtime, args[0], false));
+  method('isFrozen', 1, (runtime, args) => isLocked(runtime, args[0], true));
   method('setPrototypeOf', 2, setPrototypeOf);
 }
 
@@ -161,7 +198,10 @@ function setPrototypeOf(runtime: Runtime, args: Value[]): Value {
     return runtime.throwError('TypeError', 'Object.setPrototypeOf called on null or undefined');
   }
   if (proto !== null && !isObject(proto)) {
-    return runtime.throwError('TypeError', `Object prototype may only be an Object or null: ${primitiveText(proto)}`);
+    return runtime.throwError(
+      'TypeError',
+      `Object prototype may only be an Object or null: ${runtime.describePlain(proto)}`
+    );
   }
   if (isObject(object)) changePrototype(runtime, object, proto);
   return object;
@@ -173,11 +213,11 @@ function changePrototype(runtime: Runtime, object: JsObject, proto: JsObject | n
   if (object === runtime.realm.objectPrototype) {
     runtime.throwError('TypeError', "Immutable prototype object 'Object.prototype' cannot have their prototype set");
   }
-  if (!object.extensible) runtime.throwError('TypeError', '#<Object> is not extensible');
+  if (!object.extensible) runtime.throwError('TypeError', () => `${runtime.describePlain(object)} is not extensible`);
   for (let current = proto; current; current = current.proto) {
     if (current === object) runtime.throwError('TypeError', 'Cyclic __proto__ value');
   }
-  object.proto = proto;
+  object.setPrototype(proto);
 }
 
 /** The spec's ObjectDefineProperties, which reads every descriptor before defining any. */
@@ -205,21 +245,18 @@ function holdingTemporaries(runtime: Runtime, run: () => void): void {
   }
 }
 
-function primitiveText(value: Exclude<Value, JsObject>): string {
-  return typeof value === 'symbol' ? value.toString() : String(value);
-}
-
-/** Whether an object is sealed, or frozen when `frozen` is set, as `Object.isSealed` and `Object.isFrozen` test. */
-function isLocked(value: Value, frozen: boolean): boolean {
+/** Whether no own property of a non-extensible object is configurable, nor, when `frozen`, a writable data property. */
+function isLocked(runtime: Runtime, value: Value, frozen: boolean): boolean {
   if (!isObject(value)) return true;
   if (value.extensible) return false;
-  if (value instanceof JsArray && !(frozen ? value.frozen : value.sealed) && value.elements.some((e) => e !== HOLE))
-    return false;
-  for (const property of value.properties.values()) {
-    if (property.configurable) return false;
-    if (frozen && !isAccessor(property) && property.writable) return false;
-  }
-  return true;
+  // An array's elements have descriptors of their own, which its stored properties do not hold; V8 skips its length,
+  // so an array with a writable length can still be frozen.
+  const keys = new Set<Key>([...runtime.ownKeys(value), ...value.properties.keys()]);
+  return [...keys].every((key) => {
+    const property = runtime.getOwnProperty(value, key);
+    if (!property) return true;
+    return !property.configurable && !(frozen && !isAccessor(property) && property.writable);
+  });
 }
 
 /** The fields a property descriptor object gives, any of which may be absent. */
@@ -236,7 +273,7 @@ interface Descriptor {
  * The spec's ToPropertyDescriptor. Each value and accessor stays in the frame's temporaries from when it is read, since
  * later fields' getters run the program's code; the caller releases them once the descriptor is applied.
  */
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function toPropertyDescriptor(runtime: Runtime, value: Value): Descriptor {
   if (!isObject(value))
     return runtime.throwError('TypeError', `Property description must be an object: ${runtime.describe(value)}`);
@@ -271,8 +308,10 @@ function toPropertyDescriptor(runtime: Runtime, value: Value): Descriptor {
 }
 
 /** The spec's ValidateAndApplyPropertyDescriptor on an ordinary object, which throws where it would return false. */
-// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function definePropertyOrThrow(runtime: Runtime, object: JsObject, key: Key, descriptor: Descriptor): void {
+  // The spec's ArraySetLength converts a new length before it compares the descriptor with the current one.
+  if (object instanceof JsArray && key === 'length' && 'value' in descriptor)
+    descriptor = { ...descriptor, value: runtime.toArrayLength(descriptor.value) };
   const current = runtime.getOwnProperty(object, key);
   const isAccessorDescriptor = 'get' in descriptor || 'set' in descriptor;
   if (!current) {
@@ -292,29 +331,30 @@ function definePropertyOrThrow(runtime: Runtime, object: JsObject, key: Key, des
   if (!current.configurable && !isCompatible(current, descriptor, isAccessorDescriptor)) {
     runtime.throwError('TypeError', `Cannot redefine property: ${String(key)}`);
   }
+  runtime.defineProperty(object, key, appliedDescriptor(current, descriptor, isAccessorDescriptor));
+}
+
+/** The property a descriptor makes of an existing one, keeping the attributes the descriptor leaves out. */
+function appliedDescriptor(current: Property, descriptor: Descriptor, isAccessorDescriptor: boolean): Property {
   const flags = {
     enumerable: descriptor.enumerable ?? current.enumerable,
     configurable: descriptor.configurable ?? current.configurable,
   };
-  let next: Property;
   if (isAccessorDescriptor) {
     const previous = isAccessor(current) ? current : { get: undefined, set: undefined };
-    next = {
+    return {
       get: 'get' in descriptor ? descriptor.get : previous.get,
       set: 'set' in descriptor ? descriptor.set : previous.set,
       ...flags,
     };
-  } else if (isAccessor(current) && !('value' in descriptor || 'writable' in descriptor)) {
-    next = { ...current, ...flags };
-  } else {
-    const previous = isAccessor(current) ? { value: undefined, writable: false } : current;
-    next = {
-      value: 'value' in descriptor ? descriptor.value : previous.value,
-      writable: descriptor.writable ?? previous.writable,
-      ...flags,
-    };
   }
-  runtime.defineProperty(object, key, next);
+  if (isAccessor(current) && !('value' in descriptor || 'writable' in descriptor)) return { ...current, ...flags };
+  const previous = isAccessor(current) ? { value: undefined, writable: false } : current;
+  return {
+    value: 'value' in descriptor ? descriptor.value : previous.value,
+    writable: descriptor.writable ?? previous.writable,
+    ...flags,
+  };
 }
 
 /** Whether a descriptor only restates or narrows a non-configurable property, which the spec allows. */
@@ -342,7 +382,7 @@ function descriptorObject(runtime: Runtime, property: Property | undefined): Val
     runtime.createDataProperty(result, 'get', property.get);
     runtime.createDataProperty(result, 'set', property.set);
   } else {
-    runtime.createDataProperty(result, 'value', property.value);
+    runtime.createDataProperty(result, 'value', runtime.readPropertyValue(property));
     runtime.createDataProperty(result, 'writable', property.writable);
   }
   runtime.createDataProperty(result, 'enumerable', property.enumerable);

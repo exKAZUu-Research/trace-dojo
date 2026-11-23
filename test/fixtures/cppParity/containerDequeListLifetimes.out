@@ -1,0 +1,38 @@
+C9 
+[deque]C0 C1 C2 C3 C4 C5 
+1: cp9 cp0 D9 
+2: cp9 cp5 D9 
+3: C8 cp8 cp0 D8 D8 
+4: cp9 cp0 
+5: cp9 cp9 cp5 
+6: C7 cp0 D7 
+7: D0 
+8: D5 
+9: D0 D9 
+10: D9 D5 
+11: cp9 cp0 D9 
+12: cp9 cp9 cp0 
+13: D9 D8 D1 D9 D2 D3 D9 D9 D5 
+14: cp9 cp9 
+15: D9 D9 D9 
+16: C4 cp4 cp4 D4 
+17: C1 cp4 cp4 cp4 cp4 
+18: C3 cp9 D4 
+19: C5 C6 C7 
+20: cp6 cp5 cp9 
+21: cp7 cp4 cp4 
+22: D7 D3 D4 D4 D5 D6 D7 D4 D4 
+end: D7 D6 D5 D4 D4 D4 D4 D4 D5 D6 D7 
+[list]C0 C1 C2 C3 C4 C5 
+1: cp9 
+2: cp9 cp9 
+3: C7 
+4: D7 D9 D9 
+5: D2 D3 D4 D5 
+6: cp9 cp9 
+7: D9 D9 
+8: C1 C2 C3 C4 cp4 
+9: D1 cp1 cp2 cp3 cp4 
+10: D2 D3 D4 D1 D2 D3 D4 
+end: D1 D2 D3 D4 
+D9 

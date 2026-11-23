@@ -1,0 +1,6 @@
+type Foo<T = { [P in U]: number }, U extends string = string> = T;
+type Bar<T = [1] extends [infer X extends V] ? X : never, V = number> = T;
+type Ok<U extends string = string, T = { [P in U]: number }> = T;
+type Ok2<V = number, T = [1] extends [infer X extends V] ? X : never> = T;
+type Ok3<T = <U>(u: U) => U> = T;
+console.log(1);

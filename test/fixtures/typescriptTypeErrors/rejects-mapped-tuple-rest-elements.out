@@ -1,0 +1,13 @@
+(3,7): error TS2322: Type '[string, string]' is not assignable to type 'readonly [string, ...number[]]'.
+  Type at position 1 in source is not compatible with type at position 1 in target.
+    Type 'string' is not assignable to type 'number'.
+(7,7): error TS2322: Type '[number, boolean]' is not assignable to type '[(number | undefined)?, ...(string | undefined)[]]'.
+  Type at position 1 in source is not compatible with type at position 1 in target.
+    Type 'boolean' is not assignable to type 'string'.
+(11,7): error TS2322: Type '[]' is not assignable to type '[number, ...string[]]'.
+  Source has 0 element(s) but target requires 1.
+(16,7): error TS2322: Type '[{ value: string; }, { value: string; }, { value: true; }]' is not assignable to type '[{ value: string; }, ...{ value: number; }[], { value: boolean; }]'.
+  Type at position 1 in source is not compatible with type at position 1 in target.
+    Type '{ value: string; }' is not assignable to type '{ value: number; }'.
+      Types of property 'value' are incompatible.
+        Type 'string' is not assignable to type 'number'.

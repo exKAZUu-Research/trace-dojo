@@ -1,0 +1,8 @@
+(1,40): error TS2322: Type 'T[never]' is not assignable to type 'never'.
+(2,56): error TS2322: Type 'T[never]' is not assignable to type 'never'.
+  Type 'U[never]' is not assignable to type 'never'.
+(3,85): error TS2322: Type 'T[never]' is not assignable to type 'never'.
+  Type 'number' is not assignable to type 'never'.
+(4,52): error TS2322: Type 'T[never]' is not assignable to type 'never'.
+(5,59): error TS2322: Type 'T[K]' is not assignable to type 'never'.
+  Type 'T[never]' is not assignable to type 'never'.

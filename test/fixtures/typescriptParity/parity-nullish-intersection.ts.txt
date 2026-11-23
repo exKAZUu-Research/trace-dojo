@@ -1,0 +1,28 @@
+function named(value: unknown): value is { name: string } {
+  return typeof value === 'object' && value !== null && 'name' in value;
+}
+function report(value: { age: number } | null) {
+  if (named(value)) console.log(value.age, value.name);
+  else console.log('unnamed');
+}
+function checkArray(value: string | undefined) {
+  if (Array.isArray(value)) console.log(value.toUpperCase());
+  else console.log(value ?? 'missing');
+}
+function verifyDomains(
+  nullable: null & { first: number },
+  undefinable: undefined & (() => void),
+  intrinsic: object & 'value',
+  withAny: any & null & { first: number },
+  compatible: string & { marker: true },
+) {
+  const a: never = nullable;
+  const b: never = undefinable;
+  const c: never = intrinsic;
+  const d: never = withAny;
+  return compatible.toUpperCase();
+}
+report({ age: 42, name: 'Ada' } as { age: number; name: string });
+report(null);
+checkArray('text');
+checkArray(undefined);

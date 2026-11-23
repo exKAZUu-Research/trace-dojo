@@ -1,0 +1,5 @@
+(8,3): error TS2322: Type 'boolean' is not assignable to type 'Box[K]'.
+(11,3): error TS2322: Type 'string' is not assignable to type 'Box[K]'.
+  Type 'string' is not assignable to type 'number'.
+(14,9): error TS2322: Type 'Box[K]' is not assignable to type 'string'.
+  Type 'number' is not assignable to type 'string'.

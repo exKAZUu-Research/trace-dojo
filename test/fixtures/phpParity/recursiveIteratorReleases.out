@@ -1,0 +1,38 @@
+value:1;hook:1;destroy:child;value:2;end;
+again;destroy:child;hook:0;returned;
+destroy:child;destroy:root;done;
+break:1;destroy:child;0
+return:destroy:child;1;0
+destroy:child;loop;0
+destroy:child;1;0
+destroy:root;finished;
+depth:2;bool(true)
+bool(true)
+depth:1;bool(true)
+bool(true)
+after:0
+depth:2;bool(true)
+bool(true)
+depth:1;bool(true)
+bool(true)
+caught:0
+value:1;depth:2;bool(false)
+bool(false)
+depth:1;bool(false)
+bool(false)
+done:0
+value:1;cleared at 1:bool(false)
+bool(false)
+UNKNOWN:0
+
+Warning: Undefined variable $missing in /main.php on line 63
+
+Warning: Undefined variable $replaced in /main.php on line 66
+fallback;new;value:2;end;
+ReportsIteratorFrames->__destruct:93;
+hook:1;ReportsIteratorFrames->__destruct:93;
+ReportsIteratorFrames->__destruct:internal;RecursiveIteratorIterator->next:93;
+ReportsIteratorFrames->__destruct:internal;iterator_to_array:95;
+Object is not initialized
+replace:destroy:child;destroy:old;stored;3;destroy:new;done;
+child;root;root/child;destroy:rejected;The RecursiveIteratorIterator instance wasn't initialized properly

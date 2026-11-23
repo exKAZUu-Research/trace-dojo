@@ -1,0 +1,10 @@
+function f(x: string | number, y: string | number) {
+  const both = typeof x === "string" && typeof y === "string";
+  if (both) return x.length + y.length;
+  let z: string | number = x;
+  const isStr = typeof z === "string";
+  z = 1;
+  if (isStr) return z.length;
+  return 0;
+}
+console.log(f("a", "b"));

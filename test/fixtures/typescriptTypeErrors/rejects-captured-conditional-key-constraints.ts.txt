@@ -1,0 +1,20 @@
+function Identical<Z>() {
+  type Key<O, P extends (Z extends true ? keyof O : keyof O)> = P;
+  type Failure<T, K extends keyof T> = T[K] extends {key: 'x'} ? Key<T[K], 'key'> : never;
+}
+function OptionalFallback<Z>() {
+  type Key<O, P extends (Z extends true ? keyof O | 'fallback' : keyof O)> = P;
+  type Failure<T, K extends keyof T> = T[K] extends {key: 'x'} ? Key<T[K], 'key'> : never;
+}
+function NumericAlternative<Z>() {
+  type Key<O, P extends (Z extends true ? keyof O | number : keyof O)> = P;
+  type Failure<T, K extends keyof T> = T[K] extends {key: 'x'} ? Key<T[K], 'key'> : never;
+}
+const Nested = <Z>() => {
+  {
+    type Key<O, P extends (Z extends true ? keyof O : keyof O)> = P;
+    type Failure<T, K extends keyof T> = T[K] extends {key: 'x'} ? Key<T[K], 'key'> : never;
+  }
+};
+type Constraint<O, Z, Y, P extends (Y extends Z ? (Z extends true ? keyof O : keyof O) : keyof O)> = P;
+type Failure<T, K extends keyof T, Z, Y> = T[K] extends {key: 'x'} ? Constraint<T[K], Z, Y, 'key'> : never;

@@ -427,7 +427,7 @@ function convertReal(typecode: string, value: PyValue): PyValue {
   return typecode === 'f' ? Math.fround(number) : number;
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- One case per integer type code, with CPython's messages.
+// code-gauge-allow functionCognitiveComplexity -- One case per integer type code, with CPython's messages.
 function convertInteger(typecode: string, integer: bigint): bigint {
   const range = INTEGER_RANGES[typecode];
   if (range) {

@@ -1,0 +1,43 @@
+mode 1 flags 0
+string 0
+item 0
+release 0
+advance
+string 1
+item 1
+release 1
+advance
+end of loop
+mode 2 flags 0
+string 0
+item 0
+release 0
+advance
+string 1
+item 1
+release 1
+advance
+end of loop
+mode 3 flags 0
+string 0
+item 0
+end of loop
+release 0
+mode 4 flags 0
+string 0
+item 0
+release 0
+advance
+string 1
+item 1
+release 1
+advance
+end of loop
+mode 1 flags 2
+string 0
+release 0
+advance
+string 1
+release 1
+advance
+end of loop

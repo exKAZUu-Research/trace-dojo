@@ -1,0 +1,3 @@
+[ 'a' ] [ 'b', index: 1, input: 'abc', groups: undefined ] axc 2 abbc
+2 cbcb [ 'a', 'b' ]
+{} []

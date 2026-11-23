@@ -1,0 +1,5 @@
+const PREFIX = "id";
+function make(n: number) { return PREFIX; }
+let s = make(1);
+s = "other";
+console.log(s);

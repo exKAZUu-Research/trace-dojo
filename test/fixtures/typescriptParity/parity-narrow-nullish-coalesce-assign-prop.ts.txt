@@ -1,0 +1,8 @@
+interface C { items?: string[] }
+function add(c: C, s: string) {
+  c.items ??= [];
+  c.items.push(s);
+}
+const c: C = {};
+add(c, "a");
+console.log(c);

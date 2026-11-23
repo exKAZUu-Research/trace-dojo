@@ -1,0 +1,11 @@
+class SharedBase {
+  protected static value = 1;
+  protected static read() { return this.value; }
+}
+class SharedChild extends SharedBase {
+  show(): number { return SharedBase.value + SharedBase.read(); }
+}
+class SharedGrandchild extends SharedChild {
+  show(): number { return SharedBase.value + SharedChild.value + SharedBase.read(); }
+}
+console.log(new SharedChild().show(), new SharedGrandchild().show());

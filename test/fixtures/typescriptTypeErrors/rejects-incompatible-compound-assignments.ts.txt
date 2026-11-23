@@ -1,0 +1,148 @@
+let item: number | string = 1;
+item += 'x';
+item = item + 'x';
+let literal: 1 | 2 = 1;
+literal += 1;
+literal *= 3;
+function narrowed(x: number | string) {
+  if (typeof x === 'number') x += 'x';
+}
+function field(o: {v: number | string}) {
+  if (typeof o.v === 'number') o.v += 'x';
+  if (typeof o['v'] === 'number') o['v'] += 'x';
+}
+function fieldLiteral(o: {v: 1 | 2; w: 1 | 2}) {
+  o.v += 3;
+  o['w'] *= 3;
+}
+class WiderSetter {
+  get value(): number { return 1; }
+  set value(input: number | string) { void input; }
+}
+class NarrowerSetter {
+  get value(): number | string { return 1; }
+  set value(input: number) { void input; }
+}
+let wide = new WiderSetter();
+wide.value += 'x';
+wide['value'] += 'x';
+let narrow = new NarrowerSetter();
+narrow.value += 'x';
+narrow['value'] += 'x';
+let logic: number | string = 0;
+logic ||= 'x';
+let coalesce: number | string | undefined = undefined;
+coalesce ??= 'x';
+let truthy: number | string = 1;
+truthy &&= 'x';
+class Accessor {
+  get value(): number | string { return Math.abs(1); }
+  set value(input: number | string | boolean) { void input; }
+}
+function dot(a: Accessor) {
+  if (typeof a.value === 'number') a.value += 'x';
+}
+function index(a: Accessor) {
+  if (typeof a['value'] === 'number') a['value'] += 'x';
+}
+class NarrowAccessor {
+  get value(): number | string { return Math.abs(1); }
+  set value(input: number) { void input; }
+}
+function narrowDot(a: NarrowAccessor) {
+  if (typeof a.value === 'string') a.value += 'x';
+}
+function narrowIndex(a: NarrowAccessor) {
+  if (typeof a['value'] === 'string') a['value'] += 'x';
+}
+function signed(a: Accessor) {
+  if (typeof a.value === 'number') (a.value) += 'x';
+}
+class Receiver {
+  private stored = 1;
+  get value(): number { return this.stored; }
+  set value(value: number | string) { this.stored = typeof value === 'number' ? value : value.length; }
+  guard() {
+    if (typeof this.value === 'number') this.value += 'x';
+  }
+}
+function guarded(receiver: Receiver) {
+  if (typeof receiver.value === 'number') receiver.value += 'x';
+}
+function assigned(receiver: Receiver) {
+  receiver.value = 2;
+  receiver.value += 'x';
+}
+function guardedIndex(receiver: Receiver) {
+  if (typeof receiver['value'] === 'number') receiver['value'] += 'x';
+}
+function afterUpdate(receiver: Receiver) {
+  receiver.value++;
+  receiver.value += 'x';
+}
+function afterCompound(receiver: Receiver) {
+  receiver.value += 1;
+  receiver.value += 'x';
+}
+function afterGuardedCompound(receiver: Receiver) {
+  if (typeof receiver.value === 'number') {
+    receiver.value += 1;
+    receiver.value += 'x';
+  }
+}
+function afterGuardedUpdate(receiver: Receiver) {
+  if (typeof receiver.value === 'number') {
+    receiver.value++;
+    receiver.value += 'x';
+  }
+}
+function resultType() {
+  let numeric: 1 | 2 = 1;
+  numeric += 9;
+  const impossible: 1 | 2 = numeric;
+  return impossible;
+}
+class Different {
+  get value(): 1 | 2 { return 1; }
+  set value(value: number | string) { void value; }
+}
+function afterSetter(a: Different) {
+  a.value += 1;
+  const tooNarrow: 1 | 2 = a.value;
+  const asNumber: number = a.value;
+  a.value += 'x';
+  return asNumber;
+}
+function guardedAfterSetter(a: Different) {
+  a.value += 1;
+  if (typeof a.value === 'number') a.value += 'x';
+}
+function neutralAfterSetter(a: Different) {
+  a.value += 1;
+  if (a.value !== null) a.value += 'x';
+}
+function afterSetterBranch(a: Different, flag: boolean) {
+  if (flag) a.value += 1;
+  const tooNarrow: 1 | 2 = a.value;
+  a.value += 'x';
+}
+function afterParameterFresh(x: 1 | 2) {
+  x += 1;
+  const tooNarrow: 1 | 2 = x;
+}
+function afterUpdateParameter(x: 1 | 2) {
+  x++;
+  const tooNarrow: 1 | 2 = x;
+}
+function afterUpdateProperty(o: {value: 1 | 2}) {
+  o.value++;
+  const tooNarrow: 1 | 2 = o.value;
+}
+function afterBracket(o: {value: 'a' | 'b'}) {
+  o['value'] += 'c';
+  const tooNarrow: 'a' | 'b' = o['value'];
+}
+function afterBigIntParameter(x: 1n | 2n) {
+  x += 1n;
+  const tooNarrow: 1n | 2n = x;
+}

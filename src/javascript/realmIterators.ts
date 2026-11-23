@@ -3,7 +3,7 @@ import { DONE, type HostIterator, stepHostIterator } from './iteration';
 import type { RealmBuilder } from './realm';
 import { receiverText } from './realmCollections';
 import type { Runtime } from './runtime';
-import { JsArray, JsObject, unboxed, type Value } from './values';
+import { JsArray, type JsFunction, JsObject, unboxed, type Value } from './values';
 
 /** The well-known symbols the interpreter's builtins look up, which the program reads as `Symbol.iterator` and so on. */
 export const WELL_KNOWN_SYMBOLS = {
@@ -14,10 +14,18 @@ export const WELL_KNOWN_SYMBOLS = {
   dispose: Symbol('Symbol.dispose'),
   asyncDispose: Symbol('Symbol.asyncDispose'),
   toPrimitive: Symbol('Symbol.toPrimitive'),
+  species: Symbol('Symbol.species'),
 } as const;
 
+const iteratorClasses = new WeakMap<JsObject, string>();
+const v8IteratorClasses = new Set(['Array Iterator', 'Map Iterator', 'Set Iterator']);
+
+export function iteratorClassOf(iterator: JsObject): string | undefined {
+  return iterator.hostIteratorKind && iteratorClasses.get(iterator.hostIteratorKind);
+}
+
 /** Defines Symbol and the iterators of arrays and strings, which `%IteratorPrototype%` makes iterable themselves. */
-export function defineIteratorBuiltins(builder: RealmBuilder): void {
+export function defineIteratorBuiltins(builder: RealmBuilder): JsFunction {
   defineSymbol(builder);
   const { realm } = builder;
   builder.method(realm.iteratorPrototype, WELL_KNOWN_SYMBOLS.iterator, 0, ({ thisValue }) => thisValue);
@@ -51,6 +59,7 @@ export function defineIteratorBuiltins(builder: RealmBuilder): void {
       next: () => (index < codePoints.length ? codePoints[index++] : DONE),
     });
   });
+  return values;
 }
 
 /**
@@ -59,25 +68,34 @@ export function defineIteratorBuiltins(builder: RealmBuilder): void {
  */
 export function defineHostIteratorPrototype(builder: RealmBuilder, tag: string): JsObject {
   const prototype = new JsObject(builder.realm.iteratorPrototype);
+  if (v8IteratorClasses.has(tag)) iteratorClasses.set(prototype, tag);
   const next = builder.method(prototype, 'next', 0, ({ runtime, thisValue }) => {
-    const iterator = thisValue instanceof JsObject ? thisValue.hostIterator : undefined;
+    // Each kind of iterator steps only its own kind, as V8 checks.
+    const iterator =
+      thisValue instanceof JsObject && thisValue.hostIteratorKind === prototype ? thisValue.hostIterator : undefined;
     if (!iterator) {
       return runtime.throwError(
         'TypeError',
-        `Method ${tag}.prototype.next called on incompatible receiver ${receiverText(runtime, thisValue)}`
+        () => `Method ${tag}.prototype.next called on incompatible receiver ${receiverText(runtime, thisValue)}`
       );
     }
     const value = stepHostIterator(iterator);
     return iteratorResult(runtime, value === DONE ? undefined : value, value === DONE);
   });
   builder.realm.hostIteratorMethods.add(next);
-  builder.constant(prototype, WELL_KNOWN_SYMBOLS.toStringTag, tag);
+  prototype.properties.set(WELL_KNOWN_SYMBOLS.toStringTag, {
+    value: tag,
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  });
   return prototype;
 }
 
 export function newHostIterator(runtime: Runtime, prototype: JsObject, iteration: HostIterator): JsObject {
   const iterator = runtime.newObject(prototype);
   iterator.hostIterator = iteration;
+  iterator.hostIteratorKind = prototype;
   return iterator;
 }
 
@@ -119,7 +137,7 @@ function defineSymbol(builder: RealmBuilder): void {
     false
   );
   for (const [name, symbol] of Object.entries(WELL_KNOWN_SYMBOLS)) builder.constant(symbolConstructor, name, symbol);
-  // A registry of the run's own, which the host's Symbol.for would keep for the life of the server.
+  // A registry of the run's own, which the host's Symbol.for would keep for the life of the host.
   const { symbolRegistry } = builder.realm;
   builder.method(symbolConstructor, 'for', 1, ({ runtime, args }) => {
     const key = runtime.toString(args[0]);
@@ -134,7 +152,7 @@ function defineSymbol(builder: RealmBuilder): void {
   builder.method(symbolConstructor, 'keyFor', 1, ({ runtime, args }) => {
     const [symbol] = args;
     if (typeof symbol !== 'symbol')
-      return runtime.throwError('TypeError', `${runtime.describe(symbol)} is not a symbol`);
+      return runtime.throwError('TypeError', () => `${runtime.describePlain(symbol)} is not a symbol`);
     return registeredKeyOf(runtime, symbol);
   });
   builder.method(symbolPrototype, 'toString', 0, ({ runtime, thisValue }) =>

@@ -1,0 +1,77 @@
+"https:\/\/user:pass@example.com:8080\/path\/to\/page.php?x=1&y=2#frag" => {"scheme":"https","host":"example.com","port":8080,"user":"user","pass":"pass","path":"\/path\/to\/page.php","query":"x=1&y=2","fragment":"frag"}
+"http:\/\/example.com" => {"scheme":"http","host":"example.com"}
+"http:\/\/example.com\/" => {"scheme":"http","host":"example.com","path":"\/"}
+"\/\/example.com\/path" => {"host":"example.com","path":"\/path"}
+"\/path\/only?q" => {"path":"\/path\/only","query":"q"}
+"path?q#" => {"path":"path","query":"q","fragment":""}
+"?q=1" => {"query":"q=1"}
+"#f" => {"fragment":"f"}
+"mailto:a@b.com" => {"scheme":"mailto","path":"a@b.com"}
+"example.com:80" => {"host":"example.com","port":80}
+"example.com:80\/x" => {"host":"example.com","port":80,"path":"\/x"}
+"a.com:65536" => false
+"a.com:123456" => {"scheme":"a.com","path":"123456"}
+"localhost:" => {"scheme":"localhost"}
+":80" => false
+":" => false
+"http:\/\/[::1]:8080\/x" => {"scheme":"http","host":"[::1]","port":8080,"path":"\/x"}
+"http:\/\/[::1]\/" => {"scheme":"http","host":"[::1]","path":"\/"}
+"file:\/\/\/etc\/passwd" => {"scheme":"file","path":"\/etc\/passwd"}
+"file:\/\/\/c:\/dir\/file" => {"scheme":"file","path":"c:\/dir\/file"}
+"file:\/\/host\/x" => {"scheme":"file","host":"host","path":"\/x"}
+"http:\/\/\/x" => false
+"http:\/\/:80" => false
+"http:\/\/a:b@" => false
+"http:\/\/h:\/p" => {"scheme":"http","host":"h","path":"\/p"}
+"http:\/\/h:abc\/p" => false
+"http:\/\/h:-1\/" => false
+"http:\/\/h:+80\/" => {"scheme":"http","host":"h","port":80,"path":"\/"}
+"ht tp:\/\/x" => {"path":"ht tp:\/\/x"}
+"x:y" => {"scheme":"x","path":"y"}
+"a:65535" => {"host":"a","port":65535}
+"123:456" => {"host":"123","port":456}
+"http:\/\/user@host" => {"scheme":"http","host":"host","user":"user"}
+"http:\/\/u:p:q@h@i\/x" => {"scheme":"http","host":"i","user":"u","pass":"p:q@h","path":"\/x"}
+"https:\/\/example.com?query" => {"scheme":"https","host":"example.com","query":"query"}
+"https:\/\/example.com#frag?no" => {"scheme":"https","host":"example.com","fragment":"frag?no"}
+"javascript:alert(1)" => {"scheme":"javascript","path":"alert(1)"}
+"news:comp.lang" => {"scheme":"news","path":"comp.lang"}
+"urn:isbn:123" => {"scheme":"urn","path":"isbn:123"}
+"http:\/\/example.com:80:90\/" => {"scheme":"http","host":"example.com:80","port":90,"path":"\/"}
+"http:\/\/ex\u0001ample.com\/pa" => {"scheme":"http","host":"ex_ample.com","path":"\/p_a"}
+"" => {"path":""}
+" " => {"path":" "}
+"http:\/\/h\/p?a#b#c" => {"scheme":"http","host":"h","path":"\/p","query":"a","fragment":"b#c"}
+"\/\/h:99" => {"host":"h","port":99}
+"\/\/:99" => false
+"scheme:\/\/" => false
+"http:" => {"scheme":"http"}
+"1http:\/\/x" => {"scheme":"1http","host":"x"}
+"http:\/\/h?x" => {"scheme":"http","host":"h","query":"x"}
+"x:\/\/h:0\/" => {"scheme":"x","host":"h","port":0,"path":"\/"}
+"a@b:c\/d" => {"path":"a@b:c\/d"}
+"http:\/\/h:099\/" => {"scheme":"http","host":"h","port":99,"path":"\/"}
+"c:\/x" => {"scheme":"c","path":"\/x"}
+"c:\\x" => {"scheme":"c","path":"\\x"}
+"foo:\/bar" => {"scheme":"foo","path":"\/bar"}
+"https:\/\/\u4f8b\u3048.jp\/\u30d1\u30b9" => 
+string(5) "https"
+int(1)
+NULL
+NULL
+string(1) "f"
+array(1) {
+  ["host"]=>
+  string(1) "x"
+}
+bool(false)
+parse_url(): Argument #2 ($component) must be a valid URL component identifier, 8 given
+array(1) {
+  ["path"]=>
+  string(1) "x"
+}
+7b22736368656d65223a225c756666666478222c22686f7374223a2268222c2270617468223a225c2f70227d
+7b22736368656d65223a22785c7566666664222c22686f7374223a2268227d
+7b22736368656d65223a2268747470222c22686f7374223a22685f78222c2270617468223a225c2f5f70222c227175657279223a225f71222c22667261676d656e74223a225f227d
+7b2270617468223a225c7566666664783a5c2f5c2f685c2f70227d
+7b22736368656d65223a2268747470222c22686f7374223a22685c756666666478222c2270617468223a225c2f5c756666666470222c227175657279223a225c756666666471222c22667261676d656e74223a225c7566666664227d

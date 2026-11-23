@@ -1,0 +1,23 @@
+class ValidThisPlacement {
+  value=1;
+  same?:this;
+  values?:this[];
+  pair?:[this];
+  callback?:()=>this;
+  mapped?:{[K in 'x']:this};
+  method():this{return this;}
+  static inner(){return new class Inner {value=2; method():this{return this;}};}
+}
+interface InterfaceThisPlacement {value:number; method():this;}
+const validThis=new ValidThisPlacement();
+validThis.same=validThis;
+validThis.values=[validThis];
+validThis.pair=[validThis];
+validThis.callback=()=>validThis;
+validThis.mapped={x:validThis};
+const interfaceThis:InterfaceThisPlacement=validThis;
+console.log(validThis.same.value, validThis.values[0].value, validThis.pair[0].value, validThis.callback().value, validThis.mapped.x.value, interfaceThis.method().value, ValidThisPlacement.inner().method().value);
+class InstanceThisIndex { [key:string]:this; }
+const instanceThisIndex=new InstanceThisIndex();
+instanceThisIndex.self=instanceThisIndex;
+console.log(instanceThisIndex.self===instanceThisIndex);

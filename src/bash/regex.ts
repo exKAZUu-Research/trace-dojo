@@ -108,7 +108,7 @@ class RegexParser {
     return { min, max };
   }
 
-  // code-gauge-allow functionNcss 31 -- One case per atom of a POSIX extended regular expression.
+  // code-gauge-allow functionNcss -- One case per atom of a POSIX extended regular expression.
   private parseAtom(): RegexNode {
     const c = this.chars[this.position++];
     switch (c) {
@@ -148,8 +148,8 @@ class RegexParser {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 29 -- POSIX bracket expressions with classes, equivalence classes, collating symbols, and ranges.
-  // code-gauge-allow functionNcss 45 -- POSIX bracket expressions with classes, equivalence classes, collating symbols, and ranges.
+  // code-gauge-allow functionCognitiveComplexity -- POSIX bracket expressions with classes, equivalence classes, collating symbols, and ranges.
+  // code-gauge-allow functionNcss -- POSIX bracket expressions with classes, equivalence classes, collating symbols, and ranges.
   private parseSet(): RegexNode {
     const tests: ((c: string) => boolean)[] = [];
     let negated = false;
@@ -243,8 +243,8 @@ function isBetter(candidate: RegexMatch, best: RegexMatch): boolean {
 }
 
 /** Tries every way `node` matches at `position`, calling `next` with the position after each. */
-// code-gauge-allow functionCognitiveComplexity 28 -- One case per regex node kind, each enumerating its matches for the leftmost-longest search.
-// code-gauge-allow functionNcss 55 -- One case per regex node kind, each enumerating its matches for the leftmost-longest search.
+// code-gauge-allow functionCognitiveComplexity -- One case per regex node kind, each enumerating its matches for the leftmost-longest search.
+// code-gauge-allow functionNcss -- One case per regex node kind, each enumerating its matches for the leftmost-longest search.
 function matchNode(
   node: RegexNode,
   chars: string[],

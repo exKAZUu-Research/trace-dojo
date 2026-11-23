@@ -1,0 +1,33 @@
+function localArrays() {
+  interface Array<T> { consume: (value: T) => void; }
+  interface ReadonlyArray<T> { consume: (value: T) => void; }
+  const narrow: Array<string> = {consume: value => console.log(value.toUpperCase())};
+  const wide: Array<string | number> = narrow;
+  const narrowReadonly: ReadonlyArray<string> = {consume: value => console.log(value.toUpperCase())};
+  const wideReadonly: ReadonlyArray<string | number> = narrowReadonly;
+  wide.consume(1);
+  wideReadonly.consume(2);
+}
+function localContainers() {
+  interface ReadonlyMap<K, V> { consume: (key: K, value: V) => void; }
+  interface ReadonlySet<T> { consume: (value: T) => void; }
+  interface ArrayIterator<T> { consume: (value: T) => void; }
+  const map: ReadonlyMap<string, number> = {consume: (key, value) => console.log(key.toUpperCase(), value)};
+  const wideMap: ReadonlyMap<string | number, string | number> = map;
+  const set: ReadonlySet<string> = {consume: value => console.log(value.toUpperCase())};
+  const wideSet: ReadonlySet<string | number> = set;
+  const iterator: ArrayIterator<string> = {consume: value => console.log(value.toUpperCase())};
+  const wideIterator: ArrayIterator<string | number> = iterator;
+}
+function noArrayShortcut() {
+  interface ArrayLike<T> { value: T; }
+  const local: ArrayLike<number> = [1, 2];
+}
+class Numbers extends Array<number> {}
+const numbers: Array<number> = [1, 2];
+const strings: Array<string> = numbers;
+const mutable: Array<number> = [1, 2] as ReadonlyArray<number>;
+const wrongSubclass: Numbers = ['wrong'];
+const map: ReadonlyMap<string, number> = new Map<number, string>([[1, 'wrong']]);
+const set: ReadonlySet<number> = new Set<string>(['wrong']);
+const iterator: ArrayIterator<number> = ['wrong'].values();

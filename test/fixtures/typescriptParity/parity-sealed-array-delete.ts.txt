@@ -1,0 +1,4 @@
+const a: any = Object.seal([1, 2]);
+console.log(delete a[0], a);
+a.length = 0;
+console.log(a);

@@ -1,0 +1,13 @@
+true true false false
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+true true false false
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+true true false false
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+true true false false
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+Cannot assign to read only property 'callee' of object '#<Object>'
+Cannot assign to read only property 'callee' of object '#<Object>'
+true
+true
+true 9 true true

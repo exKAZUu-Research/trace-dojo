@@ -1,0 +1,4 @@
+interface I<const T> {value:T}
+type Alias<const T> = {value:T};
+const object: I<number> = {value:3};
+console.log(object.value);

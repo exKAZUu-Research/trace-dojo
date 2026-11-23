@@ -22,7 +22,7 @@ export function functionalMethodOf(cls: ClassInfo, objectClass: ClassInfo): Meth
  * lambda implements them all by; or `undefined` when `cls` is not one. Methods that redeclare a public method of
  * `Object` and those a default method of a more specific interface implements do not count (JLS 9.8).
  */
-// code-gauge-allow functionCognitiveComplexity 21 -- One pass applying JLS 9.8's three exclusions to each inherited method.
+// code-gauge-allow functionCognitiveComplexity -- One pass applying JLS 9.8's three exclusions to each inherited method.
 export function functionalMethodsOf(cls: ClassInfo, objectClass: ClassInfo): MethodInfo[] | undefined {
   if (cls.kind !== 'interface') return;
   const owners = [cls, ...superinterfacesOf(cls)];

@@ -1,0 +1,22 @@
+interface Labeled<T extends { value: number }> extends T {
+  label: string;
+}
+interface FromObject<T extends object> extends T {}
+interface FromEmpty<T extends {}> extends T {}
+interface FromOther<T extends { a: number }, U extends T> extends U {}
+interface WithObject<T extends { a: number }> extends T, Object {}
+interface Redeclared<T extends { value: number }> extends T {
+  value: number;
+}
+interface SelfConstrained<T extends { a: T }> extends T {}
+interface Box {
+  v: number;
+}
+interface Holder<T extends Box> {
+  t: T;
+}
+interface Extended<T extends Box> extends Holder<T> {
+  extra: string;
+}
+const extended: Extended<Box> = { t: { v: 1 }, extra: 'x' };
+console.log(extended.t.v, extended.extra);

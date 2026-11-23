@@ -1,0 +1,28 @@
+class Shop {
+  static items = ["apple", "pear"];
+  static total = Shop.items.length;
+  static label = `${this.total} items`;
+  static later = () => Shop.discount;
+  static describe = function () {
+    return `${Shop.label} at ${Shop.discount}% off`;
+  };
+  static discount = 10;
+  static first = Shop.pick(0);
+  static pick(index: number): string {
+    return Shop.items[index];
+  }
+  static {
+    console.log("static block sees", Shop.total, this.discount);
+  }
+  count = Shop.total;
+  price = this.base * 2;
+  get base(): number {
+    return 3;
+  }
+  doubled = (): number => this.tax * 2;
+  tax = 5;
+}
+
+console.log(Shop.label, Shop.later(), Shop.describe(), Shop.first);
+const shop = new Shop();
+console.log(shop.count, shop.price, shop.doubled());

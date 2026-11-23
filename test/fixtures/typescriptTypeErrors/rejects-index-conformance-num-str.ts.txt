@@ -1,0 +1,3 @@
+interface Mixed { [key: string]: string; [index: number]: number; }
+const m: Mixed = {};
+console.log(m);

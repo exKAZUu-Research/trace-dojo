@@ -1,0 +1,101 @@
+43 68 77 15 27 
+1674373667 1786570144164720316 520353657934
+float(0.09997492054384072)
+float(0.4582776746351188)
+float(2.5362177568348017)
+float(-18.321801689757606)
+973e44b582 9506450534fd700e01034cf857e9d4b8
+dfcfffeafd 193043149304
+Array
+(
+    [0] => 4
+    [1] => 5
+    [2] => 3
+    [3] => 2
+    [4] => 1
+)
+or ldlHleWo
+Array
+(
+    [0] => c
+    [1] => d
+)
+Array
+(
+    [0] => 0
+    [1] => 1
+    [2] => 2
+    [3] => 4
+)
+Array
+(
+    [0] => 2
+)
+2f6b0731 d3e2667f
+5 6 1 1 6 
+771c6967f8b5b6a5 3942500336998746198
+85a6b3a1d9008e68
+33ab451afc58b814
+1 5 6 2 3 
+3852790131a50dc5
+03f0933ea44a48f5
+d2af598bafd094df
+9d8a258f258f258f 0.74223536402028
+3,9,10,8,5,7,2,4,6,1
+2.0939994805758 -6.204059815444E+298
+Random\Randomizer::getInt(): Argument #2 ($max) must be greater than or equal to argument #1 ($min)
+Random\Randomizer::getFloat(): Argument #2 ($max) must be greater than argument #1 ($min)
+Random\Randomizer::getFloat(): Argument #1 ($min) must be finite
+Random\Randomizer::getBytes(): Argument #1 ($length) must be greater than 0
+Random\Randomizer::getBytesFromString(): Argument #1 ($string) must not be empty
+Random\Randomizer::getBytesFromString(): Argument #2 ($length) must be greater than 0
+Random\Randomizer::pickArrayKeys(): Argument #1 ($array) must not be empty
+Random\Randomizer::pickArrayKeys(): Argument #2 ($num) must be between 1 and the number of elements in argument #1 ($array)
+Random\Engine\Mt19937::__construct(): Argument #2 ($mode) must be either MT_RAND_MT19937 or MT_RAND_PHP
+Random\Engine\PcgOneseq128XslRr64::__construct(): Argument #1 ($seed) must be a 16 byte (128 bit) string
+Random\Engine\Xoshiro256StarStar::__construct(): Argument #1 ($seed) must be a 32 byte (256 bit) string
+Random\Engine\PcgOneseq128XslRr64::jump(): Argument #1 ($advance) must be greater than or equal to 0
+
+Deprecated: Constant MT_RAND_PHP is deprecated since 8.3, as it uses a biased non-standard variant of Mt19937 in /main.php on line 49
+
+Deprecated: The MT_RAND_PHP variant of Mt19937 is deprecated in /main.php on line 49
+93 77 1674862860
+bool(true)
+string(21) "Random\Engine\Mt19937"
+bool(true)
+564 0 08090a 5
+Random\BrokenRandomEngineError: A random engine must return a non-empty string
+Array
+(
+    [Random\RandomError] => Random\RandomError
+    [Error] => Error
+)
+Array
+(
+    [Exception] => Exception
+)
+Array
+(
+    [Random\Engine] => Random\Engine
+)
+Array
+(
+    [Random\CryptoSafeEngine] => Random\CryptoSafeEngine
+    [Random\Engine] => Random\Engine
+)
+Array
+(
+    [0] => __construct
+    [1] => nextInt
+    [2] => nextFloat
+    [3] => getFloat
+    [4] => getInt
+    [5] => getBytes
+    [6] => getBytesFromString
+    [7] => shuffleArray
+    [8] => shuffleBytes
+    [9] => pickArrayKeys
+    [10] => __serialize
+    [11] => __unserialize
+)
+fe68da1e43238eca fe68da1e43238eca

@@ -1,0 +1,153 @@
+/(?>a+)ab/ "aab" => [0,[]]
+/a++b/ "aaab" => [1,[["aaab",0]]]
+/a++a/ "aaa" => [0,[]]
+/(a|ab)++c/ "abc" => [0,[]]
+/(?>(a)|b)c/ "abac" => [1,[["ac",2],["a",2]]]
+/a*+b/ "aab" => [1,[["aab",0]]]
+/a?+a/ "a" => [0,[]]
+/a{1,3}+a/ "aaaa" => [1,[["aaaa",0]]]
+/(\w)++\1/ "aab" => [0,[]]
+/(x)(?>y(z))\2/ "xyzz" => [1,[["xyzz",0],["x",0],["z",2]]]
+/a(?i)b|c/ "C" => [1,[["C",0]]]
+/(a(?i)b|c)/ "xAC" => [1,[["C",2],["C",2]]]
+/(?i:a)b/ "AB" => [0,[]]
+/(?i:a)b/ "Ab" => [1,[["Ab",0]]]
+/a(?x) b # c
+c/ "abc" => [1,[["abc",0]]]
+/(?U)a+/ "aaa" => [1,[["a",0]]]
+/(?s).(?-s)./ "\n\n" => [0,[]]
+/(?m)^b/ "a\nb" => [1,[["b",2]]]
+/(?i-s:a.)b/ "A\nb" => [0,[]]
+/(?^i)a/ "A" => [1,[["A",0]]]
+/(?n)(a)(?<x>b)/ "ab" => [1,{"0":["ab",0],"x":["b",1],"1":["b",1]}]
+/(?-i)a/i "A" => [0,[]]
+/(?i)(?-i)a/ "A" => [0,[]]
+/(?:a(?i))b/ "aB" => [0,[]]
+/[[:upper:]]/iu "\u00e9" => [0,[]]
+/[[:upper:]]/i "a" => [1,[["a",0]]]
+/[[:upper:]]/iu "a" => [0,[]]
+/[^[:upper:]]/iu "A" => [0,[]]
+/[[:^upper:]]/iu "a" => [1,[["a",0]]]
+/[[:lower:]x]/iu "X" => [1,[["X",0]]]
+/(?i)[[:upper:]]/u "a" => [0,[]]
+/\p{Lu}/iu "a" => [1,[["a",0]]]
+/(a)?\1b/ "b" => [0,[]]
+/(a|)\1/ "" => [1,[["",0],["",0]]]
+/(a)?\1b/ "xb" => [0,[]]
+/(a)?x\1/ "x" => [0,[]]
+/(?<n>a)?b\k<n>/ "b" => [0,[]]
+/\1(a)/ "aa" => [0,[]]
+/(a\1)/ "aa" => [0,[]]
+/(?:(a)|b)\1/ "bb" => [0,[]]
+/a\Kb/ "ab" => [1,[["b",1]]]
+/(a\K|b)c/ "acbc" => [1,[["c",1],["a",0]]]
+/\Ga/ "aab" => [1,[["a",0]]]
+/a++?/ "a" => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 4 in /main.php on line 19
+[false,[["a",0]]]
+/a+?+/ "a" => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 4 in /main.php on line 19
+[false,[["a",0]]]
+/(?z)a/ "a" => 
+Warning: preg_match(): Compilation failed: unrecognized character after (? or (?- at offset 3 in /main.php on line 19
+[false,[["a",0]]]
+/(?i/ "a" => 
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 3 in /main.php on line 19
+[false,[["a",0]]]
+/(?=a\K)/ "a" => 
+Warning: preg_match(): Compilation failed: \K is not allowed in lookarounds (but see PCRE2_EXTRA_ALLOW_LOOKAROUND_BSK) at offset 7 in /main.php on line 19
+[false,[["a",0]]]
+/(?-)a/ "a" => [1,[["a",0]]]
+/(?^-i)a/ "a" => 
+Warning: preg_match(): Compilation failed: invalid hyphen in option setting at offset 4 in /main.php on line 19
+[false,[["a",0]]]
+/(?--i)a/ "a" => 
+Warning: preg_match(): Compilation failed: invalid hyphen in option setting at offset 4 in /main.php on line 19
+[false,[["a",0]]]
+/(?ii)a/ "a" => [1,[["a",0]]]
+/(?i)+a/ "a" => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 5 in /main.php on line 19
+[false,[["a",0]]]
+/(?>a)+b/ "aab" => [1,[["aab",0]]]
+/a{2,}+/ "aaa" => [1,[["aaa",0]]]
+/(?J)a/ "a" => [1,[["a",0]]]
+/(?i:a/ "a" => 
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 5 in /main.php on line 19
+[false,[["a",0]]]
+/(?<=a\K)b/ "ab" => 
+Warning: preg_match(): Compilation failed: \K is not allowed in lookarounds (but see PCRE2_EXTRA_ALLOW_LOOKAROUND_BSK) at offset 9 in /main.php on line 19
+[false,[["a",0]]]
+/(?x-x)a b/ "a b" => [1,[["a b",0]]]
+/a(?i)+/ "a" => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 6 in /main.php on line 19
+[false,[["a b",0]]]
+/\G+a/ "a" => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 3 in /main.php on line 19
+[false,[["a b",0]]]
+/a\K+/ "a" => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 4 in /main.php on line 19
+[false,[["a b",0]]]
+string(6) "aXaXaX"
+string(5) "XXb a"
+int(2)
+array(1) {
+  [0]=>
+  array(2) {
+    [0]=>
+    string(1) "a"
+    [1]=>
+    string(1) "a"
+  }
+}
+array(5) {
+  [0]=>
+  string(0) ""
+  [1]=>
+  string(1) "a"
+  [2]=>
+  string(0) ""
+  [3]=>
+  string(1) "b"
+  [4]=>
+  string(0) ""
+}
+array(5) {
+  [0]=>
+  string(0) ""
+  [1]=>
+  string(0) ""
+  [2]=>
+  string(0) ""
+  [3]=>
+  string(1) "b"
+  [4]=>
+  string(0) ""
+}
+string(5) "---b-"
+int(5)
+array(1) {
+  [0]=>
+  array(5) {
+    [0]=>
+    string(0) ""
+    [1]=>
+    string(1) "a"
+    [2]=>
+    string(0) ""
+    [3]=>
+    string(1) "a"
+    [4]=>
+    string(0) ""
+  }
+}
+array(4) {
+  [0]=>
+  string(0) ""
+  [1]=>
+  string(1) "a"
+  [2]=>
+  string(2) "é"
+  [3]=>
+  string(0) ""
+}
+string(10) "[][a][][a]"

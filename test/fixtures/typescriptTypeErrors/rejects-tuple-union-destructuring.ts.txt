@@ -1,0 +1,52 @@
+type Pair = ['text', string] | ['count', number];
+function make(): Pair { return ['text', 'a']; }
+function p1([kind, value]: Pair) {
+  if (kind === 'text') value.toUpperCase();
+  else value.toFixed();
+}
+function p2(...[kind, value]: Pair) {
+  switch (kind) {
+    case 'text': return value.toUpperCase();
+    case 'count': return value.toFixed();
+  }
+}
+function p3() {
+  let [kind, value] = make();
+  if (kind === 'text') value.toUpperCase();
+}
+function p4([kind, value]: Pair) {
+  kind = 'count';
+  if (kind === 'text') value.toUpperCase();
+}
+function p5() {
+  const [kind, value = 1] = make();
+  if (kind === 'text') value.toUpperCase();
+}
+function p6() {
+  const [, value, kind] = [1, 'a', 'b'] as [number, string, 'b'] | [number, number, 'c'];
+  if (kind === 'b') value.toUpperCase();
+}
+function p7() {
+  const [kind, value] = make();
+  if (typeof value === 'string') kind.length;
+  if (typeof value === 'string') { const k: 'text' = kind; }
+}
+function p8() {
+  const [kind, ...rest] = make();
+  if (kind === 'text') rest[0].toUpperCase();
+}
+function p10() {
+  const [kind, value] = make();
+  if (value === 'x') { const k: 'text' = kind; }
+}
+function pickAgain(flag: boolean): [1, 'a'] | [2, 'b', true] {
+  return flag ? [1, 'a'] : [2, 'b', true];
+}
+const [p, q, r] = pickAgain(false);
+const r1: true = r;
+const [a, b, c, d] = pickAgain(false);
+function pickAgain2(flag: boolean): [1] | [2] {
+  return flag ? [1] : [2];
+}
+const [e, f] = pickAgain2(true);
+console.log(p, q, r, r1, a, b, c, d, e, f);

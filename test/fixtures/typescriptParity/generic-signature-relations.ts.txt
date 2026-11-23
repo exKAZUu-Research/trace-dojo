@@ -1,0 +1,15 @@
+function forward<A extends unknown[]>(args: A): [...A] { return args; }
+function readonlyForward<A extends readonly unknown[]>(args: A): readonly [...A] { return args; }
+function relatedForward<A extends unknown[], B extends A>(args: B): [...A] { return args; }
+function fromExpansion<A extends unknown[] & { tag: string }>(args: [...A]): A { return args; }
+function invoke<A extends unknown[], R>(fn: (...args: A) => R, ...args: A): R { return fn.apply(undefined, args); }
+function empty<T>(): T[] { return []; }
+function maybe<T>(): T | undefined { return undefined; }
+const create: () => string[] = empty;
+const fromUnion: () => string | undefined = maybe;
+const expression: () => number[] = <T>(): T[] => [];
+function acceptsCallback(make: () => boolean[]): boolean[] { return make(); }
+function paired<T, U>(x: T): [T, U[]] { return [x, []]; }
+const both: (x: number) => [number, string[]] = paired;
+console.log(forward([1,'x']), readonlyForward([1,2] as const), relatedForward([3, 4]), invoke((x: number) => x + 1, 1));
+console.log(create(), fromUnion(), expression(), acceptsCallback(empty), both(5));

@@ -1,0 +1,33 @@
+class Point {
+  x;
+  constructor(input: {x: number}) {
+    ({x: this.x} = input);
+  }
+}
+new Point({x: 1}).x = 'wrong';
+class Optional {
+  value;
+  constructor(input: {value: number}, flag: boolean) {
+    if (flag) ({value: this.value} = input);
+  }
+}
+const required: number = new Optional({value: 1}, false).value;
+class Nested {
+  value;
+  tail;
+  rest;
+  constructor(input: {nested: {value?: number}; extra: string}, values: [number, ...string[]]) {
+    ({nested: {value: this.value = 9}, ...this.rest} = input);
+    [, ...this.tail] = values;
+  }
+}
+const nested = new Nested({nested: {}, extra: 'kept'}, [1, 'a']);
+nested.value = 'wrong';
+nested.tail = [true];
+nested.rest = {extra: 1};
+class Definite {
+  value: number;
+  constructor(input: {value: number}, flag: boolean) {
+    if (flag) ({value: this.value} = input);
+  }
+}

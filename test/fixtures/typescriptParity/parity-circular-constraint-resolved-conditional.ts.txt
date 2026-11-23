@@ -1,0 +1,28 @@
+type TrueFirst<T> = true extends false ? T : string;
+type FalseFirst<T> = false extends false ? string : T;
+type Pick2<X, T> = X extends false ? T : string;
+type Tupled<X, T> = [X] extends [false] ? T : string;
+type Inferred<X, T> = X extends [infer H] ? T : string;
+function trueFirst<T extends TrueFirst<T>>(value: T): T {
+  return value;
+}
+function falseFirst<T extends FalseFirst<T>>(value: T): T {
+  return value;
+}
+function picked<T extends Pick2<true, T>>(value: T): T {
+  return value;
+}
+function never<T extends Pick2<never, T>>(value: T): T {
+  return value;
+}
+function tupled<T extends Tupled<boolean, T>>(value: T): T {
+  return value;
+}
+function inferred<T extends Inferred<1, T>>(value: T): T {
+  return value;
+}
+function inline<T extends (true extends false ? T : string)>(value: T): T {
+  return value;
+}
+console.log(trueFirst('a'), falseFirst('b'), picked('c'), tupled('d'), inferred('e'), inline('f'));
+console.log(typeof never);

@@ -1,0 +1,13 @@
+class A {
+  static constructor() {}
+}
+class B {
+  static "constructor"() {}
+}
+class C {
+  x: number;
+  ["constructor"](x: number) {
+    this.x = x;
+  }
+}
+console.log(new A(), new B(), new C());

@@ -1,0 +1,48 @@
+
+Deprecated: Case statements followed by a semicolon (;) are deprecated, use a colon (:) instead in /main.php on line 23
+
+Deprecated: Case statements followed by a semicolon (;) are deprecated, use a colon (:) instead in /main.php on line 23
+App\Util\helper in App\Util 1.0 App\Util\Tool::name|App\Util\Tool 3 1.0
+31 5 15 15 1000000 0.5 1000 10.5 9223372036854775807
+25!
+5 -6 275 -4 4611686018427387904
+set
+bool(false)
+bool(true)
+bool(true)
+int(-1)
+60
+fallback
+caught without var
+Array
+(
+    [0] => 1
+    [1] => 20
+)
+two
+bool(false)
+Using $this when not in object context
+strictAdd(): Argument #1 ($a) must be of type int, string given, called in /main.php on line 27
+float(5)
+integerstring
+never returns
+AB
+nullobj
+Sq=9
+152
+Cannot modify readonly property Point::$x
+25 T=25
+too cold
+Property Temp::$label is read-only
+10
+Cannot modify private(set) property Acct::$balance from global scope
+25617
+Cannot access protected constant Consts::C
+Hello World
+1 magic q
+-9223372036854775808 -9223372036854775808
+3
+ab
+val: 1 1
+done
+bye

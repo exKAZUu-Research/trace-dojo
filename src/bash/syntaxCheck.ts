@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 506 -- One port of Bash's grammar, whose rules call each other as its yacc rules do.
+// code-gauge-allow-file fileNcss -- One port of Bash's grammar, whose rules call each other as its yacc rules do.
 /**
  * Bash's syntax errors, found by a port of the grammar of `parse.y` over a port of how its lexer reads words, so that
  * a program fails where Bash's does, with Bash's message and line. The tree-sitter grammar builds the statements, but
@@ -147,7 +147,7 @@ class CommandLexer {
     return line;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- A port of Bash's read_token_word: process substitutions, compound assignments, joined lines, and quotes.
+  // code-gauge-allow functionCognitiveComplexity -- A port of Bash's read_token_word: process substitutions, compound assignments, joined lines, and quotes.
   private word(assignmentAllowed: boolean): Token {
     const { source } = this.text;
     const start = this.index;
@@ -352,7 +352,7 @@ class CommandParser {
   }
 
   /** A command Bash's grammar names `shell_command`, which a function's body must be. */
-  // code-gauge-allow functionNcss 32 -- One case per compound command of Bash's grammar.
+  // code-gauge-allow functionNcss -- One case per compound command of Bash's grammar.
   private shellCommand(): void {
     if (this.isOperator(this.peek(), '((') && this.arithmeticCommand()) return;
     const current = this.peek();
@@ -595,7 +595,7 @@ class CommandParser {
   }
 
   /** Words, assignments, and redirections, or a function definition `name() body`. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Bash's simple command: redirections, assignments, its name, and a function definition.
+  // code-gauge-allow functionCognitiveComplexity -- Bash's simple command: redirections, assignments, its name, and a function definition.
   private simpleCommand(): void {
     let name: string | undefined;
     for (let count = 0; ; count++) {

@@ -1,0 +1,11 @@
+(2,16): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+(3,17): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+(4,19): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+(5,24): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+(6,29): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+(7,18): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+(8,22): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+(9,30): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+(10,24): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+(12,47): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+(13,38): error TS2526: A 'this' type is available only in a non-static member of a class or interface.

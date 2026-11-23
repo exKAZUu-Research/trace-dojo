@@ -1,0 +1,40 @@
+function defaults(value = 1) { return arguments; }
+function destructured({ value }: { value: number }) { return arguments; }
+function rest(...values: number[]) { return arguments; }
+function strict(value: number) { 'use strict'; return arguments; }
+function mapped(value: number) {
+  const descriptor = Object.getOwnPropertyDescriptor(arguments, 'callee');
+  arguments[0] = 9;
+  console.log(arguments.callee === mapped, value, descriptor?.writable, descriptor?.configurable);
+}
+const args = [defaults(), destructured({ value: 1 }), rest(1), strict(1)];
+const get = Object.getOwnPropertyDescriptor(args[0], 'callee')?.get;
+for (const object of args) {
+  const descriptor = Object.getOwnPropertyDescriptor(object, 'callee');
+  console.log(descriptor?.get === get, descriptor?.set === get, descriptor?.enumerable, descriptor?.configurable);
+  try {
+    console.log(typeof object.callee);
+  } catch (error) {
+    console.log((error as Error).message);
+  }
+}
+args[0].callee = mapped;
+function assignStrictly(object: IArguments) {
+  'use strict';
+  try {
+    object.callee = mapped;
+  } catch (error) {
+    console.log((error as Error).message);
+  }
+}
+assignStrictly(args[0]);
+const copy = Object.getOwnPropertyDescriptor(args[0], 'callee');
+Object.defineProperty(args[0], 'callee', copy!);
+assignStrictly(args[0]);
+try {
+  copy?.set?.call(args[0], mapped);
+} catch (error) {
+  console.log(error instanceof TypeError);
+}
+console.log(Object.isFrozen(get));
+mapped(1);

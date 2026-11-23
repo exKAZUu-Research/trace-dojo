@@ -1,0 +1,50 @@
+function stringOnly() {
+  let x: string | number = 'hi';
+  try { x = 'bye'; throw 0; } catch { console.log(x.toUpperCase()); }
+}
+function unchanged() {
+  let x: string | number = 'hi';
+  try { throw 0; } catch { console.log(x.toUpperCase()); }
+}
+function nestedHandled() {
+  let x: string | number = 'hi';
+  try { try { x = 1; throw 0; } catch { x = 'ok'; } } catch { x.toUpperCase(); }
+  console.log(x);
+}
+function nestedFinalized() {
+  let x: string | number = 'hi';
+  try { try { x = 1; throw 0; } finally { x = 'ok'; } } catch { console.log(x.toUpperCase()); }
+}
+function nestedCatchThrows() {
+  let x: string | number = 'hi';
+  try { try { x = 1; throw 0; } catch { throw 0; } } catch { console.log(typeof x); x.toUpperCase(); }
+}
+function declarationsAreDeferred() {
+  let x: string | number = 'hi';
+  try { const callback = () => { x = 1; }; function withDefault(value = (x = 2)) { return value; } throw 0; }
+  catch { console.log(x.toUpperCase()); }
+}
+function inlineCompletion() {
+  let x: string | number = 'hi';
+  try { (() => { x = 1; x = 'bye'; })(); } finally { console.log(x.toUpperCase()); }
+}
+function stringPatterns() {
+  let x: string | number = 'hi';
+  try { ({value: x = 'default'} = {} as {value?: string}); throw 0; }
+  catch { console.log(x.toUpperCase()); }
+}
+stringOnly();
+unchanged();
+nestedHandled();
+nestedFinalized();
+declarationsAreDeferred();
+inlineCompletion();
+stringPatterns();
+function inlineCatch() {
+  let x: string | number = 'hi';
+  try { (() => { x = 1; })(); throw 0; } catch { x.toUpperCase(); }
+}
+function finallyThrows() {
+  let x: string | number = 'hi';
+  try { try { x = 1; throw 0; } finally { throw 0; } } catch { x.toUpperCase(); }
+}

@@ -1,0 +1,18 @@
+(2,16): error TS1005: ')' expected.
+(2,19): error TS1005: ';' expected.
+(3,18): error TS1005: ')' expected.
+(3,21): error TS1005: ';' expected.
+(4,20): error TS1005: ',' expected.
+(5,15): error TS1005: ')' expected.
+(5,22): error TS1005: ';' expected.
+(6,4): error TS1005: ';' expected.
+(7,10): error TS1005: ';' expected.
+(8,8): error TS1005: ';' expected.
+(9,4): error TS1005: ';' expected.
+(10,5): error TS1005: ';' expected.
+(11,8): error TS1005: ';' expected.
+(12,7): error TS1005: ';' expected.
+(13,7): error TS1005: ';' expected.
+(14,16): error TS1005: ';' expected.
+(15,8): error TS1005: ';' expected.
+(18,3): error TS1128: Declaration or statement expected.

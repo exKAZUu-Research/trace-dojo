@@ -1,0 +1,5 @@
+(1,38): error TS2304: Cannot find name 'U'.
+(2,43): error TS2304: Cannot find name 'U'.
+(3,55): error TS2304: Cannot find name 'U'.
+(4,75): error TS2304: Cannot find name 'U'.
+(5,46): error TS2304: Cannot find name 'U'.

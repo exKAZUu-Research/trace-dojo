@@ -1,0 +1,15 @@
+class Source {
+  protected value = 2;
+}
+class Derived extends Source {
+  read(other: Source) {
+    const { value } = other;
+    const { value: renamed } = other;
+    const { inner: { value: nested } } = { inner: other };
+    const key = "value";
+    const { [key]: computed } = other;
+    let assigned = 0;
+    ({ value: assigned } = other);
+    return value + renamed + nested + computed + assigned;
+  }
+}

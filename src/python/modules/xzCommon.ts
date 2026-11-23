@@ -163,7 +163,7 @@ export class VliState {
 }
 
 /** `lzma_vli_decode`; `single` is the mode without a `vli_pos`. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
 export function vliDecode(state: VliState, single: boolean, input: Uint8Array, inPos: Pos, inSize: number): number {
   if (single) {
     state.pos = 0;

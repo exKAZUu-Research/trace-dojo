@@ -1,0 +1,26 @@
+(2,16): error TS2339: Property '0' does not exist on type 'Mixed'.
+(3,16): error TS2339: Property '1' does not exist on type 'Mixed'.
+(5,13): error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type 'Mixed'.
+  Property '0' does not exist on type 'Mixed'.
+(6,13): error TS7053: Element implicitly has an 'any' type because expression of type '"1"' can't be used to index type 'Mixed'.
+  Property '1' does not exist on type 'Mixed'.
+(7,13): error TS7053: Element implicitly has an 'any' type because expression of type 'number' can't be used to index type 'Mixed'.
+  No index signature with a parameter of type 'number' was found on type 'Mixed'.
+(8,3): error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type 'Mixed'.
+  Property '0' does not exist on type 'Mixed'.
+(13,13): error TS7053: Element implicitly has an 'any' type because expression of type 'unique symbol' can't be used to index type '{ [key: symbol]: number; } | { [key: string]: string; }'.
+  Property '[key]' does not exist on type '{ [key: symbol]: number; } | { [key: string]: string; }'.
+(14,13): error TS7053: Element implicitly has an 'any' type because expression of type 'unique symbol' can't be used to index type '{ [key]: string; } | { [key: symbol]: number; }'.
+  Property '[key]' does not exist on type '{ [key]: string; } | { [key: symbol]: number; }'.
+(18,13): error TS7053: Element implicitly has an 'any' type because expression of type '"data-foo"' can't be used to index type '{ [key: `data-${string}`]: number; } | { [key: string]: string; }'.
+  Property 'data-foo' does not exist on type '{ [key: `data-${string}`]: number; } | { [key: string]: string; }'.
+(19,13): error TS7053: Element implicitly has an 'any' type because expression of type '"data-bar" | "data-foo"' can't be used to index type '{ [key: `data-${string}`]: number; } | { [key: string]: string; }'.
+  Property 'data-bar' does not exist on type '{ [key: `data-${string}`]: number; } | { [key: string]: string; }'.
+(23,17): error TS2339: Property 'dataFoo' does not exist on type '{ [key: `data${string}`]: number; } | { [key: string]: string; }'.
+(26,17): error TS2339: Property '2' does not exist on type '[number] | [number, string]'.
+(27,17): error TS2339: Property '-1' does not exist on type '[number] | [number, string]'.
+(30,15): error TS7053: Element implicitly has an 'any' type because expression of type '"a"' can't be used to index type '{ a: string; } | { b: string; }'.
+  Property 'a' does not exist on type '{ a: string; } | { b: string; }'.
+(33,3): error TS2542: Index signature in type '{ readonly [key: string]: number; } | { [key: string]: string; }' only permits reading.
+(36,3): error TS2322: Type 'number' is not assignable to type 'string'.
+(40,3): error TS2322: Type 'boolean' is not assignable to type 'string | number'.

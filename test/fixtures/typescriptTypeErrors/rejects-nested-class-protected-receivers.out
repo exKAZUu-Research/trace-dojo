@@ -1,0 +1,3 @@
+(3,64): error TS2446: Property 'x' is protected and only accessible through an instance of class 'ProtectedDerived'. This is an instance of class 'ProtectedRoot'.
+(7,62): error TS2341: Property 'x' is private and only accessible within class 'PrivateRoot'.
+(11,97): error TS2446: Property 'value' is protected and only accessible through an instance of class '(Anonymous class)'. This is an instance of class 'NestedDerivedAccess'.

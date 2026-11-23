@@ -1,0 +1,18 @@
+function f() {}
+const label = (f.label = 'first');
+console.log(label, f.label);
+console.log(f.label = 'second');
+function g() {}
+const nested = (g.first = (g.second = 'two'));
+console.log(nested, g.first, g.second);
+const constant = () => 3;
+const result = (constant.description = 'constant');
+console.log(result, constant.description, constant());
+function outer() {}
+{
+  const outer = () => 4;
+  const result = (outer.local = 'local');
+  console.log(result, outer.local, outer());
+}
+console.log(outer.global = 'global');
+console.log(outer.global);

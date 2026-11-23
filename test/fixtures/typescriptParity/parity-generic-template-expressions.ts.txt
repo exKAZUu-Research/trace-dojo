@@ -1,0 +1,19 @@
+function wrap<T extends string>(t: T): `[${T}]` {
+  return `[${t}]`;
+}
+function key<K extends "a" | "b">(k: K, n: number): `${K}-${number}` {
+  return `${k}-${n}`;
+}
+function pick<T extends { k: string }>(t: T): `${T["k"]}!` {
+  return `${t.k}!`;
+}
+function flag<T extends boolean>(t: T): `${T}` {
+  return `${t}`;
+}
+function asConst<T extends string>(t: T): readonly [`<${T}>`] {
+  const pair = [`<${t}>`] as const;
+  return pair;
+}
+const point = { x: 1 };
+const shown: `p${string}` = `p${point}`;
+console.log(wrap("a"), key("b", 3), pick({ k: "z" }), flag(false), asConst("c"), shown);

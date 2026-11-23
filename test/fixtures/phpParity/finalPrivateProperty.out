@@ -1,0 +1,4 @@
+
+Fatal error: Property cannot be both final and private in /main.php on line 1
+Stack trace:
+#0 {main}

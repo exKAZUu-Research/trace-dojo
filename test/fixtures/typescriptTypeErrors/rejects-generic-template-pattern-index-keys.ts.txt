@@ -1,0 +1,8 @@
+type V<T extends {[k:`item-${number}`]:number}>=T[`user-${number}`];
+type V2<T extends {[k:`a${string}`]:number}>=T[`b${string}`];
+type V3<T extends {[k:`a${string}`]:number}>=T[`a${string}`];
+type V5<T extends {[k:`a${string}`]:number}>=T[string];
+type V6<T extends {[k:`a${string}`]:number}>=T["ax"];
+type V7<T extends {[k:`a${string}`]:number}>=T["bx"];
+type V8<T extends {[k:`a${string}`]:number},K extends `a${number}`>=T[K];
+type V9<T extends {[k:`a${string}`]:number},K extends `b${number}`>=T[K];

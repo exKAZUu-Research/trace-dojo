@@ -1,0 +1,15 @@
+type T = [...([number] | [string, string])];
+const invalid: T = [1, 2];
+const wrongLength: T = ['a'];
+type W<A extends readonly unknown[]> = readonly [0, ...A, 1];
+const mixed: W<[number] | [string, string]> = [0, 'x', 2, 1];
+function apply(...args: T): void { console.log(args); }
+apply(1,2);
+apply();
+apply('x');
+const readonlyValue: W<[number] | [string, string]> = [0, 1, 1];
+readonlyValue[0] = 0;
+const impossible: [...never] = [];
+type Many<T extends readonly unknown[]> =
+  [...T, ...T, ...T, ...T, ...T, ...T, ...T, ...T, ...T, ...T, ...T, ...T, ...T, ...T, ...T, ...T, ...T];
+type OverLimit = Many<[0] | [1]>;

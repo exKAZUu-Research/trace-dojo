@@ -1,0 +1,23 @@
+function f(a: number, ...rest: string) {}
+const g = (...xs: number): void => {};
+class C { m(...a: boolean) {} }
+type F = (...a: number) => void;
+function args<T extends any>(...a: T) {}
+function ok1<T extends any[]>(...a: T) {}
+function ok2(...a: number[] | string[]) {}
+function ok3(...a: any) {}
+function ok4(...a: [number, string]) {}
+function ok5(...a: readonly number[]) {}
+function ok6<T>(...a: T) {}
+function ok7(...a: unknown) {}
+interface I { m(...a: number): void; new (...b: string): I; }
+function d2(...a: number): void {}
+function ok8(...a: never) {}
+function ok9(...a: number[] & {x:1}) {}
+function ok10(...a: Iterable<number>) {}
+function ok11(...a) {}
+const h = function (...[a, b]: number) {};
+const ok12: (...a: number[]) => void = (...a) => {};
+function ok13<T extends unknown[]>(...a: T | number[]) {}
+function ok14<T extends string>(...a: T) {}
+console.log(1);

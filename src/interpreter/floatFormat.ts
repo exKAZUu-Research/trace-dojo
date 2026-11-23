@@ -16,7 +16,7 @@ export function exactParts(value: number): { mantissa: bigint; exponent: number 
 }
 
 /** The exact decimal digits of a finite positive double, and the power of ten of the first digit. */
-// code-gauge-allow duplicateLines 16 -- Numeric conversions preserve their reference language's zero representation and coefficient normalization.
+// code-gauge-allow duplicateLines -- Numeric conversions preserve their reference language's zero representation and coefficient normalization.
 function exactDigits(value: number): { digits: string; exponent: number } {
   const { mantissa, exponent } = exactParts(value);
   let digits: string;
@@ -120,8 +120,8 @@ export function formatGeneral(value: number, precision: number, alternate: boole
 }
 
 /** `%a` of a finite non-negative double, without its sign: macOS's form, `0x1.8p+1`, with the precision if given. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Keep normalization, discarded-digit rounding, and exponent formatting together as one hexadecimal conversion.
-// code-gauge-allow functionNcss 37 -- Keep normalization, discarded-digit rounding, and exponent formatting together as one hexadecimal conversion.
+// code-gauge-allow functionCognitiveComplexity -- Keep normalization, discarded-digit rounding, and exponent formatting together as one hexadecimal conversion.
+// code-gauge-allow functionNcss -- Keep normalization, discarded-digit rounding, and exponent formatting together as one hexadecimal conversion.
 export function formatHex(value: number, precision: number | undefined, alternate: boolean): string {
   if (value === 0) {
     const fraction = precision ? `.${'0'.repeat(precision)}` : alternate ? '.' : '';
@@ -179,8 +179,8 @@ export interface FloatSpecification {
  * Formats a floating-point conversion as macOS's `printf` does, with its sign and zero padding but not the spaces
  * that pad it to its width, which callers add.
  */
-// code-gauge-allow functionCognitiveComplexity 18 -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
-// code-gauge-allow functionNcss 36 -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
+// code-gauge-allow functionCognitiveComplexity -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
+// code-gauge-allow functionNcss -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
 export function formatFloatField(spec: FloatSpecification, value: number): string {
   const { conversion } = spec;
   const upper = conversion === conversion.toUpperCase();

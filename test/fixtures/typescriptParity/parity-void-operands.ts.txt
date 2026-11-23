@@ -1,0 +1,14 @@
+function show(n: number): void {
+  console.log("show", n);
+}
+function pick(flag: boolean): void | number {
+  if (flag) return 1;
+}
+const text = "result: " + show(1);
+const after = show(2) + " done";
+const same = show(3) > show(4);
+const both = pick(true) >= pick(false);
+const negated = -show(5);
+const label: string | undefined = text.length > 3 ? "long" : undefined;
+const joined = label + "!";
+console.log(text, after, same, both, negated, joined);

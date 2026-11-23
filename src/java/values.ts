@@ -1,3 +1,4 @@
+import { type HashEntry as SharedHashEntry, HashStore as SharedHashStore } from '../interpreter/hashStore';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Frame } from './runtime';
 import type { ClassInfo, JavaType, NumericKind } from './types';
@@ -56,182 +57,10 @@ export class JavaObject {
   }
 }
 
-export interface HashEntry {
-  key: Value;
-  value: Value;
-  hash: number;
-  /** For a hash-ordered store, where the entry comes within its bucket: entries iterate by bucket, then by this. */
-  order?: number;
-}
+export type HashEntry = SharedHashEntry<Value>;
 
-/** `HashMap`'s TREEIFY_THRESHOLD and MIN_TREEIFY_CAPACITY. */
-const TREEIFY_THRESHOLD = 8;
-const MIN_TREEIFY_CAPACITY = 64;
-
-/**
- * The entries of a `HashMap` or `HashSet`, which iterates as Java's does: by bucket of a table that doubles whenever
- * the entries exceed three quarters of it, or a bucket of a table smaller than 64 grows crowded, and in insertion
- * order within a bucket.
- */
-export class HashStore {
-  private list: HashEntry[] = [];
-  /** The orders of the first and the next last entry within buckets, which head and tail insertion take. */
-  private firstOrder = 0;
-  private lastOrder = 0;
-  /** The entries by hash, which finds a key among the entries of its hash only; built when first needed. */
-  private byHash: Map<number, HashEntry[]> | undefined;
-  capacity = 16;
-  /**
-   * How iteration orders the entries: by hash bucket as a `HashMap`, by insertion as a `LinkedHashMap`, or sorted by
-   * `compare` as a `TreeMap`, whose entries stay sorted as they are added.
-   */
-  order: 'hash' | 'insertion' | 'sorted' = 'hash';
-  /** For a sorted store, compares keys, which also decides which keys are the same. */
-  compare?: (frame: Frame, a: Value, b: Value) => number;
-  /** For a sorted store, the `Comparator` that `compare` calls, or `undefined` for natural ordering. */
-  comparator?: Value;
-
-  /**
-   * Where `key` is or would go among a sorted store's entries, by binary search as a `TreeMap` descends its tree, so
-   * that each lookup costs a logarithmic number of comparisons, which may call the program's comparator.
-   */
-  positionOf(frame: Frame, key: Value): { index: number; isFound: boolean } {
-    const compare = this.compare as NonNullable<HashStore['compare']>;
-    let [low, high] = [0, this.entries.length];
-    while (low < high) {
-      const middle = Math.floor((low + high) / 2);
-      const order = compare(frame, key, (this.entries[middle] as HashEntry).key);
-      if (order === 0) return { index: middle, isFound: true };
-      if (order < 0) high = middle;
-      else low = middle + 1;
-    }
-    return { index: low, isFound: false };
-  }
-
-  /**
-   * The entry of a sorted store nearest to `target` whose order against it `accepts`: the first such entry, or with
-   * `fromEnd` the last one, found by binary search since `accepts` holds on one side of `target` only.
-   */
-  nearest(frame: Frame, target: Value, accepts: (order: number) => boolean, fromEnd: boolean): HashEntry | undefined {
-    const compare = this.compare as NonNullable<HashStore['compare']>;
-    // The first index from which `accepts` holds (or, from the end, stops holding).
-    let [low, high] = [0, this.entries.length];
-    while (low < high) {
-      const middle = Math.floor((low + high) / 2);
-      const holds = accepts(compare(frame, (this.entries[middle] as HashEntry).key, target));
-      if (holds !== fromEnd) high = middle;
-      else low = middle + 1;
-    }
-    return this.entries[fromEnd ? low - 1 : low];
-  }
-
-  /** The entries in the order Java's iteration visits them, as a new array that later changes leave as it is. */
-  ordered(): HashEntry[] {
-    if (this.order !== 'hash') return [...this.list];
-    return this.list.toSorted((a, b) => this.bucketOf(a) - this.bucketOf(b) || (a.order ?? 0) - (b.order ?? 0));
-  }
-
-  get entries(): HashEntry[] {
-    return this.list;
-  }
-
-  set entries(entries: HashEntry[]) {
-    this.list = entries;
-    this.byHash = undefined;
-  }
-
-  /** The entries whose keys have `hash`, among which a key equal to one with that hash is. */
-  withHash(hash: number): readonly HashEntry[] {
-    if (!this.byHash) {
-      this.byHash = new Map();
-      for (const entry of this.list) this.indexEntry(entry);
-    }
-    return this.byHash.get(hash) ?? [];
-  }
-
-  /** Inserts an entry at a position of a sorted store, which keeps its entries in order. */
-  insertAt(index: number, entry: HashEntry): void {
-    this.list.splice(index, 0, entry);
-    this.indexEntry(entry);
-  }
-
-  /**
-   * Moves an entry to the end of an insertion-ordered store, as an access-ordered `LinkedHashMap` does, returning
-   * whether that changed the order.
-   */
-  moveToEnd(entry: HashEntry): boolean {
-    const index = this.list.indexOf(entry);
-    if (index === -1 || index === this.list.length - 1) return false;
-    this.list.splice(index, 1);
-    this.list.push(entry);
-    return true;
-  }
-
-  /** Removes an entry, keeping the order of the others. */
-  remove(entry: HashEntry): void {
-    const index = this.list.indexOf(entry);
-    if (index !== -1) this.list.splice(index, 1);
-    const sameHash = this.byHash?.get(entry.hash);
-    if (sameHash) sameHash.splice(sameHash.indexOf(entry), 1);
-  }
-
-  private indexEntry(entry: HashEntry): void {
-    const sameHash = this.byHash?.get(entry.hash);
-    if (sameHash) sameHash.push(entry);
-    else this.byHash?.set(entry.hash, [entry]);
-  }
-
-  /** Adds an entry at the end of its bucket and then grows the table, as `HashMap.put` does. */
-  add(entry: HashEntry): void {
-    const crowded = this.bucketSize(entry) >= TREEIFY_THRESHOLD;
-    entry.order = this.lastOrder++;
-    this.list.push(entry);
-    this.indexEntry(entry);
-    if (crowded) this.growCrowded();
-    while (this.entries.length > this.capacity * 0.75) this.capacity *= 2;
-  }
-
-  /**
-   * Grows a table whose entries exceed three quarters of it, as `HashMap.computeIfAbsent`, `compute`, and `merge` do
-   * first, whether or not they find the key.
-   */
-  growBeforeCompute(): void {
-    while (this.entries.length > this.capacity * 0.75) this.capacity *= 2;
-  }
-
-  /**
-   * Adds an entry at the start of its bucket, as `HashMap.computeIfAbsent`, `compute`, and `merge` do after
-   * `growBeforeCompute`; a later resize keeps the order within each bucket, as Java's split of a bucket does.
-   */
-  addAtBucketHead(entry: HashEntry): void {
-    this.growBeforeCompute();
-    const crowded = this.bucketSize(entry) >= TREEIFY_THRESHOLD - 1;
-    // An order before every other entry's puts it first in its bucket, where a HashMap's head insertion puts it.
-    entry.order = this.order === 'hash' ? --this.firstOrder : this.lastOrder++;
-    this.list.push(entry);
-    this.indexEntry(entry);
-    if (crowded) this.growCrowded();
-  }
-
-  /** The number of entries in the bucket `entry` falls into. */
-  private bucketSize(entry: HashEntry): number {
-    if (this.capacity >= MIN_TREEIFY_CAPACITY) return 0;
-    const bucket = this.bucketOf(entry);
-    return this.entries.filter((other) => this.bucketOf(other) === bucket).length;
-  }
-
-  /**
-   * Doubles a table smaller than 64 whose bucket grew crowded, as `HashMap.treeifyBin` resizes instead of turning
-   * the bucket into a tree; a larger table's tree bins are not modeled.
-   */
-  private growCrowded(): void {
-    if (this.capacity < MIN_TREEIFY_CAPACITY) this.capacity *= 2;
-  }
-
-  private bucketOf(entry: HashEntry): number {
-    return (entry.hash ^ (entry.hash >>> 16)) & (this.capacity - 1);
-  }
-}
+/** The entries of a `HashMap` or `HashSet`, as `src/interpreter/hashStore.ts` orders them, holding Java values. */
+export class HashStore extends SharedHashStore<Value, Frame> {}
 
 export class JavaArray {
   readonly identity = nextIdentity++;
@@ -266,35 +95,63 @@ export function defaultValue(type: JavaType): Value {
 
 /** Formats a double as `Double.toString` does (JDK 19 and later print the shortest round-trip digits). */
 export function formatDouble(value: number): string {
-  return formatShortest(value, (magnitude) => magnitude.toExponential());
+  return formatShortest(value, (magnitude) => {
+    const digits = magnitude.toExponential();
+    return digits.includes('.') ? digits : magnitude.toExponential(1);
+  });
 }
+
+const FLOAT_BITS = new DataView(new ArrayBuffer(4));
+const FLOAT_UNITS_PER_INTEGER = 1n << 150n;
 
 /** Formats a float as `Float.toString` does: the shortest digits that read back as the same float. */
 export function formatFloat(value: number): string {
-  return formatShortest(value, shortestFloatDigits);
+  return formatShortest(Math.fround(value), shortestFloatDigits);
 }
 
 /** The double whose shortest digits are those `Float.toString` prints for `value`. */
 export function floatToShortestDouble(value: number): number {
-  if (!Number.isFinite(value) || value === 0) return value;
-  return Math.sign(value) * Number(twoDigitsAtLeast(Math.abs(value), shortestFloatDigits));
+  const float = Math.fround(value);
+  if (!Number.isFinite(float) || float === 0) return float;
+  return Math.sign(float) * Number(shortestFloatDigits(Math.abs(float)));
 }
 
 function shortestFloatDigits(magnitude: number): string {
-  for (let precision = 1; precision < 9; precision++) {
-    const candidate = magnitude.toExponential(precision - 1);
-    if (Math.fround(Number(candidate)) === magnitude) return candidate;
+  FLOAT_BITS.setFloat32(0, magnitude);
+  const bits = FLOAT_BITS.getUint32(0);
+  const units = floatUnits(bits);
+  const lower = (units + floatUnits(bits - 1)) / 2n;
+  const upper = (units + floatUnits(bits + 1)) / 2n;
+  const acceptsTie = (bits & 1) === 0;
+  const scale = Number(magnitude.toExponential().split('e')[1]);
+  // The JVM considers one- and two-digit decimals together when a one-digit decimal round-trips.
+  for (let exponent = scale - 1; exponent >= scale - 8; exponent--) {
+    const numeratorScale = 10n ** BigInt(Math.max(0, -exponent));
+    const unit = FLOAT_UNITS_PER_INTEGER * 10n ** BigInt(Math.max(0, exponent));
+    const scaled = units * numeratorScale;
+    const significand = scaled / unit;
+    const below = significand * unit;
+    const above = below + unit;
+    const left = lower * numeratorScale;
+    const right = upper * numeratorScale;
+    const acceptsBelow = below > left || (acceptsTie && below === left);
+    const acceptsAbove = above < right || (acceptsTie && above === right);
+    if (!acceptsBelow && !acceptsAbove) continue;
+    const distanceBelow = scaled - below;
+    const distanceAbove = above - scaled;
+    const closerBelow = distanceBelow < distanceAbove || (distanceBelow === distanceAbove && significand % 2n === 0n);
+    const best = acceptsBelow && (!acceptsAbove || closerBelow) ? significand : significand + 1n;
+    const digits = String(best);
+    return `${digits[0]}.${digits.slice(1)}e${exponent + digits.length - 1}`;
   }
-  return magnitude.toExponential(8);
+  throw new Error('No round-trip decimal for Float');
 }
 
-/**
- * The shortest digits in exponential notation, but at least two of them as Java prints: among the two-digit
- * decimals, the closest one reads back as the same value whenever a one-digit one does.
- */
-function twoDigitsAtLeast(magnitude: number, shortest: (magnitude: number) => string): string {
-  const digits = shortest(magnitude);
-  return digits.includes('.') ? digits : magnitude.toExponential(1);
+// Use half the smallest float as a unit so both adjacent midpoints are exact integers.
+function floatUnits(bits: number): bigint {
+  const exponent = bits >>> 23;
+  const significand = (bits & 0x7f_ff_ff) + (exponent > 0 ? 0x80_00_00 : 0);
+  return BigInt(significand) << BigInt(Math.max(1, exponent));
 }
 
 function formatShortest(value: number, shortest: (magnitude: number) => string): string {
@@ -303,7 +160,7 @@ function formatShortest(value: number, shortest: (magnitude: number) => string):
   if (value === Number.NEGATIVE_INFINITY) return '-Infinity';
   if (value === 0) return Object.is(value, -0) ? '-0.0' : '0.0';
   const sign = value < 0 ? '-' : '';
-  const [mantissa, exponentText] = twoDigitsAtLeast(Math.abs(value), shortest).split('e');
+  const [mantissa, exponentText] = shortest(Math.abs(value)).split('e');
   const digits = mantissa.replace('.', '').replace(/0+$/, '');
   const exponent = Number(exponentText);
   if (exponent < -3 || exponent >= 7) return `${sign}${digits[0]}.${digits.slice(1) || '0'}E${exponent}`;
@@ -316,7 +173,7 @@ const LONG_MIN = -(2n ** 63n);
 const LONG_MAX = 2n ** 63n - 1n;
 
 /** Converts a numeric value between kinds as Java's widening and narrowing primitive conversions do. */
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per pair of numeric kinds that JLS 5.1.2 and 5.1.3 convert between.
+// code-gauge-allow functionCognitiveComplexity -- One case per pair of numeric kinds that JLS 5.1.2 and 5.1.3 convert between.
 export function convertNumber(value: Value, from: NumericKind, to: NumericKind): Value {
   if (from === to) return value;
   if (from === 'long') {

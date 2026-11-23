@@ -1,0 +1,36 @@
+class Box<T> {
+  value!: T;
+  method(item: T): T { return item; }
+  self(): this { return this; }
+}
+const n: number = Box.prototype.value;
+const converted: Box<string> = Box.prototype;
+const valueFromSelf: Box<string> = Box.prototype.self();
+const methodOutput: number = Box.prototype.method('text');
+console.log(n, typeof converted, valueFromSelf === Box.prototype, methodOutput);
+function outer<T>(value: T) {
+  class Nested<U extends string = 'default'> {
+    outer!: T;
+    inner!: U;
+    fromOuter(): T { return value; }
+  }
+  const out: T = Nested.prototype.outer;
+  const erasedOuter: number = Nested.prototype.outer;
+  const own: boolean = Nested.prototype.inner;
+  const erasedResult: number = Nested.prototype.fromOuter();
+  console.log(typeof out, typeof own, erasedOuter, erasedResult);
+}
+function nonGenericOuter<T>(value: T) {
+  class Local {
+    outer!: T;
+    fromOuter(): T { return value; }
+  }
+  const erasedOuter: number = Local.prototype.outer;
+  const erasedResult: number = Local.prototype.fromOuter();
+  console.log(erasedOuter, erasedResult);
+}
+class Derived<T extends string> extends Box<T> {}
+const inherited: boolean = Derived.prototype.method(42);
+const ClassExpression = class<U> { read(value: U): U { return value; } };
+const expressionResult: number = ClassExpression.prototype.read('expression');
+console.log(inherited, expressionResult);

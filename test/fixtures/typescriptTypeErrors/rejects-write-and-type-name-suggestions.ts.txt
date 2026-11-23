@@ -1,0 +1,12 @@
+let fooBar = 1;
+foobar = 2;
+foobar++;
+foobar += 1;
+[foobar] = [1];
+interface Point { x: number }
+const p: Pont = { x: 1 };
+function f(a: Strng) { return a; }
+let v: Arry<number> = [];
+class Shape {}
+const s: Shpe = new Shpe();
+console.log(fooBar, p, f, v, s);

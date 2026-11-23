@@ -1,4 +1,4 @@
-import type { ProgramRecording } from '../interpreter/program';
+import type { ProgramRecording } from '../interpreter/interpreter';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
@@ -9,7 +9,7 @@ import { type Frame, Runtime } from './runtime';
 import { Shell } from './shell';
 import { sortedElements, type Variable, type VariableValue } from './variables';
 
-// code-gauge-allow duplicateLines 15 -- Each language's trace entry point wires its runtime into the shared recorder in the same way.
+// code-gauge-allow duplicateLines -- Each language's trace entry point wires its runtime into the shared recorder in the same way.
 export function traceBashProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const parsed = parseBash(program, trace);
   const runtime = new Runtime(input);
@@ -58,7 +58,7 @@ function define(record: object, name: string, value: unknown): void {
   Object.defineProperty(record, name, { value, enumerable: true, configurable: true, writable: true });
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of value the trace shows: turtles, scalars, dense and sparse arrays, and structures.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of value the trace shows: turtles, scalars, dense and sparse arrays, and structures.
 function addVariable(shell: Shell, variables: TraceVariables, name: string, value: VariableValue | undefined): void {
   if (!value) return;
   if (value.kind === 'scalar') {

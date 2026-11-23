@@ -1,0 +1,8 @@
+(1,60): error TS2536: Type '`${number}${string}`' cannot be used to index type 'T'.
+(2,54): error TS2536: Type '`${number}${number}`' cannot be used to index type 'T'.
+(4,56): error TS2536: Type '`${bigint}`' cannot be used to index type 'T'.
+(7,72): error TS2536: Type '`${K}`' cannot be used to index type 'T'.
+(8,77): error TS2536: Type '`${K}${K}`' cannot be used to index type 'T'.
+(9,84): error TS2536: Type 'K' cannot be used to index type 'T'.
+(10,77): error TS2536: Type 'K' cannot be used to index type 'T'.
+(12,74): error TS2536: Type 'K extends "a" ? "5" : "6"' cannot be used to index type 'T'.

@@ -1,0 +1,9 @@
+(1,9): error TS2339: Property 'unsupported' does not exist on type '{}'.
+(3,9): error TS2339: Property 'missing' does not exist on type '{}'.
+(5,7): error TS2322: Type 'string' is not assignable to type '"x"'.
+(7,7): error TS2322: Type 'string' is not assignable to type '"x"'.
+(9,7): error TS2322: Type '1 | 7' is not assignable to type '1'.
+  Type '7' is not assignable to type '1'.
+(11,7): error TS2322: Type '1' is not assignable to type '2'.
+(13,9): error TS2339: Property 'notInStored' does not exist on type '{}'.
+(15,18): error TS2322: Type 'string' is not assignable to type 'number'.

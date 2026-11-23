@@ -1,0 +1,11 @@
+const iteratorWide:Iterator<number,undefined,unknown>=[1].values();
+const iteratorInput:Iterator<number,undefined,string>=iteratorWide;
+const iteratorWider:Iterator<number,undefined,unknown>=iteratorInput;
+const iterableWide:Iterable<number,undefined,unknown>=[1];
+const iterableInput:Iterable<number,undefined,string>=iterableWide;
+const iterableWider:Iterable<number,undefined,unknown>=iterableInput;
+const iterableIteratorWide:IterableIterator<number,undefined,unknown>=[1].values();
+const iterableIteratorInput:IterableIterator<number,undefined,string>=iterableIteratorWide;
+const wrongYield:Iterator<string,undefined,string>=iteratorInput;
+const wrongReturn:Iterator<number,string,string>=iteratorInput;
+const wrongNext:Iterator<number,undefined,number>=iteratorInput;

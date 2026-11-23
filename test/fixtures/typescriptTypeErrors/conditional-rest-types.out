@@ -1,0 +1,8 @@
+(3,61): error TS2322: Type 'Tail<A>' is not assignable to type 'Tail<B>'.
+  Type 'A' is not assignable to type 'B'.
+    'B' could be instantiated with an arbitrary type which could be unrelated to 'A'.
+(4,60): error TS2322: Type 'Tail<T>' is not assignable to type 'Changed<T>'.
+  Type 'unknown[]' is not assignable to type 'Changed<T>'.
+    Type 'Rest' is not assignable to type '[...Rest, string]'.
+      Type 'unknown[]' is not assignable to type '[...Rest, string]'.
+        Source provides no match for variadic element at position 0 in target.

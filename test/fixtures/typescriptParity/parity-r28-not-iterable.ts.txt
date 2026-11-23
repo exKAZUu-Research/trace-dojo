@@ -1,0 +1,12 @@
+const tries: (() => unknown)[] = [
+  () => { for (const x of (5 as any)) console.log(x); },
+  () => [...({} as any)],
+  () => new Map(5 as any),
+  () => new Set({} as any),
+  () => { const [a] = ({} as any); return a; },
+  () => Array.from(5 as any),
+  () => { const o: any = { a: 1 }; for (const x of o) console.log(x); },
+  () => Math.max(...(null as any)),
+  () => new Map([1] as any),
+];
+for (const t of tries) { try { console.log(t()); } catch (e: any) { console.log(e.constructor.name, e.message); } }

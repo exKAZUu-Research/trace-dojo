@@ -1,0 +1,10 @@
+type Boxes<T> = { [K in keyof T]: { value: T[K] } };
+function unwrap<T>(boxes: Boxes<T>): T { return {} as T; }
+const result = unwrap({ name: { value: 'text' }, size: { value: 10 } });
+const wrongText: number = result.name;
+const wrongSize: string = result.size;
+const wrongProperty = result.missing;
+const tuple: readonly [{ value: number }, { value: string }] = [{ value: 3 }, { value: 'text' }];
+const reversed = unwrap(tuple);
+reversed[0] = 5;
+const malformed = unwrap({ name: { wrong: 'text' } });

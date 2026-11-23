@@ -1,0 +1,4 @@
+get-value;Indirect modification of ValueGetter::$value is not allowed
+get-value;Indirect modification of ValueGetter::$value is not allowed
+get-reference;get-reference;9
+get-reference;get-reference;9

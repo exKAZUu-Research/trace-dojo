@@ -1,0 +1,18 @@
+(1,7): error TS2322: Type '(this: { x: string; }) => void' is not assignable to type '(this: { x: number; }) => void'.
+  The 'this' types of each signature are incompatible.
+    Type '{ x: number; }' is not assignable to type '{ x: string; }'.
+      Types of property 'x' are incompatible.
+        Type 'number' is not assignable to type 'string'.
+(4,7): error TS2322: Type '(this: { x: number; y: string; }) => void' is not assignable to type '(this: { x: number; }) => void'.
+  The 'this' types of each signature are incompatible.
+    Property 'y' is missing in type '{ x: number; }' but required in type '{ x: number; y: string; }'.
+(13,3): error TS2322: Type '(this: { value: string; }) => void' is not assignable to type '(this: { value: number; }) => void'.
+  The 'this' types of each signature are incompatible.
+    Type '{ value: number; }' is not assignable to type '{ value: string; }'.
+      Types of property 'value' are incompatible.
+        Type 'number' is not assignable to type 'string'.
+(21,7): error TS2322: Type '<T extends { x: string; }>(this: T) => void' is not assignable to type '(this: { x: number; }) => void'.
+  The 'this' types of each signature are incompatible.
+    Type '{ x: number; }' is not assignable to type '{ x: string; }'.
+      Types of property 'x' are incompatible.
+        Type 'number' is not assignable to type 'string'.

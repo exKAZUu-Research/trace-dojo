@@ -1,0 +1,5 @@
+class C { x; constructor() { try { return; } finally { this.x = 1; } } }
+const n: number = new C().x;
+class D { x; constructor(b: boolean) { try { if (b) throw new Error(); } catch { return; } finally { this.x = "s"; } } }
+const s: string = new D(true).x;
+console.log(n, s);

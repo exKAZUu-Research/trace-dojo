@@ -1,0 +1,29 @@
+interface I { [k: `a${string}`]: number; [k: `b${string}`]: string }
+type V<T extends I> = T["a1"];
+const n: V<I> = 1;
+function g<T extends I>(t: T) { const x: number = t.a1; const y: string = t.b2; const z = t.c3; return t["a9"]; }
+type R1 = Record<`a${string}`, number>;
+const r1: R1 = { a1: 1, b: 2 };
+const r2: R1 = { a1: "x" };
+function h(r: R1) { const q: string = r.a2; r.zz; }
+type M = { [K in `x${number}`]: boolean };
+const m: M = { x1: true, x2: 3 };
+type IB = { [k: `a${string}`]: number } & { [k: `a${string}`]: 1 | 2; [k: `c${string}`]: string };
+function ib(v: IB) { const p: 1 = v.a1; const q: number = v.c1; v.d1; }
+interface E extends I { [k: `c${string}`]: boolean }
+function e(v: E) { const p: boolean = v.c1; const q: string = v.a1; v.d; }
+class C { [k: `a${string}`]: number; b = "s"; }
+function cc(c: C) { const p: string = c.a1; c.z1; }
+function inn(v: I | { foo: 1 }) { if ("a1" in v) { const w = v; } }
+const ctx: { [k: `on${string}`]: (e: number) => void } = { onClick: (e) => { const s: string = e; } };
+type KK = keyof { [k: `a${string}`]: number; b: 1; [k: number]: 2 };
+const kk1: KK = "b"; const kk2: KK = 1; const kk3: KK = "c"; const kk4: KK = "abc";
+interface P { [k: `a${string}`]: number; ab: string }
+interface Q { [k: string]: number; [k: `a${string}`]: string }
+function w(i: I, k: `a${number}`, k2: `b${string}` | `a${string}`) { const x: number = i[k]; const y: string = i[k2]; i[k] = 2; i[k] = "s"; }
+interface RO { readonly [k: `a${string}`]: number }
+function ro(r: RO) { r.a1 = 1; r["a2"] = 2; delete r.a3; }
+function fx<K extends `b${string}`>(i: I, k: K) { const v: number = i[k]; }
+const asg5: { [k: `a${string}`]: number } = { a1: 1, b1: 2 };
+const asg6: { [k: `a${string}`]: number; [k: string]: number | string } = { a1: 1, b1: "x", a2: "y" };
+function tt(x: `ab${number}`, y: `a${string}`, z: `${number}-${number}`) { const p: `a${string}` = x; const q: `ab${string}` = y; const r: `${number}-${string}` = z; const u: `${string}-1` = z; const v: `a${number}` = x; }

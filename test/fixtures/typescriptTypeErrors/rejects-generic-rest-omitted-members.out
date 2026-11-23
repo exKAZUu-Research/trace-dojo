@@ -1,0 +1,5 @@
+(1,97): error TS2322: Type 'Omit<T, "x">' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'Omit<T, "x">'.
+(3,87): error TS2322: Type 'Omit<T, "method">' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'Omit<T, "method">'.
+(4,93): error TS2540: Cannot assign to 'x' because it is a read-only property.

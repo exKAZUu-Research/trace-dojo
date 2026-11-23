@@ -1,0 +1,8 @@
+function filter(value: unknown) {
+  if (typeof value === '__proto__') return value;
+  if (typeof value === 'hasOwnProperty') return value;
+  if (typeof value === 'constructor') return value;
+  if (typeof value === 'string') return value.toUpperCase();
+  return '';
+}
+console.log(filter(1));

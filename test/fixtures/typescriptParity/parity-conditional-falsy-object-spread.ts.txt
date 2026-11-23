@@ -1,0 +1,13 @@
+function build(enabled: boolean, count: number, name: string) {
+  const andSpread = { ...(enabled && { count: 2 }) };
+  const ternarySpread = { ...(enabled ? { count: 2 } : false) };
+  const numberSpread = { ...(count && { count }) };
+  const stringSpread = { ...(name && { name }) };
+  const nullSpread = { ...(enabled ? { a: 1 } : null), ...(enabled ? undefined : { b: 2 }) };
+  const chained = { x: 1, ...(enabled ? { a: 1 } : count ? { b: "s" } : false) };
+  const optional: { count?: number } = andSpread;
+  return [andSpread, ternarySpread, numberSpread, stringSpread, nullSpread, chained, optional.count];
+}
+console.log(build(true, 3, "n"));
+console.log(build(false, 0, ""));
+console.log(build(false, 5, "m"));

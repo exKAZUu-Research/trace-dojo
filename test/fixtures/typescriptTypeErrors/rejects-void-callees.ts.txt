@@ -1,0 +1,7 @@
+function name() {}
+name();
+function g(): void {}
+const r = g();
+r();
+function h(f: (() => void) | void) { f(); }
+function k(f: (() => void) | undefined) { f(); }

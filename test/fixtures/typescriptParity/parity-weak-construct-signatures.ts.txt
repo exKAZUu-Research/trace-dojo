@@ -1,0 +1,15 @@
+type T = { new (): object; x?: number };
+class C {}
+const v: T = C;
+interface Maker {
+  new (label: string): { label: string };
+  tag?: string;
+}
+class Labeled {
+  constructor(public label: string) {}
+}
+const m: Maker = Labeled;
+type Both = { new (): object } & { x?: number };
+const both: Both = C;
+type Weak = { x?: number };
+console.log(typeof v, new m('a').label, typeof both);

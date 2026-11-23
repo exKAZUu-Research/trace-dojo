@@ -36,7 +36,7 @@ const SIMPLE_ESCAPES: Record<string, number> = { a: 7, b: 8, e: 27, E: 27, f: 12
 const BACKSLASH: EscapeResult = { out: [92], length: 0, stop: false };
 
 /** The escapes of `printf`'s format and of `%b`, as Bash's `tescape`; `forB` reads `\c` and `\0nnn` as `%b` does. */
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per escape of printf's format and %b, as Bash's tescape.
+// code-gauge-allow functionCognitiveComplexity -- One case per escape of printf's format and %b, as Bash's tescape.
 function escape(bytes: number[], start: number, forB: boolean, host: PrintfHost): EscapeResult {
   const c = String.fromCodePoint(bytes[start]);
   if (c in SIMPLE_ESCAPES) return { out: [SIMPLE_ESCAPES[c]], length: 1, stop: false };
@@ -238,8 +238,8 @@ class Printf {
     return arg === undefined ? 0n : parseInteger(arg, signed, this.host, this.conversionError);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per conversion character of Bash's printf.
-  // code-gauge-allow functionNcss 33 -- One case per conversion character of Bash's printf.
+  // code-gauge-allow functionCognitiveComplexity -- One case per conversion character of Bash's printf.
+  // code-gauge-allow functionNcss -- One case per conversion character of Bash's printf.
   private format(spec: Specification): void {
     const { conversion, precision } = spec;
     if ('diouxX'.includes(conversion)) {
@@ -306,8 +306,8 @@ function pad(bytes: number[], spec: Specification): number[] {
  * Reads an integer argument as `strtoimax` with base 0 does, or the code of the character after a leading quote,
  * reporting an argument that is not wholly a number but using the part that is.
  */
-// code-gauge-allow functionCognitiveComplexity 18 -- strtoimax's syntax with Bash's character-code arguments and its two kinds of conversion error.
-// code-gauge-allow functionNcss 42 -- strtoimax's syntax with Bash's character-code arguments and its two kinds of conversion error.
+// code-gauge-allow functionCognitiveComplexity -- strtoimax's syntax with Bash's character-code arguments and its two kinds of conversion error.
+// code-gauge-allow functionNcss -- strtoimax's syntax with Bash's character-code arguments and its two kinds of conversion error.
 function parseInteger(arg: string, signed: boolean, host: PrintfHost, conversionError: () => void): bigint {
   if (arg.startsWith("'") || arg.startsWith('"')) {
     const [, c] = charactersOf(arg);
@@ -356,8 +356,8 @@ function invalidNumber(arg: string, host: PrintfHost): void {
 }
 
 /** Reads a floating-point argument as macOS's `strtold` (a `double` on arm64) does. */
-// code-gauge-allow functionCognitiveComplexity 17 -- strtod's syntax (infinities, NaN, hexadecimal, decimal) with Bash's conversion errors.
-// code-gauge-allow functionNcss 36 -- strtod's syntax (infinities, NaN, hexadecimal, decimal) with Bash's conversion errors.
+// code-gauge-allow functionCognitiveComplexity -- strtod's syntax (infinities, NaN, hexadecimal, decimal) with Bash's conversion errors.
+// code-gauge-allow functionNcss -- strtod's syntax (infinities, NaN, hexadecimal, decimal) with Bash's conversion errors.
 function parseFloatArgument(arg: string, host: PrintfHost, conversionError: () => void): number {
   if (arg.startsWith("'") || arg.startsWith('"')) {
     const [, c] = charactersOf(arg);
@@ -411,7 +411,7 @@ function groupThousands(digits: string): string {
   return digits.replaceAll(/\B(?=(\d{3})+$)/g, ',');
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- C's rules for the integer conversions: sign, precision, grouping, and alternate prefixes.
+// code-gauge-allow functionCognitiveComplexity -- C's rules for the integer conversions: sign, precision, grouping, and alternate prefixes.
 function formatInteger(value: bigint, spec: Specification): string {
   const { flags, precision, conversion } = spec;
   const negative = (conversion === 'd' || conversion === 'i') && value < 0n;

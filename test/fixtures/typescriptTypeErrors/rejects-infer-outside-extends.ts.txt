@@ -1,0 +1,11 @@
+type Extracted = infer T;
+type Value<T> = T extends string ? infer U : never;
+type Value2<T> = T extends [infer U] ? U : infer U;
+type Ok<T> = T extends [infer U, infer U] ? U : never;
+type Nested<T> = T extends { a: infer A extends string } ? A : never;
+type InCheck<T> = infer X extends T ? 1 : 0;
+type Deep<T> = T extends (infer U)[] ? U extends infer V ? V : never : never;
+type InnerOk<T> = T extends Array<T extends infer Q ? Q : never> ? 1 : 0;
+let x: infer Z = 1;
+function f(a: infer W) {}
+console.log('runs');

@@ -1,0 +1,14 @@
+function typeOfAny<T>(x: T[never]): T[never] { return x; }
+function explicitAny<T extends any>(x: T[never]): never { return x; }
+function explicitUnknown<T extends unknown>(x: T[never]): never { return x; }
+function explicitObject<T extends object>(x: T[never]): never { return x; }
+function explicitEmpty<T extends {}>(x: T[never]): never { return x; }
+function explicitNamed<T extends {a: 1}>(x: T[never]): never { return x; }
+function explicitIndexed<T extends {[k:string]: number}>(x: T[never]): number { return x; }
+function explicitChain<T extends U, U extends {a: 1}>(x: T[never]): never { return x; }
+function inter<T>(x: (T & {a: 1})[never]): never { return x; }
+function constrainedUnion<T extends {a: 1}>(x: (T | {b: 1})[never]): never { return x; }
+function constrainedKey<T extends {a: 1}, K extends never>(x: T[K]): never { return x; }
+function value<T>(x: T, k: never): never { return x[k]; }
+function constrainedValue<T extends {a: 1}>(x: T, k: never): never { return x[k]; }
+console.log(typeOfAny<any>(123));

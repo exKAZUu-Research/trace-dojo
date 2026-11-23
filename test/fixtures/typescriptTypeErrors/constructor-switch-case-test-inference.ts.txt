@@ -1,0 +1,28 @@
+class CaseWrite {
+  value;
+  constructor(candidate: number) {
+    switch (candidate) {
+      case (this.value = 1): break;
+      default: break;
+    }
+  }
+}
+class MultipleCases {
+  value;
+  constructor(candidate: string) {
+    switch (candidate) {
+      case (this.value = "one"): break;
+      case (this.value = "two"): break;
+    }
+  }
+}
+class Discriminant {
+  value;
+  constructor(candidate: number) {
+    switch (this.value = candidate) {
+      case 1: break;
+      default: break;
+    }
+  }
+}
+console.log(new CaseWrite(1).value, new MultipleCases("one").value, new Discriminant(2).value.toFixed());

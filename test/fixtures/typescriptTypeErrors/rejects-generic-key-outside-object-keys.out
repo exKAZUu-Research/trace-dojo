@@ -1,0 +1,8 @@
+(2,10): error TS2536: Type 'K' cannot be used to index type 'Record<string, number>'.
+(5,3): error TS2536: Type 'K' cannot be used to index type 'Record<string, number>'.
+(8,10): error TS2536: Type 'K' cannot be used to index type 'Record<string, number>'.
+(11,10): error TS2536: Type 'K' cannot be used to index type 'Record<number, number>'.
+(14,10): error TS2536: Type 'K' cannot be used to index type 'number[]'.
+(17,10): error TS2536: Type 'K' cannot be used to index type 'Record<string, number> | { [key: string]: number; }'.
+(25,7): error TS2322: Type 'number' is not assignable to type 'string'.
+(26,7): error TS2322: Type 'number' is not assignable to type 'string'.

@@ -1,0 +1,23 @@
+type Box<T extends string> = { value: T };
+const constraints: () => unknown = findConstraints;
+const indexed: () => unknown = findIndexed;
+const tuple: () => unknown = findTuple;
+function findConstraints() {
+  const builtin: Record<false, number> = {} as any;
+  const own: Box<number> = { value: 1 };
+  return [builtin, own];
+}
+function findIndexed() {
+  const value: { x: number }['y'] = 1;
+  return value;
+}
+function findTuple() {
+  const value: [number?, string] = [1, 'valid value'];
+  return value;
+}
+const valid: () => unknown = findValid;
+function findValid() {
+  const coordinate: ['start', number?] = ['start'];
+  const keyed: Box<(typeof coordinate)[0]> = { value: coordinate[0] };
+  return keyed;
+}

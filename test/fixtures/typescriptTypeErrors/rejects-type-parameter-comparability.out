@@ -1,0 +1,8 @@
+(5,39): error TS2352: Conversion of type 'R' to type 'T' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'R'.
+(6,55): error TS2352: Conversion of type 'string' to type 'T' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'string'.
+(8,57): error TS2367: This comparison appears to be unintentional because the types 'T' and 'number' have no overlap.
+(10,29): error TS2322: Type 'T' is not assignable to type '{}'.
+(11,34): error TS2322: Type 'number' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'number'.

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 486 -- Record layout and initialization share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss -- Record layout and initialization share representation and state; splitting registration by size would scatter that concern.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
@@ -271,7 +271,7 @@ sdef(
   'Struct',
   'new',
   [0, -1],
-  // code-gauge-allow functionCognitiveComplexity 22 -- Ruby's method takes these argument forms, which the branches mirror.
+  // code-gauge-allow functionCognitiveComplexity -- Ruby's method takes these argument forms, which the branches mirror.
   function* (self: RClass, args, block, keywords) {
     const first = args[0];
     const classNameValue =
@@ -313,7 +313,7 @@ def(
   'Struct',
   'initialize',
   [0, -1],
-  // code-gauge-allow functionNcss 50 -- The ordered cases for record layout and initialization share state; splitting them solely for the metric would hide their sequencing.
+  // code-gauge-allow functionNcss -- The ordered cases for record layout and initialization share state; splitting them solely for the metric would hide their sequencing.
   function* (self: RObject, args, _block, keywords) {
     if (self.frozen) throw frozenError(self, yield* inspect(self));
     const { members, memberSymbols, keywordInit } = layoutOf(self.cls);
@@ -387,7 +387,7 @@ def(
 );
 def('Struct', 'members', 0, (self: RObject) => arr([...layoutOf(self.cls).memberSymbols]));
 def('Struct', ['to_a', 'deconstruct', 'values'], 0, (self: RObject) => arr([...valuesOf(self)]));
-// code-gauge-allow functionCognitiveComplexity 18 -- Struct selection preserves range coercion, integer bounds and roots in one traversal; elementwise appends avoid host argument limits.
+// code-gauge-allow functionCognitiveComplexity -- Struct selection preserves range coercion, integer bounds and roots in one traversal; elementwise appends avoid host argument limits.
 def('Struct', 'values_at', [0, -1], function* (self: RObject, args) {
   const values = valuesOf(self);
   const selected: Value[] = [];
@@ -593,7 +593,7 @@ def(
   'Data',
   'initialize',
   [0, 0],
-  // code-gauge-allow functionCognitiveComplexity 20 -- Name conversion, binding and missing-before-unknown diagnostics share the ordered initialization lifecycle.
+  // code-gauge-allow functionCognitiveComplexity -- Name conversion, binding and missing-before-unknown diagnostics share the ordered initialization lifecycle.
   function* (self: RObject, _args, _block, keywords) {
     if (self.frozen) throw frozenError(self, yield* inspect(self));
     const { memberSymbols } = layoutOf(self.cls);
@@ -626,7 +626,7 @@ def(
 def('Data', 'members', 0, (self: RObject) => arr([...layoutOf(self.cls).memberSymbols]));
 def('Data', 'to_h', 0, (self: RObject, _args, block) => structToHash(self, block));
 
-// code-gauge-allow functionCognitiveComplexity 30 -- The ordered cases for record layout and initialization share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for record layout and initialization share state; splitting them solely for the metric would hide their sequencing.
 function* deconstructKeys(self: RObject, keys: Value): Gen<RHash> {
   const hash = newHash();
   const { members, memberSymbols, kind } = layoutOf(self.cls);

@@ -1,0 +1,9 @@
+function risky(): void { if (Math.floor(1.5) > 5) throw new Error("x"); }
+let x: string | number = 1;
+try {
+  x = "a";
+  risky();
+  x = 2;
+} catch {
+  console.log(x.toFixed(1));
+}

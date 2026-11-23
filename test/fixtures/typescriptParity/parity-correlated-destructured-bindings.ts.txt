@@ -1,0 +1,14 @@
+type CorrelatedShape = {kind: "text"; value: string} | {kind: "count"; value: number};
+function renamed(shape: CorrelatedShape) { const {kind: tag, value: item} = shape; if (tag === "text") console.log(item.toUpperCase()); else console.log(item.toFixed(1)); }
+function shorthand(shape: CorrelatedShape) { const {kind, value} = shape; switch (kind) { case "text": console.log(value.toUpperCase()); break; case "count": console.log(value.toFixed(1)); break; } }
+renamed({kind:"text",value:"hi"}); renamed({kind:"count",value:2}); shorthand({kind:"text",value:"bye"}); shorthand({kind:"count",value:3});
+function replacedSource(shape: CorrelatedShape) { const {kind, value} = shape; shape = {kind:"count",value:9}; if(kind === "text") console.log(value.toUpperCase()); }
+function returnedSource() { return {kind:"text", value:"returned"} as CorrelatedShape; }
+const {kind: returnedKind, value: returnedValue} = returnedSource();
+if(returnedKind === "text") console.log(returnedValue.toUpperCase());
+replacedSource({kind:"text",value:"original"});
+function parameterPattern({kind, value}: CorrelatedShape) { if(kind === "text") console.log(value.toUpperCase()); else console.log(value.toFixed(1)); }
+parameterPattern({kind:"text",value:"parameter"}); parameterPattern({kind:"count",value:4});
+type RefinedCorrelation = {kind:"text";value:"a"|"b"}|{kind:"count";value:number};
+function refinedCorrelation(shape: RefinedCorrelation) { const {kind, value} = shape; if(value === "a" && kind === "text") { const exact: "a" = value; console.log(exact); } }
+refinedCorrelation({kind:"text",value:"a"});

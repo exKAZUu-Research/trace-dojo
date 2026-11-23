@@ -48,7 +48,7 @@ export function guardFailed(context: PatternContext): void {
   context.failure = { description: 'guard clause does not return true' };
 }
 
-// code-gauge-allow functionNcss 36 -- The ordered cases for Ruby pattern matching share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for Ruby pattern matching share state; splitting them solely for the metric would hide their sequencing.
 export function* matchPattern(
   pattern: Pattern,
   value: Value,
@@ -201,8 +201,8 @@ function patternSlice(array: RArray, start: number, length: number): Value {
   return start > array.items.length || length < 0 ? NIL : arr(array.items.slice(start, start + length));
 }
 
-// code-gauge-allow functionNcss 38 -- One case per kind of pattern.
-// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of pattern.
+// code-gauge-allow functionNcss -- One case per kind of pattern.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of pattern.
 function* matchHash(
   pattern: Extract<Pattern, { k: 'hash' }>,
   value: Value,

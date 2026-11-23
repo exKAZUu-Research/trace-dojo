@@ -1,0 +1,9 @@
+TypeError 5 is not iterable
+TypeError {} is not iterable
+TypeError number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError object is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError {} is not iterable
+[]
+TypeError o is not iterable
+TypeError null is not iterable (cannot read property null)
+TypeError Iterator value 1 is not an entry object

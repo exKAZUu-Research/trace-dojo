@@ -25,6 +25,11 @@ export function mergePrivate(runtime: Runtime, target: JsObject, key: string, pr
 
 export function defineFunctionProperties(fn: JsFunction, name: string, length: number): void {
   fn.properties.set('length', { value: length, writable: false, enumerable: false, configurable: true });
+  defineFunctionName(fn, name);
+}
+
+export function defineFunctionName(fn: JsFunction, name: string): void {
+  fn.initialName = name;
   fn.properties.set('name', { value: name, writable: false, enumerable: false, configurable: true });
 }
 

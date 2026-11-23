@@ -59,8 +59,8 @@ function* stableSortFlow(data: ResumableSortData, length: number): Suspending<vo
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- A transcription of Go's pdqsort_func.
-// code-gauge-allow functionNcss 41 -- Retains the Go sort algorithm and comparison order while comparisons can suspend.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of Go's pdqsort_func.
+// code-gauge-allow functionNcss -- Retains the Go sort algorithm and comparison order while comparisons can suspend.
 function* pdq(data: ResumableSortData, start: number, end: number, depthLimit: number): Suspending<void> {
   const maxInsertion = 12;
   let a = start;
@@ -178,7 +178,7 @@ function* partitionEqual(data: ResumableSortData, a: number, b: number, pivot: n
   return i;
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Retains the Go sort algorithm and comparison order while comparisons can suspend.
+// code-gauge-allow functionCognitiveComplexity -- Retains the Go sort algorithm and comparison order while comparisons can suspend.
 function* partialInsertionSort(data: ResumableSortData, a: number, b: number): Suspending<boolean> {
   const maxSteps = 5;
   const shortestShifting = 50;
@@ -278,8 +278,8 @@ function reverseRange(data: ResumableSortData, a: number, b: number): void {
   for (let i = a, j = b - 1; i < j; i++, j--) data.swap(i, j);
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Retains the Go sort algorithm and comparison order while comparisons can suspend.
-// code-gauge-allow functionNcss 49 -- Retains the Go sort algorithm and comparison order while comparisons can suspend.
+// code-gauge-allow functionCognitiveComplexity -- Retains the Go sort algorithm and comparison order while comparisons can suspend.
+// code-gauge-allow functionNcss -- Retains the Go sort algorithm and comparison order while comparisons can suspend.
 function* symMerge(data: ResumableSortData, a: number, m: number, b: number): Suspending<void> {
   if (m - a === 1) {
     let i = m;

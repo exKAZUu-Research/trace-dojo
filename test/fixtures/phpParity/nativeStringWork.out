@@ -1,0 +1,46 @@
+cast x
+cast x
+cast x
+xxx
+cast x
+xnext
+fprintf(): Argument #1 ($stream) must be of type resource, null given
+vfprintf(): Argument #1 ($stream) must be of type resource, int given
+fprintf(): Argument #1 ($stream) must be of type resource, int given
+string(6) "8.5.12"
+string(6) "8.5.12"
+bool(false)
+string(6) "8.5.12"
+string(6) "8.5.12"
+bool(false)
+0011
+0111
+0011
+1100
+1100
+string(10) "aaababaaba"
+string(17) "<a>x</a><b>y</b>z"
+string(16) "41620043642d4566"
+string(6) "006364"
+int(3)
+int(2)
+cast throw
+printf=[     |] caught replacement
+cast throw
+vprintf=[     |] caught replacement
+cast throw
+fprintf=[     |] caught replacement
+cast throw
+vfprintf=[     |] caught replacement
+cast throw
+ caught replacement
+cast throw
+ caught replacement
+strtr(): Argument #3 ($to) must be of type string, array given
+strtr(): Argument #2 ($from) must be of type string, array given
+strtr(): Argument #2 ($from) must be of type array, string given
+
+Deprecated: strtr(): Passing null to parameter #3 ($to) of type ?string is deprecated in /main.php on line 41
+string(3) "abc"
+string(3) "xbc"
+string(3) "azc"

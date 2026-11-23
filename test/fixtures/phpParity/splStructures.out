@@ -1,0 +1,224 @@
+int(4)
+int(1)
+bool(true)
+bool(false)
+object(SplStack)#1 (2) {
+  ["flags":"SplDoublyLinkedList":private]=>
+  int(6)
+  ["dllist":"SplDoublyLinkedList":private]=>
+  array(3) {
+    [0]=>
+    int(1)
+    [1]=>
+    int(2)
+    [2]=>
+    string(3) "top"
+  }
+}
+SplStack Object
+(
+    [flags:SplDoublyLinkedList:private] => 6
+    [dllist:SplDoublyLinkedList:private] => Array
+        (
+            [0] => 1
+            [1] => added
+            [2] => 2
+            [3] => top
+        )
+
+)
+
+SplDoublyLinkedList::offsetSet(): Argument #1 ($index) must be of type ?int, string given
+SplDoublyLinkedList::offsetGet(): Argument #1 ($index) must be of type int, string given
+SplDoublyLinkedList::offsetUnset(): Argument #1 ($index) must be of type int, string given
+SplDoublyLinkedList::add(): Argument #1 ($index) is out of range
+int(2)
+int(6)
+bool(false)
+int(1)
+0=>1 0=>2 0=>3 0
+2=>3 1=>2 0=>1 0
+int(2)
+int(1)
+int(5)
+object(SplQueue)#4 (2) {
+  ["flags":"SplDoublyLinkedList":private]=>
+  int(5)
+  ["dllist":"SplDoublyLinkedList":private]=>
+  array(0) {
+  }
+}
+int(4)
+string(3) "top"
+v2,v5,v8,v11,v10,v4,v1,v7,v12,v9,v6,v3
+object(SplPriorityQueue)#7 (3) {
+  ["flags":"SplPriorityQueue":private]=>
+  int(1)
+  ["isCorrupted":"SplPriorityQueue":private]=>
+  bool(false)
+  ["heap":"SplPriorityQueue":private]=>
+  array(3) {
+    [0]=>
+    array(2) {
+      ["data"]=>
+      string(1) "b"
+      ["priority"]=>
+      int(2)
+    }
+    [1]=>
+    array(2) {
+      ["data"]=>
+      string(1) "a"
+      ["priority"]=>
+      int(1)
+    }
+    [2]=>
+    array(2) {
+      ["data"]=>
+      string(1) "c"
+      ["priority"]=>
+      int(2)
+    }
+  }
+}
+int(1)
+SplPriorityQueue Object
+(
+    [flags:SplPriorityQueue:private] => 1
+    [isCorrupted:SplPriorityQueue:private] => 
+    [heap:SplPriorityQueue:private] => Array
+        (
+            [0] => Array
+                (
+                    [data] => b
+                    [priority] => 2
+                )
+
+            [1] => Array
+                (
+                    [data] => a
+                    [priority] => 1
+                )
+
+            [2] => Array
+                (
+                    [data] => c
+                    [priority] => 2
+                )
+
+        )
+
+)
+
+Must specify at least one extract flag
+object(SplMinHeap)#3 (3) {
+  ["flags":"SplHeap":private]=>
+  int(0)
+  ["isCorrupted":"SplHeap":private]=>
+  bool(false)
+  ["heap":"SplHeap":private]=>
+  array(4) {
+    [0]=>
+    int(1)
+    [1]=>
+    int(3)
+    [2]=>
+    int(8)
+    [3]=>
+    int(5)
+  }
+}
+bool(false)
+int(3)
+bool(false)
+array(2) {
+  ["x"]=>
+  int(1)
+  ["y"]=>
+  int(2)
+}
+object(ArrayIterator)#10 (1) {
+  ["storage":"ArrayIterator":private]=>
+  object(ArrayObject)#9 (1) {
+    ["storage":"ArrayObject":private]=>
+    array(2) {
+      ["x"]=>
+      int(1)
+      ["y"]=>
+      int(2)
+    }
+  }
+}
+string(13) "{"x":1,"y":2}"
+string(13) "{"0":1,"1":2}"
+
+Deprecated: ArrayObject::__construct(): Using an object as a backing array for ArrayObject is deprecated, as it allows violating class constraints and invariants in /main.php on line 37
+int(3)
+object(ArrayObject)#11 (1) {
+  ["storage":"ArrayObject":private]=>
+  object(ArrayObject)#9 (1) {
+    ["storage":"ArrayObject":private]=>
+    array(3) {
+      ["x"]=>
+      int(1)
+      ["y"]=>
+      int(2)
+      ["z"]=>
+      int(3)
+    }
+  }
+}
+int(1)
+string(1) "t"
+string(1) "t"
+OutOfBoundsException: Index invalid or out of range
+object(DebugList)#6 (4) {
+  ["flags"]=>
+  string(5) "label"
+  ["dllist":"DebugList":private]=>
+  string(8) "distinct"
+  ["flags":"SplDoublyLinkedList":private]=>
+  int(0)
+  ["dllist":"SplDoublyLinkedList":private]=>
+  array(1) {
+    [0]=>
+    int(7)
+  }
+}
+DebugList Object
+(
+    [flags] => label
+    [dllist:DebugList:private] => distinct
+    [flags:SplDoublyLinkedList:private] => 0
+    [dllist:SplDoublyLinkedList:private] => Array
+        (
+            [0] => 7
+        )
+
+)
+object(DebugFixedArray)#15 (2) {
+  [0]=>
+  int(8)
+  ["label":protected]=>
+  string(5) "fixed"
+}
+DebugFixedArray Object
+(
+    [0] => 8
+    [label:protected] => fixed
+)
+object(DebugHeap)#16 (5) {
+  ["label"]=>
+  string(4) "heap"
+  ["heap":"DebugHeap":private]=>
+  string(8) "distinct"
+  ["flags":"SplHeap":private]=>
+  int(0)
+  ["isCorrupted":"SplHeap":private]=>
+  bool(false)
+  ["heap":"SplHeap":private]=>
+  array(1) {
+    [0]=>
+    int(9)
+  }
+}

@@ -1,0 +1,34 @@
+function prefix<T extends string>(value: `prefix-${T}` | number): T {
+  return String(value).slice('prefix-'.length) as T;
+}
+function whole<T extends string>(value: `${T}` | number): T {
+  return String(value) as T;
+}
+const prefixed = prefix('prefix-hello');
+const unprefixed = whole('world');
+const hello: 'hello' = prefixed;
+const world: 'world' = unprefixed;
+console.log(hello, world);
+
+function leaf<T>(value: { a: { b: { c: { d: T } } } } | undefined): T {
+  if (value === undefined) throw Error();
+  return value.a.b.c.d;
+}
+function entry<T>(value: { a: { b: { c: T[] } } } | undefined): T {
+  if (value === undefined) throw Error();
+  return value.a.b.c[0];
+}
+const number = leaf({ a: { b: { c: { d: 1 } } } });
+const text = entry({ a: { b: { c: ['word'] } } });
+console.log(number.toFixed(), text.toUpperCase());
+
+class Getter {
+  get value() {
+    do { return 7; } while (false);
+  }
+}
+console.log(new Getter().value);
+
+const numericKeys: Record<number, string> = { 1: 'one' };
+const knownKey: Record<1, string> = numericKeys;
+console.log(knownKey[1]);

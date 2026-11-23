@@ -1,0 +1,6 @@
+function tuple<T extends unknown[]>(...xs: T): T { return xs; }
+const t = tuple(1, "a");
+const [n, s] = t;
+const nn: number = n;
+const ss: string = s;
+console.log(nn, ss);

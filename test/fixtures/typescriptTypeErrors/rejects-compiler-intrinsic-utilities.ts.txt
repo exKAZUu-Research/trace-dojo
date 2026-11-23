@@ -1,0 +1,16 @@
+const arrayValue = [1].values().next().value;
+console.log(arrayValue.toFixed());
+const setValue = new Set([1]).values().next().value;
+const invalidString: string = setValue;
+const mapValue = new Map([["a", 1]]).values().next().value;
+console.log(mapValue.toFixed());
+const regexValue = "a".matchAll(/a/g).next().value;
+console.log(regexValue.length);
+function street<C extends string>(colors: C[], defaultColor?: NoInfer<C>) {}
+street(["red", "green"], "blue");
+function only<T>(value: NoInfer<T>): T {return value;}
+const n: number = only(1);
+function nested<T>(value: T, other: NoInfer<T[]>): T {return value;}
+nested(1, ["wrong"]);
+function optional<T>(value: T, other: NoInfer<T | undefined>): T {return value;}
+optional(1, "wrong");

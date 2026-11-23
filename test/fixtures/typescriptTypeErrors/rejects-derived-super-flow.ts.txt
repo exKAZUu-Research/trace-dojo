@@ -1,0 +1,6 @@
+class SuperFlowBase { constructor(public value = 1) {} }
+class OneSuperBranch extends SuperFlowBase { constructor(flag: boolean) { if (flag) super(); console.log(this.value); } }
+class OtherSuperBranch extends SuperFlowBase { constructor(flag: boolean) { if (flag) super(); else console.log(this.value); } }
+class BeforeSuperBranch extends SuperFlowBase { constructor(flag: boolean) { console.log(this.value); if (flag) super(); else super(); } }
+class NestedSuperArrow extends SuperFlowBase { constructor() { const call = () => super(); call(); console.log(this.value); } }
+class ReadingSuperArgument extends SuperFlowBase { constructor() { super(this.value); } }

@@ -66,8 +66,8 @@ const BYTE_ORDERS: Record<string, { little: boolean; native: boolean }> = {
 };
 
 /** Parses a struct format as CPython's prepare_s does, laying its items out with their offsets. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows prepare_s, including native alignment.
-// code-gauge-allow functionNcss 31 -- Follows prepare_s with each item budgeted before allocation.
+// code-gauge-allow functionCognitiveComplexity -- Follows prepare_s, including native alignment.
+// code-gauge-allow functionNcss -- Follows prepare_s with each item budgeted before allocation.
 function parseFormat(format: string): Layout {
   const order = BYTE_ORDERS[format[0]] ?? BYTE_ORDERS['@'];
   const codes = order.native ? NATIVE_CODES : STANDARD_CODES;

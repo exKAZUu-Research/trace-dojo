@@ -1,0 +1,23 @@
+class Dog { speak(): string { return 'woof'; } }
+class Cat { speak(): string { return 'meow'; } }
+function say(pet: Dog | Cat): string { return pet instanceof Cat ? 'cat-' + pet.speak() : pet.speak(); }
+console.log(say(new Dog()), say(new Cat()));
+class Kitten extends Cat { purr() { return 'p'; } }
+function f(x: Dog | Kitten) { if (x instanceof Cat) return x.purr(); return x.speak(); }
+console.log(f(new Kitten()), f(new Dog()));
+interface I { m: string }
+class C { get m(): string { return 'c'; } }
+function g(x: I | C) { return x instanceof C ? 0 : x.m; }
+console.log(g({ m: 'i' }));
+function h(x: Map<string, number> | string | number[]) { if (x instanceof Map) return x.size; if (x instanceof Array) return x.length; return x.length; }
+console.log(h('abc'), h([1]));
+class Box<T> { constructor(public v: T) {} }
+function k(x: Box<number> | number) { return x instanceof Box ? x.v : x; }
+console.log(k(new Box(3)), k(4));
+function e(x: unknown) { if (x instanceof Error) return x.message; return 'no'; }
+console.log(e(new Error('m')));
+class Err extends Error {}
+function e2(x: Err | string) { return x instanceof Error ? x.message : x; }
+console.log(e2('s'));
+function e3(x: { speak(): string } | Cat) { if (x instanceof Cat) return 'cat'; return x.speak(); }
+console.log(e3(new Dog()));

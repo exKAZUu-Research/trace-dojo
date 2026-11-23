@@ -1,0 +1,46 @@
+get;DivisionByZeroError
+get;DivisionByZeroError
+DivisionByZeroError:Division by zero
+TypeError:Unsupported operand types: int - array
+Error:Cannot modify readonly property ReadOnlyValue::$value
+DivisionByZeroError:Division by zero
+
+Warning: Undefined array key "element" in /main.php on line 29
+DivisionByZeroError
+
+Warning: Undefined array key "nested" in /main.php on line 30
+
+Warning: Undefined array key "element" in /main.php on line 30
+DivisionByZeroError
+
+Warning: Undefined variable $absent in /main.php on line 31
+DivisionByZeroError
+array(2) {
+  ["element"]=>
+  NULL
+  ["nested"]=>
+  array(1) {
+    ["element"]=>
+    NULL
+  }
+}
+NULL
+
+Warning: Undefined array key "element" in /main.php on line 38
+DivisionByZeroError
+
+Warning: Undefined array key "element" in /main.php on line 39
+DivisionByZeroError
+array(1) {
+  ["element"]=>
+  NULL
+}
+array(1) {
+  ["element"]=>
+  NULL
+}
+NULL
+array(1) {
+  ["changed"]=>
+  int(5)
+}

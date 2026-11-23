@@ -1,0 +1,4 @@
+
+Fatal error: I::X cannot override final constant J::X in /main.php on line 1
+Stack trace:
+#0 {main}

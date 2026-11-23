@@ -1,0 +1,15 @@
+type WithFallback<O, Z, P extends (Z extends true ? keyof O : keyof O | 'fallback')> = P;
+type OneBranch<O, Z, P extends (Z extends true ? keyof O : never)> = P;
+type TestsOpaqueValue<O, Z, P extends (Z extends true ? keyof O : O)> = P;
+type DifferentKeys<O, Z, P extends (Z extends true ? keyof O : 'other')> = P;
+type Wrong<T, K extends keyof T, Z> = T[K] extends {key: 'x'} ? WithFallback<T[K], Z, 'fallback'> : never;
+type Missing<T, K extends keyof T, Z> = T[K] extends {key: 'x'} ? WithFallback<T[K], Z, 'missing'> : never;
+type Absent<T, K extends keyof T, Z> = T[K] extends {key: 'x'} ? OneBranch<T[K], Z, 'key'> : never;
+type WrongPart<T, K extends keyof T, Z> = T[K] extends {key: 'x'} ? TestsOpaqueValue<T[K], Z, 'key'> : never;
+type Either<T, K extends keyof T, Z> = T[K] extends {key: 'x'} ? DifferentKeys<T[K], Z, 'key'> : never;
+type Distributive<O, Z, P extends (Z extends true ? keyof O | Z : keyof O)> = P;
+type Inferred<O, Z, P extends (Z extends infer W ? keyof O : keyof O)> = P;
+type UsesCheck<T, K extends keyof T, Z> =
+  T[K] extends {key: 'x'} ? Distributive<T[K], Z, 'key'> : never;
+type UsesInfer<T, K extends keyof T, Z> =
+  T[K] extends {key: 'x'} ? Inferred<T[K], Z, 'key'> : never;

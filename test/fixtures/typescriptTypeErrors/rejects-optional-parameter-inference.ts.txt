@@ -1,0 +1,7 @@
+type Arg<F> = F extends (value: infer U) => void ? U : never;
+const required: Arg<(value: string) => void> = undefined;
+const optional: Arg<(value?: number) => void> = 'other';
+function withDefault(value = 5) {}
+const fallback: Arg<typeof withDefault> = 'other';
+type FirstAndTail<F> = F extends (first: infer T, ...tail: infer U) => void ? [T, U] : never;
+const rest: FirstAndTail<(...items: string[]) => void> = ['a', [1]];

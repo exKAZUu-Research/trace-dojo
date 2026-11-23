@@ -1,0 +1,14 @@
+(13,5): error TS2345: Argument of type '1' is not assignable to parameter of type 'never'.
+(14,5): error TS2345: Argument of type 'number' is not assignable to parameter of type 'boolean'.
+(16,5): error TS2345: Argument of type 'string' is not assignable to parameter of type 'boolean'.
+(20,3): error TS2349: This expression is not callable.
+  Each member of the union type 'I' has signatures, but none of those signatures are compatible with each other.
+(21,9): error TS2322: Type 'string | number' is not assignable to type 'boolean'.
+  Type 'string' is not assignable to type 'boolean'.
+(22,3): error TS2554: Expected 2 arguments, but got 1.
+(24,9): error TS2322: Type 'string | boolean' is not assignable to type 'boolean'.
+  Type 'string' is not assignable to type 'boolean'.
+(25,5): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+(26,5): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type '1' is not assignable to parameter of type 'never'.

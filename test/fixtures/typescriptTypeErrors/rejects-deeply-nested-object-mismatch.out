@@ -1,0 +1,3 @@
+(4,9): error TS2322: Type 'A' is not assignable to type 'B'.
+  The types of 'x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x' are incompatible between these types.
+    Type 'string' is not assignable to type 'number'.

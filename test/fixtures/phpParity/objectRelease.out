@@ -1,0 +1,29 @@
+dtor p
+int(1)
+dtor a
+dtor b
+int(2)
+dtor c
+int(2)
+int(0)
+dtor p
+dtor q
+dtor e1
+dtor e2
+dtor f1
+dtor f2
+dtor f3
+dtor ga
+dtor gb
+5
+object(A)#2 (0) {
+}
+bool(true)
+bool(true)
+object(N)#2 (1) {
+  ["v"]=>
+  int(1)
+}
+dtor h
+dtor hc
+end

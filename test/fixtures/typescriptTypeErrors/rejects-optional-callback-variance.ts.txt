@@ -1,0 +1,4 @@
+function expectsOptional(callback: (value?: number) => void): void {}
+expectsOptional((value: number) => console.log(value));
+const optionalTarget: (value?: number) => void = (value: number) => console.log(value);
+const optionalProperty: {callback: (value?: number) => void} = {callback: (value: number) => console.log(value)};

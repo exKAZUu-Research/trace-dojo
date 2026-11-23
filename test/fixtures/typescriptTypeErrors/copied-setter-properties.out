@@ -1,0 +1,6 @@
+(4,7): error TS2322: Type 'undefined' is not assignable to type 'number'.
+(5,7): error TS2322: Type 'undefined' is not assignable to type 'number'.
+(6,1): error TS2322: Type '1' is not assignable to type 'undefined'.
+(7,1): error TS2322: Type '2' is not assignable to type 'undefined'.
+(13,7): error TS2322: Type 'undefined' is not assignable to type 'number'.
+(14,7): error TS2322: Type 'undefined' is not assignable to type 'number'.

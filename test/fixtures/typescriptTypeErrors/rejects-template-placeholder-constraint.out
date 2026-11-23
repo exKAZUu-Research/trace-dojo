@@ -1,0 +1,17 @@
+(1,13): error TS2322: Type '{ x: 1; }' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+(2,22): error TS2322: Type 'U' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+(4,33): error TS2322: Type 'U' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+  Type 'object' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+(5,15): error TS2322: Type 'symbol' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+(6,15): error TS2322: Type 'unknown' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+(9,15): error TS2322: Type 'string | {}' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+  Type '{}' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+(12,16): error TS2322: Type 'void' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+(13,16): error TS2322: Type 'string[]' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+(15,19): error TS2322: Type 'keyof O' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+  Type 'string | number | symbol' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+    Type 'symbol' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+(18,40): error TS2322: Type 'K' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+  Type 'keyof T' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+    Type 'string | number | symbol' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+      Type 'symbol' is not assignable to type 'string | number | bigint | boolean | null | undefined'.

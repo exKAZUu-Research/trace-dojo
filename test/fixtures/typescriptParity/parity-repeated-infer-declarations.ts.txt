@@ -1,0 +1,30 @@
+type Later<T> = T extends [infer U, infer U extends string] ? U : 'no';
+type Earlier<T> = T extends [infer U extends string, infer U] ? U : 'no';
+const a: Later<[1, 'a']> = 'no';
+const b: Earlier<[1, 'a']> = 'no';
+const c: Later<['c', 'd']> = 'c';
+type S = string;
+type Identical<T> = T extends [infer U extends S, infer U extends string] ? U : 'no';
+const d: Identical<['a', 'b']> = 'b';
+type InRest<T> = T extends [infer U, [...infer U]] ? U : 'no';
+const e: InRest<[1, [2]]> = 'no';
+const f: InRest<[[1], [2]]> = [1];
+type Template<T> = T extends [infer U, `${infer U}`] ? U : 'no';
+const g: Template<[1, 'a']> = 'no';
+const h: Template<['a', 'b']> = 'a';
+type Named<T> = T extends [first: infer U, ...last: infer U] ? U : 'no';
+const n: Named<[1, 2]> = 'no';
+type Box<T extends string> = { value: T };
+type Referenced<T> = T extends [infer U, Box<infer U>] ? U : 'no';
+const i: Referenced<[1, Box<'a'>]> = 'no';
+console.log(a, b, c, d, e, f, g, h, n, i);
+
+type Linked<A extends string, B extends A> = [A, B];
+type ThroughLink<T> = T extends Linked<(infer U), infer U> ? U : 'no';
+const linked: ThroughLink<['same', 'same']> = 'same';
+type Nested<T> = T extends [infer U, infer U extends string]
+  ? U extends infer U extends 'inner' ? U : 'outer'
+  : 'unmatched';
+const nested: Nested<['outer', 'outer']> = 'outer';
+const nestedMatch: Nested<['inner', 'inner']> = 'inner';
+console.log(linked, nested, nestedMatch);

@@ -1,0 +1,14 @@
+const fns: [string, any][] = [
+  ['push', [].push], ['splice', [].splice], ['concat', [].concat], ['reduce', [].reduce], ['indexOf', [].indexOf],
+  ['max', Math.max], ['hypot', Math.hypot], ['stringify', JSON.stringify], ['parse', JSON.parse], ['log', console.log],
+  ['assign', Object.assign], ['from', Array.from], ['of', Array.of], ['parseInt', parseInt], ['toString', (1).toString],
+  ['padStart', ''.padStart], ['replace', ''.replace], ['fromCharCode', String.fromCharCode], ['raw', String.raw],
+  ['Map', Map], ['Set', Set], ['Array', Array], ['Object', Object], ['Error', Error], ['String', String], ['Number', Number],
+  ['Symbol', Symbol], ['BigInt', BigInt], ['RegExp', RegExp], ['mapset', new Map().set], ['groupBy', Object.groupBy],
+  ['defineProperty', Object.defineProperty], ['create', Object.create], ['fill', [].fill], ['at', [].at], ['flat', [].flat],
+  ['toSorted', [].toSorted], ['with', [].with], ['localeCompare', ''.localeCompare], ['normalize', ''.normalize],
+  ['split', ''.split], ['slice', ''.slice], ['substr', ''.substr], ['isArray', Array.isArray],
+  ['dir', console.dir], ['table', console.table], ['error', console.error], ['assert', console.assert], ['count', console.count],
+  ['bind', (() => 1).bind], ['call', (() => 1).call], ['apply', (() => 1).apply],
+];
+for (const [n, f] of fns) console.log(n, f.name, f.length);

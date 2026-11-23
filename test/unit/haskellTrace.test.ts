@@ -219,7 +219,7 @@ test('tracing modest loops does not charge garbage collection to program operati
   expect(recording.traceItems.length).toBeGreaterThan(1000);
 });
 
-test('tracing lazy long literals with a turtle uses no host recursion', { timeout: 30_000 }, () => {
+test('tracing lazy long literals with a turtle uses no host recursion', () => {
   const source = `main=do\n  t <- newTurtle\n  let xs=[${Array.from({ length: 30_000 }, () => 1).join(',')}]\n  print 1\n  print(head xs)\n  forward t`;
   const recording = traceProgram('haskell', source, source);
   expect(recording.stdout).toBe('1\n1\n');
@@ -939,25 +939,21 @@ make=do
   expect(wildcard.traceItems).toEqual(bare.traceItems);
 });
 
-test.each(['i+200', ''])(
-  'normal demand exposes scalar values and aliases after composite previews: %s',
-  (end) => {
-    const source = scalarAliasesProgram(1000, end);
-    const recording = traceProgram('haskell', source, source);
-    expect(recording.uncaughtException).toBeUndefined();
-    expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${(i + 1) * 2}\n`).join(''));
-    expect(recording.traceItems).toHaveLength(5001);
-    for (const line of [2, 4, 5, 6]) {
-      const last = recording.traceItems.findLast((item) => item.line === line);
-      expect(last?.vars.i).toBe(1000);
-      if (line === 6) {
-        expect(last?.vars.n).toBe(2000);
-        expect(last?.vars.copy).toBe(2000);
-      }
+test.each(['i+200', ''])('normal demand exposes scalar values and aliases after composite previews: %s', (end) => {
+  const source = scalarAliasesProgram(1000, end);
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${(i + 1) * 2}\n`).join(''));
+  expect(recording.traceItems).toHaveLength(5001);
+  for (const line of [2, 4, 5, 6]) {
+    const last = recording.traceItems.findLast((item) => item.line === line);
+    expect(last?.vars.i).toBe(1000);
+    if (line === 6) {
+      expect(last?.vars.n).toBe(2000);
+      expect(last?.vars.copy).toBe(2000);
     }
-  },
-  30_000
-);
+  }
+});
 
 test.each(['i+200', ''])('scalar aliases retain assignment views under composite operation quotas: %s', (end) => {
   const source = scalarAliasesProgram(50, end);
@@ -1268,7 +1264,7 @@ main=mapM_ step [1..700]`;
   const assignments = recording.traceItems.filter((item) => item.line === 4);
   expect(assignments).toHaveLength(700);
   for (const [index, item] of assignments.entries()) expect(item.vars.n).toBe(index + 56);
-}, 30_000);
+});
 
 test('expired preview time preserves evaluated loop variables', () => {
   const source = `step :: Int -> IO ()
@@ -1524,7 +1520,7 @@ main=do
   for (const [index, item] of assignments.entries()) {
     if ((index + 1) % 20 !== 0) expect(item.vars.xs).toEqual(Array.from({ length: 3 }, (_, j) => index + j + 1));
   }
-}, 30_000);
+});
 
 test('nested local calls retire their own failed preview work', () => {
   const source = `import Control.Monad

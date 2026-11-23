@@ -1,0 +1,32 @@
+interface Box<T> { value: T }
+class Wrapped<T> { constructor(public value: T) {} }
+type Id<X> = X;
+type Generic<T> = T extends infer U ? Box<Id<U>> : never;
+type ArrayElement<T> = T extends (infer U)[] ? Box<Id<U>> : never;
+type TupleElement<T> = T extends [infer U] ? Box<Id<U>> : never;
+type WrappedTuple<T> = T extends infer U ? Box<[Id<U>]> : never;
+type Constructed<T> = T extends infer U ? Wrapped<Id<U>> : never;
+type Constrained<T> = T extends infer U extends string ? Box<Id<U>> : never;
+type Fixed<T> = string extends infer U ? Box<Id<U>> : never;
+type Pattern<T> = T extends Box<Id<infer U>> ? U : never;
+const text: Generic<string> = { value: 'one' };
+const count: Generic<number> = { value: 2 };
+const array: ArrayElement<string[]> = { value: 'three' };
+const tuple: TupleElement<[string]> = { value: 'four' };
+const wrapped: WrappedTuple<string> = { value: ['five'] };
+const instance: Constructed<string> = new Wrapped('six');
+const constrained: Constrained<string> = { value: 'seven' };
+const fixed: Fixed<number> = { value: 'eight' };
+const pattern: Pattern<{ value: string }> = 'nine';
+console.log(text.value.toUpperCase(), count.value.toFixed(), array.value.toUpperCase(), tuple.value.toUpperCase());
+console.log(wrapped.value[0].toUpperCase(), instance.value.toUpperCase(), constrained.value.toUpperCase(), fixed.value.toUpperCase(), pattern.toUpperCase());
+
+class Base {
+  wrap(value: this) {
+    type Result = Box<this>;
+    const result: Result = { value };
+    return result;
+  }
+}
+class Derived extends Base { extra = 42 }
+console.log(new Derived().wrap(new Derived()).value.extra);

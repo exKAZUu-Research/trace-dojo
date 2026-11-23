@@ -1,6 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
+import type { ProgramExecution, ProgramRun } from '../interpreter/interpreter';
 import { ExecutionLimitError } from '../interpreter/limits';
-import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { Program } from './ast';
 import { parseBash } from './parse';
@@ -9,7 +9,7 @@ import { Shell } from './shell';
 import { TurtleError } from './turtle';
 import { UnsupportedFeatureError } from './unsupported';
 
-// code-gauge-allow duplicateLines 15 -- The interpreter entry points mirror the other languages so callers use one contract.
+// code-gauge-allow duplicateLines -- The interpreter entry points mirror the other languages so callers use one contract.
 export function executeBashProgram(source: string, input?: ProgramInput): ProgramExecution {
   let program: Program;
   try {

@@ -1,0 +1,61 @@
+import type { TraceItem, TraceItemVariable, TurtleTrace } from '../problems/trace';
+import type { SourceDiagnostic } from './diagnostics';
+import type { ExecutionLimitError } from './limits';
+import type { ProgramInput, ProgramOutput } from './programIo';
+import { atomicAnnotationsOf, removeAnnotations, type TraceAnnotation, type TraceOptions } from './traceAnnotations';
+
+export interface ProgramRun extends ProgramOutput {
+  finalBoard: string;
+  /** The turtles that the program's variables still reach when it ends. */
+  finalTurtles: TurtleTrace[];
+  /** The description of the exception that ended the program, if one escaped it. */
+  uncaughtException: string | undefined;
+}
+
+export type ProgramExecution =
+  | { kind: 'compileError'; diagnostics: SourceDiagnostic[] }
+  | { kind: 'limitExceeded'; limit: ExecutionLimitError['limit'] }
+  | ({ kind: 'executed' } & ProgramRun);
+
+/** What an interpreter records while running a model program. */
+export interface ProgramRecording extends ProgramRun {
+  traceItems: TraceItem[];
+  /** The variables of the program's entry point when it ends. */
+  finalVars: TraceItemVariable;
+}
+
+export interface ProgramTrace extends ProgramRecording {
+  /** The program without its atomic annotations (`// atomic`, `# atomic` in Python, Ruby, and Bash, or `-- atomic` in Haskell), whose rows match the lines that trace items refer to. */
+  displayProgram: string;
+}
+
+export interface Interpreter {
+  /** Finds the annotations in line comments, skipping look-alikes in literals and other comments. */
+  findTraceAnnotations: (source: string) => TraceAnnotation[];
+  /** Runs a model program, recording its steps outside the methods its annotations mark atomic. */
+  record: (program: string, trace: TraceOptions, input?: ProgramInput) => ProgramRecording;
+  /** Compiles and runs a learner's program, reporting how it ended. */
+  execute: (source: string, input?: ProgramInput) => ProgramExecution;
+}
+
+/**
+ * Runs a model program and records its steps outside the methods marked `// atomic` (`# atomic` in Python, Ruby, and Bash, `-- atomic` in Haskell).
+ *
+ * @param program The program to run, with every blank filled in.
+ * @param displayProgram The program shown to learners, whose blanks may be placeholders on the same rows.
+ */
+export function traceWith(
+  interpreter: Interpreter,
+  program: string,
+  displayProgram: string,
+  input?: ProgramInput
+): ProgramTrace {
+  return {
+    ...interpreter.record(
+      program,
+      { atomicAnnotations: atomicAnnotationsOf(program, interpreter.findTraceAnnotations(program)) },
+      input
+    ),
+    displayProgram: removeAnnotations(displayProgram, interpreter.findTraceAnnotations(displayProgram)),
+  };
+}

@@ -1,0 +1,16 @@
+(3,16): error TS2339: Property 'x' does not exist on type '{ y: number; }'.
+(4,67): error TS2339: Property 'x' does not exist on type 'Omit<this, "read">'.
+(7,31): error TS2339: Property 'm' does not exist on type '{ z: number; }'.
+(7,37): error TS2339: Property 'q' does not exist on type '{ z: number; }'.
+(7,43): error TS2339: Property 's' does not exist on type '{ z: number; }'.
+(9,69): error TS2339: Property 'y' does not exist on type 'Omit<this, "read">'.
+(10,96): error TS2339: Property 'm' does not exist on type 'Omit<this, "g" | "m" | "read">'.
+(10,101): error TS2339: Property 'g' does not exist on type 'Omit<this, "g" | "m" | "read">'.
+(11,61): error TS2339: Property 'm' does not exist on type 'Omit<T, "g" | "m" | "read">'.
+(11,66): error TS2339: Property 'g' does not exist on type 'Omit<T, "g" | "m" | "read">'.
+(11,76): error TS2339: Property 'p' does not exist on type 'Omit<T, "g" | "m" | "read">'.
+(13,31): error TS2339: Property 'm' does not exist on type '{ z: number; w: number; }'.
+(13,37): error TS2339: Property 'n' does not exist on type '{ z: number; w: number; }'.
+(14,75): error TS2339: Property 'm' does not exist on type '{ z: number; w: number; }'.
+(15,65): error TS2339: Property 'm' does not exist on type '{ z: number; } | { k: number; }'.
+  Property 'm' does not exist on type '{ z: number; }'.

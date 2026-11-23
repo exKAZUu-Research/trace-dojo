@@ -1,0 +1,19 @@
+type ElementOf<A> = A extends readonly (infer E)[] ? E : never;
+function first<T>(xs: T[]): ElementOf<T[]> { return xs[0]; }
+function bad<T>(xs: T[]): ElementOf<T[]> { return 1; }
+type IsArr<A> = A extends unknown[] ? "yes" : "no";
+function f1<T>(x: T[]): IsArr<T[]> { return "yes"; }
+function f2<T>(x: T[]): IsArr<T[]> { return "no"; }
+type IsStr<A> = A extends string[] ? 1 : 2;
+function f3<T extends string>(x: T[]): IsStr<T[]> { return 1; }
+function f4<T>(x: T[]): IsStr<T[]> { return 2; }
+type NotArr<A> = A extends number ? 1 : 2;
+function f5<T>(x: T[]): NotArr<T[]> { return 2; }
+function f6<T>(x: T[]): NotArr<T[]> { return 1; }
+function d1<T>(xs: T[][][]): T[] { return xs.flat(2); }
+function d2<T>(xs: T[][][]): T[] { return xs.flat(); }
+type Box<T> = { v: T };
+type Unbox<B> = B extends Box<infer V> ? V : never;
+function u<T>(b: Box<T>): Unbox<Box<T>> { return b.v; }
+function w<T>(b: [T]): [T] extends [string] ? 1 : 2 { return 1; }
+console.log(first([1]), f1([1]), f3(["a"]), f5([1]), d1([[[1]]]), u({ v: 1 }));

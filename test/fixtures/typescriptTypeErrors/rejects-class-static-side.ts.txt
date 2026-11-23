@@ -1,0 +1,3 @@
+class A { static create(): A { return new A(); } }
+class B extends A { static create(x: number): B { return new B(); } }
+console.log(B.create(1));

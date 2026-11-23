@@ -1,0 +1,4 @@
+
+Fatal error: Declaration of Example\ChildClass::method(Closure $callback) must be compatible with Example\ParentClass::method(callable $callback) in /main.php on line 5
+Stack trace:
+#0 {main}

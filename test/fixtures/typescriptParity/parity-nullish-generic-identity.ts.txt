@@ -1,0 +1,4 @@
+function f<T extends string | null>(x: T) { if (x == null) { const y: T = x; console.log(y); } }
+function g<T extends string | null>(x: T) { const h = (y: T) => "fallback"; return x ?? h(x); }
+f(null);
+console.log(g(null));

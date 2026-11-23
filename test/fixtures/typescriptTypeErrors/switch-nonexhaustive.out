@@ -1,0 +1,10 @@
+(3,13): error TS2454: Variable 'b' is used before being assigned.
+(7,10): error TS2454: Variable 'result' is used before being assigned.
+(12,10): error TS2454: Variable 'result' is used before being assigned.
+(16,48): error TS2678: Type '2' is not comparable to type '1'.
+(17,10): error TS2454: Variable 'result' is used before being assigned.
+(21,21): error TS2678: Type '2' is not comparable to type '1'.
+(22,10): error TS2454: Variable 'result' is used before being assigned.
+(27,10): error TS2454: Variable 'result' is used before being assigned.
+(31,21): error TS2678: Type '2' is not comparable to type '1'.
+(32,10): error TS2454: Variable 'result' is used before being assigned.

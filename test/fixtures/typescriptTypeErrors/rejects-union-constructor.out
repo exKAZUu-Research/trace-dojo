@@ -1,0 +1,10 @@
+(8,11): error TS2511: Cannot create an instance of an abstract class.
+(9,11): error TS2511: Cannot create an instance of an abstract class.
+(10,11): error TS2673: Constructor of class 'Priv' is private and only accessible within the class declaration.
+(11,34): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+(12,11): error TS2348: Value of type 'typeof Left | typeof Right' is not callable. Did you mean to include 'new'?
+(13,36): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'boolean' is not assignable to parameter of type 'string'.
+(14,7): error TS2322: Type 'Left | Right' is not assignable to type 'Left'.
+  Property 'left' is missing in type 'Right' but required in type 'Left'.

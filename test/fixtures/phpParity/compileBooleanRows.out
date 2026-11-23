@@ -1,0 +1,27 @@
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 4
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 5
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 7
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 7
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 9
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 11
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 13
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 13
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 17
+begin;bool(false)
+bool(false)
+bool(false)
+bool(true)
+bool(true)
+bool(true)
+bool(false)
+bool(false)
+bool(false)

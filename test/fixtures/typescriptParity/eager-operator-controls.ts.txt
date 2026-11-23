@@ -1,0 +1,11 @@
+type PlainKeys<U extends Array<keyof U>> = U;
+type LazyKeys<U extends {name: keyof (U & string)}> = U;
+type LazyProperty<U extends {name: (U & string)['length']}> = U;
+type LazyMapping<U extends {name: { [K in keyof (U & string)]: unknown }}> = U;
+type LazyFunction<U extends () => (U & number)['toString']> = U;
+type KeyOfSelf<U extends { [K in keyof U]: unknown }> = U;
+type ArrayDeferred<V, U extends Array<V extends true ? (U & string)[] : {}>> = U;
+type TupleDeferred<V, U extends [V extends true ? (U & string)[] : {}]> = U;
+type ErasedDeferred<V, U extends [V extends true ? (U & string)[] : {}] | any> = U;
+
+console.log('done');

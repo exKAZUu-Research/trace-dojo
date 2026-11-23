@@ -1,0 +1,2 @@
+const moduleObject: object = this;
+console.log(Object.keys(moduleObject));

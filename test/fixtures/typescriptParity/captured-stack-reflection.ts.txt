@@ -1,0 +1,13 @@
+const ErrorWithCapture: any = Error;
+const target = {};
+ErrorWithCapture.captureStackTrace(target);
+const descriptor = Object.getOwnPropertyDescriptor(target, 'stack')!;
+console.log(Object.hasOwn(target, 'stack'), Object.keys(target).length, typeof descriptor.get, typeof descriptor.set);
+console.log(descriptor.enumerable, descriptor.configurable);
+const prior = { payload: 1, stack: 'old' };
+ErrorWithCapture.captureStackTrace(prior);
+console.log(Object.keys(prior).join(','), delete (prior as Partial<typeof prior>).stack, Object.hasOwn(prior, 'stack'));
+for (const locked of [Object.preventExtensions({ stack: 'old' }), Object.defineProperty({}, 'stack', { value: 'old' })]) {
+  try { ErrorWithCapture.captureStackTrace(locked); }
+  catch (error) { if (error instanceof Error) console.log(error.name, error.message); }
+}

@@ -33,7 +33,7 @@ function exp2(x: number): number {
   return pow(2, x);
 }
 
-const UNARY: Record<string, (x: number) => number> = {
+export const UNARY: Record<string, (x: number) => number> = {
   acos: Math.acos,
   asin: Math.asin,
   atan: Math.atan,
@@ -65,7 +65,7 @@ const UNARY: Record<string, (x: number) => number> = {
   nearbyint: roundHalfEven,
 };
 
-// code-gauge-allow functionCognitiveComplexity 18 -- C special values, exact powers, and fractional modes require distinct rounding paths.
+// code-gauge-allow functionCognitiveComplexity -- C special values, exact powers, and fractional modes require distinct rounding paths.
 function pow(x: number, y: number): number {
   if (x === 1 || y === 0 || (x === -1 && !Number.isFinite(y) && !Number.isNaN(y))) return 1;
   if (!Number.isFinite(x) || !Number.isFinite(y) || x === 0) return x ** y;
@@ -137,12 +137,12 @@ function nextAfter(x: number, y: number, isFloat = false): number {
   return view.getFloat64(0);
 }
 
-const BINARY: Record<string, (x: number, y: number) => number> = {
+export const BINARY: Record<string, (x: number, y: number, isFloat?: boolean) => number> = {
   atan2: Math.atan2,
   pow,
   fmod: (x, y) => x % y,
   remainder: (x, y) => remainderParts(x, y).value,
-  hypot: Math.hypot,
+  hypot: (x, y) => Math.hypot(x, y),
   fmin: (x, y) => (Number.isNaN(x) ? y : Number.isNaN(y) ? x : Math.min(x, y)),
   fmax: (x, y) => (Number.isNaN(x) ? y : Number.isNaN(y) ? x : Math.max(x, y)),
   fdim: (x, y) => (x > y ? x - y : Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : 0),
@@ -301,7 +301,7 @@ for (const [name, fn] of Object.entries(UNARY)) {
 for (const [name, fn] of Object.entries(BINARY)) {
   MATH_FUNCTIONS[name] = (_runtime, [x, y]) => fn(x as number, y as number);
   MATH_FUNCTIONS[`${name}l`] = MATH_FUNCTIONS[name];
-  MATH_FUNCTIONS[`${name}f`] = (_runtime, [x, y]) => Math.fround(fn(x as number, y as number));
+  MATH_FUNCTIONS[`${name}f`] = (_runtime, [x, y]) => Math.fround(fn(x as number, y as number, true));
 }
 
 for (const name of [
@@ -328,7 +328,6 @@ MATH_FUNCTIONS.scalblnl = MATH_FUNCTIONS.ldexp;
 MATH_FUNCTIONS.remquof = (runtime, args, types, row) =>
   Math.fround(MATH_FUNCTIONS.remquo(runtime, args, types, row) as number);
 
-MATH_FUNCTIONS.nextafterf = (_runtime, [x, y]) => nextAfter(x as number, y as number, true);
 MATH_FUNCTIONS.nexttoward = MATH_FUNCTIONS.nextafter;
 MATH_FUNCTIONS.nexttowardf = MATH_FUNCTIONS.nextafterf;
 MATH_FUNCTIONS.nexttowardl = MATH_FUNCTIONS.nextafterl;

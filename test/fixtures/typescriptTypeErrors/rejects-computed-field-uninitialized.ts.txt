@@ -1,0 +1,18 @@
+const key = "x";
+class A { [key]: number; }
+class B { ["y"]: number; }
+class C { [key]: number; constructor() { this[key] = 1; } }
+class D { [key]: number; constructor() { this.x = 1; } }
+class E { ["y"]: number; constructor() { this["y"] = 1; } }
+class F { [key]: number = 1; }
+class G { [key]?: number; }
+class H { [key]!: number; }
+class J { [0]: number; }
+const n = 1;
+class K { [n]: number; constructor() { this[1] = 2; } }
+const sym = Symbol();
+class L { [sym]: number; }
+class M { x: number; constructor() { this[key] = 1; } }
+let lk = "z";
+class N { [lk]: number; }
+console.log(new A().x, B, C, D, E, F, G, H, J, K, L, M, N);

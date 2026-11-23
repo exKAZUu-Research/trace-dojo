@@ -1,0 +1,12 @@
+(3,31): error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type 'Numeric & Record<"1e3", unknown>'.
+  Property '0' does not exist on type 'Numeric & Record<"1e3", unknown>'.
+(6,30): error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type 'Numeric & Record<"01", unknown>'.
+  Property '0' does not exist on type 'Numeric & Record<"01", unknown>'.
+(10,22): error TS2339: Property 'other' does not exist on type 'Numeric'.
+  Property 'other' does not exist on type '{ [n: number]: string; }'.
+(14,11): error TS2322: Type 'Numeric' is not assignable to type '{ other: number; }'.
+  Property 'other' is missing in type '{ [n: number]: string; }' but required in type '{ other: number; }'.
+(21,11): error TS2322: Type '{ a?: number | undefined; } | { b: string; }' is not assignable to type '{ b: string; }'.
+  Property 'b' is missing in type '{ a?: number | undefined; }' but required in type '{ b: string; }'.
+(30,34): error TS2339: Property 'c' does not exist on type '{ a: number; } | { b: string; }'.
+  Property 'c' does not exist on type '{ a: number; }'.

@@ -1,0 +1,2 @@
+(1,68): error TS2367: This comparison appears to be unintentional because the types '1 | null' and '2 | undefined' have no overlap.
+(2,73): error TS2367: This comparison appears to be unintentional because the types '1 | null' and '2 | undefined' have no overlap.

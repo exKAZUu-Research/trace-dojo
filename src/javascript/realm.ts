@@ -1,4 +1,5 @@
 import { defineAsyncGeneratorBuiltins } from './asyncGenerators';
+import { orderBuiltinMembers } from './builtinOrder';
 import { defineGeneratorBuiltins } from './generators';
 import { defineFunctionProperties } from './memberProperties';
 import { definePromiseBuiltins } from './promises';
@@ -17,10 +18,12 @@ import { defineRegExpBuiltins } from './realmRegExp';
 import { defineStringBuiltins } from './realmStrings';
 import { defineStructuredClone } from './realmStructuredClone';
 import type { Runtime } from './runtime';
-import { JsFunction, JsObject, type Key, type NativeFunction, Scope, type Value } from './values';
+import { JsArray, JsFunction, JsObject, type Key, type NativeFunction, Scope, type Value } from './values';
 
 export type ErrorName =
   | 'Error'
+  | 'EvalError'
+  | 'URIError'
   | 'TypeError'
   | 'RangeError'
   | 'ReferenceError'
@@ -32,7 +35,9 @@ export type ErrorName =
 export interface Realm {
   objectPrototype: JsObject;
   functionPrototype: JsObject;
+  argumentsCalleeThrower?: JsFunction;
   arrayPrototype: JsObject;
+  arrayValuesIterator: JsFunction;
   stringPrototype: JsObject;
   numberPrototype: JsObject;
   booleanPrototype: JsObject;
@@ -40,6 +45,8 @@ export interface Realm {
   bigintPrototype: JsObject;
   promisePrototype: JsObject;
   regExpPrototype: JsObject;
+  regExpConstructor?: JsFunction;
+  regExpExec?: JsFunction;
   datePrototype: JsObject;
   mapPrototype: JsObject;
   setPrototype: JsObject;
@@ -50,6 +57,8 @@ export interface Realm {
    * step through directly; an iterator whose methods the program replaced is stepped through its methods instead.
    */
   hostIteratorMethods: Set<JsFunction>;
+  /** The builtin `String.raw`, which a program may replace. */
+  stringRaw?: JsFunction;
   /** The symbols `Symbol.for` registered in this run, by key, which end with the run. */
   symbolRegistry: Map<string, symbol>;
   /** `%GeneratorPrototype%`, with the methods every generator object has. */
@@ -65,7 +74,7 @@ export interface Realm {
 
 /** Creates builtins without charging the run, since a program cannot avoid them. */
 export class RealmBuilder {
-  readonly realm: Realm;
+  readonly realm: Omit<Realm, 'arrayValuesIterator'>;
 
   constructor(readonly runtime: Runtime) {
     // oxlint-disable-next-line unicorn/no-null -- Object.prototype ends every prototype chain.
@@ -75,11 +84,17 @@ export class RealmBuilder {
     const asyncIteratorPrototype = new JsObject(objectPrototype);
     this.realm = {
       objectPrototype,
-      functionPrototype: new JsObject(objectPrototype),
-      arrayPrototype: new JsObject(objectPrototype),
-      stringPrototype: new JsObject(objectPrototype),
-      numberPrototype: new JsObject(objectPrototype),
-      booleanPrototype: new JsObject(objectPrototype),
+      // Function.prototype is itself a function that returns `undefined`, as calling it shows.
+      functionPrototype: new JsFunction(objectPrototype, {
+        kind: 'native',
+        run: () => {},
+        isConstructor: false,
+      }),
+      // Array.prototype is itself an empty array, as `Array.isArray(Array.prototype)` shows.
+      arrayPrototype: new JsArray(objectPrototype, []),
+      stringPrototype: Object.assign(new JsObject(objectPrototype), { primitive: '' }),
+      numberPrototype: Object.assign(new JsObject(objectPrototype), { primitive: 0 }),
+      booleanPrototype: Object.assign(new JsObject(objectPrototype), { primitive: false }),
       symbolPrototype: new JsObject(objectPrototype),
       bigintPrototype: new JsObject(objectPrototype),
       promisePrototype: new JsObject(objectPrototype),
@@ -98,6 +113,8 @@ export class RealmBuilder {
         TypeError: new JsObject(errorPrototype),
         RangeError: new JsObject(errorPrototype),
         ReferenceError: new JsObject(errorPrototype),
+        EvalError: new JsObject(errorPrototype),
+        URIError: new JsObject(errorPrototype),
         SyntaxError: new JsObject(errorPrototype),
         AggregateError: new JsObject(errorPrototype),
         SuppressedError: new JsObject(errorPrototype),
@@ -185,7 +202,7 @@ export function createRealm(runtime: Runtime): Realm {
   defineNodeBuiltins(builder);
   defineArrayBuiltins(builder);
   defineStringBuiltins(builder);
-  defineIteratorBuiltins(builder);
+  const arrayValuesIterator = defineIteratorBuiltins(builder);
   defineRegExpBuiltins(builder);
   defineGeneratorBuiltins(builder);
   definePromiseBuiltins(builder);
@@ -197,5 +214,7 @@ export function createRealm(runtime: Runtime): Realm {
   defineIteratorHelpers(builder);
   defineAsyncBuiltins(builder);
   defineDateBuiltins(builder);
-  return builder.realm;
+  const realm = Object.assign(builder.realm, { arrayValuesIterator });
+  orderBuiltinMembers(realm);
+  return realm;
 }

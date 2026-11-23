@@ -1,0 +1,73 @@
+function options({ outer: { value = 1 } = {} } = { outer: {} }) {
+  return value;
+}
+
+function pair({ outer: { first = 1, second = 2 } = {} } = { outer: { second: 4 } }) {
+  return first + second;
+}
+
+function tuple({ outer: [one = 1, two = 'ok'] = [] } = { outer: [] }) {
+  return [one, two];
+}
+
+function later({ outer: { value = 1 } } = { outer: {} }, next = value + 1): number {
+  return value + next;
+}
+
+const flag = Boolean(console.log);
+function union({ outer: { chosen, other } } = { outer: flag ? { chosen: 3 } : { other: 4 } }) {
+  return [chosen, other];
+}
+
+let { outer: { seed = 7 } = {} } = {};
+seed += 1;
+console.log(options(), options({ outer: { value: 2 } }), options({ outer: { other: true } }));
+console.log(pair(), pair({ outer: { second: 2 } }), tuple(), later(), later({ outer: {} }, 5), union(), seed);
+
+const typed: (options?: { outer?: { value?: number } }) => number = ({ outer: { value = 1 } = {} } = { outer: {} }) => value;
+const generic = <T>({ outer: { value = 1 } = {} } = { outer: {} }) => value;
+const omittedOuter = ({ outer: { value = 1 } = {} } = {}) => value;
+class NestedDefaults {
+  getValue({ outer: { value = 1 } = {} } = { outer: {} }) {
+    return value;
+  }
+}
+console.log(typed(), generic(), omittedOuter(), new NestedDefaults().getValue());
+
+function requiredOuter({ outer: { value = 1 } } = { outer: { value: 2 } }) {
+  return value;
+}
+function fromArray([{value = 3}] = [{value: 4}]) {
+  return value;
+}
+const configKey = 'count';
+function computedOuter({ outer: { [configKey]: count = 5 } } = { outer: { count: 6 } }) {
+  return count;
+}
+console.log(requiredOuter({outer: {}}), requiredOuter(), fromArray([{}]), fromArray(), computedOuter({outer: {}}), computedOuter());
+
+function nestedOwnDefault({outer: {value} = {value: 7}} = {outer: {}}): number | undefined {
+  return value;
+}
+function nestedOwnDefaultArray([[value] = [8]] = [[]]): number | undefined {
+  return value;
+}
+function partialBranch({outer: {flag, text} = {flag: false, text: 'inner'}} = {outer: {flag: true}}) {
+  return [flag, text];
+}
+console.log(nestedOwnDefault(), nestedOwnDefault({}), nestedOwnDefault({outer: {value: 4}}));
+console.log(nestedOwnDefaultArray(), partialBranch(), partialBranch({}));
+
+function withExtraDefault({outer: {value} = {value: 1}} = {outer: {value: 2, extra: true}}) {
+  return value;
+}
+function onlyExtraDefault({outer: {value} = {value: 1}} = {outer: {extra: true}}) {
+  return value;
+}
+function extendedOuter({outer: {value = 1} = {value: 2}} = {outer: {value: 3, extra: true}}) {
+  return value;
+}
+function restInPattern({value = 1, ...extra} = {value: 2, extra: 3}) {
+  return extra.extra;
+}
+console.log(withExtraDefault(), onlyExtraDefault(), extendedOuter(), restInPattern());

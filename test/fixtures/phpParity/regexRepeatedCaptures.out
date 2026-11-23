@@ -1,0 +1,116 @@
+int(1)
+array(3) {
+  [0]=>
+  array(2) {
+    [0]=>
+    string(18) "/learn/basic-code/"
+    [1]=>
+    int(0)
+  }
+  [1]=>
+  array(2) {
+    [0]=>
+    string(11) "basic-code/"
+    [1]=>
+    int(7)
+  }
+  [2]=>
+  array(2) {
+    [0]=>
+    string(5) "-code"
+    [1]=>
+    int(12)
+  }
+}
+int(1)
+array(3) {
+  [0]=>
+  array(2) {
+    [0]=>
+    string(11) "hello-world"
+    [1]=>
+    int(0)
+  }
+  [1]=>
+  array(2) {
+    [0]=>
+    string(11) "hello-world"
+    [1]=>
+    int(0)
+  }
+  [2]=>
+  array(2) {
+    [0]=>
+    string(6) "-world"
+    [1]=>
+    int(5)
+  }
+}
+int(1)
+array(3) {
+  [0]=>
+  array(2) {
+    [0]=>
+    string(3) "aab"
+    [1]=>
+    int(0)
+  }
+  [1]=>
+  array(2) {
+    [0]=>
+    string(1) "b"
+    [1]=>
+    int(2)
+  }
+  [2]=>
+  array(2) {
+    [0]=>
+    string(1) "b"
+    [1]=>
+    int(2)
+  }
+}
+int(1)
+array(2) {
+  [0]=>
+  array(2) {
+    [0]=>
+    string(3) "aab"
+    [1]=>
+    int(0)
+  }
+  [1]=>
+  array(2) {
+    [0]=>
+    string(1) "b"
+    [1]=>
+    int(2)
+  }
+}
+int(1)
+array(2) {
+  [0]=>
+  array(2) {
+    [0]=>
+    string(3) "bba"
+    [1]=>
+    int(0)
+  }
+  [1]=>
+  array(2) {
+    [0]=>
+    string(1) "a"
+    [1]=>
+    int(2)
+  }
+}
+int(1)
+array(1) {
+  [0]=>
+  array(2) {
+    [0]=>
+    string(2) "2 "
+    [1]=>
+    int(10)
+  }
+}

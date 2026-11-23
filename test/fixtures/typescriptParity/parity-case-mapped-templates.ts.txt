@@ -1,0 +1,18 @@
+type Up = Uppercase<`x${number}`>;
+const a: Up = 'X1';
+const b: Up = 'X1E5';
+type Low = Lowercase<`X${number}`>;
+const c: Low = 'x1';
+const d: Low = 'x1e5';
+type Cap = Capitalize<`item-${string}`>;
+const e: Cap = 'Item-any';
+type CapLead = Capitalize<`${string}-end`>;
+const f: CapLead = 'Abc-end';
+type Unc = Uncapitalize<`Key${number}`>;
+const g: Unc = 'key0x10';
+type UpBig = Uppercase<`id${bigint}`>;
+const h: UpBig = 'ID0XFF';
+type Nested = Uppercase<`a${Lowercase<string>}`>;
+const i: Nested = 'A1';
+const up: Uppercase<`${number}px`> = '10PX';
+console.log(a, b, c, d, e, f, g, h, i, up);

@@ -1,0 +1,47 @@
+function sharedString(x: {[key: string]: number} | {[key: string]: string}): void {
+  const a: number | string = x.foo;
+  const b: number | string = x[1];
+  console.log(a, b);
+}
+function sharedNumber(x: {[key: number]: number} | {[key: number]: string}): void {
+  const a: number | string = x[0];
+  const b: number | string = x['1'];
+  console.log(a, b);
+}
+function withProp(x: {0: string; foo?: string} | {[key: string]: number}): void {
+  const a: number | string = x[0];
+  const b: string | number | undefined = x.foo;
+  const c: string | number | undefined = x['foo'];
+  console.log(a, b, c);
+}
+function tuple(x: [number] | [string, boolean], y: [number] | boolean[]): void {
+  const a: boolean | undefined = x[1];
+  const b: number | boolean = y[1];
+  console.log(a, b);
+}
+const key = Symbol();
+function sym(x: {[key: symbol]: number} | {[key: symbol]: string}): void {
+  const a: number | string = x[key];
+  console.log(a);
+}
+function pattern(x: {[key: `data-${string}`]: number; [key: string]: string | number} | {[key: `data-${string}`]: string}): void {
+  const a: number | string = x['data-foo'];
+  console.log(a);
+}
+type X = ({[key: string]: number} | {[key: number]: string; 0: string})[0];
+type T = ([number] | [string, boolean])[1];
+const x: X = 'b';
+const t: T = undefined;
+function literalObjects(input: boolean): void {
+  const value = input ? { first: 1 } : { second: 'ok' };
+  const result: number | undefined = value['first'];
+  console.log(result);
+}
+sharedString({foo: 's', 1: 'x'});
+sharedNumber({0: 1, 1: 2});
+withProp({0: 'zero'});
+tuple([0], [true, false]);
+sym({[key]: 's'});
+pattern({'data-foo': 5});
+console.log(x, t);
+literalObjects(false);

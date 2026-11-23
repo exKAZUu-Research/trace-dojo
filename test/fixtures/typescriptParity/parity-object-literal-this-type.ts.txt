@@ -1,0 +1,62 @@
+const doubler: { double(): number } & ThisType<{ value: number }> = {
+  double() {
+    return this.value * 2;
+  },
+};
+console.log(doubler.double.call({ value: 4 }));
+
+const obj = { value: 3 };
+Object.defineProperty(obj, "double", {
+  get(): number {
+    return this.value * 2;
+  },
+});
+console.log((obj as { value: number } & { double?: number }).double);
+
+function define<D, M>(desc: { data: D; methods: M & ThisType<D & M> }): D & M {
+  return Object.assign({}, desc.data, desc.methods);
+}
+const made = define({
+  data: { x: 1 },
+  methods: {
+    add(y: number) {
+      return this.x + y;
+    },
+  },
+});
+console.log(made.add(2));
+
+type Outer = { inner: { read(): number } } & ThisType<{ base: number }>;
+const outer: Outer = {
+  inner: {
+    read() {
+      return this.base;
+    },
+  },
+};
+console.log(outer.inner.read.call({ base: 7 }));
+
+const counter: { n: number; inc(): number } = {
+  n: 0,
+  inc() {
+    this.n += 1;
+    return this.n;
+  },
+};
+counter.inc();
+console.log(counter.inc());
+
+const plain = {
+  n: 1,
+  next() {
+    return this.n + 1;
+  },
+};
+console.log(plain.next());
+
+const loose: { m(): string } & ThisType<any> = {
+  m() {
+    return String(this.anything);
+  },
+};
+console.log(loose.m());

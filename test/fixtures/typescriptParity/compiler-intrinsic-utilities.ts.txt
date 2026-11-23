@@ -1,0 +1,21 @@
+type Word = NoInfer<string>;
+const word: Word = "ok";
+function choose<T>(source: T, fallback: NoInfer<T>): T { return source; }
+console.log(choose(word, "fallback"));
+function alone<T>(value: NoInfer<T>): T {return value;}
+const unknownValue: unknown = alone(1);
+console.log(unknownValue);
+function both<T>(x: NoInfer<T> & T): T {return x;}
+const numberValue: number = both(1);
+console.log(numberValue);
+function either<T>(x: NoInfer<T> | T): T {return x;}
+const textValue: string = either("x");
+console.log(textValue);
+function street<C extends string>(colors: C[], defaultColor?: NoInfer<C>) {return defaultColor ?? colors[0];}
+console.log(street(["red", "green"], "red"));
+const iterator = [1].values();
+const first = iterator.next();
+if (!first.done) console.log(first.value.toFixed());
+console.log(iterator.next().value);
+const mapEntry = new Map([["a", 2]]).entries().next();
+if (!mapEntry.done) console.log(mapEntry.value[0], mapEntry.value[1]);

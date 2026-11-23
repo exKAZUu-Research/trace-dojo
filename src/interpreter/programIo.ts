@@ -11,6 +11,8 @@ export interface ProgramInput {
 /** What a run leaves besides its turtles. */
 export interface ProgramOutput {
   stdout: string;
+  /** Original stdout when it cannot be recovered from the UTF-8 display text. */
+  stdoutBytes?: Uint8Array;
   stderr: string;
   /** The files that exist when the program ends, by path relative to the working directory, in path order. */
   finalFiles: Record<string, string>;
@@ -33,13 +35,14 @@ export class ProgramIO {
 
   constructor(
     private readonly budget: ExecutionBudget,
-    input: ProgramInput = {}
+    input: ProgramInput = {},
+    outputEncoding?: 'jvm-utf8'
   ) {
     const stdin = input.stdin ?? '';
     this.stdin = new StandardInput(new TextReader(() => stdin, budget));
     const written = { length: 0 };
-    this.stdout = new OutputChannel(written);
-    this.stderr = new OutputChannel(written);
+    this.stdout = new OutputChannel(written, outputEncoding);
+    this.stderr = new OutputChannel(written, outputEncoding);
     this.files = new VirtualFileSystem(budget);
     for (const [path, content] of Object.entries(input.files ?? {})) {
       this.files.createDirectory(parentOf(path), true);
@@ -78,18 +81,38 @@ export class StandardInput {
 
 export class OutputChannel {
   text = '';
+  private pendingHighSurrogate = '';
   /** Whether the program closed the stream, after which what it writes there is lost. */
   isClosed = false;
 
   /** @param written The length written to every channel of the run, which shares one limit. */
-  constructor(private readonly written: { length: number }) {}
+  constructor(
+    private readonly written: { length: number },
+    private readonly encoding?: 'jvm-utf8'
+  ) {}
 
-  write(text: string): void {
+  write(text: string, transform?: (text: string) => string): void {
     if (this.isClosed) return;
     this.written.length += text.length;
     if (this.written.length > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
-    this.text += text;
+    const transformed = transform ? transform(text) : text;
+    this.text += this.encoding === 'jvm-utf8' ? this.encodeJvmChunk(transformed) : transformed;
   }
+
+  private encodeJvmChunk(text: string): string {
+    const chunk = this.pendingHighSurrogate + text;
+    // A JVM PrintStream holds a trailing high surrogate for the next write, and process exit discards it.
+    if (/[\uD800-\uDBFF]$/u.test(chunk)) {
+      this.pendingHighSurrogate = chunk.slice(-1);
+      return encodeJvmText(chunk.slice(0, -1));
+    }
+    this.pendingHighSurrogate = '';
+    return encodeJvmText(chunk);
+  }
+}
+
+export function encodeJvmText(text: string): string {
+  return text.replaceAll(/\p{Cs}/gu, '?');
 }
 
 /** Reads a text from its start, one UTF-16 code unit or one line at a time. */

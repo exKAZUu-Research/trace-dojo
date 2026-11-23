@@ -1,0 +1,8 @@
+class A {
+  x;
+  constructor(f: boolean) {
+    if (f) this.x = 1;
+  }
+}
+const a = new A(true);
+console.log(a.x.toFixed(1));

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 554 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
+// code-gauge-allow-file fileNcss -- Mirrors the grammar node cases while preserving each source span for diagnostics.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -105,8 +105,8 @@ export class Converter {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
-  // code-gauge-allow functionNcss 31 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
+  // code-gauge-allow functionCognitiveComplexity -- Mirrors the grammar node cases while preserving each source span for diagnostics.
+  // code-gauge-allow functionNcss -- Mirrors the grammar node cases while preserving each source span for diagnostics.
   private convertReceiver(node: Node): Receiver {
     const parameters = named(node);
     if (parameters.length !== 1) throw syntaxError(node, 'メソッドのレシーバは1つだけ書けます。');
@@ -287,7 +287,7 @@ export class Converter {
 
   // Types -------------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 46 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
+  // code-gauge-allow functionNcss -- Mirrors the grammar node cases while preserving each source span for diagnostics.
   convertType(node: Node): TypeExpression {
     const span = spanOf(node);
     switch (node.type) {
@@ -412,7 +412,7 @@ export class Converter {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
+  // code-gauge-allow functionCognitiveComplexity -- Mirrors the grammar node cases while preserving each source span for diagnostics.
   private convertFields(list: Node | undefined): FieldSyntax[] {
     if (!list) return [];
     const fields: FieldSyntax[] = [];
@@ -471,7 +471,7 @@ export class Converter {
     return named(list).map((child) => this.convertStatement(child));
   }
 
-  // code-gauge-allow functionNcss 50 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
+  // code-gauge-allow functionNcss -- Mirrors the grammar node cases while preserving each source span for diagnostics.
   private convertStatement(node: Node): Statement {
     const span = spanOf(node);
     switch (node.type) {

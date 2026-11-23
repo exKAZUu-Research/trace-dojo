@@ -1,0 +1,28 @@
+function bucket<K extends number>(k: K, r: number[][], value: number): void {
+  (r[k] ??= []).push(value);
+}
+const rows: number[][] = [];
+bucket(0, rows, 1);
+bucket(0, rows, 2);
+bucket(2, rows, 3);
+console.log(rows);
+
+function group<K extends number>(k: K, r: Record<number, string[]>, value: string): void {
+  (r[k] ||= []).push(value);
+}
+const groups: Record<number, string[]> = {};
+group(1, groups, "a");
+group(1, groups, "b");
+console.log(groups);
+
+function byName<K extends string>(k: K, r: Record<string, number[]>): number[] {
+  return (r[k] ??= []);
+}
+const names: Record<string, number[]> = {};
+byName("x", names).push(4);
+console.log(names);
+
+function first<K extends string | number>(k: K, r: { [key: string]: number }): number {
+  return r[k];
+}
+console.log(first("a", { a: 5 }), first(0, { 0: 6 }));

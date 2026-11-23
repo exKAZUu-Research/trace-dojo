@@ -1,0 +1,8 @@
+const xs = [1, null, 2, undefined];
+const ns: number[] = xs.filter((x) => x != null);
+const strs = ["a", 1].filter((v) => typeof v === "string");
+const s: string[] = strs;
+function isPos(n: number) { return n > 0; }
+const ps: number[] = [1, -1].filter(isPos);
+const odd = [1, 2, 3].filter((n) => n % 2 === 1);
+console.log(ns, s, ps, odd);

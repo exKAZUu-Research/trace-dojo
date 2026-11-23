@@ -140,16 +140,21 @@ export function hostLocales(runtime: Runtime, value: Value): unknown {
   // CanonicalizeLocaleList converts a null locale list to an object, which the host reports in its own words.
   if (value === null) runtime.throwError('TypeError', 'Cannot convert undefined or null to object');
   if (!(value instanceof JsObject)) return value;
-  const length = Math.trunc(runtime.toNumber(runtime.get(value, 'length'))) || 0;
-  runtime.scan(length);
-  // Absent entries are skipped, as CanonicalizeLocaleList checks each index before reading it.
-  const locales: unknown[] = [];
-  for (let index = 0; index < length; index++) {
-    if (!runtime.hasProperty(value, String(index))) continue;
-    const locale = runtime.get(value, String(index));
-    locales.push(isObject(locale) ? runtime.toString(locale) : locale);
-  }
-  return locales;
+  return new Proxy(
+    {},
+    {
+      has: (_, key) => runtime.hasProperty(value, key),
+      get: (_, key) => {
+        if (key === 'length') {
+          const length = Math.max(0, Math.min(Math.trunc(runtime.toNumber(runtime.get(value, key))) || 0, 2 ** 53 - 1));
+          runtime.scan(length);
+          return length;
+        }
+        const locale = runtime.get(value, key);
+        return isObject(locale) ? runtime.toString(locale) : locale;
+      },
+    }
+  );
 }
 
 /**
@@ -164,12 +169,17 @@ export function hostOptions(runtime: Runtime, value: Value): unknown {
       get: (_, key) => {
         if (typeof key !== 'string') return;
         const option = runtime.get(value, key);
-        return isObject(option) ? runtime.toString(option) : option;
+        // The host converts an object option as the option needs, a boolean one without calling the object's methods.
+        return isObject(option)
+          ? { [Symbol.toPrimitive]: (hint: 'string' | 'number' | 'default') => runtime.toPrimitive(option, hint) }
+          : option;
       },
     }
   );
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Keeps the three Date-to-primitive conversion methods together.
+// code-gauge-allow functionNcss -- Keeps the three Date-to-primitive conversion methods together.
 function defineConversions(builder: RealmBuilder, prototype: JsObject): void {
   for (const name of ['toString', 'toDateString', 'toTimeString', 'toUTCString'] as const) {
     builder.method(prototype, name, 0, ({ runtime, thisValue }) => new Date(thisTime(runtime, thisValue))[name]());
@@ -206,7 +216,7 @@ function defineConversions(builder: RealmBuilder, prototype: JsObject): void {
     }
     const [hint] = args;
     if (hint !== 'string' && hint !== 'default' && hint !== 'number') {
-      return runtime.throwError('TypeError', `Invalid hint: ${receiverText(runtime, hint)}`);
+      return runtime.throwError('TypeError', () => `Invalid hint: ${receiverText(runtime, hint)}`);
     }
     return ordinaryToPrimitive(
       runtime,

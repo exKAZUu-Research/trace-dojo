@@ -1,0 +1,1 @@
+(3,7): error TS2322: Type 'Handler<string>' is not assignable to type 'Handler<string | number>'.

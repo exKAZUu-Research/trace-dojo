@@ -1,0 +1,6 @@
+show 1
+show 2
+show 3
+show 4
+show 5
+result: undefined undefined done false false NaN long!

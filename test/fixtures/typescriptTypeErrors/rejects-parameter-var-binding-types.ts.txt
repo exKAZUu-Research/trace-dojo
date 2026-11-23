@@ -1,0 +1,9 @@
+function defaultBinding(x = 1) { var x = 'wrong'; return x; }
+function objectBinding({x}: {x:number}) { var x = 'wrong'; return x; }
+function arrayBinding([x]: [number]) { var x = 'wrong'; return x; }
+function defaultPattern({x} = {x:1}) { var x = 'wrong'; return x; }
+function optionalPattern({x=1}: {x?:number}) { var x = 'wrong'; return x; }
+const contextualBinding: (x:number)=>number = function(x) { var x = 'wrong'; return x; };
+function restBinding(...x:number[]) { var x:string[] = []; return x; }
+function bareVar(x = 1) { var x; return x; }
+function optionalBinding(x?: number) { var x:number = 1; return x; }

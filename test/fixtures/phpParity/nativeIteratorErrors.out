@@ -1,0 +1,9 @@
+#0 [internal function]: ArrayIterator->seek(4)
+#1 /main.php(2): LimitIterator->rewind()
+#2 {main}
+#0 /main.php(4): CachingIterator->count()
+#1 {main}
+#0 [internal function]: {closure:/main.php:7}(1, 0, Object(ArrayIterator))
+#1 [internal function]: CallbackFilterIterator->accept()
+#2 /main.php(9): FilterIterator->rewind()
+#3 {main}

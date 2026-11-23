@@ -1,0 +1,22 @@
+array(2) {
+  [0]=>
+  string(1) "A"
+  [1]=>
+  string(3) "NEW"
+}
+array(2) {
+  [0]=>
+  string(2) "xA"
+  [1]=>
+  string(4) "yNEW"
+}
+array(1) {
+  [0]=>
+  string(3) "abX"
+}
+array(1) {
+  [0]=>
+  string(3) "aXc"
+}
+string(5) "ASCII"
+string(3) "abc"

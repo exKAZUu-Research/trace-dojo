@@ -1,0 +1,14 @@
+let x: string | undefined = "a";
+class K { static { console.log(x.length); } }
+const K2 = class { static { console.log(x.length); } };
+class K3 { static n = 1; static { K3.n = x.length; } }
+let y: string | undefined = "b";
+class K4 { static { y = undefined; } }
+console.log(y.length);
+let z: string | undefined;
+class K5 { static { if (z) console.log(z.length); console.log(this.name); } }
+class K6 { static s = x.length; }
+let w: string | undefined = "c";
+function later() { return w.length; }
+class K7 { static { console.log(w.length); } m() { return w.length; } }
+console.log(K, K2, K3, K4, K5, K6, later, K7);

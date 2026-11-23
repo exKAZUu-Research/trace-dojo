@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 454 -- Converts every node kind of the grammar in one converter, which shares the source and annotations.
+// code-gauge-allow-file fileNcss -- Converts every node kind of the grammar in one converter, which shares the source and annotations.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -109,8 +109,8 @@ export class Converter {
     return result;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per statement node of the grammar, each delegating to its own converter.
-  // code-gauge-allow functionNcss 56 -- One case per statement node of the grammar, each delegating to its own converter.
+  // code-gauge-allow functionCognitiveComplexity -- One case per statement node of the grammar, each delegating to its own converter.
+  // code-gauge-allow functionNcss -- One case per statement node of the grammar, each delegating to its own converter.
   private statement(node: Node): Statement {
     const row = node.startPosition.row;
     const base = { row, lineRow: lineRowOf(node) };
@@ -490,7 +490,7 @@ export class Converter {
     return { parts: mergeLiterals(this.wordParts(node)), row: node.startPosition.row, text: node.text };
   }
 
-  // code-gauge-allow functionNcss 32 -- One case per word part node of the grammar.
+  // code-gauge-allow functionNcss -- One case per word part node of the grammar.
   private wordParts(node: Node): WordPart[] {
     switch (node.type) {
       case 'word':
@@ -729,7 +729,7 @@ export function decodeAnsiC(text: string): string {
 }
 
 /** The bytes of the escape whose letter is at `index`, and the index of its last character. */
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per escape of $'...', as Bash's ansicstr reads them.
+// code-gauge-allow functionCognitiveComplexity -- One case per escape of $'...', as Bash's ansicstr reads them.
 function ansiCEscape(text: string, index: number): { bytes: number[]; last: number } {
   const next = text[index];
   const rest = text.slice(index + 1);

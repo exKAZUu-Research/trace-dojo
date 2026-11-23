@@ -1,0 +1,13 @@
+function tagName(node: NodeListOf<HTMLDivElement>): string {
+  const first: HTMLDivElement = node.item(0);
+  const ancestor: Node = first;
+  return ancestor.nodeName;
+}
+function handleClicks(element: HTMLElement): void {
+  element.addEventListener('click', event => console.log(event.clientX));
+  for (const child of element.children) console.log(child.tagName);
+}
+function serializeOptions(options: BlobPropertyBag): string {
+  return options.type ?? '';
+}
+console.log(serializeOptions({ type: 'text/plain', endings: 'transparent' }));

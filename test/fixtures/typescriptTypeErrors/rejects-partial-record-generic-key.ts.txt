@@ -1,0 +1,32 @@
+function readPartial<K extends string>(key: K, record: Partial<Record<K, number>>): number {
+  const value: number = record[key];
+  return value;
+}
+
+function readOptionalMapped<K extends string>(key: K, record: { [P in K]?: number }): number {
+  const value: number = record[key];
+  return value;
+}
+
+function readRequiredPartial<K extends string>(key: K, record: Required<Partial<Record<K, number>>>): number {
+  const value: number = record[key];
+  return value;
+}
+
+function writeWrongType<K extends string>(key: K, record: Partial<Record<K, number>>): void {
+  record[key] = "text";
+}
+
+function readPartialField<T, K extends keyof T>(key: K, partial: Partial<T>): T[K] {
+  const value: T[K] = partial[key];
+  return value;
+}
+
+function readonlyPartialAsT<T>(value: Readonly<Partial<T>>): T {
+  return value;
+}
+
+function tAsReadonlyPartial<T>(value: T): Readonly<Partial<T>> {
+  return value;
+}
+

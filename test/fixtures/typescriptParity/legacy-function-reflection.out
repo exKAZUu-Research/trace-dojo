@@ -1,0 +1,34 @@
+null null
+length,name,constructor,apply,bind,call,toString,arguments,caller
+length,name,prototype
+caller true false get caller set caller
+null false
+arguments true false get arguments set arguments
+null false
+direct [Arguments] { '0': 'a', '1': 'b' } false true
+[Arguments] { '0': 'a', '1': 'b' } [Arguments] { '0': 'changed', '1': 'changed' }
+byCall [Arguments] { '0': 'c' } false true
+[Arguments] { '0': 'c' } [Arguments] { '0': 'changed' }
+byApply [Arguments] { '0': 'd' } false true
+[Arguments] { '0': 'd' } [Arguments] { '0': 'changed' }
+byBind [Arguments] { '0': 'e' } false true
+[Arguments] { '0': 'e' } [Arguments] { '0': 'changed' }
+null [Arguments] { '0': 'f' } false true
+[Arguments] { '0': 'f' } [Arguments] { '0': 'changed' }
+ [Arguments] { '0': 'g0' } false true
+[Arguments] { '0': 'g0' } [Arguments] { '0': 'changed' }
+null [Arguments] { '0': 'h', '1': 0, '2': [ 'h' ] } false true
+[Arguments] { '0': 'h', '1': 0, '2': [ 'h' ] } [Arguments] { '0': 'changed', '1': 'changed', '2': [ 'h' ] }
+[Arguments] { '0': undefined, '1': 2, '2': 3 } false
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them

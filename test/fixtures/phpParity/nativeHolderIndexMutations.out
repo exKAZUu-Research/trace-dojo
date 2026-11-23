@@ -1,0 +1,7 @@
+SplQueue:retained;one;SplQueue:destroy;none;
+SplStack:retained;one;SplStack:destroy;none;
+SplFixedArray:retained;one;SplFixedArray:destroy;none;
+SplMinHeap:retained;one;SplMinHeap:destroy;none;
+ArrayObject:retained;one;ArrayObject:destroy;none;
+one-info;info:destroy;none-info;
+replace:destroy;replaced;resize:destroy;resized;

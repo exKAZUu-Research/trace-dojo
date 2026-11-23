@@ -1,0 +1,12 @@
+function callGenericFunction<T extends Function>(value:T){return value(2);}
+function callNarrowedFunction<T>(value:T){if(typeof value==='function')return value();return 'other';}
+function callIntersectedFunction<T>(value:T&Function){return value();}
+console.log(callGenericFunction((n:number)=>n+1), callNarrowedFunction(()=>4), callNarrowedFunction(5), callIntersectedFunction(()=>6));
+function callBroadEmpty(value:{}){if(typeof value==='function')return value();return 'empty';}
+function callBroadObject(value:Object){if(typeof value==='function')return value();return 'object';}
+function callKnownFunction(value:Function){if(typeof value==='function')return value();return 'never';}
+console.log(callBroadEmpty(()=>7), callBroadEmpty({}), callBroadObject(()=>8), callBroadObject({}), callKnownFunction(()=>9));
+function opaqueFunctionUnion(value:Function|(()=>number)){return value();}
+function genericOpaqueFunctionUnion<T extends Function|(()=>number)>(value:T){return value();}
+function compatibleFunctionIntersection<T extends(()=>number)|((x?:number)=>number)>(value:T&Function){return value();}
+console.log(opaqueFunctionUnion(()=>10),genericOpaqueFunctionUnion(()=>11),compatibleFunctionIntersection(()=>12));

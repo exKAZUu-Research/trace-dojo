@@ -1,0 +1,15 @@
+class MissingMethod {
+  method(x:string):string;
+}
+class MissingConstructor {
+  constructor(x:string);
+}
+class InterruptedMethod {
+  method(x:string):string;
+  field = 1;
+  method(x:any) { return x; }
+}
+class StaticMismatch {
+  static method(x:string):string;
+  method(x:any) { return x; }
+}

@@ -1,0 +1,17 @@
+const fn: any = function named() { };
+Object.defineProperty(fn, 'fixed', { value: 1 });
+Object.defineProperty(fn, 'accessor', { get() { return 2; } });
+Object.preventExtensions(fn);
+const actions = [() => Object.setPrototypeOf(fn, {}), class {
+  static remove() { delete fn.fixed; }
+}.remove, class {
+  static assign() { fn.fixed = 2; }
+}.assign, class {
+  static write() { fn.accessor = 3; }
+}.write];
+console.log('before');
+for (const action of actions) {
+  try { action(); }
+  catch (error) { if (error instanceof Error) console.log(error.name, error.message); }
+}
+console.log(fn.fixed, fn.accessor);

@@ -1,0 +1,16 @@
+const f: () => unknown = inferLocal;
+const g: () => unknown = inferField;
+const h: () => unknown = inferGeneric;
+function inferLocal() {
+  const value: Missing = 0;
+  return value;
+}
+function inferField() {
+  return new Container().field;
+}
+function inferGeneric() {
+  const value: Array = [];
+  return value;
+}
+class Container { field: MissingField = 0; }
+console.log(f, g, h);

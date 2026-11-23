@@ -1,0 +1,20 @@
+exec a 4
+false
+exec a 0
+null
+exec a 0
+-1 3
+exec a 0
+a
+exec a 0
+true 0
+exec a-a 0
+exec a-a 1
+exec a-a 2
+a-a
+false null a
+a
+true RegExp exec method returned something other than an Object or null
+1 afirst-secondc
+a 1
+,-, false 3

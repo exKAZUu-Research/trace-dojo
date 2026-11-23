@@ -1,0 +1,6 @@
+(1,37): error TS2314: Generic type 'Tree<T>' requires 1 type argument(s).
+(2,21): error TS2314: Generic type 'Box<T>' requires 1 type argument(s).
+(3,29): error TS2314: Generic type 'List' requires 1 type argument(s).
+(4,27): error TS2314: Generic type 'Pair<A, B>' requires 2 type argument(s).
+(5,20): error TS2314: Generic type 'One<T>' requires 1 type argument(s).
+(6,29): error TS2707: Generic type 'Two' requires between 1 and 2 type arguments.

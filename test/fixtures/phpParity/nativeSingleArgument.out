@@ -1,0 +1,32 @@
+
+Deprecated: number_format(): Passing null to parameter #1 ($num) of type float is deprecated in /main.php on line 3
+string(1) "0"
+string(25) "9,223,372,036,854,775,807"
+number_format(): Argument #1 ($num) must be of type int|float, array given
+
+Warning: Array to string conversion in /main.php on line 5
+cast
+int(1)
+int(2)
+int(1)
+Object of class stdClass could not be converted to string
+get_parent_class(): Argument #1 ($object_or_class) must be an object or a valid class name, int given
+get_parent_class(): Argument #1 ($object_or_class) must be an object or a valid class name, null given
+get_parent_class(): Argument #1 ($object_or_class) must be an object or a valid class name, array given
+get_parent_class(): Argument #1 ($object_or_class) must be an object or a valid class name, float given
+get_parent_class(): Argument #1 ($object_or_class) must be an object or a valid class name, true given
+get_parent_class(): Argument #1 ($object_or_class) must be an object or a valid class name, resource given
+get_parent_class(): Argument #1 ($object_or_class) must be an object or a valid class name, string given
+bool(false)
+implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+string(2) "xy"
+
+Deprecated: implode(): Passing null to parameter #1 ($separator) of type array|string is deprecated in /main.php on line 13
+string(2) "ab"
+cast
+string(3) ",,,"
+cast
+string(3) "aaa"
+string(0) ""

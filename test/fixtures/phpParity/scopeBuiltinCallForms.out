@@ -1,0 +1,75 @@
+Cannot call compact() dynamically
+#0 /main.php(9): compact('value')
+#1 /main.php(20): checkScopeCalls(42)
+#2 {main}
+Cannot call extract() dynamically
+#0 /main.php(10): extract(Array)
+#1 /main.php(20): checkScopeCalls(42)
+#2 {main}
+Cannot call get_defined_vars() dynamically
+#0 /main.php(12): get_defined_vars()
+#1 /main.php(20): checkScopeCalls(42)
+#2 {main}
+Cannot call func_get_args() dynamically
+#0 /main.php(12): func_get_args()
+#1 /main.php(20): checkScopeCalls(42)
+#2 {main}
+Cannot call func_get_arg() dynamically
+#0 /main.php(11): func_get_arg(0)
+#1 /main.php(20): checkScopeCalls(42)
+#2 {main}
+Cannot call func_num_args() dynamically
+#0 /main.php(12): func_num_args()
+#1 /main.php(20): checkScopeCalls(42)
+#2 {main}
+extract() expects at least 1 argument, 0 given
+array(1) {
+  ["value"]=>
+  int(7)
+}
+int(1)
+int(8)
+array(1) {
+  [0]=>
+  int(42)
+}
+array(1) {
+  ["value"]=>
+  int(42)
+}
+array(1) {
+  [0]=>
+  int(42)
+}
+int(1)
+int(1)
+int(8)
+array(3) {
+  [0]=>
+  string(5) "value"
+  [1]=>
+  string(4) "data"
+  [2]=>
+  string(9) "forwarded"
+}
+Cannot call compact() dynamically
+func_get_args() cannot be called from the global scope
+func_get_arg() cannot be called from the global scope
+func_num_args() must be called from a function context
+func_get_args() cannot be called from the global scope
+int(1)
+int(2)
+array(1) {
+  ["value"]=>
+  int(5)
+}
+int(1)
+array(1) {
+  [0]=>
+  int(5)
+}
+extract(): Argument #2 ($flags) must be a valid extract type
+extract(): Argument #3 ($prefix) is required when using this extract type
+extract(): Argument #3 ($prefix) must be a valid identifier
+Cannot call extract() dynamically
+extract(): Argument #2 ($flags) must be a valid extract type

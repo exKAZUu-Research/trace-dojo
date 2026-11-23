@@ -1,0 +1,13 @@
+const yes: true = !!true;
+const no: false = !!0;
+const triple: true = !(!(!false));
+const fourfold: false = !!!!false;
+let mutable = !!1;
+const initial: true = mutable;
+mutable = false;
+const changed: false = mutable;
+function nonempty(value: string | undefined) {
+  if (!!!value) return 'empty';
+  return value.toUpperCase();
+}
+console.log(yes, no, triple, fourfold, initial, changed, nonempty('word'), nonempty(undefined));

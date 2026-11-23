@@ -6,6 +6,18 @@ export interface Span {
 export interface Program {
   body: Statement[];
   scope: ScopeDeclarations;
+  /** Whether the program's own code is strict mode code, outside which failed assignments do nothing. */
+  isStrict: boolean;
+  hasCommonJsReceiver?: boolean;
+  /**
+   * Whether turning a function into text is unavailable, as for TypeScript, whose functions Node.js shows as the
+   * source a compiler printed rather than as written.
+   */
+  rejectsFunctionText?: boolean;
+  /** Whether a tagged template may only call the builtin `String.raw`, as for TypeScript, whose other tags come later. */
+  allowsOnlyStringRawTag?: boolean;
+  /** Whether reading a library member the realm leaves out ends the program, as for TypeScript, which rejects it. */
+  rejectsUnavailableMembers?: boolean;
 }
 
 /** The names a function body or block declares, which its scope creates before running its statements. */
@@ -55,6 +67,8 @@ export type Statement = Span &
         declarationKind?: DeclarationKind;
         target: Pattern;
         iterable: Expression;
+        /** How V8 names the iterable in the error a value without an iterator throws. */
+        iterableSource?: IterationSource;
         body: Statement;
         /** Recorded after each binding of the target. */
         stepRow?: number;
@@ -119,12 +133,15 @@ export interface FunctionNode extends Span {
   isAtomic: boolean;
   /** The text `toString()` returns. */
   source: string;
+  /** Whether the function is strict mode code, which a class or a `"use strict"` directive makes it. */
+  isStrict: boolean;
 }
 
 export interface ClassNode extends Span {
   name: string;
   superClass?: Expression;
   ctor?: FunctionNode;
+  afterSuper?: Statement[];
   members: ClassMember[];
   source: string;
 }
@@ -134,6 +151,7 @@ export type ClassMember =
   | {
       kind: 'field';
       isStatic: boolean;
+      isTraceConstant?: true;
       key: PropertyName;
       value?: Expression;
       stepRow?: number;
@@ -154,7 +172,25 @@ export type ObjectMember =
   /** `__proto__: value`, which sets the prototype of the object to the value when it is an object or null. */
   | { kind: 'prototype'; value: Expression };
 
-export type Argument = Expression | { kind: 'spread'; argument: Expression };
+/** How V8's CallPrinter names an operand in the TypeError that iterating or destructuring it throws. */
+export interface IterationSource {
+  text: string;
+  /** The callee of a call or `new` operand, which V8 names instead of the operand. */
+  callee?: string;
+  /** Whether the operand is an optional chain, which V8 prints as `(intermediate value)` or names by its value. */
+  isOptionalChain?: boolean;
+  /** The name a loop's error gives a value without an iterator in place of its type, as a `??` operand's callee. */
+  unreadName?: string;
+}
+
+/**
+ * Where an iteration's operand is written, which decides how V8 words the TypeError for a value without an iterator:
+ * a spread that is the only and last argument of a call keeps the spread, while one before other arguments is
+ * lowered to an array; a nested array pattern that is a property's value is read as `{(intermediate value)}`.
+ */
+export type IterationContext = 'syntax' | 'forOf' | 'finalCallSpread' | 'loweredCallSpread' | 'propertyPattern';
+
+export type Argument = Expression | { kind: 'spread'; argument: Expression; source: IterationSource };
 
 export type Expression = Span & {
   /**
@@ -181,10 +217,13 @@ export type Expression = Span & {
     | MemberExpression
     | {
         kind: 'call';
+        skipsAfterSuper?: boolean;
         callee: Expression | SuperReference;
         args: Argument[];
         optional: boolean;
         calleeText: string;
+        /** Whether it calls the tag of a tagged template. */
+        isTaggedTemplate?: boolean;
       }
     | { kind: 'new'; callee: Expression; args: Argument[]; calleeText: string }
     | { kind: 'assign'; operator: string; target: Pattern; value: Expression }
@@ -214,15 +253,26 @@ export interface MemberExpression extends Span {
   optional: boolean;
 }
 
+/** How V8 names what a pattern takes apart, in the TypeError a value it cannot take apart throws. */
+export interface DestructuringSource {
+  /** The initializer or the hidden variable V8 takes apart, as V8 prints it; without one, V8 names the value. */
+  source?: IterationSource;
+  /** Whether V8 names the value by its type, as `object null`, as it does for a parameter. */
+  namesType?: boolean;
+  /** Whether V8 reports reading the first property instead, as it does for a pattern inside another. */
+  isNested?: boolean;
+  iterationContext?: IterationContext;
+}
+
 export type Pattern = Span &
   (
     | { kind: 'identifier'; name: string }
     | MemberExpression
-    | { kind: 'arrayPattern'; elements: (Pattern | undefined)[]; rest?: Pattern }
-    | {
+    | ({ kind: 'arrayPattern'; elements: (Pattern | undefined)[]; rest?: Pattern } & DestructuringSource)
+    | ({
         kind: 'objectPattern';
         properties: { key: PropertyName; value: Pattern }[];
         rest?: Pattern;
-      }
-    | { kind: 'default'; target: Pattern; value: Expression }
+      } & DestructuringSource)
+    | { kind: 'default'; target: Pattern; value: Expression; initializerSource?: IterationSource }
   );

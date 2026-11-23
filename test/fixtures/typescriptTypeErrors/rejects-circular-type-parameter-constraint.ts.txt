@@ -1,0 +1,14 @@
+function lookup<T extends T>(value: T) { const result: T[keyof T] = 1; return result; }
+function lookup2<T extends U, U extends T>(value:T) { const result:T[keyof T]=1; return result; }
+function f1<T extends keyof T>(value: T) { return value; }
+function f2<T extends T[]>(value: T) { return value; }
+function f3<T extends U, U extends V, V extends T>(value: T) { return value.length; }
+function f4<T extends T['x']>(value: T) { return value; }
+class Box<T extends T> { constructor(readonly value: T) {} }
+interface Item<T extends T> { value: T }
+type Alias<T extends T> = T;
+function f5<T extends U, U extends string>(value: T) { return value.length; }
+const g = <T extends T>(value: T) => value;
+function f6<T extends T>(value: T) { return value.length; }
+f6(1);
+function f7<T extends U, U extends U>(value: T) { return value; }

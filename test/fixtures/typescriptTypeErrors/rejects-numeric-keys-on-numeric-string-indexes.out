@@ -1,0 +1,16 @@
+(2,12): error TS2339: Property '0' does not exist on type 'I'.
+(4,3): error TS7053: Element implicitly has an 'any' type because expression of type '1' can't be used to index type 'I'.
+  Property '1' does not exist on type 'I'.
+(7,15): error TS7053: Element implicitly has an 'any' type because expression of type '1' can't be used to index type 'I'.
+  Property '1' does not exist on type 'I'.
+(7,35): error TS7053: Element implicitly has an 'any' type because expression of type 'number' can't be used to index type 'I'.
+  No index signature with a parameter of type 'number' was found on type 'I'.
+(12,10): error TS7053: Element implicitly has an 'any' type because expression of type '1' can't be used to index type 'A'.
+  Property '1' does not exist on type 'A'.
+(14,13): error TS2537: Type 'I' has no matching index signature for type 'number'.
+(15,30): error TS2322: Type 'number' is not assignable to type 'string'.
+(16,41): error TS2411: Property '"0"' of type 'number' is not assignable to '`${number}`' index type 'string'.
+(18,7): error TS2322: Type '{ "1": number; }' is not assignable to type 'I'.
+  Property '"1"' is incompatible with index signature.
+    Type 'number' is not assignable to type 'string'.
+(22,7): error TS2322: Type 'boolean' is not assignable to type 'string'.

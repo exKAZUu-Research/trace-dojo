@@ -125,7 +125,7 @@ export class PyMemoryView extends PyObject {
   /** The object that exported the memory, as `array.array`, which `obj` shows; undefined for the source itself. */
   exporter?: PyValue;
 
-  // code-gauge-allow functionParameterCount 7 -- Each view field is set once at creation, as CPython's buffer struct.
+  // code-gauge-allow functionParameterCount -- Each view field is set once at creation, as CPython's buffer struct.
   constructor(
     readonly source: PyBytes,
     readonly offset: number,

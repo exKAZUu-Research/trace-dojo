@@ -20,8 +20,8 @@ const KEYWORDS: Record<TypeParamKind, string[]> = {
 };
 
 /** `TypeVar(name, *constraints, ...)`, `ParamSpec(name, ...)`, or `TypeVarTuple(name, ...)`. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Checks the arguments as each constructor of typevarobject.c does.
-// code-gauge-allow functionNcss 31 -- Validates one native constructor while retaining its original name object.
+// code-gauge-allow functionCognitiveComplexity -- Checks the arguments as each constructor of typevarobject.c does.
+// code-gauge-allow functionNcss -- Validates one native constructor while retaining its original name object.
 function newTypeParamFromCall(kind: TypeParamKind, args: PyValue[], kwargs: Kwargs): PyValue {
   const label = kind.toLowerCase();
   for (const key of kwargs?.keys() ?? []) {

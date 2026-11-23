@@ -1,0 +1,61 @@
+class Box {
+  #value = 3;
+  static #tag = 5;
+  static read(value: Box | { other: number }) {
+    if (#value in value) return value.#value;
+    return value.other;
+  }
+  static readTag(value: object) {
+    if (#tag in value) return value.#tag;
+    return 0;
+  }
+  read() { return this.#value; }
+}
+class SubBox extends Box {}
+class Other {
+  "#value": "public" = "public";
+}
+const joined = Object.assign(new Box(), new Other());
+
+class PrivateTagA {
+  #tag: "a" = "a";
+  a() { return this.#tag; }
+}
+class PrivateTagB {
+  #tag: "b" = "b";
+  b = "b";
+}
+const separate = Object.assign(new PrivateTagA(), new PrivateTagB());
+
+class Dict {
+  [key: string]: number;
+  #value = "private";
+  count = 1;
+}
+class PatternDict {
+  [key: `#${string}`]: number;
+  #value = "private";
+  "#public" = 2;
+}
+let field: 0 | 1 = 0;
+let method: 1 | "method" = 1;
+let accessor: 2 | "accessor" = 2;
+class Field {
+  [field] = 10;
+}
+class Method {
+  [method]() { return 20; }
+}
+class Accessor {
+  get [accessor]() { return 30; }
+}
+field = 1;
+method = "method";
+accessor = "accessor";
+const fieldKey: keyof Field = 0;
+const methodKey: keyof Method = 1;
+const accessorKey: keyof Accessor = 2;
+
+console.log(Box.read(new SubBox()), Box.read({ other: 4 }), Box.readTag(Box), Box.readTag(SubBox));
+console.log(joined.read(), joined["#value"], separate.a(), separate.b);
+console.log(new Dict().count, new PatternDict()["#public"], new Field()[fieldKey], Object.hasOwn(Method.prototype, methodKey), new Accessor()[accessorKey]);

@@ -1,0 +1,4 @@
+(2,3): error TS1024: 'readonly' modifier can only appear on a property declaration or index signature.
+(4,20): error TS1024: 'readonly' modifier can only appear on a property declaration or index signature.
+(5,23): error TS1024: 'readonly' modifier can only appear on a property declaration or index signature.
+(6,42): error TS1024: 'readonly' modifier can only appear on a property declaration or index signature.

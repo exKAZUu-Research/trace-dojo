@@ -1,0 +1,14 @@
+type DescribeConstrained<T> = T extends infer U extends string ? 'str' : 'not';
+const wrongNumeric: DescribeConstrained<number> = 'str';
+const wrongString: DescribeConstrained<string> = 'not';
+type ConstrainedAlias = 1 | 2;
+type AliasDescription = ConstrainedAlias extends infer U extends 1 ? 'one' : 'other';
+const wrongAlias: AliasDescription = 'one';
+type DistributedConstraint<T> = T extends infer U extends string ? U : never;
+const wrongDistributed: DistributedConstraint<'word' | 3> = 3;
+type WholeConstraint<T> = [T] extends [infer U extends string] ? U : 'fallback';
+const wrongWhole: WholeConstraint<string | number> = 3;
+type TupleConstraint<T, C> = T extends [infer U extends C, infer V extends C] ? [U, V] : 'fallback';
+const wrongTuple: TupleConstraint<[1, 'b'], string> = [1, 'b'];
+type RestConstraint<T, C> = T extends [...infer U extends C[], number] ? U : 'fallback';
+const wrongRest: RestConstraint<['a', true, 1], string> = ['a', true];

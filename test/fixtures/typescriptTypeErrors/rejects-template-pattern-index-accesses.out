@@ -1,0 +1,31 @@
+(2,42): error TS2413: '`ab${string}`' index type '"x" | 1 | 2' is not assignable to '`a${string}`' index type 'number'.
+(8,15): error TS2339: Property 'c1' does not exist on type 'I'.
+(9,13): error TS7053: Element implicitly has an 'any' type because expression of type '"c1"' can't be used to index type 'I'.
+  Property 'c1' does not exist on type 'I'.
+(13,3): error TS2322: Type 'string' is not assignable to type 'number'.
+(14,5): error TS2339: Property 'c1' does not exist on type 'I'.
+(15,3): error TS7053: Element implicitly has an 'any' type because expression of type '"c1"' can't be used to index type 'I'.
+  Property 'c1' does not exist on type 'I'.
+(17,9): error TS2322: Type '1 | 2' is not assignable to type '"x"'.
+  Type '1' is not assignable to type '"x"'.
+(18,3): error TS2542: Index signature in type 'R' only permits reading.
+(20,3): error TS2542: Index signature in type 'R' only permits reading.
+(22,9): error TS2322: Type 'string | number' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+(23,3): error TS2322: Type 'string' is not assignable to type 'number'.
+(25,13): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type 'I'.
+  No index signature with a parameter of type 'string' was found on type 'I'.
+(26,8): error TS2551: Property 'toFixed' does not exist on type 'string'. Did you mean 'fixed'?
+(27,11): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(32,7): error TS2322: Type 'number' is not assignable to type 'string'.
+(34,7): error TS2322: Type '"c"' is not assignable to type 'keyof I'.
+(38,7): error TS2322: Type '"x"' is not assignable to type '1 | 2'.
+(40,17): error TS2322: Type 'string' is not assignable to type 'number'.
+(41,17): error TS2353: Object literal may only specify known properties, and 'c1' does not exist in type 'I'.
+(42,24): error TS2322: Type 'number' is not assignable to type 'string'.
+(45,16): error TS2339: Property 'c1' does not exist on type '{ [k: `a${string}`]: number; [k: `b${string}`]: string; }'.
+(47,17): error TS2339: Property 'c1' does not exist on type '{ [k: `a${string}`]: number; [k: `b${string}`]: string; }'.
+(48,7): error TS2322: Type 'number' is not assignable to type 'string'.
+(49,51): error TS2322: Type '{ [k: string]: number; }' is not assignable to type 'I'.
+  'string' and '`b${string}`' index signatures are incompatible.
+    Type 'number' is not assignable to type 'string'.

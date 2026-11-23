@@ -1,0 +1,37 @@
+let a: number;
+({ a } = { a: 1, b: 2 });
+const { c = 1 } = { d: 2 };
+const { e } = { e: 1, f: 2 };
+const [{ x = 1 }] = [{ y: 1 }];
+function g({ h = 2 } = { i: 1 }) { return h; }
+const { j, k: { l } } = { j: 1, k: { l: 2, m: 3 } };
+const { n = 1, ...rest } = { o: 2 };
+const [p, q] = [1, 's', true];
+const key: string = "z";
+const { [key]: r } = { z: 1, w: 2 };
+const { s }: { s: number } = { s: 1 };
+for (const { t } of [{ t: 1, u: 2 }]) {}
+const { v: { w = 1 } = { ww: 2 } } = {};
+
+{
+  const {outer: {value} = {value: 1, extra: true}}: {outer?: {value: number}} = {};
+  console.log(value);
+}
+{
+  const {outer: {value} = {value: 1}} = {outer: {value: 2}, extra: true};
+  console.log(value);
+}
+
+function nonObjectOuterBranch(flag: boolean) {
+  const {outer: {value} = {value: 1}} = flag ? {outer: 1} : {outer: {}};
+  return value;
+}
+function nonObjectDefaultedBranch(flag: boolean) {
+  const {outer: {value = 1} = {}} = flag ? {outer: 1} : {outer: {}};
+  return value;
+}
+function nonObjectNestedBranch(flag: boolean) {
+  const {outer: {child: {value} = {value: 1}} = {child: {value: 1}}} =
+    flag ? {outer: {child: 1}} : {outer: {child: {}}};
+  return value;
+}

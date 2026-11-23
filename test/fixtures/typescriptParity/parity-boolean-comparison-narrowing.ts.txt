@@ -1,0 +1,59 @@
+function isStr(v: unknown): v is string {
+  return typeof v === "string";
+}
+
+function viaEquals(x: number | string): string {
+  const isText = typeof x === "string";
+  if (isText === true) return x.toUpperCase();
+  return x.toFixed(1);
+}
+
+function viaLiteralFirst(x: number | string): string {
+  const isText = typeof x === "string";
+  if (false === isText) return x.toFixed(1);
+  return x.toUpperCase();
+}
+
+function viaNotEquals(x: number | string): string {
+  const isText = typeof x === "string";
+  if (isText !== true) return x.toFixed(1);
+  return x.toUpperCase();
+}
+
+function viaLooseEquals(x: number | string): string {
+  const isText = typeof x === "string";
+  if (isText == true) return x.toUpperCase();
+  return x.toFixed(1);
+}
+
+function viaNestedAlias(x: number | string): string {
+  const isText = typeof x === "string";
+  const ok = isText === true;
+  if (ok) return x.toUpperCase();
+  return x.toFixed(1);
+}
+
+function viaPredicate(x: number | string): string {
+  if (isStr(x) === false) return x.toFixed(1);
+  return x.toUpperCase();
+}
+
+function comparedItself(x: boolean | string): string {
+  if (x !== true) {
+    const rest: false | string = x;
+    return `rest ${rest}`;
+  }
+  return "true";
+}
+
+for (const value of ["abc", 2.5]) {
+  console.log(
+    viaEquals(value),
+    viaLiteralFirst(value),
+    viaNotEquals(value),
+    viaLooseEquals(value),
+    viaNestedAlias(value),
+    viaPredicate(value)
+  );
+}
+console.log(comparedItself(true), comparedItself(false), comparedItself("s"));

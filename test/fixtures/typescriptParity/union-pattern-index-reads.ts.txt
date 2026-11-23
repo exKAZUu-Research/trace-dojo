@@ -1,0 +1,4 @@
+function read<T extends {[k: `x${string}`]: number} | {[k: `x${string}`]: string}>(x: T, k: `x${string}`) {return x[k];}
+console.log(read({x1: 1}, "x1"), read({x2: "ok"}, "x2"));
+function readonlyRead<T extends {readonly [k: `x${string}`]: number} | {readonly [k: `x${string}`]: string}>(x: T, k: `x${number}`) {return x[k];}
+console.log(readonlyRead({x1: 3}, "x1"), readonlyRead({x2: "value"}, "x2"));

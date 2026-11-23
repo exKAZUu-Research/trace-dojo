@@ -1,0 +1,33 @@
+const sparse: [string?, number?] = [
+  ,
+  'bad',
+];
+const sparseTyped: [undefined, number] = [
+  ,
+  'bad',
+];
+const missing: [number, string] = [
+  ,
+  'ok',
+];
+const fixedSpread: [number, string] = [
+  ...[1] as [number],
+  3,
+];
+const longerSpread: [string, number, string] = [
+  ...['ok', 1] as [string, number],
+  true,
+];
+const rest: [string, ...number[]] = [
+  'ok',
+  true,
+];
+const prefix: [string, ...number[]] = [
+  false,
+  1,
+];
+const trailing: [string, ...number[], boolean] = [
+  'ok',
+  1,
+  'bad',
+];

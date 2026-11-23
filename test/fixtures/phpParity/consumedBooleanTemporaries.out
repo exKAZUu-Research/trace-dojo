@@ -1,0 +1,7 @@
+-1 if|-2 elseif|-3 while|do|-4 -5 for|-6 next6 and|-7 or|-8 next8 1ternary|object(Item)#1 (1) {
+  ["name"]=>
+  int(10)
+}
+-10 next11 -11 bool(false)
+string12 S-12 next|string13 S-13 end|-14 object(stdClass)#1 (0) {
+}

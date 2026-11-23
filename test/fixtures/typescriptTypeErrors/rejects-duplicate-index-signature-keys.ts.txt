@@ -1,0 +1,15 @@
+interface A { [k: string]: number; [k: string]: number }
+type B = { [k: `on${string}`]: number; [j: `on${string}`]: number };
+class C { [k: number]: string; [n: number]: string }
+interface D { [k: string]: number }
+interface D { [k: string]: string }
+const d: D = { x: 1 };
+type E = { [k: symbol]: 1; [k: symbol]: 1; [k: `a${number}`]: 1; [k: `a${number}`]: 2 };
+interface F { [k: string]: number }
+interface G extends F { [k: string]: number; [k: string]: number }
+type H = { [k: string | number]: 1; [k: number]: 1 };
+type I = { [k: string]: number; [j: string]: string };
+const i: I = { x: 1 };
+type U = Uppercase<string>;
+type J = { [k: Uppercase<string>]: number; [j: U]: number; [k: `${Uppercase<string>}`]: number };
+type K = { [k: `a${string}`]: number; [j: `a${string}${string}`]: number };

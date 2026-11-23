@@ -1,0 +1,18 @@
+array(4) {
+  [1]=>
+  string(3) "one"
+  ["01"]=>
+  string(4) "zero"
+  [-2]=>
+  string(8) "negative"
+  ["+3"]=>
+  string(4) "plus"
+}
+bool(true)
+bool(true)
+array(2) {
+  [1]=>
+  string(3) "one"
+  ["01"]=>
+  string(4) "zero"
+}

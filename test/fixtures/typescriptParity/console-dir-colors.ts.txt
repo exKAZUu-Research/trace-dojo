@@ -1,0 +1,9 @@
+console.dir({count: 1}, {colors: true});
+console.dir([true, "hi"], {colors: true});
+console.dir({boxed: Object(2), absent: undefined, nil: null, "quoted key": "value"}, {colors: true});
+console.dir({get p() { return 1; }, get a() { return {}; }, get b() { throw 2; }}, {getters: true, colors: true});
+console.dir([1, 2, 3, 100, 33, 4, 4, 4, 5, 10000, 30, 45], {colors: true});
+const circular: { self?: unknown } = {};
+circular.self = circular;
+console.dir(circular, {colors: true, compact: true});
+console.dir({count: 1}, {colors: false});

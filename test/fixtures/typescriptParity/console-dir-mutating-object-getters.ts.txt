@@ -1,0 +1,42 @@
+function inspect(value: object, showHidden = false) {
+  try {
+    console.dir(value, { getters: true, showHidden });
+  } catch (error) {
+    console.log("caught", String(error));
+  }
+}
+
+const own: { readonly first: number; later?: number } = {
+  get first() { delete own.later; return 1; },
+  later: 2,
+};
+inspect(own);
+
+const hidden: { first?: number; later?: number } = {};
+Object.defineProperty(hidden, "first", { get() { delete hidden.later; return 1; } });
+Object.defineProperty(hidden, "later", { configurable: true, value: 2 });
+inspect(hidden, true);
+
+const inherited: { first?: number; later?: number } = {
+  get first() { delete inherited.later; return 1; },
+  later: 2,
+};
+inspect(Object.create(inherited), true);
+
+const proto: { later?: number } = { later: 2 };
+const removesInherited = Object.create(proto);
+Object.defineProperty(removesInherited, "first", {
+  enumerable: true,
+  get() { console.log("own getter"); delete proto.later; return 1; },
+});
+inspect(removesInherited, true);
+
+const removesOwn = Object.create({
+  get first() { console.log("prototype getter"); delete removesOwn.later; return (this as { marker: number }).marker; },
+});
+removesOwn.marker = 3;
+removesOwn.later = 2;
+inspect(removesOwn, true);
+
+const redirected = { get first() { redirected.later = 7; return 1; }, later: 2 };
+inspect(redirected);

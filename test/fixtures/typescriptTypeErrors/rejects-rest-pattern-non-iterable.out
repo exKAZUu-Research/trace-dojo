@@ -1,0 +1,6 @@
+(1,7): error TS2488: Type '5' must have a '[Symbol.iterator]()' method that returns an iterator.
+(3,1): error TS2488: Type '5' must have a '[Symbol.iterator]()' method that returns an iterator.
+(4,22): error TS2488: Type 'number' must have a '[Symbol.iterator]()' method that returns an iterator.
+(6,7): error TS2488: Type 'void' must have a '[Symbol.iterator]()' method that returns an iterator.
+(7,12): error TS2488: Type 'number' must have a '[Symbol.iterator]()' method that returns an iterator.
+(8,7): error TS2488: Type '7' must have a '[Symbol.iterator]()' method that returns an iterator.

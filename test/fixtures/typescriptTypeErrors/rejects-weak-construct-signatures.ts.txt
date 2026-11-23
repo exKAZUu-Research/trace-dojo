@@ -1,0 +1,12 @@
+type Weak = { x?: number };
+class C {}
+class D {
+  static y = 1;
+}
+const fromClass: Weak = C;
+const fromStatic: Weak = D;
+const fromArrow: Weak = () => 1;
+const fromIntersection: Weak & { y?: string } = C;
+type T = { new (): object; x?: number };
+const notCtor: T = { x: 1 };
+console.log(fromClass, fromStatic, fromArrow, fromIntersection, notCtor);

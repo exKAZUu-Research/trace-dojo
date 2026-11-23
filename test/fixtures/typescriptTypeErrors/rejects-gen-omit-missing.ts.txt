@@ -1,0 +1,2 @@
+interface P { a: number; b: string }
+const p: Omit<P, "a"> = { a: 1, b: "s" };

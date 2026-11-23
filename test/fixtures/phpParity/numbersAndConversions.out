@@ -1,0 +1,68 @@
+float(9.223372036854776E+18)
+float(-9.223372036854776E+18)
+float(1.8446744073709552E+19)
+int(-9223372036854775807)
+int(9223372036854775807)
+float(0.30000000000000004)
+float(INF)
+float(-INF)
+float(NAN)
+
+Warning: Array to string conversion in /main.php on line 4
+Arr: Array
+
+Warning: Array to string conversion in /main.php on line 5
+Array
+12
+finally
+1ff3f
+#0 [internal function]: {closure:/main.php:10}(1)
+#1 /main.php(10): array_map(Object(Closure), Array)
+#2 {main}
+abc|ab|||
+[-00003.142] [-42       ] [+1.2e+4] [    x] [PH]
+-0042|  -42|-42  |ffffffffffffffd6
+int(2)
+float(2)
+string(2) "11"
+string(1) "7"
+string(3) "1.5"
+string(1) "1"
+string(1) "x"
+int(1)
+int(1)
+int(-1)
+bool(false)
+bool(true)
+bool(true)
+bool(true)
+bool(false)
+
+Deprecated: Implicit conversion from float 1.7 to int loses precision in /main.php on line 17
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 17
+1,01,
+string(11) "hello     !"
+int(6)
+bool(true)
+string(3) "本"
+École STRAßE STRASSE
+int(0)
+int(1)
+string(3) "abc"
+int(0)
+int(1)
+12
+Array
+(
+    [1] => Array
+        (
+            [2] => x
+            [3] => y
+        )
+
+)
+0:a 1:b 2:c 
+integerintegerdoubleintegerintegerdoubleinteger
+X
+8.5.12 8 3.1415926535898

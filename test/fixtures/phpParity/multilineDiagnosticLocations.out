@@ -1,0 +1,18 @@
+5 Class "Missing" not found
+8 Class "Missing" not found
+11 foreach() argument must be of type array|object, int given
+15 Undefined variable $undef
+16 Unhandled match case 1
+23 Value of type int is not callable
+28 strlen(): Argument #1 ($string) must be of type string, array given
+31 Unsupported operand types: int + array
+34 Unhandled match case 1
+40 Unhandled match case 1
+{closure:/main.php:43}(): Argument #1 ($x) must be of type int, string given, called in /main.php on line 45
+49 Call to undefined function absent()
+51 substr(): Argument #1 ($string) must be of type string, array given
+56
+61
+64
+no return
+68 noValue(): Return value must be of type int, none returned

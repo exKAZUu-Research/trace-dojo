@@ -1,0 +1,10 @@
+interface Self<T extends T> extends T {}
+interface Mutual<T extends U, U extends T> extends T {}
+interface Intersected<T extends T & { a: 1 }> extends T {}
+interface Indexed<T extends T[keyof T]> extends T {}
+interface Conditional<T extends (T extends string ? T : never)> extends T {}
+interface Valid<T extends { a: number }> {
+  value: T;
+}
+const valid: Valid<{ a: number }> = { value: { a: 1 } };
+console.log(valid.value.a);

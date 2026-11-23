@@ -1,0 +1,39 @@
+string(10) "Scope\Base"
+string(10) "Scope\Base"
+string(10) "Scope\Base"
+string(10) "Scope\Base"
+string(11) "Scope\Child"
+string(10) "Scope\Base"
+string(10) "Scope\Base"
+Cannot use "self" in the global scope
+object(Scope\Child)#4 (1) {
+  ["label"]=>
+  string(10) "Scope\Base"
+}
+object(Scope\Base)#5 (1) {
+  ["label"]=>
+  string(10) "Scope\Base"
+}
+object(Scope\Child)#6 (1) {
+  ["label"]=>
+  string(10) "Scope\Base"
+}
+bool(true)
+bool(true)
+int(9)
+Cannot use "parent" when current class scope has no parent
+array(6) {
+  [0]=>
+  string(5) "child"
+  [1]=>
+  string(4) "base"
+  [2]=>
+  string(5) "child"
+  [3]=>
+  string(5) "child"
+  [4]=>
+  string(5) "child"
+  [5]=>
+  string(5) "child"
+}
+Cannot access "self" when no class scope is active

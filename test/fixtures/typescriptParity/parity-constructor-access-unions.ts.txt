@@ -1,0 +1,35 @@
+class Public {
+  constructor() {}
+}
+class Hidden {
+  private constructor() {}
+  static create(flag: boolean) {
+    const Selected = flag ? Public : Hidden;
+    return new Selected();
+  }
+}
+class Restricted {
+  protected constructor() {}
+}
+class Derived extends Restricted {
+  constructor() { super(); }
+  static create(flag: boolean) {
+    const Selected = flag ? Public : Restricted;
+    return new Selected();
+  }
+}
+function explicitlyWidened(Selected: typeof Public | typeof Hidden) {
+  return new Selected();
+}
+const reverseWidened = (Selected: typeof Hidden | typeof Public) => new Selected();
+class PlainHidden { private constructor() {} }
+const publicToHidden: typeof PlainHidden = Public;
+const publicToProtected: typeof Restricted = Public;
+console.log(
+  Hidden.create(false).constructor.name,
+  Derived.create(false).constructor.name,
+  explicitlyWidened(Hidden).constructor.name,
+  reverseWidened(Public).constructor.name,
+  publicToHidden.name,
+  publicToProtected.name,
+);

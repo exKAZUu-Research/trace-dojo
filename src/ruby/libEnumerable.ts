@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 946 -- Enumerable methods share traversal protocols; extracting independent methods would not simplify those protocols.
+// code-gauge-allow-file fileNcss -- Enumerable methods share traversal protocols; extracting independent methods would not simplify those protocols.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   caseEquals,
@@ -53,7 +53,7 @@ type Visit = (value: Value) => Gen<unknown>;
  * `[key, value]` pairs, a Range's members, or whatever `each` yields (several values packed into an array). The
  * visitor returns {@link STOP} to end the iteration.
  */
-// code-gauge-allow functionCognitiveComplexity 26 -- Iteration must preserve yielded tuples and overrides across Array, Hash, Range and Enumerator.
+// code-gauge-allow functionCognitiveComplexity -- Iteration must preserve yielded tuples and overrides across Array, Hash, Range and Enumerator.
 export function* iterate(collection: Value, visit: Visit, args: Value[] = []): Gen<void> {
   const runtime = rt();
   if (args.length === 0 && collection instanceof RArray && !isOverridden(collection)) {
@@ -443,7 +443,7 @@ for (const name of ['all?', 'any?', 'none?', 'one?'])
   defineIterationMethods(
     name,
     [0, 1],
-    // code-gauge-allow functionCognitiveComplexity 23 -- Quantified predicates share traversal while retaining their distinct short-circuit thresholds.
+    // code-gauge-allow functionCognitiveComplexity -- Quantified predicates share traversal while retaining their distinct short-circuit thresholds.
     ({ iterate }) =>
       function* (self, args, block) {
         let count = 0;
@@ -778,8 +778,8 @@ def('Enumerable', 'max_by', [0, 1], function* (self, args, block) {
 });
 def('Enumerable', 'minmax', 0, (self, _args, block) => minmax(self, block));
 
-// code-gauge-allow functionCognitiveComplexity 27 -- The ordered cases for Enumerable iteration protocols share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 41 -- The ordered cases for Enumerable iteration protocols share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Enumerable iteration protocols share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for Enumerable iteration protocols share state; splitting them solely for the metric would hide their sequencing.
 export function* minmax(self: Value, block: RProc | undefined): Gen {
   let min: Value | undefined;
   let max: Value | undefined;
@@ -828,7 +828,7 @@ function orderOf(block: RProc | undefined, a: Value, b: Value): Gen<number> {
   return block ? blockCompare(block, a, b) : compareValues(a, b);
 }
 
-// code-gauge-allow functionNcss 31 -- The ordered cases for Enumerable iteration protocols share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for Enumerable iteration protocols share state; splitting them solely for the metric would hide their sequencing.
 def('Enumerable', 'minmax_by', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'minmax_by', []);
   let min: Value | undefined;
@@ -1014,8 +1014,8 @@ def('Enumerable', 'chunk', 0, function (self, _args, block) {
   return customEnumerator(self, 'chunk', [block], (consumer) => chunkByKey(self, block, consumer));
 });
 
-// code-gauge-allow functionCognitiveComplexity 22 -- The ordered cases for Enumerable iteration protocols share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 48 -- The ordered cases for Enumerable iteration protocols share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Enumerable iteration protocols share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for Enumerable iteration protocols share state; splitting them solely for the metric would hide their sequencing.
 function* chunkByKey(self: Value, classifier: RProc, consumer: RProc): Gen {
   let currentKey: Value | undefined;
   let current: Value[] = [];
@@ -1103,7 +1103,7 @@ export function* uniqValues(source: Value[] | RArray, block: RProc | undefined):
   return yield* uniqCollect(source, block);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Uniqueness streams Enumerable values and roots live Array items through hashing.
+// code-gauge-allow functionCognitiveComplexity -- Uniqueness streams Enumerable values and roots live Array items through hashing.
 function* uniqCollect(source: Value[] | Value, block: RProc | undefined): Gen<Value[]> {
   const seen = newHash();
   const result: Value[] = [];
@@ -1128,7 +1128,7 @@ function* uniqCollect(source: Value[] | Value, block: RProc | undefined): Gen<Va
   }
 }
 
-// code-gauge-allow duplicateLines 19 -- Collection methods retain separate iteration, return-value and rooting lifecycles despite similar accumulation blocks.
+// code-gauge-allow duplicateLines -- Collection methods retain separate iteration, return-value and rooting lifecycles despite similar accumulation blocks.
 def('Enumerable', 'to_h', [0, -1], function* (self, args, block) {
   const hash = newHash();
   return yield* whileHeld(hash, function* () {
@@ -1154,8 +1154,8 @@ def('Enumerable', 'zip', [0, -1], function* (self, others, block) {
   return yield* zipCollections(self, others, block);
 });
 
-// code-gauge-allow functionCognitiveComplexity 21 -- The ordered cases for Enumerable iteration protocols share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 38 -- The ordered cases for Enumerable iteration protocols share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity -- The ordered cases for Enumerable iteration protocols share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss -- The ordered cases for Enumerable iteration protocols share state; splitting them solely for the metric would hide their sequencing.
 export function* zipCollections(self: Value, others: Value[], block: RProc | undefined): Gen<Value> {
   const inputs: Value[] = [];
   const emptyArray = self instanceof RArray && self.items.length === 0;

@@ -1,0 +1,15 @@
+12 e o 72 101 d
+4 8 true true false
+Hello World World HELLO, WORLD hello, world
+pad| pad |   pad|
+007 7-- ababab [ 'Hello', 'World' ] [ 'a', 'b' ]
+a,b!? Hell0, World Hell0, W0rld 7
+[ 'o', 'o' ] 1 -1 AB
+[ 'h', 'é', 'l', 'l', 'o' ] [ 'a', 'b', 'c' ] [ 'a', 'b' ] 41
+template TS 3 1,2 [object Object] null undefined
+123 true null 12.5 11111111 ff
+multi
+line tab	here quote"s back\slash
+a+b 1 true true
+The Quick Brown Fox
+x SS 2 undefined

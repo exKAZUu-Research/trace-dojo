@@ -1,0 +1,13 @@
+function f(k: string) {
+  const o: { [key: string]: (n: number) => number } = { [k]: (n) => n + 1 };
+  console.log(o[k](1));
+  const m: { [key: number]: (s: string) => number } = { [k.length]: (s) => s.length };
+  console.log(m[k.length]("abc"));
+}
+f("x");
+function g(k: "x" | "y") {
+  const o = { [k]: "hello" } as const;
+  const x: "hello" = o.x;
+  console.log(x, o);
+}
+g("x");

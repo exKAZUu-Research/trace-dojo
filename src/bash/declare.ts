@@ -62,7 +62,7 @@ export function runDeclaration(shell: Shell, name: string, args: DeclarationArgu
 }
 
 /** Reads the options before the operands, reporting an invalid one with the builtin's usage as Bash does. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Bash's option parsing shared by the declaration builtins, with export -n's special case and declare's conflicting -a and -A.
+// code-gauge-allow functionCognitiveComplexity -- Bash's option parsing shared by the declaration builtins, with export -n's special case and declare's conflicting -a and -A.
 function parseOptions(
   shell: Shell,
   name: string,
@@ -113,7 +113,7 @@ function parseWordOperand(word: string): { name: string; subscript?: string; app
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Bash's declaration of one operand: its name, a dynamic variable, its attributes, and its value.
+// code-gauge-allow functionCognitiveComplexity -- Bash's declaration of one operand: its name, a dynamic variable, its attributes, and its value.
 function declareOne(
   shell: Shell,
   builtin: string,
@@ -205,7 +205,7 @@ function isReadonlyGlobal(shell: Shell, name: string): boolean {
 }
 
 /** Sets and removes a declaration's attributes, converting the value as Bash does, or reports why it cannot. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Bash's attribute rules for declare: conversions, exclusive case attributes, and array kinds.
+// code-gauge-allow functionCognitiveComplexity -- Bash's attribute rules for declare: conversions, exclusive case attributes, and array kinds.
 function applyAttributes(
   shell: Shell,
   builtin: string,
@@ -283,7 +283,7 @@ function isCompound(operand: DeclarationArgument): boolean {
 }
 
 /** Assigns a declaration's value to the variable it declared, which may be a local shadowing a global. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Bash's assignment kinds for a declared variable: none, empty, compound, element, and scalar.
+// code-gauge-allow functionCognitiveComplexity -- Bash's assignment kinds for a declared variable: none, empty, compound, element, and scalar.
 function assignLocally(shell: Shell, variable: Variable, assignment: Assignment): boolean {
   if (assignment.value === undefined && !assignment.array) {
     if (variable.attributes.has('a') && !variable.value) variable.value = { kind: 'indexed', elements: new Map() };

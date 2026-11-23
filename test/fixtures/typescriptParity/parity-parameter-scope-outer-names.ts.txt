@@ -1,0 +1,34 @@
+const label = "outer";
+function describe(name = label) {
+  const label = "inner";
+  return `${name}/${label}`;
+}
+console.log(describe());
+
+type Unit = "cm";
+function measure(value: number, unit: Unit = "cm") {
+  type Unit = number;
+  const scale: Unit = 2;
+  return `${value * scale}${unit}`;
+}
+console.log(measure(3));
+
+function counter(start = 0, step = start + 1) {
+  var start: number;
+  return [start, step];
+}
+console.log(counter(), counter(5));
+
+class Box<T> {
+  constructor(private item: T, private fallback: T = item) {}
+  get(): T[] {
+    return [this.item, this.fallback];
+  }
+}
+console.log(new Box(4).get());
+
+const values = [1, 2, 3].map((x, index) => {
+  var x = x * 10;
+  return x + index;
+});
+console.log(values);

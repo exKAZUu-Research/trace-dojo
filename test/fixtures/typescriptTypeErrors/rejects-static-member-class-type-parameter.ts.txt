@@ -1,0 +1,35 @@
+class C<T> {
+  static value: T;
+}
+class Box<T> {
+  static identity(value: T): T {
+    return value;
+  }
+  static own<T>(value: T): T {
+    return value;
+  }
+  static {
+    let pending: T[] = [];
+    console.log(pending);
+  }
+  static get first(): T | undefined {
+    return undefined;
+  }
+  static nested() {
+    const echo = (value: T) => value;
+    return echo;
+  }
+  item?: T;
+}
+function outer<U>(u: U) {
+  class Inner {
+    static keep(value: U): U {
+      return value;
+    }
+  }
+  return Inner.keep(u);
+}
+const Anonymous = class<T> {
+  static value: T;
+};
+console.log(C.value, Box.identity(3), Box.own("s"), outer(1), Anonymous.value);

@@ -1,0 +1,17 @@
+type Dict = { [key:string]: number };
+type Other = { value: string };
+function iStruct<T extends {a:1}>(x:(T & Dict)[never]): never { return x; }
+function iObject<T extends object>(x:(T & Dict)[never]): never { return x; }
+function iUnknown<T extends unknown>(x:(T & Dict)[never]): never { return x; }
+function iAny<T extends any>(x:(T & Dict)[never]): never { return x; }
+function iEmpty<T extends {}>(x:(T & Dict)[never]): never { return x; }
+function iChain<T extends U,U extends object>(x:(T & Dict)[never]): never { return x; }
+function iIndexed<T extends Dict>(x:(T & Other)[never]): never { return x; }
+function iBare<T>(x:(T & {})[never]): never { return x; }
+function individual<T extends {a:1}>(x:(T & {b:2})['a']): 1 { return x; }
+function known<T extends {a:1}>(x:(T & Dict)['a']): 1 { return x; }
+function both<T extends {a:number}>(x:(T | Dict)['a']): number { return x; }
+function twoKeys<T extends {a:1}>(x:(T & {b:2})['a'|'b']): 1|2 { return x; }
+function selectKey<T extends {a:1},K extends 'a'>(x:(T & Dict)[K]): 1 { return x; }
+console.log('done');
+function neverIntersection<T extends { a: 1 },K extends never>(x:(T&Record<string,number>)[K]): never { return x; }

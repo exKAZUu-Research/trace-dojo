@@ -1,0 +1,7 @@
+function objectOrder({first=1, second=first+1}:{first?:number;second?:number}={}) { return [first,second]; }
+function tupleOrder([first=2, second=first+1]:[number?,number?]=[]) { return [first,second]; }
+function nestedOrder({first=3, nested:{second=first}={}}:{first?:number;nested?:{second?:number}}={}) { return second; }
+function deferredArrow(read=()=>later,later=4) { return read(); }
+function deferredFunction(read=function(){return later;},later=5) { return read(); }
+function immediateEarlier(earlier=6, value=(()=>earlier)()) { return value; }
+console.log(objectOrder(), tupleOrder(), nestedOrder(), deferredArrow(), deferredFunction(), immediateEarlier());

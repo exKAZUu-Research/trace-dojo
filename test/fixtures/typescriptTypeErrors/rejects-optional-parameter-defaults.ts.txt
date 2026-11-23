@@ -1,0 +1,26 @@
+function withDefault(x?: number = 2) {
+  return x;
+}
+console.log(withDefault());
+class Point {
+  constructor(public n?: number = 5) {}
+  scale(factor?: number = 1) {
+    return factor;
+  }
+}
+const arrow = (y?: number = 1) => y;
+const expression = function (z?: string = '') {
+  return z;
+};
+function both(a?: number = 1, b?: number = 2) {}
+function thenRequired(a?: number = 1, b: number) {}
+type Callback = (q?: number = 1) => void;
+interface Shape {
+  area(q?: number = 1): void;
+}
+function destructured({ a }?: { a: number } = { a: 1 }) {}
+function multiline(
+  a?: number,
+  b?: number = 3,
+) {}
+function valid(a?: number, b = 2, c: number = 3) {}

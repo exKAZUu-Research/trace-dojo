@@ -1,0 +1,20 @@
+type AssertNever<T extends never> = T;
+type Plain = AssertNever<{ item: number }[never]>;
+type NoShared = { a: number } | { b: string };
+type Empty = AssertNever<NoShared[keyof NoShared]>;
+type Top = AssertNever<unknown[never]>;
+type Bottom = AssertNever<never[never]>;
+type Str = string[never];
+type Arr = number[][never];
+type Dict = { [key: string]: boolean }[never];
+type Both = { [key: string]: boolean; [key: symbol]: 3 }[never];
+type Weak<T> = T[never];
+type Mapped<T> = { [P in keyof T]: T[P] }[never];
+type WithIndex<T> = Record<string, T>[never];
+const s: Str = 's';
+const n: Arr = 1;
+const b: Dict = true;
+const both: Both = 3;
+console.log(s,n,b,both);
+function emptyValue(x: NoShared, key: never): never { return x[key]; }
+function arrayValue(x: number[], key: never): number { return x[key]; }

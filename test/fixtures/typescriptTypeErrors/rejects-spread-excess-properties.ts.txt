@@ -1,0 +1,12 @@
+interface P2 { x: number; y: number }
+const p3 = { x: 1, y: 2, z: 3 };
+const a: P2 = { ...p3, w: 1 };
+const b: P2 = { w: 1, ...p3 };
+const c: P2 = { ...p3, x: 5, nested: { q: 1 } };
+const d: { inner: P2 } = { ...{ inner: p3 }, inner: { x: 1, y: 2, extra: 1 } };
+function f(u: { x: number; y: number; k: 1 } | { x: number; y: number; k: 2 }) {
+  const e: P2 = { ...u };
+  const g: P2 = { ...u, extra: 1 };
+  console.log(e, g);
+}
+console.log(a, b, c, d);

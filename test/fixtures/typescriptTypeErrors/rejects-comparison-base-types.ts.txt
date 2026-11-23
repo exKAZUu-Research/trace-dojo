@@ -1,0 +1,17 @@
+const a: string = 'x';
+console.log(a === 1);
+const n: number = 5;
+console.log(n === 0b101);
+const b: 1 | 2 = 1;
+console.log(b === 3);
+const s: string = 'x';
+console.log(1 === s);
+console.log(a === true);
+const u: "p" | "q" = "p";
+console.log(u === 1);
+console.log(n === "x");
+const bb: boolean = true;
+console.log(bb === 1);
+console.log(n !== 'y');
+console.log(n == 'y');
+console.log(a === 1n);

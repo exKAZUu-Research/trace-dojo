@@ -1,0 +1,7 @@
+function f(): void {}
+const r = f();
+console.log(r.length);
+let name = "a";
+console.log(name.length);
+function g(x: string | void) { return x.length; }
+function h(x: void) { return x.toString(); }

@@ -1,0 +1,4 @@
+(7,48): error TS2446: Property 'count' is protected and only accessible through an instance of class 'Derived'. This is an instance of class 'BaseView'.
+(8,56): error TS2446: Property 'count' is protected and only accessible through an instance of class 'Derived'. This is an instance of class 'IndirectBase'.
+(9,68): error TS2446: Property 'count' is protected and only accessible through an instance of class 'Derived'. This is an instance of class 'BaseView'.
+(10,81): error TS2446: Property 'count' is protected and only accessible through an instance of class 'Derived'. This is an instance of class '{ extra: boolean; } & BaseView'.

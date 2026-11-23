@@ -1,0 +1,10 @@
+const numbers = new Set([1, 2]);
+const union = numbers.union(new Set([3]));
+const first: number = union.values().next().value!;
+console.log(union, first);
+
+function choose<T>(value: { has(item: T): boolean; values(): Iterator<T> }): T {
+  return value.values().next().value;
+}
+const chosen: number = choose(new Set([4, 5]));
+console.log(chosen);

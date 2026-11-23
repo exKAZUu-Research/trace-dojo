@@ -1,0 +1,79 @@
+
+Warning: Undefined global variable $inc in /main.php on line 2
+
+Warning: Undefined global variable $cat in /main.php on line 3
+
+Warning: Undefined global variable $add in /main.php on line 4
+
+Warning: Undefined global variable $dec in /main.php on line 5
+
+Warning: Decrement on type null has no effect, this will change in the next major version of PHP in /main.php on line 5
+
+Warning: Undefined array key "k" in /main.php on line 7
+
+Warning: Undefined array key "m" in /main.php on line 7
+
+Warning: Undefined array key "n" in /main.php on line 7
+
+Warning: Undefined variable $missing in /main.php on line 8
+
+Warning: Undefined array key "outer" in /main.php on line 8
+
+Warning: Undefined array key "inner" in /main.php on line 8
+
+Warning: Undefined global variable $nested in /main.php on line 9
+
+Warning: Undefined array key "one" in /main.php on line 9
+
+Warning: Undefined array key "two" in /main.php on line 9
+
+Warning: Undefined array key "outer" in /main.php on line 14
+
+Warning: Undefined array key "inner" in /main.php on line 14
+array(3) {
+  ["k"]=>
+  array(1) {
+    ["m"]=>
+    array(1) {
+      ["n"]=>
+      string(1) "x"
+    }
+  }
+  ["write"]=>
+  array(1) {
+    ["quiet"]=>
+    int(5)
+  }
+  ["coalesce"]=>
+  array(1) {
+    ["quiet"]=>
+    int(6)
+  }
+}
+array(1) {
+  ["outer"]=>
+  array(1) {
+    ["inner"]=>
+    int(1)
+  }
+}
+array(1) {
+  ["outer"]=>
+  array(1) {
+    ["inner"]=>
+    int(1)
+  }
+}
+array(1) {
+  ["one"]=>
+  array(1) {
+    ["two"]=>
+    int(4)
+  }
+}
+bool(false)
+bool(true)
+Using $this when not in object context
+Using $this when not in object context
+Using $this when not in object context
+Using $this when not in object context

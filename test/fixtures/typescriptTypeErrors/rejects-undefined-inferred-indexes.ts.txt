@@ -1,0 +1,15 @@
+function numeric(source: { 0?: number }): void {
+  const indexed: Record<number, number> = source;
+}
+
+function absent(source: { count?: undefined }): void {
+  const indexed: Record<string, number> = source;
+}
+
+function required(source: { count: number | undefined }): void {
+  const indexed: Record<string, number> = source;
+}
+
+function optionalNever(source: { item?: never }): void {
+  const indexed: Record<string, number> = source;
+}

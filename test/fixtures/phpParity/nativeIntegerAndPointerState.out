@@ -1,0 +1,36 @@
+int(9223372036854775807)
+int(9007199254740993)
+int(9007199254740993)
+int(-2)
+int(-4)
+int(9007199254740993)
+bool(false)
+int(9223372036854775807)
+bool(false)
+string(1) "c"
+int(3)
+NULL
+bool(false)
+bool(false)
+string(2) "15"
+int(4)
+int(1)
+string(1) "a"
+string(40) "004465636c6172656450726f7073006669727374"
+int(2)
+string(18) "002a007365636f6e64"
+string(5) "third"
+int(3)
+string(5) "third"
+int(4)
+string(18) "002a007365636f6e64"
+int(1)
+ab:0
+int(3)
+ba:0
+int(3)
+ba:0
+Iterators' LIFO/FIFO modes for SplStack/SplQueue objects are frozen
+int(7)
+int(5)
+Iterators' LIFO/FIFO modes for SplStack/SplQueue objects are frozen

@@ -1,0 +1,2 @@
+[ 9, 2, 3 ] { value: 9, writable: false, enumerable: true, configurable: true }
+[ '0', '2' ] [ 9, 7, 3 ]

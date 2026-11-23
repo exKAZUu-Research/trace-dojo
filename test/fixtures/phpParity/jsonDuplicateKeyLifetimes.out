@@ -1,0 +1,67 @@
+object(stdClass)#2 (2) {
+  ["a"]=>
+  object(stdClass)#3 (0) {
+  }
+  ["b"]=>
+  object(stdClass)#1 (0) {
+  }
+}
+object(stdClass)#4 (0) {
+}
+object(stdClass)#2 (2) {
+  ["a"]=>
+  int(1)
+  ["b"]=>
+  object(stdClass)#4 (0) {
+  }
+}
+object(stdClass)#1 (0) {
+}
+object(stdClass)#4 (2) {
+  ["a"]=>
+  object(stdClass)#3 (0) {
+  }
+  ["b"]=>
+  object(stdClass)#2 (0) {
+  }
+}
+object(stdClass)#1 (0) {
+}
+object(stdClass)#3 (2) {
+  ["a"]=>
+  object(stdClass)#4 (2) {
+    ["x"]=>
+    object(stdClass)#2 (0) {
+    }
+    ["b"]=>
+    object(stdClass)#1 (0) {
+    }
+  }
+  ["b"]=>
+  object(stdClass)#5 (0) {
+  }
+}
+object(stdClass)#6 (0) {
+}
+array(2) {
+  [0]=>
+  object(stdClass)#3 (1) {
+    ["a"]=>
+    object(stdClass)#5 (0) {
+    }
+  }
+  [1]=>
+  object(stdClass)#6 (0) {
+  }
+}
+object(stdClass)#4 (0) {
+}
+NULL
+object(stdClass)#6 (0) {
+}
+NULL
+object(stdClass)#3 (0) {
+}
+NULL
+object(stdClass)#3 (0) {
+}

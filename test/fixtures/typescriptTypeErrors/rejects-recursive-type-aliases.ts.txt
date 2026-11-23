@@ -1,0 +1,17 @@
+type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
+const a: Json = [1, ["x", [undefined]]];
+const b: Json = { k: { m: () => 1 } };
+type Nested<T> = T | Nested<T>[];
+const c: Nested<number> = [1, ["2"]];
+function depth(v: Json): number { return Array.isArray(v) ? v.map(depth).join() : 0; }
+type L = L[] | number;
+const d: L[] = [1, [2, ["3"]]];
+function count(v: Json[]): string { return v.map((x) => 1).length; }
+const e: L = [[undefined]];
+type O = { [k: string]: O | number };
+const o: O = { k: { m: "s" } };
+type P<X, Y> = X | Y | P<Y, X>[];
+const p: P<number, string> = [1, ["a", [true]]];
+type G<T> = T | G<T[]>[];
+const g1: G<number> = [[1]];
+const g2: G<number> = ["x"];

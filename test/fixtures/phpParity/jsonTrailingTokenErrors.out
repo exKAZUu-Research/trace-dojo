@@ -1,0 +1,24 @@
+bool(false)
+int(3)
+3 Control character error, possibly incorrectly encoded
+bool(false)
+int(3)
+3 Control character error, possibly incorrectly encoded
+bool(false)
+int(10)
+10 Single unpaired UTF-16 surrogate in unicode escape
+bool(false)
+int(5)
+5 Malformed UTF-8 characters, possibly incorrectly encoded
+bool(false)
+int(3)
+3 Control character error, possibly incorrectly encoded
+bool(false)
+int(3)
+3 Control character error, possibly incorrectly encoded
+bool(false)
+int(4)
+4 Syntax error
+bool(false)
+int(4)
+4 Syntax error

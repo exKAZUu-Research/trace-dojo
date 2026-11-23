@@ -1,0 +1,1 @@
+(2,7): error TS2322: Type '(x: unknown) => x is string' is not assignable to type '(x: unknown) => x is number'.

@@ -1,0 +1,14 @@
+type K = keyof { 0: string; "1": number; 2.5: boolean; a: 1 };
+const k0: K = 0;
+const k1: K = "1";
+const k2: K = 2.5;
+const bad1: K = "0";
+const bad2: K = 1;
+interface I { 3: string; [4]: number }
+const i3: keyof I = 3;
+const i4: keyof I = 4;
+const o = { 5: "x" };
+const o5: keyof typeof o = 5;
+class Cn { 6 = 1; }
+const c6: keyof Cn = 6;
+console.log(k0, k1, k2, i3, i4, o5, c6);

@@ -1,0 +1,9 @@
+(2,3): error TS7010: 'onClick', which lacks return-type annotation, implicitly has an 'any' return type.
+(5,16): error TS7010: 'draw', which lacks return-type annotation, implicitly has an 'any' return type.
+(7,3): error TS7013: Construct signature, which lacks return-type annotation, implicitly has an 'any' return type.
+(10,3): error TS7020: Call signature, which lacks return-type annotation, implicitly has an 'any' return type.
+(13,12): error TS7010: 'render', which lacks return-type annotation, implicitly has an 'any' return type.
+(14,3): error TS7010: 'resize', which lacks return-type annotation, implicitly has an 'any' return type.
+(19,10): error TS7010: 'format', which lacks return-type annotation, implicitly has an 'any' return type.
+(27,7): error TS7032: Property 'kelvin' implicitly has type 'any', because its set accessor lacks a parameter type annotation.
+(28,7): error TS7033: Property 'fahrenheit' implicitly has type 'any', because its get accessor lacks a return type annotation.

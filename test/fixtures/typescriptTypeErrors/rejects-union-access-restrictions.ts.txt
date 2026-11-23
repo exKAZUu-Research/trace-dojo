@@ -1,0 +1,5 @@
+class PrivateFirst { private value = 1; }
+class PrivateSecond { private value = 2; }
+function privateUnion(value: PrivateFirst | PrivateSecond) { console.log(value.value); }
+type ReadonlyUnion = {readonly value: number} | {readonly value: number; tag: string};
+function readonlyUnion(value: ReadonlyUnion) { value.value = 2; }

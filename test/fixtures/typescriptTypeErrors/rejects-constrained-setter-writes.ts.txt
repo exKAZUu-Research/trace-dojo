@@ -1,0 +1,16 @@
+class Box {
+  get value(): number { return 77; }
+  set value(value: string | number) {}
+  get plain(): number { return 33; }
+  set plain(value: number) {}
+}
+function setInvalid<K extends 'value'>(box: Box, key: K, value: boolean) {
+  box[key] = value;
+}
+function setAmbiguous<K extends 'value' | 'plain'>(box: Box, key: K, value: string) {
+  box[key] = value;
+}
+function read<K extends 'value'>(box: Box, key: K) {
+  const value: string = box[key];
+  return value;
+}

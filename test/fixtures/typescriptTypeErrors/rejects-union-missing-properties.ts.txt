@@ -1,0 +1,5 @@
+function f(x: number | string) { return x.toFixed(1); }
+function g(z: { width: number } | { height: number }) { return z.widht; }
+function h(s: string | number) { return s.toUppercase(); }
+function k(o: { a: number } | { a: string; b: number }) { return o.a; }
+console.log(k({ a: 1 }));

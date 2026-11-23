@@ -1,0 +1,14 @@
+{ x: 1 }
+{ x: 1 }
+{ value: 1 }
+{ near: 4 }
+{ near: 5, shown: 3 }
+Number {}
+Number { near: 7 }
+Custom { visible: 8 }
+{ near: 10 }
+{ shown: 11 }
+{ near: 13, tooDeep: 12 }
+[ 1, [length]: 1 ]
+Array {}
+[ 1, [length]: 1 ]

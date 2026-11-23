@@ -1,0 +1,18 @@
+type Getter = { get x(): number };
+type Field = { x: number };
+type Wide = { get x(): number; set x(value: number | string) };
+type Fixed = { readonly x: number };
+const a: Getter & Field = { x: 1 };
+a.x = 2;
+const b: Field & Getter = { x: 1 };
+b.x = 3;
+const c: Wide & Field = { x: 1 };
+c.x = "s";
+c.x = 4;
+const d: Fixed & Getter = { x: 1 };
+d.x = 5;
+const e: Getter & Getter = { x: 1 };
+e.x = 6;
+const f: Wide & Wide = { x: 1 };
+f.x = "t";
+console.log(a.x, b.x, c.x, d.x, e.x, f.x);

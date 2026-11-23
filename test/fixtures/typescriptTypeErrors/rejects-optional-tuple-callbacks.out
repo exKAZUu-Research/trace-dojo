@@ -1,0 +1,2 @@
+(1,48): error TS18048: 'x' is possibly 'undefined'.
+(10,53): error TS18048: 'x' is possibly 'undefined'.

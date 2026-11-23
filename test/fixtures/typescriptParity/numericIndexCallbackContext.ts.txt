@@ -1,0 +1,6 @@
+const callbacks: { [key: `${number}`]: (value: string) => number } = {
+  1: value => value.length,
+  [2](value) { return value.length + 1; },
+  "3": (value) => value.length + 2,
+};
+console.log(callbacks["1"]("one"), callbacks["2"]("two"), callbacks["3"]("three"));

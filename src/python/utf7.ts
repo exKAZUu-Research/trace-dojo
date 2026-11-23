@@ -46,7 +46,7 @@ class Base64Writer {
 }
 
 /** Encodes code points, writing those outside the direct set as base-64 UTF-16 between `+` and `-`. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes PyUnicode_EncodeUTF7, which decides each character in one pass.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes PyUnicode_EncodeUTF7, which decides each character in one pass.
 function encodeUtf7(points: readonly number[]): Uint8Array {
   const out: number[] = [];
   const writer = new Base64Writer(out);

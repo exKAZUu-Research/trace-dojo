@@ -1,0 +1,20 @@
+class Packet extends Array<number> {
+  changeFirst() { super[0] = 7; }
+  grow() { super[3] = 12; }
+  empty() { super.length = 0; }
+}
+const packet = new Packet(1, 2);
+packet.changeFirst();
+packet.grow();
+console.log(packet[0], packet.length, 2 in packet, packet[3]);
+Object.defineProperty(packet, '0', { writable: false });
+try { packet.changeFirst(); } catch (error) { console.log(error instanceof TypeError); }
+Object.defineProperty(packet, 'length', { writable: false });
+try { packet.empty(); } catch (error) { console.log(error instanceof TypeError); }
+const mutable = new Packet(1, 2);
+mutable.empty();
+console.log(mutable.length, 0 in mutable);
+console.log(JSON.stringify(String.prototype.valueOf()), Number.prototype.toFixed(2), Boolean.prototype.toString());
+console.log(Object.getOwnPropertyNames(String.prototype).slice(0, 2).join(','));
+console.log(Object.getOwnPropertyDescriptor(String.prototype, 'length')?.writable);
+console.table();

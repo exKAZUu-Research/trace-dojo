@@ -83,7 +83,7 @@ export class ProvenanceAlgebra {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- One dispatch applies canonical identities and validates them against the evaluated scalar.
+  // code-gauge-allow functionCognitiveComplexity -- One dispatch applies canonical identities and validates them against the evaluated scalar.
   combine(operation: {
     operator?: BinaryOperator | '~';
     value: Scalar;
@@ -138,7 +138,7 @@ export class ProvenanceAlgebra {
     this.inverses.set(key, target);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- Neutral and absorbing identities must respect signed division and C shift values in one dispatch.
+  // code-gauge-allow functionCognitiveComplexity -- Neutral and absorbing identities must respect signed division and C shift values in one dispatch.
   private identity(
     operator: BinaryOperator | '~' | undefined,
     inputs: Input[],
@@ -166,8 +166,7 @@ export class ProvenanceAlgebra {
     return undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- Canonical terms, coefficients and constants must use the same modular domain.
-  // code-gauge-allow functionNcss 32 -- One normalization pass creates the interned expression and its remaining sources.
+  // code-gauge-allow functionCognitiveComplexity -- Canonical terms, coefficients and constants must use the same modular domain.
   private normalize(
     mode: 'add' | 'xor',
     inputs: Input[],
@@ -266,7 +265,7 @@ export class ProvenanceAlgebra {
     return terms;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Boolean products and sums must share canonical monomial keys and modular coefficients.
+  // code-gauge-allow functionCognitiveComplexity -- Boolean products and sums must share canonical monomial keys and modular coefficients.
   private booleanOperation(
     operator: '&' | '|' | '^',
     a: BooleanPolynomial,

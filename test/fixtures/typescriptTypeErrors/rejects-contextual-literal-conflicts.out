@@ -1,0 +1,7 @@
+(10,7): error TS2322: Type 'string[]' is not assignable to type '"a"[]'.
+  Type 'string' is not assignable to type '"a"'.
+(11,7): error TS2322: Type '"b"[]' is not assignable to type '"a"[]'.
+  Type '"b"' is not assignable to type '"a"'.
+(12,7): error TS2322: Type '"b"[]' is not assignable to type '"a"[]'.
+  Type '"b"' is not assignable to type '"a"'.
+(13,7): error TS2322: Type '"b"' is not assignable to type '"a"'.

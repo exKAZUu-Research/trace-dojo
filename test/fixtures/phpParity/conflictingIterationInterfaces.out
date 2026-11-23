@@ -1,0 +1,4 @@
+
+Fatal error: Class Both cannot implement both Iterator and IteratorAggregate at the same time in /main.php on line 2
+Stack trace:
+#0 {main}

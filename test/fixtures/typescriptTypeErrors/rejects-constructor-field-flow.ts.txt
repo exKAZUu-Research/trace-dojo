@@ -1,0 +1,24 @@
+class OneBranch { x; constructor(c: boolean) { if (c) this.x = 1; } }
+const oneBranch: number = new OneBranch(true).x;
+class EarlyReturn { x; constructor(c: boolean) { if (c) return; this.x = 1; } }
+const earlyReturn: number = new EarlyReturn(true).x;
+class Unreachable { x; constructor() { return; this.x = 1; } }
+class NoDefault { x; constructor(k: number) { switch (k) { case 1: this.x = 1; break; case 2: this.x = 2; } } }
+const noDefault: number = new NoDefault(1).x;
+class Reassigned { x; constructor() { this.x = 1; this.x = "a"; } }
+class ShortCircuit { x; constructor(c: boolean) { c && (this.x = 1); } }
+const shortCircuit: number = new ShortCircuit(true).x;
+class Looped { x; constructor() { for (let i = 0; i < 1; i++) this.x = 1; } }
+const looped: number = new Looped().x;
+class InArrow { x; constructor() { const f = () => { this.x = 1; }; f(); } }
+class BreakFirst { x; constructor(d: boolean) { while (true) { if (d) break; this.x = 1; } } }
+const breakFirst: number = new BreakFirst(true).x;
+class ReturnInLoop { x; constructor(d: boolean) { while (true) { if (d) return; this.x = 1; } } }
+const returnInLoop: number = new ReturnInLoop(true).x;
+class Caught { x; constructor() { try { this.x = 1; this.x = "a"; } catch { } } }
+const caught: string = new Caught().x;
+class DefaultReturns { x; constructor(d: number) { switch (d) { case 1: this.x = 1; break; default: return; } } }
+const defaultReturns: number = new DefaultReturns(1).x;
+class OnlyUndefined { x; constructor() { this.x = undefined; } }
+class Nullable { x; constructor(d: boolean) { this.x = d ? "a" : null; } }
+const nullable: string = new Nullable(true).x;

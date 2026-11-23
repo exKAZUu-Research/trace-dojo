@@ -1,0 +1,28 @@
+class Box { value = 1; }
+function withPrototype(object: object, prototype: object | null) {
+  Object.setPrototypeOf(object, prototype);
+  return object;
+}
+const empty = Object.create(null);
+const content = Object.assign(Object.create(null), { label: 'prototype', nested: { value: 2 } });
+const chain = Object.create(empty);
+const throwing = Object.create(null);
+Object.defineProperty(throwing, 'constructor', { enumerable: true, get() { throw new Error('constructor getter ran'); } });
+console.log(withPrototype(new Box(), empty));
+console.log(withPrototype(new Box(), chain));
+console.log(withPrototype(new Box(), throwing));
+console.log(withPrototype(new Box(), content));
+console.log('%o', withPrototype(new Box(), content));
+Object.defineProperty(Box, 'name', { value: 'Renamed' });
+console.log(withPrototype(new Box(), chain));
+const namedPrototype = Object.create(null);
+Object.defineProperty(namedPrototype, 'constructor', { value: Box });
+console.log(withPrototype({}, namedPrototype));
+console.dir(withPrototype(new Box(), chain), { depth: 0 });
+console.dir(withPrototype(new Box(), empty), { depth: -1 });
+console.log({ a: { b: { c: withPrototype(new Box(), empty), d: withPrototype(new Box(), null) } } });
+const shortened = withPrototype(new Box(), null);
+console.dir(shortened, { depth: -1 });
+console.dir(shortened, { depth: -1, showHidden: true });
+console.dir({ shortened }, { depth: 0 });
+console.dir({ shortened }, { depth: 0, showHidden: true });

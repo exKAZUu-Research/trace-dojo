@@ -1,0 +1,11 @@
+type F = (<T = number>(x: T) => T) | (<T = string>(x: T) => T);
+function use(f: F) { return f(1); }
+type G = (<T>(x: T) => T) | (<T = number>(x?: T) => T);
+function use2(g: G) { return g("x"); }
+type H = (<T extends string>(x: T) => T) | (<T extends number>(x: T) => T);
+function use3(h: H) { return h("x" as never); }
+type K = (<T = number>(x: T) => T[]) | (<T = string>(x: T) => T);
+function use4(k: K) { const r: null = k(1); }
+type L = (<T = number>(x: T) => T) | (<T = string>(x: T) => T) | (<T = boolean>(x: T, y?: T) => T);
+function use5(l: L) { const r: null = l(true); }
+console.log(use((x) => x), use2((x) => x));

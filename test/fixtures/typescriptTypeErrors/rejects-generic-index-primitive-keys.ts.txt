@@ -1,0 +1,14 @@
+type V1<T extends {a:number}>=T[null];
+type V2<T extends {a:number}>=T[undefined];
+type V3<T extends {a:number}>=T[void];
+type V4<T extends {a:number}>=T[bigint];
+type V5<T extends {a:number}>=T[any];
+type V6<T extends {a:number}>=T[never];
+type V7<T extends {a:number}>=T[boolean];
+type V8<T extends {a:number}>=T[object];
+type V9<T extends {a:number}>=T[true];
+type V10<T extends {a:number}>=T[1n];
+type V11<T extends {a:number}>=T[unknown];
+type V12<T extends {a:number}>=T[string];
+type V13<T extends {a:number}>=T[symbol];
+console.log("checked");

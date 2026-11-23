@@ -1,0 +1,12 @@
+3 turtle true 100000000000000000000n symbol Symbol(id) id
+4 3.5 3 1 -1 1024 0.30000000000000004
+a123 x=4, y=8 single double "q"
+default true true
+5 big
+1 4 3
+1 7 6 -6 16 -4 15
+false false undefined undefined object number string object object function
+set 10 7
+[ 1, 2, 3 ] [ 'a', 1 ] 3 a
+1 1e+21 123456789012345680000 0.3333333333333333 -0 [ -0 ] NaN Infinity
+9007199254740991 true 255 15 5 1000000

@@ -1,0 +1,10 @@
+function recursiveDefault({a = (() => a)()}: {a?: number} = {}) {
+  return a;
+}
+function inferredDefault({a = 1, b = (() => a)()} = {}) {
+  return b;
+}
+function inferredNestedDefault({nested: [a = 3, b = (() => a)()] = []}: {nested?: [number?, number?]} = {}) {
+  return b;
+}
+console.log(recursiveDefault(), inferredDefault(), inferredNestedDefault());

@@ -1,0 +1,8 @@
+const m = new Map([[1, 'a'], [2, 'b'], [3, 'c']]);
+for (const [k] of m) { if (k === 1) { m.delete(2); m.set(4, 'd'); } console.log(k); }
+const s = new Set([1, 2]);
+let n = 0; for (const v of s) { if (n++ < 3) s.add(v + 10); }
+console.log(s);
+const arr = [1, 2, 3];
+arr.forEach((v, i) => { if (i === 0) arr.push(99); console.log(v); });
+const keys: string[] = []; const o: any = { a: 1, b: 2 }; for (const k in o) { delete o.b; o.c = 3; keys.push(k); } console.log(keys);

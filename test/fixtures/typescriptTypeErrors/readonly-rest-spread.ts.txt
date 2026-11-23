@@ -1,0 +1,5 @@
+function last(...values: [...number[], string]) { console.log(values); }
+last(...([1, true] as const));
+last(...([] as const));
+const unbounded: readonly (number | string)[] = [1, 'last'];
+last(...unbounded);

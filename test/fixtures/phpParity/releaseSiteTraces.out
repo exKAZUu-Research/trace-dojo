@@ -1,0 +1,23 @@
+Exception: release in /main.php:3
+Stack trace:
+#0 /main.php(7): Item->__destruct()
+#1 {main}
+Exception: release in /main.php:3
+Stack trace:
+#0 /main.php(10): Item->__destruct()
+#1 /main.php(12): remove()
+#2 {main}
+Exception: release in /main.php:3
+Stack trace:
+#0 /main.php(17): Item->__destruct()
+#1 {main}
+Exception: release in /main.php:3
+Stack trace:
+#0 /main.php(21): Item->__destruct()
+#1 /main.php(24): Holder->remove()
+#2 {main}
+Exception: release in /main.php:3
+Stack trace:
+#0 [internal function]: Item->__destruct()
+#1 /main.php(29): gc_collect_cycles()
+#2 {main}

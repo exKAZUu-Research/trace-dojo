@@ -1,0 +1,5 @@
+
+Warning: Private methods cannot be final as they are never overridden by other classes in /main.php on line 4
+
+Warning: Private methods cannot be final as they are never overridden by other classes in /main.php on line 6
+ok

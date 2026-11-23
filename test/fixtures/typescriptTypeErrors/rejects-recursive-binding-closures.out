@@ -1,0 +1,6 @@
+(1,28): error TS7022: 'a' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+(1,33): error TS7024: Function implicitly has return type 'any' because it does not have a return type annotation and is referenced directly or indirectly in one of its return expressions.
+(1,39): error TS2372: Parameter 'a' cannot reference itself.
+(4,39): error TS7011: Function expression, which lacks return-type annotation, implicitly has an 'any' return type.
+(7,42): error TS7022: 'a' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+(7,54): error TS7024: Function implicitly has return type 'any' because it does not have a return type annotation and is referenced directly or indirectly in one of its return expressions.

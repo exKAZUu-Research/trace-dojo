@@ -66,7 +66,7 @@ function findAmble(tokens: Token[], open: number): Amble | undefined {
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Bash's brace expansion: the preamble, the alternatives or sequence, and the postscript in one recursion.
+// code-gauge-allow functionCognitiveComplexity -- Bash's brace expansion: the preamble, the alternatives or sequence, and the postscript in one recursion.
 function expandTokens(tokens: Token[], spend: () => void): Token[][] {
   spend();
   for (let open = 0; open < tokens.length; open++) {
@@ -111,7 +111,7 @@ const isLetter = (value: string): boolean => /^[A-Za-z]$/.test(value);
 const isPadded = (value: string): boolean => /^-?0\d/.test(value);
 
 /** The terms of a sequence expression `x..y[..incr]`, as Bash's `expand_seqterm`, or `undefined` when invalid. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Bash's expand_seqterm, whose integer, padding, and letter rules share the parsed terms.
+// code-gauge-allow functionCognitiveComplexity -- Bash's expand_seqterm, whose integer, padding, and letter rules share the parsed terms.
 function sequenceOf(text: string, spend: () => void): string[] | undefined {
   const match = /^(.+?)\.\.(.+?)(?:\.\.([-+]?\d+))?$/u.exec(text);
   if (!match) return undefined;

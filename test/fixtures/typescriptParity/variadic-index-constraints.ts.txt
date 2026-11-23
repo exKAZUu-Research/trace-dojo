@@ -1,0 +1,18 @@
+function size<T extends unknown[]>(value: [...T]["length"]): number { return value; }
+function sizeFixed<T extends [string]>(value: [...T]["length"]): 1 { return value; }
+function named<T extends string[]>(value: [...T]["push"]): (...args: string[]) => number { return value; }
+function upper<T extends string[]>(value: [...T][0]): string { return value.toUpperCase(); }
+function readonly<T extends readonly string[]>(value: (readonly [...T])[number]): string { return value.toUpperCase(); }
+function suffix<T extends string[]>(value: [boolean, ...T, number][1]): number | string { return value; }
+function broad<T extends string[]>(value: [boolean, ...T, number][number]): boolean | number | string { return value; }
+function lengthUnion<T extends [number] | [string, string]>(value: [...T]["length"]): 1 | 2 { return value; }
+function key<T extends string[], K extends keyof [...T]>(value: [...T][K]): [...T][K] { return value; }
+function textIndex<T extends [number, string]>(value: [...T]["0"]): number { return value; }
+type TupleValues<T extends string[]> = [...T][`${number}`];
+type MixedIndex<T extends string[]> = [...T]["-1" | "length"];
+console.log(size<[]>(0), sizeFixed<[string]>(1), named<string[]>((...items) => items.length)("ok"));
+console.log(upper<[string]>("up"), readonly<readonly [string]>("rest"), suffix<[]>(2), broad<[]>(true));
+console.log(lengthUnion<[string,string]>(2), key<[string], "length">(1), textIndex<[number, string]>(3));
+const values: TupleValues<string[]> = "value";
+const mix: MixedIndex<string[]> = 1;
+console.log(values, mix);

@@ -1,0 +1,28 @@
+function strs<T extends object>(o: T) {
+  const r = {} as { [K in keyof T]: string };
+  for (const k in o) {
+    r[k] = String(o[k]);
+  }
+  return r;
+}
+console.log(strs({ a: 1, b: true }));
+
+function keysOf<T extends { a: number }>(o: T): (keyof T)[] {
+  const keys: (keyof T)[] = [];
+  for (const k in o) {
+    const key: keyof T = k;
+    keys.push(key);
+  }
+  return keys;
+}
+console.log(keysOf({ a: 1, b: 2 }));
+
+function total<K extends string>(o: Record<K, number>): number {
+  let sum = 0;
+  for (const k in o) {
+    const key: K = k;
+    sum += o[key];
+  }
+  return sum;
+}
+console.log(total({ x: 1, y: 2 }));

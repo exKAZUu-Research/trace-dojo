@@ -1,0 +1,4 @@
+
+Fatal error: Declaration of ContractA::run(): void must be compatible with ContractB::run(int $value): void in /main.php on line 2
+Stack trace:
+#0 {main}

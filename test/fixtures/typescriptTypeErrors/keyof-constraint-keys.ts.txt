@@ -1,0 +1,5 @@
+function missing<T extends { value: number }>(): keyof T { return "wrong"; }
+function unbounded<T extends any>(): keyof T { return "wrong"; }
+function recursive<T extends { [K in keyof T]: string }>(): keyof T { return "wrong"; }
+function only<T extends { left: 1, shared: 4 } | { right: 2, shared: 4 }>(): keyof T { return "left"; }
+function variadic<T extends unknown[]>(): keyof [string, ...T] { return "7"; }

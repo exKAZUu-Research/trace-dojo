@@ -1,0 +1,4 @@
+console.dir({ b: 1, a: 2, c: { z: 1, y: 2 } }, { sorted: true } as any);
+console.dir({ n: 1234567.891 }, { numericSeparator: true } as any);
+const o = { get x() { return 5; } };
+console.dir(o, { getters: true } as any);

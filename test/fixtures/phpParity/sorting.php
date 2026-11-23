@@ -1,0 +1,85 @@
+<?php
+$a = ['a' => 2, 'b' => 1]; sort($a); var_dump($a);
+$a = ['a' => 2, 'b' => 1, 5 => 0]; rsort($a); var_dump($a); $a[] = 9; var_dump(array_key_last($a));
+$a = ['x' => 3]; sort($a); var_dump($a);
+$a = ['x' => 3, 'y' => 1]; usort($a, fn($p, $q) => $p <=> $q); var_dump($a);
+$a = [0.5, 0.2, 0.9]; usort($a, fn($x, $y) => $x - $y); var_dump($a);
+$a = [3, 1, 2]; usort($a, function ($x, $y) { echo "$x-$y "; return $x <=> $y; }); echo "\n";
+$n = 0; $b = []; mt_srand(5); for ($i = 0; $i < 40; $i++) $b[] = mt_rand(1, 50);
+$c = $b; usort($c, function ($x, $y) use (&$n) { $n++; return $x <=> $y; }); echo $n, " ", implode(",", $c), "\n";
+$log = []; $d = array_slice($b, 0, 20); usort($d, function ($x, $y) use (&$log) { $log[] = "$x:$y"; return $x <=> $y; }); echo implode(" ", $log), "\n";
+$big = []; mt_srand(7); for ($i = 0; $i < 1100; $i++) $big[] = mt_rand(1, 100000); $m = 0; usort($big, function ($x, $y) use (&$m) { $m++; return $x <=> $y; }); echo $m, " ", $big[0], " ", $big[1099], "\n";
+$e = [3, 1, 2]; usort($e, fn($x, $y) => $x > $y); var_dump($e);
+$f = [1, "a", "10", 2.5, true, null, "abc", [1]]; sort($f); var_dump($f);
+$g = ["b" => 1, "a" => 1, "c" => 0]; asort($g); var_dump($g); arsort($g); var_dump($g);
+$h = ["10" => 'a', "9" => 'b', "x" => 'c']; ksort($h); var_dump($h); krsort($h); var_dump($h);
+$data = [3, 1, 2]; $data2 = ['c', 'a', 'b']; array_multisort($data, $data2); var_dump($data, $data2);
+$p = [1, 2, 3, 4, 5, 6, 7]; usort($p, fn($x, $y) => 1); echo implode(",", $p), "\n";
+$q = ["img12.png", "img10.png", "IMG2.png", "img1.png"]; natcasesort($q); var_dump($q);
+function t($f) { try { var_dump($f()); } catch (Throwable $e) { echo get_class($e), ": ", $e->getMessage(), "\n"; } }
+t(fn() => range(1, 5));
+t(fn() => range(5, 1, 2));
+t(fn() => range('1', '3'));
+t(fn() => range(1, 2, 1.0));
+t(fn() => range(1, 10, -3));
+t(fn() => range(10, 1, -3));
+t(fn() => range(1, 2, 5));
+t(fn() => range(1, 3, NAN));
+t(fn() => range('a', 'z', -1));
+t(fn() => range('a', 'e', 2));
+t(fn() => range('e', 'a'));
+t(fn() => range('a', 'c', 1.5));
+t(fn() => range('', 'c'));
+t(fn() => range('aa', 'c'));
+t(fn() => range(1, 'a'));
+t(fn() => range('5', 'a'));
+t(fn() => range(0, 1, 0.25));
+t(fn() => range(1, 0, 0.3));
+t(fn() => range(0.1, 0.5, 0.1));
+t(fn() => range(3, 3));
+t(fn() => range(3.5, 3.5));
+t(fn() => range('A', 'A'));
+t(fn() => range(1, 2, 0));
+t(fn() => range('10', '12'));
+t(fn() => range('1.5', '3'));
+t(fn() => range(INF, 3));
+t(fn() => range(1, 3, '2'));
+t(fn() => range(true, 3));
+t(fn() => range(0, 10, 3));
+t(fn() => range('z', 'w', 2));
+t(fn() => range(5, 'b'));
+t(fn() => range(-3, 3, 2.5));
+
+foreach (['ksort', 'asort', 'uasort', 'sort'] as $sorter) {
+    $values = ['x' => 1, 0 => 3, 5 => 0];
+    unset($values[5]);
+    if ($sorter === 'uasort') $sorter($values, fn($left, $right) => $left <=> $right);
+    else $sorter($values);
+    $values[] = 2;
+    var_dump(array_key_last($values));
+}
+
+$mixed = ['left' => 2, 6 => 1, 'right' => 3];
+$text = ['b' => 'z', 'a' => 'y', 'c' => 'x'];
+end($mixed);
+end($text);
+array_multisort($mixed, $text);
+var_dump(key($mixed), key($text));
+$mixed[] = 'appended';
+$text[] = 'appended';
+var_dump(array_keys($mixed), array_keys($text));
+$empty = [4 => 'deleted'];
+unset($empty[4]);
+array_multisort($empty);
+$empty[] = 'appended';
+var_dump(array_keys($empty));
+
+foreach ([SORT_LOCALE_STRING, SORT_LOCALE_STRING | SORT_FLAG_CASE, SORT_STRING | SORT_FLAG_CASE] as $flags) {
+    $values = ['b', 'A', "A\0x", 'a', 'B'];
+    echo json_encode(array_unique($values, $flags)), "\n";
+    sort($values, $flags);
+    echo json_encode($values), "\n";
+    $keys = ['b' => 1, "A\0x" => 2, 'A' => 3, 'a' => 4, 'B' => 5];
+    krsort($keys, $flags);
+    echo json_encode(array_keys($keys)), "\n";
+}

@@ -1,0 +1,10 @@
+function g<T extends unknown[]>(...a: [...T, number]): T { return a.slice(0, -1) as T; }
+const xs: string[] = ["a"];
+const r: string[] = g(...xs, 1);
+console.log(r);
+function h<T extends unknown[]>(...a: [...T, number]): number { return a.length; }
+console.log(h(...xs, 1), h("x", ...xs, 1));
+const t: [boolean, string] = [true, "s"];
+const u: [boolean, string] = g(...t, 2);
+console.log(u);
+const bad: string[] = g(...xs, "z");

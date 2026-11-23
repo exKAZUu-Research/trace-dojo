@@ -1,0 +1,60 @@
+in declare block
+printed 1
+PCP
+changedC
+bool(true)
+bool(true)
+string(1) "C"
+string(1) "C"
+Array
+(
+    [0] => 2
+    [1] => 4
+    [2] => 6
+)
+12
+Array
+(
+    [0] => 3
+    [1] => 6
+)
+Array
+(
+    [0] => 9
+)
+15 12
+ABC
+object(Dbg)#6 (2) {
+  ["shown"]=>
+  int(1)
+  ["extra"]=>
+  bool(true)
+}
+Dbg Object
+(
+    [shown] => 1
+    [extra] => 1
+)
+
+Array
+(
+    [a] => 1
+    [b] => 2
+)
+2
+a1b2
+5910
+bool(true)
+bool(false)
+bool(true)
+bool(true)
+bool(false)
+bye local
+ret
+bye x
+after null
+bye e1
+unset one
+bye e2
+cleared
+bye keep

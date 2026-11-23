@@ -1,0 +1,8 @@
+121
+33
+1212
+2ok
+
+Deprecated: Returning null from D::__debugInfo() is deprecated, return an empty array instead in /main.php on line 12
+object(D)#6 (0) {
+}

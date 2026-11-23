@@ -1,0 +1,21 @@
+const values = [1, 2, 3];
+const result: number = values[5] ?? "fallback";
+console.log(result);
+const optional: {x?: string} = {};
+console.log(optional.x ?? 0);
+if (0x0) console.log("zero");
+if (1.0) console.log("decimal one");
+if (0b1) console.log("binary one");
+if (0o1) console.log("octal one");
+function constrainedNumber<T extends number>(n: T) { const value: number = n ?? "bad"; return value; }
+function constrainedChain<U extends number, T extends U>(n: T): T { return n ?? "bad"; }
+function constrainedUnion<T extends string | number>(n: T): T { return n ?? false; }
+function constrainedObject<T extends {}>(n: T): T { return n ?? "bad"; }
+function nullableNumber<T extends number | null>(n: T): number { return n ?? 0; }
+function optionalNumber<T extends number | undefined>(n: T): number { return n ?? 0; }
+console.log(constrainedNumber(1), constrainedChain(2), constrainedUnion("a"), constrainedObject({x: 1}));
+console.log(nullableNumber(null), nullableNumber(3), optionalNumber(undefined), optionalNumber(4));
+type NullishNumber<S> = S extends string ? number | null : number;
+function conditionalNumber<S, T extends NullishNumber<S>>(n: T): number { return n ?? 0; }
+function indexedNumber<S extends {x: number | null}, T extends S["x"]>(n: T): number { return n ?? 0; }
+console.log(conditionalNumber<string, number | null>(null), indexedNumber<{x: number | null}, number | null>(null));

@@ -1,0 +1,292 @@
+import {
+  asInstanceOf,
+  boundOf,
+  closeTypeVariables,
+  type DartType,
+  DYNAMIC,
+  type FunctionType,
+  instantiateFunction,
+  instantiateToBounds,
+  type InterfaceType,
+  isSubtype,
+  lowerBound,
+  mentionsTypeParams,
+  NEVER,
+  objectPatternBound,
+  objectType,
+  type RecordType,
+  resolveBound,
+  substitute,
+  type TypeParam,
+  typeParamType,
+  upperBound,
+} from './types';
+
+/** A type parameter of a context that inference has not solved yet, which literals infer for themselves. */
+export const INFERENCE_HOLE: DartType = { kind: 'dynamic' };
+
+export function isInferenceHole(type: DartType): boolean {
+  return type === INFERENCE_HOLE;
+}
+
+/** Whether a context has a hole anywhere, which leaves it a constraint rather than a finished type. */
+export function containsInferenceHole(type: DartType): boolean {
+  return closeInferenceHoles(type) !== type;
+}
+
+/**
+ * A context's greatest closure over its holes, as a function literal's parameter types take it: Object? where a hole is
+ * covariant and Never where it is contravariant.
+ */
+export function closeInferenceHoles(type: DartType, covariant = true): DartType {
+  if (isInferenceHole(type)) return covariant ? objectType(true) : NEVER;
+  const close = (part: DartType, flip = false): DartType => closeInferenceHoles(part, flip ? !covariant : covariant);
+  switch (type.kind) {
+    case 'interface': {
+      const args = type.args.map((arg) => close(arg));
+      return args.every((arg, index) => arg === type.args[index]) ? type : { ...type, args };
+    }
+    case 'record': {
+      const positional = type.positional.map((field) => close(field));
+      const named = type.named.map((field) => ({ ...field, type: close(field.type) }));
+      const same =
+        positional.every((field, index) => field === type.positional[index]) &&
+        named.every((field, index) => field.type === type.named[index].type);
+      return same ? type : { ...type, positional, named };
+    }
+    case 'function': {
+      const positional = type.positional.map((parameter) => close(parameter, true));
+      const named = type.named.map((parameter) => ({ ...parameter, type: close(parameter.type, true) }));
+      const returnType = close(type.returnType);
+      const same =
+        returnType === type.returnType &&
+        positional.every((parameter, index) => parameter === type.positional[index]) &&
+        named.every((parameter, index) => parameter.type === type.named[index].type);
+      return same ? type : { ...type, positional, named, returnType };
+    }
+    default: {
+      return type;
+    }
+  }
+}
+
+/**
+ * Collects the constraints a context puts on a function's result type: where the result is a subclass of the context's
+ * class (`R<int> r = E()`), its type arguments are matched through the subclass's supertype.
+ */
+export function inferFromContext(
+  context: DartType,
+  formal: DartType,
+  params: ReadonlySet<TypeParam>,
+  solution: Map<TypeParam, DartType>
+): void {
+  const lower = new Map<TypeParam, DartType>();
+  const upper = new Map<TypeParam, DartType>();
+  new InferenceConstraints(params, lower, upper, upperBound).infer(context, formal, true);
+  for (const param of params) {
+    const choice = lower.get(param) ?? upper.get(param);
+    if (choice) solution.set(param, choice);
+  }
+}
+
+/** Collects constraints on type parameters that occur in the parameter type of a generic call. */
+export function inferFromSubtype(
+  actual: DartType,
+  formal: DartType,
+  params: ReadonlySet<TypeParam>,
+  lower: Map<TypeParam, DartType>,
+  join: (a: DartType, b: DartType) => DartType = (a) => a,
+  upper?: Map<TypeParam, DartType>
+): void {
+  new InferenceConstraints(params, lower, upper, join).infer(actual, formal);
+}
+
+export function inferObjectPatternType(
+  matchedType: DartType,
+  template: DartType,
+  params: readonly TypeParam[]
+): DartType {
+  const parameters = new Set(params);
+  const lower = new Map<TypeParam, DartType>();
+  const upper = new Map<TypeParam, DartType>();
+  new InferenceConstraints(parameters, lower, upper, upperBound).infer(
+    nonNullOf(resolveBound(matchedType)),
+    template,
+    true
+  );
+  const inferred = new Map(
+    params.map((param) => [param, lower.get(param) ?? upper.get(param) ?? objectPatternBound(param, parameters)])
+  );
+  for (const [param, candidate] of inferred) {
+    const declared = substitute(boundOf(param), inferred);
+    if (!isSubtype(candidate, declared)) inferred.set(param, objectPatternBound(param, parameters));
+  }
+  return substitute(template, inferred);
+}
+
+export function inferExtensionReceiver(actual: DartType, formal: DartType, params: readonly TypeParam[]): DartType[] {
+  const parameters = new Set(params);
+  const lower = new Map<TypeParam, DartType>();
+  const upper = new Map<TypeParam, DartType>();
+  const constraints = new InferenceConstraints(parameters, lower, upper, upperBound);
+  constraints.infer(actual, formal);
+  const solution = new Map<TypeParam, DartType>();
+  const env = new Map<TypeParam, DartType>(params.map((param) => [param, DYNAMIC]));
+  for (const param of params) {
+    const input = lower.get(param);
+    if (input && param.bound && mentionsTypeParams(param.bound, parameters)) constraints.infer(input, param.bound);
+    const limit = upper.get(param);
+    const choice = lower.get(param) ?? (limit && lowerBound(limit, substitute(boundOf(param), env)));
+    if (choice) {
+      solution.set(param, choice);
+      env.set(param, choice);
+    }
+  }
+  return instantiateToBounds(params, solution);
+}
+
+export function inferTearOffTypes(
+  source: FunctionType,
+  expected: FunctionType,
+  defaults: DartType[]
+): DartType[] | undefined {
+  const solution = new Map<TypeParam, DartType>();
+  const upper = new Map<TypeParam, DartType>();
+  const constraints = new InferenceConstraints(new Set(source.typeParams), solution, upper, upperBound);
+  for (const [index, parameter] of source.positional.entries()) {
+    const given = expected.positional[index];
+    if (given) constraints.infer(given, parameter);
+  }
+  for (const named of source.named) {
+    const given = expected.named.find((other) => other.name === named.name);
+    if (given) constraints.infer(given.type, named.type);
+  }
+  if (expected.returnType.kind !== 'dynamic' && expected.returnType.kind !== 'void')
+    constraints.infer(expected.returnType, source.returnType, true);
+  const typeArgs = source.typeParams.map((param, index) => solution.get(param) ?? upper.get(param) ?? defaults[index]);
+  const argumentsByParameter = new Map(source.typeParams.map((param, index) => [param, typeArgs[index]]));
+  for (const [param, arg] of argumentsByParameter) {
+    if (param.bound && !isSubtype(arg, substitute(param.bound, argumentsByParameter))) return undefined;
+  }
+  return typeArgs;
+}
+
+class InferenceConstraints {
+  private scopedParameters = new Set<TypeParam>();
+
+  constructor(
+    private readonly params: ReadonlySet<TypeParam>,
+    private readonly lower: Map<TypeParam, DartType>,
+    private readonly upper: Map<TypeParam, DartType> | undefined,
+    private readonly join: (a: DartType, b: DartType) => DartType
+  ) {}
+
+  infer(given: DartType, pattern: DartType, reversed = false): void {
+    if (pattern.kind === 'typeParam' && this.params.has(pattern.param)) {
+      this.addBound(given, pattern, reversed);
+    } else if (pattern.kind === 'interface') {
+      this.inferInterface(given, pattern, reversed);
+    } else if (pattern.kind === 'function' && given.kind === 'function') {
+      this.inferFunction(given, pattern, reversed);
+    } else if (pattern.kind === 'record' && given.kind === 'record') {
+      this.inferRecord(given, pattern, reversed);
+    }
+  }
+
+  private addBound(given: DartType, pattern: DartType & { kind: 'typeParam' }, reversed: boolean): void {
+    const bounds = reversed ? this.upper : this.lower;
+    if (!bounds || (reversed && isInferenceHole(given))) return;
+    let target = pattern.nullable ? nonNullOf(given) : given;
+    if (!reversed && pattern.nullable && given.kind === 'null') {
+      // As the SDK's constraint generation: `Null <: T?` constrains `T` by `Null` when `T`'s bound admits it, and
+      // otherwise holds through the `?` alone, leaving `T` unconstrained.
+      if (pattern.param.bound && !isSubtype(given, closeTypeVariables(pattern.param.bound, this.params, true))) return;
+      target = given;
+    }
+    if (this.scopedParameters.size > 0 && mentionsTypeParams(target, this.scopedParameters)) {
+      target = closeTypeVariables(target, this.scopedParameters, !reversed);
+    }
+    const previous = bounds.get(pattern.param);
+    const join = reversed ? lowerBound : this.join;
+    bounds.set(pattern.param, previous ? join(previous, target) : target);
+  }
+
+  private inferInterface(given: DartType, pattern: InterfaceType, reversed: boolean): void {
+    const base = resolveBound(given);
+    if (base.kind === 'dynamic' && !reversed) {
+      for (const arg of pattern.args) this.infer(DYNAMIC, arg);
+      return;
+    }
+    if (base.kind !== 'interface') return;
+    const actualType = reversed ? base : asInstanceOf({ ...base, nullable: false }, pattern.cls);
+    const formalType = reversed ? asInstanceOf(pattern, base.cls) : pattern;
+    if (!actualType || !formalType) return;
+    for (const [index, arg] of formalType.args.entries()) {
+      const actualArg = actualType.args[index];
+      if (actualArg) this.infer(actualArg, arg, reversed);
+    }
+  }
+
+  private inferFunction(given: FunctionType, pattern: FunctionType, reversed: boolean): void {
+    if (given.typeParams.length !== pattern.typeParams.length) return;
+    if (given.typeParams.length === 0) {
+      this.inferFunctionBody(given, pattern, reversed);
+      return;
+    }
+    // Like the SDK, derive nothing from generic function types whose bounds refer to their own type parameters.
+    const own = new Set([...given.typeParams, ...pattern.typeParams]);
+    if ([...given.typeParams, ...pattern.typeParams].some(({ bound }) => bound && mentionsTypeParams(bound, own)))
+      return;
+    const enclosingParameters = this.scopedParameters;
+    this.scopedParameters = new Set([...enclosingParameters, ...given.typeParams]);
+    try {
+      const typeArguments = given.typeParams.map((param) => typeParamType(param));
+      const renamed = new Map(pattern.typeParams.map((param, index) => [param, typeArguments[index]]));
+      for (const [index, param] of pattern.typeParams.entries()) {
+        const givenBound = boundOf(given.typeParams[index]);
+        const patternBound = substitute(boundOf(param), renamed);
+        this.infer(givenBound, patternBound);
+        this.infer(givenBound, patternBound, true);
+      }
+      this.inferFunctionBody(given, instantiateFunction(pattern, typeArguments), reversed);
+    } finally {
+      this.scopedParameters = enclosingParameters;
+    }
+  }
+
+  private inferFunctionBody(given: FunctionType, pattern: FunctionType, reversed: boolean): void {
+    this.infer(given.returnType, pattern.returnType, reversed);
+    if (this.upper) this.inferParameters(given, pattern, !reversed);
+  }
+
+  private inferParameters(given: FunctionType, pattern: FunctionType, reversed: boolean): void {
+    for (const [index, parameter] of pattern.positional.entries()) {
+      const corresponding = given.positional[index];
+      if (corresponding) this.infer(corresponding, parameter, reversed);
+    }
+    for (const parameter of pattern.named) {
+      const corresponding = given.named.find((other) => other.name === parameter.name);
+      if (corresponding) this.infer(corresponding.type, parameter.type, reversed);
+    }
+  }
+
+  private inferRecord(given: RecordType, pattern: RecordType, reversed: boolean): void {
+    for (const [index, field] of pattern.positional.entries()) {
+      const actualField = given.positional[index];
+      if (actualField) this.infer(actualField, field, reversed);
+    }
+    for (const field of pattern.named) {
+      const actualField = given.named.find((other) => other.name === field.name);
+      if (actualField) this.infer(actualField.type, field.type, reversed);
+    }
+  }
+}
+
+function nonNullOf(type: DartType): DartType {
+  if (type.kind === 'null') return NEVER;
+  if (type.kind === 'interface' || type.kind === 'function' || type.kind === 'record') {
+    return type.nullable ? { ...type, nullable: false } : type;
+  }
+  if (type.kind === 'typeParam' && type.nullable) return { ...type, nullable: false };
+  return type;
+}

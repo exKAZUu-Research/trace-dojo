@@ -1,0 +1,32 @@
+function ordered() {
+  let value: string | number = 0;
+  value = "ready";
+  return () => value.toUpperCase();
+}
+function compound(flag: boolean) {
+  let value: string | number = 0;
+  if (flag) value = "branch";
+  else value = "other";
+  return () => value.toUpperCase();
+}
+function staticOrdered() {
+  let value: string | number = 0;
+  class Control { static { value = "static"; } }
+  return () => value.toUpperCase();
+}
+function shadowed() {
+  let value: string | number = "outer";
+  function writer() { let value: number; value = 2; }
+  writer();
+  return () => value.toUpperCase();
+}
+console.log(ordered()(), compound(true)(), staticOrdered()(), shadowed()());
+function initializedDefault(value: string | number, fallback = (value = 'default')) {
+  value = 'ready';
+  return () => value.toUpperCase();
+}
+function initializedOptional(value: string | undefined, fallback = (value = 'default')) {
+  value = 'ready';
+  return () => value.length;
+}
+console.log(initializedDefault(0)(), initializedOptional(undefined)());

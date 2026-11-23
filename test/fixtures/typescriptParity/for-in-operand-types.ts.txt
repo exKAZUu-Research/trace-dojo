@@ -1,0 +1,13 @@
+function keys(input: { a: number } | null | undefined) {
+  for (const key in input) console.log(key);
+}
+function genericKeys<T>(input: T) {
+  for (const key in input) console.log(key, input[key]);
+}
+function branded(text: string & { readonly brand: "tag" }) {
+  for (const key in text) console.log(key);
+}
+keys({ a: 1 });
+keys(undefined);
+genericKeys({ b: 2 });
+branded("a" as string & { readonly brand: "tag" } as any);

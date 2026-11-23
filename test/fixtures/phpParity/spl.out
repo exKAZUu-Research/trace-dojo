@@ -1,0 +1,45 @@
+322
+21
+a2b
+0=b 1=c 
+132
+5310
+high mid low 
+3xNULL
+Array
+(
+    [0] => x
+    [1] => 
+    [2] => 
+)
+OutOfBoundsException: Index invalid or out of range
+
+Deprecated: Method SplObjectStorage::attach() is deprecated since 8.5, use method SplObjectStorage::offsetSet() instead in /main.php on line 11
+
+Deprecated: Method SplObjectStorage::attach() is deprecated since 8.5, use method SplObjectStorage::offsetSet() instead in /main.php on line 11
+2one
+Deprecated: Method SplObjectStorage::contains() is deprecated since 8.5, use method SplObjectStorage::offsetExists() instead in /main.php on line 11
+Y
+3
+Array
+(
+    [a] => 1
+    [b] => 2
+    [c] => 3
+)
+a1b2c3
+0:10 1:20 2:30 3
+Can't pop from an empty datastructure
+Can't extract from an empty heap
+Array
+(
+    [x] => 1
+    [y] => 2
+)
+object(ArrayObject)#14 (1) {
+  ["storage":"ArrayObject":private]=>
+  array(1) {
+    [0]=>
+    int(1)
+  }
+}

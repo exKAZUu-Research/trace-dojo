@@ -1,0 +1,12 @@
+(1,28): error TS2313: Type parameter 'U' has a circular constraint.
+(1,40): error TS2502: 'x' is referenced directly or indirectly in its own type annotation.
+(2,29): error TS2313: Type parameter 'U' has a circular constraint.
+(2,47): error TS2502: 'x' is referenced directly or indirectly in its own type annotation.
+(3,27): error TS2313: Type parameter 'U' has a circular constraint.
+(3,45): error TS2502: 'x' is referenced directly or indirectly in its own type annotation.
+(4,30): error TS2313: Type parameter 'U' has a circular constraint.
+(4,53): error TS2577: Return type annotation circularly references itself.
+(5,29): error TS2313: Type parameter 'U' has a circular constraint.
+(5,41): error TS2502: 'x' is referenced directly or indirectly in its own type annotation.
+(6,40): error TS2344: Type 'U' does not satisfy the constraint 'string'.
+  Type '(x: Uppercase<U>) => void' is not assignable to type 'string'.

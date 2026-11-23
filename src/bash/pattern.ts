@@ -101,7 +101,7 @@ function gmatch(
 }
 
 /** Matches one character of `s` at `n` against the pattern character `c` read before `pi`, returning where it ends. */
-// code-gauge-allow functionCognitiveComplexity 16 -- A port of the single-character cases of Bash's GMATCH.
+// code-gauge-allow functionCognitiveComplexity -- A port of the single-character cases of Bash's GMATCH.
 function matchOne(s: string[], n: number, p: string[], pi: number, c: string): number | undefined {
   const sc = n < s.length ? s[n] : undefined;
   switch (c) {
@@ -126,7 +126,7 @@ function matchOne(s: string[], n: number, p: string[], pi: number, c: string): n
  * Matches a `*` read before `pi`: consumes the `?`s and `*`s after it, then tries each position for the rest, returning
  * the result or, when a later `*` matched, where the outer loop resumes.
  */
-// code-gauge-allow functionCognitiveComplexity 20 -- A port of the star case of Bash's GMATCH, which collapses wildcards and resumes at a later star.
+// code-gauge-allow functionCognitiveComplexity -- A port of the star case of Bash's GMATCH, which collapses wildcards and resumes at a later star.
 function matchStar(
   s: string[],
   start: number,
@@ -229,7 +229,7 @@ function brackmatch(p: string[], start: number, test: string): number | undefine
 }
 
 /** The items of a bracket expression and the position after its `]`, or `undefined` when no `]` closes it. */
-// code-gauge-allow functionCognitiveComplexity 20 -- A port of Bash's BRACKMATCH scan, whose symbols, characters, and ranges share the position.
+// code-gauge-allow functionCognitiveComplexity -- A port of Bash's BRACKMATCH scan, whose symbols, characters, and ranges share the position.
 function parseBracket(p: string[], start: number): { items: BracketItem[]; negated: boolean; end: number } | undefined {
   let pi = start;
   const negated = p[pi] === '!' || p[pi] === '^';

@@ -1,0 +1,10 @@
+type CallbackResults<T> = T extends { a: (cb: () => infer U) => void; b: (cb: () => infer U) => void } ? U : never;
+const incompatible: CallbackResults<{ a: (cb: () => string) => void; b: (cb: () => number) => void }> = 'wrong';
+type NestedParameters<T> = T extends {
+  a: (cb: (value: infer U) => void) => void;
+  b: (cb: (value: infer U) => void) => void;
+} ? U : never;
+const outsideUnion: NestedParameters<{
+  a: (cb: (value: string) => void) => void;
+  b: (cb: (value: number) => void) => void;
+}> = true;

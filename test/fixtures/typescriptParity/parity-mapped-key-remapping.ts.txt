@@ -1,0 +1,11 @@
+type X = { [K in "a" | "b" as "x"]: K };
+const a: X = { x: "a" };
+const b: X = { x: "b" };
+type U = { [K in "a" | "A" as Uppercase<K>]: K };
+const u: U = { A: "a" };
+type A = { x?: number; readonly y: string };
+type B = { [K in keyof A as `pre_${K}`]: A[K] };
+const bb: B = { pre_y: "s" };
+type C = { [K in keyof A]: A[K] };
+const cc: C = { y: "s" };
+console.log(a, b, u, bb);

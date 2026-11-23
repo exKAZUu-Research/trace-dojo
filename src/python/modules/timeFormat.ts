@@ -396,8 +396,8 @@ function readOffset(found: string, fields: Fields): string | undefined {
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Follows how CPython's _strptime completes the date.
-// code-gauge-allow functionNcss 33 -- Follows how CPython's _strptime completes the date.
+// code-gauge-allow functionCognitiveComplexity -- Follows how CPython's _strptime completes the date.
+// code-gauge-allow functionNcss -- Follows how CPython's _strptime completes the date.
 function computeTime(groups: Record<string, string>): ParsedTime | { error: string } {
   const fields = readGroups(groups);
   if ('error' in fields) return fields;

@@ -1,0 +1,2 @@
+function f(a: number) { console.log(arguments, Array.isArray(arguments), arguments.length); }
+f(1);

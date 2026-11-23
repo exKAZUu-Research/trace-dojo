@@ -1,0 +1,152 @@
+
+Deprecated: array_udiff(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+0 array_udiff {"1":12,"2":6,"3":4,"4":6,"7":12,"10":6,"13":10} 666 2702106983
+
+Deprecated: array_uintersect(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+0 array_uintersect {"0":1,"5":1,"6":2,"8":11,"9":1,"11":5,"12":1,"14":9} 652 2854303883
+0 array_diff_ukey {"5":1,"6":2,"7":12,"8":11,"9":1,"10":6,"11":5,"12":1,"13":10,"14":9} 599 2632547506
+0 array_intersect_ukey [1,12,6,4,6] 304 4273762316
+0 array_diff_uassoc [1,12,6,4,6,1,2,12,11,1,6,5,1,10,9] 599 2632547506
+0 array_intersect_uassoc [] 330 2762270229
+
+Deprecated: array_udiff_uassoc(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+0 array_udiff_uassoc [1,12,6,4,6,1,2,12,11,1,6,5,1,10,9] 642 19142474
+
+Deprecated: array_uintersect_uassoc(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+0 array_uintersect_uassoc [] 373 3070703335
+0 array_udiff_assoc {"1":12,"2":6,"5":1,"6":2,"7":12,"8":11,"9":1,"10":6,"11":5,"12":1,"13":10,"14":9} 27 3611321030
+0 array_uintersect_assoc {"0":1,"3":4,"4":6} 27 3611321030
+1 array_udiff {"k11":9} 510 961961676
+1 array_uintersect {"k8":2,"1":5} 510 961961676
+1 array_diff_ukey {"1":5} 971 691316813
+1 array_intersect_ukey {"k8":2,"k11":9} 755 450059148
+1 array_diff_uassoc {"k8":2,"k11":9,"1":5} 971 691316813
+1 array_intersect_uassoc [] 763 1248719141
+1 array_udiff_uassoc {"k8":2,"k11":9,"1":5} 981 2425309156
+1 array_uintersect_uassoc [] 773 3169893373
+1 array_udiff_assoc {"k8":2,"k11":9,"1":5} 10 263613758
+1 array_uintersect_assoc [] 10 263613758
+2 array_udiff {"25":8} 1932 2246964403
+2 array_uintersect {"3":2,"5":6,"6":4,"9":2,"11":12,"12":6,"15":2,"16":12,"17":2,"18":4,"21":6,"23":6,"24":12} 1969 1240158634
+2 array_diff_ukey {"24":12,"25":8,"26":5,"27":1,"28":3,"29":11,"30":11,"31":5,"32":9,"33":11} 6698 3800265991
+2 array_intersect_ukey [7,5,5,2,3,6,4] 2092 940664519
+2 array_diff_uassoc {"1":5,"2":5,"4":3,"7":5,"8":5,"9":2,"10":10,"12":6,"13":9,"14":11,"15":2,"16":12,"17":2,"18":4,"19":3,"20":1,"21":6,"22":9,"23":6,"24":12,"25":8,"26":5,"27":1,"28":3,"29":11,"30":11,"31":5,"32":9,"33":11} 8115 2867562310
+2 array_intersect_uassoc [] 2071 2737702343
+2 array_udiff_uassoc {"1":5,"2":5,"4":3,"7":5,"8":5,"9":2,"10":10,"12":6,"13":9,"14":11,"15":2,"16":12,"17":2,"18":4,"19":3,"20":1,"21":6,"22":9,"23":6,"24":12,"25":8,"26":5,"27":1,"28":3,"29":11,"30":11,"31":5,"32":9,"33":11} 8309 471341499
+2 array_uintersect_uassoc [] 2007 482595894
+2 array_udiff_assoc {"1":5,"2":5,"4":3,"7":5,"8":5,"9":2,"10":10,"12":6,"13":9,"14":11,"15":2,"16":12,"17":2,"18":4,"19":3,"20":1,"21":6,"22":9,"23":6,"24":12,"25":8,"26":5,"27":1,"28":3,"29":11,"30":11,"31":5,"32":9,"33":11} 194 191009726
+2 array_uintersect_assoc [] 53 2256777307
+
+Deprecated: array_udiff(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+3 array_udiff [] 2028 2584322798
+
+Deprecated: array_uintersect(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+3 array_uintersect {"k6":5,"6":10,"9":11,"14":5,"k12":1,"k5":11,"k9":5,"k7":5,"7":3,"0":3,"k2":2,"k3":3,"k11":3,"k10":3} 2125 783195060
+3 array_diff_ukey {"k4":6} 4283 1309986638
+3 array_intersect_ukey {"6":10,"k5":11,"k7":5,"12":6,"0":3,"k2":2,"5":4,"k10":3} 1962 3970412196
+3 array_diff_uassoc {"k6":5,"1":8,"6":10,"9":11,"14":5,"k12":1,"k5":11,"k9":5,"k7":5,"7":3,"10":8,"11":8,"k4":6,"k15":4,"k2":2,"k3":3,"5":4,"k11":3,"k10":3,"k13":8} 5853 2491743246
+3 array_intersect_uassoc [] 1917 1077341509
+
+Deprecated: array_udiff_uassoc(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+3 array_udiff_uassoc {"k6":5,"1":8,"6":10,"9":11,"14":5,"k12":1,"k5":11,"k9":5,"k7":5,"7":3,"10":8,"11":8,"k4":6,"k15":4,"k2":2,"k3":3,"5":4,"k11":3,"k10":3,"k13":8} 6074 1427031419
+
+Deprecated: array_uintersect_uassoc(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+3 array_uintersect_uassoc [] 2087 1582313210
+3 array_udiff_assoc {"1":8,"6":10,"9":11,"14":5,"k5":11,"7":3,"10":8,"k4":6,"k15":4,"k13":8} 124 2755774777
+3 array_uintersect_assoc {"0":3,"5":4,"k10":3} 118 2123431397
+4 array_udiff [] 1402 2594110873
+4 array_uintersect [11] 1438 2731462992
+4 array_diff_ukey [] 2529 1209397433
+4 array_intersect_ukey [11,10] 1121 64999624
+4 array_diff_uassoc {"1":10,"2":10,"3":5,"4":9,"5":8,"7":8,"8":7,"9":6,"10":7,"12":7,"13":7,"14":1} 3049 924130602
+4 array_intersect_uassoc [] 1112 1910292904
+4 array_udiff_uassoc {"1":10,"2":10,"3":5,"4":9,"5":8,"7":8,"8":7,"9":6,"10":7,"12":7,"13":7,"14":1} 3189 4148336443
+4 array_uintersect_uassoc [] 1131 3740764536
+4 array_udiff_assoc {"1":10,"2":10,"3":5,"4":9,"5":8,"7":8,"8":7,"9":6,"10":7,"12":7,"13":7,"14":1} 140 1772586322
+4 array_uintersect_assoc [] 19 138425179
+5 array_udiff [] 368 910973852
+5 array_uintersect {"4":7,"13":9} 378 48554968
+5 array_diff_ukey {"13":9} 525 2080992883
+5 array_intersect_ukey [] 465 3136202375
+5 array_diff_uassoc {"k8":8,"4":7,"13":9} 668 3126518234
+5 array_intersect_uassoc [] 394 2269822020
+5 array_udiff_uassoc {"k8":8,"4":7,"13":9} 678 1177937101
+5 array_uintersect_uassoc [] 404 2869502976
+5 array_udiff_assoc {"k8":8,"4":7,"13":9} 10 3683412761
+5 array_uintersect_assoc [] 10 3683412761
+
+Deprecated: array_udiff(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+6 array_udiff [] 3961 3769960680
+
+Deprecated: array_uintersect(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+6 array_uintersect {"0":5,"3":2,"4":2,"6":4,"7":7,"8":9,"9":7,"12":9,"15":8,"16":11,"17":12,"21":4,"22":8,"23":5,"25":2,"28":11,"30":8} 4320 1975836418
+6 array_diff_ukey {"30":8} 6877 295714380
+6 array_intersect_ukey [5,6,1,2,2,3,4,7,9,7,3,1,9,1,6,8,11,12,3,3,1,4,8,5,10] 3786 4183443360
+6 array_diff_uassoc {"0":5,"2":1,"3":2,"4":2,"5":3,"9":7,"10":3,"12":9,"13":1,"14":6,"15":8,"16":11,"17":12,"18":3,"21":4,"23":5,"24":10,"25":2,"26":3,"27":1,"29":3,"30":8} 11595 4171160853
+6 array_intersect_uassoc [] 3761 2887034022
+
+Deprecated: array_udiff_uassoc(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+6 array_udiff_uassoc {"0":5,"2":1,"3":2,"4":2,"5":3,"9":7,"10":3,"12":9,"13":1,"14":6,"15":8,"16":11,"17":12,"18":3,"21":4,"23":5,"24":10,"25":2,"26":3,"27":1,"29":3,"30":8} 12275 2648753112
+
+Deprecated: array_uintersect_uassoc(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+6 array_uintersect_uassoc [] 3978 2040541031
+6 array_udiff_assoc {"9":7,"12":9,"15":8,"17":12,"30":8} 253 558393566
+6 array_uintersect_assoc {"1":6,"2":1,"3":2,"4":2,"5":3,"10":3,"11":1,"13":1,"18":3,"19":3,"20":1,"21":4,"23":5} 324 1695526902
+7 array_udiff [] 861 3122483924
+7 array_uintersect {"8":7,"k10":3} 883 560449112
+7 array_diff_ukey {"k8":8,"k2":9} 2700 3930958999
+7 array_intersect_ukey [] 1277 2706599841
+7 array_diff_uassoc {"5":4,"k15":2,"8":7,"k8":8,"3":9,"k2":9,"0":12,"k10":3,"9":9,"k14":8,"k1":10,"k11":12,"k7":12} 3615 1825363606
+7 array_intersect_uassoc [] 1122 712255424
+7 array_udiff_uassoc {"5":4,"k15":2,"8":7,"k8":8,"3":9,"k2":9,"0":12,"k10":3,"9":9,"k14":8,"k1":10,"k11":12,"k7":12} 3705 2798380672
+7 array_uintersect_uassoc [] 1139 180370737
+7 array_udiff_assoc {"5":4,"k15":2,"8":7,"k8":8,"3":9,"k2":9,"0":12,"k10":3,"9":9,"k14":8,"k1":10,"k11":12,"k7":12} 90 1640449647
+7 array_uintersect_assoc [] 17 3537002353
+8 array_udiff [7,12,9,8,2,10] 95 2716140575
+8 array_uintersect [7,12,9,8,2,10] 95 2716140575
+8 array_diff_ukey [7,12,9,8,2,10] 25 2995299708
+8 array_intersect_ukey [7,12,9,8,2,10] 25 2995299708
+8 array_diff_uassoc [7,12,9,8,2,10] 25 2995299708
+8 array_intersect_uassoc [7,12,9,8,2,10] 25 2995299708
+8 array_udiff_uassoc [7,12,9,8,2,10] 25 2995299708
+8 array_uintersect_uassoc [7,12,9,8,2,10] 25 2995299708
+8 array_udiff_assoc [7,12,9,8,2,10] 0 0
+8 array_uintersect_assoc [7,12,9,8,2,10] 0 0
+
+Deprecated: array_udiff(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+9 array_udiff [] 1376 1564253147
+
+Deprecated: array_uintersect(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+9 array_uintersect {"k13":8,"2":4} 1428 3485605748
+9 array_diff_ukey {"2":4} 2019 1182070578
+9 array_intersect_ukey {"k13":8} 1379 2137359746
+9 array_diff_uassoc {"5":2,"k8":10,"12":2,"k13":8,"2":4,"k2":3} 2479 3735037427
+9 array_intersect_uassoc [] 1227 1834567094
+
+Deprecated: array_udiff_uassoc(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+9 array_udiff_uassoc {"5":2,"k8":10,"12":2,"k13":8,"2":4,"k2":3} 2545 1934139437
+
+Deprecated: array_uintersect_uassoc(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+9 array_uintersect_uassoc [] 1242 3009815421
+9 array_udiff_assoc {"k8":10,"k13":8,"2":4} 41 2477162257
+9 array_uintersect_assoc [] 15 610209615
+10 array_udiff [] 1422 4220664862
+10 array_uintersect [7,9,8,1,12,11,5,4,5,2,5,6,10,8,2,2,11,5,2,3,9,8,3,6,2,8] 1422 4220664862
+10 array_diff_ukey [] 4059 3386596711
+10 array_intersect_ukey [7,9,8,1,12,11,5,4,5,2,5,6,10,8,2,2,11,5,2,3,9,8,3,6,2,8] 1830 3225979697
+10 array_diff_uassoc {"0":7,"1":9,"2":8,"5":11,"6":5,"7":4,"8":5,"9":2,"10":5,"11":6,"12":10,"13":8,"15":2,"16":11,"17":5,"18":2,"19":3,"20":9,"21":8,"22":3,"23":6,"24":2,"25":8} 4059 3386596711
+10 array_intersect_uassoc {"3":1,"4":12,"14":2} 1970 939139865
+10 array_udiff_uassoc {"0":7,"1":9,"2":8,"5":11,"6":5,"7":4,"8":5,"9":2,"10":5,"11":6,"12":10,"13":8,"15":2,"16":11,"17":5,"18":2,"19":3,"20":9,"21":8,"22":3,"23":6,"24":2,"25":8} 4197 648525781
+10 array_uintersect_uassoc {"3":1,"4":12,"14":2} 2108 4084542394
+10 array_udiff_assoc {"0":7,"1":9,"2":8,"5":11,"6":5,"7":4,"8":5,"9":2,"10":5,"11":6,"12":10,"13":8,"15":2,"16":11,"17":5,"18":2,"19":3,"20":9,"21":8,"22":3,"23":6,"24":2,"25":8} 138 1620327741
+10 array_uintersect_assoc {"3":1,"4":12,"14":2} 138 1620327741
+11 array_udiff {"8":9,"k2":12,"k8":5,"11":12,"14":12,"k12":10,"15":1,"k3":5,"k14":1,"k6":3,"k11":10,"k9":6,"9":4} 669 711106823
+11 array_uintersect [] 484 1183079335
+11 array_diff_ukey {"7":8,"k5":7,"8":9,"k15":11,"k2":12,"k8":5,"11":12,"14":12,"k12":10,"15":1,"k1":7,"2":2,"k13":8,"5":8,"k3":5,"k14":1,"k11":10,"k9":6,"9":4} 1371 3966523814
+11 array_intersect_ukey [] 657 2082013911
+11 array_diff_uassoc {"7":8,"k5":7,"8":9,"k15":11,"k2":12,"k8":5,"11":12,"14":12,"k12":10,"15":1,"k1":7,"2":2,"k13":8,"5":8,"k3":5,"k14":1,"k6":3,"k4":11,"k11":10,"k9":6,"9":4} 1371 3966523814
+11 array_intersect_uassoc [] 657 2082013911
+11 array_udiff_uassoc {"7":8,"k5":7,"8":9,"k15":11,"k2":12,"k8":5,"11":12,"14":12,"k12":10,"15":1,"k1":7,"2":2,"k13":8,"5":8,"k3":5,"k14":1,"k6":3,"k4":11,"k11":10,"k9":6,"9":4} 1387 724243465
+11 array_uintersect_uassoc [] 657 2082013911
+11 array_udiff_assoc {"7":8,"k5":7,"8":9,"k15":11,"k2":12,"k8":5,"11":12,"14":12,"k12":10,"15":1,"k1":7,"2":2,"k13":8,"5":8,"k3":5,"k14":1,"k6":3,"k4":11,"k11":10,"k9":6,"9":4} 16 4115586453
+11 array_uintersect_assoc [] 0 0

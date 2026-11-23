@@ -1,0 +1,12 @@
+type DirectTemplate<T> = T extends infer U extends `${U & string}` ? U : never;
+type PrefixedTemplate<T> = T extends [infer U extends `pre-${U & string}-end`, infer U] ? U : never;
+type UpperCycle<T> = T extends infer U extends Uppercase<U & string> ? U : never;
+type LowerCycle<T> = T extends [infer U, infer U extends Lowercase<U & string>] ? U : never;
+type CapitalCycle<T> = T extends infer U extends Capitalize<U & string> ? U : never;
+type UncapitalCycle<T> = T extends [infer U extends Uncapitalize<U & string>, infer U] ? U : never;
+type TemplateOf<V extends string> = `key-${V}`;
+type ThroughAlias<T> = T extends infer U extends TemplateOf<U & string> ? U : never;
+type OrdinaryTemplate<T extends `key-${T & string}`> = T;
+type OrdinaryMapping<T extends Lowercase<T & string>> = T;
+
+console.log('done');

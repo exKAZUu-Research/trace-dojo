@@ -1,0 +1,12 @@
+string(13) "**-^** αμω"
+string(13) "**-^** αμω"
+string(13) "*m*^xz αμω"
+string(13) "**-^** αμω"
+string(13) "a************"
+string(13) "*m-*xz αμω"
+string(13) "*m*^x* αμω"
+string(13) "*m-^x**αμω"
+string(13) "*******αμω"
+
+Warning: preg_replace(): Compilation failed: range out of order in character class at offset 8 in /main.php on line 14
+NULL

@@ -1,0 +1,17 @@
+type Literal<V extends {a: {length: number}}> = V['a']['length'];
+type Bounded<V extends {a: {length: number}}, K extends 'a'> = V[K]['length'];
+type Both<V extends {a: {length: number}; b: {length: number}}, K extends 'a' | 'b'> = V[K]['length'];
+type KeyOfValue<V, K extends keyof V, P extends keyof V[K]> = V[K][P];
+type SameValue<V, K extends keyof V> = V[K][keyof V[K]];
+type IndexedNext<V extends {a: {length: number}; b: 'length'}> = V['a'][V['b']];
+type NarrowKey<V extends {a: {length: number}}, K extends keyof V> = K extends 'a' ? V[K]['length'] : never;
+type Rest<V extends [{length: number}, ...{length: number}[]]> = V[number]['length'];
+type Choice<V extends {a: {length: number}}, K extends keyof V> =
+  V[K] extends {length: number} ? V[K]['length'] : never;
+type Correlated<V, K extends keyof V, T extends {selected: keyof V[K]}> = V[K][T['selected']];
+type KnownRecord<V, K extends keyof V, T extends Record<string, keyof V[K]>, P extends keyof T> = V[K][T[P]];
+type ExactIndexedKey<V extends {a: {length: number}}, K extends 'a'> = V[K][keyof V['a']];
+type NarrowedKey<V, K extends keyof V, T, P extends keyof T> = T[P] extends keyof V[K] ? V[K][T[P]] : never;
+type StringRecord<V extends Record<string, {length: number}>, K extends keyof V> = V[K]['length'];
+const value: KeyOfValue<{a: {length: number}}, 'a', 'length'> = 5;
+console.log(value);

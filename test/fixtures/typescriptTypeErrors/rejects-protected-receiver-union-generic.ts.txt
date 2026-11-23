@@ -1,0 +1,31 @@
+class A {
+  protected x = 1;
+}
+class B extends A {
+  viaUnion(other: A | B) {
+    return other.x;
+  }
+  viaBaseConstraint<T extends A>(other: T) {
+    return other.x;
+  }
+  viaDerivedUnion(other: B | C) {
+    return other.x;
+  }
+  viaConstraint<T extends B>(other: T) {
+    return other.x;
+  }
+  viaNestedConstraint<T extends U, U extends B>(other: T) {
+    return other.x;
+  }
+  viaOptional(other?: B) {
+    return other?.x;
+  }
+  viaIntersection(other: B & { y: number }) {
+    return other.x;
+  }
+  viaNarrowing(other: A) {
+    return other instanceof B ? other.x : 0;
+  }
+}
+class C extends B {}
+console.log(new B().viaConstraint(new C()));

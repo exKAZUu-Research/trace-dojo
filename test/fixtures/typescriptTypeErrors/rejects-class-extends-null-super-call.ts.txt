@@ -1,0 +1,7 @@
+class Empty extends null {}
+class WithSuper extends null {
+  constructor() {
+    super();
+  }
+}
+console.log(Object.getPrototypeOf(Empty.prototype), WithSuper.name);

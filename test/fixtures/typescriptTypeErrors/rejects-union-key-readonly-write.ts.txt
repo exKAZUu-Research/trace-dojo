@@ -1,0 +1,35 @@
+type Point = { readonly x: number; y: number };
+class Counter {
+  get count(): number {
+    return 1;
+  }
+  step = 2;
+}
+
+function setPoint(point: Point, key: "x" | "y"): void {
+  point[key] = 1;
+}
+
+function setAny(point: Point, key: keyof Point): void {
+  point[key] = 1;
+}
+
+function setCounter(counter: Counter, key: "count" | "step"): void {
+  counter[key] = 3;
+}
+
+function setEither(point: Point | { x: number; y: number }, key: "x" | "y"): void {
+  point[key] = 1;
+}
+
+function setY(point: Point, key: "y"): void {
+  point[key] = 1;
+}
+
+const point: Point = { x: 1, y: 2 };
+setY(point, "y");
+setPoint(point, "x");
+setAny(point, "y");
+setCounter(new Counter(), "step");
+setEither(point, "y");
+console.log(point.y);

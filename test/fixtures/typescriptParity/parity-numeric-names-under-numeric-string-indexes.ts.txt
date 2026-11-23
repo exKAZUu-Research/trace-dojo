@@ -1,0 +1,16 @@
+type I = { [k: `${number}`]: string };
+const fromNumberNames: I = { 0: "a" };
+const ignored: I = { 0: 1 };
+interface X { [k: `${number}`]: string; 0: number }
+const x: X = { 0: 1, "1": "b" };
+const src = { 1: 2 };
+const fromVariable: I = src;
+function inferValue<T>(value: { [k: `${number}`]: T }): T[] {
+  return Object.values(value);
+}
+const inferred: boolean[] = inferValue({ 0: 1, "1": true });
+function read(y: I, s: `${number}`) {
+  console.log(y["0"], y[s]);
+}
+read(fromNumberNames, "0");
+console.log(ignored, x, fromVariable, inferred);

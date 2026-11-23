@@ -1,0 +1,22 @@
+interface EmptyInterface {}
+type EmptyMapped = Record<never, never>;
+function assign<T>(value: T) {
+  const missingNull: {} | undefined = value;
+  const missingUndefined: {} | null = value;
+  const voidInstead: {} | null | void = value;
+  const namedInterface: EmptyInterface | null | undefined = value;
+  const mapped: EmptyMapped | null | undefined = value;
+  const object: object | null | undefined = value;
+  const optional: { x?: number } | null | undefined = value;
+}
+function copy(value: unknown) {
+  const object: Object | null | undefined = value;
+  const callable: (() => void) | null | undefined = value;
+  const indexed: { [key: string]: string } | null | undefined = value;
+}
+class EmptyClass {}
+type Remapped = { [K in 'x' as never]: number };
+function preserveOrigins(value: unknown) {
+  const instance: EmptyClass | null | undefined = value;
+  const remapped: Remapped | null | undefined = value;
+}

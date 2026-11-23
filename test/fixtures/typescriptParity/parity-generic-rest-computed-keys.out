@@ -1,0 +1,3 @@
+{ b: 'two', c: true } { a: 1, c: true } two 3 3
+undefined
+{ a: 9 }

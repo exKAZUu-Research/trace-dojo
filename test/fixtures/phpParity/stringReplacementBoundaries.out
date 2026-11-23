@@ -1,0 +1,24 @@
+
+Warning: strtr(): Ignoring replacement of empty string in /main.php on line 2
+string(3) "bbc"
+string(0) ""
+TypeError:str_replace(): Argument #2 ($replace) must be of type string when argument #1 ($search) is a string
+TypeError:str_replace(): Argument #2 ($replace) must be of type string when argument #1 ($search) is a string
+TypeError:str_replace(): Argument #2 ($replace) must be of type string when argument #1 ($search) is a string
+array(0) {
+}
+TypeError:str_ireplace(): Argument #2 ($replace) must be of type string when argument #1 ($search) is a string
+TypeError:str_ireplace(): Argument #2 ($replace) must be of type string when argument #1 ($search) is a string
+TypeError:str_ireplace(): Argument #2 ($replace) must be of type string when argument #1 ($search) is a string
+array(0) {
+}
+string(4) "abc
+"
+string(4) "abc
+"
+string(5) "abc--"
+string(5) "abc--"
+string(7) "abc----"
+string(7) "abc----"
+string(8) "ab--cd--"
+string(8) "ab--cd--"

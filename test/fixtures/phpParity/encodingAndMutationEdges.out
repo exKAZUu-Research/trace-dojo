@@ -1,0 +1,54 @@
+string(16) "&eacute;&commat;"
+string(12) "e926616d703b"
+string(30) "e9266575726f3be92623783130303b"
+bool(true)
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 5
+bool(true)
+bool(true)
+bool(true)
+
+Deprecated: Calling get_class() without arguments is deprecated in /main.php on line 6
+
+Deprecated: Calling get_parent_class() without arguments is deprecated in /main.php on line 6
+string(1) "B"
+string(1) "A"
+Class "parent" not found
+Class "parent" not found
+string(1) "2"
+string(1) "3"
+int(7)
+
+Warning: Only the first byte will be assigned to the string offset in /main.php on line 11
+
+Warning: Illegal string offset -20 in /main.php on line 11
+string(1) "1"
+string(3) "1bc"
+NULL
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+}
+array(2) {
+  [0]=>
+  int(2)
+  [1]=>
+  int(1)
+}
+array(2) {
+  [0]=>
+  int(3)
+  [1]=>
+  int(4)
+}
+array(2) {
+  [0]=>
+  int(4)
+  [1]=>
+  int(3)
+}
+int(1)
+string(4) "c3a9"
+string(4) "c3a9"

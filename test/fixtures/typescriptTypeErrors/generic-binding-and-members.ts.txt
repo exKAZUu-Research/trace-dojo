@@ -1,0 +1,6 @@
+function a<T>(value: T) { return value.toString(); }
+function b<T extends unknown>(value: T) { return value.valueOf(); }
+function c<T extends number | null>(value: T) { return value.toString(); }
+type Indexed<T> = T extends { value: number } ? <T>(item: T) => T["value"] : never;
+type Bracketed<T> = [T] extends [{ value: number }] ? <T>(item: T) => T["value"] : never;
+type Tuple<T> = T extends string[] ? <T>() => [...T] : never;

@@ -1,0 +1,4 @@
+(4,7): error TS2322: Type '`user-id-${number}`' is not assignable to type '`user:id-${number}`'.
+(7,7): error TS2322: Type '"m5"' is not assignable to type '`n${number}`'.
+(9,7): error TS2322: Type '"xr-1y"' is not assignable to type '`xp-${number}y` | `xq-${number}y`'.
+(10,7): error TS2322: Type 'Uppercase<string>' is not assignable to type 'Lowercase<string>'.

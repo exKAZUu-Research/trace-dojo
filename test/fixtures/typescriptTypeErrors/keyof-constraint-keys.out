@@ -1,0 +1,9 @@
+(1,60): error TS2322: Type 'string' is not assignable to type 'keyof T'.
+  Type '"wrong"' is not assignable to type '"value"'.
+(2,48): error TS2322: Type 'string' is not assignable to type 'keyof T'.
+  Type '"wrong"' is not assignable to type 'never'.
+(3,71): error TS2322: Type 'string' is not assignable to type 'keyof T'.
+(4,88): error TS2322: Type 'string' is not assignable to type 'keyof T'.
+  Type '"left"' is not assignable to type '"shared"'.
+(5,66): error TS2322: Type 'string' is not assignable to type 'keyof [string, ...T]'.
+  Type '"7"' is not assignable to type '"0" | keyof T[]'.

@@ -1,0 +1,3 @@
+Plain { x: 1 } Empty {} { x: 2 } { x: 3 } 5 Bare { x: 1 } DerivedGood { x: 1 } ReturnAny { x: 1 }
+true
+true

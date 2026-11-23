@@ -1,0 +1,19 @@
+type Deep<T> = { v: T; next?: Deep<T[]> };
+const a: Deep<string> = { v: 's', next: { v: ['t'] } };
+const b: Deep<string | number> = a;
+interface Box<T> {
+  v: T;
+  wrap(): Box<Box<T>>;
+}
+const bs: Box<string> = { v: "s", wrap() { return { v: this, wrap: this.wrap as never } as never; } };
+const bu: Box<string | number> = bs;
+type List<T> = { head: T; tail: List<T> | undefined };
+const l: List<string> = { head: 'a', tail: undefined };
+const lu: List<string | number> = l;
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+const j: Json = { a: [1, { b: 'c' }] };
+type Tree = { children: Tree[]; label: string };
+const t: Tree = { children: [{ children: [], label: 'x' }], label: 'y' };
+type Tree2 = { children: Tree2[]; label: string | number };
+const t2: Tree2 = t;
+console.log(b.v, typeof bu, lu.head, JSON.stringify(j), t2.label);

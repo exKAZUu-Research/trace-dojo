@@ -1,0 +1,10 @@
+function fail(message: string): never {
+  throw new Error(message);
+}
+function parse(s: string): number {
+  let n: number;
+  if (s === "1") n = 1;
+  else fail("bad");
+  return n;
+}
+console.log(parse("1"));

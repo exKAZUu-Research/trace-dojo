@@ -1,0 +1,36 @@
+type O = { f(n: number): number; c: number; arr: number[]; g(): O };
+
+const o: O = {
+  f: (n) => n * 10,
+  c: 2,
+  arr: [5, 6, 7],
+  g: () => o,
+};
+
+function narrowedArgument(a: O | undefined) {
+  return [a?.f(a.c), a?.arr[a.c], a?.g().f(a.c)];
+}
+function truthyCondition(a: O | undefined) {
+  let x: number;
+  if (a?.f((x = 1))) return x;
+  return 0;
+}
+function negatedCondition(a: O | undefined) {
+  let x: number;
+  return !a?.f((x = 1)) || x;
+}
+function ternaryCondition(a: O | undefined) {
+  let x: number;
+  return a?.f((x = 3)) ? x : -1;
+}
+function coalesced(a: O | undefined) {
+  let x: number;
+  a?.f((x = 4)) ?? (x = 5);
+  return x;
+}
+
+console.log(narrowedArgument(o), narrowedArgument(undefined));
+console.log(truthyCondition(o), truthyCondition(undefined));
+console.log(negatedCondition(o), negatedCondition(undefined));
+console.log(ternaryCondition(o), ternaryCondition(undefined));
+console.log(coalesced(o), coalesced(undefined));

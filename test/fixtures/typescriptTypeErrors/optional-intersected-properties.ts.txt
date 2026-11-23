@@ -1,0 +1,10 @@
+type Item = { value?: string } & { value: string | undefined };
+const item: Item = { value: undefined };
+console.log(item.value.toUpperCase());
+
+class Data {
+  get value(): string | undefined { return undefined; }
+  set value(value: string | number | undefined) { console.log(value); }
+}
+const data: Data & { value?: string } = new Data();
+data.value = 1;

@@ -1,0 +1,15 @@
+type A = { readonly a: number; readonly b: string };
+type B = { [K in keyof A as "x"]: A[K] };
+const b: B = { x: 1 };
+b.x = 2;
+type C = { a?: number; b?: string };
+type D = { [K in keyof C as "x"]: C[K] };
+const d: D = {};
+console.log(d);
+type E = { a?: number; b: string };
+type F = { [K in keyof E as "x"]: E[K] };
+const f: F = {};
+type G = { readonly a: number; b: string };
+type H = { [K in keyof G as "x"]: G[K] };
+const h: H = { x: 1 };
+h.x = 2;

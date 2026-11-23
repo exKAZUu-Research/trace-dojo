@@ -1,0 +1,11 @@
+const f: ((x: number) => number) | ((x: number) => string) = (x) => x + 1;
+console.log(f(1));
+function use(cb: ((x: string) => number) | ((x: string) => string)) {
+  console.log(cb("abc"));
+}
+use((x) => x.length);
+use((x) => x.toUpperCase());
+const g: { (x: string): string; (x: number): string } = (x) => String(x);
+console.log(g("a"), g(2));
+const h: ((x: number) => void) | undefined = (x) => console.log(x * 2);
+h?.(21);

@@ -1,0 +1,18 @@
+const nested = { a: { b: { c: { d: 1 } } } };
+console.dir([1, 2, 3]);
+console.dir([1, 2, 3], { maxArrayLength: undefined });
+console.dir([1, 2, 3], { maxArrayLength: null });
+console.dir([1, 2, 3], { maxArrayLength: 0 });
+console.dir(new Set([1, 2, 3]), { maxArrayLength: undefined });
+console.dir(new Map([[1, 2], [3, 4]]), { maxArrayLength: undefined });
+try { console.dir(new Map([[1, 2]]).keys(), { maxArrayLength: undefined }); }
+catch (error) { if (error instanceof Error) console.log(error.message); }
+console.dir({ a: 1 }, { compact: undefined });
+console.dir({ a: 1 }, { compact: null });
+console.dir({ a: 1 }, { compact: "3" });
+console.dir(nested);
+console.dir(nested, { depth: undefined });
+console.dir(nested, { depth: null });
+console.dir(nested, { depth: undefined, showHidden: true });
+console.dir({ a: 1 }, { breakLength: undefined });
+console.dir({ a: 1 }, { breakLength: null });

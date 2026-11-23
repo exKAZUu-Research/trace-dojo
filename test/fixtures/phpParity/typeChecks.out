@@ -1,0 +1,30 @@
+int(42)
+float(3)
+Cannot assign string to property A::$n of type int
+Cannot assign string to property A::$list of type array
+Cannot assign stdClass to property A::$next of type ?A
+int(5)
+int(6)
+Typed property U::$x must not be accessed before initialization
+bool(false)
+bool(true)
+Typed property U::$x must not be accessed before initialization
+int(5)
+NULL
+string(1) "5"
+bool(false)
+r5(): Return value must be of type int, string returned
+NULL
+12
+3
+calledY
+A
+NULLarray
+6
+p6(): Argument #2 must be of type int, string given, called in /main.php on line 25
+false's'
+'1'10
+1.51
+falsetruefalse
+p10(): Argument #1 ($b) must be of type bool, array given, called in /main.php on line 31
+55.5100.0
