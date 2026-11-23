@@ -386,6 +386,22 @@ class Robot {
   expect(steps.find(({ line }) => line === 15)?.vars).toEqual({ step: 2, it: 1, 'this.energy': 2, size: 9 });
 });
 
+test('a lambda called after its creator returned shows only its own variables', () => {
+  const source = `fun makeAdder(n: Int): (Int) -> Int {
+    val label = "add"
+    return { x ->
+        val y = x + n
+        y
+    }
+}
+fun main() {
+    val add5 = makeAdder(5)
+    val r = add5(1)
+}`;
+  const step = traceProgram('kotlin', source, source).traceItems.find(({ line }) => line === 4);
+  expect(step?.vars).toEqual({ x: 1, y: 6, n: 5 });
+});
+
 test("a nested block's local shows over an outer one of the same name", () => {
   const source = `fun main() {
     val x = 8

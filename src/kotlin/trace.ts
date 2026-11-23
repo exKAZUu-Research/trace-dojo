@@ -52,7 +52,7 @@ class Snapshotter {
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
     const { variables, shown } = this.frameVariables(frame);
     if (!withContext) return variables;
-    const thisFrame = enclosingFrames(frame).find((each) => each.info.showsThis);
+    const thisFrame = enclosingFrames(frame, this.runtime.frames).find((each) => each.info.showsThis);
     if (thisFrame?.thisValue instanceof KObject) addThis(variables, thisFrame.thisValue);
     for (const global of this.program.globals) {
       if (shown.has(global.name) || global.isConstant) continue;
@@ -70,7 +70,7 @@ class Snapshotter {
    */
   private frameVariables(frame: Frame): { variables: TraceVariables; shown: Set<string> } {
     const shown = new Set<string>();
-    const levels = enclosingFrames(frame).map((each) =>
+    const levels = enclosingFrames(frame, this.runtime.frames).map((each) =>
       this.bindingsOf(each).filter(({ name }) => !shown.has(name) && shown.add(name))
     );
     const variables: TraceVariables = { vars: {}, referenceVars: {} };
@@ -131,9 +131,16 @@ class Snapshotter {
   }
 }
 
-function enclosingFrames(frame: Frame): Frame[] {
+/**
+ * A frame and the frames of the functions that created the lambdas it runs in, while those still run: a lambda called
+ * after its creator returned, as one a function returns, shows only its own variables.
+ */
+function enclosingFrames(frame: Frame, running: readonly Frame[]): Frame[] {
   const frames: Frame[] = [];
-  for (let current: Frame | undefined = frame; current; current = current.enclosing) frames.push(current);
+  for (let current: Frame | undefined = frame; current; current = current.enclosing) {
+    frames.push(current);
+    if (current.enclosing && !running.includes(current.enclosing)) break;
+  }
   return frames;
 }
 
