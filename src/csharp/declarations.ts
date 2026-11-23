@@ -798,6 +798,19 @@ export class DeclarationBinder extends BinderBase {
     property.isVirtual = modifiers.has('virtual');
     property.isAbstract = modifiers.has('abstract') || (symbol.kind === 'interface' && !modifiers.has('static'));
     property.isOverride = modifiers.has('override');
+    if (
+      (property.isVirtual || property.isAbstract || property.isOverride) &&
+      property.access === 'private' &&
+      symbol.kind !== 'interface' &&
+      !this.isLibraryUnit
+    ) {
+      const shown = isIndexer ? 'this' : name;
+      this.error(
+        member,
+        'CS0621',
+        `'${displayTypeSymbol(symbol)}.${shown}': 仮想または抽象メンバーには、private を指定できません`
+      );
+    }
     property.row = member.row;
     property.column = member.column;
     if (member.kind === 'property') property.declaration = member;
@@ -981,7 +994,7 @@ export class DeclarationBinder extends BinderBase {
     }
     if (
       (method.isVirtual || method.isAbstract || method.isOverride) &&
-      modifiers.set.has('private') &&
+      method.access === 'private' &&
       method.owner.kind !== 'interface'
     ) {
       this.error(position, 'CS0621', `'${display()}': 仮想または抽象メンバーには、private を指定できません`);
