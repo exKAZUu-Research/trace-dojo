@@ -449,7 +449,9 @@ export function describeThrowable(frame: Frame, value: Value): string {
   const messageProperty = libraryClass('kotlin.Throwable').members.get('message')?.[0];
   const message =
     messageProperty?.kind === 'property' ? readProperty(frame, messageProperty, value) : throwableState(value).message;
-  return message === undefined ? name : `${name}: ${stringOf(frame, message)}`;
+  const text = message === undefined ? name : `${name}: ${stringOf(frame, message)}`;
+  frame.runtime.allocateString(frame, text.length);
+  return text;
 }
 
 function readProperty(frame: Frame, property: PropertySymbol, receiver: Value): Value {

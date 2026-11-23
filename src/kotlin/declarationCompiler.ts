@@ -938,7 +938,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       const text = dataFieldString(frame, this.boxedField(receiver, property), arrays[index]);
       return `${property.name}=${text}`;
     });
-    return frame.runtime.checkBuiltString(frame, `${symbol.name}(${fields.join(', ')})`);
+    const text = `${symbol.name}(${fields.join(', ')})`;
+    frame.runtime.allocateString(frame, text.length);
+    return text;
   }
 
   private dataObjectHash(
