@@ -122,9 +122,12 @@ export class BuilderChunks {
     let indexInChunk = start - chunk.offset;
     let replacements: number[] = [];
     while (remaining > 0) {
-      // Each position's comparison may read the whole search string, which a long common prefix makes it do.
-      charge(oldValue.length);
-      if (oldValue.length <= remaining && current.startsWith(oldValue, chunk.offset + indexInChunk)) {
+      // A comparison that passes the first character may read the whole search string, which a long common prefix
+      // makes it do; one that fails there, or does not run, costs one character.
+      const position = chunk.offset + indexInChunk;
+      const isCompared = oldValue.length <= remaining && current[position] === oldValue[0];
+      charge(isCompared ? oldValue.length : 1);
+      if (isCompared && current.startsWith(oldValue, position)) {
         replacements.push(indexInChunk);
         indexInChunk += oldValue.length;
         remaining -= oldValue.length;
