@@ -216,7 +216,7 @@ export function defaultToString(evaluator: Evaluator, value: Value): string {
   return type ? runtimeTypeName(type) : 'System.Object';
 }
 
-function isExceptionState(native: unknown): native is ExceptionState {
+export function isExceptionState(native: unknown): native is ExceptionState {
   return native instanceof Object && 'wasThrown' in native;
 }
 

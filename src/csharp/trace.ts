@@ -11,7 +11,7 @@ import { Evaluator } from './evaluator';
 import { runProgram } from './execute';
 import { formatFloat } from './format';
 import type { EnumerableState } from './library/iteration';
-import { enumText } from './objects';
+import { enumText, exceptionMessage, isExceptionState } from './objects';
 import { parseCSharp } from './parse';
 import { type Frame, Runtime } from './runtime';
 import {
@@ -268,6 +268,9 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
     const collection = collectionNodeOf(value, seen);
     if (collection) return collection;
     const entries: Record<string, DisplayNode> = {};
+    // An exception keeps its message in the library's state rather than in a field, as Java's Throwable does.
+    if (value instanceof CsObject && isExceptionState(value.native))
+      entries.Message = { kind: 'value', value: exceptionMessage(value) };
     for (const [field, fieldType] of instanceFields(value)) {
       const node = displayNodeOf(value.fields[field.slot], fieldType, seen);
       if (node) entries[field.property?.name ?? field.name] = node;
