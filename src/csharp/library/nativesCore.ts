@@ -797,6 +797,8 @@ const numericMath =
     operation(call, args as Value[]);
 
 defineNatives({
+  // .NET seeds HashCode per process, so programs rely only on equal values combining to equal hashes.
+  'System.HashCode.Combine': (call, _receiver, args) => tupleHash(call, args as Value[]),
   'System.Math.Abs': numericMath((call, [value]) => {
     const type = parameterType(call, 0);
     const special = specialOf(type) as SpecialType;
