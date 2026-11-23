@@ -458,7 +458,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   /** After `x = value`, a stable `x` has the value's type, which may be narrower than its declared one. */
-  private narrowAfterAssignment(scope: Scope, target: Expression, value: Compiled, declared: KType): void {
+  private narrowAfterAssignment(scope: Scope, assigned: Expression, value: Compiled, declared: KType): void {
+    let target = assigned;
+    while (target.kind === 'parenthesized') target = target.expression;
     if (target.kind !== 'name') return;
     const variable = this.findVariable(scope, target.name);
     if (!variable) return;
