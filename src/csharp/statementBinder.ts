@@ -9,7 +9,7 @@ import type {
   SwitchSection,
   VariableDeclarator,
 } from './ast';
-import type { TypeContext } from './binderBase';
+import { type TypeContext, unavailableDotnetNamespace } from './binderBase';
 import type {
   BoundBlock,
   BoundCatch,
@@ -90,7 +90,7 @@ export abstract class StatementBinder extends PatternBinder {
 
   protected rejectUnavailableName(name: string, position: Position): void {
     const simple = name.slice(name.lastIndexOf('.') + 1);
-    const unavailable = this.unavailableType(name, simple);
+    const unavailable = this.unavailableType(name, simple) ?? unavailableDotnetNamespace(name.split('.'));
     if (unavailable) this.unsupported(position, unavailable);
   }
 

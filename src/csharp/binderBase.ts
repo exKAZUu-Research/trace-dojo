@@ -18,7 +18,7 @@ import {
   type TypeSymbol,
   VOID_TYPE,
 } from './types';
-import { unavailableTypeOf } from './unavailable';
+import { isDotnetNamespace, unavailableTypeOf } from './unavailable';
 
 /** The full names of the library types that C# keywords and the compiler know by role. */
 export const SPECIAL_TYPE_NAMES: Record<string, SpecialType> = {
@@ -325,7 +325,9 @@ export class BinderBase {
           const found = namespace.findType(node.name, args.length);
           if (found) return this.construct(node, found, args);
         }
-        const unavailable = this.unavailableType([...path, node.name].join('.'), node.name);
+        const unavailable =
+          this.unavailableType([...path, node.name].join('.'), node.name) ??
+          unavailableDotnetNamespace([...path, node.name]);
         if (unavailable) this.unsupported(node, unavailable);
         this.error(
           node,
@@ -487,6 +489,11 @@ const UNAVAILABLE_NAMESPACES: Record<string, string> = {
   'System.Diagnostics': 'System.Diagnostics',
   'System.Runtime': 'System.Runtime',
 };
+
+/** Describes a namespace that .NET has and the library lacks, which a qualified name may reach without a using. */
+export function unavailableDotnetNamespace(path: string[]): string | undefined {
+  return isDotnetNamespace(path.join('.')) ? unavailableNamespaceOf(path) : undefined;
+}
 
 function unavailableNamespaceOf(path: string[]): string | undefined {
   const name = path.join('.');

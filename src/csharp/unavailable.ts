@@ -37,6 +37,19 @@ export function unavailableTypeOf(
   return feature ? `${feature}（${display}）` : display;
 }
 
+/** The namespaces of .NET's types and the namespaces around them, such as `System.Threading` and `System`. */
+const DOTNET_NAMESPACES = new Set(
+  DOTNET_TYPES.flatMap((fullName) => {
+    const parts = fullName.split('.').slice(0, -1);
+    return parts.map((_part, index) => parts.slice(0, index + 1).join('.'));
+  })
+);
+
+/** Whether .NET has a namespace of a dotted name. */
+export function isDotnetNamespace(name: string): boolean {
+  return DOTNET_NAMESPACES.has(name);
+}
+
 /** Whether .NET's type of a full metadata name has a public member of the name. */
 export function isKnownLibraryMember(fullName: string, member: string): boolean {
   const members = DOTNET_MEMBERS[fullName];
