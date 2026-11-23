@@ -4395,7 +4395,7 @@ fun main() {
   {
     name: 'finally sees assignments before a pending jump',
     source: `fun main() {
-    var count: Int
+    var count = 0
     do {
         try {
             count = 7
