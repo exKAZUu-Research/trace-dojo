@@ -1,6 +1,8 @@
 /** The largest coefficient of a .NET decimal, whose 96 bits hold it. */
 const MAX_COEFFICIENT = (1n << 96n) - 1n;
 const MAX_SCALE = 28;
+/** The digits of the largest coefficient, 79228162514264337593543950335. */
+const MAX_DIGITS = 29;
 
 export class DecimalOverflowError extends Error {}
 
@@ -58,6 +60,15 @@ export class CsDecimal {
     const fraction = match[3] ?? '';
     let scale = fraction.length - Number(match[4] ?? 0);
     let coefficient = BigInt(`${integer}${fraction}` || '0');
+    // An exponent far outside the decimal range decides the result at once, which digit-by-digit scaling would take
+    // as many steps as the exponent to reach.
+    const digitCount = coefficient === 0n ? 0 : coefficient.toString().length;
+    if (scale < 0 && coefficient === 0n) scale = 0;
+    if (scale < 0 && digitCount - scale > MAX_DIGITS) return undefined;
+    if (scale > MAX_SCALE + digitCount + 1) {
+      coefficient = 0n;
+      scale = MAX_SCALE;
+    }
     while (scale < 0) {
       coefficient *= 10n;
       scale++;
