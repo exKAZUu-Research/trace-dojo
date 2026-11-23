@@ -259,9 +259,9 @@ export abstract class CompilerCore {
     const local = findClassInScope(scope, name);
     if (local) return local;
     const imported = this.file.importedClasses.get(name);
+    if (imported) return imported;
     const own = this.packages.get(this.file.packageName)?.classes.get(name);
     if (own) return own;
-    if (imported) return imported;
     const fromWildcard = this.findClassInPackages(name, this.file.starPackages);
     if (fromWildcard) return fromWildcard;
     const omittedJava = this.file.starPackages.filter(isJavaPath);
@@ -294,11 +294,14 @@ export abstract class CompilerCore {
     return undefined;
   }
 
-  /** The functions of a name in the visible packages, nearest first, each level a group of equally near ones. */
+  /**
+   * The functions of a name in the visible packages, nearest first, each level a group of equally near ones; explicit
+   * imports come before the current package, as in Kotlin.
+   */
   protected topLevelFunctions(name: string, includeEmpty = false): FunctionSymbol[][] {
-    const levels: FunctionSymbol[][] = [];
+    const imported = this.file.importedFunctions.get(name) ?? [];
     const own = this.packages.get(this.file.packageName)?.functions.get(name) ?? [];
-    levels.push([...new Set([...own, ...(this.file.importedFunctions.get(name) ?? [])])]);
+    const levels = [imported, own.filter((symbol) => !imported.includes(symbol))];
     for (const level of this.visiblePackageLevels().slice(1)) {
       levels.push(level.flatMap((packageName) => this.packages.get(packageName)?.functions.get(name) ?? []));
     }
@@ -306,9 +309,9 @@ export abstract class CompilerCore {
   }
 
   protected topLevelProperties(name: string, includeEmpty = false): PropertySymbol[][] {
-    const levels: PropertySymbol[][] = [];
+    const imported = this.file.importedProperties.get(name) ?? [];
     const own = this.packages.get(this.file.packageName)?.properties.get(name) ?? [];
-    levels.push([...new Set([...own, ...(this.file.importedProperties.get(name) ?? [])])]);
+    const levels = [imported, own.filter((symbol) => !imported.includes(symbol))];
     for (const level of this.visiblePackageLevels().slice(1)) {
       levels.push(level.flatMap((packageName) => this.packages.get(packageName)?.properties.get(name) ?? []));
     }
