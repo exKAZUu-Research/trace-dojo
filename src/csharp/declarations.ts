@@ -576,8 +576,30 @@ export class DeclarationBinder extends BinderBase {
         }
       }
     }
+    if (!this.isLibraryUnit) this.checkOperatorPairs(symbol);
     if (symbol.isRecord) this.declareRecordMembers(type);
     this.declareImplicitConstructors(type);
+  }
+
+  /** Reports CS0216 for an operator declared without its pair, as `==` without `!=` with the same operand types. */
+  private checkOperatorPairs(symbol: TypeSymbol): void {
+    const operators = symbol.methods.filter((method) => method.kind === 'operator');
+    for (const method of operators) {
+      const pair = method.operatorToken ? OPERATOR_PAIRS[method.operatorToken] : undefined;
+      if (!pair) continue;
+      const hasPair = operators.some(
+        (other) =>
+          other.operatorToken === pair &&
+          other.parameters.length === method.parameters.length &&
+          other.parameters.every((parameter, index) => sameType(parameter.type, method.parameters[index].type))
+      );
+      if (!hasPair)
+        this.error(
+          method.row ?? 0,
+          'CS0216',
+          `演算子 '${displayMethod(method)}' を定義するには、合致する演算子 '${pair}' が必要です`
+        );
+    }
   }
 
   private declareDelegateInvoke({ symbol, declaration, context }: DeclaredType): void {
@@ -1629,6 +1651,16 @@ function displayAccessorsIn(property: PropertySymbol, owner: NamedType): string[
         `${displayTypeSymbol(owner.symbol, owner.args)}.${property.name}.${accessor === property.getter ? 'get' : 'set'}`
     );
 }
+
+/** The operators C# requires to be declared together. */
+const OPERATOR_PAIRS: Record<string, string> = {
+  '==': '!=',
+  '!=': '==',
+  '<': '>',
+  '>': '<',
+  '<=': '>=',
+  '>=': '<=',
+};
 
 const ACCESS_RANKS: Record<Accessibility, number> = {
   private: 0,

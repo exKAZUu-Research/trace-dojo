@@ -101,8 +101,9 @@ function receiverText(receiver: Value): string {
 const WHITESPACE = /[\t-\r\u0085\p{Zs}\u2028\u2029]/u;
 
 function trimWith(text: string, chars: string[] | undefined, start: boolean, end: boolean): string {
-  const isTrimmed = (char: string): boolean =>
-    chars && chars.length > 0 ? chars.includes(char) : WHITESPACE.test(char);
+  // A set keeps a long text trimmed of many characters linear.
+  const set = chars && chars.length > 0 ? new Set(chars) : undefined;
+  const isTrimmed = (char: string): boolean => (set ? set.has(char) : WHITESPACE.test(char));
   let first = 0;
   let last = text.length;
   if (start) while (first < last && isTrimmed(text[first])) first++;
@@ -348,14 +349,14 @@ const stringNatives: Record<string, NativeMethod> = {
   [`${STRING}.LastIndexOf`]: (call, receiver, args) => lastIndexOf(call, receiverText(receiver), args as Value[]),
   [`${STRING}.IndexOfAny`]: (_call, receiver, [chars, start = 0]) => {
     const text = receiverText(receiver);
-    const set = charsOf(chars as Value);
-    for (let index = start as number; index < text.length; index++) if (set.includes(text[index])) return index;
+    const set = new Set(charsOf(chars as Value));
+    for (let index = start as number; index < text.length; index++) if (set.has(text[index])) return index;
     return -1;
   },
   [`${STRING}.LastIndexOfAny`]: (_call, receiver, [chars]) => {
     const text = receiverText(receiver);
-    const set = charsOf(chars as Value);
-    for (let index = text.length - 1; index >= 0; index--) if (set.includes(text[index])) return index;
+    const set = new Set(charsOf(chars as Value));
+    for (let index = text.length - 1; index >= 0; index--) if (set.has(text[index])) return index;
     return -1;
   },
   [`${STRING}.Insert`]: (call, receiver, [index, value]) => {
