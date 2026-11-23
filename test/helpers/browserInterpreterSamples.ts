@@ -51,6 +51,11 @@ main = do
   javascript: `let x = Number(/x=(\\d+)/.exec('x=6')[1]);
 x = x * 7;
 console.log(('<' + x + '>').replace(/[<>]/g, ''));`,
+  kotlin: `fun main() {
+    var x = "x=6".substringAfter('=').toInt()
+    x = x * 7
+    println(x)
+}`,
   php: `<?php
 preg_match('/x=(\\d+)/', 'x=6', $matches);
 $x = (int) $matches[1];
