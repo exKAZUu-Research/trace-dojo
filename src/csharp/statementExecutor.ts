@@ -3,7 +3,7 @@ import type { BoundBlock, BoundCatch, BoundExpression, BoundStatement, BoundSwit
 import { NULL_REFERENCE } from './evaluatorBase';
 import { PendingException } from './numeric';
 import { PatternMatcher } from './patternMatcher';
-import { CsThrow, type ExceptionState, type Frame, ProgramExit } from './runtime';
+import { CsThrow, type ExceptionState, type Frame, ProgramExit, type Slot } from './runtime';
 import type { LocalSymbol, MethodSymbol, Type } from './types';
 import { Cell, copyValue, type CsArray, CsObject, type CsString, stringText, UNASSIGNED, type Value } from './values';
 
@@ -19,6 +19,13 @@ const NEXT = Symbol('next');
 
 type ForStatement = Extract<BoundStatement, { kind: 'for' }>;
 type ForeachStatement = Extract<BoundStatement, { kind: 'foreach' }>;
+
+/** The catch clause an exception goes to, with the slots its filter left for the clause's body. */
+interface Catcher {
+  statement: BoundStatement;
+  clause: BoundCatch;
+  filterSlots: Slot[];
+}
 
 /** The evaluator's execution of statements. */
 export abstract class StatementExecutor extends PatternMatcher {
@@ -357,23 +364,22 @@ export abstract class StatementExecutor extends PatternMatcher {
   private filterFloor = 0;
 
   /** The catch clause that each exception in flight goes to, or undefined when none takes it. */
-  private readonly catchers = new WeakMap<CsThrow, { statement: BoundStatement; clause: BoundCatch } | undefined>();
+  private readonly catchers = new WeakMap<CsThrow, Catcher | undefined>();
 
   /** The first catch clause from the innermost try out that accepts an exception, its filter evaluated in its frame. */
-  private findCatcher(thrown: CsThrow): { statement: BoundStatement; clause: BoundCatch } | undefined {
+  private findCatcher(thrown: CsThrow): Catcher | undefined {
     for (const { statement, frame } of this.handlers.slice(this.filterFloor).toReversed()) {
       for (const clause of statement.catches) {
         if (!this.isInstanceOf(thrown.exception, clause.type)) continue;
-        if (!clause.filter) return { statement, clause };
-        // A passing filter's locals stay in scope for the clause's body, which handle drops on its way out.
-        let passes = false;
-        try {
-          if (clause.local) this.storeLocal(frame, clause.local, thrown.exception, true);
-          passes = this.passesFilter(clause.filter, frame);
-        } finally {
-          if (!passes) this.dropLocals(frame, clause.locals);
-        }
-        if (passes) return { statement, clause };
+        const { filter, local } = clause;
+        if (!filter) return { statement, clause, filterSlots: [] };
+        // The filter's locals leave scope with it, since a finally that throws can abandon the clause before its body
+        // runs; the body gets them back from the slots kept here, cells included, so closures keep sharing them.
+        const kept = this.inScope(frame, clause.locals, [], () => {
+          if (local) this.storeLocal(frame, local, thrown.exception, true);
+          return this.passesFilter(filter, frame) ? clause.locals.map((symbol) => frame.slots[symbol.slot]) : undefined;
+        });
+        if (kept) return { statement, clause, filterSlots: kept };
       }
     }
     return undefined;
@@ -401,11 +407,12 @@ export abstract class StatementExecutor extends PatternMatcher {
   ): Completion | 'unhandled' {
     const catcher = this.catchers.get(thrown);
     if (catcher?.statement !== statement) return 'unhandled';
-    const { clause } = catcher;
+    const { clause, filterSlots } = catcher;
     const { local } = clause;
     this.currentExceptions.push(thrown);
     try {
       return this.inScope(frame, clause.locals, [], () => {
+        for (const [index, slot] of filterSlots.entries()) frame.slots[clause.locals[index].slot] = slot;
         if (local) this.storeLocal(frame, local, thrown.exception, true);
         return this.executeBlock(clause.body, frame);
       });
@@ -423,12 +430,8 @@ export abstract class StatementExecutor extends PatternMatcher {
     try {
       return run();
     } finally {
-      this.dropLocals(frame, locals);
+      for (const local of locals) frame.slots[local.slot] = UNASSIGNED;
     }
-  }
-
-  private dropLocals(frame: Frame, locals: readonly LocalSymbol[]): void {
-    for (const local of locals) frame.slots[local.slot] = UNASSIGNED;
   }
 
   /** The C# exception that a host error stands for, if the program can catch it. */
