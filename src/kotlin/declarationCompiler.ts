@@ -18,8 +18,9 @@ import type {
 import { type Compiled, convertRepr, FunctionContext, type PackageScope, type Repr, Scope } from './compilerBase';
 import type { FileContext, MemberRef } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
+import { type DataArrayField, dataArrayField, dataFieldString } from './dataFields';
 import { callFunction, getPropertyValue, isVirtual, propertyRepr, setPropertyValue } from './dispatch';
-import { hashOf, stringHash, stringOf, valueEquals } from './format';
+import { hashOf, stringHash, valueEquals } from './format';
 import {
   aliasedOverrides,
   fitsInheritedContract,
@@ -30,7 +31,7 @@ import {
 } from './inheritedMembers';
 import { jvmSignatures, overriddenMembers } from './jvmSignatures';
 import { isKnownLibraryAnnotation, isKnownLibraryPackage } from './libraryApi';
-import { arrayContentHash, arrayContentString, dataArrayKind } from './natives/arrays';
+import { arrayContentHash } from './natives/arrays';
 import { type NativeFunction, type NativeProperty, typeRefText } from './nativeTypes';
 import { toInt32 } from './operators';
 import { type Frame, MISSING } from './runtime';
@@ -47,44 +48,7 @@ import {
 } from './symbols';
 import { anyType, isSameType, isSubtype, substitutionOf } from './typeRelations';
 import { type ClassType, type KType, NOTHING, resolved, substitute, type Substitution, typeToString } from './types';
-import { Boxed, KObject, type PrimitiveKind, type Value } from './values';
-
-interface DataArrayField {
-  storage?: PrimitiveKind | 'Boolean';
-  wrapper?: string;
-}
-
-function dataArrayField(type: KType | undefined): DataArrayField | undefined {
-  const actual = type && resolved(type);
-  if (actual?.kind !== 'class' || !actual.cls.isLibrary) return undefined;
-  const name = actual.cls.name;
-  if (name === 'Array') return {};
-  const kind = dataArrayKind(name);
-  switch (kind) {
-    case 'UByte': {
-      return { storage: 'Byte', wrapper: name };
-    }
-    case 'UShort': {
-      return { storage: 'Short', wrapper: name };
-    }
-    case 'UInt': {
-      return { storage: 'Int', wrapper: name };
-    }
-    case 'ULong': {
-      return { storage: 'Long', wrapper: name };
-    }
-    case undefined: {
-      return undefined;
-    }
-    default: {
-      return { storage: kind };
-    }
-  }
-}
-
-function dataFieldString(frame: Frame, value: Value, array: DataArrayField | undefined): string {
-  return array && !array.wrapper ? arrayContentString(frame, value, array.storage) : stringOf(frame, value);
-}
+import { Boxed, KObject, type Value } from './values';
 
 export interface ClassEntry {
   decl: ClassDecl;
