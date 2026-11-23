@@ -134,7 +134,14 @@ export class Evaluator extends StatementExecutor {
         owner: this.ownerFromEnvironment(method, typeEnvironment),
         row: callRow,
       };
-      return method.native(call, self, args);
+      // The callbacks a native runs may collect garbage while its receiver and arguments are reachable from no frame.
+      const start = caller.temporaries.length;
+      caller.temporaries.push(self, ...(args as Value[]));
+      try {
+        return method.native(call, self, args);
+      } finally {
+        caller.temporaries.length = start;
+      }
     }
     const body = method.body;
     const backingField = method.property?.backingField;
