@@ -383,8 +383,8 @@ export abstract class StatementBinder extends PatternBinder {
   }
 
   /**
-   * Binds a while or do loop in a scope of its own, which the variables its condition declares (`out int x`) belong
-   * to, as C# declares them; a block around the loop drops them from the frame when the loop ends.
+   * Binds a while, do, or foreach loop in a scope of its own, which the variables its condition or collection
+   * declares (`out int x`) belong to, as C# declares them; a block around the loop drops them when the loop ends.
    */
   private inLoopScope(context: BindContext, row: number, bind: (inner: BindContext) => BoundStatement): BoundStatement {
     const scope = new LocalScope(context.scope, context.fn);
@@ -453,7 +453,8 @@ export abstract class StatementBinder extends PatternBinder {
         return this.bindFor(statement, context);
       }
       case 'foreach': {
-        return this.bindForeach(statement, context);
+        // The collection expression's declarations belong to the loop, as the iteration variable does.
+        return this.inLoopScope(context, row, (inner) => this.bindForeach(statement, inner));
       }
       case 'switch': {
         return this.bindSwitch(statement, context);
