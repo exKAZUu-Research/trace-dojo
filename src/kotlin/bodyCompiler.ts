@@ -222,6 +222,10 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     }
     const compiled = this.compileExpression(scope, context, expression, symbol.returnType);
     symbol.returnType ??= this.inferredResultType(compiled);
+    // The returns of an inferred body must fit the type its value gives, as a declared one checks them as they compile.
+    const returnType = symbol.returnType;
+    const misfit = context.returnedTypes.find((type) => !isSubtype(type, returnType));
+    if (misfit) this.error(expression.row, typeMismatchMessage(returnType, misfit));
     context.returnType = symbol.returnType;
     return convertRepr(
       this.expectType(compiled, symbol.returnType, expression.row),
