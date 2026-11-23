@@ -844,10 +844,17 @@ function booleanElvisNarrowing(left: Compiled, fallback: Expression): Compiled['
 /** Whether values of the type have no identity, as a value class's and the unsigned integers' do. */
 function isValueClassType(type: KType): boolean {
   const actual = resolved(type);
-  return actual.kind === 'class' && (actual.cls.isValue || UNSIGNED_CLASSES.has(actual.cls.qualifiedName));
+  return actual.kind === 'class' && (actual.cls.isValue || LIBRARY_VALUE_CLASSES.has(actual.cls.qualifiedName));
 }
 
-const UNSIGNED_CLASSES = new Set(['kotlin.UByte', 'kotlin.UShort', 'kotlin.UInt', 'kotlin.ULong']);
+/** The library's value classes, which the prelude declares as ordinary classes. */
+const LIBRARY_VALUE_CLASSES = new Set([
+  'kotlin.UByte',
+  'kotlin.UShort',
+  'kotlin.UInt',
+  'kotlin.ULong',
+  'kotlin.time.Duration',
+]);
 
 function typeAfterCast(operand: KType, target: KType): KType {
   const nonNullOperand = nonNull(operand);
