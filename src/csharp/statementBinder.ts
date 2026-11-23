@@ -850,7 +850,11 @@ export abstract class StatementBinder extends PatternBinder {
     return type.kind === 'named' && type.symbol.kind === 'enum';
   }
 
-  /** Finds `GetEnumerator()` and the `MoveNext()` and `Current` of what it returns, as `foreach` does. */
+  /**
+   * The one resolver of `foreach`'s enumeration pattern (C# spec §13.9.5), whose result the loop's execution follows:
+   * a public instance `GetEnumerator()`, else an implemented `IEnumerable`'s; on what it returns, a public instance
+   * `bool MoveNext()` and a public instance `Current` with a getter; and disposal through `IDisposable` only.
+   */
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private enumeratorPattern(

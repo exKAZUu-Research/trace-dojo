@@ -1019,20 +1019,23 @@ export class Evaluator extends StatementExecutor {
       created = this.defaultOf(type);
     } else {
       const named = type as NamedType;
-      if (named.symbol.kind === 'class' || constructor) this.runtime.ensureInitialized(named);
-      const object = named.symbol.isValueType ? (this.defaultOf(named) as CsStruct) : this.allocate(named);
-      frame.temporaries.push(object);
+      // .NET evaluates the arguments before creating the object, which is what runs the static constructor.
+      const args = this.evaluateArguments(expression.args, frame);
+      const start = frame.temporaries.length;
+      frame.temporaries.push(...(args as Value[]));
       try {
-        const args = this.evaluateArguments(expression.args, frame);
+        if (named.symbol.kind === 'class' || constructor) this.runtime.ensureInitialized(named);
+        const object = named.symbol.isValueType ? (this.defaultOf(named) as CsStruct) : this.allocate(named);
+        frame.temporaries.push(object);
+        created = object;
         if (constructor) {
           const result = this.invoke(frame, constructor, object, args, expression.row, substitutionOf(named));
           // A library constructor of a primitive, such as `new string('a', 3)`, returns the value it creates.
           if (constructor.native && result !== undefined) return result;
         }
       } finally {
-        frame.temporaries.pop();
+        frame.temporaries.length = start;
       }
-      created = object;
     }
     if (expression.initializer) {
       frame.temporaries.push(created);
