@@ -927,7 +927,17 @@ defineNatives({
     (result as VariableReference).set(ok ? (text as string).charCodeAt(0) : 0);
     return ok;
   },
-  [`${CHAR}.ConvertFromUtf32`]: (_call, _receiver, [code]) => String.fromCodePoint(code as number),
+  [`${CHAR}.ConvertFromUtf32`]: (call, _receiver, [code]) => {
+    const value = code as number;
+    // A surrogate or a value past U+10FFFF is no Unicode scalar, which .NET rejects.
+    if (value < 0 || value > 0x10_ff_ff || (value >= 0xd8_00 && value <= 0xdf_ff))
+      failOutOfRange(
+        call,
+        'utf32',
+        'A valid UTF32 value is between 0x000000 and 0x10ffff, inclusive, and should not include surrogate codepoint values (0x00d800 ~ 0x00dfff).'
+      );
+    return String.fromCodePoint(value);
+  },
   [`${CHAR}.ConvertToUtf32(char, char)`]: (_call, _receiver, [high, low]) =>
     ((high as number) - 0xd8_00) * 0x4_00 + ((low as number) - 0xdc_00) + 0x1_00_00,
   [`${CHAR}.ConvertToUtf32(string, int)`]: (call, _receiver, [text, index]) => {
