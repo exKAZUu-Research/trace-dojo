@@ -1,4 +1,5 @@
 // code-gauge-allow-file fileNcss -- The evaluator module keeps one stage of the C# interpreter together.
+import { checkElementStore } from './arrayStore';
 import type {
   BoundArguments,
   BoundBlock,
@@ -28,7 +29,6 @@ import { StatementExecutor } from './statementExecutor';
 import {
   type ArrayType,
   baseTypeOf,
-  isReferenceType,
   type LocalSymbol,
   type MethodSymbol,
   type NamedType,
@@ -916,16 +916,7 @@ export class Evaluator extends StatementExecutor {
     return {
       get: () => array.values[offset],
       set: (value) => {
-        if (
-          value !== undefined &&
-          isReferenceType(array.type.element) &&
-          !this.isInstanceOf(value, array.type.element)
-        ) {
-          throw new PendingException(
-            'System.ArrayTypeMismatchException',
-            'Attempted to access an element as a type incompatible with the array.'
-          );
-        }
+        checkElementStore(this, array, value);
         array.values[offset] = value;
       },
     };

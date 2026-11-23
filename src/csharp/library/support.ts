@@ -1,4 +1,5 @@
 import { CompileError } from '../../interpreter/diagnostics';
+import { checkElementStore } from '../arrayStore';
 import type { Evaluator } from '../evaluator';
 import type { NativeCall } from '../natives';
 import { convertNumeric, type NumericValue, PendingException } from '../numeric';
@@ -8,6 +9,7 @@ import {
   isReferenceType,
   type NamedType,
   namedType,
+  nullableUnderlying,
   sameType,
   specialOf,
   type SpecialType,
@@ -160,9 +162,9 @@ export function storeInArray(
   sourceElement?: Type
 ): void {
   const element = target.type.element;
+  const evaluator = evaluatorOf(call);
   let values = items;
   if (!sourceElement || !sameType(sourceElement, element)) {
-    const evaluator = evaluatorOf(call);
     values = items.map((item) => {
       if (!isReferenceType(element)) return valueElement(evaluator, item, sourceElement, element);
       const boxed = sourceElement ? evaluator.box(item, sourceElement) : item;
@@ -174,6 +176,7 @@ export function storeInArray(
       return boxed;
     });
   }
+  for (const value of values) checkElementStore(evaluator, target, value);
   for (const [offset, value] of values.entries()) target.values[index + offset] = copyValue(value);
 }
 
@@ -182,9 +185,7 @@ export function storeInArray(
  * cannot hold, so the array never holds a value of the wrong type.
  */
 export function checkArrayStore(call: NativeCall, array: CsArray, value: Value): void {
-  const element = array.type.element;
-  if (value !== undefined && isReferenceType(element) && !evaluatorOf(call).isInstanceOf(value, element))
-    fail('System.ArrayTypeMismatchException', 'Attempted to access an element as a type incompatible with the array.');
+  checkElementStore(evaluatorOf(call), array, value);
 }
 
 /**
@@ -211,6 +212,14 @@ const ARRAY_COPY_CONVERSIONS: Partial<Record<SpecialType, SpecialType[]>> = {
  */
 function valueElement(evaluator: Evaluator, item: Value, sourceElement: Type | undefined, element: Type): Value {
   if (item instanceof CsBox) return evaluator.unbox(item, element);
+  if (item === undefined && sourceElement && isReferenceType(sourceElement)) {
+    // A null unboxes to a nullable element's null; .NET's array copy cannot cast it to another value type.
+    if (nullableUnderlying(element)) return undefined;
+    fail(
+      'System.InvalidCastException',
+      'At least one element in the source array could not be cast down to the destination array type.'
+    );
+  }
   if (!sourceElement) return item;
   const from = specialOf(sourceElement);
   const to = specialOf(element);

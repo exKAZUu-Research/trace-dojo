@@ -1515,7 +1515,9 @@ defineNatives({
   [`${ARRAY}.SetValue`]: (call, receiver, [value, index]) => {
     const array = arrayOf(receiver);
     checkValueIndex(array, index as number);
-    array.values[index as number] = evaluatorOf(call).unbox(value as Value, elementTypeOf(array));
+    const stored = evaluatorOf(call).unbox(value as Value, elementTypeOf(array));
+    checkArrayStore(call, array, stored);
+    array.values[index as number] = stored;
     return;
   },
   [`${ARRAY}.Clone`]: (call, receiver) => {
