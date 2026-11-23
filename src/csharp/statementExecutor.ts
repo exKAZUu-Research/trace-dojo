@@ -147,7 +147,8 @@ export abstract class StatementExecutor extends PatternMatcher {
       }
       return undefined;
     } finally {
-      for (const local of statement.locals) if (!local.isCaptured) frame.slots[local.slot] = UNASSIGNED;
+      // A closure keeps a captured local's cell itself, so the frame lets go of every local leaving scope.
+      for (const local of statement.locals) frame.slots[local.slot] = UNASSIGNED;
     }
   }
 
@@ -186,8 +187,7 @@ export abstract class StatementExecutor extends PatternMatcher {
       return this.iterate(statement, collection, frame, runIteration);
     } finally {
       frame.temporaries.pop();
-      for (const local of [statement.variable, ...statement.locals])
-        if (!local.isCaptured) frame.slots[local.slot] = UNASSIGNED;
+      for (const local of [statement.variable, ...statement.locals]) frame.slots[local.slot] = UNASSIGNED;
     }
   }
 
@@ -274,7 +274,7 @@ export abstract class StatementExecutor extends PatternMatcher {
     } finally {
       // The sections' locals go out of scope with the switch block, so the trace stops showing them.
       for (const section of statement.sections)
-        for (const local of section.locals) if (!local.isCaptured) frame.slots[local.slot] = UNASSIGNED;
+        for (const local of section.locals) frame.slots[local.slot] = UNASSIGNED;
     }
   }
 
