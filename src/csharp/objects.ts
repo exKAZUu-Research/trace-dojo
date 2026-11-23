@@ -4,6 +4,7 @@ import { CsDecimal } from './decimal';
 import type { Evaluator } from './evaluator';
 import { formatFloat } from './format';
 import { linqDisplayName } from './library/nativesLinq';
+import { MeteredText } from './meteredText';
 import type { NativeCall } from './natives';
 import { PendingException } from './numeric';
 import type { ExceptionState, Frame, Runtime } from './runtime';
@@ -531,7 +532,13 @@ export function recordMember(
 }
 
 function recordText(evaluator: Evaluator, frame: Frame, value: CsObject | CsStruct): string {
-  const members = printedMembers(value.type).map((member) => {
+  // The text is built through a metered text, which stops at the string limit before a long member is joined in.
+  const text = new MeteredText(evaluator.runtime);
+  const isAnonymous = value.type.symbol.anonymousDisplay !== undefined;
+  const members = printedMembers(value.type);
+  if (!isAnonymous) text.append(value.type.symbol.name);
+  text.append(isAnonymous ? '{ ' : members.length > 0 ? ' { ' : ' { }');
+  for (const [index, member] of members.entries()) {
     const getter = member.getter;
     const memberValue = getter
       ? evaluator.invoke(
@@ -543,11 +550,12 @@ function recordText(evaluator: Evaluator, frame: Frame, value: CsObject | CsStru
           environmentOf(evaluator, getter, value)
         )
       : member.read(value);
-    return `${member.name} = ${memberValue === undefined ? '' : stringOf(evaluator, memberValue, member.type, frame)}`;
-  });
-  const isAnonymous = value.type.symbol.anonymousDisplay !== undefined;
-  const body = members.length > 0 ? ` ${members.join(', ')} ` : ' ';
-  return isAnonymous ? `{${body}}` : `${value.type.symbol.name}${body === ' ' ? ' { }' : ` {${body}}`}`;
+    if (index > 0) text.append(', ');
+    text.append(`${member.name} = `);
+    if (memberValue !== undefined) text.append(stringOf(evaluator, memberValue, member.type, frame));
+  }
+  if (isAnonymous || members.length > 0) text.append(members.length > 0 ? ' }' : '}');
+  return text.toString();
 }
 
 function recordEquals(evaluator: Evaluator, frame: Frame, value: CsObject | CsStruct, other: Value): boolean {
