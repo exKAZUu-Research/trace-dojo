@@ -112,6 +112,8 @@ export class Runtime {
   /** The static fields of each constructed type, keyed by the type's identity. */
   private readonly statics = new Map<string, StaticStorage>();
   private readonly initializing = new Set<string>();
+  /** The exception of each type whose initializer threw, which .NET throws again on every later use of the type. */
+  private readonly failedInitializations = new Map<string, CsThrow>();
   private readonly dispatchCache = new Map<MethodSymbol, Map<string, MethodSymbol>>();
   /** The strings .NET makes once and returns again, such as a small number's text, by what they are the text of. */
   private readonly sharedStrings = new Map<string, CsString>();
@@ -224,6 +226,8 @@ export class Runtime {
     const key = typeKey(type);
     const existing = this.statics.get(key);
     if (existing) return existing.values;
+    const failure = this.failedInitializations.get(key);
+    if (failure) throw new CsThrow(failure.exception);
     return this.initializeType(type, key).values;
   }
 
@@ -254,7 +258,9 @@ export class Runtime {
     } catch (error) {
       if (error instanceof CsThrow || error instanceof PendingException) {
         this.statics.delete(key);
-        throw this.typeInitializationError(type, error);
+        const failure = this.typeInitializationError(type, error);
+        this.failedInitializations.set(key, failure);
+        throw failure;
       }
       throw error;
     } finally {
