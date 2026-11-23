@@ -610,7 +610,8 @@ export abstract class ExpressionBinder extends MemberBinder {
     });
     return {
       kind: 'sequence',
-      locals: [],
+      // The operands' hidden locals leave scope with the comparison, so they hold nothing the program has let go.
+      locals: [leftTemporary, rightTemporary].map((temporary) => (temporary as { local: LocalSymbol }).local),
       sideEffects: [assign(leftTemporary, left), assign(rightTemporary, right)],
       value,
       type: this.boolType,
