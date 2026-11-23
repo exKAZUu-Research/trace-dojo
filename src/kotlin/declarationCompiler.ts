@@ -238,7 +238,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   /** Imports a nested class or the members of an object, or a class by its qualified name. */
   private importFromClass(context: FileContext, name: string, { path, row }: Import, beforeHeaders: boolean): void {
-    const owner = this.findQualifiedClass(path.slice(0, -1));
+    const ownerPath = path.slice(0, -1);
+    // A class of the default package has a one-part name, as `Utils` in `import Utils.f`.
+    const owner =
+      this.findQualifiedClass(ownerPath) ??
+      (ownerPath.length === 1 ? this.packages.get('')?.classes.get(ownerPath[0]) : undefined);
     const nested = owner?.nested.get(name);
     if (nested) {
       context.importedClasses.set(name, nested);
