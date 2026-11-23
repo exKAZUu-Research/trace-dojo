@@ -727,7 +727,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
   ): Compiled {
     const { name, row, isSafe } = expression;
     const qualified = this.compileQualifier(scope, expression.receiver);
-    if (qualified?.kind === 'class') return consume(this.compileClassMember(scope, context, qualified.cls, name, row));
+    if (qualified?.kind === 'class')
+      return consume(safeResultIf(isSafe, this.compileClassMember(scope, context, qualified.cls, name, row)));
     if (qualified) return consume(this.compilePackageMember(context, qualified, name, row));
     if (expression.receiver.kind === 'super') {
       if (expression.isSafe) this.error(row, 'super には ?. を使えません。');
@@ -1053,16 +1054,19 @@ export abstract class ExpressionCompiler extends CallCompiler {
       }
       const qualified = this.compileQualifier(scope, callee.receiver);
       if (qualified)
-        return this.compileQualifiedCall(
-          scope,
-          context,
-          qualified,
-          callee.name,
-          args,
-          hasTrailingLambda,
-          typeArgs,
-          expected,
-          row
+        return safeResultIf(
+          callee.isSafe,
+          this.compileQualifiedCall(
+            scope,
+            context,
+            qualified,
+            callee.name,
+            args,
+            hasTrailingLambda,
+            typeArgs,
+            expected,
+            row
+          )
         );
       const receiver = this.compileExpression(scope, context, callee.receiver);
       return this.withSafeReceiver(receiver, callee.isSafe, row, (target) =>
@@ -2048,6 +2052,17 @@ export abstract class ExpressionCompiler extends CallCompiler {
     expected: KType | undefined,
     use: ExpressionUse
   ): Compiled;
+}
+
+/** `O?.x` on an object, which is never null, still has the nullable type of a safe call's result. */
+function safeResultIf(isSafe: boolean, compiled: Compiled): Compiled {
+  if (!isSafe) return compiled;
+  return {
+    ...compiled,
+    type: nullable(compiled.type),
+    repr: 'ref',
+    eval: convertRepr(compiled.eval, compiled.repr, 'ref'),
+  };
 }
 
 function returnUnit(): Value {
