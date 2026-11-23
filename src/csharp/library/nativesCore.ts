@@ -1347,6 +1347,12 @@ defineNatives({
 // ---- Tuples ----
 
 const tupleNatives: Record<string, NativeMethod> = {};
+
+/** The items of a `Tuple`, which the turtle collector reaches through `references` as it does other native state. */
+function tupleItems(values: Value[]): Value[] {
+  const items = values.map((value) => copyValue(value));
+  return Object.assign(items, { references: () => items });
+}
 for (let arity = 1; arity <= MAX_TUPLE_ARITY; arity++) {
   const name = `System.ValueTuple\`${arity}`;
   tupleNatives[`${name}..ctor`] = (_call, receiver, args) => {
@@ -1377,7 +1383,7 @@ tupleNatives['System.ValueTuple.Create'] = (call, _receiver, args) =>
 for (const arity of [2, 3]) {
   const name = `System.Tuple\`${arity}`;
   tupleNatives[`${name}..ctor`] = (_call, receiver, args) => {
-    (receiver as CsObject).native = args;
+    (receiver as CsObject).native = tupleItems(args as Value[]);
     return;
   };
   for (let index = 1; index <= arity; index++)
@@ -1398,7 +1404,7 @@ for (const arity of [2, 3]) {
 }
 tupleNatives['System.TupleExtensions.ToTuple'] = (call, _receiver, [value]) => {
   const tuple = new CsObject(libraryType(call, 'System.Tuple', call.typeArgs), []);
-  tuple.native = [...(value as CsStruct).fields];
+  tuple.native = tupleItems((value as CsStruct).fields);
   return tuple;
 };
 tupleNatives['System.TupleExtensions.ToValueTuple'] = (call, _receiver, [value]) => {
@@ -1410,7 +1416,7 @@ tupleNatives['System.TupleExtensions.ToValueTuple'] = (call, _receiver, [value])
 tupleNatives['System.Tuple.Create'] = (call, _receiver, args) => {
   const type = libraryType(call, 'System.Tuple', call.typeArgs);
   const tuple = new CsObject(type, []);
-  tuple.native = args;
+  tuple.native = tupleItems(args as Value[]);
   return tuple;
 };
 defineNatives(tupleNatives);

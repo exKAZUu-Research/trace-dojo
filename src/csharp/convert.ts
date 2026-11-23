@@ -89,6 +89,87 @@ const UNSUPPORTED_MODIFIERS: Record<string, string> = {
 };
 
 /** Converts tree-sitter's C# tree into the program's syntax tree. */
+/** C#'s reserved keywords, which are identifiers only with an `@` prefix. */
+const RESERVED_KEYWORDS = new Set([
+  'abstract',
+  'as',
+  'base',
+  'bool',
+  'break',
+  'byte',
+  'case',
+  'catch',
+  'char',
+  'checked',
+  'class',
+  'const',
+  'continue',
+  'decimal',
+  'default',
+  'delegate',
+  'do',
+  'double',
+  'else',
+  'enum',
+  'event',
+  'explicit',
+  'extern',
+  'false',
+  'finally',
+  'fixed',
+  'float',
+  'for',
+  'foreach',
+  'goto',
+  'if',
+  'implicit',
+  'in',
+  'int',
+  'interface',
+  'internal',
+  'is',
+  'lock',
+  'long',
+  'namespace',
+  'new',
+  'null',
+  'object',
+  'operator',
+  'out',
+  'override',
+  'params',
+  'private',
+  'protected',
+  'public',
+  'readonly',
+  'ref',
+  'return',
+  'sbyte',
+  'sealed',
+  'short',
+  'sizeof',
+  'stackalloc',
+  'static',
+  'string',
+  'struct',
+  'switch',
+  'this',
+  'throw',
+  'true',
+  'try',
+  'typeof',
+  'uint',
+  'ulong',
+  'unchecked',
+  'unsafe',
+  'ushort',
+  'using',
+  'virtual',
+  'void',
+  'volatile',
+  'while',
+]);
+
 export class Converter extends ExpressionConverter {
   convertCompilationUnit(root: Node): CompilationUnit {
     const unit: CompilationUnit = { usings: [], statements: [], members: [], sourceRows: root.endPosition.row + 1 };
@@ -773,7 +854,8 @@ export class Converter extends ExpressionConverter {
       .filter((child) => child.type === 'variable_declarator')
       .map((declarator) => {
         const nameNode = field(declarator, 'name');
-        if (!nameNode)
+        // The grammar accepts a reserved keyword as a local's name, where Roslyn expects an identifier.
+        if (!nameNode || RESERVED_KEYWORDS.has(nameNode.text))
           throw new CompileError([{ row: declarator.startPosition.row, message: 'CS1001: 識別子がありません' }]);
         const parts = namedChildren(declarator).filter((part) => !sameNode(part, nameNode));
         const bracketed = parts.find((part) => part.type === 'bracketed_argument_list');
