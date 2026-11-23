@@ -326,6 +326,11 @@ export interface CallExpression {
 }
 
 export function isNullLiteral(expression: Expression): boolean {
-  while (expression.kind === 'parenthesized') expression = expression.expression;
-  return expression.kind === 'null';
+  return unparenthesized(expression).kind === 'null';
+}
+
+export function unparenthesized(expression: Expression): Expression {
+  let inner = expression;
+  while (inner.kind === 'parenthesized') inner = inner.expression;
+  return inner;
 }

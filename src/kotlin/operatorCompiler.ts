@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss -- the compiler of one area of Kotlin, whose parts call each other closely.
-import { isNullLiteral } from './ast';
+import { isNullLiteral, unparenthesized } from './ast';
 import type { CallExpression, Expression, TypeRef } from './ast';
 import { type ArgumentSyntax } from './callCompiler';
 import {
@@ -804,7 +804,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
  * `a ?: false` is true only where `a` is true, and `a ?: true` false only where `a` is false, so that outcome shows
  * that `a` was not null, as `x` of `x?.isNotEmpty() ?: false` is not.
  */
-function booleanElvisNarrowing(left: Compiled, fallback: Expression): Compiled['narrowing'] {
+function booleanElvisNarrowing(left: Compiled, written: Expression): Compiled['narrowing'] {
+  const fallback = unparenthesized(written);
   if (fallback.kind !== 'boolean') return undefined;
   const nonNullOutcome = nonNullFacts(left);
   const outcome = fallback.value ? left.narrowing?.whenFalse : left.narrowing?.whenTrue;
