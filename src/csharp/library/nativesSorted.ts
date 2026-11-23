@@ -7,6 +7,7 @@ import { CsObject, CsStruct, type Value } from '../values';
 import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { type Comparison, comparisonOf, equalityOf } from './nativesCollections';
 import {
+  bufferedElements,
   copyToArray,
   evaluatorOf,
   fail,
@@ -271,7 +272,7 @@ const sortedSetFromCollection: NativeMethod = (call, receiver, [source, comparer
 
 function setElements(call: NativeCall, other: Value): Value[] {
   if (other === undefined) failNull('other');
-  return [...iterate(call, other, 'other')];
+  return bufferedElements(call, iterate(call, other, 'other'));
 }
 
 defineNatives({

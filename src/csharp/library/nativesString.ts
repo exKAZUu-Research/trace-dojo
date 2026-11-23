@@ -385,14 +385,22 @@ const stringNatives: Record<string, NativeMethod> = {
   },
   [`${STRING}.IndexOf`]: (call, receiver, args) => indexOf(call, receiverText(receiver), args as Value[]),
   [`${STRING}.LastIndexOf`]: (call, receiver, args) => lastIndexOf(call, receiverText(receiver), args as Value[]),
-  [`${STRING}.IndexOfAny`]: (_call, receiver, [chars, start = 0]) => {
+  [`${STRING}.IndexOfAny`]: (call, receiver, [chars, start = 0]) => {
     const text = receiverText(receiver);
+    if (chars === undefined) failNull('anyOf');
+    if ((start as number) < 0 || (start as number) > text.length)
+      failOutOfRange(
+        call,
+        'startIndex',
+        'Index was out of range. Must be non-negative and less than or equal to the size of the collection.'
+      );
     const set = new Set(charsOf(chars as Value));
     for (let index = start as number; index < text.length; index++) if (set.has(text[index])) return index;
     return -1;
   },
   [`${STRING}.LastIndexOfAny`]: (_call, receiver, [chars]) => {
     const text = receiverText(receiver);
+    if (chars === undefined) failNull('anyOf');
     const set = new Set(charsOf(chars as Value));
     for (let index = text.length - 1; index >= 0; index--) if (set.has(text[index])) return index;
     return -1;
@@ -438,14 +446,17 @@ const stringNatives: Record<string, NativeMethod> = {
     if (from === '') fail('System.ArgumentException', 'The value cannot be an empty string.', 'oldValue');
     return replacedText(call, receiverText(receiver), from as string, (to as string | undefined) ?? '', false);
   },
-  [`${STRING}.Replace(string, string?, StringComparison)`]: (call, receiver, [from, to, comparison]) =>
-    replacedText(
+  [`${STRING}.Replace(string, string?, StringComparison)`]: (call, receiver, [from, to, comparison]) => {
+    if (from === undefined) failNull('oldValue');
+    if (from === '') fail('System.ArgumentException', 'The value cannot be an empty string.', 'oldValue');
+    return replacedText(
       call,
       receiverText(receiver),
       from as string,
       (to as string | undefined) ?? '',
       (comparison as number) % 2 !== 0
-    ),
+    );
+  },
   [`${STRING}.Split`]: (call, receiver, args) => split(call, receiverText(receiver), args as Value[]),
   [`${STRING}.Substring(int)`]: (call, receiver, [start]) => {
     const text = receiverText(receiver);

@@ -17,6 +17,7 @@ import {
 import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { introSort } from './sort';
 import {
+  bufferedElements,
   chargeElements,
   copyToArray,
   evaluatorOf,
@@ -1071,7 +1072,7 @@ const HASH_SET = 'System.Collections.Generic.HashSet`1';
 
 function otherElements(call: NativeCall, other: Value): Value[] {
   if (other === undefined) failNull('other');
-  return [...iterate(call, other, 'other')];
+  return bufferedElements(call, iterate(call, other, 'other'));
 }
 
 defineNatives({
