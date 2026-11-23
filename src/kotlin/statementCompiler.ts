@@ -543,7 +543,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
       return this.propertyPlace(property, receiver, row, scope);
     }
     const qualified = this.compileQualifier(scope, target.receiver);
-    if (qualified?.kind === 'class') return this.classPropertyPlace(scope, qualified.cls, target.name, row);
+    if (qualified?.kind === 'class')
+      return this.classPropertyPlace(scope, context, qualified.cls, target.name, row, isCompound);
     if (qualified) {
       const property = qualified.scope?.properties.get(target.name)?.find((candidate) => !candidate.extensionReceiver);
       if (!property) this.error(row, `${qualified.path}.${target.name} が見つかりません。`);
@@ -560,10 +561,19 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return this.propertyPlace(property, receiver, row, scope, isOwnReceiver && !isCompound ? context : undefined);
   }
 
-  private classPropertyPlace(scope: Scope, cls: ClassSymbol, name: string, row: number): Place {
+  private classPropertyPlace(
+    scope: Scope,
+    context: FunctionContext,
+    cls: ClassSymbol,
+    name: string,
+    row: number,
+    isCompound: boolean
+  ): Place {
     const holder = cls.isObject ? cls : cls.companion;
     const property = holder && this.findProperty(holder.type, name, row);
     if (!property || !holder) this.error(row, `${cls.name}.${name} が見つかりません。`);
+    // A compound write reads the property first, which the object's own initializer may not do before it is set.
+    if (isCompound) this.checkInitialized(context, property.symbol, name, row);
     return this.propertyPlace(
       property,
       { type: holder.type, repr: 'ref', eval: this.objectInstance(holder) },
