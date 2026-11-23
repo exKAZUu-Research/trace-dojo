@@ -1050,7 +1050,11 @@ const linq: Record<string, NativeMethod> = {
   },
   [`${ENUMERABLE}.SequenceEqual`]: (call, _receiver, [first, second]) => {
     const equality = equalityOf(call, undefined);
-    // .NET reads both sequences in step and stops at the first difference.
+    // .NET tells collections of different counts apart by their counts, without comparing an element.
+    const firstCount = knownCount(first as Value);
+    const secondCount = knownCount(second as Value);
+    if (firstCount !== undefined && secondCount !== undefined && firstCount !== secondCount) return false;
+    // Otherwise it reads both sequences in step and stops at the first difference.
     const left = source(call, first as Value, 'first')[Symbol.iterator]();
     const right = source(call, second as Value, 'second')[Symbol.iterator]();
     try {
