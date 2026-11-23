@@ -744,15 +744,17 @@ const linq: Record<string, NativeMethod> = {
       `System.Linq.Enumerable+${items instanceof CsArray ? '<ArrayChunkIterator>d__39' : '<EnumerableChunkIterator>d__40'}\`1[${runtimeTypeName(elementType)}]`,
       [items as Value],
       function* () {
+        // Each element is charged as the chunk takes it, so a huge chunk size meets the slot limit while it fills.
         let chunk: Value[] = [];
         for (const item of all) {
+          call.frame.runtime.allocateSlots(1);
           chunk.push(item);
           if (chunk.length === size) {
-            yield newArray(call, elementType, chunk);
+            yield arrayOfBuffer(elementType, chunk);
             chunk = [];
           }
         }
-        if (chunk.length > 0) yield newArray(call, elementType, chunk);
+        if (chunk.length > 0) yield arrayOfBuffer(elementType, chunk);
       }
     );
   },
