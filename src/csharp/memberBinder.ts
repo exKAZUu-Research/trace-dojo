@@ -91,7 +91,10 @@ export abstract class MemberBinder extends CallBinder {
     for (let current: PropertySymbol | undefined = value.property; current; current = current.overridden) {
       if (current.getter) {
         this.rejectUnimplementedAccessor(current, current.getter, position);
-        if (!this.isAccessible(current.getter.access, current.owner, context.fn.typeContext, value.receiver?.type))
+        // `base.P` reads through the class's own instance, which a protected getter allows, unlike another object.
+        const isBase = (value.receiver as { isBase?: boolean } | undefined)?.isBase === true;
+        const through = isBase ? undefined : value.receiver?.type;
+        if (!this.isAccessible(current.getter.access, current.owner, context.fn.typeContext, through))
           this.error(
             position,
             'CS0271',
