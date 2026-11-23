@@ -58,30 +58,30 @@ export function traceCSharpProgram(program: string, trace: TraceOptions, input?:
     variablesOf: (frame) => snapshotter.variablesOf(frame, true),
     recordItem: (item) => {
       charge(item.board.length + NODE_COST * (item.callLines.length + item.turtles.length * 4 + 1));
-      charge(traceCost(item.vars) + traceCost(item.referenceVars));
       return item;
     },
   });
   runtime.steps.recorder = recorder;
   let finalVars: TraceItemVariable = {};
-  // A model program may end with an uncaught exception to show how one stops the program.
-  const run = runProgram(evaluator, (frame) => {
-    finalVars = snapshotter.variablesOf(frame, false).vars;
-  });
-  charge(traceCost(finalVars));
-  return { traceItems: recorder.traceItems, finalVars, ...run };
+  // Snapshots charge each node as they build it: an array shared by many rows expands into far more nodes than the run
+  // allocates, so the budget must stop a snapshot before it is built in full.
+  chargeSnapshot = charge;
+  try {
+    // A model program may end with an uncaught exception to show how one stops the program.
+    const run = runProgram(evaluator, (frame) => {
+      finalVars = snapshotter.variablesOf(frame, false).vars;
+    });
+    return { traceItems: recorder.traceItems, finalVars, ...run };
+  } finally {
+    chargeSnapshot = undefined;
+  }
 }
 
 /** The cost of a node in the trace, as the C++ and Rust recorders count it. */
 const NODE_COST = 32;
 
-/** The cost of trace data, in the units of {@link LIMITS.maxTraceSize}: its text, plus a node's cost for each object. */
-function traceCost(data: unknown): number {
-  if (typeof data !== 'object' || data === null) return String(data).length;
-  let cost = NODE_COST;
-  for (const [key, child] of Object.entries(data)) cost += key.length + traceCost(child);
-  return cost;
-}
+/** What building a snapshot spends of the trace's budget; set only while a program is traced. */
+let chargeSnapshot: ((cost: number) => void) | undefined;
 
 class Snapshotter {
   constructor(
@@ -197,6 +197,7 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
   if (value === undefined) return NOT_SCALAR;
   if (underlying.kind === 'array') {
     if (!(value instanceof CsArray) || !hasScalarElements(underlying)) return NOT_SCALAR;
+    chargeSnapshot?.(NODE_COST * value.values.length);
     return value.values.map((item) => {
       const scalar = scalarOf(item, underlying.element);
       // oxlint-disable-next-line unicorn/no-null -- The trace format shows C# null as null.
@@ -273,6 +274,7 @@ const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
 // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNode | undefined {
+  chargeSnapshot?.(NODE_COST);
   if (value === undefined) return NULL_NODE;
   const scalar = scalarOf(value, type);
   if (scalar !== NOT_SCALAR && !Array.isArray(scalar)) return { kind: 'value', value: scalar as TraceScalar };
