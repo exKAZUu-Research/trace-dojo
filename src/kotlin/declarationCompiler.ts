@@ -938,9 +938,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       const text = dataFieldString(frame, this.boxedField(receiver, property), arrays[index]);
       return `${property.name}=${text}`;
     });
-    const text = `${symbol.name}(${fields.join(', ')})`;
-    frame.runtime.allocateString(frame, text.length);
-    return text;
+    // Checking the length first keeps a rendering beyond the limit from being built.
+    const length = fields.reduce((total, field) => total + field.length + 2, symbol.name.length);
+    frame.runtime.allocateString(frame, length);
+    return `${symbol.name}(${fields.join(', ')})`;
   }
 
   private dataObjectHash(
