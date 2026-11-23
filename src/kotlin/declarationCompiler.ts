@@ -445,10 +445,21 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       }
     }
     for (const member of decl.members) this.declareMember(entry, member);
-    if (symbol.isValue && entry.parameterProperties.length !== 1)
-      this.error(decl.row, 'value class には、プロパティを1つだけ持つコンストラクタが要ります。');
+    if (symbol.isValue) this.checkValueClassStorage(entry);
     if (symbol.isData || symbol.isValue || (symbol.isObject && decl.modifiers.keywords.has('data')))
       this.declareDataMembers(entry);
+  }
+
+  /** A value class stores exactly its constructor's one `val`, as kotlinc requires. */
+  private checkValueClassStorage(entry: ClassEntry): void {
+    const [stored, ...others] = entry.parameterProperties;
+    if (!stored || others.length > 0)
+      this.error(entry.decl.row, 'value class には、プロパティを1つだけ持つコンストラクタが要ります。');
+    if (stored.param.binding === 'var') this.error(stored.param.row, 'value class のプロパティは val にしてください。');
+    for (const member of entry.decl.members) {
+      if (member.kind === 'property' && (member.initializer || member.delegate))
+        this.error(member.row, 'value class には、値を保持するプロパティを追加できません。');
+    }
   }
 
   /** The primary constructor, written or implicit, which an enum's and a sealed class's own code alone may call. */
