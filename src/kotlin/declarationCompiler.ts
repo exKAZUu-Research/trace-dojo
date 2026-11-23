@@ -190,8 +190,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
-  /** Resolves a file's imports, which name classes, top-level functions and properties, and members of objects. */
-  /** @param beforeHeaders Whether the program's own classes have no members yet, which a later pass imports. */
+  /**
+   * Resolves a file's imports, which name classes, top-level functions and properties, and members of objects.
+   *
+   * @param beforeHeaders Whether the program's own classes have no members yet, which a later pass imports.
+   */
   protected resolveImports(file: KotlinFile, context: FileContext, beforeHeaders: boolean): void {
     for (const declaration of file.imports) {
       const { path, row } = declaration;
