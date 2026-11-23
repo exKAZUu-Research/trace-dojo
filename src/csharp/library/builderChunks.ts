@@ -107,7 +107,15 @@ export class BuilderChunks {
    * `Replace(oldValue, newValue, start, count)` on a text, returning the new text: .NET finds the occurrences chunk by
    * chunk, and for each chunk's occurrences adds a chunk for the growth or removes what they shrink by.
    */
-  replace(text: string, oldValue: string, newValue: string, start: number, count: number): string {
+  replace(
+    text: string,
+    oldValue: string,
+    newValue: string,
+    start: number,
+    count: number,
+    /** Charges work in characters, as each chunk's rebuild and search take time in the text's and chunks' sizes. */
+    charge: (work: number) => void
+  ): string {
     let current = text;
     let remaining = count;
     let chunk = this.chunkAt(start);
@@ -125,10 +133,12 @@ export class BuilderChunks {
       if (indexInChunk >= chunk.length || remaining === 0) {
         let index = chunk.offset + indexInChunk;
         if (replacements.length > 0) {
+          charge(current.length);
           current = this.replaceInChunk(current, replacements, chunk.offset, oldValue, newValue);
           index += (newValue.length - oldValue.length) * replacements.length;
           replacements = [];
         }
+        charge(this.chunks.length);
         chunk = this.chunkAt(index);
         indexInChunk = index - chunk.offset;
       }

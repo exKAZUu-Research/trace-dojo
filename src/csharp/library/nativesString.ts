@@ -1151,8 +1151,8 @@ class BuilderState implements NativeState {
     this.chunks.setLength(length);
   }
 
-  replace(oldValue: string, newValue: string, start: number, count: number): void {
-    this.text = this.chunks.replace(this.text, oldValue, newValue, start, count);
+  replace(oldValue: string, newValue: string, start: number, count: number, charge: (work: number) => void): void {
+    this.text = this.chunks.replace(this.text, oldValue, newValue, start, count, charge);
   }
 }
 
@@ -1367,7 +1367,7 @@ function replaceIn(
   reserve(call, state, 0, count);
   const growth = occurrencesIn(state.text, from, start, count) * (to.length - from.length);
   reserve(call, state, Math.max(0, growth));
-  state.replace(from, to, start, count);
+  state.replace(from, to, start, count, (work) => call.frame.runtime.spend(Math.ceil(work / 16)));
 }
 
 function setBuilder(receiver: Value, text: string, capacity: number): Value {
