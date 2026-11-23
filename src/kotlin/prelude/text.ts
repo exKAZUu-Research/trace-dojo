@@ -275,7 +275,6 @@ external fun CharSequence.contains(other: CharSequence, ignoreCase: Boolean): Bo
 operator fun CharSequence.contains(char: Char, ignoreCase: Boolean = false): Boolean =
     indexOf(char, ignoreCase = ignoreCase) >= 0
 
-operator fun Char.plus(other: String): String = toString() + other
 external fun CharSequence.indexOf(string: String, startIndex: Int = 0, ignoreCase: Boolean = false): Int
 external fun CharSequence.indexOf(char: Char, startIndex: Int = 0, ignoreCase: Boolean = false): Int
 external fun CharSequence.lastIndexOf(string: String, startIndex: Int = lastIndex, ignoreCase: Boolean = false): Int
