@@ -588,7 +588,8 @@ export class Compiler extends StatementBinder {
       order.push(local);
     };
     for (const local of pending) visit(local);
-    // Each pass can only add what a function assigns, so the passes end within one per function.
+    // The passes start from the optimistic 'assigns all' and can only take assignments away, so they end within one
+    // per function.
     for (let pass = 0; pass <= order.length; pass++) {
       let isChanged = false;
       for (const local of order) {

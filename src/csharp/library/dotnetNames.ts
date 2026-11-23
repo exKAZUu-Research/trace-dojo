@@ -1,6 +1,7 @@
 // The .NET 10 names this grader lacks, so that they are rejected as unavailable rather than reported as undefined:
-// DOTNET_TYPES is the output of scripts/csharpData/listDotnetTypes.cs, and DOTNET_MEMBERS lists the public members
-// that .NET 10's reflection gives the types this grader declares.
+// DOTNET_TYPES is the output of scripts/csharpData/listDotnetTypes.cs, and DOTNET_MEMBERS is the output of
+// scripts/csharpData/listDotnetMembers.cs for the types the library declares, plus the extension methods that programs
+// call as members of them (String's AsSpan and AsMemory), which reflection on the type does not list.
 export const DOTNET_TYPES: readonly string[] = [
   'System.AccessViolationException',
   'System.Action',
@@ -1052,16 +1053,24 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
     'BeginInvoke,Clone,Combine,CreateDelegate,DynamicInvoke,EndInvoke,EnumerateInvocationList,Equals,GetHashCode,GetInvocationList,GetObjectData,GetType,Invoke,Method,op_Equality,op_Inequality,ReferenceEquals,Remove,RemoveAll,Target,ToString',
   'System.Action`9':
     'BeginInvoke,Clone,Combine,CreateDelegate,DynamicInvoke,EndInvoke,EnumerateInvocationList,Equals,GetHashCode,GetInvocationList,GetObjectData,GetType,Invoke,Method,op_Equality,op_Inequality,ReferenceEquals,Remove,RemoveAll,Target,ToString',
+  'System.ApplicationException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
   'System.ArgumentException':
     'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ParamName,ReferenceEquals,Source,StackTrace,TargetSite,ThrowIfNullOrEmpty,ThrowIfNullOrWhiteSpace,ToString',
   'System.ArgumentNullException':
     'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ParamName,ReferenceEquals,Source,StackTrace,TargetSite,ThrowIfNull,ThrowIfNullOrEmpty,ThrowIfNullOrWhiteSpace,ToString',
   'System.ArgumentOutOfRangeException':
     'ActualValue,Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ParamName,ReferenceEquals,Source,StackTrace,TargetSite,ThrowIfEqual,ThrowIfGreaterThan,ThrowIfGreaterThanOrEqual,ThrowIfLessThan,ThrowIfLessThanOrEqual,ThrowIfNegative,ThrowIfNegativeOrZero,ThrowIfNotEqual,ThrowIfNullOrEmpty,ThrowIfNullOrWhiteSpace,ThrowIfZero,ToString',
+  'System.ArithmeticException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
   'System.Array':
     'AsReadOnly,BinarySearch,Clear,Clone,ConstrainedCopy,ConvertAll,Copy,CopyTo,CreateInstance,CreateInstanceFromArrayType,Empty,Equals,Exists,Fill,Find,FindAll,FindIndex,FindLast,FindLastIndex,ForEach,GetEnumerator,GetHashCode,GetLength,GetLongLength,GetLowerBound,GetType,GetUpperBound,GetValue,IndexOf,Initialize,IsFixedSize,IsReadOnly,IsSynchronized,LastIndexOf,Length,LongLength,MaxLength,Rank,ReferenceEquals,Resize,Reverse,SetValue,Sort,SyncRoot,ToString,TrueForAll',
+  'System.ArrayTypeMismatchException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
   'System.Boolean':
     'CompareTo,Equals,FalseString,GetHashCode,GetType,GetTypeCode,Parse,ReferenceEquals,ToString,TrueString,TryFormat,TryParse',
+  'System.Byte':
+    'Clamp,CompareTo,CreateChecked,CreateSaturating,CreateTruncating,DivRem,Equals,GetHashCode,GetType,GetTypeCode,IsEvenInteger,IsOddInteger,IsPow2,LeadingZeroCount,Log2,Max,MaxValue,Min,MinValue,Parse,PopCount,ReferenceEquals,RotateLeft,RotateRight,Sign,ToString,TrailingZeroCount,TryFormat,TryParse',
   'System.Char':
     'CompareTo,ConvertFromUtf32,ConvertToUtf32,Equals,GetHashCode,GetNumericValue,GetType,GetTypeCode,GetUnicodeCategory,IsAscii,IsAsciiDigit,IsAsciiHexDigit,IsAsciiHexDigitLower,IsAsciiHexDigitUpper,IsAsciiLetter,IsAsciiLetterLower,IsAsciiLetterOrDigit,IsAsciiLetterUpper,IsBetween,IsControl,IsDigit,IsHighSurrogate,IsLetter,IsLetterOrDigit,IsLower,IsLowSurrogate,IsNumber,IsPunctuation,IsSeparator,IsSurrogate,IsSurrogatePair,IsSymbol,IsUpper,IsWhiteSpace,MaxValue,MinValue,Parse,ReferenceEquals,ToLower,ToLowerInvariant,ToString,ToUpper,ToUpperInvariant,TryParse',
   'System.CharEnumerator': 'Clone,Current,Dispose,Equals,GetHashCode,GetType,MoveNext,ReferenceEquals,Reset,ToString',
@@ -1094,10 +1103,10 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
   'System.Collections.Generic.KeyValuePair': 'Create,Equals,GetHashCode,GetType,ReferenceEquals,ToString',
   'System.Collections.Generic.KeyValuePair`2':
     'Deconstruct,Equals,GetHashCode,GetType,Key,ReferenceEquals,ToString,Value',
-  'System.Collections.Generic.LinkedList`1':
-    'AddAfter,AddBefore,AddFirst,AddLast,Clear,Contains,CopyTo,Count,Enumerator,Equals,Find,FindLast,First,GetEnumerator,GetHashCode,GetObjectData,GetType,Last,OnDeserialization,ReferenceEquals,Remove,RemoveFirst,RemoveLast,ToString',
   'System.Collections.Generic.LinkedListNode`1':
     'Equals,GetHashCode,GetType,List,Next,Previous,ReferenceEquals,ToString,Value,ValueRef',
+  'System.Collections.Generic.LinkedList`1':
+    'AddAfter,AddBefore,AddFirst,AddLast,Clear,Contains,CopyTo,Count,Enumerator,Equals,Find,FindLast,First,GetEnumerator,GetHashCode,GetObjectData,GetType,Last,OnDeserialization,ReferenceEquals,Remove,RemoveFirst,RemoveLast,ToString',
   'System.Collections.Generic.List`1':
     'Add,AddRange,AsReadOnly,BinarySearch,Capacity,Clear,Contains,ConvertAll,CopyTo,Count,EnsureCapacity,Enumerator,Equals,Exists,Find,FindAll,FindIndex,FindLast,FindLastIndex,ForEach,GetEnumerator,GetHashCode,GetRange,GetType,IndexOf,Insert,InsertRange,Item,LastIndexOf,ReferenceEquals,Remove,RemoveAll,RemoveAt,RemoveRange,Reverse,Slice,Sort,ToArray,ToString,TrimExcess,TrueForAll',
   'System.Collections.Generic.PriorityQueue`2':
@@ -1119,6 +1128,8 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
   'System.Collections.IEnumerator': 'Current,MoveNext,Reset',
   'System.Collections.IEqualityComparer': 'Equals,GetHashCode',
   'System.Collections.IList': 'Add,Clear,Contains,IndexOf,Insert,IsFixedSize,IsReadOnly,Item,Remove,RemoveAt',
+  'System.Collections.ObjectModel.ReadOnlyCollection`1':
+    'Contains,CopyTo,Count,Empty,Equals,GetEnumerator,GetHashCode,GetType,IndexOf,Item,ReferenceEquals,ToString',
   'System.Comparison`1':
     'BeginInvoke,Clone,Combine,CreateDelegate,DynamicInvoke,EndInvoke,EnumerateInvocationList,Equals,GetHashCode,GetInvocationList,GetObjectData,GetType,Invoke,Method,op_Equality,op_Inequality,ReferenceEquals,Remove,RemoveAll,Target,ToString',
   'System.Console':
@@ -1139,8 +1150,12 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
     'Abs,Add,Ceiling,Clamp,Compare,CompareTo,ConvertToInteger,ConvertToIntegerNative,CopySign,CreateChecked,CreateSaturating,CreateTruncating,Divide,Equals,Floor,FromOACurrency,GetBits,GetHashCode,GetType,GetTypeCode,IsCanonical,IsEvenInteger,IsInteger,IsNegative,IsOddInteger,IsPositive,Max,MaxMagnitude,MaxValue,Min,MinMagnitude,MinusOne,MinValue,Multiply,Negate,One,op_Addition,op_Decrement,op_Division,op_Equality,op_Explicit,op_GreaterThan,op_GreaterThanOrEqual,op_Implicit,op_Increment,op_Inequality,op_LessThan,op_LessThanOrEqual,op_Modulus,op_Multiply,op_Subtraction,op_UnaryNegation,op_UnaryPlus,Parse,ReferenceEquals,Remainder,Round,Scale,Sign,Subtract,ToByte,ToDouble,ToInt16,ToInt32,ToInt64,ToOACurrency,ToSByte,ToSingle,ToString,ToUInt16,ToUInt32,ToUInt64,Truncate,TryFormat,TryGetBits,TryParse,Zero',
   'System.Delegate':
     'Clone,Combine,CreateDelegate,DynamicInvoke,EnumerateInvocationList,Equals,GetHashCode,GetInvocationList,GetObjectData,GetType,HasSingleTarget,InvocationListEnumerator`1,Method,op_Equality,op_Inequality,ReferenceEquals,Remove,RemoveAll,Target,ToString',
+  'System.DivideByZeroException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
   'System.Double':
     'Abs,Acos,Acosh,AcosPi,Asin,Asinh,AsinPi,Atan,Atan2,Atan2Pi,Atanh,AtanPi,BitDecrement,BitIncrement,Cbrt,Ceiling,Clamp,ClampNative,CompareTo,ConvertToInteger,ConvertToIntegerNative,CopySign,Cos,Cosh,CosPi,CreateChecked,CreateSaturating,CreateTruncating,DegreesToRadians,E,Epsilon,Equals,Exp,Exp10,Exp10M1,Exp2,Exp2M1,ExpM1,Floor,FusedMultiplyAdd,GetHashCode,GetType,GetTypeCode,Hypot,Ieee754Remainder,ILogB,IsEvenInteger,IsFinite,IsInfinity,IsInteger,IsNaN,IsNegative,IsNegativeInfinity,IsNormal,IsOddInteger,IsPositive,IsPositiveInfinity,IsPow2,IsRealNumber,IsSubnormal,Lerp,Log,Log10,Log10P1,Log2,Log2P1,LogP1,Max,MaxMagnitude,MaxMagnitudeNumber,MaxNative,MaxNumber,MaxValue,Min,MinMagnitude,MinMagnitudeNumber,MinNative,MinNumber,MinValue,MultiplyAddEstimate,NaN,NegativeInfinity,NegativeZero,op_Equality,op_GreaterThan,op_GreaterThanOrEqual,op_Inequality,op_LessThan,op_LessThanOrEqual,Parse,Pi,PositiveInfinity,Pow,RadiansToDegrees,ReciprocalEstimate,ReciprocalSqrtEstimate,ReferenceEquals,RootN,Round,ScaleB,Sign,Sin,SinCos,SinCosPi,Sinh,SinPi,Sqrt,Tan,Tanh,TanPi,Tau,ToString,Truncate,TryFormat,TryParse',
+  'System.EntryPointNotFoundException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString,TypeName',
   'System.Enum':
     'CompareTo,Equals,Format,GetHashCode,GetName,GetNames,GetType,GetTypeCode,GetUnderlyingType,GetValues,GetValuesAsUnderlyingType,HasFlag,IsDefined,Parse,ReferenceEquals,ToObject,ToString,TryFormat,TryParse',
   'System.Environment':
@@ -1153,6 +1168,8 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
   'System.EventHandler`2':
     'BeginInvoke,Clone,Combine,CreateDelegate,DynamicInvoke,EndInvoke,EnumerateInvocationList,Equals,GetHashCode,GetInvocationList,GetObjectData,GetType,Invoke,Method,op_Equality,op_Inequality,ReferenceEquals,Remove,RemoveAll,Target,ToString',
   'System.Exception':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
+  'System.FormatException':
     'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
   'System.Func`1':
     'BeginInvoke,Clone,Combine,CreateDelegate,DynamicInvoke,EndInvoke,EnumerateInvocationList,Equals,GetHashCode,GetInvocationList,GetObjectData,GetType,Invoke,Method,op_Equality,op_Inequality,ReferenceEquals,Remove,RemoveAll,Target,ToString',
@@ -1188,7 +1205,7 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
     'BeginInvoke,Clone,Combine,CreateDelegate,DynamicInvoke,EndInvoke,EnumerateInvocationList,Equals,GetHashCode,GetInvocationList,GetObjectData,GetType,Invoke,Method,op_Equality,op_Inequality,ReferenceEquals,Remove,RemoveAll,Target,ToString',
   'System.Func`9':
     'BeginInvoke,Clone,Combine,CreateDelegate,DynamicInvoke,EndInvoke,EnumerateInvocationList,Equals,GetHashCode,GetInvocationList,GetObjectData,GetType,Invoke,Method,op_Equality,op_Inequality,ReferenceEquals,Remove,RemoveAll,Target,ToString',
-  'System.HashCode': 'Add,AddBytes,Combine,Equals,GetHashCode,GetType,ToHashCode,ToString',
+  'System.HashCode': 'Add,AddBytes,Combine,Equals,GetHashCode,GetType,ReferenceEquals,ToHashCode,ToString',
   'System.ICloneable': 'Clone',
   'System.IComparable': 'CompareTo',
   'System.IComparable`1': 'CompareTo',
@@ -1200,6 +1217,20 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
     'Close,Dispose,Equals,GetHashCode,GetLifetimeService,GetType,InitializeLifetimeService,Null,Peek,Read,ReadAsync,ReadBlock,ReadBlockAsync,ReadLine,ReadLineAsync,ReadToEnd,ReadToEndAsync,ReferenceEquals,Synchronized,ToString',
   'System.IO.TextWriter':
     'Close,CreateBroadcasting,Dispose,DisposeAsync,Encoding,Equals,Flush,FlushAsync,FormatProvider,GetHashCode,GetLifetimeService,GetType,InitializeLifetimeService,NewLine,Null,ReferenceEquals,Synchronized,ToString,Write,WriteAsync,WriteLine,WriteLineAsync',
+  'System.IndexOutOfRangeException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
+  'System.InsufficientExecutionStackException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
+  'System.Int16':
+    'Abs,Clamp,CompareTo,CopySign,CreateChecked,CreateSaturating,CreateTruncating,DivRem,Equals,GetHashCode,GetType,GetTypeCode,IsEvenInteger,IsNegative,IsOddInteger,IsPositive,IsPow2,LeadingZeroCount,Log2,Max,MaxMagnitude,MaxValue,Min,MinMagnitude,MinValue,Parse,PopCount,ReferenceEquals,RotateLeft,RotateRight,Sign,ToString,TrailingZeroCount,TryFormat,TryParse',
+  'System.Int32':
+    'Abs,BigMul,Clamp,CompareTo,CopySign,CreateChecked,CreateSaturating,CreateTruncating,DivRem,Equals,GetHashCode,GetType,GetTypeCode,IsEvenInteger,IsNegative,IsOddInteger,IsPositive,IsPow2,LeadingZeroCount,Log2,Max,MaxMagnitude,MaxValue,Min,MinMagnitude,MinValue,Parse,PopCount,ReferenceEquals,RotateLeft,RotateRight,Sign,ToString,TrailingZeroCount,TryFormat,TryParse',
+  'System.Int64':
+    'Abs,BigMul,Clamp,CompareTo,CopySign,CreateChecked,CreateSaturating,CreateTruncating,DivRem,Equals,GetHashCode,GetType,GetTypeCode,IsEvenInteger,IsNegative,IsOddInteger,IsPositive,IsPow2,LeadingZeroCount,Log2,Max,MaxMagnitude,MaxValue,Min,MinMagnitude,MinValue,Parse,PopCount,ReferenceEquals,RotateLeft,RotateRight,Sign,ToString,TrailingZeroCount,TryFormat,TryParse',
+  'System.InvalidCastException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
+  'System.InvalidOperationException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
   'System.Linq.Enumerable':
     'Aggregate,AggregateBy,All,Any,Append,AsEnumerable,Average,Cast,Chunk,Concat,Contains,Count,CountBy,DefaultIfEmpty,Distinct,DistinctBy,ElementAt,ElementAtOrDefault,Empty,Equals,Except,ExceptBy,First,FirstOrDefault,GetHashCode,GetType,GroupBy,GroupJoin,Index,InfiniteSequence,Intersect,IntersectBy,Join,Last,LastOrDefault,LeftJoin,LongCount,Max,MaxBy,Min,MinBy,OfType,Order,OrderBy,OrderByDescending,OrderDescending,Prepend,Range,ReferenceEquals,Repeat,Reverse,RightJoin,Select,SelectMany,Sequence,SequenceEqual,Shuffle,Single,SingleOrDefault,Skip,SkipLast,SkipWhile,Sum,Take,TakeLast,TakeWhile,ThenBy,ThenByDescending,ToArray,ToDictionary,ToHashSet,ToList,ToLookup,ToString,TryGetNonEnumeratedCount,Union,UnionBy,Where,Zip',
   'System.Linq.IGrouping`2': 'Key',
@@ -1211,25 +1242,49 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
     'AwayFromZero,CompareTo,Equals,Format,GetHashCode,GetName,GetNames,GetType,GetTypeCode,GetUnderlyingType,GetValues,GetValuesAsUnderlyingType,HasFlag,IsDefined,Parse,ReferenceEquals,ToEven,ToNegativeInfinity,ToObject,ToPositiveInfinity,ToString,ToZero,TryFormat,TryParse,value__',
   'System.MulticastDelegate':
     'Clone,Combine,CreateDelegate,DynamicInvoke,EnumerateInvocationList,Equals,GetHashCode,GetInvocationList,GetObjectData,GetType,Method,op_Equality,op_Inequality,ReferenceEquals,Remove,RemoveAll,Target,ToString',
+  'System.NotFiniteNumberException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,OffendingNumber,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
+  'System.NotImplementedException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
+  'System.NotSupportedException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
+  'System.NullReferenceException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
   'System.Nullable':
     'Compare,Equals,GetHashCode,GetType,GetUnderlyingType,GetValueRefOrDefaultRef,ReferenceEquals,ToString',
   'System.Nullable`1':
     'Equals,GetHashCode,GetType,GetValueOrDefault,HasValue,op_Explicit,op_Implicit,ReferenceEquals,ToString,Value',
   'System.Object': 'Equals,GetHashCode,GetType,ReferenceEquals,ToString',
+  'System.ObjectDisposedException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ObjectName,ReferenceEquals,Source,StackTrace,TargetSite,ThrowIf,ToString',
+  'System.OutOfMemoryException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
+  'System.OverflowException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
+  'System.PlatformNotSupportedException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
   'System.Predicate`1':
     'BeginInvoke,Clone,Combine,CreateDelegate,DynamicInvoke,EndInvoke,EnumerateInvocationList,Equals,GetHashCode,GetInvocationList,GetObjectData,GetType,Invoke,Method,op_Equality,op_Inequality,ReferenceEquals,Remove,RemoveAll,Target,ToString',
   'System.Random':
     'Equals,GetHashCode,GetHexString,GetItems,GetString,GetType,Next,NextBytes,NextDouble,NextInt64,NextSingle,ReferenceEquals,Shared,Shuffle,ToString',
+  'System.RankException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
+  'System.Runtime.CompilerServices.SwitchExpressionException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString,UnmatchedValue',
+  'System.SByte':
+    'Abs,Clamp,CompareTo,CopySign,CreateChecked,CreateSaturating,CreateTruncating,DivRem,Equals,GetHashCode,GetType,GetTypeCode,IsEvenInteger,IsNegative,IsOddInteger,IsPositive,IsPow2,LeadingZeroCount,Log2,Max,MaxMagnitude,MaxValue,Min,MinMagnitude,MinValue,Parse,PopCount,ReferenceEquals,RotateLeft,RotateRight,Sign,ToString,TrailingZeroCount,TryFormat,TryParse',
   'System.Single':
     'Abs,Acos,Acosh,AcosPi,Asin,Asinh,AsinPi,Atan,Atan2,Atan2Pi,Atanh,AtanPi,BitDecrement,BitIncrement,Cbrt,Ceiling,Clamp,ClampNative,CompareTo,ConvertToInteger,ConvertToIntegerNative,CopySign,Cos,Cosh,CosPi,CreateChecked,CreateSaturating,CreateTruncating,DegreesToRadians,E,Epsilon,Equals,Exp,Exp10,Exp10M1,Exp2,Exp2M1,ExpM1,Floor,FusedMultiplyAdd,GetHashCode,GetType,GetTypeCode,Hypot,Ieee754Remainder,ILogB,IsEvenInteger,IsFinite,IsInfinity,IsInteger,IsNaN,IsNegative,IsNegativeInfinity,IsNormal,IsOddInteger,IsPositive,IsPositiveInfinity,IsPow2,IsRealNumber,IsSubnormal,Lerp,Log,Log10,Log10P1,Log2,Log2P1,LogP1,Max,MaxMagnitude,MaxMagnitudeNumber,MaxNative,MaxNumber,MaxValue,Min,MinMagnitude,MinMagnitudeNumber,MinNative,MinNumber,MinValue,MultiplyAddEstimate,NaN,NegativeInfinity,NegativeZero,op_Equality,op_GreaterThan,op_GreaterThanOrEqual,op_Inequality,op_LessThan,op_LessThanOrEqual,Parse,Pi,PositiveInfinity,Pow,RadiansToDegrees,ReciprocalEstimate,ReciprocalSqrtEstimate,ReferenceEquals,RootN,Round,ScaleB,Sign,Sin,SinCos,SinCosPi,Sinh,SinPi,Sqrt,Tan,Tanh,TanPi,Tau,ToString,Truncate,TryFormat,TryParse',
   'System.String':
     'AsMemory,AsSpan,Chars,Clone,Compare,CompareOrdinal,CompareTo,Concat,Contains,Copy,CopyTo,Create,Empty,EndsWith,EnumerateRunes,Equals,Format,GetEnumerator,GetHashCode,GetPinnableReference,GetType,GetTypeCode,IndexOf,IndexOfAny,Insert,Intern,IsInterned,IsNormalized,IsNullOrEmpty,IsNullOrWhiteSpace,Join,LastIndexOf,LastIndexOfAny,Length,Normalize,op_Equality,op_Implicit,op_Inequality,PadLeft,PadRight,ReferenceEquals,Remove,Replace,ReplaceLineEndings,Split,StartsWith,Substring,ToCharArray,ToLower,ToLowerInvariant,ToString,ToUpper,ToUpperInvariant,Trim,TrimEnd,TrimStart,TryCopyTo',
   'System.StringComparer':
-    'Compare,Create,CurrentCulture,CurrentCultureIgnoreCase,Equals,FromComparison,GetHashCode,GetType,InvariantCulture,InvariantCultureIgnoreCase,IsWellKnownCultureAwareComparer,IsWellKnownOrdinalComparer,Ordinal,OrdinalIgnoreCase,ToString',
+    'Compare,Create,CurrentCulture,CurrentCultureIgnoreCase,Equals,FromComparison,GetHashCode,GetType,InvariantCulture,InvariantCultureIgnoreCase,IsWellKnownCultureAwareComparer,IsWellKnownOrdinalComparer,Ordinal,OrdinalIgnoreCase,ReferenceEquals,ToString',
   'System.StringComparison':
     'CompareTo,CurrentCulture,CurrentCultureIgnoreCase,Equals,Format,GetHashCode,GetName,GetNames,GetType,GetTypeCode,GetUnderlyingType,GetValues,GetValuesAsUnderlyingType,HasFlag,InvariantCulture,InvariantCultureIgnoreCase,IsDefined,Ordinal,OrdinalIgnoreCase,Parse,ReferenceEquals,ToObject,ToString,TryFormat,TryParse,value__',
   'System.StringSplitOptions':
     'CompareTo,Equals,Format,GetHashCode,GetName,GetNames,GetType,GetTypeCode,GetUnderlyingType,GetValues,GetValuesAsUnderlyingType,HasFlag,IsDefined,None,Parse,ReferenceEquals,RemoveEmptyEntries,ToObject,ToString,TrimEntries,TryFormat,TryParse,value__',
+  'System.SystemException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
   'System.Text.Encoding':
     'ASCII,BigEndianUnicode,BodyName,Clone,CodePage,Convert,CreateTranscodingStream,DecoderFallback,Default,EncoderFallback,EncodingName,Equals,GetByteCount,GetBytes,GetCharCount,GetChars,GetDecoder,GetEncoder,GetEncoding,GetEncodings,GetHashCode,GetMaxByteCount,GetMaxCharCount,GetPreamble,GetString,GetType,HeaderName,IsAlwaysNormalized,IsBrowserDisplay,IsBrowserSave,IsMailNewsDisplay,IsMailNewsSave,IsReadOnly,IsSingleByte,Latin1,Preamble,ReferenceEquals,RegisterProvider,ToString,TryGetBytes,TryGetChars,Unicode,UTF32,UTF7,UTF8,WebName,WindowsCodePage',
   'System.Text.RegularExpressions.Capture':
@@ -1250,11 +1305,16 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
     'CacheSize,CompileToAssembly,Count,EnumerateMatches,EnumerateSplits,Equals,Escape,GetGroupNames,GetGroupNumbers,GetHashCode,GetType,GroupNameFromNumber,GroupNumberFromName,InfiniteMatchTimeout,IsMatch,Match,Matches,MatchTimeout,Options,ReferenceEquals,Replace,RightToLeft,Split,ToString,Unescape,ValueMatchEnumerator,ValueSplitEnumerator',
   'System.Text.RegularExpressions.RegexOptions':
     'CompareTo,Compiled,CultureInvariant,ECMAScript,Equals,ExplicitCapture,Format,GetHashCode,GetName,GetNames,GetType,GetTypeCode,GetUnderlyingType,GetValues,GetValuesAsUnderlyingType,HasFlag,IgnoreCase,IgnorePatternWhitespace,IsDefined,Multiline,NonBacktracking,None,Parse,ReferenceEquals,RightToLeft,Singleline,ToObject,ToString,TryFormat,TryParse,value__',
+  'System.Text.RegularExpressions.RegexParseException':
+    'Data,Equals,Error,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,Offset,ParamName,ReferenceEquals,Source,StackTrace,TargetSite,ThrowIfNullOrEmpty,ThrowIfNullOrWhiteSpace,ToString',
   'System.Text.StringBuilder':
     'Append,AppendFormat,AppendInterpolatedStringHandler,AppendJoin,AppendLine,Capacity,Chars,ChunkEnumerator,Clear,CopyTo,EnsureCapacity,Equals,GetChunks,GetHashCode,GetType,Insert,Length,MaxCapacity,ReferenceEquals,Remove,Replace,ToString',
   'System.TimeSpan':
     'Add,Compare,CompareTo,Days,Divide,Duration,Equals,FromDays,FromHours,FromMicroseconds,FromMilliseconds,FromMinutes,FromSeconds,FromTicks,GetHashCode,GetType,Hours,HoursPerDay,MaxValue,Microseconds,MicrosecondsPerDay,MicrosecondsPerHour,MicrosecondsPerMillisecond,MicrosecondsPerMinute,MicrosecondsPerSecond,Milliseconds,MillisecondsPerDay,MillisecondsPerHour,MillisecondsPerMinute,MillisecondsPerSecond,Minutes,MinutesPerDay,MinutesPerHour,MinValue,Multiply,Nanoseconds,NanosecondsPerTick,Negate,op_Addition,op_Division,op_Equality,op_GreaterThan,op_GreaterThanOrEqual,op_Inequality,op_LessThan,op_LessThanOrEqual,op_Multiply,op_Subtraction,op_UnaryNegation,op_UnaryPlus,Parse,ParseExact,ReferenceEquals,Seconds,SecondsPerDay,SecondsPerHour,SecondsPerMinute,Subtract,Ticks,TicksPerDay,TicksPerHour,TicksPerMicrosecond,TicksPerMillisecond,TicksPerMinute,TicksPerSecond,ToString,TotalDays,TotalHours,TotalMicroseconds,TotalMilliseconds,TotalMinutes,TotalNanoseconds,TotalSeconds,TryFormat,TryParse,TryParseExact,Zero',
+  'System.TimeoutException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
   'System.Tuple': 'Create,Equals,GetHashCode,GetType,ReferenceEquals,ToString',
+  'System.TupleExtensions': 'Deconstruct,Equals,GetHashCode,GetType,ReferenceEquals,ToString,ToTuple,ToValueTuple',
   'System.Tuple`1': 'Equals,GetHashCode,GetType,Item1,ReferenceEquals,ToString',
   'System.Tuple`2': 'Equals,GetHashCode,GetType,Item1,Item2,ReferenceEquals,ToString',
   'System.Tuple`3': 'Equals,GetHashCode,GetType,Item1,Item2,Item3,ReferenceEquals,ToString',
@@ -1266,6 +1326,14 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
     'Equals,GetHashCode,GetType,Item1,Item2,Item3,Item4,Item5,Item6,Item7,ReferenceEquals,Rest,ToString',
   'System.Type':
     'Assembly,AssemblyQualifiedName,Attributes,BaseType,ContainsGenericParameters,CustomAttributes,DeclaringMethod,DeclaringType,DefaultBinder,Delimiter,EmptyTypes,Equals,FilterAttribute,FilterName,FilterNameIgnoreCase,FindInterfaces,FindMembers,FullName,GenericParameterAttributes,GenericParameterPosition,GenericTypeArguments,GetArrayRank,GetConstructor,GetConstructors,GetCustomAttributes,GetCustomAttributesData,GetDefaultMembers,GetElementType,GetEnumName,GetEnumNames,GetEnumUnderlyingType,GetEnumValues,GetEnumValuesAsUnderlyingType,GetEvent,GetEvents,GetField,GetFields,GetFunctionPointerCallingConventions,GetFunctionPointerParameterTypes,GetFunctionPointerReturnType,GetGenericArguments,GetGenericParameterConstraints,GetGenericTypeDefinition,GetHashCode,GetInterface,GetInterfaceMap,GetInterfaces,GetMember,GetMembers,GetMemberWithSameMetadataDefinitionAs,GetMethod,GetMethods,GetNestedType,GetNestedTypes,GetOptionalCustomModifiers,GetProperties,GetProperty,GetRequiredCustomModifiers,GetType,GetTypeArray,GetTypeCode,GetTypeFromCLSID,GetTypeFromHandle,GetTypeFromProgID,GetTypeHandle,GUID,HasElementType,HasSameMetadataDefinitionAs,InvokeMember,IsAbstract,IsAnsiClass,IsArray,IsAssignableFrom,IsAssignableTo,IsAutoClass,IsAutoLayout,IsByRef,IsByRefLike,IsClass,IsCollectible,IsCOMObject,IsConstructedGenericType,IsContextful,IsDefined,IsEnum,IsEnumDefined,IsEquivalentTo,IsExplicitLayout,IsFunctionPointer,IsGenericMethodParameter,IsGenericParameter,IsGenericType,IsGenericTypeDefinition,IsGenericTypeParameter,IsImport,IsInstanceOfType,IsInterface,IsLayoutSequential,IsMarshalByRef,IsNested,IsNestedAssembly,IsNestedFamANDAssem,IsNestedFamily,IsNestedFamORAssem,IsNestedPrivate,IsNestedPublic,IsNotPublic,IsPointer,IsPrimitive,IsPublic,IsSealed,IsSecurityCritical,IsSecuritySafeCritical,IsSecurityTransparent,IsSerializable,IsSignatureType,IsSpecialName,IsSubclassOf,IsSZArray,IsTypeDefinition,IsUnicodeClass,IsUnmanagedFunctionPointer,IsValueType,IsVariableBoundArray,IsVisible,MakeArrayType,MakeByRefType,MakeGenericMethodParameter,MakeGenericSignatureType,MakeGenericType,MakePointerType,MemberType,MetadataToken,Missing,Module,Name,Namespace,op_Equality,op_Inequality,ReferenceEquals,ReflectedType,ReflectionOnlyGetType,StructLayoutAttribute,ToString,TypeHandle,TypeInitializer,UnderlyingSystemType',
+  'System.TypeInitializationException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString,TypeName',
+  'System.UInt16':
+    'Clamp,CompareTo,CreateChecked,CreateSaturating,CreateTruncating,DivRem,Equals,GetHashCode,GetType,GetTypeCode,IsEvenInteger,IsOddInteger,IsPow2,LeadingZeroCount,Log2,Max,MaxValue,Min,MinValue,Parse,PopCount,ReferenceEquals,RotateLeft,RotateRight,Sign,ToString,TrailingZeroCount,TryFormat,TryParse',
+  'System.UInt32':
+    'BigMul,Clamp,CompareTo,CreateChecked,CreateSaturating,CreateTruncating,DivRem,Equals,GetHashCode,GetType,GetTypeCode,IsEvenInteger,IsOddInteger,IsPow2,LeadingZeroCount,Log2,Max,MaxValue,Min,MinValue,Parse,PopCount,ReferenceEquals,RotateLeft,RotateRight,Sign,ToString,TrailingZeroCount,TryFormat,TryParse',
+  'System.UInt64':
+    'BigMul,Clamp,CompareTo,CreateChecked,CreateSaturating,CreateTruncating,DivRem,Equals,GetHashCode,GetType,GetTypeCode,IsEvenInteger,IsOddInteger,IsPow2,LeadingZeroCount,Log2,Max,MaxValue,Min,MinValue,Parse,PopCount,ReferenceEquals,RotateLeft,RotateRight,Sign,ToString,TrailingZeroCount,TryFormat,TryParse',
   'System.ValueTuple': 'CompareTo,Create,Equals,GetHashCode,GetType,ReferenceEquals,ToString',
   'System.ValueTuple`1': 'CompareTo,Equals,GetHashCode,GetType,Item1,ReferenceEquals,ToString',
   'System.ValueTuple`2': 'CompareTo,Equals,GetHashCode,GetType,Item1,Item2,ReferenceEquals,ToString',

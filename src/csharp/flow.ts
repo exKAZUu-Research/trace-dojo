@@ -494,9 +494,9 @@ export class FlowAnalyzer {
       case 'property': {
         const current = expression.receiver ? this.receiver(expression.receiver, state) : state;
         const after = this.arguments(expression.args, current);
-        // A call of a local function assigns the captured locals it definitely assigns, as `void Init() => y = 0;`
-        // does, and one that cannot return leaves what follows unreachable, as Roslyn reads both; one not analyzed yet
-        // (declared later) counts as assigning all, so no valid program is rejected.
+        // A call of a local function assigns the captured locals its summary says it definitely assigns, as
+        // `void Init() => y = 0;` does. Only a recursive callee's first pass has no summary yet, which counts as
+        // assigning all, the optimistic start that later passes narrow.
         if (expression.kind !== 'call' || expression.method.kind !== 'localFunction') return after;
         const assignedAtExit = expression.method.assignedAtExit;
         // What follows a call that never returns reads every local as assigned, while reachability (CS0161) does
