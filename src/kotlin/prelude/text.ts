@@ -650,6 +650,7 @@ fun UByte.toString(radix: Int): String = toInt().toString(radix)
 fun UShort.toString(radix: Int): String = toInt().toString(radix)
 fun UInt.toString(radix: Int): String = toLong().toString(radix)
 fun ULong.toString(radix: Int): String {
+    if (radix !in 2..36) throw IllegalArgumentException("radix $radix was not in valid range 2..36")
     val value = toLong()
     if (value >= 0) return value.toString(radix)
     // The stdlib's ulongToString halves the value to divide it as a signed Long.
