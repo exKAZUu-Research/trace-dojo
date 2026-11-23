@@ -371,8 +371,13 @@ export class Compiler extends BodyCompiler {
 
     for (const argument of (resolved(type) as ClassType).args) {
       if (argument.variance !== 'star' && argument.type.kind === 'variable' && !argument.type.variable.fixed) {
+        const { lower, upper } = argument.type.variable;
+        // Typed lambda parameters give upper bounds, of which the type is the most specific, as String of Any? and String.
         argument.type.variable.fixed =
-          argument.type.variable.lower[0] ?? argument.type.variable.upper[0] ?? anyType(true);
+          lower[0] ??
+          upper.find((bound) => upper.every((other) => isSubtype(bound, other))) ??
+          upper[0] ??
+          anyType(true);
       }
     }
     return { ...this.samWrap(compiled, sam, resolved(type)), isCreation: true };
