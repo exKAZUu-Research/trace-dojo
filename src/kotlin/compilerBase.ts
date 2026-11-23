@@ -239,6 +239,12 @@ export class Flow {
     }
   }
 
+  /** Takes the smart casts of another flow in place of this one's, keeping what this one knows is assigned. */
+  replaceNarrowing(other: Flow): void {
+    this.narrowed.clear();
+    for (const [key, type] of other.narrowed) this.narrowed.set(key, type);
+  }
+
   /** The cases of an enum or sealed type that a stable value is known not to be, as a `when` on it need not cover them. */
   excludedCases(key: string): string[] {
     const prefix = `${key}${CASE_SEPARATOR}`;

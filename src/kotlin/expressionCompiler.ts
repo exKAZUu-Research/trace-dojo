@@ -1844,10 +1844,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
       returnsUnit ? undefined : lambdaResultHint(expectedReturn),
       returnsUnit || (acceptsInferredUnit(this.unitType, expectedReturn) ? 'inferUnit' : false)
     );
-    if (!invokesExactlyOnce) {
-      for (const variable of lambdaContext.inlineWrites) outerFlow.forget(keyOf(variable));
-      this.flow = outerFlow;
-    }
+    // A lambda run exactly once keeps its definite assignments, but not its smart casts, which kotlinc drops.
+    if (invokesExactlyOnce) this.flow.replaceNarrowing(outerFlow);
+    else this.flow = outerFlow;
+    for (const variable of lambdaContext.inlineWrites) this.flow.forget(keyOf(variable));
     const resultType = returnsUnit ? this.unitType : body.type;
     const resultEval = returnsUnit
       ? (frame: Frame): Value => {
