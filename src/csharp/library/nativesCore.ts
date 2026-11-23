@@ -1156,7 +1156,10 @@ export function compositeFormat(
     }
     const arg = args[part.index];
     if (!arg) throw FORMAT_INDEX();
-    text += evaluator.formatHole(arg.value, arg.type, part.format, part.alignment, call.frame);
+    const hole = evaluator.formatHole(arg.value, arg.type, part.format, part.alignment, call.frame);
+    // Each hole may repeat a long argument, so the text so far is checked against the string limit before it grows.
+    call.frame.runtime.allocateString(text.length + hole.length, hole.length);
+    text += hole;
   }
   return text;
 }
