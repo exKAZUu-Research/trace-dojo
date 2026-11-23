@@ -1270,7 +1270,10 @@ export abstract class StatementCompiler extends OperatorCompiler {
   /** The common type of the branches of an `if`, `when`, or `try` used as an expression. */
   private branchType(branches: Compiled[], expected: KType | undefined): KType {
     const joined = this.joinedTypes(branches);
-    const decides = expected && !hasOpenVariables(expected);
+    // A variable bound from elsewhere, as `V` of `getOrElse` on a Long map, still types the literals; one nothing has bound
+    // yet, as `R` of `sortedBy`, leaves them to their siblings.
+    const hint = expected && resolved(expected);
+    const decides = hint && (!hasOpenVariables(hint) || (hint.kind === 'variable' && hint.variable.lower.length > 0));
     const types = branches.map((branch, index) =>
       branch.integerLiteral && decides
         ? this.acceptsArgument(branch, expected)
