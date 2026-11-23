@@ -88,12 +88,17 @@ function guardedComparison(call: NativeCall, compare: Comparison): Comparison {
   };
 }
 
-/** The equality of an `IEqualityComparer<T>`, or the default when it is null. */
-export function equalityOf(call: NativeCall, comparer: Value): Equality {
+/**
+ * The equality of an `IEqualityComparer<T>`, or `EqualityComparer<T>.Default` when it is null, whose `T` is by default
+ * the method's first type argument (LINQ, Array) or else the collection's (List<T>, EqualityComparer<T>).
+ */
+export function equalityOf(
+  call: NativeCall,
+  comparer: Value,
+  elementType: Type | undefined = call.typeArgs[0] ?? call.owner?.args[0]
+): Equality {
   const evaluator = evaluatorOf(call);
   if (comparer === undefined) {
-    // The element type is the method's (LINQ, Array) or else the collection's (List<T>, EqualityComparer<T>).
-    const elementType = call.typeArgs[0] ?? call.owner?.args[0];
     return {
       equals: (a, b) =>
         evaluator.equalsThroughEquatable(a, b, elementType, call.frame) ?? valuesEqual(evaluator, a, b, call.frame),
@@ -843,7 +848,7 @@ const dictionaryNatives: Record<string, NativeMethod> = {
     return hashOfState(receiver).find(key as Value) >= 0;
   },
   [`${DICTIONARY}.ContainsValue`]: (call, receiver, [value]) => {
-    const equality = equalityOf(call, undefined);
+    const equality = equalityOf(call, undefined, typeArgument(call, 1));
     for (const entry of hashOfState(receiver).live()) if (equality.equals(entry.value, value as Value)) return true;
     return false;
   },
@@ -958,9 +963,9 @@ for (const name of ['KeyCollection', 'ValueCollection']) {
     [`${prefix}.get_Count`]: (_call, receiver) => ((receiver as CsObject).native as ViewState).dictionary.count,
     [`${prefix}.get_IsReadOnly`]: () => true,
     [`${prefix}.Contains`]: (call, receiver, [value]) => {
-      const equality = equalityOf(call, undefined);
-      for (const item of ((receiver as CsObject).native as ViewState).enumerate())
-        if (equality.equals(item, value as Value)) return true;
+      const view = (receiver as CsObject).native as ViewState;
+      const equality = equalityOf(call, undefined, view.elementType);
+      for (const item of view.enumerate()) if (equality.equals(item, value as Value)) return true;
       return false;
     },
     [`${prefix}.CopyTo`]: (_call, receiver, [array, index]) => {

@@ -203,7 +203,7 @@ function sortedDictionaryNatives(prefix: string): Record<string, NativeMethod> {
     },
     [`${prefix}.ContainsKey`]: (_call, receiver, [key]) => sortedOf(receiver).position(key as Value).isFound,
     [`${prefix}.ContainsValue`]: (call, receiver, [value]) => {
-      const equality = equalityOf(call, undefined);
+      const equality = equalityOf(call, undefined, call.owner?.args[1]);
       return sortedOf(receiver).values.some((item) =>
         item === undefined ? value === undefined : value !== undefined && equality.equals(item, value as Value)
       );

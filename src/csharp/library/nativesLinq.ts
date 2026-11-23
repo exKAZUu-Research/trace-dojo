@@ -234,9 +234,12 @@ function joinQuery(
   const outers = source(call, outer, 'outer');
   const inners = source(call, inner, 'inner');
   return query(call, call.typeArgs[3], name, [outer, inner], function* () {
-    const groups = groupsOf(call, inners, innerKeyOf, (item) => item, undefined);
-    const equality = equalityOf(call, undefined);
+    const keyType = call.typeArgs[2];
+    const equality = equalityOf(call, undefined, keyType);
+    // .NET reads the inner sequence only once the outer one has an element.
+    let groups: { key: Value; elements: Value[] }[] | undefined;
     for (const item of outers) {
+      groups ??= groupsOf(call, inners, innerKeyOf, (element) => element, undefined, keyType);
       const key = outerKeyOf(item);
       const group =
         key === undefined
@@ -475,9 +478,10 @@ function groupsOf(
   items: Iterable<Value>,
   keyOf: (value: Value) => Value,
   elementOf: (value: Value) => Value,
-  comparer: Value
+  comparer: Value,
+  keyType: Type | undefined = call.typeArgs[1]
 ): { key: Value; elements: Value[] }[] {
-  const equality = equalityOf(call, comparer);
+  const equality = equalityOf(call, comparer, keyType);
   const groups: { key: Value; elements: Value[] }[] = [];
   const index = new Map<number, { key: Value; elements: Value[] }[]>();
   for (const item of items) {
@@ -800,7 +804,7 @@ const linq: Record<string, NativeMethod> = {
       generatedIterator(call, 'DistinctByIterator', 67),
       [items as Value],
       function* () {
-        const seen = seenSet(equalityOf(call, undefined));
+        const seen = seenSet(equalityOf(call, undefined, call.typeArgs[1]));
         for (const item of all) if (seen.add(keyOf(item))) yield item;
       }
     );
@@ -843,7 +847,7 @@ const linq: Record<string, NativeMethod> = {
       generatedIterator(call, 'UnionByIterator', 344),
       [first as Value, second as Value],
       function* () {
-        const seen = seenSet(equalityOf(call, undefined));
+        const seen = seenSet(equalityOf(call, undefined, call.typeArgs[1]));
         for (const item of a) if (seen.add(keyOf(item))) yield item;
         for (const item of b) if (seen.add(keyOf(item))) yield item;
       }
@@ -1105,7 +1109,7 @@ const linq: Record<string, NativeMethod> = {
       libraryType(call, 'System.Collections.Generic.Dictionary', [keyType, valueType]),
       []
     );
-    const state = new HashState(equalityOf(call, undefined), keyType, valueType, undefined);
+    const state = new HashState(equalityOf(call, undefined, keyType), keyType, valueType, undefined);
     const pairType = libraryType(call, 'System.Collections.Generic.KeyValuePair', [keyType, valueType]);
     state.pairOf = (key, value) => new CsStruct(pairType, [key, value]);
     for (const item of source(call, items)) {
@@ -1265,7 +1269,7 @@ function setOperationBy(
     generatedIterator(call, `${operation}ByIterator`, operation === 'Except' ? 89 : 122),
     [first, second],
     function* () {
-      const equality = equalityOf(call, undefined);
+      const equality = equalityOf(call, undefined, call.typeArgs[1]);
       const keys = seenSet(equality);
       for (const key of b) keys.add(key);
       const seen = seenSet(equality);
