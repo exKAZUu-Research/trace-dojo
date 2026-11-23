@@ -55,13 +55,21 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       expression.operand.suffix !== 'u' &&
       expression.operand.suffix !== 'uL'
     ) {
-      const negated = { ...expression.operand, value: -expression.operand.value };
+      const negated = {
+        ...expression.operand,
+        value: -expression.operand.value,
+      };
       return this.compileInteger(negated, expected);
     }
     if (operator === '-' && expression.operand.kind === 'real') {
       const value = -expression.operand.value;
       const kind = expression.operand.isFloat ? 'Float' : 'Double';
-      return { type: this.primitiveType(kind), repr: kind, eval: () => value, constant: value };
+      return {
+        type: this.primitiveType(kind),
+        repr: kind,
+        eval: () => value,
+        constant: value,
+      };
     }
     if (this.isLongConstant(expression, expected)) {
       return this.toLongConstant(this.compilePrefix(scope, context, expression, undefined));
@@ -77,7 +85,10 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         eval: (frame) => !(evaluate(frame) as boolean),
         constant: operand.constant === undefined ? undefined : !operand.constant,
         narrowing: operand.narrowing
-          ? { whenTrue: operand.narrowing.whenFalse, whenFalse: operand.narrowing.whenTrue }
+          ? {
+              whenTrue: operand.narrowing.whenFalse,
+              whenFalse: operand.narrowing.whenTrue,
+            }
           : undefined,
       };
     }
@@ -198,7 +209,13 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       case '..':
       case '..<': {
         const left = this.compileExpression(scope, context, expression.left);
-        const args: ArgumentSyntax[] = [{ row: expression.right.row, name: undefined, value: expression.right }];
+        const args: ArgumentSyntax[] = [
+          {
+            row: expression.right.row,
+            name: undefined,
+            value: expression.right,
+          },
+        ];
         return this.compileOperatorCall(
           scope,
           context,
@@ -372,7 +389,11 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     scope: Scope,
     context: FunctionContext,
     expression: Expression
-  ): { compiled: Compiled; whenTrue: Map<string, KType>; whenFalse: Map<string, KType> } {
+  ): {
+    compiled: Compiled;
+    whenTrue: Map<string, KType>;
+    whenFalse: Map<string, KType>;
+  } {
     const compiled = this.compileExpression(scope, context, expression, this.booleanType);
     if (!isSubtype(compiled.type, this.booleanType))
       this.error(expression.row, typeMismatchMessage(this.booleanType, compiled.type));
@@ -414,7 +435,12 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       const value = leftEval(frame);
       return value ?? rightEval(frame);
     };
-    return { type, repr, eval: convertRepr(choose, 'ref', repr) };
+    return {
+      type,
+      repr,
+      eval: convertRepr(choose, 'ref', repr),
+      narrowing: booleanElvisNarrowing(left, expression.right),
+    };
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Kotlin's rules of equality by the operands' types.
@@ -565,7 +591,11 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const args: ArgumentSyntax[] = [{ row: expression.right.row, name: undefined, value: expression.right }];
     const compared = this.compileOperatorCall(scope, context, left, 'compareTo', args, row, operator);
     const evaluate = convertRepr(compared.eval, compared.repr, 'Int');
-    return { type: this.booleanType, repr: 'ref', eval: (frame) => test(evaluate(frame) as number) };
+    return {
+      type: this.booleanType,
+      repr: 'ref',
+      eval: (frame) => test(evaluate(frame) as number),
+    };
   }
 
   protected compileInfix(
@@ -617,7 +647,11 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
           return start <= value && value <= end;
         }
       : convertRepr(contains.eval, contains.repr, 'ref');
-    return { type: this.booleanType, repr: 'ref', eval: negated ? (frame) => !(evaluate(frame) as boolean) : evaluate };
+    return {
+      type: this.booleanType,
+      repr: 'ref',
+      eval: negated ? (frame) => !(evaluate(frame) as boolean) : evaluate,
+    };
   }
 
   // Types.
@@ -632,7 +666,10 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const implied =
       actual.kind === 'class'
         ? resolved(
-            this.narrowedType(subjectType, { ...actual, args: actual.args.map(() => ({ variance: 'star' as const })) })
+            this.narrowedType(subjectType, {
+              ...actual,
+              args: actual.args.map(() => ({ variance: 'star' as const })),
+            })
           )
         : undefined;
     const isImplied = implied !== undefined && isSubtype(implied, actual) && isSubtype(actual, implied);
@@ -730,7 +767,10 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       actual.kind === 'param';
     const checkType =
       isErased && actual.kind === 'class'
-        ? { ...actual, args: actual.args.map(() => ({ variance: 'star' as const })) }
+        ? {
+            ...actual,
+            args: actual.args.map(() => ({ variance: 'star' as const })),
+          }
         : type;
     const test = actual.kind === 'param' ? () => true : instanceTest(this.core, checkType);
     const evaluate = convertRepr(operand.eval, operand.repr, 'ref');
@@ -753,8 +793,28 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     // A non-null result of `x as? T` shows that `x` is a `T`.
     const whenNonNull = new Map(operand.whenNonNull);
     if (operand.stableKey) whenNonNull.set(operand.stableKey, typeAfterCast(operand.type, nonNull(type)));
-    return { type: resultType, repr, eval: convertRepr(cast, 'ref', repr), whenNonNull };
+    return {
+      type: resultType,
+      repr,
+      eval: convertRepr(cast, 'ref', repr),
+      whenNonNull,
+    };
   }
+}
+
+/**
+ * `a ?: false` is true only where `a` is true, and `a ?: true` false only where `a` is false, so that outcome shows
+ * that `a` was not null, as `x` of `x?.isNotEmpty() ?: false` is not.
+ */
+function booleanElvisNarrowing(left: Compiled, fallback: Expression): Compiled['narrowing'] {
+  if (fallback.kind !== 'boolean') return undefined;
+  const nonNullOutcome = new Map(left.whenNonNull);
+  if (left.stableKey) nonNullOutcome.set(left.stableKey, nonNull(left.type));
+  const outcome = fallback.value ? left.narrowing?.whenFalse : left.narrowing?.whenTrue;
+  for (const [key, type] of outcome ?? []) nonNullOutcome.set(key, type);
+  return fallback.value
+    ? { whenTrue: new Map(), whenFalse: nonNullOutcome }
+    : { whenTrue: nonNullOutcome, whenFalse: new Map() };
 }
 
 function typeAfterCast(operand: KType, target: KType): KType {
