@@ -85,7 +85,8 @@ class Snapshotter {
   private bindingsOf(frame: Frame): { name: string; value: Value; type: KType }[] {
     const locals = new Map<string, { name: string; value: Value; type: KType }>();
     // Only the entry point's frame, the first on the stack, receives the launcher's arguments; another `main` keeps its.
-    const hidesArgs = this.program.mainTakesArgs && this.runtime.frames[0] === frame;
+    const hidesArgs =
+      this.program.mainTakesArgs && this.runtime.frames[0] === frame && frame.info.name === this.program.main.name;
     for (const local of frame.info.locals) {
       const slot = frame.locals[local.slot];
       // `main`'s parameter only receives the launcher's arguments, which these programs never use.
