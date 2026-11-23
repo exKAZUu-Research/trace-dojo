@@ -605,11 +605,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
       if (variable.owner !== context && !context.isProbe) variable.isCell = true;
     }
     const access = this.variableAccess(context, variable);
-    const readType = isCompound
-      ? refineLocalType(localRefinement(scope, context, variable), variable, this.flow.narrowed.get(keyOf(variable)))
-      : undefined;
-    // A compound assignment reads the value as an expression does, through the same check of its smart cast.
-    const read = readType ? checkedRead(this.core, access.read, readType) : access.read;
+    const { readType, read } = isCompound
+      ? this.narrowedRead(scope, context, variable, access.read)
+      : { readType: undefined, read: access.read };
     return {
       type: variable.type,
       readType,
@@ -620,6 +618,18 @@ export abstract class StatementCompiler extends OperatorCompiler {
       },
       withBound: (frame, use) => use({ get: () => read(frame), set: (value) => access.write(frame, value) }),
     };
+  }
+
+  /** A compound assignment reads the value as an expression does, through the same check of its smart cast. */
+  private narrowedRead(
+    scope: Scope,
+    context: FunctionContext,
+    variable: VariableSymbol,
+    read: (frame: Frame) => Value
+  ): { readType: KType | undefined; read: (frame: Frame) => Value } {
+    const key = keyOf(variable);
+    const readType = refineLocalType(localRefinement(scope, context, variable), variable, this.flow.narrowed.get(key));
+    return { readType, read: readType ? checkedRead(this.core, read, readType) : read };
   }
 
   private backingFieldPlace(
