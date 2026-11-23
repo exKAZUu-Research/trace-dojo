@@ -77,12 +77,13 @@ export class LocalScope {
   }
 
   /**
-   * Whether an enclosing scope of the same function declares the name. A lambda's or local function's locals and
-   * parameters may hide an enclosing function's (since C# 8).
+   * Whether an enclosing scope of the same function declares the name, before or after this scope, since a name's scope
+   * is its whole block. A lambda's or local function's locals and parameters may hide an enclosing function's (since
+   * C# 8).
    */
   isDeclaredOutside(name: string): boolean {
     for (let scope = this.parent; scope && scope.owner === this.owner; scope = scope.parent) {
-      if (scope.variables.has(name) || scope.localFunctions.has(name)) return true;
+      if (scope.variables.has(name) || scope.localFunctions.has(name) || scope.declaredLater.has(name)) return true;
     }
     return false;
   }
