@@ -909,7 +909,7 @@ export abstract class StatementBinder extends PatternBinder {
       return undefined;
     }
     const elementType = substitute(current.property.type, substitutionOf(current.owner));
-    const dispose = lookup(enumeratorType, 'Dispose');
+    const disposable = this.library.typeNamed('System.IDisposable');
     return {
       iteration: {
         kind: 'enumerator',
@@ -918,7 +918,8 @@ export abstract class StatementBinder extends PatternBinder {
         current: current.property,
         enumeratorType,
         receiverIsStruct: enumeratorType.kind === 'named' && enumeratorType.symbol.isValueType,
-        dispose: dispose?.kind === 'methods' ? dispose.candidates[0]?.method : undefined,
+        dispose: disposable.methods.find((candidate) => candidate.name === 'Dispose') as MethodSymbol,
+        disposable: disposable.declaredType,
       },
       elementType,
     };

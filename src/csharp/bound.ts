@@ -283,7 +283,9 @@ export type ForeachKind =
       current: PropertySymbol;
       enumeratorType: Type;
       receiverIsStruct: boolean;
-      dispose: MethodSymbol | undefined;
+      /** `IDisposable.Dispose`, which the loop calls when the enumerator implements IDisposable (C# spec §13.9.5). */
+      dispose: MethodSymbol;
+      disposable: Type;
     };
 
 export type BoundStatement =

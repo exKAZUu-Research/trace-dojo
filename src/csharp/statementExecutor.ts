@@ -247,8 +247,9 @@ export abstract class StatementExecutor extends PatternMatcher {
       return undefined;
     } finally {
       frame.temporaries.pop();
-      if (iteration.dispose) {
-        const dispose = this.runtime.dispatch(iteration.dispose, enumerator);
+      // Only an enumerator that implements IDisposable is disposed, through its implementation of the interface.
+      if (enumerator !== undefined && this.isInstanceOf(enumerator, iteration.disposable)) {
+        const dispose = this.runtime.dispatch(iteration.dispose, enumerator, iteration.disposable);
         this.invokeWithoutArguments(frame, dispose, enumerator, statement.row, this.runtime.runtimeTypeOf(enumerator));
       }
     }
