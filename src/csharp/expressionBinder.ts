@@ -540,12 +540,13 @@ export abstract class ExpressionBinder extends MemberBinder {
     return type.kind === 'named' && type.symbol.special === 'valueTuple';
   }
 
+  /** Whether the pattern being bound is the type of an `x is T` operator. */
+  protected isTypeTestOperator = false;
+
   /**
    * Binds `==` or `!=` of two tuples, which compares their elements in order after evaluating both tuples, stopping at
    * the first element that decides the result (C# spec §12.12.11).
    */
-  /** Whether the pattern being bound is the type of an `x is T` operator. */
-  protected isTypeTestOperator = false;
 
   private bindTupleEquality(
     operator: '==' | '!=',

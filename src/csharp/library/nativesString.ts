@@ -869,7 +869,6 @@ defineNatives({
   },
 });
 
-/** A character's case mapping, which keeps characters whose mapping is longer than one character. */
 /**
  * .NET's simple case mapping of a character, which keeps one character: `ß` stays as JavaScript's `SS` would expand
  * it, and `İ` lowers to `i` without JavaScript's combining dot.

@@ -526,7 +526,6 @@ const KEYWORD_NAMES: Partial<Record<SpecialType, string>> = {
   void: 'void',
 };
 
-/** The name of a type as Roslyn's diagnostics show it, such as `List<int>`, `int?`, `(int, string)`, or `A.B`. */
 /**
  * A type as Roslyn's diagnostics show it. With `qualified`, as its conversion errors do, a type outside the global
  * namespace carries its namespace, such as `System.Collections.Generic.List<int>`.

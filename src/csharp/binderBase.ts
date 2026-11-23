@@ -139,7 +139,6 @@ export class BinderBase {
     throw new CompileError([...this.diagnostics, { row, message: `${what}は、この採点環境では使えません。` }]);
   }
 
-  /** Runs a compilation step, turning the errors it reported into a `CompileError`. */
   protected finishWithErrors(): void {
     if (this.diagnostics.length > 0) throw new CompileError(this.diagnostics);
   }
@@ -213,7 +212,6 @@ export class BinderBase {
     return result;
   }
 
-  /** The program's and the library's namespaces at a path, of which either may lack it. */
   /**
    * The namespaces a declaration's names resolve in, innermost first: each namespace around it, both the program's
    * and the library's of the same name, so that a program's class finds the library's global `Turtle`.
@@ -230,6 +228,7 @@ export class BinderBase {
     }
   }
 
+  /** The program's and the library's namespaces at a path, of which either may lack it. */
   namespacesAt(path: readonly string[]): NamespaceSymbol[] {
     return [this.userRoot.resolve(path, false), this.library.root.resolve(path, false)].filter(
       (namespace): namespace is NamespaceSymbol => namespace !== undefined
@@ -430,10 +429,10 @@ export class BinderBase {
     return undefined;
   }
 
-  /** Constructs a generic type with its arguments, checking their number. */
   /** The constructed types whose type arguments the compiler checks against their constraints once they are known. */
   readonly constraintChecks: { symbol: TypeSymbol; args: Type[]; row: number }[] = [];
 
+  /** Constructs a generic type with its arguments, checking their number. */
   construct(position: Position, symbol: TypeSymbol, args: Type[]): Type {
     const expected = symbol.allTypeParameters.length;
     if (args.length !== expected) {

@@ -589,7 +589,6 @@ const listNatives: Record<string, NativeMethod> = {
 };
 defineNatives(listNatives);
 
-/** `List<T>`'s capacity, which starts at 4 and doubles. */
 /**
  * `BinarySearch` within `count` items from an index, whose result counts from the start of the whole list; the count
  * is named `count` for a list and `length` for an array.

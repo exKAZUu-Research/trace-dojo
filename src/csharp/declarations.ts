@@ -1451,7 +1451,6 @@ export class DeclarationBinder extends BinderBase {
     return missing;
   }
 
-  /** The method of a class or its bases that implements an interface's method, which must be public and an instance method. */
   /**
    * Reports an interface method that a class does not implement: as CS0737 or CS0738 when a method of the same
    * signature is not public or returns another type, and as CS0535 otherwise.
@@ -1492,6 +1491,7 @@ export class DeclarationBinder extends BinderBase {
     );
   }
 
+  /** The method of a class or its bases that implements an interface's method, which must be public and an instance method. */
   findImplementation(type: NamedType, member: MethodSymbol, face: NamedType): MethodSymbol | undefined {
     for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
       const candidate = current.symbol.methods.find(
@@ -1555,7 +1555,6 @@ function accessibilityText(access: Accessibility): string {
   return access;
 }
 
-/** A method's display name as a member of a constructed type, as diagnostics show inherited members. */
 /**
  * A method as Roslyn's diagnostics name it, such as `A.M(int)`. With `isFull`, as its ambiguity errors do, the
  * parameters carry `params` and their types' namespaces.

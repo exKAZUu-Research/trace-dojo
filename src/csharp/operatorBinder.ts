@@ -121,8 +121,11 @@ export abstract class OperatorBinder extends ConversionBinder {
     };
   }
 
-  /** Binds a binary operator other than `&&`, `||`, and `??`. */
-  /** @param shownOperator The operator that an error names, such as `-=` for a compound assignment's `-`. */
+  /**
+   * Binds a binary operator other than `&&`, `||`, and `??`.
+   *
+   * @param shownOperator The operator that an error names, such as `-=` for a compound assignment's `-`.
+   */
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   bindBinary(

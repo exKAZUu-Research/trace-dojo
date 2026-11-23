@@ -135,10 +135,10 @@ export class CsDelegate {
   ) {}
 }
 
-/** The storage of a variable that a lambda captured, which outlives the frame that declared it. */
 /** What a local's storage holds before the program assigns it, and after its scope ends. */
 export const UNASSIGNED = Symbol('unassigned');
 
+/** The storage of a variable that a lambda captured, which outlives the frame that declared it. */
 export class Cell {
   constructor(public value: Value | typeof UNASSIGNED) {}
 }
