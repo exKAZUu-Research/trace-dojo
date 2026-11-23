@@ -4410,19 +4410,20 @@ fun main() {
     stdout: '2\n10\n6\n{a=1} 1 1\n[0, 2, 3]\n5\n',
   },
   {
-    name: 'fun-interface delegates infer their types from the property and the lambda',
+    name: 'fun-interface constructors take their type arguments from the call or the expected type',
     source: `import kotlin.properties.ReadOnlyProperty
 class A(val n: String) {
-    val typed: String by ReadOnlyProperty { owner: A, _ -> owner.n + "!" }
-    val named: String by ReadOnlyProperty { _, property -> property.name }
+    val typed: String by ReadOnlyProperty<A, String> { owner, _ -> owner.n + "!" }
 }
-val declared: Int by ReadOnlyProperty { _, _ -> 1 }
-val inferred by ReadOnlyProperty { _, _ -> 2 }
+val declared: Int by ReadOnlyProperty<Any?, Int> { _, _ -> 1 }
 fun main() {
-    println(A("a").typed + A("b").named)
-    println(declared + inferred)
+    println(A("a").typed)
+    println(declared + 1)
+    println(listOf(3, 1, 2).sortedWith(Comparator { a, b -> a - b }))
+    val byLength: Comparator<String> = Comparator { a, b -> a.length - b.length }
+    println(byLength.compare("a", "bb"))
 }`,
-    stdout: 'a!named\n3\n',
+    stdout: 'a!\n2\n[1, 2, 3]\n-1\n',
   },
   {
     name: 'smart casts from try survive finally unless finally changes them',

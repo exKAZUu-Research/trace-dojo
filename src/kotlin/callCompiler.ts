@@ -190,8 +190,6 @@ function hasTypedParameters(expression: Expression | undefined): boolean {
 /** Resolves calls: picks among overloads, infers type arguments, and evaluates arguments. */
 export abstract class CallCompiler extends CompilerCore {
   protected readonly delegateCalls = new WeakMap<ArgumentSyntax[], DelegateContext>();
-  /** The arguments of calls written as a property's delegate, as their call compiles them. */
-  protected readonly delegateArgs = new WeakSet<ArgumentSyntax[]>();
 
   abstract compileExpression(
     scope: Scope,
