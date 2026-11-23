@@ -450,20 +450,18 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       this.declareDataMembers(entry);
   }
 
-  /** A value class stores exactly its constructor's one `val`, as kotlinc requires. */
+  /**
+   * A value class stores exactly its constructor's one `val`, as kotlinc requires; `validatePropertyStorage` rejects
+   * body properties with backing fields once their accessors show whether they use `field`.
+   */
   private checkValueClassStorage(entry: ClassEntry): void {
-    const [stored, ...others] = entry.parameterProperties;
-    if (!stored || others.length > 0)
+    const [stored] = entry.parameterProperties;
+    if (!stored || entry.decl.primaryConstructor?.params.length !== 1)
       this.error(entry.decl.row, 'value class には、プロパティを1つだけ持つコンストラクタが要ります。');
     if (stored.param.binding === 'var') this.error(stored.param.row, 'value class のプロパティは val にしてください。');
     for (const member of entry.decl.members) {
-      // A property without a getter, or with an initializer or delegate, stores a value of its own.
-      const isStored =
-        member.kind === 'property' &&
-        !member.receiver &&
-        !member.modifiers.keywords.has('abstract') &&
-        (!member.getter || member.initializer !== undefined || member.delegate !== undefined);
-      if (isStored) this.error(member.row, 'value class には、値を保持するプロパティを追加できません。');
+      if (member.kind === 'property' && member.delegate)
+        this.error(member.row, 'value class には、値を保持するプロパティを追加できません。');
     }
   }
 
