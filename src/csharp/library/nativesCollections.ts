@@ -93,7 +93,7 @@ export function equalityOf(call: NativeCall, comparer: Value): Equality {
   const evaluator = evaluatorOf(call);
   if (comparer === undefined) {
     return {
-      equals: (a, b) => valuesEqual(evaluator, a, b, call.frame),
+      equals: (a, b) => evaluator.equalsThroughEquatable(a, b, call.frame) ?? valuesEqual(evaluator, a, b, call.frame),
       hash: (value) => hashOf(evaluator, value, call.frame),
     };
   }

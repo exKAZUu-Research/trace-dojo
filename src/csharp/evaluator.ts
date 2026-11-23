@@ -1233,6 +1233,21 @@ export class Evaluator extends StatementExecutor {
   }
 
   /** Compares through `IComparable<T>.CompareTo` or `IComparable.CompareTo`, as `Comparer<T>.Default` does for other types. */
+  /**
+   * `IEquatable<T>.Equals` of a program's type that implements it for its own type, which `EqualityComparer<T>.Default`
+   * calls instead of `Object.Equals`, or undefined for other values.
+   */
+  equalsThroughEquatable(a: Value, b: Value, frame: Frame): boolean | undefined {
+    if (!(a instanceof CsObject || a instanceof CsStruct) || a.type.symbol.isLibrary) return undefined;
+    const face = this.runtime.library.typeNamed('System.IEquatable', 1);
+    if (!this.conversions.implicit(a.type, namedType(face, [a.type]))) return undefined;
+    const method = face.methods.find((candidate) => candidate.name === 'Equals') as MethodSymbol;
+    const implementation = this.runtime.dispatch(method, a, namedType(face, [a.type]));
+    if (implementation === method) return undefined;
+    if (b === undefined) return false;
+    return this.invoke(frame, implementation, a, [b], undefined, environmentOf(this, implementation, a)) as boolean;
+  }
+
   compareThroughInterface(a: Value, b: Value, frame: Frame): number {
     const type = this.runtime.runtimeTypeOf(a);
     const library = this.runtime.library;
