@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
@@ -54,7 +54,13 @@ test.each(['contains', 'split'])('charges the execution budget during CharSequen
     val delimiter = "a".repeat(1024) + "b"
     println(s.${operation}(delimiter))
 }`;
-  expect(executeProgram('kotlin', source)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+  // A frozen clock keeps a slow host from stopping the run by time before the operation charge does.
+  const now = vi.spyOn(performance, 'now').mockReturnValue(0);
+  try {
+    expect(executeProgram('kotlin', source)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+  } finally {
+    now.mockRestore();
+  }
 });
 
 test('keeps temporary Kotlin assignment receivers on the board during operand evaluation', () => {
