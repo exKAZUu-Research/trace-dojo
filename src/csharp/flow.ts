@@ -485,7 +485,13 @@ export class FlowAnalyzer {
       case 'call':
       case 'property': {
         const current = expression.receiver ? this.receiver(expression.receiver, state) : state;
-        return this.arguments(expression.args, current);
+        const after = this.arguments(expression.args, current);
+        // A local function may assign the locals it captures, as `void Init() => y = 0;` does, so after a call they
+        // count as assigned; a capture it only reads is accepted too, which leaves Roslyn's check at the call out.
+        if (expression.kind !== 'call' || expression.method.kind !== 'localFunction') return after;
+        let assigned = after;
+        for (const local of expression.method.captures) assigned = assign(assigned, local);
+        return assigned;
       }
       case 'invokeDelegate': {
         return this.arguments(expression.args, this.expression(expression.target, state));
