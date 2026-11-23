@@ -567,18 +567,40 @@ export class Compiler extends StatementBinder {
       markCapturedLocals(body);
       return;
     }
-    // A member's nested functions are all bound by now, so their captures can follow the local functions they call.
+    this.summarizeLocalFunctions();
+    this.analyzeFlow(method, body);
+  }
+
+  /**
+   * The one computation of what each local function of the member tells its callers, once all are bound: the locals it
+   * captures, followed through the local functions it calls, and those it definitely assigns when it returns (or that
+   * it cannot return). Callees come before callers, and recursive ones are analyzed again until nothing changes, after
+   * which each is analyzed once more to report its own diagnostics.
+   */
+  private summarizeLocalFunctions(): void {
     const callees = this.propagateLocalFunctionCaptures();
     const pending = new Set(this.pendingLocalFunctions);
     this.pendingLocalFunctions.length = 0;
-    // Callees are analyzed before their callers, so a call knows what its callee assigns; a cycle is broken anywhere.
+    const order: MethodSymbol[] = [];
     const visit = (local: MethodSymbol): void => {
       if (!pending.delete(local)) return;
       for (const callee of callees.get(local) ?? []) visit(callee);
-      this.analyzeFlow(local, local.body as BoundBlock);
+      order.push(local);
     };
     for (const local of pending) visit(local);
-    this.analyzeFlow(method, body);
+    // Each pass can only add what a function assigns, so the passes end within one per function.
+    for (let pass = 0; pass <= order.length; pass++) {
+      let isChanged = false;
+      for (const local of order) {
+        const before = summaryOf(local);
+        const saved = this.diagnostics.length;
+        this.analyzeFlow(local, local.body as BoundBlock);
+        this.diagnostics.length = saved;
+        if (summaryOf(local) !== before) isChanged = true;
+      }
+      if (!isChanged) break;
+    }
+    for (const local of order) this.analyzeFlow(local, local.body as BoundBlock);
   }
 
   private readonly pendingLocalFunctions: MethodSymbol[] = [];
@@ -850,3 +872,10 @@ function markCapturedLocals(block: BoundBlock): void {
 
 export type { LocalSymbol };
 export { substitute, substitutionOf };
+
+/** What a local function's summary says it assigns, as a string that changes exactly when the summary does. */
+function summaryOf(local: MethodSymbol): string {
+  const assigned = local.assignedAtExit;
+  if (assigned === undefined || assigned === 'never') return String(assigned);
+  return local.captures.map((captured) => (assigned(captured) ? '1' : '0')).join('');
+}
