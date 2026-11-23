@@ -557,10 +557,35 @@ export class Compiler extends StatementBinder {
     }
     const body = method.body;
     if (!body) return;
+    if (fn.kind === 'localFunction') {
+      // A local function's flow is analyzed once its member's functions are all bound, as its calls need their
+      // callees' captures and what those assign.
+      this.pendingLocalFunctions.push(method);
+      return;
+    }
+    if (fn.kind === 'lambda') {
+      markCapturedLocals(body);
+      return;
+    }
     // A member's nested functions are all bound by now, so their captures can follow the local functions they call.
-    if (fn.kind === 'member' || fn.kind === 'initializer') this.propagateLocalFunctionCaptures();
+    const callees = this.propagateLocalFunctionCaptures();
+    const pending = new Set(this.pendingLocalFunctions);
+    this.pendingLocalFunctions.length = 0;
+    // Callees are analyzed before their callers, so a call knows what its callee assigns; a cycle is broken anywhere.
+    const visit = (local: MethodSymbol): void => {
+      if (!pending.delete(local)) return;
+      for (const callee of callees.get(local) ?? []) visit(callee);
+      this.analyzeFlow(local, local.body as BoundBlock);
+    };
+    for (const local of pending) visit(local);
+    this.analyzeFlow(method, body);
+  }
+
+  private readonly pendingLocalFunctions: MethodSymbol[] = [];
+
+  /** Checks a function's definite assignment and reachability, recording for a local function what it assigns. */
+  private analyzeFlow(method: MethodSymbol, body: BoundBlock): void {
     markCapturedLocals(body);
-    if (fn.kind === 'lambda') return;
     const analyzer = new FlowAnalyzer({
       unassigned: (local, row) => {
         // A local function reads the locals it captures as assigned; Roslyn checks them where it is called instead.

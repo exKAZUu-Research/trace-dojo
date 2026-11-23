@@ -107,6 +107,8 @@ export class FlowAnalyzer {
   /** The locals already reported, which Roslyn reports once and then treats as assigned. */
   private readonly reported = new Set<LocalSymbol>();
   private outParameters: LocalSymbol[] = [];
+  /** The locals of the function being analyzed, which a call that never returns leaves assigned. */
+  private functionLocals: LocalSymbol[] = [];
 
   constructor(private readonly diagnostics: FlowDiagnostics) {}
 
@@ -122,6 +124,7 @@ export class FlowAnalyzer {
     endRow: number
   ): ((local: LocalSymbol) => boolean) | 'never' {
     this.outParameters = method.locals.filter((local) => local.isParameter && local.refKind === 'out');
+    this.functionLocals = method.locals;
     const start: State = new Set([...initiallyAssigned].filter((local) => local.refKind !== 'out'));
     const saved = this.jumps;
     this.jumps = { breaks: [], continues: [], returns: [] };
@@ -496,7 +499,9 @@ export class FlowAnalyzer {
         // (declared later) counts as assigning all, so no valid program is rejected.
         if (expression.kind !== 'call' || expression.method.kind !== 'localFunction') return after;
         const assignedAtExit = expression.method.assignedAtExit;
-        if (assignedAtExit === 'never') return 'unreachable';
+        // What follows a call that never returns reads every local as assigned, while reachability (CS0161) does
+        // not know the call never returns, as in Roslyn, so the state stays reachable.
+        if (assignedAtExit === 'never') return union(after, new Set(this.functionLocals));
         let assigned = after;
         for (const local of expression.method.captures)
           if (!assignedAtExit || assignedAtExit(local)) assigned = assign(assigned, local);

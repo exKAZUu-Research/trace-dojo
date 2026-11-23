@@ -82,7 +82,7 @@ export abstract class MemberBinder extends CallBinder {
    * are all bound: a function that calls a local function capturing `total` passes `total`'s cell along, so it and
    * the functions around it up to `total`'s owner capture it as well.
    */
-  protected propagateLocalFunctionCaptures(): void {
+  protected propagateLocalFunctionCaptures(): Map<MethodSymbol, MethodSymbol[]> {
     let isChanged = true;
     while (isChanged) {
       isChanged = false;
@@ -102,8 +102,13 @@ export abstract class MemberBinder extends CallBinder {
       }
       for (const { fn, store } of this.captureLists) store([...fn.captures]);
     }
+    // The local functions each function calls, which their flow analysis needs analyzed first.
+    const callees = new Map<MethodSymbol, MethodSymbol[]>();
+    for (const { fn, callee } of this.localFunctionUses)
+      callees.set(fn.method, [...(callees.get(fn.method) ?? []), callee]);
     this.localFunctionUses.length = 0;
     this.captureLists.length = 0;
+    return callees;
   }
 
   /** Set while binding `nameof`'s argument, which names members without reading the properties on its way. */
