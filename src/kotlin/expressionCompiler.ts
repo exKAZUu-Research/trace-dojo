@@ -1343,9 +1343,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
    * `require` and `check` holds, and the argument of `requireNotNull` and `checkNotNull` is not null.
    */
   private applyContracts(call: ResolvedCall): void {
-    const { symbol, compiledArgs } = call;
+    const { symbol, firstParameterArg: first } = call;
     if (!symbol.isLibrary || symbol.packageName !== 'kotlin' || symbol.extensionReceiver) return;
-    const [first] = compiledArgs;
     if (symbol.name === 'require' || symbol.name === 'check') {
       for (const [key, type] of first?.narrowing?.whenTrue ?? []) this.flow.narrowed.set(key, type);
     }

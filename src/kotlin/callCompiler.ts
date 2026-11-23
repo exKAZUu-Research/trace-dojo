@@ -112,8 +112,10 @@ export interface ResolvedCall {
   /** Whether every argument creates an object, which makes `arrayOf(A(), B())` a creation, as Java's `{ new A(), new B() }` is. */
   argumentsCreateObjects: boolean;
   usesDefaultArguments: boolean;
-  /** The compiled arguments in the order they are written, whose smart casts the library's contracts carry on. */
+  /** The compiled arguments in the order they are written. */
   compiledArgs: (Compiled | undefined)[];
+  /** The argument of the first parameter, whose smart casts the library's contracts, as `require`'s, carry on. */
+  firstParameterArg: Compiled | undefined;
 }
 
 interface Attempt {
@@ -1105,6 +1107,7 @@ export abstract class CallCompiler extends CompilerCore {
         (param, index) => param.hasDefault && attempt.mapping[index].length === 0
       ),
       compiledArgs,
+      firstParameterArg: compiledArgs[attempt.mapping[0]?.[0] ?? -1],
       receiverRepr: receiverRepr(symbol),
       typeArguments,
     };
