@@ -594,7 +594,9 @@ function missingGroup(call: NativeCall): CsObject {
 /** Expands a replacement pattern's substitutions (`$1`, `${name}`, `$&`, ...) for a match, as .NET does. */
 // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
 // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
-function substitute(replacement: string, state: MatchState): string {
+function substitute(call: NativeCall, replacement: string, state: MatchState): string {
+  // Each match reads the whole replacement, even where its substitutions expand to nothing.
+  call.frame.runtime.spend(Math.ceil(replacement.length / 16));
   const groupValue = (number: number): string => state.groups[number]?.value ?? '';
   const whole = state.group;
   let result = '';
@@ -753,8 +755,8 @@ defineNatives({
     if (!state.compiled || state.nextStart > state.input.length) return emptyMatch(call);
     return findMatch(call, state.compiled, state.source, state.nextStart);
   },
-  [`${NAMESPACE}.Match.Result`]: (_call, receiver, [replacement]) =>
-    substitute(replacementOf(replacement as Value), matchStateOf(receiver)),
+  [`${NAMESPACE}.Match.Result`]: (call, receiver, [replacement]) =>
+    substitute(call, replacementOf(replacement as Value), matchStateOf(receiver)),
   [`${NAMESPACE}.MatchCollection.get_Count`]: (_call, receiver) => listOf(receiver).length,
   [`${NAMESPACE}.MatchCollection.get_IsReadOnly`]: () => true,
   [`${NAMESPACE}.MatchCollection.get_Item`]: (call, receiver, [index]) =>
@@ -797,7 +799,9 @@ defineNativesKeepingStrings({
     newMatchCollection(call, allMatches(call, regexOf(receiver), inputOf(input as Value))),
   [`${REGEX}.Replace(string, string)`]: (call, receiver, [input, replacement]) => {
     const text = replacementOf(replacement as Value);
-    return replaceMatches(call, regexOf(receiver), inputOf(input as Value), (_match, state) => substitute(text, state));
+    return replaceMatches(call, regexOf(receiver), inputOf(input as Value), (_match, state) =>
+      substitute(call, text, state)
+    );
   },
   [`${REGEX}.Replace(string, string, int)`]: (call, receiver, [input, replacement, count]) => {
     const text = replacementOf(replacement as Value);
@@ -805,7 +809,7 @@ defineNativesKeepingStrings({
       call,
       regexOf(receiver),
       inputOf(input as Value),
-      (_match, state) => substitute(text, state),
+      (_match, state) => substitute(call, text, state),
       count as number
     );
   },
@@ -828,7 +832,7 @@ defineNativesKeepingStrings({
   [`${REGEX}.Replace(string, string, string)`]: (call, _receiver, [input, pattern, replacement]) => {
     const text = replacementOf(replacement as Value);
     return replaceMatches(call, patternOf(call, pattern as Value), inputOf(input as Value), (_match, state) =>
-      substitute(text, state)
+      substitute(call, text, state)
     );
   },
   [`${REGEX}.Replace(string, string, string, RegexOptions)`]: (
@@ -841,7 +845,7 @@ defineNativesKeepingStrings({
       call,
       patternOf(call, pattern as Value, options as Value),
       inputOf(input as Value),
-      (_match, state) => substitute(text, state)
+      (_match, state) => substitute(call, text, state)
     );
   },
   [`${REGEX}.Replace(string, string, MatchEvaluator)`]: (call, _receiver, [input, pattern, evaluator]) =>
