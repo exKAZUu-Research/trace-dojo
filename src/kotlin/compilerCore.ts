@@ -254,7 +254,10 @@ export abstract class CompilerCore {
     return undefined;
   }
 
-  /** The class a simple name stands for: in the scopes, then in the file's package, its imports, and the defaults. */
+  /**
+   * The class a simple name stands for: in the scopes, then the file's explicit imports, its package, its star imports,
+   * and the defaults.
+   */
   findClass(scope: Scope | undefined, name: string): ClassSymbol | undefined {
     const local = findClassInScope(scope, name);
     if (local) return local;

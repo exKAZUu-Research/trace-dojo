@@ -1434,7 +1434,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 }
 
-/** A parameter as the key of a native names it, such as `vararg T`. */
 function compatibleJvmInheritance(a: MemberSymbol, b: MemberSymbol): boolean {
   return a === b || overriddenMembers(a).has(b) || overriddenMembers(b).has(a) || sameSourceDeclaration(a, b);
 }
@@ -1489,6 +1488,7 @@ function sameSourceDeclaration(a: MemberSymbol, b: MemberSymbol): boolean {
   return !first || !second || isSubtype(first, second) || isSubtype(second, first);
 }
 
+/** A parameter as the key of a native names it, such as `vararg T`. */
 function nativeParameterText(param: ParameterDecl): string {
   const type = param.type ? typeRefText(param.type) : '';
   return param.modifiers.keywords.has('vararg') ? `vararg ${type}` : type;

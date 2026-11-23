@@ -135,7 +135,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   protected abstract mayInitializeVal(context: FunctionContext, symbol: PropertySymbol): boolean;
 
-  /** The instance of an object or companion object, created on first use. */
   protected primitiveOf(type: KType): PrimitiveKind | undefined {
     const actual = resolved(type);
     if (actual.kind !== 'class' || actual.nullable) return undefined;
