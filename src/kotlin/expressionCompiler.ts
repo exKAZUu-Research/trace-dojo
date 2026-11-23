@@ -512,9 +512,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
   ): { holder: ClassSymbol; property: MemberRef<PropertySymbol> } | undefined {
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       for (let cls = current.staticClass; cls; cls = cls.outer) {
-        const { companion } = cls;
-        const property = companion ? this.findProperty(companion.type, name, row) : undefined;
-        if (companion && property) return { holder: companion, property };
+        for (const holder of staticHolders(cls)) {
+          const property = this.findProperty(holder.type, name, row);
+          if (property) return { holder, property };
+        }
       }
     }
     return undefined;
@@ -536,15 +537,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
           return this.readEnumEntry(cls, name);
         }
         if (cls.kind === 'enum' && name === 'entries') return this.compileEnumEntries(cls);
-        const { companion } = cls;
-        if (!companion) continue;
-        const property = this.findProperty(companion.type, name, row);
-        if (property) {
-          const instance = this.objectInstance(companion);
+        for (const holder of staticHolders(cls)) {
+          const property = this.findProperty(holder.type, name, row);
+          if (!property) continue;
+          const instance = this.objectInstance(holder);
           return this.readProperty(
             scope,
             property,
-            { type: companion.type, repr: 'ref', eval: instance, stableKey: keyOf(companion) },
+            { type: holder.type, repr: 'ref', eval: instance, stableKey: keyOf(holder) },
             row
           );
         }
@@ -1126,10 +1126,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const levels: CallLevel[] = [];
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       for (let cls = current.staticClass; cls; cls = cls.outer) {
-        const { companion } = cls;
-        if (!companion) continue;
-        const receiver: Compiled = { type: companion.type, repr: 'ref', eval: this.objectInstance(companion) };
-        levels.push(...this.memberCallLevels(scope, receiver, name, row));
+        for (const holder of staticHolders(cls)) {
+          const receiver: Compiled = { type: holder.type, repr: 'ref', eval: this.objectInstance(holder) };
+          levels.push(...this.memberCallLevels(scope, receiver, name, row));
+        }
       }
     }
     return levels;
@@ -1979,3 +1979,13 @@ interface PackageQualifier {
 }
 
 type Qualifier = { kind: 'class'; cls: ClassSymbol } | PackageQualifier;
+
+/**
+ * The objects whose members the names in a class's body and in the declarations nested in it reach without a
+ * qualifier: the class itself when it is an object, and its companion object.
+ */
+function staticHolders(cls: ClassSymbol): ClassSymbol[] {
+  const holders = cls.isObject ? [cls] : [];
+  if (cls.companion) holders.push(cls.companion);
+  return holders;
+}
