@@ -841,7 +841,9 @@ export abstract class ExpressionBinder extends MemberBinder {
     initializer: Extract<Expression, { kind: 'arrayInitializer' }>,
     type: Type,
     context: BindContext,
-    sizes: BoundExpression[] = []
+    sizes: BoundExpression[] = [],
+    /** Elements already bound, as an implicitly typed array binds them to find its type, which bind only once. */
+    bound?: Map<Expression, BoundExpression>
   ): BoundExpression {
     if (type.kind !== 'array') {
       if (type.kind !== 'error')
@@ -868,7 +870,10 @@ export abstract class ExpressionBinder extends MemberBinder {
         } else if (element.kind === 'arrayInitializer') {
           elements.push(this.bindArrayInitializer(element, type.element, context));
         } else {
-          elements.push(this.bindAs(element, type.element, context));
+          const value = bound?.get(element);
+          elements.push(
+            value ? this.convert(value, type.element, element) : this.bindAs(element, type.element, context)
+          );
         }
       }
     };
@@ -926,15 +931,13 @@ export abstract class ExpressionBinder extends MemberBinder {
       }
     };
     collect(node.initializer, 0);
-    // The leaves bind again with the array's element type, so this pass only finds the type.
-    const saved = this.diagnostics.length;
-    const element = this.bestCommonType(leaves.map((leaf) => this.bindValue(leaf, context)));
-    this.diagnostics.length = saved;
+    const bound = new Map(leaves.map((leaf) => [leaf, this.bindValue(leaf, context)]));
+    const element = this.bestCommonType([...bound.values()]);
     if (!element || element.kind === 'error') {
-      this.error(node, 'CS0826', '暗黙的に型指定された配列の最適な型が見つかりませんでした');
+      if (!element) this.error(node, 'CS0826', '暗黙的に型指定された配列の最適な型が見つかりませんでした');
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
-    return this.bindArrayInitializer(node.initializer, arrayType(element, node.rank), context);
+    return this.bindArrayInitializer(node.initializer, arrayType(element, node.rank), context, [], bound);
   }
 
   private bindTuple(node: Extract<Expression, { kind: 'tuple' }>, context: BindContext): BoundExpression {

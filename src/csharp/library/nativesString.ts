@@ -124,7 +124,8 @@ function split(call: NativeCall, text: string, args: Value[]): CsArray {
   if (count < 0) failNegative(call, 'count', count);
   const isWhitespaceSplit =
     separators.length === 0 &&
-    !(call.method.parameters.some((parameter) => specialOf(parameter.type) === 'string') && args[0] === '');
+    // A single string separator, null or empty, splits nothing; whitespace splitting is for empty separator arrays.
+    !(call.method.parameters.some((parameter) => specialOf(parameter.type) === 'string') && !args[0]);
   if (count === 0) return newArray(call, libraryType(call, STRING), []);
   if (separators.length === 0 && !isWhitespaceSplit) return newArray(call, libraryType(call, STRING), [text]);
   // Separators grouped by their first character, in their order, so each position tries only those that may match;
