@@ -337,7 +337,6 @@ export function compareStrings(a: string, b: string): number {
   return a.length - b.length;
 }
 
-/** The check of `StringBuilder`'s indexes in the JDK, worded as its `Preconditions.checkIndex` words it. */
 /** Reverses a string as `StringBuilder.reverse` does, which keeps each surrogate pair in order. */
 export function reverseKeepingPairs(value: string): string {
   // oxlint-disable-next-line typescript/no-misused-spread -- Spreading splits at code points, which keeps surrogate pairs together as Java does.
