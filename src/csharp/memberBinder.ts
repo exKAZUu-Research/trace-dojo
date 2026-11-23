@@ -846,16 +846,21 @@ export abstract class MemberBinder extends CallBinder {
     const saved = this.diagnostics.length;
     // A delegate passes exactly its own arguments: no optional parameter is left out, no params array expands, and
     // each argument goes as it is, which a method that is not generic shows before overload resolution chooses.
-    const candidates = group.candidates.filter(
+    let candidates = group.candidates.filter(
       (candidate) =>
         candidate.method.parameters.length === invoke.parameterTypes.length &&
         (candidate.method.typeParameters.length > 0 ||
           this.takesDelegateArguments({ candidate, typeArgs: [], args: [] }, invoke.parameterTypes, invoke.refKinds))
     );
-    let resolved =
-      candidates.length > 0
-        ? this.resolveCall(candidates, args, group.typeArgs, row, { name: group.name, kind: 'method' })
-        : undefined;
+    let resolved: ResolvedCall | undefined;
+    // A generic method shows it only once its type arguments are inferred: one that cannot gives way to the others.
+    while (candidates.length > 0) {
+      resolved = this.resolveCall(candidates, args, group.typeArgs, row, { name: group.name, kind: 'method' });
+      if (!resolved || this.takesDelegateArguments(resolved, invoke.parameterTypes, invoke.refKinds)) break;
+      const rejected = resolved.candidate;
+      candidates = candidates.filter((candidate) => candidate !== rejected);
+      resolved = undefined;
+    }
     let receiver = group.receiver;
     if (!resolved && group.extensions.length > 0 && group.receiver) {
       this.diagnostics.length = saved;
