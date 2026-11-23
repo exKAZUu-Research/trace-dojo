@@ -134,7 +134,7 @@ function remPio2OfLargeSize(x: number, y: number[], ix: number): number {
     y[0] = y[1] = x - x;
     return 0;
   }
-  // z = scalbn(|x|, ilogb(x) - 23)
+  // z = scalbn(|x|, -(ilogb(x) - 23)), which subtracts e0 from the exponent
   const e0 = (ix >> 20) - 1046;
   let z = fromWords(ix - (e0 << 20), low(x));
   const tx = [0, 0, 0];
