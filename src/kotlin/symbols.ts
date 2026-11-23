@@ -45,7 +45,6 @@ export class ClassSymbol {
   isNative = false;
   /** Whether the class is a `fun interface`, which a lambda converts to. */
   isFunInterface = false;
-  /** Whether the program cannot inherit from the class, which the standard library's own classes mostly are. */
   visibility: Visibility = 'public';
   /** The number of fields each instance holds, its superclasses' first. */
   fieldCount = 0;
