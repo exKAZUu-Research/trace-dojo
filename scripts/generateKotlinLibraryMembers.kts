@@ -15,10 +15,6 @@ import org.jetbrains.kotlin.name.FqName
 check(KotlinVersion.CURRENT == KotlinVersion(2, 4, 21))
 check(Runtime.version().feature() == 25)
 
-val defaultPackages = setOf(
-    "kotlin", "kotlin.collections", "kotlin.comparisons", "kotlin.io", "kotlin.jvm",
-    "kotlin.ranges", "kotlin.sequences", "kotlin.text",
-)
 val members = sortedMapOf<String, MutableSet<String>>()
 val declarations = sortedMapOf<String, MutableSet<String>>()
 val annotations = sortedMapOf<String, MutableSet<String>>()
@@ -71,7 +67,8 @@ fun collectPackage(packageName: String, pkg: KmPackage) {
             javaAliases.getOrPut(expanded) { sortedSetOf() }.add("$packageName.${alias.name}")
         }
     }
-    if (packageName in defaultPackages) collect(pkg)
+    // Extensions of every package are indexed, so a call to one an import would bring in reads as unavailable.
+    collect(pkg)
 }
 
 val stdlib = Unit::class.java
