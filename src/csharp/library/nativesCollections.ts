@@ -46,8 +46,21 @@ export interface Equality {
   hash: (value: Value) => number;
 }
 
-/** The comparison of a `Comparison<T>` delegate, an `IComparer<T>`, or the default ordering when it is null. */
+/**
+ * The comparison of a `Comparison<T>` delegate, an `IComparer<T>`, or the default ordering when it is null. It is
+ * metered like each comparison and hash that natives make through `equalityOf`, so a native whose loops compare
+ * elements pays for each comparison without counting it itself.
+ */
 export function comparisonOf(call: NativeCall, comparer: Value): Comparison {
+  const compare = unmeteredComparisonOf(call, comparer);
+  const step = stepMeter(call);
+  return (a, b) => {
+    step();
+    return compare(a, b);
+  };
+}
+
+function unmeteredComparisonOf(call: NativeCall, comparer: Value): Comparison {
   const evaluator = evaluatorOf(call);
   if (comparer === undefined) return (a, b) => defaultCompare(evaluator, a, b, call.frame);
   if (comparer instanceof CsDelegate)
@@ -69,9 +82,7 @@ export function comparisonOf(call: NativeCall, comparer: Value): Comparison {
 
 /** Runs a sort's comparisons, wrapping what they throw as .NET's sorting does. */
 function guardedComparison(call: NativeCall, compare: Comparison): Comparison {
-  const step = stepMeter(call);
   return (a, b) => {
-    step();
     try {
       return compare(a, b);
     } catch (error) {
@@ -102,6 +113,21 @@ export function equalityOf(
   comparer: Value,
   elementType: Type | undefined = call.typeArgs[0] ?? call.owner?.args[0]
 ): Equality {
+  const equality = unmeteredEqualityOf(call, comparer, elementType);
+  const step = stepMeter(call);
+  return {
+    equals: (a, b) => {
+      step();
+      return equality.equals(a, b);
+    },
+    hash: (value) => {
+      step();
+      return equality.hash(value);
+    },
+  };
+}
+
+function unmeteredEqualityOf(call: NativeCall, comparer: Value, elementType: Type | undefined): Equality {
   const evaluator = evaluatorOf(call);
   if (comparer === undefined) {
     return {

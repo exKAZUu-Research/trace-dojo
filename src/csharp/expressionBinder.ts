@@ -941,7 +941,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     returnType: Type | undefined,
     report: boolean
   ): { result: BoundExpression | undefined; returnType: Type | undefined } {
-    const key = `${parameterTypes.map(lambdaKeyOf).join(',')}->${returnType ? lambdaKeyOf(returnType) : '?'}`;
+    const key = `${parameterTypes.map(typeIdentityKey).join(',')}->${returnType ? typeIdentityKey(returnType) : '?'}`;
     let cache = this.lambdaCache.get(node);
     if (!cache) {
       cache = new Map();
@@ -1516,7 +1516,7 @@ export abstract class ExpressionBinder extends MemberBinder {
   /** The anonymous type with members of the names and types, which `new { ... }` creates. */
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private anonymousTypeOf(members: { name: string; type: Type }[]): TypeSymbol {
-    const key = members.map((member) => `${member.name}:${displayType(member.type)}`).join(';');
+    const key = members.map((member) => `${member.name}:${typeIdentityKey(member.type)}`).join(';');
     let symbol = this.anonymousTypes.get(key);
     if (symbol) return symbol;
     symbol = new TypeSymbol(`<>f__AnonymousType${this.anonymousTypes.size}`, 'class', '', undefined);
@@ -1989,9 +1989,9 @@ function inferredTupleName(expression: Expression): string | undefined {
 export { isNonValue };
 
 /**
- * A type's part of a lambda binding's cache key: a type's name alone is not its identity, as two namespaces may each
- * declare `Item`, and its display carries the tuple element names that its identity leaves out.
+ * A type's part of a binding cache's key: a type's name alone is not its identity, as two namespaces may each declare
+ * `Item`, and its display carries the tuple element names that its identity leaves out.
  */
-function lambdaKeyOf(type: Type): string {
+function typeIdentityKey(type: Type): string {
   return `${typeKey(type)}:${displayType(type)}`;
 }
