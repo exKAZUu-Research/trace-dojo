@@ -560,7 +560,7 @@ export class Compiler extends StatementBinder {
     if (fn.kind === 'localFunction') {
       // A local function's flow is analyzed once its member's functions are all bound, as its calls need their
       // callees' captures and what those assign.
-      this.pendingLocalFunctions.push(method);
+      this.pendingLocalFunctions.push({ method, isTrial: this.trialLambdaDepth > 0 });
       return;
     }
     if (fn.kind === 'lambda') {
@@ -579,7 +579,8 @@ export class Compiler extends StatementBinder {
    */
   private summarizeLocalFunctions(): void {
     const callees = this.propagateLocalFunctionCaptures();
-    const pending = new Set(this.pendingLocalFunctions);
+    const trials = new Set(this.pendingLocalFunctions.filter((entry) => entry.isTrial).map((entry) => entry.method));
+    const pending = new Set(this.pendingLocalFunctions.map((entry) => entry.method));
     this.pendingLocalFunctions.length = 0;
     const order: MethodSymbol[] = [];
     const visit = (local: MethodSymbol): void => {
@@ -601,10 +602,16 @@ export class Compiler extends StatementBinder {
       }
       if (!isChanged) break;
     }
-    for (const local of order) this.analyzeFlow(local, local.body as BoundBlock);
+    // A local function of a lambda binding that only tried a delegate type keeps its summary but reports nothing,
+    // as that binding's own diagnostics were thrown away.
+    for (const local of order) {
+      const saved = this.diagnostics.length;
+      this.analyzeFlow(local, local.body as BoundBlock);
+      if (trials.has(local)) this.diagnostics.length = saved;
+    }
   }
 
-  private readonly pendingLocalFunctions: MethodSymbol[] = [];
+  private readonly pendingLocalFunctions: { method: MethodSymbol; isTrial: boolean }[] = [];
 
   /** Checks a function's definite assignment and reachability, recording for a local function what it assigns. */
   private analyzeFlow(method: MethodSymbol, body: BoundBlock): void {

@@ -964,6 +964,12 @@ export abstract class ExpressionBinder extends MemberBinder {
     return { kind: 'tuple', elements, type, row: node.row };
   }
 
+  /**
+   * How many lambda bindings that only try a delegate type enclose the code being bound, whose diagnostics are thrown
+   * away, so the local functions declared there report none of their own either.
+   */
+  protected trialLambdaDepth = 0;
+
   /** Binds a lambda to a delegate type, or returns undefined when it does not convert, reporting why if `report`. */
   protected bindLambda(
     node: LambdaExpression,
@@ -986,10 +992,12 @@ export abstract class ExpressionBinder extends MemberBinder {
     const method = context.fn.method;
     const savedThrow = this.allowsThrowExpression;
     let bound: { body: BoundBlock; inferred: Type | undefined };
+    if (!report) this.trialLambdaDepth++;
     try {
       bound = this.bindLambdaBody(node, context, returnType, report);
     } finally {
       this.allowsThrowExpression = savedThrow;
+      if (!report) this.trialLambdaDepth--;
     }
     const { body, inferred } = bound;
     method.body = body;
