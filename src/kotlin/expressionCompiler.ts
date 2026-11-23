@@ -1072,23 +1072,29 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   private receiverLevels(scope: Scope, context: FunctionContext, name: string, row: number): CallLevel[] {
     return this.receiversOf(scope).flatMap((receiver) => {
-      // Only a call that a member or extension of the receiver can take reads it, which an uninitialized one rejects.
-      const uninitialized = this.uninitializedReceiver;
-      if (uninitialized?.receiver === receiver) this.uninitializedReceiver = undefined;
-      const levels = this.memberCallLevels(
-        scope,
-        {
-          type: this.receiverTypeOf(receiver),
-          repr: reprOf(this.core, receiver.type),
-          eval: this.receiverAccess(context, receiver),
-          stableKey: keyOf(receiver),
-        },
-        name,
-        row
-      );
+      const uninitialized = this.uninitializedReceiver?.receiver === receiver ? this.uninitializedReceiver : undefined;
+      // Overload resolution may pick a call of another level, so only the call it chooses rejects the receiver.
+      if (uninitialized) this.uninitializedReceiver = undefined;
+      const compiled: Compiled = {
+        type: this.receiverTypeOf(receiver),
+        repr: reprOf(this.core, receiver.type),
+        eval: this.receiverAccess(context, receiver),
+        stableKey: keyOf(receiver),
+      };
+      const levels = this.memberCallLevels(scope, compiled, name, row);
+      if (!uninitialized) return levels;
       this.uninitializedReceiver = uninitialized;
-      if (levels.length > 0) this.receiverAccess(context, receiver);
-      return levels;
+      this.uninitializedCallReceivers.set(compiled, uninitialized.row);
+      return levels.map((level) =>
+        'candidates' in level
+          ? level
+          : {
+              functionValues: level.functionValues.map((candidate) => ({
+                ...candidate,
+                functionValue: () => this.rejectUninitialized(uninitialized.row),
+              })),
+            }
+      );
     });
   }
 

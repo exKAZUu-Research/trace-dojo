@@ -257,7 +257,9 @@ export abstract class CallCompiler extends CompilerCore {
       name,
       fallbackError
     );
-    return this.finishCall(chosen, receiverOf(chosen.candidate), row);
+    const receiver = receiverOf(chosen.candidate);
+    this.checkReceiverInitialized(receiver);
+    return this.finishCall(chosen, receiver, row);
   }
 
   private invokeValueCandidate(
