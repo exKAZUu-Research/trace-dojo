@@ -201,7 +201,7 @@ class RunMerge {
     return Math.max(1, threshold);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- both batches and their early exits preserve the JVM comparator order.
+  // code-gauge-allow functionCognitiveComplexity -- both batches and their early exits preserve the JVM comparator order.
   private gallopMerge(compare: Compare, last: MergeCursor, first: MergeCursor, threshold: number): number {
     const { left, right } = this;
     while (true) {

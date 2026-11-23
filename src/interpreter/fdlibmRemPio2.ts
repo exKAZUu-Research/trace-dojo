@@ -48,7 +48,7 @@ const PIO2_3 = 2.0222662487111665e-21;
 const PIO2_3T = 8.4784276603689e-32;
 
 /** e_rem_pio2.c: stores x - n * pi / 2 into `y` as `y[0] + y[1]` and returns n (modulo 8 for huge `x`). */
-// code-gauge-allow functionNcss 34 -- A transcription of fdlibm's e_rem_pio2.c, whose steps reviews compare with the original.
+// code-gauge-allow functionNcss -- A transcription of fdlibm's e_rem_pio2.c, whose steps reviews compare with the original.
 export function remPio2(x: number, y: number[]): number {
   let z: number;
   const hx = high(x);

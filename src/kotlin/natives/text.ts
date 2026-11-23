@@ -681,7 +681,7 @@ function splitSequence(
 }
 
 /** `split`, which splits at the first delimiter that matches at each position, keeping empty parts. */
-// code-gauge-allow functionCognitiveComplexity 17 -- split result type depends on the delimiter family and the traversal result.
+// code-gauge-allow functionCognitiveComplexity -- split result type depends on the delimiter family and the traversal result.
 function splitText(
   frame: Frame,
   value: string,

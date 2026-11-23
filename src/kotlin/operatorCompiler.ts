@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 432 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { isNullLiteral } from './ast';
 import type { CallExpression, Expression, TypeRef } from './ast';
 import { type ArgumentSyntax } from './callCompiler';
@@ -37,7 +37,7 @@ import { box, Boxed, type PrimitiveKind, type Value } from './values';
 
 /** Compiles the operators, the conditions, and the `in`, `is`, and `as` tests. */
 export abstract class OperatorCompiler extends ExpressionCompiler {
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per unary operator.
+  // code-gauge-allow functionCognitiveComplexity -- One case per unary operator.
   protected compilePrefix(
     scope: Scope,
     context: FunctionContext,
@@ -241,7 +241,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     return expected !== undefined && this.primitiveOf(nonNull(expected)) === 'Long' && isIntegerConstant(expression);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 29 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected compileArithmeticWith(
     scope: Scope,
     context: FunctionContext,
@@ -401,8 +401,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     return { type, repr, eval: convertRepr(choose, 'ref', repr) };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Kotlin's rules of equality by the operands' types.
-  // code-gauge-allow functionNcss 38 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- Kotlin's rules of equality by the operands' types.
+  // code-gauge-allow functionNcss -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected compileEquality(
     scope: Scope,
     context: FunctionContext,
@@ -637,7 +637,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   }
 
   /** The type `is` narrows to: the class type with the arguments the value's static type gives it. */
-  // code-gauge-allow functionCognitiveComplexity 24 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected narrowedType(staticType: KType, checked: KType): KType {
     const target = resolved(checked);
     const source = nonNull(resolved(staticType));
@@ -683,7 +683,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected compileAs(
     scope: Scope,
     context: FunctionContext,

@@ -70,8 +70,8 @@ export function assignedNames(node: Statement | Statement[] | Expression): Set<s
   return names;
 }
 
-// code-gauge-allow functionNcss 45 -- each assignment and lexical scope has one traversal case.
-// code-gauge-allow functionCognitiveComplexity 20 -- the visitor keeps assignment targets and lexical boundaries in one dispatch.
+// code-gauge-allow functionNcss -- each assignment and lexical scope has one traversal case.
+// code-gauge-allow functionCognitiveComplexity -- the visitor keeps assignment targets and lexical boundaries in one dispatch.
 function visit(node: unknown, shadowed: Set<string>, names: Set<string>): void {
   if (!node || typeof node !== 'object') return;
   if (Array.isArray(node)) {

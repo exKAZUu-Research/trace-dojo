@@ -7,7 +7,7 @@ const LONG_MAX = 2n ** 63n - 1n;
 const ULONG_MAX = 2n ** 64n - 1n;
 
 /** Reads an integer literal such as `1_000`, `0xFF`, `3L`, or `2u`, whose type the compiler decides from its value. */
-// code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+// code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
 export function parseIntegerLiteral(
   text: string,
   fail: Fail,

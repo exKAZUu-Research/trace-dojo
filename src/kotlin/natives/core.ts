@@ -25,8 +25,8 @@ import { Boxed, KObject, type PrimitiveKind, UNIT, type Value } from '../values'
 import { defineNative, defineNativeProperty, libraryClass, newItems, throwError } from './registry';
 
 /** Converts a number of one kind to another, as `toInt()`, `toLong()`, and their kin do. */
-// code-gauge-allow functionNcss 43 -- registers the natives of one class together, in the order the prelude declares them.
-// code-gauge-allow functionCognitiveComplexity 23 -- registers the natives of one class together, in the order the prelude declares them.
+// code-gauge-allow functionNcss -- registers the natives of one class together, in the order the prelude declares them.
+// code-gauge-allow functionCognitiveComplexity -- registers the natives of one class together, in the order the prelude declares them.
 export function convertNumber(value: number | bigint, from: PrimitiveKind, to: PrimitiveKind): number | bigint {
   const asNumber = Number(value);
   switch (to) {
@@ -210,7 +210,7 @@ function defineCharOperators(): void {
   defineNative('kotlin.Char.dec()', (_frame, receiver) => step('Char', receiver as number, -1));
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- each operator takes the 32-bit or 64-bit path in the same place.
+// code-gauge-allow functionCognitiveComplexity -- each operator takes the 32-bit or 64-bit path in the same place.
 function defineBits(kind: 'Int' | 'Long' | 'UInt' | 'ULong'): void {
   const isLong = kind.endsWith('Long');
   const unsigned = kind.startsWith('U');
@@ -275,7 +275,7 @@ function defineBooleans(): void {
   defineNative('kotlin.Boolean.toString()', (_frame, a) => (a ? 'true' : 'false'));
 }
 
-// code-gauge-allow functionNcss 32 -- registers the natives of one class together, in the order the prelude declares them.
+// code-gauge-allow functionNcss -- registers the natives of one class together, in the order the prelude declares them.
 function defineAnyAndString(): void {
   defineNative('kotlin.Any.<init>()', () => UNIT);
   defineNative('kotlin.Any.equals(Any?)', (_frame, receiver, [other]) => receiver === other);

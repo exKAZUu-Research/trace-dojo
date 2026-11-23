@@ -51,7 +51,7 @@ function checkSize(frame: Frame, size: number): void {
   frame.runtime.allocate(frame, size + 1);
 }
 
-// code-gauge-allow functionNcss 43 -- registers the natives of one class together, in the order the prelude declares them.
+// code-gauge-allow functionNcss -- registers the natives of one class together, in the order the prelude declares them.
 function defineArrays(): void {
   defineNative('kotlin.Array.clone()', cloneArray);
   for (const [name, kind, zero] of PRIMITIVE_ARRAYS) {
@@ -151,8 +151,8 @@ export function comparatorFunction(frame: Frame, comparator: Value): (a: Value, 
 
 const LN2 = fdlibmLog(2);
 
-// code-gauge-allow functionNcss 44 -- registers the natives of `kotlin.math` together, in the order the prelude declares them.
-// code-gauge-allow functionCognitiveComplexity 30 -- registers the natives of `kotlin.math` together, in the order the prelude declares them.
+// code-gauge-allow functionNcss -- registers the natives of `kotlin.math` together, in the order the prelude declares them.
+// code-gauge-allow functionCognitiveComplexity -- registers the natives of `kotlin.math` together, in the order the prelude declares them.
 function defineMath(): void {
   const unary: [string, (x: number) => number][] = [
     ['sqrt', Math.sqrt],
@@ -390,7 +390,6 @@ function defineArrayFunctions(): void {
   }
 }
 
-// code-gauge-allow functionNcss 39 -- Registers the array readers together in prelude declaration order.
 function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | undefined, zero: Value): void {
   const prefix = `kotlin.collections.${receiver}`;
   defineNative(`${prefix}.asList()`, (frame, array) => {

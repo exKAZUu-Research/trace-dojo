@@ -188,7 +188,7 @@ export function mentionsVariable(type: KType, test: (variable: InferenceVariable
 }
 
 /** Writes a type as Kotlin's compiler does in its messages. */
-// code-gauge-allow functionCognitiveComplexity 18 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+// code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
 export function typeToString(type: KType): string {
   const suffix = type.nullable ? '?' : '';
   switch (type.kind) {

@@ -316,7 +316,7 @@ export class Converter extends ExpressionConverter {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- class kind and allowed class annotation targets share the syntax.
+  // code-gauge-allow functionCognitiveComplexity -- class kind and allowed class annotation targets share the syntax.
   private convertClass(node: Node, isTopLevel: boolean): ClassDecl {
     if (!isTopLevel && this.isLocal && !this.isLibrary) throw unavailable(node, '関数の中でのクラスの宣言');
     const modifiersNode = firstOfType(node, 'modifiers');

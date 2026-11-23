@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 991 -- One method per kind of Kotlin statement and control structure.
+// code-gauge-allow-file fileNcss -- One method per kind of Kotlin statement and control structure.
 import type {
   AssignmentStatement,
   Block,
@@ -93,7 +93,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
    *
    * @param clearsLocals Function bodies keep their locals so that a trace can report `main`'s final variables.
    */
-  // code-gauge-allow functionCognitiveComplexity 19 -- statement compilation and execution both restore the block state when an exit interrupts them.
+  // code-gauge-allow functionCognitiveComplexity -- statement compilation and execution both restore the block state when an exit interrupts them.
   protected compileStatementsValue(
     scope: Scope,
     context: FunctionContext,
@@ -287,7 +287,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return this.withStep(row, (frame) => write(frame, evaluate(frame)), delegate.isCreation === true);
   }
 
-  // code-gauge-allow functionParameterCount 7 -- the declaration's scope, receiver, arguments and runtime value are distinct.
+  // code-gauge-allow functionParameterCount -- the declaration's scope, receiver, arguments and runtime value are distinct.
   private compileLocalDelegateSetter(
     scope: Scope,
     context: FunctionContext,
@@ -525,7 +525,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return this.error(row, `${target.name} が見つかりません。`);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- qualifiers and safe calls share property legality and assignment flow.
+  // code-gauge-allow functionCognitiveComplexity -- qualifiers and safe calls share property legality and assignment flow.
   private memberPlace(
     scope: Scope,
     context: FunctionContext,
@@ -579,7 +579,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return this.propertyPlace({ symbol: property, substitution: new Map() }, undefined, row, scope);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- finds the closest variable and determines which assignments it permits.
   private variablePlace(
     scope: Scope,
     context: FunctionContext,
@@ -716,7 +715,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
    * `a[i]` as a place: `set` stores into it, and for a compound assignment `get` reads it. The receiver and indexes
    * are evaluated once and stay rooted while assignment operands and accessors run.
    */
-  // code-gauge-allow functionNcss 40 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionNcss -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private indexPlace(
     scope: Scope,
     context: FunctionContext,
@@ -885,7 +884,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 31 -- the loop shares its locals and condition between analysis and execution.
+  // code-gauge-allow functionNcss -- the loop shares its locals and condition between analysis and execution.
   private compileDoWhile(scope: Scope, context: FunctionContext, statement: DoWhileStatement): Exec {
     this.forgetAssignedIn(scope, [...statement.body.statements]);
     this.forgetAssignedIn(scope, statement.condition);
@@ -932,7 +931,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 31 -- the loop shares its locals and condition between analysis and execution.
+  // code-gauge-allow functionNcss -- the loop shares its locals and condition between analysis and execution.
   private compileFor(scope: Scope, context: FunctionContext, statement: ForStatement): Exec {
     this.forgetAssignedIn(scope, [...statement.body.statements]);
     const iterable = this.compileExpression(scope, context, statement.iterable);
@@ -1062,8 +1061,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
   /** The kind of the numbers a range or progression of the standard library steps through. */
   protected abstract progressionOf(type: KType): 'Int' | 'Long' | 'Char' | undefined;
 
-  // code-gauge-allow functionNcss 39 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  // code-gauge-allow functionCognitiveComplexity 16 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileLoopBinding(
     scope: Scope,
     context: FunctionContext,
@@ -1143,7 +1140,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
 
   // Control structures as expressions.
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- condition, branch flow, and result conversion are read together.
   protected compileIf(
     scope: Scope,
     context: FunctionContext,
@@ -1245,7 +1241,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return commonSupertype(types);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- exhaustiveness selects the result type and participates in branch flow.
+  // code-gauge-allow functionCognitiveComplexity -- exhaustiveness selects the result type and participates in branch flow.
   protected compileWhen(
     scope: Scope,
     context: FunctionContext,
@@ -1403,7 +1399,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   /** A `when` branch's value, which the subject equals for the branch to run. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- the branch test and its resulting narrowing share resolved operands.
+  // code-gauge-allow functionCognitiveComplexity -- the branch test and its resulting narrowing share resolved operands.
   private compileWhenValue(
     scope: Scope,
     context: FunctionContext,
@@ -1556,8 +1552,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     }
   }
 
-  // code-gauge-allow functionNcss 50 -- try, catch clauses, and finally, as an expression.
-  // code-gauge-allow functionCognitiveComplexity 26 -- the same try and catch branches decide the flow and runtime result.
+  // code-gauge-allow functionNcss -- try, catch clauses, and finally, as an expression.
   protected compileTry(
     scope: Scope,
     context: FunctionContext,
@@ -1645,7 +1640,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return { scope: catchScope, test: instanceTest(this.core, type), write, slot: variable.slot };
   }
 
-  // code-gauge-allow functionNcss 31 -- compiles the body and transfers its result to each kind of incoming path.
+  // code-gauge-allow functionNcss -- compiles the body and transfers its result to each kind of incoming path.
   private compileFinally(
     scope: Scope,
     context: FunctionContext,

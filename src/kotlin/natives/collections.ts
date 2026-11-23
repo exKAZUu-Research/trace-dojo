@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 1000 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, identityHash, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -460,7 +460,7 @@ function listStorageForSize(frame: Frame, list: KObject, required: number): Valu
   return grown;
 }
 
-// code-gauge-allow functionNcss 32 -- registers the native list classes and the helper operations they share.
+// code-gauge-allow functionNcss -- registers the native list classes and the helper operations they share.
 function defineLists(): void {
   const constructors: [string, (frame: Frame, instance: KObject, args: Value[]) => void][] = [
     ['()', () => {}],
@@ -710,7 +710,7 @@ interface ItemIteratorState {
   last?: number;
 }
 
-// code-gauge-allow functionNcss 55 -- registers the natives of one class together, in the order the prelude declares them.
+// code-gauge-allow functionNcss -- registers the natives of one class together, in the order the prelude declares them.
 function defineIterators(): void {
   const iterator = 'kotlin.collections.ItemIterator';
   defineNative(`${iterator}.hasNext()`, (_frame, receiver) => {
@@ -902,7 +902,6 @@ function defineMapConstructors(): void {
   }
 }
 
-// code-gauge-allow functionNcss 54 -- registers the natives of one class together, in the order the prelude declares them.
 function defineMaps(): void {
   defineNativeProperty(`${MAP}.size`, (_frame, map) => storeOf(map).entries.length);
   const natives: Record<string, (frame: Frame, map: Value, args: Value[]) => Value> = {
@@ -1012,8 +1011,6 @@ function initializeSet(instance: Value, store: KStore): Value {
   return UNIT;
 }
 
-// code-gauge-allow functionNcss 54 -- registers the natives of one class together, in the order the prelude declares them.
-// code-gauge-allow functionCognitiveComplexity 19 -- registers the natives of one class together, in the order the prelude declares them.
 function defineSets(): void {
   defineSetConstructors();
   defineNativeProperty(`${SET}.size`, (_frame, set) => storeOf(set).entries.length);
@@ -1275,7 +1272,7 @@ function defineViewChanging(owner: string): void {
 }
 
 /** The iterator of a map's view, which removes the entry it returned last. */
-// code-gauge-allow functionNcss 32 -- registers the natives of one class together, in the order the prelude declares them.
+// code-gauge-allow functionNcss -- registers the natives of one class together, in the order the prelude declares them.
 function defineStoreIterator(): void {
   const iterator = 'kotlin.collections.StoreIterator';
   interface State {

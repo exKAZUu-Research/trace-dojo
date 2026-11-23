@@ -71,7 +71,7 @@ export abstract class ExpressionConverter {
     };
   }
 
-  // code-gauge-allow functionNcss 35 -- one case per kind of tree-sitter's expression nodes.
+  // code-gauge-allow functionNcss -- one case per kind of tree-sitter's expression nodes.
   convertExpression(node: Node): Expression {
     if (Object.hasOwn(UNAVAILABLE_EXPRESSIONS, node.type)) throw unavailable(node, UNAVAILABLE_EXPRESSIONS[node.type]);
     const row = rowOf(node);
@@ -379,7 +379,7 @@ export abstract class ExpressionConverter {
     return { kind: 'prefix', row: rowOf(node), operator: operator as '-' | '+' | '!' | '++' | '--', operand };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private convertWhen(node: Node): Expression {
     let subject: Expression | undefined;
     const entries: WhenEntry[] = [];

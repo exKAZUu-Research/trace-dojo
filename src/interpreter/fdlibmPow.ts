@@ -140,7 +140,7 @@ function specialPower(x: number, y: number, words: Words, yisint: number): numbe
 }
 
 /** The results of y being ±∞, ±1, 2, or 0.5, whose low word is zero. */
-// code-gauge-allow functionCognitiveComplexity 16 -- transcribes a step of fdlibm's e_pow.c statement by statement, so that it can be compared with the C source line by line.
+// code-gauge-allow functionCognitiveComplexity -- transcribes a step of fdlibm's e_pow.c statement by statement, so that it can be compared with the C source line by line.
 function specialExponent(x: number, y: number, { hx, lx, hy, ix, iy }: Words): number | undefined {
   if (iy === 0x7f_f0_00_00) {
     if (((ix - 0x3f_f0_00_00) | lx) === 0) return y - y;
@@ -169,7 +169,7 @@ function specialBase(x: number, { hx, lx, hy, ix }: Words, yisint: number): numb
  * log2(ax) in two parts for |y| beyond 2^31, where x must be near 1 for a finite result; the other x overflow or
  * underflow, which this returns as the result itself.
  */
-// code-gauge-allow functionCognitiveComplexity 17 -- transcribes a step of fdlibm's e_pow.c statement by statement, so that it can be compared with the C source line by line.
+// code-gauge-allow functionCognitiveComplexity -- transcribes a step of fdlibm's e_pow.c statement by statement, so that it can be compared with the C source line by line.
 function logNearOne(ax: number, ix: number, iy: number, hy: number, s: number): { t1: number; t2: number } | number {
   if (iy > 0x43_f0_00_00) {
     if (ix <= 0x3f_ef_ff_ff) return hy < 0 ? HUGE * HUGE : TINY * TINY;
@@ -186,7 +186,7 @@ function logNearOne(ax: number, ix: number, iy: number, hy: number, s: number): 
 }
 
 /** log2(ax) in two parts, t1 + t2, for the general case. */
-// code-gauge-allow functionNcss 44 -- transcribes a step of fdlibm's e_pow.c statement by statement, so that it can be compared with the C source line by line.
+// code-gauge-allow functionNcss -- transcribes a step of fdlibm's e_pow.c statement by statement, so that it can be compared with the C source line by line.
 function logOfMagnitude(magnitude: number, highWord: number): { t1: number; t2: number } {
   let ax = magnitude;
   let ix = highWord;
@@ -233,7 +233,7 @@ function logOfMagnitude(magnitude: number, highWord: number): { t1: number; t2: 
 }
 
 /** s times 2^(y * (t1 + t2)), where t1 + t2 is log2(|x|) and s is the result's sign. */
-// code-gauge-allow functionNcss 37 -- transcribes a step of fdlibm's e_pow.c statement by statement, so that it can be compared with the C source line by line.
+// code-gauge-allow functionNcss -- transcribes a step of fdlibm's e_pow.c statement by statement, so that it can be compared with the C source line by line.
 function exp2Product(y: number, t1: number, t2: number, s: number): number {
   const y1 = withLowZero(y);
   const pL = (y - y1) * t1 + y * t2;

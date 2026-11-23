@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 1000 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { VISIBILITY_KEYWORDS } from './ast';
 import type {
@@ -162,8 +162,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionNcss 45 -- One flag per modifier of a class.
-  // code-gauge-allow functionCognitiveComplexity 24 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionNcss -- One flag per modifier of a class.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private declareClass(decl: ClassDecl, file: FileContext, outer: ClassEntry | undefined): ClassEntry {
     const kind: ClassSymbolKind = decl.classKind === 'enum' ? 'enum' : decl.classKind;
     const prefix = outer ? `${outer.symbol.qualifiedName}$` : file.packageName ? `${file.packageName}.` : '';
@@ -584,7 +584,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** A constructor of a library class that a native implements, which initializes the instance `invoke` creates. */
-  // code-gauge-allow functionNcss 33 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionNcss -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private declareNativeConstructor(entry: ClassEntry, member: Extract<MemberDecl, { kind: 'constructor' }>): void {
     const { symbol: cls } = entry;
     const ctor = new FunctionSymbol(cls.name);
@@ -675,9 +675,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionNcss 31 -- builds the function symbol from the declaration and its modifiers.
-  // code-gauge-allow functionNcss 32 -- declaration flags and type constraints describe the same signature.
-  // code-gauge-allow functionNcss 33 -- Declaration flags, annotations, and the signature share the scope.
+  // code-gauge-allow functionNcss -- builds the function symbol from the declaration and its modifiers.
+  // code-gauge-allow functionNcss -- declaration flags and type constraints describe the same signature.
+  // code-gauge-allow functionNcss -- Declaration flags, annotations, and the signature share the scope.
   private declareFunction(
     decl: FunctionDecl,
     ownerScope: Scope,
@@ -783,8 +783,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     native: NativeFunction
   ): NonNullable<FunctionSymbol['invoke']>;
 
-  // code-gauge-allow functionNcss 45 -- The parts of a property declaration and their checks.
-  // code-gauge-allow functionCognitiveComplexity 22 -- modifier, backing-field, and initialization rules share one declaration check.
+  // code-gauge-allow functionNcss -- The parts of a property declaration and their checks.
+  // code-gauge-allow functionCognitiveComplexity -- modifier, backing-field, and initialization rules share one declaration check.
   private declareProperty(
     decl: PropertyDecl,
     ownerScope: Scope,
@@ -1108,7 +1108,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** Links a member to the members of the supertypes that it overrides, checking that it may override them. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private linkMember(symbol: ClassSymbol, member: MemberSymbol): void {
     const overridden = aliasedOverrides(symbol, this.findOverridden(symbol, member));
     if (overridden.length === 0) {
@@ -1138,7 +1138,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.vtable.set(member.root, member);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Each inherited parameter must agree on the default owner.
+  // code-gauge-allow functionCognitiveComplexity -- Each inherited parameter must agree on the default owner.
   private inheritDefaults(member: FunctionSymbol, overridden: MemberSymbol[]): void {
     if (!member.isLibrary && member.params.some((parameter) => parameter.hasDefault)) {
       this.error(member.row, `override する関数 ${member.name} では、引数の初期値を指定できません。`);
@@ -1185,7 +1185,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** The members of the supertypes that a member overrides: same name, and for functions the same parameter types. */
-  // code-gauge-allow functionCognitiveComplexity 24 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private findOverridden(
     cls: ClassSymbol,
     member: MemberSymbol,

@@ -130,7 +130,7 @@ export class Compiler extends BodyCompiler {
   }
 
   /** Compiles files together: their classes first, then their signatures, then their bodies. */
-  // code-gauge-allow functionNcss 49 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionNcss -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   compileFiles(
     files: { file: KotlinFile; isLibrary: boolean }[],
     afterClasses: () => void,

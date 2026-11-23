@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 999 -- expression compilation shares name resolution, call dispatch, and type inference.
+// code-gauge-allow-file fileNcss -- expression compilation shares name resolution, call dispatch, and type inference.
 import { CompileError } from '../interpreter/diagnostics';
 import type { Block, Expression, LambdaExpression } from './ast';
 import {
@@ -237,7 +237,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return compiled;
   }
 
-  // code-gauge-allow functionNcss 42 -- one case per kind of expression.
+  // code-gauge-allow functionNcss -- one case per kind of expression.
   private compileExpressionKind(
     scope: Scope,
     context: FunctionContext,
@@ -381,7 +381,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   // Literals.
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected compileInteger(
     expression: Extract<Expression, { kind: 'integer' }>,
     expected: KType | undefined
@@ -519,7 +519,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private findStaticMember(scope: Scope, name: string, row: number): Compiled | undefined {
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       for (let cls = current.staticClass; cls; cls = cls.outer) {
@@ -980,8 +980,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return this.compileInvoke(scope, context, functionValue, args, hasTrailingLambda, row);
   }
 
-  // code-gauge-allow functionParameterCount 8 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
-  // code-gauge-allow functionCognitiveComplexity 18 -- callable values, receiver members, and constructors follow Kotlin resolution levels.
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity -- callable values, receiver members, and constructors follow Kotlin resolution levels.
   private compileNamedCall(
     scope: Scope,
     context: FunctionContext,
@@ -1129,7 +1129,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** Enum helpers and diagnostics for a name with no callable declaration. */
-  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   private compileUnresolvedCall(
     scope: Scope,
     context: FunctionContext,
@@ -1258,7 +1257,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
   }
 
-  // code-gauge-allow functionParameterCount 9 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   private compileMethodCall(
     scope: Scope,
     context: FunctionContext,
@@ -1360,7 +1359,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
    * `x.name(...)` without a function `name` for `x`: `invoke` of a function value, a value of a function type with a
    * receiver.
    */
-  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   private compileFunctionValueCall(
     scope: Scope,
     context: FunctionContext,
@@ -1400,9 +1399,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return this.error(row, `${cls.name}.${name} が見つかりません。`);
   }
 
-  // code-gauge-allow functionParameterCount 9 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
-  // code-gauge-allow functionNcss 34 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  // code-gauge-allow functionCognitiveComplexity 21 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   private compileQualifiedCall(
     scope: Scope,
     context: FunctionContext,
@@ -1459,7 +1456,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     row: number
   ): Compiled;
 
-  // code-gauge-allow functionParameterCount 8 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   private compileSuperCall(
     scope: Scope,
     context: FunctionContext,
@@ -1508,9 +1505,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
   protected abstract nonVirtualCall(call: ResolvedCall): (frame: Frame, receiver: Value) => Value;
 
   /** Calls a value of a function type, such as a lambda held in a variable. */
-  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
-  // code-gauge-allow functionNcss 40 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  // code-gauge-allow functionCognitiveComplexity 22 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionNcss -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected compileInvoke(
     scope: Scope,
     context: FunctionContext,
@@ -1611,7 +1608,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** Calls an operator function such as `get` or `contains` on a compiled receiver. */
-  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   protected compileOperatorCall(
     scope: Scope,
     context: FunctionContext,
@@ -1625,7 +1622,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** Resolves an operator call, giving both the resolved function and its compiled call. */
-  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   protected resolveOperator(
     scope: Scope,
     context: FunctionContext,
@@ -1738,8 +1735,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   // Lambdas.
 
-  // code-gauge-allow functionNcss 33 -- the parts of a lambda, from its parameters to its function value, which follow one another.
-  // code-gauge-allow functionCognitiveComplexity 16 -- parameter setup, body flow, and representation follow the lambda lifecycle.
+  // code-gauge-allow functionNcss -- the parts of a lambda, from its parameters to its function value, which follow one another.
+  // code-gauge-allow functionCognitiveComplexity -- parameter setup, body flow, and representation follow the lambda lifecycle.
   compileLambda(
     scope: Scope,
     context: FunctionContext,
@@ -1815,7 +1812,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** The parameters of a lambda, declared or `it`, with the types that they declare or the expected type gives them. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private lambdaParameters(
     scope: Scope,
     lambda: LambdaExpression,

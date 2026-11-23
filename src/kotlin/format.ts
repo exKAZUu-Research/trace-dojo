@@ -30,7 +30,7 @@ export function charToString(code: number): string {
 }
 
 /** Formats a primitive value as `toString` does. */
-// code-gauge-allow duplicateLines 16 -- converts a primitive to text, which differs from trace.ts's conversion to a trace value in every case.
+// code-gauge-allow duplicateLines -- converts a primitive to text, which differs from trace.ts's conversion to a trace value in every case.
 export function formatPrimitive(kind: PrimitiveKind, value: number | bigint): string {
   switch (kind) {
     case 'Double': {

@@ -6,7 +6,7 @@ import { type KType, resolved } from './types';
 import { KObject, type Value } from './values';
 
 /** A test of whether a value is an instance of a type, as `is` checks it with type arguments erased. */
-// code-gauge-allow functionCognitiveComplexity 26 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+// code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
 export function instanceTest(core: Core, type: KType): (value: Value) => boolean {
   const actual = resolved(type);
   const acceptsNull = actual.nullable;

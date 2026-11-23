@@ -199,7 +199,7 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   /** Runs a function's body in a new frame, returning what it returns. */
-  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   call(
     info: FunctionInfo,
     caller: Frame | undefined,

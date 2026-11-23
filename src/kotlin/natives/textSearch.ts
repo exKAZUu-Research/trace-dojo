@@ -8,7 +8,7 @@ export interface TextSearch {
   readonly lastIndexOf: (start: number) => number;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- forward and reverse searches apply different JVM bounds to the same matcher.
+// code-gauge-allow functionCognitiveComplexity -- forward and reverse searches apply different JVM bounds to the same matcher.
 export function textSearch(
   frame: Frame,
   value: string,

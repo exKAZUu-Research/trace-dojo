@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 564 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { Expression, ParameterDecl, PropertyDecl } from './ast';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
@@ -90,8 +90,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Parameters, receivers, defaults, the body, and the frame of a function.
-  // code-gauge-allow functionNcss 52 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionNcss -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private ensureFunctionCompiled(entry: FunctionEntry): void {
     if (entry.state !== 'pending') return;
     entry.state = 'compiling';
@@ -210,7 +209,6 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       caller.runtime.call(info, caller, none, receiver, args, callRow, run);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private ensurePropertyCompiled(entry: PropertyEntry): void {
     if (entry.state !== 'pending') return;
     entry.state = 'compiling';
@@ -439,7 +437,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   }
 
   /** A property delegated with `by`, whose delegate's `getValue` and `setValue` read and write it. */
-  // code-gauge-allow functionNcss 42 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionNcss -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileMemberDelegate(entry: PropertyEntry): void {
     const { symbol, decl } = entry;
     const context = this.initializerContext(entry);
@@ -514,7 +512,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
 
   // Classes' initializers.
 
-  // code-gauge-allow functionNcss 35 -- the parts of a class's initializer, from the defaults to the constructor, which follow one another.
+  // code-gauge-allow functionNcss -- the parts of a class's initializer, from the defaults to the constructor, which follow one another.
   private compileClassInitializer(entry: ClassEntry): void {
     const { symbol } = entry;
     if (symbol.isInterface || symbol.isNative) return;

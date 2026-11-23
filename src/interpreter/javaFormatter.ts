@@ -26,7 +26,7 @@ interface Specifier {
 }
 
 /** Formats as `String.format` does for the conversions learners use. */
-// code-gauge-allow functionCognitiveComplexity 18 -- argument position and conversion rules share one left-to-right traversal.
+// code-gauge-allow functionCognitiveComplexity -- argument position and conversion rules share one left-to-right traversal.
 export function formatJava<V>(
   pattern: string,
   args: V[],

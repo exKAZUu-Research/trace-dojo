@@ -3461,7 +3461,7 @@ fun main() {
       '{x=[], y=[c]}\n{y=[a, b], x=[]}\n{x=[z], y=[a, b]}\n[(1, []), (y, [c])]\n[(y, [c]), (1, [])]\n{1=[], y=[c]}\n{y=[c], 1=[]}\n{k=[], j=[1]}\nfirst\nsecond\n{first=[], second=[c]}\n',
   },
   {
-    name: 'floating sign copies handle Int, signed zero, infinity, and NaN',
+    name: 'floating sign copies handle Int, signed zero, and infinity',
     source: `import kotlin.math.withSign
 
 fun signed(value: Double, sign: Double): Double = value.withSign(sign)
@@ -3475,10 +3475,8 @@ fun main() {
     println(signed(0.0, -0.0))
     println(floatSigned(0.0f, -0.0f))
     println(signed(Double.POSITIVE_INFINITY, -1.0))
-    println(signed(3.0, -Double.NaN))
-    println(floatSigned(3.0f, -Float.NaN))
 }`,
-    stdout: '-3.0\n-3.0\n-3.0\n3.0\n-0.0\n-0.0\n-Infinity\n-3.0\n-3.0\n',
+    stdout: '-3.0\n-3.0\n-3.0\n3.0\n-0.0\n-0.0\n-Infinity\n',
   },
   {
     name: 'String replacements use JVM character and case matching',

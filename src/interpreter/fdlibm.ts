@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 575 -- The fdlibm functions share constants and kernels.
+// code-gauge-allow-file fileNcss -- The fdlibm functions share constants and kernels.
 /**
  * The math functions of fdlibm 5.3, which the JVM's `StrictMath` is specified to compute, transcribed so that JVM
  * languages print the JVM's last digits. JavaScript engines compute `Math.sin` and the like with other algorithms,
@@ -103,7 +103,7 @@ const QS3 = -0.6882839716054533;
 const QS4 = 0.07703815055590194;
 
 /** e_asin.c */
-// code-gauge-allow functionNcss 39 -- A transcription of fdlibm's e_asin.c, whose steps reviews compare with the original.
+// code-gauge-allow functionNcss -- A transcription of fdlibm's e_asin.c, whose steps reviews compare with the original.
 export function fdlibmAsin(x: number): number {
   let t = 0;
   let w: number;
@@ -146,7 +146,7 @@ export function fdlibmAsin(x: number): number {
 }
 
 /** e_acos.c */
-// code-gauge-allow functionNcss 34 -- A transcription of fdlibm's e_acos.c, whose steps reviews compare with the original.
+// code-gauge-allow functionNcss -- A transcription of fdlibm's e_acos.c, whose steps reviews compare with the original.
 export function fdlibmAcos(x: number): number {
   const hx = high(x);
   const ix = hx & 0x7f_ff_ff_ff;
@@ -193,8 +193,8 @@ const AT = [
 ];
 
 /** s_atan.c */
-// code-gauge-allow functionCognitiveComplexity 22 -- A transcription of fdlibm's s_atan.c, whose steps reviews compare with the original.
-// code-gauge-allow functionNcss 37 -- A transcription of fdlibm's s_atan.c, whose steps reviews compare with the original.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of fdlibm's s_atan.c, whose steps reviews compare with the original.
+// code-gauge-allow functionNcss -- A transcription of fdlibm's s_atan.c, whose steps reviews compare with the original.
 export function fdlibmAtan(argument: number): number {
   let x = argument;
   let id: number;
@@ -237,8 +237,8 @@ export function fdlibmAtan(argument: number): number {
 const PI_LO = 1.2246467991473532e-16;
 
 /** e_atan2.c */
-// code-gauge-allow functionCognitiveComplexity 16 -- A transcription of fdlibm's e_atan2.c, whose steps reviews compare with the original.
-// code-gauge-allow functionNcss 38 -- A transcription of fdlibm's e_atan2.c, whose steps reviews compare with the original.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of fdlibm's e_atan2.c, whose steps reviews compare with the original.
+// code-gauge-allow functionNcss -- A transcription of fdlibm's e_atan2.c, whose steps reviews compare with the original.
 export function fdlibmAtan2(y: number, x: number): number {
   const hx = high(x);
   const ix = hx & 0x7f_ff_ff_ff;
@@ -337,8 +337,8 @@ const P4 = -0.0000016533902205465252;
 const P5 = 4.1381367970572385e-8;
 
 /** e_exp.c */
-// code-gauge-allow functionCognitiveComplexity 23 -- A transcription of fdlibm's e_exp.c, whose steps reviews compare with the original.
-// code-gauge-allow functionNcss 44 -- A transcription of fdlibm's e_exp.c, whose steps reviews compare with the original.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of fdlibm's e_exp.c, whose steps reviews compare with the original.
+// code-gauge-allow functionNcss -- A transcription of fdlibm's e_exp.c, whose steps reviews compare with the original.
 export function fdlibmExp(argument: number): number {
   let x = argument;
   let hi = 0;
@@ -395,8 +395,8 @@ const LG6 = 0.15313837699209373;
 const LG7 = 0.14798198605116586;
 
 /** e_log.c */
-// code-gauge-allow functionCognitiveComplexity 18 -- A transcription of fdlibm's e_log.c, whose steps reviews compare with the original.
-// code-gauge-allow functionNcss 52 -- A transcription of fdlibm's e_log.c, whose steps reviews compare with the original.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of fdlibm's e_log.c, whose steps reviews compare with the original.
+// code-gauge-allow functionNcss -- A transcription of fdlibm's e_log.c, whose steps reviews compare with the original.
 export function fdlibmLog(argument: number): number {
   let x = argument;
   let hx = high(x);
@@ -521,8 +521,8 @@ export function fdlibmCbrt(argument: number): number {
 }
 
 /** e_hypot.c */
-// code-gauge-allow functionCognitiveComplexity 20 -- A transcription of fdlibm's e_hypot.c, whose steps reviews compare with the original.
-// code-gauge-allow functionNcss 54 -- A transcription of fdlibm's e_hypot.c, whose steps reviews compare with the original.
+// code-gauge-allow functionCognitiveComplexity -- A transcription of fdlibm's e_hypot.c, whose steps reviews compare with the original.
+// code-gauge-allow functionNcss -- A transcription of fdlibm's e_hypot.c, whose steps reviews compare with the original.
 export function fdlibmHypot(x: number, y: number): number {
   let a: number;
   let b: number;
@@ -654,7 +654,7 @@ const T = [
 ];
 
 /** k_tan.c: tan(x + y) for |x| <= pi / 4 when `iy` is 1, and -1 / tan(x + y) when `iy` is -1. */
-// code-gauge-allow functionNcss 38 -- A transcription of fdlibm's k_tan.c, whose steps reviews compare with the original.
+// code-gauge-allow functionNcss -- A transcription of fdlibm's k_tan.c, whose steps reviews compare with the original.
 function kernelTan(xArgument: number, yArgument: number, iy: number): number {
   let x = xArgument;
   let y = yArgument;

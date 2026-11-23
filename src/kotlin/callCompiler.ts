@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 747 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   type ArgumentEvaluation,
@@ -125,7 +125,7 @@ interface Attempt {
 }
 
 /** The indexes of the arguments assigned to each parameter. */
-// code-gauge-allow functionCognitiveComplexity 20 -- mapping keeps the positional cursor, named assignments, and trailing lambda in source order.
+// code-gauge-allow functionCognitiveComplexity -- mapping keeps the positional cursor, named assignments, and trailing lambda in source order.
 function mapArguments(
   params: ParameterSymbol[],
   args: ArgumentSyntax[],
@@ -208,7 +208,7 @@ export abstract class CallCompiler extends CompilerCore {
     explicitReceiver?: Compiled
   ): Compiled;
 
-  // code-gauge-allow functionParameterCount 10 -- the call and its local fallback diagnostic are supplied by the source form.
+  // code-gauge-allow functionParameterCount -- the call and its local fallback diagnostic are supplied by the source form.
   protected resolveInLevels(
     scope: Scope,
     context: FunctionContext,
@@ -317,7 +317,7 @@ export abstract class CallCompiler extends CompilerCore {
    * Resolves a call among candidate levels, the nearest first: the first level with an applicable candidate decides,
    * as Kotlin's resolution goes from inner scopes to outer ones.
    */
-  // code-gauge-allow functionParameterCount 11 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   protected resolveCall(
     scope: Scope,
     context: FunctionContext,
@@ -454,7 +454,7 @@ export abstract class CallCompiler extends CompilerCore {
     return compiledArgs;
   }
 
-  // code-gauge-allow functionParameterCount 7 -- argument evidence depends on the original scope, flow, and sibling positions.
+  // code-gauge-allow functionParameterCount -- argument evidence depends on the original scope, flow, and sibling positions.
   private siblingArgumentHint(
     scope: Scope,
     context: FunctionContext,
@@ -510,7 +510,7 @@ export abstract class CallCompiler extends CompilerCore {
 
   private probingArgumentHint = false;
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- the hint loop restores its compiler state even when it rejects an ambiguous result.
+  // code-gauge-allow functionCognitiveComplexity -- the hint loop restores its compiler state even when it rejects an ambiguous result.
   private checkBareArgumentHints(
     scope: Scope,
     context: FunctionContext,
@@ -540,7 +540,7 @@ export abstract class CallCompiler extends CompilerCore {
   }
 
   /** The most specific applicable candidate of the nearest level that has one. */
-  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   private chooseAttempt(
     scope: Scope,
     context: FunctionContext,
@@ -567,7 +567,7 @@ export abstract class CallCompiler extends CompilerCore {
     return undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private startAttempt(
     candidate: Candidate,
     args: ArgumentSyntax[],
@@ -640,7 +640,7 @@ export abstract class CallCompiler extends CompilerCore {
     return symbol.typeParameters;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private isApplicable(
     attempt: Attempt,
     args: ArgumentSyntax[],
@@ -733,7 +733,7 @@ export abstract class CallCompiler extends CompilerCore {
     return lambda.params.length === actual.params.length;
   }
 
-  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   private mostSpecific(
     attempts: Attempt[],
     compiledArgs: (Compiled | undefined)[],
@@ -767,7 +767,7 @@ export abstract class CallCompiler extends CompilerCore {
    * they are and `b`'s become fresh variables, which keeps the comparison from constraining the variables the call
    * infers.
    */
-  // code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private isAsSpecific(a: Attempt, b: Attempt, compiledArgs: (Compiled | undefined)[]): boolean {
     const aSubstitution = a.candidate.substitution;
     const bSubstitution = this.freshSubstitution(b);
@@ -804,8 +804,8 @@ export abstract class CallCompiler extends CompilerCore {
   }
 
   /** Overloads that differ only in a lambda's result, such as `sumOf`, are chosen by the type the lambda returns. */
-  // code-gauge-allow functionCognitiveComplexity 20 -- candidates use inferred results and expected results in resolution order.
-  // code-gauge-allow functionNcss 35 -- parameter compatibility and the resulting overload decision are one inference step.
+  // code-gauge-allow functionCognitiveComplexity -- candidates use inferred results and expected results in resolution order.
+  // code-gauge-allow functionNcss -- parameter compatibility and the resulting overload decision are one inference step.
   private chooseByLambdaResult(
     attempts: Attempt[],
     args: ArgumentSyntax[],
@@ -949,7 +949,7 @@ export abstract class CallCompiler extends CompilerCore {
     }
   }
 
-  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   private completeCall(
     scope: Scope,
     context: FunctionContext,
@@ -1049,7 +1049,7 @@ export abstract class CallCompiler extends CompilerCore {
    * they mention, as `C : Iterable<T>` in `onEach` gives `T` its type from `C`, so a variable nothing constrains yet
    * waits for the others.
    */
-  // code-gauge-allow functionCognitiveComplexity 26 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private fixVariables({ candidate, substitution, variables }: Attempt, row: number, allowOpen: boolean): void {
     const { symbol } = candidate;
     let pending = variables;
@@ -1200,8 +1200,8 @@ export abstract class CallCompiler extends CompilerCore {
     return this.error(row, `${name} の引数の書き方に誤りがあります。`);
   }
 
-  // code-gauge-allow functionParameterCount 8 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
-  // code-gauge-allow functionCognitiveComplexity 27 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private reportInapplicable(
     all: Candidate[],
     args: ArgumentSyntax[],

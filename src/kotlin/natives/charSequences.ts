@@ -374,7 +374,6 @@ function searchRegions(
   return findIndex(match, Math.max(start, 0), Math.min(end, source.length()), false);
 }
 
-// code-gauge-allow functionParameterCount 6 -- both input offsets, the region length, and case handling follow Kotlin's region matching contract.
 function regionMatches(
   first: Sequence,
   firstOffset: number,
