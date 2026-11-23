@@ -227,8 +227,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const returnType = symbol.returnType;
     const misfit = context.returnedTypes.find((type) => !isSubtype(type, returnType));
     if (misfit) this.error(expression.row, typeMismatchMessage(returnType, misfit));
-    if (!declared && context.hasDirectReturn)
-      this.error(expression.row, '= の後の式で return を使うときは、関数の戻り値の型を書いてください。');
+    if (!declared) this.rejectDirectReturn(context, expression.row);
     for (const settle of context.inferredReturns) settle(returnRepr(symbol));
     context.returnType = symbol.returnType;
     return convertRepr(
@@ -376,7 +375,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     if (body?.kind !== 'expression') this.error(entry.decl.row, `プロパティ ${entry.decl.name} の型を書いてください。`);
     const { context, scope } = this.accessorContext(entry, 'get', true);
     const compiled = this.compileExpression(scope, context, body.expression);
+    this.rejectDirectReturn(context, body.expression.row);
     return this.inferredResultType(compiled);
+  }
+
+  /** A `return` written directly in an expression body needs a declared result type, as kotlinc requires. */
+  private rejectDirectReturn(context: FunctionContext, row: number): void {
+    if (context.hasDirectReturn) this.error(row, '= の後の式で return を使うときは、戻り値の型を書いてください。');
   }
 
   private accessorContext(
