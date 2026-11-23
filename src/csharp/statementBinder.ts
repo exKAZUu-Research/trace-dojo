@@ -117,6 +117,16 @@ export abstract class StatementBinder extends PatternBinder {
     return local;
   }
 
+  /** Reports CS1654 for a member of a struct that a readonly local, such as a foreach variable, holds. */
+  private reportsReadonlyLocalMember(receiver: BoundExpression, position: Position): boolean {
+    let holder = receiver;
+    while (holder.kind === 'field' && isValueType(holder.type)) holder = holder.receiver;
+    if (holder.kind !== 'local' || !holder.local.isReadonly || !isValueType(holder.type)) return false;
+    const reason = (holder.local as { readonlyReason?: string }).readonlyReason ?? 'foreach 繰り返し変数';
+    this.error(position, 'CS1654', `'${holder.local.name}' のメンバーは '${reason}' であるため変更できません`);
+    return true;
+  }
+
   // code-gauge-allow functionNcss -- Each kind of storage has its own rule for assignment.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   checkAssignable(
@@ -139,6 +149,7 @@ export abstract class StatementBinder extends PatternBinder {
       }
       case 'field': {
         this.checkReadonlyField(target.field, context, position);
+        if (this.reportsReadonlyLocalMember(target.receiver, position)) return target;
         const holder = target.receiver;
         if (
           (holder.kind === 'field' || holder.kind === 'staticField') &&
@@ -251,6 +262,7 @@ export abstract class StatementBinder extends PatternBinder {
         `set アクセサーにアクセスできないため、プロパティまたはインデクサー '${display}' はこのコンテキストでは使用できません`
       );
     }
+    if (target.receiver && this.reportsReadonlyLocalMember(target.receiver, position)) return target as BoundLValue;
     if (
       target.receiver &&
       target.receiver.type.kind === 'named' &&
@@ -950,7 +962,11 @@ export abstract class StatementBinder extends PatternBinder {
     } finally {
       context.fn.breakDepth--;
     }
-    return { kind: 'switch', value, sections, temporary, row: statement.row, step: 'none' };
+    // Roslyn closes a switch without `default` whose unguarded patterns together match every value of its input.
+    const isComplete =
+      value.type.kind !== 'error' &&
+      this.patternSpaces.isSubsumed(seen.handled, { kind: 'any', local: undefined, inputType: value.type });
+    return { kind: 'switch', value, sections, temporary, isComplete, row: statement.row, step: 'none' };
   }
 
   /** Binds a case label, reporting a duplicate constant or default and a case that an earlier one covers. */

@@ -666,11 +666,15 @@ export abstract class ExpressionBinder extends MemberBinder {
     }
     const leftType = underlying ?? left.type;
     if (right.kind !== 'unbound' && this.conversions.implicit(leftType, right.type)) {
+      const toNullable = nullableUnderlying(right.type) !== undefined;
       return {
         kind: 'coalesce',
-        left: this.convert(left, nullableUnderlying(right.type) ? right.type : left.type, node),
+        left: this.convert(left, toNullable ? right.type : left.type, node),
         right,
-        unwrapLeft: underlying !== undefined && !nullableUnderlying(right.type),
+        unwrapLeft: underlying !== undefined && !toNullable,
+        leftConversion: toNullable
+          ? undefined
+          : this.convert({ kind: 'compoundOperand', type: leftType, row: node.row }, right.type, node),
         type: right.type,
         row: node.row,
       };

@@ -293,7 +293,7 @@ export class FlowAnalyzer {
     }
     const breaks = this.jumps.breaks;
     this.jumps = saved;
-    const exit: State = hasDefault ? 'unreachable' : afterValue;
+    const exit: State = hasDefault || statement.isComplete ? 'unreachable' : afterValue;
     return intersectAll(exit, breaks);
   }
 

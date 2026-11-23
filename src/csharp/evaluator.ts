@@ -505,8 +505,9 @@ export class Evaluator extends StatementExecutor {
       }
       case 'coalesce': {
         const left = this.evaluate(expression.left, frame);
-        if (left !== undefined) return left;
-        return this.evaluate(expression.right, frame);
+        if (left === undefined) return this.evaluate(expression.right, frame);
+        const { leftConversion } = expression;
+        return leftConversion ? this.withOperand(frame, left, () => this.evaluate(leftConversion, frame)) : left;
       }
       case 'conditional': {
         return this.evaluate(expression.condition, frame)

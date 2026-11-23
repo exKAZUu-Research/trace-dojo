@@ -130,7 +130,14 @@ export type BoundExpression =
       isLifted: boolean;
     } & Base)
   | ({ kind: 'logical'; operator: '&&' | '||'; left: BoundExpression; right: BoundExpression } & Base)
-  | ({ kind: 'coalesce'; left: BoundExpression; right: BoundExpression; unwrapLeft: boolean } & Base)
+  | ({
+      kind: 'coalesce';
+      left: BoundExpression;
+      right: BoundExpression;
+      unwrapLeft: boolean;
+      /** The conversion of a non-null left value to the result type, reading it as a `compoundOperand`. */
+      leftConversion?: BoundExpression;
+    } & Base)
   | ({ kind: 'conditional'; condition: BoundExpression; whenTrue: BoundExpression; whenFalse: BoundExpression } & Base)
   | ({
       kind: 'convert';
@@ -309,7 +316,14 @@ export type BoundStatement =
       /** Whether the variable's binding records a step, as it does for values learners answer. */
       bindingStoresAnswer: boolean;
     } & StatementBase)
-  | ({ kind: 'switch'; value: BoundExpression; sections: BoundSwitchSection[]; temporary: LocalSymbol } & StatementBase)
+  | ({
+      kind: 'switch';
+      value: BoundExpression;
+      sections: BoundSwitchSection[];
+      temporary: LocalSymbol;
+      /** Whether the cases match every value without a `default`, so that no value leaves the switch unmatched. */
+      isComplete: boolean;
+    } & StatementBase)
   | ({ kind: 'break' } & StatementBase)
   | ({ kind: 'continue' } & StatementBase)
   | ({ kind: 'return'; value: BoundExpression | undefined } & StatementBase)
