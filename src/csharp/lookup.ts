@@ -1,4 +1,4 @@
-import type { TypeContext } from './binderBase';
+import type { NestedTypeFound, TypeContext } from './binderBase';
 import { DeclarationBinder } from './declarations';
 import {
   type ArrayType,
@@ -80,7 +80,7 @@ export class LookupBinder extends DeclarationBinder {
     const candidates: MethodCandidate[] = [];
     let inaccessible: FieldSymbol | PropertySymbol | MethodSymbol | undefined;
     // An inaccessible nested type is left out of the lookup, as C#'s name lookup leaves it out, unless nothing else is found.
-    let inaccessibleType: { kind: 'type'; symbol: TypeSymbol; outerArgs: Type[] } | undefined;
+    let inaccessibleType: (NestedTypeFound & { kind: 'type' }) | undefined;
     // A tuple's element names stand for its `Item1`, `Item2`, ... fields.
     const element = type.kind === 'named' ? (type.tupleNames?.indexOf(name) ?? -1) : -1;
     if (element >= 0 && name !== `Item${element + 1}`)
@@ -92,13 +92,10 @@ export class LookupBinder extends DeclarationBinder {
       if (isAccessibleMember && candidates.length > 0) break;
       if (isAccessibleMember) return { found: memberLookupOf(member, owner), inaccessible };
       inaccessible ??= member;
-      const nested = symbol.nestedTypes.find(
-        (candidate) => candidate.name === name && candidate.typeParameters.length === arity
-      );
-      if (nested && candidates.length === 0) {
-        const found = { kind: 'type' as const, symbol: nested, outerArgs: owner.args };
-        if (this.canUseNestedType(nested, context)) return { found, inaccessible };
-        inaccessibleType ??= found;
+      if (candidates.length === 0) {
+        const nestedLookup = this.findNestedType(owner, name, arity, context);
+        if (nestedLookup.nested) return { found: { kind: 'type', ...nestedLookup.nested }, inaccessible };
+        if (nestedLookup.inaccessible) inaccessibleType ??= { kind: 'type', ...nestedLookup.inaccessible };
       }
       const inaccessibleMethod = this.gatherMethods(owner, name, context, type, candidates);
       inaccessible ??= inaccessibleMethod;

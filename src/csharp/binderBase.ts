@@ -86,6 +86,12 @@ export interface Library {
 /** Thrown to stop compiling after too many errors, or at an error that later ones would only repeat. */
 class TooManyErrors extends Error {}
 
+/** A nested type a name resolves to, with the outer type arguments of the type it is found in. */
+export interface NestedTypeFound {
+  symbol: TypeSymbol;
+  outerArgs: Type[];
+}
+
 export class BinderBase {
   readonly diagnostics: SourceDiagnostic[] = [];
   /** The root of the program's own namespaces, apart from the library's. */
@@ -340,10 +346,12 @@ export class BinderBase {
     const left = this.resolveType(node.left, context);
     if (left.kind === 'error') return ERROR_TYPE;
     if (left.kind === 'named') {
-      const nested = this.findNestedType(left, node.name, args.length);
-      if (nested && !this.canUseNestedType(nested.symbol, context))
-        this.error(node, 'CS0122', `'${displayTypeSymbol(nested.symbol)}' はアクセスできない保護レベルになっています`);
+      const { nested, inaccessible } = this.findNestedType(left, node.name, args.length, context);
       if (nested) return this.construct(node, nested.symbol, [...nested.outerArgs, ...args]);
+      if (inaccessible) {
+        this.reportInaccessibleType(node, inaccessible.symbol);
+        return this.construct(node, inaccessible.symbol, [...inaccessible.outerArgs, ...args]);
+      }
       this.error(node, 'CS0426', `型名 '${node.name}' が型 '${displayType(left)}' に存在しません`);
     }
     return ERROR_TYPE;
@@ -356,22 +364,22 @@ export class BinderBase {
       for (const parameter of context.methodTypeParameters.toReversed())
         if (parameter.name === name) return parameter.type;
     }
+    let inaccessible: { symbol: TypeSymbol; outerArgs: Type[] } | undefined;
     for (let type = context.type; type; type = type.containing) {
       if (args.length === 0) {
         const parameter = type.typeParameters.find((candidate) => candidate.name === name);
         if (parameter) return parameter.type;
       }
-      const nested = this.findNestedType(type.declaredType, name, args.length);
-      if (nested && !this.canUseNestedType(nested.symbol, context))
-        this.error(
-          position,
-          'CS0122',
-          `'${displayTypeSymbol(nested.symbol)}' はアクセスできない保護レベルになっています`
-        );
-      if (nested) return this.construct(position, nested.symbol, [...nested.outerArgs, ...args]);
+      const lookup = this.findNestedType(type.declaredType, name, args.length, context);
+      if (lookup.nested) return this.construct(position, lookup.nested.symbol, [...lookup.nested.outerArgs, ...args]);
+      inaccessible ??= lookup.inaccessible;
     }
     const found = this.findTypeInScope(name, args.length, context);
     if (found) return this.construct(position, found, args);
+    if (inaccessible) {
+      this.reportInaccessibleType(position, inaccessible.symbol);
+      return this.construct(position, inaccessible.symbol, [...inaccessible.outerArgs, ...args]);
+    }
     if (this.findTypeInScope(name, -1, context)) {
       const candidate = this.findTypeInScope(name, -1, context) as TypeSymbol;
       const arity = candidate.typeParameters.length;
@@ -427,8 +435,18 @@ export class BinderBase {
     return true;
   }
 
-  /** A nested type of a type or of its bases, with the outer type arguments it takes from the type it is found in. */
-  findNestedType(type: NamedType, name: string, arity: number): { symbol: TypeSymbol; outerArgs: Type[] } | undefined {
+  /**
+   * The nested type of a name in a type or its bases that code in the context may use, with the outer type arguments it
+   * takes from the type it is found in, and else the first one it may not use, which callers report as CS0122 only
+   * when nothing else gives the name. Every resolution of a name to a nested type goes through here.
+   */
+  findNestedType(
+    type: NamedType,
+    name: string,
+    arity: number,
+    context: TypeContext
+  ): { nested?: NestedTypeFound; inaccessible?: NestedTypeFound } {
+    let inaccessible: NestedTypeFound | undefined;
     for (
       let current: NamedType | undefined = type;
       current;
@@ -439,9 +457,16 @@ export class BinderBase {
       const nested = current.symbol.nestedTypes.find(
         (candidate) => candidate.name === name && candidate.typeParameters.length === arity
       );
-      if (nested) return { symbol: nested, outerArgs: current.args };
+      if (!nested) continue;
+      const found = { symbol: nested, outerArgs: current.args };
+      if (this.canUseNestedType(nested, context)) return { nested: found };
+      inaccessible ??= found;
     }
-    return undefined;
+    return { inaccessible };
+  }
+
+  reportInaccessibleType(position: Position | number, symbol: TypeSymbol): void {
+    this.error(position, 'CS0122', `'${displayTypeSymbol(symbol)}' はアクセスできない保護レベルになっています`);
   }
 
   /** The constructed types whose type arguments the compiler checks against their constraints once they are known. */
