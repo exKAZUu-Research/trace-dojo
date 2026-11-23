@@ -14,6 +14,7 @@ import type {
 import { isNullLiteral } from './ast';
 import type { ArgumentSyntax } from './callCompiler';
 import {
+  commonNarrowing,
   type Compiled,
   convertRepr,
   type Eval,
@@ -41,7 +42,7 @@ import { needsSiblingHint, siblingResultType } from './resultInference';
 import { type Frame, LoopSignal, UNASSIGNED } from './runtime';
 import { type ClassSymbol, PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
 import { instanceTest } from './typeChecks';
-import { commonSupertype, isSameType, isSubtype } from './typeRelations';
+import { commonSupertype, isSubtype } from './typeRelations';
 import { type ClassType, isNonNullClass, type KType, nonNull, resolved, substitute, typeToString } from './types';
 import { Boxed, Cell, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
 import { WhenCoverage } from './whenCoverage';
@@ -1254,8 +1255,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       type: subject.type,
       repr: subject.repr,
       eval: (frame) => frame.locals[subjectSlot] as Value,
-      // A condition that reassigns the subject's variable leaves it no longer holding the value the branches test.
-      stableKey: conditionsWrite(expression, expression.subject) ? undefined : subject.stableKey,
+      stableKey: subject.stableKey,
     };
     const before = this.flow.copy();
     const covered = new WhenCoverage();
@@ -1753,23 +1753,3 @@ function whenValueTest(
 
 /** The integer kinds that an integer literal does not convert to among a `when` subject's branches. */
 const LITERAL_KEEPING_KINDS: ReadonlySet<string> = new Set(['Long', 'Byte', 'Short', 'ULong', 'UByte', 'UShort']);
-
-/** The facts that hold whichever of two conditions matched: a value narrowed by both is their common supertype. */
-function commonNarrowing(a: ReadonlyMap<string, KType>, b: ReadonlyMap<string, KType>): Map<string, KType> {
-  const result = new Map<string, KType>();
-  for (const [key, type] of a) {
-    const other = b.get(key);
-    if (other) result.set(key, isSameType(type, other) ? type : commonSupertype([type, other]));
-  }
-  return result;
-}
-
-function conditionsWrite(expression: Extract<Expression, { kind: 'when' }>, subject: Expression | undefined): boolean {
-  let target = subject;
-  while (target?.kind === 'parenthesized') target = target.expression;
-  if (target?.kind !== 'name') return false;
-  const { name } = target;
-  return expression.entries.some((entry) =>
-    entry.conditions.some((condition) => condition.kind !== 'is' && assignedNames(condition.expression).has(name))
-  );
-}
