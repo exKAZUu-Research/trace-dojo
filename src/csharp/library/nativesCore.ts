@@ -586,8 +586,12 @@ defineNatives({
     return b instanceof CsDecimal && (unboxed(receiver) as CsDecimal).equals(b);
   },
   'System.Decimal.GetHashCode': (_call, receiver) => primitiveHash(unboxed(receiver)) ?? 0,
-  'System.Decimal.CompareTo': (_call, receiver, [other]) =>
-    other === undefined ? 1 : (unboxed(receiver) as CsDecimal).compare(unboxed(other as Value) as CsDecimal),
+  'System.Decimal.CompareTo': (_call, receiver, [other]) => {
+    if (other === undefined) return 1;
+    const value = unboxed(other as Value);
+    if (!(value instanceof CsDecimal)) fail('System.ArgumentException', 'Object must be of type Decimal.');
+    return (unboxed(receiver) as CsDecimal).compare(value);
+  },
   'System.Decimal.Parse': (_call, _receiver, [text]) => {
     if (text === undefined) failNull('s');
     const parsed = parseDecimal(text as string);
