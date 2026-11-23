@@ -1112,7 +1112,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     ];
     if (levels.length === 0) {
       if (local) throw local;
-      return this.compileUnresolvedCall(scope, context, name, args, variable !== undefined, row);
+      return this.compileUnresolvedCall(scope, context, name, { args, typeArgs }, variable !== undefined, row);
     }
     return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name, local);
   }
@@ -1174,7 +1174,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (name !== 'enumValues' && name !== 'enumValueOf') return undefined;
     const argument = typeArgs.length === 1 ? resolved(typeArgs[0]) : undefined;
     if (argument?.kind !== 'class' || argument.cls.kind !== 'enum') return undefined;
-    return this.compileEnumFunction(scope, context, argument.cls, name, args, row);
+    // The type argument names the enum, so the call passes none to the function it means.
+    return this.compileEnumFunction(scope, context, argument.cls, name, { args, typeArgs: [] }, row);
   }
 
   private receiverLevels(scope: Scope, context: FunctionContext, name: string, row: number): CallLevel[] {
@@ -1267,14 +1268,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
     scope: Scope,
     context: FunctionContext,
     name: string,
-    args: ArgumentSyntax[],
+    { args, typeArgs }: { args: ArgumentSyntax[]; typeArgs: KType[] },
     isVariable: boolean,
     row: number
   ): Compiled {
     if (isVariable) this.error(row, `${name} は関数ではないので、呼び出せません。`);
     const enumClass = this.enclosingEnum(scope);
     if (enumClass && (name === 'values' || name === 'valueOf'))
-      return this.compileEnumFunction(scope, context, enumClass, name, args, row);
+      return this.compileEnumFunction(scope, context, enumClass, name, { args, typeArgs }, row);
     this.rejectHeaderMember(name, row);
     return this.reportUnknownFunction(name, row);
   }
@@ -1545,7 +1546,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
         receiver: undefined,
       });
     if (cls.kind === 'enum' && (name === 'values' || name === 'valueOf')) {
-      return this.compileEnumFunction(scope, context, cls, name, args, row);
+      return this.compileEnumFunction(scope, context, cls, name, { args, typeArgs }, row);
     }
     if (levels.length === 0) return this.reportMissingQualifiedMember(cls, holder, name, row);
     return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name);
@@ -1587,7 +1588,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     context: FunctionContext,
     cls: ClassSymbol,
     name: EnumFunctionName,
-    args: ArgumentSyntax[],
+    call: { args: ArgumentSyntax[]; typeArgs: KType[] },
     row: number
   ): Compiled;
 

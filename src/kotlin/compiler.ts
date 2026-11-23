@@ -447,7 +447,7 @@ export class Compiler extends BodyCompiler {
     context: FunctionContext,
     cls: ClassSymbol,
     name: EnumFunctionName,
-    args: ArgumentSyntax[],
+    { args, typeArgs }: { args: ArgumentSyntax[]; typeArgs: KType[] },
     row: number
   ): Compiled {
     const candidate: Candidate = {
@@ -462,7 +462,7 @@ export class Compiler extends BodyCompiler {
       [{ candidates: [candidate], receiver: undefined }],
       args,
       false,
-      [],
+      typeArgs,
       undefined,
       row,
       name
@@ -491,11 +491,7 @@ export class Compiler extends BodyCompiler {
       };
       symbol.invoke = (frame) => {
         instance(frame);
-        const values = frame.runtime.enumEntries.get(cls)?.values ?? [];
-        frame.runtime.allocate(frame, values.length + 1);
-        const array = new KObject(arrayClass, 0);
-        array.items = [...values];
-        return array;
+        return enumValuesArray(frame, cls, arrayClass);
       };
     } else {
       symbol.params = [
@@ -580,6 +576,17 @@ export class Compiler extends BodyCompiler {
 
 export { TURTLE_PACKAGE, callFunction, parameterReprs, receiverRepr };
 export type { Eval };
+
+function enumValuesArray(frame: Frame, cls: ClassSymbol, arrayClass: ClassSymbol): Value {
+  const state = frame.runtime.enumEntries.get(cls);
+  // The JVM's array of the constants is null until the class has created them all.
+  if (state && !state.entries) return frame.runtime.throwError(frame, 'java.lang.NullPointerException');
+  const values = state?.values ?? [];
+  frame.runtime.allocate(frame, values.length + 1);
+  const array = new KObject(arrayClass, 0);
+  array.items = [...values];
+  return array;
+}
 
 function enumEntryNamed(frame: Frame, cls: ClassSymbol, entryName: Value): Value {
   if (entryName === undefined) return frame.runtime.throwError(frame, 'java.lang.NullPointerException');
