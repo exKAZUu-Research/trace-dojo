@@ -325,6 +325,9 @@ export class Compiler extends BodyCompiler {
     const [lambda] = args;
     if (!cls.isFunInterface || args.length !== 1 || lambda.value.kind !== 'lambda') return undefined;
     if (typeArgs.length > cls.typeParameters.length) return undefined;
+    // Kotlin names the parameter of a `fun interface`'s constructor `function`.
+    if (lambda.name !== undefined && lambda.name !== 'function')
+      this.error(lambda.row, `${cls.name} に ${lambda.name} という引数はありません。`);
     return this.compileSamConstructor(scope, context, cls, lambda.value, typeArgs, expected);
   }
 
