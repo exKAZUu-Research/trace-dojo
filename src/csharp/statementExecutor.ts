@@ -175,7 +175,11 @@ export abstract class StatementExecutor extends PatternMatcher {
           ? this.withOperand(frame, element, () => this.evaluate(statement.elementConversion as BoundExpression, frame))
           : element;
         this.storeLocal(frame, statement.variable, copyValue(converted), true);
-        if (statement.deconstruction) this.evaluate(statement.deconstruction, frame);
+        if (statement.deconstruction) {
+          // Each iteration declares the deconstructed variables anew, so a closure keeps its own iteration's values.
+          for (const local of statement.locals) if (local.isCaptured) frame.slots[local.slot] = new Cell(UNASSIGNED);
+          this.evaluate(statement.deconstruction, frame);
+        }
         if (this.tracing) this.runtime.steps.stepBinding(statement.row, statement.bindingStoresAnswer);
         return this.execute(statement.body, frame);
       };
