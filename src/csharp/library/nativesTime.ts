@@ -356,6 +356,7 @@ function customTimeSpan(span: TimeSpanParts, format: string): string {
       // `%` marks the next character as a custom specifier, as in `%d`.
     } else if (char === "'") {
       const end = format.indexOf("'", index + 1);
+      if (end === -1) throw new PendingException('System.FormatException', 'Input string was not in a correct format.');
       result += format.slice(index + 1, end);
       index = end;
     } else throw new PendingException('System.FormatException', 'Input string was not in a correct format.');
@@ -440,9 +441,9 @@ defineNatives({
     timeSpan(call, ticksOf(a as Value) - ticksOf(b as Value)),
   'System.TimeSpan.op_UnaryNegation': (call, _receiver, [a]) => timeSpan(call, -ticksOf(a as Value)),
   'System.TimeSpan.op_Multiply': (call, _receiver, [a, factor]) =>
-    timeSpan(call, BigInt(Math.round(Number(ticksOf(a as Value)) * (factor as number)))),
+    timeSpan(call, ticksFromDouble(Number(ticksOf(a as Value)) * (factor as number), 1n, 'factor')),
   'System.TimeSpan.op_Division(TimeSpan, double)': (call, _receiver, [a, divisor]) =>
-    timeSpan(call, BigInt(Math.round(Number(ticksOf(a as Value)) / (divisor as number)))),
+    timeSpan(call, ticksFromDouble(Number(ticksOf(a as Value)) / (divisor as number), 1n, 'divisor')),
   'System.TimeSpan.op_Division(TimeSpan, TimeSpan)': (_call, _receiver, [a, b]) =>
     Number(ticksOf(a as Value)) / Number(ticksOf(b as Value)),
   ...comparisons('System.TimeSpan'),
