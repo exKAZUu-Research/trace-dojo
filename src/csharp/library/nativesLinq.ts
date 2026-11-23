@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss -- The nativesLinq module keeps one stage of the C# interpreter together.
 import { CsDecimal } from '../decimal';
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
-import { arithmetic, PendingException } from '../numeric';
+import { arithmetic, decimalArithmetic, PendingException } from '../numeric';
 import { runtimeTypeName } from '../objects';
 import type { NativeState } from '../runtime';
 import { type NamedType, nullableUnderlying, specialOf, type SpecialType, type Type } from '../types';
@@ -309,7 +309,11 @@ function accumulatorOf(type: Type): Accumulator {
       return { kind: special, zero: 0n, add: (a, b) => arithmetic('+', 'long', a as bigint, b as bigint, true) };
     }
     case 'decimal': {
-      return { kind: special, zero: CsDecimal.ZERO, add: (a, b) => (a as CsDecimal).add(b as CsDecimal) };
+      return {
+        kind: special,
+        zero: CsDecimal.ZERO,
+        add: (a, b) => decimalArithmetic('+', a as CsDecimal, b as CsDecimal),
+      };
     }
     case 'double': {
       return { kind: special, zero: 0, add: (a, b) => (a as number) + (b as number) };
@@ -365,7 +369,7 @@ function average(call: NativeCall, args: Value[]): Value {
   for (const value of selected(call, args)) {
     if (value === undefined && isNullable) continue;
     count++;
-    if (special === 'decimal') total = (total as CsDecimal).add(value as CsDecimal);
+    if (special === 'decimal') total = decimalArithmetic('+', total as CsDecimal, value as CsDecimal);
     else if (special === 'long' || special === 'int')
       total = arithmetic('+', 'long', total as bigint, BigInt(value as number | bigint), true);
     else total = (total as number) + (value as number);
@@ -374,7 +378,7 @@ function average(call: NativeCall, args: Value[]): Value {
     if (isNullable) return undefined;
     throw noElements();
   }
-  if (special === 'decimal') return (total as CsDecimal).divide(CsDecimal.fromBigInt(BigInt(count)));
+  if (special === 'decimal') return decimalArithmetic('/', total as CsDecimal, CsDecimal.fromBigInt(BigInt(count)));
   if (special === 'float') return Math.fround((total as number) / count);
   return Number(total) / count;
 }

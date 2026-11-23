@@ -281,7 +281,8 @@ function floatArithmetic(operator: string, a: number, b: number): number {
   }
 }
 
-function decimalArithmetic(operator: string, a: CsDecimal, b: CsDecimal): CsDecimal {
+/** Decimal arithmetic, with an overflow as the C# OverflowException. */
+export function decimalArithmetic(operator: string, a: CsDecimal, b: CsDecimal): CsDecimal {
   try {
     switch (operator) {
       case '+': {
