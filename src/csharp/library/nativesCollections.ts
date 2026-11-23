@@ -1150,8 +1150,13 @@ defineNatives({
   [`${HASH_SET}.SymmetricExceptWith`]: (call, receiver, [other]) => {
     const state = hashOfState(receiver);
     const seen = newHashState(call, state.comparer, state.keyType, undefined);
-    if (other instanceof CsObject && other.native instanceof HashState && !other.native.valueType) {
-      // Another set has unique elements, which .NET removes or adds one by one.
+    if (
+      other instanceof CsObject &&
+      other.native instanceof HashState &&
+      !other.native.valueType &&
+      other.native.comparer === state.comparer
+    ) {
+      // Another set of the same comparer has elements unique under this set's, which .NET removes or adds one by one.
       for (const item of otherElements(call, other)) if (!state.remove(item)) state.insert(item, undefined, false);
       return;
     }
