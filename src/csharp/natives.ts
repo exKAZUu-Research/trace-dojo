@@ -1,6 +1,16 @@
 import type { Frame } from './runtime';
 import { displayType, type MethodSymbol, type NamedType, specialOf, type Type } from './types';
-import { CsArray, CsString, freshString, plainString, stringText, type Value, type VariableReference } from './values';
+import {
+  copyValue,
+  CsArray,
+  CsString,
+  CsStruct,
+  freshString,
+  plainString,
+  stringText,
+  type Value,
+  type VariableReference,
+} from './values';
 
 /** What a native method knows of its call besides its receiver and arguments. */
 export interface NativeCall {
@@ -47,15 +57,19 @@ export function defineNativesKeepingStrings(natives: Record<string, NativeMethod
 export function nativeOf(method: MethodSymbol): NativeMethod | undefined {
   const native = ownNativeOf(method, method.owner.fullName) ?? inheritedConstructorOf(method);
   if (!native) return native;
-  return withLengthChecked(method, keepingStrings.has(native) ? native : withPlainStrings(method, native));
+  return withCheckedResult(method, keepingStrings.has(native) ? native : withPlainStrings(method, native));
 }
 
-/** A native whose string result is checked against the string length limit, whichever native built it. */
-function withLengthChecked(method: MethodSymbol, native: NativeMethod): NativeMethod {
-  if (resultStrings(method) !== 'string') return native;
+/**
+ * A native whose result crosses into the program as C# requires: a struct as a copy, so that no library storage shares
+ * it with a variable, and a string checked against the string length limit, whichever native built it.
+ */
+function withCheckedResult(method: MethodSymbol, native: NativeMethod): NativeMethod {
+  const hasString = resultStrings(method) === 'string';
   return (call, receiver, args) => {
     const value = native(call, receiver, args);
-    if (typeof value === 'string' || value instanceof CsString)
+    if (value instanceof CsStruct) return copyValue(value);
+    if (hasString && (typeof value === 'string' || value instanceof CsString))
       call.frame.runtime.allocateString(stringText(value).length, 0);
     return value;
   };
