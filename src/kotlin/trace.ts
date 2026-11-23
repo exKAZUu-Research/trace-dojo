@@ -78,9 +78,12 @@ class Snapshotter {
     return { variables, shown };
   }
 
-  /** A frame's assigned locals, then what it captured, by name. */
+  /**
+   * A frame's assigned locals, where a later one of a name, declared in a nested block, shadows an earlier one, then
+   * what it captured, by name.
+   */
   private bindingsOf(frame: Frame): { name: string; value: Value; type: KType }[] {
-    const bindings: { name: string; value: Value; type: KType }[] = [];
+    const locals = new Map<string, { name: string; value: Value; type: KType }>();
     const hidesArgs = frame.info.name === this.program.main.name && this.program.mainTakesArgs;
     for (const local of frame.info.locals) {
       const slot = frame.locals[local.slot];
@@ -92,8 +95,13 @@ class Snapshotter {
         local.name.startsWith('\0')
       )
         continue;
-      bindings.push({ name: local.name, value: slot instanceof Cell ? slot.value : (slot as Value), type: local.type });
+      locals.set(local.name, {
+        name: local.name,
+        value: slot instanceof Cell ? slot.value : (slot as Value),
+        type: local.type,
+      });
     }
+    const bindings = [...locals.values()];
     for (const capture of frame.info.captures) {
       const captured = frame.captured[capture.slot];
       if (captured instanceof Cell && !captured.isAssigned) continue;

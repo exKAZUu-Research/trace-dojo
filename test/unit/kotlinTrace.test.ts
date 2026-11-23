@@ -386,6 +386,15 @@ class Robot {
   expect(steps.find(({ line }) => line === 15)?.vars).toEqual({ step: 2, it: 1, 'this.energy': 2, size: 9 });
 });
 
+test("a nested block's local shows over an outer one of the same name", () => {
+  const source = `fun main() {
+    val x = 8
+    for (x in 1..2) println(x)
+}`;
+  const steps = traceProgram('kotlin', source, source).traceItems.filter(({ line }) => line === 3);
+  expect(steps.map(({ vars }) => vars.x)).toEqual([1, 1, 2, 2]);
+});
+
 test('a deferred val appears in the trace after its scope lambda assigns it', () => {
   const source = `fun main() {
     val answer: Int
