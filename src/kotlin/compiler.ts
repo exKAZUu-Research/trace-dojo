@@ -395,8 +395,8 @@ export class Compiler extends BodyCompiler {
       eval: (frame) => {
         // The JVM evaluates the argument of the static valueOf before it initializes the enum class.
         const entryName = evaluate(frame) as string | undefined;
-        if (entryName === undefined) frame.runtime.throwError(frame, 'java.lang.NullPointerException');
         instance(frame);
+        if (entryName === undefined) frame.runtime.throwError(frame, 'java.lang.NullPointerException');
         const found = frame.runtime.enumEntries
           .get(cls)
           ?.values.find((entry) => (entry.native as { name: string }).name === entryName);
