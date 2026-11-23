@@ -820,13 +820,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   /** Forgets the smart casts of the variables a loop assigns, since another iteration may have changed them. */
-  private forgetAssignedIn(scope: Scope, statements: Statement[] | Expression): void {
-    for (const name of assignedNames(statements)) {
-      const variable = this.findVariable(scope, name);
-      if (variable) this.flow.forget(keyOf(variable));
-    }
-  }
-
   private runLoopBody(loop: LoopContext, body: Exec, frame: Frame): 'break' | undefined {
     try {
       body(frame);
@@ -1545,6 +1538,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   // code-gauge-allow functionNcss -- try, catch clauses, and finally, as an expression.
+  // code-gauge-allow functionCognitiveComplexity -- the body, each catch clause, and finally take their own entry flows.
   protected compileTry(
     scope: Scope,
     context: FunctionContext,
@@ -1561,6 +1555,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const hint = this.inferBranchType(context, blocks, expected, use, (index, probe) => {
       this.flow = before.copy();
       const clause = expression.catches[index - 1];
+      if (clause) this.forgetAssignedIn(scope, expression.body.statements);
       const branchScope = clause ? this.catchParameter(scope, probe, clause).scope : scope;
       return this.compileBlockValue(branchScope, probe, blocks[index], undefined, use);
     });
@@ -1577,6 +1572,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     for (const target of this.flow.maybeAssigned) assignmentsBeforeThrow.add(target);
     const catches = expression.catches.map((clause) => {
       this.flow = before.copy();
+      this.forgetAssignedIn(scope, expression.body.statements);
       for (const variable of assignmentsBeforeThrow) this.flow.maybeAssigned.add(variable);
       const binding = this.catchParameter(scope, context, clause);
       const value = this.compileTryBlock(

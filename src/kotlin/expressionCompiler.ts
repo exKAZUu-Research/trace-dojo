@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss -- expression compilation shares name resolution, call dispatch, and type inference.
 import { CompileError } from '../interpreter/diagnostics';
-import type { Block, Expression, LambdaExpression } from './ast';
+import type { Block, Expression, LambdaExpression, Statement } from './ast';
 import {
   type ArgumentSyntax,
   CallCompiler,
@@ -30,7 +30,7 @@ import type { MemberRef } from './compilerCore';
 import { getPropertyValue, propertyRepr, receiverRepr } from './dispatch';
 import { extensionPropertySpecificity, matchExtensionReceiver, mostSpecificReceivers } from './extensionResolution';
 import { keyOf } from './flowKeys';
-import { localRefinement, refineLocalType } from './flowWrites';
+import { assignedNames, localRefinement, refineLocalType } from './flowWrites';
 import { formatPrimitive, stringOf } from './format';
 import { mostSpecificProperties } from './inheritedMembers';
 import { invokeFunctionValue, lambdaValue } from './lambdaValue';
@@ -1753,6 +1753,17 @@ export abstract class ExpressionCompiler extends CallCompiler {
     };
   }
 
+  /**
+   * Drops the smart casts of the variables that code assigns, for code that may run again after its own writes (a
+   * loop body, a lambda that may be invoked again) or that an exception may enter after any of them (a catch clause).
+   */
+  protected forgetAssignedIn(scope: Scope, code: Statement[] | Expression): void {
+    for (const name of assignedNames(code)) {
+      const variable = this.findVariable(scope, name);
+      if (variable) this.flow.forget(keyOf(variable));
+    }
+  }
+
   // Lambdas.
 
   // code-gauge-allow functionNcss -- the parts of a lambda, from its parameters to its function value, which follow one another.
@@ -1781,6 +1792,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (receiverType) lambdaScope.receiver = new ReceiverSymbol(receiverType, lambdaContext, undefined);
     const outerFlow = this.flow;
     this.flow = outerFlow.copy();
+    if (!invokesExactlyOnce) this.forgetAssignedIn(scope, lambda.statements);
     const variables = params.map((param) => {
       const variable = this.newParameter(lambdaScope, lambdaContext, param.name, param.type, param.row);
       this.flow.assigned.add(variable);
