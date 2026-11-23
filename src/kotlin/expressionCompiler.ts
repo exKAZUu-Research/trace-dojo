@@ -1145,10 +1145,15 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const constructorLevel: CallLevel[] = constructors
       ? [{ candidates: constructors.candidates, receiver: undefined }]
       : [];
-    const levels = this.topLevelFunctions(name, true).flatMap((functions, index) => [
-      ...(constructors?.level === index ? constructorLevel : []),
-      ...this.packageCallLevels(functions, properties[index], row),
-    ]);
+    const levels = this.topLevelFunctions(name, true).flatMap((functions, index) => {
+      const own = this.packageCallLevels(functions, properties[index], row);
+      if (constructors?.level !== index) return own;
+      // Constructors and the functions of the same level form one overload set.
+      const [first, ...rest] = own;
+      return first && 'candidates' in first
+        ? [{ candidates: [...constructors.candidates, ...first.candidates], receiver: undefined }, ...rest]
+        : [...constructorLevel, ...own];
+    });
     return constructors?.level === -1 ? [...constructorLevel, ...levels] : levels;
   }
 
