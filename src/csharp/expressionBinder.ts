@@ -433,8 +433,9 @@ export abstract class ExpressionBinder extends MemberBinder {
       }
       const hole = part.hole as NonNullable<typeof part.hole>;
       let value = this.bindValue(hole.expression, context);
-      // A method group or a lambda with a natural type formats as its delegate.
-      if (value.kind === 'unbound' && this.naturalTypeOf(value))
+      // A method group or a lambda with a natural type formats as its delegate, and a conditional without a common
+      // type as the object that the hole takes.
+      if (value.kind === 'unbound' && (this.naturalTypeOf(value) || value.node.kind === 'conditional'))
         value = this.convert(value, this.objectType, hole.expression);
       if (value.kind === 'unbound' || value.type.kind === 'void') {
         this.error(
@@ -516,8 +517,13 @@ export abstract class ExpressionBinder extends MemberBinder {
       return { kind: 'logical', operator, left, right, type: this.boolType, row: node.row };
     }
     if (operator === '??') return this.bindCoalesce(node, context);
-    const left = this.bindValue(node.left, context);
-    const right = this.bindValue(node.right, context);
+    let left = this.bindValue(node.left, context);
+    let right = this.bindValue(node.right, context);
+    // `string + object` takes a conditional without a common type opposite a string as its object operand.
+    if (operator === '+') {
+      if (isTypelessConditional(left) && isStringValue(right)) left = this.convert(left, this.objectType, node.left);
+      if (isTypelessConditional(right) && isStringValue(left)) right = this.convert(right, this.objectType, node.right);
+    }
     for (const [operand, syntax] of [
       [left, node.left],
       [right, node.right],
@@ -1691,7 +1697,10 @@ export abstract class ExpressionBinder extends MemberBinder {
     }
     const value = this.bindValue(node.value, context);
     const operand: BoundExpression = { kind: 'compoundOperand', type: target.type, row: node.row };
-    const resolvedValue = value.kind === 'unbound' ? this.convert(value, target.type, node) : value;
+    // `s += c` with a conditional c without a common type is `string + object` as in a binary `+`.
+    const valueTarget =
+      binaryOperator === '+' && isTypelessConditional(value) && isStringValue(operand) ? this.objectType : target.type;
+    const resolvedValue = value.kind === 'unbound' ? this.convert(value, valueTarget, node) : value;
     const operation = this.bindBinary(binaryOperator, operand, resolvedValue, node.row, operator);
     if (operation.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
     const converted =
@@ -2036,4 +2045,12 @@ function typeIdentityKey(type: Type): string {
 /** A conditional branch's type as Roslyn names it in CS0173, `<null>` for one without a type. */
 function branchTypeText(branch: BoundExpression | undefined): string {
   return !branch || branch.kind === 'unbound' || branch.type.kind === 'null' ? '<null>' : displayType(branch.type);
+}
+
+function isTypelessConditional(value: BoundExpression): boolean {
+  return value.kind === 'unbound' && value.node.kind === 'conditional';
+}
+
+function isStringValue(value: BoundExpression): boolean {
+  return value.kind !== 'unbound' && value.type.kind === 'named' && value.type.symbol.special === 'string';
 }

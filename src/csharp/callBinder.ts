@@ -21,6 +21,7 @@ import {
   substitutionOf,
   type Type,
   type TypeParameterSymbol,
+  type TypeSymbol,
 } from './types';
 import { dotnetOverloadCount } from './unavailable';
 
@@ -124,13 +125,13 @@ export abstract class CallBinder extends OperatorBinder {
       this.reportInapplicable(candidates, args, explicitTypeArgs, row, description);
       return undefined;
     }
-    // A base class's candidates drop out once one declared in a more derived class applies (C# spec §12.6.4.1),
-    // whichever converts better.
+    // A base type's candidates drop out once one declared in a more derived class or interface applies (C# spec
+    // §12.6.4.1), whichever converts better.
     const mostDerived = applicable.filter(
       (candidate) =>
         !applicable.some(
           (other) =>
-            other !== candidate && this.derivesFrom(other.candidate.owner.symbol, candidate.candidate.owner.symbol)
+            other !== candidate && this.isMoreDerived(other.candidate.owner.symbol, candidate.candidate.owner.symbol)
         )
     );
     const best = this.bestOf(mostDerived, args) ?? this.libraryTieBreak(mostDerived, args);
@@ -871,6 +872,14 @@ export abstract class CallBinder extends OperatorBinder {
         `ジェネリック メソッド '${name}' を使用するには、${method.typeParameters.length} 型引数が必要です`
       );
     return true;
+  }
+
+  /** Whether a type derives from a base class or extends or implements an interface. */
+  private isMoreDerived(type: TypeSymbol, base: TypeSymbol): boolean {
+    if (this.derivesFrom(type, base)) return true;
+    return allInterfacesOf(type.declaredType, (element) => this.wellKnown.arrayInterfaces(element)).some(
+      (face) => face.symbol === base
+    );
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Roslyn reports a different error for each way a call fails.

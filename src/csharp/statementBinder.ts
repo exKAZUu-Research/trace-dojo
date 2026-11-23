@@ -79,10 +79,10 @@ const LITERAL_TYPES = new Set<string>([
   'string',
 ]);
 
-/** Binds statements and the storage that assignments write. */
 /** The modifiers a local function may have. */
 const LOCAL_FUNCTION_MODIFIERS = new Set(['static', 'async', 'unsafe', 'extern']);
 
+/** Binds statements and the storage that assignments write. */
 export abstract class StatementBinder extends PatternBinder {
   /** Binds a constant field's initializer once, detecting constants that depend on themselves. */
   protected abstract constantValueOf(field: FieldSymbol): unknown;

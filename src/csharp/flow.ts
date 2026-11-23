@@ -530,7 +530,12 @@ export class FlowAnalyzer {
         return this.expressions(expression.elements ?? [], this.expressions(expression.sizes, state));
       }
       case 'newDelegate': {
-        return expression.receiver ? this.expression(expression.receiver, state) : state;
+        const after = expression.receiver ? this.expression(expression.receiver, state) : state;
+        // A delegate of a local function may run its body later, so what the body reads must be assigned here, as
+        // Roslyn reports it.
+        if (expression.method.kind === 'localFunction')
+          for (const local of expression.method.readsBeforeAssigned) this.read(local, after, expression.row);
+        return after;
       }
       case 'lambda': {
         this.lambda(expression.lambda.method, expression.type, state);
