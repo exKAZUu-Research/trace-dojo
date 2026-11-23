@@ -326,6 +326,11 @@ export abstract class MemberBinder extends CallBinder {
 
   /** A local variable, recording that a lambda or local function captures it from an enclosing function. */
   protected localReference(local: LocalSymbol, position: Position, context: BindContext): BoundExpression {
+    // A local constant is its value, which any function may use, static ones included, without capturing it.
+    if (local.isConst) {
+      local.isUsed = true;
+      return { kind: 'constant', value: local.constantValue, type: local.type, row: position.row };
+    }
     if (local.owner && local.owner !== context.fn.method) {
       local.isCaptured = true;
       for (let fn: typeof context.fn | undefined = context.fn; fn && fn.method !== local.owner; fn = fn.outer) {
@@ -340,7 +345,6 @@ export abstract class MemberBinder extends CallBinder {
       }
     }
     local.isUsed = true;
-    if (local.isConst) return { kind: 'constant', value: local.constantValue, type: local.type, row: position.row };
     return { kind: 'local', local, type: local.type, row: position.row };
   }
 

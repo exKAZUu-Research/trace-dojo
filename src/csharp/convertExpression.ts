@@ -1044,7 +1044,9 @@ function dedentRaw(node: Node, inner: string): string {
   }
   const indentation = last;
   const body = lines.slice(1, -1).map((line) => {
-    if (line.trim() === '') return '';
+    // A whitespace-only line keeps what follows the delimiter's indentation, and may be shorter than it.
+    if (line.trim() === '')
+      return line.startsWith(indentation) ? line.slice(indentation.length) : line.replace(/^[ \t]*/, '');
     if (!line.startsWith(indentation)) {
       throw new CompileError([
         {
@@ -1055,7 +1057,9 @@ function dedentRaw(node: Node, inner: string): string {
     }
     return line.slice(indentation.length);
   });
-  return body.join('\n').replaceAll('\r', '');
+  // The value keeps the source's line breaks, CRLF included, except the one before the closing delimiter.
+  const text = body.join('\n');
+  return text.endsWith('\r') ? text.slice(0, -1) : text;
 }
 
 /** Removes the indentation of a multi-line raw interpolated string from its literal parts. */
