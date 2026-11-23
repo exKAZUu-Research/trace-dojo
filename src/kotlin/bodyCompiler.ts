@@ -128,14 +128,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       }
       let body: Eval;
       if (decl.body.kind === 'expression') {
-        const compiled = this.compileExpression(scope, context, decl.body.expression, symbol.returnType);
-        symbol.returnType ??= this.inferredResultType(compiled);
-        context.returnType = symbol.returnType;
-        body = convertRepr(
-          this.expectType(compiled, symbol.returnType, decl.body.expression.row),
-          reprOf(this.core, symbol.returnType),
-          returnRepr(symbol)
-        );
+        body = this.compileExpressionBody(symbol, decl.body.expression, scope, context);
       } else {
         const returnType = symbol.returnType as KType;
         context.returnType = returnType;
@@ -214,6 +207,27 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const none: unknown[] = [];
     symbol.invoke = (caller, receiver, args, callRow) =>
       caller.runtime.call(info, caller, none, receiver, args, callRow, run);
+  }
+
+  private compileExpressionBody(
+    symbol: FunctionSymbol,
+    expression: Expression,
+    scope: Scope,
+    context: FunctionContext
+  ): Eval {
+    // A declared result type also checks the returns inside the body, as `= if (c) return x else 0` has.
+    if (symbol.returnType) {
+      context.returnType = symbol.returnType;
+      context.returnRepr = returnRepr(symbol);
+    }
+    const compiled = this.compileExpression(scope, context, expression, symbol.returnType);
+    symbol.returnType ??= this.inferredResultType(compiled);
+    context.returnType = symbol.returnType;
+    return convertRepr(
+      this.expectType(compiled, symbol.returnType, expression.row),
+      reprOf(this.core, symbol.returnType),
+      returnRepr(symbol)
+    );
   }
 
   private ensurePropertyCompiled(entry: PropertyEntry): void {
