@@ -2065,11 +2065,11 @@ const PROBE_PARAM = new (class extends Object {})() as unknown as TypeParameterS
 function nullOrEmptyNarrowing(call: ResolvedCall, receiver: Compiled | undefined): Compiled['narrowing'] {
   const { symbol } = call;
   const isNullCheck = symbol.isLibrary && (symbol.name === 'isNullOrEmpty' || symbol.name === 'isNullOrBlank');
-  if (!isNullCheck || !receiver?.stableKey) return undefined;
-  return {
-    whenTrue: new Map(),
-    whenFalse: new Map([[receiver.stableKey, nonNull(receiver.type)]]),
-  };
+  if (!isNullCheck || !receiver) return undefined;
+  // The receivers of the receiver's safe calls, as `x` of `x?.s`, are not null either.
+  const whenFalse = new Map(receiver.whenNonNull);
+  if (receiver.stableKey) whenFalse.set(receiver.stableKey, nonNull(receiver.type));
+  return { whenTrue: new Map(), whenFalse };
 }
 
 /** A class or a package that a qualifier names. */
