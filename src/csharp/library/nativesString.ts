@@ -1042,9 +1042,24 @@ function builder(receiver: Value): BuilderState {
 
 function append(call: NativeCall, receiver: Value, text: string): Value {
   const state = builder(receiver);
-  call.frame.runtime.allocateString(state.text.length + text.length, text.length);
+  reserve(call, state, text.length);
   state.append(text);
   return receiver;
+}
+
+/** Checks the length a builder grows to and charges its work before the new text is built, as .NET checks first. */
+function reserve(call: NativeCall, state: BuilderState, added: number, work = added): void {
+  call.frame.runtime.allocateString(state.text.length + added, work);
+}
+
+/** The non-overlapping occurrences of a text in a range of a builder's text. */
+function occurrencesIn(text: string, value: string, start: number, count: number): number {
+  let occurrences = 0;
+  for (let index = text.indexOf(value, start); index !== -1 && index + value.length <= start + count;) {
+    occurrences++;
+    index = text.indexOf(value, index + value.length);
+  }
+  return occurrences;
 }
 
 defineNatives({
@@ -1062,7 +1077,9 @@ defineNatives({
   [`${BUILDER}.get_Length`]: (_call, receiver) => builder(receiver).text.length,
   [`${BUILDER}.set_Length`]: (call, receiver, [length]) => {
     if ((length as number) < 0) failNegative(call, 'value', length as number);
-    builder(receiver).setLength(length as number);
+    const state = builder(receiver);
+    reserve(call, state, Math.max(0, (length as number) - state.text.length));
+    state.setLength(length as number);
     return;
   },
   [`${BUILDER}.get_Capacity`]: (_call, receiver) => builder(receiver).chunks.capacity,
@@ -1099,6 +1116,7 @@ defineNatives({
     if (parameters.length === 2 && specialOf(parameters[0].type) === 'char') {
       const count = args[1] as number;
       if (count < 0) failNegative(call, 'repeatCount', count);
+      reserve(call, builder(receiver), count, 0);
       return append(call, receiver, String.fromCodePoint(args[0] as number).repeat(count));
     }
     if (parameters.length === 3)
@@ -1131,18 +1149,28 @@ defineNatives({
   [`${BUILDER}.Insert`]: (call, receiver, args) => {
     const state = builder(receiver);
     const index = args[0] as number;
+    const isRepeated = call.method.parameters.length === 3;
+    if (isRepeated && (args[2] as number) < 0) failNegative(call, 'count', args[2] as number);
     if (index < 0 || index > state.text.length)
       failOutOfRange(
         call,
         'index',
         'Index was out of range. Must be non-negative and less than or equal to the size of the collection.'
       );
-    let text =
-      call.method.parameters.length === 3
-        ? ((args[1] as string | undefined) ?? '').repeat(args[2] as number)
-        : textOf(call, args[1] as Value, parameterType(call, 1));
-    if (call.method.parameters[1].type.kind === 'named' && specialOf(call.method.parameters[1].type) === 'char')
+    let text: string;
+    if (isRepeated) {
+      const value = (args[1] as string | undefined) ?? '';
+      reserve(call, state, value.length * (args[2] as number), 0);
+      text = value.repeat(args[2] as number);
+    } else if (
+      call.method.parameters[1].type.kind === 'named' &&
+      specialOf(call.method.parameters[1].type) === 'char'
+    ) {
       text = String.fromCodePoint(args[1] as number);
+    } else {
+      text = textOf(call, args[1] as Value, parameterType(call, 1));
+    }
+    reserve(call, state, text.length);
     state.insert(index, text);
     return receiver;
   },
@@ -1164,11 +1192,11 @@ defineNatives({
     state.text = state.text.replaceAll(String.fromCodePoint(from as number), String.fromCodePoint(to as number));
     return receiver;
   },
-  [`${BUILDER}.Replace(string, string?)`]: (_call, receiver, [from, to]) => {
+  [`${BUILDER}.Replace(string, string?)`]: (call, receiver, [from, to]) => {
     if (from === undefined) failNull('oldValue');
     if (from === '') fail('System.ArgumentException', 'The value cannot be an empty string.', 'oldValue');
     const state = builder(receiver);
-    state.replace(from as string, (to as string | undefined) ?? '', 0, state.text.length);
+    replaceIn(call, state, from as string, (to as string | undefined) ?? '', 0, state.text.length);
     return receiver;
   },
   [`${BUILDER}.Replace(char, char, int, int)`]: (call, receiver, [from, to, start, count]) => {
@@ -1182,7 +1210,7 @@ defineNatives({
     builderRange(call, state.text, start as number, count as number);
     if (from === undefined) failNull('oldValue');
     if (from === '') fail('System.ArgumentException', 'The value cannot be an empty string.', 'oldValue');
-    state.replace(from as string, (to as string | undefined) ?? '', start as number, count as number);
+    replaceIn(call, state, from as string, (to as string | undefined) ?? '', start as number, count as number);
     return receiver;
   },
   [`${BUILDER}.ToString()`]: (_call, receiver) => builder(receiver).text,
@@ -1195,6 +1223,19 @@ defineNatives({
     return text.slice(start as number, (start as number) + (length as number));
   },
 });
+
+function replaceIn(
+  call: NativeCall,
+  state: BuilderState,
+  from: string,
+  to: string,
+  start: number,
+  count: number
+): void {
+  const growth = occurrencesIn(state.text, from, start, count) * (to.length - from.length);
+  reserve(call, state, Math.max(0, growth), count + Math.max(0, growth));
+  state.replace(from, to, start, count);
+}
 
 function setBuilder(receiver: Value, text: string, capacity: number): Value {
   (receiver as CsObject).native = new BuilderState(text, capacity);
