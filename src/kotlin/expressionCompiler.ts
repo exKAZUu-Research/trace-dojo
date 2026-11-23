@@ -1935,12 +1935,16 @@ export abstract class ExpressionCompiler extends CallCompiler {
       statements: lambda.statements,
       isBraced: true,
     };
-    const body = this.compileBlockValue(
-      lambdaScope,
-      lambdaContext,
-      bodyBlock,
-      returnsUnit ? undefined : lambdaResultHint(expectedReturn),
-      returnsUnit || (acceptsInferredUnit(this.unitType, expectedReturn) ? 'inferUnit' : false)
+    const body = this.literalForResult(
+      this.compileBlockValue(
+        lambdaScope,
+        lambdaContext,
+        bodyBlock,
+        returnsUnit ? undefined : lambdaResultHint(expectedReturn),
+        returnsUnit || (acceptsInferredUnit(this.unitType, expectedReturn) ? 'inferUnit' : false)
+      ),
+      expectedReturn,
+      lambda.row
     );
     // A lambda run exactly once keeps its definite assignments, but not its smart casts, which kotlinc drops.
     if (invokesExactlyOnce) this.flow.replaceNarrowing(outerFlow);
@@ -2044,6 +2048,22 @@ export abstract class ExpressionCompiler extends CallCompiler {
       this.flow = savedFlow;
     }
   }
+
+  /**
+   * A lambda whose result is an integer literal, as `getOrPut(key) { 0 }` of a `MutableMap<String, Long>`, gives the
+   * integer type its result variable is already bound to, as a literal beside such a value does.
+   */
+  private literalForResult(body: Compiled, expectedReturn: KType | undefined, row: number): Compiled {
+    const result = expectedReturn && resolved(expectedReturn);
+    if (!body.integerLiteral || result?.kind !== 'variable' || result.variable.fixed) return body;
+    const bounds = result.variable.lower.map((type): Compiled => ({ type, repr: 'ref', eval: returnUnit }));
+    const [type] = this.joinedTypes([body, ...bounds]);
+    if (type === body.type) return body;
+    return { ...body, type, repr: reprOf(this.core, type), eval: this.convertTo(body, type, row) };
+  }
+
+  /** The types of operands joined into one value, an integer literal taking its siblings' integer type. */
+  protected abstract joinedTypes(operands: Compiled[]): KType[];
 
   protected abstract compileIf(
     scope: Scope,

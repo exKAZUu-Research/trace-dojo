@@ -4402,10 +4402,10 @@ fun main() {
     val counts = mutableMapOf<String, Long>()
     counts["a"] = (counts["a"] ?: 0) + 1
     val total: Long = if (counts.isEmpty()) 0 else counts.getValue("a")
-    println("$counts $total")
+    println("$counts $total \${counts.getOrPut("b") { 0 } + 1L}")
     println(scores.map { if (it > 1) it.toLong() else 0 })
 }`,
-    stdout: '2\n10\n6\n{a=1} 1\n[0, 2, 3]\n',
+    stdout: '2\n10\n6\n{a=1} 1 1\n[0, 2, 3]\n',
   },
   {
     name: 'fun-interface delegates infer their types from the property and the lambda',
