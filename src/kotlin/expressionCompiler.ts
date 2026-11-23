@@ -19,6 +19,7 @@ import {
   Flow,
   FunctionContext,
   Handoff,
+  nonNullRead,
   nullableReceiverMessage,
   type PackageScope,
   ReceiverSymbol,
@@ -600,7 +601,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return {
       type: narrowed ?? variable.type,
       repr,
-      eval: access.read,
+      eval: narrowed && isNullable(variable.type) && !isNullable(narrowed) ? nonNullRead(access.read) : access.read,
       stableKey: refinement ? key : undefined,
       unnarrowedType: narrowed && variable.type,
     };
