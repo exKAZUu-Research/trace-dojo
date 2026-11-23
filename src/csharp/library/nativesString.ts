@@ -130,7 +130,8 @@ function split(call: NativeCall, text: string, args: Value[]): CsArray {
   // the comparisons left are charged, since many separators sharing a first character multiply the work.
   const byFirst = new Map<string, string[]>();
   for (const separator of separators) {
-    if (separator === '') continue;
+    // A null or empty separator never matches, as .NET skips it.
+    if (!separator) continue;
     const group = byFirst.get(separator[0]) ?? [];
     group.push(separator);
     byFirst.set(separator[0], group);
