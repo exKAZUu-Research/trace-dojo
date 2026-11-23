@@ -52,7 +52,9 @@ export function defineNativeEntry(requireMutable: (frame: Frame, map: KObject) =
   });
   defineNative(`${owner}.toString()`, (frame, receiver) => {
     const key = stringOf(frame, entryOf(frame, receiver).entry.key);
-    return `${key}=${stringOf(frame, entryOf(frame, receiver).entry.value)}`;
+    const value = stringOf(frame, entryOf(frame, receiver).entry.value);
+    frame.runtime.allocateString(frame, key.length + 1 + value.length);
+    return `${key}=${value}`;
   });
   defineNative(`${owner}.hashCode()`, (frame, receiver) => {
     const keyHash = hashOf(frame, entryOf(frame, receiver).entry.key);
