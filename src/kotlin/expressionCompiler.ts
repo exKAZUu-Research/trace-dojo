@@ -649,7 +649,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   /** Whether a property always reads the value last stored, so that a smart cast of it holds. */
   protected isStableProperty(symbol: PropertySymbol): boolean {
-    return !symbol.isVar && !symbol.hasCustomGetter && !symbol.isOpen && !symbol.isAbstract && !symbol.isLibrary;
+    // An open property of a class nothing can inherit from, such as an override in a final class, cannot be overridden.
+    const isOverridable = symbol.isOpen && (symbol.owner?.isInheritable ?? true);
+    return !symbol.isVar && !symbol.hasCustomGetter && !isOverridable && !symbol.isAbstract && !symbol.isLibrary;
   }
 
   protected readTopLevelProperty(context: FunctionContext, symbol: PropertySymbol, row: number): Compiled {
