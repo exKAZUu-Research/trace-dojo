@@ -666,7 +666,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return {
       type: narrowed ?? type,
       repr: propertyRepr(symbol),
-      eval: (frame) => getPropertyValue(symbol, frame, undefined),
+      eval: this.topLevelPropertyRead(symbol),
       stableKey: this.isStableProperty(symbol) ? key : undefined,
     };
   }

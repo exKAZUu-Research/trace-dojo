@@ -20,7 +20,7 @@ import {
   typeMismatchMessage,
 } from './compilerBase';
 import { CompilerCore } from './compilerCore';
-import { callFunction, parameterReprs, receiverRepr, returnRepr } from './dispatch';
+import { callFunction, getPropertyValue, parameterReprs, receiverRepr, returnRepr } from './dispatch';
 import { mostSpecificReceivers, type ReceiverSpecificity } from './extensionResolution';
 import { literalFits } from './literals';
 import { siblingResultType } from './resultInference';
@@ -56,7 +56,7 @@ import {
   type TypeArgument,
   typeToString,
 } from './types';
-import { KObject, type Value } from './values';
+import { KObject, NULL, type Value } from './values';
 
 /** An argument as written at a call: positional or named, possibly the trailing lambda. */
 export interface ArgumentSyntax {
@@ -195,6 +195,15 @@ export abstract class CallCompiler extends CompilerCore {
   }
 
   protected abstract objectInstance(cls: ClassSymbol): Eval;
+
+  /**
+   * Reads a property by its simple name; one imported from an object, such as `Duration.Companion.ZERO`, reads that
+   * object as its receiver.
+   */
+  protected topLevelPropertyRead(symbol: PropertySymbol): Eval {
+    const holder = symbol.owner?.isObject ? this.objectInstance(symbol.owner) : undefined;
+    return (frame) => getPropertyValue(symbol, frame, holder ? (holder(frame) as Value) : NULL);
+  }
 
   protected abstract finishCall(call: ResolvedCall, receiver: Compiled | undefined, row: number): Compiled;
 
