@@ -1326,7 +1326,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const members = this.memberCandidates(memberType, name);
     const memberProperty = this.membersOf<PropertySymbol>(memberType, name, 'property')[0];
     const memberLevels: CallLevel[] = members.length === 0 ? [] : [{ candidates: members, receiver }];
-    const memberValue = memberProperty && this.propertyCallCandidate(scope, memberProperty, receiver, row);
+    // Only the instance an initializer builds may be uninitialized: an implicit `this`, or an object, which is one.
+    const mayBeUninitialized = !explicit || memberProperty?.symbol.owner?.isObject === true;
+    const memberValue =
+      memberProperty && this.propertyCallCandidate(scope, memberProperty, receiver, row, mayBeUninitialized);
     if (memberValue) memberLevels.push({ functionValues: [memberValue] });
     const extensionLevels = this.extensionCallLevels(scope, receiver, name, row, explicit);
     return isNullable(resolved(receiver.type))
@@ -1388,7 +1391,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     scope: Scope,
     property: MemberRef<PropertySymbol>,
     receiver: Compiled,
-    row: number
+    row: number,
+    mayBeUninitialized = false
   ): FunctionValueCandidate | undefined {
     const { symbol } = property;
     if (symbol.type && resolved(substitute(symbol.type, property.substitution)).kind !== 'function') return undefined;
@@ -1396,7 +1400,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       specificity: symbol.extensionReceiver ? extensionPropertySpecificity(property) : undefined,
       functionValue: (context) => {
         if (!symbol.extensionReceiver) this.requireNonNullReceiver(receiver, row, false);
-        this.checkInitialized(context, symbol, symbol.name, row);
+        if (mayBeUninitialized) this.checkInitialized(context, symbol, symbol.name, row);
         return this.readProperty(scope, property, receiver, row);
       },
     };
