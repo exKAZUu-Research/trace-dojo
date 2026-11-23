@@ -252,6 +252,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       const members = owner.members.get(name) ?? [];
       if (beforeHeaders && !owner.isLibrary) return;
       if (members.length === 0 || !owner.isObject) this.rejectImport(row, path.join('.'));
+      if (members.every((member) => member.visibility === 'private'))
+        this.error(row, `${name} は private なので、${owner.name} の外からは使えません。`);
       this.importObjectMembers(context, owner, name, members);
       return;
     }
