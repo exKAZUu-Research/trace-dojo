@@ -237,13 +237,20 @@ function predicateOf(call: NativeCall, predicate: Value, name = 'match'): (value
 }
 
 function indexOfValue(call: NativeCall, items: Value[], value: Value, start = 0, fromEnd = false): number {
-  chargeElements(call, items.length - start);
   const equality = equalityOf(call, undefined);
+  // Each inspected element is charged as it is compared, so a search that stops early pays only for what it read.
+  const step = stepMeter(call);
   if (fromEnd) {
-    for (let index = items.length - 1; index >= 0; index--) if (equality.equals(items[index], value)) return index;
+    for (let index = items.length - 1; index >= 0; index--) {
+      step();
+      if (equality.equals(items[index], value)) return index;
+    }
     return -1;
   }
-  for (let index = start; index < items.length; index++) if (equality.equals(items[index], value)) return index;
+  for (let index = start; index < items.length; index++) {
+    step();
+    if (equality.equals(items[index], value)) return index;
+  }
   return -1;
 }
 
