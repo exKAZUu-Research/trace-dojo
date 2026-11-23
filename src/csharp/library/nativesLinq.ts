@@ -887,6 +887,8 @@ const linq: Record<string, NativeMethod> = {
   },
   [`${ENUMERABLE}.DefaultIfEmpty`]: (call, _receiver, args) => {
     const all = source(call, args[0] as Value);
+    // .NET hands back a non-empty array itself.
+    if (args[0] instanceof CsArray && args[0].values.length > 0) return args[0];
     const fallback = args.length > 1 ? (args[1] as Value) : evaluatorOf(call).defaultOf(call.typeArgs[0]);
     return query(
       call,
