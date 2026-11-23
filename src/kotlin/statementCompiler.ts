@@ -1691,10 +1691,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   ): Eval {
     const afterTry = this.flow;
     this.flow = Flow.merge([afterTry, ...throws, ...loopExits.flatMap(({ pending }) => pending)]);
-    // Any statement of the body may throw before it assigns anything, so `finally` counts only what was assigned before.
-    for (const variable of this.flow.assigned) {
-      if (!beforeTry.assigned.has(variable)) this.flow.assigned.delete(variable);
-    }
+    keepAssignedBefore(this.flow, beforeTry);
     restrictFieldReads(this.flow, beforeTry);
     const exitStarts = loopExits.map(({ exits }) => exits.length);
     const evaluate = this.compileBlockValue(scope, context, block, undefined, true).eval;
@@ -1731,6 +1728,13 @@ function applyFinallyJumpFields(jumps: Flow[], beforeTry: Flow, afterTry: Flow):
   }
   const fields = [...afterTry.assigned].filter((target) => target instanceof PropertySymbol);
   for (const jump of jumps) for (const field of fields) jump.assigned.add(field);
+}
+
+/** Any statement of a try body may throw before it assigns anything, so `finally` counts only what was assigned before. */
+function keepAssignedBefore(flow: Flow, beforeTry: Flow): void {
+  for (const variable of flow.assigned) {
+    if (!beforeTry.assigned.has(variable)) flow.assigned.delete(variable);
+  }
 }
 
 function restrictFieldReads(flow: Flow, beforeTry: Flow): void {
