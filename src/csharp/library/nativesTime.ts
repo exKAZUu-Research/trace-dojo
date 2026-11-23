@@ -230,10 +230,15 @@ export function formatDateTime(value: CsStruct, format: string | undefined): str
 function customDate(parts: DateParts, pattern: string): string {
   let result = '';
   let index = 0;
+  // Where the run of equal characters at the index ends, kept while a literal consumes the run in parts.
+  let runEnd = 0;
   while (index < pattern.length) {
     const char = pattern[index];
-    let count = 1;
-    while (pattern[index + count] === char) count++;
+    if (index >= runEnd || pattern[runEnd - 1] !== char) {
+      runEnd = index + 1;
+      while (pattern[runEnd] === char) runEnd++;
+    }
+    const count = runEnd - index;
     const field = dateField(parts, char, count);
     if (field === undefined) {
       const literal = dateLiteral(pattern, index, count);
