@@ -275,11 +275,18 @@ defineNatives({
   },
 });
 
-/** The members of an enum in the order of their values, as `GetValues` and `GetNames` list them. */
+/** The members of an enum in the order of their values as unsigned numbers, as `GetValues` and `GetNames` list them. */
 function enumMembers(type: NamedType): FieldSymbol[] {
   return type.symbol.fields
     .filter((field) => field.isConst)
-    .toSorted((a, b) => Number(a.constantValue) - Number(b.constantValue));
+    .toSorted((a, b) => {
+      const [x, y] = [unsignedValue(a), unsignedValue(b)];
+      return x < y ? -1 : x > y ? 1 : 0;
+    });
+}
+
+function unsignedValue(field: FieldSymbol): bigint {
+  return BigInt.asUintN(64, BigInt(field.constantValue as number | bigint));
 }
 
 function parseEnum(call: NativeCall, text: string | undefined, ignoreCase: boolean, throws: boolean): Value {

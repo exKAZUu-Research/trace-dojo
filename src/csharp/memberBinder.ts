@@ -211,10 +211,10 @@ export abstract class MemberBinder extends CallBinder {
     return this.transparentMember(name, position, context);
   }
 
-  /** Binds a member of the enclosing types, from the innermost out, or a primary constructor's parameter. */
   /** A nested type that a simple name found but may not use, reported only when nothing else gives the name. */
   private inaccessibleNestedType: TypeSymbol | undefined;
 
+  /** Binds a member of the enclosing types, from the innermost out, or a primary constructor's parameter. */
   private bindEnclosingMember(
     name: string,
     typeArgs: TypeNode[] | undefined,
