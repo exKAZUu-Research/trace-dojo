@@ -348,7 +348,13 @@ export class Compiler extends BodyCompiler {
     let type: KType;
     const expectedType = expected ? resolved(expected) : undefined;
     if (typeArgs.length === cls.typeParameters.length) type = classType(cls, typeArgs);
-    else if (expectedType?.kind === 'class' && expectedType.cls === cls) type = { ...expectedType, nullable: false };
+    // A star projection, as `Comparator<*>` has, determines no type argument, which the lambda must then give.
+    else if (
+      expectedType?.kind === 'class' &&
+      expectedType.cls === cls &&
+      expectedType.args.every((typeArgument) => typeArgument.variance !== 'star')
+    )
+      type = { ...expectedType, nullable: false };
     else
       type = classType(
         cls,
