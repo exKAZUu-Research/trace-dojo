@@ -888,6 +888,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     node: Extract<Expression, { kind: 'implicitNewArray' }>,
     context: BindContext
   ): BoundExpression {
+    if (node.rank > 1) return this.bindImplicitMatrix(node, context);
     const values = node.initializer.elements.map((element) =>
       element.kind === 'arrayInitializer' ? undefined : this.bindValue(element, context)
     );
@@ -907,6 +908,33 @@ export abstract class ExpressionBinder extends MemberBinder {
       type,
       row: node.row,
     };
+  }
+
+  /**
+   * Binds `new[,] { ... }`: its element type is the best common type of the innermost elements, after which the
+   * initializer binds as that of an explicitly typed array of the rank, which checks its shape.
+   */
+  private bindImplicitMatrix(
+    node: Extract<Expression, { kind: 'implicitNewArray' }>,
+    context: BindContext
+  ): BoundExpression {
+    const leaves: Expression[] = [];
+    const collect = (initializer: Extract<Expression, { kind: 'arrayInitializer' }>, depth: number): void => {
+      for (const element of initializer.elements) {
+        if (depth + 1 < node.rank && element.kind === 'arrayInitializer') collect(element, depth + 1);
+        else if (element.kind !== 'arrayInitializer') leaves.push(element);
+      }
+    };
+    collect(node.initializer, 0);
+    // The leaves bind again with the array's element type, so this pass only finds the type.
+    const saved = this.diagnostics.length;
+    const element = this.bestCommonType(leaves.map((leaf) => this.bindValue(leaf, context)));
+    this.diagnostics.length = saved;
+    if (!element || element.kind === 'error') {
+      this.error(node, 'CS0826', '暗黙的に型指定された配列の最適な型が見つかりませんでした');
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
+    return this.bindArrayInitializer(node.initializer, arrayType(element, node.rank), context);
   }
 
   private bindTuple(node: Extract<Expression, { kind: 'tuple' }>, context: BindContext): BoundExpression {

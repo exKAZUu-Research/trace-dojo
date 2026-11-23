@@ -397,6 +397,7 @@ namespace System.Collections.ObjectModel {
     public bool IsReadOnly { get; }
     public T this[int index] { get; }
     public bool Contains(T value);
+    public void CopyTo(T[] array, int index);
     public int IndexOf(T value);
     public IEnumerator<T> GetEnumerator();
   }

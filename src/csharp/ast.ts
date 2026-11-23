@@ -140,7 +140,7 @@ export type Expression =
       sizes: (Expression | undefined)[];
       initializer: ArrayInitializer | undefined;
     } & Position)
-  | ({ kind: 'implicitNewArray'; initializer: ArrayInitializer } & Position)
+  | ({ kind: 'implicitNewArray'; rank: number; initializer: ArrayInitializer } & Position)
   | ArrayInitializer
   | ({ kind: 'collection'; elements: CollectionElement[] } & Position)
   | ({ kind: 'anonymousObject'; members: { name: string | undefined; value: Expression }[] } & Position)

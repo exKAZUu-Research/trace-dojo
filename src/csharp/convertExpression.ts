@@ -296,7 +296,9 @@ export class ExpressionConverter {
       }
       case 'implicit_array_creation_expression': {
         const [initializer] = namedChildren(node);
-        return { kind: 'implicitNewArray', initializer: this.convertArrayInitializer(initializer), ...position };
+        // `new[,]` writes its rank as the commas between its brackets.
+        const rank = childrenOf(node).filter((child) => child.type === ',').length + 1;
+        return { kind: 'implicitNewArray', rank, initializer: this.convertArrayInitializer(initializer), ...position };
       }
       case 'initializer_expression': {
         return this.convertArrayInitializer(node);

@@ -1874,6 +1874,10 @@ defineNatives({
   [`${READ_ONLY}.Contains`]: (call, receiver, [value]) =>
     indexOfValue(call, listOf(receiver).items, value as Value) >= 0,
   [`${READ_ONLY}.IndexOf`]: (call, receiver, [value]) => indexOfValue(call, listOf(receiver).items, value as Value),
+  [`${READ_ONLY}.CopyTo`]: (call, receiver, [array, index]) => {
+    copyToArray(call, listOf(receiver).items, array as Value, index as number);
+    return;
+  },
   [`${READ_ONLY}.GetEnumerator`]: (call, receiver) => {
     const enumerator = new CsObject(libraryType(call, 'System.Linq.Internal.Enumerator', [typeArgument(call)]), []);
     enumerator.native = new LibraryEnumerator(listOf(receiver).enumerate(), [receiver]);
