@@ -17,8 +17,8 @@ export const PracticePageOnClient: React.FC = () => {
   return <PracticeSession key={`practice:${courseId}:${lectureId}`} courseId={courseId} lectureId={lectureId} />;
 };
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Start, stale-session, retry, and end handling share the session state; splitting them would only pass it around.
-// code-gauge-allow functionNcss 50 -- Start, stale-session, retry, and end handling share the session state; splitting them would only pass it around.
+// code-gauge-allow functionCognitiveComplexity -- Start, stale-session, retry, and end handling share the session state; splitting them would only pass it around.
+// code-gauge-allow functionNcss -- Start, stale-session, retry, and end handling share the session state; splitting them would only pass it around.
 const PracticeSession: React.FC<{ courseId: CourseId; lectureId: string }> = ({ courseId, lectureId }) => {
   const router = useRouter();
   const [display, setDisplay] = useState<RegularExerciseDisplay>();
@@ -39,7 +39,13 @@ const PracticeSession: React.FC<{ courseId: CourseId; lectureId: string }> = ({ 
     if (request.current?.generation !== generation) {
       request.current = {
         generation,
-        promise: start({ courseId, lectureId, learningMode: 'practice', problemFormat: 'regular' }),
+        promise: start({
+          courseId,
+          lectureId,
+          learningMode: 'practice',
+          problemFormat: 'regular',
+          tracesInBrowser: true,
+        }),
       };
     }
     void request.current.promise
@@ -94,7 +100,9 @@ const PracticeSession: React.FC<{ courseId: CourseId; lectureId: string }> = ({ 
               await detectStale(switchToStep.mutateAsync({ ...location, sessionId })),
             next: async ({ sessionId }) => {
               const value = await withFailureMessage(
-                detectStale(next.mutateAsync({ ...location, sessionId, problemFormat: 'regular' })),
+                detectStale(
+                  next.mutateAsync({ ...location, sessionId, problemFormat: 'regular', tracesInBrowser: true })
+                ),
                 '次の問題を取得できませんでした。'
               );
               if ('status' in value || value.problemFormat !== 'regular')

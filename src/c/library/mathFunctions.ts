@@ -64,7 +64,7 @@ export const UNARY: Record<string, (x: number) => number> = {
   nearbyint: roundHalfEven,
 };
 
-// code-gauge-allow functionCognitiveComplexity 18 -- C special values, exact powers, and fractional modes require distinct rounding paths.
+// code-gauge-allow functionCognitiveComplexity -- C special values, exact powers, and fractional modes require distinct rounding paths.
 function pow(x: number, y: number): number {
   if (x === 1 || y === 0 || (x === -1 && !Number.isFinite(y) && !Number.isNaN(y))) return 1;
   if (!Number.isFinite(x) || !Number.isFinite(y) || x === 0) return x ** y;

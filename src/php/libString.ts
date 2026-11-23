@@ -1,8 +1,7 @@
+// code-gauge-allow-file fileNcss -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { createHash, createHmac } from 'node:crypto';
-
 import { byteAt, charAt, enc, lower, untilNul, upper } from './bytes';
 import { byteMembership, literalMatches, spendScan } from './byteSearch';
 import { callStack } from './calls';
@@ -247,7 +246,7 @@ function offsetError(name: string, argument = 3, parameter = 'offset', haystack 
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Resolves back and forward byte searches with shared case folding and offset checks.
+// code-gauge-allow functionCognitiveComplexity -- Resolves back and forward byte searches with shared case folding and offset checks.
 function search(
   name: string,
   haystack: string,
@@ -482,7 +481,7 @@ function compareLeft(a: string, ap: number, b: string, bp: number): { result: nu
 }
 
 /** Compares two runs of digits as integers: the longer run wins, then the first different digit. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Compares an entire digit run while preserving first difference and run length.
+// code-gauge-allow functionCognitiveComplexity -- Compares an entire digit run while preserving first difference and run length.
 function compareRight(a: string, ap: number, b: string, bp: number): { result: number; ap: number; bp: number } {
   let bias = 0;
   for (; ; ap++, bp++) {
@@ -497,7 +496,7 @@ function compareRight(a: string, ap: number, b: string, bp: number): { result: n
 }
 
 /** Compares strings in natural order, as PHP's strnatcmp_ex does. */
-// code-gauge-allow functionNcss 51 -- Preserves the numeric and byte comparison order while advancing both cursors.
+// code-gauge-allow functionNcss -- Preserves the numeric and byte comparison order while advancing both cursors.
 export function naturalCompare(a: string, b: string, insensitive: boolean): number {
   if (a.length === 0 || b.length === 0) return a.length === b.length ? 0 : a.length > b.length ? 1 : -1;
   let ap = 0;
@@ -681,8 +680,8 @@ defineFunction(
     )
 );
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the last break and current column through each emitted segment.
-// code-gauge-allow functionNcss 44 -- Keeps the last break and current column through each emitted segment.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the last break and current column through each emitted segment.
+// code-gauge-allow functionNcss -- Keeps the last break and current column through each emitted segment.
 function wordwrap(text: string, width: number, breakText: string, cut: boolean): string {
   if (text === '') return '';
   if (breakText === '') throwError('ValueError', 'wordwrap(): Argument #3 ($break) must not be empty');
@@ -1011,7 +1010,7 @@ defineFunction(
     )
 );
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function levenshtein(a: string, b: string, insert: bigint, replace: bigint, remove: bigint): bigint {
   if (a.length === 0) return BigInt.asIntN(64, BigInt(b.length) * insert);
   if (b.length === 0) return BigInt.asIntN(64, BigInt(a.length) * remove);
@@ -1142,7 +1141,7 @@ defineFunction('soundex(string $string): string', ({ args }) => {
   }
   return result.padEnd(4, '0');
 });
-// code-gauge-allow functionCognitiveComplexity 17 -- Shares one byte histogram across modes that expose counts or character lists.
+// code-gauge-allow functionCognitiveComplexity -- Shares one byte histogram across modes that expose counts or character lists.
 defineFunction('count_chars(string $string, int $mode = 0): array|string', ({ args }) => {
   const text = s(args[0]);
   const mode = args[1] === undefined ? 0 : n(args[1]);
@@ -1168,80 +1167,6 @@ defineFunction('str_shuffle(string $string): string', ({ args }) => {
   shuffle(chars, (end) => mt.range(0n, end));
   return chars.join('');
 });
-defineFunction('md5(string $string, bool $binary = false): string', ({ args }) =>
-  hash('md5', s(args[0]), args[1] === true)
-);
-defineFunction('sha1(string $string, bool $binary = false): string', ({ args }) =>
-  hash('sha1', s(args[0]), args[1] === true)
-);
-defineFunction('crc32(string $string): int', ({ args }) => BigInt(crc32(s(args[0]))));
-/** The algorithms of PHP's `hash_algos()`, whose cryptographic ones come before `adler32`. */
-const PHP_HASHES =
-  'md2 md4 md5 sha1 sha224 sha256 sha384 sha512/224 sha512/256 sha512 sha3-224 sha3-256 sha3-384 sha3-512 ripemd128 ripemd160 ripemd256 ripemd320 whirlpool tiger128,3 tiger160,3 tiger192,3 tiger128,4 tiger160,4 tiger192,4 snefru snefru256 gost gost-crypto haval128,3 haval160,3 haval192,3 haval224,3 haval256,3 haval128,4 haval160,4 haval192,4 haval224,4 haval256,4 haval128,5 haval160,5 haval192,5 haval224,5 haval256,5 adler32 crc32 crc32b crc32c fnv132 fnv1a32 fnv164 fnv1a64 joaat murmur3a murmur3c murmur3f xxh32 xxh64 xxh3 xxh128'.split(
-    ' '
-  );
-
-defineFunction('hash(string $algo, string $data, bool $binary = false, array $options = []): string', ({ args }) => {
-  const algorithm = lower(s(args[0]));
-  if (algorithm === 'crc32b') {
-    const digest = crc32(s(args[1])).toString(16).padStart(8, '0');
-    return args[2] === true
-      ? digest.replaceAll(/../g, (byte) => String.fromCharCode(Number.parseInt(byte, 16)))
-      : digest;
-  }
-  if (!PHP_HASHES.includes(algorithm))
-    throwError('ValueError', 'hash(): Argument #1 ($algo) must be a valid hashing algorithm');
-  return hash(nodeHashName(algorithm, 'hash'), s(args[1]), args[2] === true);
-});
-defineFunction('hash_hmac(string $algo, string $data, string $key, bool $binary = false): string', ({ args }) => {
-  const algorithm = lower(s(args[0]));
-  if (!PHP_HASHES.slice(0, PHP_HASHES.indexOf('adler32')).includes(algorithm)) {
-    throwError('ValueError', 'hash_hmac(): Argument #1 ($algo) must be a valid cryptographic hashing algorithm');
-  }
-  const hmac = createHmac(nodeHashName(algorithm, 'hash_hmac'), Buffer.from(s(args[2]), 'latin1'));
-  hmac.update(Buffer.from(s(args[1]), 'latin1'));
-  return args[3] === true ? hmac.digest('latin1') : hmac.digest('hex');
-});
-
-const NODE_HASHES = new Map([
-  ...[
-    'md5',
-    'sha1',
-    'sha224',
-    'sha256',
-    'sha384',
-    'sha512',
-    'sha3-224',
-    'sha3-256',
-    'sha3-384',
-    'sha3-512',
-    'ripemd160',
-  ].map((name): [string, string] => [name, name]),
-  ['sha512/224', 'sha512-224'],
-  ['sha512/256', 'sha512-256'],
-]);
-
-/** The name Node's crypto module gives an algorithm of PHP's, which stops the program when this grader lacks it. */
-function nodeHashName(algorithm: string, functionName: string): string {
-  const name = NODE_HASHES.get(algorithm);
-  if (!name) throw new UnsupportedFeatureError(`ハッシュアルゴリズム ${algorithm}（${functionName}）`);
-  return name;
-}
-
-function hash(algorithm: string, data: string, binary: boolean): string {
-  const digest = createHash(algorithm).update(Buffer.from(data, 'latin1'));
-  return binary ? digest.digest('latin1') : digest.digest('hex');
-}
-
-function crc32(data: string): number {
-  let crc = 0xff_ff_ff_ff;
-  for (let index = 0; index < data.length; index++) {
-    crc ^= data.charCodeAt(index);
-    for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? (crc >>> 1) ^ 0xed_b8_83_20 : crc >>> 1;
-  }
-  return (crc ^ 0xff_ff_ff_ff) >>> 0;
-}
-
 defineFunction('bin2hex(string $string): string', ({ args }) =>
   [...s(args[0])].map((char) => char.charCodeAt(0).toString(16).padStart(2, '0')).join('')
 );
@@ -1270,7 +1195,7 @@ defineFunction('str_increment(string $string): string', ({ args }) => {
     );
   return incrementString(text);
 });
-// code-gauge-allow functionCognitiveComplexity 18 -- Propagates borrow over ASCII character classes and handles a shortened result.
+// code-gauge-allow functionCognitiveComplexity -- Propagates borrow over ASCII character classes and handles a shortened result.
 defineFunction('str_decrement(string $string): string', ({ args }) => {
   const text = s(args[0]);
   if (text === '') throwError('ValueError', 'str_decrement(): Argument #1 ($string) must not be empty');
@@ -1363,7 +1288,7 @@ defineFunction('basename(string $path, string $suffix = ""): string', ({ args })
   if (suffix !== '' && path.endsWith(suffix) && path !== suffix) path = path.slice(0, -suffix.length);
   return path;
 });
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 defineFunction('dirname(string $path, int $levels = 1): string', ({ args }) => {
   const path = s(args[0]);
   const levels = (args[1] as bigint | undefined) ?? 1n;

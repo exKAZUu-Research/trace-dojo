@@ -196,7 +196,6 @@ export class Compiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionNcss 40 -- One case per kind of declaration at file scope.
   private topLevel(node: Syntax): void {
     switch (node.type) {
       case 'preproc_include': {
@@ -846,7 +845,7 @@ export class Compiler extends StatementCompiler {
    * Compiles how a constructor initializes the base and the members, from its member initializer list (or none),
    * in declaration order; undefined when it has nothing to do.
    */
-  // code-gauge-allow functionCognitiveComplexity 30 -- A constructor initializes its base, then each member, from three possible sources.
+  // code-gauge-allow functionCognitiveComplexity -- A constructor initializes its base, then each member, from three possible sources.
   private memberInitialization(cls: ClassInfo, fn: FunctionInfo, list: Syntax | undefined): Exec | undefined {
     const initializers = new Map<string, Syntax>();
     let baseInitializer: Syntax | undefined;

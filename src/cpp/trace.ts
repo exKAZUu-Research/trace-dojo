@@ -14,7 +14,7 @@ import { type Frame, Runtime } from './runtime';
 import { type ClassInfo, isCharType, type Type } from './types';
 import { ArrayStore, type Box, CObject, isIndeterminate, Ptr, type Store, UNINIT, type Value } from './values';
 
-// code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
+// code-gauge-allow duplicateLines -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceCppProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileCpp(program, { trace });
   const runtime = new Runtime(input);
@@ -42,7 +42,7 @@ const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 /** Reads the program's variables as learners see them, leaving out values the program never wrote. */
 class Snapshotter {
-  private remaining = LIMITS.maxCppTraceSize;
+  private remaining = LIMITS.maxTraceSize;
 
   constructor(private readonly program: CompiledProgram) {}
 
@@ -52,7 +52,7 @@ class Snapshotter {
   }
 
   /** The variables a frame shows: its locals in scope, then the members of `this` and the static variables. */
-  // code-gauge-allow functionCognitiveComplexity 20 -- The three scopes share the shadowing rules and snapshot budget.
+  // code-gauge-allow functionCognitiveComplexity -- The three scopes share the shadowing rules and snapshot budget.
   variablesOf(frame: Frame, withContext: boolean, withReferences: boolean): TraceVariables {
     this.take(NODE_COST * 2);
     const variables: TraceVariables = { vars: {}, referenceVars: {} };
@@ -114,8 +114,8 @@ class Snapshotter {
   }
 
   /** The node that shows a value in the trace's reference view, or undefined for one that shows nothing. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- Dispatches by type and value with one cycle guard.
-  // code-gauge-allow functionNcss 33 -- Dispatch and cycle detection belong to the same traversal.
+  // code-gauge-allow functionCognitiveComplexity -- Dispatches by type and value with one cycle guard.
+  // code-gauge-allow functionNcss -- Dispatch and cycle detection belong to the same traversal.
   private nodeOf(value: Value, type: Type, seen: Set<unknown>, receiverClass?: ClassInfo): DisplayNode | undefined {
     this.take(NODE_COST);
     if (isIndeterminate(value) || value === undefined) return undefined;
@@ -180,8 +180,8 @@ class Snapshotter {
   }
 
   /** A value as learners write it, NOT_SCALAR for an object, or undefined for a value the program never wrote. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type.
-  // code-gauge-allow functionNcss 32 -- One case per kind of type.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
+  // code-gauge-allow functionNcss -- One case per kind of type.
   private scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR | undefined {
     if (isIndeterminate(value) || value === undefined) return undefined;
     switch (type.kind) {

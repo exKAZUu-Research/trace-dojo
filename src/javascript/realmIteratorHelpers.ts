@@ -246,7 +246,7 @@ function newHelper(
   return newHostIterator(runtime, prototype, helper);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function defineLazyHelpers(builder: RealmBuilder, helperPrototype: JsObject): void {
   const { iteratorPrototype } = builder.realm;
   for (const [name, keeps] of [
@@ -354,8 +354,8 @@ function closeBoth(runtime: Runtime, inner: IteratorRecord | undefined, closeOut
   closeOuter();
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
-// code-gauge-allow functionNcss 49 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionNcss -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function defineConsumers(builder: RealmBuilder): void {
   const { iteratorPrototype } = builder.realm;
   builder.method(iteratorPrototype, 'toArray', 0, ({ runtime, thisValue }) => {

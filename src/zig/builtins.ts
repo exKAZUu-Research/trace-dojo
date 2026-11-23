@@ -17,7 +17,7 @@ import {
 } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
 import { activeUnionIndex, unionTagValue } from './bufferMemory';
-// code-gauge-allow-file fileNcss 720 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss -- The file holds one layer of the compiler, whose parts share its private state.
 import { enumLookup } from './enumLookup';
 import { ExpressionCompiler, log2IntType } from './expressions';
 import {
@@ -526,7 +526,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Validates error-set membership in the phase where the operand is known.
+  // code-gauge-allow functionCognitiveComplexity -- Validates error-set membership in the phase where the operand is known.
   private errorCast(expression: ExpressionOf<'builtinCall'>, target: Type | undefined): TExpr {
     if (!target || (target.kind !== 'error_set' && target.kind !== 'error_union'))
       return this.error(expression, '@errorCast には、結果の型が要ります。');
@@ -619,8 +619,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     return this.derived(operand, int, (value) => intCast(value as bigint, int));
   }
 
-  // code-gauge-allow functionNcss 55 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionNcss -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private divisionBuiltin(name: string, expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
     const [leftSyntax, rightSyntax] = expression.args;
     let left = this.compile(leftSyntax, resultType);
@@ -796,7 +796,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     return this.derived(operand, type, apply);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps checked overflow arithmetic and phase-specific work accounting together.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps checked overflow arithmetic and phase-specific work accounting together.
   private overflowBuiltin(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const [leftSyntax, rightSyntax] = expression.args;
     let left = this.compile(leftSyntax);
@@ -871,8 +871,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     );
   }
 
-  // code-gauge-allow functionNcss 42 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionNcss -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private bitBuiltin(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const operand = this.compile(expression.args[0]);
     const type = operand.type;
@@ -978,8 +978,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     return slice;
   }
 
-  // code-gauge-allow functionNcss 40 -- Keeps bounds, alias checks and reference transfer in copy evaluation order.
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps bounds, alias checks and reference transfer in copy evaluation order.
+  // code-gauge-allow functionNcss -- Keeps bounds, alias checks and reference transfer in copy evaluation order.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps bounds, alias checks and reference transfer in copy evaluation order.
   private memoryCopy(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const destination = this.compile(expression.args[0]);
     const source = this.compile(expression.args[1]);
@@ -1101,7 +1101,7 @@ function elementAccessor(type: Type):
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Handles native and exact rounding with the same four rounding modes.
+// code-gauge-allow functionCognitiveComplexity -- Handles native and exact rounding with the same four rounding modes.
 export function roundFloat(name: string, value: AnyFloat, bits: FloatBits): AnyFloat {
   if (typeof value === 'number') {
     switch (name) {

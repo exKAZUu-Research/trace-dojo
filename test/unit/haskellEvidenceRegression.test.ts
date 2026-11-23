@@ -5,7 +5,7 @@ import { createNodeBundleRunner } from '../helpers/nodeBundleRunner';
 
 const runNodeBundle = createNodeBundleRunner();
 
-test('deep superclass and instance evidence remains bounded under Node', { timeout: 30_000 }, () => {
+test('deep superclass and instance evidence remains bounded under Node', () => {
   const output = runNodeBundle('test/helpers/haskellEvidenceMemory.ts', { heapMb: 512 });
   const result = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('executed'), stdout: z.string(), uncaughtException: z.undefined().optional() }),

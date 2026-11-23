@@ -30,8 +30,8 @@ export function collectScopeVars(body: Stmt[]): Set<string> {
   return found;
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- One traversal selects variable names while respecting scope boundaries.
-// code-gauge-allow functionNcss 54 -- Traversal and scope dispatch share the same visitor.
+// code-gauge-allow functionCognitiveComplexity -- One traversal selects variable names while respecting scope boundaries.
+// code-gauge-allow functionNcss -- Traversal and scope dispatch share the same visitor.
 function collectScopeNames(value: unknown, add: (name: string) => void): void {
   if (!value || typeof value !== 'object') return;
   if (Array.isArray(value)) {
@@ -181,7 +181,7 @@ class ReadValidator {
       this.classes.set(lower(statement.decl.name), statement.decl);
     }
   }
-  // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   visit(value: unknown, writing: boolean): void {
     if (!value || typeof value !== 'object') return;
     if (Array.isArray(value)) {
@@ -313,7 +313,7 @@ class ReadValidator {
     this.visit(node.value, node.k === 'assign' && target.k === 'list' && hasReferenceItem(target));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps positional and named reference argument validation in evaluation order.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps positional and named reference argument validation in evaluation order.
   private arguments(expression: Expr, args: Arg[]): void {
     const params = this.parametersOf(expression);
     let positional = 0;

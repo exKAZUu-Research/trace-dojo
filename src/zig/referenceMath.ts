@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';
+import { assert } from 'es-toolkit';
 
 import { decodeFloat, encodeFloat } from './floatEncoding';
 import { type AnyFloat, type FloatBits, toNumber } from './floats';
@@ -27,17 +27,17 @@ function calculate(name: string, bits: FloatBits, values: readonly AnyFloat[]): 
   }
   const result = invoke(`${name}${bits}`, args);
   if (bits <= 64) {
-    assert.ok(typeof result === 'number');
+    assert(typeof result === 'number', 'A float of at most 64 bits must come back as a number');
     return result;
   }
   const low = invoke('resultLow', []);
   const high = invoke('resultHigh', []);
-  assert.ok(typeof low === 'bigint' && typeof high === 'bigint');
+  assert(typeof low === 'bigint' && typeof high === 'bigint', 'The result halves must be bigints');
   return decodeFloat(BigInt.asUintN(64, low) | (BigInt.asUintN(64, high) << 64n), bits);
 }
 
 function invoke(name: string, args: readonly (number | bigint)[]): unknown {
   const callable = exports[name];
-  assert.ok(typeof callable === 'function', name);
+  assert(typeof callable === 'function', name);
   return callable(...args);
 }

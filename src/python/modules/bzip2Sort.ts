@@ -222,7 +222,7 @@ interface Sorting {
   budget: number;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes mainGtU of bzip2's blocksort.c.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes mainGtU of bzip2's blocksort.c.
 function mainGtU(sorting: Sorting, i1Start: number, i2Start: number): boolean {
   const { block, quadrant, nblock } = sorting;
   let i1 = i1Start;
@@ -244,7 +244,7 @@ function mainGtU(sorting: Sorting, i1Start: number, i2Start: number): boolean {
 
 const INCS = [1, 4, 13, 40, 121, 364, 1093, 3280, 9841, 29_524, 88_573, 265_720, 797_161, 2_391_484];
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes mainSimpleSort of bzip2's blocksort.c.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes mainSimpleSort of bzip2's blocksort.c.
 function mainSimpleSort(sorting: Sorting, lo: number, hi: number, d: number): void {
   const { ptr } = sorting;
   const bigN = hi - lo + 1;

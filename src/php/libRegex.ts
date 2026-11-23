@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 462 -- The regex functions share matching, offsets, capture handling, and error state.
+// code-gauge-allow-file fileNcss -- The regex functions share matching, offsets, capture handling, and error state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
 import { callCallback, consumeInvokedResult } from './callables';
@@ -6,8 +6,8 @@ import { type CleanupException, throwError, warn, withCleanupExceptions } from '
 import { isCallable } from './libCore';
 import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
-import { type Compiled, groupName, nativePatternFor, PatternError, translate } from './pcrePattern';
-import { createBoundedRegexScanner, type MatchOffsets } from './regexExecution';
+import { type Compiled, groupName, translate } from './pcrePattern';
+import { PatternError } from './pcrePatternSource';
 import { ExitSignal, PhpThrow, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import { copyValueSlot, deref, PhpArray, PhpObject, type Ref, type Value } from './values';
@@ -39,7 +39,7 @@ defineConstant('PCRE_VERSION_MINOR', minor);
 defineConstant('PCRE_JIT_SUPPORT', REFERENCE_PCRE.jitSupport);
 
 /**
- * Translated patterns, shared by all runs in the server's process, so that a pattern in a loop is translated once. It
+ * Translated patterns, shared by all runs in the host's process, so that a pattern in a loop is translated once. It
  * keeps only the latest ones, as the patterns that programs build are unbounded.
  */
 const cache = new Map<string, Compiled | string>();
@@ -75,33 +75,15 @@ interface Match {
   texts: (string | undefined)[];
 }
 
-/**
- * The matches of a compiled pattern in a subject, from byte `offset` on (counted from the end if negative), as PCRE
- * finds them: after an empty match, PCRE looks for a non-empty one at the same place before moving on. Sets the PCRE
- * error and yields nothing for a bad subject or offset.
- */
-interface MatchScanOptions {
-  maxMatches?: number;
-  batchBudgetMs?: number;
-  noEmptyLimit?: number;
+interface MatchOffsets {
+  range: [number, number];
+  groups?: Record<string, [number, number] | undefined>;
 }
 
-const CALLBACK_BATCH_BUDGET_MS = 5;
-
-function splitScanOptions(limit: number, noEmpty: boolean): MatchScanOptions {
-  if (limit === -1) return {};
-  const needed = Math.max(0, limit - 1);
-  return noEmpty && needed > 0 ? { noEmptyLimit: needed } : { maxMatches: needed };
-}
-
-function matchesOf(
-  compiled: Compiled,
-  subject: string,
-  offset = 0,
-  status?: { error: number },
-  options?: MatchScanOptions
-): Generator<Match> {
-  return scanMatches(compiled, subject, offset, toMatch, status, options);
+interface PreparedSubject {
+  text: string;
+  position: number;
+  byteOffset: (index: number) => number;
 }
 
 type ProjectMatch<T> = (
@@ -112,122 +94,56 @@ type ProjectMatch<T> = (
   byteOffset: (index: number) => number
 ) => T;
 
-interface PreparedSubject {
-  text: string;
-  position: number;
-  byteOffset(index: number): number;
+function matchesOf(compiled: Compiled, subject: string, offset = 0, status?: { error: number }): Generator<Match> {
+  return scanMatches(compiled, subject, offset, toMatch, status);
 }
 
-interface ScanPlan<T> {
-  length: number;
-  position: number;
-  handlesRetry?: boolean;
-  advance(position: number): number;
-  match(position: number, retry: boolean): MatchOffsets | { pregError: number } | null | undefined;
-  value(result: MatchOffsets, retry: boolean): T;
-}
-
-// code-gauge-allow functionCognitiveComplexity 16 -- Shares retry, offset advancement and PHP error state across both matching engines.
+/**
+ * The matches of a compiled pattern in a subject, from byte `offset` on (counted from the end if negative), as PCRE
+ * finds them: after an empty match, PCRE looks for a non-empty one at the same place before moving on. Sets the PCRE
+ * error and yields nothing for a bad subject or offset.
+ */
 function* scanMatches<T>(
   compiled: Compiled,
   subject: string,
   offset: number,
   project: ProjectMatch<T>,
-  status?: { error: number },
-  options?: MatchScanOptions
+  status?: { error: number }
 ): Generator<T> {
   const prepared = prepareSubject(compiled, subject, offset);
   if (!prepared) {
     if (status) status.error = rt().lastPregError;
     return;
   }
-  const plan = scanPlan(compiled, subject, prepared, project, options);
-  let position: number = plan.position;
+  const { text, byteOffset } = prepared;
+  let position = prepared.position;
   let retry = false;
-  while (position <= plan.length) {
+  while (position <= text.length) {
     rt().spend();
-    const result: MatchOffsets | { pregError: number } | null | undefined = plan.match(position, retry);
-    if (result && 'pregError' in result) {
-      rt().lastPregError = result.pregError;
-      if (status) status.error = result.pregError;
-      return;
-    }
-    if (!result) {
-      if (plan.handlesRetry || !retry || position >= plan.length) return;
+    const result = executeMatch(retry ? compiled.retry : compiled.regex, text, position);
+    if (result) {
+      const bounds = matchBounds(compiled, result);
+      yield project(compiled, result, text, bounds, byteOffset);
+      position = bounds[1];
+      retry = bounds[0] === bounds[1];
+    } else if (retry && position < text.length) {
       retry = false;
-      position = plan.advance(position);
-      continue;
-    }
-    yield plan.value(result, retry);
-    const [start, end] = result.range;
-    position = end;
-    retry = start === end;
+      position += compiled.utf8 && (text.codePointAt(position) ?? 0) > 0xff_ff ? 2 : 1;
+    } else return;
   }
 }
 
-function scanPlan<T>(
-  compiled: Compiled,
-  subject: string,
-  prepared: PreparedSubject,
-  project: ProjectMatch<T>,
-  options?: MatchScanOptions
-): ScanPlan<T> {
-  const native = nativePatternFor(compiled, subject.length);
-  if (native) {
-    const projection = { ...compiled, utf8: false };
-    const startPosition = prepared.byteOffset(prepared.position);
-    const nextMatch = createBoundedRegexScanner({
-      pattern: native,
-      text: subject,
-      startPosition,
-      utf8: compiled.utf8,
-      budget: rt().budget,
-      maxMatches: options?.maxMatches,
-      batchBudgetMs: options?.batchBudgetMs,
-      noEmptyLimit: options?.noEmptyLimit,
-    });
-    return {
-      length: subject.length,
-      position: startPosition,
-      handlesRetry: true,
-      advance: (position) => (compiled.utf8 ? nextUtf8Byte(subject, position) : position + 1),
-      match: nextMatch,
-      value: (result) => project(projection, result, subject, result.range, (index) => index),
-    };
-  }
-  const { text, byteOffset, position } = prepared;
-  const emptyRegex = text === '' ? compiled.emptyRegex : undefined;
-  const inputAt = (retry: boolean): string => (emptyRegex && !retry ? '\0' : text);
-  return {
-    length: text.length,
-    position,
-    advance: (position) => position + (compiled.utf8 && (text.codePointAt(position) ?? 0) > 0xff_ff ? 2 : 1),
-    match(position, retry) {
-      const input = inputAt(retry);
-      const result = executeMatch(retry ? compiled.retry : (emptyRegex ?? compiled.regex), input, position);
-      if (result) result.range = matchBounds(compiled, result);
-      return result;
-    },
-    value: (result, retry) => project(compiled, result, inputAt(retry), result.range, byteOffset),
-  };
-}
-
-function nextUtf8Byte(text: string, position: number): number {
-  do {
-    position++;
-  } while (((text.codePointAt(position) ?? 0) & 0xc0) === 0x80);
-  return position;
-}
-
-function executeMatch(regex: RegExp, text: string, position: number): MatchOffsets | null {
+function executeMatch(regex: RegExp, text: string, position: number): MatchOffsets | undefined {
   const budget = rt().budget;
   regex.lastIndex = position;
   try {
     const indices = regex.exec(text)?.indices;
     budget.checkClock();
-    return indices?.[0] ? { range: indices[0], groups: indices.groups } : null;
+    return indices?.[0] ? { range: indices[0], groups: indices.groups } : undefined;
   } catch (error) {
-    if (error instanceof SyntaxError) throw new UnsupportedFeatureError('ホストエンジンの制限を超える正規表現');
+    // The host reports a pattern or subject past its own limits this way.
+    if (error instanceof SyntaxError || error instanceof RangeError)
+      throw new UnsupportedFeatureError('ホストエンジンの制限を超える正規表現');
     throw error;
   }
 }
@@ -286,7 +202,7 @@ function toMatch(
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function byteIndexer(text: string): (index: number) => number {
   let offsets: Uint32Array | undefined;
   let cursor = 0;
@@ -351,7 +267,7 @@ defineFunction(
       throwError('ValueError', 'preg_match(): Argument #4 ($flags) must be a PREG_* constant');
     rt().lastPregError = 0;
     const offset = Number((args[4] as bigint | undefined) ?? 0n);
-    const first = matchesOf(compiled, args[1] as string, offset, undefined, { maxMatches: 1 }).next();
+    const first = matchesOf(compiled, args[1] as string, offset).next();
     if (refs[2]) {
       refs[2].v = first.done
         ? new PhpArray()
@@ -456,10 +372,7 @@ function replaceOne(
   if (!compiled) return undefined;
   if (limit === 0) return subject;
   const status = { error: 0 };
-  const matches = matchesOf(compiled, subject, 0, status, {
-    maxMatches: limit < 0 ? Infinity : limit,
-    batchBudgetMs: name === 'preg_replace' || name === 'preg_filter' ? 0 : CALLBACK_BATCH_BUDGET_MS,
-  });
+  const matches = matchesOf(compiled, subject, 0, status);
   let result = '';
   let last = 0;
   for (let done = 0; limit < 0 || done < limit; done++) {
@@ -478,8 +391,8 @@ function replaceOne(
   return result + subject.slice(last);
 }
 
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function pregReplace(
   name: string,
   args: Value[],
@@ -647,8 +560,8 @@ defineFunction(
 );
 defineFunction(
   'preg_split(string $pattern, string $subject, int $limit = -1, int $flags = 0): array|false',
-  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the match iterator, capture offsets and split flags on the same state.
-  // code-gauge-allow functionNcss 39 -- Keeps the match iterator, capture offsets and split flags on the same state.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the match iterator, capture offsets and split flags on the same state.
+  // code-gauge-allow functionNcss -- Keeps the match iterator, capture offsets and split flags on the same state.
   ({ args }) => {
     const compiled = compile('preg_split', args[0] as string);
     if (!compiled) return false;
@@ -665,7 +578,7 @@ defineFunction(
       result.append(offsetCapture ? PhpArray.list([text, BigInt(offset)]) : text);
     };
     let last = 0;
-    const matches = matchesOf(compiled, subject, 0, undefined, splitScanOptions(limit, noEmpty));
+    const matches = matchesOf(compiled, subject);
     while (limit === -1 || limit > 1) {
       const next = matches.next();
       if (next.done) break;
@@ -707,7 +620,7 @@ defineFunction('preg_grep(string $pattern, array $array, int $flags = 0): array|
   const result = new PhpArray();
   for (const [key, value] of (args[1] as PhpArray).entries()) {
     const status = { error: 0 };
-    const matched = !matchesOf(compiled, toStr(value), 0, status, { maxMatches: 1 }).next().done;
+    const matched = !matchesOf(compiled, toStr(value), 0, status).next().done;
     if (status.error !== 0) break;
     if (matched !== invert) result.setSlot(key, copyValueSlot((args[1] as PhpArray).map.get(key) as Value | Ref));
   }

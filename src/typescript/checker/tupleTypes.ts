@@ -82,7 +82,7 @@ function buildTuple(c: Checker, elements: TupleElement[], readonly: boolean): Ob
   return tuple;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Normalizes fixed, optional and variadic elements relative to the concrete rest.
+// code-gauge-allow functionCognitiveComplexity -- Normalizes fixed, optional and variadic elements relative to the concrete rest.
 function flattenTupleElements(c: Checker, elements: TupleElement[]): TupleElement[] {
   const flat = elements.flatMap((element) =>
     element.rest && element.type.kind === 'object' && element.type.objectKind === 'tuple'

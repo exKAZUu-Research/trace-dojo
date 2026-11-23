@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 748 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
+// code-gauge-allow-file fileNcss -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -132,7 +132,7 @@ export class Checker {
 
   /**
    * The operations and the time checking may take, as running a program may: a program can make checking slow, and
-   * the server checks it in its own process.
+   * the host checks it on the thread that runs it.
    */
   constructor(
     readonly root: TreeNode,
@@ -878,7 +878,7 @@ export class Checker {
   }
 
   /** The type whose members a value of `type` has: its boxing interface for a primitive, its constraint for a type parameter. */
-  // code-gauge-allow functionNcss 38 -- One case per kind of type that boxes to an interface.
+  // code-gauge-allow functionNcss -- One case per kind of type that boxes to an interface.
   apparentType(type: Type): Type {
     switch (type.kind) {
       case 'intrinsic': {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 424 -- Declarator resolution and deferred semantic evaluation share type and scope state.
+// code-gauge-allow-file fileNcss -- Declarator resolution and deferred semantic evaluation share type and scope state.
 import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { convertScalar, type Scalar, type Value } from './arith';
@@ -335,7 +335,7 @@ export abstract class CompilerBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Tag lookup and definition must share the current-scope identity; keep their resolution rules together.
+  // code-gauge-allow functionCognitiveComplexity -- Tag lookup and definition must share the current-scope identity; keep their resolution rules together.
   private recordInfo(specifier: Extract<TypeSpecifier, { kind: 'struct' | 'union' }>): RecordInfo {
     const { tag, fields, row, kind } = specifier;
     let info: RecordInfo | undefined;
@@ -360,7 +360,7 @@ export abstract class CompilerBase {
     return info;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Field validation, duplicate names, and layout are one declaration pass; helpers already isolate type and width checks.
+  // code-gauge-allow functionCognitiveComplexity -- Field validation, duplicate names, and layout are one declaration pass; helpers already isolate type and width checks.
   private defineRecord(info: RecordInfo, fields: FieldDeclaration[], row: number): void {
     const members: RecordMember[] = [];
     const names = new Set<string>();
@@ -445,8 +445,8 @@ export abstract class CompilerBase {
     return bitWidth;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Enumerator values and tag identity are resolved in declaration order; splitting the pass would distribute its state.
-  // code-gauge-allow functionNcss 32 -- Enumerator values and tag identity are resolved in declaration order; splitting the pass would distribute its state.
+  // code-gauge-allow functionCognitiveComplexity -- Enumerator values and tag identity are resolved in declaration order; splitting the pass would distribute its state.
+  // code-gauge-allow functionNcss -- Enumerator values and tag identity are resolved in declaration order; splitting the pass would distribute its state.
   private enumType(specifier: Extract<TypeSpecifier, { kind: 'enum' }>): CType {
     const { tag, enumerators, row } = specifier;
     if (tag !== undefined && !enumerators) {
@@ -481,7 +481,7 @@ export abstract class CompilerBase {
   }
 
   /** The type a declarator derives from a base type, and the name it declares. */
-  // code-gauge-allow functionCognitiveComplexity 24 -- The declarator walk applies pointer, array, and function layers in order; separate cases would only move the same branches.
+  // code-gauge-allow functionCognitiveComplexity -- The declarator walk applies pointer, array, and function layers in order; separate cases would only move the same branches.
   protected declaredType(base: CType, declarator: Declarator): { type: CType; name?: string; row: number } {
     let type = base;
     let current = declarator;

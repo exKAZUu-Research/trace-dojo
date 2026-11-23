@@ -18,8 +18,8 @@ import { threadLocalClass } from './thread';
 
 const wokenLoops = new WeakMap<Runtime, WeakSet<object>>();
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One small builtin per native part of the event loop.
-// code-gauge-allow functionNcss 43 -- One small builtin per native part of the event loop.
+// code-gauge-allow functionCognitiveComplexity -- One small builtin per native part of the event loop.
+// code-gauge-allow functionNcss -- One small builtin per native part of the event loop.
 export function asyncioNatives(runtime: Runtime): Map<string, PyValue> {
   const woken = wokenOf(runtime);
   const core = new PyModule(moduleClass, '_asyncio_core', new NamespaceMap());

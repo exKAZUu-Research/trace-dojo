@@ -1,6 +1,7 @@
 import { Random } from '../app/utils/random';
-import { type ProgramTrace, traceProgram } from '../interpreter/program';
+import type { ProgramTrace } from '../interpreter/interpreter';
 import { extractBlanks, removeBlankMarkers } from './fillInBlank/blanks';
+import type { ProblemRunner } from './problemRunner';
 
 export interface InstantiatedProblem extends ProgramTrace {
   /**
@@ -16,14 +17,23 @@ export interface InstantiatedProblem extends ProgramTrace {
 
 const randomNumberRegex = /<(\d+)-(\d+)>/g;
 
-export function instantiateTemplate(template: string, variableSeed: string): InstantiatedProblem {
+/** @param variableSeed Decides the random numbers, so a session shows the same program whenever it is opened. */
+export async function instantiateTemplate(
+  runner: ProblemRunner,
+  template: string,
+  variableSeed: string
+): Promise<InstantiatedProblem> {
   const random = new Random(variableSeed);
   const displayProgramTemplate = template.replaceAll(randomNumberRegex, (_, min: string, max: string) =>
     random.getInteger(Number(min), Number(max)).toString()
   );
   const displayBlanks = extractBlanks(displayProgramTemplate);
   return {
-    ...traceProgram('java', removeBlankMarkers(displayProgramTemplate), displayBlanks.programWithPlaceholders),
+    ...(await runner.traceProgram(
+      'java',
+      removeBlankMarkers(displayProgramTemplate),
+      displayBlanks.programWithPlaceholders
+    )),
     blankAnswers: displayBlanks.answers,
     displayProgramTemplate,
   };

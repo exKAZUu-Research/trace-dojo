@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 448 -- Transcribes liblzma 5.8.4 C sources together, which read best side by side with them.
+// code-gauge-allow-file fileNcss -- Transcribes liblzma 5.8.4 C sources together, which read best side by side with them.
 // How the LZMA encoder of liblzma 5.8.4 chooses its symbols: `lzma_encoder_optimum_fast.c` and
 // `lzma_encoder_optimum_normal.c`. Both leave their choice in the encoder's `backRes` and `lenRes`.
 import { UINT32_MAX } from './xzCommon';
@@ -274,7 +274,7 @@ function backward(coder: LzmaEncoder, start: number): void {
 }
 
 /** `helper1`: the prices of the first symbols, or `UINT32_MAX` once the choice is made. */
-// code-gauge-allow functionNcss 42 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+// code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
 function helper1(coder: LzmaEncoder, mf: MatchFinder, position: number): number {
   const { lenMain, matchesCount } = currentMatches(coder, mf);
   const bufAvail = Math.min(mf.avail + 1, MATCH_LEN_MAX);
@@ -361,7 +361,7 @@ function priceFirstReps(coder: LzmaEncoder, repLens: readonly number[], matchPri
   }
 }
 
-// code-gauge-allow functionParameterCount 7 -- Takes the locals of the optimum_normal helper it continues.
+// code-gauge-allow functionParameterCount -- Takes the locals of the optimum_normal helper it continues.
 function priceFirstMatches(
   coder: LzmaEncoder,
   mf: MatchFinder,
@@ -386,8 +386,8 @@ function priceFirstMatches(
 }
 
 /** The state and reps at `cur` that helper2 derives from the path to it. */
-// code-gauge-allow functionNcss 37 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
-// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+// code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
 function stateAt(coder: LzmaEncoder, reps: Uint32Array, cur: number): number {
   let posPrev = coder.optPosPrev[cur];
   let state: number;
@@ -448,7 +448,7 @@ function extendEnd(coder: LzmaEncoder, lenEnd: number, offset: number): number {
 }
 
 /** Prices a literal at `cur + lenTest`, then a rep0 match, after a match of `lenTest`; the `len_test_2` blocks. */
-// code-gauge-allow functionParameterCount 8 -- Takes the locals of the optimum_normal helper it continues.
+// code-gauge-allow functionParameterCount -- Takes the locals of the optimum_normal helper it continues.
 function tryLiteralThenRep0(
   coder: LzmaEncoder,
   step: Step,
@@ -498,8 +498,8 @@ function tryLiteralThenRep0(
   return lenEnd;
 }
 
-// code-gauge-allow functionNcss 58 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
-// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+// code-gauge-allow functionNcss -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes liblzma 5.8.4 statement by statement, keeping it comparable with the C.
 function helper2(coder: LzmaEncoder, mf: MatchFinder, reps: Uint32Array, lenEndStart: number, step: Step): number {
   const { buffer, buf, cur, niceLen, bufAvailFull, state, posState, position } = step;
   const { probs } = coder;
@@ -571,7 +571,7 @@ function helper2(coder: LzmaEncoder, mf: MatchFinder, reps: Uint32Array, lenEndS
 }
 
 /** The last part of helper2: the normal matches from `cur`. */
-// code-gauge-allow functionParameterCount 7 -- Takes the locals of the optimum_normal helper it continues.
+// code-gauge-allow functionParameterCount -- Takes the locals of the optimum_normal helper it continues.
 function matchesFrom(
   coder: LzmaEncoder,
   mf: MatchFinder,

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 987 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import { newAnnotate, recordAnnotation } from './annotations';
 import type {
   BinaryOperator,
@@ -153,7 +153,7 @@ export class Evaluator extends AsyncEvaluator {
     return undefined;
   }
 
-  // code-gauge-allow functionNcss 60 -- One case per kind of simple statement.
+  // code-gauge-allow functionNcss -- One case per kind of simple statement.
   private simpleStatement(statement: Statement, frame: Frame): Completion {
     const { runtime } = this;
     runtime.spend();
@@ -349,7 +349,7 @@ export class Evaluator extends AsyncEvaluator {
   }
 
   /** Evaluates an assignment's value, telling whether it only creates objects, whose constructors' steps show it. */
-  // code-gauge-allow duplicateLines 23 -- The synchronous and suspending paths evaluate a creation the same way.
+  // code-gauge-allow duplicateLines -- The synchronous and suspending paths evaluate a creation the same way.
   private evaluateCreation(expression: Expression, frame: Frame): [PyValue, boolean] {
     if (expression.kind === 'call') {
       const callee = this.evaluateValue(expression.callee, frame);
@@ -446,8 +446,8 @@ export class Evaluator extends AsyncEvaluator {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 29 -- One case per kind of compound statement, each taking the path that can suspend when it must.
-  // code-gauge-allow functionNcss 39 -- One case per kind of compound statement.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of compound statement, each taking the path that can suspend when it must.
+  // code-gauge-allow functionNcss -- One case per kind of compound statement.
   private *compoundStatement(statement: Statement, frame: Frame): Execution {
     const { runtime } = this;
     runtime.spend();
@@ -528,8 +528,8 @@ export class Evaluator extends AsyncEvaluator {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Follows the protocol of the for loop, closing a generator it leaves.
-  // code-gauge-allow functionNcss 42 -- Follows the protocol of the for loop, closing a generator it leaves.
+  // code-gauge-allow functionCognitiveComplexity -- Follows the protocol of the for loop, closing a generator it leaves.
+  // code-gauge-allow functionNcss -- Follows the protocol of the for loop, closing a generator it leaves.
   private *forStatement(statement: Extract<Statement, { kind: 'for' }>, frame: Frame): Execution {
     const { runtime } = this;
     const { target } = statement;
@@ -726,7 +726,7 @@ export class Evaluator extends AsyncEvaluator {
   }
 
   /** Suspending counterpart of `evaluateCreation`: evaluates an assignment's value and tells whether it only creates objects. */
-  // code-gauge-allow duplicateLines 23 -- The synchronous and suspending paths evaluate a creation the same way.
+  // code-gauge-allow duplicateLines -- The synchronous and suspending paths evaluate a creation the same way.
   private *evaluateCreationSuspending(expression: Expression, frame: Frame): Suspension<[PyValue, boolean]> {
     if (expression.kind === 'call') {
       const callee = yield* this.evaluateSuspending(expression.callee, frame);
@@ -763,8 +763,8 @@ export class Evaluator extends AsyncEvaluator {
     return [yield* this.evaluateSuspending(expression, frame), false];
   }
 
-  // code-gauge-allow functionNcss 45 -- One case per kind of simple statement that evaluates expressions.
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of simple statement that evaluates expressions.
+  // code-gauge-allow functionNcss -- One case per kind of simple statement that evaluates expressions.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of simple statement that evaluates expressions.
   private *suspendingStatementBody(statement: Statement, frame: Frame): Execution {
     switch (statement.kind) {
       case 'expression': {
@@ -1009,7 +1009,7 @@ export class Evaluator extends AsyncEvaluator {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Splits an exception group among except* clauses as Python does.
+  // code-gauge-allow functionCognitiveComplexity -- Splits an exception group among except* clauses as Python does.
   private *exceptStar(
     statement: Extract<Statement, { kind: 'try' }>,
     caught: PyError,
@@ -1052,7 +1052,7 @@ export class Evaluator extends AsyncEvaluator {
 
   // With ----------------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 35 -- Enters, runs the body, and exits with or without an exception, as a with statement does.
+  // code-gauge-allow functionNcss -- Enters, runs the body, and exits with or without an exception, as a with statement does.
   private *withStatement(statement: Extract<Statement, { kind: 'with' }>, frame: Frame, index: number): Execution {
     if (index >= statement.items.length) return yield* this.block(statement.body, frame);
     const { runtime } = this;
@@ -1098,7 +1098,7 @@ export class Evaluator extends AsyncEvaluator {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Records the with statement's step as the synchronous and the suspending path each do.
+  // code-gauge-allow functionCognitiveComplexity -- Records the with statement's step as the synchronous and the suspending path each do.
   /**
    * Calls a context manager's `__enter__` and stores what it returns into the item's target, recording the with
    * statement's step after its first item. In a program that may run threads, `__enter__` may suspend the thread.

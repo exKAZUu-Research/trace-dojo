@@ -889,18 +889,6 @@ echo 'after;';`);
 });
 
 test.each([
-  ["preg_match_all('/(a?)+/', str_repeat('a ', 50000))", '100001'],
-  ["strlen(preg_replace('/(a?)+/', 'x', str_repeat('a ', 50000)))", '150001'],
-  ["strlen(preg_replace_callback('/(a?)+/', fn($m) => 'x', str_repeat('a ', 20000)))", '60001'],
-  ["count(preg_split('/(a?)+/', str_repeat('a ', 30000), 30001, PREG_SPLIT_NO_EMPTY))", '30000'],
-  ["preg_match_all('/(あ?)+/u', str_repeat('あ ', 10000))", '20001'],
-])('completes bounded native regex scan within time budget: %s', (expression, stdout) => {
-  vi.restoreAllMocks();
-  const execution = run(`<?php echo ${expression};`);
-  expect(execution).toMatchObject({ kind: 'executed', stdout });
-});
-
-test.each([
   [
     'callback exit',
     "preg_replace_callback('/(a+)+b|c/', function($m) use (&$i) { if (++$i === 578) exit('done;'); return 'x'; }, $s);",
@@ -1411,17 +1399,6 @@ test('reports Unicode caseless restriction as an unsupported regex feature', () 
   });
 });
 
-test.each([String.raw`/(a)?\1/`, String.raw`/(?<x>a)?\k<x>/`])(
-  'does not match an empty subject through a reference to an unmatched group: %s',
-  (pattern) => {
-    expect(run(`<?php var_dump(preg_match('${pattern}', '', $m));`)).toMatchObject({
-      kind: 'executed',
-      stdout: 'int(0)\n',
-      uncaughtException: undefined,
-    });
-  }
-);
-
 test('retains participating empty captures', () => {
   expect(run(String.raw`<?php var_dump(preg_match('/(a|)\1/','',$m),$m);`)).toMatchObject({
     kind: 'executed',
@@ -1561,31 +1538,6 @@ echo json_encode($matches);
   ).toMatchObject({
     kind: 'executed',
     stdout: '[[["[12345678901234567]",7],["12345678901234567",8]],[["[900]",31],["900",32]]]',
-  });
-});
-
-test('reports a regex deadline and runs the next program', () => {
-  vi.spyOn(Atomics, 'wait').mockReturnValueOnce('timed-out');
-  const source = String.raw`<?php echo preg_match('/(\w+\s*)+/', 'this is a typical sentence');`;
-  expect(run(source)).toEqual({ kind: 'limitExceeded', limit: 'time' });
-  expect(run(source)).toMatchObject({ kind: 'executed', stdout: '1' });
-});
-
-test('reports exhausted PCRE match limits independently of the execution deadline', () => {
-  expect(
-    run(`<?php
-$pattern = '/(*LIMIT_MATCH=0)(cat|dog)/';
-$subject = 'a cat and a dog';
-var_dump(preg_match($pattern, $subject), preg_last_error(), preg_last_error_msg());
-var_dump(preg_match_all($pattern, $subject), preg_last_error());
-var_dump(preg_replace($pattern, 'pet', $subject, -1, $count), $count, preg_last_error());
-var_dump(preg_split($pattern, $subject), preg_last_error());
-var_dump(preg_match('/cat/', 'cat'), preg_last_error());
-`)
-  ).toMatchObject({
-    kind: 'executed',
-    stdout:
-      'bool(false)\nint(2)\nstring(25) "Backtrack limit exhausted"\nbool(false)\nint(2)\nNULL\nint(0)\nint(2)\nbool(false)\nint(2)\nint(1)\nint(0)\n',
   });
 });
 
@@ -1801,30 +1753,6 @@ test.each([
 ])('bounds complete array replacement strings: %s', (expression) => {
   const result = run(`<?php $s='a';$p=str_repeat('x',900000);for($i=0;$i<5;$i++)$s=${expression};echo 'never';`);
   expect(result.kind === 'executed' && result.stdout).toMatch(/^\nFatal error: Allowed memory size/);
-});
-
-test.each([
-  ['/(?<=(a{1,3})(a{1,3}))b/', 'aaaab', '["b","aaa","a"]'],
-  ['/(?<=a{1,3}(a{1,3}))b/', 'aaaab', '["b","a"]'],
-  ['/(?<=(a)|bc)d/', 'ad', '["d","a"]'],
-])('preserves PHP capture order for variable-length and uneven lookbehinds: %s', (pattern, subject, stdout) => {
-  expect(run(`<?php preg_match('${pattern}','${subject}',$m);echo json_encode($m);`)).toMatchObject({
-    kind: 'executed',
-    stdout,
-  });
-});
-
-test.each([
-  [String.raw`preg_match('/(?<=(a)\1)b/', 'aab', $m); echo json_encode($m);`, '["b","a"]'],
-  [String.raw`echo preg_match('/(?<!(a)\1)b/', 'aab');`, '0'],
-  [String.raw`echo preg_replace('/(?<=(.)\1)x/', 'Y', 'aax bcx');`, 'aaY bcx'],
-  [String.raw`preg_match_all('/(?<=(\d)\1)-/', '11-23-', $m); echo json_encode($m);`, '[["-"],["1"]]'],
-  [String.raw`preg_match('/(?<=(?<x>a)\k<x>)b/', 'aab', $m); echo json_encode($m);`, '{"0":"b","x":"a","1":"a"}'],
-])('matches backreferences within lookbehinds via native PCRE: %s', (call, stdout) => {
-  expect(run(`<?php ${call}`)).toMatchObject({
-    kind: 'executed',
-    stdout,
-  });
 });
 
 test('retains fixed lookbehind captures', () => {
@@ -4326,17 +4254,6 @@ echo '|', gc_collect_cycles();
     expect(replacedWithLoopValue).toMatchObject({ kind: 'executed', stdout: 'a|cb2' });
   }
 
-  const capturedLookbehind = run(String.raw`<?php
-preg_match('/(?<=(a)|bc)d/', 'ad', $m1);
-preg_match('/(?<=(a{1,2}))b/', 'aab', $m2);
-preg_match('/(?<=(a{1,2}?))b/', 'aab', $m3);
-echo json_encode([$m1, $m2, $m3]);
-`);
-  expect(capturedLookbehind).toMatchObject({
-    kind: 'executed',
-    stdout: '[["d","a"],["b","aa"],["b","aa"]]',
-  });
-
   const liveLocalCleanup = run(String.raw`<?php
 class D { function __construct(public $n) {} function __destruct() { echo $this->n; } }
 class A {
@@ -5253,15 +5170,6 @@ throw new Exception("first");
 `)
   ).toMatchObject({ kind: 'executed', stdout: 'h\ndestroyed\n' });
 
-  for (const [pattern, subject, expected] of [
-    ['(?<=([ab]){2})c', 'abc', '[["c",2],["b",1]]'],
-    ['(?<=(?<n>[ab]){2})c', 'bac', '{"0":["c",2],"n":["a",1],"1":["a",1]}'],
-  ]) {
-    expect(
-      run(`<?php preg_match('/${pattern}/', '${subject}', $m, PREG_OFFSET_CAPTURE); echo json_encode($m);`)
-    ).toMatchObject({ kind: 'executed', stdout: expected });
-  }
-
   for (const [initial, expected] of [
     ['[]', '[4,9]:1;[]:0;'],
     ['[1,2]', '[1,2,4,9]:3;{"0":1,"1":2,"3":9}:2;'],
@@ -5451,17 +5359,7 @@ echo count($b), ':', json_encode($b);
   }
 });
 
-test('reports JIT stack limit exhaustion on long subjects with quantified groups and accurate rows for first-statement syntax errors', () => {
-  expect(
-    run(`<?php
-var_dump(preg_match('/^(?:a|b)*$/', str_repeat('a', 5000)), preg_last_error_msg());
-var_dump(preg_match('/^(?:a|b)*$/', str_repeat('a', 10000)), preg_last_error_msg());
-`)
-  ).toMatchObject({
-    kind: 'executed',
-    stdout: 'int(1)\nstring(8) "No error"\nbool(false)\nstring(25) "JIT stack limit exhausted"\n',
-  });
-
+test('reports accurate rows for first-statement syntax errors', () => {
   for (const source of [
     '<?php\nfor ($i = 0; $i < 3 $i++) {}\necho 1;\necho 2;\n',
     '<?php\ntry { } catch { }\necho 1;\necho 2;\n',

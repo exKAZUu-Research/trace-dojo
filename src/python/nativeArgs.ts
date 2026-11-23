@@ -151,7 +151,7 @@ const OMITTED = Symbol('omitted') as unknown as PyValue;
  * of a `def`, such as `mean() missing 1 required positional argument: 'data'`. `parameters` are written as in that
  * `def`, such as `population, weights=None, *, k=1`; only whether one has a default matters, not the default's value.
  */
-// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of parameter in a def's parameter list.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of parameter in a def's parameter list.
 export function pythonSignature(qualifiedName: string, parameters: string): Signature {
   const params: Signature['def']['params'] = [];
   const defaults: PyValue[] = [];

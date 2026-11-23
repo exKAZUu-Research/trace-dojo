@@ -10,7 +10,9 @@ import { z } from 'zod';
 import { type ProblemSession, problemSessions, type ProblemSubmission, users } from '../../db/schema';
 import type { db as databaseClient } from '../../src/infrastructures/database';
 import type { BackendRouter } from '../../src/infrastructures/trpcBackend/routers';
+import { gradeFillInBlankCode } from '../../src/problems/fillInBlank/grade';
 import type * as ProblemData from '../../src/problems/problemData';
+import { nodeRunner } from '../helpers/nodeProblems';
 
 const auth = vi.hoisted(() => ({ userId: 'demo-student' }));
 vi.mock('../../src/utils/sessionOnNode', () => ({
@@ -145,7 +147,7 @@ test('actual checking lists register both dedicated bugs without losing regular 
   );
 });
 
-test('actual checking challenge starts, grades both starters and repairs, then advances to the other bug', async () => {
+test('actual checking challenge starts, stores the verdicts of both starters and repairs, then advances to the other bug', async () => {
   let challenge = challengeSchema.parse(await caller.startExercise({ ...location, problemFormat: 'bugFix' }));
   const seen = new Set<string>();
   for (let i = 0; i < 2; i++) {
@@ -153,21 +155,12 @@ test('actual checking challenge starts, grades both starters and repairs, then a
     expect(seen.has(example.id)).toBe(false);
     seen.add(example.id);
     expect(challenge).toMatchObject({ finalBoard: example.board, finalTurtles: example.turtles });
-    const wrong = await caller.submitExercise({
-      ...location,
-      problemFormat: 'bugFix',
-      sessionId: challenge.sessionId,
-      code: challenge.displayProgram,
-    });
+    const submission = { ...location, problemFormat: 'bugFix' as const, sessionId: challenge.sessionId };
+    const wrong = await gradeFillInBlankCode(nodeRunner, challenge, challenge.displayProgram);
     assertWrong(wrong, example.defect);
-    expect(
-      await caller.submitExercise({
-        ...location,
-        problemFormat: 'bugFix',
-        sessionId: challenge.sessionId,
-        code: example.correct,
-      })
-    ).toMatchObject({ status: 'correct' });
+    await caller.submitExercise({ ...submission, code: challenge.displayProgram, status: 'incorrect' });
+    expect(await gradeFillInBlankCode(nodeRunner, challenge, example.correct)).toEqual({ status: 'correct' });
+    await caller.submitExercise({ ...submission, code: example.correct, status: 'correct' });
     if (i === 0)
       challenge = challengeSchema.parse(
         await caller.nextExercise({ ...location, problemFormat: 'bugFix', sessionId: challenge.sessionId })
@@ -185,48 +178,63 @@ test('actual checking challenge starts, grades both starters and repairs, then a
 test.each(['regular', 'fillInBlank'] as const)(
   'actual checking membership still starts %s challenges',
   async (problemFormat) => {
-    expect(await caller.startExercise({ ...location, problemFormat })).toMatchObject({
+    const request =
+      problemFormat === 'regular'
+        ? { ...location, problemFormat, tracesInBrowser: true as const }
+        : { ...location, problemFormat };
+    expect(await caller.startExercise(request)).toMatchObject({
       problemFormat,
       sessionId: expect.any(Number),
     });
   }
 );
 
-test.each(examples)('direct page $id resumes safely and grades through ordinary persistence', async (example) => {
-  const props = pageSchema.parse(await openPage({ ...location, problemId: example.id })).props;
-  const id = props.initialProblemSession.id;
-  expect(props.initialProblemSession).toMatchObject({ problemType: 'bugFix', traceItemIndex: 0 });
-  expect(props.javaProblem).toMatchObject({
-    problemId: example.id,
-    finalBoard: example.board,
-    finalTurtles: example.turtles,
-  });
-  expect(props.javaProblem.displayProgram).toBe(starter(example));
-  expect(pageSchema.parse(await openPage({ ...location, problemId: example.id })).props).toEqual(props);
-  const wrong = await caller.gradeFillInBlankAnswers({
-    sessionId: id,
-    code: props.javaProblem.displayProgram,
-    elapsedMilliseconds: 21,
-  });
-  assertWrong(wrong, example.defect);
-  const afterWrong = await stored(id);
-  expect(afterWrong?.completedAt).toBeNull();
-  expect(
-    await caller.gradeFillInBlankAnswers({ sessionId: id, code: example.correct, elapsedMilliseconds: 42 })
-  ).toEqual({ status: 'correct' });
-  const saved = await stored(id);
-  expect(saved?.completedAt).toEqual(new Date());
-  expect(saved?.problemType).toBe('bugFix');
-  expect(saved?.submissions).toEqual([
-    expect.objectContaining({
+test.each(examples)(
+  'direct page $id resumes safely and stores verdicts through ordinary persistence',
+  async (example) => {
+    const props = pageSchema.parse(await openPage({ ...location, problemId: example.id })).props;
+    const id = props.initialProblemSession.id;
+    expect(props.initialProblemSession).toMatchObject({ problemType: 'bugFix', traceItemIndex: 0 });
+    expect(props.javaProblem).toMatchObject({
+      problemId: example.id,
+      finalBoard: example.board,
+      finalTurtles: example.turtles,
+    });
+    expect(props.javaProblem.displayProgram).toBe(starter(example));
+    expect(pageSchema.parse(await openPage({ ...location, problemId: example.id })).props).toEqual(props);
+    assertWrong(
+      await gradeFillInBlankCode(nodeRunner, props.javaProblem, props.javaProblem.displayProgram),
+      example.defect
+    );
+    await caller.createFillInBlankSubmission({
+      sessionId: id,
       code: props.javaProblem.displayProgram,
-      isCorrect: false,
-      gradingStage: 5,
       elapsedMilliseconds: 21,
-    }),
-    expect.objectContaining({ code: example.correct, isCorrect: true, gradingStage: 5, elapsedMilliseconds: 42 }),
-  ]);
-});
+      isCorrect: false,
+    });
+    const afterWrong = await stored(id);
+    expect(afterWrong?.completedAt).toBeNull();
+    expect(await gradeFillInBlankCode(nodeRunner, props.javaProblem, example.correct)).toEqual({ status: 'correct' });
+    await caller.createFillInBlankSubmission({
+      sessionId: id,
+      code: example.correct,
+      elapsedMilliseconds: 42,
+      isCorrect: true,
+    });
+    const saved = await stored(id);
+    expect(saved?.completedAt).toEqual(new Date());
+    expect(saved?.problemType).toBe('bugFix');
+    expect(saved?.submissions).toEqual([
+      expect.objectContaining({
+        code: props.javaProblem.displayProgram,
+        isCorrect: false,
+        gradingStage: 6,
+        elapsedMilliseconds: 21,
+      }),
+      expect.objectContaining({ code: example.correct, isCorrect: true, gradingStage: 6, elapsedMilliseconds: 42 }),
+    ]);
+  }
+);
 
 test('direct page rejects wrong location before insertion', async () => {
   await expect(
@@ -247,12 +255,17 @@ test.each([
   { name: 'format', patch: { problemType: 'executionResult' } },
   { name: 'course', patch: { courseId: 'missing' } },
   { name: 'lecture', patch: { lectureId: 'missing' } },
-])('ordinary grading rejects persisted wrong $name with no history', async ({ patch }) => {
+])('an ordinary submission is rejected for persisted wrong $name with no history', async ({ patch }) => {
   const id = await pageSession();
   db.update(problemSessions).set(patch).where(eq(problemSessions.id, id)).run();
   const before = await stored(id);
   await expect(
-    caller.gradeFillInBlankAnswers({ sessionId: id, code: examples[0].correct, elapsedMilliseconds: 1 })
+    caller.createFillInBlankSubmission({
+      sessionId: id,
+      code: examples[0].correct,
+      elapsedMilliseconds: 1,
+      isCorrect: true,
+    })
   ).rejects.toThrow();
   expect(await stored(id)).toEqual(before);
 });
@@ -276,27 +289,27 @@ test.each([{ problemType: 'executionResult' }, { problemType: 'step', traceItemI
   }
 );
 
-test.each([
-  { problemType: 'bugFix', legacy: false },
-  { problemType: 'executionResult', legacy: false },
-  { problemType: 'bugFix', legacy: true },
-  { problemType: 'executionResult', legacy: true },
-])('ordinary bug session rejects client correctness %j', async ({ problemType, legacy }) => {
-  const id = await pageSession();
-  const before = await stored(id);
-  const input = { sessionId: id, problemType, traceItemIndex: 0, isCorrect: true };
-  await expect(
-    caller.createProblemSubmission(
-      legacy
-        ? { ...input, elapsedMilliseconds: 100 }
-        : { ...input, incrementalElapsedMilliseconds: 100, isCompleted: true }
-    )
-  ).rejects.toThrow();
-  expect(await stored(id)).toEqual(before);
-});
+test.each(['bugFix', 'executionResult'])(
+  'ordinary bug session rejects a trace submission of type %s',
+  async (problemType) => {
+    const id = await pageSession();
+    const before = await stored(id);
+    await expect(
+      caller.createProblemSubmission({
+        sessionId: id,
+        problemType,
+        traceItemIndex: 0,
+        isCorrect: true,
+        incrementalElapsedMilliseconds: 100,
+        isCompleted: true,
+      })
+    ).rejects.toThrow();
+    expect(await stored(id)).toEqual(before);
+  }
+);
 
 test.each(['executionResult', 'fillInBlank'])(
-  'registered bug identity cannot bypass grading with stored %s format',
+  'registered bug identity accepts no trace submission with stored %s format',
   async (problemType) => {
     const id = await pageSession();
     db.update(problemSessions).set({ problemType }).where(eq(problemSessions.id, id)).run();
@@ -323,6 +336,7 @@ test('challenge rejects foreign user, wrong location and wrong format without hi
     problemFormat: 'bugFix' as const,
     sessionId: challenge.sessionId,
     code: examples[0].correct,
+    status: 'correct' as const,
   };
   const before = sqlite.prepare('SELECT * FROM ExerciseSession').all();
   await expect(caller.submitExercise({ ...input, problemFormat: 'fillInBlank' })).rejects.toThrow();
@@ -333,12 +347,17 @@ test('challenge rejects foreign user, wrong location and wrong format without hi
   expect(sqlite.prepare('SELECT * FROM ExerciseSubmission').all()).toHaveLength(0);
 });
 
-test('foreign users cannot grade, update, or submit a bug session; their direct page creates a separate session', async () => {
+test('foreign users cannot update or submit to a bug session; their direct page creates a separate session', async () => {
   const id = await pageSession();
   const before = await stored(id);
   auth.userId = 'other';
   await expect(
-    caller.gradeFillInBlankAnswers({ sessionId: id, code: examples[0].correct, elapsedMilliseconds: 1 })
+    caller.createFillInBlankSubmission({
+      sessionId: id,
+      code: examples[0].correct,
+      elapsedMilliseconds: 1,
+      isCorrect: true,
+    })
   ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
   await expect(caller.updateProblemSession({ id, incrementalElapsedMilliseconds: 1 })).rejects.toThrow();
   await expect(

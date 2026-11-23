@@ -15,7 +15,7 @@ import { type Frame, Runtime, UNASSIGNED } from './runtime';
 import { lookupFieldOrMethod, type Type, typeString, underlying } from './types';
 import { Cell, Complex, GoArray, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from './values';
 
-// code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
+// code-gauge-allow duplicateLines -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceGoProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(parseGo(program), { atomicRows: new Set(trace.atomicAnnotations.keys()) });
   const runtime = new Runtime(input);
@@ -122,7 +122,6 @@ function addReceiverFields(variables: TraceVariables, name: string, value: Value
   walkStruct(struct, structType, []);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of type.
 function scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR {
   const under = underlying(type);
   switch (under.kind) {

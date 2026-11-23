@@ -5,7 +5,7 @@ import { createNodeBundleRunner } from '../helpers/nodeBundleRunner';
 
 const runNodeBundle = createNodeBundleRunner();
 
-test('repeated ready lists stay bounded on both sides of the display element limit', { timeout: 30_000 }, () => {
+test('repeated ready lists stay bounded on both sides of the display element limit', () => {
   const output = runNodeBundle('test/helpers/haskellReadyListTrace.ts', { heapMb: 256, timeout: 15_000 });
   const summaries = z
     .array(

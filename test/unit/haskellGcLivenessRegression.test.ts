@@ -8,7 +8,7 @@ import { createNodeBundleRunner } from '../helpers/nodeBundleRunner';
 
 const runNodeBundle = createNodeBundleRunner();
 
-test('nested turtle traces retain shared liveness within a bounded Node heap', { timeout: 30_000 }, () => {
+test('nested turtle traces retain shared liveness within a bounded Node heap', () => {
   const output = runNodeBundle('test/helpers/haskellGcLivenessMemory.ts', { heapMb: 256 });
   const results = z
     .array(

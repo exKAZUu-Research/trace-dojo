@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict';
-
+import { assert } from 'es-toolkit';
 import { Map as PersistentMap } from 'immutable';
 
 import type { LocalVar } from './rast';
@@ -20,7 +19,7 @@ export class LocalScope {
   }
 
   define(name: string, local: LocalVar): void {
-    assert.ok(!this.sealed, 'Define all bindings before creating child scopes');
+    assert(!this.sealed, 'Define all bindings before creating child scopes');
     chargeTypeWork();
     this.own.set(name, local);
     this.bindings = this.bindings.set(name, local);

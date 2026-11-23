@@ -2351,17 +2351,13 @@ run();`,
 }
 run();`,
   ],
-])(
-  'a program using %s runs as Node.js runs it',
-  (_, source) => {
-    expect(executeProgram('javascript', source)).toMatchObject({
-      kind: 'executed',
-      uncaughtException: undefined,
-      ...runOnNode(source),
-    });
-  },
-  30_000
-);
+])('a program using %s runs as Node.js runs it', (_, source) => {
+  expect(executeProgram('javascript', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    ...runOnNode(source),
+  });
+});
 
 describe('busy waits', () => {
   // A busy wait runs a quarter of the operation budget before it polls the clock, which under machine load can take

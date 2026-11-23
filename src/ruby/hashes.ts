@@ -69,7 +69,7 @@ export function* withHashTraversal<T>(body: (traversal: HashTraversal) => Gen<T>
   }
 }
 
-// code-gauge-allow functionNcss 35 -- Recursive guards end before hash-code conversion, while roots and memoization span both phases.
+// code-gauge-allow functionNcss -- Recursive guards end before hash-code conversion, while roots and memoization span both phases.
 function* hashKeyInTraversal(value: Value, traversal: HashTraversal): Gen<string> {
   if (traversal.active.has(value)) throw new RecursiveHashSignal(traversal);
   const structural = isStructuralHash(value);

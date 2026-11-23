@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 445 -- Builds and checks conditional flow for each expression form.
+// code-gauge-allow-file fileNcss -- Builds and checks conditional flow for each expression form.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -74,7 +74,7 @@ export class ConditionChecker {
     return result;
   }
 
-  // code-gauge-allow functionNcss 31 -- Computes branch states for each kind of narrowing expression.
+  // code-gauge-allow functionNcss -- Computes branch states for each kind of narrowing expression.
   private conditionOf(node: TreeNode): Condition {
     const expression = skipParentheses(node);
     switch (expression.type) {
@@ -221,7 +221,7 @@ export class ConditionChecker {
     else if (semantics === 'never') this.c.error(node, 'この種類の式は、常に偽になります。');
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of expression whose syntax decides its truthiness.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of expression whose syntax decides its truthiness.
   private syntacticTruthiness(node: TreeNode): 'always' | 'never' | 'sometimes' {
     const expression = withoutAssertions(node);
     if (alwaysTruthyTypes.has(expression.type)) return 'always';

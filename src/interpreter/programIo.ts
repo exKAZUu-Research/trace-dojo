@@ -91,11 +91,12 @@ export class OutputChannel {
     private readonly encoding?: 'jvm-utf8'
   ) {}
 
-  write(text: string): void {
+  write(text: string, transform?: (text: string) => string): void {
     if (this.isClosed) return;
     this.written.length += text.length;
     if (this.written.length > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
-    this.text += this.encoding === 'jvm-utf8' ? this.encodeJvmChunk(text) : text;
+    const transformed = transform ? transform(text) : text;
+    this.text += this.encoding === 'jvm-utf8' ? this.encodeJvmChunk(transformed) : transformed;
   }
 
   private encodeJvmChunk(text: string): string {

@@ -62,7 +62,7 @@ export class CompileClassConstants {
     return undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Resolves lexical scope and inherited visibility in lookup order.
+  // code-gauge-allow functionCognitiveComplexity -- Resolves lexical scope and inherited visibility in lookup order.
   private get(cls: ClassRef, name: string, scope: ClassDecl | undefined, closure: boolean): Constant | undefined {
     const knownScope = !closure && scope?.kind !== 'trait';
     if (cls.k === 'self') return knownScope && scope ? this.own(scope, name, scope) : undefined;

@@ -16,8 +16,8 @@ export function defineStructuredClone(builder: RealmBuilder): void {
 }
 
 /** The structured clone of plain data: primitives, arrays, plain objects, Maps, Sets, and errors. */
-// code-gauge-allow functionCognitiveComplexity 28 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
-// code-gauge-allow functionNcss 39 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionNcss -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function structuredClone(runtime: Runtime, value: Value, memory: Map<JsObject, JsObject>): Value {
   runtime.spend();
   if (typeof value === 'symbol') return cloneError(runtime, value.toString());

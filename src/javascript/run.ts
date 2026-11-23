@@ -3,7 +3,6 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { Program } from './ast';
-import { boundedHostWork } from './boundedHostWork';
 import { inspect, uncaughtErrorHeadline } from './inspect';
 import { parseJavaScript } from './parse';
 import { Runtime } from './runtime';
@@ -40,7 +39,7 @@ export function executeParsedProgram(parse: () => Program, input?: ProgramInput)
  *
  * @param onEnd Called when the program ends, while its scope still holds its variables.
  */
-// code-gauge-allow duplicateLines 20 -- Each language's runner wraps its own runtime and collects the same output contract.
+// code-gauge-allow duplicateLines -- Each language's runner wraps its own runtime and collects the same output contract.
 export function runProgram(runtime: Runtime, program: Program, onEnd?: (scope: Scope) => void): ProgramRun {
   runtime.rejectsFunctionText = program.rejectsFunctionText ?? false;
   runtime.allowsOnlyStringRawTag = program.allowsOnlyStringRawTag ?? false;
@@ -56,22 +55,22 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (scope: S
   });
   runtime.pushFrame(scope, undefined, false);
   try {
-    return boundedHostWork(runtime.budget, () => {
-      let uncaughtException: string | undefined;
-      try {
-        runtime.evaluator.runProgram(program);
-      } catch (error) {
-        uncaughtException = describeUncaught(runtime, error);
-      }
-      onEnd?.(scope);
-      runtime.collectGarbage();
-      return {
-        finalBoard: runtime.world.boardText(),
-        finalTurtles: runtime.world.turtleTraces(),
-        uncaughtException,
-        ...runtime.io.output(),
-      };
-    });
+    let uncaughtException: string | undefined;
+    try {
+      runtime.evaluator.runProgram(program);
+    } catch (error) {
+      uncaughtException = describeUncaught(runtime, error);
+    }
+    onEnd?.(scope);
+    runtime.collectGarbage();
+    // Host work that charges no operations as it runs (such as a slow regular expression) may have ended late.
+    runtime.budget.checkClock();
+    return {
+      finalBoard: runtime.world.boardText(),
+      finalTurtles: runtime.world.turtleTraces(),
+      uncaughtException,
+      ...runtime.io.output(),
+    };
   } finally {
     runtime.popFrame();
   }

@@ -8,13 +8,14 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
 import { Lecture } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/pageOnClient';
 import { ProblemPageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/pageOnClient';
+import { gradeFillInBlankCode } from '../../../src/problems/fillInBlank/grade';
 import { courseIdToLectureIds } from '../../../src/problems/problemData';
 import { readRenderedJavaSource, replaceJavaSource } from '../../helpers/javaEditor';
 
 const transport = vi.hoisted(() => ({
   problemId: 'testTurnBug',
   lectureId: '',
-  grade: vi.fn(),
+  save: vi.fn(),
   update: vi.fn(),
   start: vi.fn(),
   push: vi.fn(),
@@ -36,15 +37,24 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
     startExercise: { useMutation: () => ({ mutateAsync: transport.start }) },
     nextExercise: { useMutation: () => ({ mutateAsync: vi.fn() }) },
     endExercise: { useMutation: () => ({ mutateAsync: vi.fn() }) },
-    submitExercise: { useMutation: () => ({ mutateAsync: transport.grade }) },
+    submitExercise: { useMutation: () => ({ mutateAsync: transport.save }) },
     submitRegularExercise: { useMutation: () => ({ mutateAsync: vi.fn() }) },
     switchRegularExerciseToStep: { useMutation: () => ({ mutateAsync: vi.fn() }) },
     countIncorrectSubmissions: { useQuery: () => ({ refetch: vi.fn() }) },
     createProblemSubmission: { useMutation: () => ({ mutateAsync: vi.fn() }) },
-    gradeFillInBlankAnswers: { useMutation: () => ({ mutateAsync: transport.grade }) },
+    createFillInBlankSubmission: { useMutation: () => ({ mutateAsync: transport.save }) },
     updateProblemSession: { useMutation: () => ({ mutate: vi.fn(), mutateAsync: transport.update }) },
   },
 }));
+vi.mock('../../../src/problems/browserProblemRunner', async () => {
+  const { nodeRunner } = await import('../../helpers/nodeProblems');
+  return { getBrowserProblemRunner: () => nodeRunner };
+});
+vi.mock(import('../../../src/problems/fillInBlank/grade'), async (importOriginal) => {
+  const original = await importOriginal();
+  return { ...original, gradeFillInBlankCode: vi.fn(original.gradeFillInBlankCode) };
+});
+const grade = vi.mocked(gradeFillInBlankCode);
 
 const turn = {
   problemFormat: 'bugFix' as const,
@@ -79,7 +89,8 @@ beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
   transport.lectureId = courseIdToLectureIds.test[0];
-  transport.grade.mockReset();
+  grade.mockReset();
+  transport.save.mockReset();
   transport.start.mockReset();
   transport.update.mockReset().mockResolvedValue({ elapsedMilliseconds: 123 });
 });
@@ -112,30 +123,27 @@ test.each([turn, loop])(
     expect(screen.getByRole('heading', { name: '実行後の盤面' })).toBeVisible();
     expect(screen.queryByRole('button', { name: /ステップ|次のステップ/ })).not.toBeInTheDocument();
     expect(screen.queryByText('実行後の変数の値')).not.toBeInTheDocument();
-    expect(transport.grade).not.toHaveBeenCalled();
+    expect(grade).not.toHaveBeenCalled();
   }
 );
 
 test('ordinary syntax demo submits exact source, shows compiler diagnostics, and completes only after repair', async () => {
   const user = userEvent.setup();
   const diagnostic = 'for文の条件にはboolean型の式が必要です。';
-  transport.grade
-    .mockResolvedValueOnce({
-      status: 'incorrect',
-      detail: 'Compile error.',
-      diagnostics: [
-        { line: 4, message: diagnostic, originalMessage: 'incompatible types: int cannot be converted to boolean' },
-      ],
-    })
-    .mockResolvedValueOnce({ status: 'correct' });
+  grade.mockResolvedValueOnce({
+    status: 'incorrect',
+    detail: 'Compile error.',
+    diagnostics: [{ line: 4, message: diagnostic }],
+  });
   renderDemo(loop);
   const editor = await screen.findByRole('textbox', { name: /Java/ });
   await user.click(screen.getByRole('button', { name: '提出' }));
   await waitFor(() =>
-    expect(transport.grade).toHaveBeenNthCalledWith(1, {
+    expect(transport.save).toHaveBeenNthCalledWith(1, {
       sessionId: 31,
       code: loop.displayProgram,
       elapsedMilliseconds: 123,
+      isCorrect: false,
     })
   );
   const failure = await screen.findByRole('alertdialog');
@@ -148,10 +156,11 @@ test('ordinary syntax demo submits exact source, shows compiler diagnostics, and
   await replaceJavaSource(editor, repaired);
   await user.click(screen.getByRole('button', { name: '提出' }));
   await waitFor(() =>
-    expect(transport.grade).toHaveBeenNthCalledWith(2, {
+    expect(transport.save).toHaveBeenNthCalledWith(2, {
       sessionId: 31,
       code: repaired,
       elapsedMilliseconds: 123,
+      isCorrect: true,
     })
   );
   expect(await screen.findByRole('alertdialog')).toHaveTextContent('この問題は完了');
@@ -172,7 +181,7 @@ test('ordinary demo reset restores the buggy starter without submission and rema
   expect(readRenderedJavaSource(editor)).toBe(turn.displayProgram);
   await user.click(screen.getByRole('button', { name: '元に戻す' }));
   expect(readRenderedJavaSource(editor)).toBe(repaired);
-  expect(transport.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
   expect(transport.update).not.toHaveBeenCalled();
 });
 
@@ -203,7 +212,7 @@ test('demo drafts resume per problem and stay separate from challenge drafts wit
   page.unmount();
   renderDemo(loop);
   expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(loopDraft);
-  expect(transport.grade).not.toHaveBeenCalled();
+  expect(grade).not.toHaveBeenCalled();
 });
 
 function renderDemo(javaProblem: typeof turn): ReturnType<typeof render> {

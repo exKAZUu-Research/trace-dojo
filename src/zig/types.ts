@@ -253,7 +253,7 @@ const C_INTEGERS = new Map<string, [boolean, number]>([
 ]);
 
 /** The type a primitive name such as `i32`, `usize`, or `bool` denotes, or undefined for other names. */
-// code-gauge-allow functionNcss 41 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionNcss -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
 export function primitiveType(name: string): Type | undefined {
   const int = /^([iu])(0|[1-9]\d*)$/.exec(name);
   if (int) {
@@ -457,7 +457,7 @@ export function isScalarType(type: Type): boolean {
 }
 
 /** Whether values of a type exist only at compile time. */
-// code-gauge-allow duplicateLines 23 -- Comptime classification and by-value cycle detection traverse similar graphs with different leaf and field predicates.
+// code-gauge-allow duplicateLines -- Comptime classification and by-value cycle detection traverse similar graphs with different leaf and field predicates.
 export function isComptimeOnly(type: Type, seen = new Set<Type>()): boolean {
   if (seen.has(type)) return false;
   spendMemory();
@@ -539,8 +539,8 @@ export function indexableChild(type: Type): Type | undefined {
 // Names ---------------------------------------------------------------------------------------------------------------
 
 /** The type's name as Zig's `@typeName` writes it. */
-// code-gauge-allow functionNcss 47 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionNcss -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
 export function typeName(type: Type): string {
   switch (type.kind) {
     case 'int': {

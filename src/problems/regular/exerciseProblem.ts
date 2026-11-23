@@ -1,5 +1,3 @@
-import type { InstantiatedProblem } from '../instantiateProblem';
-
 /** The state of a regular exercise session, which changes as the learner answers within it. */
 export interface RegularExerciseState {
   problemFormat: 'regular';
@@ -12,6 +10,6 @@ export interface RegularExerciseState {
 }
 
 export interface RegularExerciseDisplay extends RegularExerciseState {
-  /** Generated on the server, where the Java interpreter runs. */
-  problem: InstantiatedProblem;
+  /** The program that the browser instantiates with `seed` and traces. */
+  programTemplate: string;
 }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file duplicateLines 17 -- Library types repeat the same shape of method on purpose, each over its own state.
+// code-gauge-allow-file duplicateLines -- Library types repeat the same shape of method on purpose, each over its own state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
@@ -178,8 +178,8 @@ function isString(type: Type): boolean {
   return false;
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Dispatches scalar conversion while sharing one expansion budget.
-// code-gauge-allow functionNcss 44 -- Keeps supported scalar type cases together.
+// code-gauge-allow functionCognitiveComplexity -- Dispatches scalar conversion while sharing one expansion budget.
+// code-gauge-allow functionNcss -- Keeps supported scalar type cases together.
 function scalarOf(
   value: Value,
   type: Type,
@@ -365,8 +365,8 @@ function guardedDisplayNode(
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Dispatches reference graphs while keeping wrapper payloads transparent.
-// code-gauge-allow functionNcss 43 -- Keeps aggregate representation cases together.
+// code-gauge-allow functionCognitiveComplexity -- Dispatches reference graphs while keeping wrapper payloads transparent.
+// code-gauge-allow functionNcss -- Keeps aggregate representation cases together.
 function displayValue(value: Value, type: Type, seen: Set<unknown>, budget: PreviewBudget): DisplayNode | undefined {
   if (budget.remaining <= 0) return TRUNCATED;
   if (value === UNASSIGNED) return undefined;

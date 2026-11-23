@@ -33,25 +33,24 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
     switchRegularExerciseToStep: { useMutation: () => ({ mutateAsync: transport.switchToStep }) },
   },
 }));
+vi.mock('../../../src/problems/browserProblemRunner', async () => {
+  const { nodeRunner } = await import('../../helpers/nodeProblems');
+  return { getBrowserProblemRunner: () => nodeRunner };
+});
 
 import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
 import { PracticePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/practice/pageOnClient';
 import { AuthContextProvider } from '../../../src/contexts/AuthContext';
-import { instantiateProblem } from '../../../src/problems/instantiateProblem';
-import { instantiatePracticeProblem } from '../../../src/problems/practice/instantiatePracticeProblem';
 import { courseIdToLectureIds } from '../../../src/problems/problemData';
 import type { RegularExerciseDisplay } from '../../../src/problems/regular/exerciseProblem';
+import { getProgramTemplate } from '../../helpers/nodeProblems';
+import { waitForProblemPreparation } from '../../helpers/problemPreparation';
 
-const problemOf = (problemId: string): RegularExerciseDisplay['problem'] => {
-  const problem = instantiatePracticeProblem(problemId, 'practice-ui') ?? instantiateProblem(problemId, 'practice-ui');
-  if (!problem) throw new Error(`Unknown problem: ${problemId}`);
-  return problem;
-};
 const display: RegularExerciseDisplay = {
   problemFormat: 'regular',
   sessionId: 17,
   problemId: 'practiceEasyV1TestL1ScalarUpdateV1',
-  problem: problemOf('practiceEasyV1TestL1ScalarUpdateV1'),
+  programTemplate: getProgramTemplate('practiceEasyV1TestL1ScalarUpdateV1'),
   seed: 'practice-ui',
   problemType: 'executionResult',
   traceItemIndex: 0,
@@ -78,6 +77,7 @@ test('starts regular practice with the shared header first and opens syntax hint
   const user = userEvent.setup();
   const { container } = render(page());
   const heading = await screen.findByRole('heading', { level: 1, name: '値を一度更新する 1' });
+  await waitForProblemPreparation();
   expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   expect(screen.queryByText(/課題の成績・進捗には影響しません/)).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '授業回に戻る' })).not.toBeInTheDocument();
@@ -94,6 +94,7 @@ test('starts regular practice with the shared header first and opens syntax hint
     lectureId: navigation.lectureId,
     learningMode: 'practice',
     problemFormat: 'regular',
+    tracesInBrowser: true,
   });
   const code = container.querySelector('code');
   if (!code) throw new Error('Practice source must render');
@@ -135,7 +136,7 @@ test('confirms step conversion and submits an independently correct first answer
   const initial = {
     ...display,
     problemId: 'practiceEasyV1Beginner2L6OverloadDispatchV1',
-    problem: problemOf('practiceEasyV1Beginner2L6OverloadDispatchV1'),
+    programTemplate: getProgramTemplate('practiceEasyV1Beginner2L6OverloadDispatchV1'),
   };
   const firstStep: RegularExerciseDisplay = { ...initial, problemType: 'step', traceItemIndex: 1 };
   transport.start.mockResolvedValue(initial);
@@ -165,6 +166,7 @@ test('confirms step conversion and submits an independently correct first answer
       learningMode: 'practice',
       context: { problemType: 'step', traceItemIndex: 1 },
       isCorrect: true,
+      isLastStep: false,
     })
   );
   expect(await screen.findByRole('alertdialog')).toHaveTextContent('正解');
@@ -201,7 +203,7 @@ test('resumes completion, requests the next practice source, and resumes that so
     ...display,
     sessionId: 18,
     problemId: 'practiceEasyV1TestL1ScalarUpdateV2',
-    problem: problemOf('practiceEasyV1TestL1ScalarUpdateV2'),
+    programTemplate: getProgramTemplate('practiceEasyV1TestL1ScalarUpdateV2'),
   };
   transport.start.mockResolvedValueOnce({ ...display, completed: true }).mockResolvedValueOnce(nextDisplay);
   transport.next.mockResolvedValue(nextDisplay);
@@ -214,13 +216,16 @@ test('resumes completion, requests the next practice source, and resumes that so
     learningMode: 'practice',
     problemFormat: 'regular',
     sessionId: 17,
+    tracesInBrowser: true,
   });
   expect(await screen.findByRole('heading', { level: 1, name: '値を一度更新する 2' })).toBeVisible();
+  await waitForProblemPreparation();
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   expect(rendered.container.querySelector('code')).toHaveTextContent('int value = 2;');
   rendered.unmount();
   render(page());
   expect(await screen.findByRole('heading', { level: 1, name: '値を一度更新する 2' })).toBeVisible();
+  await waitForProblemPreparation();
   expect(document.querySelector('code')).toHaveTextContent('int value = 2;');
   expect(transport.start).toHaveBeenCalledTimes(2);
 });
@@ -237,7 +242,7 @@ test('ignores a deferred previous-location response after navigation', async () 
       ...display,
       sessionId: 18,
       problemId: 'practiceEasyV1Beginner1L1TerminalTurnV1',
-      problem: problemOf('practiceEasyV1Beginner1L1TerminalTurnV1'),
+      programTemplate: getProgramTemplate('practiceEasyV1Beginner1L1TerminalTurnV1'),
     });
   const rendered = render(page());
   await waitFor(() => expect(transport.start).toHaveBeenCalledTimes(1));
@@ -253,12 +258,17 @@ test('ignores a deferred previous-location response after navigation', async () 
     lectureId: navigation.lectureId,
     learningMode: 'practice',
     problemFormat: 'regular',
+    tracesInBrowser: true,
   });
 });
 
 test('a late practice Next response cannot replace the challenge page or its answer draft after mode navigation', async () => {
   let resolveNext!: (value: RegularExerciseDisplay) => void;
-  const challenge: RegularExerciseDisplay = { ...display, problemId: 'test3', problem: problemOf('test3') };
+  const challenge: RegularExerciseDisplay = {
+    ...display,
+    problemId: 'test3',
+    programTemplate: getProgramTemplate('test3'),
+  };
   transport.start.mockResolvedValueOnce({ ...display, completed: true }).mockResolvedValueOnce(challenge);
   transport.next.mockReturnValue(
     new Promise<RegularExerciseDisplay>((resolve) => {
@@ -279,7 +289,7 @@ test('a late practice Next response cannot replace the challenge page or its ans
     </ChakraProvider>
   );
   expect(await screen.findByRole('heading', { level: 1, name: 'ステップ実行のテスト用問題(3)' })).toBeVisible();
-  const inputs = screen.getAllByRole('textbox');
+  const inputs = await screen.findAllByRole('textbox');
   await user.type(inputs[0], '9876');
   expect(inputs[0]).toHaveValue('9876');
   await act(async () =>
@@ -287,7 +297,7 @@ test('a late practice Next response cannot replace the challenge page or its ans
       ...display,
       sessionId: 18,
       problemId: 'practiceEasyV1TestL1ScalarUpdateV2',
-      problem: problemOf('practiceEasyV1TestL1ScalarUpdateV2'),
+      programTemplate: getProgramTemplate('practiceEasyV1TestL1ScalarUpdateV2'),
     })
   );
   expect(screen.getByRole('heading', { level: 1, name: 'ステップ実行のテスト用問題(3)' })).toBeVisible();
@@ -297,6 +307,7 @@ test('a late practice Next response cannot replace the challenge page or its ans
     courseId: 'test',
     lectureId: navigation.lectureId,
     problemFormat: 'regular',
+    tracesInBrowser: true,
   });
   const code = rendered.container.querySelector('code');
   if (!code) throw new Error('Challenge source must render');
@@ -310,7 +321,7 @@ test('a stale step draft is discarded when reloading the practice route into its
     ...display,
     sessionId: 18,
     problemId: 'practiceEasyV1TestL1ScalarUpdateV3',
-    problem: problemOf('practiceEasyV1TestL1ScalarUpdateV3'),
+    programTemplate: getProgramTemplate('practiceEasyV1TestL1ScalarUpdateV3'),
   };
   transport.start.mockResolvedValueOnce(oldStep).mockResolvedValueOnce(replacement);
   transport.submit.mockRejectedValue({ data: { code: 'CONFLICT' } });
@@ -330,6 +341,7 @@ test('a stale step draft is discarded when reloading the practice route into its
   rendered.unmount();
   const reloaded = render(page());
   expect(await screen.findByRole('heading', { name: '値を一度更新する 3' })).toBeVisible();
+  await waitForProblemPreparation();
   expect(reloaded.container.querySelector('code')).toHaveTextContent('int value = 3;');
   expect(screen.getByRole('textbox')).not.toHaveValue('9876');
   expect(screen.queryByText('ステップ実行モード', { exact: true })).not.toBeInTheDocument();

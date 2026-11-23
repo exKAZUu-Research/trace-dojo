@@ -6,15 +6,20 @@ export class ExecutionLimitError extends Error {
   }
 }
 
-/** Bounds every run, since learners' programs run inside the web server's process. */
+/** Bounds every run, since a learner's program must not hang the page that grades it. */
 export const LIMITS = {
   maxOperations: 1_000_000,
   maxMilliseconds: 2000,
   maxCallDepth: 512,
   /** The total number of array elements and object fields allocated while running. */
   maxSlots: 1_000_000,
-  /** The cumulative cost of C++ trace nodes and text. */
-  maxCppTraceSize: 12_000_000,
+  /** The cumulative cost of the trace nodes and text of a C++ or Rust model program. */
+  maxTraceSize: 12_000_000,
+  /**
+   * The cumulative size budget for Dart trace entries and text, which lets a 500-element list change its value and
+   * reference views at each of {@link MAX_TRACE_ITEMS} steps.
+   */
+  maxDartTraceSize: 100_000_000,
   /** The length of one string built while running; building strings also costs operations, which bounds the rest. */
   maxStringLength: 1_000_000,
   /** The total length of what a run writes to standard output and standard error. */
@@ -38,7 +43,10 @@ export class ExecutionBudget {
   private nextClockCheck = OPERATIONS_PER_CLOCK_CHECK;
   private deadline: number;
 
-  constructor(maxMilliseconds = LIMITS.maxMilliseconds) {
+  constructor(
+    maxMilliseconds = LIMITS.maxMilliseconds,
+    private readonly maxOperations = LIMITS.maxOperations
+  ) {
     this.deadline = performance.now() + maxMilliseconds;
   }
 
@@ -50,7 +58,7 @@ export class ExecutionBudget {
     if (!Number.isFinite(cost)) throw new ExecutionLimitError('operations');
     // A negative charge (such as a scan over an empty range computed backward) must never refill the budget.
     this.operations += Math.max(cost, 0);
-    if (this.operations > LIMITS.maxOperations) throw new ExecutionLimitError('operations');
+    if (this.operations > this.maxOperations) throw new ExecutionLimitError('operations');
     // A charge for many operations at once (e.g., scanning a long string) may stand for slow native work, so it
     // checks the clock at once; single operations check it periodically.
     if (cost === 1 && this.operations < this.nextClockCheck) return;
@@ -77,5 +85,5 @@ export class ExecutionBudget {
   }
 }
 
-/** Model programs are trusted but must not hang the server through an accidental unbounded loop. */
+/** Model programs are trusted but must not hang a page through an accidental unbounded loop. */
 export const MAX_TRACE_ITEMS = 10_000;

@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';
+import { assert } from 'es-toolkit';
 
 import type { SourceFile, Span } from './ast';
 import type { FunctionInstance } from './functions';
@@ -10,7 +10,7 @@ const files = new WeakMap<NativeFn, { file: SourceFile; implementation: NativeFn
 
 export function callableNative(sema: SemaApi, fn: NativeFn, span: Span): FunctionInstance {
   const signature = fn.signature;
-  assert.ok(signature);
+  assert(signature, 'The native function has no signature');
   let adapter = files.get(fn);
   if (!adapter) {
     const names = signature.type.params.map((_, index) => `a${index}`);

@@ -37,7 +37,7 @@ export function describeIntegerIndex(value: PyValue): string {
 }
 
 /** Interprets a value as an integer index, as `operator.index()` does. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows operator.index for each kind of value.
+// code-gauge-allow functionCognitiveComplexity -- Follows operator.index for each kind of value.
 export function toIndex(value: PyValue, describe: (value: PyValue) => string = describeIntegerIndex): bigint {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'boolean') return value ? 1n : 0n;
@@ -81,8 +81,8 @@ function digitLimitError(limit: number): PyError {
 }
 
 /** Parses a string as `int(text, base)` does, returning undefined when it is not a valid literal. */
-// code-gauge-allow functionNcss 37 -- Follows the grammar of int() literals.
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows the grammar of int() literals.
+// code-gauge-allow functionNcss -- Follows the grammar of int() literals.
+// code-gauge-allow functionCognitiveComplexity -- Follows the grammar of int() literals.
 export function parseIntText(text: string, base: number): bigint | undefined {
   let body = stripNumberSpace(text);
   let negative = false;
@@ -173,7 +173,7 @@ export function modInt(a: bigint, b: bigint): bigint {
 }
 
 /** Divides floats as CPython's float divmod does, returning the floored quotient and the remainder. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes float_divmod of CPython's floatobject.c.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes float_divmod of CPython's floatobject.c.
 export function divmodFloat(a: number, b: number): [number, number] {
   if (b === 0) throw pyError('ZeroDivisionError', 'division by zero');
   let mod = a % b;
@@ -253,7 +253,7 @@ export interface Decimal {
 }
 
 /** The exact decimal expansion of a finite double's magnitude. */
-// code-gauge-allow duplicateLines 15 -- Numeric conversions preserve their reference language's zero representation and coefficient normalization.
+// code-gauge-allow duplicateLines -- Numeric conversions preserve their reference language's zero representation and coefficient normalization.
 export function exactDecimal(value: number): Decimal {
   const magnitude = Math.abs(value);
   if (magnitude === 0) return { digits: '0', point: 1 };
@@ -293,7 +293,7 @@ export function shortestDecimal(value: number): Decimal {
 }
 
 /** Rounds a decimal to `count` significant digits, halves to even, as correctly rounded formatting does. */
-// code-gauge-allow duplicateLines 15 -- Go drops trailing zeros, while Python formatting preserves them.
+// code-gauge-allow duplicateLines -- Go drops trailing zeros, while Python formatting preserves them.
 export function roundDecimal({ digits, point }: Decimal, count: number): Decimal {
   if (digits === '0') return { digits: '0', point: 1 };
   if (count >= digits.length) return { digits, point };

@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';
+import { assert } from 'es-toolkit';
 
 import { FUNCTION_TYPE } from './builtinTypes';
 import type { ClassEnv } from './classEnv';
@@ -98,7 +98,7 @@ function defineConstructors(decl: RDataDecl): void {
 function defineClassMethods(decl: RClassDecl): void {
   const supers = decl.supers.map((sup) => {
     const direct = directClassConstraint(sup);
-    assert.ok(direct);
+    assert(direct, 'A superclass constraint must apply a class to a type variable');
     return direct;
   });
   decl.entity.supers = supers.map((sup) => sup.cls);
@@ -288,12 +288,12 @@ function checkClauses(checker: Checker, binding: Extract<RBinding, { k: 'fun' }>
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Each branch checks one condition GHC places on a derivable class.
+// code-gauge-allow functionCognitiveComplexity -- Each branch checks one condition GHC places on a derivable class.
 function deriveInstances(checker: Checker, module: RModule, options: TypecheckOptions): DeclaredInstance[] {
   const pending: { decl: RDataDecl; cls: ClassEntity; info: InstanceInfo; span: Span }[] = [];
   for (const decl of module.dataDecls) {
     for (const { cls, span } of decl.deriving) {
-      assert.ok(cls);
+      assert(cls, 'The derived class is unresolved');
       if (!options.builtins.derivableClasses.has(cls)) {
         if (['Functor', 'Foldable', 'Traversable', 'Generic', 'Data', 'Lift'].includes(cls.name)) {
           throw unsupportedError(span, `${cls.name} の deriving`);

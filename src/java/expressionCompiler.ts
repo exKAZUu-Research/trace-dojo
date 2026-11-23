@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 418 -- One compiler of the expressions, whose operators, casts, and literals share its conversions.
+// code-gauge-allow-file fileNcss -- One compiler of the expressions, whose operators, casts, and literals share its conversions.
 import type { ArrayInitializer, BinaryOperator, Expression, PatternBinding, Span, TypeSyntax } from './ast';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import {
@@ -114,8 +114,7 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
     return compiled;
   }
 
-  // code-gauge-allow functionNcss 46 -- One case per expression kind, each delegating to its own compiler.
-  // code-gauge-allow duplicateLines 19 -- A switch over expression kinds, which the JavaScript evaluator's resembles by coincidence.
+  // code-gauge-allow functionNcss -- One case per expression kind, each delegating to its own compiler.
   protected compileExpressionBody(context: MethodContext, expression: Expression): Compiled {
     switch (expression.kind) {
       case 'literal': {

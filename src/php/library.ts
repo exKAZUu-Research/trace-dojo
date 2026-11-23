@@ -4,6 +4,7 @@ import './libCore';
 import './libIntrospection';
 import './libMath';
 import './libString';
+import './libHash';
 import './libLocale';
 import './libScan';
 import './libUrl';

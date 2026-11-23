@@ -152,7 +152,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 40 -- One case per statement kind, each delegating to its own compiler.
+  // code-gauge-allow functionNcss -- One case per statement kind, each delegating to its own compiler.
   private compileStatementBody(node: Syntax): Exec {
     switch (node.type) {
       case 'compound_statement': {
@@ -905,7 +905,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return this.withScopeExit(loop, scope);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- A range-based for loop combines its range, its iterators, and its variable.
   private rangeForLoop(node: Syntax): Exec {
     const rangeNode = fieldOf(node, 'right') as Syntax;
     const { row } = node;

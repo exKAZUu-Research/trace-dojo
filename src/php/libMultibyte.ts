@@ -1,14 +1,11 @@
-// code-gauge-allow-file fileNcss 888 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/text-encoding-identifier-case -- mbstring names its encodings in this case.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { inflateRawSync } from 'node:zlib';
-
 import { eastAsianWidth } from 'get-east-asian-width';
 
-import { codePointBytes, dec, enc, lower } from './bytes';
-import { encodingValidator, extraEncodingReader } from './detectionReaders';
+import { codePointBytes, dec, enc, lower, stringToBytes } from './bytes';
 import { deprecated, throwError, warn } from './errors';
 import { type PaddingCharacters, padString } from './libString';
 import { encodingNames } from './multibyteEncodingNames';
@@ -113,7 +110,7 @@ function mbSearch(args: Value[], reverse: boolean, insensitive: boolean, name: s
   return found === false ? false : BigInt(charOffset(haystack, Number(found)));
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function utf8Offset(text: string, offset: number, start = 0): number | undefined {
   let position = offset < 0 ? text.length : start;
   while (offset !== 0) {
@@ -131,7 +128,7 @@ function utf8Offset(text: string, offset: number, start = 0): number | undefined
   return Math.min(position, text.length);
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function searchBytes(text: string, needle: string, start: number, limit: number, last: boolean): bigint | false {
   if (needle.length === 0) return BigInt(last ? limit : start);
   if (limit < start) return false;
@@ -282,7 +279,7 @@ const TITLE_EXCEPTIONS = new Map<string, string>([
   ['ῷ', 'Ω\u0342\u0345'],
 ]);
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function wordCase(text: string, mode: 'lower' | 'title' | 'title-simple'): string {
   const simple = mode === 'title-simple';
   const list = [...text];
@@ -641,8 +638,8 @@ function wordBytes(word: number, size: number, littleEndian: boolean): string {
 }
 
 /** Decodes UTF-16 as mb_utf16_to_wchar does; without a byte order, a BOM decides it, and big-endian is the default. */
-// code-gauge-allow functionNcss 38 -- Keeps pending high surrogates with byte-order and malformed-input checks.
-// code-gauge-allow functionCognitiveComplexity 25 -- Keeps pending high surrogates with byte-order and malformed-input checks.
+// code-gauge-allow functionNcss -- Keeps pending high surrogates with byte-order and malformed-input checks.
+// code-gauge-allow functionCognitiveComplexity -- Keeps pending high surrogates with byte-order and malformed-input checks.
 function decodeUtf16(bytes: string, littleEndian: boolean | undefined): number[] {
   let index = 0;
   let little = littleEndian ?? false;
@@ -867,7 +864,7 @@ const NON_ENCODINGS = new Set(
 );
 
 /** Resolves encoding lists before selecting a reader or a conversion codec. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Resolves supplied encoding names in order through one validation path.
+// code-gauge-allow functionCognitiveComplexity -- Resolves supplied encoding names in order through one validation path.
 function encodingList(
   value: Value,
   functionName: string,
@@ -936,30 +933,79 @@ defineFunction(
   }
 );
 
-type EncodingReader = Pick<Codec, 'name' | 'decode'> & { validate?: (bytes: string) => boolean };
+type EncodingReader = Pick<Codec, 'name' | 'decode'>;
 const detectionReaders = new Map<string, EncodingReader>();
+
+/** The codecs that read mbstring's fixed-width Unicode encodings, by their keys in `CODECS`. */
+const UNICODE_READERS: Record<string, string> = {
+  'UCS-2': 'utf-16',
+  'UCS-2BE': 'utf-16be',
+  'UCS-2LE': 'utf-16le',
+  'UCS-4': 'utf-32',
+  'UCS-4BE': 'utf-32be',
+  'UCS-4LE': 'utf-32le',
+};
+
+/** The WHATWG encodings whose host decoders read mbstring's encodings of other names. */
+const DECODER_LABELS: Record<string, string> = {
+  SJIS: 'shift_jis',
+  'SJIS-win': 'shift_jis',
+  CP932: 'shift_jis',
+  'EUC-JP': 'euc-jp',
+  'eucJP-win': 'euc-jp',
+  CP51932: 'euc-jp',
+  JIS: 'iso-2022-jp',
+  'ISO-2022-JP': 'iso-2022-jp',
+  'EUC-CN': 'gbk',
+  CP936: 'gbk',
+  GB18030: 'gb18030',
+  'BIG-5': 'big5',
+  CP950: 'big5',
+  'EUC-KR': 'euc-kr',
+  UHC: 'euc-kr',
+};
+
+/**
+ * The bytes of one character in the encodings that are narrower than the host decoder reading them, which also reads
+ * extensions such as GBK's of EUC-CN. Other bytes are invalid in the encoding.
+ */
+const NARROW_UNITS: Record<string, string> = {
+  'EUC-CN': String.raw`[\xa1-\xa9\xb0-\xf7][\xa1-\xfe]`,
+  CP936: String.raw`\x80|[\x81-\xfe][\x40-\x7e\x80-\xfe]`,
+  CP950: String.raw`[\x81-\xfe][\x40-\x7e\xa1-\xfe]`,
+  'EUC-KR': String.raw`[\xa1-\xfe][\xa1-\xfe]`,
+  'EUC-JP': String.raw`[\xa1-\xac\xae-\xf8][\xa1-\xfe]|\x8e[\xa1-\xdf]|\x8f[\xa1-\xfe][\xa1-\xfe]`,
+  CP51932: String.raw`[\xa1-\xfe][\xa1-\xfe]|\x8e[\xa1-\xdf]`,
+  SJIS: String.raw`[\xa1-\xdf]|[\x81-\x86\x88-\x9f\xe0-\xec\xef][\x40-\x7e\x80-\xfc]`,
+  'BIG-5': String.raw`[\xa1-\xc7\xc9-\xf9][\x40-\x7e\xa1-\xfe]`,
+};
 
 function encodingReader(name: string): EncodingReader {
   const codec = CODECS.get(lower(name));
   if (codec) return codec;
   let reader = detectionReaders.get(name);
   if (!reader) {
-    const special = extraEncodingReader(name, decodeUtf8, (bytes) => decodeUtf16(bytes, false));
-    const decoder = special ? undefined : legacyTextDecoder(name);
-    if (!special && !decoder) throw new UnsupportedFeatureError(`文字コード ${name} の判定（mb_detect_encoding）`);
-    reader = {
-      name,
-      decode: special ?? ((text) => decodeLegacy(text, decoder!)),
-      validate: encodingValidator(name, (bytes) => decodeUtf16(bytes, false)),
-    };
+    const unicode = CODECS.get(UNICODE_READERS[name]);
+    const decoder = unicode ? undefined : legacyTextDecoder(DECODER_LABELS[name] ?? name);
+    if (!unicode && !decoder) throw new UnsupportedFeatureError(`文字コード ${name} の判定（mb_detect_encoding）`);
+    reader = { name, decode: unicode?.decode ?? legacyDecoding(decoder as TextDecoder, NARROW_UNITS[name]) };
     detectionReaders.set(name, reader);
   }
   return reader;
 }
 
-function legacyTextDecoder(name: string): TextDecoder | undefined {
-  let label = name;
-  if (name === 'UHC') label = 'euc-kr';
+/** Reads bytes with a host decoder, as invalid where `units` (an encoding narrower than the decoder's) lacks them. */
+function legacyDecoding(decoder: TextDecoder, units: string | undefined): Codec['decode'] {
+  if (units === undefined) return (text) => decodeLegacy(text, decoder);
+  // oxlint-disable-next-line no-control-regex -- The units are bytes, of which ASCII ones are valid in each encoding.
+  const runs = new RegExp(String.raw`((?:[\x00-\x7f]|${units})+)|[\s\S]`, 'g');
+  return (text) =>
+    Array.from(text.matchAll(runs), ([bytes, run]) =>
+      run === undefined ? [BAD] : decodeLegacy(bytes, decoder)
+    ).flat();
+}
+
+function legacyTextDecoder(label: string): TextDecoder | undefined {
   try {
     return new TextDecoder(label, { ignoreBOM: true });
   } catch {
@@ -969,32 +1015,37 @@ function legacyTextDecoder(name: string): TextDecoder | undefined {
 
 function decodeLegacy(text: string, decoder: TextDecoder): number[] {
   rt().spend(Math.ceil(text.length / 64));
-  return Array.from(decoder.decode(Buffer.from(text, 'latin1')), (char) =>
-    char === '\uFFFD' ? BAD : (char.codePointAt(0) as number)
-  );
+  const bytes = stringToBytes(text);
+  let decoded: string;
+  // Only a failed strict reading shows that U+FFFD stands for invalid bytes, as a legacy encoding can encode U+FFFD too.
+  let invalid = false;
+  try {
+    decoded = new TextDecoder(decoder.encoding, { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    invalid = true;
+    decoded = decoder.decode(bytes);
+  }
+  return Array.from(decoded, (char) => (invalid && char === '\uFFFD' ? BAD : (char.codePointAt(0) as number)));
 }
 
 /**
  * Picks the encoding that reads a string with the fewest demerits as mb_guess_encoding_for_strings does: invalid input
  * costs 1000 (or rules a candidate out when strict), and a rare code point costs more than a common one.
  */
-// code-gauge-allow functionCognitiveComplexity 22 -- Maintains candidate weighting, validation and strict rejection in one pass.
+// code-gauge-allow functionCognitiveComplexity -- Maintains candidate weighting, validation and strict rejection in one pass.
 function guessEncoding(text: string, candidates: EncodingReader[], strict: boolean): EncodingReader | undefined {
   if (candidates.length === 1) {
     const [codec] = candidates;
-    const valid = !strict || (codec.validate?.(text) ?? !codec.decode(text).includes(BAD));
-    return valid ? codec : undefined;
+    return !strict || !codec.decode(text).includes(BAD) ? codec : undefined;
   }
   if (text === '') return candidates[0];
   let best: { codec: EncodingReader; demerits: number } | undefined;
   for (const [index, codec] of candidates.entries()) {
     rt().spend();
-    const invalid = codec.validate?.(text) === false;
-    if (strict && invalid) continue;
     const codes = codec.decode(withoutBom(text, codec));
     if (strict && codes.includes(BAD)) continue;
     const multiplier = 1 + (0.3 * index) / candidates.length;
-    let score = invalid ? 500 : 0;
+    let score = 0;
     for (let code = 0; code < codes.length; code++) {
       if ((code & 127) === 0) rt().spend(2);
       score += codeDemerits(codes[code]);
@@ -1012,54 +1063,112 @@ function withoutBom(text: string, codec: EncodingReader): string {
 
 /**
  * One bit for each code point up to U+FFFF that mbstring's rare_cp_bitvec.h marks as rare, as that table's
- * little-endian 32-bit words compressed with raw DEFLATE.
+ * little-endian 32-bit words in Base64.
  */
-const RARE_CODE_POINTS = inflateRawSync(
-  Buffer.from(
+const RARE_CODE_POINTS = Uint8Array.from(
+  atob(
     [
-      '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',
-    ].join(''),
-    'base64'
-  )
+      '/9n//wAAAAAAAAAAAAAAgP////8BIAAAAAAAAAAAAAAND/dw//f8/2He/HDMN/yB////////////////////////////////////////////////',
+      '////////////////APj///////////////8AAw8oAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP//////////',
+      '/////////////wEAAAAAAAD/AAAAeOD/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////////////////////////////////////',
+      '////////////////////////////////////////////////AAAAAAAAAAAAAAAAAAAAAP//////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '/////////////////////////////////////wEAAAAAAAB4AAAA/v//////////////////////////////////////////////////////////',
+      '/////////////////////////////////////////////////////wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '///////////////////////3gAC4f+O+//////////8A/P///+///f///////////////////////wAAAAD/////AAAAAAAAAAAAAAAAAAD///v/',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '///////////+////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////AAAAAP////8BAAAAAAAAAAAAgOEAAAAAAAAAAAAAAAD///////8BAAAAAAAAAAAAAID/////////////',
+      '////////////////////////////////////////////////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////dJCEAAnT6pDXBCIcvP/0v7skySIJhNt7',
+      'HBMF/MerOlf9G3wYqnuuyrcf1GH2bddvp1a/1xQun3/je34e/BzVur9V6Xil0f+pfy3f69//D1/e3/3898xTt99f3ftf39/16v37fv37+2uExOjr',
+      'W4QExJ7IW+XKbxL3rkT9x6xftFA0+nnQzrA+0HODrddHedp/d9j9F/Tw4T1V9dsUa//bMpz+H/30O/0xdDgB6ih3RHaL5d96m57zd/OALXSCADDM',
+      'pQhUFz4EhaSy+F7m+/7Vxq4nivk/avHeLJx5Xx2Y+8sv/e7/bi99v6d79z8N6//uYvHvyH+jM9cfv6NrpX73376cL3b/Pah3/79379por/x/P9f/',
+      '9/5v7/v7/bPy2+Cbt1azfnfe9rt6G3wTrHt//+P3+/+zt///97fvf/7/fvma/93/7XvM//zrbbr79d+91/t3Lf+8979969U+7zWw229dn2t6kW24',
+      'azQM+1q6p9wj+rOd377/tb/RZOuf5v93Vf/3Zt5/re+//f/7u9sPf///+/v///Pf+e2v/7X9//f/5f//+/v+/v//Tkin9d7eVWR/AKCzhh0L7/IX',
+      'GaSeICkQrdpv720ImBDdr8hv/X35/2zz/c33/v////283r7Xf78v9//d/9//5/7///3//+/////////r39/rnxG0YbeR7p7CHxc23t7vz3/x96MA',
+      'JXtGKT/XH/7x+Ldb8u83e+B7RnYefV2p/65Tn5vBfOXM4nC8/bln3ZdPO+x8991f2L+Lzxx6//e319r5w0iWY8/dr3u2aIvm3/PdajwEpPH9fN9j',
+      'Z/d/f++m3fpztj7/+7Ps+2/ku797+Pr/v/8bKv4KuHq/OyJ2fJTB9ncFtC3u+RGiyebdTRuEIkAQTGUPef29UcRy/xubHd4vcb4/8+ZsuvRQ+HP7',
+      '/l268/WZ79vYXyav/8+/uyv7635/ff/0c/7Qv8+F2i5Jk+u7vu/oo75/68zDY780324dlLPvSv5zpVRtT01+zd13f/8azD37Oyvnf15e/6/zZZPb',
+      'rzyuu2n8Pf87tu//P/2/zb7v4iz21E9XP0LN27I9vC/cXvw/7f1ey/JTP//vf+bv32/Fd092Nf/9+X/Mk+7kb5P8v3/d/3dfO17W/+7VW3p+v9n7',
+      '35/77//f/v//++e7/t5fz6v+/+//vu/3/9f+9v//99/5+/e99fnd+O/3/3z59/3//v/u//vv//f3///73///9+/7v/9g//ubf+32fwF54+S38b/+',
+      '/X9LY5wXQ/X9d////34ldzM2b/54/V8T7Pu6mfHssnUZs/cE7enft9H61sf993u33/u7hw0z8em/uW/+26zfdSV82+6u57367bNV8V+QZtWkTeu6',
+      '59u/9v9//z/W/b7P23O/+0/nzZvNbOs+uX3n//Lh8T59/+1mr5/+/66+f+/t//X/9P/bfu93/bu/dd1T/+//v//v3f73V54P/7mb/f8H98j5fv90',
+      'L8f/3f/93/i9/77v/63/rU+9/9/ve+t9/+/9vff+232f3/+vv9/+9//LHZg/7v91ef3b2fz7//96b7/96v56vfyN/cz/v7dH/7GvP8+/f//3/tr2',
+      'b/X99/91+vP62/3/3t//v5d9/ve7+4fv///fIef5vr939f6/d//+3/97/++zvz//7///atPUUPLfb+3N2/Pm/j87ffnlN9utX/nL9Pv77v3/1/d/',
+      'qfH/vvvvu3/bt/mDK/a1+/+//XufOigmZzvrrv3k/3/+fD+q/H/8p7Xn/x3Pv/s/X+n2Z///f+PTFbd/+c+P////6r7e/9/f/6f///2NfX5//fSr',
+      '3fPe+/9+f/v9v//9v/f/q/z8vx/eXn96zB///z+7/RH01fl+L33+1t6X/3v2v3FHug9///v1L3nl3zFOnzn/e0/zvy3WX795t/bt9b7u/+u/VajX',
+      '//9fvX5Xd//91/3/bv3//+29ff9/7///fff/HvfP//3+7/fX//V7dk+73b3/+58tf///ts7TbvF4d/b5q+/ev7m+kf39f/fp+t/pEv9z+Zr2bO/3',
+      '7f7/97e3fZ+1+8+7/Zn2zftPv+8qaxFYBxrRAFMRRk6OvYfa7pmu2v//XPv5uVr/3arvu+39+93dr+t+/v3+5ZTPXv///7dWu+Ovuv97Ih8X5b/S',
+      'yDnrO7Svv6tN/6Tam3i0+/939bz/s8T/n7f2MP57/8P+/Pdbut33fvfa5/cfiGsv/+sc/X////y/f3C7+/f7zb9P9dx/X203n3/9/cO//+9/5pv8',
+      'tvnq/nV3f+//ub////d52X3r9+//ffn/54v/3w/u/9+//X/3tefd//v3/+3///vu7/X337+v/////3X71c9fz/f59///2++/b//v979h////Xd7f',
+      'z/3/9T/z/f//3/9+/z/MI3/3/53469///////37T/3Xvv/+1+v5b7v3/f39/vV/9vv+v/tPf/7/7///7vvf7///v+7Xf/9//+/+9957PZ9HV5n79',
+      'zde77//X/f/Ze8/M7f/n3Hv/+vvf+7v37/+/f/97+389d7f7f/t324j8+f+3///++rpXVtfbpev//863sJXw7V/N176Eyvptf/e75z+Xdbrou2/V',
+      '/O7/vf99/+q/b2rf/vv3/8kYMgiEWF2QEEVIktQS0GGjzG3/vbr++/nj//3/7/efeGAnRmL696egy+/L31q3FwEATCDhJ6ayoPcO/93z3333/ue/',
+      '5+f9U+16V/v/af6f+/nN/+vi/f2vz/t7fVv//91j+/v+w/t/+///lvf9w9f/ef82j53/fz8s6keH/BQktxT4iUm+7ASb037csFliEfK/2aZZE0at',
+      '1p1bSuR79f+zO930/bv93/3eX9/7/fv9f9/+///F69/Tqx1+f/X7r//n//58AHzO9//f//+dz7/3/++/7v9/9/v/7f/W/73u/893/R3/+//v2/fu',
+      '7//++rom+///1//3///fv//7r///v/////7/fvn////////+/7/b/u//+f//9/pP//h3HRi91bfUv/7P+5+7uszm/vmBP9/3fv+d7/9/Pn/29eX+',
+      '0/z59f/rn+79GkvQ3L3sbf+7gXcOxt7XwfgW2p8zzuR2+i22DE+dpfN6Mrcumbevf//7/Pv+u634/af/31f//v7f////5/fvP+2Xd5HqcO7t3/7k',
+      'vw/Ptn93HQEJyDTK7v73/++//zb7X/uP1+n2//3+///f9/u/348Ya5/2u/3/juX/jf/a1//f/X//v/P9//9+v97/X3PbD6QlK299+81+f+7Pf+f+',
+      'v/v//7//9/9b//3vyX/v+/9///////3//7/////5/////v/////2///f+////X//////7/3f/+/v/v/+58+/v9/95////f/3v/7/d////d/97/v/',
+      '/3////9/7////3///////f///zOUX/cf13n//6//1l3//3d/n///x+c/6ZT/fv///7/3//7//7f/8/r/vf/7f+/W/vn/////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '//////////////////////////////////////////////////////////9s/ADB7k/8/P7X7/7//2z+hOHub/xo/sTt73//bGqUz+7v/e7/38/u',
+      'b/3+///Phk/57P7v7////+7+9u/u//9s/NTv////bP6Ui+5P3Oz+x8////////+P7k/87v/f7/5/3v7//8/uT/H8/9/P///97v/e7////+x+lO/v',
+      '//zu/+/v7u///v//7+pH3f///8/uT/1o/ATF7k/87P7e/////+TyxMfuT/zs/szu////7PrU4/7//v///+/u7//8/t/P5k/9/v/v7////+7+/u/v',
+      '7/3s+Jzr////7P7UiwZHcez+xO////////+PZk+17P7U7+7//O7//8+mTtXu/v/v///+7v707////+z+1O////7+///v73/9/v7+z6ZP/f7//8/m',
+      'T/js/sTn7m/8/////////+z2x+fub/z+////////7P7f7/////7//+/////////P7/f9/////////+7+/P////9s/vTv7s//7v7ez+5POOz+xM/+',
+      'f/3////P7k987P7Uz+5P/O7//c/uT/3u////////7v7+7+7//ez+1O////7////P7v//7P7ez+5Pvf///8/uT/0s/JTF7k/4/v7f/////+z+lMfu',
+      'T/zs/kfv////5P7U7////////+/vf//u//+Pxk9d7v71/////+7+/+/u7//u/vb/////bP5EjUZP3ez+xM3+3//////P5k/5bP7Ez+5f3P7//4/u',
+      'T/3+/+/v///+7v787/7//2z81O3////+///v7///7v7+z+7//////8+uT/Hs+sbH7m/8/v/+/////2z+xu////38/9b/////7v/c////////////',
+      '///+/9/P7u///////////////+/////u/vz/////7P/XT45P3Oz+xM/uT/3+//+PJk+87P7E7+5v/O7+/4/uT93u/9/v////7v/3z+5P/Wz+VOn/',
+      '//7u/t7v7k/9/v7Wz85P/f///8/mR73k/szH7u/9///f/////+z+ze/u/////////v//bP7d7/////7//+/+7//+///P7u/9/v//7////+7/////',
+      '//3sfvzv////7P7Uz6hHnOz+xM9uT13u///PxA+o7P7Ujy4PHO7+5s+ORvXs/sfP/u/97P7+z+5P/ez+1M/uz/zs/v3P7k/97P5Uz+5LAe7+/s/O',
+      'R7gs/oTP7k/8rv/f7/7//+z6lM/ub/3u/s7v////7P4U5/9//f7/3+/u7//u/9/P7k/9/v/v7////+z+/u/u7//s/tz/////bPqUyWpP/Oz/xO//',
+      '///////P7s/9/v//7////v///8/uf/X8////////7v7+/////ez+3O///////////////v//7/9v/////8/uz3ms/oTP7k/87v7f/////+z+xM/u',
+      'b/3u/+/v////7P7W7+7//////+/v///+///P7k/9/v/v7/////7/9e/v//3s/t7/////7PzUz+5P/ez+xO/////////P5k/87P7U7+5P/v7//8/u',
+      'T/3s/t/v///9/v7/7////+z+1O/u//3+/9/P7m///v7+z+7P/f///8/uT/3s/MTP7k/9/v///////+z+xM/uT/3u/+/v/v//7P7U6/////7//+//',
+      'f//+///P7m/9/v/v7////+7+3+/v7/1s+vTv/v//7P7cj65P3Oz+xM/////////P7m/87P7U7+7P/P7//8/ub/3+////////7v//7/5//+z61u//',
+      '//3////v/v///v7e7+7P/////8/uT/3s3tTP7k/8/v/f/////+z+1M/uT/3s/sTv////7P7Uze5//fz/98/uf/3+///P7m397v7+z+7//ez+9O/u',
+      '7/1s/Nzt7s//7P70////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////////////////////////////',
+      '////////////////////////////////////////////////////////////////////////////////////////APz/////////////////////',
+      '////////////////AQAAAAAAAAAAAAAAAAAAAAAAAAD//////////9////8=',
+    ].join('')
+  ),
+  (char) => char.charCodeAt(0)
 );
 
 function codeDemerits(code: number): number {
@@ -1099,7 +1208,7 @@ const KANA_ZEN2HAN_KATAKANA = 0x10_00;
 const KANA_ZEN2HAN_HIRAGANA = 0x20_00;
 const KANA_KATA2HIRA = 0x80_00;
 /** Reads the mode letters as PHP_FUNCTION(mb_convert_kana) does, refusing pairs of conversions that undo each other. */
-// code-gauge-allow functionCognitiveComplexity 29 -- Validates and combines conversion flags before their shared dispatch.
+// code-gauge-allow functionCognitiveComplexity -- Validates and combines conversion flags before their shared dispatch.
 function kanaMode(letters: string): number {
   let mode = 0;
   for (const letter of letters) {
@@ -1185,9 +1294,8 @@ const ZEN_SYMBOLS_TO_HAN = new Map([
   [0x30_fb, 0xff_65],
 ]);
 
-const ZEN_TO_HAN_BYTES = Buffer.from(
-  '6700710068007200690073006a0074006b0075007600769e7700779e7800789e7900799e7a007a9e7b007b9e7c007c9e7d007d9e7e007e9e7f007f9e8000809e8100819e6f008200829e8300839e8400849e850086008700880089008a008a9e8a9f8b008b9e8b9f8c008c9e8c9f8d008d9e8d9f8e008e9e8e9f8f0090009100920093006c0094006d0095006e0096009700980099009a009b009c009c007200740066009d00739e',
-  'hex'
+const ZEN_TO_HAN_BYTES = hexBytes(
+  '6700710068007200690073006a0074006b0075007600769e7700779e7800789e7900799e7a007a9e7b007b9e7c007c9e7d007d9e7e007e9e7f007f9e8000809e8100819e6f008200829e8300839e8400849e850086008700880089008a008a9e8a9f8b008b9e8b9f8c008c9e8c9f8d008d9e8d9f8e008e9e8e9f8f0090009100920093006c0094006d0095006e0096009700980099009a009b009c009c007200740066009d00739e'
 );
 
 const ZEN_TO_HAN = Array.from({ length: ZEN_TO_HAN_BYTES.length / 2 }, (_, index) => [
@@ -1237,18 +1345,20 @@ function symbolToHalf(code: number, mode: number): [number] | undefined {
 
 // The tables of PHP's mbfilter_cjk.c: the low byte of the fullwidth kana (from U+3000) for each halfwidth one from
 // U+FF60, and the halfwidth kana and sound mark (from U+FF00, 0 for none) for each fullwidth one from U+30A1 or U+3041.
-const HAN_TO_ZEN_KATAKANA = Buffer.from(
-  '00020c0d01fbf2a1a3a5a7a9e3e5e7c3fca2a4a6a8aaabadafb1b3b5b7b9bbbdbfc1c4c6c8cacbcccdcecfd2d5d8dbdedfe0e1e2e4e6e8e9eaebecedeff39b9c',
-  'hex'
+const HAN_TO_ZEN_KATAKANA = hexBytes(
+  '00020c0d01fbf2a1a3a5a7a9e3e5e7c3fca2a4a6a8aaabadafb1b3b5b7b9bbbdbfc1c4c6c8cacbcccdcecfd2d5d8dbdedfe0e1e2e4e6e8e9eaebecedeff39b9c'
 );
 
-const HAN_TO_ZEN_HIRAGANA = Buffer.from(
-  '00020c0d01fb92414345474983858763fc424446484a4b4d4f51535557595b5d5f616466686a6b6c6d6e6f7275787b7e7f808182848688898a8b8c8d8f939b9c',
-  'hex'
+const HAN_TO_ZEN_HIRAGANA = hexBytes(
+  '00020c0d01fb92414345474983858763fc424446484a4b4d4f51535557595b5d5f616466686a6b6c6d6e6f7275787b7e7f808182848688898a8b8c8d8f939b9c'
 );
+
+function hexBytes(hex: string): Uint8Array {
+  return Uint8Array.from(hex.match(/../g) ?? [], (byte) => Number.parseInt(byte, 16));
+}
 
 /** The halfwidth-to-fullwidth conversions of mb_convert_kana_codepoint, which come before the others. */
-// code-gauge-allow functionCognitiveComplexity 29 -- Returns the converted scalar together with whether the following mark was consumed.
+// code-gauge-allow functionCognitiveComplexity -- Returns the converted scalar together with whether the following mark was consumed.
 function halfToFull(code: number, next: number, mode: number): [number, boolean] | undefined {
   const ascii = code >= 0x21 && code <= 0x7d && code !== 0x22 && code !== 0x27 && code !== 0x5c;
   if (mode & KANA_HAN2ZEN_ALL && ascii) return [code + 0xfe_e0, false];
@@ -1268,7 +1378,7 @@ function halfToFull(code: number, next: number, mode: number): [number, boolean]
   return [0x30_00 + table[index], false];
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function defineUtf8Function(signature: string, impl: NativeFunction['impl']): void {
   const name = signature.slice(0, signature.indexOf('('));
   const parameters = signature.slice(signature.indexOf('(') + 1, signature.indexOf(')')).split(',');

@@ -16,8 +16,8 @@ interface PseudoAttribute {
 }
 
 /** The parts of an XML declaration from `<?xml` to `?>`, or the index where it is not well-formed. */
-// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
-// code-gauge-allow functionNcss 47 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+// code-gauge-allow functionNcss -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
 export function parseXmlDecl(cs: ArrayLike<number>, start: number, end: number): XmlDecl | number {
   const text = (range: [number, number]): string => String.fromCodePoint(...Array.prototype.slice.call(cs, ...range));
   let ptr = start + 5;

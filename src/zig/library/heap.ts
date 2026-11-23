@@ -97,7 +97,7 @@ export function nativeEnum(name: string, fieldNames: string[]): EnumType {
 
 const CHECK = nativeEnum('heap.Check', ['ok', 'leak']);
 
-// code-gauge-allow functionNcss 59 -- Defines the allocator methods as closures over their receiver and element type.
+// code-gauge-allow functionNcss -- Defines the allocator methods as closures over their receiver and element type.
 export function allocatorMembers(): Record<string, () => Member> {
   return {
     Error: typeMember(() => ALLOCATOR_ERROR),

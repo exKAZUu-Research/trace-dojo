@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 885 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl, Stmt } from './ast';
@@ -186,7 +186,7 @@ export function resetCallStack(): void {
 }
 
 /** The display name of a function in messages: `f`, `A::m`, or `{closure:A::m():3}`. */
-// code-gauge-allow functionCognitiveComplexity 16 -- PHP combines separate class and function names differently for each diagnostic format.
+// code-gauge-allow functionCognitiveComplexity -- PHP combines separate class and function names differently for each diagnostic format.
 export function functionDisplayName(target: CallTarget, parameter = false): string {
   const { fn, method, scope } = target;
   if (method) return parameter ? classMethodLabel(method.scope, method.name) : `${method.scope.name}::${method.name}`;
@@ -291,7 +291,6 @@ export function deprecateNative(fn: NativeFunction, deprecation: string): void {
   nativeDeprecations.set(fn, deprecation);
 }
 
-// code-gauge-allow functionNcss 32 -- Reports the deprecation, binds, calls and finishes a native call in PHP's order in one frame.
 export function invokeNative(
   target: CallTarget,
   fn: NativeFunction,
@@ -316,13 +315,8 @@ export function invokeNative(
     target.captureReturn?.(result);
   } catch (error) {
     failed = true;
-    if (error instanceof RangeError && isHostMemoryError(error.message)) {
-      if (error.message.toLowerCase().includes('maximum call stack size exceeded'))
-        saved.runtime.hostStackExhausted = true;
-      failure = saved.runtime.memoryExhausted(2 ** 31);
-    } else {
-      failure = error;
-    }
+    failure =
+      error instanceof RangeError && isHostMemoryError(error.message) ? saved.runtime.memoryExhausted(2 ** 31) : error;
     throw failure;
   } finally {
     if (target.thisObj) nativeOwnershipChanged(target.thisObj);
@@ -332,7 +326,7 @@ export function invokeNative(
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Builds the native call record and argument holders in one pass.
+// code-gauge-allow functionCognitiveComplexity -- Builds the native call record and argument holders in one pass.
 function enterNativeCall(
   target: CallTarget,
   fn: NativeFunction,
@@ -373,7 +367,7 @@ function enterNativeCall(
   return { runtime, caller, name, inline, forwardsReference, strict, record, held, savedRow: runtime.row };
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Binds native arguments, by-ref defaults, and reference holders before dispatch.
+// code-gauge-allow functionCognitiveComplexity -- Binds native arguments, by-ref defaults, and reference holders before dispatch.
 function prepareNativeCall(
   saved: NativeCallState,
   target: CallTarget,
@@ -485,7 +479,7 @@ function releaseNativeValues(runtime: Runtime, held: NativeHolders, pending?: Ph
 }
 
 /** Matches arguments to a native function's parameters, coercing them to the declared types. */
-// code-gauge-allow functionNcss 58 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function bindNative(
   fn: NativeFunction,
   args: ArgValue[],
@@ -676,8 +670,8 @@ interface UserCallState {
   bound: boolean;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Dispatches ordinary user function bodies directly to execList to avoid an extra host frame.
-// code-gauge-allow functionNcss 34 -- Handles direct body execution and RangeError host-stack translation in one frame.
+// code-gauge-allow functionCognitiveComplexity -- Dispatches ordinary user function bodies directly to execList to avoid an extra host frame.
+// code-gauge-allow functionNcss -- Handles direct body execution and RangeError host-stack translation in one frame.
 export function invokeUser(
   target: CallTarget,
   fn: UserFunction,
@@ -706,7 +700,6 @@ export function invokeUser(
   } catch (error) {
     if (error instanceof RangeError && saved.bound) {
       saved.runtime.exhausted = true;
-      saved.runtime.hostStackExhausted = true;
       hostStackExhaustion.record ??= callStack.at(-1);
       hostStackExhaustion.row ??= saved.runtime.row;
       failure = hostStackExhaustion;
@@ -872,7 +865,7 @@ function completeUserReturn(decl: FunctionDecl, frame: Frame, value: Value, targ
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function bindArgumentHolders(frame: Frame, params: Param[], record: CallRecord, args: ArgValue[]): void {
   frame.args = [...record.args];
   frame.argumentHolders = [];
@@ -1140,8 +1133,8 @@ export function setDefaultEvaluator(run: (decl: FunctionDecl, index: number, fra
   evaluateDefault = run;
 }
 
-// code-gauge-allow functionNcss 60 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
-// code-gauge-allow functionParameterCount 7 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionNcss -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionParameterCount -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function bindParams(
   frame: Frame,
   fn: UserFunction,
@@ -1251,7 +1244,7 @@ function bindRef(arg: ArgValue): Ref {
   return ref;
 }
 
-// code-gauge-allow functionParameterCount 8 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionParameterCount -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function checkParam(
   value: Value,
   param: Param,
@@ -1351,7 +1344,7 @@ export function parseSignature(signature: string): { name: string; params: Param
   return { name, params, returnType: returnText ? parseTypeText(returnText) : undefined };
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionCognitiveComplexity -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function splitParams(text: string): string[] {
   const parts: string[] = [];
   let depth = 0;

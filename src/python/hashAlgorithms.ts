@@ -322,7 +322,7 @@ function blake2ParameterBlock(parameters: Blake2Parameters, wide: boolean): Uint
   return block;
 }
 
-// code-gauge-allow functionNcss 34 -- Transcribes the BLAKE2b compression of RFC 7693.
+// code-gauge-allow functionNcss -- Transcribes the BLAKE2b compression of RFC 7693.
 export function blake2b(data: Uint8Array, parameters: Blake2Parameters): Uint8Array {
   const { iv512 } = sha2();
   const parameterView = new DataView(blake2ParameterBlock(parameters, true).buffer);
@@ -357,7 +357,7 @@ export function blake2b(data: Uint8Array, parameters: Blake2Parameters): Uint8Ar
   return bytesOf64(state, true).subarray(0, parameters.digestSize);
 }
 
-// code-gauge-allow functionNcss 33 -- Transcribes the BLAKE2s compression of RFC 7693.
+// code-gauge-allow functionNcss -- Transcribes the BLAKE2s compression of RFC 7693.
 export function blake2s(data: Uint8Array, parameters: Blake2Parameters): Uint8Array {
   const { iv256 } = sha2();
   const parameterWords = words32(blake2ParameterBlock(parameters, false), 0, 8, true);
@@ -489,7 +489,7 @@ export function ripemd160(data: Uint8Array): Uint8Array {
 const p0 = (x: number): number => (x ^ rotl32(x, 9) ^ rotl32(x, 17)) >>> 0;
 const p1 = (x: number): number => (x ^ rotl32(x, 15) ^ rotl32(x, 23)) >>> 0;
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the SM3 compression function.
+// code-gauge-allow functionCognitiveComplexity -- Transcribes the SM3 compression function.
 export function sm3(data: Uint8Array): Uint8Array {
   const state = [
     0x73_80_16_6f, 0x49_14_b2_b9, 0x17_24_42_d7, 0xda_8a_06_00, 0xa9_6f_30_bc, 0x16_31_38_aa, 0xe3_8d_ee_4d,

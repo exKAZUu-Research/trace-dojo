@@ -5,9 +5,13 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     setupFiles: ['./test/helpers/setup.ts'],
+    // Interpreter tests are CPU-bound, and the same test takes up to 4 times as long on a GitHub-hosted runner as on a
+    // developer machine, with a 1.8-fold spread between runners, so a deadline near a test's usual duration fails it at
+    // random.
+    testTimeout: 30_000,
     // Leave CPU capacity for native interpreter subprocesses within per-program deadlines.
     maxWorkers: '50%',
-    // As scripts/start-production.sh runs the server, so that deep recursion behaves as there.
+    // The interpreters recurse as deeply as the programs they run, up to their own call depth limit.
     execArgv: ['--stack-size=4000'],
   },
   resolve: {
