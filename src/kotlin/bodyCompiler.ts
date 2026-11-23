@@ -409,7 +409,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       );
     } else {
       const compiled = this.compileStatementsValue(scope, context, body.block.statements, undefined, true, false);
-      if (!this.flow.isDead) this.error(body.block.endRow, `get の最後に return を書いてください。`);
+      if (!this.flow.isDead && !isNonNullClass(type, this.core.unit))
+        this.error(body.block.endRow, `get の最後に return を書いてください。`);
       const evaluate = compiled.eval;
       run = (frame) => {
         evaluate(frame);
