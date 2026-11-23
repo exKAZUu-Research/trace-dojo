@@ -352,7 +352,6 @@ open external class Throwable {
 }
 `;
 
-/** Kotlin declares the arithmetic and `compareTo` of each signed number type for every signed number type as the argument. */
 function unsignedConversions(floating = false): string {
   const targets = floating ? ['UInt', 'ULong'] : ['UByte', 'UShort', 'UInt', 'ULong'];
   return targets.map((target) => `    external fun to${target}(): ${target}`).join('\n');
@@ -371,6 +370,7 @@ function unsignedWideBits(kind: 'UInt' | 'ULong'): string {
   ].join('\n    ');
 }
 
+/** Kotlin declares the arithmetic and `compareTo` of each signed number type for every signed number type as the argument. */
 function numberOperators(kind: NumericKind): string {
   const operands: readonly NumericKind[] = kind.startsWith('U') ? UNSIGNED_NUMBER_KINDS : SIGNED_NUMBER_KINDS;
   return operands
