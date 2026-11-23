@@ -453,14 +453,21 @@ export class Compiler extends BodyCompiler {
     const { symbol, evaluateArgs } = call;
     return (frame, instance) => {
       const values = evaluateArgs(frame);
-      (symbol.initialize as NonNullable<FunctionSymbol['initialize']>)(frame, instance, values, callRow);
+      // The evaluated arguments stay reachable while the callee runs, as an ordinary call keeps them.
+      frame.runtime.withNativeRoots([instance, values], () =>
+        (symbol.initialize as NonNullable<FunctionSymbol['initialize']>)(frame, instance, values, callRow)
+      );
     };
   }
 
   protected nonVirtualCall(call: ResolvedCall): (frame: Frame, receiver: Value) => Value {
     const { symbol, evaluateArgs, callRow } = call;
-    return (frame, receiver) =>
-      (symbol.invoke as NonNullable<FunctionSymbol['invoke']>)(frame, receiver, evaluateArgs(frame), callRow);
+    return (frame, receiver) => {
+      const values = evaluateArgs(frame);
+      return frame.runtime.withNativeRoots([receiver, values], () =>
+        (symbol.invoke as NonNullable<FunctionSymbol['invoke']>)(frame, receiver, values, callRow)
+      );
+    };
   }
 
   protected constructorCandidates(cls: ClassSymbol, row: number): Candidate[] {
