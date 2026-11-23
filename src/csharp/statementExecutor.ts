@@ -299,6 +299,8 @@ export abstract class StatementExecutor extends PatternMatcher {
           (!label.guard || (this.evaluate(label.guard, frame) as boolean))
         )
           return section;
+        // A rejected label's pattern variables belong to its section, which is not entered, so the trace drops them.
+        for (const local of section.locals) frame.slots[local.slot] = UNASSIGNED;
       }
     }
     return defaultSection;
