@@ -91,7 +91,8 @@ function kotlinTypeName(type: KType): string {
  * a value no longer of the narrowed type throws as a failed cast does, instead of flowing on as that type.
  */
 export function checkedRead(core: Core, read: (frame: Frame) => Value, narrowed: KType): (frame: Frame) => Value {
-  if (resolved(narrowed).kind !== 'class') return read;
+  const kind = resolved(narrowed).kind;
+  if (kind !== 'class' && kind !== 'function') return read;
   const test = instanceTest(core, narrowed);
   return (frame) => {
     const value = read(frame);
