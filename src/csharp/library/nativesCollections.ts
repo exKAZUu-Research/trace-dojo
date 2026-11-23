@@ -92,8 +92,11 @@ function guardedComparison(call: NativeCall, compare: Comparison): Comparison {
 export function equalityOf(call: NativeCall, comparer: Value): Equality {
   const evaluator = evaluatorOf(call);
   if (comparer === undefined) {
+    // The element type is the method's (LINQ, Array) or else the collection's (List<T>, EqualityComparer<T>).
+    const elementType = call.typeArgs[0] ?? call.owner?.args[0];
     return {
-      equals: (a, b) => evaluator.equalsThroughEquatable(a, b, call.frame) ?? valuesEqual(evaluator, a, b, call.frame),
+      equals: (a, b) =>
+        evaluator.equalsThroughEquatable(a, b, elementType, call.frame) ?? valuesEqual(evaluator, a, b, call.frame),
       hash: (value) => hashOf(evaluator, value, call.frame),
     };
   }
