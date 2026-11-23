@@ -346,20 +346,37 @@ export abstract class StatementExecutor extends PatternMatcher {
   /** The try statements whose bodies are running, innermost last, with their catch clauses. */
   private readonly handlers: { statement: Extract<BoundStatement, { kind: 'try' }>; frame: Frame }[] = [];
 
+  /** How many of the handlers outside a running catch filter an exception the filter throws cannot reach, as .NET discards it at the filter. */
+  private filterFloor = 0;
+
   /** The catch clause that each exception in flight goes to, or undefined when none takes it. */
   private readonly catchers = new WeakMap<CsThrow, { statement: BoundStatement; clause: BoundCatch } | undefined>();
 
   /** The first catch clause from the innermost try out that accepts an exception, its filter evaluated in its frame. */
   private findCatcher(thrown: CsThrow): { statement: BoundStatement; clause: BoundCatch } | undefined {
-    for (const { statement, frame } of this.handlers.toReversed()) {
+    for (const { statement, frame } of this.handlers.slice(this.filterFloor).toReversed()) {
       for (const clause of statement.catches) {
         if (!this.isInstanceOf(thrown.exception, clause.type)) continue;
         if (clause.local) this.storeLocal(frame, clause.local, thrown.exception, true);
-        if (clause.filter && !(this.evaluate(clause.filter, frame) as boolean)) continue;
+        if (clause.filter && !this.passesFilter(clause.filter, frame)) continue;
         return { statement, clause };
       }
     }
     return undefined;
+  }
+
+  /** Whether a catch filter holds, counting an exception it throws as false, as .NET discards that exception. */
+  private passesFilter(filter: BoundExpression, frame: Frame): boolean {
+    const outerFloor = this.filterFloor;
+    this.filterFloor = this.handlers.length;
+    try {
+      return this.evaluate(filter, frame) as boolean;
+    } catch (error) {
+      if (error instanceof CsThrow || error instanceof PendingException) return false;
+      throw error;
+    } finally {
+      this.filterFloor = outerFloor;
+    }
   }
 
   /** Runs the catch clause of this try that the exception goes to, or tells that it goes elsewhere. */
