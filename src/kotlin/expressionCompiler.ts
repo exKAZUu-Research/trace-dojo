@@ -13,6 +13,7 @@ import {
 import {
   type Compiled,
   convertRepr,
+  type EnumFunctionName,
   type Eval,
   type ExpressionUse,
   Flow,
@@ -1510,7 +1511,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     scope: Scope,
     context: FunctionContext,
     cls: ClassSymbol,
-    name: string,
+    name: EnumFunctionName,
     args: ArgumentSyntax[],
     row: number
   ): Compiled;

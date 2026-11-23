@@ -5,6 +5,7 @@ import {
   type Compiled,
   convertRepr,
   type Core,
+  type EnumFunctionName,
   type Eval,
   type FunctionContext,
   type PackageScope,
@@ -77,7 +78,11 @@ export interface CompiledProgram {
   /** Whether `main` takes the command line's arguments. */
   mainTakesArgs: boolean;
   /** Initializes top-level properties, the library's first, in declaration order. */
-  initializers: { row: number; isConstant: boolean; run: (frame: Frame) => void }[];
+  initializers: {
+    row: number;
+    isConstant: boolean;
+    run: (frame: Frame) => void;
+  }[];
   globalDefaults: readonly Value[];
   /** The top-level properties of the program, which traces show by their names. */
   globals: { name: string; slot: number; type: KType; isConstant: boolean }[];
@@ -115,7 +120,10 @@ export class Compiler extends BodyCompiler {
   constructor(
     packages: Map<string, PackageScope>,
     core: Core | undefined,
-    natives?: { functions: ReadonlyMap<string, NativeFunction>; properties: ReadonlyMap<string, NativeProperty> }
+    natives?: {
+      functions: ReadonlyMap<string, NativeFunction>;
+      properties: ReadonlyMap<string, NativeProperty>;
+    }
   ) {
     super(packages);
     if (core) this.core = core;
@@ -136,7 +144,10 @@ export class Compiler extends BodyCompiler {
     afterClasses: () => void,
     afterHeaders: () => void,
     options: CompileOptions = {}
-  ): { contexts: FileContext[]; initializers: CompiledProgram['initializers'] } {
+  ): {
+    contexts: FileContext[];
+    initializers: CompiledProgram['initializers'];
+  } {
     this.atomicRows = options.atomicRows ?? new Set();
     this.claimedAtomicRows.clear();
     this.recordsSteps = options.recordsSteps ?? false;
@@ -315,7 +326,12 @@ export class Compiler extends BodyCompiler {
       const arrayClass = this.packages.get('kotlin')?.classes.get(`${kind}Array`);
       if (arrayClass) return arrayClass.type;
     }
-    return { kind: 'class', cls: this.core.array, args: [{ variance: 'out', type: elementType }], nullable: false };
+    return {
+      kind: 'class',
+      cls: this.core.array,
+      args: [{ variance: 'out', type: elementType }],
+      nullable: false,
+    };
   }
 
   protected varargArrayFactory(elementType: KType): (frame: Frame, values: Value[]) => KObject {
@@ -356,60 +372,82 @@ export class Compiler extends BodyCompiler {
     }));
   }
 
+  private readonly enumFunctions = new Map<ClassSymbol, Map<EnumFunctionName, FunctionSymbol>>();
+
+  /** Calls the static `values()` or `valueOf(value)` of an enum, or `enumValues<E>()` or `enumValueOf<E>(name)` for it. */
   protected compileEnumFunction(
     scope: Scope,
     context: FunctionContext,
     cls: ClassSymbol,
-    name: string,
+    name: EnumFunctionName,
     args: ArgumentSyntax[],
     row: number
   ): Compiled {
+    const candidate: Candidate = {
+      symbol: this.enumFunction(cls, name),
+      kind: 'function',
+      substitution: new Map(),
+      receiverType: undefined,
+    };
+    return this.resolveInLevels(
+      scope,
+      context,
+      [{ candidates: [candidate], receiver: undefined }],
+      args,
+      false,
+      [],
+      undefined,
+      row,
+      name
+    );
+  }
+
+  private enumFunction(cls: ClassSymbol, name: EnumFunctionName): FunctionSymbol {
+    let functions = this.enumFunctions.get(cls);
+    if (!functions) {
+      functions = new Map();
+      this.enumFunctions.set(cls, functions);
+    }
+    const existing = functions.get(name);
+    if (existing) return existing;
+    const symbol = new FunctionSymbol(name);
+    symbol.isLibrary = true;
+    symbol.row = cls.row;
     const instance = this.objectInstance(cls);
     if (name === 'values' || name === 'enumValues') {
-      if (args.length > 0) this.error(row, 'values() には引数を書けません。');
       const arrayClass = this.core.array;
-      return {
-        type: { kind: 'class', cls: arrayClass, args: [{ variance: 'inv', type: cls.type }], nullable: false },
-        repr: 'ref',
-        eval: (frame) => {
-          instance(frame);
-          const values = frame.runtime.enumEntries.get(cls)?.values ?? [];
-          frame.runtime.allocate(frame, values.length + 1);
-          const array = new KObject(arrayClass, 0);
-          array.items = [...values];
-          return array;
+      symbol.returnType = {
+        kind: 'class',
+        cls: arrayClass,
+        args: [{ variance: 'inv', type: cls.type }],
+        nullable: false,
+      };
+      symbol.invoke = (frame) => {
+        instance(frame);
+        const values = frame.runtime.enumEntries.get(cls)?.values ?? [];
+        frame.runtime.allocate(frame, values.length + 1);
+        const array = new KObject(arrayClass, 0);
+        array.items = [...values];
+        return array;
+      };
+    } else {
+      symbol.params = [
+        {
+          name: name === 'enumValueOf' ? 'name' : 'value',
+          type: this.stringType,
+          hasDefault: false,
+          isVararg: false,
         },
-        isCall: true,
+      ];
+      symbol.returnType = cls.type;
+      symbol.invoke = (frame, _receiver, [entryName]) => {
+        // The JVM initializes the enum class on entering the static valueOf, before it checks the argument.
+        instance(frame);
+        return enumEntryNamed(frame, cls, entryName);
       };
     }
-    if (args.length !== 1) this.error(row, 'valueOf には引数を1つ書いてください。');
-    const argumentName = args[0].name;
-    const parameterName = name === 'enumValueOf' ? 'name' : 'value';
-    if (argumentName !== undefined && argumentName !== parameterName)
-      this.error(row, `${name} に ${argumentName} という名前の引数はありません。`);
-    const argument = this.compileExpression(scope, context, args[0].value, this.stringType);
-    const evaluate = this.expectType(argument, this.stringType, args[0].row);
-    return {
-      type: cls.type,
-      repr: 'ref',
-      eval: (frame) => {
-        // The JVM evaluates the argument of the static valueOf before it initializes the enum class.
-        const entryName = evaluate(frame) as string | undefined;
-        instance(frame);
-        if (entryName === undefined) frame.runtime.throwError(frame, 'java.lang.NullPointerException');
-        const found = frame.runtime.enumEntries
-          .get(cls)
-          ?.values.find((entry) => (entry.native as { name: string }).name === entryName);
-        if (!found)
-          return frame.runtime.throwError(
-            frame,
-            'java.lang.IllegalArgumentException',
-            `No enum constant ${cls.kotlinName}.${entryName}`
-          );
-        return found;
-      },
-      isCall: true,
-    };
+    functions.set(name, symbol);
+    return symbol;
   }
 
   protected enumEntriesClass(): ClassSymbol {
@@ -436,7 +474,12 @@ export class Compiler extends BodyCompiler {
   /** The `KProperty` a delegate's `getValue` and `setValue` receive, which tells the property's name. */
   protected propertyReference(scope: Scope, name: string, row: number): ArgumentSyntax {
     const variableName = `\0property:${name}`;
-    const type: KType = { kind: 'class', cls: this.core.kProperty, args: [{ variance: 'star' }], nullable: false };
+    const type: KType = {
+      kind: 'class',
+      cls: this.core.kProperty,
+      args: [{ variance: 'star' }],
+      nullable: false,
+    };
     const variable = new VariableSymbol(variableName, type, false, 0, -1, row);
     let reference: KObject | undefined;
     variable.delegateRead = () => {
@@ -447,7 +490,11 @@ export class Compiler extends BodyCompiler {
     };
     scope.variables.set(variableName, variable);
     this.flow.assigned.add(variable);
-    return { row, name: undefined, value: { kind: 'name', row, name: variableName } };
+    return {
+      row,
+      name: undefined,
+      value: { kind: 'name', row, name: variableName },
+    };
   }
 
   protected progressionOf(type: KType): 'Int' | 'Long' | 'Char' | undefined {
@@ -482,4 +529,19 @@ function rejectNullArguments(caller: Frame, nonNullParams: number[], args: Value
   for (const index of nonNullParams) {
     if (args[index] === NULL) caller.runtime.throwError(caller, 'java.lang.NullPointerException');
   }
+}
+
+function enumEntryNamed(frame: Frame, cls: ClassSymbol, entryName: Value): Value {
+  if (entryName === undefined) return frame.runtime.throwError(frame, 'java.lang.NullPointerException');
+  const found = frame.runtime.enumEntries
+    .get(cls)
+    ?.values.find((entry) => (entry.native as { name: string }).name === entryName);
+  return (
+    found ??
+    frame.runtime.throwError(
+      frame,
+      'java.lang.IllegalArgumentException',
+      `No enum constant ${cls.kotlinName}.${entryName as string}`
+    )
+  );
 }

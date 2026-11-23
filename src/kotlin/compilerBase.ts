@@ -18,6 +18,8 @@ export type Eval = (frame: Frame) => Value;
 /** How a compiled expression's value is held at run time: unboxed as a primitive, or as a reference. */
 export type Repr = 'ref' | PrimitiveKind;
 
+export type EnumFunctionName = 'values' | 'valueOf' | 'enumValues' | 'enumValueOf';
+
 export type ExpressionUse = boolean | 'inferUnit';
 
 export interface Compiled {
