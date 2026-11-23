@@ -31,6 +31,7 @@ import {
   newArrayOf,
   refOf,
   stepMeter,
+  storeInArray,
   textOf,
   typeArgument,
 } from './support';
@@ -377,7 +378,7 @@ const listNatives: Record<string, NativeMethod> = {
         "Destination array was not long enough. Check the destination index, length, and the array's lower bounds.",
         'destinationArray'
       );
-    for (const [offset, item] of items.entries()) target.values[(index as number) + offset] = copyValue(item);
+    storeInArray(call, target, index as number, items, listOf(receiver).elementType);
     return;
   },
   [`${LIST}.CopyTo(int, T[], int, int)`]: (call, receiver, [index, array, arrayIndex, count]) => {
@@ -405,7 +406,7 @@ const listNatives: Record<string, NativeMethod> = {
         "Destination array was not long enough. Check the destination index, length, and the array's lower bounds.",
         'destinationArray'
       );
-    for (let offset = 0; offset < length; offset++) target.values[to + offset] = copyValue(items[from + offset]);
+    storeInArray(call, target, to, items.slice(from, from + length), listOf(receiver).elementType);
     return;
   },
   [`${LIST}.Exists`]: (call, receiver, [match]) => listOf(receiver).items.some(predicateOf(call, match as Value)),
@@ -1535,8 +1536,7 @@ defineNatives({
         "Destination array was not long enough. Check the destination index, length, and the array's lower bounds.",
         'destinationArray'
       );
-    for (const [offset, value] of source.values.entries())
-      destination.values[(index as number) + offset] = copyValue(value);
+    storeInArray(call, destination, index as number, source.values, source.type.element);
     return;
   },
   [`${ARRAY}.GetEnumerator`]: (call, receiver) => {
@@ -1804,8 +1804,7 @@ function copyArray(
       "Destination array was not long enough. Check the destination index, length, and the array's lower bounds.",
       'destinationArray'
     );
-  const values = source.values.slice(sourceIndex, sourceIndex + length);
-  for (const [offset, value] of values.entries()) target.values[targetIndex + offset] = copyValue(value);
+  storeInArray(call, target, targetIndex, source.values.slice(sourceIndex, sourceIndex + length), source.type.element);
   return undefined;
 }
 
@@ -1901,7 +1900,7 @@ defineNatives({
         'destinationArray'
       );
     }
-    for (const [offset, value] of values.entries()) destination[(start as number) + offset] = copyValue(value);
+    storeInArray(call, target as CsArray, start as number, values, (receiver as CsArray).type.element);
     return;
   },
   [`${ARRAY_HELPER}.GetEnumerator`]: (call, receiver) => {

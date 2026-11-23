@@ -4,7 +4,15 @@ import type { NativeCall } from '../natives';
 import { PendingException } from '../numeric';
 import { stringOf } from '../objects';
 import { CsThrow, type ExceptionState } from '../runtime';
-import { type NamedType, namedType, substitute, type Type, type TypeParameterSymbol } from '../types';
+import {
+  isReferenceType,
+  type NamedType,
+  namedType,
+  sameType,
+  substitute,
+  type Type,
+  type TypeParameterSymbol,
+} from '../types';
 import { copyValue, CsArray, CsBox, CsObject, plainString, type Value, type VariableReference } from '../values';
 
 /** The evaluator that runs the call. */
@@ -133,7 +141,38 @@ export function copyToArray(call: NativeCall, items: Value[], array: Value, inde
       'Destination array is not long enough to copy all the items in the collection. Check array index and length.'
     );
   chargeElements(call, items.length);
-  for (const [offset, item] of items.entries()) target[index + offset] = copyValue(item);
+  storeInArray(call, array as CsArray, index, items);
+}
+
+/**
+ * Writes values into an array's elements from an index, converted as `Array.Copy` converts them: a value of the
+ * source's element type is boxed into a reference element type and unboxed into a value one. A value that does not
+ * fit the array's runtime element type, which a covariant array (a `string[]` seen as `object[]`) can have, fails
+ * before any element is written, so the array never holds a value of the wrong type.
+ */
+export function storeInArray(
+  call: NativeCall,
+  target: CsArray,
+  index: number,
+  items: Value[],
+  sourceElement?: Type
+): void {
+  const element = target.type.element;
+  let values = items;
+  if (!sourceElement || !sameType(sourceElement, element)) {
+    const evaluator = evaluatorOf(call);
+    values = items.map((item) => {
+      if (!isReferenceType(element)) return item instanceof CsBox ? evaluator.unbox(item, element) : item;
+      const boxed = sourceElement ? evaluator.box(item, sourceElement) : item;
+      if (boxed !== undefined && !evaluator.isInstanceOf(boxed, element))
+        fail(
+          'System.InvalidCastException',
+          'At least one element in the source array could not be cast down to the destination array type.'
+        );
+      return boxed;
+    });
+  }
+  for (const [offset, value] of values.entries()) target.values[index + offset] = copyValue(value);
 }
 
 /**
