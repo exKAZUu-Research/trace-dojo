@@ -883,8 +883,6 @@ export abstract class CallBinder extends OperatorBinder {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Roslyn reports a different error for each way a call fails.
-  // code-gauge-allow functionNcss -- Each branch handles one case of the C# rule that the function applies.
   /**
    * Reports a call of a library method that no declared overload takes as unavailable, rather than as a wrong call,
    * when .NET has more overloads of that many arguments than the library declares and one of them could take the
@@ -949,6 +947,8 @@ export abstract class CallBinder extends OperatorBinder {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Roslyn reports a different error for each way a call fails.
+  // code-gauge-allow functionNcss -- Each branch handles one case of the C# rule that the function applies.
   private reportInapplicable(
     candidates: MethodCandidate[],
     args: ArgumentInfo[],
