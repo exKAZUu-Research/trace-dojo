@@ -236,7 +236,7 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
     ) as TraceItemVariable[string];
   }
   if (underlying.kind !== 'named') return NOT_SCALAR;
-  if (underlying.symbol.kind === 'enum') return enumText(underlying, value);
+  if (underlying.symbol.kind === 'enum') return shownText(enumText(underlying, value));
   switch (underlying.symbol.special) {
     case 'bool': {
       return value as boolean;
