@@ -4,7 +4,7 @@ import { NULL_REFERENCE } from './evaluatorBase';
 import { PendingException } from './numeric';
 import { PatternMatcher } from './patternMatcher';
 import { CsThrow, type ExceptionState, type Frame, ProgramExit } from './runtime';
-import type { MethodSymbol, Type } from './types';
+import type { LocalSymbol, MethodSymbol, Type } from './types';
 import { Cell, copyValue, type CsArray, CsObject, type CsString, stringText, UNASSIGNED, type Value } from './values';
 
 const BREAK = Symbol('break');
@@ -36,17 +36,13 @@ export abstract class StatementExecutor extends PatternMatcher {
    * body (`isBody`), which the frame holds until the method exits, where the end of the program reads its locals.
    */
   executeBlock(block: BoundBlock, frame: Frame, isBody = false): Completion {
-    for (const local of block.capturedLocals) frame.slots[local.slot] = new Cell(UNASSIGNED);
-    try {
+    return this.inScope(frame, isBody ? [] : block.locals, block.capturedLocals, () => {
       for (const statement of block.statements) {
         const completion = this.execute(statement, frame);
         if (completion !== undefined) return completion;
       }
-      return undefined;
-    } finally {
-      // A closure keeps a captured local's cell itself, so the frame lets go of it too.
-      if (!isBody) for (const local of block.locals) frame.slots[local.slot] = UNASSIGNED;
-    }
+      return;
+    });
   }
 
   // code-gauge-allow functionNcss -- One case per kind of statement.
@@ -99,7 +95,9 @@ export abstract class StatementExecutor extends PatternMatcher {
         return CONTINUE;
       }
       case 'return': {
-        return { value: statement.value ? copyValue(this.evaluate(statement.value, frame)) : undefined };
+        return {
+          value: statement.value ? copyValue(this.evaluate(statement.value, frame)) : undefined,
+        };
       }
       case 'throw': {
         return this.executeThrow(statement, frame);
@@ -137,19 +135,15 @@ export abstract class StatementExecutor extends PatternMatcher {
   }
 
   private executeFor(statement: ForStatement, frame: Frame): Completion {
-    for (const local of statement.capturedLocals) frame.slots[local.slot] = new Cell(UNASSIGNED);
-    try {
+    return this.inScope(frame, statement.locals, statement.capturedLocals, () => {
       this.runForInitializers(statement, frame);
       while (!statement.condition || (this.evaluate(statement.condition, frame) as boolean)) {
         const outcome = loopOutcome(this.execute(statement.body, frame));
         if (outcome !== NEXT) return outcome;
         this.runForUpdates(statement, frame);
       }
-      return undefined;
-    } finally {
-      // A closure keeps a captured local's cell itself, so the frame lets go of every local leaving scope.
-      for (const local of statement.locals) frame.slots[local.slot] = UNASSIGNED;
-    }
+      return;
+    });
   }
 
   private runForInitializers(statement: ForStatement, frame: Frame): void {
@@ -171,23 +165,26 @@ export abstract class StatementExecutor extends PatternMatcher {
     if (collection === undefined) throw NULL_REFERENCE();
     frame.temporaries.push(collection);
     try {
-      const runIteration = (element: Value): Completion => {
-        const converted = statement.elementConversion
-          ? this.withOperand(frame, element, () => this.evaluate(statement.elementConversion as BoundExpression, frame))
-          : element;
-        this.storeLocal(frame, statement.variable, copyValue(converted), true);
-        if (statement.deconstruction) {
-          // Each iteration declares the deconstructed variables anew, so a closure keeps its own iteration's values.
-          for (const local of statement.locals) if (local.isCaptured) frame.slots[local.slot] = new Cell(UNASSIGNED);
-          this.evaluate(statement.deconstruction, frame);
-        }
-        if (this.tracing) this.runtime.steps.stepBinding(statement.row, statement.bindingStoresAnswer);
-        return this.execute(statement.body, frame);
-      };
-      return this.iterate(statement, collection, frame, runIteration);
+      return this.inScope(frame, [statement.variable, ...statement.locals], [], () => {
+        const runIteration = (element: Value): Completion => {
+          const converted = statement.elementConversion
+            ? this.withOperand(frame, element, () =>
+                this.evaluate(statement.elementConversion as BoundExpression, frame)
+              )
+            : element;
+          this.storeLocal(frame, statement.variable, copyValue(converted), true);
+          if (statement.deconstruction) {
+            // Each iteration declares the deconstructed variables anew, so a closure keeps its own iteration's values.
+            for (const local of statement.locals) if (local.isCaptured) frame.slots[local.slot] = new Cell(UNASSIGNED);
+            this.evaluate(statement.deconstruction, frame);
+          }
+          if (this.tracing) this.runtime.steps.stepBinding(statement.row, statement.bindingStoresAnswer);
+          return this.execute(statement.body, frame);
+        };
+        return this.iterate(statement, collection, frame, runIteration);
+      });
     } finally {
       frame.temporaries.pop();
-      for (const local of [statement.variable, ...statement.locals]) frame.slots[local.slot] = UNASSIGNED;
     }
   }
 
@@ -262,21 +259,22 @@ export abstract class StatementExecutor extends PatternMatcher {
 
   private executeSwitch(statement: Extract<BoundStatement, { kind: 'switch' }>, frame: Frame): Completion {
     const value = this.evaluate(statement.value, frame);
-    try {
-      // Choosing the section binds the patterns' variables, which leave scope with the switch even if none matches.
-      const chosen = this.chooseSection(statement.sections, value, frame);
-      if (!chosen) return undefined;
-      for (const inner of chosen.statements) {
-        const completion = this.execute(inner, frame);
-        if (completion === BREAK) return undefined;
-        if (completion !== undefined) return completion;
+    // Choosing the section binds the patterns' variables, so it runs in the switch block's scope.
+    return this.inScope(
+      frame,
+      statement.sections.flatMap((section) => section.locals),
+      [],
+      () => {
+        const chosen = this.chooseSection(statement.sections, value, frame);
+        if (!chosen) return;
+        for (const inner of chosen.statements) {
+          const completion = this.execute(inner, frame);
+          if (completion === BREAK) return;
+          if (completion !== undefined) return completion;
+        }
+        return;
       }
-      return undefined;
-    } finally {
-      // The sections' locals go out of scope with the switch block, so the trace stops showing them.
-      for (const section of statement.sections)
-        for (const local of section.locals) frame.slots[local.slot] = UNASSIGNED;
-    }
+    );
   }
 
   /** The section of the first label that matches, or else the default section. */
@@ -350,7 +348,10 @@ export abstract class StatementExecutor extends PatternMatcher {
   }
 
   /** The try statements whose bodies are running, innermost last, with their catch clauses. */
-  private readonly handlers: { statement: Extract<BoundStatement, { kind: 'try' }>; frame: Frame }[] = [];
+  private readonly handlers: {
+    statement: Extract<BoundStatement, { kind: 'try' }>;
+    frame: Frame;
+  }[] = [];
 
   /** How many of the handlers outside a running catch filter an exception the filter throws cannot reach, as .NET discards it at the filter. */
   private filterFloor = 0;
@@ -363,12 +364,14 @@ export abstract class StatementExecutor extends PatternMatcher {
     for (const { statement, frame } of this.handlers.slice(this.filterFloor).toReversed()) {
       for (const clause of statement.catches) {
         if (!this.isInstanceOf(thrown.exception, clause.type)) continue;
-        if (clause.local) this.storeLocal(frame, clause.local, thrown.exception, true);
-        if (clause.filter && !this.passesFilter(clause.filter, frame)) {
-          if (clause.local) frame.slots[clause.local.slot] = UNASSIGNED;
-          continue;
-        }
-        return { statement, clause };
+        const { filter, local } = clause;
+        const passes =
+          !filter ||
+          this.inScope(frame, local ? [local] : [], [], () => {
+            if (local) this.storeLocal(frame, local, thrown.exception, true);
+            return this.passesFilter(filter, frame);
+          });
+        if (passes) return { statement, clause };
       }
     }
     return undefined;
@@ -397,14 +400,28 @@ export abstract class StatementExecutor extends PatternMatcher {
     const catcher = this.catchers.get(thrown);
     if (catcher?.statement !== statement) return 'unhandled';
     const { clause } = catcher;
-    if (clause.local) this.storeLocal(frame, clause.local, thrown.exception, true);
+    const { local } = clause;
     this.currentExceptions.push(thrown);
     try {
-      return this.executeBlock(clause.body, frame);
+      return this.inScope(frame, local ? [local] : [], [], () => {
+        if (local) this.storeLocal(frame, local, thrown.exception, true);
+        return this.executeBlock(clause.body, frame);
+      });
     } finally {
       this.currentExceptions.pop();
-      // The exception variable leaves scope with its catch clause.
-      if (clause.local) frame.slots[clause.local.slot] = UNASSIGNED;
+    }
+  }
+
+  /**
+   * Runs code in a scope that declares locals: captured ones get fresh cells, and every way out drops them all from the
+   * frame, so the trace stops showing a local once control leaves its scope. A closure keeps a captured cell itself.
+   */
+  private inScope<T>(frame: Frame, locals: readonly LocalSymbol[], captured: readonly LocalSymbol[], run: () => T): T {
+    for (const local of captured) frame.slots[local.slot] = new Cell(UNASSIGNED);
+    try {
+      return run();
+    } finally {
+      for (const local of locals) frame.slots[local.slot] = UNASSIGNED;
     }
   }
 

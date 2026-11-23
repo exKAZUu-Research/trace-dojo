@@ -113,7 +113,7 @@ export class BuilderChunks {
     newValue: string,
     start: number,
     count: number,
-    /** Charges work in characters, as each chunk's rebuild and search take time in the text's and chunks' sizes. */
+    /** Charges work in characters: the text the search reads, each chunk's rebuild, and each chunk lookup. */
     charge: (work: number) => void
   ): string {
     let current = text;
@@ -121,19 +121,25 @@ export class BuilderChunks {
     let chunk = this.chunkAt(start);
     let indexInChunk = start - chunk.offset;
     let replacements: number[] = [];
+    // The next occurrence at or after the scanned position, found once for the text so far: a host search reads the
+    // text in linear time, while comparing at each position reads a long common prefix again and again.
+    let next: number | undefined;
     while (remaining > 0) {
-      // A comparison that passes the first character may read the whole search string, which a long common prefix
-      // makes it do; one that fails there, or does not run, costs one character.
       const position = chunk.offset + indexInChunk;
-      const isCompared = oldValue.length <= remaining && current[position] === oldValue[0];
-      charge(isCompared ? oldValue.length : 1);
-      if (isCompared && current.startsWith(oldValue, position)) {
-        replacements.push(indexInChunk);
-        indexInChunk += oldValue.length;
-        remaining -= oldValue.length;
+      if (next === undefined || (next !== -1 && next < position)) {
+        next = current.indexOf(oldValue, position);
+        charge((next === -1 ? current.length : next + oldValue.length) - position + 1);
+      }
+      const isMatch =
+        next !== -1 && next < chunk.offset + chunk.length && next + oldValue.length <= position + remaining;
+      if (isMatch) {
+        replacements.push(next - chunk.offset);
+        indexInChunk = next - chunk.offset + oldValue.length;
+        remaining -= next - position + oldValue.length;
       } else {
-        indexInChunk++;
-        remaining--;
+        const skipped = Math.min(chunk.length - indexInChunk, remaining);
+        indexInChunk += skipped;
+        remaining -= skipped;
       }
       if (indexInChunk >= chunk.length || remaining === 0) {
         let index = chunk.offset + indexInChunk;
@@ -142,6 +148,7 @@ export class BuilderChunks {
           current = this.replaceInChunk(current, replacements, chunk.offset, oldValue, newValue);
           index += (newValue.length - oldValue.length) * replacements.length;
           replacements = [];
+          next = undefined;
         }
         charge(this.chunks.length);
         chunk = this.chunkAt(index);

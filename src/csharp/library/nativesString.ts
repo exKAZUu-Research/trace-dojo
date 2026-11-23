@@ -1367,7 +1367,7 @@ function replaceIn(
   reserve(call, state, 0, count);
   const growth = occurrencesIn(state.text, from, start, count) * (to.length - from.length);
   reserve(call, state, Math.max(0, growth));
-  // Work is charged in characters, collected so that the many small comparisons of a short search cost little.
+  // Work is charged in characters, collected so that many small pieces of work cost little.
   let pending = 0;
   state.replace(from, to, start, count, (work) => {
     pending += work;
