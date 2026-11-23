@@ -2,6 +2,7 @@
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
 import { CsDecimal } from '../decimal';
+import { combineDelegates } from '../delegates';
 import { defineNatives, defineNativesKeepingStrings, type NativeCall, type NativeMethod } from '../natives';
 import {
   arithmetic,
@@ -1431,11 +1432,7 @@ defineNatives(tupleNatives);
 // ---- Delegates ----
 
 defineNatives({
-  'System.Delegate.Combine': (_call, _receiver, [a, b]) => {
-    if (a === undefined) return b as Value;
-    if (b === undefined) return a as Value;
-    return new CsDelegate((a as CsDelegate).type, [...(a as CsDelegate).entries, ...(b as CsDelegate).entries]);
-  },
+  'System.Delegate.Combine': (call, _receiver, [a, b]) => combineDelegates(call.frame.runtime, a as Value, b as Value),
   'System.Delegate.GetInvocationList': (call, receiver) => {
     const source = receiver as CsDelegate;
     return newArray(
