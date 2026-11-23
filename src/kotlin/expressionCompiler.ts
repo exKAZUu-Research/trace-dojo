@@ -1071,8 +1071,11 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   private receiverLevels(scope: Scope, context: FunctionContext, name: string, row: number): CallLevel[] {
-    return this.receiversOf(scope).flatMap((receiver) =>
-      this.memberCallLevels(
+    return this.receiversOf(scope).flatMap((receiver) => {
+      // Only a call that a member or extension of the receiver can take reads it, which an uninitialized one rejects.
+      const uninitialized = this.uninitializedReceiver;
+      if (uninitialized?.receiver === receiver) this.uninitializedReceiver = undefined;
+      const levels = this.memberCallLevels(
         scope,
         {
           type: this.receiverTypeOf(receiver),
@@ -1082,8 +1085,11 @@ export abstract class ExpressionCompiler extends CallCompiler {
         },
         name,
         row
-      )
-    );
+      );
+      this.uninitializedReceiver = uninitialized;
+      if (levels.length > 0) this.receiverAccess(context, receiver);
+      return levels;
+    });
   }
 
   private companionLevels(scope: Scope, name: string, row: number): CallLevel[] {

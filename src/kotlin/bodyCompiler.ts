@@ -522,8 +522,10 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     this.flow = new Flow();
     for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
     const headerScope = this.constructorHeaderScopes.get(scope) ?? scope;
+    this.uninitializedReceiver = scope.receiver && { receiver: scope.receiver, row: entry.decl.row };
     const defaults = this.compileConstructorDefaults(entry, headerScope, context);
     const superCall = this.compileSuperConstructorCall(entry, headerScope, context);
+    this.uninitializedReceiver = undefined;
     const steps = [
       ...this.compileFieldSteps(entry, headerScope, context),
       ...this.compileMemberSteps(entry, scope, context),

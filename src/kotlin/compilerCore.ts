@@ -467,8 +467,17 @@ export abstract class CompilerCore {
     };
   }
 
+  /** The instance a constructor header builds, which its defaults and superclass arguments must not read. */
+  protected uninitializedReceiver: { receiver: ReceiverSymbol; row: number } | undefined;
+
   /** Reads an implicit receiver, which a lambda inside the function that has it captures. */
   protected receiverAccess(context: FunctionContext, receiver: ReceiverSymbol): Eval {
+    if (this.uninitializedReceiver?.receiver === receiver) {
+      this.error(
+        this.uninitializedReceiver.row,
+        'インスタンスの初期化が終わる前なので、this やそのメンバーは使えません。'
+      );
+    }
     if (receiver.context === context) return (frame) => frame.thisValue;
     const index = context.captureIndex(receiver);
     return (frame) => frame.captured[index] as Value;
