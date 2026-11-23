@@ -156,6 +156,10 @@ function mapArguments(
     : undefined;
 }
 
+function parameterOf(symbol: FunctionSymbol, mapping: number[][], argumentIndex: number): ParameterSymbol | undefined {
+  return symbol.params[mapping.findIndex((indexes) => indexes.includes(argumentIndex))];
+}
+
 function isLambdaArgument(expression: Expression): expression is LambdaExpression {
   return expression.kind === 'lambda';
 }
@@ -1201,6 +1205,11 @@ export abstract class CallCompiler extends CompilerCore {
     compiledArgs: Compiled[]
   ): ArgumentEvaluation[] {
     const { symbol } = candidate;
+    // Kotlin passes a named vararg argument as the whole array, as `*array` spreads one, which learners cannot use.
+    const namedVararg = mapping
+      .flat()
+      .find((index) => args[index].name !== undefined && parameterOf(symbol, mapping, index)?.isVararg);
+    if (namedVararg !== undefined) this.unavailable(args[namedVararg].row, '可変長引数（vararg）への名前付きの引数');
     const reprs = parameterReprs(symbol);
     const evaluations = mapping.flatMap((indexes, paramIndex) =>
       indexes.map((index): ArgumentEvaluation => {
