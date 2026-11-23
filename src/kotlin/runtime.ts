@@ -194,6 +194,12 @@ export class Runtime implements TracedRuntime<Frame> {
     this.spend(1 + Math.floor(work / 64));
   }
 
+  /** Rejects a string that a library function or a generated member built beyond the limit, after building it. */
+  checkBuiltString<T extends Value>(frame: Frame, value: T): T {
+    if (typeof value === 'string' && value.length > LIMITS.maxStringLength) this.allocateString(frame, value.length);
+    return value;
+  }
+
   throwError(frame: Frame, qualifiedName: string, message?: string): never {
     throw new KotlinThrow(this.exceptions.create(frame, qualifiedName, message));
   }

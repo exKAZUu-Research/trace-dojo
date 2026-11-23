@@ -283,7 +283,7 @@ export class Compiler extends BodyCompiler {
 
   protected nativeInvoker(symbol: FunctionSymbol, native: NativeFunction): NonNullable<FunctionSymbol['invoke']> {
     return (caller, receiver, args) => {
-      if (!args.includes(MISSING)) return native(caller, receiver, args);
+      if (!args.includes(MISSING)) return caller.runtime.checkBuiltString(caller, native(caller, receiver, args));
       // Default values may read the receiver and the earlier parameters, as `missingDelimiterValue: String = this` does.
       const info = symbol.defaultsInfo ?? ROOT_DEFAULTS_INFO;
       const frame = new Frame(caller.runtime, info, [], receiver, undefined);
@@ -291,7 +291,7 @@ export class Compiler extends BodyCompiler {
       for (const [index, arg] of args.entries()) {
         if (arg === MISSING) frame.locals[index] = symbol.params[index].defaultValue?.(frame);
       }
-      return native(caller, receiver, frame.locals as Value[]);
+      return caller.runtime.checkBuiltString(caller, native(caller, receiver, frame.locals as Value[]));
     };
   }
 
