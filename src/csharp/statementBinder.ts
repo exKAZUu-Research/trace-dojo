@@ -207,7 +207,7 @@ export abstract class StatementBinder extends PatternBinder {
       ? `${displayTypeSymbol(target.owner.symbol, target.owner.args)}.this[${property.parameters.map((parameter) => displayType(substitute(parameter.type, substitutionOf(target.owner)))).join(', ')}]`
       : `${displayTypeSymbol(target.owner.symbol, target.owner.args)}.${property.name}`;
     if (!setter) {
-      if (property.backingField && this.isInConstructorOf(property, context)) {
+      if (property.backingField && !property.isStatic && this.isInConstructorOf(property, context)) {
         return {
           kind: 'field',
           receiver: target.receiver as BoundExpression,
