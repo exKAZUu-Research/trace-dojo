@@ -178,6 +178,16 @@ export function storeInArray(
 }
 
 /**
+ * Fails as a covariant array (a `string[]` seen as `object[]`) does on a store of a value its runtime element type
+ * cannot hold, so the array never holds a value of the wrong type.
+ */
+export function checkArrayStore(call: NativeCall, array: CsArray, value: Value): void {
+  const element = array.type.element;
+  if (value !== undefined && isReferenceType(element) && !evaluatorOf(call).isInstanceOf(value, element))
+    fail('System.ArrayTypeMismatchException', 'Attempted to access an element as a type incompatible with the array.');
+}
+
+/**
  * A value copied into a value-type element: unboxed from a box, or widened between primitive numeric types, which the
  * runtime's array copy allows; other source element types cannot be assigned to the array.
  */

@@ -19,6 +19,7 @@ import { introSort } from './sort';
 import {
   bufferedElements,
   chargeElements,
+  checkArrayStore,
   copyToArray,
   evaluatorOf,
   fail,
@@ -1631,6 +1632,7 @@ defineNatives({
     arrayOf(array as Value).values.some(predicateOf(call, match as Value)),
   [`${ARRAY}.Fill(T[], T)`]: (call, _receiver, [array, value]) => {
     const values = arrayOf(array as Value).values;
+    checkArrayStore(call, array as CsArray, value as Value);
     chargeElements(call, values.length);
     for (let index = 0; index < values.length; index++) values[index] = copyValue(value as Value);
     return;
@@ -1646,6 +1648,7 @@ defineNatives({
       );
     }
     const values = arrayOf(array as Value).values;
+    checkArrayStore(call, array as CsArray, value as Value);
     chargeElements(call, count as number);
     for (let index = start as number; index < (start as number) + (count as number); index++)
       values[index] = copyValue(value as Value);
@@ -1879,7 +1882,9 @@ defineNatives({
   [`${ARRAY_HELPER}.get_Item`]: (call, receiver, [index]) =>
     (receiver as CsArray).values[checkedArrayIndex(call, receiver as CsArray, index as number)],
   [`${ARRAY_HELPER}.set_Item`]: (call, receiver, [index, value]) => {
-    (receiver as CsArray).values[checkedArrayIndex(call, receiver as CsArray, index as number)] = value as Value;
+    const position = checkedArrayIndex(call, receiver as CsArray, index as number);
+    checkArrayStore(call, receiver as CsArray, value as Value);
+    (receiver as CsArray).values[position] = value as Value;
     return;
   },
   [`${ARRAY_HELPER}.Add`]: fixedSize,
