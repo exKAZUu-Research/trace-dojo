@@ -1,7 +1,8 @@
 import { CompileError } from '../../interpreter/diagnostics';
+import { implicitNumeric } from '../conversions';
 import type { Evaluator } from '../evaluator';
 import type { NativeCall } from '../natives';
-import { PendingException } from '../numeric';
+import { convertNumeric, type NumericValue, PendingException } from '../numeric';
 import { stringOf } from '../objects';
 import { CsThrow, type ExceptionState } from '../runtime';
 import {
@@ -9,6 +10,7 @@ import {
   type NamedType,
   namedType,
   sameType,
+  specialOf,
   substitute,
   type Type,
   type TypeParameterSymbol,
@@ -162,7 +164,7 @@ export function storeInArray(
   if (!sourceElement || !sameType(sourceElement, element)) {
     const evaluator = evaluatorOf(call);
     values = items.map((item) => {
-      if (!isReferenceType(element)) return item instanceof CsBox ? evaluator.unbox(item, element) : item;
+      if (!isReferenceType(element)) return valueElement(evaluator, item, sourceElement, element);
       const boxed = sourceElement ? evaluator.box(item, sourceElement) : item;
       if (boxed !== undefined && !evaluator.isInstanceOf(boxed, element))
         fail(
@@ -173,6 +175,20 @@ export function storeInArray(
     });
   }
   for (const [offset, value] of values.entries()) target.values[index + offset] = copyValue(value);
+}
+
+/**
+ * A value copied into a value-type element: unboxed from a box, or widened between primitive numeric types, which the
+ * runtime's array copy allows; other source element types cannot be assigned to the array.
+ */
+function valueElement(evaluator: Evaluator, item: Value, sourceElement: Type | undefined, element: Type): Value {
+  if (item instanceof CsBox) return evaluator.unbox(item, element);
+  if (!sourceElement) return item;
+  const from = specialOf(sourceElement);
+  const to = specialOf(element);
+  if (from && to && from !== 'decimal' && to !== 'decimal' && implicitNumeric(from, to))
+    return convertNumeric(item as NumericValue, from, to);
+  return fail('System.ArrayTypeMismatchException', 'Source array type cannot be assigned to destination array type.');
 }
 
 /**
