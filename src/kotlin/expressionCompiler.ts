@@ -728,7 +728,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const { name, row, isSafe } = expression;
     const qualified = this.compileQualifier(scope, expression.receiver);
     if (qualified?.kind === 'class')
-      return consume(safeResultIf(isSafe, this.compileClassMember(scope, context, qualified.cls, name, row)));
+      return safeResultIf(isSafe, consume(this.compileClassMember(scope, context, qualified.cls, name, row)));
     if (qualified) return consume(this.compilePackageMember(context, qualified, name, row));
     if (expression.receiver.kind === 'super') {
       if (expression.isSafe) this.error(row, 'super には ?. を使えません。');
