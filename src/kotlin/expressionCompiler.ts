@@ -1094,14 +1094,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (name !== 'enumValues' && name !== 'enumValueOf') return undefined;
     const argument = typeArgs.length === 1 ? resolved(typeArgs[0]) : undefined;
     if (argument?.kind !== 'class' || argument.cls.kind !== 'enum') return undefined;
-    return this.compileEnumFunction(
-      scope,
-      context,
-      argument.cls,
-      name === 'enumValues' ? 'values' : 'valueOf',
-      args,
-      row
-    );
+    return this.compileEnumFunction(scope, context, argument.cls, name, args, row);
   }
 
   private receiverLevels(scope: Scope, context: FunctionContext, name: string, row: number): CallLevel[] {

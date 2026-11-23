@@ -365,7 +365,7 @@ export class Compiler extends BodyCompiler {
     row: number
   ): Compiled {
     const instance = this.objectInstance(cls);
-    if (name === 'values') {
+    if (name === 'values' || name === 'enumValues') {
       if (args.length > 0) this.error(row, 'values() には引数を書けません。');
       const arrayClass = this.core.array;
       return {
@@ -383,10 +383,10 @@ export class Compiler extends BodyCompiler {
       };
     }
     if (args.length !== 1) this.error(row, 'valueOf には引数を1つ書いてください。');
-    // E.valueOf names its parameter `value`, and enumValueOf<E> names it `name`.
     const argumentName = args[0].name;
-    if (argumentName !== undefined && argumentName !== 'value' && argumentName !== 'name')
-      this.error(row, `valueOf に ${argumentName} という名前の引数はありません。`);
+    const parameterName = name === 'enumValueOf' ? 'name' : 'value';
+    if (argumentName !== undefined && argumentName !== parameterName)
+      this.error(row, `${name} に ${argumentName} という名前の引数はありません。`);
     const argument = this.compileExpression(scope, context, args[0].value, this.stringType);
     const evaluate = this.expectType(argument, this.stringType, args[0].row);
     return {
