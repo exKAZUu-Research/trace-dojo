@@ -146,11 +146,16 @@ export class BuilderChunks {
   ): string {
     const delta = (newValue.length - oldValue.length) * replacements.length;
     if (delta > 0) this.insert(chunkOffset + replacements[0], delta, false);
-    let result = text;
-    for (const replacement of replacements.toReversed()) {
+    // One pass over the text, since slicing it anew for each occurrence takes quadratic time.
+    const parts: string[] = [];
+    let copied = 0;
+    for (const replacement of replacements) {
       const index = chunkOffset + replacement;
-      result = result.slice(0, index) + newValue + result.slice(index + oldValue.length);
+      parts.push(text.slice(copied, index), newValue);
+      copied = index + oldValue.length;
     }
+    parts.push(text.slice(copied));
+    const result = parts.join('');
     if (delta < 0) this.remove(chunkOffset + (replacements.at(-1) as number) + oldValue.length + delta, -delta);
     return result;
   }

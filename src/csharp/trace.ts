@@ -214,7 +214,9 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
       return String.fromCharCode(value as number);
     }
     case 'string': {
-      return stringText(value as string | CsString);
+      const text = stringText(value as string | CsString);
+      chargeSnapshot?.(text.length);
+      return text;
     }
     case 'long':
     case 'ulong': {
