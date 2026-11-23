@@ -992,6 +992,8 @@ for (const name of ['KeyCollection', 'ValueCollection']) {
     [`${prefix}.get_IsReadOnly`]: () => true,
     [`${prefix}.Contains`]: (call, receiver, [value]) => {
       const view = (receiver as CsObject).native as ViewState;
+      // The keys' membership is the dictionary's own key lookup, with its comparer.
+      if (name === 'KeyCollection') return view.dictionary.find(value as Value) >= 0;
       const equality = equalityOf(call, undefined, view.elementType);
       for (const item of view.enumerate()) if (equality.equals(item, value as Value)) return true;
       return false;

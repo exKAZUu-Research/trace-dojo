@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss -- The format module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
+import { LIMITS } from '../interpreter/limits';
 import { CsDecimal } from './decimal';
 import { PendingException } from './numeric';
 
@@ -238,6 +239,12 @@ function formatStandard(
 ): string {
   const upper = specifier.toUpperCase();
   const mode = kind === 'decimal' || kind === 'integer' ? 'away' : 'even';
+  // A precision past the string limit would pad a result the limit rejects, so it stops before building it.
+  if (precision !== undefined && precision > LIMITS.maxStringLength)
+    throw new PendingException(
+      'System.OutOfMemoryException',
+      "Exception of type 'System.OutOfMemoryException' was thrown."
+    );
   switch (upper) {
     case 'D': {
       if (kind !== 'integer') throw invalidFormat();
