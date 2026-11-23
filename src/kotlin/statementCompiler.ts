@@ -927,8 +927,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
 
   // code-gauge-allow functionNcss -- the loop shares its locals and condition between analysis and execution.
   private compileFor(scope: Scope, context: FunctionContext, statement: ForStatement): Exec {
-    this.forgetAssignedIn(scope, [...statement.body.statements]);
+    // The iterable runs once, before any iteration's writes.
     const iterable = this.compileExpression(scope, context, statement.iterable);
+    this.forgetAssignedIn(scope, [...statement.body.statements]);
     const loopScope = new Scope(scope, context);
     const loop = this.newLoop(scope);
     const firstSlot = context.info.slotCount;
