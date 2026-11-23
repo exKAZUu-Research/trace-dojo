@@ -995,6 +995,9 @@ export abstract class ExpressionBinder extends MemberBinder {
     method.body = body;
     const failed = this.diagnostics.length > savedDiagnostics;
     const lambda: LambdaInfo = { method, captures: [...context.fn.captures], isStatic: node.isStatic };
+    this.recordCaptureList(context.fn, (captures) => {
+      lambda.captures = captures;
+    });
     const result: BoundExpression | undefined =
       failed || !delegateType ? undefined : { kind: 'lambda', lambda, type: delegateType, row: node.row };
     if (!report) {

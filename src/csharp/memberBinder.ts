@@ -7,6 +7,7 @@ import type { BindContext } from './convertBinder';
 import { displayMethodIn } from './declarations';
 import type { MethodCandidate } from './lookup';
 import type { NamespaceSymbol } from './namespaces';
+import type { FunctionScope } from './scopes';
 import {
   displayMethod,
   displayType,
@@ -64,6 +65,46 @@ export function isNonValue(result: BindResult): result is NonValue {
 export abstract class MemberBinder extends CallBinder {
   /** Set while binding a call's callee, whose member lookup leaves out members that cannot be called. */
   protected isBindingCallee = false;
+
+  /** The local functions each function refers to, whose captures it must capture too, as their callers lend them. */
+  private readonly localFunctionUses: { fn: FunctionScope; callee: MethodSymbol }[] = [];
+
+  /** How each lambda and local function bound in the current member stores its list of captures. */
+  private readonly captureLists: { fn: FunctionScope; store: (captures: LocalSymbol[]) => void }[] = [];
+
+  /** Records how a lambda or local function stores its captures, which a later local-function use may add to. */
+  protected recordCaptureList(fn: FunctionScope, store: (captures: LocalSymbol[]) => void): void {
+    this.captureLists.push({ fn, store });
+  }
+
+  /**
+   * Gives every function the captures of the local functions it refers to, transitively, once a member's functions
+   * are all bound: a function that calls a local function capturing `total` passes `total`'s cell along, so it and
+   * the functions around it up to `total`'s owner capture it as well.
+   */
+  protected propagateLocalFunctionCaptures(): void {
+    let isChanged = true;
+    while (isChanged) {
+      isChanged = false;
+      for (const { fn, callee } of this.localFunctionUses) {
+        for (const local of callee.captures) {
+          for (
+            let current: FunctionScope | undefined = fn;
+            current && current.method !== local.owner;
+            current = current.outer
+          ) {
+            if (current.captures.has(local)) continue;
+            current.captures.add(local);
+            local.isCaptured = true;
+            isChanged = true;
+          }
+        }
+      }
+      for (const { fn, store } of this.captureLists) store([...fn.captures]);
+    }
+    this.localFunctionUses.length = 0;
+    this.captureLists.length = 0;
+  }
 
   /** Set while binding `nameof`'s argument, which names members without reading the properties on its way. */
   private isBindingName = false;
@@ -240,6 +281,7 @@ export abstract class MemberBinder extends CallBinder {
     }
     if (found?.local) return this.localReference(found.local, position, context);
     if (found?.localFunction) {
+      this.localFunctionUses.push({ fn: context.fn, callee: found.localFunction });
       return {
         kind: 'methodGroup',
         name,

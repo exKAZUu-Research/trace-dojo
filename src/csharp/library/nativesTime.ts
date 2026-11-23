@@ -190,7 +190,11 @@ function scaledTicks(ticks: number, operand: number, scale: (ticks: number, by: 
   const result = scale(ticks, operand);
   if (!Number.isFinite(result) || Math.abs(result) > 9.223372036854776e18)
     fail('System.OverflowException', 'TimeSpan overflowed because the duration is too long.');
-  return BigInt(Math.round(result));
+  // .NET rounds the scaled ticks to the nearest, a tie to the even one, where Math.round would round a tie up.
+  const floor = Math.floor(result);
+  const difference = result - floor;
+  const rounded = difference > 0.5 || (difference === 0.5 && floor % 2 !== 0) ? floor + 1 : floor;
+  return BigInt(rounded);
 }
 
 // ---- Formatting ----

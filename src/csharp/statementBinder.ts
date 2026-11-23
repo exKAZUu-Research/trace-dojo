@@ -1188,6 +1188,9 @@ export abstract class StatementBinder extends PatternBinder {
     for (const parameter of method.parameters) this.declareParameter(parameter, inner);
     method.body = this.bindMethodBody(declaration.body, inner, method.returnType);
     method.captures = [...fn.captures];
+    this.recordCaptureList(fn, (captures) => {
+      method.captures = captures;
+    });
     this.finishFunction(method, fn);
   }
 

@@ -557,6 +557,8 @@ export class Compiler extends StatementBinder {
     }
     const body = method.body;
     if (!body) return;
+    // A member's nested functions are all bound by now, so their captures can follow the local functions they call.
+    if (fn.kind === 'member' || fn.kind === 'initializer') this.propagateLocalFunctionCaptures();
     markCapturedLocals(body);
     if (fn.kind === 'lambda') return;
     const analyzer = new FlowAnalyzer({
