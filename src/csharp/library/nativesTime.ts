@@ -634,11 +634,13 @@ function parseDate(text: string): bigint | undefined {
         `${hour}:${minute.padStart(2, '0')}${second === undefined ? '' : `:${second.padStart(2, '0')}`}${rest}`
     );
   const match =
-    /^\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,7}))?)?)?\s*$/.exec(
+    /^\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,7}))?)?(Z|[+-]\d{2}:?\d{2})?)?\s*$/.exec(
       normalized
     );
   if (!match) return undefined;
-  const [, year, month, day, hour = '0', minute = '0', second = '0', fraction = ''] = match;
+  const [, year, month, day, hour = '0', minute = '0', second = '0', fraction = '', zone] = match;
+  // A time with `Z` or an offset is converted to local time (ja-JP's +09:00), as .NET's Parse does.
+  const zoneTicks = zone === undefined ? undefined : zone === 'Z' ? 0n : offsetTicks(zone);
   try {
     const whole = ticksFromParts(
       Number(year),
@@ -649,10 +651,18 @@ function parseDate(text: string): bigint | undefined {
       Number(second)
     );
     // A fraction of a second has up to seven digits, one per tick (100 ns).
-    return whole + BigInt(fraction.padEnd(7, '0') || '0');
+    const ticks = whole + BigInt(fraction.padEnd(7, '0') || '0');
+    return zoneTicks === undefined ? ticks : ticks - zoneTicks + LOCAL_OFFSET_TICKS;
   } catch {
     return undefined;
   }
+}
+
+/** The ticks of a `+09:00`, `-0530`, or similar UTC offset. */
+function offsetTicks(zone: string): bigint {
+  const sign = zone.startsWith('-') ? -1n : 1n;
+  const digits = zone.slice(1).replace(':', '');
+  return sign * (BigInt(digits.slice(0, 2)) * TICKS_PER_HOUR + BigInt(digits.slice(2)) * TICKS_PER_MINUTE);
 }
 
 /** .NET's message for a string that DateTime.Parse rejects, which points at the first word it does not know. */
