@@ -146,6 +146,8 @@ export class CsDecimal {
     const scale = Math.max(this.scale, other.scale);
     const a = this.signed * 10n ** BigInt(scale - this.scale);
     const b = other.signed * 10n ** BigInt(scale - other.scale);
+    // A dividend smaller in magnitude than the divisor is its own remainder, scale included, as .NET returns it.
+    if ((a < 0n ? -a : a) < (b < 0n ? -b : b)) return this;
     const result = a % b;
     return new CsDecimal(result < 0n ? -result : result, scale, this.isNegative);
   }
@@ -239,8 +241,15 @@ function fittedQuotient(
     const shift = current - preferred;
     const scaledNumerator = shift >= 0 ? numerator * 10n ** BigInt(shift) : numerator;
     const scaledDenominator = shift >= 0 ? denominator : denominator * 10n ** BigInt(-shift);
-    const quotient = roundDivide(scaledNumerator, scaledDenominator);
-    if (quotient <= MAX_COEFFICIENT) return new CsDecimal(quotient, current, negative && quotient !== 0n);
+    let quotient = roundDivide(scaledNumerator, scaledDenominator);
+    if (quotient > MAX_COEFFICIENT) continue;
+    // .NET drops the trailing zeros of a rounded quotient down to the scale the operands suggest.
+    let fittedScale = current;
+    while (fittedScale > Math.max(preferred, 0) && quotient % 10n === 0n) {
+      quotient /= 10n;
+      fittedScale--;
+    }
+    return new CsDecimal(quotient, fittedScale, negative && quotient !== 0n);
   }
   throw new DecimalOverflowError();
 }
