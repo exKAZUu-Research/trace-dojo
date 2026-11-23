@@ -444,15 +444,18 @@ export class BinderBase {
     type: NamedType,
     name: string,
     arity: number,
-    context: TypeContext
+    context: TypeContext,
+    /** Whether to search the bases too, which member lookup, walking the bases level by level itself, leaves out. */
+    withBases = true
   ): { nested?: NestedTypeFound; inaccessible?: NestedTypeFound } {
     let inaccessible: NestedTypeFound | undefined;
     for (
       let current: NamedType | undefined = type;
       current;
-      current = current.symbol.baseType
-        ? (substitute(current.symbol.baseType, substitutionOf(current)) as NamedType)
-        : undefined
+      current =
+        withBases && current.symbol.baseType
+          ? (substitute(current.symbol.baseType, substitutionOf(current)) as NamedType)
+          : undefined
     ) {
       const nested = current.symbol.nestedTypes.find(
         (candidate) => candidate.name === name && candidate.typeParameters.length === arity

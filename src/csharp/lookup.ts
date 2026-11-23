@@ -93,7 +93,7 @@ export class LookupBinder extends DeclarationBinder {
       if (isAccessibleMember) return { found: memberLookupOf(member, owner), inaccessible };
       inaccessible ??= member;
       if (candidates.length === 0) {
-        const nestedLookup = this.findNestedType(owner, name, arity, context);
+        const nestedLookup = this.findNestedType(owner, name, arity, context, false);
         if (nestedLookup.nested) return { found: { kind: 'type', ...nestedLookup.nested }, inaccessible };
         if (nestedLookup.inaccessible) inaccessibleType ??= { kind: 'type', ...nestedLookup.inaccessible };
       }
