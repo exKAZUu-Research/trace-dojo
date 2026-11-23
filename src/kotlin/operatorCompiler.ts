@@ -885,11 +885,11 @@ function unboxNumber(value: Value): number | bigint {
 }
 
 /**
- * Reads a Boolean that a smart cast made non-null, which a write inside its own test may have nulled since; the JVM's
- * unboxing throws for it instead of treating it as false.
+ * Reads a Boolean that is non-null by its type, though a write inside its own test may have nulled a smart-cast value
+ * since, however it is forwarded; the JVM's unboxing throws for it instead of treating it as false.
  */
 function checkedBoolean(compiled: Compiled, evaluate: Eval): Eval {
-  if (compiled.stableKey === undefined) return evaluate;
+  if (compiled.constant !== undefined) return evaluate;
   return (frame) => {
     const value = evaluate(frame);
     if (value === NULL) frame.runtime.throwError(frame, 'java.lang.NullPointerException');
