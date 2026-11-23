@@ -858,18 +858,23 @@ defineNatives({
 
 const CHAR = 'System.Char';
 const charTest =
-  (test: (char: string) => boolean): NativeMethod =>
+  (test: (char: string) => boolean, unit: 'scalar' | 'codeUnit' = 'scalar'): NativeMethod =>
   (_call, _receiver, args) => {
     if (args.length === 1) return test(String.fromCodePoint(args[0] as number));
-    return test(charOfString(args[0] as Value, args[1] as number));
+    return test(charOfString(args[0] as Value, args[1] as number, unit));
   };
 
-/** The character at an index of a string that `char.IsDigit(s, index)` and its kin test. */
-function charOfString(text: Value, index: number): string {
+/**
+ * The character at an index of a string that `char.IsDigit(s, index)` and its kin test: for a Unicode category, a
+ * surrogate pair there is one character, as .NET classifies it; the surrogate and ASCII tests read one code unit.
+ */
+function charOfString(text: Value, index: number, unit: 'scalar' | 'codeUnit'): string {
   if (text === undefined) failNull('s');
   if (index < 0 || index >= (text as string).length)
     fail('System.ArgumentOutOfRangeException', 'Specified argument was out of the range of valid values.', 'index');
-  return (text as string).charAt(index);
+  return unit === 'scalar'
+    ? String.fromCodePoint((text as string).codePointAt(index) as number)
+    : (text as string).charAt(index);
 }
 
 defineNatives({
@@ -897,15 +902,15 @@ defineNatives({
   [`${CHAR}.IsSeparator`]: charTest((char) => /\p{Z}/u.test(char)),
   [`${CHAR}.IsControl`]: charTest((char) => /\p{Cc}/u.test(char)),
   [`${CHAR}.IsWhiteSpace`]: charTest((char) => WHITESPACE.test(char)),
-  [`${CHAR}.IsSurrogate`]: charTest((char) => /[\uD800-\uDFFF]/.test(char)),
-  [`${CHAR}.IsHighSurrogate`]: charTest((char) => /[\uD800-\uDBFF]/.test(char)),
-  [`${CHAR}.IsLowSurrogate`]: charTest((char) => /[\uDC00-\uDFFF]/.test(char)),
-  [`${CHAR}.IsAscii`]: charTest((char) => char.charCodeAt(0) < 128),
-  [`${CHAR}.IsAsciiDigit`]: charTest((char) => /[0-9]/.test(char)),
-  [`${CHAR}.IsAsciiLetter`]: charTest((char) => /[A-Za-z]/.test(char)),
-  [`${CHAR}.IsAsciiLetterOrDigit`]: charTest((char) => /[A-Za-z0-9]/.test(char)),
-  [`${CHAR}.IsAsciiLetterLower`]: charTest((char) => /[a-z]/.test(char)),
-  [`${CHAR}.IsAsciiLetterUpper`]: charTest((char) => /[A-Z]/.test(char)),
+  [`${CHAR}.IsSurrogate`]: charTest((char) => /[\uD800-\uDFFF]/.test(char), 'codeUnit'),
+  [`${CHAR}.IsHighSurrogate`]: charTest((char) => /[\uD800-\uDBFF]/.test(char), 'codeUnit'),
+  [`${CHAR}.IsLowSurrogate`]: charTest((char) => /[\uDC00-\uDFFF]/.test(char), 'codeUnit'),
+  [`${CHAR}.IsAscii`]: charTest((char) => char.charCodeAt(0) < 128, 'codeUnit'),
+  [`${CHAR}.IsAsciiDigit`]: charTest((char) => /[0-9]/.test(char), 'codeUnit'),
+  [`${CHAR}.IsAsciiLetter`]: charTest((char) => /[A-Za-z]/.test(char), 'codeUnit'),
+  [`${CHAR}.IsAsciiLetterOrDigit`]: charTest((char) => /[A-Za-z0-9]/.test(char), 'codeUnit'),
+  [`${CHAR}.IsAsciiLetterLower`]: charTest((char) => /[a-z]/.test(char), 'codeUnit'),
+  [`${CHAR}.IsAsciiLetterUpper`]: charTest((char) => /[A-Z]/.test(char), 'codeUnit'),
   [`${CHAR}.IsAsciiHexDigit`]: charTest((char) => /[0-9A-Fa-f]/.test(char)),
   [`${CHAR}.IsBetween`]: (_call, _receiver, [value, low, high]) =>
     (value as number) >= (low as number) && (value as number) <= (high as number),
