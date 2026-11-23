@@ -453,6 +453,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       repr: reprOf(this.core, receiver.type),
       eval: this.receiverAccess(context, receiver),
       stableKey: key,
+      isThis: true,
     };
   }
 
@@ -1327,7 +1328,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const memberProperty = this.membersOf<PropertySymbol>(memberType, name, 'property')[0];
     const memberLevels: CallLevel[] = members.length === 0 ? [] : [{ candidates: members, receiver }];
     // Only the instance an initializer builds may be uninitialized: an implicit `this`, or an object, which is one.
-    const mayBeUninitialized = !explicit || memberProperty?.symbol.owner?.isObject === true;
+    const mayBeUninitialized = !explicit || receiver.isThis === true || memberProperty?.symbol.owner?.isObject === true;
     const memberValue =
       memberProperty && this.propertyCallCandidate(scope, memberProperty, receiver, row, mayBeUninitialized);
     if (memberValue) memberLevels.push({ functionValues: [memberValue] });
