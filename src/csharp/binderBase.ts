@@ -362,6 +362,12 @@ export class BinderBase {
         if (parameter) return parameter.type;
       }
       const nested = this.findNestedType(type.declaredType, name, args.length);
+      if (nested && !this.canUseNestedType(nested.symbol, context))
+        this.error(
+          position,
+          'CS0122',
+          `'${displayTypeSymbol(nested.symbol)}' はアクセスできない保護レベルになっています`
+        );
       if (nested) return this.construct(position, nested.symbol, [...nested.outerArgs, ...args]);
     }
     const found = this.findTypeInScope(name, args.length, context);
