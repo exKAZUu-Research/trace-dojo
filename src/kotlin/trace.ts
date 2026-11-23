@@ -69,6 +69,9 @@ class Snapshotter {
       ? this.frameVariables(frame.enclosing)
       : { variables: { vars: {}, referenceVars: {} }, shown: new Set<string>() };
     const hidesArgs = frame.info.name === this.program.main.name && this.program.mainTakesArgs;
+    // What a lambda captured is what it reads, over an enclosing frame's variable of the same name; only its own
+    // locals shadow it.
+    const locals = new Set<string>();
     for (const local of frame.info.locals) {
       const slot = frame.locals[local.slot];
       // `main`'s parameter only receives the launcher's arguments, which these programs never use.
@@ -79,11 +82,12 @@ class Snapshotter {
         local.name.startsWith('\0')
       )
         continue;
+      locals.add(local.name);
       shown.add(local.name);
       addVariable(variables, local.name, slot instanceof Cell ? slot.value : (slot as Value), local.type);
     }
     for (const capture of frame.info.captures) {
-      if (shown.has(capture.name)) continue;
+      if (locals.has(capture.name)) continue;
       const captured = frame.captured[capture.slot];
       if (captured instanceof Cell && !captured.isAssigned) continue;
       shown.add(capture.name);
