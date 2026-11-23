@@ -435,27 +435,7 @@ export abstract class MemberBinder extends CallBinder {
     }
     const { property } = found;
     const type = substitute(property.type, substitution);
-    if (
-      property.backingField &&
-      !property.isStatic &&
-      this.isInsideOwnInitialization(property, context) &&
-      !property.setter
-    ) {
-      return {
-        kind: 'field',
-        receiver: receiver as BoundExpression,
-        field: property.backingField,
-        type,
-        row: position.row,
-      };
-    }
     return { kind: 'property', receiver, property, args: [], owner: found.owner, type, row: position.row };
-  }
-
-  /** Whether a get-only auto-property is assigned in its type's constructor, which writes its backing field. */
-  private isInsideOwnInitialization(property: PropertySymbol, context: BindContext): boolean {
-    const method = context.fn.method;
-    return (method.kind === 'constructor' || method.kind === 'staticConstructor') && method.owner === property.owner;
   }
 
   /** The value of a constant field, binding its initializer when it has not been bound yet. */
