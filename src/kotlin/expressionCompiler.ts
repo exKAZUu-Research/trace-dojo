@@ -1424,6 +1424,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
   private reportMissingMember(type: KType, name: string, row: number): never {
     const unavailable = unavailableLibraryMember(type, name);
     if (unavailable) this.unavailable(row, unavailable);
+    const actual = resolved(type);
+    if (actual.kind === 'class') this.rejectJavaStubMember(actual.cls, name, row);
     return this.error(row, `${typeToString(type)} には ${name} がありません。`);
   }
 
@@ -1435,7 +1437,13 @@ export abstract class ExpressionCompiler extends CallCompiler {
   ): never {
     const label = unavailableQualifiedLibraryMember(cls, holder, name);
     if (label) this.unavailable(row, label);
+    this.rejectJavaStubMember(cls, name, row);
     return this.error(row, `${cls.name}.${name} が見つかりません。`);
+  }
+
+  /** The prelude declares a few JDK classes, such as `java.util.Locale`, with only the members Kotlin programs need. */
+  private rejectJavaStubMember(cls: ClassSymbol, name: string, row: number): void {
+    if (cls.isLibrary && /^javax?\./.test(cls.kotlinName)) this.unavailable(row, `Java の ${cls.name}.${name}`);
   }
 
   // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
