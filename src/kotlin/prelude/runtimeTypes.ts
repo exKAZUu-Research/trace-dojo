@@ -75,6 +75,42 @@ class PrintStream internal constructor(private val isError: Boolean) {
 object System {
     val out: PrintStream = PrintStream(false)
     val err: PrintStream = PrintStream(true)
+
+    fun lineSeparator(): String = "\\n"
+
+    fun arraycopy(src: Any?, srcPos: Int, dest: Any?, destPos: Int, length: Int) {
+        if (src == null || dest == null) throw NullPointerException()
+        val srcSize = arraySizeOf(src)
+        val destSize = arraySizeOf(dest)
+        if (srcPos < 0 || destPos < 0 || length < 0 || srcPos + length > srcSize || destPos + length > destSize)
+            throw ArrayIndexOutOfBoundsException("arraycopy: last index ${'$'}{srcPos + length} out of bounds for length ${'$'}srcSize")
+        when {
+            src is IntArray && dest is IntArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
+            src is LongArray && dest is LongArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
+            src is DoubleArray && dest is DoubleArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
+            src is FloatArray && dest is FloatArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
+            src is CharArray && dest is CharArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
+            src is BooleanArray && dest is BooleanArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
+            src is ByteArray && dest is ByteArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
+            src is ShortArray && dest is ShortArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
+            src is Array<*> && dest is Array<*> ->
+                (src as Array<Any?>).copyInto(dest as Array<Any?>, destPos, srcPos, srcPos + length)
+            else -> throw ArrayStoreException("arraycopy: type mismatch")
+        }
+    }
+
+    private fun arraySizeOf(array: Any): Int = when (array) {
+        is IntArray -> array.size
+        is LongArray -> array.size
+        is DoubleArray -> array.size
+        is FloatArray -> array.size
+        is CharArray -> array.size
+        is BooleanArray -> array.size
+        is ByteArray -> array.size
+        is ShortArray -> array.size
+        is Array<*> -> array.size
+        else -> throw ArrayStoreException("arraycopy: argument type mismatch")
+    }
 }
 
 internal external fun writeStream(isError: Boolean, text: String)
@@ -147,6 +183,7 @@ export const EXCEPTIONS: [kotlinPackage: string, name: string, parent: string, j
   ['java.lang', 'ExceptionInInitializerError', 'LinkageError', 'java.lang.ExceptionInInitializerError'],
   ['java.lang', 'NoClassDefFoundError', 'LinkageError', 'java.lang.NoClassDefFoundError'],
   ['java.lang', 'NegativeArraySizeException', 'RuntimeException', 'java.lang.NegativeArraySizeException'],
+  ['java.lang', 'ArrayStoreException', 'RuntimeException', 'java.lang.ArrayStoreException'],
   ['java.util', 'IllegalFormatException', 'IllegalArgumentException', 'java.util.IllegalFormatException'],
   ...[
     'DuplicateFormatFlagsException',
