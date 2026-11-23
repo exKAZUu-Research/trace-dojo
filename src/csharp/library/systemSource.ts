@@ -1097,7 +1097,7 @@ namespace System.Text {
 `;
 
 /**
- * Tuples of 8 to 16 elements, which .NET nests as `ValueTuple<T1, …, T7, TRest>`. They are flat here, with their
+ * Tuples of 8 to `MAX_TUPLE_ARITY` elements, which .NET nests as `ValueTuple<T1, …, T7, TRest>`. They are flat here, with their
  * `ItemN` fields; `runtimeTypeName` gives them .NET's nested names.
  */
 function longTupleDeclarations(): string {
