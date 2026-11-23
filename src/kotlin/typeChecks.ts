@@ -85,3 +85,17 @@ function kotlinTypeName(type: KType): string {
   if (type.kind === 'class') return type.cls.kotlinName;
   return 'kotlin.Any';
 }
+
+/**
+ * Reads a local that a smart cast narrowed, which a write inside the expression that tested it may have changed since;
+ * a value no longer of the narrowed type throws as a failed cast does, instead of flowing on as that type.
+ */
+export function checkedRead(core: Core, read: (frame: Frame) => Value, narrowed: KType): (frame: Frame) => Value {
+  if (resolved(narrowed).kind !== 'class') return read;
+  const test = instanceTest(core, narrowed);
+  return (frame) => {
+    const value = read(frame);
+    if (!test(value)) throwCastFailure(frame, value, narrowed);
+    return value;
+  };
+}

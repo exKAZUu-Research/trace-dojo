@@ -430,15 +430,3 @@ export function checkedBoolean(compiled: Compiled, evaluate: Eval): Eval {
     return value;
   };
 }
-
-/**
- * Reads a variable that a smart cast made non-null, which a write inside the expression that tested it may have nulled
- * since; it throws as the JVM does on such a null, instead of letting the value flow on as if non-null.
- */
-export function nonNullRead(read: Eval): Eval {
-  return (frame) => {
-    const value = read(frame);
-    if (value === NULL) frame.runtime.throwError(frame, 'java.lang.NullPointerException');
-    return value;
-  };
-}

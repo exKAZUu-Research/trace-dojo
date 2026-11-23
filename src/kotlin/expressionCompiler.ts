@@ -19,7 +19,6 @@ import {
   Flow,
   FunctionContext,
   Handoff,
-  nonNullRead,
   nullableReceiverMessage,
   type PackageScope,
   ReceiverSymbol,
@@ -47,6 +46,7 @@ import {
   type TypeParameterSymbol,
   type VariableSymbol,
 } from './symbols';
+import { checkedRead } from './typeChecks';
 import {
   acceptsInferredUnit,
   anyType,
@@ -601,7 +601,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return {
       type: narrowed ?? variable.type,
       repr,
-      eval: narrowed && isNullable(variable.type) && !isNullable(narrowed) ? nonNullRead(access.read) : access.read,
+      eval: narrowed ? checkedRead(this.core, access.read, narrowed) : access.read,
       stableKey: refinement ? key : undefined,
       unnarrowedType: narrowed && variable.type,
     };
