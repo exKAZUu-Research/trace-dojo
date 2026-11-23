@@ -23,7 +23,7 @@ import { hasNonNullReceiver, nonNullParameterIndexes, rejectNullArguments } from
 import { Frame, type FunctionInfo, MISSING } from './runtime';
 import { ClassSymbol, FunctionSymbol, type MemberSymbol, VariableSymbol } from './symbols';
 import { anyType, fixVariable, isSubtype } from './typeRelations';
-import { type ClassType, classType, type FunctionType, isNonNullClass, type KType, resolved } from './types';
+import { type ClassType, classType, type FunctionType, isNonNullClass, type KType, NOTHING, resolved } from './types';
 import { KObject, NULL, type Value } from './values';
 
 /** Adds a symbol to the imports of a name, once, since a file's imports are resolved before and after its headers. */
@@ -369,12 +369,12 @@ export class Compiler extends BodyCompiler {
     }
     const compiled = this.compileSamFunction(scope, context, argument, sam.functionType);
 
-    this.fixSamTypeArguments(resolved(type) as ClassType, argument.row);
+    this.fixSamTypeArguments(resolved(type) as ClassType);
     return { ...this.samWrap(compiled, sam, resolved(type)), isCreation: true };
   }
 
-  /** Fixes the type arguments a SAM constructor's lambda left open, rejecting typed parameters no one type satisfies. */
-  private fixSamTypeArguments(type: ClassType, row: number): void {
+  /** Fixes the type arguments a SAM constructor's lambda left open from the bounds its typed parameters gave. */
+  private fixSamTypeArguments(type: ClassType): void {
     for (const typeArgument of type.args) {
       if (
         typeArgument.variance !== 'star' &&
@@ -384,9 +384,10 @@ export class Compiler extends BodyCompiler {
         const { lower, upper } = typeArgument.type.variable;
         // Typed lambda parameters give upper bounds, of which the type is the most specific, as String of Any? and String.
         const mostSpecific = upper.find((bound) => upper.every((other) => isSubtype(bound, other)));
-        if (lower.length === 0 && upper.length > 0 && !mostSpecific)
-          this.error(row, typeMismatchMessage(upper[0], upper[1]));
-        typeArgument.type.variable.fixed = lower[0] ?? mostSpecific ?? anyType(true);
+        // Kotlin infers the intersection of bounds none of which is the most specific, as `Int & String`, which only
+        // warns; no value has every type, so `Nothing` stands for it and every call with an argument is rejected.
+        const intersection = upper.length > 0 ? NOTHING : anyType(true);
+        typeArgument.type.variable.fixed = lower[0] ?? mostSpecific ?? intersection;
       }
     }
   }
