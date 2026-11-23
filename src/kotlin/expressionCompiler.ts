@@ -35,7 +35,7 @@ import { localRefinement, refineLocalType } from './flowWrites';
 import { formatPrimitive, stringOf } from './format';
 import { mostSpecificProperties } from './inheritedMembers';
 import { invokeFunctionValue, lambdaValue } from './lambdaValue';
-import { unavailableLibraryMember, unavailableQualifiedLibraryMember } from './libraryApi';
+import { isKnownLibraryPackage, unavailableLibraryMember, unavailableQualifiedLibraryMember } from './libraryApi';
 import { literalFits } from './literals';
 import { floatRangeBounds } from './rangeBounds';
 import { type Frame, KotlinThrow, LoopSignal, ReturnSignal } from './runtime';
@@ -811,7 +811,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
     const path = `${outer.path}.${expression.name}`;
     const packageScope = this.packages.get(path);
-    if (packageScope) return { kind: 'package', path, scope: packageScope };
+    // A library package that the prelude lacks qualifies names too, which then report as unavailable.
+    if (packageScope || isKnownLibraryPackage(path)) return { kind: 'package', path, scope: packageScope };
     const cls = outer.scope?.classes.get(expression.name);
     if (cls) return { kind: 'class', cls };
     this.rejectUnavailableLibraryReference(path, expression.row);
