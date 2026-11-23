@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-import type { Block, Expression, TypeRef } from './ast';
+import { type Block, type Expression, type TypeRef, unparenthesized } from './ast';
 import type { IntegerLiteral } from './literals';
 import type { Frame, FunctionInfo, LocalInfo } from './runtime';
 import {
@@ -438,7 +438,8 @@ export function isBareCall(block: Block): boolean {
   return last?.kind === 'expressionStatement' && isBareCallExpression(last.expression);
 }
 
-export function isBareCallExpression(expression: Expression): boolean {
+export function isBareCallExpression(written: Expression): boolean {
+  const expression = unparenthesized(written);
   return (
     expression.kind === 'call' &&
     expression.callee.kind === 'name' &&
