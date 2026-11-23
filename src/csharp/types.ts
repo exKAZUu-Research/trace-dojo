@@ -167,6 +167,8 @@ export class MethodSymbol {
    * a call of it gives its caller's flow analysis; undefined until the function's own body is analyzed.
    */
   assignedAtExit?: ((local: LocalSymbol) => boolean) | 'never';
+  /** For a local function, the captured locals it reads before assigning them, which its callers must have assigned. */
+  readsBeforeAssigned: LocalSymbol[] = [];
   /** The row of the method's declaration, for diagnostics and the trace. */
   row = 0;
   /** For an operator, its token (`+`, `==`). */

@@ -765,7 +765,7 @@ export class Evaluator extends StatementExecutor {
       !method.isStatic &&
       !method.isExtension &&
       !method.owner.isValueType &&
-      this.isValueTypeValue(receiver, receiverType)
+      this.isValueTypeValue(receiver)
     ) {
       receiver = new CsBox(receiverType, copyValue(receiver));
     }
@@ -792,7 +792,7 @@ export class Evaluator extends StatementExecutor {
       receiver !== undefined &&
       !implementation.owner.isValueType &&
       !(receiver instanceof CsStruct) &&
-      this.isValueTypeValue(receiver, staticType) &&
+      this.isValueTypeValue(receiver) &&
       !nullableUnderlying(staticType)
         ? new CsBox(staticType, receiver)
         : receiver;

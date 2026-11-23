@@ -498,6 +498,8 @@ export class FlowAnalyzer {
         // `void Init() => y = 0;` does. Only a recursive callee's first pass has no summary yet, which counts as
         // assigning all, the optimistic start that later passes narrow.
         if (expression.kind !== 'call' || expression.method.kind !== 'localFunction') return after;
+        // The captured locals the callee reads before assigning must be assigned at the call, where Roslyn reports them.
+        for (const local of expression.method.readsBeforeAssigned) this.read(local, after, expression.row);
         const assignedAtExit = expression.method.assignedAtExit;
         // What follows a call that never returns reads every local as assigned, while reachability (CS0161) does
         // not know the call never returns, as in Roslyn, so the state stays reachable.

@@ -223,7 +223,7 @@ export abstract class EvaluatorBase {
 
   box(value: Value, from: Type): Value {
     if (value === undefined) return undefined;
-    if (!this.isValueTypeValue(value, from)) return value;
+    if (!this.isValueTypeValue(value)) return value;
     const underlying = nullableUnderlying(from);
     const boxedType = underlying ?? from;
     return new CsBox(boxedType, copyValue(value));
@@ -274,11 +274,11 @@ export abstract class EvaluatorBase {
       return convertNumeric(value as NumericValue, fromSpecial, toSpecial);
     }
     if (nullableUnderlying(to)) return value;
-    if (isReferenceType(to) && this.isValueTypeValue(value, from)) return new CsBox(from, copyValue(value));
+    if (isReferenceType(to) && this.isValueTypeValue(value)) return new CsBox(from, copyValue(value));
     return value;
   }
 
-  protected isValueTypeValue(value: Value, type: Type): boolean {
+  protected isValueTypeValue(value: Value): boolean {
     if (
       value instanceof CsObject ||
       value instanceof CsArray ||
@@ -287,7 +287,7 @@ export abstract class EvaluatorBase {
       isString(value)
     )
       return false;
-    return type.kind !== 'typeParameter' || true;
+    return true;
   }
 
   unbox(value: Value, to: Type): Value {
@@ -324,20 +324,14 @@ export abstract class EvaluatorBase {
   isInstanceOf(value: Value, type: Type): boolean {
     if (value === undefined) return false;
     if (type.kind === 'named' && type.symbol.special === 'object') return true;
-    const actual = this.runtime.runtimeTypeOf(value instanceof CsBox ? value : value) ?? undefined;
     if (value instanceof CsBox) {
       if (sameType(value.type, type)) return true;
       if (nullableUnderlying(type) && sameType(nullableUnderlying(type) as Type, value.type)) return true;
       return this.isAssignable(value.type, type);
     }
-    if (!actual) {
-      return this.primitiveIsInstance(value, type);
-    }
-    return this.isAssignable(actual, type);
-  }
-
-  private primitiveIsInstance(_value: Value, _type: Type): boolean {
-    return false;
+    // A primitive carries no type of its own, so it is an instance of no type tested here.
+    const actual = this.runtime.runtimeTypeOf(value);
+    return actual !== undefined && this.isAssignable(actual, type);
   }
 
   /** Whether a runtime type converts to another by reference or boxing, as instance tests decide. */

@@ -616,10 +616,14 @@ export class Compiler extends StatementBinder {
   /** Checks a function's definite assignment and reachability, recording for a local function what it assigns. */
   private analyzeFlow(method: MethodSymbol, body: BoundBlock): void {
     markCapturedLocals(body);
+    const readsBeforeAssigned: LocalSymbol[] = [];
     const analyzer = new FlowAnalyzer({
       unassigned: (local, row) => {
-        // A local function reads the locals it captures as assigned; Roslyn checks them where it is called instead.
-        if (method.kind === 'localFunction' && local.owner !== method) return;
+        // A local function's read of a captured local is checked where it is called instead, as Roslyn does.
+        if (method.kind === 'localFunction' && local.owner !== method) {
+          if (!readsBeforeAssigned.includes(local)) readsBeforeAssigned.push(local);
+          return;
+        }
         if (local.isParameter && local.refKind === 'out')
           this.error(row, 'CS0269', `未割り当ての out パラメーター '${local.name}' が使用されました`);
         else this.error(row, 'CS0165', `未割り当てのローカル変数 '${local.name}' が使用されました`);
@@ -654,7 +658,10 @@ export class Compiler extends StatementBinder {
     const parameters = method.locals.filter((local) => local.isParameter && local.owner === method);
     const returnsValue = method.returnType.kind !== 'void' && method.returnType.kind !== 'error';
     const assignedAtExit = analyzer.analyzeFunction(method, body, parameters, returnsValue, body.row);
-    if (method.kind === 'localFunction') method.assignedAtExit = assignedAtExit;
+    if (method.kind === 'localFunction') {
+      method.assignedAtExit = assignedAtExit;
+      method.readsBeforeAssigned = readsBeforeAssigned;
+    }
   }
 
   protected methodDisplay(method: MethodSymbol): string {

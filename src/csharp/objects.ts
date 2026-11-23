@@ -280,7 +280,7 @@ export function exceptionText(evaluator: Evaluator, exception: CsObject): string
 export function valuesEqual(evaluator: Evaluator, first: Value, second: Value, frame: Frame): boolean {
   const a = plainString(first);
   const b = plainString(second);
-  if (a === b) return typeof a !== 'number' || !Number.isNaN(a) || true;
+  if (a === b) return true;
   if (a === undefined || b === undefined) return false;
   if (typeof a === 'number' && typeof b === 'number') return a === b || (Number.isNaN(a) && Number.isNaN(b));
   if (typeof a === 'bigint' || typeof b === 'bigint') return typeof a === typeof b && a === b;
