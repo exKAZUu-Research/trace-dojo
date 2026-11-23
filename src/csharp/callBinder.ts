@@ -124,8 +124,10 @@ export abstract class CallBinder extends OperatorBinder {
     }
     const best = this.bestOf(applicable, args) ?? this.libraryTieBreak(applicable, args);
     if (!best) {
-      // An argument whose binding already failed fits every overload, which Roslyn does not report again.
-      if (args.some((arg) => arg.expression.type.kind === 'error')) return undefined;
+      // An argument whose binding already failed fits every overload, which Roslyn does not report again; a
+      // target-typed one (a lambda, a method group, `default`) has the error type only until its target is known.
+      if (args.some((arg) => arg.expression.type.kind === 'error' && arg.expression.kind !== 'unbound'))
+        return undefined;
       const [first, second] = this.tiedCandidates(applicable, args);
       this.error(
         row,
