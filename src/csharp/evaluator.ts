@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss -- The evaluator module keeps one stage of the C# interpreter together.
 import { checkElementStore } from './arrayStore';
 import type {
   BoundArguments,
@@ -12,6 +11,8 @@ import type { CompiledProgram } from './compiler';
 import { combineDelegates, delegatesEqual, removeDelegate } from './delegates';
 import { NULL_REFERENCE, type Place, Reference } from './evaluatorBase';
 import { formatValue } from './library/formatting';
+// code-gauge-allow-file fileNcss -- The evaluator module keeps one stage of the C# interpreter together.
+import { MeteredText } from './meteredText';
 import type { NativeCall } from './natives';
 import {
   arithmetic,
@@ -697,9 +698,10 @@ export class Evaluator extends StatementExecutor {
     const nonEmpty = strings.filter((part) => stringText(part) !== '');
     if (nonEmpty.length === 0) return '';
     if (nonEmpty.length === 1 && strings.length <= 4) return nonEmpty[0];
-    const text = strings.map((part) => stringText(part)).join('');
-    this.runtime.allocateString(text.length);
-    return freshString(text);
+    const texts = strings.map((part) => stringText(part));
+    // The length is checked before joining, since repeating one long string builds a host string past the limit.
+    this.runtime.allocateString(texts.reduce((length, part) => length + part.length, 0));
+    return freshString(texts.join(''));
   }
 
   protected evaluator(): Evaluator {
@@ -1181,18 +1183,17 @@ export class Evaluator extends StatementExecutor {
         )
       );
     }
-    let text = '';
+    const text = new MeteredText(this.runtime);
     for (const part of expression.parts) {
       if (typeof part === 'string') {
-        text += part;
+        text.append(part);
         continue;
       }
       const value = this.evaluate(part.value, frame);
-      text += this.formatHole(value, frame.resolve(part.value.type), part.format, part.alignment, frame);
+      text.append(this.formatHole(value, frame.resolve(part.value.type), part.format, part.alignment, frame));
     }
-    this.runtime.allocateString(text.length);
     this.runtime.returnInterpolationBuffer();
-    return freshString(text);
+    return freshString(text.toString());
   }
 
   /** Formats one hole of an interpolated string or a composite format, with its format string and alignment. */
