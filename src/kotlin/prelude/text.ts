@@ -593,8 +593,10 @@ private fun CharSequence.bestChar(largest: Boolean): Char? {
     }
     return best
 }
+@OverloadResolutionByLambdaReturnType
 inline fun String.replaceFirstChar(transform: (Char) -> CharSequence): String =
     if (isNotEmpty()) transform(this[0]).toString() + substring(1) else this
+@OverloadResolutionByLambdaReturnType
 @JvmName("replaceFirstCharWithChar")
 inline fun String.replaceFirstChar(transform: (Char) -> Char): String =
     if (isNotEmpty()) transform(this[0]).toString() + substring(1) else this
