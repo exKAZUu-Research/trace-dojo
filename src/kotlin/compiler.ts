@@ -21,7 +21,7 @@ import { Frame, type FunctionInfo, MISSING } from './runtime';
 import { ClassSymbol, FunctionSymbol, type MemberSymbol, VariableSymbol } from './symbols';
 import { isSubtype } from './typeRelations';
 import { type ClassType, isNonNullClass, type KType, resolved } from './types';
-import { KObject, type Value } from './values';
+import { KObject, NULL, type Value } from './values';
 
 /** Adds a symbol to the imports of a name, once, since a file's imports are resolved before and after its headers. */
 function addOnce<T>(imports: Map<string, T[]>, name: string, symbol: T): void {
@@ -282,7 +282,10 @@ export class Compiler extends BodyCompiler {
   private readonly importedObjectOwners = new Map<string, ClassSymbol>();
 
   protected nativeInvoker(symbol: FunctionSymbol, native: NativeFunction): NonNullable<FunctionSymbol['invoke']> {
+    let nonNullParams: number[] | undefined;
     return (caller, receiver, args) => {
+      nonNullParams ??= nonNullParameterIndexes(symbol);
+      rejectNullArguments(caller, nonNullParams, args);
       if (!args.includes(MISSING)) return caller.runtime.checkBuiltString(caller, native(caller, receiver, args));
       // Default values may read the receiver and the earlier parameters, as `missingDelimiterValue: String = this` does.
       const info = symbol.defaultsInfo ?? ROOT_DEFAULTS_INFO;
@@ -461,3 +464,20 @@ export class Compiler extends BodyCompiler {
 
 export { TURTLE_PACKAGE, callFunction, parameterReprs, receiverRepr };
 export type { Eval };
+
+function nonNullParameterIndexes(symbol: FunctionSymbol): number[] {
+  return symbol.params.flatMap(({ type }, index) => {
+    const actual = resolved(type);
+    return actual.kind === 'class' && !actual.nullable ? [index] : [];
+  });
+}
+
+/**
+ * Erased generic code, such as a Comparable's compareTo, can pass null where the library declares a non-null
+ * parameter, which the JVM's library methods reject.
+ */
+function rejectNullArguments(caller: Frame, nonNullParams: number[], args: Value[]): void {
+  for (const index of nonNullParams) {
+    if (args[index] === NULL) caller.runtime.throwError(caller, 'java.lang.NullPointerException');
+  }
+}
