@@ -15,6 +15,7 @@ import {
   convertRepr,
   type Eval,
   type ExpressionUse,
+  findClassInScope,
   Flow,
   FunctionContext,
   Handoff,
@@ -1022,11 +1023,11 @@ export abstract class ExpressionCompiler extends CallCompiler {
     ) {
       return this.compileSamConstructor(scope, context, cls, args[0].value, typeArgs, expected);
     }
-    const instantiable = cls !== undefined && !cls.isInterface && !cls.isAbstract && cls.kind !== 'enum';
-    if (cls && (instantiable || receiverLevels.length + packageLevels.length === 0)) {
-      this.addConstructorLevel(packageLevels, cls, name, row);
-    }
-    const levels = [...receiverLevels, ...packageLevels];
+    const levels = [
+      ...receiverLevels,
+      ...(this.withConstructors(scope, name, cls, receiverLevels.length + packageLevels.length === 0, row) ??
+        packageLevels),
+    ];
     if (levels.length === 0) {
       if (local) throw local;
       return this.compileUnresolvedCall(scope, context, name, args, variable !== undefined, row);
@@ -1034,13 +1035,30 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name, local);
   }
 
-  /** An explicitly imported class comes before the functions of the current package, as its import does. */
-  private addConstructorLevel(packageLevels: CallLevel[], cls: ClassSymbol, name: string, row: number): void {
-    const constructors = this.constructorCandidates(cls, row);
-    if (constructors.length === 0) return;
-    const level = { candidates: constructors, receiver: undefined };
-    if (this.file.importedClasses.get(name) === cls) packageLevels.unshift(level);
-    else packageLevels.push(level);
+  /** The package levels with a class's constructors at the class's own level, if it can be constructed here. */
+  private withConstructors(
+    scope: Scope,
+    name: string,
+    cls: ClassSymbol | undefined,
+    hasNoOtherLevel: boolean,
+    row: number
+  ): CallLevel[] | undefined {
+    if (!cls) return undefined;
+    const instantiable = !cls.isInterface && !cls.isAbstract && cls.kind !== 'enum';
+    const candidates = instantiable || hasNoOtherLevel ? this.constructorCandidates(cls, row) : [];
+    if (candidates.length === 0) return undefined;
+    return this.topLevelCallLevels(name, row, { candidates, level: this.classLevel(scope, name) });
+  }
+
+  /**
+   * Where the class a simple name means sits among the levels of `topLevelFunctions`: -1 for a class of the scopes,
+   * then explicit imports, the current package, star imports and the defaults, as `findClass` looks them up.
+   */
+  private classLevel(scope: Scope, name: string): number {
+    if (findClassInScope(scope, name)) return -1;
+    if (this.file.importedClasses.has(name)) return 0;
+    if (this.packages.get(this.file.packageName)?.classes.has(name)) return 1;
+    return this.file.starPackages.some((packageName) => this.packages.get(packageName)?.classes.has(name)) ? 2 : 3;
   }
 
   private tryLocalFunction(
@@ -1117,11 +1135,21 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return levels;
   }
 
-  private topLevelCallLevels(name: string, row: number): CallLevel[] {
+  /** @param constructors A class's constructors, which come before the functions of the class's own level. */
+  private topLevelCallLevels(
+    name: string,
+    row: number,
+    constructors?: { candidates: Candidate[]; level: number }
+  ): CallLevel[] {
     const properties = this.topLevelProperties(name, true);
-    return this.topLevelFunctions(name, true).flatMap((functions, index) =>
-      this.packageCallLevels(functions, properties[index], row)
-    );
+    const constructorLevel: CallLevel[] = constructors
+      ? [{ candidates: constructors.candidates, receiver: undefined }]
+      : [];
+    const levels = this.topLevelFunctions(name, true).flatMap((functions, index) => [
+      ...(constructors?.level === index ? constructorLevel : []),
+      ...this.packageCallLevels(functions, properties[index], row),
+    ]);
+    return constructors?.level === -1 ? [...constructorLevel, ...levels] : levels;
   }
 
   private packageCallLevels(functions: FunctionSymbol[], properties: PropertySymbol[], row: number): CallLevel[] {
