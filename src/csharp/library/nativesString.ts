@@ -1367,7 +1367,14 @@ function replaceIn(
   reserve(call, state, 0, count);
   const growth = occurrencesIn(state.text, from, start, count) * (to.length - from.length);
   reserve(call, state, Math.max(0, growth));
-  state.replace(from, to, start, count, (work) => call.frame.runtime.spend(Math.ceil(work / 16)));
+  // Work is charged in characters, collected so that the many small comparisons of a short search cost little.
+  let pending = 0;
+  state.replace(from, to, start, count, (work) => {
+    pending += work;
+    if (pending < 1024) return;
+    call.frame.runtime.spend(Math.floor(pending / 16));
+    pending %= 16;
+  });
 }
 
 function setBuilder(receiver: Value, text: string, capacity: number): Value {
