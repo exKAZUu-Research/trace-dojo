@@ -1716,6 +1716,11 @@ defineNatives({
   [`${ARRAY}.Sort(TKey[], TValue[])`]: (call, _receiver, [keys, items]) => {
     const keyArray = arrayOf(keys as Value, 'keys');
     const itemArray = arrayOf(items as Value, 'items');
+    if (itemArray.values.length < keyArray.values.length)
+      fail(
+        'System.ArgumentException',
+        'Offset and length were out of bounds for the array or count is greater than the number of elements from index to the end of the source collection.'
+      );
     const pairs = keyArray.values.map((key, index) => ({ key, item: itemArray.values[index] }));
     const compare = guardedComparison(call, comparisonOf(call, undefined));
     introSort(pairs, 0, pairs.length, (a, b) => compare(a.key, b.key));
