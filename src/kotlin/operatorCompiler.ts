@@ -327,12 +327,13 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     this.flow = Flow_merge([afterRight, this.withNarrowing(before, isAnd ? condition.whenFalse : condition.whenTrue)]);
     const leftEval = condition.compiled.eval;
     const rightEval = right.compiled.eval;
-    const whenTrue = isAnd
-      ? new Map([...condition.whenTrue, ...right.whenTrue])
-      : intersectNarrowing(condition.whenTrue, right.whenTrue);
+    // The right operand runs after the left one, so its writes undo what the left one established.
+    const leftTrue = this.withoutWritten(scope, condition.whenTrue, expression.right);
+    const leftFalse = this.withoutWritten(scope, condition.whenFalse, expression.right);
+    const whenTrue = isAnd ? new Map([...leftTrue, ...right.whenTrue]) : intersectNarrowing(leftTrue, right.whenTrue);
     const whenFalse = isAnd
-      ? intersectNarrowing(condition.whenFalse, right.whenFalse)
-      : new Map([...condition.whenFalse, ...right.whenFalse]);
+      ? intersectNarrowing(leftFalse, right.whenFalse)
+      : new Map([...leftFalse, ...right.whenFalse]);
     return {
       type: this.booleanType,
       repr: 'ref',
@@ -341,6 +342,18 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         : (frame) => (leftEval(frame) as boolean) || (rightEval(frame) as boolean),
       narrowing: { whenTrue, whenFalse },
     };
+  }
+
+  private withoutWritten(scope: Scope, narrowing: Map<string, KType>, code: Expression): Map<string, KType> {
+    const flow = new Flow(new Map(narrowing));
+    const saved = this.flow;
+    this.flow = flow;
+    try {
+      this.forgetAssignedIn(scope, code);
+    } finally {
+      this.flow = saved;
+    }
+    return flow.narrowed;
   }
 
   /** A flow that has the narrowing of a condition applied, without changing `flow`. */
