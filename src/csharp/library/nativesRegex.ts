@@ -1,6 +1,8 @@
 // code-gauge-allow-file fileNcss -- The nativesRegex module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
+import { LIMITS } from '../../interpreter/limits';
 import { defineNatives, defineNativesKeepingStrings, type NativeCall } from '../natives';
+import { PendingException } from '../numeric';
 import type { NativeState } from '../runtime';
 import { CsObject, type CsString, freshString, plainString, stringText, type Value } from '../values';
 import { type EnumerableState, LibraryEnumerator } from './iteration';
@@ -428,10 +430,17 @@ function scanPatternAt(pattern: string, index: number, scan: PatternScan): numbe
 }
 
 function scanEscape(pattern: string, index: number, scan: PatternScan): number | PatternError {
-  if (index + 1 >= pattern.length) return { offset: index + 1, reason: String.raw`Illegal \ at end of pattern.` };
+  if (index + 1 >= pattern.length)
+    return {
+      offset: index + 1,
+      reason: String.raw`Illegal \ at end of pattern.`,
+    };
   const escaped = pattern[index + 1];
   if (/[A-Za-z]/.test(escaped) && !/[dDwWsSbBAzZGntrfvaeuxcpPk]/.test(escaped))
-    return { offset: index + 2, reason: `Unrecognized escape sequence \\${escaped}.` };
+    return {
+      offset: index + 2,
+      reason: `Unrecognized escape sequence \\${escaped}.`,
+    };
   scan.canQuantify = true;
   scan.quantified = false;
   return index + 2;
@@ -440,7 +449,10 @@ function scanEscape(pattern: string, index: number, scan: PatternScan): number |
 function scanQuantifier(quantifier: RegExpExecArray, index: number, scan: PatternScan): number | PatternError {
   const [text, low, high] = quantifier;
   if (!scan.canQuantify)
-    return { offset: index + 1, reason: `Quantifier '${text[0] === '{' ? text : text[0]}' following nothing.` };
+    return {
+      offset: index + 1,
+      reason: `Quantifier '${text[0] === '{' ? text : text[0]}' following nothing.`,
+    };
   if (scan.quantified) return { offset: index + 1, reason: `Nested quantifier '${text[0]}'.` };
   if (high !== undefined && high !== '' && Number(low) > Number(high))
     return { offset: index + text.length, reason: 'Illegal {x,y} with x > y.' };
@@ -521,7 +533,14 @@ function findMatch(call: NativeCall, compiled: CompiledPattern, source: string |
 
 function emptyMatch(call: NativeCall): CsObject {
   const match = new CsObject(libraryType(call, `${NAMESPACE}.Match`), []);
-  const group: GroupResult = { number: 0, name: '0', success: false, index: 0, length: 0, value: '' };
+  const group: GroupResult = {
+    number: 0,
+    name: '0',
+    success: false,
+    index: 0,
+    length: 0,
+    value: '',
+  };
   match.native = new MatchState(group, [group], undefined, '', 0);
   return match;
 }
@@ -561,7 +580,14 @@ function groupObjectsOf(call: NativeCall, state: MatchState, match: CsObject): C
 
 function missingGroup(call: NativeCall): CsObject {
   const object = new CsObject(libraryType(call, `${NAMESPACE}.Group`), []);
-  object.native = new GroupState({ number: -1, name: '', success: false, index: 0, length: 0, value: '' });
+  object.native = new GroupState({
+    number: -1,
+    name: '',
+    success: false,
+    index: 0,
+    length: 0,
+    value: '',
+  });
   return object;
 }
 
@@ -585,7 +611,7 @@ function substitute(replacement: string, state: MatchState): string {
       let length = digits.length;
       while (length > 0 && Number(digits.slice(0, length)) >= state.groups.length) length--;
       if (length > 0) {
-        result += groupValue(Number(digits.slice(0, length)));
+        result = appended(result, groupValue(Number(digits.slice(0, length))));
         index += length;
         continue;
       }
@@ -597,7 +623,7 @@ function substitute(replacement: string, state: MatchState): string {
       const name = braced[1];
       const number = /^\d+$/.test(name) ? Number(name) : (state.compiled?.names.indexOf(name) ?? -1);
       if (number >= 0 && number < state.groups.length) {
-        result += groupValue(number);
+        result = appended(result, groupValue(number));
         index += braced[0].length;
         continue;
       }
@@ -615,7 +641,7 @@ function substitute(replacement: string, state: MatchState): string {
     };
     const expand = replaced[special];
     if (expand) {
-      result += expand();
+      result = appended(result, expand());
       index++;
     } else result += char;
   }
@@ -639,11 +665,24 @@ function replaceMatches(
   let replaced = 0;
   for (const match of matches) {
     const state = match.native as MatchState;
-    result += input.slice(position, state.group.index) + replace(match, state);
+    result = appended(appended(result, input.slice(position, state.group.index)), replace(match, state));
     position = state.group.index + state.group.length;
     if (++replaced === count) break;
   }
   return freshString(result + input.slice(position));
+}
+
+/**
+ * A text with another appended, failing as .NET's string limit does before building one past it: a substitution can
+ * repeat a long capture many times, which builds a huge host string before the native's result check sees it.
+ */
+function appended(text: string, addition: string): string {
+  if (text.length + addition.length > LIMITS.maxStringLength)
+    throw new PendingException(
+      'System.OutOfMemoryException',
+      "Exception of type 'System.OutOfMemoryException' was thrown."
+    );
+  return text + addition;
 }
 
 /** `Split`, whose only part is the input itself when nothing matches. */
