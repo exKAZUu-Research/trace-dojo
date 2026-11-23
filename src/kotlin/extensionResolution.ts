@@ -1,6 +1,6 @@
 import type { PackageScope } from './compilerBase';
 import type { MemberRef } from './compilerCore';
-import type { PropertySymbol, TypeParameterSymbol } from './symbols';
+import type { FunctionSymbol, MemberSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
 import { anyType, commonSupertype, isSubtype } from './typeRelations';
 import { type KType, resolved, substitute } from './types';
 
@@ -65,8 +65,9 @@ export function matchExtensionReceiver(
 }
 
 /**
- * The package outside `defaultImports` whose extension `name` the prelude declares for a receiver of `type`, as
- * `kotlin.math` declares `Double.roundToInt`, which a program reaches by importing it.
+ * The path a program imports to reach the prelude's extension `name` for a receiver of `type`, outside the default
+ * imports: a package, as `kotlin.math` for `Double.roundToInt`, or an object, as `kotlin.time.Duration.Companion` for
+ * `Int.seconds`.
  */
 export function importableExtension(
   packages: ReadonlyMap<string, PackageScope>,
@@ -76,11 +77,17 @@ export function importableExtension(
 ): string | undefined {
   const actual = resolved(type);
   const receiver = actual.nullable ? { ...actual, nullable: false } : actual;
+  const declares = (symbols: readonly (MemberSymbol | FunctionSymbol | PropertySymbol)[]): boolean =>
+    symbols.some((symbol) => symbol.isLibrary && acceptsReceiver(symbol.extensionReceiver, receiver));
   for (const [packageName, scope] of packages) {
-    if (defaultImports.includes(packageName)) continue;
-    const symbols = [...(scope.functions.get(name) ?? []), ...(scope.properties.get(name) ?? [])];
-    if (symbols.some((symbol) => symbol.isLibrary && acceptsReceiver(symbol.extensionReceiver, receiver)))
-      return packageName;
+    const topLevel = [...(scope.functions.get(name) ?? []), ...(scope.properties.get(name) ?? [])];
+    if (!defaultImports.includes(packageName) && declares(topLevel)) return packageName;
+    for (const cls of scope.classes.values()) {
+      for (const holder of [cls, cls.companion]) {
+        if (holder?.isObject && declares(holder.members.get(name) ?? []))
+          return holder === cls ? `${packageName}.${cls.name}` : `${packageName}.${cls.name}.Companion`;
+      }
+    }
   }
   return undefined;
 }
