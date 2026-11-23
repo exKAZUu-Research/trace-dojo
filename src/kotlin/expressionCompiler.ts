@@ -281,8 +281,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
         return this.compileString(scope, context, expression);
       }
       case 'parenthesized': {
-        const inner = this.compileAny(scope, context, expression.expression, expected, use);
-        return { ...inner, isCall: false, isCreation: false };
+        return this.compileAny(scope, context, expression.expression, expected, use);
       }
       case 'name': {
         return this.compileName(scope, context, expression.name, expression.row);
