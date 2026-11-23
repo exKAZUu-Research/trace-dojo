@@ -521,6 +521,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   ): Compiled {
     const { operator, row } = expression;
     const left = this.compileExpression(scope, context, expression.left);
+    const beforeRight = this.flow.copy();
     const right = this.compileExpression(scope, context, expression.right);
     const leftKind = this.primitiveOf(left.type);
     const rightKind = this.primitiveOf(right.type);
@@ -559,6 +560,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         eval: (frame) => test(compareNumbers(leftEval(frame) as number | bigint, rightEval(frame) as number | bigint)),
       };
     }
+    // The compareTo call compiles the right operand again, whose writes the flow must see once.
+    this.flow = beforeRight;
     const args: ArgumentSyntax[] = [{ row: expression.right.row, name: undefined, value: expression.right }];
     const compared = this.compileOperatorCall(scope, context, left, 'compareTo', args, row, operator);
     const evaluate = convertRepr(compared.eval, compared.repr, 'Int');
