@@ -1,6 +1,6 @@
-// Generated from .NET 10's reflection: the public types of the namespaces programs import, listed by
-// scripts/csharpData/listDotnetTypes.cs, and the public members of the types this grader declares, so that names .NET
-// has but this grader lacks are rejected as unavailable rather than reported as undefined.
+// The .NET 10 names this grader lacks, so that they are rejected as unavailable rather than reported as undefined:
+// DOTNET_TYPES is the output of scripts/csharpData/listDotnetTypes.cs, and DOTNET_MEMBERS lists the public members
+// that .NET 10's reflection gives the types this grader declares.
 export const DOTNET_TYPES: readonly string[] = [
   'System.AccessViolationException',
   'System.Action',

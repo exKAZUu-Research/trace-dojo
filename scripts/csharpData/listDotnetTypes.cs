@@ -1,9 +1,29 @@
-// Lists the public top-level types of the given namespaces across the shared framework that runs this script, for
+// Lists the public top-level types of the namespaces below across the shared framework that runs this script, for
 // DOTNET_TYPES in src/csharp/library/dotnetNames.ts. Run with the .NET SDK the interpreter follows:
-//   dotnet run scripts/csharpData/listDotnetTypes.cs -- System System.Collections ...
+//   dotnet run scripts/csharpData/listDotnetTypes.cs
 using System.Reflection;
 
-var namespaces = new HashSet<string>(args);
+string[] namespaces =
+[
+    "System",
+    "System.Collections",
+    "System.Collections.Concurrent",
+    "System.Collections.Generic",
+    "System.Collections.ObjectModel",
+    "System.Collections.Specialized",
+    "System.Diagnostics",
+    "System.Globalization",
+    "System.IO",
+    "System.Linq",
+    "System.Net",
+    "System.Net.Http",
+    "System.Numerics",
+    "System.Reflection",
+    "System.Text",
+    "System.Text.RegularExpressions",
+    "System.Threading",
+    "System.Threading.Tasks",
+];
 var directory = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
 var names = new SortedSet<string>(StringComparer.Ordinal);
 foreach (var file in Directory.GetFiles(directory, "*.dll"))
