@@ -191,7 +191,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** Resolves a file's imports, which name classes, top-level functions and properties, and members of objects. */
-  protected resolveImports(file: KotlinFile, context: FileContext): void {
+  /** @param beforeHeaders Whether the program's own classes have no members yet, which a later pass imports. */
+  protected resolveImports(file: KotlinFile, context: FileContext, beforeHeaders: boolean): void {
     for (const declaration of file.imports) {
       const { path, row } = declaration;
       if (declaration.isWildcard) {
@@ -208,7 +209,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       }
       const packageScope = this.packages.get(path.slice(0, -1).join('.'));
       if (packageScope) this.importFromPackage(context, packageScope, name, declaration);
-      else this.importFromClass(context, name, declaration);
+      else this.importFromClass(context, name, declaration, beforeHeaders);
     }
   }
 
@@ -233,7 +234,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** Imports a nested class or the members of an object, or a class by its qualified name. */
-  private importFromClass(context: FileContext, name: string, { path, row }: Import): void {
+  private importFromClass(context: FileContext, name: string, { path, row }: Import, beforeHeaders: boolean): void {
     const owner = this.findQualifiedClass(path.slice(0, -1));
     const nested = owner?.nested.get(name);
     if (nested) {
@@ -242,6 +243,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
     if (owner) {
       const members = owner.members.get(name) ?? [];
+      if (beforeHeaders && !owner.isLibrary) return;
       if (members.length === 0 || !owner.isObject) this.rejectImport(row, path.join('.'));
       this.importObjectMembers(context, owner, name, members);
       return;

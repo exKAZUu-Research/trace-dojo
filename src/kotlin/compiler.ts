@@ -151,13 +151,13 @@ export class Compiler extends BodyCompiler {
     afterClasses();
     for (const { file, context } of prepared) {
       this.file = context;
-      this.resolveImports(file, context);
+      this.resolveImports(file, context, true);
     }
     const classOrder = this.declareHeaders(prepared);
     this.checkAtomicRows();
     for (const { file, context } of prepared) {
       this.file = context;
-      this.resolveImports(file, context);
+      this.resolveImports(file, context, false);
     }
     this.linkClasses(classOrder);
     afterHeaders();
