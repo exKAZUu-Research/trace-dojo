@@ -150,6 +150,8 @@ function ticksFromParts(
       'System.ArgumentOutOfRangeException',
       'Hour, Minute, and Second parameters describe an un-representable DateTime.'
     );
+  if (millisecond < 0 || millisecond > 999)
+    fail('System.ArgumentOutOfRangeException', 'Valid values are between 0 and 999, inclusive.', 'millisecond');
   return (
     BigInt(daysFromCivil(year, month, day)) * TICKS_PER_DAY +
     BigInt(hour) * TICKS_PER_HOUR +
