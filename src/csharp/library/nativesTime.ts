@@ -248,7 +248,9 @@ function customDate(parts: DateParts, pattern: string, result: MeteredText): str
     if (field === undefined) {
       const literal = dateLiteral(pattern, index, count);
       result.read(literal.length);
-      result.append(literal.text);
+      // .NET drops a `.` before `F` digits that all come out as zeros, so a whole second shows no point.
+      if (!(literal.text === '.' && isEmptyOptionalFraction(parts, pattern, index + literal.length)))
+        result.append(literal.text);
       index += literal.length;
     } else {
       result.append(field);
@@ -256,6 +258,13 @@ function customDate(parts: DateParts, pattern: string, result: MeteredText): str
     }
   }
   return result.toString();
+}
+
+/** Whether the pattern has a run of `F` at the index whose digits are all zeros for the date. */
+function isEmptyOptionalFraction(parts: DateParts, pattern: string, index: number): boolean {
+  let end = index;
+  while (pattern[end] === 'F') end++;
+  return end > index && dateField(parts, 'F', end - index) === '';
 }
 
 /** The text of a run of `count` copies of a custom date format specifier, or undefined for a literal character. */
