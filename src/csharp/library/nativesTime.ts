@@ -170,11 +170,10 @@ function nowTicks(): bigint {
   return BigInt(Date.now()) * TICKS_PER_MILLISECOND + UNIX_EPOCH_TICKS + LOCAL_OFFSET_TICKS;
 }
 
-/** Rounds a double number of a unit to ticks as .NET's `TimeSpan.From*` and `DateTime.Add*` do. */
+/** Truncates a double number of a unit to ticks as .NET's `TimeSpan.From*` and `DateTime.Add*` do. */
 function ticksFromDouble(
   value: number,
   unit: bigint,
-  parameter: string,
   /** How .NET truncates: TimeSpan's factories the whole product, DateTime's Add* the whole units and fraction apart. */
   truncation: 'product' | 'parts'
 ): bigint {
@@ -183,7 +182,6 @@ function ticksFromDouble(
   const ticks = value * Number(unit);
   if (!Number.isFinite(ticks) || Math.abs(ticks) > 9.223372036854776e18)
     fail('System.OverflowException', 'TimeSpan overflowed because the duration is too long.');
-  void parameter;
   if (truncation === 'product') return BigInt(Math.trunc(ticks));
   const whole = Math.trunc(value);
   return BigInt(whole) * unit + BigInt(Math.trunc((value - whole) * Number(unit)));
@@ -430,7 +428,7 @@ function timeSpanField(span: TimeSpanParts, char: string, count: number): string
 const fromUnit =
   (unit: bigint): NativeMethod =>
   (call, _receiver, [value]) =>
-    timeSpan(call, ticksFromDouble(value as number, unit, 'value', 'product'));
+    timeSpan(call, ticksFromDouble(value as number, unit, 'product'));
 
 defineNatives({
   'System.TimeSpan..ctor(long)': (_call, receiver, [ticks]) => setTicks(receiver, ticks as bigint),
@@ -536,7 +534,7 @@ function comparisons(type: string): Record<string, NativeMethod> {
 const addUnit =
   (unit: bigint): NativeMethod =>
   (call, receiver, [value]) =>
-    dateTime(call, ticksOf(receiver) + ticksFromDouble(value as number, unit, 'value', 'parts'));
+    dateTime(call, ticksOf(receiver) + ticksFromDouble(value as number, unit, 'parts'));
 
 defineNatives({
   'System.DateTime..ctor(long)': (call, receiver, [ticks]) => {
