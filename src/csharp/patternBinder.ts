@@ -75,7 +75,8 @@ export abstract class PatternBinder extends ExpressionBinder {
       }
       case 'notPattern': {
         const saved = this.noPatternVariables;
-        this.noPatternVariables = true;
+        // Roslyn permits variables under `not` in an `is` pattern, as `if (o is not int i) return;` declares `i`.
+        if (!this.isUnderIsPattern) this.noPatternVariables = true;
         try {
           return { kind: 'not', pattern: this.bindPattern(pattern.pattern, inputType, context), inputType };
         } finally {

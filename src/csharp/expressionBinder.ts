@@ -246,12 +246,15 @@ export abstract class ExpressionBinder extends MemberBinder {
         // `x is T` is the type-testing operator, which only warns (CS0184) when T can never match.
         const isTypeTest = node.pattern.kind === 'constantPattern' || node.pattern.kind === 'typePattern';
         const saved = this.isTypeTestOperator;
+        const savedUnderIs = this.isUnderIsPattern;
         this.isTypeTestOperator = isTypeTest;
+        this.isUnderIsPattern = true;
         try {
           const pattern = this.bindPattern(node.pattern, operand.type, context);
           return { kind: 'is', operand, pattern, type: this.boolType, row };
         } finally {
           this.isTypeTestOperator = saved;
+          this.isUnderIsPattern = savedUnderIs;
         }
       }
       default: {
@@ -542,6 +545,9 @@ export abstract class ExpressionBinder extends MemberBinder {
 
   /** Whether the pattern being bound is the type of an `x is T` operator. */
   protected isTypeTestOperator = false;
+
+  /** Whether the pattern being bound is an `is` expression's rather than a switch's. */
+  protected isUnderIsPattern = false;
 
   /**
    * Binds `==` or `!=` of two tuples, which compares their elements in order after evaluating both tuples, stopping at
