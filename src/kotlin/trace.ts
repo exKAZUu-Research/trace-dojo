@@ -292,14 +292,15 @@ function collectionNodeOf(object: KObject, seen: Set<unknown>): DisplayNode | un
   if (!object.store) return undefined;
   const entries: Record<string, DisplayNode> = {};
   for (const entry of object.store.ordered())
-    entries[keyText(entry.key)] = displayNodeOf(entry.value, seen) ?? NULL_NODE;
+    entries[keyText(entry.key, seen)] = displayNodeOf(entry.value, seen) ?? NULL_NODE;
   return { kind: 'object', entries };
 }
 
 /** The text a map's key shows as, which is what learners write for it. */
-function keyText(key: Value): string {
+/** A key's text, rendered with the objects being rendered around it so that a key reaching its own map stops there. */
+function keyText(key: Value, seen: ReadonlySet<unknown>): string {
   if (key === undefined) return 'null';
-  const node = displayNodeOf(key, new Set());
+  const node = displayNodeOf(key, new Set(seen));
   return node?.kind === 'value' ? String(node.value) : `#${(key as KObject).identity}`;
 }
 
