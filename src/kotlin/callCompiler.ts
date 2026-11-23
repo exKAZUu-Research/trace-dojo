@@ -160,6 +160,16 @@ function isLambdaArgument(expression: Expression): expression is LambdaExpressio
   return expression.kind === 'lambda';
 }
 
+function hasTypedParameters(expression: Expression | undefined): boolean {
+  return (
+    expression !== undefined &&
+    isLambdaArgument(expression) &&
+    expression.params !== undefined &&
+    expression.params.length > 0 &&
+    expression.params.every((param) => param.type !== undefined)
+  );
+}
+
 /** Resolves calls: picks among overloads, infers type arguments, and evaluates arguments. */
 export abstract class CallCompiler extends CompilerCore {
   protected readonly delegateCalls = new WeakMap<ArgumentSyntax[], DelegateContext>();
@@ -817,7 +827,7 @@ export abstract class CallCompiler extends CompilerCore {
     name: string
   ): Attempt {
     let best = attempts.filter((attempt) =>
-      attempts.every((other) => other === attempt || this.isAsSpecific(attempt, other, compiledArgs))
+      attempts.every((other) => other === attempt || this.isAsSpecific(attempt, other, compiledArgs, args))
     );
     if (best.length > 1) {
       // Without a vararg or default parameter left unused, a candidate is more specific.
@@ -841,16 +851,23 @@ export abstract class CallCompiler extends CompilerCore {
    * infers.
    */
   // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  private isAsSpecific(a: Attempt, b: Attempt, compiledArgs: (Compiled | undefined)[]): boolean {
+  private isAsSpecific(
+    a: Attempt,
+    b: Attempt,
+    compiledArgs: (Compiled | undefined)[],
+    args: ArgumentSyntax[]
+  ): boolean {
     const aSubstitution = a.candidate.substitution;
     const bSubstitution = this.freshSubstitution(b);
     for (const [index, compiled] of compiledArgs.entries()) {
       const aType = parameterTypeOf(a, index);
       const bType = parameterTypeOf(b, index);
-      if (!aType || !bType || !compiled) continue;
+      // A lambda that declares its parameters' types compares as a value of either function type would, as
+      // `(Number) -> Unit` is more specific than `(Int) -> Unit`; an untyped one is ranked by its result later.
+      if (!aType || !bType || (!compiled && !hasTypedParameters(args[index]?.value))) continue;
       // An integer literal is an Int unless only another integer type fits, as `1..4` calls `rangeTo(Int)`; a type
       // parameter fits any, so `maxOf(Long, Long)` is as specific as `maxOf(T, T)` for `maxOf(1, 2L)`.
-      if (compiled.integerLiteral && aType.kind !== 'param' && bType.kind !== 'param') {
+      if (compiled?.integerLiteral && aType.kind !== 'param' && bType.kind !== 'param') {
         const aIsLiteral = isSubtype(compiled.type, substitute(aType, a.substitution));
         const bIsLiteral = isSubtype(compiled.type, substitute(bType, b.substitution));
         if (aIsLiteral !== bIsLiteral) {
