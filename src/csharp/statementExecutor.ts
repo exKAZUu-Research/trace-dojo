@@ -44,7 +44,8 @@ export abstract class StatementExecutor extends PatternMatcher {
       }
       return undefined;
     } finally {
-      if (!isBody) for (const local of block.locals) if (!local.isCaptured) frame.slots[local.slot] = UNASSIGNED;
+      // A closure keeps a captured local's cell itself, so the frame lets go of it too.
+      if (!isBody) for (const local of block.locals) frame.slots[local.slot] = UNASSIGNED;
     }
   }
 
@@ -358,7 +359,10 @@ export abstract class StatementExecutor extends PatternMatcher {
       for (const clause of statement.catches) {
         if (!this.isInstanceOf(thrown.exception, clause.type)) continue;
         if (clause.local) this.storeLocal(frame, clause.local, thrown.exception, true);
-        if (clause.filter && !this.passesFilter(clause.filter, frame)) continue;
+        if (clause.filter && !this.passesFilter(clause.filter, frame)) {
+          if (clause.local) frame.slots[clause.local.slot] = UNASSIGNED;
+          continue;
+        }
         return { statement, clause };
       }
     }
@@ -394,6 +398,8 @@ export abstract class StatementExecutor extends PatternMatcher {
       return this.executeBlock(clause.body, frame);
     } finally {
       this.currentExceptions.pop();
+      // The exception variable leaves scope with its catch clause.
+      if (clause.local) frame.slots[clause.local.slot] = UNASSIGNED;
     }
   }
 
