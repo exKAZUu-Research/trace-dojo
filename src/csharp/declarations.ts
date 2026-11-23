@@ -1461,7 +1461,11 @@ export class DeclarationBinder extends BinderBase {
       }
       const baseType = substitute(candidate.type, substitutionOf(current));
       // A get-only property may override with a more derived reference type (covariant return); any other must match.
-      const isCovariant = !property.setter && isReferenceType(property.type) && isReferenceType(baseType);
+      const isCovariant =
+        !property.setter &&
+        isReferenceType(property.type) &&
+        isReferenceType(baseType) &&
+        this.conversions.isReferenceConvertible(property.type, baseType);
       if (!sameType(property.type, baseType) && !isCovariant && property.type.kind !== 'error') {
         this.error(
           property.row,

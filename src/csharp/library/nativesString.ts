@@ -264,7 +264,14 @@ function elementStrings(call: NativeCall, args: Value[], startIndex: number): (s
     specialOf(parameter.type) !== 'string'
   ) {
     const elementType = call.typeArgs[0] ?? libraryType(call, STRING);
-    return [...iterate(call, last)].map((item) => toText(item, elementType));
+    // The texts are built as the sequence is read, under the slot limit, since a lazy source may yield without end.
+    const texts: (string | CsString)[] = [];
+    for (const item of iterate(call, last)) {
+      texts.push(toText(item, elementType));
+      if (texts.length % 64 === 0) call.frame.runtime.allocateSlots(64);
+    }
+    call.frame.runtime.allocateSlots(texts.length % 64);
+    return texts;
   }
   return args.slice(startIndex).map((arg, index) => toText(arg, parameterType(call, startIndex + index)));
 }
