@@ -419,8 +419,9 @@ export function isBareCallExpression(expression: Expression): boolean {
 }
 
 /**
- * Reads a Boolean that is non-null by its type, though a write inside its own test may have nulled a smart-cast value
- * since, however it is forwarded; the JVM's unboxing throws for it instead of treating it as false.
+ * Reads a Boolean that is non-null by its type, though a null can still reach it through an erased generic result,
+ * such as an element of a list cast to `List<Boolean>`; the JVM's unboxing throws for it instead of treating it as
+ * false.
  */
 export function checkedBoolean(compiled: Compiled, evaluate: Eval): Eval {
   if (compiled.constant !== undefined) return evaluate;
