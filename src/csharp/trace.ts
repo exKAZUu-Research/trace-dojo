@@ -1,4 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
@@ -46,9 +47,20 @@ export function traceCSharpProgram(program: string, trace: TraceOptions, input?:
   const evaluator = new Evaluator(runtime, compiled);
   evaluator.tracing = true;
   const snapshotter = new Snapshotter(runtime, compiled);
+  // The trace keeps every step's snapshot, so a large array shown at each step adds up past what the run allocates.
+  let remaining = LIMITS.maxTraceSize;
+  const charge = (cost: number): void => {
+    remaining -= cost;
+    if (remaining < 0) throw new ExecutionLimitError('trace');
+  };
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.method?.isAtomic === true,
     variablesOf: (frame) => snapshotter.variablesOf(frame, true),
+    recordItem: (item) => {
+      charge(item.board.length + NODE_COST * (item.callLines.length + item.turtles.length * 4 + 1));
+      charge(traceCost(item.vars) + traceCost(item.referenceVars));
+      return item;
+    },
   });
   runtime.steps.recorder = recorder;
   let finalVars: TraceItemVariable = {};
@@ -56,7 +68,19 @@ export function traceCSharpProgram(program: string, trace: TraceOptions, input?:
   const run = runProgram(evaluator, (frame) => {
     finalVars = snapshotter.variablesOf(frame, false).vars;
   });
+  charge(traceCost(finalVars));
   return { traceItems: recorder.traceItems, finalVars, ...run };
+}
+
+/** The cost of a node in the trace, as the C++ and Rust recorders count it. */
+const NODE_COST = 32;
+
+/** The cost of trace data, in the units of {@link LIMITS.maxTraceSize}: its text, plus a node's cost for each object. */
+function traceCost(data: unknown): number {
+  if (typeof data !== 'object' || data === null) return String(data).length;
+  let cost = NODE_COST;
+  for (const [key, child] of Object.entries(data)) cost += key.length + traceCost(child);
+  return cost;
 }
 
 class Snapshotter {

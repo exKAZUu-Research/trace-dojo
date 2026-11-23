@@ -13,7 +13,7 @@ export const LIMITS = {
   maxCallDepth: 512,
   /** The total number of array elements and object fields allocated while running. */
   maxSlots: 1_000_000,
-  /** The cumulative cost of the trace nodes and text of a C++ or Rust model program. */
+  /** The cumulative cost of the trace nodes and text of a C++, Rust, or C# model program. */
   maxTraceSize: 12_000_000,
   /**
    * The cumulative size budget for Dart trace entries and text, which lets a 500-element list change its value and

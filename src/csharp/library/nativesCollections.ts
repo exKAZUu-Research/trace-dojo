@@ -477,7 +477,7 @@ const listNatives: Record<string, NativeMethod> = {
   },
   [`${LIST}.IndexOf`]: (call, receiver, [value, start = 0]) => {
     const items = listOf(receiver).items;
-    if ((start as number) > items.length)
+    if ((start as number) < 0 || (start as number) > items.length)
       failOutOfRange(
         call,
         'index',
