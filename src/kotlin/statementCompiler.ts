@@ -1403,7 +1403,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       const evaluate = convertRepr(subject.eval, subject.repr, 'ref');
       const narrowing = this.typeTestNarrowing(subject, type);
       covered.coverTypeCases(subject.type, type, condition.negated, this.core.boolean);
-      const exclusion = isExclusion(subject.stableKey, type);
+      const exclusion = isExclusion(subject, type);
       return condition.negated
         ? { test: (frame) => !test(evaluate(frame)), whenTrue: exclusion, whenFalse: narrowing }
         : { test: (frame) => test(evaluate(frame)), whenTrue: narrowing, whenFalse: exclusion };

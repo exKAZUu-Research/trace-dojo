@@ -456,7 +456,9 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const isIdentity = operator === '===' || operator === '!==';
     const comparesNullLiteral = isNullLiteral(expression.left) || isNullLiteral(expression.right);
     this.checkEqualityApplicable(left, right, row, operator);
-    if (isIdentity && !comparesNullLiteral && (isValueClassType(left.type) || isValueClassType(right.type)))
+    // A null check, against `null` or a value of type `Nothing?`, is the identity comparison a value class allows.
+    const comparesNull = resolved(left.type).kind === 'nothing' || resolved(right.type).kind === 'nothing';
+    if (isIdentity && !comparesNull && (isValueClassType(left.type) || isValueClassType(right.type)))
       this.error(row, `値クラスの値には ${operator} を使えません。`);
     const leftKind = this.primitiveOf(nonNull(left.type));
     const rightKind = this.primitiveOf(nonNull(right.type));
@@ -738,7 +740,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const test = instanceTest(this.core, type);
     const evaluate = convertRepr(operand.eval, operand.repr, 'ref');
     const narrowing = this.typeTestNarrowing(operand, type);
-    const exclusion = isExclusion(operand.stableKey, type);
+    const exclusion = isExclusion(operand, type);
     return {
       type: this.booleanType,
       repr: 'ref',
@@ -894,9 +896,13 @@ function addCaseNarrowing(
 }
 
 /** That a stable value is not of a class, which `is` gives when it is false, for a `when` to skip that case. */
-export function isExclusion(key: string | undefined, type: KType): Map<string, KType> {
+/** What failing `is type` shows: the value is not of the type, and for a nullable type, not null either. */
+export function isExclusion(operand: Compiled, type: KType): Map<string, KType> {
   const actual = resolved(type);
-  return key && actual.kind === 'class' ? excludingCases(key, [`class:${keyOf(actual.cls)}`]) : new Map();
+  const key = operand.stableKey;
+  const exclusion = key && actual.kind === 'class' ? excludingCases(key, [`class:${keyOf(actual.cls)}`]) : new Map();
+  if (isNullable(actual)) for (const [fact, known] of nonNullFacts(operand)) exclusion.set(fact, known);
+  return exclusion;
 }
 
 /** The methods of the integer types that kotlinc evaluates on constants, as it does the operators. */
