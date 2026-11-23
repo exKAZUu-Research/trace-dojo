@@ -635,7 +635,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const declaredType = this.ensurePropertyType(symbol, row);
     const type = approximatedReadType(substitute(declaredType, substitution));
     const receiverEval = convertRepr(receiver.eval, receiver.repr, receiverRepr(symbol));
-    const isStable = receiver.stableKey !== undefined && this.isStableProperty(symbol);
+    const isStable = receiver.stableKey !== undefined && this.isStableProperty(symbol, receiver.type);
     const key = isStable ? `${receiver.stableKey}.${keyOf(symbol)}` : undefined;
     const narrowed = key ? this.flow.narrowed.get(key) : undefined;
     return {
@@ -648,9 +648,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** Whether a property always reads the value last stored, so that a smart cast of it holds. */
-  protected isStableProperty(symbol: PropertySymbol): boolean {
-    // An open property of a class nothing can inherit from, such as an override in a final class, cannot be overridden.
-    const isOverridable = symbol.isOpen && (symbol.owner?.isInheritable ?? true);
+  protected isStableProperty(symbol: PropertySymbol, receiverType?: KType): boolean {
+    // An open property read on a final class, such as an override there or one inherited unchanged, cannot be
+    // overridden any more.
+    const receiverClass = receiverType && resolved(receiverType);
+    const finalReceiver = receiverClass?.kind === 'class' && !receiverClass.cls.isInheritable;
+    const isOverridable = symbol.isOpen && !finalReceiver && (symbol.owner?.isInheritable ?? true);
     return !symbol.isVar && !symbol.hasCustomGetter && !isOverridable && !symbol.isAbstract && !symbol.isLibrary;
   }
 
