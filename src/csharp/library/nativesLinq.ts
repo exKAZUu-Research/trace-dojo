@@ -551,7 +551,8 @@ class GroupingState implements NativeState {
 }
 
 /** A distinct set of keys, by the default equality or a comparer. */
-function seenSet(equality: Equality): { add(value: Value): boolean; remove(value: Value): boolean } {
+/** A set of the values a query has seen, each one it keeps charged against the slot limit, since a lazy source may yield without end. */
+function seenSet(call: NativeCall, equality: Equality): { add(value: Value): boolean; remove(value: Value): boolean } {
   const buckets = new Map<number, Value[]>();
   const indexIn = (bucket: Value[], value: Value): number =>
     bucket.findIndex((existing) =>
@@ -570,6 +571,7 @@ function seenSet(equality: Equality): { add(value: Value): boolean; remove(value
     add(value) {
       const bucket = bucketOf(value);
       if (indexIn(bucket, value) >= 0) return false;
+      call.frame.runtime.allocateSlots(1);
       bucket.push(value);
       return true;
     },
@@ -821,7 +823,7 @@ const linq: Record<string, NativeMethod> = {
       iteratorName('DistinctIterator', [call.typeArgs[0]]),
       [items as Value],
       function* () {
-        const seen = seenSet(equalityOf(call, (comparer as Value | undefined) ?? undefined));
+        const seen = seenSet(call, equalityOf(call, (comparer as Value | undefined) ?? undefined));
         for (const item of all) if (seen.add(item)) yield item;
       }
     );
@@ -835,7 +837,7 @@ const linq: Record<string, NativeMethod> = {
       generatedIterator(call, 'DistinctByIterator', 67),
       [items as Value],
       function* () {
-        const seen = seenSet(equalityOf(call, undefined, call.typeArgs[1]));
+        const seen = seenSet(call, equalityOf(call, undefined, call.typeArgs[1]));
         for (const item of all) if (seen.add(keyOf(item))) yield item;
       }
     );
@@ -878,7 +880,7 @@ const linq: Record<string, NativeMethod> = {
       generatedIterator(call, 'UnionByIterator', 344),
       [first as Value, second as Value],
       function* () {
-        const seen = seenSet(equalityOf(call, undefined, call.typeArgs[1]));
+        const seen = seenSet(call, equalityOf(call, undefined, call.typeArgs[1]));
         for (const item of a) if (seen.add(keyOf(item))) yield item;
         for (const item of b) if (seen.add(keyOf(item))) yield item;
       }
@@ -1267,14 +1269,14 @@ function setOperation(
   const b = source(call, second, 'second');
   return query(call, call.typeArgs[0], setIteratorName(call, operation), [first, second], function* () {
     const equality = equalityOf(call, undefined);
-    const seen = seenSet(equality);
+    const seen = seenSet(call, equality);
     if (operation === 'Union') {
       for (const item of a) if (seen.add(item)) yield item;
       for (const item of b) if (seen.add(item)) yield item;
       return;
     }
     // As .NET's iterators do, Except yields what it can add to the second's set, and Intersect what it can remove.
-    const others = seenSet(equality);
+    const others = seenSet(call, equality);
     for (const item of b) others.add(item);
     for (const item of a) if (operation === 'Except' ? others.add(item) : others.remove(item)) yield item;
   });
@@ -1302,7 +1304,7 @@ function setOperationBy(
     [first, second],
     function* () {
       const equality = equalityOf(call, undefined, call.typeArgs[1]);
-      const keys = seenSet(equality);
+      const keys = seenSet(call, equality);
       for (const key of b) keys.add(key);
       for (const item of a) {
         const key = keyOf(item);
