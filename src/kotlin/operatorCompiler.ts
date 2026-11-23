@@ -118,7 +118,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       return this.compileIncrement(scope, context, expression.operand, operator === '++' ? 1 : -1, false, row);
     const operand = this.compileExpression(scope, context, expression.operand);
     const evaluate = operand.eval;
-    if (operand.stableKey) this.flow.narrowed.set(operand.stableKey, nonNull(operand.type));
+    this.flow.assumeNonNull(operand);
     return {
       type: nonNull(operand.type),
       repr: operand.repr,
@@ -401,7 +401,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     );
     const rightIsNothing = resolved(right.type).kind === 'nothing' && !resolved(right.type).nullable;
     this.flow = rightIsNothing ? before : Flow_merge([before, this.flow]);
-    if (rightIsNothing && left.stableKey) this.flow.narrowed.set(left.stableKey, nonNull(left.type));
+    if (rightIsNothing) this.flow.assumeNonNull(left);
     const type = rightIsNothing ? nonNull(left.type) : commonSupertype([nonNull(left.type), right.type]);
     const repr = reprOf(this.core, type);
     const leftEval = convertRepr(left.eval, left.repr, 'ref');
@@ -729,6 +729,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const evaluate = convertRepr(operand.eval, operand.repr, 'ref');
     const resultType = expression.isSafe ? nullable(type) : type;
     const repr = reprOf(this.core, resultType);
+    if (!expression.isSafe && !isNullable(actual)) this.flow.assumeNonNull(operand);
     if (operand.stableKey && !expression.isSafe)
       this.flow.narrowed.set(operand.stableKey, typeAfterCast(operand.type, type));
     const cast: Eval = expression.isSafe

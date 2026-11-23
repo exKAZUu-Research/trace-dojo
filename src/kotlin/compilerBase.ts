@@ -10,7 +10,7 @@ import {
   VariableSymbol,
 } from './symbols';
 import { anyType, commonSupertype, isSubtype } from './typeRelations';
-import { type ClassType, type KType, NOTHING, resolved, type TypeArgument, typeToString } from './types';
+import { type ClassType, type KType, nonNull, NOTHING, resolved, type TypeArgument, typeToString } from './types';
 import { box, Boxed, Cell, NULL, type PrimitiveKind, type Value } from './values';
 
 export type Eval = (frame: Frame) => Value;
@@ -247,6 +247,12 @@ export class Flow {
       if (narrowedKey.startsWith(`${key}${CASE_SEPARATOR}`) || narrowedKey.startsWith(`${key}.`))
         this.narrowed.delete(narrowedKey);
     }
+  }
+
+  /** Records what a non-null result of the expression shows: it and the receivers of its safe calls are not null. */
+  assumeNonNull(compiled: Compiled): void {
+    if (compiled.stableKey) this.narrowed.set(compiled.stableKey, nonNull(compiled.type));
+    for (const [key, type] of compiled.whenNonNull ?? []) this.narrowed.set(key, type);
   }
 
   /** Takes the smart casts of another flow in place of this one's, keeping what this one knows is assigned. */

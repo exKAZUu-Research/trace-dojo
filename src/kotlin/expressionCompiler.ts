@@ -957,6 +957,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
       type: nullable(result.type),
       repr: 'ref',
       whenNonNull,
+      // `a?.b` is `a.b` wherever it is not null, so facts about its value, such as `a?.b != null`, hold for `a.b`.
+      stableKey: result.stableKey,
       eval: (frame) => {
         const value = receiverEval(frame);
         if (value === undefined) return;
@@ -1346,9 +1348,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (symbol.name === 'require' || symbol.name === 'check') {
       for (const [key, type] of first?.narrowing?.whenTrue ?? []) this.flow.narrowed.set(key, type);
     }
-    if ((symbol.name === 'requireNotNull' || symbol.name === 'checkNotNull') && first?.stableKey) {
-      this.flow.narrowed.set(first.stableKey, nonNull(first.type));
-    }
+    if ((symbol.name === 'requireNotNull' || symbol.name === 'checkNotNull') && first) this.flow.assumeNonNull(first);
   }
 
   // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
