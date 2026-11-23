@@ -372,7 +372,7 @@ export abstract class StatementBinder extends PatternBinder {
       );
       return { kind: 'discard', type: ERROR_TYPE, row: node.row };
     }
-    if (use === 'compound') this.checkReadable(value, node);
+    if (use === 'compound') this.checkReadable(value, node, context);
     return this.checkAssignable(value, node, context, use);
   }
 

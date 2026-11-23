@@ -81,16 +81,22 @@ export abstract class MemberBinder extends CallBinder {
   /** Binds an expression as a value. */
   bindValue(node: Expression, context: BindContext): BoundExpression {
     const value = this.toValue(this.bindExpression(node, context), node);
-    this.checkReadable(value, node);
+    this.checkReadable(value, node, context);
     return value;
   }
 
-  /** Reports a read of a property that has no getter. */
-  protected checkReadable(value: BoundExpression, position: Position): void {
+  /** Reports a read of a property that has no getter, or whose getter the code may not use. */
+  protected checkReadable(value: BoundExpression, position: Position, context: BindContext): void {
     if (value.kind !== 'property') return;
     for (let current: PropertySymbol | undefined = value.property; current; current = current.overridden) {
       if (current.getter) {
         this.rejectUnimplementedAccessor(current, current.getter, position);
+        if (!this.isAccessible(current.getter.access, current.owner, context.fn.typeContext, value.receiver?.type))
+          this.error(
+            position,
+            'CS0271',
+            `get アクセサーにアクセスできないため、プロパティまたはインデクサー '${displayTypeSymbol(value.owner.symbol, value.owner.args)}.${value.property.isIndexer ? `this[${value.property.parameters.map((parameter) => displayType(substitute(parameter.type, substitutionOf(value.owner)))).join(', ')}]` : value.property.name}' はこのコンテキストでは使用できません`
+          );
         return;
       }
     }
@@ -493,7 +499,7 @@ export abstract class MemberBinder extends CallBinder {
       return this.bindStaticMember(target.type, node.name, typeArgs, position, context, isCallee);
     const receiver = target.kind === 'methodGroup' ? this.toValue(target, node.target) : target;
     // A property that a member is accessed on is read, as any value is, except in a name.
-    if (!this.isBindingName) this.checkReadable(receiver, node.target);
+    if (!this.isBindingName) this.checkReadable(receiver, node.target, context);
     if (receiver.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
     if (receiver.kind === 'unbound' || receiver.type.kind === 'null' || receiver.type.kind === 'void') {
       this.error(
@@ -859,7 +865,8 @@ export abstract class MemberBinder extends CallBinder {
       receiver = group.receiver;
     }
     this.diagnostics.length = saved;
-    if (resolved && !this.takesDelegateArguments(resolved, invoke.parameterTypes)) resolved = undefined;
+    if (resolved && !this.takesDelegateArguments(resolved, invoke.parameterTypes, invoke.refKinds))
+      resolved = undefined;
     if (!resolved) {
       if (report)
         this.error(
@@ -946,7 +953,7 @@ export abstract class MemberBinder extends CallBinder {
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
     if (target.type.kind === 'error') return this.failedAccess(target, node);
-    this.checkReadable(target, node.target);
+    this.checkReadable(target, node.target, context);
     const invoke = this.delegateInvokeOf(target.type);
     if (!invoke) {
       if (
@@ -1124,14 +1131,19 @@ export abstract class MemberBinder extends CallBinder {
   /** The override of a virtual method that a type or its nearest base declares, for a non-virtual `base` call. */
   /**
    * Whether a method takes a delegate's arguments as they are: each converts to its parameter by identity or an
-   * implicit reference conversion, as the delegate passes them unconverted (C# spec §10.8).
+   * implicit reference conversion, as the delegate passes them unconverted, with the same passing mode (C# spec §10.8).
    */
-  private takesDelegateArguments(resolved: ResolvedCall, argumentTypes: Type[]): boolean {
+  private takesDelegateArguments(
+    resolved: ResolvedCall,
+    argumentTypes: Type[],
+    refKinds: ('ref' | 'out' | 'in' | undefined)[]
+  ): boolean {
     const { method } = resolved.candidate;
     const parameters = method.isExtension ? method.parameters.slice(1) : method.parameters;
     if (parameters.length !== argumentTypes.length) return false;
     const substitution = this.callSubstitution(resolved.candidate, resolved.typeArgs);
     return parameters.every((parameter, index) => {
+      if (parameter.refKind !== refKinds[index]) return false;
       const parameterType = substitute(parameter.type, substitution);
       const argumentType = argumentTypes[index];
       return (
@@ -1436,10 +1448,14 @@ export abstract class MemberBinder extends CallBinder {
         target = { kind: 'discard', type: ERROR_TYPE, row: member.row };
       } else {
         const access = this.memberAccessOn(placeholder, found, member, context);
+        // A nested initializer reads the member and fills what it holds, so the member must be readable.
+        if (isNested) this.checkReadable(access, member, context);
         target = isNested ? (access as BoundLValue) : this.checkAssignable(access, member, context, 'initializer');
       }
     } else {
-      target = this.bindElementAccess(placeholder, member.args, member, context) as BoundLValue;
+      const access = this.bindElementAccess(placeholder, member.args, member, context);
+      if (isNested) this.checkReadable(access, member, context);
+      target = access as BoundLValue;
     }
     if (isNested) {
       return {
