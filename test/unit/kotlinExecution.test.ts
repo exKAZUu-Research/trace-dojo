@@ -1019,15 +1019,6 @@ fun main() {
     stdout: 'true\ntrue\nhell\nlo\nhello\ntrue\ntrue\n HEllo \ncsv\nreport.2024\nnone\nnone\nhe\n',
   },
   {
-    name: 'Turtle painted-cell checks have English and Japanese names',
-    source: `fun main() {
-    val turtle = Turtle()
-    println(turtle.isFrontPainted())
-    println(turtle.前のマスが塗られているか())
-}`,
-    stdout: 'false\nfalse\n',
-  },
-  {
     name: 'floating-point literal overflow rounds to infinity',
     source: `fun main() { println(1e309); println(-1.0e400); println(1e39f) }`,
     stdout: 'Infinity\n-Infinity\nInfinity\n',

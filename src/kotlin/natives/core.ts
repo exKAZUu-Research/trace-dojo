@@ -535,7 +535,7 @@ function defineTurtle(): void {
     frame.runtime.collectGarbage();
     return frame.runtime.world.canMoveForward(turtle);
   });
-  defineTurtleMethods([...TURTLE_METHOD_NAMES.isFrontPainted, 'isFrontPainted'], (frame, turtle) =>
+  defineTurtleMethods(TURTLE_METHOD_NAMES.isFrontPainted, (frame, turtle) =>
     frame.runtime.world.isFrontPainted(turtle)
   );
   defineTurtleMethods(TURTLE_METHOD_NAMES.remove, (frame, turtle) => {
