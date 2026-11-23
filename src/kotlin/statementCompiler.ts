@@ -42,7 +42,7 @@ import { NUMBER_OPERATOR_NAMES } from './operators';
 import { needsSiblingHint, siblingResultType } from './resultInference';
 import { type Frame, LoopSignal, UNASSIGNED } from './runtime';
 import { type ClassSymbol, PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
-import { instanceTest } from './typeChecks';
+import { checkedRead, instanceTest } from './typeChecks';
 import { commonSupertype, isSubtype } from './typeRelations';
 import { type ClassType, isNonNullClass, type KType, nonNull, resolved, substitute, typeToString } from './types';
 import { Boxed, Cell, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
@@ -605,17 +605,20 @@ export abstract class StatementCompiler extends OperatorCompiler {
       if (variable.owner !== context && !context.isProbe) variable.isCell = true;
     }
     const access = this.variableAccess(context, variable);
+    const readType = isCompound
+      ? refineLocalType(localRefinement(scope, context, variable), variable, this.flow.narrowed.get(keyOf(variable)))
+      : undefined;
+    // A compound assignment reads the value as an expression does, through the same check of its smart cast.
+    const read = readType ? checkedRead(this.core, access.read, readType) : access.read;
     return {
       type: variable.type,
-      readType: isCompound
-        ? refineLocalType(localRefinement(scope, context, variable), variable, this.flow.narrowed.get(keyOf(variable)))
-        : undefined,
+      readType,
       repr: reprOf(this.core, variable.type),
       recordAssignment: (type) => {
         this.recordLocalWrite(context, variable, type);
         this.recordAssignment(context, variable, row);
       },
-      withBound: (frame, use) => use({ get: () => access.read(frame), set: (value) => access.write(frame, value) }),
+      withBound: (frame, use) => use({ get: () => read(frame), set: (value) => access.write(frame, value) }),
     };
   }
 
