@@ -448,6 +448,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
   protected compileThis(scope: Scope, context: FunctionContext, row: number, label?: string): Compiled {
     const receivers = this.receiversOf(scope);
     const receiver = label === undefined ? receivers[0] : receivers.find((candidate) => candidate.label === label);
+    if (!receiver && label === undefined && this.headerInstance)
+      this.error(row, 'インスタンスの初期化が終わる前なので、this やそのメンバーは使えません。');
     if (!receiver)
       this.error(row, label === undefined ? 'ここでは this を使えません。' : `this@${label} が見つかりません。`);
     const key = keyOf(receiver);
@@ -464,12 +466,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const variable = this.findVariable(scope, name);
     if (variable) return this.readVariable(scope, context, variable, row);
     const member = this.readReceiverProperty(scope, context, name, row);
-    if (member && member !== 'uninitialized') return member;
+    if (member) return member;
     const staticMember = this.findStaticMember(scope, name, row);
     if (staticMember) return staticMember;
     const property = this.topLevelPlainProperty(name);
     if (property) return this.readTopLevelProperty(context, property, row);
-    if (member) this.rejectUninitialized((this.uninitializedReceiver as { row: number }).row);
+    this.rejectHeaderMember(name, row);
     const cls = this.findClass(scope, name);
     if (cls) this.checkNestedAccessible(scope, cls, row);
     if (cls) {
@@ -481,24 +483,16 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return this.error(row, `${name} が見つかりません。`);
   }
 
-  /**
-   * Reads the property of an implicit receiver that a simple name means. A constructor header reaches the members of
-   * the instance it builds only after every other name, so finding one there gives `uninitialized`.
-   */
+  /** Reads the property of an implicit receiver that a simple name means. */
   private readReceiverProperty(
     scope: Scope,
     context: FunctionContext,
     name: string,
     row: number
-  ): Compiled | 'uninitialized' | undefined {
-    let uninitialized = false;
+  ): Compiled | undefined {
     for (const receiver of this.receiversOf(scope)) {
       const property = this.findProperty(this.receiverTypeOf(receiver), name, row);
       if (!property) continue;
-      if (this.uninitializedReceiver?.receiver === receiver) {
-        uninitialized = true;
-        continue;
-      }
       this.checkInitialized(context, property.symbol, name, row);
       const receiverCompiled: Compiled = {
         type: this.receiverTypeOf(receiver),
@@ -508,7 +502,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       };
       return this.readProperty(scope, property, receiverCompiled, row);
     }
-    return uninitialized ? 'uninitialized' : undefined;
+    return undefined;
   }
 
   /** The companion object whose property a simple name in a class's body means, with the property. */
@@ -1015,10 +1009,11 @@ export abstract class ExpressionCompiler extends CallCompiler {
         ? this.tryLocalFunction(scope, context, variable, args, hasTrailingLambda, row)
         : undefined;
     if (local && !(local instanceof CompileError)) return local;
-    const { levels: memberLevels, uninitialized } = this.receiverLevels(scope, context, name, row);
-    const receiverLevels = [...memberLevels, ...this.companionLevels(scope, name, row)];
-    // A constructor header reaches the members of the instance it builds only after every other name.
-    const packageLevels = [...this.topLevelCallLevels(name, row), ...uninitialized];
+    const receiverLevels = [
+      ...this.receiverLevels(scope, context, name, row),
+      ...this.companionLevels(scope, name, row),
+    ];
+    const packageLevels = this.topLevelCallLevels(name, row);
     const cls = this.findClass(scope, name);
     if (cls) this.checkNestedAccessible(scope, cls, row);
     if (
@@ -1095,48 +1090,20 @@ export abstract class ExpressionCompiler extends CallCompiler {
     );
   }
 
-  /** The call levels of the implicit receivers, and apart from them those of the instance a constructor header builds. */
-  private receiverLevels(
-    scope: Scope,
-    context: FunctionContext,
-    name: string,
-    row: number
-  ): { levels: CallLevel[]; uninitialized: CallLevel[] } {
-    const levels: CallLevel[] = [];
-    let uninitializedLevels: CallLevel[] = [];
-    for (const receiver of this.receiversOf(scope)) {
-      const uninitialized = this.uninitializedReceiver?.receiver === receiver ? this.uninitializedReceiver : undefined;
-      // Overload resolution may pick a call of another level, so only the call it chooses rejects the receiver.
-      if (uninitialized) this.uninitializedReceiver = undefined;
-      const compiled: Compiled = {
-        type: this.receiverTypeOf(receiver),
-        repr: reprOf(this.core, receiver.type),
-        // Reading the instance would make a lambda capture it, so only a call that resolves to it, which the
-        // resolver rejects, reaches this reader.
-        eval: uninitialized
-          ? () => this.rejectUninitialized(uninitialized.row)
-          : this.receiverAccess(context, receiver),
-        stableKey: keyOf(receiver),
-      };
-      const receiverLevels = this.memberCallLevels(scope, compiled, name, row);
-      if (!uninitialized) {
-        levels.push(...receiverLevels);
-        continue;
-      }
-      this.uninitializedReceiver = uninitialized;
-      this.uninitializedCallReceivers.set(compiled, uninitialized.row);
-      uninitializedLevels = receiverLevels.map((level) =>
-        'candidates' in level
-          ? level
-          : {
-              functionValues: level.functionValues.map((candidate) => ({
-                ...candidate,
-                functionValue: () => this.rejectUninitialized(uninitialized.row),
-              })),
-            }
-      );
-    }
-    return { levels, uninitialized: uninitializedLevels };
+  private receiverLevels(scope: Scope, context: FunctionContext, name: string, row: number): CallLevel[] {
+    return this.receiversOf(scope).flatMap((receiver) =>
+      this.memberCallLevels(
+        scope,
+        {
+          type: this.receiverTypeOf(receiver),
+          repr: reprOf(this.core, receiver.type),
+          eval: this.receiverAccess(context, receiver),
+          stableKey: keyOf(receiver),
+        },
+        name,
+        row
+      )
+    );
   }
 
   private companionLevels(scope: Scope, name: string, row: number): CallLevel[] {
@@ -1191,6 +1158,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const enumClass = this.enclosingEnum(scope);
     if (enumClass && (name === 'values' || name === 'valueOf'))
       return this.compileEnumFunction(scope, context, enumClass, name, args, row);
+    this.rejectHeaderMember(name, row);
     return this.reportUnknownFunction(name, row);
   }
 

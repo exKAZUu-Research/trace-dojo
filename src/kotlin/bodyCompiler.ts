@@ -291,7 +291,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         entry.cls.symbol.name
       );
       const ctor = entry.cls.constructorSymbol;
-      const headerScope = new Scope(scope, context);
+      // The header's names do not reach the instance it builds, as in Kotlin.
+      const headerScope = new Scope(entry.cls.scope, context);
       for (const [index, param] of (ctor?.params ?? []).entries()) {
         const declaration = entry.cls.decl.primaryConstructor?.params[index];
         const variable = this.newParameter(
@@ -522,14 +523,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     this.flow = new Flow();
     for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
     const headerScope = this.constructorHeaderScopes.get(scope) ?? scope;
-    this.uninitializedReceiver = scope.receiver && { receiver: scope.receiver, row: entry.decl.row };
-    const defaults = this.compileConstructorDefaults(entry, headerScope, context);
-    const superCall = this.compileSuperConstructorCall(entry, headerScope, context);
-    this.uninitializedReceiver = undefined;
-    const steps = [
-      ...this.compileFieldSteps(entry, headerScope, context),
-      ...this.compileMemberSteps(entry, scope, context),
-    ];
+    const { defaults, superCall, fieldSteps } = this.compileConstructorHeader(entry, scope, headerScope, context);
+    const steps = [...fieldSteps, ...this.compileMemberSteps(entry, scope, context)];
     this.checkValsInitialized(entry);
     if (symbol.kind === 'enum') this.compileEnumArguments(entry);
     const info = { ...context.info, isAtomic: entry.constructorSymbol?.isAtomic ?? false };
@@ -548,6 +543,28 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     symbol.initialize = (frame, instance) => initialize(frame, instance, [], undefined);
     if (symbol.isObject) this.objectInitializers.set(symbol, initialize);
     else if (entry.constructorSymbol) this.bindConstructor(symbol, entry.constructorSymbol, initialize);
+  }
+
+  private compileConstructorHeader(
+    entry: ClassEntry,
+    scope: Scope,
+    headerScope: Scope,
+    context: FunctionContext
+  ): {
+    defaults: (Eval | undefined)[];
+    superCall: ((frame: Frame) => void) | undefined;
+    fieldSteps: ((frame: Frame) => void)[];
+  } {
+    this.headerInstance = scope.receiver?.type;
+    try {
+      return {
+        defaults: this.compileConstructorDefaults(entry, headerScope, context),
+        superCall: this.compileSuperConstructorCall(entry, headerScope, context),
+        fieldSteps: this.compileFieldSteps(entry, headerScope, context),
+      };
+    } finally {
+      this.headerInstance = undefined;
+    }
   }
 
   private compileConstructorDefaults(entry: ClassEntry, scope: Scope, context: FunctionContext): (Eval | undefined)[] {

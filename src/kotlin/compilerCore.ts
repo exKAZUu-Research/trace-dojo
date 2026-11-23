@@ -483,24 +483,22 @@ export abstract class CompilerCore {
     };
   }
 
-  /** The instance a constructor header builds, which its defaults and superclass arguments must not read. */
-  protected uninitializedReceiver: { receiver: ReceiverSymbol; row: number } | undefined;
+  /**
+   * The instance whose constructor header (defaults, superclass arguments, delegates) is compiling. The header's scope
+   * leaves the instance out, as Kotlin does, so this only words the error for a name that only its members declare.
+   */
+  protected headerInstance: KType | undefined;
 
-  /** The implicit receivers of call levels built for an uninitialized instance, which only a chosen call reads. */
-  protected readonly uninitializedCallReceivers = new WeakMap<Compiled, number>();
-
-  protected checkReceiverInitialized(receiver: Compiled | undefined): void {
-    const row = receiver && this.uninitializedCallReceivers.get(receiver);
-    if (row !== undefined) this.rejectUninitialized(row);
-  }
-
-  protected rejectUninitialized(row: number): never {
-    return this.error(row, 'インスタンスの初期化が終わる前なので、this やそのメンバーは使えません。');
+  /** Rejects a name that nothing but a member of the instance a constructor header builds declares. */
+  protected rejectHeaderMember(name: string, row: number): void {
+    const instance = this.headerInstance;
+    if (!instance) return;
+    if (this.membersOf(instance, name, 'property').length + this.membersOf(instance, name, 'function').length > 0)
+      this.error(row, 'インスタンスの初期化が終わる前なので、this やそのメンバーは使えません。');
   }
 
   /** Reads an implicit receiver, which a lambda inside the function that has it captures. */
   protected receiverAccess(context: FunctionContext, receiver: ReceiverSymbol): Eval {
-    if (this.uninitializedReceiver?.receiver === receiver) this.rejectUninitialized(this.uninitializedReceiver.row);
     if (receiver.context === context) return (frame) => frame.thisValue;
     const index = context.captureIndex(receiver);
     return (frame) => frame.captured[index] as Value;
