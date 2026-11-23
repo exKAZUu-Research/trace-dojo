@@ -285,9 +285,12 @@ function arrayUtilities(kind: ArrayKind): string[] {
       `fun ${g}${receiver}.asIterable(): Iterable<${element}> = if (isEmpty()) emptyList() else ArrayElements(asList())`
     );
   if (!unsigned && (isComparable || typeParameters)) {
-    const comparable = typeParameters ? '(this[it] as Comparable<T>)' : 'this[it]';
+    // The JVM's natural order throws NullPointerException for a null element or key it compares.
+    const comparison = typeParameters
+      ? '(this[it] as Comparable<T>).compareTo(element!!)'
+      : 'this[it].compareTo(element)';
     lines.push(`fun ${g}${receiver}.binarySearch(element: ${element}, fromIndex: Int = 0, toIndex: Int = size): Int =
-        binarySearchArray(size, fromIndex, toIndex) { ${comparable}.compareTo(element) }`);
+        binarySearchArray(size, fromIndex, toIndex) { ${comparison} }`);
   }
   return lines;
 }
