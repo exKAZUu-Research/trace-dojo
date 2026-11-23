@@ -607,8 +607,8 @@ function substitute(replacement: string, state: MatchState): string {
     const rest = replacement.slice(index + 1);
     const digits = /^\d+/.exec(rest)?.[0];
     if (digits) {
-      // .NET takes the longest prefix of the digits that names a group.
-      let length = digits.length;
+      // .NET takes the longest prefix of the digits that names a group, which has no more digits than the group count.
+      let length = Math.min(digits.length, String(state.groups.length).length);
       while (length > 0 && Number(digits.slice(0, length)) >= state.groups.length) length--;
       if (length > 0) {
         result = appended(result, groupValue(Number(digits.slice(0, length))));
