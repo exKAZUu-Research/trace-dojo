@@ -334,24 +334,26 @@ export class Compiler extends BodyCompiler {
     // Kotlin names the parameter of a `fun interface`'s constructor `function`.
     if (argument.name !== undefined && argument.name !== 'function')
       this.error(argument.row, `${cls.name} に ${argument.name} という引数はありません。`);
-    return this.compileSamConstructor(
-      scope,
-      context,
-      cls,
-      argument.value,
+    const delegated = this.delegateArgs.has(args);
+    return this.compileSamConstructor(scope, context, cls, argument.value, {
       typeArgs,
-      expected ?? this.delegateSamType(cls, args)
-    );
+      expected: expected ?? this.delegateSamType(cls, args),
+      delegated,
+    });
   }
 
   /**
-   * The type a `fun interface` constructed as a delegate, as `val x: Int by ReadOnlyProperty { ... }`, has from its
-   * property: kotlinc infers `ReadOnlyProperty<Any?, Int>` from the owner and the property type through getValue.
+   * The type a `fun interface` constructed as a typed property's delegate, as `val x: Int by ReadOnlyProperty { ... }`,
+   * has from its property: the value type, with the owner left to the lambda's parameters.
    */
   private delegateSamType(cls: ClassSymbol, args: ArgumentSyntax[]): KType | undefined {
     const delegate = this.delegateCalls.get(args);
+    const [owner] = cls.typeParameters;
     if (!delegate || cls.typeParameters.length !== 2) return undefined;
-    return classType(cls, [anyType(true), delegate.type]);
+    return classType(cls, [
+      { kind: 'variable', variable: { param: owner, lower: [], upper: [], fixed: undefined }, nullable: false },
+      delegate.type,
+    ]);
   }
 
   private compileSamConstructor(
@@ -359,8 +361,7 @@ export class Compiler extends BodyCompiler {
     context: FunctionContext,
     cls: ClassSymbol,
     argument: Expression,
-    typeArgs: KType[],
-    expected: KType | undefined
+    { typeArgs, expected, delegated }: { typeArgs: KType[]; expected: KType | undefined; delegated: boolean }
   ): Compiled {
     let type: KType;
     const expectedType = expected ? resolved(expected) : undefined;
@@ -385,6 +386,7 @@ export class Compiler extends BodyCompiler {
         )
       );
     const sam = this.samOf(type) as NonNullable<ReturnType<Compiler['samOf']>>;
+    if (delegated) fixUntypedOwner(type, argument);
     // The lambda's parameters need their types, which variables of an expected type such as `Comparator<in T>` give.
     for (const param of sam.functionType.params) {
       const actual = resolved(param);
@@ -392,15 +394,15 @@ export class Compiler extends BodyCompiler {
     }
     const compiled = this.compileSamFunction(scope, context, argument, sam.functionType);
 
-    this.fixSamTypeArguments(resolved(type) as ClassType, argument.row);
+    this.fixSamTypeArguments(resolved(type) as ClassType, delegated ? undefined : argument.row);
     return { ...this.samWrap(compiled, sam, resolved(type)), isCreation: true };
   }
 
   /**
    * Fixes the type arguments a SAM constructor's lambda left open from the bounds its typed parameters gave, rejecting
-   * one nothing determines, as kotlinc does.
+   * one nothing determines at `row`, as kotlinc does; a delegate's getValue determines its owner, which `Any?` accepts.
    */
-  private fixSamTypeArguments(type: ClassType, row: number): void {
+  private fixSamTypeArguments(type: ClassType, row: number | undefined): void {
     for (const typeArgument of type.args) {
       if (
         typeArgument.variance !== 'star' &&
@@ -412,9 +414,10 @@ export class Compiler extends BodyCompiler {
         const mostSpecific = upper.find((bound) => upper.every((other) => isSubtype(bound, other)));
         // Kotlin infers the intersection of bounds none of which is the most specific, as `Int & String`, which only
         // warns; no value has every type, so `Nothing` stands for it and every call with an argument is rejected.
-        if (lower.length === 0 && upper.length === 0)
+        const unbounded = lower.length === 0 && upper.length === 0;
+        if (unbounded && row !== undefined)
           this.error(row, `型引数 ${typeArgument.type.variable.param.name} を推論できません。型を明示してください。`);
-        typeArgument.type.variable.fixed = lower[0] ?? mostSpecific ?? NOTHING;
+        typeArgument.type.variable.fixed = lower[0] ?? mostSpecific ?? (unbounded ? anyType(true) : NOTHING);
       }
     }
   }
@@ -681,4 +684,15 @@ function enumEntryNamed(frame: Frame, cls: ClassSymbol, entryName: Value): Value
       `No enum constant ${cls.kotlinName}.${entryName as string}`
     )
   );
+}
+
+/**
+ * A delegate's getValue receives its owner, null for a top-level or local property, so an owner type argument that the
+ * lambda's first parameter does not declare is `Any?`, which accepts every owner, before the lambda compiles.
+ */
+function fixUntypedOwner(type: KType, argument: Expression): void {
+  const owner = resolved(type).kind === 'class' ? (resolved(type) as ClassType).args[0] : undefined;
+  if (!owner || owner.variance === 'star' || owner.type.kind !== 'variable' || owner.type.variable.fixed) return;
+  if (argument.kind === 'lambda' && argument.params?.[0]?.type) return;
+  owner.type.variable.fixed = anyType(true);
 }

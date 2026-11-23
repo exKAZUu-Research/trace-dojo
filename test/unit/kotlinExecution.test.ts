@@ -4393,6 +4393,21 @@ fun main() {
     stdout: '1\n2\n3\n0\n0\n0\n',
   },
   {
+    name: 'fun-interface delegates infer their types from the property and the lambda',
+    source: `import kotlin.properties.ReadOnlyProperty
+class A(val n: String) {
+    val typed: String by ReadOnlyProperty { owner: A, _ -> owner.n + "!" }
+    val named: String by ReadOnlyProperty { _, property -> property.name }
+}
+val declared: Int by ReadOnlyProperty { _, _ -> 1 }
+val inferred by ReadOnlyProperty { _, _ -> 2 }
+fun main() {
+    println(A("a").typed + A("b").named)
+    println(declared + inferred)
+}`,
+    stdout: 'a!named\n3\n',
+  },
+  {
     name: 'smart casts from try survive finally unless finally changes them',
     source: `class Box(val text: String?)
 fun main() {

@@ -95,6 +95,9 @@ export interface Place {
 }
 
 export abstract class ExpressionCompiler extends CallCompiler {
+  /** The calls written as a property's delegate, typed or not. */
+  private readonly delegateExpressions = new WeakSet<Expression>();
+
   protected compileDelegateExpression(
     scope: Scope,
     context: FunctionContext,
@@ -102,6 +105,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     type: KType | undefined,
     isVar: boolean
   ): Compiled {
+    if (expression.kind === 'call') this.delegateExpressions.add(expression);
     if (!type || expression.kind !== 'call') return this.compileExpression(scope, context, expression);
     return this.recordExpressionExit(this.compileCall(scope, context, expression, undefined, { type, isVar }));
   }
@@ -1048,6 +1052,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
         value: expression.trailingLambda,
       });
     if (delegate) this.delegateCalls.set(args, delegate);
+    if (this.delegateExpressions.has(expression)) this.delegateArgs.add(args);
     const hasTrailingLambda = expression.trailingLambda !== undefined;
     const typeArgs = expression.typeArgs.map((ref) => this.resolveType(scope, ref));
     if (callee.kind === 'name') {
