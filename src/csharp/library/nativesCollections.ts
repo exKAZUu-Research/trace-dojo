@@ -1713,6 +1713,8 @@ defineNatives({
     if ((size as number) < 0) failOutOfRange(call, 'newSize', 'Non-negative number required.');
     const ref = refOf(reference);
     const array = ref.get() as CsArray | undefined;
+    // An array that already has the size stays as it is, aliases included.
+    if (array && array.values.length === size) return;
     // .NET allocates `new T[newSize]`, of the call's element type even when the old array is a covariant `string[]`.
     const elementType = call.typeArgs[0] ?? (array ? elementTypeOf(array) : undefined);
     ref.set(

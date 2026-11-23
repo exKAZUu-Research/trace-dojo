@@ -630,3 +630,35 @@ export function displayMethod(method: MethodSymbol): string {
     }
   }
 }
+
+/** A key that identifies a constructed type, for per-type static storage and caches. */
+export function typeKey(type: Type): string {
+  switch (type.kind) {
+    case 'named': {
+      return type.args.length === 0
+        ? type.symbol.fullName + `#${symbolId(type.symbol)}`
+        : `${type.symbol.fullName}#${symbolId(type.symbol)}[${type.args.map(typeKey).join(',')}]`;
+    }
+    case 'array': {
+      return `${typeKey(type.element)}[${type.rank}]`;
+    }
+    case 'typeParameter': {
+      return `!${type.symbol.name}`;
+    }
+    default: {
+      return type.kind;
+    }
+  }
+}
+
+const symbolIds = new WeakMap<TypeSymbol, number>();
+let nextSymbolId = 1;
+
+function symbolId(symbol: TypeSymbol): number {
+  let id = symbolIds.get(symbol);
+  if (id === undefined) {
+    id = nextSymbolId++;
+    symbolIds.set(symbol, id);
+  }
+  return id;
+}

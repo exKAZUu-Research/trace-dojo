@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss -- The expressionBinder module keeps one stage of the C# interpreter together.
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Block, Designation, Expression, LambdaParameter, Pattern, Position } from './ast';
 import type {
@@ -19,6 +18,7 @@ import { missingDeconstruct } from './deconstructionErrors';
 import { type BindResult, isNonValue, MemberBinder, type NonValue } from './memberBinder';
 import type { Space } from './patternSpace';
 import { desugarQuery, TRANSPARENT_PREFIX } from './queries';
+// code-gauge-allow-file fileNcss -- The expressionBinder module keeps one stage of the C# interpreter together.
 import { FunctionScope, LocalScope } from './scopes';
 import {
   arrayType,
@@ -40,6 +40,7 @@ import {
   substitute,
   substitutionOf,
   type Type,
+  typeKey,
   TypeSymbol,
   VOID_TYPE,
 } from './types';
@@ -940,7 +941,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     returnType: Type | undefined,
     report: boolean
   ): { result: BoundExpression | undefined; returnType: Type | undefined } {
-    const key = `${parameterTypes.map((type) => displayType(type)).join(',')}->${returnType ? displayType(returnType) : '?'}`;
+    const key = `${parameterTypes.map(lambdaKeyOf).join(',')}->${returnType ? lambdaKeyOf(returnType) : '?'}`;
     let cache = this.lambdaCache.get(node);
     if (!cache) {
       cache = new Map();
@@ -1986,3 +1987,11 @@ function inferredTupleName(expression: Expression): string | undefined {
 }
 
 export { isNonValue };
+
+/**
+ * A type's part of a lambda binding's cache key: a type's name alone is not its identity, as two namespaces may each
+ * declare `Item`, and its display carries the tuple element names that its identity leaves out.
+ */
+function lambdaKeyOf(type: Type): string {
+  return `${typeKey(type)}:${displayType(type)}`;
+}
