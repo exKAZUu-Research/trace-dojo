@@ -34,7 +34,7 @@ import { type ClassSymbol, type TypeParameterSymbol } from './symbols';
 import { instanceTest, throwCastFailure } from './typeChecks';
 import { branchHint, commonSupertype, isSubtype } from './typeRelations';
 import { isNullable, type KType, nonNull, nullable, resolved, substitute, typeToString } from './types';
-import { box, Boxed, type PrimitiveKind, type Value } from './values';
+import { box, Boxed, NULL, type PrimitiveKind, type Value } from './values';
 
 /** Compiles the operators, the conditions, and the `in`, `is`, and `as` tests. */
 export abstract class OperatorCompiler extends ExpressionCompiler {
@@ -69,7 +69,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     if (operator === '!') {
       if (!isSubtype(operand.type, this.booleanType))
         this.error(row, typeMismatchMessage(this.booleanType, operand.type));
-      const evaluate = operand.eval;
+      const evaluate = checkedBoolean(operand, operand.eval);
       return {
         type: this.booleanType,
         repr: 'ref',
@@ -376,7 +376,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     if (!isSubtype(compiled.type, this.booleanType))
       this.error(expression.row, typeMismatchMessage(this.booleanType, compiled.type));
     const { narrowing } = compiled;
-    const evaluate = convertRepr(compiled.eval, compiled.repr, 'ref');
+    const evaluate = checkedBoolean(compiled, convertRepr(compiled.eval, compiled.repr, 'ref'));
     return {
       compiled: { ...compiled, eval: evaluate },
       whenTrue: narrowing?.whenTrue ?? new Map(),
@@ -882,4 +882,17 @@ function isSameCachedBox(a: Value, b: Value): boolean {
 }
 function unboxNumber(value: Value): number | bigint {
   return value instanceof Boxed ? value.value : (value as number | bigint);
+}
+
+/**
+ * Reads a Boolean that a smart cast made non-null, which a write inside its own test may have nulled since; the JVM's
+ * unboxing throws for it instead of treating it as false.
+ */
+function checkedBoolean(compiled: Compiled, evaluate: Eval): Eval {
+  if (compiled.stableKey === undefined) return evaluate;
+  return (frame) => {
+    const value = evaluate(frame);
+    if (value === NULL) frame.runtime.throwError(frame, 'java.lang.NullPointerException');
+    return value;
+  };
 }
