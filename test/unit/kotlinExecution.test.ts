@@ -3460,6 +3460,17 @@ fun main() {
       '{x=[], y=[c]}\n{y=[a, b], x=[]}\n{x=[z], y=[a, b]}\n[(1, []), (y, [c])]\n[(y, [c]), (1, [])]\n{1=[], y=[c]}\n{y=[c], 1=[]}\n{k=[], j=[1]}\nfirst\nsecond\n{first=[], second=[c]}\n',
   },
   {
+    name: 'enum constructor arguments leave the locals of the function that first reads the enum',
+    source: `enum class Size(val n: Int) { S(when (1) { 1 -> 5; else -> 6 }) }
+
+fun main() {
+    val x = 42
+    println(Size.S.n)
+    println(x)
+}`,
+    stdout: '5\n42\n',
+  },
+  {
     name: 'explicit imports take priority over declarations of the same package',
     source: `import kotlin.math.PI
 import kotlin.math.abs

@@ -16,7 +16,7 @@ import {
 import { type FileContext } from './compilerCore';
 import { type ClassEntry, DeclarationCompiler, type FunctionEntry, type PropertyEntry } from './declarationCompiler';
 import { propertyRepr, returnRepr } from './dispatch';
-import { type Frame, MISSING } from './runtime';
+import { Frame, type FunctionInfo, MISSING } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol } from './symbols';
 import { VariableSymbol } from './symbols';
 import { anyType, isSameType, isSubtype, substitutionOf } from './typeRelations';
@@ -833,17 +833,19 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     frame: Frame,
     cls: ClassSymbol,
     ctor: FunctionSymbol,
-    evaluators: ((frame: Frame) => Value[])[],
+    evaluators: { info: FunctionInfo; evaluate: ((frame: Frame) => Value[])[] },
     createList: (entries: KObject[]) => KObject
   ): void {
     const state: { values: KObject[]; entries?: KObject } = { values: [] };
     frame.runtime.enumEntries.set(cls, state);
     const initialize = ctor.initialize as NonNullable<FunctionSymbol['initialize']>;
+    // The arguments' temporaries live in slots of their own context, apart from the locals of the function running.
+    const argumentFrame = new Frame(frame.runtime, evaluators.info, [], undefined, undefined);
     for (const [ordinal, enumEntry] of cls.enumEntries.entries()) {
       const instance = new KObject(cls);
       instance.native = { name: enumEntry.name, ordinal };
       state.values.push(instance);
-      initialize(frame, instance, evaluators[ordinal](frame), undefined);
+      initialize(frame, instance, evaluators.evaluate[ordinal](argumentFrame), undefined);
     }
     state.entries = createList(state.values);
   }
@@ -886,7 +888,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       });
       const createList = this.enumEntriesValue();
       entry.symbol.initializeEnumEntries = (frame) =>
-        this.createEnumEntries(frame, entry.symbol, ctor, evaluators, createList);
+        this.createEnumEntries(frame, entry.symbol, ctor, { info: context.info, evaluate: evaluators }, createList);
     } finally {
       this.recordsSteps = savedRecords;
     }
