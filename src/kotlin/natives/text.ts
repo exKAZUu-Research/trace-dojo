@@ -58,7 +58,7 @@ function result(frame: Frame, value: string): string {
   return value;
 }
 
-/** Java's `Character.isWhitespace`, which `isBlank` and `trim` use, unlike JavaScript's `\s`. */
+/** Java's `Character.isWhitespace`, the base of `isKotlinWhitespace`, which differs from JavaScript's `\s`. */
 function isJavaWhitespace(code: number): boolean {
   return (
     (code >= 0x09 && code <= 0x0d) ||
