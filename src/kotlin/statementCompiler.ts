@@ -15,7 +15,6 @@ import { isNullLiteral } from './ast';
 import type { ArgumentSyntax } from './callCompiler';
 import {
   checkedBoolean,
-  commonNarrowing,
   type Compiled,
   convertRepr,
   type Eval,
@@ -1344,16 +1343,16 @@ export abstract class StatementCompiler extends OperatorCompiler {
   ): { tests: ((frame: Frame) => boolean)[]; flow: Flow } {
     if (entry.conditions.length === 0) return { tests: [], flow: this.flow.copy() };
     const tests: ((frame: Frame) => boolean)[] = [];
-    let whenTrue: Map<string, KType> | undefined;
+    // Any of the conditions may have matched, skipping the later ones, so the branch starts from the merge of each match.
+    const matches: Flow[] = [];
     let whenFalse = new Map<string, KType>();
     for (const condition of entry.conditions) {
       const compiled = this.compileWhenCondition(scope, context, subject, condition, covered);
       tests.push(compiled.test);
-      // Any of the conditions may have matched, so only a narrowing that all of them give holds.
-      whenTrue = whenTrue ? commonNarrowing(whenTrue, compiled.whenTrue) : compiled.whenTrue;
+      matches.push(this.withNarrowing(this.flow, compiled.whenTrue));
       whenFalse = new Map([...whenFalse, ...compiled.whenFalse]);
     }
-    const flow = this.withNarrowing(this.flow, whenTrue ?? new Map());
+    const flow = Flow.merge(matches);
     this.flow = this.withNarrowing(this.flow, entry.conditions.length === 1 ? whenFalse : new Map());
     return { tests, flow };
   }
