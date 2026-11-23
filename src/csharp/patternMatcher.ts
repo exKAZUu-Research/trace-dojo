@@ -206,7 +206,7 @@ export abstract class PatternMatcher extends EvaluatorBase {
       elements = this.deconstructedElements(targets.deconstruct, value, targets.elements.length, frame);
     }
     // Every element is evaluated before any target is assigned, as `(a, b) = (b, a)` swaps.
-    const snapshot = [...elements];
+    const snapshot = elements.map((element) => copyValue(element));
     for (const [index, element] of targets.elements.entries()) this.deconstruct(element, snapshot[index], frame);
   }
 

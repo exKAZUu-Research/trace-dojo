@@ -215,7 +215,7 @@ export abstract class EvaluatorBase {
     }
   }
 
-  protected box(value: Value, from: Type): Value {
+  box(value: Value, from: Type): Value {
     if (value === undefined) return undefined;
     if (!this.isValueTypeValue(value, from)) return value;
     const underlying = nullableUnderlying(from);
@@ -284,7 +284,7 @@ export abstract class EvaluatorBase {
     return type.kind !== 'typeParameter' || true;
   }
 
-  private unbox(value: Value, to: Type): Value {
+  unbox(value: Value, to: Type): Value {
     const underlying = nullableUnderlying(to);
     if (value === undefined) {
       if (underlying || isReferenceType(to)) return undefined;

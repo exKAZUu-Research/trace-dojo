@@ -5,7 +5,7 @@ import { arithmetic, PendingException } from '../numeric';
 import { runtimeTypeName } from '../objects';
 import type { NativeState } from '../runtime';
 import { type NamedType, nullableUnderlying, specialOf, type SpecialType, type Type } from '../types';
-import { CsArray, CsBox, CsObject, CsStruct, isString, stringText, type Value } from '../values';
+import { copyValue, CsArray, CsBox, CsObject, CsStruct, isString, stringText, type Value } from '../values';
 import { isEnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { comparisonOf, type Equality, equalityOf, HashState, ListState, newList } from './nativesCollections';
 import { stableSort } from './sort';
@@ -686,7 +686,7 @@ const linq: Record<string, NativeMethod> = {
     return query(call, target, iteratorName('OfTypeIterator', [target]), [items as Value], function* () {
       for (const item of all)
         if (item !== undefined && evaluator.isInstanceOf(item, target))
-          yield item instanceof CsObject || typeof item !== 'object' ? item : item;
+          yield isValueType && item instanceof CsBox ? copyValue(item.value) : item;
     });
   },
   [`${ENUMERABLE}.Chunk`]: (call, _receiver, [items, size]) => {

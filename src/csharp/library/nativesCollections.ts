@@ -1414,9 +1414,14 @@ defineNatives({
   },
   [`${ARRAY}.GetUpperBound`]: (_call, receiver, [dimension]) => arrayOf(receiver).lengths[dimension as number] - 1,
   [`${ARRAY}.GetLowerBound`]: () => 0,
-  [`${ARRAY}.GetValue`]: (_call, receiver, [index]) => arrayOf(receiver).values[index as number],
-  [`${ARRAY}.SetValue`]: (_call, receiver, [value, index]) => {
-    arrayOf(receiver).values[index as number] = value as Value;
+  // `GetValue` and `SetValue` take and return `object`, so value-type elements cross them boxed.
+  [`${ARRAY}.GetValue`]: (call, receiver, [index]) => {
+    const array = arrayOf(receiver);
+    return evaluatorOf(call).box(array.values[index as number], elementTypeOf(array));
+  },
+  [`${ARRAY}.SetValue`]: (call, receiver, [value, index]) => {
+    const array = arrayOf(receiver);
+    array.values[index as number] = evaluatorOf(call).unbox(value as Value, elementTypeOf(array));
     return;
   },
   [`${ARRAY}.Clone`]: (call, receiver) => {
@@ -1534,7 +1539,8 @@ defineNatives({
   [`${ARRAY}.Exists`]: (call, _receiver, [array, match]) =>
     arrayOf(array as Value).values.some(predicateOf(call, match as Value)),
   [`${ARRAY}.Fill(T[], T)`]: (_call, _receiver, [array, value]) => {
-    arrayOf(array as Value).values.fill(value as Value);
+    const values = arrayOf(array as Value).values;
+    for (let index = 0; index < values.length; index++) values[index] = copyValue(value as Value);
     return;
   },
   [`${ARRAY}.Fill(T[], T, int, int)`]: (call, _receiver, [array, value, start, count]) => {
@@ -1547,7 +1553,9 @@ defineNatives({
         'Count must be positive and count must refer to a location within the string/array/collection.'
       );
     }
-    arrayOf(array as Value).values.fill(value as Value, start as number, (start as number) + (count as number));
+    const values = arrayOf(array as Value).values;
+    for (let index = start as number; index < (start as number) + (count as number); index++)
+      values[index] = copyValue(value as Value);
     return;
   },
   [`${ARRAY}.Find`]: (call, _receiver, [array, match]) => {

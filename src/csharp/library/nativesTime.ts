@@ -1,6 +1,6 @@
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
-import { CsStruct, type Value } from '../values';
+import { CsBox, CsStruct, type Value } from '../values';
 import { fail, libraryType, refOf } from './support';
 
 /** DateTime and TimeSpan keep their ticks (100 ns) in their one field. */
@@ -21,7 +21,32 @@ const ENGLISH_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'F
 const ENGLISH_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function ticksOf(value: Value): bigint {
-  return (value as CsStruct).fields[0] as bigint;
+  return (unboxedTime(value) as CsStruct).fields[0] as bigint;
+}
+
+/** A DateTime or TimeSpan, unboxed when an `object` overload receives it. */
+function unboxedTime(value: Value): Value {
+  return value instanceof CsBox ? value.value : value;
+}
+
+/** `Equals(object)` of DateTime and TimeSpan, true for the same type's value with the same ticks, boxed or not. */
+function timeEquals(receiver: Value, other: Value): boolean {
+  const value = unboxedTime(other);
+  return (
+    value instanceof CsStruct &&
+    value.type.symbol === (receiver as CsStruct).type.symbol &&
+    ticksOf(receiver) === ticksOf(value)
+  );
+}
+
+/** `CompareTo(object)` of DateTime and TimeSpan, which puts null first and rejects other types. */
+function timeCompare(receiver: Value, other: Value): number {
+  if (other === undefined) return 1;
+  const value = unboxedTime(other);
+  const symbol = (receiver as CsStruct).type.symbol;
+  if (!(value instanceof CsStruct) || value.type.symbol !== symbol)
+    fail('System.ArgumentException', `Object must be of type ${symbol.name}.`);
+  return compareTicks(ticksOf(receiver), ticksOf(value));
 }
 
 function dateTime(call: NativeCall, ticks: bigint): CsStruct {
@@ -398,11 +423,8 @@ defineNatives({
   'System.TimeSpan.Negate': (call, receiver) => timeSpan(call, -ticksOf(receiver)),
   'System.TimeSpan.Duration': (call, receiver) =>
     timeSpan(call, ticksOf(receiver) < 0n ? -ticksOf(receiver) : ticksOf(receiver)),
-  'System.TimeSpan.CompareTo': (_call, receiver, [other]) => compareTicks(ticksOf(receiver), ticksOf(other as Value)),
-  'System.TimeSpan.Equals': (_call, receiver, [other]) =>
-    other instanceof CsStruct &&
-    other.type.symbol === (receiver as CsStruct).type.symbol &&
-    ticksOf(receiver) === ticksOf(other),
+  'System.TimeSpan.CompareTo': (_call, receiver, [other]) => timeCompare(receiver, other as Value),
+  'System.TimeSpan.Equals': (_call, receiver, [other]) => timeEquals(receiver, other as Value),
   'System.TimeSpan.GetHashCode': (_call, receiver) =>
     Number(BigInt.asIntN(32, ticksOf(receiver) ^ (ticksOf(receiver) >> 32n))),
   'System.TimeSpan.ToString': (_call, receiver, [format]) =>
@@ -496,13 +518,9 @@ defineNatives({
     timeSpan(call, ticksOf(receiver) - ticksOf(other as Value)),
   'System.DateTime.Subtract(TimeSpan)': (call, receiver, [span]) =>
     dateTime(call, ticksOf(receiver) - ticksOf(span as Value)),
-  'System.DateTime.CompareTo': (_call, receiver, [other]) =>
-    other === undefined ? 1 : compareTicks(ticksOf(receiver), ticksOf(other as Value)),
+  'System.DateTime.CompareTo': (_call, receiver, [other]) => timeCompare(receiver, other as Value),
   'System.DateTime.Compare': (_call, _receiver, [a, b]) => compareTicks(ticksOf(a as Value), ticksOf(b as Value)),
-  'System.DateTime.Equals': (_call, receiver, [other]) =>
-    other instanceof CsStruct &&
-    other.type.symbol === (receiver as CsStruct).type.symbol &&
-    ticksOf(receiver) === ticksOf(other),
+  'System.DateTime.Equals': (_call, receiver, [other]) => timeEquals(receiver, other as Value),
   'System.DateTime.GetHashCode': (_call, receiver) =>
     Number(BigInt.asIntN(32, ticksOf(receiver) ^ (ticksOf(receiver) >> 32n))),
   'System.DateTime.ToString': (_call, receiver, [format]) =>
