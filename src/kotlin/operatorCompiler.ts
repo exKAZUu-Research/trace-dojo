@@ -458,7 +458,12 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         ? (frame) => sameReference(frame, left.eval(frame), right.eval(frame))
         : referenceEquality(leftEval, rightEval, isIdentity || comparesNullLiteral ? sameReference : valueEquals);
     }
-    const narrowing = this.equalityNarrowing(left, right, negated);
+    // The right operand runs after the left one is read, so its writes undo what comparing the left one shows.
+    const { whenTrue, whenFalse } = this.equalityNarrowing(left, right, negated);
+    const narrowing = {
+      whenTrue: this.withoutWritten(scope, whenTrue, expression.right),
+      whenFalse: this.withoutWritten(scope, whenFalse, expression.right),
+    };
     return {
       type: this.booleanType,
       repr: 'ref',
