@@ -17,7 +17,7 @@ export function parseIntegerLiteral(
   if (suffixText === 'l') throw fail('Long の数には、小文字の l ではなく大文字の L を付けてください。');
   const body = digitsText.replace(/^0[xXbB]/, '');
   if (body.startsWith('_') || body.endsWith('_') || body === '') throw fail('数の書き方に誤りがあります。');
-  if (/^0\d/.test(digitsText)) throw fail('0 で始まる10進数は書けません。');
+  if (/^0[\d_]/.test(digitsText)) throw fail('0 で始まる10進数は書けません。');
   const value = BigInt(digitsText.replaceAll('_', ''));
   const suffix =
     suffixText.toLowerCase() === 'ul' ? 'uL' : suffixText.toLowerCase() === 'u' ? 'u' : suffixText === 'L' ? 'L' : '';
