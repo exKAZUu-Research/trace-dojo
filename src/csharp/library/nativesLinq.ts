@@ -1050,9 +1050,12 @@ const linq: Record<string, NativeMethod> = {
   },
   [`${ENUMERABLE}.SequenceEqual`]: (call, _receiver, [first, second]) => {
     const equality = equalityOf(call, undefined);
-    // .NET tells collections of different counts apart by their counts, without comparing an element.
-    const firstCount = cheapCount(call, first as Value);
-    const secondCount = cheapCount(call, second as Value);
+    // .NET tells collections of different counts apart by their counts, without comparing an element; a query is no
+    // collection, and counting one could read a composed query graph again and again.
+    const collectionCount = (value: Value): number | undefined =>
+      value instanceof CsObject && value.native instanceof QueryState ? undefined : cheapCount(call, value);
+    const firstCount = collectionCount(first as Value);
+    const secondCount = collectionCount(second as Value);
     if (firstCount !== undefined && secondCount !== undefined && firstCount !== secondCount) return false;
     // Otherwise it reads both sequences in step and stops at the first difference.
     const left = source(call, first as Value, 'first')[Symbol.iterator]();
