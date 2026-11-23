@@ -4906,6 +4906,29 @@ fun main() { show("abc", "do") }`,
     stdout: '3\n2\na\n',
   },
   {
+    name: 'parentheses change no expression but a callee',
+    source: `fun pick(f: (Number) -> Unit, n: Int = 0) { f(3) }
+fun pick(f: (Int) -> Unit, s: String = "") { f(4) }
+fun show(x: String?, flag: Boolean) {
+    if (x?.isNotEmpty() ?: (false)) println(x.length)
+    println(when (flag) { (true) -> 1; (false) -> 2 })
+}
+fun main() {
+    show("ab", true)
+    val empty = if (false) listOf(1) else (emptyList())
+    println(empty)
+    println(listOf("bb", "a").maxWithOrNull((compareBy { it.length })))
+    pick(({ n: Number -> println(n) }))
+    println((31 * 2L).toInt())
+    var x = 1
+    (x) = 2
+    println(x)
+    val f = { 5 }
+    println((f)())
+}`,
+    stdout: '2\n1\n[]\nbb\n3\n62\n2\n5\n',
+  },
+  {
     name: 'conditions implying a non-null safe-call result smart-cast its receivers',
     source: `class Box(val text: String?)
 fun show(x: String?, box: Box?, any: Any?) {

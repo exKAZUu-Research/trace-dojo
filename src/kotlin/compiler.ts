@@ -1,4 +1,4 @@
-import { type Expression, type KotlinFile, unparenthesized } from './ast';
+import type { Expression, KotlinFile } from './ast';
 import { BodyCompiler } from './bodyCompiler';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
@@ -332,7 +332,7 @@ export class Compiler extends BodyCompiler {
     // Kotlin names the parameter of a `fun interface`'s constructor `function`.
     if (argument.name !== undefined && argument.name !== 'function')
       this.error(argument.row, `${cls.name} に ${argument.name} という引数はありません。`);
-    return this.compileSamConstructor(scope, context, cls, unparenthesized(argument.value), typeArgs, expected);
+    return this.compileSamConstructor(scope, context, cls, argument.value, typeArgs, expected);
   }
 
   private compileSamConstructor(

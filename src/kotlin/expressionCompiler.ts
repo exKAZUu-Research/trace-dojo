@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss -- expression compilation shares name resolution, call dispatch, and type inference.
 import { CompileError } from '../interpreter/diagnostics';
-import { type Block, type Expression, type LambdaExpression, unparenthesized } from './ast';
+import type { Block, Expression, LambdaExpression } from './ast';
 import {
   type ArgumentSyntax,
   CallCompiler,
@@ -97,9 +97,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     type: KType | undefined,
     isVar: boolean
   ): Compiled {
-    const delegate = unparenthesized(expression);
-    if (!type || delegate.kind !== 'call') return this.compileExpression(scope, context, expression);
-    return this.recordExpressionExit(this.compileCall(scope, context, delegate, undefined, { type, isVar }));
+    if (!type || expression.kind !== 'call') return this.compileExpression(scope, context, expression);
+    return this.recordExpressionExit(this.compileCall(scope, context, expression, undefined, { type, isVar }));
   }
 
   /** Compiles a block, whose last expression gives its value, or `Unit` when it has none. */

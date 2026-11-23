@@ -1,7 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { convertAnnotation } from './annotationArguments';
-import { unparenthesized, VISIBILITY_KEYWORDS } from './ast';
+import { VISIBILITY_KEYWORDS } from './ast';
 import type {
   Argument,
   BinaryOperator,
@@ -105,7 +105,10 @@ export abstract class ExpressionConverter {
         return { kind: 'super', row };
       }
       case 'parenthesized_expression': {
-        return { kind: 'parenthesized', row, expression: this.convertExpression(named(node)[0]) };
+        // Grouping changes no expression's meaning, so the compiler never sees it, except around a callee.
+        const grouped = this.convertExpression(named(node)[0]);
+        GROUPED.add(grouped);
+        return grouped;
       }
       case 'navigation_expression': {
         return this.convertNavigation(node);
@@ -308,7 +311,10 @@ export abstract class ExpressionConverter {
 
   private convertCall(node: Node): Expression {
     const parts = named(node);
-    const callee = this.convertExpression(parts[0]);
+    const callee: Expression =
+      parts[0].type === 'parenthesized_expression'
+        ? { kind: 'parenthesized', row: rowOf(parts[0]), expression: this.convertExpression(parts[0]) }
+        : this.convertExpression(parts[0]);
     let typeArgs: TypeRef[] = [];
     let args: Argument[] = [];
     let trailingLambda: LambdaExpression | undefined;
@@ -355,12 +361,10 @@ export abstract class ExpressionConverter {
     const isSpread = hasToken(node, '*') || valueNode.type === 'spread_expression';
     if (isSpread) this.requireLibrary(node, '配列の展開（*配列）');
     const value = this.convertExpression(valueNode.type === 'spread_expression' ? named(valueNode)[0] : valueNode);
-    // A parenthesized lambda is the same argument, which its candidates give its parameter types to.
-    const inner = unparenthesized(value);
     return {
       row: rowOf(node),
       name: isNamed ? identifierName(parts[0]) : undefined,
-      value: inner.kind === 'lambda' ? inner : value,
+      value,
       isSpread,
     };
   }
@@ -595,11 +599,15 @@ function decodeContent(node: Node, next: Node | undefined): { text: string; cons
   };
 }
 
+/** The expressions written in parentheses, which the AST does not keep. */
+const GROUPED = new WeakSet<Expression>();
+
 /**
  * The grammar can parse `2 to listOf<Int>()` as a call of `2 to listOf`. Postfix syntax binds to the rightmost
- * operand in these cases, and parentheses stop the descent.
+ * operand in these cases, and parentheses stop the descent, as in `(31 * a).toInt()`.
  */
 function intoRightOperand(target: Expression, apply: (operand: Expression) => Expression): Expression {
+  if (GROUPED.has(target)) return apply(target);
   switch (target.kind) {
     case 'binary':
     case 'infix':

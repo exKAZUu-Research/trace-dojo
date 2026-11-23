@@ -1426,9 +1426,6 @@ function containsBareCall(expression: Expression): boolean {
     case 'binary': {
       return containsBareCall(expression.left) || containsBareCall(expression.right);
     }
-    case 'parenthesized': {
-      return containsBareCall(expression.expression);
-    }
     default: {
       return false;
     }

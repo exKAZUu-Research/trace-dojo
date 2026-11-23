@@ -299,6 +299,7 @@ export type Expression =
   | { kind: 'in'; row: number; negated: boolean; left: Expression; right: Expression }
   | { kind: 'is'; row: number; negated: boolean; operand: Expression; type: TypeRef }
   | { kind: 'as'; row: number; isSafe: boolean; operand: Expression; type: TypeRef }
+  /** Only a callee keeps its parentheses, as `(f)()` invokes the value `f` rather than calling a function `f`. */
   | { kind: 'parenthesized'; row: number; expression: Expression }
   | { kind: 'if'; row: number; condition: Expression; thenBranch: Block; elseBranch: Block | undefined }
   | { kind: 'when'; row: number; subject: Expression | undefined; entries: WhenEntry[] }
@@ -326,11 +327,5 @@ export interface CallExpression {
 }
 
 export function isNullLiteral(expression: Expression): boolean {
-  return unparenthesized(expression).kind === 'null';
-}
-
-export function unparenthesized(expression: Expression): Expression {
-  let inner = expression;
-  while (inner.kind === 'parenthesized') inner = inner.expression;
-  return inner;
+  return expression.kind === 'null';
 }

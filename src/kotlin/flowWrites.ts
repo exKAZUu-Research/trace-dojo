@@ -150,7 +150,5 @@ function visitStatements(statements: Statement[], shadowed: Set<string>, names: 
 }
 
 function addWrite(target: Expression | undefined, shadowed: Set<string>, names: Set<string>): void {
-  // The assignment compiler sees through parentheses, as `(text) = null` assigns `text`.
-  while (target?.kind === 'parenthesized') target = target.expression;
   if (target?.kind === 'name' && !shadowed.has(target.name)) names.add(target.name);
 }

@@ -11,7 +11,7 @@ import type {
   WhenCondition,
   WhileStatement,
 } from './ast';
-import { isNullLiteral, unparenthesized } from './ast';
+import { isNullLiteral } from './ast';
 import type { ArgumentSyntax } from './callCompiler';
 import {
   checkedBoolean,
@@ -151,9 +151,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
 
   /** Whether an expression statement records a step: `if`, `when`, `try`, and jumps record none, as Java's do not. */
   private recordsStepOf(expression: Expression): boolean {
-    return !['if', 'when', 'try', 'return', 'throw', 'break', 'continue', 'lambda'].includes(
-      unparenthesized(expression).kind
-    );
+    return !['if', 'when', 'try', 'return', 'throw', 'break', 'continue', 'lambda'].includes(expression.kind);
   }
 
   protected compileStatement(scope: Scope, context: FunctionContext, statement: Statement): Exec {
@@ -416,8 +414,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     name: string
   ): Exec {
     const { operator, row, value } = statement;
-    let target = statement.target;
-    while (target.kind === 'parenthesized') target = target.expression;
+    const { target } = statement;
     const args: ArgumentSyntax[] = [{ row: value.row, name: undefined, value }];
     const call = (receiver: Compiled): Compiled => {
       const result = this.compileOperatorCall(scope, context, receiver, name, args, row, operator);
@@ -467,9 +464,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   /** After `x = value`, a stable `x` has the value's type, which may be narrower than its declared one. */
-  private narrowAfterAssignment(scope: Scope, assigned: Expression, value: Compiled, declared: KType): void {
-    let target = assigned;
-    while (target.kind === 'parenthesized') target = target.expression;
+  private narrowAfterAssignment(scope: Scope, target: Expression, value: Compiled, declared: KType): void {
     if (target.kind !== 'name') return;
     const variable = this.findVariable(scope, target.name);
     if (!variable) return;
@@ -488,7 +483,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   compilePlace(scope: Scope, context: FunctionContext, target: Expression, row: number, isCompound: boolean): Place {
-    if (target.kind === 'parenthesized') return this.compilePlace(scope, context, target.expression, row, isCompound);
     if (target.kind === 'name') return this.namePlace(scope, context, target, row, isCompound);
     if (target.kind === 'member') return this.memberPlace(scope, context, target, row, isCompound);
     if (target.kind === 'index') return this.indexPlace(scope, context, target, row, isCompound);
@@ -1497,8 +1491,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   /** Notes the constants a `when` branch covers: enum entries, objects, `true`, `false`, and `null`. */
-  private recordCovered(value: Compiled, written: Expression, covered: Set<string>): void {
-    const expression = unparenthesized(written);
+  private recordCovered(value: Compiled, expression: Expression, covered: Set<string>): void {
     if (expression.kind === 'boolean') covered.add(String(expression.value));
     if (expression.kind === 'null') covered.add('null');
     const found = caseOf(value);
@@ -1571,9 +1564,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
         return Boolean(
           variable && !variable.backingField && !variable.delegateRead && this.flow.assigned.has(variable)
         );
-      }
-      case 'parenthesized': {
-        return this.isNonThrowingExpression(scope, expression.expression);
       }
       default: {
         return false;

@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss -- the compiler of one area of Kotlin, whose parts call each other closely.
-import { isNullLiteral, unparenthesized } from './ast';
+import { isNullLiteral } from './ast';
 import type { CallExpression, Expression, TypeRef } from './ast';
 import { type ArgumentSyntax } from './callCompiler';
 import {
@@ -152,9 +152,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     isPrefix: boolean,
     row: number
   ): Compiled {
-    let operand = target;
-    while (operand.kind === 'parenthesized') operand = operand.expression;
-    if (operand.kind === 'member' && operand.isSafe) this.unavailable(row, '?. を使った ++・--');
+    if (target.kind === 'member' && target.isSafe) this.unavailable(row, '?. を使った ++・--');
     const place = this.compilePlace(scope, context, target, row, true);
     const readType = place.readType ?? place.type;
     const kind = this.primitiveOf(readType);
@@ -813,11 +811,10 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
  */
 function addBooleanComparisonNarrowing(
   operand: Compiled,
-  other: Expression,
+  literal: Expression,
   whenEqual: Map<string, KType>,
   whenUnequal: Map<string, KType>
 ): void {
-  const literal = unparenthesized(other);
   if (literal.kind !== 'boolean' || !operand.narrowing) return;
   const { whenTrue, whenFalse } = operand.narrowing;
   const [onEqual, onUnequal] = literal.value ? [whenTrue, whenFalse] : [whenFalse, whenTrue];
@@ -830,8 +827,7 @@ function addBooleanComparisonNarrowing(
  * `a ?: false` is true only where `a` is true, and `a ?: true` false only where `a` is false, so that outcome shows
  * that `a` was not null, as `x` of `x?.isNotEmpty() ?: false` is not.
  */
-function booleanElvisNarrowing(left: Compiled, written: Expression): Compiled['narrowing'] {
-  const fallback = unparenthesized(written);
+function booleanElvisNarrowing(left: Compiled, fallback: Expression): Compiled['narrowing'] {
   if (fallback.kind !== 'boolean') return undefined;
   const nonNullOutcome = nonNullFacts(left);
   const outcome = fallback.value ? left.narrowing?.whenFalse : left.narrowing?.whenTrue;
@@ -921,9 +917,6 @@ function isIntegerConstant(expression: Expression): boolean {
   switch (expression.kind) {
     case 'integer': {
       return expression.suffix === '' || expression.suffix === 'L';
-    }
-    case 'parenthesized': {
-      return isIntegerConstant(expression.expression);
     }
     case 'prefix': {
       return (expression.operator === '-' || expression.operator === '+') && isIntegerConstant(expression.operand);

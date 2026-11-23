@@ -1,4 +1,4 @@
-import { type Expression, unparenthesized } from './ast';
+import type { Expression } from './ast';
 import { type Compiled, type Eval, isBareCallExpression } from './compilerBase';
 import { type Frame, MISSING } from './runtime';
 import type { FunctionSymbol } from './symbols';
@@ -36,8 +36,7 @@ export function expectedArgumentType(
   isOverloaded: boolean,
   useLowerHints: boolean
 ): KType | undefined {
-  const hints =
-    useLowerHints && unparenthesized(argument).kind === 'call' ? argumentTypeHints(attempts, index) : undefined;
+  const hints = useLowerHints && argument.kind === 'call' ? argumentTypeHints(attempts, index) : undefined;
   const agreed = agreedParameterType(attempts, index, isOverloaded, hints);
   if (!isBareCallExpression(argument) || (agreed && !hasOpenVariables(agreed))) return agreed;
   const sibling = attempts
