@@ -1584,8 +1584,20 @@ export class DeclarationBinder extends BinderBase {
 
   findPropertyImplementation(type: NamedType, member: PropertySymbol, face: NamedType): PropertySymbol | undefined {
     for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
+      const substitution = substitutionOf(current);
+      // An indexer implements the interface's indexer of the same parameter types, among the overloads.
       const candidate = current.symbol.properties.find(
-        (property) => property.name === member.name && property.isIndexer === member.isIndexer && !property.isStatic
+        (property) =>
+          property.name === member.name &&
+          property.isIndexer === member.isIndexer &&
+          !property.isStatic &&
+          property.parameters.length === member.parameters.length &&
+          property.parameters.every((parameter, index) =>
+            sameType(
+              substitute(parameter.type, substitution),
+              substitute(member.parameters[index].type, substitutionOf(face))
+            )
+          )
       );
       if (candidate) {
         const ok =

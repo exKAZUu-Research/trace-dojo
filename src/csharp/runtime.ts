@@ -296,7 +296,12 @@ export class Runtime {
   ): CsObject {
     const type = this.exceptionType(fullName);
     const exception = new CsObject(type, Array.from({ length: type.symbol.instanceFieldCount }));
-    const state: ExceptionState = { message, inner, paramName, wasThrown: false };
+    const state: ExceptionState = {
+      message,
+      inner,
+      paramName,
+      wasThrown: false,
+    };
     exception.native = state;
     return exception;
   }
@@ -341,7 +346,11 @@ export class Runtime {
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private findImplementation(type: NamedType, method: MethodSymbol, face?: NamedType): MethodSymbol | undefined {
     const isInterface = method.owner.kind === 'interface';
-    const exact = face && isInterface ? this.findExactImplementation(type, method, face) : undefined;
+    // Without the call's interface type, the interface's own suits a non-generic interface, whose overloads (such as
+    // indexers) then map by their parameter types.
+    const exact = isInterface
+      ? this.findExactImplementation(type, method, face ?? method.owner.declaredType)
+      : undefined;
     if (exact) return exact;
     const implementsMethod = (candidate: MethodSymbol): boolean =>
       candidate.name === method.name &&
@@ -369,8 +378,10 @@ export class Runtime {
     const start = this.declaringClass(type, method.owner) ?? type;
     for (let current: NamedType | undefined = start; current; current = baseTypeOf(current)) {
       const substitution = substitutionOf(current);
-      const found = current.symbol.methods.find(
-        (candidate) =>
+      const accessors = current.symbol.properties.flatMap((property) => [property.getter, property.setter]);
+      const found = [...current.symbol.methods, ...accessors].find(
+        (candidate): candidate is MethodSymbol =>
+          candidate !== undefined &&
           candidate.name === method.name &&
           !candidate.isStatic &&
           candidate.typeParameters.length === method.typeParameters.length &&
