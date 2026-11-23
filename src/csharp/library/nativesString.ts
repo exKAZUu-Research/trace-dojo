@@ -522,7 +522,41 @@ const stringNatives: Record<string, NativeMethod> = {
   [`${STRING}.Compare`]: (call, _receiver, args) => {
     const [a, b] = args as (string | undefined)[];
     if (args.length === 5) {
-      const [strA, indexA, strB, indexB, length] = args as [string, number, string, number, number];
+      const [strA, indexA, strB, indexB, length] = args as [
+        string | undefined,
+        number,
+        string | undefined,
+        number,
+        number,
+      ];
+      if (length < 0) failOutOfRange(call, 'length', 'Length cannot be less than zero.');
+      if (indexA < 0)
+        failOutOfRange(
+          call,
+          'indexA',
+          'Index was out of range. Must be non-negative and less than the size of the collection.'
+        );
+      if (indexB < 0)
+        failOutOfRange(
+          call,
+          'indexB',
+          'Index was out of range. Must be non-negative and less than the size of the collection.'
+        );
+      // A null string orders before any other, as CompareInfo.Compare does.
+      if (strA === undefined) return strB === undefined ? 0 : -1;
+      if (strB === undefined) return 1;
+      if (indexA > strA.length)
+        failOutOfRange(
+          call,
+          'indexA',
+          'Index was out of range. Must be non-negative and less than the size of the collection.'
+        );
+      if (indexB > strB.length)
+        failOutOfRange(
+          call,
+          'indexB',
+          'Index was out of range. Must be non-negative and less than the size of the collection.'
+        );
       return compareCulture(
         strA.slice(indexA, indexA + length),
         strB.slice(indexB, indexB + length),
