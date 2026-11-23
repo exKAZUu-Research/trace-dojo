@@ -72,7 +72,6 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     return property.type ?? anyType(true);
   }
 
-  /** Runs a compilation of another declaration in the middle of one, restoring what the current one had. */
   /**
    * Compiles an entry in its own file and flow. A failure leaves the entry pending, as a probe that swallows the
    * error, such as one choosing an overload, must not make a later compilation of it look recursive.
