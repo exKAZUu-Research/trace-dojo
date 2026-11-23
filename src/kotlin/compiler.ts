@@ -22,7 +22,7 @@ import type { NativeFunction, NativeProperty } from './nativeTypes';
 import { hasNonNullReceiver, nonNullParameterIndexes, rejectNullArguments } from './nullArguments';
 import { Frame, type FunctionInfo, MISSING } from './runtime';
 import { ClassSymbol, FunctionSymbol, type MemberSymbol, VariableSymbol } from './symbols';
-import { fixVariable, isSubtype } from './typeRelations';
+import { anyType, fixVariable, isSubtype } from './typeRelations';
 import { type ClassType, classType, type FunctionType, isNonNullClass, type KType, NOTHING, resolved } from './types';
 import { KObject, NULL, type Value } from './values';
 
@@ -334,7 +334,24 @@ export class Compiler extends BodyCompiler {
     // Kotlin names the parameter of a `fun interface`'s constructor `function`.
     if (argument.name !== undefined && argument.name !== 'function')
       this.error(argument.row, `${cls.name} に ${argument.name} という引数はありません。`);
-    return this.compileSamConstructor(scope, context, cls, argument.value, typeArgs, expected);
+    return this.compileSamConstructor(
+      scope,
+      context,
+      cls,
+      argument.value,
+      typeArgs,
+      expected ?? this.delegateSamType(cls, args)
+    );
+  }
+
+  /**
+   * The type a `fun interface` constructed as a delegate, as `val x: Int by ReadOnlyProperty { ... }`, has from its
+   * property: kotlinc infers `ReadOnlyProperty<Any?, Int>` from the owner and the property type through getValue.
+   */
+  private delegateSamType(cls: ClassSymbol, args: ArgumentSyntax[]): KType | undefined {
+    const delegate = this.delegateCalls.get(args);
+    if (!delegate || cls.typeParameters.length !== 2) return undefined;
+    return classType(cls, [anyType(true), delegate.type]);
   }
 
   private compileSamConstructor(
