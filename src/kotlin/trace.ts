@@ -62,16 +62,26 @@ class Snapshotter {
     return variables;
   }
 
-  /** A frame's locals and captures over those of the frames enclosing a lambda, with the names they show. */
-  // code-gauge-allow functionCognitiveComplexity -- lists the kinds of variables a frame holds side by side, as Java's trace does.
+  /**
+   * The variables visible where a frame's statement runs, with the names they take: for each name the nearest
+   * binding, looking from the frame through the frames enclosing a lambda, where a frame's own locals come before what
+   * it captured and a captured variable before an enclosing frame's of the same name. Farther frames' variables come
+   * first in the display.
+   */
   private frameVariables(frame: Frame): { variables: TraceVariables; shown: Set<string> } {
-    const { variables, shown } = frame.enclosing
-      ? this.frameVariables(frame.enclosing)
-      : { variables: { vars: {}, referenceVars: {} }, shown: new Set<string>() };
+    const shown = new Set<string>();
+    const levels = enclosingFrames(frame).map((each) =>
+      this.bindingsOf(each).filter(({ name }) => !shown.has(name) && shown.add(name))
+    );
+    const variables: TraceVariables = { vars: {}, referenceVars: {} };
+    for (const { name, value, type } of levels.toReversed().flat()) addVariable(variables, name, value, type);
+    return { variables, shown };
+  }
+
+  /** A frame's assigned locals, then what it captured, by name. */
+  private bindingsOf(frame: Frame): { name: string; value: Value; type: KType }[] {
+    const bindings: { name: string; value: Value; type: KType }[] = [];
     const hidesArgs = frame.info.name === this.program.main.name && this.program.mainTakesArgs;
-    // What a lambda captured is what it reads, over an enclosing frame's variable of the same name; only its own
-    // locals shadow it.
-    const locals = new Set<string>();
     for (const local of frame.info.locals) {
       const slot = frame.locals[local.slot];
       // `main`'s parameter only receives the launcher's arguments, which these programs never use.
@@ -82,23 +92,18 @@ class Snapshotter {
         local.name.startsWith('\0')
       )
         continue;
-      locals.add(local.name);
-      shown.add(local.name);
-      addVariable(variables, local.name, slot instanceof Cell ? slot.value : (slot as Value), local.type);
+      bindings.push({ name: local.name, value: slot instanceof Cell ? slot.value : (slot as Value), type: local.type });
     }
     for (const capture of frame.info.captures) {
-      if (locals.has(capture.name)) continue;
       const captured = frame.captured[capture.slot];
       if (captured instanceof Cell && !captured.isAssigned) continue;
-      shown.add(capture.name);
-      addVariable(
-        variables,
-        capture.name,
-        captured instanceof Cell ? captured.value : (captured as Value),
-        capture.type
-      );
+      bindings.push({
+        name: capture.name,
+        value: captured instanceof Cell ? captured.value : (captured as Value),
+        type: capture.type,
+      });
     }
-    return { variables, shown };
+    return bindings;
   }
 
   /**
@@ -123,9 +128,6 @@ function enclosingFrames(frame: Frame): Frame[] {
 }
 
 function addVariable(variables: TraceVariables, name: string, value: Value, type: KType): void {
-  // A lambda's variable replaces both entries of an enclosing one of the same name.
-  delete variables.vars[name];
-  delete variables.referenceVars[name];
   if (resolved(type).kind === 'function') return;
   if (value instanceof KObject && value.function) return;
   const scalar = typedScalar(value, type);
@@ -279,7 +281,6 @@ function displayNodeOf(value: Value, seen: Set<unknown>): DisplayNode | undefine
 }
 
 /** Lists, arrays, and sets show as arrays of their elements, and maps as objects keyed by their keys. */
-// code-gauge-allow duplicateLines -- the same snapshot of objects as Java's trace, over Kotlin's objects.
 function collectionNodeOf(object: KObject, seen: Set<unknown>): DisplayNode | undefined {
   const kind = isArray(object) ? arrayElementKind(object) : undefined;
   const items =
@@ -294,14 +295,17 @@ function collectionNodeOf(object: KObject, seen: Set<unknown>): DisplayNode | un
     return { kind: 'array', entries };
   }
   if (!object.store) return undefined;
-  const entries: Record<string, DisplayNode> = {};
+  // Keys are the learner's strings, so they must not reach Object.prototype's setters, as `__proto__` would.
+  const entries = Object.create(null) as Record<string, DisplayNode>;
   for (const entry of object.store.ordered())
     entries[keyText(entry.key, seen)] = displayNodeOf(entry.value, seen) ?? NULL_NODE;
   return { kind: 'object', entries };
 }
 
-/** The text a map's key shows as, which is what learners write for it. */
-/** A key's text, rendered with the objects being rendered around it so that a key reaching its own map stops there. */
+/**
+ * The text a map's key shows as, which is what learners write for it, rendered with the objects being rendered around
+ * it so that a key reaching its own map stops there.
+ */
 function keyText(key: Value, seen: ReadonlySet<unknown>): string {
   if (key === undefined) return 'null';
   const node = displayNodeOf(key, new Set(seen));
