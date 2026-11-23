@@ -1754,13 +1754,14 @@ function whenValueTest(
 /** The integer kinds that an integer literal does not convert to among a `when` subject's branches. */
 const LITERAL_KEEPING_KINDS: ReadonlySet<string> = new Set(['Long', 'Byte', 'Short', 'ULong', 'UByte', 'UShort']);
 
+/** The facts that hold whichever of two conditions matched: a value narrowed by both is their common supertype. */
 function commonNarrowing(a: ReadonlyMap<string, KType>, b: ReadonlyMap<string, KType>): Map<string, KType> {
-  return new Map(
-    [...a].filter(([key, type]) => {
-      const other = b.get(key);
-      return other !== undefined && isSameType(type, other);
-    })
-  );
+  const result = new Map<string, KType>();
+  for (const [key, type] of a) {
+    const other = b.get(key);
+    if (other) result.set(key, isSameType(type, other) ? type : commonSupertype([type, other]));
+  }
+  return result;
 }
 
 function conditionsWrite(expression: Extract<Expression, { kind: 'when' }>, subject: Expression | undefined): boolean {
