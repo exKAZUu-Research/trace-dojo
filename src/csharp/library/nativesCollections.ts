@@ -1405,6 +1405,18 @@ function arrayOf(value: Value, name = 'array'): CsArray {
   return value as CsArray;
 }
 
+function checkValueIndex(array: CsArray, index: number): void {
+  if (index < 0 || index >= array.values.length)
+    fail('System.IndexOutOfRangeException', 'Index was outside the bounds of the array.');
+}
+
+/** Resets elements to their default, a value of its own in each slot, since a struct default is mutable storage. */
+function clearRange(call: NativeCall, array: CsArray, index: number, length: number): void {
+  const evaluator = evaluatorOf(call);
+  const type = elementTypeOf(array);
+  for (let offset = index; offset < index + length; offset++) array.values[offset] = evaluator.defaultOf(type);
+}
+
 function elementTypeOf(array: CsArray): Type {
   return array.type.element;
 }
@@ -1424,10 +1436,12 @@ defineNatives({
   // `GetValue` and `SetValue` take and return `object`, so value-type elements cross them boxed.
   [`${ARRAY}.GetValue`]: (call, receiver, [index]) => {
     const array = arrayOf(receiver);
+    checkValueIndex(array, index as number);
     return evaluatorOf(call).box(array.values[index as number], elementTypeOf(array));
   },
   [`${ARRAY}.SetValue`]: (call, receiver, [value, index]) => {
     const array = arrayOf(receiver);
+    checkValueIndex(array, index as number);
     array.values[index as number] = evaluatorOf(call).unbox(value as Value, elementTypeOf(array));
     return;
   },
@@ -1494,7 +1508,7 @@ defineNatives({
     ),
   [`${ARRAY}.Clear(Array)`]: (call, _receiver, [array]) => {
     const target = arrayOf(array as Value);
-    target.values.fill(evaluatorOf(call).defaultOf(elementTypeOf(target)));
+    clearRange(call, target, 0, target.values.length);
     return;
   },
   [`${ARRAY}.Clear(Array, int, int)`]: (call, _receiver, [array, index, length]) => {
@@ -1505,11 +1519,7 @@ defineNatives({
       (index as number) + (length as number) > target.values.length
     )
       fail('System.IndexOutOfRangeException', 'Index was outside the bounds of the array.');
-    target.values.fill(
-      evaluatorOf(call).defaultOf(elementTypeOf(target)),
-      index as number,
-      (index as number) + (length as number)
-    );
+    clearRange(call, target, index as number, length as number);
     return;
   },
   [`${ARRAY}.ConvertAll`]: (call, _receiver, [array, converter]) =>

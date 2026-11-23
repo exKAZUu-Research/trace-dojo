@@ -133,7 +133,10 @@ defineNatives({
   },
   'System.Object.MemberwiseClone': (_call, receiver) => {
     const object = receiver as CsObject;
-    const copy = new CsObject(object.type, [...object.fields]);
+    const copy = new CsObject(
+      object.type,
+      object.fields.map((field) => copyValue(field))
+    );
     copy.native = object.native;
     return copy;
   },

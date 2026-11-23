@@ -37,10 +37,15 @@ import {
 
 /** A `ref` or `out` argument, which reads and writes the caller's variable. */
 export class Reference implements VariableReference {
+  readonly set: (value: Value) => void;
+
+  /** A variable's storage, which receives a copy of a struct written through it, as an `out` argument from a library method. */
   constructor(
     readonly get: () => Value,
-    readonly set: (value: Value) => void
-  ) {}
+    set: (value: Value) => void
+  ) {
+    this.set = (value) => set(copyValue(value));
+  }
 }
 
 /** Storage that an assignment reads and writes after evaluating its receiver and indices once. */
@@ -152,12 +157,13 @@ export abstract class EvaluatorBase {
       typeof value !== 'number' &&
       typeof value !== 'bigint' &&
       typeof value !== 'boolean' &&
-      !(value instanceof CsDecimal)
+      !(value instanceof CsDecimal) &&
+      !(value instanceof CsStruct)
     )
       return value;
     const type = substitute(implementation.returnType, this.environmentFor(implementation, receiverType));
     return type.kind === 'named' && type.symbol.isValueType && !nullableUnderlying(type)
-      ? new CsBox(type, value)
+      ? new CsBox(type, copyValue(value))
       : value;
   }
 
