@@ -896,8 +896,18 @@ export abstract class StatementBinder extends PatternBinder {
       this.error(position, 'CS0117', `'${displayType(enumeratorType)}' に 'Current' の定義がありません`);
       return undefined;
     }
-    const moveNextMethod = moveNext.candidates.find((candidate) => candidate.method.parameters.length === 0)?.method;
-    if (!moveNextMethod) return undefined;
+    // The pattern calls a public instance MoveNext() that returns bool.
+    const moveNextMethod = moveNext.candidates.find(
+      ({ method: candidate }) =>
+        candidate.parameters.length === 0 &&
+        !candidate.isStatic &&
+        candidate.access === 'public' &&
+        specialOf(candidate.returnType) === 'bool'
+    )?.method;
+    if (!moveNextMethod) {
+      this.error(position, 'CS0117', `'${displayType(enumeratorType)}' に 'MoveNext' の定義がありません`);
+      return undefined;
+    }
     const elementType = substitute(current.property.type, substitutionOf(current.owner));
     const dispose = lookup(enumeratorType, 'Dispose');
     return {
