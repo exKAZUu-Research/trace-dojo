@@ -1091,11 +1091,10 @@ function reserve(call: NativeCall, state: BuilderState, added: number, work = ad
 
 /** The non-overlapping occurrences of a text in a range of a builder's text. */
 function occurrencesIn(text: string, value: string, start: number, count: number): number {
+  const range = text.slice(start, start + count);
   let occurrences = 0;
-  for (let index = text.indexOf(value, start); index !== -1 && index + value.length <= start + count;) {
+  for (let index = range.indexOf(value); index !== -1; index = range.indexOf(value, index + value.length))
     occurrences++;
-    index = text.indexOf(value, index + value.length);
-  }
   return occurrences;
 }
 
@@ -1279,8 +1278,10 @@ function replaceIn(
   start: number,
   count: number
 ): void {
+  // The scan of the range is charged before it runs, and the growth it finds before the text is built.
+  reserve(call, state, 0, count);
   const growth = occurrencesIn(state.text, from, start, count) * (to.length - from.length);
-  reserve(call, state, Math.max(0, growth), count + Math.max(0, growth));
+  reserve(call, state, Math.max(0, growth));
   state.replace(from, to, start, count);
 }
 
