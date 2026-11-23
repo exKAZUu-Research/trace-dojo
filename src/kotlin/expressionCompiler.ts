@@ -1998,7 +1998,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     context: FunctionContext,
     lambda: LambdaExpression,
     type: FunctionType,
-    useExpectedResult = false
+    { isInline, useExpectedResult = false }: { isInline: boolean; useExpectedResult?: boolean }
   ): KType | undefined {
     const savedFlow = this.flow.copy();
     try {
@@ -2021,7 +2021,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
                 nullable: false,
               },
             },
-        false
+        isInline
       );
       return (resolved(compiled.type) as FunctionType).returnType;
     } catch {

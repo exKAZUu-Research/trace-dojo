@@ -926,7 +926,12 @@ export abstract class CallCompiler extends CompilerCore {
     if (first.kind !== 'function' || !lambdaTypes.every((type) => hasSameLambdaParameters(first, type)))
       return undefined;
     const lambda = args[lambdaIndex].value as LambdaExpression;
-    const probe = this.compileLambdaProbe(scope, context, lambda, first);
+    // An inline function's lambda may return from the enclosing function, as `sumOf { if (it < 0) return 0L; ... }` does.
+    const isInline = attempts.every(({ candidate, mapping }) => {
+      const param = candidate.symbol.params[mapping.findIndex((indexes) => indexes.includes(lambdaIndex))];
+      return candidate.symbol.isInline && param?.blocksNonlocalControl !== true;
+    });
+    const probe = this.compileLambdaProbe(scope, context, lambda, first, { isInline });
     const matching =
       probe === undefined || hasOpenVariables(probe)
         ? []
@@ -942,7 +947,7 @@ export abstract class CallCompiler extends CompilerCore {
         : attempts.filter((_, index) => {
             const type = lambdaTypes[index];
             if (type.kind !== 'function' || hasOpenVariables(type.returnType)) return false;
-            const result = this.compileLambdaProbe(scope, context, lambda, type, true);
+            const result = this.compileLambdaProbe(scope, context, lambda, type, { isInline, useExpectedResult: true });
             return result !== undefined && isSubtype(result, type.returnType);
           });
     if (fitting.length === 1) return fitting[0];
@@ -963,7 +968,7 @@ export abstract class CallCompiler extends CompilerCore {
     context: FunctionContext,
     lambda: LambdaExpression,
     type: FunctionType,
-    useExpectedResult?: boolean
+    options: { isInline: boolean; useExpectedResult?: boolean }
   ): KType | undefined;
 
   /**
@@ -1393,9 +1398,13 @@ export abstract class CallCompiler extends CompilerCore {
     }
   }
 
-  /** A context for compiling a lambda only to learn its result type, whose code is thrown away. */
+  /**
+   * A context for compiling a lambda only to learn its result type, whose code is thrown away. It keeps the function
+   * an inline lambda's `return` leaves.
+   */
   protected probeContext(context: FunctionContext): FunctionContext {
-    return new FunctionContext(context, true, '<probe>', context.info.isLibrary, undefined, true);
+    const returnTarget = context.isLambda ? context.returnTarget : context;
+    return new FunctionContext(context, true, '<probe>', context.info.isLibrary, returnTarget, true);
   }
 }
 
