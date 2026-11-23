@@ -692,6 +692,9 @@ export class HashState implements EnumerableState {
   /** Charges a new entry against the run's slot limit, set where the collection is created. */
   allocate: (count: number) => void = () => {};
 
+  /** Charges work against the run's operations budget, set where the collection is created. */
+  spend: (count: number) => void = () => {};
+
   /** The type of a set's elements, which it holds unboxed; a dictionary's pairs carry their own type. */
   get elementType(): Type | undefined {
     return this.valueType ? undefined : this.keyType;
@@ -703,7 +706,10 @@ export class HashState implements EnumerableState {
 
   find(key: Value): number {
     const hash = this.equality.hash(key);
-    for (const index of this.buckets.get(hash) ?? []) {
+    const bucket = this.buckets.get(hash) ?? [];
+    // Keys whose hashes collide are compared one by one, which colliding keys can make long.
+    if (bucket.length > 1) this.spend(bucket.length);
+    for (const index of bucket) {
       const entry = this.entries[index];
       if (!entry.isFree && this.equality.equals(entry.key, key)) return index;
     }
@@ -803,6 +809,7 @@ function hashOfState(value: Value): HashState {
 function newHashState(call: NativeCall, comparer: Value, keyType: Type, valueType: Type | undefined): HashState {
   const state = new HashState(equalityOf(call, comparer), keyType, valueType, comparer);
   state.allocate = (count) => call.frame.runtime.allocateSlots(count);
+  state.spend = (count) => call.frame.runtime.spend(count);
   if (valueType) {
     const pairType = libraryType(call, 'System.Collections.Generic.KeyValuePair', [keyType, valueType]);
     state.pairOf = (key, value) => new CsStruct(pairType, [key, value]);
