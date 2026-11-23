@@ -174,6 +174,16 @@ function ticksFromDouble(value: number, unit: bigint, parameter: string): bigint
   return BigInt(Math.round(ticks));
 }
 
+/** TimeSpan's `*` and `/` by a double: .NET rejects a NaN operand, and a NaN or infinite result as an overflow. */
+function scaledTicks(ticks: number, operand: number, scale: (ticks: number, by: number) => number): bigint {
+  if (Number.isNaN(operand))
+    fail('System.ArgumentException', 'TimeSpan does not accept floating point Not-a-Number values.');
+  const result = scale(ticks, operand);
+  if (!Number.isFinite(result) || Math.abs(result) > 9.223372036854776e18)
+    fail('System.OverflowException', 'TimeSpan overflowed because the duration is too long.');
+  return BigInt(Math.round(result));
+}
+
 // ---- Formatting ----
 
 function pad(value: number, width: number): string {
@@ -441,9 +451,15 @@ defineNatives({
     timeSpan(call, ticksOf(a as Value) - ticksOf(b as Value)),
   'System.TimeSpan.op_UnaryNegation': (call, _receiver, [a]) => timeSpan(call, -ticksOf(a as Value)),
   'System.TimeSpan.op_Multiply': (call, _receiver, [a, factor]) =>
-    timeSpan(call, ticksFromDouble(Number(ticksOf(a as Value)) * (factor as number), 1n, 'factor')),
+    timeSpan(
+      call,
+      scaledTicks(Number(ticksOf(a as Value)), factor as number, (ticks, by) => ticks * by)
+    ),
   'System.TimeSpan.op_Division(TimeSpan, double)': (call, _receiver, [a, divisor]) =>
-    timeSpan(call, ticksFromDouble(Number(ticksOf(a as Value)) / (divisor as number), 1n, 'divisor')),
+    timeSpan(
+      call,
+      scaledTicks(Number(ticksOf(a as Value)), divisor as number, (ticks, by) => ticks / by)
+    ),
   'System.TimeSpan.op_Division(TimeSpan, TimeSpan)': (_call, _receiver, [a, b]) =>
     Number(ticksOf(a as Value)) / Number(ticksOf(b as Value)),
   ...comparisons('System.TimeSpan'),
