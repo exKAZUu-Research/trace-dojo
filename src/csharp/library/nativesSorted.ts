@@ -130,6 +130,11 @@ function newSorted(call: NativeCall, comparer: Value, keyType: Type, valueType: 
   );
 }
 
+/** An empty sorted state ordered as another is, for looking up a sequence's elements by the set's own comparer. */
+function lookupWithComparer(state: SortedState): SortedState {
+  return new SortedState(state.compare, state.keyType, undefined, undefined, state.keyText);
+}
+
 function keyNotFound(call: NativeCall, key: Value): never {
   throw new PendingException(
     'System.Collections.Generic.KeyNotFoundException',
@@ -313,14 +318,14 @@ defineNatives({
   },
   [`${SORTED_SET}.IntersectWith`]: (call, receiver, [other]) => {
     const state = sortedOf(receiver);
-    const others = newSorted(call, undefined, state.keyType, undefined);
+    const others = lookupWithComparer(state);
     for (const item of setElements(call, other as Value)) others.insert(item, undefined, false);
     for (const key of state.keys.filter((key) => !others.position(key).isFound)) state.remove(key);
     return;
   },
   [`${SORTED_SET}.IsSubsetOf`]: (call, receiver, [other]) => {
     const state = sortedOf(receiver);
-    const others = newSorted(call, undefined, state.keyType, undefined);
+    const others = lookupWithComparer(state);
     for (const item of setElements(call, other as Value)) others.insert(item, undefined, false);
     return state.keys.every((key) => others.position(key).isFound);
   },
@@ -342,13 +347,13 @@ defineNatives({
     newArray(call, typeArgument(call), sortedOf(receiver).keys.toReversed()),
   [`${SORTED_SET}.SetEquals`]: (call, receiver, [other]) => {
     const state = sortedOf(receiver);
-    const others = newSorted(call, undefined, state.keyType, undefined);
+    const others = lookupWithComparer(state);
     for (const item of setElements(call, other as Value)) others.insert(item, undefined, false);
     return others.keys.length === state.keys.length && others.keys.every((key) => state.position(key).isFound);
   },
   [`${SORTED_SET}.SymmetricExceptWith`]: (call, receiver, [other]) => {
     const state = sortedOf(receiver);
-    const others = newSorted(call, undefined, state.keyType, undefined);
+    const others = lookupWithComparer(state);
     for (const item of setElements(call, other as Value)) others.insert(item, undefined, false);
     for (const key of others.keys) if (!state.remove(key)) state.insert(key, undefined, false);
     return;

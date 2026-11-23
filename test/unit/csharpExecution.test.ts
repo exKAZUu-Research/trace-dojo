@@ -168,7 +168,7 @@ test.each([
   expect(executeProgram('csharp', program)).toEqual({ kind: 'compileError', diagnostics: [expected] });
 });
 
-// Learners' programs run in the server's process: work that the host cannot interrupt (a backtracking regex, a lazy
+// Learners' programs run in a browser's interpreter worker: work that the host cannot interrupt (a backtracking regex, a lazy
 // sequence, a culture search) must count against the budget, and a run must not see what an earlier run did.
 test('hostile programs stop within the limits, and runs share no state', () => {
   for (const program of [
