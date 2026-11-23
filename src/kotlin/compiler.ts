@@ -22,7 +22,7 @@ import type { NativeFunction, NativeProperty } from './nativeTypes';
 import { hasNonNullReceiver, nonNullParameterIndexes, rejectNullArguments } from './nullArguments';
 import { Frame, type FunctionInfo, MISSING } from './runtime';
 import { ClassSymbol, FunctionSymbol, type MemberSymbol, VariableSymbol } from './symbols';
-import { anyType, fixVariable, isSubtype } from './typeRelations';
+import { fixVariable, isSubtype } from './typeRelations';
 import { type ClassType, classType, type FunctionType, isNonNullClass, type KType, NOTHING, resolved } from './types';
 import { KObject, NULL, type Value } from './values';
 
@@ -369,12 +369,15 @@ export class Compiler extends BodyCompiler {
     }
     const compiled = this.compileSamFunction(scope, context, argument, sam.functionType);
 
-    this.fixSamTypeArguments(resolved(type) as ClassType);
+    this.fixSamTypeArguments(resolved(type) as ClassType, argument.row);
     return { ...this.samWrap(compiled, sam, resolved(type)), isCreation: true };
   }
 
-  /** Fixes the type arguments a SAM constructor's lambda left open from the bounds its typed parameters gave. */
-  private fixSamTypeArguments(type: ClassType): void {
+  /**
+   * Fixes the type arguments a SAM constructor's lambda left open from the bounds its typed parameters gave, rejecting
+   * one nothing determines, as kotlinc does.
+   */
+  private fixSamTypeArguments(type: ClassType, row: number): void {
     for (const typeArgument of type.args) {
       if (
         typeArgument.variance !== 'star' &&
@@ -386,8 +389,9 @@ export class Compiler extends BodyCompiler {
         const mostSpecific = upper.find((bound) => upper.every((other) => isSubtype(bound, other)));
         // Kotlin infers the intersection of bounds none of which is the most specific, as `Int & String`, which only
         // warns; no value has every type, so `Nothing` stands for it and every call with an argument is rejected.
-        const intersection = upper.length > 0 ? NOTHING : anyType(true);
-        typeArgument.type.variable.fixed = lower[0] ?? mostSpecific ?? intersection;
+        if (lower.length === 0 && upper.length === 0)
+          this.error(row, `型引数 ${typeArgument.type.variable.param.name} を推論できません。型を明示してください。`);
+        typeArgument.type.variable.fixed = lower[0] ?? mostSpecific ?? NOTHING;
       }
     }
   }
