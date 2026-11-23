@@ -43,6 +43,9 @@ const ROOT_DEFAULTS_INFO: FunctionInfo = {
   showsThis: false,
 };
 
+/** The prelude's `fun interface`s that stand for Java interfaces on the JVM, such as `java.util.Comparator`. */
+const JAVA_SAM_INTERFACES = new Set(['kotlin.Comparator']);
+
 const samImplementations = new WeakMap<FunctionSymbol, ClassSymbol>();
 
 /** The class of the objects a lambda converts to for a `fun interface`, whose abstract method calls the lambda. */
@@ -397,12 +400,15 @@ export class Compiler extends BodyCompiler {
   protected samWrap(lambda: Compiled, sam: NonNullable<ReturnType<Compiler['samOf']>>, type: KType): Compiled {
     const implementation = samImplementation(this.core, sam.cls, sam.method);
     const evaluate = lambda.eval;
+    const defersNull = JAVA_SAM_INTERFACES.has(sam.cls.qualifiedName);
     return {
       type,
       repr: 'ref',
       eval: (frame) => {
-        // A function-valued property read before its initializer ran is null, which only calling the method rejects.
+        // A function-valued property read before its initializer ran is null, which a Kotlin fun interface's constructor
+        // rejects, while a Java interface's adapter fails only when its method calls the function.
         const fn = evaluate(frame) as KObject | undefined;
+        if (!fn && !defersNull) return frame.runtime.throwError(frame, 'java.lang.NullPointerException');
         const object = new KObject(implementation, 0);
         object.function = fn?.function;
         object.env = fn?.env;
