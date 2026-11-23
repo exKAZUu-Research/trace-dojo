@@ -379,6 +379,7 @@ export class Compiler extends BodyCompiler {
           array.items = [...values];
           return array;
         },
+        isCall: true,
       };
     }
     if (args.length !== 1) this.error(row, 'valueOf には引数を1つ書いてください。');
