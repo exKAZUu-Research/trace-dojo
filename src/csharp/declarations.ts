@@ -812,6 +812,10 @@ export class DeclarationBinder extends BinderBase {
         `'${displayTypeSymbol(symbol)}.${member.kind === 'property' ? member.name : 'this'}': プロパティまたはインデクサーに void 型を指定することはできません`
       );
     const hasBodies = member.accessors.some((accessor) => accessor.body !== undefined);
+    if (symbol.kind === 'interface' && !this.isLibraryUnit) {
+      if (property.isStatic) this.unsupported(member, 'インターフェイスの静的メンバー');
+      else if (hasBodies) this.unsupported(member, 'インターフェイスの既定の実装');
+    }
     const isAuto =
       !this.isLibraryUnit &&
       member.kind === 'property' &&
