@@ -72,16 +72,16 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     return property.type ?? anyType(true);
   }
 
-  /**
-   * Compiles an entry in its own file and flow. A failure leaves the entry pending, as a probe that swallows the
-   * error, such as one choosing an overload, must not make a later compilation of it look recursive.
-   */
   /** Starts the flow of code compiled on its own, where only the top-level properties are assigned. */
   protected startFlow(): void {
     this.flow = new Flow();
     for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
   }
 
+  /**
+   * Compiles an entry in its own file and flow. A failure leaves the entry pending, as a probe that swallows the
+   * error, such as one choosing an overload, must not make a later compilation of it look recursive.
+   */
   private withSavedState<T>(entry: FunctionEntry | PropertyEntry, compile: () => T): T {
     const { file } = entry;
     const savedFile = this.file;

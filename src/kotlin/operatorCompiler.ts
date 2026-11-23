@@ -902,8 +902,10 @@ function addCaseNarrowing(
   for (const [key, type] of excludingCases(operand.stableKey, [otherCase.id])) whenUnequal.set(key, type);
 }
 
-/** That a stable value is not of a class, which `is` gives when it is false, for a `when` to skip that case. */
-/** What failing `is type` shows: the value is not of the type, and for a nullable type, not null either. */
+/**
+ * What failing `is type` shows: the value is not of the type, which lets a `when` skip that case, and for a nullable
+ * type, that it is not null either.
+ */
 export function isExclusion(operand: Compiled, type: KType): Map<string, KType> {
   const actual = resolved(type);
   const key = operand.stableKey;

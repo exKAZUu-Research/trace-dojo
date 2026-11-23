@@ -290,16 +290,16 @@ export class Flow {
   }
 }
 
-/**
- * What a non-null value of an expression shows: a stable value is not null, and neither is any receiver of the safe
- * calls it was read through, as `x` and `x.s` of `x?.s?.length` are not. Every condition that implies a non-null
- * value, such as `!= null`, `is T`, `?: return`, `!!` or `isNullOrEmpty()`, applies these facts.
- */
 /** Whether a smart cast's key is about the value of `key`: itself, its properties, or the cases it is known not to be. */
 export function isKeyOf(narrowedKey: string, key: string): boolean {
   return narrowedKey === key || narrowedKey.startsWith(`${key}.`) || narrowedKey.startsWith(`${key}${CASE_SEPARATOR}`);
 }
 
+/**
+ * What a non-null value of an expression shows: a stable value is not null, and neither is any receiver of the safe
+ * calls it was read through, as `x` and `x.s` of `x?.s?.length` are not. Every condition that implies a non-null
+ * value, such as `!= null`, `is T`, `?: return`, `!!` or `isNullOrEmpty()`, applies these facts.
+ */
 export function nonNullFacts(compiled: Compiled): Map<string, KType> {
   const facts = new Map(compiled.whenNonNull);
   if (compiled.stableKey && resolved(compiled.type).nullable) facts.set(compiled.stableKey, nonNull(compiled.type));
