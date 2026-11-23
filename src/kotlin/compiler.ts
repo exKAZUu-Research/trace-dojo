@@ -320,7 +320,7 @@ export class Compiler extends BodyCompiler {
     };
   }
 
-  /** `Comparator { a, b -> ... }`: a lambda converted to a `fun interface`, whose type arguments it may infer. */
+  /** `Comparator<Int> { a, b -> ... }`: a lambda or function value converted to a `fun interface` by its constructor. */
   protected samConstructorCall(
     scope: Scope,
     context: FunctionContext,
