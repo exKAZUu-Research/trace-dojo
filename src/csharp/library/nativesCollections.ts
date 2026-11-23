@@ -3,7 +3,7 @@ import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import { defaultCompare, environmentOf, hashOf, stringOf, valuesEqual } from '../objects';
 import { CsThrow } from '../runtime';
-import type { MethodSymbol, Type } from '../types';
+import { type MethodSymbol, sameType, type Type } from '../types';
 import {
   copyValue,
   CsArray,
@@ -1734,8 +1734,13 @@ defineNatives({
     if (length < 0 || from + length > values.length) failCount(call);
     return indexOfValue(call, values, value as Value, from, false, from + length);
   },
-  [`${ARRAY}.IndexOf(Array, object?)`]: (call, _receiver, [array, value]) =>
-    indexOfValue(call, arrayOf(array as Value).values, value as Value),
+  // The value comes boxed, while an array of a value type holds its elements unboxed.
+  [`${ARRAY}.IndexOf(Array, object?)`]: (call, _receiver, [array, value]) => {
+    const target = arrayOf(array as Value);
+    const element = elementTypeOf(target);
+    const sought = value instanceof CsBox && sameType(value.type, element) ? value.value : value;
+    return indexOfValue(call, target.values, sought as Value);
+  },
   [`${ARRAY}.LastIndexOf(T[], T)`]: (call, _receiver, [array, value]) =>
     indexOfValue(call, arrayOf(array as Value).values, value as Value, 0, true),
   [`${ARRAY}.LastIndexOf(T[], T, int)`]: (call, _receiver, [array, value, start]) =>
