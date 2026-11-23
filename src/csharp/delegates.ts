@@ -28,6 +28,7 @@ export function removeDelegate(runtime: Runtime, a: Value, b: Value): Value {
     };
   for (let start = source.length - removed.length; start >= 0; start--) {
     if (removed.every(equalAt(start))) {
+      runtime.allocateSlots(source.length - removed.length);
       const remaining = [...source.slice(0, start), ...source.slice(start + removed.length)];
       return remaining.length === 0 ? undefined : new CsDelegate((a as CsDelegate).type, remaining);
     }
