@@ -486,19 +486,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         : referenceEquality(leftEval, rightEval, isIdentity || comparesNullLiteral ? sameReference : valueEquals);
     }
     // The right operand runs after the left one is read, so its writes undo what comparing the left one shows.
-    const { whenTrue, whenFalse } = this.equalityNarrowing(left, right, negated);
-    addBooleanComparisonNarrowing(
-      left,
-      expression.right,
-      negated ? whenFalse : whenTrue,
-      negated ? whenTrue : whenFalse
-    );
-    addBooleanComparisonNarrowing(
-      right,
-      expression.left,
-      negated ? whenFalse : whenTrue,
-      negated ? whenTrue : whenFalse
-    );
+    const { whenTrue, whenFalse } = this.equalityNarrowing(left, right, negated, [expression.left, expression.right]);
     const narrowing = {
       whenTrue: this.withoutWritten(scope, whenTrue, expression.right),
       whenFalse: this.withoutWritten(scope, whenFalse, expression.right),
@@ -515,7 +503,12 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
    * The smart casts of `x != null` and `x == null` for a stable `x`, and of a safe call's receivers, which are not null
    * when the call's value is not null, as in `s?.length != null` and `s?.length == 3`.
    */
-  protected equalityNarrowing(left: Compiled, right: Compiled, negated: boolean): NonNullable<Compiled['narrowing']> {
+  protected equalityNarrowing(
+    left: Compiled,
+    right: Compiled,
+    negated: boolean,
+    [leftSyntax, rightSyntax]: [Expression | undefined, Expression]
+  ): NonNullable<Compiled['narrowing']> {
     const whenEqual = new Map<string, KType>();
     const whenUnequal = new Map<string, KType>();
     for (const [operand, other] of [
@@ -530,6 +523,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     }
     addCaseNarrowing(left, right, whenEqual, whenUnequal);
     addCaseNarrowing(right, left, whenEqual, whenUnequal);
+    addBooleanComparisonNarrowing(left, rightSyntax, whenEqual, whenUnequal);
+    if (leftSyntax) addBooleanComparisonNarrowing(right, leftSyntax, whenEqual, whenUnequal);
     return negated ? { whenTrue: whenUnequal, whenFalse: whenEqual } : { whenTrue: whenEqual, whenFalse: whenUnequal };
   }
 

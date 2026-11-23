@@ -1292,6 +1292,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       eval: (frame) => frame.locals[subjectSlot] as Value,
       stableKey: subject.stableKey,
       whenNonNull: subject.whenNonNull,
+      narrowing: subject.narrowing,
     };
     const before = this.flow.copy();
     const covered = new WhenCoverage();
@@ -1484,7 +1485,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
       narrowing.set(subject.stableKey, nonNull(subject.type));
     return {
       test: whenValueTest(subjectEval, nullLiteral ? undefined : valueEval, comparesPrimitives),
-      whenTrue: nullLiteral ? new Map() : this.equalityNarrowing(subject, value, false).whenTrue,
+      whenTrue: nullLiteral
+        ? new Map()
+        : this.equalityNarrowing(subject, value, false, [undefined, expression]).whenTrue,
       whenFalse: narrowing,
     };
   }
