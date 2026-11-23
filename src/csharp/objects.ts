@@ -318,6 +318,9 @@ export function structEquals(evaluator: Evaluator, a: CsStruct, b: Value, frame:
 /** The hash code that `GetHashCode()` gives, calling the program's overrides. */
 export function hashOf(evaluator: Evaluator, value: Value, frame: Frame): number {
   if (value === undefined) return 0;
+  // A string's hash reads every character, so hashing many references to one long string costs its length each time.
+  const text = unboxed(value);
+  if (typeof text === 'string') evaluator.runtime.spend(Math.ceil(text.length / 16));
   const primitive = primitiveHash(value);
   if (primitive !== undefined) return primitive;
   const getHashCode = objectMethod(evaluator, 'GetHashCode', 0);
