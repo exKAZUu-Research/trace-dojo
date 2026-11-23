@@ -329,8 +329,12 @@ export abstract class MemberBinder extends CallBinder {
     if (local.owner && local.owner !== context.fn.method) {
       local.isCaptured = true;
       for (let fn: typeof context.fn | undefined = context.fn; fn && fn.method !== local.owner; fn = fn.outer) {
-        if (fn.kind === 'lambda' && (fn.method as { isStaticLambda?: boolean }).isStaticLambda) {
-          this.error(position, 'CS8820', `静的な匿名関数に '${local.name}' への参照を含めることはできません。`);
+        // A static lambda or local function, nested at any depth, may not capture an enclosing local.
+        if ((fn.method as { isStaticLambda?: boolean }).isStaticLambda) {
+          if (fn.kind === 'lambda')
+            this.error(position, 'CS8820', `静的な匿名関数に '${local.name}' への参照を含めることはできません。`);
+          else
+            this.error(position, 'CS8421', `静的なローカル関数に '${local.name}' への参照を含めることはできません。`);
         }
         fn.captures.add(local);
       }

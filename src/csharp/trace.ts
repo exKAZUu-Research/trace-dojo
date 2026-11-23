@@ -366,10 +366,10 @@ function collectionNodeOf(value: CsObject | CsStruct, seen: Set<unknown>): Displ
   const native = value.native as EnumerableState | undefined;
   const shown = native && typeof native.display === 'function' ? native.display() : undefined;
   if (!shown) return undefined;
-  const entries: Record<string, DisplayNode> = {};
-  for (const [key, item, type] of shown.items) {
-    entries[key] = displayNodeOf(item, type, seen) ?? NULL_NODE;
-  }
+  // The keys are the program's, so they become own properties, which a key such as `__proto__` stays as.
+  const entries: Record<string, DisplayNode> = Object.fromEntries(
+    shown.items.map(([key, item, type]) => [key, displayNodeOf(item, type, seen) ?? NULL_NODE])
+  );
   return { kind: shown.kind, entries };
 }
 
