@@ -1199,6 +1199,8 @@ export class Evaluator extends StatementExecutor {
   ): string {
     const text = formatValue(this, value, type, format, frame);
     if (alignment === undefined) return text;
+    // A wide alignment is checked against the string limit before the host pads to it.
+    this.runtime.allocateString(Math.max(text.length, Math.abs(alignment)), 0);
     return alignment < 0 ? text.padEnd(-alignment) : text.padStart(alignment);
   }
 
