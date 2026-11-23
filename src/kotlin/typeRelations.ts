@@ -282,16 +282,17 @@ function commonFunctionType(types: KType[]): FunctionType | undefined {
   const [first] = types;
   if (first.kind !== 'function') return undefined;
   const functions = types.filter((type): type is FunctionType => type.kind === 'function');
-  const sameArity = (type: FunctionType): boolean =>
-    (type.receiver === undefined) === (first.receiver === undefined) && type.params.length === first.params.length;
-  if (functions.length < types.length || !functions.every(sameArity)) return undefined;
-  const receiver = first.receiver && mostSpecific(functions.map((type) => type.receiver as KType));
-  const params = first.params.map((_, index) => mostSpecific(functions.map((type) => type.params[index])));
-  if ((first.receiver && !receiver) || params.some((param) => !param)) return undefined;
+  if (functions.length < types.length) return undefined;
+  // A receiver is the first parameter of the invocation, as `String.() -> Int` is a `(String) -> Int`.
+  const invocations = functions.map((type) => (type.receiver ? [type.receiver, ...type.params] : type.params));
+  if (invocations.some((params) => params.length !== invocations[0].length)) return undefined;
+  const params = invocations[0].map((_, index) => mostSpecific(invocations.map((invocation) => invocation[index])));
+  if (params.some((param) => !param)) return undefined;
+  const keepsReceiver = functions.every((type) => type.receiver);
   return {
     kind: 'function',
-    receiver,
-    params: params as KType[],
+    receiver: keepsReceiver ? params[0] : undefined,
+    params: (keepsReceiver ? params.slice(1) : params) as KType[],
     returnType: commonSupertype(functions.map((type) => type.returnType)),
     nullable: false,
   };
