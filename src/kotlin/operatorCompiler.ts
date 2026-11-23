@@ -20,6 +20,7 @@ import {
 import { ExpressionCompiler, type Place } from './expressionCompiler';
 import { caseOf, keyOf } from './flowKeys';
 import { valueEquals } from './format';
+import { type IntegerLiteral, literalFits } from './literals';
 import {
   arithmeticOperation,
   type ArithmeticOperator,
@@ -405,6 +406,27 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     };
   }
 
+  /**
+   * The types of operands joined into one value, as the branches of an `if` or the sides of `?:`: without an expected
+   * type, an integer literal takes the one integer type its siblings have, as `0` in `if (c) n.toLong() else 0` is a
+   * Long, when it fits.
+   */
+  protected joinedTypes(operands: Compiled[]): KType[] {
+    const integral = new Set(
+      operands.flatMap((operand) => {
+        const kind = operand.integerLiteral ? undefined : this.primitiveOf(nonNull(operand.type));
+        return kind === 'Long' || kind === 'Short' || kind === 'Byte' ? [kind] : [];
+      })
+    );
+    const [kind] = integral;
+    if (integral.size !== 1 || !kind) return operands.map((operand) => operand.type);
+    const literals = operands.filter((operand) => operand.integerLiteral);
+    if (!literals.every((operand) => literalFits(operand.integerLiteral as IntegerLiteral, kind)))
+      return operands.map((operand) => operand.type);
+    const type = this.primitiveType(kind);
+    return operands.map((operand) => (operand.integerLiteral ? type : operand.type));
+  }
+
   protected compileElvis(
     scope: Scope,
     context: FunctionContext,
@@ -422,12 +444,13 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const rightIsNothing = resolved(right.type).kind === 'nothing' && !resolved(right.type).nullable;
     this.flow = rightIsNothing ? before : Flow_merge([before, this.flow]);
     if (rightIsNothing) this.flow.assumeNonNull(left);
-    const type = rightIsNothing ? nonNull(left.type) : commonSupertype([nonNull(left.type), right.type]);
+    const [, rightType] = this.joinedTypes([{ ...left, type: nonNull(left.type) }, right]);
+    const type = rightIsNothing ? nonNull(left.type) : commonSupertype([nonNull(left.type), rightType]);
     const repr = reprOf(this.core, type);
     const leftEval = convertRepr(left.eval, left.repr, 'ref');
     const rightEval = convertRepr(
-      this.convertTo(right, right.type, expression.row),
-      reprOf(this.core, right.type),
+      this.convertTo(right, rightType, expression.row),
+      reprOf(this.core, rightType),
       'ref'
     );
     const choose: Eval = (frame) => {

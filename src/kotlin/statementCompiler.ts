@@ -44,7 +44,16 @@ import { type Frame, LoopSignal, UNASSIGNED } from './runtime';
 import { type ClassSymbol, type PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
 import { checkedRead, instanceTest } from './typeChecks';
 import { commonSupertype, isSubtype } from './typeRelations';
-import { type ClassType, isNonNullClass, type KType, nonNull, resolved, substitute, typeToString } from './types';
+import {
+  type ClassType,
+  hasOpenVariables,
+  isNonNullClass,
+  type KType,
+  nonNull,
+  resolved,
+  substitute,
+  typeToString,
+} from './types';
 import { Boxed, Cell, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
 import { WhenCoverage } from './whenCoverage';
 
@@ -1260,12 +1269,14 @@ export abstract class StatementCompiler extends OperatorCompiler {
 
   /** The common type of the branches of an `if`, `when`, or `try` used as an expression. */
   private branchType(branches: Compiled[], expected: KType | undefined): KType {
-    const types = branches.map((branch) =>
-      branch.integerLiteral && expected
+    const joined = this.joinedTypes(branches);
+    const decides = expected && !hasOpenVariables(expected);
+    const types = branches.map((branch, index) =>
+      branch.integerLiteral && decides
         ? this.acceptsArgument(branch, expected)
           ? expected
           : branch.type
-        : branch.type
+        : joined[index]
     );
     if (expected && types.every((type, index) => this.acceptsArgument({ ...branches[index], type }, expected))) {
       const common = commonSupertype(types);
