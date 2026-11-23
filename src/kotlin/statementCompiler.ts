@@ -1690,8 +1690,11 @@ export abstract class StatementCompiler extends OperatorCompiler {
     loopExits: { exits: Flow[]; pending: Flow[] }[]
   ): Eval {
     const afterTry = this.flow;
-    // Any statement of the body may throw before it assigns anything, so `finally` also starts from before the try.
-    this.flow = Flow.merge([beforeTry, afterTry, ...throws, ...loopExits.flatMap(({ pending }) => pending)]);
+    this.flow = Flow.merge([afterTry, ...throws, ...loopExits.flatMap(({ pending }) => pending)]);
+    // Any statement of the body may throw before it assigns anything, so `finally` counts only what was assigned before.
+    for (const variable of this.flow.assigned) {
+      if (!beforeTry.assigned.has(variable)) this.flow.assigned.delete(variable);
+    }
     restrictFieldReads(this.flow, beforeTry);
     const exitStarts = loopExits.map(({ exits }) => exits.length);
     const evaluate = this.compileBlockValue(scope, context, block, undefined, true).eval;
