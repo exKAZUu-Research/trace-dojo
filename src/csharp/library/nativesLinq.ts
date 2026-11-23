@@ -126,6 +126,71 @@ function shapeOf(value: Value): QueryShape | undefined {
   return value instanceof CsObject && value.native instanceof QueryState ? value.native.shape : undefined;
 }
 
+/**
+ * The iterator .NET's `Select` makes, as a console project names it (a file-based app turns on LINQ's size-optimized
+ * iterators instead): a `Where` or `Select` iterator over an array or a list fuses the selector into its own kind.
+ */
+function selectIteratorName(call: NativeCall, items: Value): string {
+  const result = runtimeTypeName(call.typeArgs[1]);
+  const inner = iteratorParts(items);
+  if (!inner) {
+    if (items instanceof CsArray) return iteratorName('ArraySelectIterator', call.typeArgs);
+    if (isGenericList(items)) return iteratorName('ListSelectIterator', call.typeArgs);
+    // Another list, such as a ReadOnlyCollection<T>, takes the IList<T> iterator.
+    if (isArrayOrList(items)) return iteratorName('IListSelectIterator', call.typeArgs);
+    return iteratorName('IEnumerableSelectIterator', call.typeArgs);
+  }
+  const fused = FUSED_SELECT_ITERATORS[inner.name] ?? (inner.name.endsWith('SelectIterator') ? inner.name : undefined);
+  if (fused) return `System.Linq.Enumerable+${fused}\`2[${inner.sourceType},${result}]`;
+  // A compiler-generated iterator is no LINQ Iterator, whose Select the others share.
+  const name = inner.name.startsWith('<') ? 'IEnumerableSelectIterator' : 'IteratorSelectIterator';
+  return iteratorName(name, call.typeArgs);
+}
+
+/** The `Select` iterators that fuse a selector into a LINQ iterator of another kind. */
+const FUSED_SELECT_ITERATORS: Readonly<Record<string, string>> = {
+  ArrayWhereIterator: 'ArrayWhereSelectIterator',
+  ListWhereIterator: 'ListWhereSelectIterator',
+  IEnumerableWhereIterator: 'IEnumerableWhereSelectIterator',
+  RangeIterator: 'RangeSelectIterator',
+  IListSkipTakeIterator: 'IListSkipTakeSelectIterator',
+};
+
+/** The iterator .NET's `Where` makes, which a `Where` over an array or a list keeps, combining the predicates. */
+function whereIteratorName(call: NativeCall, items: Value): string {
+  const inner = iteratorParts(items);
+  if (inner) {
+    const keeps = ['ArrayWhereIterator', 'ListWhereIterator', 'IEnumerableWhereIterator'].includes(inner.name);
+    return iteratorName(keeps ? inner.name : 'IEnumerableWhereIterator', call.typeArgs);
+  }
+  if (items instanceof CsArray) return iteratorName('ArrayWhereIterator', call.typeArgs);
+  if (isGenericList(items)) return iteratorName('ListWhereIterator', call.typeArgs);
+  return iteratorName('IEnumerableWhereIterator', call.typeArgs);
+}
+
+/** A query's iterator class name and its first type argument, read back from the name `ToString()` prints. */
+function iteratorParts(value: Value): { name: string; sourceType: string } | undefined {
+  if (!(value instanceof CsObject && value.native instanceof QueryState)) return undefined;
+  const match = /^System\.Linq\.Enumerable\+([^`]+)`\d+\[(.*)\]$/.exec(value.native.displayName);
+  if (!match) return undefined;
+  let depth = 0;
+  let end = match[2].length;
+  for (const [index, char] of [...match[2]].entries()) {
+    if (char === '[') depth++;
+    else if (char === ']') depth--;
+    else if (char === ',' && depth === 0) {
+      end = index;
+      break;
+    }
+  }
+  return { name: match[1], sourceType: match[2].slice(0, end) };
+}
+
+/** Whether a value is a `List<T>` itself, which LINQ specializes apart from other lists. */
+function isGenericList(value: Value): boolean {
+  return value instanceof CsObject && value.type.symbol.fullName === 'System.Collections.Generic.List`1';
+}
+
 function isEmptyArray(value: Value): boolean {
   return value instanceof CsArray && value.values.length === 0;
 }
@@ -1024,17 +1089,13 @@ const linq: Record<string, NativeMethod> = {
     const select = delegateCall(call, selector as Value, 'selector');
     const withIndex = (call.method.parameters[1].type as NamedType).args.length === 3;
     const all = source(call, items as Value);
-    const name = withIndex
-      ? `<SelectIterator>d__251`
-      : isList(items as Value)
-        ? 'SizeOptIListSelectIterator'
-        : 'IEnumerableSelectIterator';
+    if (!withIndex && isEmptyArray(items as Value)) return newArray(call, call.typeArgs[1], []);
     return query(
       call,
       call.typeArgs[1],
       withIndex
-        ? `System.Linq.Enumerable+${name}\`2[${call.typeArgs.map(runtimeTypeName).join(',')}]`
-        : iteratorName(name, call.typeArgs),
+        ? `System.Linq.Enumerable+<SelectIterator>d__251\`2[${call.typeArgs.map(runtimeTypeName).join(',')}]`
+        : selectIteratorName(call, items as Value),
       [items as Value],
       function* () {
         let index = 0;
@@ -1206,19 +1267,17 @@ const linq: Record<string, NativeMethod> = {
     return dictionary;
   },
   [`${ENUMERABLE}.Where`]: (call, _receiver, args) =>
-    predicateQuery(
-      call,
-      args as Value[],
-      (withIndex) =>
-        withIndex
-          ? generatedIterator(call, 'WhereIterator', 350)
-          : iteratorName(isArrayOrList(args[0] as Value) ? 'SizeOptIListWhereIterator' : 'IEnumerableWhereIterator', [
-              call.typeArgs[0],
-            ]),
-      function* (all, matches) {
-        for (const item of all) if (matches(item)) yield item;
-      }
-    ),
+    (call.method.parameters[1].type as NamedType).args.length === 2 && isEmptyArray(args[0] as Value)
+      ? newArray(call, call.typeArgs[0], [])
+      : predicateQuery(
+          call,
+          args as Value[],
+          (withIndex) =>
+            withIndex ? generatedIterator(call, 'WhereIterator', 350) : whereIteratorName(call, args[0] as Value),
+          function* (all, matches) {
+            for (const item of all) if (matches(item)) yield item;
+          }
+        ),
   [`${ENUMERABLE}.Zip(IEnumerable<TFirst>, IEnumerable<TSecond>, IEnumerable<TThird>)`]: (call, _receiver, args) => {
     const [first, second, third] = args as Value[];
     const sources = [source(call, first, 'first'), source(call, second, 'second'), source(call, third, 'third')];

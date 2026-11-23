@@ -48,7 +48,7 @@ Console.WriteLine(System.Text.RegularExpressions.Regex.Replace("2024-05-06", @"(
       'n0 n15 n12 n18 n6 n9 n3 n4 n7 n10 n13 n1 n16 n19 n8 n11 n2 n14 n17 n5',
       'n0 n3 n6 n9 n12 n15 n18 n1 n4 n7 n10 n13 n16 n19 n2 n5 n8 n11 n14 n17',
       '1434747710 1 6 0.5227642760252413',
-      'System.Linq.Enumerable+SizeOptIListWhereIterator`1[System.Int32] System.Collections.Generic.List`1[System.Int32] System.Int32[] (1, a) System.Collections.Generic.Dictionary`2[System.Int32,System.Int32]',
+      'System.Linq.Enumerable+ListWhereIterator`1[System.Int32] System.Collections.Generic.List`1[System.Int32] System.Int32[] (1, a) System.Collections.Generic.Dictionary`2[System.Int32,System.Int32]',
       '06/2024/2024',
       '',
     ].join('\n'),
