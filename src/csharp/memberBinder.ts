@@ -844,9 +844,13 @@ export abstract class MemberBinder extends CallBinder {
       target: undefined,
     }));
     const saved = this.diagnostics.length;
-    // A delegate passes exactly its own arguments: no optional parameter is left out and no params array expands.
+    // A delegate passes exactly its own arguments: no optional parameter is left out, no params array expands, and
+    // each argument goes as it is, which a method that is not generic shows before overload resolution chooses.
     const candidates = group.candidates.filter(
-      (candidate) => candidate.method.parameters.length === invoke.parameterTypes.length
+      (candidate) =>
+        candidate.method.parameters.length === invoke.parameterTypes.length &&
+        (candidate.method.typeParameters.length > 0 ||
+          this.takesDelegateArguments({ candidate, typeArgs: [], args: [] }, invoke.parameterTypes, invoke.refKinds))
     );
     let resolved =
       candidates.length > 0
