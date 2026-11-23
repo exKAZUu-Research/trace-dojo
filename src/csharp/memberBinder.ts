@@ -1211,7 +1211,6 @@ export abstract class MemberBinder extends CallBinder {
     };
   }
 
-  /** The override of a virtual method that a type or its nearest base declares, for a non-virtual `base` call. */
   /**
    * Whether a method takes a delegate's arguments as they are: each converts to its parameter by identity or an
    * implicit reference conversion, as the delegate passes them unconverted, with the same passing mode (C# spec §10.8).
@@ -1249,6 +1248,7 @@ export abstract class MemberBinder extends CallBinder {
     return sameType(override.returnType, method.returnType) ? undefined : override.returnType;
   }
 
+  /** The override of a virtual method that a type or its nearest base declares, for a non-virtual `base` call. */
   protected implementationIn(type: Type, method: MethodSymbol): MethodSymbol {
     if (!(method.isVirtual || method.isAbstract || method.isOverride)) return method;
     for (const owner of this.searchChain(type)) {
