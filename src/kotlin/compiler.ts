@@ -1,4 +1,4 @@
-import type { KotlinFile, LambdaExpression } from './ast';
+import { type Expression, type KotlinFile, unparenthesized } from './ast';
 import { BodyCompiler } from './bodyCompiler';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
@@ -322,20 +322,19 @@ export class Compiler extends BodyCompiler {
     typeArgs: KType[],
     expected: KType | undefined
   ): Compiled | undefined {
-    const [lambda] = args;
-    if (!cls.isFunInterface || args.length !== 1 || lambda.value.kind !== 'lambda') return undefined;
-    if (typeArgs.length > cls.typeParameters.length) return undefined;
+    const [argument] = args;
+    if (!cls.isFunInterface || args.length !== 1 || typeArgs.length > cls.typeParameters.length) return undefined;
     // Kotlin names the parameter of a `fun interface`'s constructor `function`.
-    if (lambda.name !== undefined && lambda.name !== 'function')
-      this.error(lambda.row, `${cls.name} に ${lambda.name} という引数はありません。`);
-    return this.compileSamConstructor(scope, context, cls, lambda.value, typeArgs, expected);
+    if (argument.name !== undefined && argument.name !== 'function')
+      this.error(argument.row, `${cls.name} に ${argument.name} という引数はありません。`);
+    return this.compileSamConstructor(scope, context, cls, unparenthesized(argument.value), typeArgs, expected);
   }
 
   private compileSamConstructor(
     scope: Scope,
     context: FunctionContext,
     cls: ClassSymbol,
-    lambda: LambdaExpression,
+    argument: Expression,
     typeArgs: KType[],
     expected: KType | undefined
   ): Compiled {
@@ -361,14 +360,8 @@ export class Compiler extends BodyCompiler {
       const actual = resolved(param);
       if (actual.kind === 'variable' && !actual.variable.fixed) fixVariable(actual.variable);
     }
-    const compiled = this.compileLambda(scope, context, lambda, resolved(sam.functionType) as FunctionType, false);
-    const bodyType = (resolved(compiled.type) as FunctionType).returnType;
-    if (
-      !isSubtype(bodyType, sam.functionType.returnType) &&
-      !isNonNullClass(sam.functionType.returnType, this.core.unit)
-    ) {
-      this.error(lambda.row, typeMismatchMessage(sam.functionType.returnType, bodyType));
-    }
+    const compiled = this.compileSamFunction(scope, context, argument, sam.functionType);
+
     for (const argument of (resolved(type) as ClassType).args) {
       if (argument.variance !== 'star' && argument.type.kind === 'variable' && !argument.type.variable.fixed) {
         argument.type.variable.fixed =
@@ -376,6 +369,27 @@ export class Compiler extends BodyCompiler {
       }
     }
     return { ...this.samWrap(compiled, sam, resolved(type)), isCreation: true };
+  }
+
+  /** The function a `fun interface`'s constructor wraps: a lambda, or a value of a function type such as `(Int, Int) -> Int`. */
+  private compileSamFunction(
+    scope: Scope,
+    context: FunctionContext,
+    argument: Expression,
+    functionType: FunctionType
+  ): Compiled {
+    if (argument.kind !== 'lambda') {
+      const compiled = this.compileExpression(scope, context, argument, functionType);
+      if (!isSubtype(compiled.type, functionType))
+        this.error(argument.row, typeMismatchMessage(functionType, compiled.type));
+      return compiled;
+    }
+    const compiled = this.compileLambda(scope, context, argument, resolved(functionType) as FunctionType, false);
+    const bodyType = (resolved(compiled.type) as FunctionType).returnType;
+    if (!isSubtype(bodyType, functionType.returnType) && !isNonNullClass(functionType.returnType, this.core.unit)) {
+      this.error(argument.row, typeMismatchMessage(functionType.returnType, bodyType));
+    }
+    return compiled;
   }
 
   protected samWrap(lambda: Compiled, sam: NonNullable<ReturnType<Compiler['samOf']>>, type: KType): Compiled {
