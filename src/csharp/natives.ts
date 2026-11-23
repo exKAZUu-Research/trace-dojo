@@ -1,6 +1,6 @@
 import type { Frame } from './runtime';
 import { displayType, type MethodSymbol, type NamedType, specialOf, type Type } from './types';
-import { CsArray, freshString, plainString, type Value, type VariableReference } from './values';
+import { CsArray, CsString, freshString, plainString, stringText, type Value, type VariableReference } from './values';
 
 /** What a native method knows of its call besides its receiver and arguments. */
 export interface NativeCall {
@@ -46,8 +46,19 @@ export function defineNativesKeepingStrings(natives: Record<string, NativeMethod
 /** The native implementation of a library method, if any, which a constructor may take from its base class's. */
 export function nativeOf(method: MethodSymbol): NativeMethod | undefined {
   const native = ownNativeOf(method, method.owner.fullName) ?? inheritedConstructorOf(method);
-  if (!native || keepingStrings.has(native)) return native;
-  return withPlainStrings(method, native);
+  if (!native) return native;
+  return withLengthChecked(method, keepingStrings.has(native) ? native : withPlainStrings(method, native));
+}
+
+/** A native whose string result is checked against the string length limit, whichever native built it. */
+function withLengthChecked(method: MethodSymbol, native: NativeMethod): NativeMethod {
+  if (resultStrings(method) !== 'string') return native;
+  return (call, receiver, args) => {
+    const value = native(call, receiver, args);
+    if (typeof value === 'string' || value instanceof CsString)
+      call.frame.runtime.allocateString(stringText(value).length, 0);
+    return value;
+  };
 }
 
 function inheritedConstructorOf(method: MethodSymbol): NativeMethod | undefined {
