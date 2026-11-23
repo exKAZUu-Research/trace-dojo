@@ -744,6 +744,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
     );
     // A value of type Nothing fits any `set`, whose parameter then gives the type the place stores.
     const valueArg = heldName('\0assigned', this.nothing(), () => held().value);
+    // Reading that placeholder would mark the code after the assignment unreachable, which the real value is not.
+    const wasDead = this.flow.isDead;
     const setter = this.resolveOperator(
       indexScope,
       context,
@@ -753,6 +755,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       row,
       '[]='
     );
+    this.flow.isDead = wasDead;
     const valueParam = setter.call.symbol.params.at(-1);
     if (!valueParam) return this.error(row, 'ここには代入できません。');
     const substitution = new Map([...setter.call.candidate.substitution, ...setter.call.typeArguments]);

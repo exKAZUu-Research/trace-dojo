@@ -5158,6 +5158,15 @@ fun square(x: Int) = x * x`,
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
 
+test('requires a return after an indexed assignment ends a non-Unit function', () => {
+  expect(
+    executeProgram(
+      'kotlin',
+      'fun value(): Int {\n    val numbers = intArrayOf(0)\n    numbers[0] = 1\n}\nfun main() { println(value()) }'
+    )
+  ).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 3 }] });
+});
+
 test.each(['listOf(1).sumOf { error("stop") }', 'intArrayOf(1).sumOf { throw IllegalArgumentException("stop") }'])(
   'rejects ambiguous selector overloads before running %s',
   (call) => {
