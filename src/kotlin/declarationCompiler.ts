@@ -250,7 +250,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       if (members.length === 0 || !owner.isObject) this.rejectImport(row, path.join('.'));
       if (members.every((member) => member.visibility === 'private'))
         this.error(row, `${name} は private なので、${owner.name} の外からは使えません。`);
-      this.importObjectMembers(context, owner, name, members);
+      this.importObjectMembers(context, name, members);
       return;
     }
     const cls = this.findQualifiedClass(path);
@@ -259,12 +259,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** Imports members of an object, such as `Delegates.observable`, as if they were top-level. */
-  protected abstract importObjectMembers(
-    context: FileContext,
-    owner: ClassSymbol,
-    name: string,
-    members: MemberSymbol[]
-  ): void;
+  protected abstract importObjectMembers(context: FileContext, name: string, members: MemberSymbol[]): void;
 
   private rejectImport(row: number, path: string): never {
     this.rejectUnavailableLibraryReference(path, row);

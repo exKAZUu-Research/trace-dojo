@@ -269,17 +269,12 @@ export class Compiler extends BodyCompiler {
 
   // Implementations of the hooks the compiler's layers declare.
 
-  protected importObjectMembers(context: FileContext, owner: ClassSymbol, name: string, members: MemberSymbol[]): void {
-    void owner;
+  protected importObjectMembers(context: FileContext, name: string, members: MemberSymbol[]): void {
     for (const member of members) {
       if (member.kind === 'function') addOnce(context.importedFunctions, name, member);
       else addOnce(context.importedProperties, name, member);
     }
-    this.importedObjectOwners.set(name, owner);
   }
-
-  /** The objects whose members a file imported, which calls of those members use as their receiver. */
-  private readonly importedObjectOwners = new Map<string, ClassSymbol>();
 
   protected nativeInvoker(symbol: FunctionSymbol, native: NativeFunction): NonNullable<FunctionSymbol['invoke']> {
     let nonNullParams: number[] | undefined;
