@@ -434,16 +434,17 @@ export class Runtime {
     const reached = new Set<TurtleState>();
     const seen = new Set<object>();
     const pending = this.garbageRoots();
+    // Every entry the traversal visits is charged, primitives and repeated references included, so that a program
+    // cannot repeat collections over a large array for free.
     let scanned = 0;
     while (pending.length > 0) {
       const value = pending.pop();
+      if (++scanned % 64 === 0) this.spend();
       if (!(value instanceof Object) || seen.has(value)) continue;
       seen.add(value);
-      scanned++;
       if (value instanceof CsObject && value.turtle?.isAlive) reached.add(value.turtle);
       for (const reference of referencesOf(value)) pending.push(reference);
     }
-    this.spend(Math.ceil(scanned / 64));
     this.world.retain((turtle) => reached.has(turtle));
   }
 

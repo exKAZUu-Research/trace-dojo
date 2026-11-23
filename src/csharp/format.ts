@@ -249,6 +249,12 @@ function formatStandard(
       if (kind !== 'integer') throw invalidFormat();
       return hexText(value as number | bigint, specifier === 'x', precision ?? 0, bits);
     }
+    case 'B': {
+      if (kind !== 'integer') throw invalidFormat();
+      return BigInt.asUintN(bits, BigInt(value as number | bigint))
+        .toString(2)
+        .padStart(precision ?? 0, '0');
+    }
     case 'F':
     case 'N': {
       return fixedText(value, kind, upper === 'N', precision ?? CULTURE.numberDecimalDigits, mode);
