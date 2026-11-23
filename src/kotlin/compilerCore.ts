@@ -318,6 +318,15 @@ export abstract class CompilerCore {
     return includeEmpty ? levels : levels.filter((level) => level.length > 0);
   }
 
+  /** The nearest top-level property of a name that takes no receiver, which a bare name reads and assigns. */
+  protected topLevelPlainProperty(name: string): PropertySymbol | undefined {
+    for (const level of this.topLevelProperties(name)) {
+      const property = level.find((candidate) => !candidate.extensionReceiver);
+      if (property) return property;
+    }
+    return undefined;
+  }
+
   // Members.
 
   /** The members of a name on a receiver type, those of subclasses hiding the ones they override. */

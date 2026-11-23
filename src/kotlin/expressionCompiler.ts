@@ -479,11 +479,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
     const staticMember = this.findStaticMember(scope, name, row);
     if (staticMember) return staticMember;
-    const levels = this.topLevelProperties(name);
-    for (const level of levels) {
-      const property = level.find((candidate) => !candidate.extensionReceiver);
-      if (property) return this.readTopLevelProperty(context, property, row);
-    }
+    const property = this.topLevelPlainProperty(name);
+    if (property) return this.readTopLevelProperty(context, property, row);
     const cls = this.findClass(scope, name);
     if (cls) this.checkNestedAccessible(scope, cls, row);
     if (cls) {

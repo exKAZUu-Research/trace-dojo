@@ -520,7 +520,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       };
       return this.propertyPlace(companion.property, holder, row, scope);
     }
-    const property = this.topLevelProperties(target.name)[0]?.find((candidate) => !candidate.extensionReceiver);
+    const property = this.topLevelPlainProperty(target.name);
     if (property) return this.topLevelPlace(scope, context, property, row, isCompound);
     return this.error(row, `${target.name} が見つかりません。`);
   }
