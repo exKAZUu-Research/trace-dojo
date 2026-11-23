@@ -72,7 +72,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     return property.type ?? anyType(true);
   }
 
-  /** Starts the flow of code compiled on its own, where only the top-level properties are assigned. */
+  /** Starts the flow of code compiled on its own, where only the constructor parameters initializers see are assigned. */
   protected startFlow(): void {
     this.flow = new Flow();
     for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
