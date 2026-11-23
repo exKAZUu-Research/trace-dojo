@@ -1459,6 +1459,17 @@ export class DeclarationBinder extends BinderBase {
         );
         return;
       }
+      const baseType = substitute(candidate.type, substitutionOf(current));
+      // A get-only property may override with a more derived reference type (covariant return); any other must match.
+      const isCovariant = !property.setter && isReferenceType(property.type) && isReferenceType(baseType);
+      if (!sameType(property.type, baseType) && !isCovariant && property.type.kind !== 'error') {
+        this.error(
+          property.row,
+          'CS1715',
+          `'${displayTypeSymbol(symbol)}.${property.name}': オーバーライドされたメンバー '${displayTypeSymbol(current.symbol, current.args)}.${candidate.name}' に対応するために、型は '${displayType(baseType)}' でなければなりません`
+        );
+        return;
+      }
       property.overridden = candidate;
       if (property.getter) property.getter.overridden = this.accessorOf(candidate, 'getter');
       if (property.setter) property.setter.overridden = this.accessorOf(candidate, 'setter');
