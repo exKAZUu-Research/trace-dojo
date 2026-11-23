@@ -667,6 +667,16 @@ export class ExpressionConverter {
         }
       }
     }
+    const mixed = parameters.find((parameter) => (parameter.type === undefined) !== (parameters[0].type === undefined));
+    if (mixed) {
+      throw new CompileError([
+        {
+          row: mixed.row,
+          message:
+            'CS0748: ラムダ パラメーターの使用方法に一貫性がありません。パラメーター型はすべて明示的であるか、またはすべて暗黙的である必要があります',
+        },
+      ]);
+    }
     const bodyNode = requiredField(node, 'body');
     const returnTypeNode = field(node, 'type');
     return {

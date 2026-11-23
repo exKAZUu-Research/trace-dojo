@@ -680,12 +680,15 @@ export class Converter extends ExpressionConverter {
       if (['ref', 'out', 'in', 'params', 'this'].includes(text)) modifier = text as Parameter['modifier'];
     }
     const typeNode = field(node, 'type');
+    // The grammar lets a parameter omit its type for lambdas, whose parameters convertLambda takes instead; Roslyn
+    // reads the name of `int Add(int a, b)` as a type still waiting for its name.
+    if (!typeNode) throw new CompileError([{ row: node.endPosition.row, message: 'CS1001: 識別子がありません' }]);
     const defaultNode = namedChildren(node).find(
       (child) => !sameNode(child, typeNode) && !sameNode(child, field(node, 'name')) && child.type !== 'modifier'
     );
     return {
       name: requiredField(node, 'name').text,
-      type: typeNode ? this.convertType(typeNode) : undefined,
+      type: this.convertType(typeNode),
       modifier,
       defaultValue: defaultNode ? this.convertExpression(defaultNode) : undefined,
       ...positionOf(node),
