@@ -320,7 +320,10 @@ function generalStandardText(
 ): string {
   // `G0` of a decimal drops its trailing zeros, which `G` keeps, by taking all 29 of its digits as the precision.
   if (precision === 0 && kind === 'decimal') precision = 29;
-  if (precision === undefined || precision === 0) return roundTripText(value, kind);
+  if (precision === undefined || precision === 0) {
+    const text = roundTripText(value, kind);
+    return letter === 'e' ? text.replace('E', 'e') : text;
+  }
   return generalText(roundDigits(digitsOf(value, kind), precision, mode), precision, letter);
 }
 

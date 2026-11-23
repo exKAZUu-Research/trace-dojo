@@ -184,6 +184,15 @@ function splitParts(
     index += length;
     start = index;
   }
+  // .NET skips the entries the options remove before it takes the rest as the last part.
+  while (removeEmpty && parts.length === count - 1) {
+    let next = start;
+    while (next < text.length && separatorLengthAt(next) === 0) next++;
+    if (next >= text.length) break;
+    const piece = text.slice(start, next);
+    if ((trimEntries ? trimWith(piece, undefined, true, true) : piece) !== '') break;
+    start = next + separatorLengthAt(next);
+  }
   push(text.slice(start));
   return parts;
 }
@@ -388,13 +397,15 @@ const stringNatives: Record<string, NativeMethod> = {
   [`${STRING}.Replace(string, string?)`]: (call, receiver, [from, to]) => {
     if (from === undefined) failNull('oldValue');
     if (from === '') fail('System.ArgumentException', 'The value cannot be an empty string.', 'oldValue');
-    const text = receiverText(receiver).replaceAll(from as string, (to as string | undefined) ?? '');
+    // A callback keeps the replacement literal, which JavaScript would read for `$&` and other substitutions.
+    const text = receiverText(receiver).replaceAll(from as string, () => (to as string | undefined) ?? '');
     call.frame.runtime.allocateString(text.length);
     return text;
   },
   [`${STRING}.Replace(string, string?, StringComparison)`]: (_call, receiver, [from, to, comparison]) => {
     const text = receiverText(receiver);
-    if ((comparison as number) % 2 === 0) return text.replaceAll(from as string, (to as string | undefined) ?? '');
+    if ((comparison as number) % 2 === 0)
+      return text.replaceAll(from as string, () => (to as string | undefined) ?? '');
     return text.replaceAll(
       new RegExp((from as string).replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`), 'gi'),
       () => (to as string | undefined) ?? ''
@@ -422,7 +433,9 @@ const stringNatives: Record<string, NativeMethod> = {
     newArray(
       call,
       libraryType(call, 'System.Char'),
-      [...receiverText(receiver)].flatMap((char) => [...char].map((unit) => unit.charCodeAt(0)))
+      Array.from({ length: receiverText(receiver).length }, (_unused, index) =>
+        receiverText(receiver).charCodeAt(index)
+      )
     ),
   [`${STRING}.ToCharArray(int, int)`]: (call, receiver, [start, length]) => {
     const text = receiverText(receiver);
