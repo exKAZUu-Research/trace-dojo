@@ -134,6 +134,8 @@ export class FunctionContext {
   forbidsReturn = false;
   /** Whether a `return` written directly in the context, not in a lambda, leaves it. */
   hasDirectReturn = false;
+  /** Gives the returns compiled before an inferred result type the representation that type settles on. */
+  readonly inferredReturns: ((to: Repr) => void)[] = [];
   inlineLambda = false;
   /** A discarded probe may retain open types until the enclosing argument reveals their positions. */
   allowOpenCallTypes: boolean;

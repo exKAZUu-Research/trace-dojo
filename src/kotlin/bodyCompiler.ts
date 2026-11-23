@@ -229,6 +229,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     if (misfit) this.error(expression.row, typeMismatchMessage(returnType, misfit));
     if (!declared && context.hasDirectReturn)
       this.error(expression.row, '= の後の式で return を使うときは、関数の戻り値の型を書いてください。');
+    for (const settle of context.inferredReturns) settle(returnRepr(symbol));
     context.returnType = symbol.returnType;
     return convertRepr(
       this.expectType(compiled, symbol.returnType, expression.row),

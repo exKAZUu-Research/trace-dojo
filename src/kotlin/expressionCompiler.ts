@@ -1768,7 +1768,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
         );
       } else {
         if (!context.isProbe || target.isProbe) target.returnedTypes.push(value.type);
-        evaluate = value.eval;
+        let converted = value.eval;
+        evaluate = (frame) => converted(frame);
+        target.inferredReturns.push((to) => (converted = convertRepr(value.eval, value.repr, to)));
       }
     } else if (returnType && !isNonNullClass(returnType, this.core.unit)) {
       this.error(expression.row, 'return に値が必要です。');
