@@ -5,8 +5,7 @@ import type { Value } from './values';
 
 /**
  * A function of the standard library implemented in TypeScript. Its receiver and arguments come as the function
- * declares them, unboxed where it declares a primitive type. A function with reified type parameters also gets their
- * types, after its arguments.
+ * declares them, unboxed where it declares a primitive type.
  */
 export type NativeFunction = (frame: Frame, receiver: Value, args: Value[]) => Value;
 
