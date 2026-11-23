@@ -24,7 +24,6 @@ import {
   type FunctionContext,
   Handoff,
   isBareCall,
-  isKeyOf,
   type LoopContext,
   type Repr,
   reprOf,
@@ -34,6 +33,13 @@ import {
 import { discardResult, ifEval, tryEval, whenEval } from './controlEvaluation';
 import { getPropertyValue, receiverRepr, setPropertyValue } from './dispatch';
 import { type BoundPlace, type Place } from './expressionCompiler';
+import {
+  applyFinallyJumpFields,
+  finallyEffect,
+  keepAssignedBefore,
+  restrictFieldReads,
+  throughFinally,
+} from './finallyFlow';
 import { caseOf, keyOf } from './flowKeys';
 import { assignedNames, localRefinement, refineLocalType, remainingWrites } from './flowWrites';
 import { valueEquals } from './format';
@@ -41,9 +47,9 @@ import { isExclusion, OperatorCompiler } from './operatorCompiler';
 import { NUMBER_OPERATOR_NAMES } from './operators';
 import { needsSiblingHint, siblingResultType } from './resultInference';
 import { type Frame, LoopSignal, UNASSIGNED } from './runtime';
-import { type ClassSymbol, PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
+import { type ClassSymbol, type PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
 import { checkedRead, instanceTest } from './typeChecks';
-import { commonSupertype, isSameType, isSubtype } from './typeRelations';
+import { commonSupertype, isSubtype } from './typeRelations';
 import { type ClassType, isNonNullClass, type KType, nonNull, resolved, substitute, typeToString } from './types';
 import { Boxed, Cell, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
 import { WhenCoverage } from './whenCoverage';
@@ -1703,7 +1709,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
       const variable = this.findVariable(scope, name);
       return variable ? [keyOf(variable)] : [];
     });
-    const transfer = (flow: Flow): Flow => throughFinally(flow, afterFinally, atEntry, assignedKeys);
+    const effect = finallyEffect(afterFinally, atEntry, assignedKeys);
+    const transfer = (flow: Flow): Flow => throughFinally(flow, effect);
     this.flow = transfer(afterTry);
     if (afterFinally.isDead) return evaluate;
     for (const { exits, pending } of loopExits) {
@@ -1711,50 +1718,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
     }
     return evaluate;
   }
-}
-
-/**
- * A path that ran finally: it keeps what it knew, but loses what finally assigned and takes what finally established,
- * so each path keeps the sharper smart casts it entered with.
- */
-function throughFinally(flow: Flow, afterFinally: Flow, atEntry: Map<string, KType>, assignedKeys: string[]): Flow {
-  const completed = flow.copy();
-  completed.isDead ||= afterFinally.isDead;
-  for (const key of assignedKeys) completed.forget(key);
-  for (const [key, type] of afterFinally.narrowed) {
-    const entered = atEntry.get(key);
-    if (assignedKeys.some((assigned) => isKeyOf(key, assigned))) completed.narrowed.set(key, type);
-    else if (entered && isSameType(entered, type)) continue;
-    else {
-      const known = completed.narrowed.get(key);
-      if (!known || !isSubtype(known, type)) completed.narrowed.set(key, type);
-    }
-  }
-  for (const variable of afterFinally.assigned) completed.assigned.add(variable);
-  for (const variable of afterFinally.maybeAssigned) completed.maybeAssigned.add(variable);
-  return completed;
-}
-
-function applyFinallyJumpFields(jumps: Flow[], beforeTry: Flow, afterTry: Flow): void {
-  // Kotlin checks finally's field reads before try, but uses normal try/catch flow for its own jumps.
-  if (afterTry.isDead) {
-    for (const jump of jumps) restrictFieldReads(jump, beforeTry);
-    return;
-  }
-  const fields = [...afterTry.assigned].filter((target) => target instanceof PropertySymbol);
-  for (const jump of jumps) for (const field of fields) jump.assigned.add(field);
-}
-
-/** Any statement of a try body may throw before it assigns anything, so `finally` counts only what was assigned before. */
-function keepAssignedBefore(flow: Flow, beforeTry: Flow): void {
-  for (const variable of flow.assigned) {
-    if (!beforeTry.assigned.has(variable)) flow.assigned.delete(variable);
-  }
-}
-
-function restrictFieldReads(flow: Flow, beforeTry: Flow): void {
-  for (const target of flow.assigned)
-    if (target instanceof PropertySymbol && !beforeTry.assigned.has(target)) flow.assigned.delete(target);
 }
 
 interface LoopState {
