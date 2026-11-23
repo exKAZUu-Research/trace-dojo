@@ -382,6 +382,17 @@ export abstract class StatementBinder extends PatternBinder {
     return { kind: 'block', statements, capturedLocals: [], locals: scope.locals, row: block.row, step: 'none' };
   }
 
+  /**
+   * Binds a while or do loop in a scope of its own, which the variables its condition declares (`out int x`) belong
+   * to, as C# declares them; a block around the loop drops them from the frame when the loop ends.
+   */
+  private inLoopScope(context: BindContext, row: number, bind: (inner: BindContext) => BoundStatement): BoundStatement {
+    const scope = new LocalScope(context.scope, context.fn);
+    const loop = bind({ scope, fn: context.fn });
+    if (scope.locals.length === 0) return loop;
+    return { kind: 'block', statements: [loop], capturedLocals: [], locals: scope.locals, row, step: 'none' };
+  }
+
   /** Makes a block's names known from its start: local functions to call, and locals that may not be used before their declarations. */
   protected predeclare(statements: Statement[], context: BindContext): void {
     for (const statement of statements) {
@@ -425,14 +436,18 @@ export abstract class StatementBinder extends PatternBinder {
         return { kind: 'if', condition, consequence, alternative, row, step: 'none' };
       }
       case 'while': {
-        const condition = this.bindAs(statement.condition, this.boolType, context);
-        const body = this.inLoop(context, () => this.bindEmbedded(statement.body, context));
-        return { kind: 'while', condition, body, row, step: 'none' };
+        return this.inLoopScope(context, row, (inner) => {
+          const condition = this.bindAs(statement.condition, this.boolType, inner);
+          const body = this.inLoop(inner, () => this.bindEmbedded(statement.body, inner));
+          return { kind: 'while', condition, body, row, step: 'none' };
+        });
       }
       case 'do': {
-        const body = this.inLoop(context, () => this.bindEmbedded(statement.body, context));
-        const condition = this.bindAs(statement.condition, this.boolType, context);
-        return { kind: 'do', body, condition, conditionRow: statement.conditionRow, row, step: 'none' };
+        return this.inLoopScope(context, row, (inner) => {
+          const body = this.inLoop(inner, () => this.bindEmbedded(statement.body, inner));
+          const condition = this.bindAs(statement.condition, this.boolType, inner);
+          return { kind: 'do', body, condition, conditionRow: statement.conditionRow, row, step: 'none' };
+        });
       }
       case 'for': {
         return this.bindFor(statement, context);
