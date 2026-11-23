@@ -170,7 +170,8 @@ export abstract class CallBinder extends OperatorBinder {
           typeArgs = explicitTypeArgs;
         } else {
           const inferred = this.inferTypeArguments(candidate, args, mapping.parameterOf, form);
-          if (!inferred) return undefined;
+          // Inference fails in one form at a time: `Show<T>(params T[])` infers nothing from `Show(1)` until expanded.
+          if (!inferred) continue;
           typeArgs = inferred;
         }
       } else {
