@@ -37,7 +37,7 @@ import {
   type Substitution,
   type TypeArgument,
 } from './types';
-import { Cell, type KObject, type Value } from './values';
+import { Cell, type KObject, type PrimitiveKind, type Value } from './values';
 
 /** The package of `Turtle`, which no program can name. */
 export const TURTLE_PACKAGE = 'tracedojo';
@@ -429,6 +429,12 @@ export abstract class CompilerCore {
       const variable = this.findVariable(scope, name);
       if (variable) this.flow.forget(keyOf(variable));
     }
+  }
+
+  protected primitiveOf(type: KType): PrimitiveKind | undefined {
+    const actual = resolved(type);
+    if (actual.kind !== 'class' || actual.nullable) return undefined;
+    return this.core.primitives.get(actual.cls);
   }
 
   protected findVariable(scope: Scope, name: string): VariableSymbol | undefined {

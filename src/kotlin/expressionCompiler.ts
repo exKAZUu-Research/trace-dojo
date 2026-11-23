@@ -136,12 +136,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   protected abstract mayInitializeVal(context: FunctionContext, symbol: PropertySymbol): boolean;
 
-  protected primitiveOf(type: KType): PrimitiveKind | undefined {
-    const actual = resolved(type);
-    if (actual.kind !== 'class' || actual.nullable) return undefined;
-    return this.core.primitives.get(actual.cls);
-  }
-
   protected isClass(type: KType, cls: ClassSymbol): boolean {
     const actual = resolved(type);
     return actual.kind === 'class' && actual.cls === cls;
@@ -681,7 +675,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   ): Compiled {
     const { name, row, isSafe } = expression;
     const qualified = this.compileQualifier(scope, expression.receiver);
-    if (qualified?.kind === 'class') return consume(this.compileClassMember(scope, qualified.cls, name, row));
+    if (qualified?.kind === 'class') return consume(this.compileClassMember(scope, context, qualified.cls, name, row));
     if (qualified) return consume(this.compilePackageMember(context, qualified, name, row));
     if (expression.receiver.kind === 'super') {
       if (expression.isSafe) this.error(row, 'super には ?. を使えません。');
@@ -713,7 +707,13 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** `C.name` for a class `C`: an enum entry, a nested class or object, a member of an object or companion, or entries. */
-  private compileClassMember(scope: Scope, cls: ClassSymbol, name: string, row: number): Compiled {
+  private compileClassMember(
+    scope: Scope,
+    context: FunctionContext,
+    cls: ClassSymbol,
+    name: string,
+    row: number
+  ): Compiled {
     if (cls.kind === 'enum' && cls.enumEntries.some((entry) => entry.name === name))
       return this.readEnumEntry(cls, name);
     const nested = cls.nested.get(name);
@@ -723,6 +723,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const holder = cls.isObject ? cls : cls.companion;
     const property = holder && this.findProperty(holder.type, name, row);
     if (holder && property) {
+      // Inside the object's own initializer, `O.y` reads a later property as soon as `y` would.
+      this.checkInitialized(context, property.symbol, name, row);
       return this.readProperty(
         scope,
         property,
