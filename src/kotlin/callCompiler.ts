@@ -1377,15 +1377,8 @@ export abstract class CallCompiler extends CompilerCore {
     inline = false
   ): CompileError | undefined {
     const savedFlow = this.flow;
-    const returnTarget = context.isLambda ? context.returnTarget : context;
-    const probe = new FunctionContext(context, true, '<probe>', context.info.isLibrary, returnTarget, true);
+    const probe = this.probeContext(context);
     probe.inlineLambda = inline;
-    probe.loops = context.loops.map((loop) => ({
-      ...loop,
-      breaks: [],
-      continues: [],
-      valWrites: new Map(),
-    }));
     this.flow = savedFlow.copy();
     try {
       check(probe);
@@ -1399,12 +1392,14 @@ export abstract class CallCompiler extends CompilerCore {
   }
 
   /**
-   * A context for compiling a lambda only to learn its result type, whose code is thrown away. It keeps the function
-   * an inline lambda's `return` leaves.
+   * A context for compiling code only to learn its types, whose code is thrown away. It keeps the function an inline
+   * lambda's `return` leaves and the loops its `break` and `continue` may leave, with their jumps not recorded.
    */
   protected probeContext(context: FunctionContext): FunctionContext {
     const returnTarget = context.isLambda ? context.returnTarget : context;
-    return new FunctionContext(context, true, '<probe>', context.info.isLibrary, returnTarget, true);
+    const probe = new FunctionContext(context, true, '<probe>', context.info.isLibrary, returnTarget, true);
+    probe.loops = context.loops.map((loop) => ({ ...loop, breaks: [], continues: [], valWrites: new Map() }));
+    return probe;
   }
 }
 
