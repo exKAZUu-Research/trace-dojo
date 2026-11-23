@@ -437,6 +437,17 @@ export abstract class CompilerCore {
     return this.core.primitives.get(actual.cls);
   }
 
+  /**
+   * Where the class a simple name means sits among the levels of `topLevelFunctions`: -1 for a class of the scopes,
+   * then explicit imports, the current package, star imports and the defaults, as `findClass` looks them up.
+   */
+  protected classLevel(scope: Scope, name: string): number {
+    if (findClassInScope(scope, name)) return -1;
+    if (this.file.importedClasses.has(name)) return 0;
+    if (this.packages.get(this.file.packageName)?.classes.has(name)) return 1;
+    return this.file.starPackages.some((packageName) => this.packages.get(packageName)?.classes.has(name)) ? 2 : 3;
+  }
+
   protected findVariable(scope: Scope, name: string): VariableSymbol | undefined {
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       const found = current.variables.get(name);

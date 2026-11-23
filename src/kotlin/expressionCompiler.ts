@@ -15,7 +15,6 @@ import {
   convertRepr,
   type Eval,
   type ExpressionUse,
-  findClassInScope,
   Flow,
   FunctionContext,
   Handoff,
@@ -1059,17 +1058,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return this.topLevelCallLevels(name, row, { candidates, level: this.classLevel(scope, name) });
   }
 
-  /**
-   * Where the class a simple name means sits among the levels of `topLevelFunctions`: -1 for a class of the scopes,
-   * then explicit imports, the current package, star imports and the defaults, as `findClass` looks them up.
-   */
-  private classLevel(scope: Scope, name: string): number {
-    if (findClassInScope(scope, name)) return -1;
-    if (this.file.importedClasses.has(name)) return 0;
-    if (this.packages.get(this.file.packageName)?.classes.has(name)) return 1;
-    return this.file.starPackages.some((packageName) => this.packages.get(packageName)?.classes.has(name)) ? 2 : 3;
-  }
-
   private tryLocalFunction(
     scope: Scope,
     context: FunctionContext,
@@ -1406,8 +1394,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (symbol.type && resolved(substitute(symbol.type, property.substitution)).kind !== 'function') return undefined;
     return {
       specificity: symbol.extensionReceiver ? extensionPropertySpecificity(property) : undefined,
-      functionValue: () => {
+      functionValue: (context) => {
         if (!symbol.extensionReceiver) this.requireNonNullReceiver(receiver, row, false);
+        this.checkInitialized(context, symbol, symbol.name, row);
         return this.readProperty(scope, property, receiver, row);
       },
     };
@@ -1750,6 +1739,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- each place a return may not leave, and the value it converts, are one rule of Kotlin's.
   private compileReturn(
     scope: Scope,
     context: FunctionContext,
@@ -1757,6 +1747,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   ): Compiled {
     const target = context.isLambda ? context.returnTarget : context;
     if (!target) this.error(expression.row, 'ここでは return を書けません。ラムダ式の値は、最後の式に書いてください。');
+    if (target.forbidsReturn) this.error(expression.row, 'ここでは return を書けません。');
     const returnType = target.returnType;
     let evaluate: Eval = returnUnit;
     if (expression.value) {

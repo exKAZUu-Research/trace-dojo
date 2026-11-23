@@ -128,6 +128,8 @@ export class FunctionContext {
   returnRepr: Repr | undefined;
   readonly returnedTypes: KType[] = [];
   loops: LoopContext[] = [];
+  /** Whether the context is a class or file initializer, which no `return` may leave. */
+  forbidsReturn = false;
   inlineLambda = false;
   /** A discarded probe may retain open types until the enclosing argument reveals their positions. */
   allowOpenCallTypes: boolean;

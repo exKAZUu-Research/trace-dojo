@@ -800,6 +800,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (isInterface && !decl.getter?.body) symbol.isAbstract = true;
     if (symbol.isAbstract && decl.initializer)
       this.error(decl.row, `abstract なプロパティ ${decl.name} には初期値を書けません。`);
+    if (decl.modifiers.keywords.has('abstract') && (decl.getter?.body || decl.setter?.body))
+      this.error(decl.row, `abstract なプロパティ ${decl.name} には get() や set() の中身を書けません。`);
     if (decl.modifiers.keywords.has('external')) this.bindNativeProperty(symbol, decl, cls?.symbol, file);
     const entry: PropertyEntry = {
       kind: 'property',

@@ -274,6 +274,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     if (!context) {
       const name = entry.cls ? entry.cls.symbol.name : '<init>';
       context = new FunctionContext(undefined, false, name, entry.file.isLibrary, undefined);
+      context.forbidsReturn = true;
       context.info.showsThis = entry.cls !== undefined && !entry.cls.symbol.isObject && !entry.file.isLibrary;
       this.initializerContexts.set(key, context);
     }
