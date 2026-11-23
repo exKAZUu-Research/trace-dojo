@@ -1399,7 +1399,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   /** A `when` branch's value, which the subject equals for the branch to run. */
-  // code-gauge-allow functionCognitiveComplexity -- the branch test and its resulting narrowing share resolved operands.
   private compileWhenValue(
     scope: Scope,
     context: FunctionContext,
@@ -1421,11 +1420,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     );
     const subjectKind = this.primitiveOf(nonNull(subject.type));
     const isIntLiteralForLong = isLongSubject && value.integerLiteral !== undefined && !value.integerLiteral.isLong;
-    if (
-      subjectKind &&
-      (isIntLiteralForLong || !this.acceptsArgument(value, nonNull(subject.type))) &&
-      resolved(value.type).kind !== 'nothing'
-    ) {
+    if (isIntLiteralForLong) {
       this.error(
         row,
         `演算子 == は ${typeToString(resolved(subject.type))} と ${typeToString(resolved(value.type))} には使えません。`
