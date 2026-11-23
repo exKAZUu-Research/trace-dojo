@@ -65,6 +65,9 @@ export abstract class MemberBinder extends CallBinder {
   /** Set while binding a call's callee, whose member lookup leaves out members that cannot be called. */
   protected isBindingCallee = false;
 
+  /** Set while binding `nameof`'s argument, which names members without reading the properties on its way. */
+  private isBindingName = false;
+
   /** Whether the member being looked up is called, which consumes the flag so that inner lookups do not see it. */
   protected takeCallee(): boolean {
     const isCallee = this.isBindingCallee;
@@ -489,8 +492,8 @@ export abstract class MemberBinder extends CallBinder {
     if (target.kind === 'typeRef')
       return this.bindStaticMember(target.type, node.name, typeArgs, position, context, isCallee);
     const receiver = target.kind === 'methodGroup' ? this.toValue(target, node.target) : target;
-    // A property that a member is accessed on is read, as any value is.
-    this.checkReadable(receiver, node.target);
+    // A property that a member is accessed on is read, as any value is, except in a name.
+    if (!this.isBindingName) this.checkReadable(receiver, node.target);
     if (receiver.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
     if (receiver.kind === 'unbound' || receiver.type.kind === 'null' || receiver.type.kind === 'void') {
       this.error(
@@ -982,8 +985,12 @@ export abstract class MemberBinder extends CallBinder {
       this.error(arg, 'CS8081', '式に名前がありません。');
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
-    const bound = this.bindExpression(value, context);
-    void bound;
+    this.isBindingName = true;
+    try {
+      this.bindExpression(value, context);
+    } finally {
+      this.isBindingName = false;
+    }
     return this.constant(name, this.stringType, node.row);
   }
 
