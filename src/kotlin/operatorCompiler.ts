@@ -138,7 +138,9 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     isPrefix: boolean,
     row: number
   ): Compiled {
-    if (target.kind === 'member' && target.isSafe) this.unavailable(row, '?. を使った ++・--');
+    let operand = target;
+    while (operand.kind === 'parenthesized') operand = operand.expression;
+    if (operand.kind === 'member' && operand.isSafe) this.unavailable(row, '?. を使った ++・--');
     const place = this.compilePlace(scope, context, target, row, true);
     const readType = place.readType ?? place.type;
     const kind = this.primitiveOf(readType);
