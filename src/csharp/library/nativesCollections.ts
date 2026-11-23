@@ -1855,11 +1855,13 @@ const READ_ONLY = 'System.Collections.ObjectModel.ReadOnlyCollection`1';
 defineNatives({
   [`${READ_ONLY}..ctor`]: (call, receiver, [list]) => {
     if (list === undefined) failNull('list');
+    // A List or an array stays the wrapper's backing store, so the wrapper shows later changes to it, as .NET's does.
+    if (list instanceof CsArray) return setNative(receiver, new ListState(list.values, typeArgument(call)));
     return setNative(
       receiver,
       (list as CsObject).native instanceof ListState
         ? (list as CsObject).native
-        : new ListState([...iterate(call, list as Value)], typeArgument(call))
+        : new ListState(chargedElements(call, list as Value), typeArgument(call))
     );
   },
   [`${READ_ONLY}.get_Count`]: (_call, receiver) => listOf(receiver).items.length,
