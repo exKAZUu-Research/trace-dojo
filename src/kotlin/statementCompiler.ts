@@ -33,13 +33,7 @@ import {
 import { discardResult, ifEval, tryEval, whenEval } from './controlEvaluation';
 import { getPropertyValue, receiverRepr, setPropertyValue } from './dispatch';
 import { type BoundPlace, type Place } from './expressionCompiler';
-import {
-  applyFinallyJumpFields,
-  finallyEffect,
-  keepAssignedBefore,
-  restrictFieldReads,
-  throughFinally,
-} from './finallyFlow';
+import { applyFinallyJumpFields, finallyEffect, keepAssignedBefore, throughFinally } from './finallyFlow';
 import { caseOf, keyOf } from './flowKeys';
 import { assignedNames, localRefinement, refineLocalType, remainingWrites } from './flowWrites';
 import { valueEquals } from './format';
@@ -1698,7 +1692,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const afterTry = this.flow;
     this.flow = Flow.merge([afterTry, ...throws, ...loopExits.flatMap(({ pending }) => pending)]);
     keepAssignedBefore(this.flow, beforeTry);
-    restrictFieldReads(this.flow, beforeTry);
     const atEntry = new Map(this.flow.narrowed);
     const exitStarts = loopExits.map(({ exits }) => exits.length);
     const evaluate = this.compileBlockValue(scope, context, block, undefined, true).eval;

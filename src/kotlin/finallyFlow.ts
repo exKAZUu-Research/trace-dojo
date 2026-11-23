@@ -57,7 +57,7 @@ export function keepAssignedBefore(flow: Flow, beforeTry: Flow): void {
   }
 }
 
-export function restrictFieldReads(flow: Flow, beforeTry: Flow): void {
+function restrictFieldReads(flow: Flow, beforeTry: Flow): void {
   for (const target of flow.assigned)
     if (target instanceof PropertySymbol && !beforeTry.assigned.has(target)) flow.assigned.delete(target);
 }
