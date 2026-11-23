@@ -3,6 +3,8 @@ const MAX_COEFFICIENT = (1n << 96n) - 1n;
 const MAX_SCALE = 28;
 /** The digits of the largest coefficient, 79228162514264337593543950335. */
 const MAX_DIGITS = 29;
+/** The significant digits of a numeral that parsing keeps, beyond the 29 a decimal holds and its rounding digit. */
+const PARSED_DIGITS = 40;
 
 export class DecimalOverflowError extends Error {}
 
@@ -59,7 +61,15 @@ export class CsDecimal {
     const integer = match[2];
     const fraction = match[3] ?? '';
     let scale = fraction.length - Number(match[4] ?? 0);
-    let coefficient = BigInt(`${integer}${fraction}` || '0');
+    // Digits past the first PARSED_DIGITS significant ones cannot change the rounded result except as a nonzero tail,
+    // which one sticky digit keeps, so a long numeral is reduced at once rather than by one division per digit.
+    let digits = `${integer}${fraction}`.replace(/^0+/, '');
+    if (digits.length > PARSED_DIGITS) {
+      const hasNonzeroTail = /[1-9]/.test(digits.slice(PARSED_DIGITS));
+      scale -= digits.length - PARSED_DIGITS - 1;
+      digits = `${digits.slice(0, PARSED_DIGITS)}${hasNonzeroTail ? '1' : '0'}`;
+    }
+    let coefficient = BigInt(digits || '0');
     // An exponent far outside the decimal range decides the result at once, which digit-by-digit scaling would take
     // as many steps as the exponent to reach.
     const digitCount = coefficient === 0n ? 0 : coefficient.toString().length;
