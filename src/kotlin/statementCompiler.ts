@@ -1254,7 +1254,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
       type: subject.type,
       repr: subject.repr,
       eval: (frame) => frame.locals[subjectSlot] as Value,
-      stableKey: subject.stableKey,
+      // A condition that reassigns the subject's variable leaves it no longer holding the value the branches test.
+      stableKey: conditionsWrite(expression, expression.subject) ? undefined : subject.stableKey,
     };
     const before = this.flow.copy();
     const covered = new WhenCoverage();
@@ -1759,5 +1760,15 @@ function commonNarrowing(a: ReadonlyMap<string, KType>, b: ReadonlyMap<string, K
       const other = b.get(key);
       return other !== undefined && isSameType(type, other);
     })
+  );
+}
+
+function conditionsWrite(expression: Extract<Expression, { kind: 'when' }>, subject: Expression | undefined): boolean {
+  let target = subject;
+  while (target?.kind === 'parenthesized') target = target.expression;
+  if (target?.kind !== 'name') return false;
+  const { name } = target;
+  return expression.entries.some((entry) =>
+    entry.conditions.some((condition) => condition.kind !== 'is' && assignedNames(condition.expression).has(name))
   );
 }
