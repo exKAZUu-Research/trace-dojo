@@ -348,11 +348,17 @@ export abstract class StatementCompiler extends OperatorCompiler {
     });
     const holderWrite = this.variableAccess(context, holder).write;
     const evaluate = initializer.eval;
+    // Releasing the initializer lets the collector remove what no component keeps, such as a skipped `_` turtle.
+    const releasesHolder = initializer.repr === 'ref';
     return this.withStep(
       row,
       (frame) => {
         holderWrite(frame, evaluate(frame));
-        for (const write of writes) write?.(frame);
+        try {
+          for (const write of writes) write?.(frame);
+        } finally {
+          if (releasesHolder) holderWrite(frame, NULL);
+        }
       },
       false
     );
@@ -1285,6 +1291,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       repr: subject.repr,
       eval: (frame) => frame.locals[subjectSlot] as Value,
       stableKey: subject.stableKey,
+      whenNonNull: subject.whenNonNull,
     };
     const before = this.flow.copy();
     const covered = new WhenCoverage();
@@ -1395,8 +1402,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       const type = this.checkableType(scope, condition.type, condition.row, subject.type);
       const test = instanceTest(this.core, type);
       const evaluate = convertRepr(subject.eval, subject.repr, 'ref');
-      const narrowing = new Map<string, KType>();
-      if (subject.stableKey) narrowing.set(subject.stableKey, this.narrowedType(subject.type, type));
+      const narrowing = this.typeTestNarrowing(subject, type);
       covered.coverTypeCases(subject.type, type, condition.negated, this.core.boolean);
       const exclusion = isExclusion(subject.stableKey, type);
       return condition.negated
