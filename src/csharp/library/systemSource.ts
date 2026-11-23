@@ -393,6 +393,9 @@ namespace System {
     public Decimal(int value);
     public Decimal(long value);
     public Decimal(double value);
+    public Decimal(float value);
+    public Decimal(uint value);
+    public Decimal(ulong value);
     public int CompareTo(object? value);
     public int CompareTo(decimal value);
     public override bool Equals(object? value);
