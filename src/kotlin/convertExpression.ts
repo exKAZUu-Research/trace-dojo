@@ -1,7 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { convertAnnotation } from './annotationArguments';
-import { VISIBILITY_KEYWORDS } from './ast';
+import { unparenthesized, VISIBILITY_KEYWORDS } from './ast';
 import type {
   Argument,
   BinaryOperator,
@@ -354,11 +354,13 @@ export abstract class ExpressionConverter {
     const valueNode = parts.at(-1) as Node;
     const isSpread = hasToken(node, '*') || valueNode.type === 'spread_expression';
     if (isSpread) this.requireLibrary(node, '配列の展開（*配列）');
-    const value = valueNode.type === 'spread_expression' ? named(valueNode)[0] : valueNode;
+    const value = this.convertExpression(valueNode.type === 'spread_expression' ? named(valueNode)[0] : valueNode);
+    // A parenthesized lambda is the same argument, which its candidates give its parameter types to.
+    const inner = unparenthesized(value);
     return {
       row: rowOf(node),
       name: isNamed ? identifierName(parts[0]) : undefined,
-      value: this.convertExpression(value),
+      value: inner.kind === 'lambda' ? inner : value,
       isSpread,
     };
   }
