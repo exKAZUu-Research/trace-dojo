@@ -383,6 +383,10 @@ export class Compiler extends BodyCompiler {
       };
     }
     if (args.length !== 1) this.error(row, 'valueOf には引数を1つ書いてください。');
+    // E.valueOf names its parameter `value`, and enumValueOf<E> names it `name`.
+    const argumentName = args[0].name;
+    if (argumentName !== undefined && argumentName !== 'value' && argumentName !== 'name')
+      this.error(row, `valueOf に ${argumentName} という名前の引数はありません。`);
     const argument = this.compileExpression(scope, context, args[0].value, this.stringType);
     const evaluate = this.expectType(argument, this.stringType, args[0].row);
     return {
