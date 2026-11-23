@@ -48,7 +48,7 @@ export function traceCSharpProgram(program: string, trace: TraceOptions, input?:
   evaluator.tracing = true;
   const snapshotter = new Snapshotter(runtime, compiled);
   // The trace keeps every step's snapshot, so a large array shown at each step adds up past what the run allocates.
-  let remaining = LIMITS.maxTraceSize;
+  let remaining = LIMITS.maxCSharpTraceSize;
   const charge = (cost: number): void => {
     remaining -= cost;
     if (remaining < 0) throw new ExecutionLimitError('trace');
