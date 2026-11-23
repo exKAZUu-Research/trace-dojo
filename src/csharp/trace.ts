@@ -83,6 +83,12 @@ const NODE_COST = 32;
 /** What building a snapshot spends of the trace's budget; set only while a program is traced. */
 let chargeSnapshot: ((cost: number) => void) | undefined;
 
+/** A text a snapshot shows, charged by its length whatever the static type that shows it. */
+function shownText(text: string): string {
+  chargeSnapshot?.(text.length);
+  return text;
+}
+
 class Snapshotter {
   constructor(
     private readonly runtime: Runtime,
@@ -214,9 +220,7 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
       return String.fromCharCode(value as number);
     }
     case 'string': {
-      const text = stringText(value as string | CsString);
-      chargeSnapshot?.(text.length);
-      return text;
+      return shownText(stringText(value as string | CsString));
     }
     case 'long':
     case 'ulong': {
@@ -241,7 +245,7 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
       return Number.isFinite(number) && number !== 0 ? Number(formatFloat(number, true)) : number;
     }
     case 'object': {
-      return isString(value) ? stringText(value) : NOT_SCALAR;
+      return isString(value) ? shownText(stringText(value)) : NOT_SCALAR;
     }
     default: {
       return NOT_SCALAR;
@@ -281,7 +285,7 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
   const scalar = scalarOf(value, type);
   if (scalar !== NOT_SCALAR && !Array.isArray(scalar)) return { kind: 'value', value: scalar as TraceScalar };
   if (typeof value !== 'object' || value instanceof CsDecimal || value instanceof CsString)
-    return { kind: 'value', value: String(value) };
+    return { kind: 'value', value: shownText(String(value)) };
   if (seen.has(value)) return undefined;
   if (value instanceof CsObject && value.turtle) return turtleNodeOf(value.turtle);
   if (value instanceof CsDelegate) return undefined;
