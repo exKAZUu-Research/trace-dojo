@@ -464,23 +464,13 @@ export abstract class ExpressionCompiler extends CallCompiler {
   protected compileName(scope: Scope, context: FunctionContext, name: string, row: number): Compiled {
     const variable = this.findVariable(scope, name);
     if (variable) return this.readVariable(scope, context, variable, row);
-    for (const receiver of this.receiversOf(scope)) {
-      const property = this.findProperty(this.receiverTypeOf(receiver), name, row);
-      if (property) {
-        this.checkInitialized(context, property.symbol, name, row);
-        const receiverCompiled: Compiled = {
-          type: this.receiverTypeOf(receiver),
-          repr: reprOf(this.core, receiver.type),
-          eval: this.receiverAccess(context, receiver),
-          stableKey: keyOf(receiver),
-        };
-        return this.readProperty(scope, property, receiverCompiled, row);
-      }
-    }
+    const member = this.readReceiverProperty(scope, context, name, row);
+    if (member && member !== 'uninitialized') return member;
     const staticMember = this.findStaticMember(scope, name, row);
     if (staticMember) return staticMember;
     const property = this.topLevelPlainProperty(name);
     if (property) return this.readTopLevelProperty(context, property, row);
+    if (member) this.rejectUninitialized((this.uninitializedReceiver as { row: number }).row);
     const cls = this.findClass(scope, name);
     if (cls) this.checkNestedAccessible(scope, cls, row);
     if (cls) {
@@ -490,6 +480,36 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
     this.rejectUnavailableLibraryReference(name, row);
     return this.error(row, `${name} が見つかりません。`);
+  }
+
+  /**
+   * Reads the property of an implicit receiver that a simple name means. A constructor header reaches the members of
+   * the instance it builds only after every other name, so finding one there gives `uninitialized`.
+   */
+  private readReceiverProperty(
+    scope: Scope,
+    context: FunctionContext,
+    name: string,
+    row: number
+  ): Compiled | 'uninitialized' | undefined {
+    let uninitialized = false;
+    for (const receiver of this.receiversOf(scope)) {
+      const property = this.findProperty(this.receiverTypeOf(receiver), name, row);
+      if (!property) continue;
+      if (this.uninitializedReceiver?.receiver === receiver) {
+        uninitialized = true;
+        continue;
+      }
+      this.checkInitialized(context, property.symbol, name, row);
+      const receiverCompiled: Compiled = {
+        type: this.receiverTypeOf(receiver),
+        repr: reprOf(this.core, receiver.type),
+        eval: this.receiverAccess(context, receiver),
+        stableKey: keyOf(receiver),
+      };
+      return this.readProperty(scope, property, receiverCompiled, row);
+    }
+    return uninitialized ? 'uninitialized' : undefined;
   }
 
   /** The companion object whose property a simple name in a class's body means, with the property. */
