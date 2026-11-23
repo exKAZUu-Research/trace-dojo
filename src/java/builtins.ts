@@ -297,6 +297,10 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
   defineThrowable('PatternSyntaxException', illegalArgument, 'java.util.regex');
   const illegalFormat = defineThrowable('IllegalFormatException', illegalArgument, 'java.util');
   for (const name of [
+    'DuplicateFormatFlagsException',
+    'IllegalFormatArgumentIndexException',
+    'IllegalFormatFlagsException',
+    'IllegalFormatWidthException',
     'MissingFormatArgumentException',
     'UnknownFormatConversionException',
     'IllegalFormatConversionException',
