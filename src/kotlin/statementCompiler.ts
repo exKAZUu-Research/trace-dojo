@@ -11,7 +11,7 @@ import type {
   WhenCondition,
   WhileStatement,
 } from './ast';
-import { isNullLiteral } from './ast';
+import { isNullLiteral, unparenthesized } from './ast';
 import type { ArgumentSyntax } from './callCompiler';
 import {
   checkedBoolean,
@@ -1493,9 +1493,10 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   /** Notes the constants a `when` branch covers: enum entries, objects, `true`, `false`, and `null`. */
-  private recordCovered(value: Compiled, expression: Expression, covered: Set<string>): void {
+  private recordCovered(value: Compiled, written: Expression, covered: Set<string>): void {
+    const expression = unparenthesized(written);
     if (expression.kind === 'boolean') covered.add(String(expression.value));
-    if (isNullLiteral(expression)) covered.add('null');
+    if (expression.kind === 'null') covered.add('null');
     const found = caseOf(value);
     if (found) covered.add(found.id);
   }
