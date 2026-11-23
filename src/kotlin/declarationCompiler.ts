@@ -1160,7 +1160,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   private checkOverridable(member: MemberSymbol, base: MemberSymbol): void {
-    if (!isVirtual(base) && !base.isOpen && !base.isAbstract && !base.isOverride) {
+    // An override stays open unless it is `final`, which `isOpen` records, so `isOverride` alone allows nothing.
+    if (!base.isOpen && !base.isAbstract && !base.owner?.isInterface) {
       this.error(member.row, `${base.owner?.name ?? ''}.${member.name} は open ではないので、上書きできません。`);
     }
     if (base.kind === 'property' && member.kind === 'property' && base.isVar && !member.isVar) {
