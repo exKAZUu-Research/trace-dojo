@@ -488,7 +488,13 @@ function scanPattern(pattern: string): PatternScan {
     scaleDown: 0,
     scientific: undefined,
   };
-  const state: ScanState = { inFraction: false, firstZero: -1, lastDigitBeforePoint: -1 };
+  const state: ScanState = {
+    inFraction: false,
+    firstZero: -1,
+    lastDigitBeforePoint: -1,
+    nextDigit: -1,
+    digitSearchEnd: -1,
+  };
   for (let index = 0; index < pattern.length; index++) {
     const literalEnd = literalEndOf(pattern, index);
     if (literalEnd !== undefined) index = literalEnd;
@@ -502,6 +508,9 @@ interface ScanState {
   inFraction: boolean;
   firstZero: number;
   lastDigitBeforePoint: number;
+  /** Where the integer part's next digit placeholder is (-1 for none), as found after `digitSearchEnd`'s comma. */
+  nextDigit: number;
+  digitSearchEnd: number;
 }
 
 /** The index of the last character of a quoted string or an escaped character that starts at an index. */
@@ -548,8 +557,14 @@ function scanDigit(char: string, index: number, scan: PatternScan, state: ScanSt
 
 function scanComma(pattern: string, index: number, scan: PatternScan, state: ScanState): void {
   // A comma after the integer part's last digit placeholder scales the number by a thousand; others group digits.
-  const integerRest = /^[^.;]*/.exec(pattern.slice(index + 1))?.[0] ?? '';
-  if (!/[0#]/.test(integerRest)) scan.scaleDown++;
+  // The search resumes where the last one ended, so the commas of a pattern take one pass over it in all.
+  if (index >= state.digitSearchEnd || (state.nextDigit >= 0 && state.nextDigit <= index)) {
+    let end = index + 1;
+    while (end < pattern.length && !'.;0#'.includes(pattern[end])) end++;
+    state.nextDigit = end < pattern.length && (pattern[end] === '0' || pattern[end] === '#') ? end : -1;
+    state.digitSearchEnd = end;
+  }
+  if (state.nextDigit < 0) scan.scaleDown++;
   else if (state.lastDigitBeforePoint >= 0) scan.hasGrouping = true;
 }
 
