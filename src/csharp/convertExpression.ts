@@ -549,11 +549,14 @@ export class ExpressionConverter {
   /** An object or collection initializer, told apart by whether its elements assign members. */
   private convertInitializer(node: Node): Initializer {
     const elements = namedChildren(node);
-    const isObject = elements.some(
-      (element) =>
-        element.type === 'assignment_expression' &&
-        ['identifier', 'element_binding_expression'].includes(requiredField(element, 'left').type)
-    );
+    // Empty braces initialize no member, which C# reads as an object initializer, so any type takes them.
+    const isObject =
+      elements.length === 0 ||
+      elements.some(
+        (element) =>
+          element.type === 'assignment_expression' &&
+          ['identifier', 'element_binding_expression'].includes(requiredField(element, 'left').type)
+      );
     if (!isObject) {
       return {
         kind: 'collectionInitializer',
