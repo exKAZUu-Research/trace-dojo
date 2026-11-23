@@ -56,6 +56,8 @@ export interface BoundSwitchArm {
   pattern: BoundPattern;
   guard: BoundExpression | undefined;
   value: BoundExpression;
+  /** The variables its pattern and guard declare, which leave scope with the arm. */
+  locals: LocalSymbol[];
   row: number;
 }
 

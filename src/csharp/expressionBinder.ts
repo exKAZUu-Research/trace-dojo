@@ -1899,6 +1899,7 @@ export abstract class ExpressionBinder extends MemberBinder {
         pattern: BoundPattern;
         guard: BoundExpression | undefined;
         value: BoundExpression;
+        locals: LocalSymbol[];
         row: number;
         syntax: Expression;
       }[];
@@ -1924,7 +1925,7 @@ export abstract class ExpressionBinder extends MemberBinder {
         const guard = arm.guard ? this.bindAs(arm.guard, this.boolType, armContext) : undefined;
         if (value.type.kind !== 'error') this.checkArmReachable(handled, { pattern, guard }, arm.pattern);
         const result = this.bindAllowingThrow(arm.value, armContext);
-        return { pattern, guard, value: result, row: arm.row, syntax: arm.value };
+        return { pattern, guard, value: result, locals: scope.locals, row: arm.row, syntax: arm.value };
       });
       parts = { scope: context.scope, value, arms };
       this.switchParts.set(node, parts);
@@ -1944,6 +1945,7 @@ export abstract class ExpressionBinder extends MemberBinder {
         pattern: arm.pattern,
         guard: arm.guard,
         value: arm.value.kind === 'throw' ? arm.value : this.convert(arm.value, type, arm.syntax),
+        locals: arm.locals,
         row: arm.row,
       })),
       type,

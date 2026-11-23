@@ -425,7 +425,12 @@ export abstract class StatementExecutor extends PatternMatcher {
    * Runs code in a scope that declares locals: captured ones get fresh cells, and every way out drops them all from the
    * frame, so the trace stops showing a local once control leaves its scope. A closure keeps a captured cell itself.
    */
-  private inScope<T>(frame: Frame, locals: readonly LocalSymbol[], captured: readonly LocalSymbol[], run: () => T): T {
+  protected inScope<T>(
+    frame: Frame,
+    locals: readonly LocalSymbol[],
+    captured: readonly LocalSymbol[],
+    run: () => T
+  ): T {
     for (const local of captured) frame.slots[local.slot] = new Cell(UNASSIGNED);
     try {
       return run();

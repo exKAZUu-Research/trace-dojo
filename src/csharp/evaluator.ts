@@ -665,8 +665,14 @@ export class Evaluator extends StatementExecutor {
   private evaluateSwitch(expression: Extract<BoundExpression, { kind: 'switch' }>, frame: Frame): Value {
     const value = this.evaluate(expression.value, frame);
     for (const arm of expression.arms) {
-      if (this.matches(arm.pattern, value, frame) && (!arm.guard || (this.evaluate(arm.guard, frame) as boolean)))
-        return this.evaluate(arm.value, frame);
+      // Each arm is a scope of its own, whose variables leave it whether the arm is taken or not.
+      const captured = arm.locals.filter((local) => local.isCaptured);
+      const result = this.inScope(frame, arm.locals, captured, () =>
+        this.matches(arm.pattern, value, frame) && (!arm.guard || (this.evaluate(arm.guard, frame) as boolean))
+          ? { value: this.evaluate(arm.value, frame) }
+          : undefined
+      );
+      if (result) return result.value;
     }
     throw new PendingException(
       'System.Runtime.CompilerServices.SwitchExpressionException',
