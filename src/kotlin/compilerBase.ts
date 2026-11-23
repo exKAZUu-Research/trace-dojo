@@ -9,9 +9,9 @@ import {
   type TypeParameterSymbol,
   VariableSymbol,
 } from './symbols';
-import { anyType, isSubtype } from './typeRelations';
+import { anyType, commonSupertype, isSubtype } from './typeRelations';
 import { type ClassType, type KType, NOTHING, resolved, type TypeArgument, typeToString } from './types';
-import { box, Boxed, Cell, type PrimitiveKind, type Value } from './values';
+import { box, Boxed, Cell, NULL, type PrimitiveKind, type Value } from './values';
 
 export type Eval = (frame: Frame) => Value;
 
@@ -265,20 +265,28 @@ export class Flow {
       return dead;
     }
     const [first, ...rest] = live;
-    const narrowed = new Map(
-      [...first.narrowed].filter(([key, type]) =>
-        rest.every((flow) => {
-          const other = flow.narrowed.get(key);
-          return other !== undefined && isSubtype(other, type) && isSubtype(type, other);
-        })
-      )
-    );
+    let narrowed = new Map(first.narrowed);
+    for (const flow of rest) narrowed = commonNarrowing(narrowed, flow.narrowed);
     const assigned = new Set(
       [...first.assigned].filter((variable) => rest.every((flow) => flow.assigned.has(variable)))
     );
     const maybeAssigned = new Set(live.flatMap((flow) => [...flow.maybeAssigned]));
     return new Flow(narrowed, assigned, maybeAssigned, false);
   }
+}
+
+/**
+ * The facts that hold on either of two paths: a value narrowed on both keeps their common supertype, as `Animal` does
+ * for `Cat` and `Dog`.
+ */
+export function commonNarrowing(a: ReadonlyMap<string, KType>, b: ReadonlyMap<string, KType>): Map<string, KType> {
+  const result = new Map<string, KType>();
+  for (const [key, type] of a) {
+    const other = b.get(key);
+    if (other)
+      result.set(key, isSubtype(type, other) && isSubtype(other, type) ? type : commonSupertype([type, other]));
+  }
+  return result;
 }
 
 /**
@@ -331,7 +339,11 @@ export function convertRepr(eval_: Eval, from: Repr, to: Repr): Eval {
   if (from === 'ref') {
     return (frame) => {
       const value = eval_(frame);
-      return value instanceof Boxed ? value.value : value;
+      if (value instanceof Boxed) return value.value;
+      // A null that reaches a primitive, as a smart cast that a write inside its own test outdated lets it, throws
+      // as the JVM's unboxing does instead of turning into a number.
+      if (value === NULL) frame.runtime.throwError(frame, 'java.lang.NullPointerException');
+      return value;
     };
   }
   if (to === 'ref') return (frame) => box(from, eval_(frame) as number | bigint);

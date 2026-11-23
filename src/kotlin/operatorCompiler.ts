@@ -3,6 +3,7 @@ import { isNullLiteral } from './ast';
 import type { CallExpression, Expression, TypeRef } from './ast';
 import { type ArgumentSyntax } from './callCompiler';
 import {
+  commonNarrowing,
   type Compiled,
   convertRepr,
   type Eval,
@@ -330,10 +331,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     // The right operand runs after the left one, so its writes undo what the left one established.
     const leftTrue = this.withoutWritten(scope, condition.whenTrue, expression.right);
     const leftFalse = this.withoutWritten(scope, condition.whenFalse, expression.right);
-    const whenTrue = isAnd ? new Map([...leftTrue, ...right.whenTrue]) : intersectNarrowing(leftTrue, right.whenTrue);
-    const whenFalse = isAnd
-      ? intersectNarrowing(leftFalse, right.whenFalse)
-      : new Map([...leftFalse, ...right.whenFalse]);
+    const whenTrue = isAnd ? new Map([...leftTrue, ...right.whenTrue]) : commonNarrowing(leftTrue, right.whenTrue);
+    const whenFalse = isAnd ? commonNarrowing(leftFalse, right.whenFalse) : new Map([...leftFalse, ...right.whenFalse]);
     return {
       type: this.booleanType,
       repr: 'ref',
@@ -794,16 +793,6 @@ export function isExclusion(key: string | undefined, type: KType): Map<string, K
   return key && actual.kind === 'class' ? excludingCases(key, [`class:${keyOf(actual.cls)}`]) : new Map();
 }
 
-/** The facts that hold on either of two paths: a value narrowed on both is their common supertype, as `Animal` for `Cat` or `Dog`. */
-function intersectNarrowing(a: Map<string, KType>, b: Map<string, KType>): Map<string, KType> {
-  const result = new Map<string, KType>();
-  for (const [key, type] of a) {
-    const other = b.get(key);
-    if (other)
-      result.set(key, isSubtype(type, other) && isSubtype(other, type) ? type : commonSupertype([type, other]));
-  }
-  return result;
-}
 /** The methods of the integer types that kotlinc evaluates on constants, as it does the operators. */
 const CONSTANT_BINARY_METHODS = new Set([
   'plus',
