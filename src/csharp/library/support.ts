@@ -1,5 +1,4 @@
 import { CompileError } from '../../interpreter/diagnostics';
-import { implicitNumeric } from '../conversions';
 import type { Evaluator } from '../evaluator';
 import type { NativeCall } from '../natives';
 import { convertNumeric, type NumericValue, PendingException } from '../numeric';
@@ -11,6 +10,7 @@ import {
   namedType,
   sameType,
   specialOf,
+  type SpecialType,
   substitute,
   type Type,
   type TypeParameterSymbol,
@@ -188,16 +188,33 @@ export function checkArrayStore(call: NativeCall, array: CsArray, value: Value):
 }
 
 /**
- * A value copied into a value-type element: unboxed from a box, or widened between primitive numeric types, which the
- * runtime's array copy allows; other source element types cannot be assigned to the array.
+ * The primitive element types that the runtime's array copy converts each one to, besides itself: its primitive
+ * widenings (wider than C#'s implicit conversions, as from byte to char) and the types of the same size and the other
+ * signedness, whose bits it keeps.
+ */
+const ARRAY_COPY_CONVERSIONS: Partial<Record<SpecialType, SpecialType[]>> = {
+  sbyte: ['byte', 'short', 'int', 'long', 'float', 'double'],
+  byte: ['sbyte', 'char', 'short', 'ushort', 'int', 'uint', 'long', 'ulong', 'float', 'double'],
+  short: ['ushort', 'char', 'int', 'long', 'float', 'double'],
+  ushort: ['short', 'char', 'int', 'uint', 'long', 'ulong', 'float', 'double'],
+  char: ['short', 'ushort', 'int', 'uint', 'long', 'ulong', 'float', 'double'],
+  int: ['uint', 'long', 'float', 'double'],
+  uint: ['int', 'long', 'ulong', 'float', 'double'],
+  long: ['ulong', 'float', 'double'],
+  ulong: ['long', 'float', 'double'],
+  float: ['double'],
+};
+
+/**
+ * A value copied into a value-type element: unboxed from a box, or converted between primitive types as the runtime's
+ * array copy converts them; other source element types cannot be assigned to the array.
  */
 function valueElement(evaluator: Evaluator, item: Value, sourceElement: Type | undefined, element: Type): Value {
   if (item instanceof CsBox) return evaluator.unbox(item, element);
   if (!sourceElement) return item;
   const from = specialOf(sourceElement);
   const to = specialOf(element);
-  if (from && to && from !== 'decimal' && to !== 'decimal' && implicitNumeric(from, to))
-    return convertNumeric(item as NumericValue, from, to);
+  if (from && to && ARRAY_COPY_CONVERSIONS[from]?.includes(to)) return convertNumeric(item as NumericValue, from, to);
   return fail('System.ArrayTypeMismatchException', 'Source array type cannot be assigned to destination array type.');
 }
 
