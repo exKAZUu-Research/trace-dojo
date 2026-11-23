@@ -369,18 +369,26 @@ export class Compiler extends BodyCompiler {
     }
     const compiled = this.compileSamFunction(scope, context, argument, sam.functionType);
 
-    for (const argument of (resolved(type) as ClassType).args) {
-      if (argument.variance !== 'star' && argument.type.kind === 'variable' && !argument.type.variable.fixed) {
-        const { lower, upper } = argument.type.variable;
+    this.fixSamTypeArguments(resolved(type) as ClassType, argument.row);
+    return { ...this.samWrap(compiled, sam, resolved(type)), isCreation: true };
+  }
+
+  /** Fixes the type arguments a SAM constructor's lambda left open, rejecting typed parameters no one type satisfies. */
+  private fixSamTypeArguments(type: ClassType, row: number): void {
+    for (const typeArgument of type.args) {
+      if (
+        typeArgument.variance !== 'star' &&
+        typeArgument.type.kind === 'variable' &&
+        !typeArgument.type.variable.fixed
+      ) {
+        const { lower, upper } = typeArgument.type.variable;
         // Typed lambda parameters give upper bounds, of which the type is the most specific, as String of Any? and String.
-        argument.type.variable.fixed =
-          lower[0] ??
-          upper.find((bound) => upper.every((other) => isSubtype(bound, other))) ??
-          upper[0] ??
-          anyType(true);
+        const mostSpecific = upper.find((bound) => upper.every((other) => isSubtype(bound, other)));
+        if (lower.length === 0 && upper.length > 0 && !mostSpecific)
+          this.error(row, typeMismatchMessage(upper[0], upper[1]));
+        typeArgument.type.variable.fixed = lower[0] ?? mostSpecific ?? anyType(true);
       }
     }
-    return { ...this.samWrap(compiled, sam, resolved(type)), isCreation: true };
   }
 
   /** The function a `fun interface`'s constructor wraps: a lambda, or a value of a function type such as `(Int, Int) -> Int`. */
