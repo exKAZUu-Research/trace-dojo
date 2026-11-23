@@ -195,29 +195,43 @@ function skipTake(
  * The count that `TryGetNonEnumeratedCount` finds without enumerating, as .NET's collections and the LINQ iterators
  * that know theirs give it, or undefined.
  */
+function cheapCount(
+  call: NativeCall,
+  items: Value,
+  /** The counts found so far in this traversal, so that a query shared by both sides of a Concat is counted once. */
+  counted = new Map<Value, number | undefined>()
+): number | undefined {
+  if (counted.has(items)) return counted.get(items);
+  call.frame.runtime.spend();
+  const count = uncachedCount(call, items, counted);
+  counted.set(items, count);
+  return count;
+}
+
 // code-gauge-allow functionCognitiveComplexity -- Each branch handles one kind of .NET iterator that knows its count.
-function cheapCount(call: NativeCall, items: Value): number | undefined {
+function uncachedCount(call: NativeCall, items: Value, counted: Map<Value, number | undefined>): number | undefined {
   if (items instanceof CsArray) return items.values.length;
   if (!(items instanceof CsObject) || items.native === undefined) return undefined;
   const { native } = items;
   if (!(native instanceof QueryState)) return isEnumerableState(native) ? [...native.enumerate()].length : undefined;
   if (native.shape?.kind === 'range' || native.shape?.kind === 'repeat') return native.shape.count;
-  if (native.ordering) return cheapCount(call, native.ordering.source);
+  if (native.ordering) return cheapCount(call, native.ordering.source, counted);
   const [first, second] = native.holds;
   if (native.bounds) {
-    const total = cheapCount(call, first);
+    const total = cheapCount(call, first, counted);
     if (total === undefined) return undefined;
     const rest = Math.max(0, total - native.bounds.skipped);
     return native.bounds.taken === undefined ? rest : Math.min(rest, native.bounds.taken);
   }
   const name = native.displayName;
-  if (name.includes('+ReverseIterator') || name.includes('+CastICollectionIterator')) return cheapCount(call, first);
+  if (name.includes('+ReverseIterator') || name.includes('+CastICollectionIterator'))
+    return cheapCount(call, first, counted);
   if (name.includes('+AppendPrepend1Iterator')) {
-    const count = cheapCount(call, first);
+    const count = cheapCount(call, first, counted);
     return count === undefined ? undefined : count + 1;
   }
   if (name.includes('+Concat2Iterator')) {
-    const [a, b] = [cheapCount(call, first), cheapCount(call, second)];
+    const [a, b] = [cheapCount(call, first, counted), cheapCount(call, second, counted)];
     return a === undefined || b === undefined ? undefined : a + b;
   }
   return undefined;
