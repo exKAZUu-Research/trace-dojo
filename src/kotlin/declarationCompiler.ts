@@ -403,6 +403,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       const type = this.resolveType(entry.scope, spec.type) as ClassType;
       if (type.kind !== 'class') this.error(spec.row, '親にはクラスかインターフェースを書いてください。');
       if (type.cls.isInterface) this.declareInterface(entry, spec, type);
+      else if (symbol.kind === 'enum' && !entry.file.isLibrary)
+        this.error(spec.row, 'enum class は、ほかのクラスを継承できません。');
       else this.declareSuperclass(entry, spec, type);
     }
     if (symbol.kind === 'enum') {
