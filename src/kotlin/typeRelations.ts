@@ -259,6 +259,8 @@ function isJvmSerializable(cls: ClassSymbol): boolean {
 function nonNullCommonSupertype(types: KType[]): KType {
   const [first] = types;
   if (types.every((type) => isSubtype(type, first))) return first;
+  const callable = commonFunctionType(types);
+  if (callable) return callable;
   // The first type itself merges its arguments first, as `Pair<Int, String>` and `Pair<Int, Nothing?>` make a
   // `Pair<Int, String?>`.
   for (const candidate of [first, ...supertypesInOrder(first)]) {
@@ -270,6 +272,20 @@ function nonNullCommonSupertype(types: KType[]): KType {
     }
   }
   return anyType();
+}
+
+/** Function types with the same parameters, whose results merge as `out` arguments do: `(Int) -> Int` and `(Int) -> String` make `(Int) -> Any`. */
+function commonFunctionType(types: KType[]): FunctionType | undefined {
+  const [first] = types;
+  if (first.kind !== 'function') return undefined;
+  const sameShape = (type: KType): type is FunctionType =>
+    type.kind === 'function' &&
+    (type.receiver === undefined) === (first.receiver === undefined) &&
+    (!type.receiver || !first.receiver || isSameType(type.receiver, first.receiver)) &&
+    type.params.length === first.params.length &&
+    type.params.every((param, index) => isSameType(param, first.params[index]));
+  if (!types.every(sameShape)) return undefined;
+  return { ...first, nullable: false, returnType: commonSupertype(types.map((type) => type.returnType)) };
 }
 
 function mergeArguments(candidate: ClassType, types: KType[]): ClassType | undefined {
