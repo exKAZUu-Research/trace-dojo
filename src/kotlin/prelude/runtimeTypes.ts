@@ -78,25 +78,50 @@ object System {
 
     fun lineSeparator(): String = "\\n"
 
+    /** Checks its arrays and range in HotSpot's order, with its messages, as the Java interpreter's does. */
     fun arraycopy(src: Any?, srcPos: Int, dest: Any?, destPos: Int, length: Int) {
         if (src == null || dest == null) throw NullPointerException()
+        val from = arrayKindOf(src)
+            ?: throw ArrayStoreException("arraycopy: source type ${'$'}{runtimeClassName(src)} is not an array")
+        val to = arrayKindOf(dest)
+            ?: throw ArrayStoreException("arraycopy: destination type ${'$'}{runtimeClassName(dest)} is not an array")
+        if (from != to) throw ArrayStoreException("arraycopy: type mismatch: can not copy ${'$'}from[] into ${'$'}to[]")
         val srcSize = arraySizeOf(src)
         val destSize = arraySizeOf(dest)
-        if (srcPos < 0 || destPos < 0 || length < 0 || srcPos + length > srcSize || destPos + length > destSize)
-            throw ArrayIndexOutOfBoundsException("arraycopy: last index ${'$'}{srcPos + length} out of bounds for length ${'$'}srcSize")
-        when {
-            src is IntArray && dest is IntArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
-            src is LongArray && dest is LongArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
-            src is DoubleArray && dest is DoubleArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
-            src is FloatArray && dest is FloatArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
-            src is CharArray && dest is CharArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
-            src is BooleanArray && dest is BooleanArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
-            src is ByteArray && dest is ByteArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
-            src is ShortArray && dest is ShortArray -> src.copyInto(dest, destPos, srcPos, srcPos + length)
-            src is Array<*> && dest is Array<*> ->
-                (src as Array<Any?>).copyInto(dest as Array<Any?>, destPos, srcPos, srcPos + length)
-            else -> throw ArrayStoreException("arraycopy: type mismatch")
+        if (srcPos < 0) outOfBounds("source index ${'$'}srcPos out of bounds for ${'$'}from[${'$'}srcSize]")
+        if (destPos < 0) outOfBounds("destination index ${'$'}destPos out of bounds for ${'$'}to[${'$'}destSize]")
+        if (length < 0) outOfBounds("length ${'$'}length is negative")
+        if (srcPos + length > srcSize) outOfBounds("last source index ${'$'}{srcPos + length} out of bounds for ${'$'}from[${'$'}srcSize]")
+        if (destPos + length > destSize)
+            outOfBounds("last destination index ${'$'}{destPos + length} out of bounds for ${'$'}to[${'$'}destSize]")
+        val end = srcPos + length
+        when (src) {
+            is IntArray -> src.copyInto(dest as IntArray, destPos, srcPos, end)
+            is LongArray -> src.copyInto(dest as LongArray, destPos, srcPos, end)
+            is DoubleArray -> src.copyInto(dest as DoubleArray, destPos, srcPos, end)
+            is FloatArray -> src.copyInto(dest as FloatArray, destPos, srcPos, end)
+            is CharArray -> src.copyInto(dest as CharArray, destPos, srcPos, end)
+            is BooleanArray -> src.copyInto(dest as BooleanArray, destPos, srcPos, end)
+            is ByteArray -> src.copyInto(dest as ByteArray, destPos, srcPos, end)
+            is ShortArray -> src.copyInto(dest as ShortArray, destPos, srcPos, end)
+            else -> (src as Array<Any?>).copyInto(dest as Array<Any?>, destPos, srcPos, end)
         }
+    }
+
+    private fun outOfBounds(message: String): Nothing = throw ArrayIndexOutOfBoundsException("arraycopy: ${'$'}message")
+
+    /** An array's element kind as HotSpot's messages name it: int and the like, or object array. */
+    private fun arrayKindOf(array: Any): String? = when (array) {
+        is IntArray -> "int"
+        is LongArray -> "long"
+        is DoubleArray -> "double"
+        is FloatArray -> "float"
+        is CharArray -> "char"
+        is BooleanArray -> "boolean"
+        is ByteArray -> "byte"
+        is ShortArray -> "short"
+        is Array<*> -> "object array"
+        else -> null
     }
 
     private fun arraySizeOf(array: Any): Int = when (array) {
@@ -108,12 +133,12 @@ object System {
         is BooleanArray -> array.size
         is ByteArray -> array.size
         is ShortArray -> array.size
-        is Array<*> -> array.size
-        else -> throw ArrayStoreException("arraycopy: argument type mismatch")
+        else -> (array as Array<*>).size
     }
 }
 
 internal external fun writeStream(isError: Boolean, text: String)
+internal external fun runtimeClassName(value: Any): String
 internal external fun formatStream(isError: Boolean, pattern: String, args: Array<out Any?>)
 `;
 

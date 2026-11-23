@@ -476,6 +476,7 @@ function defineOutput(): void {
     (isError ? frame.runtime.io.stderr : frame.runtime.io.stdout).write(text as string);
     return UNIT;
   });
+  defineNative('java.lang.runtimeClassName(Any)', (_frame, _receiver, [value]) => runtimeClassOf(value).qualifiedName);
   defineNativeProperty(
     'kotlin.reflect.PropertyReference.name',
     (_frame, receiver) => (receiver as KObject).native?.name as string
