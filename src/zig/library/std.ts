@@ -4,6 +4,7 @@ import { bytesToText, CONST_U8 } from '../builtins';
 import { rejectRuntimeEffect } from '../comptimeMemory';
 import { known, type NativeCall, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
+  ANYERROR,
   BOOL,
   CONST_U8_SLICE,
   errorSetOf,
@@ -17,11 +18,13 @@ import {
   TYPE,
   type Type,
   U8,
+  U64,
   USIZE,
   VOID,
 } from '../types';
 import { decodeUtf8 } from '../utf8';
 import { ErrorValue, NativeHandle, Pointer, type Slice, type Value, ZArray, ZStruct } from '../values';
+import { configureFiles, fileDescriptor, filesType, openFileLength } from './files';
 import { ALLOCATOR, allocatorMembers, ARENA_ALLOCATOR, arenaValue, heapNamespace } from './heap';
 import { langNamespace } from './lang';
 import {
@@ -231,14 +234,14 @@ const FILE_WRITER: StructType = nativeStruct(
 
 const WRITE_ERROR = errorSetOf(['WriteFailed']);
 
+configureFiles(IO, FILE);
 addIoMembers();
 
 function addIoMembers(): void {
   addMembers(IO, {
     File: typeMember(() => FILE),
     Writer: typeMember(() => WRITER),
-    Reader: unavailableMember('標準入力やファイルからの読み込み（std.Io.Reader）'),
-    Dir: unavailableMember('ファイルの読み書き（std.Io.Dir）'),
+
     net: unavailableMember('ネットワーク（std.Io.net）'),
     Clock: unavailableMember('時刻（std.Io.Clock）'),
   });
@@ -259,7 +262,42 @@ function addIoMembers(): void {
       },
       () => ({ type: fnType([], FILE) })
     ),
-    stdin: unavailableMember('標準入力（std.Io.File.stdin）'),
+    stdin: fnMember(
+      'std.Io.File.stdin',
+      (sema, call) => {
+        expectArgs(sema, call, 0, 'std.Io.File.stdin');
+        return known(FILE, handle('file', { fd: 0 }), call.span);
+      },
+      () => ({ type: fnType([], FILE) })
+    ),
+    reader: fnMember('File.reader', (sema, call) => fileReader(sema, call)),
+    readerStreaming: fnMember('File.readerStreaming', (sema, call) => fileReader(sema, call)),
+    close: fnMember('File.close', (sema, call) => {
+      const file = fileOf(sema, call);
+      const [io] = compileArgs(sema, expectArgs(sema, call, 1, 'close'), [IO]);
+      const evaluate = file.eval;
+      return runtime(
+        VOID,
+        (frame) => {
+          io.eval(frame);
+          frame.runtime.openFiles.delete(fileDescriptor(evaluate(frame)));
+        },
+        call.span
+      );
+    }),
+    length: fnMember('File.length', (sema, call) => {
+      const file = fileOf(sema, call);
+      const [io] = compileArgs(sema, expectArgs(sema, call, 1, 'length'), [IO]);
+      const evaluate = file.eval;
+      return runtime(
+        errorUnionOf(ANYERROR, U64),
+        (frame) => {
+          io.eval(frame);
+          return openFileLength(frame, fileDescriptor(evaluate(frame)));
+        },
+        call.span
+      );
+    }),
     Writer: typeMember(() => FILE_WRITER),
     writer: fnMember(
       'File.writer',
@@ -291,8 +329,25 @@ function addIoMembers(): void {
       },
       () => ({ type: fnType([FILE, IO, CONST_U8_SLICE], errorUnionOf(FILE_WRITE_ERROR, VOID)), receiver: true })
     ),
-    reader: unavailableMember('標準入力やファイルからの読み込み'),
   });
+  for (const [owner, name, path] of [
+    [IO, 'Reader', 'Reader'],
+    [IO, 'Dir', 'Dir'],
+    [IO, 'Limit', 'Limit'],
+    [FILE, 'Reader', 'File.Reader'],
+    [FILE, 'OpenError', 'File.OpenError'],
+    [FILE, 'Kind', 'File.Kind'],
+    [FILE, 'Stat', 'File.Stat'],
+  ] as const) {
+    owner.namespace.decls.set(name, {
+      kind: 'native',
+      name,
+      resolve: () => {
+        throw new Error(`Io.${path} needs the compiler`);
+      },
+      resolveWith: (sema: SemaApi, span: Span) => known(TYPE, filesType(sema, path, span), span),
+    });
+  }
   addWriterMembers();
 }
 
@@ -459,6 +514,26 @@ function fileOf(sema: SemaApi, call: NativeCall): TExpr {
   if (receiver.type === FILE) return receiver;
   const evaluate = receiver.eval;
   return runtime(FILE, (frame) => (evaluate(frame) as Pointer).load(), receiver.span);
+}
+
+/** `file.reader(io, &buffer)`: a File.Reader whose interface reads into the buffer. */
+function fileReader(sema: SemaApi, call: NativeCall): TExpr {
+  const file = fileOf(sema, call);
+  const [, buffer] = expectArgs(sema, call, 2, 'reader');
+  const [io] = compileArgs(sema, [call.args[0]], [IO]);
+  const slice = sema.coerce(sema.compile(buffer, sliceOf(U8, false)), sliceOf(U8, false), buffer);
+  const type = filesType(sema, 'File.Reader', call.span);
+  const evaluateFile = file.eval;
+  const evaluateBuffer = slice.eval;
+  return runtime(
+    type,
+    (frame) => {
+      const descriptor = BigInt(fileDescriptor(evaluateFile(frame)));
+      io.eval(frame);
+      return new ZStruct([new ZStruct([evaluateBuffer(frame), 0n, 0n, descriptor])]);
+    },
+    call.span
+  );
 }
 
 /** `file.writer(io, &buffer)`: a File.Writer whose interface buffers up to the buffer's length. */

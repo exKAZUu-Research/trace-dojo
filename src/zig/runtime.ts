@@ -1,5 +1,5 @@
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
+import { type FileHandle, type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
@@ -94,6 +94,11 @@ export class Runtime {
   private activeFrameSlots = 0;
   /** The backward branches of the analysis that evaluates code at compile time, which a run of the program lacks. */
   branchCount: BranchCount | undefined;
+  /** The files the program has opened, by the descriptor that a `std.Io.File` holds. */
+  readonly openFiles = new Map<number, OpenFile>();
+  private nextDescriptor = 3;
+  private stdinBytes: Uint8Array | undefined;
+  private stdinPosition = 0;
 
   constructor(input?: ProgramInput, budget = new ExecutionBudget()) {
     this.budget = budget;
@@ -114,8 +119,48 @@ export class Runtime {
     if (count && ++count.count > count.quota) throw new BranchQuotaExceeded(row, count.quota);
   }
 
+  openFile(file: OpenFile): number {
+    const descriptor = this.nextDescriptor++;
+    this.openFiles.set(descriptor, file);
+    return descriptor;
+  }
+
+  /** Reads up to `limit` bytes of standard input (descriptor 0) or of an open file, none at its end. */
+  readInput(descriptor: number, limit: number): Uint8Array {
+    rejectRuntimeEffect();
+    if (descriptor === 0) {
+      this.stdinBytes ??= new TextEncoder().encode(this.io.stdin.reader.readRest());
+      const bytes = this.stdinBytes.subarray(this.stdinPosition, this.stdinPosition + limit);
+      this.stdinPosition += bytes.length;
+      this.spend(Math.ceil((bytes.length + 1) / 64));
+      return bytes;
+    }
+    const file = this.openFiles.get(descriptor);
+    if (!file?.read) return new Uint8Array();
+    const content = new TextEncoder().encode(file.read());
+    const bytes = content.subarray(file.position, file.position + limit);
+    file.position += bytes.length;
+    this.spend(Math.ceil((content.length + 1) / 64));
+    return bytes;
+  }
+
+  /** Whether reading standard input or an open file would give no more bytes. */
+  inputAtEnd(descriptor: number): boolean {
+    if (descriptor === 0) {
+      this.stdinBytes ??= new TextEncoder().encode(this.io.stdin.reader.readRest());
+      return this.stdinPosition >= this.stdinBytes.length;
+    }
+    const file = this.openFiles.get(descriptor);
+    return !file?.read || file.position >= new TextEncoder().encode(file.read()).length;
+  }
+
   writeOutput(fd: number, bytes: readonly number[]): void {
     rejectRuntimeEffect();
+    const file = this.openFiles.get(fd);
+    if (file) {
+      file.write?.write(file.decoder.decode(new Uint8Array(bytes), { stream: true }));
+      return;
+    }
     const index = fd === 2 ? 1 : 0;
     const text = this.outputDecoders[index].decode(new Uint8Array(bytes), { stream: true });
     (index === 1 ? this.io.stderr : this.io.stdout).write(text);
@@ -169,6 +214,16 @@ export class Runtime {
     const turtles = this.turtleReachability.collect(this.globals, this.frames);
     this.world.retain((turtle) => turtles.has(turtle));
   }
+}
+
+/** A file that the program opened, which reads the file's text as UTF-8 bytes and writes text it decodes. */
+export interface OpenFile {
+  path: string;
+  read?: () => string;
+  /** How many bytes of the file reading has passed. */
+  position: number;
+  write?: FileHandle;
+  readonly decoder: TextDecoder;
 }
 
 export class OutOfMemory extends Error {

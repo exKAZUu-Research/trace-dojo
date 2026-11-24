@@ -493,6 +493,7 @@ export abstract class SemaBase implements SemaApi {
         return known(this.declarationType(decl, span), ref, span);
       }
       case 'native': {
+        if (decl.resolveWith) return (decl.resolveWith as (sema: SemaApi, span: Span) => TExpr)(this, span);
         const { type, value, unavailable } = decl.resolve();
         if (unavailable) this.error(span, `${unavailable}は、この採点環境では使えません。`);
         return known(type, value, span);

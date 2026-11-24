@@ -132,14 +132,10 @@ const UNAVAILABLE = new Map<string, string>([
   ['@cVaCopy', '可変個の引数'],
   ['@cVaEnd', '可変個の引数'],
   ['@cVaStart', '可変個の引数'],
-  ['@call', '@call'],
-  ['@bitCast', '@bitCast（メモリの表現に依存する変換）'],
   ['@Vector', 'ベクトル（@Vector）'],
   ['@reduce', 'ベクトル（@reduce）'],
   ['@shuffle', 'ベクトル（@shuffle）'],
   ['@select', 'ベクトル（@select）'],
-  ['@constCast', '@constCast'],
-  ['@volatileCast', '@volatileCast'],
   ['@intFromError', '@intFromError（エラーの番号）'],
   ['@errorFromInt', '@errorFromInt（エラーの番号）'],
   ['@errorReturnTrace', '@errorReturnTrace'],
@@ -148,8 +144,6 @@ const UNAVAILABLE = new Map<string, string>([
   ['@Struct', '@Struct（型の操作）'],
   ['@Union', '@Union（型の操作）'],
   ['@Enum', '@Enum（型の操作）'],
-  ['@backingInt', '@backingInt'],
-  ['@fromBackingInt', '@fromBackingInt'],
 ]);
 
 const ARGUMENT_COUNTS: Record<string, number> = {

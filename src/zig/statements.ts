@@ -32,6 +32,7 @@ import {
   BOOL,
   COMPTIME_INT,
   type EnumType,
+  errorSetOf,
   type ErrorSetType,
   fitsInt,
   type IntType,
@@ -1875,7 +1876,7 @@ export abstract class StatementCompiler extends CallCompiler {
       exhausted && expression.otherwise
         ? this.branch(expression.otherwise, undefined, target.resultType, asStatement, false)
         : undefined;
-    const valueType = asStatement ? VOID : this.loopType(target, otherwise?.value, false, expression);
+    const valueType = asStatement ? VOID : this.loopType(target, otherwise?.value, !exhausted, expression);
     const otherwiseExec = otherwise?.stmt?.exec;
     const otherwiseValue = otherwise?.value ? this.coerce(otherwise.value, valueType, expression).eval : undefined;
     const { id } = target;
@@ -1962,7 +1963,7 @@ export abstract class StatementCompiler extends CallCompiler {
     asStatement: boolean
   ): { stmt: Stmt; value: TExpr } {
     const fn = this.currentFn(expression);
-    if (expression.isInline) return this.inlineFor(expression, asStatement);
+    if (expression.isInline) return this.inlineFor(expression, resultType, asStatement);
     const target: JumpTarget = {
       id: {},
       label: expression.label?.name,
@@ -2200,79 +2201,128 @@ export abstract class StatementCompiler extends CallCompiler {
   /** `inline for`, which the compiler unrolls, binding each capture to a value it may know. */
   // code-gauge-allow functionCognitiveComplexity -- Keeps lexical captures and early exits with the unrolled loop.
   // code-gauge-allow functionNcss -- Keeps lexical captures and early exits with the unrolled loop.
-  private inlineFor(expression: ExpressionOf<'for'>, asStatement: boolean): { stmt: Stmt; value: TExpr } {
-    if (!asStatement) this.error(expression, 'inline for の値は、この採点環境では使えません。');
-    if (expression.operands.length !== 1 || expression.otherwise) {
-      this.error(expression, 'inline for は、対象1つで else のない形だけが、この採点環境で使えます。');
-    }
-    const [operand] = expression.operands;
-    const [capture] = expression.captures;
+  private inlineFor(
+    expression: ExpressionOf<'for'>,
+    resultType: Type | undefined,
+    asStatement: boolean
+  ): { stmt: Stmt; value: TExpr } {
     const fn = this.currentFn(expression);
-    const operandSlot = this.localSlot();
-    const { elements, evaluateOperand } = this.inlineElements(operand, capture, operandSlot);
+    const operandSlots = expression.operands.map(() => this.localSlot());
+    const known = expression.operands.map((operand, index) =>
+      operand.isRange && !operand.rangeEnd
+        ? undefined
+        : this.inlineElements(operand, expression.captures[index], operandSlots[index])
+    );
+    const lengths = known.flatMap((each) => (each ? [each.elements.length] : []));
+    if (lengths.length === 0) this.error(expression, 'for の対象には、長さの決まるものが1つ以上要ります。');
+    if (lengths.some((length) => length !== lengths[0])) this.error(expression, 'for の対象の長さがそろっていません。');
+    const count = lengths[0];
+    const columns = known.map((each, index) => each?.elements ?? this.inlineRange(expression.operands[index], count));
     const target: JumpTarget = {
       id: {},
       label: expression.label?.name,
       kind: 'loop',
+      resultType: asStatement ? undefined : resultType,
       breaks: [],
       broken: false,
     };
     const row = this.stepRow(expression);
     const iterations: {
       body: Exec;
-      slot: number | undefined;
-      evaluate: TExpr['eval'];
-      binding: LocalBinding | undefined;
+      slots: number[];
+      evaluators: TExpr['eval'][];
+      bindings: (LocalBinding | undefined)[];
     }[] = [];
     let noreturn = false;
-    for (const element of elements) {
+    let exhausted = true;
+    for (let position = 0; position < count; position++) {
       target.continued = false;
       this.compilationBudget.spend();
       this.countUnrolledIteration(expression);
       const locals = new Map<string, LocalBinding>();
-      let binding: LocalBinding | undefined;
-      if (capture && !isDiscardName(capture)) {
+      const bindings = expression.captures.map((capture, index) => {
+        if (!capture || isDiscardName(capture)) return;
+        const element = columns[index][position];
         const fact = staticResultOf(element);
-        binding = { ...this.newLocal(capture.name, element.type, true), known: fact !== undefined, value: fact?.value };
+        const binding = {
+          ...this.newLocal(capture.name, element.type, true),
+          known: fact !== undefined,
+          value: fact?.value,
+        };
         locals.set(capture.name, binding);
-      }
+        return binding;
+      });
       fn.targets.push(target);
       try {
         const body = this.withScope({ locals, parent: this.scope }, () => this.loopBody(expression.body, false));
+        const slots = bindings.flatMap((binding) => (binding ? [binding.slot] : []));
         iterations.push({
-          body: clearingLocals(binding ? [binding.slot] : [], body.exec),
-          slot: binding?.slot,
-          evaluate: element.eval,
-          binding,
+          body: clearingLocals(slots, body.exec),
+          slots,
+          evaluators: bindings.flatMap((binding, index) => (binding ? [columns[index][position].eval] : [])),
+          bindings,
         });
         if (body.noreturn && !target.continued) {
           noreturn = !target.broken;
+          exhausted = false;
           break;
         }
       } finally {
         fn.targets.pop();
       }
     }
+    const otherwise =
+      exhausted && expression.otherwise
+        ? this.branch(expression.otherwise, undefined, target.resultType, asStatement, false)
+        : undefined;
+    const valueType = asStatement ? VOID : this.loopType(target, otherwise?.value, !exhausted, expression);
+    const otherwiseExec = otherwise?.stmt?.exec;
+    const otherwiseValue = otherwise?.value ? this.coerce(otherwise.value, valueType, expression).eval : undefined;
+    const evaluateOperands = known.map((each) => each?.evaluateOperand);
     const { id } = target;
-    return {
-      stmt: {
-        exec: clearingLocals([operandSlot], (frame) => {
-          if (evaluateOperand) frame.slots[operandSlot] = evaluateOperand(frame);
-          for (const iteration of iterations) {
-            frame.runtime.spend();
-            if (iteration.slot !== undefined) frame.slots[iteration.slot] = iteration.evaluate(frame);
-            frame.runtime.steps.stepBinding(row, bindingStoresAnswer(iteration.binding, frame));
-            const completion = runBody(iteration.body, frame, id);
-            if (completion) {
-              if (completion.target !== id) return completion;
-              if (completion.kind === 'break') return;
-            }
-          }
-          return;
-        }),
-        noreturn,
+    const loop = clearingLocals(operandSlots, (frame: Frame): Jump | { value: Value } | undefined => {
+      for (const [index, evaluate] of evaluateOperands.entries())
+        if (evaluate) frame.slots[operandSlots[index]] = evaluate(frame);
+      for (const iteration of iterations) {
+        frame.runtime.spend();
+        for (const [index, slot] of iteration.slots.entries()) frame.slots[slot] = iteration.evaluators[index](frame);
+        frame.runtime.steps.stepBinding(
+          row,
+          iteration.bindings.some((binding) => bindingStoresAnswer(binding, frame))
+        );
+        const completion = loopExit(runBody(iteration.body, frame, id), id);
+        if (completion) return completion;
+      }
+      if (otherwiseExec) {
+        const completion = otherwiseExec(frame);
+        if (completion) return completion;
+      }
+      if (otherwiseValue) return { value: otherwiseValue(frame) };
+      return undefined;
+    });
+    const stmt: Stmt = {
+      exec: (frame) => {
+        const result = loop(frame);
+        return result instanceof Jump ? result : undefined;
       },
-      value: known(VOID, undefined, expression),
+      noreturn: noreturn || otherwise?.stmt?.noreturn === true,
+    };
+    return {
+      stmt,
+      value: this.loopResult(
+        target,
+        otherwise?.value,
+        false,
+        runtime(
+          stmt.noreturn ? NORETURN : valueType,
+          (frame) => {
+            const result = loop(frame);
+            if (result instanceof Jump) throw result;
+            return result?.value;
+          },
+          expression
+        )
+      ),
     };
   }
 
@@ -2307,12 +2357,15 @@ export abstract class StatementCompiler extends CallCompiler {
     return { elements, evaluateOperand: source.known ? undefined : plan.evaluate };
   }
 
-  private inlineRange(operand: ExpressionOf<'for'>['operands'][number]): TExpr[] {
+  /** The indexes of a range operand, which an open range `start..` takes as many of as the other operands have. */
+  private inlineRange(operand: ExpressionOf<'for'>['operands'][number], openCount?: number): TExpr[] {
     const start = this.knownValue(this.coerce(this.compile(operand.value, USIZE), USIZE), '範囲') as bigint;
-    if (!operand.rangeEnd) return this.error(operand, '終わりのない範囲は、inline for では回せません。');
-    const end = this.knownValue(this.coerce(this.compile(operand.rangeEnd, USIZE), USIZE), '範囲') as bigint;
-    if (end < start) this.error(operand, '範囲の始まりが終わりより大きくなっています。');
-    const count = Number(end - start);
+    let count = openCount ?? 0;
+    if (operand.rangeEnd) {
+      const end = this.knownValue(this.coerce(this.compile(operand.rangeEnd, USIZE), USIZE), '範囲') as bigint;
+      if (end < start) this.error(operand, '範囲の始まりが終わりより大きくなっています。');
+      count = Number(end - start);
+    }
     this.compilationBudget.spend(count);
     return Array.from({ length: count }, (_, index) => known(USIZE, start + BigInt(index), operand));
   }
@@ -2827,7 +2880,14 @@ export abstract class StatementCompiler extends CallCompiler {
         inline,
       };
     }
-    const captureType = !each.capture || each.isElse ? operandType : captureFor(values);
+    // An `else` prong of an error switch captures the errors that no other prong names.
+    const remainingErrors =
+      each.capture && each.isElse && operandType.kind === 'error_set' && operandType.names !== undefined;
+    const captureType = remainingErrors
+      ? errorSetOf(this.remainingKeys(tagType, seen, each).map(String))
+      : !each.capture || each.isElse
+        ? operandType
+        : captureFor(values);
     const compiled = compileBody(captureType, undefined);
     return { values, ranges, ...compiled, isElse: each.isElse, isUnnamed };
   }

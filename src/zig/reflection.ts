@@ -1,8 +1,11 @@
+import { PANIC, panic } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
+import { BufferMemory } from './bufferMemory';
 import { BuiltinCompiler } from './builtins';
 import { constantText } from './constantText';
 import { alignOf, bitSizeOf, fieldOffsets, sizeOf } from './layout';
 import { langNamespace } from './library/lang';
+import { memorySpace, spendMemory } from './memoryAccounting';
 import { known, runtime, type TExpr } from './semaBase';
 import {
   BOOL,
@@ -10,6 +13,8 @@ import {
   ENUM_LITERAL,
   intType,
   isComptimeOnly,
+  optionalOf,
+  sliceOf,
   type StructField,
   type StructType,
   TYPE,
@@ -17,6 +22,7 @@ import {
   typeName,
   type UnionType,
   VOID,
+  withPointerAttributes,
 } from './types';
 import { decodeUtf8 } from './utf8';
 import { Cell, markConstantStorage, NULL, Pointer, Slice, type Value, ZArray, ZStruct, ZUnion } from './values';
@@ -27,12 +33,12 @@ import { Cell, markConstantStorage, NULL, Pointer, Slice, type Value, ZArray, ZS
  */
 export abstract class ReflectionCompiler extends BuiltinCompiler {
   protected compileBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
-    return this.reflectionBuiltin(expression) ?? super.compileBuiltin(expression, resultType);
+    return this.reflectionBuiltin(expression, resultType) ?? super.compileBuiltin(expression, resultType);
   }
 
   // code-gauge-allow functionNcss -- One case per builtin, as Zig's language reference lists them.
   // code-gauge-allow functionCognitiveComplexity -- One case per builtin, as Zig's language reference lists them.
-  private reflectionBuiltin(expression: ExpressionOf<'builtinCall'>): TExpr | undefined {
+  private reflectionBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr | undefined {
     const { name, args } = expression;
     const arity = (count: number): void => {
       if (args.length !== count)
@@ -99,7 +105,8 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
         arity(2);
         const type = this.containerArgument(args[0], name);
         const declName = this.comptimeText(args[1]);
-        return known(BOOL, this.findDecl(type, declName) !== undefined, expression);
+        const decl = this.findDecl(type, declName);
+        return known(BOOL, decl !== undefined && (decl.kind === 'native' || decl.syntax.isPub), expression);
       }
       case '@hasField': {
         arity(2);
@@ -170,17 +177,117 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
       }
       case '@Tuple': {
         arity(1);
-        const types = this.comptimeElements(args[0]) as Type[];
+        const types = this.comptimeElements(args[0], TYPE) as Type[];
         return known(
           TYPE,
           this.tupleType(types.map((type, index) => ({ name: String(index), type, hasDefault: false }))),
           expression
         );
       }
+      case '@constCast':
+      case '@volatileCast': {
+        arity(1);
+        const operand = this.compile(args[0]);
+        const pointer = operand.type.kind === 'optional' ? operand.type.child : operand.type;
+        if (pointer.kind !== 'pointer')
+          return this.error(args[0], `${name} にはポインタを渡してください（${typeName(operand.type)} 型です）。`);
+        const cast = withPointerAttributes(pointer, name === '@constCast' ? { isConst: false } : { isVolatile: false });
+        return {
+          ...operand,
+          type: operand.type.kind === 'optional' ? optionalOf(cast) : cast,
+          place: undefined,
+          local: undefined,
+        };
+      }
+      case '@bitCast': {
+        arity(1);
+        const target = this.resultTypeOf(expression, resultType);
+        const operand = this.compile(args[0]);
+        for (const [type, span] of [
+          [operand.type, args[0]],
+          [target, expression],
+        ] as const) {
+          this.resolveStorage(type, span);
+          if (!bitCastable(type)) return this.error(span, `@bitCast では ${typeName(type)} 型を変換できません。`);
+        }
+        const from = bitSizeOf(operand.type);
+        const to = bitSizeOf(target);
+        if (from !== to)
+          return this.error(
+            expression,
+            `@bitCast の変換の前後でビット数が合いません（${typeName(target)} は ${to} ビット、${typeName(operand.type)} は ${from} ビットです）。`
+          );
+        return this.derived(operand, target, (value) => reinterpret(value, operand.type, target));
+      }
+      case '@backingInt': {
+        arity(1);
+        const operand = this.compile(args[0]);
+        const type = operand.type;
+        if (type.kind === 'enum') {
+          const tag = this.enumFields(type) && (type.tagType as Type);
+          return this.derived(operand, tag, (value) => value);
+        }
+        if (type.kind === 'union' && type.layout !== 'packed' && type.tagType) {
+          const tags = this.enumFields(type.tagType);
+          this.unionFields(type);
+          return this.derived(operand, type.tagType.tagType as Type, (value) => tags[(value as ZUnion).tag].value);
+        }
+        if ((type.kind === 'struct' || type.kind === 'union') && type.layout === 'packed') {
+          // Zig takes the backing integer only of a packed type that names it, as `packed struct(u8)` does.
+          if (!type.namespace.syntax?.argument)
+            return this.error(
+              args[0],
+              `${typeName(type)} 型は基底の整数型を書いていないので、@backingInt があいまいです。`
+            );
+          this.resolveStorage(type, args[0]);
+          const backing = intType(false, bitSizeOf(type));
+          return this.derived(operand, backing, (value) => reinterpret(value, type, backing));
+        }
+        return this.error(
+          args[0],
+          `@backingInt には enum か packed struct・packed union を渡してください（${typeName(type)} 型です）。`
+        );
+      }
+      case '@fromBackingInt': {
+        arity(1);
+        const target = this.resultTypeOf(expression, resultType);
+        if (target.kind === 'enum') {
+          const fields = this.enumFields(target);
+          const tag = target.tagType as Type;
+          const operand = this.coerce(this.compile(args[0], tag), tag, args[0]);
+          const values = new Set(fields.map((field) => field.value));
+          const exhaustive = target.exhaustive;
+          return this.derived(operand, target, (value) =>
+            exhaustive && !values.has(value as bigint) ? panic(PANIC.invalidEnum) : value
+          );
+        }
+        if ((target.kind === 'struct' || target.kind === 'union') && target.layout === 'packed') {
+          this.resolveStorage(target, expression);
+          const backing = intType(false, bitSizeOf(target));
+          const operand = this.coerce(this.compile(args[0], backing), backing, args[0]);
+          return this.derived(operand, target, (value) => reinterpret(value, backing, target));
+        }
+        return this.error(
+          expression,
+          `@fromBackingInt の結果の型には enum か packed struct・packed union が要ります（${typeName(target)} 型です）。`
+        );
+      }
       default: {
         return undefined;
       }
     }
+  }
+
+  private resultTypeOf(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): Type {
+    let target = resultType;
+    while (target?.kind === 'optional' || target?.kind === 'error_union')
+      target = target.kind === 'optional' ? target.child : target.payload;
+    if (!target)
+      return this.error(
+        expression,
+        `${expression.name} には結果の型が要ります（@as(T, ${expression.name}(...)) のように書いてください）。`
+      );
+    return target;
   }
 
   /** `@field(object, "name")` as the field access `object.name`, which may also be assigned to. */
@@ -213,8 +320,9 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
   }
 
   /** The elements of an array or slice that the compiler knows, such as `@Tuple`'s types. */
-  private comptimeElements(arg: Expression): Value[] {
-    const value = this.knownValue(this.compile(arg), '配列');
+  private comptimeElements(arg: Expression, element: Type): Value[] {
+    const type = sliceOf(element, true);
+    const value = this.knownValue(this.coerce(this.compile(arg, type), type, arg), '配列');
     if (value instanceof Slice) return value.values();
     if (value instanceof Pointer && value.load() instanceof ZArray) return (value.load() as ZArray).values();
     if (value instanceof ZArray) return value.values();
@@ -433,4 +541,36 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
 
 function optionalValue(value: Type | undefined): Value {
   return value ?? NULL;
+}
+
+/** Whether `@bitCast` takes or gives a value of a type, which must have a fixed bit layout. */
+function bitCastable(type: Type): boolean {
+  switch (type.kind) {
+    case 'int':
+    case 'float':
+    case 'bool': {
+      return true;
+    }
+    case 'enum': {
+      return type.namespace.syntax?.argument !== undefined;
+    }
+    case 'struct':
+    case 'union': {
+      return type.layout !== 'auto';
+    }
+    case 'array': {
+      return bitCastable(type.child);
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/** A value's bits read as a value of another type of the same size, as memory holds them on a little-endian CPU. */
+function reinterpret(value: Value, from: Type, to: Type): Value {
+  const length = Math.max(sizeOf(from), sizeOf(to));
+  const bytes = Array.from<Value>({ length }).fill(0n);
+  new BufferMemory(bytes, spendMemory, memorySpace()).write(from, 0, value);
+  return new BufferMemory(bytes, spendMemory, memorySpace()).read(to, 0);
 }

@@ -39,6 +39,9 @@ import {
 } from './types';
 import { FnValue, Pointer, type Value } from './values';
 
+/** The value of `std.lang.CallModifier.compile_time`, the seventh of its fields. */
+const COMPILE_TIME_MODIFIER = 6n;
+
 /** What a function body's compilation needs to know about the function. */
 export interface FunctionCompilation {
   instance: FunctionInstance;
@@ -61,6 +64,38 @@ export abstract class CallCompiler extends ReflectionCompiler {
   protected abstract atomicRow(fn: FunctionDeclaration): boolean;
 
   // Calls -------------------------------------------------------------------------------------------------------------
+
+  protected compileBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
+    if (expression.name !== '@call') return super.compileBuiltin(expression, resultType);
+    const { args } = expression;
+    if (args.length !== 3)
+      this.error(expression, `@call の引数の数が合いません（3 個が必要ですが、${args.length} 個です）。`);
+    const modifierType = this.langMember('CallModifier', expression);
+    const modifier = this.knownValue(
+      this.coerce(this.compile(args[0], modifierType), modifierType, args[0]),
+      '呼び出し方'
+    );
+    const tuple = this.compile(args[2]);
+    if (tuple.type.kind !== 'struct' || !tuple.type.isTuple)
+      return this.error(args[2], '@call の引数は、.{ 1, 2 } のようなタプルにしてください。');
+    const fields = this.structFields(tuple.type, args[2]);
+    const elements = fields.map((field, index) => this.tupleElement(tuple, index, field, args[2]));
+    const call: ExpressionOf<'call'> = {
+      kind: 'call',
+      row: expression.row,
+      col: expression.col,
+      endRow: expression.endRow,
+      callee: args[1],
+      args: elements as unknown as Expression[],
+    };
+    const callee = this.compile(args[1]);
+    if (callee.value instanceof NativeFn)
+      return this.error(args[1], '@call では、標準ライブラリの関数は呼び出せません。');
+    // `.compile_time` runs the call while the compiler analyzes it; the other modifiers only hint at optimizations.
+    if (modifier === COMPILE_TIME_MODIFIER)
+      return this.comptimeValue(() => this.compileCall(call, resultType), expression);
+    return this.compileCall(call, resultType);
+  }
 
   protected compileCall(expression: ExpressionOf<'call'>, resultType: Type | undefined): TExpr {
     const { callee } = expression;

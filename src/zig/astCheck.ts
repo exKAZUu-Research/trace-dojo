@@ -552,6 +552,11 @@ class AstChecker {
         break;
       }
       case 'builtinCall': {
+        if (expression.name === '@field' && use === 'ref' && expression.args.length === 2) {
+          this.expression(expression.args[0], 'ref');
+          this.expression(expression.args[1], 'value');
+          break;
+        }
         this.builtinCall(expression);
         break;
       }
@@ -948,7 +953,8 @@ function isAssignable(expression: Expression): boolean {
     inner.kind === 'field' ||
     inner.kind === 'index' ||
     inner.kind === 'deref' ||
-    inner.kind === 'unwrap'
+    inner.kind === 'unwrap' ||
+    (inner.kind === 'builtinCall' && inner.name === '@field')
   );
 }
 

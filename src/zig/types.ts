@@ -1,4 +1,4 @@
-import type { Container, FunctionDeclaration, VariableDeclaration } from './ast';
+import type { Container, FunctionDeclaration, Span, VariableDeclaration } from './ast';
 import { constantText } from './constantText';
 import { spendMemory } from './memoryAccounting';
 import { scalarValueKey, type Value } from './values';
@@ -197,7 +197,13 @@ export type Decl =
       alignment?: number;
     }
   | { kind: 'fn'; syntax: FunctionDeclaration; namespace: Namespace }
-  | { kind: 'native'; name: string; resolve: () => { type: Type; value: Value; unavailable?: string } };
+  | {
+      kind: 'native';
+      name: string;
+      resolve: () => { type: Type; value: Value; unavailable?: string };
+      /** Resolves a native name for a declaration that the compiler analyzes, such as a type the library declares in Zig. */
+      resolveWith?: (sema: never, span: Span) => unknown;
+    };
 
 // Simple types --------------------------------------------------------------------------------------------------------
 
