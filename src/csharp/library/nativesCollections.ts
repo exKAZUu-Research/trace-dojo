@@ -932,6 +932,8 @@ const dictionaryNatives: Record<string, NativeMethod> = {
     hashOfState(receiver).insert(key as Value, value as Value, true);
     return;
   },
+  // ICollection<KeyValuePair<TKey, TValue>>.Contains: the key by the dictionary's comparer, the value by default.
+  [`${DICTIONARY}.Contains`]: (call, receiver, [pair]) => hashOfState(receiver).containsPair(pair as CsStruct, call),
   [`${DICTIONARY}.get_Keys`]: (call, receiver) =>
     viewOf(call, receiver, 'KeyCollection', typeArgument(call, 0), (entry) => entry.key),
   [`${DICTIONARY}.get_Values`]: (call, receiver) =>

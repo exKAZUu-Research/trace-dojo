@@ -161,6 +161,7 @@ namespace System.Collections.Generic {
     public void Add(TKey key, TValue value);
     public void Clear();
     public bool ContainsKey(TKey key);
+    public bool Contains(KeyValuePair<TKey, TValue> item);
     public bool ContainsValue(TValue value);
     public Enumerator GetEnumerator();
     public bool Remove(TKey key);
@@ -213,6 +214,7 @@ namespace System.Collections.Generic {
     public void Add(TKey key, TValue value);
     public void Clear();
     public bool ContainsKey(TKey key);
+    public bool Contains(KeyValuePair<TKey, TValue> item);
     public bool ContainsValue(TValue value);
     public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator();
     public bool Remove(TKey key);
@@ -230,6 +232,7 @@ namespace System.Collections.Generic {
     public void Add(TKey key, TValue value);
     public void Clear();
     public bool ContainsKey(TKey key);
+    public bool Contains(KeyValuePair<TKey, TValue> item);
     public bool ContainsValue(TValue value);
     public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator();
     public int IndexOfKey(TKey key);
