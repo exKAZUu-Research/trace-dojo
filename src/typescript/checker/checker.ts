@@ -148,10 +148,10 @@ export class Checker {
     this.libraryBinder = new Binder(libraryTree.rootNode, libraryScope(), { deferLibraryTypes: true });
     this.localeOptionsBinder = new Binder(localeOptionsTree.rootNode, this.libraryBinder.moduleScope);
     markUnsupported(this.libraryBinder.moduleScope);
-    this.binder = new Binder(root, this.libraryBinder.globalScope, {
-      rootScope: this.libraryBinder.moduleScope,
-      budget,
-    });
+    // A program with an import or an export is a module, whose declarations shadow the globals rather than merge with them.
+    this.binder = isModule(root)
+      ? new Binder(root, this.libraryBinder.moduleScope, { budget })
+      : new Binder(root, this.libraryBinder.globalScope, { rootScope: this.libraryBinder.moduleScope, budget });
   }
 
   check(): SourceDiagnostic[] {
@@ -1283,4 +1283,9 @@ function isUnitType(type: Type): boolean {
 /** TypeScript's `isLiteralType`: a unit type or a union of them, `boolean` included. */
 function isLiteralType(type: Type): boolean {
   return type.kind === 'union' ? type.types.every((member) => isUnitType(member)) : isUnitType(type);
+}
+
+/** Whether a program has an `import` or an `export`, which makes it a module. */
+export function isModule(root: TreeNode): boolean {
+  return root.namedChildren.some((child) => child?.type === 'import_statement' || child?.type === 'export_statement');
 }

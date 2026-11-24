@@ -101,6 +101,7 @@ export class StatementChecker {
     ['export_statement', (node) => this.exportStatement(node)],
     ['ambient_declaration', (node) => this.ambientDeclaration(node)],
     ['import_alias', (node) => this.c.namespaces.checkImportAlias(node)],
+    ['import_statement', (node) => this.c.namespaces.checkImport(node)],
     ['using_declaration', (node) => this.usingDeclaration(node)],
   ]);
 

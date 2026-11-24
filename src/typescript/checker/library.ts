@@ -4,6 +4,7 @@ import { BROWSER_ONLY_GLOBALS, DOM_TYPE_ALIASES, SHARED_HOST_GLOBALS } from './d
 import { DOM_INTERFACES } from './domMembers';
 import { ECMASCRIPT_LIBRARY } from './ecmascriptLibrary';
 import { LOCALE_OPTIONS_LIBRARY } from './localeOptionsLibrary';
+import { NODE_LIBRARY } from './nodeLibrary';
 import { Scope, Sym } from './scopes';
 import { undefinedType } from './types';
 
@@ -102,7 +103,9 @@ const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter
 
 /** The library's declarations, parsed once; its tree lives as long as the process. */
 export const libraryTree = (() => {
-  const tree = parser.parse(`${ECMASCRIPT_LIBRARY}\n${HOST_LIBRARY}\n${BROWSER_LIBRARY}\n${DOM_INTERFACES}`);
+  const tree = parser.parse(
+    `${ECMASCRIPT_LIBRARY}\n${HOST_LIBRARY}\n${NODE_LIBRARY}\n${BROWSER_LIBRARY}\n${DOM_INTERFACES}`
+  );
   if (!tree) throw new Error('The parser returned no tree for the library');
   return tree;
 })();
@@ -139,6 +142,7 @@ const unsupportedValues: Record<string, string> = {
   alert: 'alert',
   prompt: 'prompt などの標準入力',
   AggregateError: 'AggregateError',
+  Buffer: 'Buffer',
 };
 
 export function markUnsupported(scope: Scope): void {

@@ -7,5 +7,5 @@ console.log(undefinedName);
 console.log(xyzzy);
 function f() { const counter = 1; return countr; }
 console.log(cosole);
-console.log(require);
+console.log(module);
 console.log(Stirng(1), lenght);

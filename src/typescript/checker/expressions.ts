@@ -799,8 +799,9 @@ export class ExpressionChecker {
       case 'enumMember': {
         return symbol.valueDeclaration && this.c.enums.memberType(symbol.valueDeclaration);
       }
-      case 'importAlias': {
-        const target = this.c.namespaces.aliasTarget(symbol, 'value');
+      case 'importAlias':
+      case 'import': {
+        const target = this.c.namespaces.imported(symbol, 'value');
         return target ? this.valueTypeOf(target) : errorType;
       }
       default: {
@@ -1205,7 +1206,7 @@ function isIndirectCall(sequence: TreeNode, left: TreeNode, right: TreeNode): bo
 
 /** Node.js names that need its type definitions, which the reference `tsc` does not have. */
 function nodeGlobalHint(name: string): string {
-  return ['process', 'require', 'module', 'exports', '__dirname', '__filename', 'Buffer'].includes(name)
+  return ['module', 'exports', '__dirname', '__filename'].includes(name)
     ? 'Node.js の機能は、この採点環境では使えません。'
     : '';
 }

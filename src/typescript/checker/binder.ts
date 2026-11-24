@@ -2,8 +2,8 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
 import { memberNameOf } from './enums';
-import { Scope, type Sym, type ValueKind } from './scopes';
-import { assignmentKind, isWithin, named, patternIdentifiers } from './syntax';
+import { Scope, Sym, type ValueKind } from './scopes';
+import { assignmentKind, isWithin, named, patternIdentifiers, stringValue } from './syntax';
 
 export const functionLikeTypes = new Set([
   'function_declaration',
@@ -53,6 +53,8 @@ export class Binder {
   /** The identifiers that name what an assignment changes, to find the variables a program reassigns. */
   private readonly assignedIdentifiers: { identifier: TreeNode; scope: Scope }[] = [];
   readonly moduleScope: Scope;
+  /** The modules `declare module "m"` declares, by their names. */
+  readonly ambientModules = new Map<string, Sym>();
   /** How each kind of node that declares names or opens a scope of its own is bound. */
   private readonly binders = new Map<string, (node: TreeNode, scope: Scope) => void>([
     ['lexical_declaration', (node, scope) => this.bindVariableDeclaration(node, scope)],
@@ -71,6 +73,7 @@ export class Binder {
     ['module', (node, scope) => this.bindNamespace(node, scope)],
     ['export_statement', (node, scope) => this.bindExport(node, scope)],
     ['import_alias', (node, scope) => this.bindImportAlias(node, scope)],
+    ['import_statement', (node, scope) => this.bindImport(node, scope)],
     ['assignment_expression', (node, scope) => this.bindAssignment(node, scope, 'left')],
     ['augmented_assignment_expression', (node, scope) => this.bindAssignment(node, scope, 'left')],
     ['update_expression', (node, scope) => this.bindAssignment(node, scope, 'argument')],
@@ -205,11 +208,11 @@ export class Binder {
   private bindNamespace(node: TreeNode, scope: Scope, isAmbient = scope.isAmbient): void {
     const name = node.childForFieldName('name');
     const body = node.childForFieldName('body');
-    if (name?.type === 'string' || !name) {
-      // `declare module "m" { ... }` declares a module only an import could use.
-      if (body) this.bindChildren(body, this.newScope(body, 'block', scope));
+    if (name?.type === 'string') {
+      this.bindAmbientModule(node, stringValue(name), scope);
       return;
     }
+    if (!name) return;
     let outer = scope;
     let namespace: Sym | undefined;
     for (const part of namespacePath(name)) {
@@ -231,6 +234,30 @@ export class Binder {
       }
       this.bindAmbientChild(child, scope);
       this.exportDeclared(child, scope);
+    }
+  }
+
+  /** `declare module "m" { ... }`, whose declarations are the exports an `import` of "m" sees. */
+  private bindAmbientModule(node: TreeNode, name: string, scope: Scope): void {
+    const module = new Sym(name, scope);
+    module.valueKind = 'namespace';
+    module.valueDeclarations.push(node);
+    module.namespaceExports = new Scope('block', scope, node);
+    this.ambientModules.set(name, module);
+    const body = node.childForFieldName('body');
+    if (body) this.bindNamespaceBody(body, this.newNamespaceBody(node, module, true), true);
+  }
+
+  /** The names an `import` declares, which stand for what a module exports. */
+  private bindImport(node: TreeNode, scope: Scope): void {
+    const clause = node.childForFieldName('import_clause');
+    const source = node.childForFieldName('source') ?? clause?.childForFieldName('source');
+    if (!source || !clause) return;
+    const module = stringValue(source);
+    for (const [nameNode, name] of importedNames(clause)) {
+      const value = scope.declareValue(nameNode.text, 'import', node, nameNode);
+      value.importTarget = { module, name };
+      scope.declareType(nameNode.text, 'import', node, nameNode).importTarget = { module, name };
     }
   }
 
@@ -489,6 +516,27 @@ class SignatureScope extends Scope {
 
 export function symbolDeclaredBy(scope: Scope, name: string): Sym | undefined {
   return scope.values.get(name);
+}
+
+/** The names an import clause declares, with the export each names: `*` for the module, `default` for its default. */
+function importedNames(clause: TreeNode): [TreeNode, string][] {
+  if (clause.type === 'import_require_clause')
+    return named(clause)
+      .slice(0, 1)
+      .map((name) => [name, '*']);
+  return named(clause).flatMap((part): [TreeNode, string][] => {
+    if (part.type === 'identifier') return [[part, 'default']];
+    if (part.type === 'namespace_import')
+      return named(part)
+        .slice(0, 1)
+        .map((name) => [name, '*']);
+    if (part.type !== 'named_imports') return [];
+    return named(part).flatMap((specifier): [TreeNode, string][] => {
+      const imported = specifier.childForFieldName('name');
+      const local = specifier.childForFieldName('alias') ?? imported;
+      return imported && local ? [[local, imported.text]] : [];
+    });
+  });
 }
 
 /** The names of a namespace's path, as `A`, `B`, and `C` of `A.B.C`. */

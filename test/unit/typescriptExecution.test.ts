@@ -305,7 +305,11 @@ console.log(s.area() as Id, s, Object.keys(s), (s.name() satisfies string).lengt
 });
 
 test.each([
-  ['an import', 'import fs from "fs";', 'import や export は、この採点環境では使えません。'],
+  [
+    'an import of another file',
+    'import { f } from "./other";',
+    "モジュール './other' の import は、この採点環境では使えません。",
+  ],
   ['a Date', 'new Date();', 'Date（日付と時刻）は、この採点環境では使えません。'],
   ['Math.random', 'Math.random();', 'Math.random は、この採点環境では使えません。'],
   [
@@ -438,10 +442,8 @@ test('a function turned into text through any or an array ends the program as un
   });
 });
 
-test('Node.js names are unknown, as the reference tsc has no Node.js types', () => {
-  expect(diagnosticsOf('process.exit(0);')).toEqual([
-    '1: 名前 process が見つかりません。Node.js の機能は、この採点環境では使えません。',
-  ]);
+test('Node.js features beyond the standard streams and fs are unavailable', () => {
+  expect(diagnosticsOf('process.exit(0);')).toEqual(['1: process.exit は、この採点環境では使えません。']);
 });
 
 test('a type error is reported in Japanese on its row and stops the program before it runs', () => {

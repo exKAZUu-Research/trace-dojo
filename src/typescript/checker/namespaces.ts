@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { FlowState } from './flow';
 import type { Scope, Sym } from './scopes';
-import { named } from './syntax';
+import { named, stringValue } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -142,7 +142,49 @@ export class Namespaces {
 
   private unaliased(symbol: Sym | undefined, meaning: 'value' | 'type'): Sym | undefined {
     const kind = meaning === 'value' ? symbol?.valueKind : symbol?.typeKind;
-    return symbol && kind === 'importAlias' ? this.aliasTarget(symbol, meaning) : symbol;
+    return symbol && (kind === 'import' || kind === 'importAlias') ? this.imported(symbol, meaning) : symbol;
+  }
+
+  /** What a name that `import` or `import X = N.Y` declares stands for, as a value or as a type. */
+  imported(symbol: Sym, meaning: 'value' | 'type'): Sym | undefined {
+    return symbol.importTarget ? this.importTarget(symbol, meaning) : this.aliasTarget(symbol, meaning);
+  }
+
+  /** What a name an `import` declares stands for: the module, or what the module exports by that name. */
+  importTarget(symbol: Sym, meaning: 'value' | 'type'): Sym | undefined {
+    const target = symbol.importTarget;
+    const module = target && this.moduleNamed(target.module);
+    if (!target || !module) return undefined;
+    if (target.name === '*') return module;
+    const exports = module.namespaceExports as Scope;
+    return (meaning === 'value' ? exports.values : exports.types).get(target.name);
+  }
+
+  private moduleNamed(name: string): Sym | undefined {
+    return this.c.libraryBinder.ambientModules.get(name) ?? this.c.binder.ambientModules.get(name);
+  }
+
+  /** Reports a default import of a module without a default export, and a name a module does not export. */
+  checkImport(node: TreeNode): void {
+    const source = node.childForFieldName('source');
+    const clause = node.childForFieldName('import_clause');
+    if (!source || !clause || clause.type === 'import_require_clause') return;
+    const module = this.moduleNamed(stringValue(source));
+    if (!module) return;
+    for (const part of named(clause)) {
+      if (part.type === 'identifier')
+        this.c.error(part, `モジュール '${source.text}' には既定のエクスポートがありません。`);
+      if (part.type !== 'named_imports') continue;
+      for (const specifier of named(part)) {
+        const name = specifier.childForFieldName('name');
+        const exports = module.namespaceExports as Scope;
+        if (name && !exports.values.has(name.text) && !exports.types.has(name.text))
+          this.c.error(
+            name,
+            `モジュール '${source.text}' には、エクスポートされたメンバー '${name.text}' がありません。`
+          );
+      }
+    }
   }
 
   /** The symbol of the type a qualified name such as `N.T` or `A.B.T` names, through the namespaces of its path. */

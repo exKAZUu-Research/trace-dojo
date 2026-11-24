@@ -632,7 +632,7 @@ export class TypeNodes {
   }
 
   private qualifiedType(node: TreeNode): Type {
-    if (this.c.isLibrary(node)) return this.libraryQualifiedType(node);
+    if (this.c.isLibrary(node) && node.text.startsWith('Intl.')) return this.libraryQualifiedType(node);
     let root = node;
     while (root.childForFieldName('module') ?? root.childForFieldName('object'))
       root = (root.childForFieldName('module') ?? root.childForFieldName('object')) as TreeNode;
@@ -640,7 +640,7 @@ export class TypeNodes {
     const value = this.c.scopeOf(root).lookupValue(root.text);
     if (value?.valueKind === 'enum' && root.id === node.childForFieldName('module')?.id)
       return this.enumMemberTypeNamed(node, value, root.text);
-    if (value?.namespaceExports || value?.valueKind === 'importAlias') {
+    if (value?.namespaceExports || value?.valueKind === 'importAlias' || value?.valueKind === 'import') {
       const resolved = this.c.namespaces.qualifiedTypeSymbol(node);
       if (resolved.symbol) return this.declaredTypeOf(resolved.symbol);
       if (resolved.error) this.c.error(node, resolved.error);
@@ -654,8 +654,7 @@ export class TypeNodes {
   }
 
   private libraryQualifiedType(node: TreeNode): Type {
-    const name = node.text.startsWith('Intl.') ? node.text.slice('Intl.'.length) : undefined;
-    const symbol = name ? this.c.localeOptionsBinder.moduleScope.types.get(name) : undefined;
+    const symbol = this.c.localeOptionsBinder.moduleScope.types.get(node.text.slice('Intl.'.length));
     return symbol ? this.declaredTypeOf(symbol) : anyType;
   }
 
@@ -968,8 +967,9 @@ export class TypeNodes {
         symbol.declaredType = this.c.enums.declaredType(symbol);
         break;
       }
-      case 'importAlias': {
-        const target = this.c.namespaces.aliasTarget(symbol, 'type');
+      case 'importAlias':
+      case 'import': {
+        const target = this.c.namespaces.imported(symbol, 'type');
         symbol.declaredType = target ? this.declaredTypeOf(target) : errorType;
         break;
       }

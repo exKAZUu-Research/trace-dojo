@@ -98,6 +98,7 @@ export function javaScriptViewOf(root: TreeNode, budget: ExecutionBudget): Node 
 const compiledDeclarations: Record<string, (node: TreeNode, binder: Binder) => ViewNode> = {
   module: (node, binder) => namespaceView(node, binder),
   import_alias: (node, binder) => importAliasView(node, binder),
+  import_statement: (node) => importView(node),
 };
 
 function view(node: TreeNode, binder: Binder): ViewNode {
@@ -255,6 +256,70 @@ function namespaceView(node: TreeNode, binder: Binder): ViewNode {
     declaresObject ? orEmptyObject(node, outermost) : leaf(node, 'identifier', outermost)
   );
   return declaresObject ? varDeclaration(node, outermost, call) : expressionStatement(node, call);
+}
+
+/**
+ * An `import` of a Node.js module as tsx compiles it for a CommonJS program, which reads the module with `require`:
+ * `var fs = require("fs");` and `var readFileSync = require("fs").readFileSync;`. A type-only one compiles to nothing.
+ */
+function importView(node: TreeNode): ViewNode {
+  const clause = node.childForFieldName('import_clause');
+  const source = node.childForFieldName('source') ?? clause?.childForFieldName('source');
+  if (!clause || !source || node.children.some((child) => child?.type === 'type')) return leaf(node, 'empty_statement');
+  const bindings = importBindings(node, clause, source);
+  if (bindings.length === 0) return leaf(node, 'empty_statement');
+  const declarators = bindings.flatMap(([name, value], index) => [
+    ...(index === 0 ? [] : [{ node: token(node, ','), fieldName: undefined }]),
+    {
+      node: assemble(node, 'variable_declarator', [
+        { node: leaf(node, 'identifier', name), fieldName: 'name' },
+        { node: token(node, '='), fieldName: undefined },
+        { node: value, fieldName: 'value' },
+      ]),
+      fieldName: undefined,
+    },
+  ]);
+  return unstepped(
+    assemble(node, 'variable_declaration', [
+      { node: token(node, 'var'), fieldName: undefined },
+      ...declarators,
+      { node: token(node, ';'), fieldName: undefined },
+    ])
+  );
+}
+
+/** The names an import declares, with the expressions that read them from the module `require` returns. */
+function importBindings(node: TreeNode, clause: TreeNode, source: TreeNode): [string, ViewNode][] {
+  const required = (): ViewNode =>
+    assemble(node, 'call_expression', [
+      { node: leaf(node, 'identifier', 'require'), fieldName: 'function' },
+      {
+        node: assemble(node, 'arguments', [
+          { node: token(node, '('), fieldName: undefined },
+          { node: leaf(source, 'string', source.text), fieldName: undefined },
+          { node: token(node, ')'), fieldName: undefined },
+        ]),
+        fieldName: 'arguments',
+      },
+    ]);
+  const parts = clause.type === 'import_require_clause' ? [clause] : clause.namedChildren;
+  return parts.flatMap((part): [string, ViewNode][] => {
+    const name = part?.namedChildren[0];
+    if ((part?.type === 'import_require_clause' || part?.type === 'namespace_import') && name)
+      return [[name.text, required()]];
+    if (part?.type !== 'named_imports') return [];
+    return part.namedChildren.flatMap((specifier): [string, ViewNode][] => {
+      const imported = specifier?.childForFieldName('name');
+      const local = specifier?.childForFieldName('alias') ?? imported;
+      if (!imported || !local || specifier?.children.some((child) => child?.type === 'type')) return [];
+      const member = assemble(node, 'member_expression', [
+        { node: required(), fieldName: 'object' },
+        { node: token(node, '.'), fieldName: undefined },
+        { node: leaf(imported, 'property_identifier', imported.text), fieldName: 'property' },
+      ]);
+      return [[local.text, member]];
+    });
+  });
 }
 
 /** `import X = N.Y` as TypeScript compiles it, `var X = N.Y;`, or nothing when `N.Y` has no value. */

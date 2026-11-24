@@ -2,6 +2,7 @@ import { FileSystemError, type FileSystemErrorCode, type OpenMode } from '../int
 import { inspect } from './inspect';
 import type { RealmBuilder } from './realm';
 import type { Runtime } from './runtime';
+import { rejectUnavailableMember } from './unavailableMembers';
 import { isObject, JsObject, JsThrow, type Value } from './values';
 
 /** Node.js's descriptions and Linux's numbers of the errors that file system calls report. */
@@ -44,6 +45,9 @@ export function defineNodeBuiltins(builder: RealmBuilder): void {
 // code-gauge-allow functionNcss -- Lists the builtin methods, each a small closure of its own.
 function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
   builder.method(fs, 'readFileSync', 2, ({ runtime, args }) => {
+    // Node.js reads into a Buffer without an encoding, which a TypeScript program sees as unavailable.
+    if (runtime.unavailableMember && args[1] === undefined)
+      rejectUnavailableMember('エンコーディングを指定しない readFileSync（Buffer）', runtime.currentRow);
     // File descriptor 0 is standard input.
     if (args[0] === 0) return runtime.io.openReader('/dev/stdin').readRest();
     const path = requirePath(runtime, args[0]);

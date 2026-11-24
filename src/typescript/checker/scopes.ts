@@ -15,8 +15,9 @@ export type ValueKind =
   | 'enum'
   | 'enumMember'
   | 'namespace'
-  | 'importAlias';
-export type TypeKind = 'interface' | 'alias' | 'class' | 'typeParameter' | 'enum' | 'importAlias';
+  | 'importAlias'
+  | 'import';
+export type TypeKind = 'interface' | 'alias' | 'class' | 'typeParameter' | 'enum' | 'importAlias' | 'import';
 
 let nextSymbolId = 1;
 
@@ -61,6 +62,8 @@ export class Sym {
   namespaceExports?: Scope;
   /** The namespace that exports this name, which its declarations refer to it through. */
   exportedFrom?: Sym;
+  /** For a name an `import` declares, the module and the export it names: `*` for the module, `default` for its default. */
+  importTarget?: { module: string; name: string };
 
   constructor(
     readonly name: string,

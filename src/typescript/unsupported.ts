@@ -4,9 +4,11 @@ import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics'
 
 /** Syntax this interpreter does not run yet, by node type, named as learners know it. */
 const unsupportedNodes: Record<string, string> = {
-  import_statement: 'import や export',
   import: 'import や export',
 };
+
+/** The modules a program may import, which are the Node.js modules this interpreter provides. */
+export const importableModules = new Set(['fs', 'node:fs']);
 
 /** The message for a feature this interpreter does not run, with a space after a name ending in ASCII. */
 export function unsupportedMessage(feature: string): string {
@@ -36,6 +38,11 @@ export function rejectUnsupportedSyntax(root: TreeNode): void {
 /** A feature that a node of a supported type spells in a form this interpreter does not run. */
 function unsupportedForm(node: TreeNode): string | undefined {
   if (node.type === 'export_statement' && !isInNamespace(node)) return 'import や export';
+  if (node.type === 'import_statement') {
+    const source = node.childForFieldName('source') ?? node.namedChildren.at(-1)?.childForFieldName('source');
+    const module = source?.text.slice(1, -1);
+    if (module === undefined || !importableModules.has(module)) return `モジュール '${module ?? ''}' の import`;
+  }
   if (node.type === 'meta_property' && node.text.replaceAll(/\s/g, '') === 'import.meta') return 'import.meta';
   return undefined;
 }
