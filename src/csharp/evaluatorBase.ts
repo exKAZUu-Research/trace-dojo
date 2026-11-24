@@ -355,9 +355,10 @@ export abstract class EvaluatorBase {
       return underlying === 'long' || underlying === 'ulong' ? 0n : 0;
     }
     if (type.symbol.kind !== 'struct') return undefined;
-    // No struct is larger than MAX_STRUCT_SLOTS, far beyond any a learner writes, so the struct values that locals and
-    // frames hold, which no charge counts since the slot count only grows, stay within a constant factor of the call
-    // depth; storage that keeps structs charges their layouts besides.
+    // No struct is larger than MAX_STRUCT_SLOTS, far beyond any a learner writes, so no single value is too large to
+    // make; the fields of the struct values that locals and closures keep, which no storage charge counts, are bounded
+    // by the work every struct's fields cost (Runtime.meterStructFields), and storage that keeps structs charges
+    // their layouts besides.
     if (this.defaultSlotCount(type) > MAX_STRUCT_SLOTS)
       throw new PendingException(
         'System.OutOfMemoryException',
