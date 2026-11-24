@@ -861,8 +861,9 @@ function hashOfState(value: Value): HashState {
   return (value as CsObject).native as HashState;
 }
 
-function newHashState(call: NativeCall, comparer: Value, keyType: Type, valueType: Type | undefined): HashState {
-  const state = new HashState(equalityOf(call, comparer), keyType, valueType, comparer);
+/** The state of a dictionary or a hash set, charged, metered, and shown as every one is. */
+export function newHashState(call: NativeCall, comparer: Value, keyType: Type, valueType: Type | undefined): HashState {
+  const state = new HashState(equalityOf(call, comparer, keyType), keyType, valueType, comparer);
   state.retain = (baseSlots, values) => call.frame.runtime.retainSlots(baseSlots, values);
   state.store = (previous, next) => call.frame.runtime.chargeStore(previous, next);
   state.spend = (count) => call.frame.runtime.spend(count);

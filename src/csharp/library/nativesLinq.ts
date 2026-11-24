@@ -21,6 +21,7 @@ import {
   equalityOf,
   HashState,
   ListState,
+  newHashState,
   newList,
   sortChecked,
 } from './nativesCollections';
@@ -1288,10 +1289,7 @@ const linq: Record<string, NativeMethod> = {
     newList(call, call.typeArgs[0], bufferedElements(call, source(call, items as Value)), true),
   [`${ENUMERABLE}.ToHashSet`]: (call, _receiver, [items]) => {
     const set = new CsObject(libraryType(call, 'System.Collections.Generic.HashSet', [call.typeArgs[0]]), []);
-    const state = new HashState(equalityOf(call, undefined), call.typeArgs[0], undefined, undefined);
-    state.retain = (baseSlots, values) => call.frame.runtime.retainSlots(baseSlots, values);
-    state.store = (previous, next) => call.frame.runtime.chargeStore(previous, next);
-    state.spend = (count) => call.frame.runtime.spend(count);
+    const state = newHashState(call, undefined, call.typeArgs[0], undefined);
     for (const item of source(call, items as Value)) state.insert(item, undefined, false);
     set.native = state;
     return set;
@@ -1313,12 +1311,7 @@ const linq: Record<string, NativeMethod> = {
       libraryType(call, 'System.Collections.Generic.Dictionary', [keyType, valueType]),
       []
     );
-    const state = new HashState(equalityOf(call, undefined, keyType), keyType, valueType, undefined);
-    state.retain = (baseSlots, values) => call.frame.runtime.retainSlots(baseSlots, values);
-    state.store = (previous, next) => call.frame.runtime.chargeStore(previous, next);
-    state.spend = (count) => call.frame.runtime.spend(count);
-    const pairType = libraryType(call, 'System.Collections.Generic.KeyValuePair', [keyType, valueType]);
-    state.pairOf = (key, value) => new CsStruct(pairType, [key, value]);
+    const state = newHashState(call, undefined, keyType, valueType);
     for (const item of source(call, items)) {
       const key = keyOf(item);
       if (key === undefined) failNull('key');
