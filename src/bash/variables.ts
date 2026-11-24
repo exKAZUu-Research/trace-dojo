@@ -190,39 +190,47 @@ export function isValidFunctionName(name: string): boolean {
   return name !== '' && !name.includes('$') && !/^[0-9]+$/.test(name);
 }
 
-export interface PrefixPromotion {
-  variable: Variable;
-  promoted: boolean;
-  prefixValue: string;
+export interface ActiveDeclarationPrefix {
+  scope: Scope;
+  propagated: Set<string>;
 }
 
-/** Resolves how `export` or `readonly` handles a direct prefix assignment on the same declaration command. */
-export function resolvePrefixPromotion(
-  scopes: Scope[],
-  tempScopes: WeakSet<Scope>,
-  commandTemp: Scope | undefined,
+/** Marks or unmarks a direct declaration-command prefix binding for end-of-command propagation. */
+export function selectDirectPrefix(
+  active: ActiveDeclarationPrefix | undefined,
   name: string,
   assigns: boolean,
   unsetExport: boolean
-): PrefixPromotion | undefined {
-  const tempVar = commandTemp?.get(name);
-  if (!commandTemp || !tempVar) return undefined;
-  const prefixValue = tempVar.value?.kind === 'scalar' ? tempVar.value.value : '';
-  if (unsetExport && !assigns) return { variable: tempVar, promoted: false, prefixValue };
-  let target: Variable | undefined;
-  for (let i = scopes.length - 1; i >= 0; i--) {
-    if (tempScopes.has(scopes[i])) continue;
-    target = scopes[i].get(name);
-    if (target) break;
+): Variable | undefined {
+  const tempVar = active?.scope.get(name);
+  if (!active || !tempVar) return undefined;
+  if (unsetExport && !assigns) active.propagated.delete(name);
+  else active.propagated.add(name);
+  return tempVar;
+}
+
+/** Resolves destination variables in enclosing scopes for propagated prefix bindings after removing `active.scope`. */
+export function propagatedPrefixTargets(
+  scopes: Scope[],
+  active: ActiveDeclarationPrefix
+): { target: Variable; tempVar: Variable }[] {
+  const pairs: { target: Variable; tempVar: Variable }[] = [];
+  for (const name of active.propagated) {
+    const tempVar = active.scope.get(name);
+    if (!tempVar) continue;
+    let target: Variable | undefined;
+    for (let i = scopes.length - 1; i >= 0; i--) {
+      target = scopes[i].get(name);
+      if (target) break;
+    }
+    if (target?.attributes.has('n') || target?.attributes.has('r')) continue;
+    if (!target) {
+      target = { name, value: undefined, attributes: new Set() };
+      scopes[0].set(name, target);
+    }
+    pairs.push({ target, tempVar });
   }
-  if (target?.attributes.has('n')) return { variable: tempVar, promoted: false, prefixValue };
-  commandTemp.delete(name);
-  if (!target) {
-    target = { name, value: undefined, attributes: new Set() };
-    scopes[0].set(name, target);
-  }
-  if (!unsetExport) target.attributes.add('x');
-  return { variable: target, promoted: true, prefixValue };
+  return pairs;
 }
 
 /** Elements of call-stack dynamic arrays (`FUNCNAME`, `BASH_LINENO`, `BASH_SOURCE`). */

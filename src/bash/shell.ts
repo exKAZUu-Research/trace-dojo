@@ -28,6 +28,7 @@ import {
 } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import {
+  type ActiveDeclarationPrefix,
   advanceRandomState,
   AssociativeTable,
   type Attribute,
@@ -40,8 +41,9 @@ import {
   isIdentifier,
   isValidFunctionName,
   PERMANENT_DYNAMIC_VARIABLES,
-  resolvePrefixPromotion,
+  propagatedPrefixTargets,
   type Scope,
+  selectDirectPrefix,
   sortedElements,
   type Variable,
   type VariableValue,
@@ -118,9 +120,8 @@ export class Shell implements ArithmeticHost {
   /** Outputs of running and pending command substitutions and loop word lists, whose turtle handles stay live. */
   private readonly inFlight: { values: string[] }[] = [];
   private readonly activeOutputs: { text: string }[] = [];
-  /** Prefix-assignment scopes active for the running command, distinct from persistent local/global scopes. */
-  private readonly tempScopes = new WeakSet<Scope>();
-  private currentDeclarationTemp: Scope | undefined;
+  /** Prefix-assignment scope owned by the currently executing declaration command, if any. */
+  private activeDeclarationPrefix: ActiveDeclarationPrefix | undefined;
   private readonlyFailure = false;
 
   constructor(readonly runtime: Runtime) {
@@ -563,19 +564,19 @@ export class Shell implements ArithmeticHost {
 
   /** Runs a command with the assignments written before it visible both to later assignments and to the command. */
   private withTemporaryScope(assignments: Assignment[], run: () => number, forDeclaration = false): number {
-    const prevDeclTemp = this.currentDeclarationTemp;
+    const prevPrefix = this.activeDeclarationPrefix;
     if (assignments.length === 0) {
-      this.currentDeclarationTemp = undefined;
+      this.activeDeclarationPrefix = undefined;
       try {
         return run();
       } finally {
-        this.currentDeclarationTemp = prevDeclTemp;
+        this.activeDeclarationPrefix = prevPrefix;
       }
     }
     const scope: Scope = new Map();
-    this.tempScopes.add(scope);
+    const active = forDeclaration ? { scope, propagated: new Set<string>() } : undefined;
     this.state.scopes.push(scope);
-    this.currentDeclarationTemp = forDeclaration ? scope : undefined;
+    this.activeDeclarationPrefix = active;
     try {
       for (const assignment of assignments) {
         if (assignment.subscript || assignment.array) {
@@ -599,8 +600,20 @@ export class Shell implements ArithmeticHost {
       }
       return run();
     } finally {
-      this.currentDeclarationTemp = prevDeclTemp;
+      this.activeDeclarationPrefix = prevPrefix;
       this.removeScope(scope);
+      if (active) this.commitPropagatedPrefixes(active);
+    }
+  }
+
+  private commitPropagatedPrefixes(active: ActiveDeclarationPrefix): void {
+    for (const { target, tempVar } of propagatedPrefixTargets(this.state.scopes, active)) {
+      if (tempVar.value?.kind === 'scalar') this.assignScalarTo(target, tempVar.value.value, false);
+      else if (tempVar.value) {
+        target.value = tempVar.value;
+        target.shared = false;
+      }
+      for (const attr of tempVar.attributes) target.attributes.add(attr);
     }
   }
 
@@ -897,27 +910,8 @@ export class Shell implements ArithmeticHost {
     return undefined;
   }
 
-  /**
-   * When `name` is bound in an active command-prefix temporary scope, promotes that binding into the enclosing
-   * persistent variable scope (as `export` and `readonly` require) and returns it.
-   */
-  promoteDirectPrefix(
-    name: string,
-    assigns: boolean,
-    unsetExport: boolean
-  ): { variable: Variable; promoted: boolean } | undefined {
-    const resolved = resolvePrefixPromotion(
-      this.state.scopes,
-      this.tempScopes,
-      this.currentDeclarationTemp,
-      name,
-      assigns,
-      unsetExport
-    );
-    if (resolved?.promoted && !assigns) {
-      this.assignScalarTo(resolved.variable, resolved.prefixValue, false);
-    }
-    return resolved && { variable: resolved.variable, promoted: resolved.promoted };
+  selectCommandPrefix(name: string, assigns: boolean, unsetExport: boolean): Variable | undefined {
+    return selectDirectPrefix(this.activeDeclarationPrefix, name, assigns, unsetExport);
   }
 
   /** The name a name reference finally names, or the name itself. */

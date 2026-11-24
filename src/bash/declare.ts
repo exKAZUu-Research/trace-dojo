@@ -203,11 +203,11 @@ function declaredDestination(
   const scope = isLocal ? scopes[shell.state.functionScopes.at(-1) as number] : undefined;
   const directPrefix =
     !scope && !isSubscripted && (builtin === 'export' || builtin === 'readonly')
-      ? shell.promoteDirectPrefix(name, assigns, unset.has('x'))
+      ? shell.selectCommandPrefix(name, assigns, unset.has('x'))
       : undefined;
   if (directPrefix) {
-    if (checkReadonlyConflict(shell, builtin, name, directPrefix.variable, set, assigns)) return undefined;
-    return { variable: directPrefix.variable, promoted: directPrefix.promoted };
+    if (checkReadonlyConflict(shell, builtin, name, directPrefix, set, assigns)) return undefined;
+    return { variable: directPrefix, promoted: true };
   }
   const { targetName, referencedSubscript } = resolveDeclaredTarget(shell, name, set, unset, isSubscripted);
   const targetScope = scope && referencedSubscript === undefined ? scope : undefined;
