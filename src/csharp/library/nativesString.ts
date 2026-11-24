@@ -245,6 +245,24 @@ function replacedText(call: NativeCall, text: string, from: string, to: string, 
   return text.replaceAll(new RegExp(from.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`), 'gi'), replace);
 }
 
+/**
+ * Replaces each match that the culture comparison finds from the left, taking a match as long as the value, which
+ * kana and case variants are.
+ */
+function culturallyReplacedText(call: NativeCall, text: string, from: string, to: string, comparison: number): string {
+  const culture = cultureOf(call, comparison);
+  let result = '';
+  let position = 0;
+  while (position < text.length) {
+    const found = cultureIndexOf(text, from, position, text.length, culture);
+    if (found === -1) break;
+    result += text.slice(position, found) + to;
+    position = found + from.length;
+    call.frame.runtime.allocateString(result.length, 0);
+  }
+  return result + text.slice(position);
+}
+
 function joinValues(call: NativeCall, separator: string, args: Value[], startIndex = 1): string {
   return joinedText(
     call,
@@ -465,6 +483,15 @@ const stringNatives: Record<string, NativeMethod> = {
   [`${STRING}.Replace(string, string?, StringComparison)`]: (call, receiver, [from, to, comparison]) => {
     if (from === undefined) failNull('oldValue');
     if (from === '') fail('System.ArgumentException', 'The value cannot be an empty string.', 'oldValue');
+    // The culture modes find each match as IndexOf does, so the ja-JP culture matches か in カ as .NET's does.
+    if ((comparison as number) < 4)
+      return culturallyReplacedText(
+        call,
+        receiverText(receiver),
+        from as string,
+        (to as string | undefined) ?? '',
+        comparison as number
+      );
     return replacedText(
       call,
       receiverText(receiver),
