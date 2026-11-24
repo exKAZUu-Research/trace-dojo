@@ -8,6 +8,8 @@ export interface Span {
 
 export interface Library extends Span {
   imports: ImportDirective[];
+  /** The `dart:` libraries the library re-exports, which a program of one file only names. */
+  exports: (Span & { uri: string })[];
   declarations: TopLevelDeclaration[];
 }
 
@@ -210,8 +212,6 @@ export interface FormalParameter extends Span {
   isCovariant: boolean;
   isRequired: boolean;
   defaultValue: Expression | undefined;
-  /** An old-style function-typed parameter `int f(int x)`. */
-  functionType: { returnType: TypeSyntax | undefined; parameters: FormalParameters } | undefined;
 }
 
 export interface NamedFormalParameter extends FormalParameter {

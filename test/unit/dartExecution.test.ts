@@ -9888,3 +9888,31 @@ test('Dart missing semicolon diagnostics use the statement row in recovered cont
     });
   }
 });
+
+test('Dart directives pick conditional imports by the VM environment and accept tool-only lines', () => {
+  const program = `#!/usr/bin/env dart
+library my.tools;
+export 'dart:math';
+import 'dart:math' if (dart.library.io) 'dart:collection' as picked;
+import 'dart:math' if (dart.library.html) 'dart:collection' as kept;
+typedef int Compare(int a, int b);
+class Holder {
+  final int Function(int) f;
+  Holder(int this.f(int x));
+}
+int apply(int f(int x), [String g(Object)?]) => f(3);
+void main() {
+  print(picked.Queue.of([1]));
+  print(kept.max(1, 2));
+  Compare compare = (a, b) => a - b;
+  print([compare.runtimeType, apply((x) => x * 2), Holder((x) => x + 1).f(1)]);
+  print([bool.fromEnvironment('dart.library.io'), bool.hasEnvironment('dart.library.html')]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '{1}\n2\n[(int, int) => int, 6, 2]\n[true, false]\n',
+  });
+  for (const directive of ["part of 'main.dart';", "export 'tools.dart';", "int f() native 'f';"]) {
+    expect(executeProgram('dart', `${directive}\nvoid main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+});

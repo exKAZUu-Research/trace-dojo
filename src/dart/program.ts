@@ -222,14 +222,10 @@ export function compileProgram(syntax: Library, options: { atomicRows?: Readonly
     env.addImport(envs.get('dart:core') as LibraryEnv, undefined, undefined, []);
   }
   for (const directive of syntax.imports) {
-    const unavailable = UNAVAILABLE_LIBRARIES[directive.uri];
-    if (unavailable)
-      throw new CompileError([{ row: directive.row, message: `${unavailable}は、この採点環境では使えません。` }]);
-    const library = envs.get(directive.uri);
-    if (!library)
-      throw new CompileError([{ row: directive.row, message: `ライブラリ ${directive.uri} はありません。` }]);
-    env.addImport(library, directive.prefix, directive.show, directive.hide);
+    env.addImport(libraryAt(envs, directive), directive.prefix, directive.show, directive.hide);
   }
+  // A program is the only library of its run, so what it exports reaches no other library.
+  for (const directive of syntax.exports) libraryAt(envs, directive);
   const compiler = new Compiler(env, false, options.atomicRows, globals, NATIVES);
   compiler.declareAll(syntax);
   compiler.resolveAll(syntax);
@@ -249,6 +245,15 @@ export function compileProgram(syntax: Library, options: { atomicRows?: Readonly
     programGlobals: globals.slice(libraryGlobals.length),
     mainTakesArguments: main.type.typeParams.length === 0 && main.type.positional.length > 0,
   };
+}
+
+function libraryAt(envs: Map<string, LibraryEnv>, directive: { uri: string; row: number }): LibraryEnv {
+  const unavailable = UNAVAILABLE_LIBRARIES[directive.uri];
+  if (unavailable)
+    throw new CompileError([{ row: directive.row, message: `${unavailable}は、この採点環境では使えません。` }]);
+  const library = envs.get(directive.uri);
+  if (!library) throw new CompileError([{ row: directive.row, message: `ライブラリ ${directive.uri} はありません。` }]);
+  return library;
 }
 
 function validateConstants(compiler: Compiler, globals: GlobalVariable[]): void {

@@ -11,6 +11,7 @@ import {
 } from '../operators';
 import type { Runtime } from '../runtime';
 import type { Value } from '../values';
+import { VM_ENVIRONMENT } from '../vmEnvironment';
 import { magnitudeBitLength, modInverse } from './bigIntArithmetic';
 import { callFunction, define, defineAll, intArg, named, numArg, stringArg } from './nativeSupport';
 import { trimDartEnd, trimDartStart, trimDartWhitespace } from './stringWhitespace';
@@ -426,8 +427,11 @@ function parseBool(text: string, caseSensitive: boolean): boolean | undefined {
   if (value === 'false') return false;
   return undefined;
 }
-define('bool.fromEnvironment', (_runtime, _self, _args, namedArgs) => named(namedArgs, 'defaultValue', false));
-define('bool.hasEnvironment', () => false);
+define('bool.fromEnvironment', (_runtime, _self, [name], namedArgs) => {
+  const value = VM_ENVIRONMENT.get(name as string);
+  return value === 'true' ? true : value === 'false' ? false : named(namedArgs, 'defaultValue', false);
+});
+define('bool.hasEnvironment', (_runtime, _self, [name]) => VM_ENVIRONMENT.has(name as string));
 define('bool.parse', (runtime, _self, [source], namedArgs) => {
   const text = stringArg(runtime, source, 'source');
   const result = parseBool(text, named(namedArgs, 'caseSensitive', true) as boolean);
