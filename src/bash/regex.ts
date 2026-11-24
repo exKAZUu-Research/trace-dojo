@@ -169,9 +169,8 @@ class RegexParser {
       }
       this.position++;
       if (this.chars[this.position] === '-' && (this.chars[this.position + 1] ?? ']') !== ']') {
-        const end = this.chars[this.position + 1];
-        this.position += 2;
-        tests.push(makeCodeRangeTest(c, end));
+        this.position++;
+        tests.push(makeCodeRangeTest(c, this.readRangeEndChar()));
         continue;
       }
       tests.push((ch) => ch === c);
@@ -187,34 +186,47 @@ class RegexParser {
     if (close === -1) throw new RegexSyntaxError('brackets ([ ]) not balanced');
     const name = rest.slice(0, close);
     this.position += 2 + charactersOf(name).length + 2;
-    if (type === ':') {
-      const test = Object.hasOwn(CLASSES, name) ? CLASSES[name] : undefined;
-      if (!test) throw new RegexSyntaxError('invalid character class');
-      return test;
-    }
+    const hasTrailingRange = this.chars[this.position] === '-' && (this.chars[this.position + 1] ?? ']') !== ']';
+    return type === ':'
+      ? parseCharacterClassSubbracket(name, hasTrailingRange)
+      : this.parseCollatingSubbracket(type, name, hasTrailingRange);
+  }
+
+  private parseCollatingSubbracket(type: '=' | '.', name: string, hasTrailingRange: boolean): (ch: string) => boolean {
     const element = resolveRegexCollatingElement(name);
     if (element === undefined) throw new RegexSyntaxError('invalid collating element');
-    if (type === '.' && this.chars[this.position] === '-' && (this.chars[this.position + 1] ?? ']') !== ']') {
+    if (hasTrailingRange) {
+      if (type !== '.') throw new RegexSyntaxError('invalid character range');
       this.position++;
-      const end = this.readRangeEndChar();
-      return makeCodeRangeTest(element, end);
+      return makeCodeRangeTest(element, this.readRangeEndChar());
     }
     return type === '=' ? (ch) => matchesRegexEquivalenceClass(element, ch) : (ch) => ch === element;
   }
 
   private readRangeEndChar(): string {
-    if (this.chars[this.position] === '[' && this.chars[this.position + 1] === '.') {
+    const type = this.chars[this.position + 1];
+    if (this.chars[this.position] === '[' && (type === '.' || type === ':' || type === '=')) {
       const rest = this.chars.slice(this.position + 2).join('');
-      const close = rest.indexOf('.]');
+      const close = rest.indexOf(`${type}]`);
       if (close === -1) throw new RegexSyntaxError('brackets ([ ]) not balanced');
+      if (type !== '.') throw new RegexSyntaxError('invalid character range');
       const name = rest.slice(0, close);
       this.position += 2 + charactersOf(name).length + 2;
       const element = resolveRegexCollatingElement(name);
       if (element === undefined) throw new RegexSyntaxError('invalid collating element');
       return element;
     }
-    return this.chars[this.position++];
+    const end = this.chars[this.position++];
+    if (end === undefined) throw new RegexSyntaxError('brackets ([ ]) not balanced');
+    return end;
   }
+}
+
+function parseCharacterClassSubbracket(name: string, hasTrailingRange: boolean): (ch: string) => boolean {
+  const test = Object.hasOwn(CLASSES, name) ? CLASSES[name] : undefined;
+  if (!test) throw new RegexSyntaxError('invalid character class');
+  if (hasTrailingRange) throw new RegexSyntaxError('invalid character range');
+  return test;
 }
 
 function makeCodeRangeTest(startChar: string, endChar: string): (ch: string) => boolean {
