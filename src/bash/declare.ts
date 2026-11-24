@@ -49,6 +49,7 @@ interface Options {
   set: Set<string>;
   unset: Set<string>;
   attemptedSet: Set<string>;
+  suppressedNameref?: boolean;
 }
 
 /** Expands declaration command arguments left-to-right before prefix bindings and `runDeclaration` execute. */
@@ -157,7 +158,7 @@ function commitCompoundDeclaration(
   options: Options,
   rawItems: CompoundElement[]
 ): { variable: Variable; priorKind: VariableValue['kind'] | undefined } | undefined {
-  const { set, unset } = options;
+  const { set } = options;
   if (!hasValidCompoundContext(shell, builtin, options)) return undefined;
   const { localScope, targetName, referencedSubscript } = resolveCompoundTargetContext(shell, builtin, arg, options);
   if (arg.subscript || referencedSubscript !== undefined) {
@@ -165,7 +166,7 @@ function commitCompoundDeclaration(
     shell.discard(`${arg.name}[${sub}]: cannot assign list to array member`);
   }
   if (localScope !== undefined && options.attemptedSet.has('n')) return undefined;
-  if (!validateCompoundDeclarationTarget(shell, builtin, targetName, arg.append, set, unset, localScope)) {
+  if (!validateCompoundDeclarationTarget(shell, builtin, targetName, arg.append, options, localScope)) {
     return undefined;
   }
   const variable = ensureCompoundTargetVariable(shell, targetName, set, localScope);
@@ -233,8 +234,9 @@ function resolveCompoundTargetContext(
   shell: Shell,
   builtin: string,
   arg: Assignment,
-  { set, unset }: Options
+  options: Options
 ): { localScope: Map<string, Variable> | undefined; targetName: string; referencedSubscript?: string } {
+  const { set, unset } = options;
   const isLocal =
     shell.isInFunction && !set.has('g') && (builtin === 'local' || builtin === 'declare' || builtin === 'typeset');
   const { scopes, functionScopes } = shell.state;
@@ -242,7 +244,7 @@ function resolveCompoundTargetContext(
   const { targetName, referencedSubscript } = resolveDeclaredTarget(
     shell,
     arg.name,
-    set,
+    options.suppressedNameref ? new Set([...set, 'n']) : set,
     unset,
     Boolean(arg.subscript),
     set.has('g'),
@@ -251,20 +253,21 @@ function resolveCompoundTargetContext(
   return { localScope, targetName, ...(referencedSubscript === undefined ? {} : { referencedSubscript }) };
 }
 
-// code-gauge-allow functionParameterCount -- Checks host-env append, readonly boundary, array-kind clash, and conversion error for compound targets.
 function validateCompoundDeclarationTarget(
   shell: Shell,
   builtin: string,
   targetName: string,
   append: boolean,
-  set: Set<string>,
-  unset: Set<string>,
+  options: Options,
   localScope: Map<string, Variable> | undefined
 ): boolean {
-  const existing = resolveCompoundExisting(shell, targetName, set, localScope);
+  const { set, unset } = options;
+  const lookupSet = options.suppressedNameref ? new Set([...set, 'n']) : set;
+  const existing = resolveCompoundExisting(shell, targetName, lookupSet, localScope);
   if (!existing && !localScope && append && shell.isUnreadHostEnv(targetName)) {
     throw new UnsupportedFeatureError(`環境変数（${targetName}）`);
   }
+  if (!localScope && options.suppressedNameref && existing && isArrayCell(existing)) return false;
   if (
     existing?.attributes.has('r') ||
     Boolean(localScope && !localScope.has(targetName) && isReadonlyGlobal(shell, targetName))
@@ -383,7 +386,7 @@ function normalizeArrayNamerefPrecedence(options: Options): Options {
   if (!options.set.has('n') || (!options.set.has('a') && !options.set.has('A'))) return options;
   const set = new Set(options.set);
   set.delete('n');
-  return { ...options, set };
+  return { ...options, set, suppressedNameref: true };
 }
 
 /** Reads the options before the operands, reporting an invalid one with the builtin's usage as Bash does. */
@@ -467,8 +470,8 @@ function declareOne(
   const tempVar =
     !isLocal && (builtin === 'export' || builtin === 'readonly') ? shell.declarationPrefixVariable(name) : undefined;
   if (tempVar) return declarePrefixed(shell, builtin, name, tempVar, operand, parsed, options);
-  const pendingRef = checkPendingNameref(shell, builtin, name, operand, parsed, options, isLocal, isSubscripted);
-  if (pendingRef === 'invalid') return false;
+  const pendingRef = checkPendingNameref(shell, builtin, name, operand, parsed, { options, isLocal, isSubscripted });
+  if (pendingRef === false) return false;
   const priorKind = shell.findVariable(name, !options.set.has('n') && !options.unset.has('n'))?.value?.kind;
   const destination = declaredDestination(
     shell,
@@ -547,20 +550,17 @@ function isElementAliasAttributeBuiltin(
   );
 }
 
-// code-gauge-allow functionParameterCount -- Resolves and validates an explicit nameref target before variable creation.
 function checkPendingNameref(
   shell: Shell,
   builtin: string,
   name: string,
   operand: DeclarationArgument,
   parsed: { subscript?: string; append: boolean; value?: string } | undefined,
-  options: Options,
-  isLocal: boolean,
-  isSubscripted: boolean
-): string | 'invalid' | undefined {
-  const target = resolvePendingNamerefTarget(shell, name, operand, parsed, options, isLocal, isSubscripted);
+  ctx: { options: Options; isLocal: boolean; isSubscripted: boolean }
+): string | false | undefined {
+  const target = resolvePendingNamerefTarget(shell, name, operand, parsed, ctx.options, ctx.isLocal, ctx.isSubscripted);
   if (target === undefined) return undefined;
-  return validatePendingNamerefTarget(shell, builtin, name, target, shell.isInFunction) ? target : 'invalid';
+  return validatePendingNamerefTarget(shell, builtin, name, target, shell.isInFunction) ? target : false;
 }
 
 // code-gauge-allow functionParameterCount -- Selects the effective store cell and writes the declared operand value.
@@ -1045,23 +1045,24 @@ function declaredDestination(
   assignsCompound = false
 ): DeclarationDestination | undefined {
   const { set, unset } = options;
+  const lookupSet = effectiveTargetSet(options);
   const { scopes } = shell.state;
   const scope = isLocal ? scopes[shell.state.functionScopes.at(-1) as number] : undefined;
   const { targetName, referencedSubscript } = resolveDeclaredTarget(
     shell,
     name,
-    set,
+    lookupSet,
     unset,
     isSubscripted,
     set.has('g'),
     scope
   );
   const targetScope = referencedSubscript === undefined ? scope : undefined;
-  const variable = lookupDeclaredVariable(shell, targetName, set, targetScope);
+  const variable = lookupDeclaredVariable(shell, targetName, lookupSet, targetScope);
   if (rejectDeclaredTarget(shell, builtin, targetName, variable, targetScope, assignMode, isSubscripted)) {
     return undefined;
   }
-  if (rejectLocalArrayNameref(shell, builtin, targetName, variable, targetScope, options)) {
+  if (rejectArrayNameref(shell, builtin, targetName, variable, targetScope, options, assignMode !== 'none')) {
     return undefined;
   }
   const candidate = variable ?? createNewDeclaredVariable(shell, targetName, set, isSubscripted, targetScope);
@@ -1081,6 +1082,25 @@ function declaredDestination(
     variable: candidate,
     ...(referencedSubscript === undefined ? {} : { referencedSubscript }),
   };
+}
+
+function effectiveTargetSet(options: Options): Set<string> {
+  return options.suppressedNameref ? new Set([...options.set, 'n']) : options.set;
+}
+
+// code-gauge-allow functionParameterCount -- Validates local and existing-global array cells when -n is combined with -a/-A.
+function rejectArrayNameref(
+  shell: Shell,
+  builtin: string,
+  targetName: string,
+  variable: Variable | undefined,
+  targetScope: Map<string, Variable> | undefined,
+  options: Options,
+  assigns: boolean
+): boolean {
+  return targetScope
+    ? rejectLocalArrayNameref(shell, builtin, targetName, variable, targetScope, options)
+    : rejectGlobalExistingArrayNameref(shell, builtin, targetName, variable, options, assigns);
 }
 
 function rejectLocalArrayNameref(
@@ -1107,6 +1127,21 @@ function rejectLocalArrayNameref(
     applyArrayKindAttributes(shell, variable, set.has('A'), set.has('a'), false);
   }
   shell.reportError(`${builtin}: ${targetName}: reference variable cannot be an array`);
+  return true;
+}
+
+function rejectGlobalExistingArrayNameref(
+  shell: Shell,
+  builtin: string,
+  targetName: string,
+  variable: Variable | undefined,
+  options: Options,
+  assigns: boolean
+): boolean {
+  if (!options.suppressedNameref || !variable || !isArrayCell(variable)) return false;
+  if (checkReadonlyConflict(shell, builtin, targetName, variable, options, assigns)) return true;
+  const kindErr = incompatibleArrayKindError(variable, options.set);
+  shell.reportError(`${builtin}: ${targetName}: ${kindErr ?? 'reference variable cannot be an array'}`);
   return true;
 }
 
