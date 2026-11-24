@@ -189,14 +189,15 @@ function assignDefaultTarget(shell: Shell, name: string, subscript: string | und
   if (!split) return shell.assignScalar(name, text);
   const arr = shell.resolveNameOrUndefined(split.name);
   if (arr === undefined) return false;
-  if (split.subscript === '@' || split.subscript === '*')
-    return failDefaultSubscript(shell, `${arr}[${split.subscript}]`);
-  const sub = shell.expandDynamicSubscript(split.subscript);
   if (shell.isAssociative(arr)) {
+    const sub = shell.expandDynamicSubscript(split.subscript);
     return sub === ''
       ? failDefaultSubscript(shell, `${split.name}[${split.subscript}]`)
       : shell.assignElement(arr, sub, text, false, true);
   }
+  if (split.subscript === '@' || split.subscript === '*')
+    return failDefaultSubscript(shell, `${arr}[${split.subscript}]`);
+  const sub = shell.expandDynamicSubscript(split.subscript);
   return shell.assignElement(arr, sub === '' && split.subscript !== '' ? '0' : sub, text, false);
 }
 
