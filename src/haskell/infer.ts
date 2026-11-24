@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss -- The type checker keeps its inference rules beside the substitution state they share.
 import { LIMITS } from '../interpreter/limits';
 import { CHAR_TYPE, FUNCTION_TYPE, LIST_TYPE, tupleCon, UNIT_TYPE } from './builtinTypes';
-import { type ClassEnv, entailByGivens, hasConstructorHead, isSubclassOf, predsEqual } from './classEnv';
+import { type ClassEnv, entailByGivens, hasConstructorHead, impliedBySuperclasses, predsEqual } from './classEnv';
 import { dependencyOrder } from './dependencies';
 import type { ClassEntity, ConInfo, DictParam, Evidence, EvidenceHole, TypeEntity, ValueEntity } from './entities';
 import { compileError } from './errors';
@@ -33,6 +33,7 @@ import {
   type Kind,
   kindArrow,
   kindOfType,
+  matchType,
   occursIn,
   parameterKinds,
   type Pred,
@@ -47,6 +48,7 @@ import {
   type TVar,
   type Type,
   typeChildren,
+  typesEqual,
   typeVarsOf,
   unifyKinds,
   unifyTypes,
@@ -193,7 +195,9 @@ export class Checker {
         hole.solution = given;
         continue;
       }
-      if (hasConstructorHead(pred.type)) {
+      if (pred.cls.fundeps?.length) this.improveByFundeps(pred, hole.span, givens);
+      const unsolvable = pred.cls.packed && typeVarsOf(pred.type).size > 0 && this.env.findInstance(pred) === 'none';
+      if (hasConstructorHead(pred.type) && !unsolvable) {
         const found = this.instanceFor(hole);
         if (found !== 'pending') {
           const { instance, args } = found;
@@ -217,6 +221,29 @@ export class Checker {
     return { retained, deferred };
   }
 
+  /**
+   * Improves a constraint of a class with functional dependencies: when an instance or a given constraint determines
+   * the arguments that depend on the ones the constraint already has, the dependent arguments must be theirs.
+   */
+  private improveByFundeps(pred: Pred, span: Span, givens: readonly { pred: Pred }[]): void {
+    const args = splitApp(pred.type).args;
+    for (const fundep of pred.cls.fundeps ?? []) {
+      for (const instance of this.env.instancesOf(pred.cls)) {
+        const instanceArgs = splitApp(instance.head).args;
+        const bindings: (Type | undefined)[] = [];
+        if (!fundep.from.every((index) => matchType(instanceArgs[index], args[index], bindings))) continue;
+        const fresh = instance.kinds.map((kind, index) => bindings[index] ?? this.freshVar(kind));
+        for (const index of fundep.to) this.unify(args[index], instantiateType(instanceArgs[index], fresh), span);
+      }
+      for (const given of givens) {
+        if (given.pred.cls !== pred.cls) continue;
+        const givenArgs = splitApp(zonk(given.pred.type)).args;
+        if (!fundep.from.every((index) => typesEqual(givenArgs[index], args[index]))) continue;
+        for (const index of fundep.to) this.unify(args[index], givenArgs[index], span);
+      }
+    }
+  }
+
   noInstance(hole: EvidenceHole): never {
     const printer = new TypePrinter();
     typeError(hole.span, `${printer.showPred(hole.pred)} のインスタンスがありません（${hole.origin}）。`);
@@ -227,13 +254,7 @@ export class Checker {
     for (const hole of holes) if (!distinct.some((pred) => predsEqual(pred, hole.pred))) distinct.push(hole.pred);
     const kept = distinct.filter(
       (pred) =>
-        !distinct.some(
-          (other) =>
-            other !== pred &&
-            other.cls !== pred.cls &&
-            isSubclassOf(other.cls, pred.cls) &&
-            predsEqual({ cls: pred.cls, type: other.type }, pred)
-        )
+        !distinct.some((other) => other !== pred && other.cls !== pred.cls && impliedBySuperclasses(other, pred))
     );
     const params = kept.map((pred) => newDictParam(pred));
     const givens = params.map((param) => ({ pred: param.pred, evidence: { kind: 'param', param } as Evidence }));
@@ -337,8 +358,8 @@ export class Checker {
     return this.typeConversion.predicates(context, vars, varKinds);
   }
 
-  checkSuperclassTypes(context: readonly RConstraint[], parameter: string, kind: Kind): void {
-    this.typeConversion.superclasses(context, parameter, kind);
+  superclassTypes(context: readonly RConstraint[], parameters: readonly string[], kinds: readonly Kind[]): Pred[] {
+    return this.typeConversion.superclasses(context, parameters, kinds);
   }
 
   derivingClass(type: RType): ClassEntity | undefined {
@@ -1178,6 +1199,26 @@ export function typeVarNames(types: readonly RType[]): string[] {
 
 export function checkSchemeAmbiguity(scheme: Scheme, span: Span, defaultable?: (index: number) => boolean): void {
   const visible = genericIndices(scheme.type);
+  // Functional dependencies determine variables from visible ones, which then are visible too.
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const pred of scheme.preds) {
+      const args = pred.cls.packed ? splitApp(pred.type).args : [pred.type];
+      for (const fundep of pred.cls.fundeps ?? []) {
+        if (!fundep.from.every((index) => [...genericIndices(args[index])].every((generic) => visible.has(generic)))) {
+          continue;
+        }
+        for (const index of fundep.to) {
+          for (const generic of genericIndices(args[index])) {
+            if (!visible.has(generic)) {
+              visible.add(generic);
+              changed = true;
+            }
+          }
+        }
+      }
+    }
+  }
   const ambiguous = new Set<number>();
   for (const pred of scheme.preds) {
     for (const index of genericIndices(pred.type)) {

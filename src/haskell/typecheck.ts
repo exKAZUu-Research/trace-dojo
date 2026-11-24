@@ -1,14 +1,14 @@
 import { assert } from 'es-toolkit';
 
 import { FUNCTION_TYPE } from './builtinTypes';
-import type { ClassEnv } from './classEnv';
+import { type ClassEnv, superPred } from './classEnv';
 import { deriveInstance, FUNCTOR_LIKE_CLASSES } from './deriving';
 import { type ClassEntity, type Evidence, type InstanceInfo, nextId, type ValueEntity } from './entities';
 import { compileError, unsupportedError } from './errors';
 import { type Builtins, Checker, newDictParam, typeParamKinds, typeVarNames } from './infer';
 import { inferKinds } from './kindCheck';
 import { TypePrinter } from './prettyType';
-import { directClassConstraint, type RBinding, type RExpr, type RType } from './rast';
+import type { RBinding, RExpr, RType } from './rast';
 import type { RClassDecl, RDataDecl, RInstanceDecl, RModule } from './rename';
 import type { DerivingStrategy, Span } from './syntax';
 import {
@@ -61,7 +61,7 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
   inferKinds(checker, module);
   applyDefaultDecls(checker, module);
   for (const decl of module.dataDecls) defineConstructors(decl);
-  for (const decl of module.classes) defineClassMethods(decl);
+  for (const decl of module.classes) defineClassMethods(decl, module.extensions.has('UndecidableSuperClasses'));
   const instanceDecls = module.instances.map((decl) =>
     declareInstance(checker, decl, module.name, module.extensions.has('UndecidableInstances'))
   );
@@ -122,15 +122,9 @@ function defineConstructors(decl: RDataDecl): void {
   }
 }
 
-function defineClassMethods(decl: RClassDecl): void {
-  const supers = decl.supers.map((sup) => {
-    const direct = directClassConstraint(sup);
-    assert(direct, 'A superclass constraint must apply a class to a type variable');
-    return direct;
-  });
-  decl.entity.supers = supers.map((sup) => sup.cls);
-  for (const sup of supers) {
-    if (reachesSuperclass(sup.cls, decl.entity)) {
+function defineClassMethods(decl: RClassDecl, undecidable: boolean): void {
+  for (const sup of decl.entity.supers) {
+    if (!undecidable && reachesSuperclass(sup, decl.entity)) {
       throw compileError(decl.span, `クラス ${decl.entity.name} のスーパークラスが循環しています。`);
     }
   }
@@ -208,13 +202,13 @@ function checkInstanceSupers(checker: Checker, info: InstanceInfo, span: Span): 
     pred: param.pred,
     evidence: { kind: 'param', param } as Evidence,
   }));
-  info.supers = info.cls.supers.map((sup) => {
+  info.supers = info.cls.supers.map((sup, index) => {
     let evidence: Evidence | undefined;
     checker.checkAgainstScheme(
       { kinds: [], preds: [], type: head },
       () => {
         evidence = checker.want(
-          { cls: sup, type: head },
+          superPred({ cls: info.cls, type: head }, index),
           span,
           `インスタンス ${info.cls.name} のスーパークラス ${sup.name}`
         );
@@ -251,11 +245,12 @@ function checkInstanceMethods(checker: Checker, declared: DeclaredInstance): Omi
       newDictParam({ cls: pred.cls, type: instantiateType(pred.type, skolems) })
     );
     const methodScheme = method.scheme as Scheme;
+    const classArgs = info.cls.packed ? splitApp(head).args : [head];
     const rest: Scheme = {
-      kinds: methodScheme.kinds.slice(1),
-      names: methodScheme.names?.slice(1),
-      preds: methodScheme.preds.slice(1).map((pred) => ({ cls: pred.cls, type: shiftGens(pred.type, head) })),
-      type: shiftGens(methodScheme.type, head),
+      kinds: methodScheme.kinds.slice(classArgs.length),
+      names: methodScheme.names?.slice(classArgs.length),
+      preds: methodScheme.preds.slice(1).map((pred) => ({ cls: pred.cls, type: shiftGens(pred.type, classArgs) })),
+      type: shiftGens(methodScheme.type, classArgs),
     };
     const givens = contextParams.map((param) => ({ pred: param.pred, evidence: { kind: 'param', param } as Evidence }));
     const scoped = new Map(declared.typeNames.map((name, position) => [name, skolems[position]]));
@@ -299,9 +294,14 @@ function genericDefaultBindings(declared: DeclaredInstance): RBinding[] {
   });
 }
 
-function shiftGens(type: Type, replacement: Type): Type {
+/** Replaces a method scheme's class parameters with the instance's types, renumbering the method's own variables. */
+function shiftGens(type: Type, classArgs: readonly Type[]): Type {
   return mapType(type, (node) =>
-    node.tag === 'tgen' ? (node.index === 0 ? replacement : { tag: 'tgen', index: node.index - 1 }) : node
+    node.tag === 'tgen'
+      ? node.index < classArgs.length
+        ? classArgs[node.index]
+        : { tag: 'tgen', index: node.index - classArgs.length }
+      : node
   );
 }
 
@@ -315,7 +315,9 @@ function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
     if (generic) {
       const scheme = generic.scheme as Scheme;
       const params = checker.checkAgainstScheme(scheme, (type, skolems) =>
-        checker.withScopedTypes(new Map([[decl.param, skolems[0]]]), () => checkClauses(checker, binding, type))
+        checker.withScopedTypes(new Map(decl.params.map((name, index) => [name, skolems[index]])), () =>
+          checkClauses(checker, binding, type)
+        )
       );
       result.push({ ...binding, binder: { kind: 'global', entity: generic }, dictParams: params });
       continue;
@@ -329,7 +331,9 @@ function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
     };
     decl.entity.defaults[index] = implementation;
     const params = checker.checkAgainstScheme(method.scheme as Scheme, (type, skolems) =>
-      checker.withScopedTypes(new Map([[decl.param, skolems[0]]]), () => checkClauses(checker, binding, type))
+      checker.withScopedTypes(new Map(decl.params.map((name, index) => [name, skolems[index]])), () =>
+        checkClauses(checker, binding, type)
+      )
     );
     const implementationBinding: RBinding = {
       ...binding,

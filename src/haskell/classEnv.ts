@@ -1,5 +1,14 @@
 import type { ClassEntity, Evidence, InstanceInfo, TypeEntity } from './entities';
-import { couldMatch, matchType, type Pred, splitApp, type Type, typesEqual, typeVarsOf } from './types';
+import {
+  couldMatch,
+  instantiateType,
+  matchType,
+  type Pred,
+  splitApp,
+  type Type,
+  typesEqual,
+  typeVarsOf,
+} from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 
 /** The instances visible to a module: the library's, and the module's own. */
@@ -69,52 +78,49 @@ export function hasConstructorHead(type: Type): boolean {
   return splitApp(type).head.tag === 'tcon';
 }
 
-export function isSubclassOf(cls: ClassEntity, ancestor: ClassEntity): boolean {
-  return superclassPath(cls, ancestor) !== undefined;
+/** The superclass constraint a constraint implies: the class's superclass at the position, at its type. */
+export function superPred(pred: Pred, index: number): Pred {
+  const cls = pred.cls.supers[index];
+  const template = pred.cls.superTypes?.[index];
+  if (!template) return { cls, type: pred.type };
+  const args = pred.cls.packed ? splitApp(pred.type).args : [pred.type];
+  return { cls, type: instantiateType(template, args) };
 }
 
+/** Whether a constraint implies another through its superclasses. */
+export function impliedBySuperclasses(given: Pred, pred: Pred): boolean {
+  return superclassPath(given, pred) !== undefined;
+}
+
+/** Whether a given constraint implies another through its superclasses, giving the evidence if it does. */
 export function entailByGivens(
   givens: readonly { pred: Pred; evidence: Evidence }[],
   pred: Pred
 ): Evidence | undefined {
   for (const given of givens) {
-    if (!typesEqual(given.pred.type, pred.type)) continue;
-    const path = superclassPath(given.pred.cls, pred.cls);
+    const path = superclassPath(given.pred, pred);
     if (!path) continue;
     let evidence = given.evidence;
-    for (const index of path) {
-      chargeTypeWork();
-      evidence = { kind: 'super', of: evidence, index };
-    }
+    for (const index of path) evidence = { kind: 'super', of: evidence, index };
     return evidence;
   }
   return undefined;
 }
 
-interface SuperclassStep {
-  index: number;
-  parent: SuperclassStep | undefined;
-}
-
-function superclassPath(cls: ClassEntity, ancestor: ClassEntity): number[] | undefined {
+/** The superclass positions that lead from a constraint to another it implies, if it does. */
+function superclassPath(given: Pred, pred: Pred): number[] | undefined {
   const seen = new Set<ClassEntity>();
-  const work: { cls: ClassEntity; path: SuperclassStep | undefined }[] = [{ cls, path: undefined }];
+  const work: { pred: Pred; path: number[] }[] = [{ pred: given, path: [] }];
   while (work.length > 0) {
     chargeTypeWork();
     const current = work.pop()!;
-    if (seen.has(current.cls)) continue;
-    seen.add(current.cls);
-    if (current.cls === ancestor) {
-      const path: number[] = [];
-      for (let step = current.path; step; step = step.parent) {
-        chargeTypeWork();
-        path.push(step.index);
-      }
-      return path.toReversed();
-    }
-    for (let index = current.cls.supers.length - 1; index >= 0; index--) {
-      chargeTypeWork();
-      work.push({ cls: current.cls.supers[index], path: { index, parent: current.path } });
+    if (predsEqual(current.pred, pred)) return current.path;
+    // A class reached again only repeats what it implies, unless its superclasses apply to other types.
+    if (seen.has(current.pred.cls) && !current.pred.cls.superTypes?.length) continue;
+    seen.add(current.pred.cls);
+    if (current.path.length > 100) continue;
+    for (let index = current.pred.cls.supers.length - 1; index >= 0; index--) {
+      work.push({ pred: superPred(current.pred, index), path: [...current.path, index] });
     }
   }
   return undefined;

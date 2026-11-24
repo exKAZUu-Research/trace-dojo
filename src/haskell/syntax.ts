@@ -199,14 +199,16 @@ export type Decl =
       kind: 'class';
       context: Constraint[];
       name: Name;
-      param: Name;
-      paramKind?: TypeExpr;
+      params: Name[];
+      paramKinds?: (TypeExpr | undefined)[];
+      /** The functional dependencies, `| a -> b`, as the names each determines from. */
+      fundeps: { from: Name[]; to: Name[] }[];
       decls: Decl[];
       span: Span;
     }
   /** A standalone kind signature, `type T :: Type -> Type`. */
   | { kind: 'kindSig'; name: Name; kindSig: TypeExpr; span: Span }
-  | { kind: 'instance'; context: Constraint[]; cls: QName; type: TypeExpr; decls: Decl[]; span: Span }
+  | { kind: 'instance'; context: Constraint[]; cls: QName; types: TypeExpr[]; decls: Decl[]; span: Span }
   /** `default (T1, T2)`, or `default C (T1, T2)` for one class, which choose the types ambiguous variables get. */
   | { kind: 'defaultTypes'; cls?: QName; types: TypeExpr[]; span: Span }
   | {

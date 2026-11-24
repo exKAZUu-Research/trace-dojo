@@ -67,6 +67,10 @@ export class TypePrinter {
   }
 
   showPred(pred: Pred): string {
+    if (pred.cls.packed) {
+      const args = splitApp(pred.type).args.map((arg) => ` ${this.show(arg, 2)}`);
+      return `${pred.cls.name}${args.join('')}`;
+    }
     return `${pred.cls.name} ${this.show(pred.type, 2)}`;
   }
 

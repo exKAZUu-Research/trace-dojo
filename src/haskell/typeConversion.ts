@@ -13,7 +13,6 @@ import {
   kindArrow,
   parameterKinds,
   type Pred,
-  prune,
   pruneKind,
   showKind,
   STAR,
@@ -48,16 +47,11 @@ export class TypeConversion {
     return predicates;
   }
 
-  superclasses(context: readonly RConstraint[], parameter: string, kind: Kind): void {
-    const vars = new Map<string, Type>([[parameter, { tag: 'tgen', index: 0 }]]);
-    const kinds = new Map([[parameter, kind]]);
-    for (const constraint of context) {
-      for (const pred of this.predicates([constraint], vars, kinds)) {
-        const type = prune(pred.type);
-        if (type.tag !== 'tgen' || type.index !== 0)
-          this.markUnsupported(constraint.span, '型変数以外のスーパークラス制約');
-      }
-    }
+  /** A class's superclass constraints, with the types they apply to in terms of the class's parameters. */
+  superclasses(context: readonly RConstraint[], parameters: readonly string[], kinds: readonly Kind[]): Pred[] {
+    const vars = new Map<string, Type>(parameters.map((name, index) => [name, { tag: 'tgen', index }]));
+    const varKinds = new Map(parameters.map((name, index) => [name, kinds[index]]));
+    return this.predicates(context, vars, varKinds);
   }
 
   derivingClass(type: RType): ClassEntity | undefined {

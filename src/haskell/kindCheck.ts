@@ -12,10 +12,13 @@ import {
   freshKindVar,
   type Kind,
   kindArrow,
+  parameterKinds,
   type Pred,
   type Scheme,
   showKind,
   STAR,
+  tap,
+  tcon,
   type Type,
   unifyKinds,
 } from './types';
@@ -66,12 +69,17 @@ function prepareDeclarations(checker: Checker, module: RModule): KindDeclaration
     declarations.push({ kind: 'synonym', decl, kinds });
   }
   for (const decl of module.classes) {
-    decl.entity.tyvarKind = decl.paramKind ? checker.kindOf(decl.paramKind, new Map()) : freshKindVar();
+    const kinds = annotated(decl.paramKinds, decl.params.length);
+    const { packed } = decl.entity;
+    if (packed) {
+      packed.kind = arrowKind(kinds, STAR);
+      decl.entity.tyvarKind = STAR;
+    } else decl.entity.tyvarKind = kinds[0];
     declarations.push({ kind: 'class', decl });
   }
   for (const { entity, kind, span } of module.kindSigs) {
     const given = checker.kindOf(kind, new Map());
-    const actual = 'tyvarKind' in entity ? kindArrow(entity.tyvarKind, CONSTRAINT) : entity.kind;
+    const actual = 'tyvarKind' in entity ? arrowKind(classParamKinds(entity), CONSTRAINT) : (entity as TypeEntity).kind;
     if (!unifyKinds(actual, given)) {
       throw compileError(span, `${entity.name} の種類が、種類のシグネチャ ${showKind(given)} と合いません。`);
     }
@@ -101,14 +109,22 @@ function inferGroup(checker: Checker, group: KindDeclaration[]): void {
     else if (entry.kind === 'class') inferClass(checker, entry.decl);
   }
   checker.checkKinds(true);
-  for (const entry of group)
-    rememberKind(entry.decl.entity, entry.kind === 'class' ? entry.decl.entity.tyvarKind : entry.decl.entity.kind);
+  for (const entry of group) {
+    if (entry.kind !== 'class') rememberKind(entry.decl.entity, entry.decl.entity.kind);
+    else {
+      rememberKind(entry.decl.entity, entry.decl.entity.tyvarKind);
+      const { packed } = entry.decl.entity;
+      if (packed) rememberKind(packed, packed.kind);
+    }
+  }
 }
 
 function defaultDeclarations(group: KindDeclaration[]): void {
   for (const entry of group) {
     if (entry.kind === 'class') {
       entry.decl.entity.tyvarKind = defaultKind(entry.decl.entity.tyvarKind);
+      const { packed } = entry.decl.entity;
+      if (packed) packed.kind = defaultKind(packed.kind);
       for (const method of entry.decl.methods) {
         const scheme = method.entity.scheme as Scheme;
         scheme.kinds = scheme.kinds.map(defaultKind);
@@ -131,8 +147,15 @@ function inferTypeDeclaration(checker: Checker, entry: Exclude<KindDeclaration, 
   }
 }
 
+/** The kinds of a class's parameters, in order. */
+export function classParamKinds(cls: ClassEntity): Kind[] {
+  return cls.packed ? parameterKinds(cls.packed.kind) : [cls.tyvarKind];
+}
+
 function inferClass(checker: Checker, decl: RClassDecl): void {
-  checker.checkSuperclassTypes(decl.supers, decl.param, decl.entity.tyvarKind);
+  const supers = checker.superclassTypes(decl.supers, decl.params, classParamKinds(decl.entity));
+  decl.entity.supers = supers.map((sup) => sup.cls);
+  decl.entity.superTypes = supers.map((sup) => sup.type);
   for (const method of decl.methods) method.entity.scheme = methodScheme(checker, decl, method.sig);
   for (const item of decl.defaultSigs) {
     const index = item.entity.method?.index as number;
@@ -193,17 +216,22 @@ function* synonymDependencies(type: RType, byEntity: ReadonlyMap<TypeEntity, RSy
 }
 
 function methodScheme(checker: Checker, decl: RClassDecl, sig: RClassDecl['methods'][number]['sig']): Scheme {
-  const names = [decl.param, ...typeVarNames([sig.type, ...sig.context]).filter((name) => name !== decl.param)];
-  const kinds: Kind[] = names.map((_, index) => (index === 0 ? decl.entity.tyvarKind : freshKindVar()));
+  const { params } = decl;
+  const names = [...params, ...typeVarNames([sig.type, ...sig.context]).filter((name) => !params.includes(name))];
+  const paramKinds = classParamKinds(decl.entity);
+  const kinds: Kind[] = names.map((_, index) => paramKinds[index] ?? freshKindVar());
   const vars = new Map<string, Type>(names.map((name, index) => [name, { tag: 'tgen', index }]));
   const varKinds = new Map<string, Kind>(names.map((name, index) => [name, kinds[index]]));
   const type = checker.convertType(sig.type, vars, varKinds, STAR);
-  const preds: Pred[] = [{ cls: decl.entity, type: { tag: 'tgen', index: 0 } }];
+  const classArgs = params.map((_, index): Type => ({ tag: 'tgen', index }));
+  const { packed } = decl.entity;
+  const preds: Pred[] = [{ cls: decl.entity, type: packed ? tap(tcon(packed), ...classArgs) : classArgs[0] }];
   for (const pred of checker.convertConstraints(sig.context, vars, varKinds)) preds.push(pred);
   const order = sig.forall ? sig.forall.map((binder) => binder.name) : typeVarNames([...sig.context, sig.type]);
-  const specified = [0, ...order.flatMap((name) => (name === decl.param ? [] : [names.indexOf(name)]))].filter(
-    (index) => index >= 0
-  );
+  const specified = [
+    ...params.keys(),
+    ...order.flatMap((name) => (params.includes(name) ? [] : [names.indexOf(name)])),
+  ].filter((index) => index >= 0);
   const scheme = { kinds, names, preds, type, specified };
   checkSchemeAmbiguity(scheme, sig.span);
   return scheme;

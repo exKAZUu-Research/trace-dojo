@@ -205,7 +205,22 @@ export interface RBindGroup {
   bindings: RBinding[];
 }
 
+/**
+ * The class a constraint applies and the type it applies the class to: the one argument of a class of one parameter,
+ * or the arguments packed by the class's `packed` type constructor.
+ */
 export function directClassConstraint(constraint: RType): { cls: ClassEntity; type: RType; span: Span } | undefined {
-  if (constraint.k !== 'app' || constraint.fn.k !== 'class') return;
-  return { cls: constraint.fn.entity, type: constraint.arg, span: constraint.span };
+  const args: RType[] = [];
+  let head = constraint;
+  while (head.k === 'app') {
+    args.unshift(head.arg);
+    head = head.fn;
+  }
+  if (head.k !== 'class') return;
+  const { packed } = head.entity;
+  if (!packed) return args.length === 1 ? { cls: head.entity, type: args[0], span: constraint.span } : undefined;
+  if (args.length !== packed.arity) return;
+  let type: RType = { k: 'con', entity: packed, span: constraint.span };
+  for (const arg of args) type = { k: 'app', fn: type, arg, span: constraint.span };
+  return { cls: head.entity, type, span: constraint.span };
 }

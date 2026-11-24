@@ -23,8 +23,8 @@ export interface TypeEntity {
   /** What a synonym stands for, with its parameters as `TGen` indices. */
   synonym?: Type;
   span?: Span;
-  /** How the type prints when it is special syntax: lists, tuples, unit, and functions. */
-  special?: 'list' | 'tuple' | 'unit' | 'function';
+  /** How the type prints when it is special syntax: lists, tuples, unit, functions, and a class's arguments. */
+  special?: 'list' | 'tuple' | 'unit' | 'function' | 'classArguments';
   traceKind?: 'bool' | 'ratio' | 'maybe' | 'map' | 'set';
 }
 
@@ -85,7 +85,20 @@ export interface ClassEntity {
   id: number;
   name: string;
   module: string;
+  /**
+   * The kind of the type a constraint of the class applies it to. A class of other than one parameter applies to
+   * the type `packed` makes of its arguments, whose kind is `Type`.
+   */
   tyvarKind: Kind;
+  /** For a class of other than one parameter, the type constructor that packs its arguments into one type. */
+  packed?: TypeEntity;
+  /**
+   * The type each superclass applies to, in terms of the class's parameters as `TGen` indices; a superclass without
+   * one applies to the class's own parameter.
+   */
+  superTypes?: Type[];
+  /** The functional dependencies, by parameter position. */
+  fundeps?: { from: number[]; to: number[] }[];
   supers: ClassEntity[];
   methods: ValueEntity[];
   exportedMethods?: ValueEntity[];

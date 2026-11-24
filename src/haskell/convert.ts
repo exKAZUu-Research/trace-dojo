@@ -49,8 +49,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   field_path: '入れ子のレコードの更新（OverloadedRecordUpdate）',
   forall: 'forall',
   forall_required: 'forall',
-  fundep: '関数従属性',
-  fundeps: '関数従属性',
   gadt_constructor: 'GADT の構文',
   gadt_constructors: 'GADT の構文',
   group: 'TransformListComp の内包表記',
@@ -965,18 +963,21 @@ function convertTypeSynonym(node: Node): Decl {
 }
 
 function convertClass(node: Node): Decl {
-  for (const name of ['fundeps', 'head']) {
-    const child = field(node, name);
-    if (child) {
-      if (name === 'head') throw unsupportedError(spanOf(child), '演算子のクラスの宣言');
-      throw unsupported(child);
-    }
-  }
+  const head = field(node, 'head');
+  if (head) throw unsupportedError(spanOf(head), '演算子のクラスの宣言');
   const binders = typeParamBinders(node);
   const params = binders.map((binder) => binder.name);
-  if (params.length !== 1) {
-    throw unsupportedError(spanOf(node), params.length === 0 ? '型変数のないクラス' : '多引数の型クラス');
+  if (params.length !== 1 && !extensions.has('MultiParamTypeClasses')) {
+    throw syntaxError(spanOf(node), '型引数が1つでないクラスには、MultiParamTypeClasses の拡張が要ります。');
   }
+  const fundepsNode = field(node, 'fundeps');
+  if (fundepsNode && !extensions.has('FunctionalDependencies')) {
+    throw syntaxError(spanOf(fundepsNode), '関数従属性を書くには、FunctionalDependencies の拡張が要ります。');
+  }
+  const fundeps = (fundepsNode ? fields(fundepsNode, 'fundep') : []).map((fundep) => ({
+    from: fields(fundep, 'matched').map(plainName),
+    to: fields(fundep, 'determined').map(plainName),
+  }));
   const contextNode = field(node, 'context');
   const declarationsNode = field(node, 'declarations');
   const decls = declarationsNode
@@ -995,8 +996,9 @@ function convertClass(node: Node): Decl {
     kind: 'class',
     context: contextNode ? convertContext(contextNode) : [],
     name: typeDeclName(node),
-    param: params[0],
-    paramKind: binders[0].kind,
+    params,
+    paramKinds: binders.some((binder) => binder.kind) ? binders.map((binder) => binder.kind) : undefined,
+    fundeps,
     decls,
     span: spanOf(node),
   };
@@ -1014,9 +1016,6 @@ function convertInstance(node: Node): Decl {
   const nameNode = required(node, 'name');
   const patterns = fields(node, 'patterns');
   const types = patterns.flatMap((patternsNode) => namedChildren(patternsNode));
-  if (types.length !== 1) {
-    throw unsupportedError(spanOf(node), types.length === 0 ? '型を書かないインスタンス' : '多引数の型クラス');
-  }
   for (const type of types) rejectUnsupported(type);
   const declarationsNode = field(node, 'declarations');
   const decls = declarationsNode
@@ -1029,13 +1028,13 @@ function convertInstance(node: Node): Decl {
     kind: 'instance',
     context: contextNode ? convertContext(contextNode) : [],
     cls: qualifiedName(nameNode).name,
-    type: convertType(types[0]),
+    types: types.map(convertType),
     decls,
     // GHC reports an instance at its head, from the context to the type.
     span: {
       ...spanOf(contextNode?.firstChild ?? nameNode),
-      endRow: spanOf(types[0]).endRow,
-      endCol: spanOf(types[0]).endCol,
+      endRow: spanOf(types.at(-1) ?? nameNode).endRow,
+      endCol: spanOf(types.at(-1) ?? nameNode).endCol,
     },
   };
 }

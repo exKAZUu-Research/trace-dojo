@@ -97,8 +97,8 @@ export interface RSynonymDecl {
 
 export interface RClassDecl {
   entity: ClassEntity;
-  param: string;
-  paramKind?: RType;
+  params: string[];
+  paramKinds?: (RType | undefined)[];
   supers: RConstraint[];
   methods: { entity: ValueEntity; sig: RSigType }[];
   /** The `default` signatures, which type the default implementations of their methods instead. */
@@ -498,6 +498,23 @@ class Renamer {
           defaults: [],
           span: decl.span,
         };
+        if (decl.params.length !== 1) {
+          entity.packed = {
+            id: nextId(),
+            name: decl.name.name,
+            module: this.module.name,
+            sort: 'prim',
+            kind: STAR,
+            arity: decl.params.length,
+            cons: [],
+            fields: new Map(),
+            special: 'classArguments',
+          };
+        }
+        entity.fundeps = decl.fundeps.map((fundep) => ({
+          from: fundep.from.map((name) => classParamIndex(decl, name)),
+          to: fundep.to.map((name) => classParamIndex(decl, name)),
+        }));
         const like: TypeLike = { kind: 'class', entity };
         this.declareOwnType(decl.name, like);
         const children: ValueEntity[] = [];
@@ -688,8 +705,8 @@ class Renamer {
   private renameClass(decl: Extract<Decl, { kind: 'class' }>): void {
     const like = this.ownTypes.get(decl.name.name) as { kind: 'class'; entity: ClassEntity };
     const entity = like.entity;
-    const param = decl.param.name;
-    const supers = decl.context.map((constraint) => this.renameType(constraint, new Set([param])));
+    const params = decl.params.map((param) => param.name);
+    const supers = decl.context.map((constraint) => this.renameType(constraint, new Set(params)));
     const methods: RClassDecl['methods'] = [];
     const defaultSigs: RClassDecl['defaultSigs'] = [];
     for (const member of decl.decls) {
@@ -707,10 +724,10 @@ class Renamer {
         }
         continue;
       }
-      if (!rtypeMentions(sig.type, param)) {
+      if (params.length > 0 && !params.some((param) => rtypeMentions(sig.type, param))) {
         throw compileError(
           member.span,
-          `クラスのメソッド ${member.names[0].name} の型に、クラスの型変数 ${param} がありません。`
+          `クラスのメソッド ${member.names[0].name} の型に、クラスの型変数 ${params.join('・')} がありません。`
         );
       }
       for (const name of member.names) {
@@ -740,8 +757,8 @@ class Renamer {
     }
     this.classes.push({
       entity,
-      param,
-      paramKind: decl.paramKind && this.renameKind(decl.paramKind),
+      params,
+      paramKinds: decl.paramKinds?.map((kind) => kind && this.renameKind(kind)),
       supers,
       methods,
       defaultSigs,
@@ -753,8 +770,12 @@ class Renamer {
   private renameInstance(decl: Extract<Decl, { kind: 'instance' }>): void {
     const cls = this.lookupClass(decl.cls);
     const vars = new Set<string>();
-    collectTypeVars(decl.type, vars);
-    const type = this.renameType(decl.type, vars);
+    for (const type of decl.types) collectTypeVars(type, vars);
+    const type = this.classArgumentsType(
+      cls,
+      decl.types.map((argument) => this.renameType(argument, vars)),
+      decl.span
+    );
     const context = decl.context.map((constraint) => this.renameType(constraint, vars));
     const sigs = new Map<string, Extract<Decl, { kind: 'sig' }>>();
     for (const member of decl.decls) {
@@ -821,6 +842,16 @@ class Renamer {
       result.push({ cls, types: decl.types.map((type) => this.renameType(type, new Set())), span: decl.span });
     }
     return result;
+  }
+
+  /** The type a constraint or instance of a class applies it to: its one argument, or its arguments packed. */
+  private classArgumentsType(cls: ClassEntity, args: RType[], span: Span): RType {
+    const arity = cls.packed?.arity ?? 1;
+    if (args.length !== arity) throw compileError(span, `クラス ${cls.name} には、型を ${arity} 個書いてください。`);
+    if (!cls.packed) return args[0];
+    let type: RType = { k: 'con', entity: cls.packed, span };
+    for (const arg of args) type = { k: 'app', fn: type, arg, span };
+    return type;
   }
 
   private renameStandaloneDeriving(decl: Extract<Decl, { kind: 'standaloneDeriving' }>): void {
@@ -1634,6 +1665,12 @@ class Renamer {
     if (found.kind !== 'class') throw compileError(name.span, `${describeName(name)} は型で、クラスではありません。`);
     return found.entity;
   }
+}
+
+function classParamIndex(decl: Extract<Decl, { kind: 'class' }>, name: Name): number {
+  const index = decl.params.findIndex((param) => param.name === name.name);
+  if (index === -1) throw compileError(name.span, `関数従属性の ${name.name} は、クラスの型変数ではありません。`);
+  return index;
 }
 
 /** Whether a variable is a named typed hole: an unqualified name starting with `_` that nothing defines. */
