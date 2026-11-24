@@ -14,7 +14,7 @@ export type ArithmeticTarget =
   | { kind: 'indexedElement'; name: string; index: bigint }
   | { kind: 'invalidElement'; raw: string; emptyWrite?: boolean };
 
-export type WriteTargetResult = 'ok' | 'readonly' | 'invalid';
+export type WriteTargetResult = 'ok' | 'ignored' | 'readonly' | 'invalid';
 
 export interface ArithmeticHost {
   /** Resolves a variable or `name[subscript]` once into a reusable target. */
@@ -175,7 +175,7 @@ export function evaluateArithmetic(
   spend: () => void,
   preExpanded = false
 ): bigint {
-  return new ExpressionSession(host, commandName, spend, preExpanded).evaluateSubexpression(expression);
+  return new ExpressionSession(host, commandName, spend).evaluateSubexpression(expression, preExpanded);
 }
 
 /** Splits `name[subscript]` into `{ name, subscript }` when `[`...`]` spans to the end of `text`. */
@@ -205,11 +205,10 @@ class ExpressionSession {
   constructor(
     readonly host: ArithmeticHost,
     readonly commandName: string | undefined,
-    readonly spend: () => void,
-    private readonly preExpanded = false
+    readonly spend: () => void
   ) {}
 
-  evaluateSubexpression(source: string): bigint {
+  evaluateSubexpression(source: string, preExpanded = false): bigint {
     let current = source;
     let entered = 0;
     try {
@@ -223,7 +222,7 @@ class ExpressionSession {
         this.depth++;
         entered++;
         const identMatch = SIMPLE_IDENTIFIER_EXPRESSION.exec(current);
-        if (!identMatch) return new FrameParser(this, current, !this.preExpanded || entered > 1).parseAll();
+        if (!identMatch) return new FrameParser(this, current, !preExpanded || entered > 1).parseAll();
         const nextRaw = this.host.readTarget(this.host.resolveTarget(identMatch[1], undefined, true));
         if (!nextRaw) return 0n;
         current = nextRaw;
@@ -579,7 +578,7 @@ class FrameParser {
       throw new ArithmeticStoreError(false);
     }
     const status = this.session.host.writeTarget(target, value.toString());
-    if (status !== 'ok') throw new ArithmeticStoreError(status === 'readonly');
+    if (status === 'readonly' || status === 'invalid') throw new ArithmeticStoreError(status === 'readonly');
   }
 
   private isOp(op: OperatorText): boolean {

@@ -101,7 +101,10 @@ export class Expander {
   }
 
   /** Expands the raw elements of `name=(...)` before destination subscript/integer evaluation. */
-  expandRawCompoundItems(words: Word[]): CompoundElement[] {
+  expandRawCompoundItems(words: Word[], isAssociative = false): CompoundElement[] {
+    if (isAssociative && words.length > 0 && !splitKeyedElement(words[0])) {
+      return words.map((word) => ({ plain: this.expandAssignmentValue(word), rawText: word.text }));
+    }
     const elements: CompoundElement[] = [];
     for (const word of words) {
       const keyed = splitKeyedElement(word);
@@ -120,30 +123,35 @@ export class Expander {
   }
 
   /**
-   * The elements of `name=(...)` up to the first empty key of an associative array, which Bash reports after it
+   * The elements of `name=(...)` up to the first invalid or empty-keyed associative member, which Bash reports after it
    * assigns the elements before it. A declaration builtin gets the elements quoted again, as its error shows them.
    */
   expandCompound(
     words: Word[],
     isAssociative: boolean,
-    declared: boolean
+    declared: boolean,
+    reportedName = ''
   ): { elements: CompoundElement[]; error?: string } {
-    return this.validateCompoundItems(this.expandRawCompoundItems(words), isAssociative, declared);
+    return this.validateCompoundItems(
+      this.expandRawCompoundItems(words, isAssociative),
+      isAssociative,
+      declared,
+      reportedName
+    );
   }
 
   validateCompoundItems(
     items: CompoundElement[],
     isAssociative: boolean,
-    declared: boolean
+    declared: boolean,
+    reportedName = ''
   ): { elements: CompoundElement[]; error?: string } {
     const keyedMode = items.length > 0 && typeof items[0] !== 'string' && !('plain' in items[0]);
     if (!isAssociative || !keyedMode) return { elements: items };
     const elements: CompoundElement[] = [];
     for (const item of items) {
-      if (typeof item !== 'string' && !('plain' in item) && item.key === '') {
-        const text = declared ? `[${singleQuote(item.key)}]=${singleQuote(item.value)}` : (item.rawText ?? '');
-        return { elements, error: `${text}: bad array subscript` };
-      }
+      const error = compoundItemValidationError(item, declared, reportedName);
+      if (error !== undefined) return { elements, error };
       elements.push(item);
     }
     return { elements };
@@ -459,7 +467,8 @@ export class Expander {
     for (const [index, element] of value.values.entries()) {
       if (index > 0) pieces.push(separator);
       if (element !== '') pieces.push({ text: element, quoted: inDouble, split: !inDouble });
-      else pieces.push(inDouble ? QUOTED_EMPTY : { text: '', quoted: false, split: true });
+      else if (inDouble) pieces.push(QUOTED_EMPTY);
+      else pieces.push({ text: '', quoted: false, split: true, ...(!value.star ? { listNull: true } : {}) });
     }
     if (inDouble && value.values.length > 0) pieces.unshift(QUOTED_EMPTY);
     return pieces;
@@ -564,6 +573,23 @@ export class Expander {
     this.shell.reportError(`${name}: ${message}`);
     throw new ExitSignal(1);
   }
+}
+
+function compoundItemValidationError(
+  item: CompoundElement,
+  declared: boolean,
+  reportedName: string
+): string | undefined {
+  if (typeof item === 'string' || 'plain' in item) {
+    const invalidPlain = typeof item === 'string' ? item : item.plain;
+    const prefix = reportedName === '' ? '' : `${reportedName}: `;
+    return `${prefix}${invalidPlain}: must use subscript when assigning associative array`;
+  }
+  if (item.key === '') {
+    const text = declared ? `[${singleQuote(item.key)}]=${singleQuote(item.value)}` : (item.rawText ?? '');
+    return `${text}: bad array subscript`;
+  }
+  return undefined;
 }
 
 function isValidParameterName(name: string): boolean {

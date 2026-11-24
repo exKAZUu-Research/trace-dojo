@@ -150,13 +150,18 @@ export function assignSubscriptedBuiltinTarget(
 ): boolean {
   const resolved = shell.resolveNameOrUndefined(name);
   if (resolved === undefined) return false;
-  if (!isIdentifier(resolved)) {
-    shell.reportError(`${builtin}: \`${resolved}': not a valid identifier`);
-    return false;
-  }
   if (!shell.isAssociative(resolved)) {
     const expanded = shell.expandDynamicSubscript(subscript);
-    return shell.assignElement(resolved, expanded === '' && subscript !== '' ? '0' : expanded, value, false);
+    const normalized = expanded === '' && subscript !== '' ? '0' : expanded;
+    if (!isIdentifier(resolved)) {
+      if (normalized === '' || shell.arrayIndex(resolved, normalized, true) === undefined) {
+        shell.reportError(`${builtin}: [${subscript}]: bad array subscript`);
+      } else {
+        shell.reportError(`${builtin}: \`${resolved}': not a valid identifier`);
+      }
+      return false;
+    }
+    return shell.assignElement(resolved, normalized, value, false);
   }
   const key = shell.expander.expandSubscriptText(subscript);
   if (key === '') {
@@ -241,6 +246,7 @@ export function unsetElement(shell: Shell, name: string, subscript: string, viaR
   const resolved = shell.resolveNameOrUndefined(name);
   if (resolved === undefined) return false;
   if (!isIdentifier(resolved)) {
+    if (shell.isValidNamerefTarget(resolved)) return true;
     shell.reportError(`unset: \`${resolved}': not a valid identifier`);
     return false;
   }

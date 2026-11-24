@@ -920,6 +920,10 @@ export class Shell implements ArithmeticHost {
   }
 
   writeTarget(target: ArithmeticTarget, value: string): WriteTargetResult {
+    if ((target.kind === 'associativeElement' || target.kind === 'indexedElement') && !isIdentifier(target.name)) {
+      this.reportError(`\`${target.name}': not a valid identifier`);
+      return 'ignored';
+    }
     this.readonlyFailure = false;
     let ok = false;
     if (target.kind === 'scalar') ok = this.assignScalar(target.name, value);
@@ -927,8 +931,7 @@ export class Shell implements ArithmeticHost {
     else if (target.kind === 'indexedElement') {
       ok = this.assignElement(target.name, String(target.index), value, false, true);
     } else this.reportError(`${target.raw}: bad array subscript`);
-    if (ok) return 'ok';
-    return this.readonlyFailure ? 'readonly' : 'invalid';
+    return ok ? 'ok' : this.readonlyFailure ? 'readonly' : 'invalid';
   }
 
   /** Whether a name holds an associative array, including one declared with `-A` that has no elements yet. */
@@ -1447,7 +1450,12 @@ export class Shell implements ArithmeticHost {
         this.reportError(`${resolved}: readonly variable`);
         return false;
       }
-      const { elements, error } = this.expander.expandCompound(assignment.array, this.isAssociative(resolved), false);
+      const { elements, error } = this.expander.expandCompound(
+        assignment.array,
+        this.isAssociative(resolved),
+        false,
+        assignment.name
+      );
       const ok = this.assignCompound(resolved, elements, assignment.append);
       if (error) this.discard(error);
       return ok;

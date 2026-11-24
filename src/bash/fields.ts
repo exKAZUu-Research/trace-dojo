@@ -6,6 +6,10 @@ export interface Fragment {
   quoted: boolean;
   /** Whether the text came from an unquoted expansion, which field splitting splits at `IFS` characters. */
   split: boolean;
+  /** Whether an empty fragment came from a singleton `@`-list element (`$@` or `${a[@]}`). */
+  listNull?: boolean;
+  /** Whether an empty `@`-list fragment was selected by an unquoted `${x:-word}` / `${x:+word}` operator. */
+  operatorNull?: boolean;
 }
 
 /** Separates the fields of `"$@"` and `"${a[@]}"`. */
@@ -53,6 +57,11 @@ export class FieldSplitter {
       this.afterDelimiter = false;
     } else if (piece.text !== '') {
       this.split(piece.text);
+    } else if (piece.operatorNull && this.hasNonWhitePrimaryIfs) {
+      this.started = true;
+      this.afterWhite = false;
+      this.afterListWhite = false;
+      this.afterDelimiter = false;
     }
   }
 

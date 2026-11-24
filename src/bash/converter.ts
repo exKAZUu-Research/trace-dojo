@@ -151,21 +151,7 @@ export class Converter {
         return this.forStatement(node);
       }
       case 'c_style_for_statement': {
-        const opening = node.children.find((child) => child.type === '((');
-        const raw = opening ? this.masked.get(opening.endIndex) : undefined;
-        const parts = raw === undefined ? undefined : splitForHeader(raw);
-        const part = (index: number, field: string): ArithmeticSource | undefined => {
-          if (!parts) return this.optionalArithmetic(node, field);
-          return parts[index].trim() === '' ? undefined : { pieces: this.rawPieces(parts[index]), row };
-        };
-        return {
-          ...base,
-          kind: 'arithmeticFor',
-          init: part(0, 'initializer'),
-          condition: part(1, 'condition'),
-          update: part(2, 'update'),
-          body: this.body(node.childForFieldName('body') as Node),
-        };
+        return this.arithmeticForStatement(node, base);
       }
       case 'case_statement': {
         return this.caseStatement(node);
@@ -291,6 +277,25 @@ export class Converter {
       : { ...base, kind: 'command', assignments: [], words: [this.assignmentAsWord(node)], redirects: [] };
   }
 
+  private arithmeticForStatement(node: Node, base: { row: number; lineRow: number }): Statement {
+    const opening = node.children.find((child) => child.type === '((');
+    const raw = opening ? this.masked.get(opening.endIndex) : undefined;
+    const restored = raw === undefined || !opening ? undefined : this.restoreQuotes(raw, opening.endIndex);
+    const parts = restored === undefined ? undefined : splitForHeader(restored);
+    const part = (index: number, field: string): ArithmeticSource | undefined => {
+      if (!parts) return this.optionalArithmetic(node, field);
+      return parts[index].trim() === '' ? undefined : { pieces: this.rawPieces(parts[index]), row: base.row };
+    };
+    return {
+      ...base,
+      kind: 'arithmeticFor',
+      init: part(0, 'initializer'),
+      condition: part(1, 'condition'),
+      update: part(2, 'update'),
+      body: this.body(node.childForFieldName('body') as Node),
+    };
+  }
+
   private splitPrefixAssignments(nodes: Node[]): { assignments: Assignment[]; leadingWords: Word[] } {
     const assignments: Assignment[] = [];
     const leadingWords: Word[] = [];
@@ -374,7 +379,7 @@ export class Converter {
       const joined: Word = {
         parts: mergeLiterals(parts),
         row: words[i].row,
-        text: this.source.slice(nodes[i].startIndex, nodes[end].endIndex),
+        text: this.restoreQuotes(this.source.slice(nodes[i].startIndex, nodes[end].endIndex), nodes[i].startIndex),
       };
       elements.push(this.restoreMaskedKeyedElement(joined, nodes[i].startIndex, nodes[end].endIndex));
       i = end;
@@ -420,7 +425,11 @@ export class Converter {
     }
     const start = children[open]?.endIndex ?? node.startIndex;
     const end = children[close]?.startIndex ?? node.endIndex;
-    return { parts: mergeLiterals(parts), row: node.startPosition.row, text: this.source.slice(start, end) };
+    return {
+      parts: mergeLiterals(parts),
+      row: node.startPosition.row,
+      text: this.restoreQuotes(this.source.slice(start, end), start),
+    };
   }
 
   private redirect(node: Node): Redirect {
@@ -579,7 +588,9 @@ export class Converter {
     const start = opening?.endIndex ?? node.startIndex;
     const end = closing?.startIndex ?? node.endIndex;
     const raw = this.masked.get(start);
-    if (raw !== undefined) return { pieces: this.rawPieces(raw), row: node.startPosition.row };
+    if (raw !== undefined) {
+      return { pieces: this.rawPieces(this.restoreQuotes(raw, start)), row: node.startPosition.row };
+    }
     return this.arithmeticOf(
       start,
       end,
@@ -594,7 +605,9 @@ export class Converter {
     let position = start;
     const visit = (node: Node): void => {
       if (EXPANSION_TYPES.has(node.type)) {
-        if (node.startIndex > position) pieces.push(this.source.slice(position, node.startIndex));
+        if (node.startIndex > position) {
+          pieces.push(this.restoreQuotes(this.source.slice(position, node.startIndex), position));
+        }
         pieces.push(...this.wordParts(node));
         position = node.endIndex;
         return;
@@ -602,7 +615,7 @@ export class Converter {
       for (const child of node.children) visit(child);
     };
     for (const node of nodes) visit(node);
-    if (end > position) pieces.push(this.source.slice(position, end));
+    if (end > position) pieces.push(this.restoreQuotes(this.source.slice(position, end), position));
     return { pieces, row: owner.startPosition.row };
   }
 

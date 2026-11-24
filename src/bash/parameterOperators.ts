@@ -128,13 +128,20 @@ function expandUnquotedOperatorWord(expander: Expander, parts: WordPart[]): Piec
       part.kind === 'double' ||
       (part.kind === 'parameter' && part.operator !== undefined && /^:?[-+]$/.test(part.operator));
     for (const piece of expander.expandParts([part], false)) {
-      if (piece === EMPTY_LIST) continue;
-      if (piece === FIELD_BREAK && !keepsFields) pieces.push({ text: ' ', quoted: false, split: true });
-      else if (isFieldBreak(piece) || piece.quoted) pieces.push(piece);
-      else pieces.push({ ...piece, split: true });
+      const mapped = mapUnquotedOperatorPiece(piece, keepsFields);
+      if (mapped !== undefined) pieces.push(mapped);
     }
   }
   return pieces;
+}
+
+function mapUnquotedOperatorPiece(piece: Piece, keepsFields: boolean): Piece | undefined {
+  if (piece === EMPTY_LIST) return undefined;
+  if (piece === FIELD_BREAK && !keepsFields) return { text: ' ', quoted: false, split: true };
+  if (isFieldBreak(piece) || piece.quoted) return piece;
+  return piece.listNull || piece.operatorNull
+    ? { ...piece, split: true, operatorNull: true }
+    : { ...piece, split: true };
 }
 
 // code-gauge-allow functionParameterCount -- The default and assignment operators need the expansion, the parameter, and how it is quoted.
@@ -172,7 +179,7 @@ function mapPatternRemoval(
   inDouble: boolean,
   map: (text: string) => string
 ): Piece[] {
-  if (!inDouble && value.kind === 'list' && shell.scalarValue('IFS') === '') {
+  if (!inDouble && value.kind === 'list' && !value.positional && shell.scalarValue('IFS') === '') {
     if (value.values.length === 0) return [];
     const text = value.values.map(map).join(' ');
     return text === '' ? [] : [{ text, quoted: false, split: false }];
