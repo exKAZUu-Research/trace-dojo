@@ -6415,6 +6415,17 @@ test('suspends a sequence builder inside the inline lambdas and branches its blo
   });
 });
 
+test.each([
+  ['a local function', 'fun main() {\n  inline fun twice(b: () -> Int) = b() + b()\n  println(twice { 1 })\n}', false],
+  [
+    'a local class member',
+    'fun main() {\n  class L { inline fun twice(b: () -> Int) = b() + b() }\n  println(L().twice { 1 })\n}',
+    true,
+  ],
+])('accepts inline on %s only where kotlinc does', (_name, source, compiles) => {
+  expect(executeProgram('kotlin', source).kind === 'compileError').toBe(!compiles);
+});
+
 test('increments through a safe call and infers a fun interface from its lambda', () => {
   const source = `class C { var n = 1 }
 fun interface Mapper<A, B> { fun map(a: A): B }

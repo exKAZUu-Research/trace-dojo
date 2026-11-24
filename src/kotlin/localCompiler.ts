@@ -595,6 +595,8 @@ export abstract class LocalCompiler extends AnnotationCompiler {
   protected compileLocalFunction(scope: Scope, context: FunctionContext, decl: FunctionDecl): Exec {
     this.validateAnnotations(scope, decl.modifiers, annotationSite(['FUNCTION'], decl.receiver ? ['receiver'] : []));
     this.rejectLocalModifiers(decl.modifiers.keywords, decl.row, 'ローカル関数');
+    // kotlinc does not inline functions declared in function bodies, though it does their classes' members.
+    if (decl.modifiers.keywords.has('inline')) this.error(decl.row, 'ローカル関数には inline 修飾子を付けられません。');
     const symbol = new FunctionSymbol(decl.name);
     symbol.isSuspend = decl.modifiers.keywords.has('suspend');
     symbol.row = decl.row;
