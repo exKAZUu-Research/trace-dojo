@@ -1,3 +1,4 @@
+import { ExecutionLimitError } from '../interpreter/limits';
 import { type ClassEntity, type ConInfo, nextId, type TypeEntity, type ValueEntity } from './entities';
 import { compileError } from './errors';
 import { rememberKind } from './kindTemplates';
@@ -299,16 +300,33 @@ function boolKind(): Kind {
   return { tag: 'data', entity: (comparisonCons as { bool: ConInfo[] }).bool[0].type, args: [] };
 }
 
+/** The most bits a type-level natural number may have, which bounds the work of `*` and `^` on them. */
+const MAX_NATURAL_BITS = 1_000_000;
+
+function bitLength(value: bigint): number {
+  return value === 0n ? 0 : value.toString(2).length;
+}
+
+/** Stops a type-level computation whose result would exceed the size type-level numbers may have. */
+function boundNaturalBits(bits: number): void {
+  if (bits > MAX_NATURAL_BITS) throw new ExecutionLimitError('operations');
+}
+
 const naturalOperands = [NATURAL_KIND, NATURAL_KIND];
 
 /** GHC.TypeLits' type families, by name. */
 export const TYPE_LIT_FAMILIES: Record<string, TypeEntity> = {
   '+': builtinFamily('+', naturalOperands, NATURAL_KIND, ([a, b]) => natural((a as bigint) + (b as bigint))),
-  '*': builtinFamily('*', naturalOperands, NATURAL_KIND, ([a, b]) => natural((a as bigint) * (b as bigint))),
+  '*': builtinFamily('*', naturalOperands, NATURAL_KIND, ([a, b]) => {
+    boundNaturalBits(bitLength(a as bigint) + bitLength(b as bigint));
+    return natural((a as bigint) * (b as bigint));
+  }),
   '-': builtinFamily('-', naturalOperands, NATURAL_KIND, ([a, b]) => natural((a as bigint) - (b as bigint))),
-  '^': builtinFamily('^', naturalOperands, NATURAL_KIND, ([a, b]) =>
-    (b as bigint) > 10_000n ? undefined : natural((a as bigint) ** (b as bigint))
-  ),
+  '^': builtinFamily('^', naturalOperands, NATURAL_KIND, ([a, b]) => {
+    const [base, exponent] = [a as bigint, b as bigint];
+    if (base > 1n) boundNaturalBits(Number(BigInt(bitLength(base) - 1) * exponent));
+    return natural(base ** exponent);
+  }),
   Div: builtinFamily('Div', naturalOperands, NATURAL_KIND, ([a, b]) =>
     b === 0n ? undefined : natural((a as bigint) / (b as bigint))
   ),
