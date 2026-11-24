@@ -1391,16 +1391,7 @@ export class DeclarationBinder extends BinderBase {
         if (member.isStatic || member.property) continue;
         if (!this.findImplementation(symbol.declaredType, member, face)) this.reportUnimplemented(symbol, member, face);
       }
-      for (const property of face.symbol.properties) {
-        const implementation = this.findPropertyImplementation(symbol.declaredType, property, face);
-        if (!implementation) {
-          this.error(
-            symbol.row,
-            'CS0535',
-            `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${displayTypeSymbol(face.symbol, face.args)}.${property.isIndexer ? `this[${property.parameters.map((parameter) => displayType(substitute(parameter.type, substitutionOf(face)))).join(', ')}]` : property.name}' を実装しません`
-          );
-        }
-      }
+      for (const property of face.symbol.properties) this.checkPropertyImplementation(symbol, property, face);
     }
   }
 
@@ -1560,8 +1551,20 @@ export class DeclarationBinder extends BinderBase {
         return;
       }
       property.overridden = candidate;
-      if (property.getter) property.getter.overridden = this.accessorOf(candidate, 'getter');
-      if (property.setter) property.setter.overridden = this.accessorOf(candidate, 'setter');
+      for (const [kind, keyword, code] of [
+        ['getter', 'get', 'CS0545'],
+        ['setter', 'set', 'CS0546'],
+      ] as const) {
+        const accessor = property[kind];
+        if (!accessor) continue;
+        accessor.overridden = this.accessorOf(candidate, kind);
+        if (!accessor.overridden)
+          this.error(
+            property.row,
+            code,
+            `'${displayTypeSymbol(symbol)}.${property.name}.${keyword}': '${displayTypeSymbol(current.symbol, current.args)}.${candidate.name}' にオーバーライド可能な ${keyword} アクセサーがないため、オーバーライドできません`
+          );
+      }
       return;
     }
     this.error(
@@ -1590,9 +1593,13 @@ export class DeclarationBinder extends BinderBase {
         addOverriddenChain(method, implemented);
       }
       for (const property of current.symbol.properties) {
-        if (property.isAbstract && !isOwn && !implemented.has(property))
-          missing.push(...displayAccessorsIn(property, current));
-        addOverriddenChain(property, implemented);
+        // An override implements only the accessors it declares, so each abstract accessor is checked on its own.
+        for (const accessor of [property.getter, property.setter]) {
+          if (!accessor) continue;
+          if (property.isAbstract && !isOwn && !implemented.has(accessor))
+            missing.push(displayAccessorIn(property, accessor, current));
+          addOverriddenChain(accessor, implemented);
+        }
       }
     }
     return missing;
@@ -1657,24 +1664,51 @@ export class DeclarationBinder extends BinderBase {
     return undefined;
   }
 
-  findPropertyImplementation(type: NamedType, member: PropertySymbol, face: NamedType): PropertySymbol | undefined {
-    for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
+  /**
+   * Reports an interface property that a class does not implement: as a whole when no property of its name and type
+   * matches, else each accessor the match lacks (CS0535) or does not make public (CS0277), as Roslyn names them.
+   */
+  private checkPropertyImplementation(symbol: TypeSymbol, member: PropertySymbol, face: NamedType): void {
+    const memberName = `${displayTypeSymbol(face.symbol, face.args)}.${member.isIndexer ? `this[${member.parameters.map((parameter) => displayType(substitute(parameter.type, substitutionOf(face)))).join(', ')}]` : member.name}`;
+    const missing = (name: string): void =>
+      this.error(
+        symbol.row,
+        'CS0535',
+        `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${name}' を実装しません`
+      );
+    for (let current: NamedType | undefined = symbol.declaredType; current; current = baseTypeOf(current)) {
       const substitution = substitutionOf(current);
       const candidate = current.symbol.properties.find(
         (property) => !property.isStatic && isSameProperty(property, substitution, member, substitutionOf(face))
       );
-      if (candidate) {
-        const ok =
-          sameType(
-            substitute(candidate.type, substitutionOf(current)),
-            substitute(member.type, substitutionOf(face))
-          ) &&
-          (!member.getter || candidate.getter?.access === 'public') &&
-          (!member.setter || candidate.setter?.access === 'public');
-        return ok ? candidate : undefined;
+      if (!candidate) continue;
+      const expected = substitute(member.type, substitutionOf(face));
+      if (!sameType(substitute(candidate.type, substitution), expected)) {
+        const closeText = `${displayTypeSymbol(current.symbol, current.args)}.${candidate.isIndexer ? 'this[]' : candidate.name}`;
+        this.error(
+          symbol.row,
+          'CS0738',
+          `'${displayTypeSymbol(symbol)}' は、インターフェイス メンバー '${memberName}' を実装していません。'${closeText}' は一致する '${displayType(expected)}' の戻り値の型を持たないため、'${memberName}' を実装できません。`
+        );
+        return;
       }
+      for (const [kind, keyword] of [
+        ['getter', 'get'],
+        ['setter', 'set'],
+      ] as const) {
+        if (!member[kind]) continue;
+        const accessor = candidate[kind];
+        if (!accessor) missing(`${memberName}.${keyword}`);
+        else if (accessor.access !== 'public')
+          this.error(
+            symbol.row,
+            'CS0277',
+            `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${memberName}.${keyword}' を実装しません。'${displayTypeSymbol(current.symbol, current.args)}.${candidate.isIndexer ? 'this[]' : candidate.name}.${keyword}' はパブリックではありません。`
+          );
+      }
+      return;
     }
-    return undefined;
+    missing(memberName);
   }
 }
 
@@ -1764,13 +1798,8 @@ function addOverriddenChain(
     implemented.add(overridden);
 }
 
-function displayAccessorsIn(property: PropertySymbol, owner: NamedType): string[] {
-  return [property.getter, property.setter]
-    .filter((accessor) => accessor !== undefined)
-    .map(
-      (accessor) =>
-        `${displayTypeSymbol(owner.symbol, owner.args)}.${property.name}.${accessor === property.getter ? 'get' : 'set'}`
-    );
+function displayAccessorIn(property: PropertySymbol, accessor: MethodSymbol, owner: NamedType): string {
+  return `${displayTypeSymbol(owner.symbol, owner.args)}.${property.name}.${accessor === property.getter ? 'get' : 'set'}`;
 }
 
 /** The operators C# requires to be declared together. */
