@@ -642,7 +642,8 @@ function addMonths(call: NativeCall, receiver: Value, months: number): Value {
 /**
  * The one grammar of `DateTime.Parse` and `TryParse`: a date `2024/3/5`, `2024-03-05`, or ja-JP's `2024年3月5日`; then
  * optionally a time `H:m[:s[.fffffff]]` (or `10時20分[30秒]`) after a space or `T`; then optionally `Z` or a UTC offset
- * (`+09`, `+0900`, `+09:00`), converted to local time. A string outside it fails as .NET fails one it cannot read.
+ * (`+09`, `+0900`, `+09:00`), converted to local time. A string outside it throws the FormatException .NET throws for a
+ * string it cannot read, though .NET reads some such strings, such as `5/6/2024`, a time alone, and English month names.
  */
 function parseDate(text: string): bigint | undefined {
   // ja-JP also reads the long date, as `2024年3月5日 10時20分`.
