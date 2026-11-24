@@ -523,6 +523,13 @@ function completeLocalElementLinkCompound(
   if (!localVar) return false;
   if (checkReadonlyConflict(shell, builtin, name, localVar, options, false)) return false;
   const priorKind = localVar.value?.kind;
+  if (
+    localVar.attributes.has('n') &&
+    (options.set.has('a') || options.set.has('A')) &&
+    !conversionError(localVar, options.set, options.unset)
+  ) {
+    localVar.value = undefined;
+  }
   if (!applyAttributes(shell, builtin, localVar, options, true, false, false, false)) return false;
   if (options.set.has('r')) localVar.attributes.add('r');
   notifyIfArrayMaterialized(true, localVar, priorKind, onMaterialize);
@@ -1484,13 +1491,12 @@ function applyAttributes(
   shell: Shell,
   builtin: string,
   variable: Variable,
-  options: Options,
+  { set, unset }: Options,
   assigns: boolean,
   impliesIndexed: boolean,
   deferUnsetN = false,
   assignsCompound = false
 ): boolean {
-  const { set, unset } = options;
   const error = conversionError(variable, set, unset, impliesIndexed || assignsCompound);
   if (error) {
     shell.reportError(`${builtin}: ${variable.name}: ${error}`);
@@ -1499,8 +1505,8 @@ function applyAttributes(
   const becomesIndexed =
     set.has('a') ||
     (impliesIndexed && !set.has('A') && !variable.attributes.has('A') && variable.value?.kind !== 'associative');
-  if ((set.has('A') || becomesIndexed) && variable.attributes.delete('n') && !options.suppressedNameref) {
-    variable.value = undefined;
+  if ((set.has('A') || becomesIndexed) && variable.attributes.delete('n') && !set.has('a') && !set.has('A')) {
+    variable.value = { kind: 'indexed', elements: new Map() };
   }
   for (const attribute of ['i', 'l', 'u', 'c', 'n', 'x', 't'] as Attribute[]) {
     if (set.has(attribute)) variable.attributes.add(attribute);
