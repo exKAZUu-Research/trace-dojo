@@ -827,6 +827,40 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       });
     });
   }
+  define('move', [[0, 1], [2]], (args) => {
+    const info = rangeAt(args, 0);
+    const output = outputOf(args[2]);
+    if (!info || !output || args.length !== 3) return;
+    const assign = outputAssignment(compiler(), { type: info.element, category: 'xvalue' }, output, args[2].row);
+    return native('move', params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
+      const values = range(first, last, info, frame);
+      values.checkCopyDestination(start as Ptr, output, false);
+      const out = new Output(start as Ptr, output, frame, assign);
+      for (let index = 0; index < values.length; index++) out.write(values.location(index));
+      return out.end;
+    });
+  });
+  for (const name of ['copy_backward', 'move_backward']) {
+    define(name, [[0, 1], [2]], (args) => {
+      const info = rangeAt(args, 0);
+      const output = outputOf(args[2]);
+      if (!info || !output || output.isOutput || args.length !== 3) return;
+      const operand: CallbackOperand =
+        name === 'move_backward' ? { type: info.element, category: 'xvalue' } : iteratorOperand(info);
+      const assign = outputAssignment(compiler(), operand, output, args[2].row);
+      return native(name, params(args), unqualified(args[2].type), ([first, last, end], { frame }) => {
+        const values = range(first, last, info, frame);
+        const destination = (offset: number): Ptr =>
+          (end as Ptr).offset(output.isReverse ? offset : -offset, true).element(output.isReverse);
+        // The last element is written first, so that a destination after the source in the same range is safe.
+        for (let index = values.length - 1; index >= 0; index--) {
+          const offset = values.length - index;
+          withTemporaries(frame, () => assign(frame, () => destination(offset), values.location(index)));
+        }
+        return (end as Ptr).offset(output.isReverse ? values.length : -values.length, true);
+      });
+    });
+  }
   define('transform', transformTemplateParameters, (args) => {
     const info = rangeAt(args, 0);
     if (!info || (args.length !== 4 && args.length !== 5)) return;

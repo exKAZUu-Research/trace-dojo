@@ -40,9 +40,6 @@ int main() {
 });
 
 test.each([
-  ['list', 'std::list<int> first{1, 2}, second{3}; first.splice(first.begin(), second);', 'splice'],
-  ['list', 'std::list<int> first{1, 2}, second{3}; first.merge(second);', 'merge'],
-  ['list', 'std::list<int> first{1, 2}; first.remove_if(isOdd);', 'remove_if'],
   ['vector', 'std::vector<int>::allocator_type allocator;', 'allocator_type'],
   ['vector', 'std::vector<int> values{1}; values.rbegin().base();', 'base'],
   ['list', 'std::list<int> values{1}; values.crbegin().base();', 'base'],

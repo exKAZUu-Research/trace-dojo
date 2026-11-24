@@ -766,23 +766,38 @@ export function listSortInPlace(frame: Frame, self: SequenceValue, less: (a: Ptr
     const middle = first + Math.floor((last - first) / 2);
     sort(first, middle);
     sort(middle, last);
-    let left = first;
-    let right = middle;
-    while (left < right && right < last) {
-      const item = self.location(left);
-      if (!compare(self.location(right), item)) {
-        left++;
-        continue;
-      }
-      let end = right + 1;
-      while (end < last && compare(self.location(end), item)) end++;
-      frame.runtime.spend(Math.ceil((end - left) / 64));
-      self.moveNodesBefore(right, end, left);
-      left += end - right + 1;
-      right = end;
-    }
+    mergeListRuns(frame, self, first, middle, last, compare);
   };
   sort(0, self.length);
+}
+
+/**
+ * Merges the sorted runs [first, middle) and [middle, last) of a list in place, as libc++'s `list::merge` does: each
+ * run of right elements less than a left one is spliced before it.
+ */
+export function mergeListRuns(
+  frame: Frame,
+  self: SequenceValue,
+  first: number,
+  middle: number,
+  last: number,
+  less: (a: Ptr, b: Ptr) => boolean
+): void {
+  let left = first;
+  let right = middle;
+  while (left < right && right < last) {
+    const item = self.location(left);
+    if (!less(self.location(right), item)) {
+      left++;
+      continue;
+    }
+    let end = right + 1;
+    while (end < last && less(self.location(end), item)) end++;
+    frame.runtime.spend(Math.ceil((end - left) / 64));
+    self.moveNodesBefore(right, end, left);
+    left += end - right + 1;
+    right = end;
+  }
 }
 
 /**

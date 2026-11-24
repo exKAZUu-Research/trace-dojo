@@ -113,10 +113,8 @@ const UNSUPPORTED_STD_NAMES: Record<string, string> = {
   smatch: '正規表現（std::smatch）',
   locale: 'ロケール（std::locale）',
   type_index: '実行時の型の情報（std::type_index）',
-  move: 'ムーブ（std::move）',
   forward: '完全転送（std::forward）',
   valarray: 'std::valarray',
-  forward_list: 'std::forward_list',
   wstring: 'ワイド文字列（std::wstring）',
   wcout: 'ワイド文字の出力（std::wcout）',
 };
@@ -306,7 +304,7 @@ export class Library {
   }
 
   trackDefinition(name: string, type: Type): Type {
-    if (type.kind === 'class' && isSdkStdForwardOnly(name, this.headers)) {
+    if (type.kind === 'class' && !this.isCompilingLibrary && isSdkStdForwardOnly(name, this.headers)) {
       type.cls.isComplete = false;
       this.incomplete.set(type.cls, name);
     }
