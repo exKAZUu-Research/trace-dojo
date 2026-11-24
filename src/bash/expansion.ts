@@ -350,11 +350,16 @@ export class Expander {
     if (!isValidParameterName(name) || (expansion.prefix === '#' && expansion.operator !== undefined)) {
       this.shell.discard(`${expansion.text}: bad substitution`);
     }
+    if (
+      expansion.prefix === '#' &&
+      expansion.subscript !== undefined &&
+      expansion.subscript.text !== '@' &&
+      expansion.subscript.text !== '*'
+    ) {
+      return this.valuePieces(this.elementLengthValue(expansion), inDouble);
+    }
     const subscript = expansion.subscript ? this.subscriptRef(name, expansion.subscript) : undefined;
     if (expansion.prefix === '!') return this.expandIndirect(expansion, subscript, inDouble);
-    if (expansion.prefix === '#' && subscript !== undefined && !subscript.wholeArray) {
-      return this.valuePieces(this.elementLengthValue(expansion, subscript.text), inDouble);
-    }
     const value = this.parameterValue(name, subscript, expansion);
     if (expansion.prefix === '#') return this.valuePieces(lengthOf(value), inDouble);
     if (expansion.operator === undefined) {
@@ -364,17 +369,29 @@ export class Expander {
     return this.withRestoredTail(() => applyOperator(this, this.shell, expansion, value, name, subscript, inDouble));
   }
 
-  /** `${#a[i]}`: evaluates `i` once, abandons an invalid or empty subscript, and returns the element's length. */
-  private elementLengthValue(expansion: ParameterExpansion, subscript: string): ParameterValue {
-    if (expansion.subscript?.text === '') this.shell.discard(`${expansion.text}: bad substitution`);
+  /** `${#a[i]}`: returns 0 for unmaterialized targets, or evaluates `i` once and returns the element's length. */
+  private elementLengthValue(expansion: ParameterExpansion): ParameterValue {
+    const rawSubscript = expansion.subscript as Word;
+    if (rawSubscript.text === '') this.shell.discard(`${expansion.text}: bad substitution`);
     const resolved = this.shell.resolveName(expansion.name);
+    if (!this.hasMaterializedLengthTarget(resolved)) return { kind: 'scalar', value: '0' };
     if (this.shell.isAssociative(resolved)) {
-      if (subscript === '') this.shell.discard(`[${expansion.subscript?.text}]: bad array subscript`);
+      const subscript = this.expandAssociativeKey(rawSubscript);
+      if (subscript === '') this.shell.discard(`[${rawSubscript.text}]: bad array subscript`);
       return lengthOf({ kind: 'scalar', value: this.shell.elementValue(resolved, subscript) });
     }
+    const subscript = this.expandSubscriptString(rawSubscript);
     const index = this.shell.arrayIndex(resolved, subscript === '' ? '0' : subscript);
     if (index === undefined) this.shell.discard(`[${subscript}]: bad array subscript`);
     return lengthOf({ kind: 'scalar', value: this.shell.elementAtIndex(resolved, index) });
+  }
+
+  private hasMaterializedLengthTarget(resolved: string): boolean {
+    const variable = this.shell.findVariable(resolved);
+    if (variable) return variable.value !== undefined;
+    if (this.shell.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
+    if (!this.shell.isDynamic(resolved)) return false;
+    return resolved !== 'FUNCNAME' || this.shell.dynamicElements(resolved) !== undefined;
   }
 
   /** Evaluates a subscript, distinguishing literal `@` and `*` from an expanded associative key or index expression. */
