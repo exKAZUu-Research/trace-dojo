@@ -28,6 +28,7 @@ import { Box, Ptr } from '../values';
 import { algorithmFunctions } from './algorithms';
 import { makePair } from './associative';
 import { cFunctions } from './cFunctions';
+import { orderingClasses, type OrderingName } from './compare';
 import { constantsOf } from './constants';
 import { containerTemplates } from './containers';
 import { exceptionClasses } from './exceptions';
@@ -191,6 +192,7 @@ export class Library {
   readonly streams: Streams;
   private readonly exceptions: Map<string, ClassInfo>;
   private readonly stdNames = new Map<string, Entity>();
+  private readonly orderings = orderingClasses();
   private readonly nativeStdTemplates = new Set<FunctionInfo>();
   private readonly localeCtypeOverloads = new Map<string, FunctionInfo>();
   private readonly globalNames = new Map<string, Entity>();
@@ -233,6 +235,11 @@ export class Library {
     if (pointer.store === this.files.get('stderr')) return 'stderr';
     if (pointer.store === this.files.get('stdout')) return 'stdout';
     throw new CppRuntimeError('nullAccess');
+  }
+
+  /** The result type of `<=>`: `std::strong_ordering`, `std::weak_ordering`, or `std::partial_ordering`. */
+  ordering(name: OrderingName): ClassInfo {
+    return this.orderings.get(name) as ClassInfo;
   }
 
   exception(name: string): ClassInfo {
@@ -406,6 +413,7 @@ export class Library {
     this.addStd('FILE', file);
     this.addStd('string', { kind: 'class', cls: this.stringClass });
     for (const [name, cls] of this.exceptions) this.addStd(name, { kind: 'class', cls });
+    for (const [name, cls] of this.orderings) this.addStd(name, { kind: 'class', cls });
     this.addStreams();
     this.addFunctions(stringFunctions(this, this.stringClass), this.stdNames);
     const c = cFunctions(this);

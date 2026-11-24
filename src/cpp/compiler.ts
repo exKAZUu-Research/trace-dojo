@@ -23,9 +23,11 @@ import {
   initializerWithConstancy,
   memberConstantOf,
   NO_CONSTANT_MEMBERS,
+  zeroLiteral,
 } from './expr';
 import { thisLocation } from './expressionCompiler';
 import { compileLambda } from './lambdas';
+import { type OrderingName, orderingNumber, ORDERINGS } from './library/compare';
 import { provideProgramOperators, type ValueComparison } from './library/elements';
 import type { Library } from './library/registry';
 import {
@@ -43,7 +45,6 @@ import {
   zeroMembers,
   zeroOf,
 } from './objectCompiler';
-import { overloadedOperator } from './operatorOverloads';
 import { expandPacks, packElements, withPackElement } from './packs';
 import {
   argumentsKey,
@@ -103,6 +104,7 @@ import {
   typeName,
   unqualified,
   VOID,
+  withConst,
 } from './types';
 import {
   ArrayStore,
@@ -153,6 +155,8 @@ export class Compiler extends StatementCompiler {
   private pendingObjectUses: (() => void)[] | undefined = [];
   private readonly programComparisons = new Map<string, ValueComparison<boolean> | undefined>();
   private readonly lambdaCaptures = new WeakMap<ClassInfo, CaptureLookup>();
+  /** The defaulted comparison operators that are friends of a class, which compare its objects. */
+  private readonly defaultedFriends = new Map<FunctionInfo, ClassInfo>();
   /** The variables an `extern` declaration declares, which a later declaration may define. */
   private readonly externGlobals = new Set<GlobalInfo>();
   /** Whether member function bodies wait for their first use, as a class template instance's do. */
@@ -233,9 +237,9 @@ export class Compiler extends StatementCompiler {
     });
     let comparison: ValueComparison<boolean> | undefined;
     try {
-      const overloaded = overloadedOperator(this, operator, [operand(0), operand(1)], cls.row);
+      const overloaded = this.binary(operator, operand(0), operand(1), cls.row);
       if (overloaded) {
-        const test = this.condition(overloaded.expr, cls.row);
+        const test = this.condition(overloaded, cls.row);
         comparison = (a, b, frame) => {
           operands.push([new Ptr(new Box(a), 0), new Ptr(new Box(b), 0)]);
           try {
@@ -574,6 +578,7 @@ export class Compiler extends StatementCompiler {
         }
       }
       this.completeClass(cls, isFinalClass);
+      this.defineDefaultedComparisons(cls);
       for (const fn of cls.constructors) this.bindDefaultArguments(fn);
       for (const methods of cls.methods.values()) {
         for (const fn of methods) this.bindDefaultArguments(fn);
@@ -630,9 +635,17 @@ export class Compiler extends StatementCompiler {
           for (const method of methods) cls.friendFunctions.add(method);
           continue;
         }
-        const fn = this.declareFunction(inner, declared, isDefinition);
+        const isDefaulted = isDefinition && specialDefinition(inner) === 'default';
+        const fn = this.declareFunction(inner, declared, isDefinition && !isDefaulted);
         cls.friendFunctions.add(fn);
-        if (isDefinition) definitions.push({ fn, node: inner });
+        if (isDefaulted) {
+          // A defaulted comparison of a class may be its friend (`friend bool operator==(const P&, const P&) = default;`).
+          if (!isDefaultableComparison(fn))
+            this.error(inner.row, `${fn.displayName} には = default を付けられません。`);
+          fn.isDefaulted = true;
+          fn.isDefined = true;
+          this.defaultedFriends.set(fn, cls);
+        } else if (isDefinition) definitions.push({ fn, node: inner });
       }
       return;
     }
@@ -891,13 +904,119 @@ export class Compiler extends StatementCompiler {
     return fn;
   }
 
+  /**
+   * Gives the defaulted comparison operators of a class their bodies (C++20 [class.compare]): `==` compares the
+   * members in order, `<=>` gives the first unequal member's ordering, and a defaulted `<=>` declares `==` too.
+   */
+  private defineDefaultedComparisons(cls: ClassInfo): void {
+    const friends = [...this.defaultedFriends].filter(([, owner]) => owner === cls).map(([fn]) => fn);
+    const defaulted = [...[...cls.methods.values()].flat(), ...friends].filter(
+      (fn) => fn.isDefaulted && isDefaultableComparison(fn) && !fn.compiled
+    );
+    const spaceship = defaulted.find((fn) => fn.name === 'operator<=>');
+    if (spaceship && !cls.methods.has('operator==')) {
+      const equal: FunctionInfo = {
+        ...spaceship,
+        name: 'operator==',
+        displayName: `${cls.name}::operator==`,
+        ret: BOOL,
+      };
+      cls.methods.set('operator==', [equal]);
+      defaulted.push(equal);
+    }
+    for (const fn of defaulted) this.defineDefaultedComparison(cls, fn);
+  }
+
+  private defineDefaultedComparison(cls: ClassInfo, fn: FunctionInfo): void {
+    const context = new FunctionContext(fn, fn.owner, fn.ret);
+    const saved = this.context;
+    this.context = context;
+    try {
+      const operands = fn.params.map((param): Expr => {
+        const local = context.declareLocal(param.name ?? `\0operand${param.row}`, param.type, true);
+        const isReference = param.type.kind === 'reference';
+        return {
+          type: withConst(nonReference(param.type)),
+          isLvalue: true,
+          row: fn.row,
+          run: (frame) => (isReference ? (frame.slots[local.slot] as Ptr) : new Ptr(frame.slots[local.slot] as Box, 0)),
+        };
+      });
+      const self: Expr = {
+        type: classType(cls, true),
+        isLvalue: true,
+        isThis: true,
+        row: fn.row,
+        run: (frame) => thisLocation(frame),
+      };
+      const [left, right] = fn.owner ? [self, operands[0]] : [operands[0], operands[1]];
+      if (!left || !right) return this.error(fn.row, `${fn.displayName} の引数が足りません。`);
+      fn.compiled = {
+        slotCount: context.slotCount,
+        locals: context.locals,
+        body: this.comparisonBody(cls, fn, left, right),
+      };
+    } finally {
+      this.context = saved;
+    }
+  }
+
+  private comparisonBody(cls: ClassInfo, fn: FunctionInfo, left: Expr, right: Expr): (frame: Frame) => void {
+    const row = fn.row;
+    const members = cls.fields;
+    if (fn.name === 'operator==') {
+      const tests = members.map((field) =>
+        this.condition(
+          this.binary('==', this.fieldAccess(left, field, row), this.fieldAccess(right, field, row), row),
+          row
+        )
+      );
+      return (frame) => {
+        frame.returnValue = Number(tests.every((test) => test(frame)));
+      };
+    }
+    if (fn.name === 'operator<=>') {
+      const orders = members.map((field) =>
+        this.threeWay(this.fieldAccess(left, field, row), this.fieldAccess(right, field, row), row)
+      );
+      // The result is the weakest category of the members' comparisons.
+      let weakest: OrderingName = 'strong_ordering';
+      for (const order of orders) {
+        const name = (order.type as Extract<Type, { kind: 'class' }>).cls.library?.kind as OrderingName;
+        if (ORDERINGS.indexOf(name) > ORDERINGS.indexOf(weakest)) weakest = name;
+      }
+      const result = this.library.ordering(weakest);
+      if (hasAuto(fn.ret)) fn.ret = classType(result);
+      const runs = orders.map((order) => this.rvalue(order).run);
+      return (frame) => {
+        for (const run of runs) {
+          const value = orderingNumber(run(frame) as Value);
+          if (value !== 0) {
+            frame.returnValue = new CObject(result, [value]);
+            return;
+          }
+        }
+        frame.returnValue = new CObject(result, [0]);
+      };
+    }
+    // A defaulted relational operator compares `<=>` with 0.
+    const test = this.condition(
+      this.binary(fn.name.slice('operator'.length), this.threeWay(left, right, row), zeroLiteral(row), row),
+      row
+    );
+    return (frame) => {
+      frame.returnValue = Number(test(frame));
+    };
+  }
+
   /** Rejects `= default` on a function that is no special member function (C++20 [dcl.fct.def.default]). */
   private checkDefaultable(cls: ClassInfo, fn: FunctionInfo, row: number): void {
     const isCopy = fn.params.length === 1 && isCopyParameter(fn.params[0].type, cls);
     const isSpecial =
       (fn.isConstructor && (fn.params.length === 0 || isCopy)) ||
       fn.isDestructor ||
-      (fn.name === 'operator=' && isCopy);
+      (fn.name === 'operator=' && isCopy) ||
+      isDefaultableComparison(fn);
     if (!isSpecial)
       this.error(row, `${fn.displayName} には = default を付けられません（特別なメンバ関数ではありません）。`);
   }
@@ -4100,6 +4219,13 @@ function classOfEntity(entity: Entity): ClassInfo | undefined {
   if (entity.kind === 'class') return entity.cls;
   if (entity.kind === 'type' && entity.type.kind === 'class' && !entity.type.cls.library) return entity.type.cls;
   return undefined;
+}
+
+/** Whether a function is a comparison operator that `= default` may define. */
+function isDefaultableComparison(fn: FunctionInfo): boolean {
+  return ['operator==', 'operator!=', 'operator<=>', 'operator<', 'operator>', 'operator<=', 'operator>='].includes(
+    fn.name
+  );
 }
 
 /** Whether a function's definition is `= default` or `= delete`. */

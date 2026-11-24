@@ -31,9 +31,11 @@ import {
   memberConstantOf,
   NO_CONSTANT_MEMBERS,
   offsetConstantLocation,
+  zeroLiteral,
 } from './expr';
 import { type FloatingValue, fusedNaN, negateFloat } from './floatSign';
-import { moveValue } from './library/elements';
+import { orderingOf, UNORDERED } from './library/compare';
+import { lessThan, moveValue } from './library/elements';
 import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral, utf8 } from './literals';
 import { constructArray, initializeAt, invoke, ObjectCompiler, zeroOf } from './objectCompiler';
@@ -823,10 +825,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         'not_eq',
       ]) ?? '';
     const normalized = ALTERNATIVE_TOKENS[operator] ?? operator;
-    if (normalized === '<=>') return this.unsupported(node.row, '三方比較演算子（<=>）');
     const leftNode = fieldOf(node, 'left') as Syntax;
     const left = this.compileExpression(leftNode);
     const right = this.compileExpression(fieldOf(node, 'right') as Syntax);
+    if (normalized === '<=>') return this.threeWay(left, right, node.row);
     if (RELATIONAL_OPERATORS.includes(normalized))
       this.checkChainedComparison(normalized, leftNode, left, right, node.row);
     return this.binary(normalized, left, right, node.row);
@@ -867,7 +869,71 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         overloadedOperator(this, '==', [left, right], row) ?? overloadedOperator(this, '==', [right, left], row);
       if (equal) return operator === '==' ? equal.expr : this.unary('!', equal.expr, row);
     }
+    if (RELATIONAL_OPERATORS.includes(operator)) {
+      // `a < b` compares `a <=> b` with 0, or `b <=> a` the other way (C++20 [over.match.oper]p3).
+      const forward = overloadedOperator(this, '<=>', [left, right], row);
+      if (forward) return this.binary(operator, forward.expr, zeroLiteral(row), row);
+      const reversed = overloadedOperator(this, '<=>', [right, left], row);
+      if (reversed) return this.binary(operator, constantExpr(INT, 0, row), reversed.expr, row);
+    }
     return builtin();
+  }
+
+  /**
+   * `a <=> b` (C++20 [expr.spaceship]): an operator function the program declares, or the built-in comparison of
+   * arithmetic values (a `std::strong_ordering` for integers, a `std::partial_ordering` for floating-point values)
+   * and of pointers, or the library's three-way comparison of its classes.
+   */
+  threeWay(left: Expr, right: Expr, row: number): Expr {
+    if (hasUserType(left.type) || hasUserType(right.type)) {
+      const overloaded = overloadedOperator(this, '<=>', [left, right], row);
+      if (overloaded) return overloaded.expr;
+    }
+    const a = this.rvalue(left);
+    const b = this.rvalue(right);
+    if (isArithmetic(a.type) && isArithmetic(b.type) && !isScopedEnum(a.type)) {
+      const common = commonType(unqualified(a.type) as never, unqualified(b.type) as never) as ArithmeticType;
+      const x = convertArithmetic(a, common).run;
+      const y = convertArithmetic(b, common).run;
+      const cls = this.library.ordering(common.kind === 'float' ? 'partial_ordering' : 'strong_ordering');
+      return orderingOf(
+        cls,
+        (frame) =>
+          frame.unsequencedOperands(x, y, (first, second) => {
+            const p = first as number | bigint;
+            const q = second as number | bigint;
+            if (Number.isNaN(Number(p)) || Number.isNaN(Number(q))) return UNORDERED;
+            return p < q ? -1 : p > q ? 1 : 0;
+          }),
+        row
+      );
+    }
+    if (a.type.kind === 'pointer' && b.type.kind === 'pointer') {
+      const x = a.run;
+      const y = b.run;
+      return orderingOf(
+        this.library.ordering('strong_ordering'),
+        (frame) => Math.sign((x(frame) as Ptr).compareAddress(y(frame) as Ptr)),
+        row
+      );
+    }
+    const less = sameType(unqualified(left.type), unqualified(right.type), false)
+      ? lessThan(unqualified(left.type))
+      : undefined;
+    if (less && left.type.kind === 'class') {
+      const x = this.materialize(left).run;
+      const y = this.materialize(right).run;
+      return orderingOf(
+        this.library.ordering('strong_ordering'),
+        (frame) => {
+          const p = (x(frame) as Ptr).read();
+          const q = (y(frame) as Ptr).read();
+          return Math.sign(less(p, q, frame));
+        },
+        row
+      );
+    }
+    return this.error(row, `演算子 <=> は ${typeName(left.type)} と ${typeName(right.type)} には使えません。`);
   }
 
   private builtinBinary(operator: string, written: Expr, writtenRight: Expr, row: number): Expr {

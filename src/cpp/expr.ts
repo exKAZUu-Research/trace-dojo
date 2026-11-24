@@ -106,6 +106,11 @@ export function constantExpr(type: Type, value: number | bigint, row: number): E
   return { type, isLvalue: false, run: () => value, row, constant: value };
 }
 
+/** The literal `0`, which a comparison category compares with. */
+export function zeroLiteral(row: number): Expr {
+  return { ...constantExpr({ kind: 'int', name: 'int' }, 0, row), isNullConstant: true };
+}
+
 export function memberConstantOf(expr: Expr): MemberConstant | undefined {
   const value = expr.constant;
   return value === undefined ? expr.memberConstant : () => value;
