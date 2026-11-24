@@ -2884,14 +2884,16 @@ export abstract class StatementCompiler extends CallCompiler {
         inline,
       };
     }
-    // An `else` prong of an error switch captures the errors that no other prong names.
-    const remainingErrors =
-      each.capture && each.isElse && operandType.kind === 'error_set' && operandType.names !== undefined;
-    const captureType = remainingErrors
-      ? errorSetOf(this.remainingKeys(tagType, seen, each).map(String))
-      : !each.capture || each.isElse
-        ? operandType
-        : captureFor(values);
+    // A prong of an error switch captures the errors it names, and an `else` prong those that no other prong names.
+    const errorSwitch = each.capture !== undefined && operandType.kind === 'error_set';
+    const captureType =
+      errorSwitch && !each.isElse
+        ? errorSetOf(values.map(String))
+        : errorSwitch && operandType.names !== undefined
+          ? errorSetOf(this.remainingKeys(tagType, seen, each).map(String))
+          : !each.capture || each.isElse
+            ? operandType
+            : captureFor(values);
     const compiled = compileBody(captureType, undefined);
     return { values, ranges, ...compiled, isElse: each.isElse, isUnnamed };
   }
