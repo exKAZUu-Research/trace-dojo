@@ -24,6 +24,13 @@ export const collectionModified = (): PendingException =>
     'Collection was modified; enumeration operation may not execute.'
   );
 
+/** The wording of the enumerators of SortedSet, SortedDictionary, SortedList, LinkedList, and Stack. */
+export const collectionModifiedAfterStart = (): PendingException =>
+  new PendingException(
+    'System.InvalidOperationException',
+    'Collection was modified after the enumerator was instantiated.'
+  );
+
 /**
  * Enumerates any `IEnumerable`: arrays, strings, and library collections directly, and the program's own enumerables
  * through `GetEnumerator`, `MoveNext`, and `Current`, as `foreach` does. Every 16 elements cost an operation, since a

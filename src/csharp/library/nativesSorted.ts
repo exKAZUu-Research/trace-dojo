@@ -5,7 +5,7 @@ import { valuesEqual } from '../objects';
 import type { NativeState } from '../runtime';
 import type { Type } from '../types';
 import { CsObject, CsStruct, type Value } from '../values';
-import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
+import { collectionModifiedAfterStart, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { type Comparison, comparisonOf, equalityOf, ListState } from './nativesCollections';
 import {
   bufferedElements,
@@ -111,10 +111,10 @@ class SortedState implements EnumerableState {
   *enumerate(): Generator<Value> {
     const version = this.version;
     for (let index = 0; index < this.keys.length; index++) {
-      if (this.version !== version) throw collectionModified();
+      if (this.version !== version) throw collectionModifiedAfterStart();
       yield this.pairOf ? this.pairOf(this.keys[index], this.values[index]) : this.keys[index];
     }
-    if (this.version !== version) throw collectionModified();
+    if (this.version !== version) throw collectionModifiedAfterStart();
   }
 
   references(): Value[] {
@@ -423,10 +423,10 @@ class LinkedState implements EnumerableState {
   *nodes(): Generator<LinkNode> {
     const version = this.version;
     for (let node = this.first; node; node = node.next) {
-      if (this.version !== version) throw collectionModified();
+      if (this.version !== version) throw collectionModifiedAfterStart();
       yield node;
     }
-    if (this.version !== version) throw collectionModified();
+    if (this.version !== version) throw collectionModifiedAfterStart();
   }
 
   *enumerate(): Generator<Value> {
@@ -786,11 +786,7 @@ function liveView(call: NativeCall, owner: SortedState, items: Value[], elementT
   const state = new ListState(items, elementType);
   // The view's enumerators see the dictionary's changes, so changing it during foreach fails as .NET's does.
   Object.defineProperty(state, 'version', { get: () => owner.version, set: () => {} });
-  state.modified = () =>
-    new PendingException(
-      'System.InvalidOperationException',
-      'Collection was modified after the enumerator was instantiated.'
-    );
+  state.modified = collectionModifiedAfterStart;
   view.native = state;
   return view;
 }

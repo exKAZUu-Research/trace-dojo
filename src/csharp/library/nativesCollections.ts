@@ -5,7 +5,13 @@ import { defaultCompare, environmentOf, hashOf, runtimeTypeName, stringOf, value
 import { CsThrow } from '../runtime';
 import { type MethodSymbol, specialOf, substitute, substitutionOf, type Type } from '../types';
 import { copyValue, CsArray, CsDelegate, CsObject, CsStruct, type Value, type VariableReference } from '../values';
-import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
+import {
+  collectionModified,
+  collectionModifiedAfterStart,
+  type EnumerableState,
+  iterate,
+  LibraryEnumerator,
+} from './iteration';
 import { InconsistentComparer, introSort } from './sort';
 import {
   bufferedElements,
@@ -1336,14 +1342,7 @@ class SequenceState implements EnumerableState {
   *enumerate(): Generator<Value> {
     const version = this.version;
     const order = this.isStack ? this.items.toReversed() : this.items.slice(this.head);
-    // Stack's enumerator words the error differently from the other collections'.
-    const modified = (): PendingException =>
-      this.isStack
-        ? new PendingException(
-            'System.InvalidOperationException',
-            'Collection was modified after the enumerator was instantiated.'
-          )
-        : collectionModified();
+    const modified = this.isStack ? collectionModifiedAfterStart : collectionModified;
     for (const item of order) {
       if (this.version !== version) throw modified();
       yield item;
