@@ -137,3 +137,8 @@ export function headerFeature(header: string): string | undefined {
   if (MISSING_HEADERS.has(header)) return `ヘッダ <${header}>（libc++ にないヘッダ）`;
   return `標準ライブラリ以外のヘッダの読み込み（#include <${header}>）`;
 }
+
+/** Whether a header is one of the standard library's, as `__has_include(<header>)` asks. */
+export function isStandardHeader(name: string): boolean {
+  return STANDARD_HEADERS.has(name);
+}

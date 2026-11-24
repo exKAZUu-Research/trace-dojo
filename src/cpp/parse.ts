@@ -4,6 +4,7 @@ import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import { stripAttributes } from './attributes';
+import { preprocessCpp } from './preprocessor';
 import { rejectUnsupportedSyntax } from './stages';
 import { copySyntax, type Syntax } from './syntax';
 
@@ -19,7 +20,8 @@ const MISSING_TOKEN_NAMES: Record<string, string> = {
 };
 
 /** Parses a translation unit, throwing a `CompileError` for invalid syntax or syntax the interpreter leaves out. */
-export function parseCpp(source: string): Syntax {
+export function parseCpp(written: string): Syntax {
+  const source = preprocessCpp(written);
   return parseSource(
     parser,
     source,
