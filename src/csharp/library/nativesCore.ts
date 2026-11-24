@@ -59,6 +59,7 @@ import {
   freshString,
   isString,
   stringText,
+  structFieldSlots,
   type Value,
   type VariableReference,
 } from '../values';
@@ -137,7 +138,12 @@ defineNatives({
     if (a === undefined || b === undefined) return false;
     return valuesEqual(evaluatorOf(call), a as Value, b as Value, call.frame);
   },
-  'System.Object.MemberwiseClone': (call, receiver) => evaluatorOf(call).cloneObject(receiver as CsObject),
+  // A struct calls it in its box, whose copy is a new box of a copy of the value.
+  'System.Object.MemberwiseClone': (call, receiver) => {
+    if (!(receiver instanceof CsBox)) return evaluatorOf(call).cloneObject(receiver as CsObject);
+    call.frame.runtime.allocateSlots(1 + structFieldSlots(receiver.value));
+    return new CsBox(receiver.type, copyValue(receiver.value));
+  },
   // A call through `object` passes the struct in its box, since ValueType is a class.
   // An enum reaches it in a box, which compares as Object.Equals does a boxed value.
   'System.ValueType.Equals': (call, receiver, [other]) => {
