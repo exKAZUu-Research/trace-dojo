@@ -275,6 +275,9 @@ function elementStrings(call: NativeCall, args: Value[], startIndex: number): (s
   const evaluator = evaluatorOf(call);
   const toText = (item: Value, type: Type): string | CsString => toStringValue(evaluator, item, type, call.frame);
   const last = args[startIndex];
+  const isSequence =
+    parameter.type.kind === 'named' && specialOf(parameter.type) !== 'object' && specialOf(parameter.type) !== 'string';
+  if (last === undefined && (parameter.type.kind === 'array' || isSequence)) failNull(parameter.name);
   if (parameter.type.kind === 'array') {
     const elementType = parameter.type.element;
     const values = arrayValues(last);
@@ -287,11 +290,7 @@ function elementStrings(call: NativeCall, args: Value[], startIndex: number): (s
         : values;
     return items.map((item) => toText(item, elementType));
   }
-  if (
-    parameter.type.kind === 'named' &&
-    specialOf(parameter.type) !== 'object' &&
-    specialOf(parameter.type) !== 'string'
-  ) {
+  if (isSequence) {
     const elementType = call.typeArgs[0] ?? libraryType(call, STRING);
     // The texts are built as the sequence is read, under the slot limit, since a lazy source may yield without end.
     const texts: (string | CsString)[] = [];
@@ -665,7 +664,6 @@ defineNativesKeepingStrings({
   },
   [`${STRING}.Concat`]: (call, _receiver, args) => combinedString(call, elementStrings(call, args as Value[], 0), ''),
   [`${STRING}.Join`]: (call, _receiver, args) => {
-    if (args.length === 2 && args[1] === undefined) failNull('value');
     const separator = plainString(args[0] as Value);
     const separatorText =
       separator === undefined
