@@ -923,20 +923,31 @@ function calleesFirst(locals: MethodSymbol[], callees: Map<MethodSymbol, MethodS
 
 /**
  * Whether a value of the type holds a struct by value, through its instance fields and theirs. The path holds the
- * constructed types it passes through, so a construction repeated on it ends that path, and a path longer than any
- * real layout counts as the cycle that a layout growing without end is, as Roslyn reports it.
+ * constructed types being expanded, so a construction repeated on it ends that path, and a generic struct constructed
+ * again and again on one path counts as the cycle that a layout growing without end is, as Roslyn reports it; the
+ * results of finished constructions are kept, so shared layouts are expanded once.
  */
-function holdsByValue(type: Type, target: TypeSymbol, path: string[]): boolean {
+function holdsByValue(
+  type: Type,
+  target: TypeSymbol,
+  path: { key: string; symbol: TypeSymbol }[],
+  finished = new Map<string, boolean>()
+): boolean {
   if (type.kind !== 'named' || type.symbol.kind !== 'struct') return false;
   if (type.symbol === target) return true;
   const key = typeKey(type);
-  if (path.includes(key)) return false;
-  if (path.length >= MAX_LAYOUT_DEPTH) return true;
+  const known = finished.get(key);
+  if (known !== undefined) return known;
+  if (path.some((entry) => entry.key === key)) return false;
+  if (path.filter((entry) => entry.symbol === type.symbol).length >= MAX_GENERIC_NESTING) return true;
   const substitution = substitutionOf(type);
-  return type.symbol.fields.some(
+  const inner = [...path, { key, symbol: type.symbol }];
+  const holds = type.symbol.fields.some(
     (field) =>
-      !field.isStatic && !field.isConst && holdsByValue(substitute(field.type, substitution), target, [...path, key])
+      !field.isStatic && !field.isConst && holdsByValue(substitute(field.type, substitution), target, inner, finished)
   );
+  finished.set(key, holds);
+  return holds;
 }
 
-const MAX_LAYOUT_DEPTH = 64;
+const MAX_GENERIC_NESTING = 16;
