@@ -1176,8 +1176,7 @@ export class Shell implements ArithmeticHost {
       const previous = variable.value?.kind === 'associative' ? variable.value.table : undefined;
       const table = append && previous ? previous : new AssociativeTable(previous?.bucketCount);
       variable.value = { kind: 'associative', table };
-      assignAssociative(table, elements);
-      return true;
+      return this.assignAssociative(variable, table, elements);
     }
     const existing = append ? this.indexedElements(variable) : new Map<bigint, string>();
     if (!append) {
@@ -1195,9 +1194,28 @@ export class Shell implements ArithmeticHost {
       const base = keyed.append ? (existing.get(index) ?? '') : '';
       const converted = this.convertForAttributes(variable, keyed.value, base, keyed.append);
       if (converted === undefined) return false;
-      this.chargeSlot();
+      this.checkLength(converted);
+      if (!existing.has(index)) this.chargeSlot();
       existing.set(index, converted);
       next = index + 1n;
+    }
+    return true;
+  }
+
+  /** Assigns an associative array's elements, reading its plain words as alternating keys and values, as Bash 5.1 does. */
+  private assignAssociative(variable: Variable, table: AssociativeTable, elements: CompoundElement[]): boolean {
+    for (let i = 0; i < elements.length; i++) {
+      const element = elements[i];
+      const entry =
+        typeof element === 'string'
+          ? { key: element, value: typeof elements[++i] === 'string' ? (elements[i] as string) : '', append: false }
+          : element;
+      const base = entry.append ? (table.get(entry.key) ?? '') : '';
+      const converted = this.convertForAttributes(variable, entry.value, base, entry.append);
+      if (converted === undefined) return false;
+      this.checkLength(converted);
+      if (!table.has(entry.key)) this.chargeSlot();
+      table.set(entry.key, converted);
     }
     return true;
   }
@@ -1320,17 +1338,6 @@ export class Shell implements ArithmeticHost {
 
 /** An element of a compound assignment: a plain word, or `[key]=value`. */
 export type CompoundElement = { key: string; value: string; append: boolean } | string;
-
-/** Assigns an associative array's elements, reading its plain words as alternating keys and values, as Bash 5.1 does. */
-function assignAssociative(table: AssociativeTable, elements: CompoundElement[]): void {
-  for (let i = 0; i < elements.length; i++) {
-    const element = elements[i];
-    if (typeof element === 'string') {
-      const value = elements[++i];
-      table.set(element, typeof value === 'string' ? value : '');
-    } else table.set(element.key, (element.append ? (table.get(element.key) ?? '') : '') + element.value);
-  }
-}
 
 /** Whether a declaration declares name references (`local -n this=$1`), which hold no value of their own. */
 function declaresReferences(statement: Extract<Statement, { kind: 'declaration' }>): boolean {
