@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss -- Keeps Bash's declaration builtins (declare, typeset, local, readonly, export) and declare -p formatting together.
+// code-gauge-allow-file fileNcss -- Keeps Bash's declaration builtins (declare, typeset, local, readonly, export) together.
 import { skipSubscript } from './arithmetic';
 import type { Assignment, Word } from './ast';
 import { expandBraces } from './braces';
-import { ansicQuote, ansicShouldQuote, containsShellMetas, doubleQuote } from './quoting';
+import { printDeclarations } from './declarePrint';
 import { DiscardSignal } from './runtime';
 import type { CompoundElement, Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
@@ -10,13 +10,11 @@ import {
   applyCaseAttributes,
   AssociativeTable,
   type Attribute,
-  ATTRIBUTE_ORDER,
   cloneValue,
   CONVERTED_BUCKETS,
   findEnclosingVariable,
   isIdentifier,
   resolveNameInScopes,
-  sortedElements,
   type Variable,
   type VariableValue,
 } from './variables';
@@ -510,6 +508,7 @@ interface DeclarationDestination {
 }
 
 interface PreUnsetNamerefStore extends DeclarationDestination {
+  operandName: string;
   finalLink: Variable;
   deferUnsetN: boolean;
   extraUnsetLink?: Variable;
@@ -530,11 +529,18 @@ function declareOperand(
   if (typeof operand !== 'string' && operand.failedCompound) return false;
   if (typeof operand !== 'string' && operand.committedTarget) {
     notifyIfArrayMaterialized(true, operand.committedTarget.variable, operand.committedTarget.priorKind, onMaterialize);
-    return operand.committedTarget.localElementLink
-      ? completeLocalElementLinkCompound(shell, builtin, operand.name, options, onMaterialize)
-      : declareOne(shell, builtin, operand.name, options, isLocal);
+    if (operand.committedTarget.localElementLink) {
+      return completeLocalElementLinkCompound(shell, builtin, operand.name, options, onMaterialize);
+    }
+    const phase2Options = !isLocal && options.unset.has('n') ? withoutArraySetOptions(options) : options;
+    return declareOne(shell, builtin, operand.name, phase2Options, isLocal);
   }
   return declareOne(shell, builtin, operand, options, isLocal, onMaterialize);
+}
+
+function withoutArraySetOptions(options: Options): Options {
+  if (!options.set.has('a') && !options.set.has('A')) return options;
+  return { ...options, set: new Set([...options.set].filter((flag) => flag !== 'a' && flag !== 'A')) };
 }
 
 function completeLocalElementLinkCompound(
@@ -606,16 +612,7 @@ function declareOne(
     assignMode !== 'none'
   );
   if (
-    !applyAttributes(
-      shell,
-      builtin,
-      destination.variable,
-      options,
-      assignMode !== 'none' || isCompound(operand),
-      isSubscripted || destination.referencedSubscript !== undefined,
-      Boolean(preUnsetStore?.deferUnsetN),
-      isCompound(operand)
-    )
+    !applyDeclaredAttributes(shell, builtin, destination, preUnsetStore, options, operand, assignMode, isSubscripted)
   ) {
     return false;
   }
@@ -635,6 +632,69 @@ function declareOne(
         );
   finishDeclarationEffects(ok, destination.variable, preUnsetStore, options.set.has('r'), priorKind, onMaterialize);
   return ok;
+}
+
+// code-gauge-allow functionParameterCount -- Applies array attributes to a +n referent when separate, and link/cell attributes to destination.
+function applyDeclaredAttributes(
+  shell: Shell,
+  builtin: string,
+  destination: DeclarationDestination,
+  preUnsetStore: PreUnsetNamerefStore | undefined,
+  options: Options,
+  operand: DeclarationArgument,
+  assignMode: AssignMode,
+  isSubscripted: boolean
+): boolean {
+  const assigns = assignMode !== 'none' || isCompound(operand);
+  if (preUnsetStore?.deferUnsetN && !isSubscripted && (options.set.has('a') || options.set.has('A'))) {
+    if (!applyReferentArrayKind(shell, builtin, preUnsetStore, options, assigns)) return false;
+    return applyAttributes(
+      shell,
+      builtin,
+      destination.variable,
+      withoutArraySetOptions(options),
+      assigns,
+      false,
+      true,
+      isCompound(operand)
+    );
+  }
+  return applyAttributes(
+    shell,
+    builtin,
+    destination.variable,
+    options,
+    assigns,
+    isSubscripted || destination.referencedSubscript !== undefined,
+    Boolean(preUnsetStore?.deferUnsetN),
+    isCompound(operand)
+  );
+}
+
+function applyReferentArrayKind(
+  shell: Shell,
+  builtin: string,
+  preUnsetStore: PreUnsetNamerefStore,
+  options: Options,
+  assigns: boolean
+): boolean {
+  const referent = preUnsetStore.variable;
+  const arrayOpts: Options = {
+    set: new Set([...options.set].filter((f) => f === 'a' || f === 'A')),
+    unset: new Set(),
+    attemptedSet: new Set(),
+  };
+  if (checkReadonlyConflict(shell, builtin, referent.name, referent, arrayOpts, false)) return false;
+  const kindErr = incompatibleArrayKindError(referent, arrayOpts.set);
+  if (kindErr) {
+    shell.reportError(`${builtin}: ${referent.name}: ${kindErr}`);
+    return false;
+  }
+  applyArrayKindAttributes(shell, referent, arrayOpts.set.has('A'), arrayOpts.set.has('a'), assigns);
+  if (options.set.has('g') && isIndexedCell(referent) && preUnsetStore.preResolved === undefined) {
+    preUnsetStore.preResolved = resolveNameInScopes(shell.state.scopes, preUnsetStore.operandName);
+  }
+  return true;
 }
 
 function rejectOperandHeader(
@@ -933,7 +993,9 @@ function resolvePreUnsetNamerefStore(
   isLocal: boolean,
   assigns: boolean
 ): PreUnsetNamerefStore | undefined {
-  if (isLocal || !assigns || !unset.has('n') || !finalLink?.attributes.has('n')) return undefined;
+  if (isLocal || !unset.has('n') || !finalLink?.attributes.has('n') || (!assigns && !set.has('a') && !set.has('A'))) {
+    return undefined;
+  }
   const globalOnly = set.has('g');
   const { targetName, referencedSubscript } = resolveDeclaredTarget(
     shell,
@@ -945,12 +1007,15 @@ function resolvePreUnsetNamerefStore(
   );
   if (targetName === finalLink.name && referencedSubscript === undefined) return undefined;
   if (referencedSubscript !== undefined) {
-    return resolvePreUnsetElementStore(shell, finalLink, targetName, referencedSubscript, globalOnly);
+    return assigns
+      ? resolvePreUnsetElementStore(shell, operandName, finalLink, targetName, referencedSubscript, globalOnly)
+      : undefined;
   }
   const variable = ensurePreUnsetScalarStore(shell, targetName, globalOnly);
   const preResolved =
     globalOnly && isIndexedCell(variable) ? resolveNameInScopes(shell.state.scopes, operandName) : undefined;
   return {
+    operandName,
     variable,
     finalLink,
     deferUnsetN: true,
@@ -960,6 +1025,7 @@ function resolvePreUnsetNamerefStore(
 
 function resolvePreUnsetElementStore(
   shell: Shell,
+  operandName: string,
   finalLink: Variable,
   baseName: string,
   referencedSubscript: string,
@@ -971,11 +1037,12 @@ function resolvePreUnsetElementStore(
     : undefined;
   const resolvedBase = shell.resolveNameOrUndefined(baseName);
   if (resolvedBase === undefined) {
-    return { variable: finalLink, finalLink, deferUnsetN: false, failedBase: true, referencedSubscript };
+    return { operandName, variable: finalLink, finalLink, deferUnsetN: false, failedBase: true, referencedSubscript };
   }
   const direct = resolvedBase.includes('[') ? shell.findOwnVariable(resolvedBase) : undefined;
   if (!direct && !isIdentifier(resolvedBase)) {
     return {
+      operandName,
       variable: finalLink,
       finalLink,
       deferUnsetN: false,
@@ -985,6 +1052,7 @@ function resolvePreUnsetElementStore(
     };
   }
   return {
+    operandName,
     variable: direct ?? ensureStoreVariable(shell, resolvedBase),
     finalLink,
     deferUnsetN: false,
@@ -1830,60 +1898,4 @@ function assignLocallyCompound(
   const ok = shell.assignCompoundTo(variable, elements, assignment.append);
   if (error) shell.discard(error);
   return ok;
-}
-
-/** `declare -p names`: each variable as a declaration that recreates it. */
-function printDeclarations(shell: Shell, builtin: string, names: DeclarationArgument[]): number {
-  let status = 0;
-  for (const operand of names) {
-    const name = typeof operand === 'string' ? operand : operand.name;
-    const variable = declarationToShow(shell, builtin, name);
-    if (!variable) {
-      shell.reportError(`${builtin}: ${name}: not found`);
-      status = 1;
-      continue;
-    }
-    shell.state.fd1.write(`${declarationText(variable)}\n`);
-  }
-  return status;
-}
-
-/** The variable `declare -p name` shows; `local -p` shows only the current function's own variables. */
-function declarationToShow(shell: Shell, builtin: string, name: string): Variable | undefined {
-  const found = shell.findVariable(name, false);
-  if (builtin !== 'local') {
-    if (!found && shell.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
-    return found ?? shell.dynamicDeclaration(name);
-  }
-  const { scopes, functionScopes } = shell.state;
-  return scopes[functionScopes.at(-1) as number].get(name) === found ? found : undefined;
-}
-
-export function declarationText(variable: Variable): string {
-  const flags = ATTRIBUTE_ORDER.filter((attribute) => variable.attributes.has(attribute)).join('');
-  const prefix = `declare -${flags || '-'} ${variable.name}`;
-  const { value } = variable;
-  if (!value) return prefix;
-  if (value.kind === 'scalar') return `${prefix}=${quoteValue(value.value)}`;
-  if (value.kind === 'indexed') {
-    const body = sortedElements(value.elements)
-      .map(([index, element]) => `[${index}]=${quoteValue(element)}`)
-      .join(' ');
-    return `${prefix}=(${body})`;
-  }
-  const body = value.table
-    .entries()
-    .map(([key, element]) => `[${quoteKey(key)}]=${quoteValue(element)} `)
-    .join('');
-  return `${prefix}=(${body})`;
-}
-
-function quoteValue(text: string): string {
-  return ansicShouldQuote(text) ? ansicQuote(text) : doubleQuote(text);
-}
-
-function quoteKey(key: string): string {
-  if (ansicShouldQuote(key)) return ansicQuote(key);
-  if (containsShellMetas(key) || key === '@' || key === '*') return doubleQuote(key);
-  return key;
 }

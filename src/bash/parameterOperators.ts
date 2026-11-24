@@ -2,7 +2,7 @@
 import type { ParameterExpansion, WordPart } from './ast';
 import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
-import { declarationText } from './declare';
+import { declarationText } from './declarePrint';
 import { appendBounded, type Expander, joinBounded, type ParameterValue, type SubscriptRef } from './expansion';
 import {
   EMPTY_LIST,
