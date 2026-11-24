@@ -269,7 +269,6 @@ function checkReadonlyConflict(
   return true;
 }
 
-// code-gauge-allow functionParameterCount -- Carries shell, operand name, set/unset option sets, subscript flag, and global-only lookup mode.
 function resolveDeclaredTarget(
   shell: Shell,
   name: string,
@@ -300,7 +299,6 @@ function isReadonlyGlobal(shell: Shell, name: string): boolean {
 
 /** Sets and removes a declaration's attributes, converting the value as Bash does, or reports why it cannot. */
 // code-gauge-allow functionCognitiveComplexity -- Bash's attribute rules for declare: conversions, exclusive case attributes, and array kinds.
-// code-gauge-allow functionParameterCount -- Needs shell, builtin, target variable, option sets, assignment presence, and element-target flag.
 function applyAttributes(
   shell: Shell,
   builtin: string,
