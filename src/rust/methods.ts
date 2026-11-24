@@ -4,7 +4,9 @@ import type { Program } from './items';
 import { dynIteratorTarget, intoIterItem, intoIterShape, isUserIterator, iterationBound } from './iterTypes';
 import type { TraitSolver } from './traits';
 import {
+  adt,
   allSupertraits,
+  type DerefKind,
   type FnDef,
   freshVar,
   type ImplDef,
@@ -21,7 +23,7 @@ import {
 
 export interface DerefStep {
   type: Type;
-  derefs: ('ref' | 'mutRef' | 'own')[];
+  derefs: DerefKind[];
 }
 
 /** The types a value derefs to, as method calls and field accesses look through them. */
@@ -44,7 +46,7 @@ export function autoderefSteps(program: Program, type: Type): DerefStep[] {
 }
 
 /** One deref: through a reference, or from an owner to what it owns (`Box<T>` → `T`, `String` → `str`, `Vec<T>` → `[T]`). */
-export function derefOnce(program: Program, type: Type): { type: Type; kind: 'ref' | 'mutRef' | 'own' } | undefined {
+export function derefOnce(program: Program, type: Type): { type: Type; kind: DerefKind } | undefined {
   const t = shallow(type);
   if (t.kind === 'ref') return { type: t.target, kind: t.mutable ? 'mutRef' : 'ref' };
   if (t.kind !== 'adt') return undefined;
@@ -59,10 +61,17 @@ export function derefOnce(program: Program, type: Type): { type: Type; kind: 're
       return { type: { kind: 'slice', elem: t.args[0] }, kind: 'own' };
     }
     default: {
-      void program;
-      return undefined;
+      return t.def.builtin ? undefined : userDeref(program, t);
     }
   }
+}
+
+/** The `Target` of the program's `Deref` impl for one of its types, which `*` and autoderef reach by calling `deref`. */
+function userDeref(program: Program, type: Type): { type: Type; kind: DerefKind } | undefined {
+  const projection = program.traitDef('Deref').assocTypes.get('Target')?.projection;
+  if (!projection) return undefined;
+  const target = normalize(adt(projection, [type]));
+  return target.kind === 'adt' && target.def === projection ? undefined : { type: target, kind: 'user' };
 }
 
 export interface MethodMatch {

@@ -1,7 +1,7 @@
 import type { Expr, Pattern, Span } from './ast';
 import type { Known } from './constLint';
 import type { ProjectedCapture } from './loanCaptures';
-import type { AdtDef, ClosureType, ConstDef, FnDef, TraitRef, Type } from './types';
+import type { AdtDef, ClosureType, ConstDef, DerefKind, FnDef, TraitRef, Type } from './types';
 
 /** A variable of a function or closure: a `let` binding, a parameter, or a binding of a pattern. */
 export interface LocalVar {
@@ -52,7 +52,7 @@ export type PathRes =
 /** How a method call reaches its receiver: through derefs, then by reference or by value. */
 export interface ReceiverAdjust {
   /** The derefs from the receiver expression's type, each of a reference (`ref`/`mutRef`) or of an owner. */
-  derefs: ('ref' | 'mutRef' | 'own')[];
+  derefs: DerefKind[];
   autoref: 'none' | 'ref' | 'mut';
   /** A receiver used as the iterator it makes: a range, or a type parameter bounded by `Iterator` or `IntoIterator`. */
   asIter: boolean;
@@ -66,7 +66,7 @@ export interface MethodRes {
 }
 
 export interface FieldRes {
-  derefs: ('ref' | 'mutRef' | 'own')[];
+  derefs: DerefKind[];
   index: number;
   /** `Range`'s fields live on a `RangeValue`. */
   range: boolean;
@@ -74,7 +74,7 @@ export interface FieldRes {
 
 export type Coercion =
   /** References that reach the same value: `&String` → `&str`, `&Box<T>` → `&T`, `&&T` → `&T`. */
-  | { kind: 'deref'; derefs: ('ref' | 'mutRef' | 'own')[]; fromMut: boolean; toStr: boolean }
+  | { kind: 'deref'; derefs: DerefKind[]; fromMut: boolean; toStr: boolean }
   /** A value becomes a trait object of the type it has. */
   | { kind: 'dyn'; type: Type; mutable: boolean; trait: TraitRef }
   /** A collection becomes an iterator, as `IntoIterator` makes it. */
@@ -88,7 +88,7 @@ export interface IndexRes {
   range: boolean;
   /** Whether a library type's `Index` impl indexes it (a `Vec`), whose panics report the `[`'s position. */
   overloaded: boolean;
-  derefs: ('ref' | 'mutRef' | 'own')[];
+  derefs: DerefKind[];
 }
 
 export interface TryRes {

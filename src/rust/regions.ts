@@ -1,5 +1,5 @@
 import { normalize } from './infer';
-import { type AdtDef, childTypes, type ClosureType, shallow, type Type, type TypeParam } from './types';
+import { type AdtDef, childTypes, type ClosureType, type DerefKind, shallow, type Type, type TypeParam } from './types';
 
 /** A region: the points where the borrows of a reference (or of a lifetime parameter) must stay valid. */
 export type RVar = number;
@@ -372,12 +372,12 @@ export function ownedDerefLayout(layout: Layout): Layout {
 }
 
 /** The projections of derefs: `*` through a reference, `#` through an owner (a `Box`, a collection's slice). */
-export function derefSteps(derefs: readonly ('ref' | 'mutRef' | 'own')[] | undefined): string[] {
+export function derefSteps(derefs: readonly DerefKind[] | undefined): string[] {
   return (derefs ?? []).map((step) => (step === 'own' ? '#' : '*'));
 }
 
 /** The type of a receiver after the derefs of its method call's adjustment. */
-export function typeAfter(type: Type | undefined, derefs: readonly ('ref' | 'mutRef' | 'own')[]): Type | undefined {
+export function typeAfter(type: Type | undefined, derefs: readonly DerefKind[]): Type | undefined {
   let t = type && normalize(shallow(type));
   for (let index = 0; index < derefs.length && t; index++) {
     if (t.kind === 'ref') t = normalize(shallow(t.target));

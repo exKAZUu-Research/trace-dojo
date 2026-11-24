@@ -4,10 +4,11 @@ import type { Checker } from './checker';
 import { collectionKeyTraits } from './collectionBounds';
 import { normalize } from './infer';
 import { compileError, projectionOf, visibleFrom } from './items';
-import { autoderefSteps, lookupMethod } from './methods';
+import { autoderefSteps, derefOnce, lookupMethod } from './methods';
 import { RANGE_TYPES } from './traits';
 import {
   type AdtDef,
+  type DerefKind,
   type FieldDef,
   freshVar,
   ref,
@@ -22,12 +23,7 @@ import {
 } from './types';
 
 /** Requires a place to be mutable: rooted in a `mut` variable or behind a `&mut` reference. */
-export function requireMutablePlace(
-  c: Checker,
-  place: Expr,
-  purpose: string,
-  derefs: readonly ('ref' | 'mutRef' | 'own')[] = []
-): void {
+export function requireMutablePlace(c: Checker, place: Expr, purpose: string, derefs: readonly DerefKind[] = []): void {
   const root = throughDerefs(c, place, derefs);
   if (root.kind === 'temporary') return;
   if (root.kind === 'sharedRef') {
@@ -79,7 +75,8 @@ function placeRoot(
     case 'unary': {
       if (place.op !== '*') return { kind: 'temporary' };
       const type = normalize(shallow(place.operand.ty ?? UNIT));
-      const deref = type.kind === 'ref' ? (type.mutable ? 'mutRef' : 'ref') : 'own';
+      const deref =
+        type.kind === 'ref' ? (type.mutable ? 'mutRef' : 'ref') : (derefOnce(c.program, type)?.kind ?? 'own');
       return throughDerefs(c, place.operand, [deref]);
     }
     case 'methodCall': {
@@ -93,12 +90,16 @@ function placeRoot(
   }
 }
 
-function throughDerefs(
-  c: Checker,
-  operand: Expr,
-  derefs: readonly ('ref' | 'mutRef' | 'own')[]
-): ReturnType<typeof placeRoot> {
+function throughDerefs(c: Checker, operand: Expr, derefs: readonly DerefKind[]): ReturnType<typeof placeRoot> {
   if (derefs.includes('ref')) return { kind: 'sharedRef' };
+  let type = operand.ty ?? UNIT;
+  for (const step of derefs) {
+    // The program's `Deref` gives a place to write to only through its `DerefMut`.
+    if (step === 'user' && c.solver.implements(type, { trait: c.program.traitDef('DerefMut'), args: [] }) === 'no') {
+      return { kind: 'sharedRef' };
+    }
+    type = derefOnce(c.program, type)?.type ?? type;
+  }
   const base = placeRoot(c, operand);
   return base.kind !== 'sharedRef' && derefs.includes('mutRef') ? { kind: 'mutRef' } : base;
 }

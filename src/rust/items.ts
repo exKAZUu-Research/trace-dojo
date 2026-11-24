@@ -862,6 +862,8 @@ const STD_TRAITS_LEARNERS_IMPLEMENT = new Set([
   'Index',
   'IndexMut',
   'Iterator',
+  'Deref',
+  'DerefMut',
 ]);
 
 const REQUIRED_STD_METHODS: Record<string, string[]> = {

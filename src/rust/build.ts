@@ -107,21 +107,23 @@ function projectionType(solver: TraitSolver, type: Type & { kind: 'adt' }): Type
   }
   const builtin = builtinAssocType(solver.program, trait, name, self, traitArgs);
   if (builtin) return builtin;
-  if (hasVars(self)) return undefined;
   const { unifier } = solver;
-  const snapshot = unifier.snapshot();
-  try {
-    for (const impl of solver.program.impls) {
-      if (impl.trait?.trait !== trait) continue;
-      const assoc = impl.assocTypes.get(name);
-      if (!assoc) continue;
-      const subst = solver.matchImpl(impl, self, traitArgs);
-      if (subst) return resolve(substitute(assoc, subst));
-    }
-    return undefined;
-  } finally {
+  // A type not fully known yet (`MyBox<{integer}>`) settles the projection only when one impl can be its.
+  let found: Type | undefined;
+  for (const impl of solver.program.impls) {
+    if (impl.trait?.trait !== trait) continue;
+    const assoc = impl.assocTypes.get(name);
+    if (!assoc) continue;
+    const snapshot = unifier.snapshot();
+    const subst = solver.matchImpl(impl, self, traitArgs);
+    const result = subst && resolve(substitute(assoc, subst));
     unifier.rollback(snapshot);
+    if (!result) continue;
+    if (!hasVars(self)) return result;
+    if (found) return undefined;
+    found = result;
   }
+  return found;
 }
 
 /** The associated types of the standard library's traits for the types whose impls the interpreter knows. */

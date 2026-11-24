@@ -2,11 +2,12 @@ import type { IndexRes } from './annotations';
 import type { Expr, Span } from './ast';
 import { madeString, stringCapacity } from './capacity';
 import type { Compiler, Eval, PlaceEval } from './compiler';
-import { evaluateValues, LocalPlace } from './compilerCommon';
+import { derefAll, evaluateValues, LocalPlace } from './compilerCommon';
 import { normalize } from './infer';
+import { derefOnce } from './methods';
 import { type Frame, RustPanic } from './runtime';
 import { runtimeType } from './runtimeTypes';
-import { shallow } from './types';
+import { type DerefKind, shallow, type Type } from './types';
 import { decodeUtf8 } from './utf8';
 import {
   AccessorPlace,
@@ -25,7 +26,7 @@ import {
 } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
-type Derefs = ('ref' | 'mutRef' | 'own')[];
+type Derefs = DerefKind[];
 
 /** The place a place expression denotes, which assignments and `&mut` borrows write through. */
 export function compilePlace(c: Compiler, expr: Expr): PlaceEval {
@@ -104,6 +105,11 @@ function rangeEndpoint(name: string): 'start' | 'end' {
 
 function derefPlace(c: Compiler, expr: ExprOf<'unary'>): PlaceEval {
   const operandType = normalize(shallow(expr.operand.ty!));
+  if (derefOnce(c.program, operandType)?.kind === 'user') {
+    const base = compilePlace(c, expr.operand);
+    const call = userDerefCall(c, operandType, true, expr.span);
+    return (frame) => call(frame, base(frame)) as Place;
+  }
   if (operandType.kind === 'ref' && operandType.mutable) {
     const operand = c.read(expr.operand);
     return (frame) => operand(frame) as Place;
@@ -177,12 +183,43 @@ export function placeThrough(c: Compiler, operand: Expr, derefs: Derefs): PlaceE
     return (frame) => readOnlyPlace(read(frame));
   }
   const base = compilePlace(c, operand);
-  if (!derefs.includes('mutRef')) return base;
+  if (!derefs.includes('mutRef') && !derefs.includes('user')) return base;
+  const calls = userDerefs(c, operand, derefs, true);
   return (frame) => {
     let place = base(frame);
-    for (const step of derefs) if (step === 'mutRef') place = place.get() as Place;
+    for (const [index, step] of derefs.entries()) {
+      if (step === 'mutRef') place = place.get() as Place;
+      else if (step === 'user') place = calls[index]!(frame, place) as Place;
+    }
     return place;
   };
+}
+
+/** For each `user` step of derefs, the call of the program's `deref` (or `deref_mut`) on the value it derefs. */
+function userDerefs(
+  c: Compiler,
+  operand: Expr,
+  derefs: Derefs,
+  mutable: boolean
+): (((frame: Frame, value: Value) => Value) | undefined)[] {
+  let type = operand.ty!;
+  return derefs.map((step) => {
+    const self = type;
+    type = derefOnce(c.program, type)?.type ?? type;
+    return step === 'user' ? userDerefCall(c, self, mutable, operand.span) : undefined;
+  });
+}
+
+/** Calls the program's `Deref::deref`, or `DerefMut::deref_mut` for a place, on a value of a type. */
+export function userDerefCall(
+  c: Compiler,
+  self: Type,
+  mutable: boolean,
+  span: Span
+): (frame: Frame, value: Value) => Value {
+  const fn = c.program.traitDef(mutable ? 'DerefMut' : 'Deref').methods.get(mutable ? 'deref_mut' : 'deref')!;
+  const type = runtimeType(normalize(shallow(self)));
+  return (frame, value) => c.support.callFn(fn, [type(frame)], [value], undefined, span, frame);
 }
 
 function readOnlyPlace(value: Value): Place {
@@ -195,10 +232,14 @@ function readOnlyPlace(value: Value): Place {
 /** An operand's value after derefs, reading through `&mut` references. */
 export function valueThrough(c: Compiler, operand: Expr, derefs: Derefs): Eval {
   const read = c.read(operand);
-  if (!derefs.includes('mutRef')) return read;
+  if (!derefs.includes('mutRef') && !derefs.includes('user')) return read;
+  const calls = userDerefs(c, operand, derefs, false);
   return (frame) => {
     let value = read(frame);
-    for (const step of derefs) if (step === 'mutRef') value = (value as Place).get();
+    for (const [index, step] of derefs.entries()) {
+      if (step === 'mutRef') value = (value as Place).get();
+      else if (step === 'user') value = calls[index]!(frame, derefAll(value));
+    }
     return value;
   };
 }

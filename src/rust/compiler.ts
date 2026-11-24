@@ -9,11 +9,12 @@ import { compileFor, compileIf, compileLoop, compileMatch, compileWhile } from '
 import { compileMacro } from './compilerMacros';
 import { compileBinary, compileCompoundAssign, compileUnary } from './compilerOperators';
 import { compileConstant, compileMatcher, compilePatternInput, type Matcher, takesWhole } from './compilerPatterns';
-import { compileField, compileIndex, compilePlace } from './compilerPlaces';
+import { compileField, compileIndex, compilePlace, userDerefCall } from './compilerPlaces';
 import type { Formatter } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
 import { type CaptureMode, captureStoragePlaces } from './loanCaptures';
+import { derefOnce } from './methods';
 import { castValue, copyValue, needsCopy } from './ops';
 import { ControlSignal, type Frame, type FunctionInfo, MOVED, UNASSIGNED } from './runtime';
 import { runtimeType } from './runtimeTypes';
@@ -502,10 +503,20 @@ export class Compiler {
         const sourceMut = sourceType.kind === 'ref' && sourceType.mutable;
         const { derefs, fromMut, toStr } = coercion;
         const keepsPlace = sourceMut && !fromMut;
+        // The program's `Deref` impls run on each value they deref, from the referent of the reference.
+        let stepType: Type = sourceType.kind === 'ref' ? sourceType.target : sourceType;
+        const calls = derefs.map((step) => {
+          const self = stepType;
+          stepType = derefOnce(this.program, stepType)?.type ?? stepType;
+          return step === 'user' ? userDerefCall(this, self, false, expr.span) : undefined;
+        });
         return (frame) => {
           let value = read(frame);
           if (fromMut) value = (value as Place).get();
-          for (const step of derefs) if (step === 'mutRef') value = (value as Place).get();
+          for (const [index, step] of derefs.entries()) {
+            if (step === 'mutRef') value = (value as Place).get();
+            else if (step === 'user') value = calls[index]!(frame, derefAll(value));
+          }
           return toStr && !keepsPlace ? textOf(value) : value;
         };
       }

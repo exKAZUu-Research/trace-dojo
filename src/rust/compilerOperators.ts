@@ -2,8 +2,10 @@ import type { Expr, Span } from './ast';
 import { concatStrings, sizeTable } from './capacity';
 import type { Compiler, Eval } from './compiler';
 import { derefAll, evaluateValues, isStringType, stringish, stripRefs, withEvaluatedValues } from './compilerCommon';
+import { userDerefCall } from './compilerPlaces';
 import { floatNumber, negateFloat } from './floatBits';
 import { normalize } from './infer';
+import { derefOnce } from './methods';
 import { btreeSetOp, hashSetMembers, type SetOp } from './natives/setOps';
 import { cloneValue, floatArith, intArith, overflow, testPartialOrder, valuesEqual, valuesUnequal, wrap } from './ops';
 import type { Frame } from './runtime';
@@ -47,6 +49,10 @@ export function compileUnary(c: Compiler, expr: ExprOf<'unary'>): Eval {
   const operand = expr.op === '*' ? c.read(expr.operand) : c.value(expr.operand);
   if (expr.op === '*') {
     const operandType = normalize(shallow(expr.operand.ty!));
+    if (derefOnce(c.program, operandType)?.kind === 'user') {
+      const call = userDerefCall(c, operandType, false, expr.span);
+      return (frame) => call(frame, derefAll(operand(frame)));
+    }
     if (operandType.kind === 'ref' && operandType.mutable) return (frame) => (operand(frame) as Place).get();
     return operand;
   }
