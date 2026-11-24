@@ -82,14 +82,7 @@ export abstract class PatternMatcher extends EvaluatorBase {
   private matchesType(pattern: Extract<BoundPattern, { kind: 'type' }>, value: Value, frame: Frame): boolean {
     if (value === undefined) return false;
     const type = frame.resolve(pattern.testType);
-    // A primitive carries no type, so it tests as a box of the input's static type.
-    const inputType = frame.resolve(pattern.inputType);
-    const subject =
-      !(value instanceof CsBox) && this.runtime.runtimeTypeOf(value) === undefined && isValueType(inputType)
-        ? new CsBox(nullableUnderlying(inputType) ?? inputType, value)
-        : value;
-    if (!(subject instanceof CsStruct && sameType(subject.type, type)) && !this.isInstanceOf(subject, type))
-      return false;
+    if (!this.isOfType(value, frame.resolve(pattern.inputType), type)) return false;
     if (pattern.local)
       this.storeLocal(
         frame,
@@ -97,6 +90,15 @@ export abstract class PatternMatcher extends EvaluatorBase {
         value instanceof CsBox && !isReferenceType(type) ? copyValue(value.value) : copyValue(value)
       );
     return true;
+  }
+
+  /** Whether an input value has a type, where a primitive, which carries no type, tests as its input type's box. */
+  private isOfType(value: Value, inputType: Type, type: Type): boolean {
+    const subject =
+      !(value instanceof CsBox) && this.runtime.runtimeTypeOf(value) === undefined && isValueType(inputType)
+        ? new CsBox(nullableUnderlying(inputType) ?? inputType, value)
+        : value;
+    return (subject instanceof CsStruct && sameType(subject.type, type)) || this.isInstanceOf(subject, type);
   }
 
   private matchesRelational(
@@ -121,11 +123,7 @@ export abstract class PatternMatcher extends EvaluatorBase {
 
   private matchesRecursive(pattern: Extract<BoundPattern, { kind: 'recursive' }>, value: Value, frame: Frame): boolean {
     if (value === undefined) return false;
-    if (
-      pattern.testType &&
-      !this.isInstanceOf(value, frame.resolve(pattern.testType)) &&
-      !(value instanceof CsStruct && sameType(value.type, frame.resolve(pattern.testType)))
-    )
+    if (pattern.testType && !this.isOfType(value, frame.resolve(pattern.inputType), frame.resolve(pattern.testType)))
       return false;
     const target = value instanceof CsBox ? value.value : value;
     if (!this.matchesPositional(pattern, target, frame) || !this.matchesProperties(pattern, target, frame))
