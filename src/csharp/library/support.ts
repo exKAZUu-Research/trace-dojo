@@ -17,7 +17,16 @@ import {
   type Type,
   type TypeParameterSymbol,
 } from '../types';
-import { copyValue, CsArray, CsBox, CsObject, plainString, type Value, type VariableReference } from '../values';
+import {
+  copyValue,
+  CsArray,
+  CsBox,
+  CsObject,
+  isString,
+  plainString,
+  type Value,
+  type VariableReference,
+} from '../values';
 
 /** The evaluator that runs the call. */
 export function evaluatorOf(call: NativeCall): Evaluator {
@@ -309,3 +318,12 @@ export function isObject(value: Value): value is CsObject {
 
 /** The integral types whose `CompareTo` returns the difference of the values rather than its sign. */
 export const NARROW_INTEGRALS: ReadonlySet<string> = new Set(['sbyte', 'byte', 'short', 'ushort', 'char']);
+
+/**
+ * The text a trace shows a dictionary's key as, which the Java trace shows a map's alike: a value its text, and an
+ * object of a class by its identity, without running its ToString.
+ */
+export function dictionaryKeyText(call: NativeCall, key: Value, keyType: Type): string {
+  if (key instanceof CsObject && !isString(key)) return call.frame.runtime.displayIdentity(key);
+  return textOf(call, key, keyType);
+}

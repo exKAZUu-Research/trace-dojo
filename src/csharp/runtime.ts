@@ -140,6 +140,22 @@ export class Runtime {
     this.budget.spend(cost);
   }
 
+  private readonly displayIdentities = new WeakMap<object, number>();
+  private shownIdentities = 0;
+
+  /**
+   * A label for an object a trace names by identity, as the Java trace names a map's object keys (`#1`): numbered in
+   * the order the trace first shows them, apart from the hash codes the program sees.
+   */
+  displayIdentity(value: object): string {
+    let identity = this.displayIdentities.get(value);
+    if (identity === undefined) {
+      identity = ++this.shownIdentities;
+      this.displayIdentities.set(value, identity);
+    }
+    return `#${identity}`;
+  }
+
   /** The struct fields made since the last operation they were charged. */
   private unchargedStructFields = 0;
 

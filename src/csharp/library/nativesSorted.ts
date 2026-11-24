@@ -9,6 +9,7 @@ import { type Comparison, comparisonOf, equalityOf } from './nativesCollections'
 import {
   bufferedElements,
   copyToArray,
+  dictionaryKeyText,
   evaluatorOf,
   fail,
   failNegative,
@@ -136,7 +137,7 @@ function newSorted(call: NativeCall, comparer: Value, keyType: Type, valueType: 
     keyType,
     valueType,
     pairType ? (key, value) => new CsStruct(pairType, [key, value]) : undefined,
-    (key) => textOf(call, key, keyType)
+    (key) => dictionaryKeyText(call, key, keyType)
   );
   state.retain = (baseSlots, values) => call.frame.runtime.retainSlots(baseSlots, values);
   state.store = (previous, next) => call.frame.runtime.chargeStore(previous, next);

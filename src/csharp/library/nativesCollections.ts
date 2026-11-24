@@ -12,6 +12,7 @@ import {
   chargeElements,
   chargeStructFields,
   copyToArray,
+  dictionaryKeyText,
   evaluatorOf,
   fail,
   failIndex,
@@ -869,7 +870,7 @@ function newHashState(call: NativeCall, comparer: Value, keyType: Type, valueTyp
     const pairType = libraryType(call, 'System.Collections.Generic.KeyValuePair', [keyType, valueType]);
     state.pairOf = (key, value) => new CsStruct(pairType, [key, value]);
   }
-  state.keyText = (key) => textOf(call, key, keyType);
+  state.keyText = (key) => dictionaryKeyText(call, key, keyType);
   return state;
 }
 
