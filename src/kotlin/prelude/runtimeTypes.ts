@@ -37,6 +37,8 @@ inline fun File.forEachLine(action: (line: String) -> Unit) {
     for (line in readLines()) action(line)
 }
 
+inline fun <T> File.useLines(block: (Sequence<String>) -> T): T = block(readLines().asSequence())
+
 val File.extension: String
     get() = name.substringAfterLast('.', "")
 

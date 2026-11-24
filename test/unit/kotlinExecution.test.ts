@@ -6160,11 +6160,6 @@ test.each([
     'String の chunkedSequenceは、この採点環境では使えません。',
   ],
   [
-    'the Result companion',
-    'fun main() { println(Result.success(1)) }',
-    'kotlin.Resultは、この採点環境では使えません。',
-  ],
-  [
     'a JVM class implicitly imported by Kotlin',
     'fun main() { println(StringBuffer()) }',
     'Java のクラスの直接の利用（java.lang.StringBuffer）は、この採点環境では使えません。',

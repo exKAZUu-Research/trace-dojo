@@ -1,8 +1,12 @@
 import { type FileHandle, FileSystemError, type TextReader } from '../../interpreter/programIo';
 import { stringHash, stringOf } from '../format';
-import type { Frame } from '../runtime';
+import { type Frame, ProgramExit } from '../runtime';
 import { KObject, NULL, type Value } from '../values';
 import { defineNative, defineNativeProperty, libraryClass, newItems, throwError } from './registry';
+
+defineNative('kotlin.system.exitProcess(Int)', (_frame, _receiver, [status]) => {
+  throw new ProgramExit(status as number);
+});
 
 /** The standard input that `readln` and `readLine` read, a line at a time. */
 defineNative('kotlin.io.readLine()', (frame) => frame.runtime.io.stdin.reader.readLine() ?? NULL);

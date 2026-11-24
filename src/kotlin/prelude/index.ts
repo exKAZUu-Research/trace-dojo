@@ -8,6 +8,7 @@ import { COMPARISONS_SOURCE, MATH_SOURCE, RANDOM_SOURCE } from './comparisonsRan
 import { CORE_SOURCE } from './core';
 import { PROPERTIES_SOURCE } from './properties';
 import { RANGES_SOURCE } from './ranges';
+import { RESULT_SOURCE, SYSTEM_EXIT_SOURCE } from './result';
 import {
   exceptionSources,
   FUNCTIONS_SOURCE,
@@ -17,6 +18,7 @@ import {
   SYSTEM_SOURCE,
   TURTLE_SOURCE,
 } from './runtimeTypes';
+import { SEQUENCES_SOURCE } from './sequences';
 import { STANDARD_SOURCE } from './standard';
 import { TEXT_SOURCE, UTIL_SOURCE } from './text';
 import { TEXT_COLLECTIONS_SOURCE } from './textCollections';
@@ -29,11 +31,14 @@ export const PRELUDE_SOURCES = [
   FUNCTIONS_SOURCE,
   ...exceptionSources(),
   STANDARD_SOURCE,
+  RESULT_SOURCE,
+  SYSTEM_EXIT_SOURCE,
   RANGES_SOURCE,
   COLLECTION_TYPES_SOURCE,
   COLLECTION_CLASSES_SOURCE,
   COLLECTION_FUNCTIONS_SOURCE,
   COLLECTION_VIEWS_SOURCE,
+  SEQUENCES_SOURCE,
   arraysSource(),
   COMPARISONS_SOURCE,
   RANDOM_SOURCE,

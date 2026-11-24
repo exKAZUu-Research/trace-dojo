@@ -4,7 +4,6 @@ import type { ClassSymbol, TypeParameterSymbol } from './symbols';
 import { type KType, resolved, typeToString } from './types';
 
 const memberLabels = new Map([
-  ['asSequence', 'シーケンス（asSequence）'],
   ['toRegex', '正規表現（toRegex）'],
   ['toSortedMap', '並べ替えた Map（toSortedMap）'],
   ['toSortedSet', '並べ替えた Set（toSortedSet）'],
