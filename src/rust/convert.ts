@@ -340,12 +340,13 @@ export class Converter extends ExpressionConverter {
         continue;
       }
       if (child.type === 'const_parameter') {
-        if (child.childForFieldName('value')) unavailable(span, '定数のジェネリクスの既定の値');
+        const value = child.childForFieldName('value');
         generics.params.push({
           name: this.identifier(this.field(child, 'name')),
           span,
           bounds: [],
           constType: this.type(this.field(child, 'type')),
+          defaultType: value ? { kind: 'constArg', value: this.expr(value), span: this.span(value) } : undefined,
         });
         continue;
       }
@@ -784,11 +785,8 @@ export class Converter extends ExpressionConverter {
         );
       }
       case 'abstract_type': {
-        const trait = this.field(node, 'trait');
-        if (node.namedChildren.some((child) => child.type === 'type_parameters')) {
-          return unavailable(span, "for<'a> の境界");
-        }
-        return this.objectBoundType('impl', [trait], span);
+        // `impl for<'a> Fn(&'a str)`: the borrow checker reads the lifetimes from the types.
+        return this.objectBoundType('impl', [this.field(node, 'trait')], span);
       }
       case 'function_type': {
         if (!node.childForFieldName('trait')) return this.fnPointerType(node, span);
@@ -825,9 +823,6 @@ export class Converter extends ExpressionConverter {
     const modifiers = node.namedChildren.find((child) => child.type === 'function_modifiers');
     if (modifiers?.text.includes('extern')) unavailable(span, '外部の関数のポインタ（extern "C" fn）');
     if (modifiers?.text.includes('unsafe')) unavailable(span, 'unsafe fn のポインタ');
-    if (node.namedChildren.some((child) => child.type === 'for_lifetimes')) {
-      return syntaxError(span, "for<'a> fn(...) は、この採点環境では使えません。");
-    }
     const params = this.field(node, 'parameters')
       .namedChildren.filter((child) => !isComment(child))
       .map((child) => this.type(child.type === 'parameter' ? this.field(child, 'type') : child));
@@ -958,8 +953,11 @@ export class Converter extends ExpressionConverter {
       case 'scoped_type_identifier': {
         const path = node.childForFieldName('path');
         const prefix = path ? this.exprPath(path).segments : [];
-        if (!path && node.text.startsWith('::')) unavailable(span, '先頭が :: のパス');
         const name = this.field(node, 'name');
+        // `::std::mem::swap` names the crate of the standard library from the root.
+        if (!path && node.text.startsWith('::') && !['std', 'core', 'alloc'].includes(name.text)) {
+          unavailable(span, '外部のクレート');
+        }
         return { segments: [...prefix, { name: this.identifier(name), args: undefined, span: this.span(name) }], span };
       }
       case 'generic_type':

@@ -1,11 +1,11 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
-import type { Block, Expr, FormatArgs, Item, MacroCall, Pattern, Span, TypeAst } from './ast';
+import type { Block, Expr, FormatArgs, Item, MacroCall, MatchArm, Pattern, Span, TypeAst } from './ast';
 import { PatternConverter } from './convertPatterns';
 import { isComment, syntaxError, unavailable } from './convertSyntax';
 import { parseFormatString } from './formatString';
-import { parseStringLiteral } from './literals';
+import { parseRawStringLiteral, parseStringLiteral } from './literals';
 import { expand, MacroError, type MacroRule, parseParts, tokensOf, tokenText as macroTokenText } from './macroRules';
 
 const MAX_MACRO_DEPTH = 128;
@@ -172,6 +172,17 @@ export abstract class MacroConverter extends PatternConverter {
         const segments = ['std', 'pin', 'pin_value'].map((part) => ({ name: part, args: undefined, span }));
         const callee: Expr = { kind: 'path', path: { segments, span }, span };
         return { kind: 'call', callee, args: [this.expr(args[0])], span };
+      }
+      case 'matches': {
+        // With a guard, `matches!(v, p if g)` is the `match` it expands to.
+        if (!tree) return undefined;
+        const { value, pattern, guard } = this.matchesParts(tree, span);
+        if (!guard) return undefined;
+        const arms: MatchArm[] = [
+          { pattern, guard, body: { kind: 'bool', value: true, span }, span },
+          { pattern: { kind: 'wild', span }, guard: undefined, body: { kind: 'bool', value: false, span }, span },
+        ];
+        return { kind: 'match', scrutinee: value, arms, endRow: span.row, span };
       }
       case 'line': {
         return { kind: 'int', value: BigInt(span.row + 1), suffix: 'u32', span };
@@ -412,6 +423,12 @@ export abstract class MacroConverter extends PatternConverter {
   }
 
   private matchesMacro(tree: Node, span: Span): MacroCall {
+    const { value, pattern } = this.matchesParts(tree, span);
+    return { kind: 'matches', value, pattern };
+  }
+
+  /** The value, the pattern, and the guard of `matches!(value, pattern if guard)`. */
+  private matchesParts(tree: Node, span: Span): { value: Expr; pattern: Pattern; guard: Expr | undefined } {
     const tokens = tree.children.slice(1, -1).filter((child) => !isComment(child));
     const last = tokens.at(-1);
     const end = last?.type === ',' ? last.startIndex - tree.startIndex : tree.text.length - 1;
@@ -422,11 +439,14 @@ export abstract class MacroConverter extends PatternConverter {
       const arm = root.descendantsOfType('match_arm')[0];
       if (!arm) syntaxError(span, 'matches! の書き方に誤りがあります。');
       const matchPattern = this.field(arm, 'pattern');
-      if (matchPattern.childForFieldName('condition')) unavailable(span, 'match の腕のガード（if）');
-      const patternNode = matchPattern.namedChildren.find((child) => !isComment(child));
-      return patternNode ? this.pattern(patternNode) : ({ kind: 'wild', span } as Pattern);
-    }) as Pattern;
-    return { kind: 'matches', value, pattern };
+      const condition = matchPattern.childForFieldName('condition');
+      const patternNode = matchPattern.namedChildren.find((child) => !isComment(child) && child.id !== condition?.id);
+      return {
+        pattern: patternNode ? this.pattern(patternNode) : ({ kind: 'wild', span } as Pattern),
+        guard: condition ? this.expr(condition) : undefined,
+      };
+    }) as { pattern: Pattern; guard: Expr | undefined };
+    return { value, ...pattern };
   }
 
   /**
@@ -487,7 +507,10 @@ export abstract class MacroConverter extends PatternConverter {
   }
 
   private formatString(formatNode: Node, argCount: number, span: Span, macroName: string): string {
-    if (formatNode.type === 'raw_string_literal') unavailable(this.span(formatNode), '生の文字列（r"..."）');
+    if (formatNode.type === 'raw_string_literal') {
+      const raw = parseRawStringLiteral(formatNode.text);
+      if (raw && !raw.prefix) return raw.body;
+    }
     if (formatNode.type !== 'string_literal' || formatNode.text.startsWith('b')) {
       if (macroName === 'panic' && argCount === 1) {
         syntaxError(span, 'panic! の引数は、書式の文字列にしてください。');
