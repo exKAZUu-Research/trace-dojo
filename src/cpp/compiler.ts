@@ -845,6 +845,14 @@ export class Compiler extends StatementCompiler {
     };
   }
 
+  protected declareParameterNames(list: Syntax, declare: (name: string, entity: Entity) => void): void {
+    for (const param of this.parameters(list)) {
+      if (!param.name) continue;
+      const local = { name: param.name, slot: -1, type: param.type, isParameter: true };
+      declare(param.name, { kind: 'local', local, isReference: param.type.kind === 'reference' });
+    }
+  }
+
   protected parameterTypes(list: Syntax): Type[] {
     return this.parameters(list).map((param) => param.type);
   }

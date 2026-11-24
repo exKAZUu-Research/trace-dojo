@@ -32,7 +32,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   requires_clause: 'requires',
   requires_expression: 'requires',
   concept_definition: 'コンセプト（concept）',
-  decltype: 'decltype',
   structured_binding_declarator: '構造化束縛（auto [a, b] = ...）',
   alignas_qualifier: 'alignas',
   alignof_expression: 'alignof',

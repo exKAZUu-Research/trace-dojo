@@ -434,9 +434,16 @@ export abstract class CompilerBase {
       }
       case 'placeholder_type_specifier': {
         if (fieldOf(node, 'constraint')) return this.unsupported(node.row, 'コンセプトで制約した auto');
-        if (node.children.some((child) => child.type === 'decltype')) return this.unsupported(node.row, 'decltype');
         if (!allowAuto) return this.error(node.row, 'auto は、この場所では型として使えません。');
         return AUTO;
+      }
+      case 'decltype': {
+        const operand = node.children[0];
+        if (operand?.type === 'auto') {
+          if (!allowAuto) return this.error(node.row, 'decltype(auto) は、この場所では型として使えません。');
+          return AUTO;
+        }
+        return this.decltypeOf(operand as Syntax);
       }
       case 'type_identifier':
       case 'identifier':
@@ -632,7 +639,14 @@ export abstract class CompilerBase {
         if (trailing) {
           if (!isAuto(base))
             this.error(declarator.row, '後置の戻り値の型（-> 型）を書くときは、前の型を auto にしてください。');
-          base = this.typeDescriptor(trailing.children[0]);
+          // The parameters are in scope in the trailing return type (`auto f(int a) -> decltype(a)`).
+          const parameters = fieldOf(declarator, 'parameters');
+          let trailingType: Type = base;
+          this.withNames((declare) => {
+            if (parameters) this.declareParameterNames(parameters, declare);
+            trailingType = this.typeDescriptor(trailing.children[0]);
+          });
+          base = trailingType;
         }
         const inner = fieldOf(declarator, 'declarator');
         // `int (*fp)(int)` declares a pointer to a function type rather than a function.
@@ -667,6 +681,12 @@ export abstract class CompilerBase {
     const parameters = fieldOf(declarator, 'parameters');
     return { kind: 'function', ret, params: parameters ? this.parameterTypes(parameters) : [] };
   }
+
+  /** The type `decltype(e)` names (C++20 [dcl.type.decltype]). */
+  protected abstract decltypeOf(operand: Syntax): Type;
+
+  /** Declares a parameter list's names, for the unevaluated operands of a trailing return type. */
+  protected abstract declareParameterNames(list: Syntax, declare: (name: string, entity: Entity) => void): void;
 
   /** The types of a parameter list's parameters, after arrays and functions decay to pointers. */
   protected abstract parameterTypes(list: Syntax): Type[];

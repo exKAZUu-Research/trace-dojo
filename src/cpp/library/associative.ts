@@ -3,6 +3,7 @@ import { implicitConversion } from '../conversions';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
+import { withTemporaries } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import {
   alignOf,
@@ -25,7 +26,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { CObject, holdValues, Ptr, type Value } from '../values';
+import { Box, CObject, holdValues, Ptr, type Value } from '../values';
 import { MapValue, NodePositions } from './containerValues';
 import {
   assignElement,
@@ -510,7 +511,37 @@ export function comparatorOrder(
       return (a, b, frame) => (apply(a, b, frame) ? -1 : apply(b, a, frame) ? 1 : 0);
     }
   }
+  if (comparator.kind === 'class' && !comparator.cls.library)
+    return programComparatorOrder(compiler, keyType, comparator.cls, row);
   return compiler.unsupported(row, `比べ方に ${typeName(comparator)} を使うこと`);
+}
+
+/**
+ * The order of a comparator class the program wrote (a function object or a lambda's closure type), whose objects
+ * hold nothing, so that any of them compares as the container's does.
+ */
+function programComparatorOrder(compiler: ExpressionCompiler, keyType: Type, cls: ClassInfo, row: number): Order {
+  if (cls.fields.length > 0)
+    return compiler.unsupported(row, `値を持つ比べ方の関数オブジェクト（${cls.name}）をコンテナに使うこと`);
+  const object = new CObject(cls, []);
+  const callee: Expr = { type: classType(cls, true), isLvalue: true, row, run: () => new Ptr(new Box(object), 0) };
+  const operands: Value[][] = [];
+  const operand = (index: number): Expr => ({
+    type: withConst(unqualified(keyType)),
+    isLvalue: true,
+    row,
+    run: () => new Ptr(new Box((operands.at(-1) as Value[])[index]), 0),
+  });
+  const test = compiler.condition(compiler.callWith(callee, [operand(0), operand(1)], row), row);
+  const less = (a: Value, b: Value, frame: Frame): boolean => {
+    operands.push([a, b]);
+    try {
+      return withTemporaries(frame, () => test(frame));
+    } finally {
+      operands.pop();
+    }
+  };
+  return (a, b, frame) => (less(a, b, frame) ? -1 : less(b, a, frame) ? 1 : 0);
 }
 
 /** The members of an ordered associative container that compare keys, besides `erase` of a key. */
@@ -798,6 +829,14 @@ export function orderedClass(
       uses: (row) => compiler.requireLibraryObjectUse(entryType, 'destroy', row),
     }),
   ];
+  // The comparator a container of a program's comparator class is given orders it as any other object does.
+  if (custom?.kind === 'class' && !custom.cls.library)
+    cls.constructors.push(
+      nativeConstructor(cls, [constRef(custom)], make, {
+        isExplicit: true,
+        uses: (row) => compiler.requireLibraryObjectUse(entryType, 'destroy', row),
+      })
+    );
   addRangeMembers(compiler, cls, entryType, table);
   const method = (
     memberName: string,

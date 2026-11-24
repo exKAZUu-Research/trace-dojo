@@ -64,6 +64,7 @@ import {
   NULLPTR,
   pointerTo,
   PTRDIFF_T,
+  referenceTo,
   sameType,
   SIZE_T,
   sizeOf,
@@ -1792,6 +1793,33 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const type = target && this.expressionAsType(target);
       if (type) return type;
       return this.compileExpression(value).type;
+    } finally {
+      this.isUnevaluated = previous;
+    }
+  }
+
+  protected decltypeOf(operand: Syntax): Type {
+    const previous = this.isUnevaluated;
+    this.isUnevaluated = true;
+    try {
+      // An unparenthesized name or member access gives the type its entity was declared with.
+      if (operand.type === 'identifier' || operand.type === 'qualified_identifier') {
+        const entity =
+          operand.type === 'identifier' ? this.lookupName(operand.text, operand.row) : this.lookupQualified(operand);
+        if (entity.kind === 'local') return entity.local.type;
+        if (entity.kind === 'global') return entity.global.type;
+        if (entity.kind === 'field') return entity.field.type;
+        if (entity.kind === 'staticField') return entity.field.type;
+      }
+      const expr = this.compileExpression(operand);
+      if (operand.type === 'field_expression' && expr.description !== undefined) return expr.type;
+      if (expr.functions) {
+        const [fn, ...others] = expr.functions.candidates;
+        if (others.length > 0) return this.error(operand.row, `${expr.functions.name} はオーバーロードされています。`);
+        return functionTypeOf(fn);
+      }
+      // Otherwise an lvalue gives a reference to its type.
+      return expr.isLvalue && !expr.isXvalue ? referenceTo(expr.type) : expr.type;
     } finally {
       this.isUnevaluated = previous;
     }
