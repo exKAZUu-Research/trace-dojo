@@ -1,6 +1,8 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr } from './ast';
+import { reportConstantDeprecation } from './attributeEffects';
 import { debugType } from './conversions';
+import { requireBackedCases } from './enums';
 import { reportUncaughtWarning, throwError } from './errors';
 import { strictEquals } from './operators';
 import { share } from './places';
@@ -10,9 +12,9 @@ import { type ClassConst, PhpArray, type PhpClass, type Value, visibilityRank } 
 import { isSubtype } from './variance';
 
 /** Evaluates a constant expression of a class in that class's scope, which the interpreter provides. */
-export let evaluateInClass: (e: Expr, cls: PhpClass) => Value = () => null;
+export let evaluateInClass: (e: Expr, cls: PhpClass | undefined) => Value = () => null;
 
-export function setClassEvaluator(run: (e: Expr, cls: PhpClass) => Value): void {
+export function setClassEvaluator(run: (e: Expr, cls: PhpClass | undefined) => Value): void {
   evaluateInClass = run;
 }
 
@@ -24,6 +26,7 @@ export function addConst(cls: PhpClass, ast: ClassDecl['consts'][number]): void 
     visibility: ast.visibility,
     isFinal: ast.isFinal,
     type: ast.type,
+    attributes: ast.attributes,
     evaluate: () => evaluateInClass(ast.value, cls),
   };
   const inherited = cls.consts.get(ast.name);
@@ -91,6 +94,7 @@ export function applyTraitConstants(cls: PhpClass, trait: PhpClass, origins: Map
       visibility: source.visibility,
       isFinal: source.isFinal,
       type: source.type,
+      attributes: source.attributes,
       initializer,
       evaluate: initializer ? () => evaluateInClass(initializer, cls) : source.evaluate,
     };
@@ -150,6 +154,8 @@ export function classConstant(
   if (!canAccessConstant(constant, scope))
     throwError('Error', `Cannot access ${constant.visibility} constant ${displayName}::${name}`);
   if (cls.kind === 'trait') throwError('Error', `Cannot access trait constant ${displayName}::${name} directly`);
+  requireBackedCases(cls);
+  reportConstantDeprecation(constant);
   return share(resolveConstant(constant, displayName, trackEvaluation));
 }
 
@@ -159,7 +165,7 @@ export function initializeClassConstants(cls: PhpClass): void {
   }
 }
 
-function resolveConstant(constant: ClassConst, displayName: string, trackEvaluation: boolean): Value {
+export function resolveConstant(constant: ClassConst, displayName: string, trackEvaluation: boolean): Value {
   const { name } = constant;
   if (constant.value === undefined) {
     if (constant.evaluating) throwError('Error', `Cannot declare self-referencing constant ${displayName}::${name}`);

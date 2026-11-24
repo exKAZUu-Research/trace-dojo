@@ -2,7 +2,9 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
+import { CompileError } from '../interpreter/diagnostics';
 import type {
+  AttributeAst,
   ClassDecl,
   ClassRef,
   Expr,
@@ -14,6 +16,7 @@ import type {
   TraitRule,
 } from './ast';
 import { boundStaticMethodParameters, hasNullsafeReceiver } from './astAnalysis';
+import { attributeError, type AttributeSubject, hasAttribute, readAttributes } from './attributeRules';
 import { enc, lower } from './bytes';
 import { parseTypeText } from './calls';
 import { CompileClassConstants } from './compileClassConstants';
@@ -41,6 +44,19 @@ import { markSuspendingStatements } from './suspension';
 import { describeType, typeToString } from './types';
 import { type Param, type TypeDecl, type Visibility, visibilityRank } from './values';
 import { isSubtype } from './variance';
+
+const CLASS_KINDS: Record<string, ClassDecl['kind']> = {
+  interface_declaration: 'interface',
+  trait_declaration: 'trait',
+  enum_declaration: 'enum',
+};
+
+const CLASS_KIND_NOUNS: Record<ClassDecl['kind'], string> = {
+  class: 'a class',
+  interface: 'an interface',
+  trait: 'a trait',
+  enum: 'an enum',
+};
 
 const MAGIC_METHODS: Record<
   string,
@@ -156,8 +172,6 @@ export abstract class DeclarationConverter extends ConverterBase {
   // code-gauge-allow functionNcss -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private convertFunction(node: Node, isClosure: boolean, className?: string): FunctionDecl {
-    const attributes = node.childForFieldName('attributes');
-    if (attributes) this.unsupported(attributes, '属性（#[...]）');
     const nameNode = node.childForFieldName('name');
     const rawName = nameNode ? this.nameText(nameNode) : '';
     const name = isClosure
@@ -195,6 +209,10 @@ export abstract class DeclarationConverter extends ConverterBase {
       this.fn.isGenerator = body !== null && (body.type === 'yield_expression' || containsYield(body));
       if (this.fn.isGenerator && returnType && !allowsGenerator(returnType))
         this.error(node, `Generator return type must be a supertype of Generator, ${typeToString(returnType)} given`);
+      const attributes = this.attributeList(node, {
+        targets: [className !== undefined && !isClosure ? 'method' : 'function'],
+        returnType,
+      });
       if (byRefReturn && returnType?.k === 'named' && returnType.name === 'void')
         this.notices.push({
           level: 'Deprecated',
@@ -218,12 +236,13 @@ export abstract class DeclarationConverter extends ConverterBase {
       if (this.fn.isGenerator) markSuspendingStatements(statements);
       return {
         name,
+        attributes,
         params,
         returnType,
         byRefReturn,
         body: statements,
         arrowBody,
-        row: node.startPosition.row,
+        row: declarationRow(node),
         endRow: node.endPosition.row,
         isAtomic,
         usesThis: this.fn.usesThis === true,
@@ -271,8 +290,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     const seen = new Set<string>();
     for (const child of node.namedChildren) {
       if (child.type === 'comment') continue;
-      const attributes = child.childForFieldName('attributes');
-      if (attributes) this.unsupported(attributes, '属性（#[...]）');
+      const promoted = child.type === 'property_promotion_parameter';
+      const attributes = this.attributeList(child, { targets: promoted ? ['parameter', 'property'] : ['parameter'] });
       const nameNode = child.childForFieldName('name') as Node;
       const promotedReference = nameNode.type === 'by_ref';
       const name = this.variableName(promotedReference ? semanticChildren(nameNode)[0] : nameNode);
@@ -309,9 +328,11 @@ export abstract class DeclarationConverter extends ConverterBase {
         defaultReportRow: defaultExpr ? this.constantCompileRow(defaultExpr, child.startPosition.row, true) : undefined,
         row: child.startPosition.row,
       };
-      if (child.type === 'property_promotion_parameter')
+      if (hasAttribute(attributes, 'SensitiveParameter')) param.sensitive = true;
+      if (promoted) {
         param.promote = this.parameterPromotion(child, param, functionName, className);
-      else if (defaultExpr?.k === 'lit' && defaultExpr.v === null && type && !typeAllowsNull(type))
+        param.promote.attributes = attributes;
+      } else if (defaultExpr?.k === 'lit' && defaultExpr.v === null && type && !typeAllowsNull(type))
         param.implicitNullable = true;
       params.push(param);
     }
@@ -642,6 +663,11 @@ export abstract class DeclarationConverter extends ConverterBase {
         }
         return;
       }
+      case 'prop': {
+        check(expression.obj);
+        if (typeof expression.name !== 'string') check(expression.name);
+        return;
+      }
       case 'idx': {
         check(expression.base);
         if (!expression.index) return invalid();
@@ -684,7 +710,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         return;
       }
       case 'new': {
-        if (!allowNew) invalid();
+        if (!allowNew) this.error(expression.row, 'New expressions are not supported in this context');
         className(expression.cls);
         for (const arg of expression.args) {
           if (arg.spread) this.error(expression.row, 'Argument unpacking in constant expressions is not supported');
@@ -784,20 +810,13 @@ export abstract class DeclarationConverter extends ConverterBase {
     this.checkUnscopedModifiers(node);
     if (!this.preserveSyntax && !anonymous && this.currentClass !== undefined)
       this.error(node, 'Class declarations may not be nested');
-    const attributes = node.childForFieldName('attributes');
-    if (attributes) this.unsupported(attributes, '属性（#[...]）');
-    const kind: ClassDecl['kind'] =
-      node.type === 'interface_declaration' ? 'interface' : node.type === 'trait_declaration' ? 'trait' : 'class';
+    const kind = CLASS_KINDS[node.type] ?? 'class';
     const nameNode = node.childForFieldName('name');
     let name = '';
     if (!anonymous) {
       const raw = this.declaredIdentifier(nameNode as Node);
-      if (isReservedClassName(raw)) {
-        this.error(
-          node,
-          `「${raw}」はクラスの名前に使えません（Cannot use '${raw}' as class name as it is reserved）。`
-        );
-      }
+      if (isReservedClassName(raw))
+        this.error(node, `Cannot use "${raw}" as ${CLASS_KIND_NOUNS[kind]} name as it is reserved`);
       name = this.qualify(raw);
     }
     const modifiers = node.children;
@@ -827,6 +846,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       name,
       fullName,
       kind,
+      backingType: kind === 'enum' ? this.enumBackingType(node) : undefined,
       parent,
       interfaces,
       isAbstract: modifiers.some((child) => child.type === 'abstract_modifier'),
@@ -837,11 +857,12 @@ export abstract class DeclarationConverter extends ConverterBase {
       methods: [],
       traits: [],
       syntaxMembers: this.preserveSyntax ? [] : undefined,
-      row: node.startPosition.row,
+      row: declarationRow(node),
       endRow: node.endPosition.row,
       isAnonymous: anonymous,
     };
     if (!this.preserveSyntax) this.validateClassModifiers(node, decl);
+    decl.attributes = this.attributeList(node, { targets: ['class'], cls: decl });
     this.withClassContext(decl, () => {
       const body = node.childForFieldName('body') as Node;
       const memberNames = new Set<string>();
@@ -855,6 +876,14 @@ export abstract class DeclarationConverter extends ConverterBase {
       if (!anonymous && (!topLevel || !this.compileClasses.bind(decl))) this.runtimeDefinitionKeys++;
     }
     return decl;
+  }
+
+  private enumBackingType(node: Node): ClassDecl['backingType'] {
+    const typeNode = node.namedChildren.find((child) => child.type === 'primitive_type');
+    if (!typeNode) return undefined;
+    const type = lower(typeNode.text);
+    if (type !== 'int' && type !== 'string') this.error(node, `Enum backing type must be int or string, ${type} given`);
+    return type;
   }
 
   private addPromotedProperties(decl: ClassDecl): void {
@@ -937,6 +966,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         return;
       }
       case 'property_declaration': {
+        if (decl.kind === 'enum') this.error(member, `Enum ${decl.name} cannot include properties`);
         const start = decl.props.length;
         this.properties(member, decl, decl.kind);
         decl.syntaxMembers?.push({
@@ -974,13 +1004,57 @@ export abstract class DeclarationConverter extends ConverterBase {
         return;
       }
       case 'enum_case': {
-        this.unsupported(member, '列挙型（enum）');
+        this.enumCase(member, decl);
         return;
       }
       default: {
         this.error(member, '書き方に誤りがあります。');
       }
     }
+  }
+
+  /** Converts the attributes written on a declaration and checks them as PHP does when it compiles one. */
+  protected attributeList(node: Node, subject: AttributeSubject): AttributeAst[] | undefined {
+    const list = node.childForFieldName('attributes');
+    if (!list) return undefined;
+    const row = declarationRow(node);
+    let attributes: AttributeAst[];
+    try {
+      attributes = readAttributes(list, {
+        className: (name) => this.namedClass(name),
+        constant: (value) => this.constantExpr(value, true),
+      });
+    } catch (error) {
+      // PHP reports errors in attribute arguments on the line of the declaration.
+      if (error instanceof CompileError) this.error(row, error.diagnostics[0].message);
+      throw error;
+    }
+    const error = this.preserveSyntax ? undefined : attributeError(attributes, subject);
+    if (error) this.error(row, error);
+    return attributes;
+  }
+
+  private enumCase(member: Node, decl: ClassDecl): void {
+    if (decl.kind !== 'enum') this.error(member, 'Case can only be used in enums');
+    const name = this.nameText(member.childForFieldName('name') as Node);
+    const valueNode = member.childForFieldName('value');
+    if (!this.preserveSyntax) {
+      if (lower(name) === 'class')
+        this.error(member, "A class constant must not be called 'class'; it is reserved for class name fetching");
+      if (decl.consts.some((constant) => constant.name === name))
+        this.error(
+          member,
+          `定数 ${decl.name}::${name} は、すでに宣言されています（Cannot redefine class constant ${decl.name}::${name}）。`
+        );
+      if (decl.backingType && !valueNode)
+        this.error(member, `Case ${name} of backed enum ${decl.name} must have a value`);
+      if (!decl.backingType && valueNode)
+        this.error(member, `Case ${name} of non-backed enum ${decl.name} must not have a value`);
+    }
+    const attributes = this.attributeList(member, { targets: ['class constant'] });
+    const row = member.startPosition.row;
+    const value: Expr = valueNode ? this.constantExpr(valueNode) : { k: 'lit', v: null, row };
+    decl.consts.push({ name, value, visibility: 'public', isFinal: false, row, isCase: true, attributes });
   }
 
   private withClassContext<T>(decl: ClassDecl | undefined, convert: () => T): T {
@@ -1061,8 +1135,7 @@ export abstract class DeclarationConverter extends ConverterBase {
 
   // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected classConsts(member: Node, decl: ClassDecl, kind: ClassDecl['kind']): void {
-    const attributes = member.childForFieldName('attributes');
-    if (attributes) this.unsupported(attributes, '属性（#[...]）');
+    const attributes = this.attributeList(member, { targets: ['class constant'] });
     const modifiers = this.memberModifiers(member);
     const typeNode = member.childForFieldName('type');
     for (const element of member.namedChildren.filter((child) => child.type === 'const_element')) {
@@ -1096,6 +1169,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         isFinal: modifiers.isFinal,
         row: element.startPosition.row,
         type: constantType,
+        attributes,
       });
       if (this.preserveSyntax) continue;
       const folded = this.compileClasses.add(decl, name, constantValue, constantType, (token) =>
@@ -1139,9 +1213,9 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   // code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected properties(member: Node, decl: ClassDecl, kind: ClassDecl['kind']): void {
-    const attributes = member.childForFieldName('attributes');
-    if (attributes) this.unsupported(attributes, '属性（#[...]）');
+    const attributes = this.attributeList(member, { targets: ['property'] });
     if (kind === 'interface' && !member.namedChildren.some((child) => child.type === 'property_hook_list')) {
       this.error(
         member,
@@ -1181,6 +1255,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       if (type && defaultExpr) this.checkDefaultType(element, name, type, defaultExpr, decl);
       const prop: PropertyDeclAst = {
         name,
+        attributes,
         visibility: modifiers.visibility ?? 'public',
         setVisibility: modifiers.setVisibility,
         isStatic: modifiers.isStatic,
@@ -1226,8 +1301,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
     const hooks: NonNullable<PropertyDeclAst['hooks']> = { syntax: this.preserveSyntax ? [] : undefined };
     for (const { hook, kind, body, final } of declarations) {
-      const attributes = hook.childForFieldName('attributes');
-      if (attributes) this.unsupported(attributes, '属性（#[...]）');
+      const attributes = this.attributeList(hook, { targets: ['method'] });
       const paramsNode = hook.childForFieldName('parameters');
       const outerFn = this.fn;
       const outerLoop = this.loop;
@@ -1332,6 +1406,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         if (this.fn.isGenerator) markSuspendingStatements(statements);
         const fn: FunctionDecl = {
           name: `$${prop.name}::${kind}`,
+          attributes,
           isPropertyHook: true,
           returnType: this.fn.returnType,
           params,
@@ -1396,6 +1471,7 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected methodDecl(member: Node, decl: ClassDecl): MethodDeclAst {
     const modifiers = this.memberModifiers(member);
     if (!this.preserveSyntax && modifiers.isReadonly)
@@ -1434,6 +1510,8 @@ export abstract class DeclarationConverter extends ConverterBase {
         `メソッド ${decl.name}::${fn.name}() に本体がありません（Non-abstract method ${decl.name}::${fn.name}() must contain body）。`
       );
     }
+    if (modifiers.isAbstract && decl.kind === 'enum')
+      this.error(member, `Enum method ${decl.name}::${fn.name}() must not be abstract`);
     if (modifiers.isAbstract && !decl.isAbstract && decl.kind === 'class' && !decl.isAnonymous) {
       this.error(
         member,
@@ -1546,6 +1624,12 @@ export abstract class DeclarationConverter extends ConverterBase {
   // Expressions -------------------------------------------------------------------------------------------------------
 
   protected abstract block(node: Node | null | undefined): Stmt[];
+}
+
+/** The row where a declaration starts after the attributes written before it, which PHP's messages name. */
+function declarationRow(node: Node): number {
+  const start = node.children.find((child) => child.type !== 'attribute_list' && child.type !== 'comment') ?? node;
+  return start.startPosition.row;
 }
 
 function typeAllowsNull(type: TypeDecl): boolean {

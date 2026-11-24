@@ -441,7 +441,8 @@ export function foreachReferences(target: Expr, byRef: boolean): boolean {
 }
 
 export function canBindClass(decl: ClassDecl, parentIsBound: (name: string) => boolean): boolean {
-  if (decl.interfaces.length > 0 || decl.traits.length > 0 || declaresStringConversion(decl)) return false;
+  if (decl.kind === 'enum' || decl.interfaces.length > 0 || decl.traits.length > 0 || declaresStringConversion(decl))
+    return false;
   return !decl.parent || parentIsBound(lower(decl.parent));
 }
 

@@ -315,7 +315,9 @@ function printRValue(value: Value, indent: number, state: Inspection): string {
   }
   if (value instanceof PhpObject && value.cls.name === '(stream)') return `Resource id #${value.id}`;
   if (value instanceof PhpObject) {
-    const header = `${value.cls.name} ${value.cls.kind === 'enum' ? 'Enum' : 'Object'}\n`;
+    const backing = value.cls.decl?.backingType;
+    const kind = value.cls.kind === 'enum' ? `Enum${backing ? `:${backing}` : ''}` : 'Object';
+    const header = `${value.cls.name} ${kind}\n`;
     if (state.active.has(value)) return `${header} *RECURSION*`;
     state.active.add(value);
     try {
@@ -490,7 +492,7 @@ function exportValue(value: Value, level: number, state: Inspection): string {
     }
   }
   const object = value as PhpObject;
-  if (object.cls.kind === 'enum') return `\\${enumCaseName(object)}`;
+  if (object.cls.kind === 'enum') return `${lead}\\${enumCaseName(object)}`;
   if (state.active.has(object)) return circularExport();
   state.active.add(object);
   try {

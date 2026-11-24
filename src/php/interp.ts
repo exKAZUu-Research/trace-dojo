@@ -13,6 +13,7 @@ import {
 } from './assignment';
 import type { Arg, ClassDecl, ClassRef, Expr } from './ast';
 import { hasNullsafeReceiver } from './astAnalysis';
+import { reportGlobalConstantDeprecation } from './attributeEffects';
 import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
 import {
@@ -586,6 +587,8 @@ function readPropertyOperand(object: Value, name: Value, row: number, mode: Read
       return null;
     });
   }
+  if (runtime.frame.constantExpression && object.cls.kind !== 'enum')
+    throwError('Error', 'Fetching properties on non-enums in constant expressions is not allowed');
   const key = toStr(name);
   runtime.row = row;
   if (mode === 'isset') return issetProp(object, key, runtime.frame.scope);
@@ -961,6 +964,7 @@ export function rejectUnsupportedConstant(name: string): void {
 export function deprecatedConstant(name: string, value: Value): Value {
   const message = constantDeprecation(name);
   if (message) deprecated(message);
+  reportGlobalConstantDeprecation(constantKey(name), name);
   return value;
 }
 

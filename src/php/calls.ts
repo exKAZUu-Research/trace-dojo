@@ -2,6 +2,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl, Stmt } from './ast';
+import { hideSensitiveArguments, reportCallAttributes } from './attributeEffects';
 import { lower, untilNul } from './bytes';
 import { valueName } from './conversions';
 import {
@@ -97,6 +98,8 @@ export interface CallRecord {
   named?: [string, Value][];
   /** The row of the call in its caller, or undefined when native code made the call. */
   row: number | undefined;
+  /** The parameters of a function with `#[\SensitiveParameter]` ones, whose arguments traces hide. */
+  sensitiveParams?: readonly Param[];
 }
 
 export type StatementCompletion =
@@ -187,11 +190,13 @@ setCallCapture(() =>
 );
 
 export function callArguments(record: CallRecord): Value[] {
-  if (record.boundFrame) return frameArguments(record.boundFrame);
-  return record.args.map((value, index) => {
-    const ref = record.argumentRefs?.[index];
-    return ref ? ref.v : value;
-  });
+  const values = record.boundFrame
+    ? frameArguments(record.boundFrame)
+    : record.args.map((value, index) => {
+        const ref = record.argumentRefs?.[index];
+        return ref ? ref.v : value;
+      });
+  return record.sensitiveParams ? hideSensitiveArguments(values, record.sensitiveParams) : values;
 }
 
 export function frameArguments(frame: Frame): Value[] {
@@ -696,6 +701,11 @@ function callerIsStrict(): boolean {
   return rt().strictTypes && nativeDepth === 0;
 }
 
+/** Whether the code that called the running native function declared strict_types. */
+export function nativeCallerIsStrict(): boolean {
+  return rt().strictTypes && nativeDepth === 1;
+}
+
 // User functions -----------------------------------------------------------------------------------------------------
 
 interface UserCallState {
@@ -725,6 +735,7 @@ export function invokeUser(
   row: number | undefined,
   discardResult: boolean
 ): Value {
+  reportCallAttributes(target, fn, args, discardResult);
   const saved = enterUserCall(target, fn, args, row);
   let returned: Value = null;
   let failure: unknown;
@@ -904,6 +915,7 @@ function recordForUserCall(target: CallTarget, received: UserArgumentSlots, row:
   );
   if (received.extraNamed.length > 0)
     record.named = received.extraNamed.map(({ name, argument }) => [name, argument.ref?.v ?? argument.v]);
+  if (target.fn.params.some((param) => param.sensitive)) record.sensitiveParams = target.fn.params;
   return record;
 }
 

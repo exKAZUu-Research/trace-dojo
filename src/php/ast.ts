@@ -142,7 +142,7 @@ export type Stmt = { row: number; suspends?: true } & (
   | { k: 'unset'; targets: Expr[] }
   | { k: 'func'; decl: FunctionDecl }
   | { k: 'class'; decl: ClassDecl }
-  | { k: 'const'; items: { name: string; value: Expr; opcodeRow: number }[] }
+  | { k: 'const'; items: { name: string; value: Expr; opcodeRow: number; attributes?: AttributeAst[] }[] }
   | { k: 'goto'; label: string; offset: number }
   | { k: 'label'; name: string }
   | { k: 'nop' }
@@ -150,8 +150,17 @@ export type Stmt = { row: number; suspends?: true } & (
   | { k: 'tick'; every: number; count: number }
 );
 
+/** An attribute (`#[Name(args)]`), whose arguments only reflection, which this environment lacks, evaluates. */
+export interface AttributeAst {
+  /** The fully qualified class name, without a leading backslash. */
+  name: string;
+  args: { name?: string; value: Expr }[];
+  row: number;
+}
+
 export interface FunctionDecl {
   name: string;
+  attributes?: AttributeAst[];
   isPropertyHook?: boolean;
   params: ParamDecl[];
   returnType?: TypeDecl;
@@ -181,6 +190,7 @@ export interface FunctionDecl {
 
 export interface PropertyDeclAst {
   name: string;
+  attributes?: AttributeAst[];
   visibility: Visibility;
   setVisibility?: Visibility;
   isStatic: boolean;
@@ -241,13 +251,26 @@ export interface ClassDecl {
   name: string;
   /** The name `get_class` and `::class` give an anonymous class, which holds a NUL byte, the file, and the line. */
   fullName?: string;
-  kind: 'class' | 'interface' | 'trait';
+  kind: 'class' | 'interface' | 'trait' | 'enum';
+  attributes?: AttributeAst[];
+  /** The type of an enum's case values, which a pure enum lacks. */
+  backingType?: 'int' | 'string';
   parent?: string;
   interfaces: string[];
   isAbstract: boolean;
   isFinal: boolean;
   isReadonly: boolean;
-  consts: { name: string; value: Expr; visibility: Visibility; isFinal: boolean; row: number; type?: TypeDecl }[];
+  /** The constants and enum cases in declaration order; a case of a pure enum has a `null` placeholder value. */
+  consts: {
+    name: string;
+    value: Expr;
+    visibility: Visibility;
+    isFinal: boolean;
+    row: number;
+    type?: TypeDecl;
+    isCase?: true;
+    attributes?: AttributeAst[];
+  }[];
   props: PropertyDeclAst[];
   methods: MethodDeclAst[];
   traits: { names: string[]; rules: TraitRule[]; row: number }[];

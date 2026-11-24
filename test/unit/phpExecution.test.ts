@@ -250,7 +250,6 @@ test('counts decoded PHP output against the shared limit', () => {
 });
 
 test.each([
-  ['an enum', '<?php\nenum Suit { case Hearts; }', '列挙型（enum）'],
   ['include', "<?php\ninclude 'a.php';", 'include・require'],
   ['a superglobal', '<?php\necho $_GET["x"];', '$_GET'],
 ])('rejects %s with a message in Japanese', (_name, program, what) => {
@@ -943,7 +942,7 @@ test.each([
   '<?php mb_strlen("abc","sjis");',
   '<?php echo defined("PHP_BINARY") ? "y" : "n";',
   '<?php echo constant("PHP_BINARY");',
-  '<?php var_dump(class_exists("Attribute"));',
+  '<?php var_dump(class_exists("ReflectionAttribute"));',
 ])('unsupported arguments produce the unsupported-feature message: %s', (source) => {
   expect(run(source)).toMatchObject({
     kind: 'executed',

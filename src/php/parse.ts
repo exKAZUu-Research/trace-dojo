@@ -9,6 +9,7 @@ import {
 } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from './ast';
+import { parseTypeText } from './calls';
 import { castType, type CompileNotice, Converter } from './converter';
 import {
   PHP_NUMBER,
@@ -16,6 +17,7 @@ import {
   traitAdaptationModifierError,
   unexpectedTextToken,
 } from './converterBase';
+import { typeToString } from './types';
 
 const parser = await loadParser('@willbooster/tree-sitter-php/tree-sitter-php.wasm');
 
@@ -53,10 +55,22 @@ export interface ParsedProgram {
 export function parsePhp(source: string, trace?: TraceOptions): ParsedProgram {
   const atomicRows = new Set(trace?.atomicAnnotations.keys());
   const ignoredPrefix = shebangEnd(source);
-  const text = hideShebang(source, ignoredPrefix);
-  return parseSource(parser, text, MISSING_TOKEN_NAMES, (root) => convertPhp(root, text, atomicRows, ignoredPrefix), {
-    locateErrors: locatePhpErrors,
-  });
+  let text = hideShebang(source, ignoredPrefix);
+  for (;;) {
+    const rewrites: Rewrite[] = [];
+    try {
+      return parseSource(
+        parser,
+        text,
+        MISSING_TOKEN_NAMES,
+        (root) => convertPhp(root, text, atomicRows, ignoredPrefix),
+        { locateErrors: (root, diagnostics) => locatePhpErrors(root, diagnostics, rewrites) }
+      );
+    } catch (error) {
+      if (!(error instanceof CompileError) || rewrites.length === 0) throw error;
+      for (const { start, end, replacement } of rewrites) text = text.slice(0, start) + replacement + text.slice(end);
+    }
+  }
 }
 
 function convertPhp(root: Node, text: string, atomicRows: Set<number>, ignoredPrefix: number): ParsedProgram {
@@ -99,11 +113,18 @@ function collectLexerNotices(root: Node): CompileNotice[] {
   return notices;
 }
 
-function locatePhpErrors(root: Node, diagnostics: SourceDiagnostic[]): SourceDiagnostic[] {
+function locatePhpErrors(root: Node, diagnostics: SourceDiagnostic[], rewrites: Rewrite[]): SourceDiagnostic[] {
   const creationError = newKeywordError(root, diagnostics.length > 0);
   if (creationError) return [creationError];
   if (diagnostics.length === 0) return diagnostics;
-  for (const error of root.descendantsOfType('ERROR')) {
+  const voidCast = voidCastError(root, rewrites);
+  if (voidCast) return [voidCast];
+  const errors = root.descendantsOfType('ERROR');
+  for (const error of errors) {
+    const diagnostic = recoveredEnumError(root, error, rewrites);
+    if (diagnostic) return [diagnostic];
+  }
+  for (const error of errors) {
     if (diagnostics[0].row !== error.startPosition.row) continue;
     const diagnostic = reservedClassSyntax(error) ?? recoveredTraitModifier(root, error) ?? recoveredMatchError(error);
     if (diagnostic) return [diagnostic];
@@ -111,6 +132,120 @@ function locatePhpErrors(root: Node, diagnostics: SourceDiagnostic[]): SourceDia
     if (shifted) return shifted;
   }
   return diagnostics;
+}
+
+/** A change to the source that lets the grammar parse valid PHP it does not know, keeping every offset. */
+interface Rewrite {
+  start: number;
+  end: number;
+  replacement: string;
+}
+
+/** Text before a `(void)` cast that ends a statement or begins one, where PHP allows the cast. */
+const STATEMENT_BOUNDARY = /(?:[;{}:)]|<\?php|<\?=|\?>|\belse|\bdo)$/i;
+
+/**
+ * The error PHP reports for a `(void)` cast where an expression is expected. The grammar lacks the cast, which only
+ * discards a statement's value, so the source is parsed again with a `(bool)` cast in its place: it evaluates the
+ * operand alike and also marks the result as used.
+ */
+function voidCastError(root: Node, rewrites: Rewrite[]): SourceDiagnostic | undefined {
+  for (const node of root.descendantsOfType('parenthesized_expression')) {
+    const [name, ...rest] = node.namedChildren.filter((child) => child.type !== 'comment');
+    if (rest.length > 0 || name?.type !== 'name' || name.text.toLowerCase() !== 'void') continue;
+    const before = root.text.slice(0, node.startIndex - root.startIndex).trimEnd();
+    if (!STATEMENT_BOUNDARY.test(before))
+      return { row: node.startPosition.row, message: 'syntax error, unexpected token "(void)"' };
+    rewrites.push({ start: name.startIndex, end: name.endIndex, replacement: 'bool' });
+  }
+  return rewrites.length > 0 ? { row: 0, message: 'syntax error' } : undefined;
+}
+
+const ENUM_MEMBERS = new Set(['enum_case', 'const_declaration', 'method_declaration', 'use_declaration', 'comment']);
+const CLASS_MEMBERS = new Set([
+  'const_declaration',
+  'property_declaration',
+  'method_declaration',
+  'use_declaration',
+  'comment',
+]);
+const PROPERTY_START =
+  /^(?:(?:public|protected|private|var|static|readonly|final|abstract)\b\s*)+(?:[^\s$;(){}]+\s+)?\$/i;
+
+/**
+ * PHP's message for the parts of an enum declaration the grammar rejects but PHP reports as a compile error, and
+ * for a case outside an enum. A backing type spelled with capitals is valid PHP, which `rewrites` collects to parse
+ * again in lower case.
+ */
+// code-gauge-allow functionCognitiveComplexity -- Recognizes each recovered enum form in the order PHP reports them.
+// code-gauge-allow functionNcss -- Recognizes each recovered enum form in the order PHP reports them.
+function recoveredEnumError(root: Node, error: Node, rewrites: Rewrite[]): SourceDiagnostic | undefined {
+  const parts = error.children.filter((node) => node.type !== 'comment');
+  const last = parts.at(-1);
+  const next = error.nextSibling;
+  if (last?.type.endsWith('_modifier') && next?.type === 'enum_declaration')
+    return {
+      row: next.startPosition.row,
+      message: 'syntax error, unexpected token "enum", expecting "abstract" or "final" or "readonly" or "class"',
+    };
+  if (error.parent?.type === 'enum_declaration' && parts[1]?.type === ':' && next?.type === 'name')
+    return {
+      row: error.parent.startPosition.row,
+      message: `Enum backing type must be int or string, ${next.text} given`,
+    };
+  const keyword = parts.findIndex(
+    (node) =>
+      ['class', 'interface', 'trait', 'enum'].includes(node.type) || (node.type === 'name' && node.text === 'trait')
+  );
+  if (keyword === -1 || parts[keyword + 1]?.type !== 'name') return undefined;
+  const following = parts[keyword + 2];
+  if (parts[keyword].type === 'enum' && following) {
+    const header = enumHeaderError(root, parts[keyword], following, rewrites);
+    if (header) return header;
+  }
+  const open = parts.findIndex((node, index) => index > keyword && node.type === '{');
+  if (open === -1) return undefined;
+  const members = parts[keyword].type === 'enum' ? ENUM_MEMBERS : CLASS_MEMBERS;
+  const member = parts.slice(open + 1).find((node) => !members.has(node.type));
+  if (!member) return undefined;
+  const row = member.startPosition.row;
+  if (parts[keyword].type === 'enum') {
+    if (!PROPERTY_START.test(root.text.slice(member.startIndex - root.startIndex))) return undefined;
+    return { row, message: `Enum ${qualifiedName(root, parts[keyword + 1])} cannot include properties` };
+  }
+  const word = member.type === 'name' ? member.text.toLowerCase() : '';
+  if (word === 'case') return { row, message: 'Case can only be used in enums' };
+  if (word === 'enum') return { row, message: 'syntax error, unexpected token "enum", expecting "function"' };
+}
+
+/** PHP's message for what follows an enum's name, where the grammar accepts neither `extends` nor most types. */
+function enumHeaderError(
+  root: Node,
+  keyword: Node,
+  following: Node,
+  rewrites: Rewrite[]
+): SourceDiagnostic | undefined {
+  const row = keyword.startPosition.row;
+  if (following.type === 'name' && following.text.toLowerCase() === 'extends')
+    return { row: following.startPosition.row, message: 'syntax error, unexpected token "extends", expecting "{"' };
+  if (following.type !== ':') return undefined;
+  const rest = root.text.slice(following.endIndex - root.startIndex);
+  const typeText = /^\s*([^{]*?)\s*(?:\bimplements\b|\{)/i.exec(rest);
+  if (!typeText) return undefined;
+  const type = typeToString(parseTypeText(typeText[1].replaceAll(/\s+/g, '')));
+  if (type !== 'int' && type !== 'string')
+    return { row, message: `Enum backing type must be int or string, ${type} given` };
+  const start = following.endIndex + typeText[0].indexOf(typeText[1]);
+  rewrites.push({ start, end: start + typeText[1].length, replacement: type });
+  return { row, message: 'syntax error' };
+}
+
+/** The name a declaration in the program's top level gets, with the namespace declared before it. */
+function qualifiedName(root: Node, name: Node): string {
+  const namespace = root.namedChildren
+    .findLast((node) => node.type === 'namespace_definition' && node.startIndex < name.startIndex)
+    ?.childForFieldName('name')?.text;
+  return namespace ? `${namespace}\\${name.text}` : name.text;
 }
 
 function recoveredMatchError(error: Node): SourceDiagnostic | undefined {

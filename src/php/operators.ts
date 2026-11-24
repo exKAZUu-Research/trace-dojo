@@ -663,6 +663,7 @@ function compareObjectScalar(
   tryString: ObjectString = objectToString
 ): number {
   const other = deref(slot);
+  if (object.cls.kind === 'enum') return 1;
   const uncast = objectOnLeft ? 1 : -1;
   let cast: Value;
   if (typeof other === 'string' && object.cls.findMethod('__tostring')) {

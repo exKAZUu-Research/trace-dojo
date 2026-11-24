@@ -1,4 +1,5 @@
 import './bootstrap';
+import './libAttributes';
 import './exceptions';
 import './libCore';
 import './libIntrospection';

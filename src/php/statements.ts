@@ -4,6 +4,7 @@ import type { CompileError } from '../interpreter/diagnostics';
 import { foreachSubjectPlace, unsetTarget } from './assignment';
 import type { Expr, FunctionDecl, Program, Stmt } from './ast';
 import { foreachReferences, nestedBodies } from './astAnalysis';
+import { deprecateConstant } from './attributeEffects';
 import { lower } from './bytes';
 import { callValue, discardInvokedResult } from './callables';
 import { asInternal, invoke, setBodyRunner, setDefaultEvaluator } from './calls';
@@ -544,7 +545,7 @@ function dispatchSimpleStatement(
       for (const item of statement.items) {
         const value = evaluateInitializer(item.value, frame, item.opcodeRow);
         runtime.row = item.opcodeRow;
-        defineConstant(item.name, value);
+        if (defineConstant(item.name, value)) deprecateConstant(constantKey(item.name), item.attributes);
       }
       return undefined;
     }

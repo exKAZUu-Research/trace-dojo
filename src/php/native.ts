@@ -243,31 +243,36 @@ function buildClass(definition: ClassDefinition): PhpClass {
   }
   registerNativeEnumCases(cls, definition.enumCases);
   for (const nativeMethod of definition.methods ?? []) {
-    const { name: rawName, params, returnType } = parseSignature(nativeMethod.signature);
-    const name = enc(rawName);
-    const fn: NativeFunction = {
-      kind: 'native',
-      name,
-      params,
-      returnType,
-      acceptsNamed: nativeMethod.acceptsNamed,
-      impl: nativeMethod.impl as (ctx: NativeContext) => Value,
-    };
-    if (nativeMethod.deprecation) deprecateNative(fn, nativeMethod.deprecation);
-    const method: Method = {
-      name,
-      lname: lower(name),
-      cls,
-      fn,
-      isStatic: nativeMethod.isStatic ?? false,
-      isAbstract: nativeMethod.isAbstract ?? definition.kind === 'interface',
-      isFinal: nativeMethod.isFinal ?? false,
-      visibility: nativeMethod.visibility ?? 'public',
-      scope: cls,
-    };
+    const method = createNativeMethod(cls, nativeMethod);
     cls.methods.set(method.lname, method);
   }
   return cls;
+}
+
+/** A method of `cls` that a native implementation runs; an interface's methods are abstract unless stated. */
+export function createNativeMethod(cls: PhpClass, nativeMethod: NativeMethod): Method {
+  const { name: rawName, params, returnType } = parseSignature(nativeMethod.signature);
+  const name = enc(rawName);
+  const fn: NativeFunction = {
+    kind: 'native',
+    name,
+    params,
+    returnType,
+    acceptsNamed: nativeMethod.acceptsNamed,
+    impl: nativeMethod.impl as (ctx: NativeContext) => Value,
+  };
+  if (nativeMethod.deprecation) deprecateNative(fn, nativeMethod.deprecation);
+  return {
+    name,
+    lname: lower(name),
+    cls,
+    fn,
+    isStatic: nativeMethod.isStatic ?? false,
+    isAbstract: nativeMethod.isAbstract ?? cls.kind === 'interface',
+    isFinal: nativeMethod.isFinal ?? false,
+    visibility: nativeMethod.visibility ?? 'public',
+    scope: cls,
+  };
 }
 
 function registerNativeEnumCases(cls: PhpClass, cases: readonly string[] | undefined): void {
@@ -277,6 +282,7 @@ function registerNativeEnumCases(cls: PhpClass, cases: readonly string[] | undef
       cls,
       visibility: 'public',
       isFinal: false,
+      isCase: true,
       evaluate: () => {
         const runtime = rt();
         const value = runtime.newObject(cls);

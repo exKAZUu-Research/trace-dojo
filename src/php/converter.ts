@@ -343,43 +343,41 @@ export class Converter extends DeclarationConverter {
           }
           this.declaredFunctions.set(key, decl.params);
         }
-        return [{ k: 'func', decl, row }];
+        return [{ k: 'func', decl, row: decl.row }];
       }
       case 'class_declaration':
       case 'interface_declaration':
-      case 'trait_declaration': {
-        this.declareSymbol(node, 'class', this.nameText(node.childForFieldName('name') as Node));
-        return [{ k: 'class', decl: this.classDecl(node, false, topLevel), row }];
-      }
+      case 'trait_declaration':
       case 'enum_declaration': {
-        this.checkUnscopedModifiers(node);
-        if (this.currentClass !== undefined) this.error(node, 'Class declarations may not be nested');
-        this.unsupported(node, '列挙型（enum）');
-        break;
+        this.declareSymbol(node, 'class', this.nameText(node.childForFieldName('name') as Node));
+        const decl = this.classDecl(node, false, topLevel);
+        return [{ k: 'class', decl, row: decl.row }];
       }
       case 'const_declaration': {
         this.checkUnscopedModifiers(node);
         if (!topLevel || isPlainBlockChild(node)) this.error(node, 'syntax error, unexpected token "const"');
         let declarationRow: number | undefined;
         let opcodeRow: number | undefined;
-        const items = node.namedChildren
-          .filter((child) => child.type === 'const_element')
-          .map((child) => {
-            const [nameNode, valueNode] = child.namedChildren.filter((part) => part.type !== 'comment');
-            const name = this.declaredIdentifier(nameNode);
-            const word = lower(name);
-            if (['null', 'true', 'false'].includes(word)) this.error(nameNode, `Cannot redeclare constant '${name}'`);
-            if (
-              MAGIC_RUNTIME.has(word.toUpperCase()) ||
-              ['__line__', '__file__', '__dir__', '__namespace__', '__property__'].includes(word)
-            )
-              this.error(nameNode, `syntax error, unexpected token "${name}", expecting identifier`);
-            this.declareSymbol(nameNode, 'const', name);
-            declarationRow ??= nameNode.startPosition.row;
-            const value = this.constantExpr(valueNode, true);
-            opcodeRow = this.constantCompileRow(value, opcodeRow ?? declarationRow);
-            return { name: this.qualify(name), value, opcodeRow };
-          });
+        const elements = node.namedChildren.filter((child) => child.type === 'const_element');
+        const attributes = this.attributeList(node, { targets: ['constant'] });
+        if (attributes && elements.length > 1)
+          this.error(elements[0], 'Cannot apply attributes to multiple constants at once');
+        const items = elements.map((child) => {
+          const [nameNode, valueNode] = child.namedChildren.filter((part) => part.type !== 'comment');
+          const name = this.declaredIdentifier(nameNode);
+          const word = lower(name);
+          if (['null', 'true', 'false'].includes(word)) this.error(nameNode, `Cannot redeclare constant '${name}'`);
+          if (
+            MAGIC_RUNTIME.has(word.toUpperCase()) ||
+            ['__line__', '__file__', '__dir__', '__namespace__', '__property__'].includes(word)
+          )
+            this.error(nameNode, `syntax error, unexpected token "${name}", expecting identifier`);
+          this.declareSymbol(nameNode, 'const', name);
+          declarationRow ??= nameNode.startPosition.row;
+          const value = this.constantExpr(valueNode, true);
+          opcodeRow = this.constantCompileRow(value, opcodeRow ?? declarationRow);
+          return { name: this.qualify(name), value, opcodeRow, attributes };
+        });
         return [{ k: 'const', items, row: declarationRow ?? row }];
       }
       case 'named_label_statement': {

@@ -12,10 +12,13 @@ import {
   linkInterfaceConstants,
 } from './classConstants';
 export { canAccessConstant, classConstant, setClassEvaluator } from './classConstants';
+import { reportTraitDeprecation } from './attributeEffects';
+import { hasAttribute } from './attributeRules';
 import { lower } from './bytes';
 import { type ArgValue, asInternal, invoke } from './calls';
 import { foldedConstant, selectConstantBranch } from './constantDefaults';
 import { formatFloat, normalizeKeyString, toBool, valueName } from './conversions';
+import { addEnumCase, isEnumBuiltinMethod, linkEnumMembers, prepareEnum } from './enums';
 import {
   deprecated,
   E_COMPILE_WARNING,
@@ -151,9 +154,8 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
   const key = lower(decl.name);
   if (!decl.isAnonymous && runtime.classes.has(key)) {
     const existing = runtime.classes.get(key) as PhpClass;
-    const kind = existing.kind === 'interface' ? 'interface' : existing.kind === 'trait' ? 'trait' : 'class';
     const previously = existing.decl ? ` (previously declared in ${SCRIPT_PATH}:${existing.decl.row + 1})` : '';
-    throw new FatalError(`Cannot redeclare ${kind} ${existing.name}${previously}`, row);
+    throw new FatalError(`Cannot redeclare ${existing.kind} ${existing.name}${previously}`, row);
   }
   const cls = new PhpClass(decl.name, decl.kind);
   cls.decl = decl;
@@ -169,6 +171,7 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
     if (parent.kind === 'interface')
       throw new FatalError(`Class ${decl.name} cannot extend interface ${parent.name}`, row);
     if (parent.kind === 'trait') throw new FatalError(`Class ${decl.name} cannot extend trait ${parent.name}`, row);
+    if (parent.kind === 'enum') throw new FatalError(`Class ${decl.name} cannot extend enum ${parent.name}`, row);
     if (parent.isFinal) throw new FatalError(`Class ${decl.name} cannot extend final class ${parent.name}`, row);
     if (parent.isReadonly !== decl.isReadonly) {
       throw new FatalError(
@@ -182,6 +185,7 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
     inherit(cls, parent);
   }
   const declared = [...decl.interfaces];
+  if (decl.kind === 'enum') prepareEnum(cls, decl, declared);
   // A class that declares __toString implements Stringable, as if it had named it last.
   if (
     cls.kind !== 'trait' &&
@@ -209,19 +213,64 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
       const trait = findClass(name);
       if (!trait) throwError('Error', `Trait "${name}" not found`);
       if (trait.kind !== 'trait') throwError('Error', `${decl.name} cannot use ${trait.name} - it is not a trait`);
+      reportTraitDeprecation(trait, cls);
       cls.traits.push(trait);
     }
   }
-  for (const constant of decl.consts) addConst(cls, constant);
+  addConstants(cls, decl);
   addDeclaredProperties(cls, decl.props);
   for (const method of decl.methods) addMethod(cls, method);
   applyTraits(cls, decl);
+  if (cls.kind === 'enum') linkEnumMembers(cls, row);
   linkTraitStringable(cls);
   linkInterfaceConstants(cls, row);
   checkInheritance(cls, row);
+  checkOverrideAttributes(cls);
   if (!decl.isAnonymous) runtime.classes.set(key, cls);
   runtime.userClasses.push(cls);
   return cls;
+}
+
+function addConstants(cls: PhpClass, decl: ClassDecl): void {
+  for (const constant of decl.consts) {
+    if (constant.isCase) addEnumCase(cls, constant);
+    else addConst(cls, constant);
+  }
+}
+
+/** Checks that what `#[\Override]` marks overrides a method or property of a parent class or an interface. */
+function checkOverrideAttributes(cls: PhpClass): void {
+  if (cls.kind === 'trait' || cls.kind === 'interface') return;
+  for (const method of cls.methods.values()) {
+    if (method.cls !== cls || method.fn.kind !== 'user' || !hasAttribute(method.fn.decl.attributes, 'Override'))
+      continue;
+    if (!overridesMethod(cls, method.lname))
+      throw new FatalError(
+        `${cls.name}::${method.name}() has #[\\Override] attribute, but no matching parent method exists`,
+        method.fn.decl.row
+      );
+  }
+  for (const property of [...cls.props, ...[...cls.staticProps.values()].map(({ decl }) => decl)]) {
+    if (property.cls !== cls || !hasAttribute(property.declarationAst?.attributes, 'Override')) continue;
+    const inherited = [
+      cls.parent?.propByName.get(property.name),
+      ...cls.interfaces.map((iface) => iface.propByName.get(property.name)),
+    ];
+    if (!inherited.some((parent) => parent && parent.visibility !== 'private'))
+      throw new FatalError(
+        `${cls.name}::$${property.name} has #[\\Override] attribute, but no matching parent property exists`,
+        property.declarationAst?.row ?? cls.declaredRow
+      );
+  }
+}
+
+function overridesMethod(cls: PhpClass, lname: string): boolean {
+  const contracts = cls.interfaces.map((iface) => iface.findMethod(lname));
+  if (contracts.some(Boolean)) return true;
+  const parent = cls.parent?.findMethod(lname);
+  if (!parent || parent.visibility === 'private') return false;
+  // A constructor overrides only an abstract one, as only then does PHP check the signatures.
+  return lname !== '__construct' || parent.isAbstract;
 }
 
 function linkTraitStringable(cls: PhpClass): void {
@@ -236,6 +285,9 @@ function linkTraitStringable(cls: PhpClass): void {
 function checkBuiltinInterfaces(cls: PhpClass, row: number): void {
   if (cls.kind !== 'class') return;
   const implementsInterface = (name: string): boolean => cls.interfaces.some((iface) => lower(iface.name) === name);
+  const enumInterface = cls.interfaces.find((iface) => iface.name === 'UnitEnum' || iface.name === 'BackedEnum');
+  if (enumInterface)
+    throw new FatalError(`Non-enum class ${cls.name} cannot implement interface ${enumInterface.name}`, row);
   const iterator = implementsInterface('iterator');
   const aggregate = implementsInterface('iteratoraggregate');
   if (iterator && aggregate)
@@ -781,17 +833,19 @@ function checkInheritance(cls: PhpClass, row: number): void {
   }
   const contracts = bindInterfaceMethods(cls, inherited, checkParentMethods(cls, inherited));
   const hooks = bindPropertyHooks(cls, row);
-  if (cls.kind !== 'class' || cls.isAbstract) return;
+  if ((cls.kind !== 'class' && cls.kind !== 'enum') || cls.isAbstract) return;
   const missing = unimplementedMethods(cls, inherited, contracts);
   const allNames = [...missing.map((method) => `${method.cls.name}::${method.name}`), ...hooks];
   if (allNames.length === 0) return;
   const names = allNames.slice(0, 3);
   const count = allNames.length;
   const methods = count === 1 ? 'method' : 'methods';
-  const requirement = cls.isAnonymous
-    ? `must implement ${count} abstract ${methods}`
-    : `contains ${count} abstract ${methods} and must therefore be declared abstract or implement the remaining ${methods}`;
-  throw new FatalError(`Class ${cls.name} ${requirement} (${names.join(', ')}${count > 3 ? ', ...' : ''})`, row);
+  const requirement =
+    cls.isAnonymous || cls.kind === 'enum'
+      ? `must implement ${count} abstract ${methods}`
+      : `contains ${count} abstract ${methods} and must therefore be declared abstract or implement the remaining ${methods}`;
+  const kind = cls.kind === 'enum' ? 'Enum' : 'Class';
+  throw new FatalError(`${kind} ${cls.name} ${requirement} (${names.join(', ')}${count > 3 ? ', ...' : ''})`, row);
 }
 
 function checkParentMethods(cls: PhpClass, inherited: Map<string, Method>): Set<string> {
@@ -835,7 +889,7 @@ function bindInterfaceMethods(
     for (const [name, contract] of effectiveInterfaceMethods(iface)) {
       const method = cls.methods.get(name) ?? inherited.get(name) ?? contracts.get(name);
       if (!method) contracts.set(name, contract);
-      else if (method !== contract) {
+      else if (method !== contract && !isEnumBuiltinMethod(cls, method)) {
         checkOverride(cls, method, contract, !checked.has(name));
         checked.add(name);
       }
@@ -1000,7 +1054,8 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method, reportTent
     const actual = returnTypeOf(method.fn);
     const result = actual ? variance(actual, method.cls, expected, parent.cls) : false;
     if (typeof result === 'string') throw incompatibleMethod(method, signatureText(parent), result, row);
-    if (!result && reportTentative) {
+    const suppressed = method.fn.kind === 'user' && hasAttribute(method.fn.decl.attributes, 'ReturnTypeWillChange');
+    if (!result && reportTentative && !suppressed) {
       const saved = rt().row;
       rt().row = row;
       try {
@@ -1533,7 +1588,12 @@ function writeOverloadedProperty(object: PhpObject, name: string, value: Value):
 }
 
 export function createDynamicProp(object: PhpObject, name: string, value: Slot = null, deprecate = deprecated): void {
-  if (object.cls.isReadonly || object.cls.name === 'Closure' || object.cls.name === 'WeakReference')
+  if (
+    object.cls.isReadonly ||
+    object.cls.kind === 'enum' ||
+    object.cls.name === 'Closure' ||
+    object.cls.name === 'WeakReference'
+  )
     throwError('Error', `Cannot create dynamic property ${object.cls.name}::$${name}`);
   try {
     if (object.cls.name !== 'stdClass' && !allowsDynamicProps(object.cls))
@@ -1545,7 +1605,7 @@ export function createDynamicProp(object: PhpObject, name: string, value: Slot =
 
 function allowsDynamicProps(cls: PhpClass): boolean {
   for (let current: PhpClass | undefined = cls; current; current = current.parent) {
-    if (current.name === 'stdClass') return true;
+    if (current.name === 'stdClass' || hasAttribute(current.decl?.attributes, 'AllowDynamicProperties')) return true;
   }
   return false;
 }

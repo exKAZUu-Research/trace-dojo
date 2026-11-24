@@ -3,7 +3,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
-import type { ClassRef, Expr, ResolvedName, Stmt } from './ast';
+import type { ClassDecl, ClassRef, Expr, ResolvedName, Stmt } from './ast';
 import { nestedBodies } from './astAnalysis';
 import { dec, enc, lower } from './bytes';
 import { unavailableVariable, unsupportedMessage } from './unsupported';
@@ -103,7 +103,7 @@ export abstract class ConverterBase {
   protected fn: FunctionContext = { isGenerator: false, labels: new Set(), gotos: [], isMethod: false };
   protected strictTypes = false;
   protected currentClass?: string;
-  protected currentClassKind?: 'class' | 'interface' | 'trait';
+  protected currentClassKind?: ClassDecl['kind'];
   protected currentClassHasParent = false;
 
   constructor(
@@ -173,7 +173,7 @@ export abstract class ConverterBase {
     return raw;
   }
 
-  protected namedClass(node: Node, expected = '', declaration?: 'class' | 'interface' | 'trait'): string {
+  protected namedClass(node: Node, expected = '', declaration?: ClassDecl['kind']): string {
     const raw = this.declaredIdentifier(node, expected);
     const relative = relativeClassName(raw);
     if (relative && declaration && !this.preserveSyntax) {
