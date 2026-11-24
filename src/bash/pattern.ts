@@ -1,168 +1,25 @@
 /**
- * Bash's pattern matching (`case`, `[[ == ]]`, and the pattern operators of parameter expansion), ported from
- * `lib/glob/sm_loop.c` of Bash 5.3 without extended patterns. A pattern is a string in which a backslash quotes the
- * character after it, which is how the shell passes the quoted parts of a word to the matcher.
+ * Clean-room shell wildcard and POSIX bracket pattern matcher for `case`, `[[ == ]]`, and parameter-expansion
+ * pattern operators (`#`, `##`, `%`, `%%`, `/`, `//`, `/#`, `/%`, `^`, `,`, `~`).
+ * Backslashes quote the following pattern character; unquoted `*`, `?`, and `[...]` act as wildcards.
  */
 
 import { charactersOf } from './characters';
 
-/** Whether a whole text matches a pattern. */
-export function matchesPattern(pattern: string, text: string, spend: () => void): boolean {
-  return gmatch(charactersOf(text), 0, charactersOf(pattern), 0, undefined, spend);
-}
+type BracketSpec =
+  | { kind: 'char'; c: string }
+  | { kind: 'range'; low: number; high: number }
+  | { kind: 'class'; test: ((c: string) => boolean) | undefined };
 
-/** Whether a pattern has unquoted characters that make it more than a literal string. */
-export function hasPatternCharacters(pattern: string): boolean {
-  const chars = charactersOf(pattern);
-  for (let i = 0; i < chars.length; i++) {
-    const c = chars[i];
-    if (c === '\\') {
-      i++;
-      continue;
-    }
-    if (c === '*' || c === '?') return true;
-    if (c === '[' && bracketEnd(chars, i + 1) !== undefined) return true;
-  }
-  return false;
-}
+type GlobAtom =
+  | { kind: 'star' }
+  | { kind: 'any' }
+  | { kind: 'char'; c: string }
+  | { kind: 'bracket'; negated: boolean; specs: BracketSpec[] };
 
-/** Quotes the characters of a literal string so that a pattern matches only that string. */
-export function quotePattern(text: string): string {
-  return text.replaceAll(/[*?[\]\\]/g, (c) => `\\${c}`);
-}
-
-/** Removes the backslashes that quote characters in a pattern, giving the text it matches literally. */
-export function unquotePattern(pattern: string): string {
-  return pattern.replaceAll(/\\([\s\S])/g, '$1');
-}
-
-/** The index after the `]` that closes a bracket expression whose contents start at `start`, as Bash scans one. */
-function bracketEnd(p: string[], start: number): number | undefined {
-  let i = start;
-  if (p[i] === '!' || p[i] === '^') i++;
-  if (p[i] === ']') i++;
-  for (; i < p.length; i++) {
-    const c = p[i];
-    if (c === '\\') {
-      i++;
-      continue;
-    }
-    if (c === '[' && (p[i + 1] === ':' || p[i + 1] === '=' || p[i + 1] === '.')) {
-      const close = parseSubbracket(p, i + 1);
-      if (close !== undefined) {
-        i = close + 1;
-        continue;
-      }
-    }
-    if (c === ']') return i + 1;
-  }
-  return undefined;
-}
-
-interface StarEnd {
-  pattern: number | undefined;
-  string: number;
-}
-
-/**
- * Matches `s` from `start` against `p` from `pstart`, as Bash's GMATCH. With `ends`, a `*` stops the match there and
- * records where, so that the caller resumes from the later `*` instead of backtracking to its own.
- */
-function gmatch(
-  s: string[],
-  start: number,
-  p: string[],
-  pstart: number,
-  ends: StarEnd | undefined,
-  spend: () => void
-): boolean {
-  let n = start;
-  let pi = pstart;
-  while (pi < p.length) {
-    spend();
-    const c = p[pi++];
-    if (c === '*') {
-      if (ends) {
-        ends.pattern = pi - 1;
-        ends.string = n;
-        return true;
-      }
-      const resumed = matchStar(s, n, p, pi, spend);
-      if (typeof resumed === 'boolean') return resumed;
-      [pi, n] = resumed;
-      continue;
-    }
-    const next = matchOne(s, n, p, pi, c);
-    if (next === undefined) return false;
-    pi = next;
-    n++;
-  }
-  return n === s.length;
-}
-
-/** Matches one character of `s` at `n` against the pattern character `c` read before `pi`, returning where it ends. */
-// code-gauge-allow functionCognitiveComplexity -- A port of the single-character cases of Bash's GMATCH.
-function matchOne(s: string[], n: number, p: string[], pi: number, c: string): number | undefined {
-  const sc = n < s.length ? s[n] : undefined;
-  switch (c) {
-    case '?': {
-      return sc === undefined ? undefined : pi;
-    }
-    case '\\': {
-      // A trailing backslash matches a backslash that ends the text.
-      if (pi === p.length) return sc === '\\' && n + 1 === s.length ? pi : undefined;
-      return sc === p[pi] ? pi + 1 : undefined;
-    }
-    case '[': {
-      return sc === undefined ? undefined : brackmatch(p, pi, sc);
-    }
-    default: {
-      return sc === c ? pi : undefined;
-    }
-  }
-}
-
-/**
- * Matches a `*` read before `pi`: consumes the `?`s and `*`s after it, then tries each position for the rest, returning
- * the result or, when a later `*` matched, where the outer loop resumes.
- */
-// code-gauge-allow functionCognitiveComplexity -- A port of the star case of Bash's GMATCH, which collapses wildcards and resumes at a later star.
-function matchStar(
-  s: string[],
-  start: number,
-  p: string[],
-  start2: number,
-  spend: () => void
-): boolean | [number, number] {
-  let n = start;
-  let pi = start2;
-  if (pi === p.length) return true;
-  let c = p[pi++];
-  for (; c === '?' || c === '*'; c = p[pi++]) {
-    if (c === '?') {
-      if (n >= s.length) return false;
-      n++;
-    }
-    if (pi === p.length) return true;
-  }
-  const first = c === '\\' ? p[pi] : c;
-  pi--;
-  const end: StarEnd = { pattern: undefined, string: 0 };
-  for (; n < s.length; ++n) {
-    if (c !== '[' && s[n] !== first) continue;
-    if (gmatch(s, n, p, pi, end, spend)) return end.pattern === undefined ? true : [end.pattern, end.string];
-  }
-  return false;
-}
-
-/** The position of the terminating `.]`, `=]`, or `:]` of a symbol whose type character is at `start`. */
-function parseSubbracket(p: string[], start: number): number | undefined {
-  const type = p[start];
-  for (let i = start + 1; i < p.length; i++) {
-    if (type !== '.' && p[i] === ']') return undefined;
-    if (p[i] === type && p[i + 1] === ']') return i;
-  }
-  return undefined;
+export interface CompiledGlob {
+  readonly atoms: readonly GlobAtom[];
+  readonly hasStar: boolean;
 }
 
 const CHARACTER_CLASSES: Record<string, (c: string) => boolean> = {
@@ -174,7 +31,7 @@ const CHARACTER_CLASSES: Record<string, (c: string) => boolean> = {
   digit: (c) => /^[0-9]$/.test(c),
   graph: (c) => /^[^\p{C}\p{Z}]$/u.test(c),
   lower: (c) => /^\p{Ll}$/u.test(c),
-  print: (c) => /^[^\p{C}]$/u.test(c) && c !== ' ' && c !== ' ',
+  print: (c) => /^[^\p{C}]$/u.test(c) && c !== '\u2028' && c !== '\u2029',
   punct: (c) => /^[!-/:-@[-`{-~]$/.test(c),
   space: (c) => /^[ \t\n\v\f\r]$/.test(c),
   upper: (c) => /^\p{Lu}$/u.test(c),
@@ -199,99 +56,273 @@ const COLLATING_SYMBOLS: Record<string, string> = {
   'right-square-bracket': ']',
 };
 
-function collatingSymbol(name: string): string {
-  if (charactersOf(name).length === 1) return name;
-  return COLLATING_SYMBOLS[name] ?? name;
+/** Whether the entire `text` matches `pattern`. */
+export function matchesPattern(pattern: string, text: string, spend: () => void): boolean {
+  const chars = charactersOf(text);
+  return matchesSlice(compileGlob(pattern), chars, 0, chars.length, spend);
 }
 
-const codeOf = (c: string): number => c.codePointAt(0) as number;
-
-type BracketItem =
-  | { kind: 'char'; c: string }
-  | { kind: 'range'; low: number; high: number }
-  | { kind: 'class'; test: ((c: string) => boolean) | undefined };
-
-/**
- * Matches `test` against the bracket expression whose contents start at `start`, returning the position after it on a
- * match. An unterminated bracket matches only a literal `[`, after which matching continues from its contents. The
- * expression is read whole before `test` is checked, which gives what Bash's BRACKMATCH gives while it reads.
- */
-function brackmatch(p: string[], start: number, test: string): number | undefined {
-  const parsed = parseBracket(p, start);
-  if (!parsed) return test === '[' ? start : undefined;
-  const code = codeOf(test);
-  const matched = parsed.items.some((item) => {
-    if (item.kind === 'char') return item.c === test;
-    if (item.kind === 'range') return code >= item.low && code <= item.high;
-    return item.test?.(test) ?? false;
-  });
-  return matched === parsed.negated ? undefined : parsed.end;
+/** Whether `pattern` contains any unescaped `*`, `?`, or closed `[...]` wildcard. */
+export function hasPatternCharacters(pattern: string): boolean {
+  return compileGlob(pattern).atoms.some((atom) => atom.kind !== 'char');
 }
 
-/** The items of a bracket expression and the position after its `]`, or `undefined` when no `]` closes it. */
-// code-gauge-allow functionCognitiveComplexity -- A port of Bash's BRACKMATCH scan, whose symbols, characters, and ranges share the position.
-function parseBracket(p: string[], start: number): { items: BracketItem[]; negated: boolean; end: number } | undefined {
-  let pi = start;
-  const negated = p[pi] === '!' || p[pi] === '^';
-  if (negated) pi++;
-  const items: BracketItem[] = [];
-  let c = p[pi++];
-  for (;;) {
-    if (c === undefined) return undefined;
-    const item = c === '[' && (p[pi] === '=' || p[pi] === ':') ? readSymbolItem(p, pi) : undefined;
-    if (item) {
-      items.push(item.item);
-      pi = item.next;
-      c = p[pi++];
+/** Escapes shell glob metacharacters so `text` matches literally. */
+export function quotePattern(text: string): string {
+  return text.replaceAll(/[*?[\]\\]/g, (c) => `\\${c}`);
+}
+
+/** Strips pattern-quoting backslashes from `pattern`. */
+export function unquotePattern(pattern: string): string {
+  return pattern.replaceAll(/\\([\s\S])/g, '$1');
+}
+
+/** Compiles a shell pattern into a sequence of wildcard, literal, and bracket atoms. */
+export function compileGlob(pattern: string): CompiledGlob {
+  const chars = charactersOf(pattern);
+  const atoms: GlobAtom[] = [];
+  let hasStar = false;
+  for (let i = 0; i < chars.length;) {
+    const c = chars[i];
+    if (c === '*') {
+      if (atoms.at(-1)?.kind !== 'star') atoms.push({ kind: 'star' });
+      hasStar = true;
+      i++;
+    } else if (c === '?') {
+      atoms.push({ kind: 'any' });
+      i++;
+    } else if (c === '\\') {
+      atoms.push({ kind: 'char', c: i + 1 < chars.length ? chars[i + 1] : '\\' });
+      i += 2;
+    } else if (c === '[') {
+      const bracket = readBracketExpression(chars, i + 1);
+      if (bracket) {
+        atoms.push({ kind: 'bracket', negated: bracket.negated, specs: bracket.specs });
+        i = bracket.next;
+      } else {
+        atoms.push({ kind: 'char', c: '[' });
+        i++;
+      }
     } else {
-      const read = readCharacterItem(p, pi, c);
-      if (!read) return undefined;
-      if (read.item) items.push(read.item);
-      pi = read.next;
-      c = p[read.next - 1];
+      atoms.push({ kind: 'char', c });
+      i++;
     }
-    if (c === ']') return { items, negated, end: pi };
+  }
+  return { atoms, hasStar };
+}
+
+/** Fixed character length of a star-free pattern, or `undefined` when `*` allows variable lengths. */
+export function fixedGlobLength(glob: CompiledGlob): number | undefined {
+  return glob.hasStar ? undefined : glob.atoms.length;
+}
+
+/** End index of the shortest prefix of `chars[start..]` matching `glob`, or `undefined` if none matches. */
+export function shortestPrefixMatch(
+  glob: CompiledGlob,
+  chars: readonly string[],
+  start: number,
+  spend: () => void
+): number | undefined {
+  if (!glob.hasStar) {
+    const end = start + glob.atoms.length;
+    return end <= chars.length && matchesFixed(glob.atoms, chars, start, spend) ? end : undefined;
+  }
+  return scanStates(glob.atoms, chars, start, chars.length, true, spend);
+}
+
+/** End index of the longest prefix of `chars[start..]` matching `glob`, or `undefined` if none matches. */
+export function longestPrefixMatch(
+  glob: CompiledGlob,
+  chars: readonly string[],
+  start: number,
+  spend: () => void
+): number | undefined {
+  if (!glob.hasStar) {
+    const end = start + glob.atoms.length;
+    return end <= chars.length && matchesFixed(glob.atoms, chars, start, spend) ? end : undefined;
+  }
+  return scanStates(glob.atoms, chars, start, chars.length, false, spend);
+}
+
+/** Whether `chars[start..end]` as a whole matches `glob`. */
+export function matchesSlice(
+  glob: CompiledGlob,
+  chars: readonly string[],
+  start: number,
+  end: number,
+  spend: () => void
+): boolean {
+  if (!glob.hasStar) {
+    return end - start === glob.atoms.length && matchesFixed(glob.atoms, chars, start, spend);
+  }
+  return scanSlice(glob.atoms, chars, start, end, spend);
+}
+
+function matchesFixed(atoms: readonly GlobAtom[], chars: readonly string[], start: number, spend: () => void): boolean {
+  spend();
+  for (const [offset, atom] of atoms.entries()) {
+    if (!matchesAtom(atom, chars[start + offset])) return false;
+  }
+  return true;
+}
+
+/** Advances an NFA state-set across `chars[start..limit]`, returning the shortest or longest matching end index. */
+// code-gauge-allow functionCognitiveComplexity -- Single-pass state-set simulation with early exit when no active state remains.
+function scanStates(
+  atoms: readonly GlobAtom[],
+  chars: readonly string[],
+  start: number,
+  limit: number,
+  stopAtFirst: boolean,
+  spend: () => void
+): number | undefined {
+  const count = atoms.length;
+  let current = new Uint8Array(count + 1);
+  let next = new Uint8Array(count + 1);
+  current[0] = 1;
+  closeStars(atoms, current);
+  let matchedEnd: number | undefined = current[count] ? start : undefined;
+  if (stopAtFirst && matchedEnd !== undefined) return matchedEnd;
+  for (let pos = start; pos < limit; pos++) {
+    spend();
+    if (!stepAtoms(atoms, current, next, chars[pos])) break;
+    [current, next] = [next, current];
+    next.fill(0);
+    if (current[count]) {
+      if (stopAtFirst) return pos + 1;
+      matchedEnd = pos + 1;
+    }
+  }
+  return matchedEnd;
+}
+
+function scanSlice(
+  atoms: readonly GlobAtom[],
+  chars: readonly string[],
+  start: number,
+  end: number,
+  spend: () => void
+): boolean {
+  const count = atoms.length;
+  let current = new Uint8Array(count + 1);
+  let next = new Uint8Array(count + 1);
+  current[0] = 1;
+  closeStars(atoms, current);
+  for (let pos = start; pos < end; pos++) {
+    spend();
+    if (!stepAtoms(atoms, current, next, chars[pos])) return false;
+    [current, next] = [next, current];
+    next.fill(0);
+  }
+  return current[count] === 1;
+}
+
+function closeStars(atoms: readonly GlobAtom[], state: Uint8Array): void {
+  for (let i = 0; i < atoms.length; i++) {
+    if (state[i] && atoms[i].kind === 'star') state[i + 1] = 1;
   }
 }
 
-/** `[=c=]` or `[:class:]` starting at the `=` or `:` at `pi`, with the position after its closing `]`. */
-function readSymbolItem(p: string[], pi: number): { item: BracketItem; next: number } | undefined {
-  const close = parseSubbracket(p, pi);
-  if (close === undefined) return undefined;
-  const name = p.slice(pi + 1, close).join('');
-  const item: BracketItem =
-    p[pi] === '='
-      ? { kind: 'char', c: collatingSymbol(name) }
-      : { kind: 'class', test: CHARACTER_CLASSES[name.replaceAll(/\\(.)/g, '$1')] };
-  return { item, next: close + 2 };
-}
-
-/**
- * A character or a range that `c`, read before `pi`, starts, with the position after the character that follows it,
- * or `undefined` at the end of the pattern. A range whose end comes before its start gives no item.
- */
-function readCharacterItem(
-  p: string[],
-  pi: number,
-  c: string
-): { item: BracketItem | undefined; next: number } | undefined {
-  const first = readBracketChar(p, pi, c);
-  if (!first || p[first.next] === undefined) return undefined;
-  if (p[first.next] !== '-' || p[first.next + 1] === ']')
-    return { item: { kind: 'char', c: first.c }, next: first.next + 1 };
-  const endChar = p[first.next + 1];
-  const last = endChar === undefined ? undefined : readBracketChar(p, first.next + 2, endChar);
-  if (!last || p[last.next] === undefined) return undefined;
-  const [low, high] = [codeOf(first.c), codeOf(last.c)];
-  return { item: low <= high ? { kind: 'range', low, high } : undefined, next: last.next + 1 };
-}
-
-/** A character of a bracket expression that `c`, read before `pi`, starts: itself, a quoted one, or `[.name.]`. */
-function readBracketChar(p: string[], pi: number, c: string): { c: string; next: number } | undefined {
-  if (c === '[' && p[pi] === '.') {
-    const close = parseSubbracket(p, pi);
-    if (close !== undefined) return { c: collatingSymbol(p.slice(pi + 1, close).join('')), next: close + 2 };
+function stepAtoms(atoms: readonly GlobAtom[], current: Uint8Array, next: Uint8Array, ch: string): boolean {
+  let anyActive = false;
+  for (let i = 0; i < atoms.length; i++) {
+    if (!current[i]) continue;
+    const atom = atoms[i];
+    if (atom.kind === 'star') {
+      next[i] = 1;
+      anyActive = true;
+    } else if (matchesAtom(atom, ch)) {
+      next[i + 1] = 1;
+      anyActive = true;
+    }
   }
-  if (c === '\\') return p[pi] === undefined ? undefined : { c: p[pi], next: pi + 1 };
-  return { c, next: pi };
+  if (anyActive) closeStars(atoms, next);
+  return anyActive;
+}
+
+function matchesAtom(atom: GlobAtom, ch: string): boolean {
+  if (atom.kind === 'any') return true;
+  if (atom.kind === 'char') return ch === atom.c;
+  if (atom.kind === 'star') return true;
+  const code = ch.codePointAt(0) as number;
+  const hit = atom.specs.some((spec) => {
+    if (spec.kind === 'char') return ch === spec.c;
+    if (spec.kind === 'range') return code >= spec.low && code <= spec.high;
+    return spec.test?.(ch) ?? false;
+  });
+  return hit !== atom.negated;
+}
+
+/** Parses `[...]` starting just after `[`, or returns `undefined` if unclosed. */
+// code-gauge-allow functionCognitiveComplexity -- POSIX bracket syntax: optional negation, initial `]`, character classes, equivalence classes, collating symbols, and ranges.
+function readBracketExpression(
+  chars: readonly string[],
+  start: number
+): { negated: boolean; specs: BracketSpec[]; next: number } | undefined {
+  let pos = start;
+  const negated = chars[pos] === '!' || chars[pos] === '^';
+  if (negated) pos++;
+  const specs: BracketSpec[] = [];
+  let first = true;
+  while (pos < chars.length) {
+    if (chars[pos] === ']' && !first) return { negated, specs, next: pos + 1 };
+    first = false;
+    if (chars[pos] === '[' && (chars[pos + 1] === ':' || chars[pos + 1] === '=')) {
+      const kind = chars[pos + 1];
+      const end = findSubbracketClose(chars, pos + 2, kind);
+      if (end !== undefined) {
+        const rawName = chars.slice(pos + 2, end).join('');
+        if (kind === ':') {
+          const className = rawName.replaceAll(/\\(.)/g, '$1');
+          const test = Object.hasOwn(CHARACTER_CLASSES, className) ? CHARACTER_CLASSES[className] : undefined;
+          specs.push({ kind: 'class', test });
+        } else {
+          specs.push({ kind: 'char', c: resolveCollatingSymbol(rawName) });
+        }
+        pos = end + 2;
+        continue;
+      }
+    }
+    const startAtom = readBracketAtom(chars, pos);
+    if (!startAtom) return undefined;
+    pos = startAtom.next;
+    if (chars[pos] === '-' && pos + 1 < chars.length && chars[pos + 1] !== ']') {
+      const endAtom = readBracketAtom(chars, pos + 1);
+      if (!endAtom) return undefined;
+      pos = endAtom.next;
+      const low = startAtom.c.codePointAt(0) as number;
+      const high = endAtom.c.codePointAt(0) as number;
+      if (low <= high) specs.push({ kind: 'range', low, high });
+      continue;
+    }
+    specs.push({ kind: 'char', c: startAtom.c });
+  }
+  return undefined;
+}
+
+function readBracketAtom(chars: readonly string[], pos: number): { c: string; next: number } | undefined {
+  if (pos >= chars.length) return undefined;
+  if (chars[pos] === '[' && chars[pos + 1] === '.') {
+    const end = findSubbracketClose(chars, pos + 2, '.');
+    if (end !== undefined) {
+      return { c: resolveCollatingSymbol(chars.slice(pos + 2, end).join('')), next: end + 2 };
+    }
+  }
+  if (chars[pos] === '\\') {
+    return pos + 1 < chars.length ? { c: chars[pos + 1], next: pos + 2 } : undefined;
+  }
+  return { c: chars[pos], next: pos + 1 };
+}
+
+function findSubbracketClose(chars: readonly string[], from: number, delimiter: string): number | undefined {
+  for (let i = from; i + 1 < chars.length; i++) {
+    if (delimiter !== '.' && chars[i] === ']') return undefined;
+    if (chars[i] === delimiter && chars[i + 1] === ']') return i;
+  }
+  return undefined;
+}
+
+function resolveCollatingSymbol(name: string): string {
+  if (charactersOf(name).length === 1) return name;
+  return Object.hasOwn(COLLATING_SYMBOLS, name) ? COLLATING_SYMBOLS[name] : name;
 }

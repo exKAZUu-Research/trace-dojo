@@ -4,7 +4,7 @@ import { decodeAnsiC } from './converter';
 import { declarationText } from './declare';
 import type { Expander, ParameterValue } from './expansion';
 import { EMPTY_LIST, isFieldBreak, type Piece } from './fields';
-import { matchesPattern } from './pattern';
+import { compileGlob, fixedGlobLength, longestPrefixMatch, matchesSlice, shortestPrefixMatch } from './pattern';
 import { quoteReusable } from './quoting';
 import { ExitSignal } from './runtime';
 import type { Shell } from './shell';
@@ -156,26 +156,34 @@ function mapValues(
 }
 
 /** `${x#p}`, `${x##p}`, `${x%p}`, and `${x%%p}`, matching by characters. */
+// code-gauge-allow functionCognitiveComplexity -- Dispatches shortest/longest prefix and suffix pattern removal with fixed-length fast paths.
 function removePattern(text: string, pattern: string, operator: string, shell: Shell): string {
   const chars = charactersOf(text);
+  const glob = compileGlob(pattern);
   const spend = (): void => shell.runtime.spend();
-  const matches = (candidate: string[]): boolean => matchesPattern(pattern, candidate.join(''), spend);
-  if (operator === '#' || operator === '##') {
-    const lengths = operator === '#' ? range(0, chars.length) : range(chars.length, 0);
-    for (const length of lengths) if (matches(chars.slice(0, length))) return chars.slice(length).join('');
+  if (operator === '#') {
+    const end = shortestPrefixMatch(glob, chars, 0, spend);
+    return end === undefined ? text : chars.slice(end).join('');
+  }
+  if (operator === '##') {
+    const end = longestPrefixMatch(glob, chars, 0, spend);
+    return end === undefined ? text : chars.slice(end).join('');
+  }
+  const fixed = fixedGlobLength(glob);
+  if (fixed !== undefined) {
+    const start = chars.length - fixed;
+    return start >= 0 && matchesSlice(glob, chars, start, chars.length, spend) ? chars.slice(0, start).join('') : text;
+  }
+  if (operator === '%') {
+    for (let start = chars.length; start >= 0; start--) {
+      if (matchesSlice(glob, chars, start, chars.length, spend)) return chars.slice(0, start).join('');
+    }
     return text;
   }
-  const starts = operator === '%' ? range(chars.length, 0) : range(0, chars.length);
-  for (const start of starts) if (matches(chars.slice(start))) return chars.slice(0, start).join('');
+  for (let start = 0; start <= chars.length; start++) {
+    if (matchesSlice(glob, chars, start, chars.length, spend)) return chars.slice(0, start).join('');
+  }
   return text;
-}
-
-/** The integers from `from` to `to`, both included, in either direction. */
-function range(from: number, to: number): number[] {
-  const result: number[] = [];
-  if (from <= to) for (let i = from; i <= to; i++) result.push(i);
-  else for (let i = from; i >= to; i--) result.push(i);
-  return result;
 }
 
 /** Splits the argument of `${x/pattern/replacement}` at its first unquoted `/`. */
@@ -230,24 +238,32 @@ function replacementFor(replacement: Piece[], matched: string): string {
 function substitute(text: string, pattern: string, replacement: Piece[], operator: string, shell: Shell): string {
   if (pattern === '' && operator !== '/#' && operator !== '/%') return text;
   const chars = charactersOf(text);
+  const glob = compileGlob(pattern);
   const spend = (): void => shell.runtime.spend();
-  const matches = (start: number, end: number): boolean =>
-    matchesPattern(pattern, chars.slice(start, end).join(''), spend);
   const replace = (start: number, end: number): string => replacementFor(replacement, chars.slice(start, end).join(''));
   if (operator === '/#') {
-    const end = longestMatch(chars.length, 0, matches);
+    const end = longestPrefixMatch(glob, chars, 0, spend);
     return end === undefined ? text : replace(0, end) + chars.slice(end).join('');
   }
   if (operator === '/%') {
+    const fixed = fixedGlobLength(glob);
+    if (fixed !== undefined) {
+      const start = chars.length - fixed;
+      return start >= 0 && matchesSlice(glob, chars, start, chars.length, spend)
+        ? chars.slice(0, start).join('') + replace(start, chars.length)
+        : text;
+    }
     for (let start = 0; start <= chars.length; start++) {
-      if (matches(start, chars.length)) return chars.slice(0, start).join('') + replace(start, chars.length);
+      if (matchesSlice(glob, chars, start, chars.length, spend)) {
+        return chars.slice(0, start).join('') + replace(start, chars.length);
+      }
     }
     return text;
   }
   let result = '';
   for (let position = 0; position <= chars.length;) {
     const end =
-      position < chars.length || chars.length === 0 ? longestMatch(chars.length, position, matches) : undefined;
+      position < chars.length || chars.length === 0 ? longestPrefixMatch(glob, chars, position, spend) : undefined;
     if (end === undefined || (end === position && position >= chars.length)) {
       result += chars[position] ?? '';
       position++;
@@ -260,16 +276,6 @@ function substitute(text: string, pattern: string, replacement: Piece[], operato
     else position = end;
   }
   return result;
-}
-
-/** The end of the longest match that starts at `start`. */
-function longestMatch(
-  length: number,
-  start: number,
-  matches: (start: number, end: number) => boolean
-): number | undefined {
-  for (let end = length; end >= start; end--) if (matches(start, end)) return end;
-  return undefined;
 }
 
 /** `${x:offset}` and `${x:offset:length}`, and the slices of arrays and positional parameters. */
@@ -401,11 +407,12 @@ function splitSubstring(parts: WordPart[]): {
 /** `${x^p}`, `${x^^p}`, `${x,p}`, `${x,,p}`, `${x~p}`, and `${x~~p}`, changing the characters that match `p`. */
 function changeCase(text: string, pattern: string, operator: string, shell: Shell): string {
   const chars = charactersOf(text);
+  const glob = compileGlob(pattern);
   const all = operator.length === 2;
   const spend = (): void => shell.runtime.spend();
   for (let i = 0; i < chars.length; i++) {
     if (!all && i > 0) break;
-    if (!matchesPattern(pattern, chars[i], spend)) continue;
+    if (!matchesSlice(glob, chars, i, i + 1, spend)) continue;
     const c = chars[i];
     if (operator.startsWith('^')) chars[i] = upperCase(c);
     else if (operator.startsWith(',')) chars[i] = lowerCase(c);
