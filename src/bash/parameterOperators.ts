@@ -145,7 +145,9 @@ function expandUnquotedOperatorWord(expander: Expander, parts: WordPart[]): Piec
   if (ifs !== '' && ifs[0] !== ' ' && entries.some(isUnquotedAtListEntry)) {
     return joinOperatorWordFields(ifs, entries);
   }
-  return entries.map(({ piece }) => (isFieldBreak(piece) || piece.quoted ? piece : { ...piece, split: true }));
+  return entries.map(({ piece, keepsFields }) =>
+    isFieldBreak(piece) || piece.quoted || keepsFields ? piece : { ...piece, split: true }
+  );
 }
 
 function collectOperatorWordEntries(expander: Expander, parts: WordPart[], starJoiner: string): OperatorWordEntry[] {
@@ -221,8 +223,8 @@ function joinOperatorSegment(ifs: string, entries: OperatorWordEntry[]): Piece[]
 }
 
 function toOperatorSplitterPiece({ piece, keepsFields }: OperatorWordEntry): Piece {
-  if (isFieldBreak(piece) || piece.quoted) return piece;
-  if (!keepsFields && piece.atListElement) {
+  if (isFieldBreak(piece) || piece.quoted || keepsFields) return piece;
+  if (piece.atListElement) {
     return piece.text === '' ? { ...piece, split: true, operatorNull: true } : { ...piece, split: false };
   }
   return { ...piece, split: true };
