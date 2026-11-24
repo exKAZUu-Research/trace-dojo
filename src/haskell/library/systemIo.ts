@@ -555,6 +555,17 @@ getArgs = return []
 getProgName :: IO String
 getProgName = return "Main.hs"
 
+-- A run has no environment variables, as the grading environment gives the program none.
+
+lookupEnv :: String -> IO (Maybe String)
+lookupEnv _ = return Nothing
+
+getEnvironment :: IO [(String, String)]
+getEnvironment = return []
+
+getEnv :: String -> IO String
+getEnv name = ioError (IOError Nothing NoSuchThing "getEnv" "no environment variable" Nothing (Just name))
+
 withArgs :: [String] -> IO a -> IO a
 withArgs _ action = action
 

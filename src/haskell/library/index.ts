@@ -869,7 +869,7 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
   'System.Environment': {
     from: 'Base',
     types: [],
-    values: ['getArgs', 'getProgName', 'withArgs'],
+    values: ['getArgs', 'getProgName', 'withArgs', 'lookupEnv', 'getEnv', 'getEnvironment'],
   },
   'Data.IORef': {
     from: 'Base',
