@@ -148,15 +148,15 @@ function isSet(shell: Shell, operand: string): boolean {
 
 function isSubscriptedSet(shell: Shell, split: { name: string; subscript: string }): boolean {
   const resolved = shell.resolveName(split.name);
-  if (split.subscript === '@' || split.subscript === '*') return shell.arrayValues(resolved).length > 0;
   if (shell.isAssociative(resolved)) {
-    const key = shell.expander.expandSubscriptText(split.subscript);
+    const key = shell.expandDynamicSubscript(split.subscript);
     if (key === '') {
       shell.reportError(`${resolved}: bad array subscript`);
       return false;
     }
     return shell.elementValue(resolved, key) !== undefined;
   }
+  if (split.subscript === '@' || split.subscript === '*') return shell.arrayValues(resolved).length > 0;
   if (split.subscript === '') {
     shell.reportError(`${resolved}: bad array subscript`);
     return false;

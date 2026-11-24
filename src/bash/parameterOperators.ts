@@ -3,7 +3,7 @@ import type { ParameterExpansion, WordPart } from './ast';
 import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
 import { declarationText } from './declare';
-import type { Expander, ParameterValue } from './expansion';
+import type { Expander, ParameterValue, SubscriptRef } from './expansion';
 import { EMPTY_LIST, FieldSplitter, type Fragment, isFieldBreak, type Piece, STAR_BREAK } from './fields';
 import { rawLengthSource } from './parse';
 import {
@@ -31,7 +31,7 @@ export function applyOperator(
   expansion: ParameterExpansion,
   value: ParameterValue,
   name: string,
-  subscript: string | undefined,
+  subscript: SubscriptRef | undefined,
   inDouble: boolean
 ): Piece[] {
   const operator = expansion.operator as string;
@@ -88,7 +88,7 @@ export function applyOperator(
       return mapValues(expander, value, inDouble, (text) => changeCase(text, pattern, operator, shell));
     }
     case '@': {
-      return transform(expander, shell, expansion, value, name, subscript, inDouble);
+      return transform(expander, shell, expansion, value, name, inDouble);
     }
     default: {
       return shell.discard(`${expansion.text}: bad substitution`);
@@ -211,7 +211,7 @@ function defaultValue(
   kind: string,
   colon: boolean,
   name: string,
-  subscript: string | undefined,
+  subscript: SubscriptRef | undefined,
   inDouble: boolean
 ): Piece[] {
   if (kind === '-') return expander.withSpacedStar(() => expandArgument(expander, expansion.argument, inDouble, false));
@@ -219,13 +219,13 @@ function defaultValue(
   const text = expander.joinPieces(word);
   if (kind === '?') {
     const message = text === '' ? (colon ? 'parameter null or not set' : 'parameter not set') : text;
-    expander.failParameter(subscript === undefined ? name : `${name}[${subscript}]`, message);
+    expander.failParameter(subscript === undefined ? name : `${name}[${subscript.text}]`, message);
   }
   // `:=` and `=` assign to variables only.
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || subscript === '@' || subscript === '*') {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || subscript?.wholeArray) {
     shell.discard(`$${name}: cannot assign in this way`);
   }
-  if (!assignDefaultTarget(shell, name, subscript, text)) throw new DiscardSignal();
+  if (!assignDefaultTarget(shell, name, subscript?.text, text)) throw new DiscardSignal();
   return expander.valuePieces({ kind: 'scalar', value: shell.lastStored }, inDouble);
 }
 
@@ -530,7 +530,6 @@ function changeCase(text: string, pattern: string, operator: string, shell: Shel
 
 /** `${x@Q}` and the other transformations. */
 // code-gauge-allow functionCognitiveComplexity -- Dispatches @Q/@E/@P/@u/@U/@L/@a/@A/@K/@k parameter transformations.
-// code-gauge-allow functionParameterCount -- The transformations need the expansion, the parameter, and how it is quoted, as the other operators do.
 // code-gauge-allow functionNcss -- One case per transformation letter of Bash's parameter expansion.
 function transform(
   expander: Expander,
@@ -538,7 +537,6 @@ function transform(
   expansion: ParameterExpansion,
   value: ParameterValue,
   name: string,
-  subscript: string | undefined,
   inDouble: boolean
 ): Piece[] {
   const letter =

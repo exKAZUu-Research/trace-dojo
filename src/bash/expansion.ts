@@ -21,6 +21,12 @@ export type ParameterValue =
   | { kind: 'scalar'; value: string | undefined }
   | { kind: 'list'; values: string[]; star: boolean; positional?: boolean; transformed?: boolean };
 
+/** An expanded parameter subscript, preserving whether `@` or `*` was written as a whole-array operator. */
+export interface SubscriptRef {
+  text: string;
+  wholeArray: boolean;
+}
+
 const SPECIAL_PARAMETERS = new Set(['@', '*', '#', '?', '-', '$', '!', '0', '_']);
 
 /** Expands words as Bash does: braces, parameters, arithmetic, command substitutions, splitting, and quotes. */
@@ -344,10 +350,10 @@ export class Expander {
     if (!isValidParameterName(name) || (expansion.prefix === '#' && expansion.operator !== undefined)) {
       this.shell.discard(`${expansion.text}: bad substitution`);
     }
-    const subscript = expansion.subscript ? this.subscriptText(name, expansion.subscript) : undefined;
+    const subscript = expansion.subscript ? this.subscriptRef(name, expansion.subscript) : undefined;
     if (expansion.prefix === '!') return this.expandIndirect(expansion, subscript, inDouble);
-    if (expansion.prefix === '#' && subscript !== undefined && subscript !== '@' && subscript !== '*') {
-      return this.valuePieces(this.elementLengthValue(expansion, subscript), inDouble);
+    if (expansion.prefix === '#' && subscript !== undefined && !subscript.wholeArray) {
+      return this.valuePieces(this.elementLengthValue(expansion, subscript.text), inDouble);
     }
     const value = this.parameterValue(name, subscript, expansion);
     if (expansion.prefix === '#') return this.valuePieces(lengthOf(value), inDouble);
@@ -371,15 +377,17 @@ export class Expander {
     return lengthOf({ kind: 'scalar', value: this.shell.elementAtIndex(resolved, index) });
   }
 
-  /** The text of a subscript: `@` and `*` as written, an associative array's key, or an indexed one's expression. */
-  private subscriptText(name: string, subscript: Word): string {
+  /** Evaluates a subscript, distinguishing literal `@` and `*` from an expanded associative key or index expression. */
+  private subscriptRef(name: string, subscript: Word): SubscriptRef {
     const raw = subscript.text;
-    if (raw === '@' || raw === '*') return raw;
-    if (this.shell.isAssociative(this.shell.resolveName(name))) return this.expandAssociativeKey(subscript);
-    return this.expandSubscriptString(subscript);
+    if (raw === '@' || raw === '*') return { text: raw, wholeArray: true };
+    const text = this.shell.isAssociative(this.shell.resolveName(name))
+      ? this.expandAssociativeKey(subscript)
+      : this.expandSubscriptString(subscript);
+    return { text, wholeArray: false };
   }
 
-  parameterValue(name: string, subscript: string | undefined, expansion?: ParameterExpansion): ParameterValue {
+  parameterValue(name: string, subscript: SubscriptRef | undefined, expansion?: ParameterExpansion): ParameterValue {
     const { shell } = this;
     if (subscript !== undefined) return this.subscriptedParameterValue(name, subscript, expansion);
     const special = this.specialParameterValue(name);
@@ -398,13 +406,17 @@ export class Expander {
     return { kind: 'scalar', value: shell.scalarValue(name) };
   }
 
-  private subscriptedParameterValue(name: string, subscript: string, expansion?: ParameterExpansion): ParameterValue {
+  private subscriptedParameterValue(
+    name: string,
+    subscript: SubscriptRef,
+    expansion?: ParameterExpansion
+  ): ParameterValue {
     const resolved = this.shell.resolveName(name);
-    if (subscript === '@' || subscript === '*') {
-      return { kind: 'list', values: this.shell.arrayValues(resolved), star: subscript === '*' };
+    if (subscript.wholeArray) {
+      return { kind: 'list', values: this.shell.arrayValues(resolved), star: subscript.text === '*' };
     }
-    if (subscript === '' && expansion) return this.emptySubscriptValue(expansion, resolved);
-    return { kind: 'scalar', value: this.shell.elementValue(resolved, subscript) };
+    if (subscript.text === '' && expansion) return this.emptySubscriptValue(expansion, resolved);
+    return { kind: 'scalar', value: this.shell.elementValue(resolved, subscript.text) };
   }
 
   private specialParameterValue(name: string): ParameterValue | undefined {
@@ -451,14 +463,17 @@ export class Expander {
   }
 
   /** `${!name}`, `${!name[@]}`, and `${!prefix*}`. */
-  // code-gauge-allow functionCognitiveComplexity -- Bash's indirection forms: keys, names by prefix, name references, and indirect values.
-  private expandIndirect(expansion: ParameterExpansion, subscript: string | undefined, inDouble: boolean): Piece[] {
+  private expandIndirect(
+    expansion: ParameterExpansion,
+    subscript: SubscriptRef | undefined,
+    inDouble: boolean
+  ): Piece[] {
     const { shell } = this;
     const { name } = expansion;
-    if (subscript === '@' || subscript === '*') {
+    if (subscript?.wholeArray) {
       if (expansion.operator !== undefined) shell.discard(`${expansion.text}: bad substitution`);
       return this.valuePieces(
-        { kind: 'list', values: shell.arrayKeys(shell.resolveName(name)), star: subscript === '*' },
+        { kind: 'list', values: shell.arrayKeys(shell.resolveName(name)), star: subscript.text === '*' },
         inDouble
       );
     }
@@ -476,7 +491,7 @@ export class Expander {
     const direct = this.parameterValue(name, subscript, expansion);
     const reference = direct.kind === 'scalar' ? direct.value : direct.values.join(' ');
     if (reference === undefined || reference === '') {
-      if (expansion.operator === undefined) this.checkIndirectReference(name, subscript);
+      if (expansion.operator === undefined) this.checkIndirectReference(name, subscript?.text);
       return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, '', undefined, inDouble);
     }
     const target = this.indirectTarget(reference);
@@ -493,7 +508,7 @@ export class Expander {
     expansion: ParameterExpansion,
     value: ParameterValue,
     targetName: string,
-    targetSubscript: string | undefined,
+    targetSubscript: SubscriptRef | undefined,
     inDouble: boolean
   ): Piece[] {
     if (expansion.operator === undefined) return this.valuePieces(value, inDouble);
@@ -506,17 +521,22 @@ export class Expander {
     if (!this.shell.findVariable(name)) this.shell.discard(`${name}[${subscript}]: invalid indirect expansion`);
   }
 
-  private indirectTarget(reference: string): { name: string; subscript: string | undefined } {
+  private indirectTarget(reference: string): { name: string; subscript: SubscriptRef | undefined } {
     const split = this.shell.splitSubscript(reference);
     if (split && isIdentifier(split.name) && split.subscript !== '') {
       const resolved = this.shell.resolveName(split.name);
       const raw = split.subscript;
-      if (raw === '@' || raw === '*') return { name: split.name, subscript: raw };
+      if (raw === '@' || raw === '*') return { name: split.name, subscript: { text: raw, wholeArray: true } };
       const expanded = this.shell.expandDynamicSubscript(raw);
-      if (this.shell.isAssociative(resolved)) return { name: split.name, subscript: expanded };
+      if (this.shell.isAssociative(resolved)) {
+        return { name: split.name, subscript: { text: expanded, wholeArray: false } };
+      }
       const normalized = expanded === '' ? '0' : expanded;
       const index = this.shell.arrayIndex(resolved, normalized);
-      return { name: split.name, subscript: index === undefined ? normalized : String(index) };
+      return {
+        name: split.name,
+        subscript: { text: index === undefined ? normalized : String(index), wholeArray: false },
+      };
     }
     if (!isValidParameterName(reference)) this.shell.discard(`${reference}: invalid variable name`);
     return { name: reference, subscript: undefined };
