@@ -273,7 +273,7 @@ export function unsetElement(shell: Shell, name: string, subscript: string, viaR
   if (!variable) return unsetSpecialOrMissingElement(shell, resolved, subscript, viaReference);
   if (subscript === '@' || subscript === '*') return clearIndexedOrScalar(shell, variable, resolved, viaReference);
   const expanded = shell.expandDynamicSubscript(subscript);
-  const index = shell.arrayIndex(resolved, expanded === '' && subscript !== '' ? '0' : expanded);
+  const index = shell.arrayIndex(resolved, expanded === '' && subscript !== '' ? '0' : expanded, false, true);
   if (index === undefined) {
     shell.reportError(`unset: [${subscript}]: bad array subscript`);
     return false;
@@ -297,7 +297,7 @@ function unsetSpecialOrMissingElement(
   if (resolved === 'RANDOM') shell.scalarValue('RANDOM');
   if (subscript === '@' || subscript === '*') return unsetAllDynamicElements(shell, resolved, viaReference);
   const expanded = shell.expandDynamicSubscript(subscript);
-  const index = shell.arrayIndex(resolved, expanded === '' && subscript !== '' ? '0' : expanded);
+  const index = shell.arrayIndex(resolved, expanded === '' && subscript !== '' ? '0' : expanded, false, true);
   if (index === undefined) {
     shell.reportError(`unset: [${subscript}]: bad array subscript`);
     return false;

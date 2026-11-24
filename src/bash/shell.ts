@@ -1143,9 +1143,14 @@ export class Shell implements ArithmeticHost {
    * Evaluates an indexed array's subscript, counting a negative one from the end, as Bash does, or `undefined` for a
    * negative one before the first element, which each caller reports in its own way.
    */
-  arrayIndex(name: string, subscript: string, allowScalarWrite = false): bigint | undefined {
-    const dynamicLen = !SCALAR_DYNAMIC_VARIABLES.has(name) ? dynamicArrayLength(this.dynamicElements(name)) : undefined;
-    return this.arrayIndexFor(this.findVariable(name), subscript, dynamicLen, allowScalarWrite);
+  arrayIndex(name: string, subscript: string, allowScalarWrite = false, forMutation = false): bigint | undefined {
+    const elements =
+      forMutation && name === 'FUNCNAME' && this.isDynamic('FUNCNAME')
+        ? this.state.funcname
+        : !SCALAR_DYNAMIC_VARIABLES.has(name)
+          ? this.dynamicElements(name)
+          : undefined;
+    return this.arrayIndexFor(this.findVariable(name), subscript, dynamicArrayLength(elements), allowScalarWrite);
   }
 
   private arrayIndexFor(
