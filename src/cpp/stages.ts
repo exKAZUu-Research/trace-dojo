@@ -45,13 +45,8 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   decltype: 'decltype',
   lambda_expression: 'ラムダ式',
   structured_binding_declarator: '構造化束縛（auto [a, b] = ...）',
-  annotation: '注釈（[[=...]]）',
   alignas_qualifier: 'alignas',
   alignof_expression: 'alignof',
-  explicit_object_parameter_declaration: '明示的なオブジェクト引数（this を付けた引数）',
-  expansion_statement: 'template for',
-  consteval_block_declaration: 'consteval のブロック',
-  contract_specifier: '契約（pre・post）',
   generic_expression: '_Generic',
   offsetof_expression: 'offsetof',
   va_arg_expression: '可変長引数（va_arg）',
@@ -66,9 +61,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   preproc_ifdef: '条件付きのコンパイル（#if・#ifdef など）',
   linkage_specification: '外部の関数の宣言（extern "C"）',
   typeid_expression: '実行時の型の情報（typeid）',
-  reflect_expression: 'リフレクション',
-  splice_expression: 'リフレクション',
-  splice_type_specifier: 'リフレクション',
   co_await_expression: 'コルーチン（co_await・co_yield・co_return）',
   co_return_statement: 'コルーチン（co_await・co_yield・co_return）',
   co_yield_statement: 'コルーチン（co_await・co_yield・co_return）',
@@ -80,6 +72,22 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   atomic_type_specifier: '_Atomic',
   gnu_asm_expression: 'インラインアセンブリ（asm）',
   builtin_available_expression: '__builtin_available',
+};
+
+/**
+ * The syntax of later standards that the grammar accepts and clang++ rejects in C++20, by node type, with the name
+ * learners know it by and the standard that adds it.
+ */
+const LATER_STANDARD_NODES: Record<string, [string, string]> = {
+  annotation: ['注釈（[[=...]]）', 'C++26'],
+  explicit_object_parameter_declaration: ['明示的なオブジェクト引数（this を付けた引数）', 'C++23'],
+  expansion_statement: ['template for', 'C++26'],
+  consteval_block_declaration: ['consteval のブロック', 'C++26'],
+  contract_specifier: ['契約（pre・post）', 'C++26'],
+  reflect_expression: ['リフレクション（^^）', 'C++26'],
+  splice_expression: ['リフレクション（[: :]）', 'C++26'],
+  splice_type_specifier: ['リフレクション（[: :]）', 'C++26'],
+  splice_specifier: ['リフレクション（[: :]）', 'C++26'],
 };
 
 const MICROSOFT_PREFIXES = ['ms_', 'seh_'];
@@ -106,6 +114,8 @@ export function rejectUnsupportedSyntax(root: Syntax): void {
     // `catch (...)` writes its parameter as `...`, which is no variadic parameter.
     const feature = isCatchParameters && node.type === 'variadic_parameter' ? undefined : UNSUPPORTED_NODES[node.type];
     if (feature) unsupported(node.row, feature);
+    const later = LATER_STANDARD_NODES[node.type];
+    if (later) compileError(node.row, `${later[0]} は ${later[1]} の書き方なので、C++20 では使えません。`);
     if (MICROSOFT_PREFIXES.some((prefix) => node.type.startsWith(prefix))) unsupported(node.row, 'Microsoft の拡張');
     switch (node.type) {
       case 'preproc_include': {
