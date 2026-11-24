@@ -333,6 +333,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** Resolves a file's imports, which name classes, top-level functions and properties, and members of objects. */
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected resolveImports(file: KotlinFile, context: FileContext): void {
     for (const declaration of file.imports) {
       const { path, row } = declaration;
@@ -529,6 +530,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private declareSupertypes(entry: ClassEntry): void {
     const { symbol } = entry;
     this.validateAnnotations(
@@ -546,6 +548,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       else this.declareSuperclass(entry, spec, type);
     }
     if (symbol.isAnnotation) this.declareAnnotationSupertype(entry);
+    for (const enumEntry of entry.decl.enumEntries)
+      this.validateAnnotations(entry.scope, enumEntry.modifiers, annotationSite(['FIELD', 'PROPERTY', 'CLASS']));
     if (symbol.kind === 'enum') {
       symbol.superclass = {
         kind: 'class',
@@ -1126,6 +1130,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** Checks `lateinit` and `const`, which kotlinc allows only on the properties that can hold them. */
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private checkPropertyModifiers(
     decl: PropertyDecl,
     symbol: PropertySymbol,

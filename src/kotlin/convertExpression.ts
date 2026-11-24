@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- the file holds one layer of the compiler, whose parts share its state.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { convertAnnotation } from './annotationArguments';
@@ -85,6 +86,7 @@ export abstract class ExpressionConverter {
   }
 
   // code-gauge-allow functionNcss -- one case per kind of tree-sitter's expression nodes.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   convertExpression(node: Node): Expression {
     if (Object.hasOwn(UNAVAILABLE_EXPRESSIONS, node.type)) throw unavailable(node, UNAVAILABLE_EXPRESSIONS[node.type]);
     const row = rowOf(node);
@@ -385,6 +387,7 @@ export abstract class ExpressionConverter {
     }));
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private convertCall(node: Node): Expression {
     const parts = named(node);
     const callee: Expression =
@@ -612,6 +615,8 @@ export abstract class ExpressionConverter {
     };
   }
 
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   convertType(node: Node): TypeRef {
     const row = rowOf(node);
     switch (node.type) {

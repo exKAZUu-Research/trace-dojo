@@ -33,7 +33,9 @@ function optionNames(options: Value): string[] {
 function compile(frame: Frame, pattern: string, options: Value): CompiledRegex {
   const names = optionNames(options);
   const flags = names.map((name) => OPTION_FLAGS[name] ?? '').join('');
-  const literal = names.includes('LITERAL') ? `\\Q${pattern.replaceAll(String.raw`\E`, String.raw`\E\\E\Q`)}\\E` : pattern;
+  const literal = names.includes('LITERAL')
+    ? `\\Q${pattern.replaceAll(String.raw`\E`, String.raw`\E\\E\Q`)}\\E`
+    : pattern;
   const source = flags ? `(?${flags})${literal}` : literal;
   try {
     const search = translateJavaRegex(source, false);

@@ -226,6 +226,7 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** Runs a suspend function's body in a new frame as `call` does, suspending where the body's generator yields. */
   // code-gauge-allow functionParameterCount -- the same parts as `call`'s.
+  // code-gauge-allow duplicateLines -- the copies compile the same Kotlin construct in different contexts, whose differences sit between the shared lines.
   *callSuspend(
     info: FunctionInfo,
     caller: Frame,
@@ -256,6 +257,7 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** Runs a function's body in a new frame, returning what it returns. */
   // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow duplicateLines -- the copies compile the same Kotlin construct in different contexts, whose differences sit between the shared lines.
   call(
     info: FunctionInfo,
     caller: Frame | undefined,

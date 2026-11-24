@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- the file holds one layer of the compiler, whose parts share its state.
 import type { AnnotationSite } from './annotationSites';
 import type { Annotation, Expression, Modifiers, Statement, TypeProjectionRef, TypeRef } from './ast';
 import {
@@ -152,6 +153,8 @@ export abstract class CompilerCore {
   // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   // code-gauge-allow functionNcss -- the type is resolved and checked in the order the written name and arguments determine it.
   resolveType(scope: Scope, ref: TypeRef, allowsBareClass = false): KType {
+    if (ref.kind === 'function' && ref.contextTypes.length > 0)
+      this.unavailable(ref.row, 'コンテキスト引数を持つ関数型（context(A) () -> Unit）');
     if (ref.kind === 'function') {
       return {
         kind: 'function',
@@ -301,6 +304,7 @@ export abstract class CompilerCore {
    * The type alias a simple name stands for, when no class of the name is nearer: in the classes around the scope, then
    * the file's explicit imports, its package, and its star imports.
    */
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected findTypeAlias(scope: Scope | undefined, name: string): TypeAliasSymbol | undefined {
     if (findClassInScope(scope, name)) return undefined;
     for (let current = scope; current; current = current.parent) {

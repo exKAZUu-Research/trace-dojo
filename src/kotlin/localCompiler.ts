@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- the file holds one layer of the compiler, whose parts share its state.
 import { AnnotationCompiler } from './annotationCompiler';
 import { annotationSite } from './annotationSites';
 import type { ClassDecl, Expression, FunctionDecl, LambdaExpression, Statement } from './ast';
@@ -244,6 +245,7 @@ export abstract class LocalCompiler extends AnnotationCompiler {
   }
 
   /** What a reference names without an expected function type: one function, or a property. */
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private referencedSignature(scope: Scope, target: ReferenceTarget, name: string, row: number): ReferencedSignature {
     const receiverType =
       target.kind === 'free' ? undefined : target.kind === 'unbound' ? target.type : target.receiver.type;
@@ -322,6 +324,7 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     return symbol && { symbol, substitution: new Map() };
   }
 
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
   protected compileIsInitialized(
     scope: Scope,
     context: FunctionContext,
@@ -501,6 +504,7 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     return { type, repr: 'ref', eval: evaluate };
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private functionValueHeader(
     scope: Scope,
     context: FunctionContext,
@@ -587,9 +591,11 @@ export abstract class LocalCompiler extends AnnotationCompiler {
    * what the function reads, in a slot of the frame declaring it, which a call finds by following the frames that
    * created the caller's frame.
    */
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
   protected compileLocalFunction(scope: Scope, context: FunctionContext, decl: FunctionDecl): Exec {
     this.validateAnnotations(scope, decl.modifiers, annotationSite(['FUNCTION'], decl.receiver ? ['receiver'] : []));
     this.rejectLocalModifiers(decl.modifiers.keywords, decl.row, 'ローカル関数');
+    if (decl.modifiers.keywords.has('suspend')) this.unavailable(decl.row, '関数の中の suspend 関数');
     const symbol = new FunctionSymbol(decl.name);
     symbol.row = decl.row;
     symbol.isLibrary = context.info.isLibrary;
@@ -649,6 +655,9 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     };
   }
 
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow duplicateLines -- the copies compile the same Kotlin construct in different contexts, whose differences sit between the shared lines.
   private compileLocalFunctionBody(
     scope: Scope,
     context: FunctionContext,

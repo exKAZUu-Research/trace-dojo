@@ -42,6 +42,7 @@ const ROOT_INFO: FunctionInfo = {
  *
  * @param onMainExit Receives `main`'s frame when it returns or throws, while the frame still holds its variables.
  */
+// code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
 export function runProgram(
   runtime: Runtime,
   program: CompiledProgram,

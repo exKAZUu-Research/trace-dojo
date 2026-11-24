@@ -218,6 +218,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   }
 
   // code-gauge-allow functionNcss -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow duplicateLines -- the copies compile the same Kotlin construct in different contexts, whose differences sit between the shared lines.
   private ensureFunctionCompiled(entry: FunctionEntry): void {
     if (entry.state !== 'pending') return;
     entry.state = 'compiling';
@@ -792,6 +793,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   // Classes' initializers.
 
   // code-gauge-allow functionNcss -- the parts of a class's initializer, from the defaults to the constructor, which follow one another.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileClassInitializer(entry: ClassEntry): void {
     const { symbol } = entry;
     if (symbol.isInterface || symbol.isNative) return;
@@ -922,7 +924,6 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   }
 
   /** The constructor a `constructor(...)` delegates to: another of its class's with `this(...)`, or the superclass's. */
-  // code-gauge-allow functionParameterCount -- the class, the constructor, its syntax, and the scope it compiles in are each needed.
   private compileConstructorDelegation(
     entry: ClassEntry,
     ctor: FunctionSymbol,

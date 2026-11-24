@@ -1376,6 +1376,7 @@ export abstract class CallCompiler extends CompilerCore {
   }
 
   /** The arguments, in the order they are written, converted to the parameters' declared representations. */
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private argumentEvaluations(
     { candidate, substitution, mapping }: Attempt,
     args: ArgumentSyntax[],

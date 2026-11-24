@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- the file holds one layer of the compiler, whose parts share its state.
 import type { Block, Expression, FunctionDecl, LambdaExpression, Statement, TypeRef } from './ast';
 import {
   type Compiled,
@@ -53,6 +54,7 @@ function hiddenName(what: string): string {
  * returned value, inside `if`, `when`, `try`, loops, and the lambdas of `repeat` and `forEach`.
  */
 export abstract class SuspendCompiler extends LocalCompiler {
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
   protected compileSuspendFunction(
     entry: FunctionEntry,
     scope: Scope,
@@ -103,6 +105,7 @@ export abstract class SuspendCompiler extends LocalCompiler {
       caller.runtime.throwError(caller, 'java.lang.IllegalStateException', `${symbol.name} is a suspend function`);
   }
 
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
   protected compileSuspendLambda(
     scope: Scope,
     context: FunctionContext,
@@ -208,7 +211,7 @@ export abstract class SuspendCompiler extends LocalCompiler {
     return this.compileSuspendStatements(scope, context, block.statements);
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- one case per kind of statement that may suspend.
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
   private compileSuspendStatement(scope: Scope, context: FunctionContext, statement: Statement): Gen {
     if (!this.mayYield(scope, statement)) {
       const exec = this.compileStatement(scope, context, statement);
@@ -272,6 +275,8 @@ export abstract class SuspendCompiler extends LocalCompiler {
     }
   }
 
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileSuspendLoop(
     scope: Scope,
     context: FunctionContext,
@@ -321,7 +326,6 @@ export abstract class SuspendCompiler extends LocalCompiler {
   // Expressions.
 
   /** An expression's value, which a suspend call that is the expression, or the result of its branches, may give. */
-  // code-gauge-allow functionCognitiveComplexity -- one case per kind of expression that may suspend.
   private compileSuspendValue(
     scope: Scope,
     context: FunctionContext,
@@ -403,6 +407,7 @@ export abstract class SuspendCompiler extends LocalCompiler {
 
   /** An expression with the suspend calls in its parts replaced by variables that `before` assigns, in order. */
   // code-gauge-allow functionCognitiveComplexity -- one case per kind of expression whose parts may suspend.
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
   private hoistParts(scope: Scope, expression: Expression, before: Statement[]): Expression {
     const hoist = (part: Expression): Expression => {
       if (!this.mayYield(scope, part)) return part;

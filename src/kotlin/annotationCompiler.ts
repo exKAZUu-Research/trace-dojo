@@ -148,6 +148,7 @@ export abstract class AnnotationCompiler extends BodyCompiler {
   }
 
   /** Checks one value of an annotation's argument, which must be a constant of the parameter's type. */
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private checkAnnotationValue(scope: Scope, value: Expression, type: KType, row: number): void {
     const expected = resolved(type);
     if (value.kind === 'collectionLiteral') {

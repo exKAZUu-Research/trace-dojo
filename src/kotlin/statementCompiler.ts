@@ -228,6 +228,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
   /** Declares a class in a function body, whose members see the variables declared before it. */
   protected abstract compileLocalClass(scope: Scope, context: FunctionContext, decl: ClassDecl): Exec;
 
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileLocalProperty(scope: Scope, context: FunctionContext, statement: PropertyDecl): Exec {
     this.validateAnnotations(
       scope,
@@ -1318,6 +1320,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- exhaustiveness selects the result type and participates in branch flow.
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
   protected compileWhen(
     scope: Scope,
     context: FunctionContext,

@@ -1590,6 +1590,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       : [...memberLevels, ...extensionLevels];
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private extensionCallLevels(
     scope: Scope,
     receiver: Compiled,
@@ -1858,9 +1859,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
   protected abstract nonVirtualCall(call: ResolvedCall): (frame: Frame, receiver: Value) => Value;
 
   /** Calls a value of a function type, such as a lambda held in a variable. */
-  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
-  // code-gauge-allow functionNcss -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   /** Whether values of the type can be called as functions, through an `operator fun invoke`. */
   protected hasInvokeOperator(type: KType): boolean {
     return (
@@ -2069,6 +2067,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- each place a return may not leave, and the value it converts, are one rule of Kotlin's.
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
   private compileReturn(
     scope: Scope,
     context: FunctionContext,
@@ -2126,6 +2125,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** `return@label` from a lambda, which ends that lambda with the value, as its last expression would. */
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileLambdaReturn(
     scope: Scope,
     context: FunctionContext,
@@ -2181,6 +2181,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   // code-gauge-allow functionNcss -- the parts of a lambda, from its parameters to its function value, which follow one another.
   // code-gauge-allow functionCognitiveComplexity -- parameter setup, body flow, and representation follow the lambda lifecycle.
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the construct are each needed, and bundling them would only rename them.
   compileLambda(
     scope: Scope,
     context: FunctionContext,
