@@ -54,7 +54,6 @@ function hiddenName(what: string): string {
  * returned value, inside `if`, `when`, `try`, loops, and the lambdas of `repeat` and `forEach`.
  */
 export abstract class SuspendCompiler extends LocalCompiler {
-  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
   protected compileSuspendFunction(
     entry: FunctionEntry,
     scope: Scope,

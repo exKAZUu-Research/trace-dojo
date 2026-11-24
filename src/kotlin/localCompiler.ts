@@ -644,24 +644,8 @@ export abstract class LocalCompiler extends AnnotationCompiler {
       this.flow = outerFlow;
     }
     const build = this.captureBuilder(context, functionContext);
-    const declaringInfo = context.info;
-    const { info } = functionContext;
-    symbol.defaultsInfo = info;
-    if (suspendRun) {
-      const body = suspendRun;
-      symbol.invokeSuspend = (caller, receiver, args, callRow) => {
-        const declaring = declaringFrame(caller, declaringInfo);
-        const env = declaring.locals[envSlot] as unknown as unknown[];
-        return caller.runtime.callSuspend(info, caller, env, receiver, args, callRow, body, declaring);
-      };
-    } else {
-      const body = run as Eval;
-      symbol.invoke = (caller, receiver, args, callRow) => {
-        const declaring = declaringFrame(caller, declaringInfo);
-        const env = declaring.locals[envSlot] as unknown as unknown[];
-        return caller.runtime.call(info, caller, env, receiver, args, callRow, body, declaring);
-      };
-    }
+    symbol.defaultsInfo = functionContext.info;
+    bindLocalFunction(symbol, { declaringInfo: context.info, info: functionContext.info, envSlot }, run, suspendRun);
     return (frame) => {
       frame.locals[envSlot] = build(frame) as unknown as Value;
     };
@@ -863,6 +847,31 @@ const LOCAL_FORBIDDEN_MODIFIERS = new Set([
   'inner',
   'companion',
 ]);
+
+/** A local function's calls, which run its body with what its declaration captured in the frame that ran it. */
+function bindLocalFunction(
+  symbol: FunctionSymbol,
+  { declaringInfo, info, envSlot }: { declaringInfo: Frame['info']; info: Frame['info']; envSlot: number },
+  run: Eval | undefined,
+  suspendRun: ((frame: Frame) => Suspension) | undefined
+): void {
+  const declared = (caller: Frame): { declaring: Frame; env: unknown[] } => {
+    const declaring = declaringFrame(caller, declaringInfo);
+    return { declaring, env: declaring.locals[envSlot] as unknown as unknown[] };
+  };
+  if (suspendRun) {
+    symbol.invokeSuspend = (caller, receiver, args, callRow) => {
+      const { declaring, env } = declared(caller);
+      return caller.runtime.callSuspend(info, caller, env, receiver, args, callRow, suspendRun, declaring);
+    };
+    return;
+  }
+  const body = run as Eval;
+  symbol.invoke = (caller, receiver, args, callRow) => {
+    const { declaring, env } = declared(caller);
+    return caller.runtime.call(info, caller, env, receiver, args, callRow, body, declaring);
+  };
+}
 
 /** The frame of the function or lambda that declared a local function, which created the caller's frame. */
 function declaringFrame(caller: Frame, info: Frame['info']): Frame {

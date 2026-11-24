@@ -792,12 +792,12 @@ export abstract class BodyCompiler extends DeclarationCompiler {
 
   // Classes' initializers.
 
-  // code-gauge-allow functionNcss -- the parts of a class's initializer, from the defaults to the constructor, which follow one another.
-  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileClassInitializer(entry: ClassEntry): void {
     this.withOptIns(this.classOptIns(entry.symbol), () => this.compileClassInitializerOpted(entry));
   }
 
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileClassInitializerOpted(entry: ClassEntry): void {
     const { symbol } = entry;
     if (symbol.isInterface || symbol.isNative) return;

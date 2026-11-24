@@ -530,7 +530,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private declareSupertypes(entry: ClassEntry): void {
     const { symbol } = entry;
     symbol.optInMarkers = this.optInMarkersOf(entry.scope, entry.decl.modifiers.annotations);
@@ -538,6 +537,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     this.withOptIns(this.classOptIns(symbol), () => this.declareSupertypesOpted(entry));
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private declareSupertypesOpted(entry: ClassEntry): void {
     const { symbol } = entry;
     this.validateAnnotations(
@@ -914,9 +914,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionNcss -- builds the function symbol from the declaration and its modifiers.
-  // code-gauge-allow functionNcss -- declaration flags and type constraints describe the same signature.
-  // code-gauge-allow functionNcss -- Declaration flags, annotations, and the signature share the scope.
   private declareFunction(
     decl: FunctionDecl,
     ownerScope: Scope,
@@ -933,6 +930,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     return entry;
   }
 
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
   private declareFunctionOpted(
     decl: FunctionDecl,
     ownerScope: Scope,
@@ -1079,8 +1077,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     native: NativeFunction
   ): NonNullable<FunctionSymbol['invoke']>;
 
-  // code-gauge-allow functionNcss -- The parts of a property declaration and their checks.
-  // code-gauge-allow functionCognitiveComplexity -- modifier, backing-field, and initialization rules share one declaration check.
   private declareProperty(
     decl: PropertyDecl,
     ownerScope: Scope,
@@ -1097,6 +1093,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     return entry;
   }
 
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private declarePropertyOpted(
     decl: PropertyDecl,
     ownerScope: Scope,

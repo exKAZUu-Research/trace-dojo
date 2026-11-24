@@ -158,18 +158,22 @@ export abstract class AnnotationCompiler extends BodyCompiler {
     for (const annotation of annotations) {
       const cls = this.resolvedAnnotationClass(scope, annotation);
       if (isOptInMarker(cls)) optIns.push(cls);
-      if (cls?.kotlinName !== 'kotlin.OptIn') continue;
-      for (const argument of annotation.args ?? []) {
-        const values = argument.value.kind === 'collectionLiteral' ? argument.value.elements : [argument.value];
-        for (const value of values) {
-          const receiver = value.kind === 'reference' && value.name === 'class' ? value.receiver : undefined;
-          const path = receiver?.kind === 'expression' ? qualifiedPath(receiver.expression) : undefined;
-          const marker = path && (path.length > 1 ? this.findQualifiedClass(path) : this.findClass(scope, path[0]));
-          if (marker) optIns.push(marker);
-        }
-      }
+      if (cls?.kotlinName === 'kotlin.OptIn') optIns.push(...this.optInArguments(scope, annotation));
     }
     return optIns;
+  }
+
+  /** The classes `@OptIn(A::class, B::class)` names, as `X::class` values or arrays of them. */
+  private optInArguments(scope: Scope, annotation: Annotation): ClassSymbol[] {
+    const values = (annotation.args ?? []).flatMap((argument) =>
+      argument.value.kind === 'collectionLiteral' ? argument.value.elements : [argument.value]
+    );
+    return values.flatMap((value) => {
+      const receiver = value.kind === 'reference' && value.name === 'class' ? value.receiver : undefined;
+      const path = receiver?.kind === 'expression' ? qualifiedPath(receiver.expression) : undefined;
+      const marker = path && (path.length > 1 ? this.findQualifiedClass(path) : this.findClass(scope, path[0]));
+      return marker ? [marker] : [];
+    });
   }
 
   /** The class an annotation names, without reporting one that is missing, which `checkAnnotations` reports. */
