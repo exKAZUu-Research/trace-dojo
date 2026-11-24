@@ -22,6 +22,7 @@ export class RegexSyntaxError extends Error {}
 export interface CompiledRegex {
   root: RegexNode;
   groups: number;
+  nfa?: CompiledNfa;
 }
 
 const CLASSES: Record<string, (c: string) => boolean> = {
@@ -211,28 +212,171 @@ class RegexParser {
 /** A match: the start and end of the whole match and of each group, by character index, or -1 when unset. */
 export type RegexMatch = [number, number][];
 
-/** Finds the leftmost-longest match, choosing among equally long ones the one whose earlier groups are longer. */
+type NfaState =
+  | { kind: 'accept' }
+  | { kind: 'char'; c: string; out: number }
+  | { kind: 'any'; out: number }
+  | { kind: 'set'; negated: boolean; test: (c: string) => boolean; out: number }
+  | { kind: 'start'; out: number }
+  | { kind: 'end'; out: number }
+  | { kind: 'open'; slot: number; maxSlot: number; out: number }
+  | { kind: 'close'; slot: number; out: number }
+  | { kind: 'split'; first: number; second: number };
+
+interface CompiledNfa {
+  entry: number;
+  accept: number;
+  states: NfaState[];
+  /** For each state, the set of slots currently open along paths through that state. */
+  openSlots: ReadonlySet<number>[];
+  slotCount: number;
+  /** For each group `1..groups`, the slot index storing its `[start, end]`. */
+  groupSlots: number[];
+}
+
+interface Thread {
+  slots: [number, number][];
+  opens: number[];
+}
+
+/** Finds the leftmost-longest match, choosing among equally long ones the one whose earlier subpatterns are longer. */
 export function searchRegex(regex: CompiledRegex, text: string, spend: () => void): RegexMatch | undefined {
+  const nfa = (regex.nfa ??= buildNfa(regex, spend));
   const chars = charactersOf(text);
   for (let start = 0; start <= chars.length; start++) {
-    let best: RegexMatch | undefined;
-    const captures: [number, number][] = Array.from({ length: regex.groups + 1 }, () => [-1, -1]);
-    const accept = (end: number): void => {
-      const candidate: RegexMatch = captures.map(([s, e]) => [s, e]);
-      candidate[0] = [start, end];
-      if (!best || isBetter(candidate, best)) best = candidate;
-    };
-    matchNode(regex.root, chars, start, captures, accept, spend);
-    if (best) return best;
+    const match = matchFrom(nfa, chars, start, spend);
+    if (match) return match;
   }
   return undefined;
 }
 
-function isBetter(candidate: RegexMatch, best: RegexMatch): boolean {
-  if (candidate[0][1] !== best[0][1]) return candidate[0][1] > best[0][1];
-  for (let i = 1; i < candidate.length; i++) {
-    const [cs, ce] = candidate[i];
-    const [bs, be] = best[i];
+function matchFrom(nfa: CompiledNfa, chars: string[], start: number, spend: () => void): RegexMatch | undefined {
+  let current: (Thread | undefined)[] = Array.from({ length: nfa.states.length });
+  current[nfa.entry] = {
+    slots: Array.from({ length: nfa.slotCount + 1 }, () => [-1, -1]),
+    opens: Array.from({ length: nfa.slotCount + 1 }, () => -1),
+  };
+  let bestEnd = -1;
+  let bestThread: Thread | undefined;
+  for (let pos = start; pos <= chars.length; pos++) {
+    closeEpsilons(nfa, current, pos, chars.length, spend);
+    const accepted = current[nfa.accept];
+    if (accepted) {
+      bestEnd = pos;
+      bestThread = accepted;
+    }
+    if (pos === chars.length || !current.some(Boolean)) break;
+    current = stepChar(nfa, current, chars[pos], spend);
+  }
+  if (!bestThread) return undefined;
+  const result: RegexMatch = [[start, bestEnd]];
+  for (let group = 1; group < nfa.groupSlots.length; group++) {
+    const [s, e] = bestThread.slots[nfa.groupSlots[group]];
+    result.push([s, e]);
+  }
+  return result;
+}
+
+// code-gauge-allow functionCognitiveComplexity -- Relaxes epsilon transitions (splits, anchors, and subpattern open/close tags) in a single worklist pass.
+function closeEpsilons(
+  nfa: CompiledNfa,
+  states: (Thread | undefined)[],
+  pos: number,
+  textLength: number,
+  spend: () => void
+): void {
+  const queue: number[] = [];
+  const queued = new Uint8Array(nfa.states.length);
+  for (let i = 0; i < states.length; i++) {
+    if (states[i]) {
+      queue.push(i);
+      queued[i] = 1;
+    }
+  }
+  const relax = (target: number, thread: Thread): void => {
+    const existing = states[target];
+    if (existing && !betterThread(nfa.openSlots[target], thread, existing)) return;
+    states[target] = thread;
+    if (!queued[target]) {
+      queued[target] = 1;
+      queue.push(target);
+    }
+  };
+  for (let head = 0; head < queue.length; head++) {
+    const id = queue[head];
+    queued[id] = 0;
+    const thread = states[id];
+    if (!thread) continue;
+    spend();
+    const state = nfa.states[id];
+    switch (state.kind) {
+      case 'split': {
+        relax(state.first, thread);
+        relax(state.second, thread);
+        break;
+      }
+      case 'start': {
+        if (pos === 0) relax(state.out, thread);
+        break;
+      }
+      case 'end': {
+        if (pos === textLength) relax(state.out, thread);
+        break;
+      }
+      case 'open': {
+        const slots = [...thread.slots];
+        for (let s = state.slot + 1; s <= state.maxSlot; s++) slots[s] = [-1, -1];
+        const opens = [...thread.opens];
+        opens[state.slot] = pos;
+        relax(state.out, { slots, opens });
+        break;
+      }
+      case 'close': {
+        const slots = [...thread.slots];
+        slots[state.slot] = [thread.opens[state.slot], pos];
+        relax(state.out, { slots, opens: thread.opens });
+        break;
+      }
+      default: {
+        break;
+      }
+    }
+  }
+}
+
+function stepChar(
+  nfa: CompiledNfa,
+  current: (Thread | undefined)[],
+  ch: string,
+  spend: () => void
+): (Thread | undefined)[] {
+  const next: (Thread | undefined)[] = Array.from({ length: nfa.states.length });
+  const advance = (target: number, thread: Thread): void => {
+    const existing = next[target];
+    if (!existing || betterThread(nfa.openSlots[target], thread, existing)) next[target] = thread;
+  };
+  for (let id = 0; id < current.length; id++) {
+    const thread = current[id];
+    if (!thread) continue;
+    spend();
+    const state = nfa.states[id];
+    if (state.kind === 'char' && ch === state.c) advance(state.out, thread);
+    else if (state.kind === 'any') advance(state.out, thread);
+    else if (state.kind === 'set' && state.test(ch) !== state.negated) advance(state.out, thread);
+  }
+  return next;
+}
+
+function betterThread(openAtState: ReadonlySet<number>, candidate: Thread, existing: Thread): boolean {
+  for (let s = 1; s < candidate.slots.length; s++) {
+    if (openAtState.has(s)) {
+      const co = candidate.opens[s];
+      const eo = existing.opens[s];
+      if (co !== eo) return eo === -1 || (co !== -1 && co < eo);
+      continue;
+    }
+    const [cs, ce] = candidate.slots[s];
+    const [bs, be] = existing.slots[s];
     if (cs === bs && ce === be) continue;
     if (bs === -1) return cs !== -1;
     if (cs === -1) return false;
@@ -242,90 +386,122 @@ function isBetter(candidate: RegexMatch, best: RegexMatch): boolean {
   return false;
 }
 
-/** Tries every way `node` matches at `position`, calling `next` with the position after each. */
-// code-gauge-allow functionCognitiveComplexity -- One case per regex node kind, each enumerating its matches for the leftmost-longest search.
-// code-gauge-allow functionNcss -- One case per regex node kind, each enumerating its matches for the leftmost-longest search.
-function matchNode(
-  node: RegexNode,
-  chars: string[],
-  position: number,
-  captures: [number, number][],
-  next: (position: number) => void,
-  spend: () => void
-): void {
-  spend();
+interface NfaBuilder {
+  states: NfaState[];
+  slotMap: SlotAssignment;
+  add: (state: NfaState, active: ReadonlySet<number>) => number;
+}
+
+function buildNfa(regex: CompiledRegex, spend: () => void): CompiledNfa {
+  const states: NfaState[] = [];
+  const openSlots: ReadonlySet<number>[] = [];
+  const groupSlots: number[] = Array.from({ length: regex.groups + 1 }, () => 0);
+  const slotMap = assignSlots(regex.root, groupSlots);
+  const add = (state: NfaState, active: ReadonlySet<number>): number => {
+    spend();
+    const id = states.length;
+    states.push(state);
+    openSlots.push(active);
+    return id;
+  };
+  const builder: NfaBuilder = { states, slotMap, add };
+  const accept = add({ kind: 'accept' }, new Set());
+  const entry = compileNode(regex.root, accept, new Set(), builder);
+  return { entry, accept, states, openSlots, slotCount: slotMap.count, groupSlots };
+}
+
+interface SlotAssignment {
+  count: number;
+  rangeOf: Map<RegexNode, { slot: number; maxSlot: number }>;
+}
+
+function assignSlots(root: RegexNode, groupSlots: number[]): SlotAssignment {
+  let count = 0;
+  const rangeOf = new Map<RegexNode, { slot: number; maxSlot: number }>();
+  const visit = (node: RegexNode): void => {
+    if (node.kind === 'group' || node.kind === 'repeat') {
+      const slot = ++count;
+      if (node.kind === 'group') groupSlots[node.index] = slot;
+      visit(node.body);
+      rangeOf.set(node, { slot, maxSlot: count });
+      return;
+    }
+    if (node.kind === 'concat') for (const item of node.items) visit(item);
+    else if (node.kind === 'alternation') for (const option of node.options) visit(option);
+  };
+  visit(root);
+  return { count, rangeOf };
+}
+
+// code-gauge-allow functionCognitiveComplexity -- Compiles each regex AST node kind into Thompson NFA states with POSIX subpattern tags.
+function compileNode(node: RegexNode, out: number, active: ReadonlySet<number>, builder: NfaBuilder): number {
+  const { add, slotMap } = builder;
   switch (node.kind) {
     case 'char': {
-      if (chars[position] === node.c) next(position + 1);
-      return;
+      return add({ kind: 'char', c: node.c, out }, active);
     }
     case 'any': {
-      if (position < chars.length) next(position + 1);
-      return;
+      return add({ kind: 'any', out }, active);
     }
     case 'set': {
-      if (position < chars.length && node.test(chars[position]) !== node.negated) next(position + 1);
-      return;
+      return add({ kind: 'set', negated: node.negated, test: node.test, out }, active);
     }
     case 'start': {
-      if (position === 0) next(position);
-      return;
+      return add({ kind: 'start', out }, active);
     }
     case 'end': {
-      if (position === chars.length) next(position);
-      return;
+      return add({ kind: 'end', out }, active);
     }
     case 'group': {
-      const saved = captures[node.index];
-      matchNode(
-        node.body,
-        chars,
-        position,
-        captures,
-        (end) => {
-          const previous = captures[node.index];
-          captures[node.index] = [position, end];
-          next(end);
-          captures[node.index] = previous;
-        },
-        spend
-      );
-      captures[node.index] = saved;
-      return;
+      const { slot, maxSlot } = slotMap.rangeOf.get(node) as { slot: number; maxSlot: number };
+      const inner = new Set([...active, slot]);
+      const close = add({ kind: 'close', slot, out }, active);
+      const body = compileNode(node.body, close, inner, builder);
+      return add({ kind: 'open', slot, maxSlot, out: body }, active);
     }
     case 'concat': {
-      const step = (index: number, at: number): void => {
-        if (index === node.items.length) {
-          next(at);
-          return;
-        }
-        matchNode(node.items[index], chars, at, captures, (after) => step(index + 1, after), spend);
-      };
-      step(0, position);
-      return;
+      let next = out;
+      for (let i = node.items.length - 1; i >= 0; i--) next = compileNode(node.items[i], next, active, builder);
+      return next;
     }
     case 'alternation': {
-      for (const option of node.options) matchNode(option, chars, position, captures, next, spend);
-      return;
+      let next = compileNode(node.options.at(-1) as RegexNode, out, active, builder);
+      for (let i = node.options.length - 2; i >= 0; i--) {
+        const branch = compileNode(node.options[i], out, active, builder);
+        next = add({ kind: 'split', first: branch, second: next }, active);
+      }
+      return next;
     }
     case 'repeat': {
-      const iterate = (count: number, at: number): void => {
-        if (count >= node.min) next(at);
-        if (count >= node.max) return;
-        matchNode(
-          node.body,
-          chars,
-          at,
-          captures,
-          (after) => {
-            // An iteration that matches nothing cannot help a longer match, and would repeat forever.
-            if (after === at && count >= node.min) return;
-            iterate(count + 1, after);
-          },
-          spend
-        );
-      };
-      iterate(0, position);
+      const { slot, maxSlot } = slotMap.rangeOf.get(node) as { slot: number; maxSlot: number };
+      const inner = new Set([...active, slot]);
+      const close = add({ kind: 'close', slot, out }, active);
+      const bodyEntry = compileRepeat(node.body, node.min, node.max, close, inner, builder);
+      return add({ kind: 'open', slot, maxSlot, out: bodyEntry }, active);
     }
   }
+}
+
+function compileRepeat(
+  body: RegexNode,
+  min: number,
+  max: number,
+  out: number,
+  active: ReadonlySet<number>,
+  builder: NfaBuilder
+): number {
+  let next = out;
+  if (max === Infinity) {
+    const loop = builder.add({ kind: 'split', first: 0, second: out }, active);
+    const iter = compileNode(body, loop, active, builder);
+    (builder.states[loop] as Extract<NfaState, { kind: 'split' }>).first = iter;
+    next = loop;
+  } else {
+    for (let i = 0; i < max - min; i++) {
+      const iter = compileNode(body, next, active, builder);
+      next = builder.add({ kind: 'split', first: iter, second: next }, active);
+    }
+  }
+  for (let i = 0; i < min; i++) next = compileNode(body, next, active, builder);
+  return next;
 }
