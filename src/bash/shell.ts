@@ -919,7 +919,11 @@ export class Shell implements ArithmeticHost {
   }
 
   writeTarget(target: ArithmeticTarget, value: string): WriteTargetResult {
-    if ((target.kind === 'associativeElement' || target.kind === 'indexedElement') && !isIdentifier(target.name)) {
+    if (
+      (target.kind === 'associativeElement' || target.kind === 'indexedElement') &&
+      !isIdentifier(target.name) &&
+      !this.findOwnVariable(target.name)
+    ) {
       this.reportError(`\`${target.name}': not a valid identifier`);
       return 'ignored';
     }
@@ -1258,12 +1262,12 @@ export class Shell implements ArithmeticHost {
    * is expanded text, which an indexed array evaluates as arithmetic.
    */
   assignElement(name: string, subscript: string, value: string, append: boolean, evaluated = false): boolean {
-    if (!isIdentifier(name)) {
+    const existing = this.findVariable(name);
+    if (!isIdentifier(name) && !existing) {
       this.reportError(`\`${name}': not a valid identifier`);
       return false;
     }
     if (this.isDynamic(name)) return this.assignDynamic(name, value);
-    const existing = this.findVariable(name);
     if (!existing && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
     if (existing?.attributes.has('r')) {
       this.readonlyFailure = true;

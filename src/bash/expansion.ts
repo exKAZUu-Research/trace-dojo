@@ -289,19 +289,12 @@ export class Expander {
 
   parameterValue(name: string, subscript: string | undefined, expansion?: ParameterExpansion): ParameterValue {
     const { shell } = this;
-    if (subscript !== undefined) {
-      const resolved = shell.resolveName(name);
-      if (subscript === '@' || subscript === '*') {
-        return { kind: 'list', values: shell.arrayValues(resolved), star: subscript === '*' };
-      }
-      if (subscript === '' && expansion) return this.emptySubscriptValue(expansion, resolved);
-      return { kind: 'scalar', value: shell.elementValue(resolved, subscript) };
-    }
+    if (subscript !== undefined) return this.subscriptedParameterValue(name, subscript, expansion);
     const special = this.specialParameterValue(name);
     if (special) return special;
     const resolved = shell.resolveNameOrUndefined(name);
     if (resolved === undefined) return { kind: 'scalar', value: undefined };
-    const split = shell.splitSubscript(resolved);
+    const split = shell.findOwnVariable(resolved) ? undefined : shell.splitSubscript(resolved);
     if (
       (expansion?.braced === false || expansion?.prefix === '#') &&
       split &&
@@ -311,6 +304,15 @@ export class Expander {
       return { kind: 'list', values: arr === undefined ? [] : shell.arrayValues(arr), star: split.subscript === '*' };
     }
     return { kind: 'scalar', value: shell.scalarValue(name) };
+  }
+
+  private subscriptedParameterValue(name: string, subscript: string, expansion?: ParameterExpansion): ParameterValue {
+    const resolved = this.shell.resolveName(name);
+    if (subscript === '@' || subscript === '*') {
+      return { kind: 'list', values: this.shell.arrayValues(resolved), star: subscript === '*' };
+    }
+    if (subscript === '' && expansion) return this.emptySubscriptValue(expansion, resolved);
+    return { kind: 'scalar', value: this.shell.elementValue(resolved, subscript) };
   }
 
   private specialParameterValue(name: string): ParameterValue | undefined {

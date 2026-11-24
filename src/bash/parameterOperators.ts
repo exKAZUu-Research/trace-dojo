@@ -176,8 +176,11 @@ function defaultValue(
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || subscript === '@' || subscript === '*') {
     shell.discard(`$${name}: cannot assign in this way`);
   }
+  const resolved = subscript === undefined ? name : shell.resolveNameOrUndefined(name);
   const assigned =
-    subscript === undefined ? shell.assignScalar(name, text) : shell.assignElement(name, subscript, text, false);
+    subscript === undefined
+      ? shell.assignScalar(name, text)
+      : resolved !== undefined && shell.assignElement(resolved, subscript, text, false);
   if (!assigned) throw new DiscardSignal();
   return expander.valuePieces({ kind: 'scalar', value: shell.lastStored }, inDouble);
 }

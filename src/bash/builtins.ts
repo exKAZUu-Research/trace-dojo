@@ -153,7 +153,7 @@ export function assignSubscriptedBuiltinTarget(
   if (!shell.isAssociative(resolved)) {
     const expanded = shell.expandDynamicSubscript(subscript);
     const normalized = expanded === '' && subscript !== '' ? '0' : expanded;
-    if (!isIdentifier(resolved)) {
+    if (!isIdentifier(resolved) && !shell.findOwnVariable(resolved)) {
       if (normalized === '' || shell.arrayIndex(resolved, normalized, true) === undefined) {
         shell.reportError(`${builtin}: [${subscript}]: bad array subscript`);
       } else {
@@ -247,7 +247,7 @@ function unsetNameref(shell: Shell, name: string): boolean {
 export function unsetElement(shell: Shell, name: string, subscript: string, viaReference = false): boolean {
   const resolved = shell.resolveNameOrUndefined(name);
   if (resolved === undefined) return false;
-  if (!isIdentifier(resolved)) {
+  if (!isIdentifier(resolved) && !shell.findOwnVariable(resolved)) {
     if (shell.isValidNamerefTarget(resolved)) return true;
     shell.reportError(`unset: \`${resolved}': not a valid identifier`);
     return false;
@@ -318,10 +318,7 @@ function deleteIndexedOrScalarElement(shell: Shell, variable: Variable, resolved
     return true;
   }
   if (variable.attributes.has('a')) return true;
-  if (index === 0n) {
-    shell.unsetVariable(resolved);
-    return true;
-  }
+  if (index === 0n) return shell.unsetVariable(resolved, false);
   shell.reportError(`unset: ${resolved}: not an array variable`);
   return false;
 }
