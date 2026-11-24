@@ -9,6 +9,7 @@ import {
   cultureLastIndexOf,
   cultureStartsWith,
   equalsCulture,
+  isIgnorable,
 } from '../culture';
 import { MeteredText } from '../meteredText';
 import { defineNatives, defineNativesKeepingStrings, type NativeCall, type NativeMethod } from '../natives';
@@ -251,6 +252,8 @@ function replacedText(call: NativeCall, text: string, from: string, to: string, 
  */
 function culturallyReplacedText(call: NativeCall, text: string, from: string, to: string, comparison: number): string {
   const culture = cultureOf(call, comparison);
+  // A value without culture weights matches with no width anywhere, which .NET's Replace leaves the text as it is for.
+  if (isIgnorable(from, culture)) return text;
   let result = '';
   let position = 0;
   while (position < text.length) {

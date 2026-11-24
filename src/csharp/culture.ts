@@ -628,7 +628,7 @@ const MAX_ELEMENTS_PER_CHARACTER = 18;
 const MAX_CHARACTERS_PER_ELEMENT = 4;
 
 /** Whether a text has no weights under a comparison, as control and format characters have none. */
-function isIgnorable(text: string, options: CultureComparison): boolean {
+export function isIgnorable(text: string, options: CultureComparison): boolean {
   const { compare, comparable } = comparisonOf(options);
   return compare(comparable(text), '') === 0;
 }
