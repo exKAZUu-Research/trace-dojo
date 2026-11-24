@@ -523,41 +523,35 @@ export class Shell implements ArithmeticHost {
   // code-gauge-allow functionNcss -- Bash's order of expansion, assignment, and lookup of functions, builtins, and external commands.
   private executeCommand(statement: Extract<Statement, { kind: 'command' }>): number {
     const argv = this.expander.expandWords(statement.words);
-    if (argv.length === 0) {
-      // A command of assignments alone takes the status of its last command substitution.
-      this.expander.lastSubstitutionStatus = 0;
-      // A failed assignment, as to a readonly variable, abandons the line, as it does in Bash.
-      for (const assignment of statement.assignments) {
-        if (!this.performAssignment(assignment)) throw new DiscardSignal();
-      }
-      this.state.lastArgument = '';
-      return this.expander.lastSubstitutionStatus;
-    }
     return this.withRedirects(statement.redirects, () => {
+      if (argv.length === 0) {
+        // A command of assignments alone takes the status of its last command substitution.
+        this.expander.lastSubstitutionStatus = 0;
+        // A failed assignment, as to a readonly variable, abandons the line, as it does in Bash.
+        for (const assignment of statement.assignments) {
+          if (!this.performAssignment(assignment)) throw new DiscardSignal();
+        }
+        this.state.lastArgument = '';
+        return this.expander.lastSubstitutionStatus;
+      }
       const [name] = argv;
       const fn = this.state.functions.get(name);
       if (fn) {
-        const temporary = this.temporaryScope(statement.assignments);
-        if (temporary === undefined) return 1;
-        const status = this.callFunction(fn, argv.slice(1), statement.row, temporary);
-        // The commands in the function reset the flag, so the call sets it after they ran.
-        this.ranFunction = true;
-        this.state.lastArgument = argv.at(-1) as string;
-        return status;
+        return this.withTemporaryScope(statement.assignments, () => {
+          const status = this.callFunction(fn, argv.slice(1), statement.row);
+          // The commands in the function reset the flag, so the call sets it after they ran.
+          this.ranFunction = true;
+          this.state.lastArgument = argv.at(-1) as string;
+          return status;
+        });
       }
-      const builtin = BUILTINS[name];
+      const builtin = Object.hasOwn(BUILTINS, name) ? BUILTINS[name] : undefined;
       if (builtin) {
-        const temporary = this.temporaryScope(statement.assignments);
-        if (temporary === undefined) return 1;
-        this.state.scopes.push(temporary);
-        let status: number;
-        try {
-          status = builtin(this, argv.slice(1), name);
-        } finally {
-          this.removeScope(temporary);
-        }
-        this.state.lastArgument = argv.at(-1) as string;
-        return status;
+        return this.withTemporaryScope(statement.assignments, () => {
+          const status = builtin(this, argv.slice(1), name);
+          this.state.lastArgument = argv.at(-1) as string;
+          return status;
+        });
       }
       if (EXTERNAL_COMMANDS.has(name) || name.includes('/')) {
         throw new UnsupportedFeatureError(`外部コマンド（${name}）`);
@@ -573,30 +567,36 @@ export class Shell implements ArithmeticHost {
     if (index !== -1) this.state.scopes.splice(index, 1);
   }
 
-  /** The scope of the assignments written before a command, which hold only while it runs. */
-  private temporaryScope(assignments: Assignment[]): Scope | undefined {
+  /** Runs a command with the assignments written before it visible both to later assignments and to the command. */
+  private withTemporaryScope(assignments: Assignment[], run: () => number): number {
+    if (assignments.length === 0) return run();
     const scope: Scope = new Map();
-    for (const assignment of assignments) {
-      if (assignment.subscript || assignment.array) {
-        // Bash assigns array elements before a command in the shell itself.
-        if (!this.performAssignment(assignment)) return undefined;
-        continue;
+    this.state.scopes.push(scope);
+    try {
+      for (const assignment of assignments) {
+        if (assignment.subscript || assignment.array) {
+          // Bash assigns array elements before a command in the shell itself.
+          if (!this.performAssignment(assignment)) return 1;
+          continue;
+        }
+        const value = assignment.value ? this.expander.expandAssignmentValue(assignment.value) : '';
+        const existing = this.findVariable(assignment.name);
+        if (existing?.attributes.has('r')) {
+          // Bash reports the assignment and runs the command without it.
+          this.reportError(`${assignment.name}: readonly variable`);
+          continue;
+        }
+        const base = assignment.append ? (this.scalarValue(assignment.name) ?? '') : '';
+        scope.set(assignment.name, {
+          name: assignment.name,
+          value: { kind: 'scalar', value: base + value },
+          attributes: new Set(['x']),
+        });
       }
-      const value = assignment.value ? this.expander.expandAssignmentValue(assignment.value) : '';
-      const existing = this.findVariable(assignment.name);
-      if (existing?.attributes.has('r')) {
-        // Bash reports the assignment and runs the command without it.
-        this.reportError(`${assignment.name}: readonly variable`);
-        continue;
-      }
-      const base = assignment.append ? (this.scalarValue(assignment.name) ?? '') : '';
-      scope.set(assignment.name, {
-        name: assignment.name,
-        value: { kind: 'scalar', value: base + value },
-        attributes: new Set(['x']),
-      });
+      return run();
+    } finally {
+      this.removeScope(scope);
     }
-    return scope;
   }
 
   private executeDeclaration(statement: Extract<Statement, { kind: 'declaration' }>): number {
@@ -616,10 +616,9 @@ export class Shell implements ArithmeticHost {
   // ---------------------------------------------------------------- functions
 
   // code-gauge-allow functionNcss -- Sets up and restores every part of the shell state a function call changes.
-  callFunction(fn: FunctionDefinition, args: string[], callRow: number, temporary?: Scope): number {
+  callFunction(fn: FunctionDefinition, args: string[], callRow: number): number {
     if (this.runtime.frames.length >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
     const { state } = this;
-    if (temporary && temporary.size > 0) state.scopes.push(temporary);
     const scope: Scope = new Map();
     state.scopes.push(scope);
     const scopeIndex = state.scopes.length - 1;
@@ -652,7 +651,6 @@ export class Shell implements ArithmeticHost {
       state.positional.pop();
       state.functionScopes.pop();
       state.scopes.length = scopeIndex;
-      if (temporary && temporary.size > 0) state.scopes.splice(state.scopes.lastIndexOf(temporary), 1);
       if (fn.isAtomic) this.runtime.steps.completeAtomicCall();
       this.currentRow = reportedRow;
     }
@@ -704,6 +702,7 @@ export class Shell implements ArithmeticHost {
     const savedLoop = this.loopDepth;
     const savedCondition = this.conditionDepth;
     const savedRow = this.currentRow;
+    const savedRanFunction = this.ranFunction;
     this.loopDepth = 0;
     let status: number;
     try {
@@ -718,6 +717,7 @@ export class Shell implements ArithmeticHost {
       this.loopDepth = savedLoop;
       this.conditionDepth = savedCondition;
       this.currentRow = savedRow;
+      this.ranFunction = savedRanFunction;
     }
     // Bash keeps the random generator's state across command substitutions only when they reseed it.
     return { output, status };

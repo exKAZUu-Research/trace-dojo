@@ -45,7 +45,7 @@ const PRIMARY_INDEX = new Map(PRIMARY_ORDER.map((c, index) => [c, index]));
 
 function weightOf(c: string): Weight | undefined {
   if (c === 'ß') return { primary: (PRIMARY_INDEX.get('s') as number) + 0.5, secondary: 0, tertiary: 0 };
-  const accented = ACCENTED[c];
+  const accented = Object.hasOwn(ACCENTED, c) ? ACCENTED[c] : undefined;
   const lower = c.toLowerCase();
   const base = accented ? accented[0] : charactersOf(lower).length === 1 && /^[a-z]$/.test(lower) ? lower : c;
   const primary = PRIMARY_INDEX.get(base);

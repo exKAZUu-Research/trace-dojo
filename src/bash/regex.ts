@@ -179,7 +179,7 @@ class RegexParser {
         const name = rest.slice(0, close);
         this.position += 2 + charactersOf(name).length + 2;
         if (type === ':') {
-          const test = CLASSES[name];
+          const test = Object.hasOwn(CLASSES, name) ? CLASSES[name] : undefined;
           if (!test) throw new RegexSyntaxError('invalid character class');
           tests.push(test);
         } else tests.push((ch) => ch === name);
