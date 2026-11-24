@@ -1,6 +1,6 @@
 import { promote } from '../c/types';
 import { isBaseAccessible } from './access';
-import { AUTO, hasAuto, isAuto } from './compilerBase';
+import { AUTO, type Declared, hasAuto, isAuto } from './compilerBase';
 import { convertArithmetic, permitsQualificationConversion } from './conversions';
 import { CppException, CppRuntimeError } from './errors';
 import {
@@ -39,6 +39,7 @@ import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
   type GlobalInfo,
   hasVacuousInitialization,
+  INT,
   intMax,
   intMin,
   isArithmetic,
@@ -87,7 +88,7 @@ export interface AutoDeduction {
   type: Type;
 }
 
-interface LocalDeclaration {
+export interface LocalDeclaration {
   exec: Exec;
   hasInitializer: boolean;
   createsObject: boolean;
@@ -316,13 +317,21 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   /** Brings `std` names into scope, for `using namespace std;` or `using std::cout;`. */
   abstract usingDeclaration(node: Syntax): void;
 
+  /** Declares a function in a block (`int f(int);`), which names a function of the enclosing namespace. */
+  protected abstract localFunctionDeclaration(declaration: Syntax, declared: Declared): LocalDeclaration;
+
   // Declarations -----------------------------------------------------------------------------------------------------
 
   private localDeclaration(
     node: Syntax,
     recordStep = true
   ): { exec: Exec; recordsStep: boolean; enter?: Exec | false } {
-    const isStatic = this.hasSpecifier(node, 'static');
+    // A thread_local variable of a program with one thread is a static one.
+    const isStatic =
+      this.hasSpecifier(node, 'static') ||
+      this.hasSpecifier(node, 'thread_local') ||
+      this.hasSpecifier(node, '__thread');
+    if (this.hasSpecifier(node, 'extern')) return this.blockExtern(node);
     const base = this.specifiedType(node, true);
     const declarators = fieldsOf(node, 'declarator');
     if (declarators.length === 0) return this.error(node.row, '変数の名前を書いてください。');
@@ -352,6 +361,18 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
+  /** `extern int g;` in a block, which names the namespace's variable of that name. */
+  private blockExtern(node: Syntax): { exec: Exec; recordsStep: boolean } {
+    for (const declarator of fieldsOf(node, 'declarator')) {
+      const { name } = this.applyDeclarator(INT, declarator);
+      const entity = name === undefined ? undefined : this.globalScope.names.get(name);
+      if (!name || entity?.kind !== 'global')
+        return this.unsupported(node.row, '関数の中の extern の宣言で、まだ宣言されていない変数を宣言すること');
+      this.context.scope.names.set(name, entity);
+    }
+    return { exec: () => {}, recordsStep: false };
+  }
+
   private localDeclarator(base: Type, declarator: Syntax, declaration: Syntax): LocalDeclaration {
     const structured = structuredBinding(declarator, `\0binding ${declarator.start}`);
     if (structured) {
@@ -377,11 +398,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const declared = this.applyDeclarator(base, declarator);
     const reread = declared.function ? this.asDirectInitialization(declarator, declared.function) : undefined;
     if (reread) return this.localDeclarator(base, reread, declaration);
-    if (declared.function)
-      return this.error(
-        declarator.row,
-        `${declared.name ?? ''}(); は関数の宣言になります。変数を作るには ${declared.name ?? ''}; と書いてください（関数の中での関数の宣言は、この採点環境では使えません）。`
-      );
+    if (declared.function) return this.localFunctionDeclaration(declaration, declared);
     const name = declared.name as string;
     if (declared.nameNode?.type === 'qualified_identifier')
       return this.error(declarator.row, `${name} の宣言に :: は書けません。`);
@@ -423,7 +440,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (entity.isConstexpr)
       entity.constant = this.requireConstantInitializer(type, value, declarator.row, !hasToken(declarator, '='));
     // A constexpr variable holds its value from the start, as the compiler evaluated its initializer.
-    const evaluated = entity.isConstexpr && isArithmetic(type) ? entity.constant : undefined;
+    const evaluated = entity.isConstexpr && isInteger(type) && !init.isConstant ? entity.constant : undefined;
     if (evaluated !== undefined) init = initializerWithConstancy(() => evaluated, true);
     if (this.isClassLike(type) && !value) createsObject = true;
     const { local } = entity;
@@ -1585,12 +1602,28 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
   }
 
-  private tryStatement(node: Syntax): Exec {
+  /**
+   * A function-try-block, whose handlers catch what the member initializers and the body throw; a constructor's or a
+   * destructor's handler rethrows the exception when it completes (C++20 [except.handle]p15).
+   */
+  protected functionTryBlock(node: Syntax, initialization: Exec | undefined, rethrows: boolean): Exec {
+    if (!rethrows) return this.tryStatement(node, initialization);
+    const all = node.all.map((child) => (child.type === 'catch_clause' ? withRethrow(child) : child));
+    return this.tryStatement({ ...node, all, children: all.filter((child) => child.isNamed) }, initialization);
+  }
+
+  private tryStatement(node: Syntax, prelude?: Exec): Exec {
     const block = fieldOf(node, 'body');
     if (!block) return this.error(node.row, 'try の後に {} を書いてください。');
     const scope = new Scope();
     scope.isTryBlock = true;
-    const body = this.inScope(() => this.compileStatements(block.children), scope);
+    const statements = this.inScope(() => this.compileStatements(block.children), scope);
+    const body: Exec = prelude
+      ? (frame) => {
+          prelude(frame);
+          return statements(frame);
+        }
+      : statements;
     const clauses = node.children.filter((child) => child.type === 'catch_clause');
     const handlers = clauses.map((clause, index) => {
       if (index < clauses.length - 1 && catchesAll(clause))
@@ -1850,6 +1883,24 @@ function structuredBinding(
 /** Whether a child of a condition's declaration is one of its specifiers rather than its declarator or value. */
 function isSpecifier(child: Syntax): boolean {
   return child.field !== 'declarator' && child.field !== 'value' && child.type !== '=';
+}
+
+/** A catch clause whose handler ends with `throw;`, which rethrows the exception it handles. */
+function withRethrow(clause: Syntax): Syntax {
+  const body = fieldOf(clause, 'body') as Syntax;
+  const statement: Syntax = {
+    ...body,
+    type: 'throw_statement',
+    text: 'throw;',
+    all: [],
+    children: [],
+    field: undefined,
+    row: body.endRow,
+  };
+  const all = [...body.all.slice(0, -1), statement, ...body.all.slice(-1)];
+  const rewritten: Syntax = { ...body, all, children: [...body.children, statement] };
+  const parts = clause.all.map((child) => (child === body ? rewritten : child));
+  return { ...clause, all: parts, children: parts.filter((child) => child.isNamed) };
 }
 
 /** A statement that a `goto` may enter at one of the labels it contains. */

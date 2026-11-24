@@ -61,6 +61,7 @@ import {
   type AutoDeduction,
   deducedType,
   endScope,
+  type LocalDeclaration,
   type ReferenceBinding,
   StatementCompiler,
 } from './statementCompiler';
@@ -76,6 +77,7 @@ import {
 } from './templateCompiler';
 import {
   type Access,
+  alignOf,
   allowsMemberAssignment,
   BOOL,
   ClassInfo,
@@ -151,6 +153,8 @@ export class Compiler extends StatementCompiler {
   private pendingObjectUses: (() => void)[] | undefined = [];
   private readonly programComparisons = new Map<string, ValueComparison<boolean> | undefined>();
   private readonly lambdaCaptures = new WeakMap<ClassInfo, CaptureLookup>();
+  /** The variables an `extern` declaration declares, which a later declaration may define. */
+  private readonly externGlobals = new Set<GlobalInfo>();
   /** Whether member function bodies wait for their first use, as a class template instance's do. */
   private defersBodies = false;
   private defaultDependencies?: {
@@ -186,7 +190,7 @@ export class Compiler extends StatementCompiler {
       this.inlineDependencies.get(fn)?.();
     }
     for (const [member, row] of this.usedStaticMembers) {
-      if (!member.isDefined) this.error(row, `static のメンバ変数 ${member.name} は宣言だけで、定義がありません。`);
+      if (!member.isDefined) this.error(row, `変数 ${member.name} は宣言だけで、定義がありません。`);
     }
     for (const row of this.atomicRows.keys()) {
       if (!this.usedAtomicRows.has(row)) this.error(row, misplacedAtomicMessage);
@@ -504,6 +508,8 @@ export class Compiler extends StatementCompiler {
   }
 
   private defineClassMembers(cls: ClassInfo, node: Syntax, body: Syntax): void {
+    const alignment = node.children.find((child) => child.type === 'alignas_qualifier');
+    if (alignment) cls.alignment = this.alignmentOf(alignment);
     const isFinalClass = node.children.some((child) => child.type === 'virtual_specifier' && child.text === 'final');
     const defaultAccess: Access = node.type === 'struct_specifier' ? 'public' : 'private';
     this.baseClause(cls, node, defaultAccess);
@@ -720,6 +726,9 @@ export class Compiler extends StatementCompiler {
         this.unsupported(declarator.row, '大きさのない配列のメンバ（柔軟な配列メンバ）');
       }
       const isMutable = this.hasSpecifier(node, 'mutable');
+      const alignas = node.children
+        .flatMap((child) => child.children)
+        .find((child) => child.type === 'alignas_qualifier');
       if (isMutable && (declared.type.kind === 'reference' || isConstType(declared.type)))
         this.error(declarator.row, `mutable は const のメンバや参照のメンバには付けられません（${name}）。`);
       const field: FieldInfo = {
@@ -732,6 +741,7 @@ export class Compiler extends StatementCompiler {
         initializer,
         directInitializer,
         isMutable,
+        alignment: alignas && this.alignmentOf(alignas),
       };
       cls.fields.push(field);
     }
@@ -913,7 +923,6 @@ export class Compiler extends StatementCompiler {
     const specifiers = declarator.children
       .filter((child) => child.type === 'virtual_specifier')
       .map((child) => child.text);
-    if (qualifiers.has('volatile')) this.unsupported(node.row, 'volatile');
     if (ret.kind === 'array') this.error(node.row, '関数は配列を返せません。');
     const params = this.parameters(fieldOf(declarator, 'parameters') as Syntax);
     const displayName = owner
@@ -987,6 +996,17 @@ export class Compiler extends StatementCompiler {
     const value = this.constantValueOf(this.compileExpression(condition));
     if (value === undefined) this.error(condition.row, 'noexcept(...) の条件は定数式でなければなりません。');
     return Number(value) !== 0;
+  }
+
+  /** The alignment an `alignas` qualifier gives: a power of two, or the alignment of a type. */
+  private alignmentOf(node: Syntax): number {
+    const operand = node.children[0];
+    if (operand.type === 'type_descriptor') return alignOf(this.typeDescriptor(operand));
+    const value = this.constantValueOf(this.compileExpression(operand));
+    const alignment = Number(value);
+    if (value === undefined || alignment <= 0 || (alignment & (alignment - 1)) !== 0)
+      return this.error(node.row, 'alignas には 2 のべき乗の定数を書いてください。');
+    return alignment;
   }
 
   /** Whether a declaration says `explicit`, or `explicit(true)` with a constant condition. */
@@ -1707,8 +1727,6 @@ export class Compiler extends StatementCompiler {
       this.error(node.row, 'virtual はメンバ関数にしか付けられません。');
     const name = declared.name as string;
     if (name === 'main') this.checkMainSpecifiers(node);
-    else if (!isDefinition && this.hasSpecifier(node, 'static'))
-      this.unsupported(node.row, 'static の関数（内部結合）');
     const fn = this.functionInfo(name, declared.type, declared.function as Syntax, node, undefined);
     if (name === 'main') {
       if (!sameType(fn.ret, INT)) this.error(node.row, 'main 関数の戻り値の型は int にしてください。');
@@ -1751,6 +1769,12 @@ export class Compiler extends StatementCompiler {
     overloads.push(fn);
     if (!existing) this.globalScope.names.set(name, { kind: 'functions', functions: overloads });
     return fn;
+  }
+
+  protected localFunctionDeclaration(declaration: Syntax, declared: Declared): LocalDeclaration {
+    const fn = this.declareFunction(declaration, declared, false);
+    this.context.scope.names.set(fn.name, { kind: 'functions', functions: [fn] });
+    return { exec: () => {}, hasInitializer: false, createsObject: false };
   }
 
   private checkMainSpecifiers(node: Syntax): void {
@@ -2326,17 +2350,6 @@ export class Compiler extends StatementCompiler {
     return this.inTemplate(template, bindings, run);
   }
 
-  /** Runs `run` in an unevaluated operand, which compiles expressions without running them. */
-  unevaluated<T>(run: () => T): T {
-    const previous = this.isUnevaluated;
-    this.isUnevaluated = true;
-    try {
-      return run();
-    } finally {
-      this.isUnevaluated = previous;
-    }
-  }
-
   /** Runs `run` where a requires expression's parameters are declared. */
   withRequiresParameters<T>(list: Syntax | undefined, run: () => T): T {
     let result: T | undefined;
@@ -2473,21 +2486,22 @@ export class Compiler extends StatementCompiler {
         const name = inner && this.applyDeclarator(INT, inner).name;
         if (name && !scope.names.has(name)) scope.names.set(name, { kind: 'pack', items: [] });
       }
-      // The grammar gives a constructor's function-try-block no `body` field.
-      if (node.children.some((child) => child.type === 'try_statement'))
-        return this.unsupported(node.row, '関数の try ブロック');
-      const body = fieldOf(node, 'body');
-      if (!body) {
-        if (node.children.some((child) => child.type === 'default_method_clause'))
-          this.unsupported(node.row, '= default');
-        return this.error(node.row, `${fn.displayName} の本体を書いてください。`);
-      }
-      const initializerList = node.children.find((child) => child.type === 'field_initializer_list');
-      const memberInit = fn.isConstructor && cls ? this.memberInitialization(cls, fn, initializerList) : undefined;
+      // A function-try-block (`A() try : x(f()) { } catch (...) { }`) catches what the member initializers and the
+      // body throw; the grammar gives a constructor's no `body` field.
+      const body = fieldOf(node, 'body') ?? node.children.find((child) => child.type === 'try_statement');
+      if (!body) return this.error(node.row, `${fn.displayName} の本体を書いてください。`);
+      const isTryBlock = body.type === 'try_statement';
+      const initializerList = (isTryBlock ? body : node).children.find(
+        (child) => child.type === 'field_initializer_list'
+      );
+      const initialization = fn.isConstructor && cls ? this.memberInitialization(cls, fn, initializerList) : undefined;
       if (!fn.isConstructor && initializerList) {
         this.error(node.row, 'メンバの初期化子の並び（: x(...)）は、コンストラクタにしか書けません。');
       }
-      const statements = this.compileStatements(body.children);
+      const memberInit = isTryBlock ? undefined : initialization;
+      const statements = isTryBlock
+        ? this.functionTryBlock(body, initialization, fn.isConstructor || fn.isDestructor)
+        : this.compileStatements(body.children);
       context.endBody();
       // A function whose `auto` return type no `return` statement decided returns nothing.
       if (hasAuto(context.returnType)) {
@@ -2586,7 +2600,13 @@ export class Compiler extends StatementCompiler {
         continue;
       }
       const name = declared.name as string;
-      const type = this.globalVariable(declarator, name, declared.type, this.isConstexpr(node));
+      const type = this.globalVariable(
+        declarator,
+        name,
+        declared.type,
+        this.isConstexpr(node),
+        this.hasSpecifier(node, 'extern')
+      );
       firstDeduced = this.checkAutoDeduction(
         firstDeduced,
         hasAuto(declared.type) ? { name, type: deducedType(declared.type, type) } : undefined,
@@ -2624,9 +2644,38 @@ export class Compiler extends StatementCompiler {
     }
   }
 
-  private globalVariable(declarator: Syntax, name: string, declaredType: Type, isConstexpr: boolean): Type {
-    if (this.globalScope.names.has(name)) return this.error(declarator.row, `${name} はすでに宣言されています。`);
+  private globalVariable(
+    declarator: Syntax,
+    name: string,
+    declaredType: Type,
+    isConstexpr: boolean,
+    isExtern = false
+  ): Type {
     const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
+    const existing = this.globalScope.names.get(name);
+    // `extern int g;` declares a variable that a later declaration defines (C++20 [basic.def]).
+    if (existing?.kind === 'global' && this.externGlobals.has(existing.global)) {
+      if (!sameType(existing.global.type, declaredType))
+        return this.error(declarator.row, `変数 ${name} の型が、前の extern の宣言と違います。`);
+      if (isExtern && !value) return declaredType;
+      if (existing.global.isDefined) return this.error(declarator.row, `変数 ${name} はすでに定義されています。`);
+      existing.global.isDefined = true;
+      existing.constant = this.initializeGlobal(
+        existing.global,
+        declaredType,
+        value,
+        declarator.row,
+        !hasToken(declarator, '=')
+      );
+      return declaredType;
+    }
+    if (existing) return this.error(declarator.row, `${name} はすでに宣言されています。`);
+    if (isExtern && !value) {
+      const global = this.declareStaticStorage(this.namespacedName(name), declaredType, declarator.row, true);
+      this.externGlobals.add(global);
+      this.globalScope.names.set(name, { kind: 'global', global, isReference: false });
+      return declaredType;
+    }
     let type = declaredType;
     if (type.kind === 'reference') return this.globalReference(name, type, declarator, isConstexpr);
     if (hasAuto(type))

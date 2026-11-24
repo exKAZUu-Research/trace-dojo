@@ -7,14 +7,8 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   union_specifier: '共用体（union）',
   bitfield_clause: 'ビットフィールド',
   variadic_parameter: '可変長引数（...）',
-  alignas_qualifier: 'alignas',
-  alignof_expression: 'alignof',
-  generic_expression: '_Generic',
-  offsetof_expression: 'offsetof',
   va_arg_expression: '可変長引数（va_arg）',
-  extension_expression: '__extension__',
   bit_int_specifier: '_BitInt',
-  typeof_specifier: '__typeof__',
   macro_specifier: 'マクロ',
   pragma_operator: '_Pragma',
   preproc_def: 'マクロの定義（#define）',
@@ -55,11 +49,8 @@ const LATER_STANDARD_NODES: Record<string, [string, string]> = {
 const MICROSOFT_PREFIXES = ['ms_', 'seh_'];
 
 const UNSUPPORTED_SPECIFIERS: Record<string, string> = {
-  extern: 'extern',
-  thread_local: 'thread_local（スレッドごとの変数）',
   _Noreturn: '_Noreturn',
   noreturn: '_Noreturn',
-  __thread: 'thread_local（スレッドごとの変数）',
 };
 
 /**

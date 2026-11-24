@@ -97,6 +97,8 @@ export interface FieldInfo {
   initializer?: Syntax;
   /** Whether the member is `mutable`, which a const object's member function may still change. */
   isMutable?: boolean;
+  /** The alignment `alignas` gives the member, in bytes. */
+  alignment?: number;
   directInitializer?: boolean;
 }
 
@@ -278,6 +280,8 @@ export class ClassInfo {
   templateEntity?: Entity;
   /** The namespace the class is a member of. */
   namespace?: NamespaceInfo;
+  /** The alignment `alignas` gives the class, in bytes. */
+  alignment?: number;
   /** Whether the class is a lambda's closure type. */
   isLambda = false;
   /** The class this one is nested in. */
@@ -689,7 +693,7 @@ function classLayout(cls: ClassInfo): ClassLayout {
     return { size, align, dataSize: size, baseOffset: 0, fieldOffsets, atOrigin };
   }
   let offset = cls.isPolymorphic && !cls.base?.isPolymorphic ? 8 : 0;
-  let align = offset > 0 ? 8 : 1;
+  let align = Math.max(offset > 0 ? 8 : 1, cls.alignment ?? 1);
   let baseOffset = 0;
   let emptyBase: ReadonlySet<ClassInfo> | undefined;
   if (cls.base) {
@@ -710,7 +714,7 @@ function classLayout(cls: ClassInfo): ClassLayout {
   for (const field of cls.ownFields) {
     // A reference member takes the room of a pointer, though `sizeof` of a reference type is that of its referent.
     const type = field.type.kind === 'reference' ? pointerTo(field.type.to) : field.type;
-    const fieldAlign = alignOf(type);
+    const fieldAlign = Math.max(alignOf(type), field.alignment ?? 1);
     const at = Math.ceil(offset / fieldAlign) * fieldAlign;
     const members = at === 0 ? typesAtOrigin(type) : undefined;
     const hasConflict = members && emptyBase && [...members].some((member) => emptyBase.has(member));

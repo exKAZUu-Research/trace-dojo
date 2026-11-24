@@ -612,6 +612,12 @@ export abstract class CompilerBase {
         const element = this.packElement(node);
         return this.typeOfEntity(element, fieldOf(node, 'pack') as Syntax);
       }
+      case 'typeof_specifier': {
+        // `__typeof__(e)` (a GNU extension) names the type of an expression or a type.
+        const operand = node.children[0];
+        if (operand.type === 'type_descriptor') return this.typeDescriptor(operand);
+        return this.typeOfExpression(operand);
+      }
       case 'dependent_type': {
         return this.resolveTypeSpecifier(node.children[0], allowAuto, true);
       }
@@ -865,6 +871,9 @@ export abstract class CompilerBase {
     const parameters = fieldOf(declarator, 'parameters');
     return { kind: 'function', ret, params: parameters ? this.parameterTypes(parameters) : [] };
   }
+
+  /** The type of an unevaluated expression, without a reference. */
+  protected abstract typeOfExpression(operand: Syntax): Type;
 
   /** The type `decltype(e)` names (C++20 [dcl.type.decltype]). */
   protected abstract decltypeOf(operand: Syntax): Type;

@@ -44,12 +44,14 @@ import { type Eval, type Frame, holdAll } from './runtime';
 import type { Entity } from './scopes';
 import { fieldOf, type Syntax, tokenOf } from './syntax';
 import {
+  alignOf,
   type ArithmeticType,
   BOOL,
   CHAR,
   type ClassInfo,
   classType,
   type FieldInfo,
+  fieldSubobjectOffset,
   type FunctionInfo,
   type GlobalInfo,
   INT,
@@ -232,6 +234,21 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       case 'lambda_expression': {
         return this.lambdaExpression(node);
       }
+      case 'extension_expression': {
+        return this.compileExpression(node.children[0]);
+      }
+      case 'alignof_expression': {
+        const operand = fieldOf(node, 'type') ?? node.children[0];
+        const type =
+          operand.type === 'type_descriptor' ? this.typeDescriptor(operand) : this.compileExpression(operand).type;
+        return constantExpr(SIZE_T, BigInt(alignOf(nonReference(type))), node.row);
+      }
+      case 'offsetof_expression': {
+        return this.offsetOf(node);
+      }
+      case 'generic_expression': {
+        return this.genericSelection(node);
+      }
       case 'initializer_list': {
         return this.error(node.row, '{...} は、この場所では値として使えません。');
       }
@@ -412,6 +429,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         };
       }
       case 'global': {
+        if (!entity.global.isDefined) this.requireStaticDefinition(entity.global, row);
         return this.staticStorageExpr(entity.global, row, entity.constant);
       }
       case 'field': {
@@ -1486,11 +1504,36 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
   }
 
+  /** `a ?: b` (a GNU extension clang++ accepts), which gives `a` when it is true and else `b`, evaluating `a` once. */
+  private elvis(test: Expr, alternative: Expr, row: number): Expr {
+    const value = this.rvalue(test);
+    const held: Value[] = [];
+    const first: Expr = { ...value, run: () => held.at(-1) as Value, constant: undefined };
+    const condition = this.condition(first, row);
+    const { left, right, type } = this.conditionalOperands(first, alternative, row);
+    const leftValue = this.rvalue(left).run;
+    const rightValue = this.rvalue(right).run;
+    return {
+      type,
+      isLvalue: false,
+      row,
+      run: (frame) => {
+        held.push(value.run(frame) as Value);
+        try {
+          return condition(frame) ? leftValue(frame) : rightValue(frame);
+        } finally {
+          held.pop();
+        }
+      },
+    };
+  }
+
   private conditionalExpression(node: Syntax): Expr {
     const test = this.compileExpression(fieldOf(node, 'condition') as Syntax);
     const condition = this.condition(test, node.row);
     const consequenceNode = fieldOf(node, 'consequence');
-    if (!consequenceNode) return this.unsupported(node.row, '条件演算子の省略形（x ?: y）');
+    if (!consequenceNode)
+      return this.elvis(test, this.compileExpression(fieldOf(node, 'alternative') as Syntax), node.row);
     const a = this.compileExpression(consequenceNode);
     const b = this.compileExpression(fieldOf(node, 'alternative') as Syntax);
     const { left, right, type, isLvalue } = this.conditionalOperands(a, b, node.row);
@@ -1878,7 +1921,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         row,
         kind === 'C' ? '関係のない型のポインタへのキャスト（reinterpret_cast にあたる）' : 'reinterpret_cast'
       );
-    if (isConstType(from) && !isConstType(to)) return this.unsupported(row, 'const を外すキャスト（const_cast）');
+    // A C-style cast may take `const` away, as const_cast does; static_cast may not.
+    if (isConstType(from) && !isConstType(to) && kind !== 'C')
+      return this.error(row, `static_cast では const を外せません（${typeName(value.type)} から ${typeName(type)}）。`);
     if (from.kind === 'class' && to.kind === 'class')
       return this.castClassLocation(value, type, from.cls, to.cls, row, kind);
     const run = value.run;
@@ -2104,6 +2149,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
   }
 
+  protected typeOfExpression(operand: Syntax): Type {
+    return this.unevaluated(() => this.compileExpression(operand).type);
+  }
+
   protected decltypeOf(operand: Syntax): Type {
     const previous = this.isUnevaluated;
     this.isUnevaluated = true;
@@ -2131,11 +2180,55 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
   }
 
+  /** `offsetof(T, member)`, the offset in bytes of a member in the objects of a standard-layout class. */
+  private offsetOf(node: Syntax): Expr {
+    const type = this.typeDescriptor(fieldOf(node, 'type') as Syntax);
+    const member = fieldOf(node, 'member') as Syntax;
+    if (type.kind !== 'class') return this.error(node.row, `${typeName(type)} はクラスではありません。`);
+    const field = type.cls.fields.find((candidate) => candidate.name === member.text);
+    if (!field) return this.error(node.row, `${typeName(type)} に ${member.text} というメンバはありません。`);
+    return constantExpr(SIZE_T, BigInt(fieldSubobjectOffset(type.cls, field)), node.row);
+  }
+
+  /**
+   * `_Generic(e, T1: v1, default: v2)` (a C11 feature clang++ accepts), which gives the value whose type is the
+   * controlling expression's after array and function decay and without qualifiers.
+   */
+  private genericSelection(node: Syntax): Expr {
+    const [control, ...associations] = node.children;
+    const controlType = this.unevaluated(() => this.rvalue(this.compileExpression(control)).type);
+    let fallback: Syntax | undefined;
+    for (let index = 0; index + 1 < associations.length; index += 2) {
+      const typeNode = associations[index];
+      const value = associations[index + 1];
+      if (typeNode.text === 'default') {
+        fallback = value;
+        continue;
+      }
+      if (sameType(unqualified(this.typeDescriptor(typeNode)), unqualified(controlType)))
+        return this.compileExpression(value);
+    }
+    if (fallback) return this.compileExpression(fallback);
+    return this.error(node.row, `_Generic に ${typeName(controlType)} 型に合うものがありません。`);
+  }
+
+  /** Runs `run` in an unevaluated operand. */
+  unevaluated<T>(run: () => T): T {
+    const previous = this.isUnevaluated;
+    this.isUnevaluated = true;
+    try {
+      return run();
+    } finally {
+      this.isUnevaluated = previous;
+    }
+  }
+
   /** `T{...}`, a braced functional cast, which list-initializes a prvalue. */
   private bracedCast(node: Syntax): Expr {
     const typeNode = fieldOf(node, 'type') as Syntax;
-    if (typeNode.type === 'type_descriptor') return this.unsupported(node.row, '複合リテラル（(型){...}）');
-    const type = this.resolveTypeSpecifier(typeNode);
+    // `(T){...}` is a C99 compound literal, which clang++ makes a temporary as `T{...}`.
+    const type =
+      typeNode.type === 'type_descriptor' ? this.typeDescriptor(typeNode) : this.resolveTypeSpecifier(typeNode);
     const list = fieldOf(node, 'value') as Syntax;
     const value = this.listValue(type, list, true, node.row);
     const object = { ...value, onlyCalls: type.kind === 'class' };
