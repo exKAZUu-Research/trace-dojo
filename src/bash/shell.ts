@@ -156,6 +156,8 @@ export class Shell implements ArithmeticHost {
   private ranFunction = false;
   /** Whether the shell is reading a statement's condition, whose commands record no steps. */
   private conditionDepth = 0;
+  /** Nesting depth on the left side of `&&` or `||`, where pure tests record no step unless shown state changed. */
+  private listConditionDepth = 0;
   /** Outputs of running and pending command substitutions and loop word lists, whose turtle handles stay live. */
   private readonly inFlight: { values: string[] }[] = [];
   private readonly activeOutputs: { text: string }[] = [];
@@ -303,12 +305,12 @@ export class Shell implements ArithmeticHost {
         break;
       }
       case 'list': {
-        this.conditionDepth++;
+        this.listConditionDepth++;
         let left: number;
         try {
           left = this.execute(statement.left);
         } finally {
-          this.conditionDepth--;
+          this.listConditionDepth--;
         }
         const runsRight = statement.operator === '&&' ? left === 0 : left !== 0;
         status = runsRight ? this.execute(statement.right) : left;
@@ -353,9 +355,8 @@ export class Shell implements ArithmeticHost {
       }
     };
     if (!recordsStep) return this.withRoots(() => this.withStatus(run));
-    if (statement.kind === 'declaration' && declaresReferences(statement)) {
-      // A name reference stores no value learners answer, as Java's `this` binds none, so it records a step only
-      // when it changes what the trace shows.
+    if (this.listConditionDepth > 0 || (statement.kind === 'declaration' && declaresReferences(statement))) {
+      // A list's left command (which may be a pure test) or a name reference records a step only when shown state changed.
       const status = this.withRoots(() => this.withStatus(run));
       this.runtime.steps.stepBinding(statement.row, false);
       return status;
@@ -650,9 +651,11 @@ export class Shell implements ArithmeticHost {
     this.runtime.frames.push(frame);
     const savedLoopDepth = this.loopDepth;
     const savedCondition = this.conditionDepth;
+    const savedListCondition = this.listConditionDepth;
     const savedShift = this.lineShift;
     this.loopDepth = 0;
     this.conditionDepth = 0;
+    this.listConditionDepth = 0;
     this.lineShift = fn.lineShift;
     try {
       // The call is a simple command, which restores Bash's line counter however it ends.
@@ -663,6 +666,7 @@ export class Shell implements ArithmeticHost {
     } finally {
       this.loopDepth = savedLoopDepth;
       this.conditionDepth = savedCondition;
+      this.listConditionDepth = savedListCondition;
       this.lineShift = savedShift;
       this.runtime.frames.pop();
       // A subshell's state replaces the caller's while it runs, so the call cleans up the state it started in.
@@ -721,6 +725,7 @@ export class Shell implements ArithmeticHost {
     this.state = child;
     const savedLoop = this.loopDepth;
     const savedCondition = this.conditionDepth;
+    const savedListCondition = this.listConditionDepth;
     const savedRow = this.currentRow;
     const savedRanFunction = this.ranFunction;
     this.loopDepth = 0;
@@ -737,6 +742,7 @@ export class Shell implements ArithmeticHost {
       this.state = this.suspended.pop() as ShellState;
       this.loopDepth = savedLoop;
       this.conditionDepth = savedCondition;
+      this.listConditionDepth = savedListCondition;
       this.currentRow = savedRow;
       this.ranFunction = savedRanFunction;
     }
