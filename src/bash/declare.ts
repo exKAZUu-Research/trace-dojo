@@ -137,10 +137,14 @@ function declareOne(
   }
   let ok = true;
   if (parsed?.value !== undefined) {
-    ok =
-      parsed.subscript === undefined
-        ? shell.assignScalar(name, parsed.value, parsed.append)
-        : shell.assignElement(name, parsed.subscript, parsed.value, parsed.append);
+    if (variable.attributes.has('n') && parsed.subscript === undefined) {
+      ok = assignReferenceTarget(shell, builtin, variable, parsed.value);
+    } else {
+      ok =
+        parsed.subscript === undefined
+          ? shell.assignScalarTo(variable, parsed.value, parsed.append)
+          : shell.assignElementTo(variable, parsed.subscript, parsed.value, parsed.append);
+    }
   } else if (typeof operand !== 'string') {
     ok = variable.attributes.has('n')
       ? assignReference(shell, builtin, variable, operand)
@@ -263,6 +267,10 @@ function conversionError(variable: Variable, set: Set<string>, unset: Set<string
 function assignReference(shell: Shell, builtin: string, variable: Variable, assignment: Assignment): boolean {
   if (assignment.value === undefined || assignment.array) return assignLocally(shell, variable, assignment);
   const target = shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(assignment.value as Word));
+  return assignReferenceTarget(shell, builtin, variable, target);
+}
+
+function assignReferenceTarget(shell: Shell, builtin: string, variable: Variable, target: string): boolean {
   if (target !== '' && !isIdentifier(target) && !shell.splitSubscript(target)) {
     shell.reportError(`${builtin}: \`${target}': invalid variable name for name reference`);
     variable.attributes.delete('n');
@@ -282,7 +290,7 @@ function isCompound(operand: DeclarationArgument): boolean {
   return typeof operand !== 'string' && operand.array !== undefined;
 }
 
-/** Assigns a declaration's value to the variable it declared, which may be a local shadowing a global. */
+/** Assigns a declaration's value to the variable it declared, which may be a local shadowing a global or vice versa. */
 // code-gauge-allow functionCognitiveComplexity -- Bash's assignment kinds for a declared variable: none, empty, compound, element, and scalar.
 function assignLocally(shell: Shell, variable: Variable, assignment: Assignment): boolean {
   if (assignment.value === undefined && !assignment.array) {
@@ -290,18 +298,17 @@ function assignLocally(shell: Shell, variable: Variable, assignment: Assignment)
     if (variable.attributes.has('A') && !variable.value)
       variable.value = { kind: 'associative', table: new AssociativeTable() };
     // `declare x` and `local x` declare a variable with no value; `x=` gives it the empty one.
-    if (assignment.text.includes('=')) return storeScalar(shell, variable, '', assignment.append);
+    if (assignment.text.includes('=')) return shell.assignScalarTo(variable, '', assignment.append);
     return true;
   }
   const { scopes } = shell.state;
-  // Assigning through the shell finds the innermost variable of the name, which is the one just declared.
   const owner = scopes.findLast((scope) => scope.get(variable.name) === variable);
   if (!owner) return true;
   if (assignment.array) {
     const { elements, error } = shell.expander.expandCompound(assignment.array, variable.attributes.has('A'), true);
     if (variable.attributes.has('A') && !variable.value)
       variable.value = { kind: 'associative', table: new AssociativeTable() };
-    const ok = shell.assignCompound(variable.name, elements, assignment.append);
+    const ok = shell.assignCompoundTo(variable, elements, assignment.append);
     if (error) shell.discard(error);
     return ok;
   }
@@ -312,16 +319,9 @@ function assignLocally(shell: Shell, variable: Variable, assignment: Assignment)
     const subscript = variable.attributes.has('A')
       ? shell.expander.expandString(assignment.subscript)
       : shell.expander.expandSubscriptString(assignment.subscript);
-    return shell.assignElement(variable.name, subscript, value, assignment.append);
+    return shell.assignElementTo(variable, subscript, value, assignment.append);
   }
-  return storeScalar(shell, variable, value, assignment.append);
-}
-
-function storeScalar(shell: Shell, variable: Variable, value: string, append: boolean): boolean {
-  if (variable.value?.kind === 'indexed' || variable.value?.kind === 'associative') {
-    return shell.assignElement(variable.name, '0', value, append);
-  }
-  return shell.assignScalar(variable.name, value, append);
+  return shell.assignScalarTo(variable, value, assignment.append);
 }
 
 /** `declare -p names`: each variable as a declaration that recreates it. */

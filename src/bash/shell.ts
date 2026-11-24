@@ -1026,9 +1026,12 @@ export class Shell implements ArithmeticHost {
    * negative one before the first element, which each caller reports in its own way.
    */
   arrayIndex(name: string, subscript: string): bigint | undefined {
+    return this.arrayIndexFor(this.findVariable(name), subscript);
+  }
+
+  private arrayIndexFor(variable: Variable | undefined, subscript: string): bigint | undefined {
     const index = this.evaluateText(subscript, undefined);
     if (index >= 0n) return index;
-    const variable = this.findVariable(name);
     const length = variable?.value?.kind === 'indexed' ? this.maxIndex(variable.value.elements) + 1n : 1n;
     const resolved = length + index;
     return resolved < 0n ? undefined : resolved;
@@ -1083,13 +1086,17 @@ export class Shell implements ArithmeticHost {
     if (open !== -1) return this.assignElement(resolved.slice(0, open), resolved.slice(open + 1, -1), value, append);
     if (this.assignDynamic(resolved, value)) return true;
     let variable = this.findVariable(resolved, false);
-    if (variable?.attributes.has('r')) {
-      this.reportError(`${resolved}: readonly variable`);
-      return false;
-    }
     if (!variable) {
       variable = { name: resolved, value: undefined, attributes: new Set() };
       this.state.scopes[0].set(resolved, variable);
+    }
+    return this.assignScalarTo(variable, value, append);
+  }
+
+  assignScalarTo(variable: Variable, value: string, append = false): boolean {
+    if (variable.attributes.has('r')) {
+      this.reportError(`${variable.name}: readonly variable`);
+      return false;
     }
     if (
       variable.value?.kind === 'indexed' ||
@@ -1097,7 +1104,7 @@ export class Shell implements ArithmeticHost {
       variable.attributes.has('a') ||
       variable.attributes.has('A')
     ) {
-      return this.assignElement(resolved, '0', value, append);
+      return this.assignElementTo(variable, '0', value, append);
     }
     const base = append && variable.value?.kind === 'scalar' ? variable.value.value : '';
     const converted = this.convertForAttributes(variable, value, base, append);
@@ -1130,8 +1137,6 @@ export class Shell implements ArithmeticHost {
    * Assigns `name[subscript]=value`, making `name` an indexed array unless it is an associative one. The subscript
    * is expanded text, which an indexed array evaluates as arithmetic.
    */
-  // code-gauge-allow functionCognitiveComplexity -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
-  // code-gauge-allow functionNcss -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
   assignElement(name: string, subscript: string, value: string, append: boolean, evaluated = false): boolean {
     if (this.isDynamic(name)) return this.assignDynamic(name, value);
     let variable = this.findVariable(name);
@@ -1143,11 +1148,29 @@ export class Shell implements ArithmeticHost {
       variable = { name, value: undefined, attributes: new Set() };
       this.state.scopes[0].set(name, variable);
     }
+    return this.assignElementTo(variable, subscript, value, append, evaluated, name);
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
+  // code-gauge-allow functionNcss -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
+  // code-gauge-allow functionParameterCount -- Carries the target variable, subscript, value, append mode, pre-evaluated flag, and reported name.
+  assignElementTo(
+    variable: Variable,
+    subscript: string,
+    value: string,
+    append: boolean,
+    evaluated = false,
+    reportedName = variable.name
+  ): boolean {
+    if (variable.attributes.has('r')) {
+      this.reportError(`${reportedName}: readonly variable`);
+      return false;
+    }
     if (variable.value?.kind === 'associative' || variable.attributes.has('A')) {
       variable.value ??= { kind: 'associative', table: new AssociativeTable() };
       const table = (variable.value as Extract<VariableValue, { kind: 'associative' }>).table;
       if (subscript === '' && !evaluated) {
-        this.reportError(`${name}[${subscript}]: bad array subscript`);
+        this.reportError(`${reportedName}[${subscript}]: bad array subscript`);
         return false;
       }
       const base = append ? (table.get(subscript) ?? '') : '';
@@ -1158,12 +1181,12 @@ export class Shell implements ArithmeticHost {
       return true;
     }
     if (subscript === '') {
-      this.reportError(`${name}[]: bad array subscript`);
+      this.reportError(`${reportedName}[]: bad array subscript`);
       return false;
     }
-    const index = evaluated ? BigInt(subscript) : this.arrayIndex(name, subscript);
+    const index = evaluated ? BigInt(subscript) : this.arrayIndexFor(variable, subscript);
     if (index === undefined) {
-      this.reportError(`${name}[${subscript}]: bad array subscript`);
+      this.reportError(`${reportedName}[${subscript}]: bad array subscript`);
       return false;
     }
     const elements = this.indexedElements(variable);
@@ -1194,8 +1217,6 @@ export class Shell implements ArithmeticHost {
   }
 
   /** Assigns the words of `name=(...)` or `name+=(...)`, already expanded into keyed and plain elements. */
-  // code-gauge-allow functionCognitiveComplexity -- Bash's compound assignments for associative and indexed arrays, keyed and plain elements.
-  // code-gauge-allow functionNcss -- Bash's compound assignments for associative and indexed arrays, keyed and plain elements.
   assignCompound(name: string, elements: CompoundElement[], append: boolean): boolean {
     if (this.isDynamic(name)) return true;
     let variable = this.findVariable(name);
@@ -1206,6 +1227,21 @@ export class Shell implements ArithmeticHost {
     if (!variable) {
       variable = { name, value: undefined, attributes: new Set() };
       this.state.scopes[0].set(name, variable);
+    }
+    return this.assignCompoundTo(variable, elements, append, name);
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- Bash's compound assignments for associative and indexed arrays, keyed and plain elements.
+  // code-gauge-allow functionNcss -- Bash's compound assignments for associative and indexed arrays, keyed and plain elements.
+  assignCompoundTo(
+    variable: Variable,
+    elements: CompoundElement[],
+    append: boolean,
+    reportedName = variable.name
+  ): boolean {
+    if (variable.attributes.has('r')) {
+      this.reportError(`${reportedName}: readonly variable`);
+      return false;
     }
     if (variable.value?.kind === 'associative' || variable.attributes.has('A')) {
       const previous = variable.value?.kind === 'associative' ? variable.value.table : undefined;
@@ -1220,9 +1256,9 @@ export class Shell implements ArithmeticHost {
     }
     let next = append ? this.maxIndex(existing) + 1n : 0n;
     for (const element of elements) {
-      const index = typeof element === 'string' ? next : this.arrayIndex(name, element.key);
+      const index = typeof element === 'string' ? next : this.arrayIndexFor(variable, element.key);
       if (index === undefined) {
-        this.reportError(`${name}[${(element as { key: string }).key}]: bad array subscript`);
+        this.reportError(`${reportedName}[${(element as { key: string }).key}]: bad array subscript`);
         return false;
       }
       const keyed = typeof element === 'string' ? { value: element, append: false } : element;
