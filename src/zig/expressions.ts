@@ -320,15 +320,14 @@ export abstract class ExpressionCompiler extends SemaBase {
   /** The alignment that `align(n)` gives a pointer to or a variable of `type`, or undefined when it is the type's own. */
   protected explicitAlignment(expression: Expression, type: Type): number | undefined {
     const value = this.alignmentValue(expression);
-    if (value === 0) return undefined;
     this.resolveStorage(type, expression);
     return value === alignOf(type) ? undefined : value;
   }
 
   protected alignmentValue(expression: Expression): number {
     const value = this.knownValue(this.coerce(this.compile(expression, USIZE), USIZE, expression), '整列') as bigint;
-    if (value !== 0n && (value & (value - 1n)) !== 0n)
-      this.error(expression, `整列の値 ${value} は、2 のべき乗ではありません。`);
+    if (value < 1n) this.error(expression, '整列の値は 1 以上にしてください。');
+    if ((value & (value - 1n)) !== 0n) this.error(expression, `整列の値 ${value} は、2 のべき乗ではありません。`);
     if (value > 1n << 32n) this.error(expression, `整列の値 ${value} が大きすぎます。`);
     return Number(value);
   }

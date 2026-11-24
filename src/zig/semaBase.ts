@@ -609,7 +609,7 @@ export abstract class SemaBase implements SemaApi {
           defaultValue,
           hasDefault: field.value !== undefined,
           ...(field.isComptime ? { comptimeValue: { value: defaultValue } } : {}),
-          ...(field.alignment ? { alignment: this.alignmentValue(field.alignment) || undefined } : {}),
+          ...(field.alignment ? { alignment: this.alignmentValue(field.alignment) } : {}),
         });
       }
     });
