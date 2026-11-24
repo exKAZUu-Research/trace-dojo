@@ -1,5 +1,5 @@
 import type { ValueEntity } from './entities';
-import type { LocalVar, RBinding, RExpr, RRhs } from './rast';
+import { type LocalVar, type RBinding, type RExpr, type RPat, rpatChildren, type RRhs } from './rast';
 
 type Key = LocalVar | ValueEntity;
 
@@ -74,10 +74,20 @@ export function stronglyConnected(edges: readonly number[][]): number[][] {
 
 function collectBindingRefs(binding: RBinding, visit: (key: Key) => void): void {
   if (binding.k === 'pat') {
+    collectPatRefs(binding.pat, visit);
     collectRhsRefs(binding.rhs, visit);
     return;
   }
-  for (const clause of binding.clauses) collectRhsRefs(clause.rhs, visit);
+  for (const clause of binding.clauses) {
+    for (const pat of clause.pats) collectPatRefs(pat, visit);
+    collectRhsRefs(clause.rhs, visit);
+  }
+}
+
+/** Collects the references of the expressions of a pattern's view patterns. */
+function collectPatRefs(pat: RPat, visit: (key: Key) => void): void {
+  if (pat.k === 'view') collectExprRefs(pat.expr, visit);
+  for (const child of rpatChildren(pat)) collectPatRefs(child, visit);
 }
 
 function collectRhsRefs(rhs: RRhs, visit: (key: Key) => void): void {
@@ -88,7 +98,8 @@ function collectRhsRefs(rhs: RRhs, visit: (key: Key) => void): void {
   }
   for (const branch of rhs.body.branches) {
     for (const guard of branch.guards) {
-      if (guard.k === 'bool') collectExprRefs(guard.expr, visit);
+      if (guard.k === 'pat') collectPatRefs(guard.pat, visit);
+      if (guard.k !== 'let') collectExprRefs(guard.expr, visit);
       else for (const binding of guard.binds.bindings) collectBindingRefs(binding, visit);
     }
     collectExprRefs(branch.expr, visit);
@@ -97,10 +108,30 @@ function collectRhsRefs(rhs: RRhs, visit: (key: Key) => void): void {
 
 export function collectExprRefs(expr: RExpr, visit: (key: Key) => void): void {
   if (expr.k === 'var') visit(expr.ref.kind === 'local' ? expr.ref.local : expr.ref.entity);
+  for (const pat of exprPatterns(expr)) collectPatRefs(pat, visit);
   const { exprs, bindings, rhss } = childrenOf(expr);
   for (const child of exprs) collectExprRefs(child, visit);
   for (const binding of bindings) collectBindingRefs(binding, visit);
   for (const rhs of rhss) collectRhsRefs(rhs, visit);
+}
+
+/** The patterns an expression binds directly, whose view patterns may refer to other bindings. */
+function exprPatterns(expr: RExpr): RPat[] {
+  switch (expr.k) {
+    case 'lambda': {
+      return expr.pats;
+    }
+    case 'case': {
+      return expr.alts.map((alt) => alt.pat);
+    }
+    case 'do':
+    case 'comp': {
+      return (expr.k === 'do' ? expr.stmts : expr.quals).flatMap((stmt) => (stmt.k === 'bind' ? [stmt.pat] : []));
+    }
+    default: {
+      return [];
+    }
+  }
 }
 
 // code-gauge-allow functionNcss -- One case per expression kind that nests others.

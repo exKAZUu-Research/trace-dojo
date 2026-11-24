@@ -32,6 +32,7 @@ import type {
   RType,
   VarRef,
 } from './rast';
+import { rpatChildren } from './rast';
 import { RecursionBudget } from './recursionBudget';
 import type {
   Alt,
@@ -205,8 +206,11 @@ class Renamer {
 
   run(): RModule {
     this.importModules();
-    const decls = this.module.decls;
-    this.declareTypes(decls);
+    this.declareTypes(this.module.decls);
+    const decls = this.expandBindingWildcards(this.module.decls, (name) => {
+      const own = name.qualifier ? undefined : this.ownValues.get(name.name);
+      return own?.con ?? this.lookupCon(name);
+    });
     const topBindings = this.declareValues(decls);
     this.addOwnToScope();
     this.applyTopFixities(decls);
@@ -713,7 +717,7 @@ class Renamer {
     const clauses: RClause[] = raw.clauses.map((clause) => {
       const clauseScope = new LocalScope(scope);
       const binders = new Map<string, LocalVar>();
-      const pats = clause.args.map((pat) => this.renamePat(pat, binders));
+      const pats = clause.args.map((pat) => this.renamePat(pat, binders, scope));
       for (const [name, local] of binders) clauseScope.define(name, local);
       return { pats, rhs: this.renameRhs(clause.rhs, clauseScope), span: clause.span };
     });
@@ -727,7 +731,7 @@ class Renamer {
   ): Extract<RBinding, { k: 'pat' }> {
     const clause = raw.clauses[0];
     const binders = new Map<string, LocalVar>();
-    const pat = this.renamePat(raw.pattern as Pat, binders);
+    const pat = this.renamePat(raw.pattern as Pat, binders, scope);
     const result: Extract<RBinding, { k: 'pat' }> = {
       k: 'pat',
       pat,
@@ -741,8 +745,9 @@ class Renamer {
 
   // code-gauge-allow functionCognitiveComplexity -- Local declarations combine signatures, fixities, and bindings in one scope.
   // code-gauge-allow functionNcss -- Local declarations combine signatures, fixities, and bindings in one scope.
-  renameLocalDecls(decls: Decl[], parent: LocalScope): { group: RBindGroup; scope: LocalScope } {
+  renameLocalDecls(sourceDecls: Decl[], parent: LocalScope): { group: RBindGroup; scope: LocalScope } {
     const scope = new LocalScope(parent);
+    const decls = this.expandBindingWildcards(sourceDecls, (name) => this.lookupCon(name));
     for (const decl of decls) {
       if (decl.kind === 'data' || decl.kind === 'typeSyn' || decl.kind === 'class' || decl.kind === 'instance') {
         throw compileError(decl.span, 'data・type・class・instance の宣言は、最上位にだけ書けます。');
@@ -792,6 +797,14 @@ class Renamer {
       const guards: RGuard[] = branch.guards.map((guard) => {
         if (guard.kind === 'bool')
           return { k: 'bool', expr: this.renameExpr(guard.expr, branchScope), span: guard.span };
+        if (guard.kind === 'pat') {
+          const expr = this.renameExpr(guard.expr, branchScope);
+          const binders = new Map<string, LocalVar>();
+          const pat = this.renamePat(guard.pat, binders, branchScope);
+          branchScope = new LocalScope(branchScope);
+          for (const [name, local] of binders) branchScope.define(name, local);
+          return { k: 'pat', pat, expr, span: guard.span };
+        }
         const local = this.renameLocalDecls(guard.decls, branchScope);
         branchScope = local.scope;
         return { k: 'let', binds: local.group, span: guard.span };
@@ -810,7 +823,13 @@ class Renamer {
     const { span } = expr;
     switch (expr.kind) {
       case 'var': {
+        if (isHoleName(expr.name, scope, (name) => this.valuesNamed(name))) {
+          return { k: 'hole', name: expr.name.name, span };
+        }
         return { k: 'var', ref: this.resolveVar(expr.name, scope), name: describeName(expr.name), span };
+      }
+      case 'hole': {
+        return { k: 'hole', name: expr.name, span };
       }
       case 'con': {
         return { k: 'con', con: this.lookupCon(expr.name), span };
@@ -836,7 +855,7 @@ class Renamer {
       }
       case 'lambda': {
         const binders = new Map<string, LocalVar>();
-        const pats = expr.pats.map((pat) => this.renamePat(pat, binders));
+        const pats = expr.pats.map((pat) => this.renamePat(pat, binders, scope));
         const inner = new LocalScope(scope);
         for (const [name, local] of binders) inner.define(name, local);
         return { k: 'lambda', pats, body: this.renameExpr(expr.body, inner), span };
@@ -860,6 +879,7 @@ class Renamer {
           scrutinee: this.renameExpr(expr.scrutinee, scope),
           alts: expr.alts.map((alt) => this.renameAlt(alt, scope)),
           span,
+          what: expr.what,
         };
       }
       case 'do': {
@@ -908,7 +928,10 @@ class Renamer {
       }
       case 'recordCon': {
         const con = this.lookupCon(expr.con);
-        return { k: 'recordCon', con, fields: this.renameFieldBinds(expr.fields, scope, [con]), span };
+        const fields = expr.wildcard
+          ? [...expr.fields, ...this.wildcardFields(con, expr.fields, expr.wildcard, scope)]
+          : expr.fields;
+        return { k: 'recordCon', con, fields: this.renameFieldBinds(fields, scope, [con]), span };
       }
       case 'recordUpdate': {
         return {
@@ -940,6 +963,20 @@ class Renamer {
     return { k: 'app', fn: inner, arg: right, span };
   }
 
+  /** The fields `..` fills in a construction: each one not given whose name a variable in scope has. */
+  private wildcardFields(con: ConInfo, given: FieldBind[], span: Span, scope: LocalScope): FieldBind[] {
+    const named = new Set(given.map((bind) => bind.field.name));
+    return (con.fieldNames ?? []).flatMap((name) => {
+      if (named.has(name)) return [];
+      const defined =
+        scope.lookup(name) !== undefined ||
+        this.scope.values.get(name).some((entity) => entity.sort === 'var' && entity.module === this.module.name);
+      return defined
+        ? [{ field: { name, span }, value: { kind: 'var', name: { name, span }, span } as Expr, span }]
+        : [];
+    });
+  }
+
   private renameFieldBinds(fields: FieldBind[], scope: LocalScope, cons: ConInfo[] | undefined): RFieldBind[] {
     const seen = new Set<string>();
     return fields.map((fieldBind) => {
@@ -960,7 +997,7 @@ class Renamer {
 
   private renameAlt(alt: Alt, scope: LocalScope): RAlt {
     const binders = new Map<string, LocalVar>();
-    const pat = this.renamePat(alt.pat, binders);
+    const pat = this.renamePat(alt.pat, binders, scope);
     const inner = new LocalScope(scope);
     for (const [name, local] of binders) inner.define(name, local);
     return { pat, rhs: this.renameRhs(alt.rhs, inner), span: alt.span };
@@ -980,7 +1017,7 @@ class Renamer {
           if (isDo && isLast) throw compileError(stmt.span, 'do の最後の文は、式にしてください（<- で終われません）。');
           const expr = this.renameExpr(stmt.expr, scope);
           const binders = new Map<string, LocalVar>();
-          const pat = this.renamePat(stmt.pat, binders);
+          const pat = this.renamePat(stmt.pat, binders, scope);
           scope = new LocalScope(scope);
           for (const [name, local] of binders) scope.define(name, local);
           result.push({ k: 'bind', pat, expr, span: stmt.span });
@@ -1008,14 +1045,37 @@ class Renamer {
     return entity.fixity ?? DEFAULT_FIXITY;
   }
 
-  renamePat(pat: Pat, binders: Map<string, LocalVar>): RPat {
-    return this.recursion.run(() => ({ ...this.renamePatCore(pat, binders), span: pat.span, surface: pat }));
+  /** @param scope The scope of the expressions in view patterns, besides the variables the pattern binds before them. */
+  renamePat(pat: Pat, binders: Map<string, LocalVar>, scope?: LocalScope): RPat {
+    return this.recursion.run(() => ({ ...this.renamePatCore(pat, binders, scope), span: pat.span, surface: pat }));
   }
 
   // code-gauge-allow functionNcss -- One short case per pattern kind.
-  private renamePatCore(pat: Pat, binders: Map<string, LocalVar>): RPat {
+  private renamePatCore(pat: Pat, binders: Map<string, LocalVar>, scope: LocalScope | undefined): RPat {
     const { span } = pat;
     switch (pat.kind) {
+      case 'pbang': {
+        return { k: 'bang', pat: this.renamePat(pat.pat, binders, scope), span };
+      }
+      case 'plazy': {
+        return { k: 'lazy', pat: this.renamePat(pat.pat, binders, scope), span };
+      }
+      case 'pview': {
+        const viewScope = new LocalScope(scope);
+        for (const [name, local] of binders) viewScope.define(name, local);
+        const expr = this.renameExpr(pat.expr, viewScope);
+        return { k: 'view', expr, pat: this.renamePat(pat.pat, binders, scope), span };
+      }
+      case 'por': {
+        const alts = pat.alts.map((alt) => {
+          const own = new Map<string, LocalVar>();
+          const renamed = this.renamePat(alt, own, scope);
+          const bound = [...own.values()][0];
+          if (bound) throw compileError(bound.span, 'or パターンの中では、変数を束縛できません。');
+          return renamed;
+        });
+        return { k: 'or', alts, span };
+      }
       case 'pvar': {
         return { k: 'var', local: this.bindPatVar(pat.name, binders), span };
       }
@@ -1036,35 +1096,51 @@ class Renamer {
             `構成子 ${con.name} には ${con.arity} 個の引数が要りますが、パターンには ${pat.args.length} 個あります。`
           );
         }
-        return { k: 'con', con, args: pat.args.map((arg) => this.renamePat(arg, binders)), span };
+        return { k: 'con', con, args: pat.args.map((arg) => this.renamePat(arg, binders, scope)), span };
       }
       case 'ptuple': {
         const con = tupleCon(pat.elems.length);
-        return { k: 'con', con, args: pat.elems.map((elem) => this.renamePat(elem, binders)), span };
+        return { k: 'con', con, args: pat.elems.map((elem) => this.renamePat(elem, binders, scope)), span };
       }
       case 'plist': {
         let result: RPat = { k: 'con', con: NIL_CON, args: [], span };
-        const elems = pat.elems.map((elem) => this.renamePat(elem, binders));
+        const elems = pat.elems.map((elem) => this.renamePat(elem, binders, scope));
         for (const elem of elems.toReversed()) result = { k: 'con', con: CONS_CON, args: [elem, result], span };
         return result;
       }
       case 'pas': {
         const local = this.bindPatVar(pat.name, binders);
-        return { k: 'as', local, pat: this.renamePat(pat.pat, binders), span };
+        return { k: 'as', local, pat: this.renamePat(pat.pat, binders, scope), span };
       }
       case 'precord': {
-        return this.renameRecordPattern(pat, binders);
+        return this.renameRecordPattern(pat, binders, scope);
       }
       case 'pchain': {
         return this.renamePat(
           resolvePatChain(pat.items, span, (op) => this.lookupCon(op).entity.fixity ?? DEFAULT_FIXITY),
-          binders
+          binders,
+          scope
         );
       }
     }
   }
 
-  private renameRecordPattern(pat: Extract<Pat, { kind: 'precord' }>, binders: Map<string, LocalVar>): RPat {
+  /**
+   * Replaces the `..` of the record patterns of pattern bindings with the fields they bind, whose names the bindings
+   * must declare before their patterns are renamed.
+   */
+  private expandBindingWildcards(decls: Decl[], resolve: (name: QName) => ConInfo): Decl[] {
+    return decls.map((decl) =>
+      decl.kind === 'patBind' ? { ...decl, pat: expandRecordWildcards(decl.pat, resolve) } : decl
+    );
+  }
+
+  private renameRecordPattern(
+    source: Extract<Pat, { kind: 'precord' }>,
+    binders: Map<string, LocalVar>,
+    scope: LocalScope | undefined
+  ): RPat {
+    const pat = expandRecordWildcards(source, (name) => this.lookupCon(name)) as typeof source;
     const { span } = pat;
     const con = this.lookupCon(pat.con);
     const args: RPat[] = Array.from({ length: con.arity }, () => ({ k: 'wild', span }) as RPat);
@@ -1078,7 +1154,7 @@ class Renamer {
       }
       if (seen.has(field.name)) throw compileError(fieldPat.span, `フィールド ${field.name} が重複しています。`);
       seen.add(field.name);
-      args[position] = this.renamePat(fieldPat.pat, binders);
+      args[position] = this.renamePat(fieldPat.pat, binders, scope);
       order.push(position);
     }
     return { k: 'con', con, args, order, span };
@@ -1137,6 +1213,12 @@ class Renamer {
     return { kind: 'global', entity };
   }
 
+  private valuesNamed(name: QName): readonly ValueEntity[] {
+    if (name.qualifier) return this.scope.qualifiedValues.get(name.qualifier)?.get(name.name) ?? [];
+    const weak = this.options.weakValues?.get(name.name);
+    return weak ? [...this.scope.values.get(name.name), weak] : this.scope.values.get(name.name);
+  }
+
   private lookupValue(name: QName, variablesOnly: boolean): ValueEntity {
     let candidates: ValueEntity[];
     if (name.qualifier) {
@@ -1171,9 +1253,6 @@ class Renamer {
     if (found.length === 1) return found[0];
     const text = describeName(name);
     if (found.length === 0) {
-      if (what === 'value' && name.name.startsWith('_') && !name.qualifier) {
-        throw unsupportedError(name.span, `型の穴（${name.name}）`);
-      }
       const role = what === 'type' ? '型・クラスの名前' : isOperatorName(name.name) ? '演算子' : '名前';
       throw compileError(name.span, `${role} ${text} がスコープにありません。`);
     }
@@ -1276,6 +1355,56 @@ class Renamer {
     const found = this.lookupType(name);
     if (found.kind !== 'class') throw compileError(name.span, `${describeName(name)} は型で、クラスではありません。`);
     return found.entity;
+  }
+}
+
+/** Whether a variable is a named typed hole: an unqualified name starting with `_` that nothing defines. */
+function isHoleName(name: QName, scope: LocalScope, lookup: (name: QName) => readonly ValueEntity[]): boolean {
+  if (name.qualifier || !name.name.startsWith('_')) return false;
+  return !scope.lookup(name.name) && lookup(name).length === 0;
+}
+
+/** A pattern with the `..` of its record patterns replaced by the fields it binds, as variables of the same names. */
+function expandRecordWildcards(pat: Pat, resolve: (name: QName) => ConInfo): Pat {
+  switch (pat.kind) {
+    case 'precord': {
+      const fields = pat.fields.map((field) => ({ ...field, pat: expandRecordWildcards(field.pat, resolve) }));
+      if (!pat.wildcard) return { ...pat, fields };
+      const span = pat.wildcard;
+      const named = new Set(fields.map((field) => field.field.name));
+      for (const name of resolve(pat.con).fieldNames ?? []) {
+        if (!named.has(name))
+          fields.push({ field: { name, span }, pat: { kind: 'pvar', name: { name, span }, span }, span });
+      }
+      return { ...pat, fields, wildcard: undefined };
+    }
+    case 'pcon': {
+      return { ...pat, args: pat.args.map((arg) => expandRecordWildcards(arg, resolve)) };
+    }
+    case 'ptuple':
+    case 'plist': {
+      return { ...pat, elems: pat.elems.map((elem) => expandRecordWildcards(elem, resolve)) };
+    }
+    case 'pas':
+    case 'pbang':
+    case 'plazy':
+    case 'pview': {
+      return { ...pat, pat: expandRecordWildcards(pat.pat, resolve) };
+    }
+    case 'por': {
+      return { ...pat, alts: pat.alts.map((alt) => expandRecordWildcards(alt, resolve)) };
+    }
+    case 'pchain': {
+      return {
+        ...pat,
+        items: pat.items.map((item) =>
+          item.kind === 'operand' ? { ...item, value: expandRecordWildcards(item.value, resolve) } : item
+        ),
+      };
+    }
+    default: {
+      return pat;
+    }
   }
 }
 
@@ -1385,6 +1514,12 @@ function collectPatNames(pat: Pat, into: Name[]): void {
       for (const item of pat.items) if (item.kind === 'operand') collectPatNames(item.value, into);
       break;
     }
+    case 'pbang':
+    case 'plazy':
+    case 'pview': {
+      collectPatNames(pat.pat, into);
+      break;
+    }
     default: {
       break;
     }
@@ -1396,8 +1531,7 @@ function replacePatLocals(pat: RPat, scope: LocalScope): void {
   while (pending.length > 0) {
     const current = pending.pop()!;
     if (current.k === 'var' || current.k === 'as') current.local = scope.vars.get(current.local.name) as LocalVar;
-    if (current.k === 'as') pending.push(current.pat);
-    else if (current.k === 'con') pending.push(...current.args.toReversed());
+    pending.push(...rpatChildren(current).toReversed());
   }
 }
 

@@ -641,6 +641,11 @@ export class Machine {
   private selectAlternative(state: RunState, core: CaseCore, env: Env, type: TypeHint | undefined): void {
     const scrutinee = state.value as ConValue;
     if (core.bindIndex !== undefined) env.slots[core.bindIndex] = typedSlot(scrutinee, type);
+    // A case without alternatives only evaluates its scrutinee, which may be of any type, as `!x` does.
+    if (core.alts.size === 0 && core.default) {
+      state.evaluate(core.default, env);
+      return;
+    }
     const alt = core.alts.get(scrutinee.con.tag);
     if (alt) {
       const { slots } = alt;

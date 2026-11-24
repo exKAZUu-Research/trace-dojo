@@ -71,6 +71,13 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
     instances.push({ ...checkInstanceMethods(checker, declared), sourceDefined: instanceDecls.includes(declared) });
   const defaults = module.classes.flatMap((decl) => checkDefaults(checker, decl));
   const main = options.isProgram ? checkMain(checker, module, options.builtins) : undefined;
+  const hole = checker.holes[0];
+  if (hole) {
+    throw compileError(
+      hole.hole.span,
+      `型の穴 ${hole.hole.name} があります。ここには ${new TypePrinter().show(hole.type)} 型の式を書いてください。`
+    );
+  }
   checker.solveTop();
   return { instances, defaults, main };
 }

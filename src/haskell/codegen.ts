@@ -30,7 +30,19 @@ import { TailCall } from './machine';
 import { patternProjection, patternResult } from './patternBindings';
 import { surfacePatternText } from './patternText';
 import { primitiveNamed, rationalToFloat } from './primitives';
-import type { LocalVar, RAlt, RBindGroup, RBinding, RClause, RExpr, RGuard, RPat, RRhs, RStmt } from './rast';
+import {
+  type LocalVar,
+  type RAlt,
+  type RBindGroup,
+  type RBinding,
+  type RClause,
+  type RExpr,
+  type RGuard,
+  type RPat,
+  rpatLocals,
+  type RRhs,
+  type RStmt,
+} from './rast';
 import { RecursionBudget } from './recursionBudget';
 import { type DictBuilders, dictBuilders, type Runtime } from './runtime';
 import type { Span } from './syntax';
@@ -498,6 +510,8 @@ export class Codegen {
   private planPattern(pat: RPat, slot: number, visible: boolean): Plan {
     const result: Plan[] = [];
     const pending = [{ pat, slot, target: result, index: 0 }];
+    // The plans of the patterns inside `!p` and view patterns, which planning fills in after it plans them.
+    const innerPlans: { plan: { inner: Plan }; inner: Plan[] }[] = [];
     while (pending.length > 0) {
       const job = pending.pop()!;
       const { pat, slot, target, index } = job;
@@ -507,6 +521,28 @@ export class Codegen {
       }
       if (pat.k === 'as') {
         pending.push({ ...job, pat: pat.pat });
+        continue;
+      }
+      if (pat.k === 'bang' || pat.k === 'view') {
+        const inner: Plan[] = [];
+        if (pat.k === 'bang') {
+          target[index] = { k: 'bang', slot, inner: undefined as unknown as Plan };
+          pending.push({ pat: pat.pat, slot, target: inner, index: 0 });
+        } else {
+          const viewSlot = this.frame.alloc();
+          const fn = this.compileExpr(pat.expr);
+          target[index] = { k: 'view', slot, fn, viewSlot, inner: undefined as unknown as Plan };
+          pending.push({ pat: pat.pat, slot: viewSlot, target: inner, index: 0 });
+        }
+        innerPlans.push({ plan: target[index] as { inner: Plan }, inner });
+        continue;
+      }
+      if (pat.k === 'lazy') {
+        target[index] = this.planLazyPattern(pat, slot, visible);
+        continue;
+      }
+      if (pat.k === 'or') {
+        target[index] = { k: 'or', alts: pat.alts.map((alt) => this.planPattern(alt, slot, false)) };
         continue;
       }
       if (pat.k !== 'con') {
@@ -532,7 +568,37 @@ export class Codegen {
       }
       pending.push(...children.toReversed());
     }
+    for (const { plan, inner } of innerPlans) plan.inner = inner[0];
     return result[0];
+  }
+
+  /**
+   * Plans `~p`: its variables are projections of one shared match of `p`, which runs only when one of them is used
+   * and fails then if `p` does not match.
+   */
+  private planLazyPattern(pat: Extract<RPat, { k: 'lazy' }>, slot: number, visible: boolean): Plan {
+    const binders = rpatLocals(pat.pat);
+    if (binders.length === 0) return { k: 'any' };
+    const plan = this.planPattern(pat.pat, slot, false);
+    const text = pat.pat.surface ? surfacePatternText(pat.pat.surface) : patternText(pat.pat);
+    const fail: Core = { k: 'error', message: `${sourceSpanText(pat.pat.span)}: Non-exhaustive patterns in ${text}` };
+    const matched = this.frame.alloc();
+    const binds = [
+      {
+        index: matched,
+        expr: this.matchPlan(plan, patternResult(binders.map((binder) => this.localRef(binder))), fail),
+      },
+    ];
+    for (const [index, binder] of binders.entries()) {
+      const own = this.frame.alloc();
+      this.frame.slots.set(binder, own);
+      if (visible) this.addVisible(binder, own);
+      binds.push({
+        index: own,
+        expr: patternProjection({ k: 'local', depth: 0, index: matched }, index, binders.length),
+      });
+    }
+    return { k: 'lazy', binds };
   }
 
   private matchPlan(plan: Plan, success: Core, fail: Core): Core {
@@ -543,6 +609,40 @@ export class Codegen {
       if (plan.k === 'any') continue;
       if (plan.k === 'lit') {
         code = this.matchLiteral(plan.pat, plan.slot, code, fail);
+        continue;
+      }
+      if (plan.k === 'lazy') {
+        code = { k: 'let', binds: plan.binds, body: code };
+        continue;
+      }
+      if (plan.k === 'or') {
+        code = this.matchAlternatives(plan.alts, code, fail);
+        continue;
+      }
+      if (plan.k === 'bang' || plan.k === 'view') {
+        if (!wrap) {
+          pending.push({ plan, wrap: true }, { plan: plan.inner, wrap: false });
+          continue;
+        }
+        code =
+          plan.k === 'bang'
+            ? {
+                k: 'case',
+                scrut: { k: 'local', depth: 0, index: plan.slot },
+                bindIndex: plan.slot,
+                alts: new Map(),
+                default: code,
+              }
+            : {
+                k: 'let',
+                binds: [
+                  {
+                    index: plan.viewSlot,
+                    expr: { k: 'app', fn: plan.fn, args: [{ k: 'local', depth: 0, index: plan.slot }] },
+                  },
+                ],
+                body: code,
+              };
         continue;
       }
       if (!wrap) {
@@ -575,6 +675,15 @@ export class Codegen {
             };
     }
     return code;
+  }
+
+  /** Matches the alternatives of an or pattern in turn, sharing the code that runs after any of them matches. */
+  private matchAlternatives(alts: readonly Plan[], success: Core, fail: Core): Core {
+    const shared = this.frame.alloc();
+    const ref: Core = { k: 'local', depth: 0, index: shared };
+    let code = fail;
+    for (const alt of alts.toReversed()) code = this.matchPlan(alt, ref, code);
+    return { k: 'let', binds: [{ index: shared, expr: success }], body: code };
   }
 
   private matchLiteral(pat: Extract<RPat, { k: 'lit' }>, slot: number, success: Core, fail: Core): Core {
@@ -621,18 +730,32 @@ export class Codegen {
 
   private compileGuarded(guards: readonly RGuard[], expr: RExpr, fail: Core, ioResult: boolean): Core {
     const savedVisible = this.visible;
-    const wrappers: ({ binds: { index: number; expr: Core }[] } | { condition: Core })[] = [];
+    const wrappers: (
+      | { binds: { index: number; expr: Core }[] }
+      | { condition: Core }
+      | { slot: number; value: Core; plan: Plan }
+    )[] = [];
     try {
       for (const guard of guards) {
         chargeTypeWork();
         if (guard.k === 'let') wrappers.push({ binds: this.compileLocalGroup(guard.binds) });
-        else if (!isOtherwise(guard.expr, this.options.support))
+        else if (guard.k === 'pat') {
+          const value = this.compileExpr(guard.expr);
+          const slot = this.frame.alloc();
+          wrappers.push({ slot, value, plan: this.planPattern(guard.pat, slot, true) });
+        } else if (!isOtherwise(guard.expr, this.options.support))
           wrappers.push({ condition: this.compileExpr(guard.expr) });
       }
       let body = this.bodyExpr(expr, ioResult);
       for (const wrapper of wrappers.toReversed()) {
-        body =
-          'binds' in wrapper ? { k: 'let', binds: wrapper.binds, body } : this.ifCore(wrapper.condition, body, fail);
+        if ('binds' in wrapper) body = { k: 'let', binds: wrapper.binds, body };
+        else if ('plan' in wrapper) {
+          body = {
+            k: 'let',
+            binds: [{ index: wrapper.slot, expr: wrapper.value }],
+            body: this.matchPlan(wrapper.plan, body, fail),
+          };
+        } else body = this.ifCore(wrapper.condition, body, fail);
       }
       return body;
     } finally {
@@ -664,6 +787,9 @@ export class Codegen {
   // code-gauge-allow functionNcss -- One short case per expression kind, each delegating to a helper.
   private compileExprInner(expr: RExpr): Core {
     switch (expr.k) {
+      case 'hole': {
+        throw new Error('A typed hole reached code generation');
+      }
       case 'var': {
         return this.compileVar(expr);
       }
@@ -839,7 +965,7 @@ export class Codegen {
       const plans = expr.pats.map((pat, index) => this.planPattern(pat, slots[index], true));
       let body: Core;
       const inner = stripParens(expr.body);
-      const binding = { row: expr.span.row, names: expr.pats.flatMap(patternLocals).map((local) => local.name) };
+      const binding = { row: expr.span.row, names: expr.pats.flatMap(rpatLocals).map((local) => local.name) };
       if (ioResult) {
         body = this.ioBlock(expr.body, binding);
       } else if (this.options.isProgram && inner.k === 'do') {
@@ -862,10 +988,12 @@ export class Codegen {
   private compileCase(expr: Extract<RExpr, { k: 'case' }>, ioResult: boolean): Core {
     const fail: Core = {
       k: 'error',
-      message: `${sourceSpanText(expr.span)}: Non-exhaustive patterns in case`,
+      message: `${sourceSpanText(expr.span)}: Non-exhaustive patterns in ${expr.what ?? 'case'}`,
     };
     const scrutinee = this.compileExpr(expr.scrutinee);
-    if (expr.alts.length === 0) return { k: 'case', scrut: scrutinee, alts: new Map(), default: fail };
+    if (expr.alts.length === 0) {
+      return { k: 'app', fn: { k: 'global', global: this.supportGlobal('seq') }, args: [scrutinee, fail] };
+    }
     const slot = this.frame.alloc();
     const clauses: RClause[] = expr.alts.map((alt: RAlt) => ({ pats: [alt.pat], rhs: alt.rhs, span: alt.span }));
     const body = this.compileMatch([slot], clauses, fail, ioResult);
@@ -1126,9 +1254,7 @@ export class Codegen {
             matcher = this.matchPlan(plan, { k: 'con', con: UNIT_CON, args: [] }, fail);
           }
           const onlyCalls =
-            patternLocals(stmt.pat).length === 0
-              ? isCall(stmt.expr)
-              : isTurtleCreation(stmt.expr, this.options.support);
+            rpatLocals(stmt.pat).length === 0 ? isCall(stmt.expr) : isTurtleCreation(stmt.expr, this.options.support);
           stmts.push({
             kind: 'bind',
             row,
@@ -1262,7 +1388,7 @@ export class Codegen {
 
   private addVisible(local: LocalVar, slot: number): void {
     const type = local.scheme?.type ?? local.type;
-    if (!type) return;
+    if (!type || local.name.startsWith(' ')) return;
     chargeTypeWork();
     this.visible = this.visible.set(local.name, { level: this.frame.level, index: slot, type, previewOwner: local });
   }
@@ -1391,6 +1517,10 @@ export class Codegen {
 
 type Plan =
   | { k: 'any' }
+  | { k: 'bang'; slot: number; inner: Plan }
+  | { k: 'view'; slot: number; fn: Core; viewSlot: number; inner: Plan }
+  | { k: 'lazy'; binds: { index: number; expr: Core }[] }
+  | { k: 'or'; alts: Plan[] }
   | { k: 'lit'; pat: Extract<RPat, { k: 'lit' }>; slot: number }
   | { k: 'newtype'; slot: number; fieldSlot: number; fields: Plan[] }
   | { k: 'con'; con: ConInfo; slot: number; fieldSlots: number[]; fields: Plan[] };
@@ -1533,18 +1663,6 @@ function isOtherwise(expr: RExpr, support: CodegenSupport): boolean {
   return expr.k === 'con' && expr.con.name === 'True' && expr.con.type === support.boolType();
 }
 
-function patternLocals(pat: RPat): LocalVar[] {
-  const result: LocalVar[] = [];
-  const pending = [pat];
-  while (pending.length > 0) {
-    const current = pending.pop()!;
-    if (current.k === 'var' || current.k === 'as') result.push(current.local);
-    if (current.k === 'as') pending.push(current.pat);
-    else if (current.k === 'con') pending.push(...current.args.toReversed());
-  }
-  return result;
-}
-
 function patternText(pat: RPat): string {
   switch (pat.k) {
     case 'var': {
@@ -1558,6 +1676,12 @@ function patternText(pat: RPat): string {
     }
     case 'lit': {
       return pat.lit.kind === 'string' ? JSON.stringify(pat.lit.value.join('')) : String(pat.lit.value);
+    }
+    case 'bang':
+    case 'lazy':
+    case 'view':
+    case 'or': {
+      return pat.surface ? surfacePatternText(pat.surface) : '_';
     }
     case 'con': {
       if (pat.con.type.special === 'tuple') return `(${pat.args.map(patternText).join(', ')})`;

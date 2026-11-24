@@ -99,6 +99,8 @@ export class Checker {
   private reductionsRemaining = LIMITS.maxOperations;
   private readonly typeConversion = new TypeConversion();
   private scopedTypes: ReadonlyMap<string, Type> = new Map();
+  /** The typed holes found so far with their types, which the module reports once it is checked. */
+  readonly holes: { hole: Extract<RExpr, { k: 'hole' }>; type: Type }[] = [];
 
   constructor(
     readonly env: ClassEnv,
@@ -344,6 +346,11 @@ export class Checker {
   // code-gauge-allow functionNcss -- One short case per expression kind, each delegating to a helper.
   private inferExprInner(expr: RExpr): Type {
     switch (expr.k) {
+      case 'hole': {
+        const type = this.freshVar();
+        this.holes.push({ hole: expr, type });
+        return type;
+      }
       case 'var': {
         return this.typeOfRef(expr.ref, expr.span, expr.name, expr);
       }
@@ -601,6 +608,21 @@ export class Checker {
           pending.push({ pat: pat.pat, type });
           break;
         }
+        case 'bang':
+        case 'lazy': {
+          pending.push({ pat: pat.pat, type });
+          break;
+        }
+        case 'view': {
+          const result = this.freshVar();
+          this.checkExpr(pat.expr, fnType(type, result), 'ビューパターンの関数');
+          pending.push({ pat: pat.pat, type: result });
+          break;
+        }
+        case 'or': {
+          for (const alt of pat.alts.toReversed()) pending.push({ pat: alt, type });
+          break;
+        }
         case 'lit': {
           pat.type = type;
           switch (pat.lit.kind) {
@@ -649,6 +671,7 @@ export class Checker {
     for (const branch of rhs.body.branches) {
       for (const guard of branch.guards) {
         if (guard.k === 'bool') this.checkExpr(guard.expr, tcon(this.builtins.bool), 'ガード');
+        else if (guard.k === 'pat') this.inferPat(guard.pat, this.inferExpr(guard.expr));
         else this.inferBindGroup(guard.binds);
       }
       this.checkExpr(branch.expr, expected);
@@ -971,8 +994,16 @@ export function isFailable(pat: RPat): boolean {
     case 'wild': {
       return false;
     }
-    case 'as': {
+    case 'as':
+    case 'bang':
+    case 'view': {
       return isFailable(pat.pat);
+    }
+    case 'lazy': {
+      return false;
+    }
+    case 'or': {
+      return pat.alts.every(isFailable);
     }
     case 'lit': {
       return true;

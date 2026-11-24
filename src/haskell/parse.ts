@@ -2,9 +2,27 @@ import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAn
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import { convertModule } from './convert';
 import { validateDialect } from './dialect';
+import { Extensions, readExtensions } from './extensions';
 import type { Module } from './syntax';
 
 const parser = await loadParser('@willbooster/tree-sitter-haskell/tree-sitter-haskell_ghc2021.wasm');
+/** The grammar with the lexical syntax of the extensions GHC2021 lacks, which a program reads with when it enables one. */
+const extendedParser = await loadParser('@willbooster/tree-sitter-haskell/tree-sitter-haskell.wasm');
+
+/** The extensions whose syntax only the extended grammar reads. */
+export const LEXICAL_EXTENSIONS = [
+  'TemplateHaskell',
+  'TemplateHaskellQuotes',
+  'QuasiQuotes',
+  'OverloadedRecordDot',
+  'OverloadedRecordUpdate',
+  'RecursiveDo',
+  'PatternSynonyms',
+  'UnboxedTuples',
+  'UnboxedSums',
+  'MagicHash',
+  'OverloadedLabels',
+];
 
 const MISSING_TOKEN_NAMES: Record<string, string> = {
   variable: '名前',
@@ -19,9 +37,11 @@ export const misplacedHaskellAtomicMessage =
 
 /** Parses a module, throwing a `CompileError` for syntax errors and for syntax this environment does not support. */
 export function parseHaskell(source: string, defaultName = 'Main', library = false): Module {
-  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) => {
-    if (!library) validateDialect(root);
-    return convertModule(root, defaultName, library);
+  const extensions = library ? new Extensions() : readExtensions(source);
+  const extended = LEXICAL_EXTENSIONS.some((name) => extensions.has(name));
+  return parseSource(extended ? extendedParser : parser, source, MISSING_TOKEN_NAMES, (root) => {
+    if (!library) validateDialect(root, extensions);
+    return convertModule(root, extensions, defaultName);
   });
 }
 

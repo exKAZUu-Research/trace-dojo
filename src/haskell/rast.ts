@@ -31,7 +31,7 @@ export type RExpr = (
   | { k: 'lambda'; pats: RPat[]; body: RExpr; span: Span }
   | { k: 'let'; binds: RBindGroup; body: RExpr; span: Span }
   | { k: 'if'; cond: RExpr; ifTrue: RExpr; ifFalse: RExpr; span: Span }
-  | { k: 'case'; scrutinee: RExpr; alts: RAlt[]; span: Span }
+  | { k: 'case'; scrutinee: RExpr; alts: RAlt[]; span: Span; what?: string }
   | {
       k: 'do';
       stmts: RStmt[];
@@ -47,6 +47,7 @@ export type RExpr = (
   | { k: 'typed'; expr: RExpr; sig: RSigType; span: Span; dictParams?: DictParam[]; evidence?: Evidence[] }
   | { k: 'recordCon'; con: ConInfo; fields: RFieldBind[]; span: Span }
   | { k: 'recordUpdate'; expr: RExpr; fields: RFieldBind[]; span: Span; cons?: ConInfo[] }
+  | { k: 'hole'; name: string; span: Span }
 ) & { type?: Type };
 
 export interface RFieldBind {
@@ -70,7 +71,48 @@ export type RPat = (
     }
   | { k: 'con'; con: ConInfo; args: RPat[]; order?: number[]; span: Span }
   | { k: 'as'; local: LocalVar; pat: RPat; span: Span }
+  /** `!p`, which evaluates the value before matching it. */
+  | { k: 'bang'; pat: RPat; span: Span }
+  /** `~p`, which always matches and matches its pattern only when a variable of it is used. */
+  | { k: 'lazy'; pat: RPat; span: Span }
+  /** `(f -> p)`, which matches the result of applying the function to the value. */
+  | { k: 'view'; expr: RExpr; pat: RPat; span: Span }
+  /** `(p1; p2)`, which matches if any of its alternatives does; they bind no variables. */
+  | { k: 'or'; alts: RPat[]; span: Span }
 ) & { surface?: Pat };
+
+/** The patterns directly inside a pattern. */
+export function rpatChildren(pat: RPat): RPat[] {
+  switch (pat.k) {
+    case 'con': {
+      return pat.args;
+    }
+    case 'as':
+    case 'bang':
+    case 'lazy':
+    case 'view': {
+      return [pat.pat];
+    }
+    case 'or': {
+      return pat.alts;
+    }
+    default: {
+      return [];
+    }
+  }
+}
+
+/** The variables a pattern binds, in order. */
+export function rpatLocals(pat: RPat): LocalVar[] {
+  const result: LocalVar[] = [];
+  const pending = [pat];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (current.k === 'var' || current.k === 'as') result.push(current.local);
+    pending.push(...rpatChildren(current).toReversed());
+  }
+  return result;
+}
 
 export type RType =
   | { k: 'var'; name: string; span: Span }
@@ -94,7 +136,10 @@ export interface RGuarded {
   span: Span;
 }
 
-export type RGuard = { k: 'bool'; expr: RExpr; span: Span } | { k: 'let'; binds: RBindGroup; span: Span };
+export type RGuard =
+  | { k: 'bool'; expr: RExpr; span: Span }
+  | { k: 'let'; binds: RBindGroup; span: Span }
+  | { k: 'pat'; pat: RPat; expr: RExpr; span: Span };
 
 export interface RRhs {
   body: { k: 'plain'; expr: RExpr } | { k: 'guarded'; branches: RGuarded[] };

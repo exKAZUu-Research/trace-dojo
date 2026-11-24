@@ -40,7 +40,14 @@ export type Expr =
   | { kind: 'lambda'; pats: Pat[]; body: Expr; span: Span }
   | { kind: 'let'; decls: Decl[]; body: Expr; span: Span }
   | { kind: 'if'; cond: Expr; ifTrue: Expr; ifFalse: Expr; span: Span }
-  | { kind: 'case'; scrutinee: Expr; alts: Alt[]; span: Span }
+  | {
+      kind: 'case';
+      scrutinee: Expr;
+      alts: Alt[];
+      span: Span;
+      /** The construct the case stands for in messages, such as `\case`, when it is not a `case` itself. */
+      what?: string;
+    }
   | { kind: 'do'; stmts: Stmt[]; span: Span }
   | { kind: 'tuple'; elems: Expr[]; span: Span }
   | { kind: 'list'; elems: Expr[]; span: Span }
@@ -49,9 +56,11 @@ export type Expr =
   | { kind: 'leftSection'; left: Expr; op: Operator; span: Span }
   | { kind: 'rightSection'; op: Operator; right: Expr; span: Span }
   | { kind: 'typed'; expr: Expr; sig: SigType; span: Span }
-  | { kind: 'recordCon'; con: QName; fields: FieldBind[]; span: Span }
+  | { kind: 'recordCon'; con: QName; fields: FieldBind[]; span: Span; wildcard?: Span }
   | { kind: 'recordUpdate'; expr: Expr; fields: FieldBind[]; span: Span }
-  | { kind: 'paren'; expr: Expr; span: Span };
+  | { kind: 'paren'; expr: Expr; span: Span }
+  /** A typed hole, `_` or an unbound name starting with `_`, which GHC reports with its type. */
+  | { kind: 'hole'; name: string; span: Span };
 
 export interface FieldBind {
   field: QName;
@@ -73,8 +82,12 @@ export type Pat =
   | { kind: 'ptuple'; elems: Pat[]; span: Span }
   | { kind: 'plist'; elems: Pat[]; span: Span }
   | { kind: 'pas'; name: Name; pat: Pat; span: Span }
-  | { kind: 'precord'; con: QName; fields: { field: QName; pat: Pat; span: Span }[]; span: Span }
-  | { kind: 'pchain'; items: ChainItem<Pat>[]; span: Span };
+  | { kind: 'precord'; con: QName; fields: { field: QName; pat: Pat; span: Span }[]; span: Span; wildcard?: Span }
+  | { kind: 'pchain'; items: ChainItem<Pat>[]; span: Span }
+  | { kind: 'pbang'; pat: Pat; span: Span }
+  | { kind: 'plazy'; pat: Pat; span: Span }
+  | { kind: 'pview'; expr: Expr; exprText: string; pat: Pat; span: Span }
+  | { kind: 'por'; alts: Pat[]; span: Span };
 
 export type TypeExpr =
   | { kind: 'tvar'; name: string; span: Span }
@@ -98,7 +111,10 @@ export interface GuardedExpr {
   span: Span;
 }
 
-export type Guard = { kind: 'bool'; expr: Expr; span: Span } | { kind: 'let'; decls: Decl[]; span: Span };
+export type Guard =
+  | { kind: 'bool'; expr: Expr; span: Span }
+  | { kind: 'let'; decls: Decl[]; span: Span }
+  | { kind: 'pat'; pat: Pat; expr: Expr; span: Span };
 
 /** The right-hand side of an equation or alternative: a plain expression or guarded ones, with `where` bindings. */
 export interface Rhs {

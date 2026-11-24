@@ -36,6 +36,18 @@ export function surfacePatternText(pat: Pat): string {
     case 'pchain': {
       return chainText(pat);
     }
+    case 'pbang': {
+      return `!${patternArgument(pat.pat)}`;
+    }
+    case 'plazy': {
+      return `~${patternArgument(pat.pat)}`;
+    }
+    case 'pview': {
+      return `(${pat.exprText} -> ${surfacePatternText(pat.pat)})`;
+    }
+    case 'por': {
+      return `(${pat.alts.map(surfacePatternText).join('; ')})`;
+    }
   }
 }
 

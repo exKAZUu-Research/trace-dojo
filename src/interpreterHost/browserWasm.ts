@@ -13,6 +13,8 @@ const wasmUrls: Record<string, () => URL> = {
     new URL('../../node_modules/@willbooster/tree-sitter-dart/tree-sitter-dart.wasm', import.meta.url),
   '@willbooster/tree-sitter-go/tree-sitter-go.wasm': () =>
     new URL('../../node_modules/@willbooster/tree-sitter-go/tree-sitter-go.wasm', import.meta.url),
+  '@willbooster/tree-sitter-haskell/tree-sitter-haskell.wasm': () =>
+    new URL('../../node_modules/@willbooster/tree-sitter-haskell/tree-sitter-haskell.wasm', import.meta.url),
   '@willbooster/tree-sitter-haskell/tree-sitter-haskell_ghc2021.wasm': () =>
     new URL('../../node_modules/@willbooster/tree-sitter-haskell/tree-sitter-haskell_ghc2021.wasm', import.meta.url),
   '@willbooster/tree-sitter-java/tree-sitter-java.wasm': () =>

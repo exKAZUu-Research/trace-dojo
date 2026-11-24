@@ -1,6 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { compileError } from './errors';
+import type { Extensions } from './extensions';
 import { sourceColumns } from './sourceCoordinates';
 import type { Span } from './syntax';
 
@@ -23,15 +24,18 @@ interface Layout {
   itemStart: number;
 }
 
-export function validateDialect(root: Node): void {
-  new DialectValidator(root).run();
+export function validateDialect(root: Node, extensions: Extensions): void {
+  new DialectValidator(root, extensions.has('BlockArguments')).run();
 }
 
 class DialectValidator {
   private previousRow = -1;
   private readonly columns: Uint32Array;
 
-  constructor(private readonly root: Node) {
+  constructor(
+    private readonly root: Node,
+    private readonly blockArguments: boolean
+  ) {
     this.columns = sourceColumns(root.text);
   }
 
@@ -41,7 +45,7 @@ class DialectValidator {
 
   private visit(node: Node, context?: Layout): void {
     if (isComment(node)) return;
-    validateSyntaxNode(node);
+    validateSyntaxNode(node, this.blockArguments);
     const children = node.children.filter((child): child is Node => child !== null);
     if (children.length === 0) {
       this.checkToken(node, context);
@@ -80,7 +84,7 @@ class DialectValidator {
   }
 }
 
-function validateSyntaxNode(node: Node): void {
+function validateSyntaxNode(node: Node, allowBlockArguments: boolean): void {
   if (node.type === 'variable' && reservedNames.has(node.text)) fail(node);
   if (node.type === 'arithmetic_sequence') {
     const value = node.childForFieldName('step') ?? node.childForFieldName('from');
@@ -88,7 +92,7 @@ function validateSyntaxNode(node: Node): void {
     const dots = node.children.find((child) => child?.type === '..');
     if (value && name?.type === 'constructor' && value.endIndex === dots?.startIndex) fail(value);
   }
-  if (node.type !== 'apply') return;
+  if (node.type !== 'apply' || allowBlockArguments) return;
   const argument = node.childForFieldName('argument');
   if (argument && blockArguments.has(argument.type)) fail(argument);
 }
