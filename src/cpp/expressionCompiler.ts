@@ -2754,6 +2754,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** A concept-id used as an expression (`std::integral<int>`), which is a constant of type `bool`. */
   protected abstract conceptId(node: Syntax): Expr | undefined;
+  abstract isInitializerList(cls: ClassInfo): boolean;
   protected abstract instantiateVariableTemplate(info: ClassTemplateInfo, written: Type[], row: number): Entity;
 
   /** A lambda expression's closure object. */
@@ -2865,8 +2866,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         `${cls.name} には、引数（${args.map((arg) => typeName(arg.type)).join(', ')}）をとるコンストラクタがありません。`
       );
     }
-    // A library class takes an object of the program's class through the class's conversion function.
+    // A library container takes a `std::initializer_list` as the range of its elements.
     const [only] = args;
+    if (cls.library && args.length === 1 && only.type.kind === 'class' && this.isInitializerList(only.type.cls)) {
+      const range = this.materialize(only);
+      const ends = ['begin', 'end'].map((end) => this.callWith(this.member(range, end, row), [], row));
+      return this.constructArguments(cls, ends, row, isBraced);
+    }
+    // A library class takes an object of the program's class through the class's conversion function.
     if (cls.library && args.length === 1 && only.type.kind === 'class' && !only.type.cls.library) {
       const conversions = [...only.type.cls.methods.values()].flat().filter((fn) => fn.isConversion);
       const conversion = conversions.length > 0 ? implicitConversion(this, only, classType(cls)) : undefined;

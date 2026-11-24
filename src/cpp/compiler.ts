@@ -3777,12 +3777,92 @@ export class Compiler extends StatementCompiler {
       if (run) return run;
     }
     if (copy && library) return this.copyInitializer(type, copy, row, false);
+    if (this.isInitializerList(type.cls)) return this.initializerListOf(type.cls, elements);
     if (isAggregate) return this.aggregateInitializer(type.cls, elements, row);
+    // List-initialization prefers a constructor that takes a `std::initializer_list` (C++20 [over.match.list]).
+    const listConstructors = type.cls.constructors.filter((fn) => this.takesInitializerList(fn));
+    if (
+      listConstructors.length > 0 &&
+      (elements.length > 0 || !type.cls.constructors.some((fn) => fn.params.length === 0))
+    ) {
+      const whole: Expr = {
+        type: VOID,
+        isLvalue: false,
+        row,
+        run: () => {},
+        braced: {
+          type: 'initializer_list',
+          text: '',
+          row,
+          endRow: row,
+          start: 0,
+          end: 0,
+          isNamed: true,
+          field: undefined,
+          all: elements,
+          children: elements,
+        },
+      };
+      const viable = this.matchingOverloads(listConstructors, [whole]);
+      const chosen = this.chooseOverload(`${type.cls.name} のコンストラクタ`, viable, row);
+      if (chosen) {
+        this.checkListConstructor(chosen.fn, direct, row);
+        return this.objectInitializer(this.constructWith(type.cls, chosen, [whole], row));
+      }
+    }
     if (elements.length === 0) return this.objectInitializer(this.defaultConstructed(type.cls, row, true, direct));
     const args = single ? [single] : elements.map((element) => this.argument(element));
     const resolved = this.resolveConstructor(type.cls, args, row, true);
     this.checkListConstructor(resolved.fn, direct, row);
     return this.objectInitializer(this.constructWith(type.cls, resolved, args, row));
+  }
+
+  /** Whether a class is an instance of `std::initializer_list`. */
+  isInitializerList(cls: ClassInfo): boolean {
+    const entity = this.libraryNamespace.scope.names.get('initializer_list');
+    return (
+      entity?.kind === 'template' && cls.templateOrigin !== undefined && cls.templateOrigin === entity.template.program
+    );
+  }
+
+  /** Whether a constructor's only parameter without a default is a `std::initializer_list`. */
+  private takesInitializerList(fn: FunctionInfo): boolean {
+    const [first, ...rest] = fn.params;
+    const type = first && unqualified(nonReference(first.type));
+    return (
+      type?.kind === 'class' &&
+      this.isInitializerList(type.cls) &&
+      rest.every((param) => param.defaultValue !== undefined)
+    );
+  }
+
+  /**
+   * A `std::initializer_list<E>` that a braced list makes: an array of its elements, each copy-initialized as an `E`
+   * without narrowing, which the list designates (C++20 [dcl.init.list]p5).
+   */
+  private initializerListOf(cls: ClassInfo, elements: readonly Syntax[]): Initializer {
+    const element = withConst(cls.templateArgs?.[0] as Type);
+    const plain = unqualified(element);
+    const initializers = elements.map((node) =>
+      node.type === 'initializer_list'
+        ? this.listInitializer(plain, node, node.row)
+        : this.copyInitializer(plain, this.compileExpression(node), node.row, true)
+    );
+    const destroy = this.destroyerOf(plain);
+    return (frame, target) => {
+      const store = constructArray(
+        frame,
+        initializers.length,
+        plain,
+        (current, slot, index) => initializers[index](current, slot, false, 'full-expression'),
+        destroy
+      );
+      const object = newObject(frame, cls, false, asObject(target));
+      object.values[0] = new Ptr(store, 0);
+      object.values[1] = BigInt(initializers.length);
+      object.needsConstruction = false;
+      return object;
+    };
   }
 
   private checkListConstructor(constructor: FunctionInfo, allowsExplicit: boolean, row: number): void {

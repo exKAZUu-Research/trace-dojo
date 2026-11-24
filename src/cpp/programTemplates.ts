@@ -7,9 +7,11 @@ import { type Entity, type NamespaceInfo, Scope } from './scopes';
 import { fieldOf, hasToken, type Syntax } from './syntax';
 import {
   type ClassInfo,
+  decay,
   type FunctionInfo,
   type IntType,
   isConstType,
+  nonReference,
   pointerTo,
   referenceTo,
   type Type,
@@ -279,7 +281,23 @@ export class Deduction {
 
   /** Matches a call argument against a parameter's pattern, after the adjustments a call makes (C++20 [temp.deduct.call]). */
   matchArgument(pattern: Pattern, arg: Expr): boolean {
-    if (arg.braced) return true;
+    if (arg.braced) {
+      // A braced list deduces the element type of a `std::initializer_list<T>` parameter from its elements.
+      const list = pattern.kind === 'reference' ? pattern.to : pattern;
+      if (
+        list.kind !== 'instance' ||
+        list.args.length !== 1 ||
+        list.name.text.replace(/^std::/, '').replace(/<.*$/s, '') !== 'initializer_list'
+      )
+        return true;
+      const [element] = list.args;
+      if (element.kind === 'valueName') return false;
+      return arg.braced.children.every(
+        (node) =>
+          node.type !== 'initializer_list' &&
+          this.match(element, unqualified(decay(nonReference(this.compiler.compileExpression(node).type))))
+      );
+    }
     let type = arg.type;
     if (arg.functions) {
       const [fn, ...others] = arg.functions.candidates;

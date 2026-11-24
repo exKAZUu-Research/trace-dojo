@@ -37,6 +37,7 @@ import { type ConstantReference, type Entity, Scope } from './scopes';
 import { isObjectCreation, onlyCalls } from './stepRules';
 import { fieldOf, fieldsOf, hasToken, type Syntax, tokenOf } from './syntax';
 import {
+  decay,
   type GlobalInfo,
   hasVacuousInitialization,
   INT,
@@ -471,6 +472,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let createsObject = false;
     let entity: Extract<Entity, { kind: 'local' }>;
     let deduced: AutoDeduction | undefined;
+    const listType = isAuto(type) ? this.initializerListDeduction(declarator, value) : undefined;
+    if (listType) type = listType;
     if (hasAuto(type)) {
       const source = this.autoInitializer(declarator, value, name);
       const expr = this.withInitializingName(name, type, () => this.compileExpression(source));
@@ -579,6 +582,24 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       );
     }
     return first;
+  }
+
+  /** The `std::initializer_list<T>` that `auto x = {1, 2};` deduces from its elements, all of type `T`. */
+  private initializerListDeduction(declarator: Syntax, value: Syntax | undefined): Type | undefined {
+    if (value?.type !== 'initializer_list' || value.children.length === 0 || !hasToken(declarator, '=')) return;
+    const types = value.children.map((node) =>
+      node.type === 'initializer_list'
+        ? this.error(node.row, 'auto x = {...} の要素には {...} を書けません。')
+        : unqualified(decay(nonReference(this.compileExpression(node).type)))
+    );
+    const [first] = types;
+    if (types.some((type) => !sameType(type, first)))
+      return this.error(declarator.row, 'auto x = {...} の要素の型がそろっていないので、型を決められません。');
+    const entity = this.findStdName('initializer_list');
+    const info = entity?.kind === 'template' ? entity.template : undefined;
+    if (!info || info.takesArrayBound)
+      return this.error(declarator.row, 'auto x = {...} を使うには #include <initializer_list> を書いてください。');
+    return info.instantiate([first], declarator.row);
   }
 
   /** Rejects `auto x = {1, 2};`, which deduces `std::initializer_list`. */
