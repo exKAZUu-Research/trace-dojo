@@ -513,6 +513,7 @@ interface PreUnsetNamerefStore extends DeclarationDestination {
   finalLink: Variable;
   deferUnsetN: boolean;
   extraUnsetLink?: Variable;
+  elementBaseName?: string;
   failedBase?: boolean;
   invalidBaseTarget?: string;
   preResolved?: { resolved: string } | { cyclicName: string };
@@ -790,10 +791,7 @@ function selectDeclarationStore(
   isSubscripted: boolean,
   assignsNonCompound: boolean
 ): SelectedDeclarationStore {
-  if (preUnsetStore?.failedBase) {
-    if (preUnsetStore.invalidBaseTarget !== undefined) {
-      shell.reportError(`${builtin}: \`${preUnsetStore.invalidBaseTarget}': not a valid identifier`);
-    }
+  if (preUnsetStore && rejectPreUnsetElementStore(shell, builtin, preUnsetStore)) {
     return { kind: 'failed' };
   }
   const base = preUnsetStore ?? destination;
@@ -811,6 +809,20 @@ function selectDeclarationStore(
       ? resolveElementStoreVariable(shell, name, variable.name, set, unset, isSubscripted)
       : variable;
   return { kind: 'store', storeVariable, effectiveSubscript: referencedSubscript };
+}
+
+function rejectPreUnsetElementStore(shell: Shell, builtin: string, preUnsetStore: PreUnsetNamerefStore): boolean {
+  if (preUnsetStore.failedBase) {
+    if (preUnsetStore.invalidBaseTarget !== undefined) {
+      shell.reportError(`${builtin}: \`${preUnsetStore.invalidBaseTarget}': not a valid identifier`);
+    }
+    return true;
+  }
+  if (preUnsetStore.elementBaseName !== undefined && preUnsetStore.variable.attributes.has('r')) {
+    shell.reportError(`${builtin}: ${preUnsetStore.elementBaseName}: readonly variable`);
+    return true;
+  }
+  return false;
 }
 
 function resolveImplicitIndexedStore(
@@ -976,6 +988,7 @@ function resolvePreUnsetElementStore(
     variable: direct ?? ensureStoreVariable(shell, resolvedBase),
     finalLink,
     deferUnsetN: false,
+    elementBaseName: baseName,
     referencedSubscript,
     ...(extraUnsetLink ? { extraUnsetLink } : {}),
   };
