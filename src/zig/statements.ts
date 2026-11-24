@@ -163,7 +163,18 @@ export abstract class StatementCompiler extends CallCompiler {
     }
   }
 
-  protected comptimeValue(compileCode: () => TExpr, span: Span): TExpr {
+  /** @param store The `comptime var` that the code stores to, when it is a store, which reads the others' values. */
+  protected comptimeValue(compileCode: () => TExpr, span: Span, store?: LocalBinding): TExpr {
+    const outerStore = this.comptimeStore;
+    this.comptimeStore = store;
+    try {
+      return this.comptimeValueOf(compileCode, span);
+    } finally {
+      this.comptimeStore = outerStore;
+    }
+  }
+
+  private comptimeValueOf(compileCode: () => TExpr, span: Span): TExpr {
     const outer = this.fn;
     // Code outside a function, such as a container-level declaration's value, declares its locals in a frame of its own.
     const fn: FnContext = outer ?? {
@@ -741,10 +752,14 @@ export abstract class StatementCompiler extends CallCompiler {
       // Zig stores to a `comptime var` as it analyzes the assignment, which runs no code when the program runs.
       if (this.runtimeConditionDepth > variable.comptimeCell.conditionDepth)
         this.error(expression, `comptime var「${variable.name}」への代入が、実行時に決まる条件の中にあります。`);
-      this.comptimeValue(() => {
-        const exec = this.assignment(expression, span).exec;
-        return runtime(VOID, (frame) => void exec(frame), expression);
-      }, expression);
+      this.comptimeValue(
+        () => {
+          const exec = this.assignment(expression, span).exec;
+          return runtime(VOID, (frame) => void exec(frame), expression);
+        },
+        expression,
+        variable
+      );
       return { exec: () => {}, noreturn: false };
     }
     if (target.kind === 'identifier' && isDiscardName(target)) {

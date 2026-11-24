@@ -384,7 +384,8 @@ export abstract class ExpressionCompiler extends SemaBase {
         compileTimePointer: new Pointer(cell, 0),
       };
       // Code that the compiler runs reads the variable when it runs; other code, its value where the code stands.
-      if (this.comptimeDepth > 0) return { ...runtime(binding.type, () => cell.slots[0], span, place), local: binding };
+      if (this.comptimeDepth > 0 && (!this.comptimeStore || this.comptimeStore === binding))
+        return { ...runtime(binding.type, () => cell.slots[0], span, place), local: binding };
       // A value read here is a constant of the code that stands here, which later stores must not change: its parts
       // come from a copy, while stores still reach the variable.
       const value = copyForStorage(cell.slots[0]);

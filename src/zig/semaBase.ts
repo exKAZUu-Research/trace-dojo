@@ -263,6 +263,11 @@ export abstract class SemaBase implements SemaApi {
   protected resolvingFields = 0;
   /** How deep the compiler is in code that it runs itself, such as a `comptime` block. */
   protected comptimeDepth = 0;
+  /**
+   * The `comptime var` that the code the compiler runs stores to, when that code is such a store: it runs once where it
+   * stands, so the other `comptime var`s it reads have the values they hold there.
+   */
+  protected comptimeStore: LocalBinding | undefined;
   /** How many branches on runtime conditions and runtime loop bodies enclose the code being compiled. */
   protected runtimeConditionDepth = 0;
   /** The backward branches that the analysis of the current function or declaration has evaluated. */
@@ -358,7 +363,7 @@ export abstract class SemaBase implements SemaApi {
   /** Evaluates a function call at compile time, as a container-level constant's initializer does. */
   protected abstract evaluateAtCompileTime(expression: TExpr, ownSlots?: { from: number; count: number }): Value;
   /** Compiles code that the compiler runs as it analyzes, such as a `comptime` block, and gives its value. */
-  protected abstract comptimeValue(compileCode: () => TExpr, span: Span): TExpr;
+  protected abstract comptimeValue(compileCode: () => TExpr, span: Span, store?: LocalBinding): TExpr;
   /** Runs an analysis of its own, as Zig analyzes each function and declaration apart from the one that uses it. */
   protected abstract separateAnalysis<T>(run: () => T): T;
   protected abstract explicitAlignment(expression: Expression, type: Type): number | undefined;
@@ -980,19 +985,15 @@ export abstract class SemaBase implements SemaApi {
   private coerceToInt(expression: TExpr, to: IntType, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'comptime_int' || (from.kind === 'int' && expression.known)) {
-      // Code the compiler runs reads a `comptime var` as it runs, and checks the value fits then.
-      if (!expression.known && this.comptimeDepth > 0)
-        return this.derived(expression, to, (value) =>
-          fitsInt(value as bigint, to)
-            ? value
-            : panic(`${typeName(to)} cannot represent integer value ${value as bigint}`)
-        );
+      if (!expression.known && this.comptimeDepth > 0) return this.checkedComptimeInt(expression, to);
       if (!expression.known) return undefined;
       const value = expression.value as bigint;
       if (!fitsInt(value, to)) this.error(span, `${typeName(to)} 型では、整数 ${value} を表せません。`);
       return known(to, value, span);
     }
-    if (from.kind === 'int') return intWidens(from, to) ? { ...expression, type: to } : undefined;
+    if (from.kind === 'int' && intWidens(from, to)) return { ...expression, type: to };
+    if (from.kind === 'int' && this.comptimeDepth > 0) return this.checkedComptimeInt(expression, to);
+    if (from.kind === 'int') return undefined;
     if ((from.kind === 'comptime_float' || from.kind === 'float') && expression.known) {
       const value = asBigFloat(expression.value as AnyFloat);
       if (!isIntegral(value)) this.error(span, fractional(value, to));
@@ -1001,6 +1002,16 @@ export abstract class SemaBase implements SemaApi {
       return known(to, integer, span);
     }
     return undefined;
+  }
+
+  /**
+   * An integer that code the compiler runs reads as it runs, such as a `comptime var` in a `comptime` block's loop,
+   * which Zig knows at every step: whether it fits the type is checked when the code runs.
+   */
+  private checkedComptimeInt(expression: TExpr, to: IntType): TExpr {
+    return this.derived(expression, to, (value) =>
+      fitsInt(value as bigint, to) ? value : panic(`${typeName(to)} cannot represent integer value ${value as bigint}`)
+    );
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Checks each rule of Zig's type coercion or container analysis in turn.
