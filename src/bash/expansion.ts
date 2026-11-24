@@ -19,7 +19,7 @@ const QUOTED_EMPTY: Fragment = { text: '', quoted: true, split: false };
 /** A parameter's value before its operator: one string, or the elements of `$@`, `$*`, or `${a[@]}`. */
 export type ParameterValue =
   | { kind: 'scalar'; value: string | undefined }
-  | { kind: 'list'; values: string[]; star: boolean; positional?: boolean };
+  | { kind: 'list'; values: string[]; star: boolean; positional?: boolean; transformed?: boolean };
 
 const SPECIAL_PARAMETERS = new Set(['@', '*', '#', '?', '-', '$', '!', '0', '_']);
 
@@ -479,6 +479,7 @@ export class Expander {
           quoted: inDouble,
           split: !inDouble,
           ...(!inDouble && !value.star ? { atListElement: true } : {}),
+          ...(!inDouble && value.transformed ? { transformedList: true } : {}),
         });
       }
     }

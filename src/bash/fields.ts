@@ -10,6 +10,8 @@ export interface Fragment {
   atListElement?: boolean;
   /** Whether an empty `@`-list fragment was selected by an unquoted `${x:-word}` / `${x:+word}` operator. */
   operatorNull?: boolean;
+  /** Whether the fragment came from an unquoted transformed list expansion (`${a[@]#p}`, `${a[@]/p/r}`, etc.). */
+  transformedList?: boolean;
 }
 
 /** Separates the fields of `"$@"` and `"${a[@]}"`. */
@@ -56,7 +58,7 @@ export class FieldSplitter {
       this.afterListWhite = false;
       this.afterDelimiter = false;
     } else if (piece.text !== '') {
-      this.split(piece.text);
+      this.split(piece.text, Boolean(piece.transformedList));
     } else if (piece.operatorNull && this.ifs !== '' && this.ifs[0] !== ' ') {
       this.started = true;
       this.afterWhite = false;
@@ -97,7 +99,7 @@ export class FieldSplitter {
     this.started = false;
   }
 
-  private split(text: string): void {
+  private split(text: string, transformedList = false): void {
     let run = '';
     for (const c of text) {
       if (!this.ifs.includes(c)) {
@@ -110,18 +112,19 @@ export class FieldSplitter {
       }
       if (run) this.field.push({ text: run, quoted: false, split: false });
       run = '';
-      this.separate(c);
+      this.separate(c, transformedList);
     }
     if (run) this.field.push({ text: run, quoted: false, split: false });
   }
 
-  private separate(c: string): void {
+  private separate(c: string, transformedList = false): void {
     if (c === ' ' || c === '\t' || c === '\n') {
       if (this.started) {
         this.end();
         this.afterWhite = true;
       } else if (!this.afterDelimiter) {
-        this.afterListWhite = true;
+        if (transformedList) this.afterWhite = true;
+        else this.afterListWhite = true;
       }
       return;
     }

@@ -211,7 +211,7 @@ function mapValues(
     if (value.value === undefined) return [];
     return expander.valuePieces({ kind: 'scalar', value: map(value.value) }, inDouble);
   }
-  return expander.valuePieces({ ...value, values: value.values.map(map) }, inDouble);
+  return expander.valuePieces({ ...value, values: value.values.map(map), transformed: true }, inDouble);
 }
 
 /** `${x#p}`, `${x##p}`, `${x%p}`, and `${x%%p}`, matching by characters. */
@@ -343,7 +343,7 @@ function substring(
   const length = lengthParts === undefined ? undefined : evaluate(lengthParts);
   if (length !== undefined && length < 0n) negativeLength();
   return expander.valuePieces(
-    { ...value, values: length === undefined ? values : values.slice(0, Number(length)) },
+    { ...value, values: length === undefined ? values : values.slice(0, Number(length)), transformed: true },
     inDouble
   );
 }
