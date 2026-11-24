@@ -36,6 +36,7 @@ import {
   zeroOf,
 } from './objectCompiler';
 import { overloadedOperator } from './operatorOverloads';
+import { expandPacks, packElements, withPackElement } from './packs';
 import {
   argumentsKey,
   argumentsText,
@@ -957,6 +958,10 @@ export class Compiler extends StatementCompiler {
     const declarations = list.children;
     for (const param of declarations) {
       if (param.type === 'variadic_parameter') return this.unsupported(param.row, '可変長引数（...）');
+      if (param.type === 'variadic_parameter_declaration') {
+        params.push(...this.packParameters(param));
+        continue;
+      }
       const base = this.specifiedType(param, true);
       const declarator = fieldOf(param, 'declarator');
       const declared = declarator ? this.applyDeclarator(base, declarator) : { name: undefined, type: base };
@@ -979,6 +984,29 @@ export class Compiler extends StatementCompiler {
       });
     }
     return params;
+  }
+
+  /** The parameters a function parameter pack (`Ts... xs`) declares, one per element of the packs its type names. */
+  private packParameters(param: Syntax): ParamInfo[] {
+    const written = fieldOf(param, 'declarator');
+    // `const Ts&... xs` declares `xs` with the declarator around the `...`.
+    const inner = written && withoutEllipsis(written);
+    const declarator = written;
+    const pattern: Syntax = {
+      ...param,
+      type: 'parameter_declaration',
+      all: param.all.filter((child) => child !== declarator),
+    };
+    const elements = packElements(this, pattern, param.row);
+    const name = inner ? this.applyDeclarator(INT, inner).name : undefined;
+    return elements.map((element, index) =>
+      withPackElement(this, element, (declaration) => {
+        let type = this.specifiedType(declaration, true);
+        if (inner) type = this.applyDeclarator(type, inner).type;
+        if (type.kind === 'array') type = { kind: 'pointer', to: type.of };
+        return { name: name && `\0${name}#${index}`, type, row: param.row, pack: name };
+      })
+    );
   }
 
   /** Marks a function atomic when an `// atomic` annotation is on its header, from its start through its body's `{`. */
@@ -1309,7 +1337,7 @@ export class Compiler extends StatementCompiler {
 
   private initializerArguments(initializer: Syntax): Expr[] {
     const argumentsNode = initializer.children[1];
-    return (argumentsNode?.children ?? []).map((arg) => this.argument(arg));
+    return expandPacks(this, argumentsNode?.children ?? []).map((arg) => this.argument(arg));
   }
 
   private baseInitialization(cls: ClassInfo, base: ClassInfo, initializer: Syntax | undefined): Exec {
@@ -2285,10 +2313,26 @@ export class Compiler extends StatementCompiler {
           );
         }
         const local = context.declareLocal(param.name ?? `\0param${param.row}`, type, true);
-        if (param.name) {
+        const entity: Entity = { kind: 'local', local, isReference: type.kind === 'reference' };
+        if (param.pack) {
+          // The elements of a function parameter pack make the pack its name denotes.
+          const pack = scope.names.get(param.pack);
+          if (pack?.kind === 'pack') pack.items.push(entity);
+          else scope.names.set(param.pack, { kind: 'pack', items: [entity] });
+        } else if (param.name) {
           if (scope.names.has(param.name)) this.error(param.row, `引数 ${param.name} の名前が重複しています。`);
-          scope.names.set(param.name, { kind: 'local', local, isReference: type.kind === 'reference' });
+          scope.names.set(param.name, entity);
         }
+      }
+      // A function parameter pack with no elements is still a pack.
+      const declarator = fieldOf(node, 'declarator');
+      const written = declarator && functionDeclarator(declarator);
+      for (const param of (written && fieldOf(written, 'parameters')?.children) ?? []) {
+        const packDeclarator =
+          param.type === 'variadic_parameter_declaration' ? fieldOf(param, 'declarator') : undefined;
+        const inner = packDeclarator && withoutEllipsis(packDeclarator);
+        const name = inner && this.applyDeclarator(INT, inner).name;
+        if (name && !scope.names.has(name)) scope.names.set(name, { kind: 'pack', items: [] });
       }
       // The grammar gives a constructor's function-try-block no `body` field.
       if (node.children.some((child) => child.type === 'try_statement'))
@@ -2630,7 +2674,7 @@ export class Compiler extends StatementCompiler {
       run = this.listInitializer(type, value, row, direct);
       isCreation = createsClass || isObjectCreation(value);
     } else if (value.type === 'argument_list') {
-      const args = value.children.map((arg) => this.argument(arg));
+      const args = expandPacks(this, value.children).map((arg) => this.argument(arg));
       if (type.kind === 'class') {
         run = this.objectInitializer(this.constructObject(type.cls, args, row, false));
         isCreation = createsClass;
@@ -2836,7 +2880,7 @@ export class Compiler extends StatementCompiler {
   }
 
   listInitializer(type: Type, list: Syntax, row: number, direct = false): Initializer {
-    return this.initializeList(type, list.children, row, direct);
+    return this.initializeList(type, expandPacks(this, list.children), row, direct);
   }
 
   protected initializeList(type: Type, elements: readonly Syntax[], row: number, direct = false): Initializer {
@@ -3557,6 +3601,17 @@ function intMaxOf(type: Extract<Type, { kind: 'int' }>): bigint {
 }
 
 /** The function declarator of a declarator, which pointer and reference declarators may wrap (`int* f()`). */
+/** A declarator without its `...`, which a function parameter pack's declarator has (`Ts&... xs`). */
+function withoutEllipsis(node: Syntax): Syntax | undefined {
+  if (node.type === 'variadic_declarator') return node.children[0] && { ...node.children[0], field: node.field };
+  const all = node.all.flatMap((child) => {
+    if (!child.isNamed) return child.type === '...' ? [] : [child];
+    const inner = withoutEllipsis(child);
+    return inner ? [inner] : [];
+  });
+  return { ...node, all, children: all.filter((child) => child.isNamed) };
+}
+
 /** The class whose namespace argument-dependent lookup searches for an argument of a type. */
 function argumentClass(type: Type): ClassInfo | undefined {
   const target = type.kind === 'pointer' || type.kind === 'reference' ? type.to : type;

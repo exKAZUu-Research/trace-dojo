@@ -139,6 +139,7 @@ type Pattern =
   | { kind: 'reference'; to: Pattern; isRvalue: boolean }
   | { kind: 'array'; of: Pattern; size: string | number | undefined }
   | { kind: 'instance'; name: Syntax; args: (Pattern | { kind: 'valueName'; name: string })[]; isConst: boolean }
+  | { kind: 'function'; ret: Pattern; params: Pattern[] }
   | { kind: 'nondeduced' };
 
 /**
@@ -232,7 +233,9 @@ export class Deduction {
       }
       case 'function_declarator':
       case 'abstract_function_declarator': {
-        return { kind: 'nondeduced' };
+        const parameters = fieldOf(declarator, 'parameters')?.children ?? [];
+        const params = parameters.map((parameter) => this.pattern(parameter, fieldOf(parameter, 'declarator')));
+        return this.applyDeclarator({ kind: 'function', ret: base, params }, fieldOf(declarator, 'declarator'));
       }
       case 'variadic_declarator': {
         return this.applyDeclarator(base, declarator.children[0]);
@@ -290,6 +293,11 @@ export class Deduction {
       }
       case 'instance': {
         return this.matchInstance(pattern, type);
+      }
+      case 'function': {
+        if (type.kind !== 'function' || type.params.length !== pattern.params.length) return false;
+        if (!this.match(pattern.ret, type.ret)) return false;
+        return pattern.params.every((param, index) => this.match(param, unqualified(type.params[index])));
       }
       default: {
         return true;

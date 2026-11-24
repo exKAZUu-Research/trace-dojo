@@ -3,6 +3,7 @@ import { compileError, unsupported } from './errors';
 import type { Expr } from './expr';
 import { isSdkMemberDeclared } from './library/libcGlobals';
 import type { Library, LibraryTemplate } from './library/registry';
+import { expandPacks, PACK_ELEMENT, withPackElement } from './packs';
 import { type Entity, FunctionContext, type NamespaceInfo, Scope } from './scopes';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
@@ -454,6 +455,31 @@ export abstract class CompilerBase {
     this.globalScope.names.set(name, entity);
   }
 
+  /** Runs `run` where some names denote the given entities, as a pack expansion's element binds its packs. */
+  withBindings<T>(bindings: ReadonlyMap<string, Entity>, run: () => T): T {
+    const scope = new Scope();
+    for (const [name, entity] of bindings) scope.names.set(name, entity);
+    this.context.scopes.push(scope);
+    try {
+      return run();
+    } finally {
+      this.context.scopes.pop();
+    }
+  }
+
+  /** The element of a pack that `xs...[i]` or `Ts...[i]` names, its index being a constant expression. */
+  packElement(node: Syntax): Entity {
+    const packNode = fieldOf(node, 'pack') as Syntax;
+    const pack = this.findName(packNode.text);
+    if (pack?.kind !== 'pack') return this.error(node.row, `${packNode.text} はパラメータパックではありません。`);
+    const index = this.rvalue(this.compileExpression(fieldOf(node, 'index') as Syntax));
+    if (index.constant === undefined) return this.error(node.row, 'パックの添字には整数の定数式を書いてください。');
+    const element = pack.items[Number(index.constant)];
+    if (!element || Number(index.constant) < 0)
+      return this.error(node.row, `パック ${packNode.text} の添字 ${index.constant} が範囲を超えています。`);
+    return element;
+  }
+
   /** Runs `compile` with a scope of names it declares, which only it sees. */
   withNames(compile: (declare: (name: string, entity: Entity) => void) => void): void {
     const scope = new Scope();
@@ -583,6 +609,10 @@ export abstract class CompilerBase {
       case 'enum_specifier': {
         return enumSpecifierType(this, node);
       }
+      case 'pack_index_type': {
+        const element = this.packElement(node);
+        return this.typeOfEntity(element, fieldOf(node, 'pack') as Syntax);
+      }
       case 'dependent_type': {
         return this.resolveTypeSpecifier(node.children[0], allowAuto, true);
       }
@@ -648,7 +678,11 @@ export abstract class CompilerBase {
 
   /** The arguments of a template argument list: types, or the values of constant expressions. */
   templateArguments(list: Syntax): Type[] {
-    return list.children.map((argument) => this.templateTypeArgument(argument));
+    return expandPacks(this, list.children).map((argument) =>
+      argument.type === PACK_ELEMENT
+        ? withPackElement(this, argument, (pattern) => this.templateTypeArgument(pattern))
+        : this.templateTypeArgument(argument)
+    );
   }
 
   private templateTypeArgument(argument: Syntax): Type {

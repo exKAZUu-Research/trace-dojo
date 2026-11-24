@@ -139,6 +139,8 @@ export interface ParamInfo {
   };
   /** Whether a call to a library function may leave the argument out, which the library then supplies. */
   isOptional?: boolean;
+  /** The function parameter pack (`Ts... xs`) whose element the parameter is. */
+  pack?: string;
   row: number;
 }
 

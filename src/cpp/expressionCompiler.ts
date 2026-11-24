@@ -38,6 +38,7 @@ import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
 import { constructArray, initializeAt, invoke, ObjectCompiler, zeroOf } from './objectCompiler';
 import { hasUserType, memberOperators, overloadedOperator, withOverloads } from './operatorOverloads';
+import { expandPacks, PACK_ELEMENT, packElements, packsIn, withPackElement } from './packs';
 import { erasePointee, recoverPointee } from './pointerCasts';
 import { type Eval, type Frame, holdAll } from './runtime';
 import type { Entity } from './scopes';
@@ -149,6 +150,15 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       }
       case 'template_function': {
         return this.templateFunction(node);
+      }
+      case PACK_ELEMENT: {
+        return withPackElement(this, node, (pattern) => this.compileExpression(pattern));
+      }
+      case 'fold_expression': {
+        return this.foldExpression(node);
+      }
+      case 'pack_index_expression': {
+        return this.entityExpr(this.packElement(node), fieldOf(node, 'pack') as Syntax, false);
       }
       case 'dependent_name': {
         return this.compileExpression({ ...node.children[0], field: node.field });
@@ -1466,6 +1476,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   private commaExpression(node: Syntax): Expr {
     const left = this.compileExpression(fieldOf(node, 'left') as Syntax);
     const right = this.compileExpression(fieldOf(node, 'right') as Syntax);
+    return this.comma(left, right);
+  }
+
+  /** `left, right`, which evaluates `left`, discards its value, and gives `right`. */
+  comma(left: Expr, right: Expr): Expr {
     const { run: second, temporaryBinding } = right;
     const value = this.rvalue(left);
     const hasConstantLeft = value.constant !== undefined;
@@ -1773,8 +1788,55 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return this.explicitConversion(this.compileExpression(fieldOf(node, 'value') as Syntax), type, node.row, 'static');
   }
 
+  /**
+   * A fold expression (C++20 [expr.prim.fold]): `(xs + ...)` and `(0 + ... + xs)` fold from the right or the left,
+   * applying the operator to the pack's elements in order.
+   */
+  private foldExpression(node: Syntax): Expr {
+    const operator = (fieldOf(node, 'operator') as Syntax).type;
+    const left = fieldOf(node, 'left') as Syntax;
+    const right = fieldOf(node, 'right') as Syntax;
+    const isPack = (side: Syntax): boolean => side.isNamed && packsIn(this, side).size > 0;
+    const isRightFold = left.isNamed && isPack(left);
+    const pattern = isRightFold ? left : right;
+    const init = isRightFold ? (right.isNamed ? right : undefined) : left.isNamed ? left : undefined;
+    const operands = packElements(this, pattern, node.row).map((element) => this.compileExpression(element));
+    if (init) {
+      const initial = this.compileExpression(init);
+      if (isRightFold) operands.push(initial);
+      else operands.unshift(initial);
+    }
+    if (operands.length === 0) {
+      // An empty pack folds to the operator's identity, which only `&&`, `||`, and `,` have.
+      if (operator === '&&') return constantExpr(BOOL, 1, node.row);
+      if (operator === '||') return constantExpr(BOOL, 0, node.row);
+      if (operator === ',') return { type: { kind: 'void' }, isLvalue: false, row: node.row, run: () => {} };
+      return this.error(node.row, `空のパラメータパックは、演算子 ${operator} で畳み込めません。`);
+    }
+    // A right fold applies the operator from the last element back, a left fold from the first forward.
+    const [first, ...rest] = isRightFold ? operands.toReversed() : operands;
+    let folded = first;
+    for (const operand of rest)
+      folded = isRightFold
+        ? this.foldOperation(operator, operand, folded, node.row)
+        : this.foldOperation(operator, folded, operand, node.row);
+    return folded;
+  }
+
+  private foldOperation(operator: string, left: Expr, right: Expr, row: number): Expr {
+    if (operator === ',') return this.comma(left, right);
+    if (operator.endsWith('=') && !['==', '!=', '<=', '>='].includes(operator))
+      return this.assign(operator, left, right, row);
+    return this.binary(ALTERNATIVE_TOKENS[operator] ?? operator, left, right, row);
+  }
+
   private sizeofExpression(node: Syntax): Expr {
-    if (node.all.some((child) => child.type === '...')) return this.unsupported(node.row, 'sizeof...');
+    if (node.all.some((child) => child.type === '...')) {
+      const name = fieldOf(node, 'value') as Syntax;
+      const entity = this.findName(name.text);
+      if (entity?.kind !== 'pack') return this.error(node.row, `${name.text} はパラメータパックではありません。`);
+      return constantExpr(SIZE_T, BigInt(entity.items.length), node.row);
+    }
     const type = this.sizeofOperandType(node);
     if (type.kind === 'function') return this.error(node.row, '関数には sizeof を使えません。');
     if (type.kind === 'void') return this.error(node.row, 'void 型には sizeof を使えません。');
@@ -1855,7 +1917,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   private callExpression(node: Syntax): Expr {
     const functionNode = fieldOf(node, 'function') as Syntax;
     const argsNode = fieldOf(node, 'arguments') as Syntax;
-    const argNodes = argsNode.children;
+    const argNodes = expandPacks(this, argsNode.children);
     const isUnqualified = functionNode.type === 'identifier';
     if (isUnqualified && this.library.isFunctionMacro(functionNode.text))
       return this.unsupported(functionNode.row, `マクロ（${functionNode.text}）`);
@@ -1915,6 +1977,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** An argument of a call, which may be a braced list only for parameters whose type the call decides. */
   argument(node: Syntax): Expr {
+    if (node.type === PACK_ELEMENT) return withPackElement(this, node, (pattern) => this.argument(pattern));
     if (node.type === 'initializer_list') {
       return { type: { kind: 'void' }, isLvalue: false, row: node.row, run: () => {}, braced: node };
     }

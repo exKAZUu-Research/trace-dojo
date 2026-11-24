@@ -17,6 +17,7 @@ import {
 import { ExpressionCompiler } from './expressionCompiler';
 import { SequenceValue } from './library/containerValues';
 import { bindRetainedTemporary, initializeAt, withTemporaries, zeroOf } from './objectCompiler';
+import { expandPacks } from './packs';
 import { parseInitializerArguments } from './parse';
 import { erasePointee } from './pointerCasts';
 import {
@@ -525,7 +526,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       };
     }
     if (value.type === 'argument_list') {
-      const args = value.children.map((arg) => this.argument(arg));
+      const args = expandPacks(this, value.children).map((arg) => this.argument(arg));
       if (type.kind === 'class')
         return {
           init: this.copyInitializer(type, this.constructObject(type.cls, args, row, false), row, false),
