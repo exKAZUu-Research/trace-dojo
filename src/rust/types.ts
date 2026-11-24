@@ -250,6 +250,8 @@ export interface AssocTypeDef {
   bounds: TraitRef[];
   /** The `Projection` that stands for it on a type. */
   projection: AdtDef;
+  /** The type parameters of a generic associated type, whose arguments follow the trait's in a projection. */
+  params: TypeParam[];
 }
 
 export interface TraitDef {
@@ -287,6 +289,8 @@ export interface ImplDef {
   consts: Map<string, ConstDef>;
   /** The associated types of a trait impl (`type Item = u32;`), lowered once the impl's types are. */
   assocTypes: Map<string, Type>;
+  /** The type parameters of the impl's generic associated types (`type Item<T> = Vec<T>;`). */
+  assocTypeParams?: Map<string, TypeParam[]>;
   /** The bounds between lifetimes the impl declares (`impl<'a, 'b: 'a>`). */
   lifetimeBounds?: { name: string; outlives: string[] }[];
   module: unknown;
@@ -799,10 +803,13 @@ export function typeToString(type: Type): string {
 
 function adtToString(t: Type & { kind: 'adt' }): string {
   if (t.def.projection) {
-    const [self, ...args] = t.args;
-    const trait =
-      args.length === 0 ? t.def.projection.trait.name : traitRefToString({ trait: t.def.projection.trait, args });
-    return `<${typeToString(self)} as ${trait}>::${t.def.projection.name}`;
+    const { trait, name } = t.def.projection;
+    const [self, ...rest] = t.args;
+    const args = rest.slice(0, trait.params.length);
+    const own = rest.slice(trait.params.length);
+    const traitText = args.length === 0 ? trait.name : traitRefToString({ trait, args });
+    const ownText = own.length === 0 ? '' : `<${own.map(typeToString).join(', ')}>`;
+    return `<${typeToString(self)} as ${traitText}>::${name}${ownText}`;
   }
   if (t.def.builtin === 'ConstPtr' || t.def.builtin === 'MutPtr') {
     return `*${t.def.builtin === 'MutPtr' ? 'mut' : 'const'} ${typeToString(t.args[0])}`;

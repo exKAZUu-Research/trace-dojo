@@ -537,17 +537,6 @@ export class Converter extends ExpressionConverter {
     };
   }
 
-  /**
-   * Requires the parameters of a generic associated type to be lifetimes (`type Item<'a> where Self: 'a;`), which the
-   * borrow checker reads from the types that use them, so that the type stands for one type as an associated type does.
-   */
-  private requireLifetimeParamsOnly(node: Node): void {
-    const parameters = node.childForFieldName('type_parameters');
-    if (parameters?.namedChildren.some((child) => !isComment(child) && child.type !== 'lifetime_parameter')) {
-      unavailable(this.span(node), '型引数を持つ関連型（type Item<T>;）');
-    }
-  }
-
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of trait member, including macro expansions.
   // code-gauge-allow functionNcss -- One case per kind of trait member, including macro expansions.
   private traitItem(node: Node): TraitItem {
@@ -567,10 +556,10 @@ export class Converter extends ExpressionConverter {
           if (method.isConst) syntaxError(method.span, 'トレイトの関数は const にできません（E0379）。');
           methods.push(method);
         } else if (child.type === 'associated_type') {
-          this.requireLifetimeParamsOnly(child);
           const typeBounds = child.childForFieldName('bounds');
           assocTypes.push({
             name: this.identifier(this.field(child, 'name')),
+            generics: this.generics(child),
             bounds: typeBounds ? this.bounds(typeBounds) : [],
             span: this.span(child),
           });
@@ -625,9 +614,9 @@ export class Converter extends ExpressionConverter {
         else if (child.type === 'function_signature_item' && this.isStd) methods.push(this.fnItem(child, true, attrs));
         else if (child.type === 'const_item') consts.push(this.item(child) as ImplItem['consts'][number]);
         else if (child.type === 'type_item') {
-          this.requireLifetimeParamsOnly(child);
           assocTypes.push({
             name: this.identifier(this.field(child, 'name')),
+            generics: this.generics(child),
             type: this.type(this.field(child, 'type')),
             span: this.span(child),
           });

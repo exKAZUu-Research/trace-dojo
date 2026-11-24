@@ -544,6 +544,7 @@ export class ItemCollector {
         name: assoc.name,
         bounds: [],
         projection: projectionDef(def, assoc.name, module),
+        params: declareTypeParams(assoc.generics, def.params),
       });
     }
     for (const constant of item.consts) {
@@ -618,13 +619,7 @@ export class ItemCollector {
         const trait = resolveTraitPath(item.trait, scope, impl.selfType);
         impl.trait = trait;
         scope.implTrait = trait;
-        for (const assoc of item.assocTypes) {
-          if (!trait.trait.assocTypes.has(assoc.name)) {
-            compileError(assoc.span, `関連型 ${assoc.name} は、トレイト ${trait.trait.name} にありません（E0437）。`);
-          }
-          if (impl.assocTypes.has(assoc.name)) compileError(assoc.span, `関連型 ${assoc.name} が2回あります。`);
-          impl.assocTypes.set(assoc.name, lowerType(assoc.type, scope));
-        }
+        lowerImplAssocTypes(item, impl, trait, scope);
         this.checkTraitImpl(item, impl, trait.trait);
       } else if (!module.isStd) {
         const self = impl.selfType;
@@ -790,6 +785,23 @@ export class ItemCollector {
         module.imports.set(name, imported);
       }
     }
+  }
+}
+
+/** The associated types of a trait impl (`type Item<T> = Vec<T>;`), lowered with their own parameters in scope. */
+function lowerImplAssocTypes(item: ImplItem, impl: ImplDef, trait: TraitRef, scope: TypeScope): void {
+  for (const assoc of item.assocTypes) {
+    const declared = trait.trait.assocTypes.get(assoc.name);
+    if (!declared)
+      compileError(assoc.span, `関連型 ${assoc.name} は、トレイト ${trait.trait.name} にありません（E0437）。`);
+    if (impl.assocTypes.has(assoc.name)) compileError(assoc.span, `関連型 ${assoc.name} が2回あります。`);
+    const own = declareTypeParams(assoc.generics, impl.params);
+    if (own.length !== declared.params.length) {
+      compileError(assoc.span, `関連型 ${assoc.name} の型引数の数が、トレイトの宣言と合いません（E0049）。`);
+    }
+    const params = new Map([...scope.params, ...own.map((param): [string, TypeParam] => [param.name, param])]);
+    impl.assocTypes.set(assoc.name, lowerType(assoc.type, { ...scope, params }));
+    if (own.length > 0) (impl.assocTypeParams ??= new Map()).set(assoc.name, own);
   }
 }
 
@@ -1459,7 +1471,8 @@ function lowerPathType(path: PathAst, scope: TypeScope): Type {
   const owner = names.length === 2 ? scope.params.get(names[0]) : undefined;
   if (owner) return lowerAssocItemPath(path, names, owner, scope);
   if (names.length === 2 && names[0] === 'Self' && scope.selfType) {
-    return assocTypeOf(scope.selfType, names[1], undefined, scope, path.span);
+    const args = (last.args ?? []).map((arg) => lowerType(arg, scope));
+    return assocTypeOf(scope.selfType, names[1], undefined, scope, path.span, args);
   }
   if (last.bindings)
     compileError(last.bindings[0].span, '関連型の指定（Item = ...）は、トレイトの境界にだけ書けます。');

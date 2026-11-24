@@ -9070,6 +9070,22 @@ test('an iterator that owns its elements drops those it has not yielded when it 
   });
 });
 
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('a generic associated type takes its own type arguments in signatures and paths', () => {
+  const program = rustMain(
+    `    let v: <VecMaker as Container>::Item<u8> = VecMaker.wrap(3u8);
+    println!("{:?} {:?} {:?}", make(&VecMaker), make(&OptMaker), v);`,
+    `use std::fmt::Debug;
+trait Container { type Item<T>: Debug where T: Debug; fn wrap<T: Debug>(&self, v: T) -> Self::Item<T>; }
+struct VecMaker;
+impl Container for VecMaker { type Item<T> = Vec<T> where T: Debug; fn wrap<T: Debug>(&self, v: T) -> Vec<T> { vec![v] } }
+struct OptMaker;
+impl Container for OptMaker { type Item<T> = Option<T> where T: Debug; fn wrap<T: Debug>(&self, v: T) -> Self::Item<T> { Some(v) } }
+fn make<C: Container>(c: &C) -> C::Item<i32> { c.wrap(5) }`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[5] Some(5) [3]\n' });
+});
+
 test('an empty match covers the uninhabited Infallible', () => {
   const program = rustMain(
     '    println!("{:?}", widen(5));',

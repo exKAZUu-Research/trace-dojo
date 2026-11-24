@@ -164,7 +164,8 @@ export interface TraitItem {
   supertraits: BoundAst[];
   methods: FnItem[];
   /** The associated types the trait declares (`type Item: Display;`). */
-  assocTypes: { name: string; bounds: BoundAst[]; span: Span }[];
+  /** `generics`: the parameters of a generic associated type (`type Item<T>;`). */
+  assocTypes: { name: string; bounds: BoundAst[]; generics: Generics; span: Span }[];
   /** The associated constants the trait declares, with their default values if any. */
   consts: ConstItem[];
 }
@@ -178,7 +179,7 @@ export interface ImplItem {
   methods: FnItem[];
   consts: ConstItem[];
   /** The associated types a trait impl sets (`type Item = u32;`). */
-  assocTypes: { name: string; type: TypeAst; span: Span }[];
+  assocTypes: { name: string; type: TypeAst; generics: Generics; span: Span }[];
 }
 
 export interface ConstItem {

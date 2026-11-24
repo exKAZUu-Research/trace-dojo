@@ -98,7 +98,8 @@ function projectionType(solver: TraitSolver, type: Type & { kind: 'adt' }): Type
   if (!projection) return undefined;
   const { trait, name } = projection;
   const self = normalize(shallow(type.args[0]));
-  const traitArgs = type.args.slice(1);
+  const traitArgs = type.args.slice(1, 1 + trait.params.length);
+  const assocArgs = type.args.slice(1 + trait.params.length);
   if (self.kind === 'var') return undefined;
   const bounds = boundsOf(self);
   if (bounds) return boundAssocType(bounds, self, trait, name);
@@ -106,7 +107,9 @@ function projectionType(solver: TraitSolver, type: Type & { kind: 'adt' }): Type
     const item = intoIterItem(self);
     if (item) return item;
   }
-  return builtinAssocType(trait, name, self, traitArgs) ?? implAssocType(solver, trait, name, self, traitArgs);
+  return (
+    builtinAssocType(trait, name, self, traitArgs) ?? implAssocType(solver, { trait, name, self, traitArgs, assocArgs })
+  );
 }
 
 /** The associated type a bound of a type parameter, a trait object, or an `impl Trait` sets. */
@@ -122,10 +125,13 @@ function boundAssocType(bounds: TraitRef[], self: Type, trait: TraitDef, name: s
 /** The associated type the program's impl for `self` gives; a type not fully known yet (`MyBox<{integer}>`) settles it only when one impl can be its. */
 function implAssocType(
   solver: TraitSolver,
-  trait: TraitDef,
-  name: string,
-  self: Type,
-  traitArgs: Type[]
+  {
+    trait,
+    name,
+    self,
+    traitArgs,
+    assocArgs,
+  }: { trait: TraitDef; name: string; self: Type; traitArgs: Type[]; assocArgs: Type[] }
 ): Type | undefined {
   const { unifier } = solver;
   let found: Type | undefined;
@@ -134,6 +140,7 @@ function implAssocType(
     if (!assoc) continue;
     const snapshot = unifier.snapshot();
     const subst = solver.matchImpl(impl, self, traitArgs);
+    for (const [index, param] of (impl.assocTypeParams?.get(name) ?? []).entries()) subst?.set(param, assocArgs[index]);
     const result = subst && resolve(substitute(assoc, subst));
     unifier.rollback(snapshot);
     if (!result) continue;

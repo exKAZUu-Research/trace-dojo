@@ -19,8 +19,8 @@ import {
 
 export function lowerAssocItemPath(path: PathAst, names: string[], owner: TypeParam, scope: TypeScope): Type {
   const last = path.segments.at(-1)!;
-  if (last.args) compileError(path.span, `${names.join('::')} には型引数を書けません。`);
-  return assocTypeOf({ kind: 'param', param: owner }, last.name, undefined, scope, path.span);
+  const args = (last.args ?? []).map((arg) => lowerType(arg, scope));
+  return assocTypeOf({ kind: 'param', param: owner }, last.name, undefined, scope, path.span, args);
 }
 
 /** `<T as Trait>::Name` or `<T>::Name`. */
@@ -32,7 +32,8 @@ export function lowerQualifiedPath(
   if (path.segments.length !== 2) compileError(path.span, '<T as Trait>:: の後には、関連型の名前を1つ書いてください。');
   const self = lowerType(qualified.self, scope);
   const trait = qualified.trait && resolveTraitPath(qualified.trait, scope, self);
-  return assocTypeOf(self, path.segments[1].name, trait, scope, path.span);
+  const args = (path.segments[1].args ?? []).map((arg) => lowerType(arg, scope));
+  return assocTypeOf(self, path.segments[1].name, trait, scope, path.span, args);
 }
 
 export const ITERATION_TRAITS = new Set(['Iterator', 'IntoIterator', 'DoubleEndedIterator', 'ExactSizeIterator']);
@@ -40,9 +41,17 @@ export const ITERATION_TRAITS = new Set(['Iterator', 'IntoIterator', 'DoubleEnde
 /**
  * The associated type `name` of a type, of the trait given or else of the bounds or the impl it has: what a bound sets
  * (`T: Add<Output = T>`), a type parameter added for it in a signature, or the projection `<T as Trait>::Name`, which
- * resolves once the type is known.
+ * resolves once the type is known. A generic associated type takes `args` after the trait's (`Self::Item<T>`).
  */
-export function assocTypeOf(self: Type, name: string, trait: TraitRef | undefined, scope: TypeScope, span: Span): Type {
+// code-gauge-allow functionCognitiveComplexity -- Follows rustc's resolution of associated types case by case.
+export function assocTypeOf(
+  self: Type,
+  name: string,
+  trait: TraitRef | undefined,
+  scope: TypeScope,
+  span: Span,
+  args: Type[] = []
+): Type {
   const t = shallow(self);
   const bound = trait ?? boundWithAssoc(self, name, scope, span);
   const iteration = ITERATION_TRAITS.has(bound.trait.builtin ?? '');
@@ -58,6 +67,10 @@ export function assocTypeOf(self: Type, name: string, trait: TraitRef | undefine
     if (name === 'Item' && iteration) return intoIterItem(self) ?? freshVar();
     return compileError(span, `トレイト ${bound.trait.name} に関連型 ${name} がありません。`);
   }
+  if (assoc.params.length !== args.length) {
+    compileError(span, `関連型 ${name} には、型引数を ${assoc.params.length} 個書いてください（E0107）。`);
+  }
+  if (args.length > 0) return projectionOf(bound.trait, name, self, [...bound.args, ...args]);
   const ownParam = t.kind === 'param' && !t.param.isSelf && scope.ownParams?.includes(t.param) !== false;
   if (ownParam && scope.assocParams && t.param.bounds.includes(bound)) {
     return assocParam(t.param, bound, assoc, scope.assocParams);
