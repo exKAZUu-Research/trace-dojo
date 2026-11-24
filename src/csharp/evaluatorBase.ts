@@ -355,6 +355,13 @@ export abstract class EvaluatorBase {
       return underlying === 'long' || underlying === 'ulong' ? 0n : 0;
     }
     if (type.symbol.kind !== 'struct') return undefined;
+    // No struct is larger than the slot limit, so a value of one, wherever it lives, stays within it; storage that
+    // keeps structs charges their layouts besides.
+    if (this.defaultSlotCount(type) > LIMITS.maxSlots)
+      throw new PendingException(
+        'System.OutOfMemoryException',
+        "Exception of type 'System.OutOfMemoryException' was thrown."
+      );
     const fields: Value[] = Array.from<Value>({ length: type.symbol.instanceFieldCount });
     const substitution = substitutionOf(type);
     for (const field of type.symbol.fields) {
