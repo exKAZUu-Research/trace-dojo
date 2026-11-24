@@ -319,6 +319,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   abstract usingDeclaration(node: Syntax): void;
 
   /** Declares a function in a block (`int f(int);`), which names a function of the enclosing namespace. */
+  protected abstract tupleLikeSize(type: Type): number | undefined;
+  protected abstract tupleLikeElement(source: Expr, index: number, row: number): Expr;
   protected abstract localFunctionDeclaration(declaration: Syntax, declared: Declared): LocalDeclaration;
 
   // Declarations -----------------------------------------------------------------------------------------------------
@@ -1382,6 +1384,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
     if (library?.tupleElements) return library.tupleElements(this, source, count, row);
     if (library) return this.error(row, `${typeName(type)} 型の値は構造化束縛で分けられません。`);
+    // A class that `std::tuple_size` gives a size splits into what `get<i>` gives (C++20 [dcl.struct.bind]).
+    const size = this.tupleLikeSize(type);
+    if (size !== undefined) {
+      if (size !== count) return mismatch(size);
+      return Array.from({ length: count }, (_, index) => this.tupleLikeElement(source, index, row));
+    }
     const fields = type.cls.fields;
     if (fields.some((field) => field.access !== 'public'))
       return this.error(row, `${typeName(type)} には public でないメンバがあるので、構造化束縛で分けられません。`);

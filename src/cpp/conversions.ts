@@ -151,6 +151,12 @@ function convertWithoutFunctions(
   if (expr.braced) return host.bracedConversion(expr.braced, to);
   const pointee = to.kind === 'pointer' && to.to.kind === 'function' ? to.to : undefined;
   if (pointee && expr.functions) return functionPointer(host, expr, to as Extract<Type, { kind: 'pointer' }>, pointee);
+  // A function's name binds a reference to a pointer to it (a forwarding reference's deduction) as a temporary.
+  const pointerTarget = to.kind === 'reference' && (to.isRvalue || isConstType(to.to)) ? unqualified(to.to) : undefined;
+  if (expr.functions && pointerTarget?.kind === 'pointer' && pointerTarget.to.kind === 'function') {
+    const pointer = functionPointer(host, expr, pointerTarget, pointerTarget.to);
+    if (pointer) return { ...pointer, apply: (e) => host.materialize(pointer.apply(e)) };
+  }
   if (pointee && allowUser && expr.type.kind === 'class' && expr.type.cls.isLambda)
     return lambdaPointer(host, expr, to as Extract<Type, { kind: 'pointer' }>, pointee);
   // A function's name converts only to a parameter that takes a callable, as the library's algorithms have, or to

@@ -249,6 +249,37 @@ export class Compiler extends StatementCompiler {
     );
   }
 
+  protected override tupleLikeSize(type: Type): number | undefined {
+    const tupleSize = this.libraryNamespace.member('tuple_size');
+    const info = tupleSize?.kind === 'template' ? tupleSize.template.program : undefined;
+    if (info?.kind !== 'class') return undefined;
+    const size = this.instantiateClassTemplate(info, [unqualified(type)], 0);
+    if (size.kind !== 'class' || !size.cls.isComplete) return undefined;
+    const value = this.lookupInClass(size.cls, { type: 'identifier', text: 'value' } as Syntax, 0);
+    if (value.kind !== 'value' && value.kind !== 'staticField') return undefined;
+    const constant = this.constantValueOf(
+      this.entityExpr(value, { type: 'identifier', text: 'value' } as Syntax, true)
+    );
+    return constant === undefined ? undefined : Number(constant);
+  }
+
+  protected override tupleLikeElement(source: Expr, index: number, row: number): Expr {
+    const get = this.libraryNamespace.member('get');
+    if (get?.kind !== 'functions') return this.error(row, 'get が宣言されていません。');
+    const callee: Expr = {
+      type: VOID,
+      isLvalue: false,
+      row,
+      run: () => {},
+      functions: {
+        name: 'get',
+        candidates: get.functions,
+        templateArgs: [{ kind: 'int', name: 'ulong', templateValue: BigInt(index) }],
+      },
+    };
+    return this.callWith(callee, [source], row);
+  }
+
   completeTemplateBindings(info: ProgramTemplate, deduction: Deduction): TemplateBindings | undefined {
     return completeBindings(this, info, deduction);
   }
@@ -2612,9 +2643,17 @@ export class Compiler extends StatementCompiler {
         continue;
       }
       const deduction = new Deduction(this, spec.parameters);
+      // A pack expansion last (`template <class H, class... R> struct S<H, R...>`) takes the arguments left over.
+      const last = list.children.at(-1);
+      const packPattern = last?.type === 'parameter_pack_expansion' ? fieldOf(last, 'pattern') : undefined;
+      const packName = packPattern?.type === 'type_descriptor' ? fieldOf(packPattern, 'type')?.text : packPattern?.text;
+      const pack = spec.parameters.find((parameter) => parameter.isPack && parameter.name === packName);
+      const fixed = pack ? list.children.slice(0, -1) : list.children;
+      if (pack ? args.length < fixed.length : args.length !== fixed.length) continue;
+      if (pack) deduction.bindPack(pack.name as string, args.slice(fixed.length));
       // The names in the specialization's arguments are those its declaration sees.
       const matches = this.inTemplate({ ...info, enclosing: spec.enclosing }, undefined, () =>
-        list.children.every((argument, index) => {
+        fixed.every((argument, index) => {
           const actual = args[index];
           if (!actual) return false;
           const value = templateValue(actual);
@@ -2641,7 +2680,7 @@ export class Compiler extends StatementCompiler {
           return fixed !== undefined && BigInt(fixed) === BigInt(value);
         })
       );
-      if (!matches || list.children.length !== args.length) continue;
+      if (!matches) continue;
       const bindings = new TemplateBindings();
       let complete = true;
       for (const parameter of spec.parameters) {
@@ -3678,7 +3717,7 @@ export class Compiler extends StatementCompiler {
   }
 
   bracedArrayLength(type: Extract<Type, { kind: 'array' }>, list: Syntax): number {
-    const elements = list.children;
+    const elements = expandPacks(this, list.children);
     const literal = this.bracedStringLiteral(type, elements);
     if (literal) return (literal.literalBytes as string).length + 1;
     const clauses: Clauses = { nodes: elements, next: 0, compiled: new Map() };
@@ -3686,7 +3725,8 @@ export class Compiler extends StatementCompiler {
   }
 
   protected bracedArrayInitializers(element: Type, list: Syntax): Initializer[] {
-    const literal = this.bracedStringLiteral({ kind: 'array', of: element }, list.children);
+    const elements = expandPacks(this, list.children);
+    const literal = this.bracedStringLiteral({ kind: 'array', of: element }, elements);
     const bytes = literal?.literalBytes;
     if (bytes !== undefined) {
       const signed = element.kind === 'int' && element.name !== 'uchar';
@@ -3695,7 +3735,7 @@ export class Compiler extends StatementCompiler {
         return () => value;
       });
     }
-    const clauses: Clauses = { nodes: list.children, next: 0, compiled: new Map() };
+    const clauses: Clauses = { nodes: elements, next: 0, compiled: new Map() };
     return this.takeArrayElements(element, Infinity, clauses, list.row).map((take) => take());
   }
 
@@ -4459,6 +4499,8 @@ function parameterSpecificity(node: Syntax): number {
 /** How much a partial specialization's argument list constrains its arguments, for choosing the most specialized. */
 function specificity(node: Syntax): number {
   if (node.type === 'type_identifier' || node.type === 'identifier') return 0;
+  // A pack expansion matches any number of arguments, which is less specialized than a fixed number.
+  if (node.type === 'parameter_pack_expansion') return -1;
   // A parameter's name alone, which the grammar reads as a type, is as general as an argument gets.
   if (node.type === 'type_descriptor' && node.children.length === 1 && node.children[0].type === 'type_identifier')
     return 0;

@@ -208,7 +208,10 @@ export class Deduction {
             }
           : (fieldOf(templateType, 'name') as Syntax);
       const list = fieldOf(templateType, 'arguments') as Syntax;
-      const args = list.children.map((argument): Pattern | { kind: 'valueName'; name: string } => {
+      const args = list.children.map((written): Pattern | { kind: 'valueName'; name: string } => {
+        // A pack expansion (`Seq<I...>`) deduces its pack from the arguments left over.
+        const argument =
+          written.type === 'parameter_pack_expansion' ? (fieldOf(written, 'pattern') as Syntax) : written;
         if (argument.type === 'type_descriptor') {
           const inner = fieldOf(argument, 'type') as Syntax;
           const parameter = this.parameterNamed(inner.text);
@@ -280,6 +283,10 @@ export class Deduction {
       type = { kind: 'function', ret: fn.ret, params: fn.params.map((param) => unqualified(param.type)) };
     }
     if (pattern.kind === 'reference') {
+      // A function's name passed to a forwarding reference deduces a pointer to the function, which the interpreter
+      // calls as the reference to the function the language deduces.
+      if (arg.functions && pattern.isRvalue && pattern.to.kind === 'parameter' && type.kind === 'function')
+        return this.bind(pattern.to.name, pointerTo(type));
       // A forwarding reference (`T&&`) deduces `T&` from an lvalue.
       if (pattern.isRvalue && pattern.to.kind === 'parameter' && !pattern.to.isConst)
         return this.bind(pattern.to.name, arg.isLvalue && !arg.isXvalue ? referenceTo(type) : unqualified(type));
@@ -368,10 +375,11 @@ export class Deduction {
   /** The name of the pack a list of patterns ends with, if any. */
   private trailingPack(patterns: readonly (Pattern | { kind: 'valueName'; name: string })[]): string | undefined {
     const last = patterns.at(-1);
-    return last?.kind === 'parameter' && this.parameterNamed(last.name)?.isPack ? last.name : undefined;
+    const isNamed = last?.kind === 'parameter' || last?.kind === 'valueName';
+    return isNamed && this.parameterNamed(last.name)?.isPack ? last.name : undefined;
   }
 
-  private bindPack(name: string, types: readonly Type[]): void {
+  bindPack(name: string, types: readonly Type[]): void {
     if (this.fixed.has(name)) return;
     if (!this.packs.has(name)) this.packs.set(name, []);
     for (const type of types) this.bind(name, type);

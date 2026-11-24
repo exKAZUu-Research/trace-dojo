@@ -363,7 +363,7 @@ export abstract class CompilerBase {
     return entity;
   }
 
-  private lookupInClass(cls: ClassInfo, nameNode: Syntax, row: number): Entity {
+  protected lookupInClass(cls: ClassInfo, nameNode: Syntax, row: number): Entity {
     if (!cls.isComplete && cls.library) return this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
     this.checkLibraryLayout(classType(cls), row);
     if (nameNode.type === 'qualified_identifier') {
@@ -594,9 +594,10 @@ export abstract class CompilerBase {
     const typeNode = fieldOf(declaration, 'type');
     if (!typeNode) return this.error(declaration.row, '型を書いてください。');
     const type = this.resolveTypeSpecifier(typeNode, allowAuto);
+    // `constexpr` makes a variable const, but not the type a function returns.
     const isConst =
       this.hasSpecifier(declaration, 'const') ||
-      this.isConstexpr(declaration) ||
+      (this.isConstexpr(declaration) && !declaresFunction(declaration)) ||
       (typeNode.type === 'sized_type_specifier' && this.hasSpecifier(typeNode, 'const'));
     return isConst ? withConst(type) : type;
   }
@@ -750,6 +751,26 @@ export abstract class CompilerBase {
         const entity = this.findName(named.text);
         if (entity?.kind === 'value' || entity?.kind === 'local' || entity?.kind === 'global')
           return this.valueArgument(named);
+      }
+      // `S<f<int>()>` calls a function template, which the grammar reads as the type of a function.
+      const declarator = fieldOf(argument, 'declarator');
+      if (
+        named?.type === 'template_type' &&
+        declarator?.type === 'abstract_function_declarator' &&
+        !fieldOf(declarator, 'declarator') &&
+        fieldOf(declarator, 'parameters')?.children.length === 0 &&
+        this.findName((fieldOf(named, 'name') as Syntax).text)?.kind === 'functions'
+      ) {
+        const parameters = fieldOf(declarator, 'parameters') as Syntax;
+        return this.valueArgument({
+          ...argument,
+          type: 'call_expression',
+          all: [
+            { ...named, type: 'template_function', field: 'function' },
+            { ...parameters, type: 'argument_list', field: 'arguments' },
+          ],
+          children: [],
+        });
       }
       // `S<is_small_v<T>>` and `S<C<T>>` name a variable template's instance and a concept's satisfaction, which the
       // grammar reads as types.
@@ -1077,4 +1098,15 @@ function sizedIntType(words: string[]): Type | undefined {
 function unsignedName(name: IntName): IntName {
   const names: Partial<Record<IntName, IntName>> = { short: 'ushort', int: 'uint', long: 'ulong', llong: 'ullong' };
   return names[name] ?? name;
+}
+
+/** Whether a declaration declares a function: its declarator ends in a parameter list. */
+function declaresFunction(declaration: Syntax): boolean {
+  let current = fieldOf(declaration, 'declarator');
+  while (current) {
+    if (current.type === 'function_declarator') return true;
+    if (current.type === 'init_declarator' || current.type === 'parenthesized_declarator') return false;
+    current = fieldOf(current, 'declarator') ?? current.children.find((child) => child.type.endsWith('declarator'));
+  }
+  return false;
 }
