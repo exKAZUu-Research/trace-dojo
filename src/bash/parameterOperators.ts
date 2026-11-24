@@ -674,7 +674,7 @@ function transform(
 
 function splitQuotedDeclarationFields(text: string, ifs: string): string[] {
   const eqIndex = text.indexOf('=');
-  const splitter = new FieldSplitter(ifs);
+  const splitter = new FieldSplitter(ifs || ' ');
   if (eqIndex === -1) {
     splitter.add({ text, quoted: false, split: true });
   } else {
