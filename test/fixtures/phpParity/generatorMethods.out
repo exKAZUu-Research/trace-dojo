@@ -1,0 +1,48 @@
+x=A
+int(2)
+caught boom
+int(99)
+bool(true)
+finally
+bool(false)
+string(4) "done"
+Exception: Cannot rewind a generator that was already run
+Exception: Cannot traverse an already closed generator
+Exception: Cannot get return value of a generator that hasn't returned
+x=
+Exception: Cannot rewind a generator that was already run
+Exception: Cannot rewind a generator that was already run
+1
+caught: inside line 16
+bool(false)
+NULL
+NULL
+Cannot get return value of a generator that hasn't returned
+Error: Cannot resume an already running generator
+Error: The "Generator" class is reserved for internal use and cannot be manually instantiated
+Error: Trying to clone an uncloneable object of class Generator
+x=
+y=
+finally
+NULL
+NULL
+late caught
+bool(true)
+bool(true)
+array(2) {
+  ["a"]=>
+  int(1)
+  ["b"]=>
+  int(2)
+}
+array(4) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+  [2]=>
+  int(3)
+  [3]=>
+  int(4)
+}
+finally

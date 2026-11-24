@@ -1,0 +1,27 @@
+Array
+(
+    [0] => 10
+    [1] => 20
+    [2] => 30
+)
+
+Notice: Only variable references should be yielded by reference in /main.php on line 8
+1
+a=1
+b=2
+1,2,3,4,5
+12
+01234
+5:a 6:b 2:c 7:d -10:e 8:f 
+x=1 y=2 a=1 b=2 7
+Error: Can use "yield from" only with arrays and Traversables
+bool(false)
+string(5) "early"
+0=>1 2=>9 4=>25 
+1
+
+Fatal error: Uncaught LogicException: bad in /main.php:42
+Stack trace:
+#0 /main.php(43): boom()
+#1 {main}
+  thrown in /main.php on line 42

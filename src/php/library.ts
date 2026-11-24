@@ -13,6 +13,7 @@ import './libArray';
 import './libArrayUser';
 import './libJson';
 import './libSpl';
+import './libGenerator';
 import './libUnsupported';
 import './libRegex';
 import './libRandomizer';

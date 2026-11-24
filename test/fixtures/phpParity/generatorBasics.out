@@ -1,0 +1,31 @@
+start
+0 => 1
+got 
+1 => 2
+k => 3
+10 => 4
+11 => 5
+start
+1
+got hello
+2
+string(1) "k"
+int(3)
+bool(true)
+bool(false)
+int(99)
+0:0 1:1 2:4 3:9 
+0=1
+1=2
+inner returned r
+10=a
+11=b
+0=3
+42
+object(Generator)#4 (1) {
+  ["function"]=>
+  string(3) "gen"
+}
+1
+cleanup
+end

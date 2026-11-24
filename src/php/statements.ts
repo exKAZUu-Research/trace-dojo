@@ -1,12 +1,11 @@
 // code-gauge-allow-file fileNcss -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
-import type { ArrayCursor } from './arrayOrder';
-import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
+import { foreachSubjectPlace, unsetTarget } from './assignment';
 import type { Expr, FunctionDecl, Program, Stmt } from './ast';
 import { foreachReferences, nestedBodies } from './astAnalysis';
 import { lower } from './bytes';
-import { consumeInvokedResult, discardInvokedResult } from './callables';
+import { discardInvokedResult } from './callables';
 import { asInternal, invoke, setBodyRunner, setDefaultEvaluator } from './calls';
 import {
   bindPropertyReference,
@@ -15,26 +14,28 @@ import {
   declareClass,
   declareClassEarly,
   findClass,
-  propNameOf,
-  propRef,
-  readProp,
   setClassEvaluator,
-  visiblePropertyKeys,
   writeProp,
 } from './classes';
-import { valueName } from './conversions';
 import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn, withPendingException } from './errors';
+import {
+  bindForeachValue,
+  type LoopDriver,
+  objectLoop,
+  ReferenceLoop,
+  SubjectLoop,
+  warnForeachSubject,
+} from './foreachLoops';
 import { collectBeforeAllocation, setDestructor } from './garbage';
+import { enterSuspendingStatement, stepSuspendingLoop } from './generatorStatements';
+import type { Steps, YieldRequest } from './generatorSteps';
 import { binary, consumeExpression, ev, evBool, evOpcodeOperand, evQuiet, evReturn, prepareOperand } from './interp';
-import { acquireIterator, InnerIterator } from './iteratorAcquisition';
 import { builtinLiteralKey } from './native';
-import { compiledOperandRow } from './opcodeRows';
 import { looseEquals, setObjectToString, toStr } from './operators';
-import { ElementPlace, RefPlace, share, ValuePlace, VarPlace, writableContainer } from './places';
+import { share, ValuePlace, VarPlace } from './places';
 import { ExitSignal, FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
 import {
   type Callable,
-  deref,
   type Key,
   type Method,
   nativeOwnershipChanged,
@@ -42,12 +43,11 @@ import {
   type PhpClass,
   PhpObject,
   Ref,
-  UNDEFINED_RESULT,
   type UserFunction,
   type Value,
 } from './values';
 
-type Completion =
+export type Completion =
   | undefined
   | { t: 'break' | 'continue'; depth: number }
   | { t: 'return'; slot: Value | Ref; row: number }
@@ -140,7 +140,7 @@ function containsLabel(statement: Stmt, label: string): boolean {
   return nestedBodies(statement).some(([body, isLoop]) => !isLoop && body.some((inner) => containsLabel(inner, label)));
 }
 
-type BlockFrame =
+export type BlockFrame =
   | { k: 'list'; stmts: Stmt[]; index: number; seek?: string; stmtHeld?: number }
   | { k: 'while'; stmt: Extract<Stmt, { k: 'while' }>; held: number; started: boolean }
   | { k: 'do'; stmt: Extract<Stmt, { k: 'do' }>; held: number; started: boolean }
@@ -159,20 +159,58 @@ type BlockFrame =
       completion?: Completion;
       pending?: PhpThrow | ExitSignal;
       finMark?: number;
-    };
+    }
+  | { k: 'loop'; driver: LoopDriver; started: boolean }
+  | SuspendingLoopFrame
+  /** A statement part that contains `yield`, which runs step by step and then goes on with what it evaluated to. */
+  | { k: 'pending'; steps: Steps<Value>; after: (value: Value) => Completion };
+
+/** A generator's loop whose header contains a `yield`, which evaluates the header step by step. */
+export interface SuspendingLoopFrame {
+  k: 'stepLoop';
+  stmt: Extract<Stmt, { k: 'while' | 'do' | 'for' }>;
+  held: number;
+  started: boolean;
+}
+
+/** The block stack of running statements, which a generator keeps while it is suspended. */
+export interface ExecState {
+  readonly stack: BlockFrame[];
+  /** What the `yield` that suspended the statements yields. */
+  suspendedAt?: YieldRequest;
+}
+
+export const SUSPENDED = Symbol('suspended');
+
+/**
+ * How a suspended generator goes on: with the value its `yield` evaluates to, with an exception thrown at the `yield`,
+ * or by returning from there, as destroying a generator runs its `finally` blocks.
+ */
+export type Resumption = { k: 'send'; v: Value } | { k: 'throw'; error: PhpThrow } | { k: 'close' };
+
+export function newExecState(statements: Stmt[], seek?: string): ExecState {
+  return {
+    stack: [
+      { k: 'list', stmts: statements, index: seek === undefined ? 0 : Math.max(labelIndex(statements, seek), 0), seek },
+    ],
+  };
+}
+
+export function execList(statements: Stmt[], seek?: string): Completion {
+  return runBlocks(newExecState(statements, seek)) as Completion;
+}
 
 /** Runs statements iteratively on a heap block stack so nested control flow does not grow the host stack. */
 // code-gauge-allow functionCognitiveComplexity -- Keeps the active list/statement hot path in one JS frame so deep PHP recursion fits the host stack.
 // code-gauge-allow functionNcss -- Keeps return and expr inline in the iterative block loop.
-export function execList(statements: Stmt[], seek?: string): Completion {
+export function runBlocks(state: ExecState, resumption?: Resumption): Completion | typeof SUSPENDED {
   const runtime = rt();
   const frame = runtime.frame;
   const byRefReturn = frame.fn?.kind === 'user' && frame.fn.decl.byRefReturn;
-  const stack: BlockFrame[] = [
-    { k: 'list', stmts: statements, index: seek === undefined ? 0 : Math.max(labelIndex(statements, seek), 0), seek },
-  ];
-  let completion: Completion;
-  while (stack.length > 0) {
+  const stack = state.stack;
+  let input = resumption;
+  let completion: Completion | typeof SUSPENDED = closeOnResume(stack, input);
+  while (stack.length > 0 && completion !== SUSPENDED) {
     try {
       if (completion !== undefined) {
         completion = propagateCompletion(stack, completion, runtime, frame);
@@ -180,7 +218,9 @@ export function execList(statements: Stmt[], seek?: string): Completion {
       }
       const top = stack.at(-1) as BlockFrame;
       if (top.k !== 'list') {
-        completion = stepNonListFrame(stack, top, runtime, frame);
+        const sent = input;
+        input = undefined;
+        completion = stepFrame(state, top, sent, runtime, frame);
         continue;
       }
       releaseListHeld(top, runtime, frame);
@@ -198,13 +238,13 @@ export function execList(statements: Stmt[], seek?: string): Completion {
       runtime.spend();
       const held = frame.temporaries.length;
       top.stmtHeld = held;
-      if (statement.k === 'return' && !byRefReturn && statement.e) {
+      if (statement.k === 'return' && !byRefReturn && statement.e && !statement.suspends) {
         const value = statement.e.k === 'bin' ? (statement.e.foldedString ?? binary(statement.e)) : ev(statement.e);
         frame.returnedLocal = movedLocal(statement.e, frame, stack);
         frame.returning = share(value);
         completion = { t: 'return', slot: frame.returning, row: statement.e.row };
         releaseListHeld(top, runtime, frame);
-      } else if (statement.k === 'expr') {
+      } else if (statement.k === 'expr' && !statement.suspends) {
         const mark = runtime.steps.statementMark();
         if (statement.e.k === 'var') evQuiet(statement.e);
         else ev(statement.e, true);
@@ -215,11 +255,44 @@ export function execList(statements: Stmt[], seek?: string): Completion {
         if (stack.at(-1) === top) releaseListHeld(top, runtime, frame);
       }
     } catch (error) {
-      unwindStackOnThrow(stack, error, runtime, frame, completion);
+      unwindStackOnThrow(stack, error, runtime, frame, completion as Completion);
       completion = undefined;
     }
   }
   return completion;
+}
+
+/** Leaves a suspended generator by returning from its `yield` when destroying the generator resumes it. */
+function closeOnResume(stack: BlockFrame[], resumption: Resumption | undefined): Completion {
+  if (resumption?.k !== 'close') return undefined;
+  stack.pop();
+  return { t: 'return', slot: null, row: rt().row };
+}
+
+function stepFrame(
+  state: ExecState,
+  top: Exclude<BlockFrame, { k: 'list' }>,
+  sent: Resumption | undefined,
+  runtime: Runtime,
+  frame: Frame
+): Completion | typeof SUSPENDED {
+  return top.k === 'pending' ? stepPending(state, top, sent) : stepNonListFrame(state.stack, top, runtime, frame);
+}
+
+/** Runs a statement part that contains `yield` until its next `yield` or its end. */
+function stepPending(
+  state: ExecState,
+  top: Extract<BlockFrame, { k: 'pending' }>,
+  input: Resumption | undefined
+): Completion | typeof SUSPENDED {
+  const step =
+    input?.k === 'throw' ? top.steps.throw(input.error) : top.steps.next(input?.k === 'send' ? input.v : null);
+  if (!step.done) {
+    state.suspendedAt = step.value;
+    return SUSPENDED;
+  }
+  state.stack.pop();
+  return top.after(step.value);
 }
 
 function releaseListHeld(top: Extract<BlockFrame, { k: 'list' }>, runtime: Runtime, frame: Frame): void {
@@ -229,7 +302,7 @@ function releaseListHeld(top: Extract<BlockFrame, { k: 'list' }>, runtime: Runti
   runtime.dropTemporaries(frame, held);
 }
 
-function pushListFrame(stack: BlockFrame[], statements: Stmt[], seek?: string): void {
+export function pushListFrame(stack: BlockFrame[], statements: Stmt[], seek?: string): void {
   stack.push({
     k: 'list',
     stmts: statements,
@@ -242,7 +315,7 @@ function pushListFrame(stack: BlockFrame[], statements: Stmt[], seek?: string): 
 // code-gauge-allow functionNcss -- One case per control-flow frame kind (while, do, for, switch, foreach, try).
 function stepNonListFrame(
   stack: BlockFrame[],
-  top: Exclude<BlockFrame, { k: 'list' }>,
+  top: Exclude<BlockFrame, { k: 'list' | 'pending' }>,
   runtime: Runtime,
   frame: Frame
 ): Completion {
@@ -289,6 +362,12 @@ function stepNonListFrame(
       pushListFrame(stack, top.stmt.body);
       return undefined;
     }
+    case 'loop': {
+      return stepLoop(stack, top);
+    }
+    case 'stepLoop': {
+      return stepSuspendingLoop(stack, top, runtime, frame);
+    }
     case 'switch': {
       if (top.index >= top.cases.length) {
         stack.pop();
@@ -319,11 +398,12 @@ function stepNonListFrame(
 // code-gauge-allow functionNcss -- Flat dispatch over non-hot PHP statement kinds.
 function dispatchOtherStatement(
   stack: BlockFrame[],
-  statement: Exclude<Stmt, { k: 'expr' }>,
+  statement: Stmt,
   runtime: Runtime,
   frame: Frame,
   held: number
 ): Completion {
+  if (statement.suspends) return enterSuspendingStatement(stack, statement, runtime, frame);
   switch (statement.k) {
     case 'if': {
       if (evBool(statement.cond)) pushListFrame(stack, statement.consequent);
@@ -373,7 +453,8 @@ function dispatchOtherStatement(
       return { t: 'goto', label: statement.label };
     }
     case 'label':
-    case 'nop': {
+    case 'nop':
+    case 'expr': {
       return undefined;
     }
     default: {
@@ -473,6 +554,10 @@ function propagateCompletion(
     return completion;
   }
   if (top.k === 'try') return propagateTryCompletion(stack, top, completion, runtime, frame);
+  if (top.k === 'pending') {
+    stack.pop();
+    return completion;
+  }
   if (top.k === 'switch') {
     stack.pop();
     return decrementLoopCompletion(completion);
@@ -480,6 +565,7 @@ function propagateCompletion(
   if (completion.t === 'continue' && completion.depth === 1) return undefined;
   if (top.k === 'foreachArray') frame.foreachSubjects.pop();
   stack.pop();
+  if (top.k === 'loop') top.driver.close();
   return decrementLoopCompletion(completion);
 }
 
@@ -493,6 +579,7 @@ function decrementLoopCompletion(completion: NonNullable<Completion>): Completio
  * Unwinds the block stack for `error`. A return that `error` interrupts is freed only on entering a handler or leaving
  * the function, after the handler is chosen for the original error, as PHP's cleanup_live_vars runs.
  */
+// code-gauge-allow functionNcss -- One case per block frame kind that an exception unwinds.
 function unwindStackOnThrow(
   stack: BlockFrame[],
   error: unknown,
@@ -524,6 +611,11 @@ function unwindStackOnThrow(
       stack.pop();
       continue;
     }
+    if (top.k === 'loop') {
+      stack.pop();
+      activeError = closeLoop(top.driver, activeError);
+      continue;
+    }
     if (top.k === 'try') {
       const result = handleTryThrow(stack, top, activeError, runtime, frame, {
         fromExit,
@@ -537,6 +629,28 @@ function unwindStackOnThrow(
     stack.pop();
   }
   throw freeInterrupted(activeError);
+}
+
+function stepLoop(stack: BlockFrame[], top: Extract<BlockFrame, { k: 'loop' }>): Completion {
+  const first = !top.started;
+  top.started = true;
+  if (top.driver.advance(first)) {
+    pushListFrame(stack, top.driver.body);
+    return undefined;
+  }
+  stack.pop();
+  top.driver.close();
+  return undefined;
+}
+
+/** Closes a loop that `error` leaves, returning the error to unwind with, which closing the loop may replace. */
+function closeLoop(driver: LoopDriver, error: unknown): unknown {
+  try {
+    driver.close(error);
+    return error;
+  } catch (closeError) {
+    return closeError;
+  }
 }
 
 function releaseTemporariesKeepingError(runtime: Runtime, frame: Frame, mark: number, error: unknown): unknown {
@@ -602,16 +716,6 @@ export function constantKey(name: string): string {
   return lower(name.slice(0, slash)) + name.slice(slash);
 }
 
-function loopBody(body: Stmt[]): 'next' | Completion {
-  const completion = execList(body);
-  if (!completion) return 'next';
-  if (completion.t === 'break') return completion.depth > 1 ? { t: 'break', depth: completion.depth - 1 } : undefined;
-  if (completion.t === 'continue') {
-    return completion.depth > 1 ? { t: 'continue', depth: completion.depth - 1 } : 'next';
-  }
-  return completion;
-}
-
 function runForClause(expressions: Expr[], row: number, frame: Frame, held: number): void {
   if (expressions.length === 0) return;
   const runtime = rt();
@@ -644,7 +748,7 @@ function staticDeclaration(statement: Extract<Stmt, { k: 'static' }>, frame: Fra
   for (const { name, init } of statement.vars) declareStaticVar(statics, name, init, frame);
 }
 
-function declareStaticVar(statics: Map<string, Ref>, name: string, init: Expr | undefined, frame: Frame): void {
+export function declareStaticVar(statics: Map<string, Ref>, name: string, init: Expr | undefined, frame: Frame): void {
   const existing = statics.get(name);
   if (existing) {
     new VarPlace(frame, name).bind(existing);
@@ -869,23 +973,13 @@ function catches(object: PhpObject, name: string): boolean {
   return cls !== undefined && object.cls.isSubclassOf(cls);
 }
 
-function withForeachSubject<T>(subject: PhpArray | PhpObject | Ref, run: () => T): T {
-  const subjects = rt().frame.foreachSubjects;
-  subjects.push(subject);
-  try {
-    return run();
-  } finally {
-    subjects.pop();
-  }
-}
-
-function enterForeach(
+export function enterForeach(
   stack: BlockFrame[],
   statement: Extract<Stmt, { k: 'foreach' }>,
   runtime: Runtime,
   frame: Frame
 ): Completion {
-  if (foreachReferences(statement.value, statement.byRef)) return foreachReferenceSubject(statement);
+  if (foreachReferences(statement.value, statement.byRef)) return enterReferenceForeach(stack, statement, frame);
   const subjectMark = frame.temporaries.length;
   const nativeMark = runtime.nativeHeld.at(-1)?.length ?? 0;
   const subject = ev(statement.subject);
@@ -893,8 +987,8 @@ function enterForeach(
     return warnForeachSubject(statement, subject);
   frame.temporaries.push(subject);
   if (subject instanceof PhpObject) {
-    return withForeachSubject(subject, () =>
-      foreachObject(statement, subject, false, () => runtime.discardNativeResult(subject, nativeMark, subjectMark))
+    return enterLoop(stack, frame, subject, () =>
+      objectLoop(statement, subject, false, () => runtime.discardNativeResult(subject, nativeMark, subjectMark))
     );
   }
   subject.shared = true;
@@ -903,10 +997,30 @@ function enterForeach(
   return undefined;
 }
 
-const FOREACH_REPLACED = Symbol();
-type ForeachCompletion = Completion | typeof FOREACH_REPLACED;
+/** Pushes a loop over `subject`, which the frame keeps among its foreach subjects while the loop runs. */
+function enterLoop(
+  stack: BlockFrame[],
+  frame: Frame,
+  subject: PhpArray | PhpObject | Ref,
+  create: () => LoopDriver
+): Completion {
+  frame.foreachSubjects.push(subject);
+  let driver: LoopDriver;
+  try {
+    driver = create();
+  } catch (error) {
+    frame.foreachSubjects.pop();
+    throw error;
+  }
+  stack.push({ k: 'loop', driver: new SubjectLoop(driver, frame), started: false });
+  return undefined;
+}
 
-function foreachReferenceSubject(statement: Extract<Stmt, { k: 'foreach' }>): Completion {
+function enterReferenceForeach(
+  stack: BlockFrame[],
+  statement: Extract<Stmt, { k: 'foreach' }>,
+  frame: Frame
+): Completion {
   const runtime = rt();
   const place = foreachSubjectPlace(statement.subject);
   const initial = place.get();
@@ -916,204 +1030,7 @@ function foreachReferenceSubject(statement: Extract<Stmt, { k: 'foreach' }>): Co
   // PHP's FE_RESET_RW makes the subject a reference, which it stays after the loop.
   if (!(place instanceof ValuePlace)) reference.isRef = true;
   runtime.holdTemporaryReference(reference);
-  return withForeachSubject(reference, () => foreachReferenceLoop(statement, initial, reference));
-}
-
-function foreachReferenceLoop(
-  statement: Extract<Stmt, { k: 'foreach' }>,
-  initial: PhpArray | PhpObject,
-  reference: Ref
-): Completion {
-  const traversable = rt().classes.get('traversable') as PhpClass;
-  for (;;) {
-    const container = reference.v;
-    let result: ForeachCompletion;
-    if (container instanceof PhpArray) {
-      const array = writableContainer(new RefPlace(reference), container) as PhpArray;
-      result = foreachArrayByRef(statement, array, reference);
-    } else if (container instanceof PhpObject && !container.isResource) {
-      if (container.cls.isSubclassOf(traversable))
-        return container === initial ? foreachObject(statement, container, true) : undefined;
-      result = foreachPropertyByRef(statement, container, reference);
-    } else return warnForeachSubject(statement, container);
-    if (result !== FOREACH_REPLACED) return result;
-  }
-}
-
-interface NativeForeachStorage {
-  cursor(): ArrayCursor;
-  writable(): PhpArray;
-}
-
-function foreachArrayByRef(
-  statement: Extract<Stmt, { k: 'foreach' }>,
-  array: PhpArray,
-  subject: Ref
-): ForeachCompletion {
-  const runtime = rt();
-  let current = array;
-  let cursor = current.foreachCursor();
-  try {
-    for (;;) {
-      const next = subject.v;
-      if (next !== current) {
-        if (!(next instanceof PhpArray)) return FOREACH_REPLACED;
-        current = writableContainer(new RefPlace(subject), next) as PhpArray;
-        cursor = current.foreachCursor(cursor);
-      }
-      const key = cursor.key;
-      if (key === undefined) return undefined;
-      runtime.spend();
-      cursor.next();
-      if (current.map.get(key) === UNDEFINED_RESULT) continue;
-      const result = foreachRefIteration(statement, current, key);
-      if (result !== 'next') return result;
-    }
-  } finally {
-    cursor.close();
-  }
-}
-
-function foreachPropertyByRef(
-  statement: Extract<Stmt, { k: 'foreach' }>,
-  object: PhpObject,
-  subject: Ref
-): ForeachCompletion {
-  const runtime = rt();
-  const scope = runtime.frame.scope;
-  const keys = visiblePropertyKeys(object, scope, true);
-  for (const key of keys) {
-    const name = propNameOf(key);
-    const ref = propRef(object, name, scope, 'foreach');
-    bindForeachRef(statement, ref);
-    if (statement.key) assignTo(statement.key, name);
-    runtime.steps.stepBinding(statement.row, true);
-    const result = loopBody(statement.body);
-    if (result !== 'next') return result;
-    if (subject.v !== object) return FOREACH_REPLACED;
-  }
-  return undefined;
-}
-
-function warnForeachSubject(statement: Extract<Stmt, { k: 'foreach' }>, value: Value | undefined): undefined {
-  rt().row = statement.subject.row;
-  warn(`foreach() argument must be of type array|object, ${valueName(value ?? null)} given`);
-  return undefined;
-}
-
-function foreachIteration(
-  statement: Extract<Stmt, { k: 'foreach' }>,
-  key: Key | Value,
-  value: Value
-): 'next' | Completion {
-  bindForeachValue(statement, key, value);
-  return loopBody(statement.body);
-}
-
-function bindForeachValue(statement: Extract<Stmt, { k: 'foreach' }>, key: Key | Value, value: Value): void {
-  const runtime = rt();
-  runtime.row = statement.row;
-  if (statement.value.k === 'list')
-    destructure(statement.value, value, undefined, compiledOperandRow(statement.subject));
-  else assignTo(statement.value, share(value));
-  if (statement.key) assignTo(statement.key, key as Value);
-  runtime.steps.stepBinding(statement.row, statement.value.k === 'list' || storesAnswer(value));
-}
-
-/** Whether a foreach binding stores a value learners answer, as Java's primitives and strings are. */
-function storesAnswer(value: Value): boolean {
-  return value !== null && !(value instanceof PhpObject) && !(value instanceof PhpArray);
-}
-
-function bindForeachRef(statement: Extract<Stmt, { k: 'foreach' }>, ref: Ref): void {
-  const target = statement.value;
-  if (target.k === 'list') destructure(target, ref.v, new RefPlace(ref), compiledOperandRow(statement.subject));
-  else if (target.k === 'var') new VarPlace(rt().frame, target.name).bind(ref);
-  else bindRef(target, ref);
-}
-
-function foreachObject(
-  statement: Extract<Stmt, { k: 'foreach' }>,
-  object: PhpObject,
-  byRef = false,
-  releaseSubject?: () => void
-): Completion {
-  const runtime = rt();
-  runtime.row = statement.subjectEndRow;
-  const acquired = acquireIterator(object, byRef);
-  if (acquired) {
-    const { iterator, handle } = acquired;
-    let failure: PhpThrow | undefined;
-    try {
-      if (byRef) return foreachStorageByRef(statement, iterator.internal as NativeForeachStorage);
-      return foreachIteratorByValue(statement, new InnerIterator(iterator, handle), releaseSubject);
-    } catch (error) {
-      if (error instanceof PhpThrow) failure = error;
-      throw error;
-    } finally {
-      withPendingException(runtime, failure, () => runtime.discardNativeResult(handle, Infinity, 0));
-    }
-  }
-  const scope = runtime.frame.scope;
-  for (const key of visiblePropertyKeys(object, scope, true)) {
-    const name = propNameOf(key);
-    const completion = foreachIteration(statement, name, readProp(object, name, scope, 'quiet'));
-    if (completion !== 'next') return completion;
-  }
-  return undefined;
-}
-
-function foreachStorageByRef(statement: Extract<Stmt, { k: 'foreach' }>, storage: NativeForeachStorage): Completion {
-  const runtime = rt();
-  storage.cursor().rewind();
-  for (;;) {
-    const key = storage.cursor().key;
-    if (key === undefined) return undefined;
-    runtime.spend();
-    const array = storage.writable();
-    if (array.map.get(key) !== UNDEFINED_RESULT) {
-      const result = foreachRefIteration(statement, array, key);
-      if (result !== 'next') return result;
-    }
-    storage.cursor().next();
-  }
-}
-
-function foreachRefIteration(
-  statement: Extract<Stmt, { k: 'foreach' }>,
-  array: PhpArray,
-  key: Key
-): 'next' | Completion {
-  bindForeachRef(statement, new ElementPlace(array, key).ref());
-  if (statement.key) assignTo(statement.key, key);
-  rt().steps.stepBinding(statement.row, true);
-  return loopBody(statement.body);
-}
-
-function foreachIteratorByValue(
-  statement: Extract<Stmt, { k: 'foreach' }>,
-  iterator: InnerIterator,
-  releaseSubject: (() => void) | undefined
-): Completion {
-  const runtime = rt();
-  iterator.rewind();
-  let valid = iterator.valid();
-  releaseSubject?.();
-  while (valid) {
-    runtime.spend();
-    const slot = iterator.currentSlot();
-    if (statement.key) {
-      consumeInvokedResult(
-        () => iterator.key(),
-        (key) => bindForeachValue(statement, key, deref(slot))
-      );
-    } else bindForeachValue(statement, null, deref(slot));
-    const completion = loopBody(statement.body);
-    if (completion !== 'next') return completion;
-    runtime.row = statement.subjectEndRow;
-    iterator.next();
-    valid = iterator.valid();
-  }
+  return enterLoop(stack, frame, reference, () => new ReferenceLoop(statement, initial, reference));
 }
 
 function runBody(decl: FunctionDecl, frame: Frame): Value {

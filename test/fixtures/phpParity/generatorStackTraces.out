@@ -1,0 +1,13 @@
+#0 /main.php(3): g()
+#1 {main}
+#0 [internal function]: g()
+#1 /main.php(5): Generator->next()
+#2 {main}
+#0 /main.php(6): g()
+#1 /main.php(7): outer()
+#2 {main}
+#0 /main.php(9): k()
+#1 {main}
+#0 [internal function]: k()
+#1 /main.php(10): iterator_to_array(Object(Generator))
+#2 {main}

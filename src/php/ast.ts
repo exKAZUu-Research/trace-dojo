@@ -1,5 +1,5 @@
 import type { Constant } from './constantDefaults';
-import type { Param, TypeDecl, Visibility } from './values';
+import type { Param, TypeDecl, Value, Visibility } from './values';
 
 /** A name a program refers to, resolved against its namespace and `use` imports. */
 export interface ResolvedName {
@@ -89,6 +89,10 @@ export type Expr = { row: number } & (
   | { k: 'match'; subject: Expr; arms: MatchArm[]; jumpTable?: boolean }
   | { k: 'print'; e: Expr }
   | { k: 'pipe'; l: Expr; r: Expr }
+  | { k: 'yield'; key?: Expr; value?: Expr; byRef: boolean }
+  | { k: 'yieldFrom'; e: Expr }
+  /** A value a generator evaluated before it suspended, which the rest of the expression uses after it resumes. */
+  | { k: 'held'; v: Value }
   | { k: 'unsupported'; what: string }
 );
 
@@ -107,8 +111,11 @@ export interface SwitchCase {
   row: number;
 }
 
-/** Every statement carries the 0-based row where it starts, at which it records its step. */
-export type Stmt = { row: number } & (
+/**
+ * Every statement carries the 0-based row where it starts, at which it records its step. A generator's statement whose
+ * own expressions or loop header contain a `yield` is marked as suspending, which runs them step by step.
+ */
+export type Stmt = { row: number; suspends?: true } & (
   | { k: 'expr'; e: Expr; onlyCalls: boolean }
   | { k: 'echo'; args: Expr[] }
   | { k: 'inline'; text: string }
@@ -166,6 +173,8 @@ export interface FunctionDecl {
   className?: string;
   /** Whether the declaration is a closure or an arrow function. */
   isClosure: boolean;
+  /** Whether the body contains `yield`, so that a call returns a Generator that runs the body. */
+  isGenerator?: boolean;
 }
 
 export interface PropertyDeclAst {

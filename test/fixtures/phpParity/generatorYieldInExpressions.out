@@ -1,0 +1,32 @@
+yielded 0 => 1
+yielded 1 => 2
+array(2) {
+  [0]=>
+  string(1) "a"
+  [1]=>
+  string(1) "b"
+}
+sum: yielded 2 => 3
+yielded 3 => 4
+30
+yielded 4 => 5
+got X!
+yielded 5 => 6
+truthy
+yielded 6 => 7
+loop 1
+yielded 7 => 7
+loop 2
+yielded 8 => 7
+yielded 9 => 8
+j=1
+yielded 10 => 9
+j=2
+yielded 11 => 9
+
+Fatal error: Uncaught TypeError: Unsupported operand types: int + array in /main.php:11
+Stack trace:
+#0 [internal function]: g()
+#1 /main.php(34): Generator->send(Array)
+#2 {main}
+  thrown in /main.php on line 11

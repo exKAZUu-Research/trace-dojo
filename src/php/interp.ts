@@ -403,6 +403,13 @@ export function evChain(e: Expr, discardResult = false): Chain {
     case 'unsupported': {
       throwError('Error', e.what);
     }
+    case 'held': {
+      return e.v;
+    }
+    case 'yield':
+    case 'yieldFrom': {
+      throw new Error('A yield runs only as a step of its generator');
+    }
   }
 }
 

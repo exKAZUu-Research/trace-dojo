@@ -37,6 +37,7 @@ import { virtualPropertyVisibilityError } from './errors';
 import { decodeLiteral, decodeSingleQuoted } from './literals';
 import { compiledOperandRow } from './opcodeRows';
 import { SCRIPT_PATH } from './runtime';
+import { markSuspendingStatements } from './suspension';
 import { describeType, typeToString } from './types';
 import { type Param, type TypeDecl, type Visibility, visibilityRank } from './values';
 import { isSubtype } from './variance';
@@ -191,6 +192,9 @@ export abstract class DeclarationConverter extends ConverterBase {
     try {
       const returnType = this.scopedTypeDecl(returnTypeNode);
       this.fn.returnType = returnType;
+      this.fn.isGenerator = body !== null && (body.type === 'yield_expression' || containsYield(body));
+      if (this.fn.isGenerator && returnType && !allowsGenerator(returnType))
+        this.error(node, `Generator return type must be a supertype of Generator, ${typeToString(returnType)} given`);
       if (byRefReturn && returnType?.k === 'named' && returnType.name === 'void')
         this.notices.push({
           level: 'Deprecated',
@@ -204,13 +208,14 @@ export abstract class DeclarationConverter extends ConverterBase {
       let statements: Stmt[] = [];
       let arrowBody: Expr | undefined;
       if (node.type === 'arrow_function') {
-        this.checkVoidReturn(body as Node);
+        if (!this.fn.isGenerator) this.checkVoidReturn(body as Node);
         arrowBody = this.expr(body as Node);
         this.checkReferenceReturn(body as Node, arrowBody);
       } else if (body) {
         statements = this.block(body);
       }
       this.checkGotos(this.fn, statements);
+      if (this.fn.isGenerator) markSuspendingStatements(statements);
       return {
         name,
         params,
@@ -226,12 +231,23 @@ export abstract class DeclarationConverter extends ConverterBase {
         namespace: this.namespace,
         className: lexicalClass,
         isClosure,
+        ...(this.fn.isGenerator ? { isGenerator: true } : {}),
       };
     } finally {
       this.fn = outerFn;
       this.initializerContext = outerInitializer;
       this.loop = outerLoop;
     }
+  }
+
+  /** Makes a property hook whose body contains `yield` a generator, as PHP does for any function. */
+  private markHookGenerator(hook: Node, body: Node | null): void {
+    if (!body || (body.type !== 'yield_expression' && !containsYield(body))) return;
+    this.fn.isGenerator = true;
+    this.fn.isFunction = true;
+    const returnType = this.fn.returnType;
+    if (returnType && !allowsGenerator(returnType))
+      this.error(hook, `Generator return type must be a supertype of Generator, ${typeToString(returnType)} given`);
   }
 
   protected checkVoidReturn(node: Node): void {
@@ -1236,6 +1252,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       };
       this.loop = { depth: 0, switches: [] };
       try {
+        this.markHookGenerator(hook, body);
         let params: ParamDecl[] = [];
         if (paramsNode) params = this.params(paramsNode, `$${prop.name}::${kind}`, className);
         if (kind === 'set' && params[0]) {
@@ -1312,6 +1329,7 @@ export abstract class DeclarationConverter extends ConverterBase {
           body !== null &&
           ((kind === 'set' && body.type !== 'compound_statement') || referencesProperty(body, prop.name));
         this.checkGotos(this.fn, statements);
+        if (this.fn.isGenerator) markSuspendingStatements(statements);
         const fn: FunctionDecl = {
           name: `$${prop.name}::${kind}`,
           isPropertyHook: true,
@@ -1328,6 +1346,7 @@ export abstract class DeclarationConverter extends ConverterBase {
           namespace: this.namespace,
           className,
           isClosure: false,
+          ...(this.fn.isGenerator ? { isGenerator: true } : {}),
         };
         if (kind === 'get') {
           hooks.get = fn;
@@ -1594,4 +1613,31 @@ function hasProhibitedMemberType(type: TypeDecl): boolean {
 
 function builtinType(type: TypeDecl): boolean {
   return type.k === 'named' ? BUILTIN_TYPES.has(type.name) : type.types.every(builtinType);
+}
+
+/** The syntax that starts a scope of its own, whose `yield` belongs to it rather than to the enclosing function. */
+const NESTED_FUNCTION_SCOPES = new Set([
+  'function_definition',
+  'anonymous_function',
+  'arrow_function',
+  'method_declaration',
+  'class_declaration',
+  'anonymous_class',
+  'interface_declaration',
+  'trait_declaration',
+  'enum_declaration',
+]);
+
+function containsYield(node: Node): boolean {
+  for (const child of node.namedChildren) {
+    if (child.type === 'yield_expression') return true;
+    if (!NESTED_FUNCTION_SCOPES.has(child.type) && containsYield(child)) return true;
+  }
+  return false;
+}
+
+/** Whether a generator may declare `type`, which must accept the Generator object a call returns. */
+function allowsGenerator(type: TypeDecl): boolean {
+  if (type.k !== 'named') return type.types.some(allowsGenerator);
+  return ['iterable', 'object', 'mixed', 'traversable', 'iterator', 'generator'].includes(lower(type.name));
 }

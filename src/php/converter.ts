@@ -540,7 +540,7 @@ export class Converter extends DeclarationConverter {
   private returnStatement(node: Node): Stmt {
     const argument = node.namedChildren.find((child) => child.type !== 'comment');
     const row = node.startPosition.row;
-    const type = this.fn.returnType;
+    const type = this.fn.isGenerator ? undefined : this.fn.returnType;
     if (type?.k === 'named' && !type.nullable) {
       if (argument) this.checkVoidReturn(argument);
       if (type.name === 'never') {
@@ -1167,8 +1167,7 @@ export class Converter extends DeclarationConverter {
         break;
       }
       case 'yield_expression': {
-        this.unsupported(node, 'ジェネレータ（yield）');
-        break;
+        return this.yieldExpression(node);
       }
       case 'include_expression':
       case 'include_once_expression':
@@ -1189,6 +1188,22 @@ export class Converter extends DeclarationConverter {
         this.error(node, '書き方に誤りがあります。');
       }
     }
+  }
+
+  private yieldExpression(node: Node): Expr {
+    const row = node.startPosition.row;
+    if (this.constantInitializer) this.error(node, 'Constant expression contains invalid operations');
+    if (!this.fn.isFunction) this.error(node, 'The "yield" expression can only be used inside a function');
+    const operand = semanticChildren(node)[0] as Node | undefined;
+    if (node.children.some((child) => child.type === 'yield from'))
+      return { k: 'yieldFrom', e: this.expr(operand as Node), row };
+    if (!operand) return { k: 'yield', byRef: false, row };
+    const parts = operand.namedChildren.filter((child) => child.type !== 'comment');
+    const key = parts.length === 2 ? this.expr(parts[0]) : undefined;
+    const valueNode = parts.at(-1) as Node;
+    const value =
+      this.fn.byRefReturn && REFERENCEABLE_NODES.has(valueNode.type) ? this.writable(valueNode) : this.expr(valueNode);
+    return { k: 'yield', key, value, byRef: this.fn.byRefReturn === true, row };
   }
 
   private compileRuntimeCall(node: Node): Expr {
@@ -2408,3 +2423,12 @@ function parserScalar(expression: Expr): string | bigint | number | undefined {
   if (left === undefined || right === undefined) return undefined;
   return `${typeof left === 'number' ? formatFloat(left) : left}${typeof right === 'number' ? formatFloat(right) : right}`;
 }
+
+/** The syntax a by-reference generator yields a reference to; it yields other values by value, with a notice. */
+const REFERENCEABLE_NODES = new Set([
+  'variable_name',
+  'dynamic_variable_name',
+  'subscript_expression',
+  'member_access_expression',
+  'scoped_property_access_expression',
+]);

@@ -251,7 +251,6 @@ test('counts decoded PHP output against the shared limit', () => {
 
 test.each([
   ['an enum', '<?php\nenum Suit { case Hearts; }', '列挙型（enum）'],
-  ['a generator', '<?php\nfunction g() { yield 1; }', 'ジェネレータ（yield）'],
   ['include', "<?php\ninclude 'a.php';", 'include・require'],
   ['a superglobal', '<?php\necho $_GET["x"];', '$_GET'],
 ])('rejects %s with a message in Japanese', (_name, program, what) => {

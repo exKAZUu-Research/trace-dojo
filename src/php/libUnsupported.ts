@@ -167,7 +167,6 @@ const UNSUPPORTED_CLASSES: [string, string[]][] = [
     ],
   ],
   ['Fiber', ['Fiber']],
-  ['ジェネレータ', ['Generator']],
   ['弱い参照', ['WeakReference', 'WeakMap']],
   ['データベース', ['PDO', 'mysqli', 'SQLite3']],
 ];

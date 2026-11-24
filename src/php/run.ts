@@ -200,6 +200,11 @@ function shutdownObjects(runtime: Runtime): string | undefined {
   if (globalStep.stop) return globalStep.failure;
   for (const object of runtime.objectsInShutdownOrder()) {
     if (object.destructed) continue;
+    const native = object.internal as { destructAtShutdown?: () => void } | undefined;
+    if (native?.destructAtShutdown) {
+      const step = guardShutdownStep(runtime, () => native.destructAtShutdown?.());
+      if (step.stop) return step.failure;
+    }
     const destructor = object.cls.findMethod('__destruct');
     object.destructed = true;
     if (!destructor) continue;
