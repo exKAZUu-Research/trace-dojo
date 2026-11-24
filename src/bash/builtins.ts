@@ -1,3 +1,4 @@
+import { legalNumber } from './characters';
 import { type DeclarationArgument, runDeclaration } from './declare';
 import { decodeBytes, encodeText, formatPrintf } from './printf';
 import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
@@ -14,14 +15,6 @@ import {
   unsetDynamicArrayElement,
   type Variable,
 } from './variables';
-
-/** Parses a signed 64-bit decimal integer surrounded by optional blanks, or `undefined` when invalid. */
-function legalNumber(text: string): bigint | undefined {
-  const match = /^[ \t\n]*([-+]?\d+)[ \t\n]*$/.exec(text);
-  if (!match) return undefined;
-  const value = BigInt(match[1]);
-  return value === BigInt.asIntN(64, value) ? value : undefined;
-}
 
 /** Skips a leading `--`, which Bash's builtins accept before their operands. */
 function operands(args: string[]): string[] {

@@ -11,6 +11,7 @@ import {
 } from './arithmetic';
 import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word } from './ast';
 import { BUILTINS, unsetElement } from './builtins';
+import { legalNumber } from './characters';
 import { conditionalStatus } from './conditional';
 import { declarationAssignsAnswer, expandDeclarationArguments, runDeclaration } from './declare';
 import { Expander } from './expansion';
@@ -1066,7 +1067,7 @@ export class Shell implements ArithmeticHost {
   assignDynamic(name: string, value: string): boolean {
     if (!this.isDynamic(name)) return false;
     if (name === 'RANDOM') this.seedRandom(value);
-    if (name === 'BASH_SUBSHELL') this.state.subshellLevel = /^\s*[-+]?\d+\s*$/.test(value) ? Number(value) : 0;
+    if (name === 'BASH_SUBSHELL') this.state.subshellLevel = Number(legalNumber(value) ?? 0n);
     this.lastStored = value;
     return true;
   }

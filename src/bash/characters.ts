@@ -26,6 +26,14 @@ export function charactersOf(text: string): string[] {
   return Array.from(text);
 }
 
+/** Parses a signed 64-bit decimal integer surrounded by optional ASCII whitespace, or `undefined` when invalid. */
+export function legalNumber(text: string): bigint | undefined {
+  const match = /^[ \t\n\v\f\r]*([-+]?\d+)[ \t\n\v\f\r]*$/.exec(text);
+  if (!match) return undefined;
+  const value = BigInt(match[1]);
+  return value === BigInt.asIntN(64, value) ? value : undefined;
+}
+
 /** Shared POSIX bracket character-class predicates under macOS `en_US.UTF-8` (`isw*`). */
 export const POSIX_CHARACTER_CLASSES: Record<string, (c: string) => boolean> = {
   alnum: (c) => /^[\p{L}\p{Nd}]$/u.test(c),

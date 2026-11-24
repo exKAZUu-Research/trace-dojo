@@ -3,6 +3,7 @@
  * and GNU Bash Reference Manual §4.1 (`==`, `<`, `>`, `-v`, `-R`, and parenthesized/compound expressions).
  */
 
+import { legalNumber } from './characters';
 import { ARITHMETIC_OPERATORS, FILE_TEST_OPERATORS, unaryTest } from './conditional';
 import type { Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
@@ -222,10 +223,8 @@ class TestReader {
   }
 
   private parseInteger(text: string): bigint {
-    const match = /^[ \t\n]*([-+]?\d+)[ \t\n]*$/.exec(text);
-    if (!match) this.fail(`${text}: integer expression expected`);
-    const value = BigInt(match[1]);
-    if (value !== BigInt.asIntN(64, value)) this.fail(`${text}: integer expression expected`);
+    const value = legalNumber(text);
+    if (value === undefined) this.fail(`${text}: integer expression expected`);
     return value;
   }
 }

@@ -1,6 +1,6 @@
 import { ArithmeticError, ArithmeticStoreError, evaluateArithmetic } from './arithmetic';
 import type { TestExpression } from './ast';
-import { charactersOf } from './characters';
+import { charactersOf, legalNumber } from './characters';
 import { compareCollated } from './collation';
 import { compileRegex, RegexSyntaxError, searchRegex } from './regex';
 import type { Shell } from './shell';
@@ -138,9 +138,9 @@ export function unaryTest(shell: Shell, operator: string, operand: string): bool
 function isSet(shell: Shell, operand: string): boolean {
   const split = shell.splitSubscript(operand);
   if (split && isIdentifier(split.name)) return isSubscriptedSet(shell, split);
-  if (/^\s*[-+]?\d+\s*$/.test(operand)) {
-    const index = Number(operand);
-    return index >= 0 && index <= (shell.state.positional.at(-1) as string[]).length;
+  const index = legalNumber(operand);
+  if (index !== undefined) {
+    return index >= 0n && index <= BigInt((shell.state.positional.at(-1) as string[]).length);
   }
   if (!isIdentifier(operand)) return false;
   return shell.scalarValue(operand) !== undefined;
