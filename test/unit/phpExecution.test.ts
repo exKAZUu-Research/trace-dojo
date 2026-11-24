@@ -263,11 +263,11 @@ test.each([
 });
 
 test('stops at a runtime feature the grader rejects, keeping the output before it', () => {
-  const execution = run('<?php\necho "start\\n";\n$f = fopen("a.txt", "r");\necho "never";');
+  const execution = run('<?php\necho "start\\n";\n$f = stat("a.txt");\necho "never";');
   expect(execution).toMatchObject({
     kind: 'executed',
     stdout: 'start\n',
-    uncaughtException: 'ファイルの読み書き（fopen）は、この採点環境では使えません。',
+    uncaughtException: 'ファイルの読み書き（stat）は、この採点環境では使えません。',
   });
 });
 
@@ -276,14 +276,13 @@ test.each([
   ['_FILES', 'isset(${$name});', 'スーパーグローバル変数'],
   ['_SERVER', '$$name = 1;', 'スーパーグローバル変数'],
   ['_GET', 'unset($$name);', 'スーパーグローバル変数'],
-  ['argv', 'echo ${$name};', 'コマンドライン引数'],
-  ['argc', 'echo $GLOBALS[$name];', 'コマンドライン引数'],
+  ['_COOKIE', 'echo $GLOBALS[$name];', 'スーパーグローバル変数'],
   ['_GET', '$value = 1; $$name =& $value;', 'スーパーグローバル変数'],
-  ['argv', '$values = [1]; [&$$name] = $values;', 'コマンドライン引数'],
+  ['_ENV', '$values = [1]; [&$$name] = $values;', 'スーパーグローバル変数'],
   ['_POST', '$values = [1]; foreach ($values as &$$name) {}', 'スーパーグローバル変数'],
   ['_GET', 'extract([$name => 1]);', 'スーパーグローバル変数'],
-  ['argc', 'global $$name;', 'コマンドライン引数'],
-  ['argv', 'compact([[$name]]);', 'コマンドライン引数'],
+  ['_SESSION', 'global $$name;', 'スーパーグローバル変数'],
+  ['_REQUEST', 'compact([[$name]]);', 'スーパーグローバル変数'],
 ])('rejects indirect access to $%s through %s', (name, action, label) => {
   expect(run(`<?php $name = '${name}'; echo 'before'; ${action} echo 'after';`)).toMatchObject({
     kind: 'executed',
@@ -941,10 +940,8 @@ test.each([
 });
 
 test.each([
-  '<?php file_put_contents("a.txt","x",FILE_APPEND|LOCK_EX);',
   '<?php mb_strlen("abc","sjis");',
   '<?php echo defined("PHP_OS") ? "y" : "n";',
-  '<?php echo defined("SEEK_SET") ? "y" : "n";',
   '<?php echo constant("PHP_OS");',
   '<?php echo defined("DateTimeInterface::ATOM") ? "y" : "n";',
   '<?php var_dump(method_exists("DateTime", "format"));',
@@ -3433,8 +3430,8 @@ test.each(['static', '?static'])('rejects %s parameter types independently of re
 });
 
 test.each([
-  ['fopen', 'fopen("file.txt", "r")'],
-  ['file_get_contents', 'file_get_contents("file.txt")'],
+  ['stat', 'stat("file.txt")'],
+  ['tempnam', 'tempnam("/", "x")'],
 ])('reports unsupported %s from a replacement throwable stringifier', (name, expression) => {
   const program = `<?php
     class First extends Exception { function __toString(): string { throw new Second(); } }
@@ -5369,11 +5366,6 @@ test('reports accurate rows for first-statement syntax errors', () => {
 });
 
 test('rejects unsupported functions without spurious undefined-variable warnings on out-parameters', () => {
-  expect(run('<?php fscanf(STDIN, "%d", $n); echo $n;')).toMatchObject({
-    kind: 'executed',
-    stdout: '',
-    uncaughtException: '標準入力の読み込み（fscanf）は、この採点環境では使えません。',
-  });
   expect(run('<?php exec("ls", $out, $rc);')).toMatchObject({
     kind: 'executed',
     stdout: '',
@@ -6368,4 +6360,59 @@ foreach (['a', 'b', 'c'] as $f) {
       )
     ).toMatchObject({ kind: 'executed', stdout: expected });
   }
+});
+
+test('reads standard input through streams and readline as PHP buffers them', () => {
+  const program = String.raw`<?php
+    $n = (int) trim(fgets(STDIN));
+    $sum = array_sum(explode(' ', trim(fgets(STDIN))));
+    fscanf(STDIN, "%d %s", $age, $name);
+    echo $n, ';', $sum, ';', $age, ';', $name, ';', $argc, ';', $argv[0], "\n";
+    while (($line = fgets(STDIN)) !== false) echo '[', rtrim($line), ']';
+    var_dump(feof(STDIN), readline('> '));`;
+  expect(executeProgram('php', program, { stdin: '3\n1 2 3\n20 bob\nx\ny' })).toMatchObject({
+    kind: 'executed',
+    stdout: '3;6;20;bob;1;/main.php\n[x][y]> bool(true)\nbool(false)\n',
+  });
+  expect(
+    executeProgram('php', '<?php $a = readline("Name: "); echo strtoupper($a), "|", fgets(STDIN);', {
+      stdin: 'ann\nrest\n',
+    })
+  ).toMatchObject({ kind: 'executed', stdout: 'Name: ann\nANN|rest\n' });
+});
+
+test('reads and writes files of the run by bytes and reports failures as PHP does', () => {
+  const program = String.raw`<?php
+    $fp = fopen('data/in.csv', 'r');
+    while (($row = fgetcsv($fp, null, ',', '"', '\\')) !== false) echo implode('|', $row), ';';
+    fclose($fp);
+    var_dump($fp);
+    $out = fopen('out.txt', 'w+');
+    fwrite($out, "日本\n");
+    fseek($out, 0, SEEK_END);
+    fwrite($out, "語");
+    rewind($out);
+    var_dump(fread($out, 3), ftell($out));
+    file_put_contents('out.txt', ['!', 1], FILE_APPEND);
+    var_dump(file('out.txt', FILE_IGNORE_NEW_LINES), fopen('none.txt', 'r'), unlink('data/in.csv'));
+    fwrite(STDERR, "err\n");`;
+  expect(executeProgram('php', program, { files: { 'data/in.csv': 'a,"b\nc"\n1,2\n' } })).toMatchObject({
+    kind: 'executed',
+    stdout: `a|b\nc;1|2;resource(5) of type (Unknown)
+string(3) "日"
+int(3)
+
+Warning: fopen(none.txt): Failed to open stream: No such file or directory in /main.php on line 13
+array(2) {
+  [0]=>
+  string(6) "日本"
+  [1]=>
+  string(5) "語!1"
+}
+bool(false)
+bool(true)
+`,
+    stderr: 'err\n',
+    finalFiles: { 'out.txt': '日本\n語!1' },
+  });
 });

@@ -4,7 +4,7 @@ import { nestedBodies } from './astAnalysis';
 import { callMethod, consumeInvokedResult } from './callables';
 import { declForKey, nativePropertySlot, objectPropertyKeys, propNameOf, snapshotDynamicProperties } from './classes';
 import type { Constant } from './constantDefaults';
-import { formatFloat, formatFloatRepr } from './conversions';
+import { formatFloat, formatFloatRepr, resourceType } from './conversions';
 import {
   type CleanupException,
   deprecated,
@@ -391,7 +391,7 @@ function dumpValue(value: Value, level: number, state: Inspection, write: (text:
     }
   }
   if (value instanceof PhpObject) {
-    if (value.isResource) return write(`${pad}resource(${value.id}) of type (stream)\n`);
+    if (value.isResource) return write(`${pad}resource(${value.id}) of type (${resourceType(value)})\n`);
     if (value.cls.kind === 'enum') return write(`${pad}enum(${enumCaseName(value)})\n`);
   }
   if (state.active.has(value)) return write(`${indent}*RECURSION*\n`);

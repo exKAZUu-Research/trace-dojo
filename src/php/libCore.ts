@@ -34,23 +34,17 @@ import { traceLine } from './exceptions';
 import { collectGarbage } from './garbage';
 import { cast, cloneObject, deprecatedConstant, iterate, rejectUnsupportedConstant } from './interp';
 import { isCtypeSpace } from './libLocale';
-import {
-  defineAlias,
-  defineConstant,
-  defineFunction,
-  defineRuntimeConstant,
-  markDirectOnly,
-  markReferenceForwarding,
-} from './native';
+import { defineAlias, defineConstant, defineFunction, markDirectOnly, markReferenceForwarding } from './native';
 import { toFloat, toInt, toKey, toStr } from './operators';
 import { printR, varDump, varExport } from './output';
 import { share } from './places';
 import { ExitSignal, PhpThrow, rt } from './runtime';
 import { formatPrintf } from './sprintf';
 import { constantKey, defineConstant as defineUserConstant } from './statements';
+import { isStream, type Stream } from './streams';
 import { setCallableCheck } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { copyValueSlot, isClosure, PhpArray, PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
+import { copyValueSlot, isClosure, PhpArray, type PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
 
 // Constants ------------------------------------------------------------------------------------------------------------
 
@@ -189,7 +183,10 @@ defineFunction(
     return args[1] === true ? syntax : isCallable(value);
   }
 );
-defineFunction('is_resource(mixed $value): bool', ({ args }) => isStream(args[0]));
+defineFunction(
+  'is_resource(mixed $value): bool',
+  ({ args }) => isStream(args[0]) && !(args[0].internal as Stream).isClosed
+);
 defineFunction('intval(mixed $value, int $base = 10): int', ({ args }) => {
   const [value, base = 10n] = args;
   if (typeof value === 'string' && base !== 10n) return parseIntBase(value, Number(BigInt.asIntN(32, base as bigint)));
@@ -728,46 +725,6 @@ defineFunction('debug_print_backtrace(int $options = 0, int $limit = 0): void', 
   return null;
 });
 
-// Standard streams ---------------------------------------------------------------------------------------------------
-
-const streamClass = new PhpClass('(stream)');
-
-/** A standard stream, which PHP's CLI predefines as the resources STDIN, STDOUT, and STDERR. */
-function isStream(value: Value): value is PhpObject {
-  return value instanceof PhpObject && value.cls === streamClass;
-}
-
-const streams: [string, number][] = [
-  ['STDIN', 1],
-  ['STDOUT', 2],
-  ['STDERR', 3],
-];
-for (const [name, id] of streams) {
-  defineRuntimeConstant(name, () => {
-    const stream = new PhpObject(streamClass, id);
-    stream.internal = name;
-    return stream;
-  });
-}
-
-export function writeStream(stream: PhpObject, text: string): bigint {
-  if (stream.internal === 'STDOUT') rt().echo(text);
-  else if (stream.internal === 'STDERR') rt().echoError(text);
-  else throw new UnsupportedFeatureError('標準入力への書き込み');
-  return BigInt(text.length);
-}
-
-defineFunction('fwrite(resource $stream, string $data, ?int $length = null): int|false', ({ args }) => {
-  const stream = args[0] as PhpObject;
-  const data = args[1] as string;
-  const length = args[2] === undefined || args[2] === null ? data.length : Number(args[2]);
-  return writeStream(stream, data.slice(0, Math.max(length, 0)));
-});
-defineAlias('fputs', 'fwrite');
-defineFunction('fprintf(resource $stream, string $format, mixed ...$values): int', ({ args }) => {
-  const stream = args[0] as PhpObject;
-  return BigInt(formatPrintf(args[1] as string, args.slice(2), (output) => writeStream(stream, output)).length);
-});
 function checkArgumentFunction(name: string, dynamic: boolean | undefined): void {
   if (!rt().frame.fn) {
     const message =

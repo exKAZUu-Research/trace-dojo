@@ -231,8 +231,23 @@ export class FileHandle {
   }
 
   write(text: string): void {
-    this.files.writeAt(this.node, this.position ?? this.node.content.length, text);
+    this.writeAt(this.position ?? this.node.content.length, text);
     if (this.position !== undefined) this.position += text.length;
+  }
+
+  /** The file's text as it is now, for a language that keeps its own position in the file. */
+  get content(): string {
+    return this.node.content;
+  }
+
+  /** Writes at a position in the file's text, leaving the handle's own position where it is. */
+  writeAt(position: number, text: string): void {
+    this.files.writeAt(this.node, position, text);
+  }
+
+  /** Cuts the file to a length, or lengthens it with NUL characters, as POSIX `ftruncate` does. */
+  truncate(length: number): void {
+    this.files.truncate(this.node, length);
   }
 }
 
@@ -312,6 +327,15 @@ export class VirtualFileSystem {
     const updated = `${content.slice(0, position)}${text}${content.slice(position + text.length)}`;
     const gap = Math.max(position - node.content.length, 0);
     this.storedLength += node.isLinked ? updated.length - node.content.length : text.length + gap;
+    if (this.storedLength > LIMITS.maxStoredLength) throw new ExecutionLimitError('storage');
+    node.content = updated;
+  }
+
+  truncate(node: FileNode, length: number): void {
+    const gap = Math.max(length - node.content.length, 0);
+    this.budget.spend(Math.ceil((gap + 1) / 64));
+    const updated = gap > 0 ? node.content.padEnd(length, '\0') : node.content.slice(0, length);
+    this.storedLength += node.isLinked ? updated.length - node.content.length : gap;
     if (this.storedLength > LIMITS.maxStoredLength) throw new ExecutionLimitError('storage');
     node.content = updated;
   }

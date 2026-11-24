@@ -7,6 +7,8 @@ import './libString';
 import './libHash';
 import './libLocale';
 import './libScan';
+import './libStream';
+import './libFileSystem';
 import './libUrl';
 import './libMultibyte';
 import './libArray';

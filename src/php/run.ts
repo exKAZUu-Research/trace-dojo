@@ -15,7 +15,7 @@ import { type ParsedProgram, parsePhp } from './parse';
 import { ExitSignal, FatalError, type Frame, PhpThrow, Runtime, SCRIPT_PATH, withRuntime } from './runtime';
 import { mayDestruct, runStatements } from './statements';
 import { UnsupportedFeatureError } from './unsupported';
-import { PhpObject } from './values';
+import { PhpArray, PhpObject } from './values';
 
 import './library';
 
@@ -39,6 +39,9 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
   return withRuntime(runtime, () => {
     resetCallStack();
     bootstrap();
+    // PHP's CLI passes the script's path as the only command-line argument.
+    runtime.globalRef('argv').v = PhpArray.list([SCRIPT_PATH]);
+    runtime.globalRef('argc').v = 1n;
     runtime.program = parsed.program;
     runtime.notices = parsed.notices;
     let uncaughtException: string | undefined;

@@ -2,6 +2,11 @@ import { warn } from './errors';
 import { trimmedSignificantDigits } from './strings';
 import { INT_MAX, INT_MIN, type Key, PhpArray, type PhpObject, UNDEFINED_RESULT, type Value } from './values';
 
+/** The type of a resource, which PHP names `Unknown` once the program closes it. */
+export function resourceType(object: PhpObject): 'stream' | 'Unknown' {
+  return (object.internal as { isClosed?: boolean } | undefined)?.isClosed ? 'Unknown' : 'stream';
+}
+
 /** Formats a float as PHP's `echo` does, with 14 significant digits (`precision=14`). */
 export function formatFloat(value: number, precision = 14): string {
   if (Number.isNaN(value)) return 'NAN';
@@ -143,7 +148,8 @@ export function getType(value: Value): string {
   if (value === UNDEFINED_RESULT) return 'unknown type';
   if (typeof value !== 'object') return SCALAR_TYPE_NAMES[typeof value as keyof typeof SCALAR_TYPE_NAMES].gettype;
   if (value instanceof PhpArray) return 'array';
-  return value.isResource ? 'resource' : 'object';
+  if (!value.isResource) return 'object';
+  return resourceType(value) === 'stream' ? 'resource' : 'resource (closed)';
 }
 
 /** The type name in error messages and `get_debug_type`. */
@@ -153,7 +159,7 @@ export function debugType(value: Value): string {
   if (typeof value !== 'object') return SCALAR_TYPE_NAMES[typeof value as keyof typeof SCALAR_TYPE_NAMES].debug;
   if (value instanceof PhpArray) return 'array';
   const object = value as PhpObject;
-  if (object.isResource) return 'resource (stream)';
+  if (object.isResource) return resourceType(object) === 'stream' ? 'resource (stream)' : 'resource (closed)';
   return object.cls.name;
 }
 
