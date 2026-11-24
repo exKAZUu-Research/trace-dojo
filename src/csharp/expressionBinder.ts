@@ -1416,16 +1416,22 @@ export abstract class ExpressionBinder extends LambdaBinder {
     }
     const value = this.bindAllowingThrow(node.value, context);
     const operand: BoundExpression = { kind: 'compoundOperand', type: target.type, row: node.row };
-    const right = value.kind === 'throw' ? value : this.convert(value, underlying ?? target.type, node);
+    // `a ??= b` on a nullable `a` has the underlying type when `b` converts to it, and the nullable type otherwise, as
+    // for `int? b` or `null` (C# spec §12.22.1).
+    const isUnderlying =
+      underlying !== undefined &&
+      (value.kind === 'throw' || this.implicitConversionOf(value, underlying) !== undefined);
+    const resultType = isUnderlying ? (underlying as Type) : target.type;
+    const right = value.kind === 'throw' ? value : this.convert(value, resultType, node);
     const coalesce: BoundExpression = {
       kind: 'coalesce',
       left: operand,
-      right: underlying ? this.convert(right, target.type, node) : right,
+      right: isUnderlying ? this.convert(right, target.type, node) : right,
       unwrapLeft: false,
       type: target.type,
       row: node.row,
     };
-    return { kind: 'compoundAssign', target, operation: coalesce, type: underlying ?? target.type, row: node.row };
+    return { kind: 'compoundAssign', target, operation: coalesce, type: resultType, row: node.row };
   }
 
   private bindIncrement(node: Extract<Expression, { kind: 'increment' }>, context: BindContext): BoundExpression {
