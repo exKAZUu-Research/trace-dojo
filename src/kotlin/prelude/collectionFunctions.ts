@@ -108,6 +108,20 @@ inline fun <T> Iterable<T>.filterIndexed(predicate: (index: Int, T) -> Boolean):
     return destination
 }
 
+inline fun <reified R> Iterable<*>.filterIsInstance(): List<R> = filterIsInstanceTo(ArrayList<R>())
+
+inline fun <reified R, C : MutableCollection<in R>> Iterable<*>.filterIsInstanceTo(destination: C): C {
+    for (element in this) if (element is R) destination.add(element)
+    return destination
+}
+
+inline fun <reified R> Array<*>.filterIsInstance(): List<R> = filterIsInstanceTo(ArrayList<R>())
+
+inline fun <reified R, C : MutableCollection<in R>> Array<*>.filterIsInstanceTo(destination: C): C {
+    for (element in this) if (element is R) destination.add(element)
+    return destination
+}
+
 fun <T : Any> Iterable<T?>.filterNotNull(): List<T> {
     val destination = ArrayList<T>()
     for (element in this) if (element != null) destination.add(element)

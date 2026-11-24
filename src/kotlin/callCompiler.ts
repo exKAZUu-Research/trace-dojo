@@ -23,6 +23,7 @@ import { CompilerCore } from './compilerCore';
 import { callFunction, getPropertyValue, parameterReprs, receiverRepr, returnRepr } from './dispatch';
 import { mostSpecificReceivers, type ReceiverSpecificity } from './extensionResolution';
 import { literalFits } from './literals';
+import { runtimeType } from './reified';
 import { siblingResultType } from './resultInference';
 import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
@@ -159,10 +160,6 @@ function mapArguments(
     : undefined;
 }
 
-function parameterOf(symbol: FunctionSymbol, mapping: number[][], argumentIndex: number): ParameterSymbol | undefined {
-  return symbol.params[mapping.findIndex((indexes) => indexes.includes(argumentIndex))];
-}
-
 /**
  * A lambda's probed result that is still a variable, as `if (c) 1 else 2` leaves one with an Int lower bound, is the
  * type inference would fix it to, so it matches the overload a lone literal does.
@@ -172,6 +169,11 @@ function settledResult(result: KType | undefined): KType | undefined {
   if (actual?.kind !== 'variable' || actual.variable.fixed) return result;
   const lower = actual.variable.lower.map(resolved).filter((type) => !hasOpenVariables(type));
   return lower.length > 0 ? commonSupertype(lower) : result;
+}
+
+/** Whether an argument passes a vararg parameter's array, spread as `*array` or named. */
+function passesArray(argument: ArgumentSyntax, param: ParameterSymbol): boolean {
+  return argument.isSpread === true || (argument.name !== undefined && param.isVararg);
 }
 
 function isLambdaArgument(expression: Expression): expression is LambdaExpression {
@@ -777,7 +779,10 @@ export abstract class CallCompiler extends CompilerCore {
         if (value.kind === 'lambda' ? !this.lambdaFits(value, paramType) : !this.referenceFits(paramType)) return false;
         continue;
       }
-      if (args[index].isSpread) continue;
+      if (passesArray(args[index], param)) {
+        if (!this.acceptsArgument(compiled, this.varargArrayOf(param, paramType))) return false;
+        continue;
+      }
       if (!this.acceptsArgument(compiled, param.isVararg ? this.varargElementType(paramType) : paramType)) return false;
     }
     for (const variable of attempt.variables) {
@@ -791,6 +796,18 @@ export abstract class CallCompiler extends CompilerCore {
       if (!fitsInferenceBounds(copy)) return false;
     }
     return true;
+  }
+
+  /** The array a `vararg` parameter of the element type holds. */
+  protected abstract varargArrayType(elementType: KType): KType;
+
+  /**
+   * The array a vararg parameter holds, whose class its declared type decides: `IntArray` for `vararg xs: Int`, and
+   * `Array<out T>` for `vararg xs: T` whatever `T` is.
+   */
+  private varargArrayOf(param: ParameterSymbol, paramType: KType): KType {
+    if (resolved(param.type).kind === 'class') return this.varargArrayType(paramType);
+    return { kind: 'class', cls: this.core.array, args: [{ variance: 'out', type: paramType }], nullable: false };
   }
 
   /** The type of each element a `vararg` parameter collects; its declared type is that of one element. */
@@ -1122,6 +1139,9 @@ export abstract class CallCompiler extends CompilerCore {
       (type) => this.varargArrayFactory(type)
     );
     const callRow = this.recordsSteps && !this.file.isLibrary ? row : undefined;
+    const reifiedTypes = symbol.typeParameters
+      .filter((param) => param.isReified)
+      .map((param) => substitute({ kind: 'param', param, nullable: false }, substitution));
     const call = (frame: Frame, receiver: Value): Value => {
       const { temporaries } = frame;
       const mark = temporaries.length;
@@ -1129,6 +1149,8 @@ export abstract class CallCompiler extends CompilerCore {
       try {
         if (candidate.kind === 'constructor' && symbol.owner) this.ensureClassInitialized(frame, symbol.owner);
         const values = evaluateArgs(frame);
+        if (symbol.passesTypeArguments)
+          values.push(reifiedTypes.map((type) => runtimeType(resolved(type), frame)) as unknown as Value);
         for (const value of values) temporaries.push(value);
         return callFunction(symbol, frame, receiver, values, callRow);
       } finally {
@@ -1258,11 +1280,6 @@ export abstract class CallCompiler extends CompilerCore {
     compiledArgs: Compiled[]
   ): ArgumentEvaluation[] {
     const { symbol } = candidate;
-    // Kotlin passes a named vararg argument as the whole array, as `*array` spreads one, which learners cannot use.
-    const namedVararg = mapping
-      .flat()
-      .find((index) => args[index].name !== undefined && parameterOf(symbol, mapping, index)?.isVararg);
-    if (namedVararg !== undefined) this.unavailable(args[namedVararg].row, '可変長引数（vararg）への名前付きの引数');
     const reprs = parameterReprs(symbol);
     const evaluations = mapping.flatMap((indexes, paramIndex) =>
       indexes.map((index): ArgumentEvaluation => {
@@ -1270,8 +1287,14 @@ export abstract class CallCompiler extends CompilerCore {
         const compiled = compiledArgs[index];
         const paramType = substitute(param.type, substitution);
         const elementType = param.isVararg ? this.varargElementType(paramType) : paramType;
-        const isSpread = args[index].isSpread === true;
-        if (isSpread) return { index, paramIndex, eval: compiled.eval, isSpread };
+        // A named argument of a vararg parameter is the whole array, as `*array` spreads one.
+        const isSpread = passesArray(args[index], param);
+        if (isSpread) {
+          const arrayType = this.varargArrayOf(param, paramType);
+          if (!this.acceptsArgument(compiled, arrayType))
+            this.error(args[index].row, typeMismatchMessage(arrayType, compiled.type));
+          return { index, paramIndex, eval: compiled.eval, isSpread };
+        }
         if (!this.acceptsArgument(compiled, elementType)) {
           this.error(args[index].row, typeMismatchMessage(elementType, compiled.type));
         }

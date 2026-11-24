@@ -42,6 +42,7 @@ import { assignedNames, localRefinement, refineLocalType, remainingWrites } from
 import { valueEquals } from './format';
 import { isExclusion, OperatorCompiler } from './operatorCompiler';
 import { NUMBER_OPERATOR_NAMES } from './operators';
+import { framedInstanceTest } from './reified';
 import { needsSiblingHint, siblingResultType } from './resultInference';
 import { type Frame, LoopSignal, UNASSIGNED } from './runtime';
 import { type ClassSymbol, type PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
@@ -219,6 +220,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
 
   // Declarations.
 
+  protected abstract checkLateinitType(type: KType | undefined, row: number): void;
+
   /** Declares a function in a function body, whose body sees the variables declared before it. */
   protected abstract compileLocalFunction(scope: Scope, context: FunctionContext, decl: FunctionDecl): Exec;
 
@@ -233,12 +236,21 @@ export abstract class StatementCompiler extends OperatorCompiler {
     );
     const { row, name } = statement;
     if (statement.getter || statement.setter) this.error(row, 'ローカル変数には get・set を書けません。');
+    const misplaced = [...statement.modifiers.keywords].find((keyword) => keyword !== 'lateinit');
+    if (misplaced) this.error(row, `ローカル変数には ${misplaced} 修飾子を付けられません。`);
+    const isLateinit = statement.modifiers.keywords.has('lateinit');
     const declared = statement.type ? this.resolveType(scope, statement.type) : undefined;
+    if (isLateinit) {
+      if (!statement.isVar) this.error(row, 'lateinit は var にだけ付けられます。');
+      if (statement.initializer || statement.delegate) this.error(row, 'lateinit の変数には初期値を書けません。');
+      this.checkLateinitType(declared, row);
+    }
     if (statement.delegate) return this.compileLocalDelegate(scope, context, statement, declared);
     if (!statement.initializer) {
       if (!declared) this.error(row, `変数 ${name} の型を書くか、初期値を書いてください。`);
       const variable = this.newVariable(scope, context, name, declared, statement.isVar, row);
       variable.awaitsValue = !statement.isVar;
+      variable.isLateinit = isLateinit;
       return (frame) => {
         if (variable.isCell) frame.locals[variable.slot] = new Cell(undefined, false);
       };
@@ -1493,14 +1505,14 @@ export abstract class StatementCompiler extends OperatorCompiler {
     }
     if (condition.kind === 'is') {
       const type = this.checkableType(scope, condition.type, condition.row, subject.type);
-      const test = instanceTest(this.core, type);
+      const test = framedInstanceTest(this.core, type);
       const evaluate = convertRepr(subject.eval, subject.repr, 'ref');
       const narrowing = this.typeTestNarrowing(subject, type);
       covered.coverTypeCases(subject.type, type, condition.negated, this.core.boolean);
       const exclusion = isExclusion(subject, type);
       return condition.negated
-        ? { test: (frame) => !test(evaluate(frame)), whenTrue: exclusion, whenFalse: narrowing }
-        : { test: (frame) => test(evaluate(frame)), whenTrue: narrowing, whenFalse: exclusion };
+        ? { test: (frame) => !test(frame, evaluate(frame)), whenTrue: exclusion, whenFalse: narrowing }
+        : { test: (frame) => test(frame, evaluate(frame)), whenTrue: narrowing, whenFalse: exclusion };
     }
     if (condition.kind === 'in') return this.compileWhenIn(scope, context, subject, condition);
     return this.compileWhenValue(scope, context, subject, condition.expression, condition.row, covered.cases);

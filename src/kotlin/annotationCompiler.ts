@@ -3,7 +3,7 @@ import type { Annotation, Argument, Expression, Modifiers } from './ast';
 import { BodyCompiler } from './bodyCompiler';
 import { type Compiled, Flow, FunctionContext, Scope, typeMismatchMessage } from './compilerBase';
 import { isKnownLibraryAnnotation, knownLibraryDeclaration } from './libraryApi';
-import type { ClassSymbol, ParameterSymbol } from './symbols';
+import type { ClassSymbol, ParameterSymbol, PropertySymbol } from './symbols';
 import { isSubtype } from './typeRelations';
 import { type KType, resolved } from './types';
 
@@ -168,7 +168,65 @@ export abstract class AnnotationCompiler extends BodyCompiler {
     const compiled = this.compileAnnotationExpression(scope, value, expected);
     if (!isSubtype(compiled.type, expected) && !compiled.integerLiteral)
       this.error(row, typeMismatchMessage(expected, compiled.type));
-    if (!isConstantValue(compiled, value)) this.error(row, 'アノテーションの引数には、定数を書いてください。');
+    if (!this.isConstantExpression(scope, value) && !isAnnotationConstant(compiled, value))
+      this.error(row, 'アノテーションの引数には、定数を書いてください。');
+  }
+
+  protected isConstantExpression(scope: Scope, expression: Expression): boolean {
+    switch (expression.kind) {
+      case 'integer':
+      case 'real':
+      case 'char':
+      case 'boolean': {
+        return true;
+      }
+      case 'string': {
+        return expression.parts.every((part) => typeof part === 'string' || this.isConstantExpression(scope, part));
+      }
+      case 'parenthesized': {
+        return this.isConstantExpression(scope, expression.expression);
+      }
+      case 'prefix': {
+        return ['-', '+', '!'].includes(expression.operator) && this.isConstantExpression(scope, expression.operand);
+      }
+      case 'binary': {
+        return (
+          !['?:', '..', '..<', '===', '!=='].includes(expression.operator) &&
+          this.isConstantExpression(scope, expression.left) &&
+          this.isConstantExpression(scope, expression.right)
+        );
+      }
+      case 'infix': {
+        return (
+          CONSTANT_INFIX_OPERATORS.has(expression.name) &&
+          this.isConstantExpression(scope, expression.left) &&
+          this.isConstantExpression(scope, expression.right)
+        );
+      }
+      case 'name':
+      case 'member': {
+        return this.constantProperty(scope, expression)?.isConst === true;
+      }
+      default: {
+        return false;
+      }
+    }
+  }
+
+  /** The property a name or `Holder.NAME` reads, when it is a top-level or an object's property. */
+  private constantProperty(scope: Scope, expression: Expression): PropertySymbol | undefined {
+    if (expression.kind === 'name') {
+      if (this.findVariable(scope, expression.name)) return undefined;
+      return (
+        this.findCompanionProperty(scope, expression.name, expression.row)?.property.symbol ??
+        this.topLevelPlainProperty(expression.name)
+      );
+    }
+    if (expression.kind !== 'member' || expression.isSafe) return undefined;
+    const qualifier = this.compileQualifier(scope, expression.receiver);
+    if (qualifier?.kind !== 'class') return undefined;
+    const holder = qualifier.cls.isObject ? qualifier.cls : qualifier.cls.companion;
+    return holder && this.membersOf<PropertySymbol>(holder.type, expression.name, 'property')[0]?.symbol;
   }
 
   /** Whether `X::class` names an opt-in marker of Kotlin's library that the prelude does not declare. */
@@ -260,14 +318,11 @@ function qualifiedPath(expression: Expression): string[] | undefined {
   return receiver && [...receiver, expression.name];
 }
 
-/** Whether a compiled argument is a constant: a literal, a `const val`, an enum entry, a class literal, or an array of them. */
-function isConstantValue(compiled: Compiled, value: Expression): boolean {
-  if (compiled.constant !== undefined || compiled.integerLiteral) return true;
+const CONSTANT_INFIX_OPERATORS = new Set(['shl', 'shr', 'ushr', 'and', 'or', 'xor']);
+
+/** Whether a compiled argument is a constant only an annotation may take: an enum entry, a class literal, or an array. */
+function isAnnotationConstant(compiled: Compiled, value: Expression): boolean {
   switch (value.kind) {
-    case 'null':
-    case 'string': {
-      return value.kind === 'null' || value.parts.every((part) => typeof part === 'string');
-    }
     case 'reference': {
       return value.name === 'class';
     }

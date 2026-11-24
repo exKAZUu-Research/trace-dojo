@@ -16,6 +16,7 @@ import {
 import { returnRepr, runtimeClassOf } from './dispatch';
 import { lambdaValue } from './lambdaValue';
 import { type ClassReference, classReference } from './natives/reflection';
+import { mentionsReified, runtimeType } from './reified';
 import { type Frame, MISSING } from './runtime';
 import type { Exec } from './statementCompiler';
 import { type ClassSymbol, FunctionSymbol, type ParameterSymbol, type PropertySymbol } from './symbols';
@@ -31,7 +32,7 @@ import {
   substitute,
   type Substitution,
 } from './types';
-import { UNIT, type Value } from './values';
+import { type KObject, UNIT, type Value } from './values';
 
 /** What is written before `::`, as the compiler reads it. */
 type ReferenceTarget = { kind: 'free' } | { kind: 'unbound'; type: KType } | { kind: 'bound'; receiver: Compiled };
@@ -319,6 +320,44 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     return symbol && { symbol, substitution: new Map() };
   }
 
+  protected compileIsInitialized(
+    scope: Scope,
+    context: FunctionContext,
+    reference: Extract<Expression, { kind: 'reference' }>
+  ): Compiled {
+    const { receiver, name, row } = reference;
+    let property: PropertySymbol | undefined;
+    let receiverEval: Eval | undefined;
+    if (!receiver) {
+      for (const candidate of this.receiversOf(scope)) {
+        const member = this.membersOf<PropertySymbol>(this.receiverTypeOf(candidate), name, 'property')[0];
+        if (!member) continue;
+        property = member.symbol;
+        receiverEval = this.receiverAccess(context, candidate);
+        break;
+      }
+      property ??= this.topLevelPlainProperty(name);
+      if (!property && this.findVariable(scope, name)) this.error(row, 'ローカル変数は :: で参照できません。');
+    } else if (receiver.kind === 'expression') {
+      const compiled = this.compileExpression(scope, context, receiver.expression);
+      property = this.findProperty(compiled.type, name, row)?.symbol;
+      receiverEval = coerce(compiled, 'ref');
+    }
+    if (!property) return this.error(row, `${name} が見つかりません。`);
+    if (!property.isLateinit) this.error(row, 'isInitialized は、lateinit のプロパティにだけ使えます。');
+    const symbol = property;
+    const readReceiver = receiverEval;
+    return {
+      type: this.booleanType,
+      repr: 'ref',
+      eval: (frame) => {
+        const slot = symbol.slot as number;
+        if (!readReceiver) return frame.runtime.globals[slot] !== undefined;
+        return (readReceiver(frame) as KObject).fields[slot] !== undefined;
+      },
+    };
+  }
+
   /** `X::class` and `value::class`, which tell a class's names. */
   private compileClassReference(
     scope: Scope,
@@ -335,15 +374,34 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     });
     if (!receiver) return this.error(row, '::class の前に、クラスか値を書いてください。');
     const qualifier = receiver.kind === 'expression' ? this.compileQualifier(scope, receiver.expression) : undefined;
-    if (receiver.kind === 'type' || qualifier?.kind === 'class') {
-      const type =
-        receiver.kind === 'type'
+    const typeParameter =
+      receiver.kind === 'expression' &&
+      receiver.expression.kind === 'name' &&
+      !this.findVariable(scope, receiver.expression.name)
+        ? this.findTypeParameter(scope, receiver.expression.name)
+        : undefined;
+    if (receiver.kind === 'type' || qualifier?.kind === 'class' || typeParameter) {
+      const type: KType = typeParameter
+        ? { kind: 'param', param: typeParameter, nullable: false }
+        : receiver.kind === 'type'
           ? resolved(this.resolveType(scope, receiver.type, true))
           : this.starredClassType((qualifier as { cls: ClassSymbol }).cls);
+      if (type.kind === 'param' && !type.param.isReified)
+        this.error(row, `型引数 ${type.param.name} は reified ではないので、::class を使えません。`);
       if (type.nullable) this.error(row, '::class の前には、null かもしれない型を書けません。');
       if (type.kind === 'nothing') {
         const value = classReference({ nothing: true });
         return { type: typed(type, 'inv'), repr: 'ref', eval: () => value };
+      }
+      if (type.kind === 'param' && mentionsReified(type)) {
+        return {
+          type: typed(type, 'inv'),
+          repr: 'ref',
+          eval: (frame) => {
+            const actual = resolved(runtimeType(type, frame));
+            return actual.kind === 'class' ? classReference({ cls: actual.cls }) : classReference({ nothing: true });
+          },
+        };
       }
       if (type.kind !== 'class')
         return this.error(row, `${receiver.kind === 'type' ? '型引数' : '関数の型'} には ::class を使えません。`);

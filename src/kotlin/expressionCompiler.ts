@@ -45,7 +45,7 @@ import { invokeFunctionValue, lambdaValue } from './lambdaValue';
 import { isKnownLibraryPackage, unavailableLibraryMember, unavailableQualifiedLibraryMember } from './libraryApi';
 import { literalFits } from './literals';
 import { floatRangeBounds } from './rangeBounds';
-import { type Frame, KotlinThrow, LoopSignal, ReturnSignal } from './runtime';
+import { type Frame, KotlinThrow, LoopSignal, ReturnSignal, UNASSIGNED } from './runtime';
 import {
   type ClassSymbol,
   type FunctionSymbol,
@@ -53,6 +53,7 @@ import {
   type TypeParameterSymbol,
   type VariableSymbol,
 } from './symbols';
+import { TailCallSignal } from './tailCalls';
 import { checkedRead } from './typeChecks';
 import {
   acceptsInferredUnit,
@@ -78,6 +79,7 @@ import {
   substitute,
   typeToString,
 } from './types';
+import { uninitializedCheck } from './uninitialized';
 import { box, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
 
 /** A place to store a value, with its receiver and indexes evaluated. */
@@ -668,6 +670,18 @@ export abstract class ExpressionCompiler extends CallCompiler {
       };
     }
     if (delegateRead) return { type: variable.type, repr, eval: delegateRead };
+    if (variable.isLateinit) {
+      const { read } = this.variableAccess(context, variable);
+      const { name } = variable;
+      return {
+        type: variable.type,
+        repr,
+        eval: (frame) => {
+          const value = read(frame);
+          return uninitializedCheck(frame, (value as unknown) === UNASSIGNED ? undefined : value, name);
+        },
+      };
+    }
     if (!this.flow.assigned.has(variable) && !this.flow.isDead) {
       this.error(row, `変数 ${variable.name} に値が入っていません。`);
     }
@@ -757,6 +771,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     consume: (member: Compiled) => Compiled = (member) => member
   ): Compiled {
     const { name, row, isSafe } = expression;
+    if (name === 'isInitialized' && expression.receiver.kind === 'reference')
+      return consume(this.compileIsInitialized(scope, context, expression.receiver));
     const qualified = this.compileQualifier(scope, expression.receiver);
     if (qualified?.kind === 'class')
       return safeResultIf(isSafe, consume(this.compileClassMember(scope, context, qualified.cls, name, row)));
@@ -1054,6 +1070,31 @@ export abstract class ExpressionCompiler extends CallCompiler {
   // Calls.
 
   protected compileCall(
+    scope: Scope,
+    context: FunctionContext,
+    expression: Extract<Expression, { kind: 'call' }>,
+    expected: KType | undefined,
+    delegate?: DelegateContext
+  ): Compiled {
+    const { callee } = expression;
+    const outerTailCall = this.tailCallSite;
+    const tailrec = context.tailrec;
+    this.tailCallSite =
+      tailrec?.calls.has(expression) &&
+      (callee.kind === 'name' || (callee.kind === 'member' && callee.receiver.kind === 'this'))
+        ? { symbol: tailrec.symbol, context }
+        : undefined;
+    try {
+      return this.compileCallSite(scope, context, expression, expected, delegate);
+    } finally {
+      this.tailCallSite = outerTailCall;
+    }
+  }
+
+  /** A call of a `tailrec` function by itself in tail position, which `finishCall` makes restart the function. */
+  private tailCallSite: { symbol: FunctionSymbol; context: FunctionContext } | undefined;
+
+  private compileCallSite(
     scope: Scope,
     context: FunctionContext,
     expression: Extract<Expression, { kind: 'call' }>,
@@ -1387,6 +1428,18 @@ export abstract class ExpressionCompiler extends CallCompiler {
   /** Calls a resolved function on its receiver, checking that a receiver that may be `null` is accepted. */
   protected finishCall(call: ResolvedCall, receiver: Compiled | undefined, row: number): Compiled {
     const { symbol } = call;
+    const tailCall = this.tailCallSite;
+    if (tailCall && symbol === tailCall.symbol && (!receiver || receiver.thisOf?.context === tailCall.context)) {
+      this.tailCallSite = undefined;
+      const { evaluateArgs } = call;
+      return {
+        type: NOTHING,
+        repr: 'ref',
+        eval: (frame) => {
+          throw new TailCallSignal(frame, evaluateArgs(frame));
+        },
+      };
+    }
     if (receiver && call.candidate.kind === 'member') {
       this.requireNonNullReceiver(receiver, row, false);
     }
@@ -2240,6 +2293,13 @@ export abstract class ExpressionCompiler extends CallCompiler {
       expected
     );
   }
+
+  /** `::x.isInitialized` and `this::x.isInitialized`, which tell whether a `lateinit` property has a value. */
+  protected abstract compileIsInitialized(
+    scope: Scope,
+    context: FunctionContext,
+    reference: Extract<Expression, { kind: 'reference' }>
+  ): Compiled;
 
   /** `::f`, `Type::member`, `value::member`, `::Class`, and `X::class`. */
   protected abstract compileReference(

@@ -5,7 +5,6 @@ import { type KType, resolved, typeToString } from './types';
 
 const memberLabels = new Map([
   ['asSequence', 'シーケンス（asSequence）'],
-  ['filterIsInstance', '型で要素を絞り込む filterIsInstance'],
   ['toRegex', '正規表現（toRegex）'],
   ['toSortedMap', '並べ替えた Map（toSortedMap）'],
   ['toSortedSet', '並べ替えた Set（toSortedSet）'],

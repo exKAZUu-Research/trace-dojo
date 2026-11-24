@@ -147,6 +147,8 @@ export class FunctionContext {
   inlineLambda = false;
   /** The name `return@label` leaves the context by: a function's name, or a lambda's label. */
   label: string | undefined;
+  /** For a `tailrec` function, the function and the calls in tail position of its body. */
+  tailrec: { symbol: FunctionSymbol; calls: ReadonlySet<Expression> } | undefined;
   /** For a lambda, what its `return@label` must give and has given, which its result type joins. */
   lambdaResult: { expected: KType | undefined; returnsUnit: boolean; returned: Compiled[] } | undefined;
   /** A discarded probe may retain open types until the enclosing argument reveals their positions. */

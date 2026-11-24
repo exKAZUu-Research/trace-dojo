@@ -32,9 +32,10 @@ import {
   unaryResult,
   widen,
 } from './operators';
+import { framedInstanceTest, mentionsReified, runtimeType } from './reified';
 import { type Frame } from './runtime';
 import { type ClassSymbol, type TypeParameterSymbol } from './symbols';
-import { instanceTest, throwCastFailure } from './typeChecks';
+import { throwCastFailure } from './typeChecks';
 import { branchHint, commonSupertype, isSubtype } from './typeRelations';
 import { isNullable, type KType, nonNull, nullable, resolved, substitute, typeToString } from './types';
 import { box, Boxed, type PrimitiveKind, type Value } from './values';
@@ -760,14 +761,14 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   ): Compiled {
     const operand = this.compileExpression(scope, context, expression.operand);
     const type = this.checkableType(scope, expression.type, expression.row, operand.type);
-    const test = instanceTest(this.core, type);
+    const test = framedInstanceTest(this.core, type);
     const evaluate = convertRepr(operand.eval, operand.repr, 'ref');
     const narrowing = this.typeTestNarrowing(operand, type);
     const exclusion = isExclusion(operand, type);
     return {
       type: this.booleanType,
       repr: 'ref',
-      eval: expression.negated ? (frame) => !test(evaluate(frame)) : (frame) => test(evaluate(frame)),
+      eval: expression.negated ? (frame) => !test(frame, evaluate(frame)) : (frame) => test(frame, evaluate(frame)),
       narrowing: expression.negated
         ? { whenTrue: exclusion, whenFalse: narrowing }
         : { whenTrue: narrowing, whenFalse: exclusion },
@@ -802,7 +803,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
             args: actual.args.map(() => ({ variance: 'star' as const })),
           }
         : type;
-    const test = actual.kind === 'param' ? () => true : instanceTest(this.core, checkType);
+    const test: (frame: Frame, value: Value) => boolean =
+      actual.kind === 'param' && !mentionsReified(actual) ? () => true : framedInstanceTest(this.core, checkType);
     const evaluate = convertRepr(operand.eval, operand.repr, 'ref');
     const resultType = expression.isSafe ? nullable(type) : type;
     const repr = reprOf(this.core, resultType);
@@ -812,11 +814,12 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const cast: Eval = expression.isSafe
       ? (frame) => {
           const value = evaluate(frame);
-          return test(value) ? value : undefined;
+          return test(frame, value) ? value : undefined;
         }
       : (frame) => {
           const value = evaluate(frame);
-          if (!test(value)) throwCastFailure(frame, value, type);
+          if (!test(frame, value))
+            throwCastFailure(frame, value, mentionsReified(type) ? runtimeType(type, frame) : type);
           return value;
         };
     if (!expression.isSafe) return { type: resultType, repr, eval: convertRepr(cast, 'ref', repr) };

@@ -6210,11 +6210,6 @@ test.each([
     'Map<Int, String> の maxWithOrNullは、この採点環境では使えません。',
   ],
   [
-    'filterIsInstance',
-    'fun main() { println(listOf(1, "a").filterIsInstance<Int>()) }',
-    '型で要素を絞り込む filterIsInstanceは、この採点環境では使えません。',
-  ],
-  [
     'standard input',
     'fun main() {\n    val s = readln()\n    println(s)\n}',
     '標準入力（readln）は、この採点環境では使えません。',

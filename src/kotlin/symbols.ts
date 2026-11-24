@@ -190,6 +190,10 @@ export class FunctionSymbol implements MemberBase {
   isOpen = false;
   isOverride = false;
   isInline = false;
+  /** Whether calls pass the type arguments of the function's reified type parameters after its arguments. */
+  passesTypeArguments = false;
+  /** Whether the function is `tailrec`, whose calls of itself in tail position reuse its frame. */
+  isTailrec = false;
   resolvesByLambdaResult = false;
   isDeprecatedError = false;
   isInfix = false;
@@ -240,6 +244,10 @@ export class PropertySymbol implements MemberBase {
   constantInitializer: Value | undefined;
   /** The visibility of a `var`'s setter, such as `private set`. */
   setterVisibility: Visibility = 'public';
+  /** Whether the property is `lateinit`, whose read before its first assignment throws. */
+  isLateinit = false;
+  /** Whether the property is a `const val`, a compile-time constant. */
+  isConst = false;
 
   constructor(readonly name: string) {}
 }
@@ -265,6 +273,8 @@ export class VariableSymbol {
     | undefined;
   /** Whether the variable is a `val` declared without a value, which one assignment may give it later. */
   awaitsValue = false;
+  /** Whether the variable is a `lateinit var`, whose read before its first assignment throws. */
+  isLateinit = false;
   isParameter = false;
 
   constructor(

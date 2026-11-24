@@ -16,14 +16,33 @@ import {
 import { type FileContext } from './compilerCore';
 import { type ClassEntry, DeclarationCompiler, type FunctionEntry, type PropertyEntry } from './declarationCompiler';
 import { propertyRepr, returnRepr } from './dispatch';
-import { Frame, type FunctionInfo, MISSING } from './runtime';
+import { setReifiedAccess } from './reified';
+import { Frame, type FunctionInfo, MISSING, UNASSIGNED } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol } from './symbols';
 import { VariableSymbol } from './symbols';
+import { TailCallSignal, tailCallsOf } from './tailCalls';
 import { anyType, isSameType, isSubtype, substitutionOf } from './typeRelations';
 import { type ClassType, isNonNullClass, type KType, resolved } from './types';
+import { uninitializedCheck } from './uninitialized';
 import { KObject, UNIT, type Value } from './values';
 
 /** Compiles the bodies of functions, the accessors and initializers of properties, and the initializers of classes and objects. */
+/** Runs a `tailrec` function's body again in its frame with the arguments of each tail call it makes of itself. */
+function restartingOnTailCalls(run: Eval): Eval {
+  return (frame) => {
+    for (;;) {
+      try {
+        return run(frame);
+      } catch (error) {
+        if (!(error instanceof TailCallSignal) || error.frame !== frame) throw error;
+        frame.locals.fill(UNASSIGNED);
+        for (const [index, value] of error.args.entries()) frame.locals[index] = value;
+        frame.runtime.spend();
+      }
+    }
+  };
+}
+
 export abstract class BodyCompiler extends DeclarationCompiler {
   // Phase 4: bodies.
 
@@ -111,6 +130,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       const context = new FunctionContext(undefined, false, symbol.name, entry.file.isLibrary, undefined);
       Object.defineProperty(context, 'returnTarget', { value: context });
       context.label = symbol.name;
+      if (symbol.isTailrec && decl.body)
+        context.tailrec = { symbol, calls: tailCallsOf(decl.body, isNonNullClass(symbol.returnType, this.core.unit)) };
       context.info.isAtomic = symbol.isAtomic;
       const scope = new Scope(entry.scope, context);
       const thisType = this.addReceivers(scope, context, entry.cls, symbol.extensionReceiver, symbol.name);
@@ -126,6 +147,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           decl.params[index].row
         )
       );
+      const reified = symbol.typeParameters.filter((param) => param.isReified);
+      if (reified.length > 0 && decl.body) {
+        // A call passes the reified type arguments after the arguments, in the frame's next slot.
+        const slot = context.allocate('\0typeArguments', this.core.any.type, false);
+        for (const [index, param] of reified.entries()) setReifiedAccess(param, { info: context.info, slot, index });
+        symbol.passesTypeArguments = true;
+      }
       const defaults = this.compileParameterDefaults(decl.params, symbol.params, variables, scope, context);
       symbol.defaultsInfo = context.info;
       if (!decl.body) {
@@ -211,8 +239,9 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         }
       : body;
     const none: unknown[] = [];
+    const runs = symbol.isTailrec ? restartingOnTailCalls(run) : run;
     symbol.invoke = (caller, receiver, args, callRow) =>
-      caller.runtime.call(info, caller, none, receiver, args, callRow, run);
+      caller.runtime.call(info, caller, none, receiver, args, callRow, runs);
   }
 
   private compileExpressionBody(
@@ -360,7 +389,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       return;
     }
     if (entry.cls) return;
-    if (!decl.initializer) this.error(decl.row, `プロパティ ${decl.name} には初期値を書いてください。`);
+    if (!decl.initializer && !symbol.isLateinit)
+      this.error(decl.row, `プロパティ ${decl.name} には初期値を書いてください。`);
     this.bindGlobal(entry);
   }
 
@@ -369,7 +399,10 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const slot = this.globalDefaults.length;
     this.globalDefaults.push(this.defaultValueOf(symbol.type));
     symbol.slot = slot;
-    symbol.get ??= (frame) => frame.runtime.globals[slot];
+    const { name } = symbol;
+    symbol.get ??= symbol.isLateinit
+      ? (frame) => uninitializedCheck(frame, frame.runtime.globals[slot], name)
+      : (frame) => frame.runtime.globals[slot];
     symbol.set ??= (frame, _receiver, value) => {
       frame.runtime.globals[slot] = value;
     };
@@ -775,7 +808,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       // A property with accessors needs a value only when they use its backing field, which then has a slot.
       if (member.kind !== 'property' || member.initializer || member.delegate) continue;
       const property = this.findOwnProperty(entry.symbol, member.name);
-      if (property.isAbstract || property.slot === undefined) continue;
+      if (property.isAbstract || property.isLateinit || property.slot === undefined) continue;
       if (!this.flow.assigned.has(property)) {
         this.error(member.row, `プロパティ ${member.name} には初期値を書くか、init で値を入れてください。`);
       }

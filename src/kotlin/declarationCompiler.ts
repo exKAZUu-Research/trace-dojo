@@ -6,6 +6,7 @@ import type {
   ClassDecl,
   ClassParameterDecl,
   Declaration,
+  Expression,
   FunctionDecl,
   Import,
   KotlinFile,
@@ -54,6 +55,7 @@ import { anyType, functionInterfaceOf, isSameType, isSubtype, substitutionOf } f
 import {
   type ClassType,
   type FunctionType,
+  isNullable,
   type KType,
   NOTHING,
   resolved,
@@ -61,6 +63,7 @@ import {
   type Substitution,
   typeToString,
 } from './types';
+import { uninitializedCheck } from './uninitialized';
 import { KObject, type Value } from './values';
 
 export interface ClassEntry {
@@ -105,6 +108,12 @@ export interface PropertyEntry {
 }
 
 const VISIBILITY_RANK: Record<Visibility, number> = { private: 0, protected: 1, internal: 2, public: 2 };
+
+/** The modifiers a function's parameter may have. */
+const PARAMETER_MODIFIERS = new Set(['vararg', 'noinline', 'crossinline']);
+
+/** The modifiers that only properties may have. */
+const PROPERTY_ONLY_MODIFIERS = new Set(['lateinit', 'const']);
 
 function visibilityOf(modifiers: Modifiers): Visibility {
   return VISIBILITY_KEYWORDS.find((keyword) => modifiers.keywords.has(keyword)) ?? 'public';
@@ -784,6 +793,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const { keywords } = decl.modifiers;
     this.applyMemberModifiers(symbol, decl.modifiers, cls?.symbol);
     symbol.isInline = keywords.has('inline');
+    symbol.isTailrec = keywords.has('tailrec');
+    if (!file.isLibrary) this.checkFunctionModifiers(decl, symbol, cls?.symbol);
     symbol.resolvesByLambdaResult = decl.modifiers.annotations.some(
       ({ name }) => name === 'OverloadResolutionByLambdaReturnType'
     );
@@ -806,6 +817,25 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     this.functionEntries.push(entry);
     this.entryOfFunction.set(symbol, entry);
     return entry;
+  }
+
+  /** Checks the modifiers of a function and its parameters that kotlinc restricts. */
+  protected checkFunctionModifiers(decl: FunctionDecl, symbol: FunctionSymbol, owner: ClassSymbol | undefined): void {
+    if (decl.typeParameters.some((param) => param.isReified) && !symbol.isInline)
+      this.error(decl.row, 'reified な型引数は、インライン関数にだけ書けます。');
+    if (decl.params.filter((param) => param.modifiers.keywords.has('vararg')).length > 1)
+      this.error(decl.row, 'vararg の引数は1つだけ書けます。');
+    for (const param of decl.params) {
+      const { keywords } = param.modifiers;
+      const misplaced = [...keywords].find((keyword) => !PARAMETER_MODIFIERS.has(keyword));
+      if (misplaced) this.error(param.row, `引数には ${misplaced} 修飾子を付けられません。`);
+      if ((keywords.has('noinline') || keywords.has('crossinline')) && !symbol.isInline)
+        this.error(param.row, 'noinline・crossinline は、インライン関数の引数にだけ付けられます。');
+    }
+    if (symbol.isTailrec && (symbol.isOpen || owner?.isInterface))
+      this.error(decl.row, 'tailrec は、オーバーライドできない関数にだけ付けられます。');
+    const misplaced = [...decl.modifiers.keywords].find((keyword) => PROPERTY_ONLY_MODIFIERS.has(keyword));
+    if (misplaced) this.error(decl.row, `関数には ${misplaced} 修飾子を付けられません。`);
   }
 
   private checkFunctionBody(decl: FunctionDecl, symbol: FunctionSymbol, owner: ClassSymbol | undefined): void {
@@ -934,6 +964,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (decl.modifiers.keywords.has('abstract') && (decl.getter?.body || decl.setter?.body))
       this.error(decl.row, `abstract なプロパティ ${decl.name} には get() や set() の中身を書けません。`);
     if (decl.modifiers.keywords.has('external')) this.bindNativeProperty(symbol, decl, cls?.symbol, file);
+    if (!file.isLibrary) this.checkPropertyModifiers(decl, symbol, cls?.symbol, scope);
     const entry: PropertyEntry = {
       kind: 'property',
       declarationIndex: this.propertyEntries.length,
@@ -950,6 +981,50 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     this.entryOfProperty.set(symbol, entry);
     return entry;
   }
+
+  /** Checks `lateinit` and `const`, which kotlinc allows only on the properties that can hold them. */
+  private checkPropertyModifiers(
+    decl: PropertyDecl,
+    symbol: PropertySymbol,
+    owner: ClassSymbol | undefined,
+    scope: Scope
+  ): void {
+    const { keywords } = decl.modifiers;
+    if (keywords.has('lateinit')) {
+      symbol.isLateinit = true;
+      if (!decl.isVar) this.error(decl.row, 'lateinit は var にだけ付けられます。');
+      if (decl.initializer) this.error(decl.row, 'lateinit のプロパティには初期値を書けません。');
+      if (decl.getter?.body || decl.setter?.body)
+        this.error(decl.row, 'lateinit のプロパティには get・set を書けません。');
+      if (decl.delegate || decl.receiver || symbol.isAbstract)
+        this.error(decl.row, 'このプロパティには lateinit を付けられません。');
+      this.checkLateinitType(symbol.type, decl.row);
+    }
+    if (keywords.has('const')) {
+      symbol.isConst = true;
+      if (owner && !owner.isObject) this.error(decl.row, 'const val は、トップレベルか object の中にだけ書けます。');
+      if (decl.isVar) this.error(decl.row, 'const は val にだけ付けられます。');
+      if (decl.getter?.body || decl.delegate) this.error(decl.row, 'const val には get や by を書けません。');
+      if (!decl.initializer) this.error(decl.row, 'const val には初期値を書いてください。');
+      else if (!this.isConstantExpression(scope, decl.initializer))
+        this.error(decl.initializer.row, 'const val の初期値には、定数を書いてください。');
+    }
+    if (decl.typeParameters.some((param) => param.isReified))
+      this.error(decl.row, 'reified な型引数は、インライン関数にだけ書けます。');
+  }
+
+  protected checkLateinitType(type: KType | undefined, row: number): void {
+    if (!type) return this.error(row, 'lateinit のプロパティには型を書いてください。');
+    const actual = resolved(type);
+    if (actual.nullable) this.error(row, 'lateinit のプロパティの型には、null かもしれない型を使えません。');
+    if (actual.kind === 'class' && this.core.primitives.has(actual.cls))
+      this.error(row, `lateinit のプロパティの型には、${actual.cls.name} を使えません。`);
+    if (actual.kind === 'param' && isNullable(actual))
+      this.error(row, 'lateinit のプロパティの型には、null かもしれない型引数を使えません。');
+  }
+
+  /** Whether an expression is a compile-time constant: literals, `const val`s, and operators on them. */
+  protected abstract isConstantExpression(scope: Scope, expression: Expression): boolean;
 
   private bindNativeProperty(
     symbol: PropertySymbol,
@@ -1185,7 +1260,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   /** Reads and writes a property's backing field directly, as its default accessors do. */
   protected bindFieldAccessors(property: PropertySymbol): void {
     const slot = property.slot as number;
-    property.get ??= (_frame, receiver) => (receiver as KObject).fields[slot];
+    const { name } = property;
+    property.get ??= property.isLateinit
+      ? (frame, receiver) => uninitializedCheck(frame, (receiver as KObject).fields[slot], name)
+      : (_frame, receiver) => (receiver as KObject).fields[slot];
     property.set ??= (_frame, receiver, value) => {
       (receiver as KObject).fields[slot] = value;
     };
