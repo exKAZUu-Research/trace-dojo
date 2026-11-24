@@ -219,7 +219,7 @@ function replacementFor(replacement: Piece[], matched: string): string {
 /** `${x/p/r}`, `${x//p/r}`, `${x/#p/r}`, and `${x/%p/r}`, replacing the longest match at each position. */
 // code-gauge-allow functionCognitiveComplexity -- Bash's four replacement operators share the match search and the empty-match rule.
 function substitute(text: string, pattern: string, replacement: Piece[], operator: string, shell: Shell): string {
-  if (pattern === '') return text;
+  if (pattern === '' && operator !== '/#' && operator !== '/%') return text;
   const chars = charactersOf(text);
   const spend = (): void => shell.runtime.spend();
   const matches = (start: number, end: number): boolean =>
