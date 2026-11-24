@@ -174,7 +174,11 @@ class UsageCounter {
       case 'rsection': {
         return scale(add(this.expr(expr.op), this.expr(expr.right)), false);
       }
-      case 'recordUpdate':
+      case 'recordUpdate': {
+        // The new values go to the constructor's linear fields, as building a record does.
+        const values = total(expr.fields, (field) => this.expr(field.value));
+        return add(scale(this.expr(expr.expr), false), values);
+      }
       case 'projection': {
         return scale(this.expr(expr.expr), false);
       }
