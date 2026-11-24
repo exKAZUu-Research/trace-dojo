@@ -215,9 +215,9 @@ class TestReader {
 
   private parseInteger(text: string): bigint {
     const match = /^[ \t\n]*([-+]?\d+)[ \t\n]*$/.exec(text);
-    if (!match) this.fail(`${text}: integer expected`);
+    if (!match) this.fail(`${text}: integer expression expected`);
     const value = BigInt(match[1]);
-    if (value !== BigInt.asIntN(64, value)) this.fail(`${text}: integer expected`);
+    if (value !== BigInt.asIntN(64, value)) this.fail(`${text}: integer expression expected`);
     return value;
   }
 }
