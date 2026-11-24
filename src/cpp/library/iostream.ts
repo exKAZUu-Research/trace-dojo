@@ -1,10 +1,12 @@
 import { isFloatUnderflow, isSpaceByte, parseFloatPrefix } from '../../c/library/numberParsing';
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
+import { type FileHandle, FileSystemError } from '../../interpreter/programIo';
 import { byteArray, byteAt } from '../bytes';
 import { scalarValue } from '../conversions';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
+import { utf8 } from '../literals';
 import { type Frame, holdAll } from '../runtime';
 import {
   BOOL,
@@ -73,6 +75,9 @@ const STREAM_SIZES = {
   ostringstream: 264,
   istringstream: 272,
   stringstream: 280,
+  ifstream: 576,
+  ofstream: 568,
+  fstream: 584,
 } as const;
 
 type StreamKind = Exclude<keyof typeof STREAM_SIZES, 'ios_base' | 'ios'>;
@@ -85,6 +90,9 @@ const STREAM_BASES: Record<StreamKind, readonly StreamBaseKind[]> = {
   ostringstream: ['ios_base', 'ios', 'ostream'],
   istringstream: ['ios_base', 'ios', 'istream'],
   stringstream: ['ios_base', 'ios', 'ostream', 'istream'],
+  ifstream: ['ios_base', 'ios', 'istream'],
+  ofstream: ['ios_base', 'ios', 'ostream'],
+  fstream: ['ios_base', 'ios', 'ostream', 'istream'],
 };
 
 const IOS_OFFSETS: Record<StreamKind, number> = {
@@ -93,6 +101,9 @@ const IOS_OFFSETS: Record<StreamKind, number> = {
   ostringstream: 112,
   istringstream: 120,
   stringstream: 128,
+  ifstream: 424,
+  ofstream: 416,
+  fstream: 432,
 };
 
 /** A stream: standard output or error, or a string stream, with its formatting state. */
@@ -110,12 +121,61 @@ export class StreamValue extends Store {
   tied = NULL_PTR;
   private readonly bases = new Map<StreamBaseKind, Ptr>();
 
+  /** The file a file stream writes to, while it is open. */
+  file: FileHandle | undefined;
+  /** Whether a file stream has a file open. */
+  isOpen = false;
+  private readonly decoder = new TextDecoder();
+
   constructor(
     private readonly kind: StreamKind,
-    readonly target: 'stdout' | 'stderr' | 'buffer',
-    readonly mode = OPEN_MODE.in | OPEN_MODE.out
+    readonly target: 'stdout' | 'stderr' | 'buffer' | 'file',
+    public mode: number = OPEN_MODE.in | OPEN_MODE.out
   ) {
     super();
+  }
+
+  /**
+   * Opens a file as `basic_filebuf::open` does (C++20 [filebuf.members]): reading needs the file to exist, writing
+   * creates it and empties it unless the mode appends or reads too; failing sets `failbit`.
+   */
+  openFile(frame: Frame, path: string, mode: number): void {
+    const { files } = frame.runtime.io;
+    if (this.isOpen) {
+      this.state |= IO_STATE.failbit;
+      return;
+    }
+    this.mode = mode;
+    const reads = (mode & OPEN_MODE.in) !== 0;
+    const writes = (mode & (OPEN_MODE.out | OPEN_MODE.app)) !== 0;
+    try {
+      const appends = (mode & OPEN_MODE.app) !== 0;
+      const truncates = (mode & OPEN_MODE.trunc) !== 0 || (writes && !reads && !appends);
+      if (writes)
+        this.file = files.open(path, {
+          create: reads && !truncates && !appends ? 'never' : 'always',
+          truncate: truncates,
+          append: appends,
+        });
+      this.startWith(reads ? utf8(files.readFile(path)) : '');
+      this.position = 0;
+      this.isOpen = true;
+      this.state = IO_STATE.goodbit;
+    } catch (error) {
+      if (!(error instanceof FileSystemError)) throw error;
+      this.state |= IO_STATE.failbit;
+    }
+  }
+
+  closeFile(): boolean {
+    if (!this.isOpen) {
+      this.state |= IO_STATE.failbit;
+      return false;
+    }
+    this.file?.write(this.decoder.decode());
+    this.file = undefined;
+    this.isOpen = false;
+    return true;
   }
 
   override classView(location: Ptr, cls: ClassInfo): Ptr | undefined {
@@ -129,7 +189,7 @@ export class StreamValue extends Store {
       const offset =
         kind === 'ios' || kind === 'ios_base'
           ? IOS_OFFSETS[this.kind]
-          : this.kind === 'stringstream' && kind === 'ostream'
+          : (this.kind === 'stringstream' || this.kind === 'fstream') && kind === 'ostream'
             ? 16
             : 0;
       view = new StreamBaseStorage(complete, this, offset, sizeOf(classType(cls))).location(0);
@@ -192,6 +252,12 @@ export class StreamValue extends Store {
       if (end > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
       this.content.replaceBytes(frame, this.buffer.slice(0, at) + bytes + this.buffer.slice(end), bytes.length);
       this.writePosition = end;
+    } else if (this.target === 'file') {
+      if (!this.file) {
+        this.state |= IO_STATE.badbit;
+        return;
+      }
+      this.file.write(this.decoder.decode(byteArray(bytes), { stream: true }));
     } else {
       frame.runtime.write(this.target, bytes);
     }
@@ -266,6 +332,9 @@ export class Streams {
   readonly ostringstream: ClassInfo;
   readonly istringstream: ClassInfo;
   readonly stringstream: ClassInfo;
+  readonly ifstream: ClassInfo;
+  readonly ofstream: ClassInfo;
+  readonly fstream: ClassInfo;
   readonly iosBase: ClassInfo;
   readonly ios: ClassInfo;
   /** A manipulator that both `<<` and `>>` apply. */
@@ -288,6 +357,9 @@ export class Streams {
     this.ostringstream = this.streamClass('ostringstream', this.ostream, true, false);
     this.istringstream = this.streamClass('istringstream', this.istream, false, true);
     this.stringstream = this.streamClass('stringstream', this.ostream, true, true, [this.istream]);
+    this.ifstream = this.fileStreamClass('ifstream', this.istream, false, true);
+    this.ofstream = this.fileStreamClass('ofstream', this.ostream, true, false);
+    this.fstream = this.fileStreamClass('fstream', this.ostream, true, true, [this.istream]);
     this.commonMethods();
   }
 
@@ -375,6 +447,81 @@ export class Streams {
         })
       );
     }
+    if (isOutput) this.addOutputMembers(cls);
+    return cls;
+  }
+
+  /**
+   * `std::ifstream`, `std::ofstream`, or `std::fstream` of `<fstream>`, which reads and writes a file of the run's
+   * file system.
+   */
+  private fileStreamClass(
+    kind: 'ifstream' | 'ofstream' | 'fstream',
+    base: ClassInfo,
+    isOutput: boolean,
+    isInput: boolean,
+    additionalPublicBases?: readonly ClassInfo[]
+  ): ClassInfo {
+    const cls = streamInfo(kind, base, {
+      additionalPublicBases,
+      operator: (compiler, operator, operands, row) =>
+        this.operator(compiler, cls, isOutput, isInput, operator, operands, row),
+    });
+    cls.operations = {
+      copy: () => {
+        throw new Error('A stream cannot be copied');
+      },
+      assign: () => {},
+      destroy: (_frame, value) => {
+        const stream = value as StreamValue;
+        if (stream.isOpen) stream.closeFile();
+      },
+    };
+    const defaultMode = (isInput ? OPEN_MODE.in : 0) | (isOutput ? OPEN_MODE.out : 0);
+    const requiredMode = kind === 'fstream' ? 0 : defaultMode;
+    const open = (stream: StreamValue, frame: Frame, path: string, mode: unknown): void =>
+      stream.openFile(frame, path, (mode === undefined ? defaultMode : asNumber(mode)) | requiredMode);
+    const make = (frame: Frame, path?: string, mode?: unknown): StreamValue => {
+      const stream = new StreamValue(kind, 'file', defaultMode);
+      if (path !== undefined) open(stream, frame, path, mode);
+      return stream;
+    };
+    const stringRef = constRef(this.library.stringType);
+    cls.constructors = [
+      nativeConstructor(cls, [], (_args, { frame }) => make(frame)),
+      nativeConstructor(
+        cls,
+        [CONST_CHAR_PTR, UINT],
+        ([path, mode], { frame }) => make(frame, pathOf(path, frame), mode),
+        {
+          isExplicit: true,
+          optional: 1,
+        }
+      ),
+      nativeConstructor(cls, [stringRef, UINT], ([path, mode], { frame }) => make(frame, stringPath(path), mode), {
+        isExplicit: true,
+        optional: 1,
+      }),
+    ];
+    const method = bindStreamMethods(cls);
+    method(
+      'open',
+      [CONST_CHAR_PTR, UINT],
+      VOID,
+      (stream, [path, mode], frame) => open(stream, frame, pathOf(path, frame), mode),
+      { optional: 1 }
+    );
+    method(
+      'open',
+      [stringRef, UINT],
+      VOID,
+      (stream, [path, mode], frame) => open(stream, frame, stringPath(path), mode),
+      { optional: 1 }
+    );
+    method('is_open', [], BOOL, (stream) => (stream.isOpen ? 1 : 0), { isConst: true });
+    method('close', [], VOID, (stream) => {
+      stream.closeFile();
+    });
     if (isOutput) this.addOutputMembers(cls);
     return cls;
   }
@@ -705,7 +852,7 @@ export class Streams {
   /** `std::getline(stream, s)` and `std::getline(stream, s, delimiter)`. */
   getline(): ReturnType<typeof native>[] {
     const stringRef: Type = { kind: 'reference', to: this.library.stringType };
-    const input = new Set([this.istream, this.istringstream, this.stringstream]);
+    const input = new Set([this.istream, this.istringstream, this.stringstream, this.ifstream, this.fstream]);
     return [
       generic('getline', (args) => {
         const stream = args[0];
@@ -773,6 +920,19 @@ const readLine: NativeFunction = ([stream, text, delimiter], { frame }) => {
 };
 
 const self = (value: unknown): StreamValue => value as StreamValue;
+
+/** A file's path as the program wrote it in UTF-8 bytes. */
+function decodeBytes(bytes: string): string {
+  return new TextDecoder().decode(byteArray(bytes));
+}
+
+function pathOf(path: unknown, frame: Frame): string {
+  return decodeBytes(readCString(path as Ptr, frame.runtime));
+}
+
+function stringPath(path: unknown): string {
+  return decodeBytes(((path as Ptr).read() as StringValue).bytes);
+}
 
 /** A manipulator such as `std::endl` or `std::setw(3)`, which `<<` applies to a stream. */
 export class ManipulatorValue extends Store {

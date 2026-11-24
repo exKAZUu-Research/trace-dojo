@@ -1,3 +1,5 @@
+import { FileSystemError } from '../../interpreter/programIo';
+import { byteArray } from '../bytes';
 import type { ConceptInfo } from '../concepts';
 import { CppRuntimeError, ProgramExit } from '../errors';
 import type { ExpressionCompiler } from '../expressionCompiler';
@@ -32,7 +34,14 @@ import { orderingClasses, type OrderingName } from './compare';
 import { constantsOf } from './constants';
 import { containerTemplates } from './containers';
 import { exceptionClasses } from './exceptions';
-import { FLAGS, ManipulatorValue, Streams, type StreamValue } from './iostream';
+import {
+  FLAGS,
+  ManipulatorValue,
+  OPEN_MODE,
+  Streams,
+  type StreamValue,
+  StreamValue as StreamValueClass,
+} from './iostream';
 import {
   conflictsWithLibcGlobal,
   conflictsWithStdName,
@@ -47,7 +56,7 @@ import {
 import { mathFunctions } from './math';
 import { randomEngines } from './random';
 import { stringClass, stringFunctions } from './string';
-import { asNumber, CONST_CHAR_PTR, generic, native } from './support';
+import { asNumber, CONST_CHAR_PTR, generic, native, readCString } from './support';
 import { turtleClass } from './turtle';
 import { headerOf, isCtypeFunction, isVisible } from './visibility';
 
@@ -65,9 +74,6 @@ export type LibraryTemplate =
 /** The names the library declares that the interpreter leaves out, with the feature they belong to. */
 const UNSUPPORTED_STD_NAMES: Record<string, string> = {
   wcin: '標準入力（std::wcin）',
-  ifstream: 'ファイルの読み書き（std::ifstream）',
-  ofstream: 'ファイルの読み書き（std::ofstream）',
-  fstream: 'ファイルの読み書き（std::fstream）',
   nothrow: '例外を投げない割り当て（std::nothrow）',
   nothrow_t: '例外を投げない割り当て（std::nothrow_t）',
   new_handler: 'メモリ不足時のハンドラ（std::new_handler）',
@@ -152,19 +158,13 @@ const UNSUPPORTED_C_NAMES: Record<string, string> = {
   longjmp: '大域的な脱出（longjmp）',
   vscanf: '標準入力（vscanf）',
   vfscanf: '標準入力・ファイル（vfscanf）',
-  fopen: 'ファイルの読み書き（fopen）',
   freopen: 'ファイルの読み書き（freopen）',
-  fclose: 'ファイルの読み書き（fclose）',
   fread: 'ファイルの読み書き（fread）',
   fwrite: 'ファイルの読み書き（fwrite）',
-  fseek: 'ファイルの読み書き（fseek）',
-  ftell: 'ファイルの読み書き（ftell）',
   fgetpos: 'ファイルの読み書き（fgetpos）',
   fsetpos: 'ファイルの読み書き（fsetpos）',
-  rewind: 'ファイルの読み書き（rewind）',
   tmpfile: 'ファイルの読み書き（tmpfile）',
   tmpnam: 'ファイルの読み書き（tmpnam）',
-  rename: 'ファイルの名前の変更（std::rename）',
   abort: 'std::abort',
   atexit: 'std::atexit',
   quick_exit: 'std::quick_exit',
@@ -192,8 +192,17 @@ export class Library {
   /** `FILE`, which only `stdout` and `stderr` point to. */
   readonly fileClass: ClassInfo;
   private readonly files = new Map<'stdin' | 'stdout' | 'stderr', Box>();
-  private readonly removeFile = native('remove', [CONST_CHAR_PTR], INT, () => {}, {
-    uses: (row) => this.compiler.unsupported(row, 'ファイルの削除（remove）'),
+  private readonly removeFile = native('remove', [CONST_CHAR_PTR], INT, ([path], { frame }) => {
+    try {
+      frame.runtime.io.files.remove(
+        new TextDecoder().decode(byteArray(readCString(path as Ptr, frame.runtime))),
+        'file'
+      );
+      return 0;
+    } catch (error) {
+      if (error instanceof FileSystemError) return -1;
+      throw error;
+    }
   });
 
   constructor() {
@@ -221,11 +230,28 @@ export class Library {
     return this.files.get(name) as Box;
   }
 
-  /** The stream a `FILE*` reads from: standard input, or else none the program may read. */
+  /** The stream a `FILE*` reads from: standard input, or a file `fopen` opened to read. */
   inputStream(pointer: Ptr, frame: Frame): StreamValue {
     if (pointer.isNull) throw new CppRuntimeError('nullAccess');
     if (pointer.store === this.files.get('stdin')) return frame.runtime.standardInput();
-    throw new CppRuntimeError('custom', '書き込み用のストリームからは読めません。');
+    const file = pointer.store instanceof Box ? pointer.store.value : undefined;
+    if (file instanceof StreamValueClass && file.mode & OPEN_MODE.in) return file;
+    throw new CppRuntimeError('custom', '書き込み用に開いたファイルからは読めません。');
+  }
+
+  /** Writes bytes to what a `FILE*` points to: standard output or error, or a file `fopen` opened to write. */
+  writeFile(pointer: Ptr, frame: Frame, bytes: string): void {
+    if (pointer.isNull) throw new CppRuntimeError('nullAccess');
+    if (pointer.store === this.files.get('stdout') || pointer.store === this.files.get('stderr')) {
+      frame.runtime.write(this.fileTarget(pointer), bytes);
+      return;
+    }
+    const file = pointer.store instanceof Box ? pointer.store.value : undefined;
+    if (!(file instanceof StreamValueClass) || !file.isOpen)
+      throw new CppRuntimeError('custom', '閉じたファイルには書き込めません。');
+    if (!(file.mode & (OPEN_MODE.out | OPEN_MODE.app)))
+      throw new CppRuntimeError('custom', '読み込み用に開いたファイルには書き込めません。');
+    file.write(frame, bytes);
   }
 
   /** The standard stream a `FILE*` points to. */
@@ -493,6 +519,9 @@ export class Library {
       ['ostringstream', streams.ostringstream],
       ['istringstream', streams.istringstream],
       ['stringstream', streams.stringstream],
+      ['ifstream', streams.ifstream],
+      ['ofstream', streams.ofstream],
+      ['fstream', streams.fstream],
       ['ios_base', streams.iosBase],
       ['ios', streams.ios],
     ] as const) {

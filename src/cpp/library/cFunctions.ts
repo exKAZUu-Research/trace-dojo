@@ -1,4 +1,5 @@
-import { byteAt } from '../bytes';
+import { FileSystemError } from '../../interpreter/programIo';
+import { byteArray, byteAt } from '../bytes';
 import { CppRuntimeError, overflowError } from '../errors';
 import type { Frame } from '../runtime';
 import {
@@ -16,10 +17,9 @@ import {
   UINT,
   VOID,
 } from '../types';
-import type { Ptr } from '../values';
-import { NULL_PTR } from '../values';
+import { Box, NULL_PTR, Ptr } from '../values';
 import { formatPrintf, type PrintfArgument } from './formatting';
-import { IO_STATE, type StreamValue } from './iostream';
+import { IO_STATE, OPEN_MODE, StreamValue } from './iostream';
 import type { Library } from './registry';
 import { scanFormat } from './scanf';
 import {
@@ -80,7 +80,7 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
       INT,
       ([stream, format, ...args], { frame }) => {
         const text = printf(frame, format as Ptr, args);
-        frame.runtime.write(library.fileTarget(stream as Ptr), text);
+        library.writeFile(stream as Ptr, frame, text);
         return text.length;
       },
       { isVariadic: true }
@@ -121,7 +121,7 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
   add(
     native('fputs', [CONST_CHAR_PTR, streamType], INT, ([text, stream], { frame }) => {
       const bytes = readCString(text as Ptr, frame.runtime);
-      frame.runtime.write(library.fileTarget(stream as Ptr), bytes);
+      library.writeFile(stream as Ptr, frame, bytes);
       // macOS returns the number of bytes written.
       return bytes.length;
     })
@@ -129,7 +129,7 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
   for (const name of ['fputc', 'putc']) {
     add(
       native(name, [INT, streamType], INT, ([char, stream], { frame }) => {
-        frame.runtime.write(library.fileTarget(stream as Ptr), String.fromCodePoint(asNumber(char) & 0xff));
+        library.writeFile(stream as Ptr, frame, String.fromCodePoint(asNumber(char) & 0xff));
         return asNumber(char) & 0xff;
       })
     );
@@ -377,6 +377,7 @@ function addInputFunctions(library: Library, add: (fn: FunctionInfo) => void, st
     )
   );
   add(native('getchar', [], INT, (_args, { frame }) => readByte(frame.runtime.standardInput())));
+  addFileFunctions(library, add, streamType);
   for (const name of ['getc', 'fgetc'])
     add(native(name, [streamType], INT, ([file], { frame }) => readByte(library.inputStream(file as Ptr, frame))));
   add(
@@ -427,4 +428,79 @@ function readByte(stream: StreamValue): number {
     return -1;
   }
   return byteAt(stream.buffer, stream.position++);
+}
+
+/** The modes of `fopen`, as `basic_filebuf::open` takes them (C++20 [filebuf.members] Table 135). */
+const FOPEN_MODES: Record<string, number> = {
+  r: OPEN_MODE.in,
+  w: OPEN_MODE.out | OPEN_MODE.trunc,
+  a: OPEN_MODE.app,
+  'r+': OPEN_MODE.in | OPEN_MODE.out,
+  'w+': OPEN_MODE.in | OPEN_MODE.out | OPEN_MODE.trunc,
+  'a+': OPEN_MODE.in | OPEN_MODE.app,
+};
+
+/** `fopen`, `fclose`, and the functions that ask where a file stands, over the run's file system. */
+function addFileFunctions(library: Library, add: (fn: FunctionInfo) => void, streamType: Type): void {
+  add(
+    native('fopen', [CONST_CHAR_PTR, CONST_CHAR_PTR], streamType, ([path, mode], { frame }) => {
+      const flags = FOPEN_MODES[textOf(mode, frame).replaceAll('b', '')];
+      if (flags === undefined) return NULL_PTR;
+      const stream = new StreamValue('fstream', 'file', flags);
+      stream.openFile(frame, textOf(path, frame), flags);
+      return stream.isOpen ? new Ptr(new Box(stream), 0) : NULL_PTR;
+    })
+  );
+  add(native('fclose', [streamType], INT, ([file]) => (fileOf(file).closeFile() ? 0 : -1)));
+  add(
+    native('feof', [streamType], INT, ([file], { frame }) =>
+      library.inputStream(file as Ptr, frame).state & IO_STATE.eofbit ? 1 : 0
+    )
+  );
+  add(native('ferror', [streamType], INT, () => 0));
+  add(
+    native('rewind', [streamType], VOID, ([file], { frame }) => {
+      const stream = library.inputStream(file as Ptr, frame);
+      stream.position = 0;
+      stream.state = IO_STATE.goodbit;
+      return;
+    })
+  );
+  add(
+    native('ftell', [streamType], LONG, ([file], { frame }) => BigInt(library.inputStream(file as Ptr, frame).position))
+  );
+  add(
+    native('fseek', [streamType, LONG, INT], INT, ([file, offset, whence], { frame }) => {
+      const stream = library.inputStream(file as Ptr, frame);
+      const base = asNumber(whence) === 0 ? 0 : asNumber(whence) === 1 ? stream.position : stream.buffer.length;
+      const target = base + Number(offset);
+      if (target < 0) return -1;
+      stream.position = target;
+      stream.state &= ~IO_STATE.eofbit;
+      return 0;
+    })
+  );
+  add(
+    native('rename', [CONST_CHAR_PTR, CONST_CHAR_PTR], INT, ([from, to], { frame }) => {
+      try {
+        frame.runtime.io.files.rename(textOf(from, frame), textOf(to, frame));
+        return 0;
+      } catch (error) {
+        if (error instanceof FileSystemError) return -1;
+        throw error;
+      }
+    })
+  );
+}
+
+/** A C string the program wrote in UTF-8 bytes, such as a file's path. */
+function textOf(pointer: unknown, frame: Frame): string {
+  return new TextDecoder().decode(byteArray(readCString(pointer as Ptr, frame.runtime)));
+}
+
+/** The stream of a file `fopen` opened. */
+function fileOf(pointer: unknown): StreamValue {
+  const file = pointer instanceof Ptr && pointer.store instanceof Box ? pointer.store.value : undefined;
+  if (!(file instanceof StreamValue)) throw new CppRuntimeError('custom', 'fopen で開いたファイルではありません。');
+  return file;
 }

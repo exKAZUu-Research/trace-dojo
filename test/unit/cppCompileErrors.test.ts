@@ -552,18 +552,6 @@ int main() { cout << ${name}; }`;
   }
 );
 
-test.each([
-  ['cstdio', 'FILE* file = fopen("example.txt", "r");'],
-  ['cstdio', 'std::remove("example.txt");'],
-])('rejects unavailable C file access with an explicit diagnostic: %s %s', (header, body) => {
-  const program = `#include <${header}>
-int main() { ${body} }`;
-  expect(executeProgram('cpp', program)).toMatchObject({
-    kind: 'compileError',
-    diagnostics: [{ row: 1, message: expect.stringContaining('この採点環境では使えません。') }],
-  });
-});
-
 test('copy-list initialization rejects an explicit forwarding pair constructor', () => {
   const program = `#include <utility>
 #include <vector>
