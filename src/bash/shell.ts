@@ -1194,8 +1194,9 @@ export class Shell implements ArithmeticHost {
   /** Applies the integer and case attributes to a value about to be stored, or `undefined` after an error. */
   private convertForAttributes(variable: Variable, value: string, base: string, append: boolean): string | undefined {
     if (!variable.attributes.has('i')) return applyCaseAttributes(variable, base + value);
-    const number = this.evaluateFatalReadonly(value);
-    const total = append ? this.evaluateFatalReadonly(base || '0') + number : number;
+    const total = append
+      ? this.evaluateFatalReadonly(base || '0') + this.evaluateFatalReadonly(value)
+      : this.evaluateFatalReadonly(value);
     return applyCaseAttributes(variable, String(BigInt.asIntN(64, total)));
   }
 
