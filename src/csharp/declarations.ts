@@ -1551,6 +1551,13 @@ export class DeclarationBinder extends BinderBase {
         return;
       }
       property.overridden = candidate;
+      const overriddenSetter = this.accessorOf(candidate, 'setter');
+      if (property.setter && overriddenSetter && property.isInitOnly !== overriddenSetter.property?.isInitOnly)
+        this.error(
+          property.row,
+          'CS8853',
+          `'${displayTypeSymbol(symbol)}.${property.name}' は、オーバーライドされたメンバー '${displayTypeSymbol(current.symbol, current.args)}.${candidate.name}' の init 専用と一致する必要があります`
+        );
       for (const [kind, keyword, code] of [
         ['getter', 'get', 'CS0545'],
         ['setter', 'set', 'CS0546'],
@@ -1698,8 +1705,16 @@ export class DeclarationBinder extends BinderBase {
       ] as const) {
         if (!member[kind]) continue;
         const accessor = candidate[kind];
+        const candidateName = `${displayTypeSymbol(current.symbol, current.args)}.${candidate.isIndexer ? 'this[]' : candidate.name}`;
         if (!accessor) missing(`${memberName}.${keyword}`);
-        else if (accessor.access !== 'public')
+        else if (kind === 'setter' && candidate.isInitOnly !== member.isInitOnly) {
+          const [wanted, given] = member.isInitOnly ? ['init', 'set'] : ['set', 'init'];
+          this.error(
+            symbol.row,
+            'CS8854',
+            `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${memberName}.${wanted}' を実装しません。'${candidateName}.${given}' は '${memberName}.${wanted}' を実装できません。`
+          );
+        } else if (accessor.access !== 'public')
           this.error(
             symbol.row,
             'CS0277',
