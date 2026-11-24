@@ -26,7 +26,11 @@ export type DeclarationArgument =
       expandedElements?: CompoundElement[];
       committedCompound?: boolean;
       failedCompound?: boolean;
-      committedTarget?: { variable: Variable; priorKind: VariableValue['kind'] | undefined };
+      committedTarget?: {
+        variable: Variable;
+        priorKind: VariableValue['kind'] | undefined;
+        localElementLink?: boolean;
+      };
     });
 
 const USAGES: Record<string, string> = {
@@ -174,12 +178,15 @@ function commitCompoundDeclaration(
   rawOptions: Options,
   options: Options,
   rawItems: CompoundElement[]
-): { variable: Variable; priorKind: VariableValue['kind'] | undefined } | 'failed' | undefined {
+):
+  | { variable: Variable; priorKind: VariableValue['kind'] | undefined; localElementLink?: boolean }
+  | 'failed'
+  | undefined {
   if (!hasValidCompoundContext(shell, builtin, rawOptions)) return undefined;
   if (isLocalDeclaration(shell, builtin, rawOptions) && rawOptions.attemptedSet.has('n')) return undefined;
   if (options.set.has('n')) return undefined;
   const phase1Options = buildPhase1CompoundOptions(options);
-  const { localScope, targetName, referencedSubscript, fromNameref } = resolvePhase1CompoundTarget(
+  const { localScope, targetName, referencedSubscript, fromNameref, localElementLink } = resolvePhase1CompoundTarget(
     shell,
     builtin,
     arg,
@@ -203,7 +210,7 @@ function commitCompoundDeclaration(
   const ok = shell.assignCompoundTo(storeVariable, elements, arg.append, arg.name);
   if (error) shell.discard(error);
   if (!ok) throw new DiscardSignal();
-  return { variable: storeVariable, priorKind };
+  return { variable: storeVariable, priorKind, ...(localElementLink ? { localElementLink: true } : {}) };
 }
 
 function rejectCompoundArrayMember(
@@ -261,6 +268,7 @@ function resolvePhase1CompoundTarget(
   targetName: string;
   referencedSubscript?: string;
   fromNameref?: boolean;
+  localElementLink?: boolean;
 } {
   const { set, unset } = phase1Options;
   const isLocal = isLocalDeclaration(shell, builtin, phase1Options);
@@ -268,7 +276,7 @@ function resolvePhase1CompoundTarget(
   const localScope = isLocal ? scopes[functionScopes.at(-1) as number] : undefined;
   if (localScope && rawUnsetN && !arg.subscript && localScope.get(arg.name)?.attributes.has('n')) {
     const localElementTarget = resolveLocalElementNamerefTarget(shell, arg.name);
-    if (localElementTarget !== undefined) return { localScope, targetName: localElementTarget };
+    if (localElementTarget !== undefined) return { localScope, targetName: localElementTarget, localElementLink: true };
   }
   if (!localScope && set.has('g') && !arg.subscript) {
     const firstHop = resolveGlobalNamerefFirstHop(scopes[0].get(arg.name));
@@ -497,13 +505,28 @@ function declareOperand(
   if (typeof operand !== 'string' && operand.failedCompound) return false;
   if (typeof operand !== 'string' && operand.committedTarget) {
     notifyIfArrayMaterialized(true, operand.committedTarget.variable, operand.committedTarget.priorKind, onMaterialize);
-    const ok = declareOne(shell, builtin, operand.name, options, isLocal);
-    if (ok && isLocal && options.unset.has('n')) {
-      shell.state.scopes[shell.state.functionScopes.at(-1) as number].get(operand.name)?.attributes.delete('n');
-    }
-    return ok;
+    return operand.committedTarget.localElementLink
+      ? completeLocalElementLinkCompound(shell, builtin, operand.name, options, onMaterialize)
+      : declareOne(shell, builtin, operand.name, options, isLocal);
   }
   return declareOne(shell, builtin, operand, options, isLocal, onMaterialize);
+}
+
+function completeLocalElementLinkCompound(
+  shell: Shell,
+  builtin: string,
+  name: string,
+  options: Options,
+  onMaterialize: (() => void) | undefined
+): boolean {
+  const localVar = shell.state.scopes[shell.state.functionScopes.at(-1) as number].get(name);
+  if (!localVar) return false;
+  if (checkReadonlyConflict(shell, builtin, name, localVar, options, false)) return false;
+  const priorKind = localVar.value?.kind;
+  if (!applyAttributes(shell, builtin, localVar, options, true, false, false, false)) return false;
+  if (options.set.has('r')) localVar.attributes.add('r');
+  notifyIfArrayMaterialized(true, localVar, priorKind, onMaterialize);
+  return true;
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Bash's declaration of one operand: its name, a dynamic variable, its attributes, and its value.
@@ -816,7 +839,7 @@ function rejectUnsetArrayThroughNameref(
 ): boolean {
   if (!unset.has('n') || !variable.attributes.has('n') || (!unset.has('a') && !unset.has('A'))) return false;
   const firstHop = variable.value?.kind === 'scalar' ? variable.value.value : '';
-  if (firstHop === '') return false;
+  if (firstHop === '' || firstHop.includes('[')) return false;
   const { targetName, referencedSubscript } = resolveVisibleReferentTarget(shell, firstHop);
   if (referencedSubscript !== undefined) return false;
   const referent = shell.findVariable(targetName, false);
@@ -1461,12 +1484,13 @@ function applyAttributes(
   shell: Shell,
   builtin: string,
   variable: Variable,
-  { set, unset }: Options,
+  options: Options,
   assigns: boolean,
   impliesIndexed: boolean,
   deferUnsetN = false,
   assignsCompound = false
 ): boolean {
+  const { set, unset } = options;
   const error = conversionError(variable, set, unset, impliesIndexed || assignsCompound);
   if (error) {
     shell.reportError(`${builtin}: ${variable.name}: ${error}`);
@@ -1475,8 +1499,8 @@ function applyAttributes(
   const becomesIndexed =
     set.has('a') ||
     (impliesIndexed && !set.has('A') && !variable.attributes.has('A') && variable.value?.kind !== 'associative');
-  if ((set.has('A') || becomesIndexed) && variable.attributes.delete('n') && !set.has('a') && !set.has('A')) {
-    variable.value = { kind: 'indexed', elements: new Map() };
+  if ((set.has('A') || becomesIndexed) && variable.attributes.delete('n') && !options.suppressedNameref) {
+    variable.value = undefined;
   }
   for (const attribute of ['i', 'l', 'u', 'c', 'n', 'x', 't'] as Attribute[]) {
     if (set.has(attribute)) variable.attributes.add(attribute);
