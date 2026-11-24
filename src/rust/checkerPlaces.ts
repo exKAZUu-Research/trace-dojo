@@ -57,6 +57,8 @@ function placeRoot(
     case 'path': {
       const res = c.annotations.paths.get(place);
       if (res?.kind === 'local' || res?.kind === 'capture') return { kind: 'local', local: res.local };
+      if (res?.kind === 'const' && res.def.ast.isStatic)
+        return res.def.ast.isMutable ? { kind: 'mutRef' } : { kind: 'sharedRef' };
       return { kind: 'temporary' };
     }
     case 'field': {
@@ -75,6 +77,8 @@ function placeRoot(
     case 'unary': {
       if (place.op !== '*') return { kind: 'temporary' };
       const type = normalize(shallow(place.operand.ty ?? UNIT));
+      if (type.kind === 'adt' && type.def.builtin === 'MutPtr') return { kind: 'mutRef' };
+      if (type.kind === 'adt' && type.def.builtin === 'ConstPtr') return { kind: 'sharedRef' };
       const deref =
         type.kind === 'ref' ? (type.mutable ? 'mutRef' : 'ref') : (derefOnce(c.program, type)?.kind ?? 'own');
       return throughDerefs(c, place.operand, [deref]);
@@ -107,6 +111,7 @@ function throughDerefs(c: Checker, operand: Expr, derefs: readonly DerefKind[]):
 export function isPlaceExpr(c: Checker, expr: Expr): boolean {
   if (expr.kind === 'path') {
     const res = c.annotations.paths.get(expr);
+    if (res?.kind === 'const' && res.def.ast.isStatic) return true;
     return res?.kind === 'local' || res?.kind === 'capture' || res?.kind === 'discard';
   }
   if (expr.kind === 'field' || expr.kind === 'index') return true;
@@ -132,6 +137,7 @@ export function checkField(c: Checker, expr: Extract<Expr, { kind: 'field' }>): 
       if (index < 0) continue;
       const field = variant.fields[index];
       checkFieldVisible(c, t.def, field, expr.nameSpan);
+      if (t.def.isUnion && !c.body.writingUnionField) c.requireUnsafe(expr.span, '共用体のフィールドを読むこと');
       const subst = new Map(t.def.params.map((param, i) => [param, t.args[i]]));
       c.annotations.fields.set(expr, {
         derefs: step.derefs,

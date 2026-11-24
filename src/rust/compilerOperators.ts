@@ -2,7 +2,7 @@ import type { Expr, Span } from './ast';
 import { concatStrings, sizeTable } from './capacity';
 import type { Compiler, Eval } from './compiler';
 import { derefAll, evaluateValues, isStringType, stringish, stripRefs, withEvaluatedValues } from './compilerCommon';
-import { userDerefCall } from './compilerPlaces';
+import { pointee, userDerefCall } from './compilerPlaces';
 import { floatNumber, negateFloat } from './floatBits';
 import { normalize } from './infer';
 import { derefOnce } from './methods';
@@ -11,7 +11,7 @@ import { cloneValue, floatArith, intArith, overflow, testPartialOrder, valuesEqu
 import type { Frame } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { type IntName, resolve, shallow, type Type } from './types';
-import { DONE, type Place, SetValue, textOf, UNIT_VALUE } from './values';
+import { DONE, type Place, type RawPtr, SetValue, textOf, UNIT_VALUE } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
 
@@ -49,6 +49,12 @@ export function compileUnary(c: Compiler, expr: ExprOf<'unary'>): Eval {
   const operand = expr.op === '*' ? c.read(expr.operand) : c.value(expr.operand);
   if (expr.op === '*') {
     const operandType = normalize(shallow(expr.operand.ty!));
+    if (
+      operandType.kind === 'adt' &&
+      (operandType.def.builtin === 'ConstPtr' || operandType.def.builtin === 'MutPtr')
+    ) {
+      return (frame) => pointee(derefAll(operand(frame)) as RawPtr, expr.span).get();
+    }
     if (derefOnce(c.program, operandType)?.kind === 'user') {
       const call = userDerefCall(c, operandType, false, expr.span);
       return (frame) => call(frame, derefAll(operand(frame)));

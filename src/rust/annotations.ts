@@ -78,7 +78,9 @@ export type Coercion =
   /** A value becomes a trait object of the type it has. */
   | { kind: 'dyn'; type: Type; mutable: boolean; trait: TraitRef }
   /** A collection becomes an iterator, as `IntoIterator` makes it. */
-  | { kind: 'intoIter'; from: Type };
+  | { kind: 'intoIter'; from: Type }
+  /** A reference becomes a raw pointer to what it refers to. */
+  | { kind: 'rawPtr' };
 
 export interface IndexRes {
   /** `user`: a type with an impl of `Index` (and `IndexMut`) that the program writes. */

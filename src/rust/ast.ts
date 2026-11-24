@@ -72,6 +72,8 @@ export type BoundAst =
 export interface FnItem {
   kind: 'fn';
   isConst?: boolean;
+  /** An `unsafe fn`, which only unsafe code may call. */
+  isUnsafe?: boolean;
   name: string;
   span: Span;
   vis: Visibility;
@@ -111,6 +113,8 @@ export interface StructItem {
   shape: 'named' | 'tuple' | 'unit';
   fields: FieldAst[];
   attrs: Attributes;
+  /** A `union`, whose fields share one place. */
+  isUnion?: boolean;
 }
 
 export interface FieldAst {
@@ -175,6 +179,8 @@ export interface ConstItem {
   value: Expr | undefined;
   /** A `static`, which is one value that every use refers to, rather than a value each use copies. */
   isStatic?: boolean;
+  /** A `static mut`, which only unsafe code may read or write. */
+  isMutable?: boolean;
 }
 
 export interface ModItem {
@@ -207,6 +213,8 @@ export type TypeAst =
   | { kind: 'dyn'; bounds: BoundAst[]; lifetime?: string; span: Span }
   | { kind: 'impl'; bounds: BoundAst[]; span: Span }
   | { kind: 'fnBound'; bound: BoundAst & { kind: 'fn' }; span: Span }
+  /** A raw pointer type (`*const T`, `*mut T`). */
+  | { kind: 'pointer'; mutable: boolean; target: TypeAst; span: Span }
   /** A function pointer type (`fn(i32) -> i32`). */
   | { kind: 'fnPointer'; params: TypeAst[]; ret: TypeAst | undefined; span: Span };
 
@@ -242,6 +250,8 @@ export interface Block {
   ty?: Type;
   /** A `const { ... }` block, whose value is a constant. */
   isConst?: boolean;
+  /** An `unsafe { ... }` block, in which unsafe operations may happen. */
+  isUnsafe?: boolean;
 }
 
 export type Stmt =
@@ -298,7 +308,8 @@ export type Expr = ExprBase &
     | { kind: 'binary'; op: BinaryOp; left: Expr; right: Expr; opSpan: Span }
     | { kind: 'assign'; target: Expr; value: Expr }
     | { kind: 'compoundAssign'; op: ArithOp; target: Expr; value: Expr }
-    | { kind: 'ref'; mutable: boolean; operand: Expr }
+    /** `raw`: `&raw const x` or `&raw mut x`, which makes a raw pointer. */
+    | { kind: 'ref'; mutable: boolean; operand: Expr; raw?: boolean }
     | { kind: 'cast'; operand: Expr; type: TypeAst }
     | { kind: 'call'; callee: Expr; args: Expr[] }
     | {

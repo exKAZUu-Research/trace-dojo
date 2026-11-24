@@ -17,7 +17,6 @@ import {
 const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
   await_expression: '.await',
   async_block: 'async ブロック',
-  unsafe_block: 'unsafe ブロック',
   attribute_item: '式に付けた属性',
   attributed_expression: '式に付けた属性',
 };
@@ -194,6 +193,13 @@ export abstract class ExpressionConverter extends MacroConverter {
       case 'struct_expression': {
         return this.structExpr(node);
       }
+      case 'unsafe_block': {
+        return {
+          ...this.block(node.namedChildren.find((child) => child.type === 'block') as Node),
+          isUnsafe: true,
+          span,
+        };
+      }
       case 'const_block': {
         return { ...this.block(this.field(node, 'body')), isConst: true, span };
       }
@@ -365,8 +371,9 @@ export abstract class ExpressionConverter extends MacroConverter {
   }
 
   private referenceExpr(node: Node, span: Span): Expr {
-    if (/^&\s*raw\b/.test(node.text)) unavailable(span, '&raw');
+    const raw = node.children.some((child) => child.type === 'raw');
     const mutable = node.namedChildren.some((child) => child.type === 'mutable_specifier');
+    if (raw) return { kind: 'ref', mutable, operand: this.expr(this.field(node, 'value')), span, raw };
     const ref: Expr = { kind: 'ref', mutable, operand: this.expr(this.field(node, 'value')), span };
     // `&&x` is one token, which stands for two borrows.
     if (node.children[0]?.type === '&&') return { kind: 'ref', mutable: false, operand: ref, span };

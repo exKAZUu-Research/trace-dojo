@@ -1455,6 +1455,8 @@ function refTarget(type: Type | undefined): Type | undefined {
   return t?.kind === 'ref' ? t.target : undefined;
 }
 
+/** Whether `*` of a value of the type goes through a pointer: a reference, a raw pointer, or a `Deref` impl. */
 function isReference(type: Type | undefined): boolean {
-  return type !== undefined && normalize(shallow(type)).kind === 'ref';
+  const t = type && normalize(shallow(type));
+  return t?.kind === 'ref' || (t?.kind === 'adt' && t.def.builtin !== 'Box');
 }

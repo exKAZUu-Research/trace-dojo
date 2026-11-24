@@ -25,6 +25,7 @@ import {
   ElementPlace,
   type IterValue,
   RangeValue,
+  RawPtr,
   sliceBase,
   sliceGet,
   sliceItems,
@@ -137,7 +138,15 @@ function binarySearch(slice: Value, compare: (item: Value) => number): { found: 
   return { found: false, index: base + (order < 0 ? 1 : 0) };
 }
 
+/** A pointer to a slice's first element, which pointer arithmetic moves along the elements. */
+function elementPointer(slice: Value): RawPtr {
+  const { base, start } = sliceBase(slice);
+  return new RawPtr(new ElementPlace(base, start));
+}
+
 const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
+  as_ptr: ([self]) => elementPointer(deref(self)),
+  as_mut_ptr: ([self]) => elementPointer(deref(self)),
   len: ([self]) => BigInt(sliceLength(deref(self))),
   is_empty: ([self]) => sliceLength(deref(self)) === 0,
   first: ([self], ctx) => {

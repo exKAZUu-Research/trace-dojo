@@ -285,6 +285,8 @@ pub mod slice {
     pub type Windows<'a, T> = IterImpl<'a, &'a [T], WindowsShape>;
     pub type Chunks<'a, T> = IterImpl<'a, &'a [T], ChunksShape>;
     impl<T> [T] {
+        pub fn as_ptr(&self) -> super::ptr::ConstPtr<T>;
+        pub fn as_mut_ptr(&mut self) -> super::ptr::MutPtr<T>;
         pub const fn len(&self) -> usize;
         pub const fn is_empty(&self) -> bool;
         pub fn first(&self) -> Option<&T>;
@@ -890,6 +892,31 @@ pub mod result {
     }
     impl<T, E> Result<Option<T>, E> {
         pub fn transpose(self) -> Option<Result<T, E>>;
+    }
+}
+pub mod ptr {
+    pub struct ConstPtr<T>;
+    pub struct MutPtr<T>;
+    pub fn null<T>() -> ConstPtr<T>;
+    pub fn null_mut<T>() -> MutPtr<T>;
+    pub fn eq<T>(a: ConstPtr<T>, b: ConstPtr<T>) -> bool;
+    impl<T> ConstPtr<T> {
+        pub unsafe fn add(self, count: usize) -> ConstPtr<T>;
+        pub unsafe fn sub(self, count: usize) -> ConstPtr<T>;
+        pub unsafe fn offset(self, count: isize) -> ConstPtr<T>;
+        pub fn is_null(self) -> bool;
+        pub unsafe fn read(self) -> T where T: Copy;
+        pub unsafe fn as_ref(self) -> Option<&T>;
+    }
+    impl<T> MutPtr<T> {
+        pub unsafe fn add(self, count: usize) -> MutPtr<T>;
+        pub unsafe fn sub(self, count: usize) -> MutPtr<T>;
+        pub unsafe fn offset(self, count: isize) -> MutPtr<T>;
+        pub fn is_null(self) -> bool;
+        pub unsafe fn read(self) -> T where T: Copy;
+        pub unsafe fn write(self, value: T);
+        pub unsafe fn as_ref(self) -> Option<&T>;
+        pub unsafe fn as_mut(self) -> Option<&mut T>;
     }
 }
 pub mod rc {

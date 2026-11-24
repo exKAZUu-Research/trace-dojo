@@ -51,6 +51,8 @@ const CLONE_CONTAINERS = new Set([
 ]);
 
 const DEBUG_TYPES = new Set([
+  'ConstPtr',
+  'MutPtr',
   'Cell',
   'Rc',
   'Weak',
@@ -313,6 +315,7 @@ function copy(goal: Goal): Answer {
 /** What `Copy` and `Clone` share: primitives, shared references, and what is made of copies. */
 function plainCopy({ t, all }: Goal): Answer | undefined {
   if (isPrimitive(t) || t.kind === 'fn' || t.kind === 'never') return 'yes';
+  if (t.kind === 'adt' && (t.def.builtin === 'ConstPtr' || t.def.builtin === 'MutPtr')) return 'yes';
   if (t.kind === 'ref') return t.mutable ? 'no' : 'yes';
   if (t.kind === 'tuple') return all(t.elems);
   if (t.kind === 'array') return all([t.elem]);
@@ -508,7 +511,7 @@ function comparisonAdt(goal: Goal, t: AdtType): Answer {
   if (d) return d;
   const builtin = t.def.builtin as string;
   const equality = name === 'PartialEq' || name === 'Eq';
-  if (builtin === 'String' || builtin === 'Ordering') return 'yes';
+  if (builtin === 'String' || builtin === 'Ordering' || builtin === 'ConstPtr' || builtin === 'MutPtr') return 'yes';
   if (ERROR_TYPES.has(builtin)) return equality ? 'yes' : 'no';
   if (builtin === 'HashMap' || builtin === 'HashSet') {
     if (!equality) return 'no';

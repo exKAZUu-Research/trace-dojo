@@ -161,7 +161,14 @@ function controlFlowExpr(
 ): Type {
   switch (expr.kind) {
     case 'block': {
-      return expr.isConst ? constBlock(c, expr, expected) : c.checkBlock(expr, expected);
+      if (expr.isConst) return constBlock(c, expr, expected);
+      if (!expr.isUnsafe) return c.checkBlock(expr, expected);
+      c.body.unsafeDepth++;
+      try {
+        return c.checkBlock(expr, expected);
+      } finally {
+        c.body.unsafeDepth--;
+      }
     }
     case 'if': {
       return ifExpr(c, expr, expected);

@@ -73,6 +73,9 @@ export class Converter extends ExpressionConverter {
       case 'struct_item': {
         return this.structItem(node, attrs ?? { derives: [] });
       }
+      case 'union_item': {
+        return { ...this.structItem(node, attrs ?? { derives: [] }), isUnion: true };
+      }
       case 'enum_item': {
         return this.enumItem(node, attrs ?? { derives: [] });
       }
@@ -86,9 +89,6 @@ export class Converter extends ExpressionConverter {
         return this.constItem(node, this.isStd);
       }
       case 'static_item': {
-        if (node.namedChildren.some((child) => child.type === 'mutable_specifier')) {
-          return unavailable(span, 'static mut');
-        }
         return {
           kind: 'const',
           name: this.identifier(this.field(node, 'name')),
@@ -97,6 +97,7 @@ export class Converter extends ExpressionConverter {
           type: this.type(this.field(node, 'type')),
           value: this.expr(this.field(node, 'value')),
           isStatic: true,
+          isMutable: node.namedChildren.some((child) => child.type === 'mutable_specifier'),
         };
       }
       case 'type_item': {
@@ -179,7 +180,6 @@ export class Converter extends ExpressionConverter {
     if (Object.hasOwn(unstable, node.type))
       syntaxError(span, `${unstable[node.type]}は、不安定な機能なので使えません（E0658）。`);
     const names: Record<string, string> = {
-      union_item: '共用体（union）',
       extern_crate_declaration: '外部のクレート（extern crate）',
       foreign_mod_item: '外部の関数の宣言（extern ブロック）',
       inner_attribute_item: `属性（${node.text.split('\n')[0]}）`,
@@ -194,7 +194,8 @@ export class Converter extends ExpressionConverter {
     const attrs = this.attributes.read(attributes);
     if (!attrs || !target) return undefined;
     const declaration = target;
-    if (attrs.derives.length > 0 && declaration.type !== 'struct_item' && declaration.type !== 'enum_item') {
+    const derivable = ['struct_item', 'enum_item', 'union_item'];
+    if (attrs.derives.length > 0 && !derivable.includes(declaration.type)) {
       syntaxError(this.span(node), '#[derive] は、構造体と列挙型にだけ付けられます。');
     }
     if (attrs.isDefault) syntaxError(this.span(node), '#[default] は、列挙型の選択肢にだけ付けられます。');
@@ -225,13 +226,16 @@ export class Converter extends ExpressionConverter {
   private fnItem(node: Node, allowMissingBody = false, attrs?: Attributes): FnItem {
     const span = this.span(node);
     const modifiers = node.namedChildren.find((child) => child.type === 'function_modifiers');
-    const isConst = modifiers?.text.trim() === 'const';
-    if (modifiers && !isConst) {
+    const words = modifiers?.text.split(/\s+/) ?? [];
+    const isConst = words.includes('const');
+    const isUnsafe = words.includes('unsafe');
+    if (modifiers) {
       const text = modifiers.text;
-      if (text.includes('async')) unavailable(span, 'async fn');
-      if (text.includes('unsafe')) unavailable(span, 'unsafe fn');
-      if (text.includes('extern')) unavailable(span, 'extern fn');
-      unavailable(span, `関数の修飾子（${text}）`);
+      if (words.includes('async')) unavailable(span, 'async fn');
+      if (words.includes('extern')) unavailable(span, '外部から呼べる関数（extern fn）');
+      if (words.some((word) => word && word !== 'const' && word !== 'unsafe')) {
+        unavailable(span, `関数の修飾子（${text}）`);
+      }
     }
     const parametersNode = this.field(node, 'parameters');
     let selfParam: SelfParam | undefined;
@@ -255,6 +259,7 @@ export class Converter extends ExpressionConverter {
     return {
       kind: 'fn',
       isConst,
+      isUnsafe,
       name: this.identifier(this.field(node, 'name')),
       span,
       vis: this.visibility(node),
@@ -488,7 +493,6 @@ export class Converter extends ExpressionConverter {
 
   private traitItem(node: Node): TraitItem {
     const span = this.span(node);
-    if (node.text.startsWith('unsafe')) unavailable(span, 'unsafe trait');
     const methods: FnItem[] = [];
     const assocTypes: TraitItem['assocTypes'] = [];
     const consts: TraitItem['consts'] = [];
@@ -532,7 +536,6 @@ export class Converter extends ExpressionConverter {
   // code-gauge-allow functionNcss -- One case per kind of syntax node.
   private implItem(node: Node): ImplItem {
     const span = this.span(node);
-    if (node.text.startsWith('unsafe')) unavailable(span, 'unsafe impl');
     if (/^impl\b[^{]*!/.test(node.text))
       syntaxError(span, '否定の実装（impl !Trait）は、不安定な機能なので使えません（E0658）。');
     const trait = node.childForFieldName('trait');
@@ -712,7 +715,8 @@ export class Converter extends ExpressionConverter {
         return syntaxError(span, '型 ! は、関数の戻り値の型にだけ書けます（ほかの場所では不安定な機能です。E0658）。');
       }
       case 'pointer_type': {
-        return unavailable(span, '生ポインタ（*const T・*mut T）');
+        const mutable = node.namedChildren.some((child) => child.type === 'mutable_specifier');
+        return { kind: 'pointer', mutable, target: this.type(this.field(node, 'type')), span };
       }
       case 'bounded_type': {
         return this.boundedType(node, span);

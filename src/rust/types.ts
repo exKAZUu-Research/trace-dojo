@@ -170,7 +170,10 @@ export type BuiltinAdt =
   | 'RefCell'
   | 'Ref'
   | 'RefMut'
-  | 'Cell';
+  | 'Cell'
+  /** `*const T` and `*mut T`. */
+  | 'ConstPtr'
+  | 'MutPtr';
 
 export interface AdtDef {
   name: string;
@@ -191,6 +194,8 @@ export interface AdtDef {
   module?: unknown;
   /** For an enum with `#[derive(Default)]`, the index of its `#[default]` variant. */
   defaultVariant?: number;
+  /** A `union`, whose fields share one place. */
+  isUnion?: boolean;
   /** For a `Projection`, the trait and the name of the associated type. */
   projection?: { trait: TraitDef; name: string };
 }
@@ -717,6 +722,9 @@ export function typeToString(type: Type): string {
         const trait =
           args.length === 0 ? t.def.projection.trait.name : traitRefToString({ trait: t.def.projection.trait, args });
         return `<${typeToString(self)} as ${trait}>::${t.def.projection.name}`;
+      }
+      if (t.def.builtin === 'ConstPtr' || t.def.builtin === 'MutPtr') {
+        return `*${t.def.builtin === 'MutPtr' ? 'mut' : 'const'} ${typeToString(t.args[0])}`;
       }
       if (t.def.builtin === 'Iter') {
         // An iterator is the std type its shape stands for.

@@ -388,6 +388,7 @@ export class ItemCollector {
       span: item.span,
       lifetimeParams: item.generics.lifetimes,
       module,
+      isUnion: item.isUnion,
     };
     const builtin = module.isStd ? builtinStruct(module, item.name) : undefined;
     if (builtin) {
@@ -967,6 +968,8 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   Ref: 'Ref',
   RefMut: 'RefMut',
   Cell: 'Cell',
+  ConstPtr: 'ConstPtr',
+  MutPtr: 'MutPtr',
 };
 
 const BUILTIN_ENUMS: Record<string, BuiltinAdt> = {
@@ -1468,7 +1471,6 @@ function checkUnavailableStd(segments: string[], span: Span): void {
     future: 'async/await（std::future）',
     task: 'async/await（std::task）',
     any: 'std::any',
-    ptr: '生ポインタ（std::ptr）',
     ffi: '外部の関数との連携（std::ffi）',
     os: 'OS の機能（std::os）',
     path: 'ファイルのパス（std::path）',
@@ -1590,6 +1592,9 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
         return type;
       }
       return compileError(ast.span, 'impl Trait は、関数の引数と戻り値の型にだけ書けます。');
+    }
+    case 'pointer': {
+      return scope.module.program.builtinType(ast.mutable ? 'MutPtr' : 'ConstPtr', [lowerType(ast.target, scope)]);
     }
     case 'fnPointer': {
       return {

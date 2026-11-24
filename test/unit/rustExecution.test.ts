@@ -8895,6 +8895,33 @@ fn main() {
   });
 });
 
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('unsafe code reaches raw pointers, mutable statics, unsafe functions, and unions', () => {
+  const program = `static mut COUNTER: u32 = 0;
+unsafe fn twice(x: i32) -> i32 { x * 2 }
+union IntOrFloat { i: u32, f: f32 }
+fn main() {
+    let mut num = 5;
+    let r1 = &raw const num;
+    let r2 = &raw mut num;
+    let mut values = [1, 2, 3];
+    let p = values.as_mut_ptr();
+    let u = IntOrFloat { f: 1.0 };
+    unsafe {
+        *r2 = 10;
+        COUNTER += 3;
+        *p.add(2) = 9;
+        println!("{} {} {} {:#x}", *r1, twice(COUNTER as i32), values[2], u.i);
+    }
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '10 6 9 0x3f800000\n' });
+  const outside = program.replace('    unsafe {\n        *r2 = 10;', '    *r2 = 10;\n    unsafe {');
+  expect(executeProgram('rust', outside)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('E0133') })],
+  });
+});
+
 test('an empty match covers the uninhabited Infallible', () => {
   const program = rustMain(
     '    println!("{:?}", widen(5));',

@@ -35,6 +35,7 @@ export type Value =
   | WeakRef
   | CellBox
   | BorrowGuard
+  | RawPtr
   | undefined;
 
 export const UNIT_VALUE: Value[] = Object.freeze([]) as unknown as Value[];
@@ -365,5 +366,16 @@ export class BorrowGuard {
         cell.value = value;
       }
     );
+  }
+}
+
+let nextAddress = 0x7f_f7_b0_00_00_00;
+
+/** A raw pointer (`*const T`, `*mut T`): the place it points to, or none for a null pointer. */
+export class RawPtr {
+  /** The address `{:?}` shows, which only tells pointers apart, as real addresses differ between runs. */
+  readonly address: number;
+  constructor(readonly place: Place | undefined) {
+    this.address = place ? (nextAddress += 16) : 0;
   }
 }

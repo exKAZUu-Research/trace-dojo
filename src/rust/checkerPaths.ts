@@ -43,6 +43,8 @@ import {
 export function pathExpr(c: Checker, expr: Extract<Expr, { kind: 'path' }>, expected: Type | undefined): Type {
   const res = resolveValuePath(c, expr.path, expr.span);
   c.annotations.paths.set(expr, res);
+  if (res.kind === 'const' && res.def.ast.isMutable) c.requireUnsafe(expr.span, 'static mut を使うこと');
+  if (res.kind === 'fn' && res.fn.ast?.isUnsafe) c.requireUnsafe(expr.span, 'unsafe fn を使うこと');
   return typeOfRes(c, res, expr.span, expected);
 }
 
@@ -435,6 +437,11 @@ export function structExpr(c: Checker, expr: Extract<Expr, { kind: 'struct' }>, 
     if (def.kind === 'enum') compileError(expr.base.span, '列挙子には .. を書けません。');
     for (const field of variantDef.fields) if (!seen.has(field.name)) checkFieldVisible(c, def, field, expr.base.span);
     c.coerceExpr(expr.base, self);
+    return self;
+  }
+  if (def.isUnion) {
+    if (expr.fields.length !== 1 || expr.base)
+      compileError(expr.span, '共用体は、フィールドを1つだけ書いて作ってください（E0784）。');
     return self;
   }
   const missing = variantDef.fields.filter((field) => !seen.has(field.name)).map((field) => field.name);

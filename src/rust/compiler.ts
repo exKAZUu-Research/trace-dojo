@@ -27,8 +27,10 @@ import {
   DynValue,
   EnumValue,
   FnValue,
+  isPlace,
   type Place,
   RangeValue,
+  RawPtr,
   StructValue,
   textOf,
   UNIT_VALUE,
@@ -71,6 +73,8 @@ export interface CallSupport {
   convertError(value: Value, from: Type, to: Type, frame: Frame): Value;
   strSlice(text: string, range: RangeValue | undefined, span: Span): string;
   dropper: Dropper;
+  /** The one place a `static mut` lives in. */
+  staticPlace(def: ConstDef, frame: Frame): Place;
 }
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
@@ -540,6 +544,9 @@ export class Compiler {
         const from = runtimeType(coercion.from);
         return (frame) => this.support.toIter(read(frame), from(frame));
       }
+      case 'rawPtr': {
+        return rawPointer(this, expr, read);
+      }
     }
   }
 
@@ -589,6 +596,10 @@ export class Compiler {
         return () => new FnValue((args) => construct(def, variant, args), def.variants[variant].name);
       }
       case 'const': {
+        if (res.def.ast.isMutable) {
+          const def = res.def;
+          return (frame) => this.support.staticPlace(def, frame).get();
+        }
         return compileConstant(this, res);
       }
       case 'builtinConst': {
@@ -879,6 +890,10 @@ function dynCoercion(read: Eval, type: (frame: Frame) => Type, mutable: boolean)
 }
 
 function readRef(c: Compiler, expr: ExprOf<'ref'>): Eval {
+  if (expr.raw) {
+    const place = c.place(expr.operand);
+    return (frame) => new RawPtr(place(frame));
+  }
   if (expr.mutable) {
     const place = c.place(expr.operand);
     return (frame) => place(frame);
@@ -886,7 +901,27 @@ function readRef(c: Compiler, expr: ExprOf<'ref'>): Eval {
   return c.read(expr.operand);
 }
 
+/**
+ * A raw pointer made of a reference: to the place a borrow written there borrows (so it reads what the place holds
+ * later), or else to the place a `&mut` is, or to the value a shared reference refers to.
+ */
+function rawPointer(c: Compiler, expr: Expr, read: Eval): Eval {
+  if (expr.kind === 'ref' && !expr.raw) {
+    const place = c.place(expr.operand);
+    return (frame) => new RawPtr(place(frame));
+  }
+  return (frame) => {
+    const value = read(frame);
+    if (value instanceof RawPtr) return value;
+    return new RawPtr(isPlace(value) ? value : new CellPlace(value));
+  };
+}
+
 function readCast(c: Compiler, expr: ExprOf<'cast'>): Eval {
+  const target = normalize(shallow(expr.ty!));
+  if (target.kind === 'adt' && (target.def.builtin === 'ConstPtr' || target.def.builtin === 'MutPtr')) {
+    return rawPointer(c, expr.operand, c.value(expr.operand));
+  }
   const operand = c.value(expr.operand);
   const to = resolve(expr.ty!, true);
   return (frame) => castValue(operand(frame), to);

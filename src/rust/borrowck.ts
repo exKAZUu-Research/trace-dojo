@@ -946,9 +946,14 @@ function isMutReference(type: Type | undefined): boolean {
   return t.kind === 'ref' && t.mutable;
 }
 
+/**
+ * Whether `*` of a value of the type reaches something the value does not own: through a reference, a raw pointer,
+ * or a `Deref` impl, as a `Box` alone owns what it derefs to.
+ */
 function isReference(type: Type | undefined): boolean {
   if (!type) return false;
-  return normalize(shallow(type)).kind === 'ref';
+  const t = normalize(shallow(type));
+  return t.kind === 'ref' || (t.kind === 'adt' && t.def.builtin !== 'Box');
 }
 
 function diverges(ret: Type): boolean {

@@ -327,6 +327,17 @@ export class Interpreter implements CallSupport {
     return fn;
   }
 
+  private readonly statics = new Map<ConstDef, Place>();
+
+  staticPlace(def: ConstDef, frame: Frame): Place {
+    let place = this.statics.get(def);
+    if (!place) {
+      place = new CellPlace(this.constValue(def, frame, []));
+      this.statics.set(def, place);
+    }
+    return place;
+  }
+
   toIter(value: Value, from: Type): Value {
     const type = this.revealType(from);
     if (!(value instanceof IterValue) && isUserIterator(type)) return this.userIterator(value, type);

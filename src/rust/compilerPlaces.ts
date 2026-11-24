@@ -3,13 +3,14 @@ import type { Expr, Span } from './ast';
 import { madeString, stringCapacity } from './capacity';
 import type { Compiler, Eval, PlaceEval } from './compiler';
 import { derefAll, evaluateValues, LocalPlace } from './compilerCommon';
+import { floatBits, floatFromBits } from './floatBits';
 import { normalize } from './infer';
 import { derefOnce } from './methods';
-import { type Frame, RustPanic } from './runtime';
+import { type Frame, MOVED, RustPanic } from './runtime';
 import { runtimeType } from './runtimeTypes';
-import { type DerefKind, shallow, type Type } from './types';
+import { type DerefKind, intBits, resolve, shallow, substitute, type Type } from './types';
 import { decodeUtf8 } from './utf8';
-import {
+import { type RawPtr,
   AccessorPlace,
   CellPlace,
   ElementPlace,
@@ -22,8 +23,7 @@ import {
   SliceView,
   type StructValue,
   textOf,
-  type Value,
-} from './values';
+  type Value } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
 type Derefs = DerefKind[];
@@ -69,6 +69,10 @@ function pathPlace(c: Compiler, expr: ExprOf<'path'>): PlaceEval | undefined {
     if (local.mode === 'refMut') return (frame) => frame.captures[index].get() as Place;
     return (frame) => frame.captures[index];
   }
+  if (res?.kind === 'const' && res.def.ast.isMutable) {
+    const def = res.def;
+    return (frame) => c.support.staticPlace(def, frame);
+  }
   return undefined;
 }
 
@@ -78,6 +82,20 @@ function fieldPlace(c: Compiler, expr: ExprOf<'field'>): PlaceEval | undefined {
   const base = placeThrough(c, expr.operand, field.derefs);
   const { index } = field;
   if (field.range) return rangeFieldPlace(base, rangeEndpoint(expr.name));
+  const union = unionFields(expr);
+  if (union) {
+    return (frame) => {
+      const fields = (base(frame).get() as StructValue).fields;
+      return new AccessorPlace(
+        () => readUnionField(fields, union, index, expr.span),
+        (value) => {
+          // A union's fields share one place, so writing one leaves the others without a value of their own.
+          fields.fill(MOVED);
+          fields[index] = value;
+        }
+      );
+    };
+  }
   return (frame) => {
     const place = base(frame);
     const value = place.get();
@@ -105,6 +123,10 @@ function rangeEndpoint(name: string): 'start' | 'end' {
 
 function derefPlace(c: Compiler, expr: ExprOf<'unary'>): PlaceEval {
   const operandType = normalize(shallow(expr.operand.ty!));
+  if (operandType.kind === 'adt' && (operandType.def.builtin === 'ConstPtr' || operandType.def.builtin === 'MutPtr')) {
+    const operand = c.value(expr.operand);
+    return (frame) => pointee(derefAll(operand(frame)) as RawPtr, expr.span);
+  }
   if (derefOnce(c.program, operandType)?.kind === 'user') {
     const base = compilePlace(c, expr.operand);
     const call = userDerefCall(c, operandType, true, expr.span);
@@ -253,11 +275,59 @@ export function compileField(c: Compiler, expr: ExprOf<'field'>): Eval {
     const endpoint = rangeEndpoint(expr.name);
     return (frame) => (base(frame) as RangeValue)[endpoint];
   }
+  const union = unionFields(expr);
+  if (union) return (frame) => readUnionField((base(frame) as StructValue).fields, union, index, expr.span);
   return (frame) => {
     const owner = base(frame);
     if (Array.isArray(owner)) return owner[index];
     return (owner as StructValue).fields[index];
   };
+}
+
+/** The types of the fields of the union a field expression reads, or undefined for a field of another type. */
+function unionFields(expr: ExprOf<'field'>): Type[] | undefined {
+  let t = normalize(shallow(expr.operand.ty!));
+  while (t.kind === 'ref') t = normalize(shallow(t.target));
+  if (t.kind !== 'adt' || !t.def.isUnion) return undefined;
+  const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
+  return t.def.variants[0].fields.map((field) => resolve(substitute(field.type, subst), true));
+}
+
+/**
+ * A union's field, reading the bits another field wrote as its type where both are numbers of one size (as the
+ * union's one place holds them); reading other types differently depends on the target's layout.
+ */
+function readUnionField(fields: Value[], types: Type[], index: number, span: Span): Value {
+  if (fields[index] !== MOVED) return fields[index];
+  const written = fields.findIndex((value) => value !== MOVED);
+  if (written === -1) throw new RustPanic('共用体のフィールドに値がありません。', span);
+  const bits = scalarBits(fields[written], types[written]);
+  const value = bits && fromBits(bits.bits, bits.width, types[index]);
+  if (value === undefined) {
+    throw new RustPanic('共用体の別のフィールドとして読むことは、この採点環境では使えません。', span);
+  }
+  return value;
+}
+
+function scalarBits(value: Value, type: Type): { bits: bigint; width: number } | undefined {
+  const t = normalize(shallow(type));
+  if (t.kind === 'int') return { bits: BigInt.asUintN(intBits(t.name), value as bigint), width: intBits(t.name) };
+  if (t.kind === 'float') {
+    const width = t.name === 'f32' ? 32 : 64;
+    return { bits: floatBits(value, width), width };
+  }
+  if (t.kind === 'bool') return { bits: value ? 1n : 0n, width: 8 };
+  if (t.kind === 'char') return { bits: BigInt((value as string).codePointAt(0) ?? 0), width: 32 };
+  return undefined;
+}
+
+function fromBits(bits: bigint, width: number, type: Type): Value | undefined {
+  const t = normalize(shallow(type));
+  if (t.kind === 'int' && intBits(t.name) === width) {
+    return t.name.startsWith('i') ? BigInt.asIntN(width, bits) : bits;
+  }
+  if (t.kind === 'float' && (t.name === 'f32' ? 32 : 64) === width) return floatFromBits(bits, width as 32 | 64);
+  return undefined;
 }
 
 export function compileIndex(c: Compiler, expr: ExprOf<'index'>): Eval {
@@ -381,4 +451,10 @@ export function sliceRange(container: Value, range: RangeValue | undefined, span
 function indexPanic(container: string | undefined, length: number, index: bigint): string {
   if (container === 'vecDeque') return 'out of bounds access';
   return `index out of bounds: the len is ${length} but the index is ${index}`;
+}
+
+/** The place a raw pointer points to; following a null pointer panics, as debug builds check. */
+export function pointee(pointer: RawPtr, span: Span): Place {
+  if (!pointer.place) throw new RustPanic('null pointer dereference occurred', span);
+  return pointer.place;
 }

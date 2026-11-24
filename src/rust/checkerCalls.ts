@@ -42,6 +42,7 @@ export function checkCall(c: Checker, expr: Extract<Expr, { kind: 'call' }>, exp
   if (callee.kind === 'path') {
     const res = resolveValuePath(c, callee.path, callee.span);
     c.annotations.paths.set(callee, res);
+    if (res.kind === 'fn' && res.fn.ast?.isUnsafe) c.requireUnsafe(callee.span, 'unsafe fn を呼ぶこと');
     if (res.kind === 'fn') return callFn(c, expr, res.fn, res.typeArgs, expected);
     if (res.kind === 'ctor') return callCtor(c, expr, res, expected);
     const type = typeOfRes(c, res, callee.span, undefined);
@@ -344,6 +345,7 @@ export function checkMethodCall(
     );
   }
   checkArgs(c, expr.args, sig.params, expectations(c, sig.ret, sig.params, expected), iterableParams(fn));
+  if (fn.ast?.isUnsafe) c.requireUnsafe(expr.span, 'unsafe fn を呼ぶこと');
   if (fn.trait?.builtin === 'Drop' || fn.impl?.trait?.trait.builtin === 'Drop') {
     compileError(expr.methodSpan, 'drop メソッドは直接呼べません（std::mem::drop(x) を使ってください。E0040）。');
   }

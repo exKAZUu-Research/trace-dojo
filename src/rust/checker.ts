@@ -92,6 +92,10 @@ export interface BodyContext {
   coverage: CoverageCheck[];
   /** The trait the body's impl implements or its trait declares, which is in scope in it as rustc puts it. */
   currentTrait?: TraitDef;
+  /** How many `unsafe` blocks (or an `unsafe fn`'s body) the code being checked is in. */
+  unsafeDepth: number;
+  /** While checking the left side of an assignment, whose union field the assignment writes without reading it. */
+  writingUnionField?: boolean;
 }
 
 interface CoverageCheck {
@@ -559,6 +563,7 @@ export class Checker {
       selfType: options.selfType,
       coverage: [],
       currentTrait: options.currentTrait,
+      unsafeDepth: 0,
     };
   }
 
@@ -605,6 +610,8 @@ export class Checker {
     });
     this.fnContexts.set(def, this.body.fn);
     this.coverageChecks.set(def, this.body.coverage);
+    // In edition 2024 an `unsafe fn`'s body may still do unsafe operations, with a warning.
+    if (item.isUnsafe) this.body.unsafeDepth = 1;
     if (item.selfParam && selfType) {
       const mode = item.selfParam.mode;
       const type = mode === 'value' ? selfType : ref(selfType, mode === 'mutRef');
@@ -1066,6 +1073,19 @@ export class Checker {
         return;
       }
     }
+    // `&T` and `&mut T` become `*const T`, and `&mut T` becomes `*mut T`.
+    if (
+      a.kind === 'ref' &&
+      t.kind === 'adt' &&
+      (t.def.builtin === 'ConstPtr' || (t.def.builtin === 'MutPtr' && a.mutable)) &&
+      this.unifier.tryUnify(a.target, t.args[0])
+    ) {
+      this.setCoercion(expr, { kind: 'rawPtr' });
+      return;
+    }
+    const mutToConst =
+      a.kind === 'adt' && a.def.builtin === 'MutPtr' && t.kind === 'adt' && t.def.builtin === 'ConstPtr';
+    if (mutToConst && this.unifier.tryUnify(a.args[0], t.args[0])) return;
     // Only a closure that captures nothing is a function.
     if (
       a.kind === 'closure' &&
@@ -1256,6 +1276,13 @@ export class Checker {
     }
     if (!stmt.else) this.requireIrrefutable(stmt.pattern, type, 'let');
     return diverges;
+  }
+
+  /** Requires the code to be in an `unsafe` block for an operation that may break memory safety (E0133). */
+  requireUnsafe(span: Span, what: string): void {
+    if (this.body.unsafeDepth === 0) {
+      compileError(span, `${what}は、unsafe ブロックの中でだけできます（E0133）。`);
+    }
   }
 
   requireIrrefutable(pattern: Pattern, type: Type, where: 'let' | 'fn' | 'for'): void {

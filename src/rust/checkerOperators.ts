@@ -114,6 +114,10 @@ function overloadedOperator(
 export function checkUnary(c: Checker, expr: Extract<Expr, { kind: 'unary' }>, expected: Type | undefined): Type {
   if (expr.op === '*') {
     const type = normalize(shallow(c.settled(c.expr(expr.operand, undefined))));
+    if (type.kind === 'adt' && (type.def.builtin === 'ConstPtr' || type.def.builtin === 'MutPtr')) {
+      c.requireUnsafe(expr.span, '生ポインタの参照外し（*p）');
+      return type.args[0];
+    }
     const deref = derefOnce(c.program, type);
     if (deref) return deref.type;
     if (type.kind === 'var') compileError(expr.span, '型が決まらないので、* で参照をたどれません。');
@@ -310,7 +314,13 @@ export function checkAssign(c: Checker, expr: Extract<Expr, { kind: 'assign' }>)
     c.expr(expr.value, undefined);
     return UNIT;
   }
-  const targetType = c.expr(target, undefined);
+  c.body.writingUnionField = target.kind === 'field';
+  let targetType: Type;
+  try {
+    targetType = c.expr(target, undefined);
+  } finally {
+    c.body.writingUnionField = false;
+  }
   if (!isPlaceExpr(c, target)) compileError(target.span, '代入の左辺には、変数やフィールドなどを書いてください。');
   c.coerceAtReferenceSite(expr.value, targetType);
   requireMutablePlace(c, target, '代入する');
@@ -385,6 +395,15 @@ export function refExpr(c: Checker, expr: Extract<Expr, { kind: 'ref' }>, expect
   }
   const type = c.expr(expr.operand, inner);
   if (expr.mutable) requireMutablePlace(c, expr.operand, '&mut で借りる');
+  const res = expr.operand.kind === 'path' ? c.annotations.paths.get(expr.operand) : undefined;
+  if (res?.kind === 'const' && res.def.ast.isMutable && !expr.raw) {
+    compileError(expr.span, 'static mut の参照は作れません（&raw const や &raw mut を使ってください）。');
+  }
+  if (expr.raw) {
+    if (!isPlaceExpr(c, expr.operand))
+      compileError(expr.operand.span, '&raw の後には、変数やフィールドなどを書いてください。');
+    return c.program.builtinType(expr.mutable ? 'MutPtr' : 'ConstPtr', [type]);
+  }
   return ref(type, expr.mutable);
 }
 
