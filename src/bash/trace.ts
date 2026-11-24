@@ -9,7 +9,15 @@ import { DiscardSignal, ExitSignal, type Frame, ObservationAbortError, Runtime }
 import { type OutputTarget, Shell } from './shell';
 import { TurtleError } from './turtle';
 import { UnsupportedFeatureError } from './unsupported';
-import { cloneScope, isIdentifier, type Scope, sortedElements, type Variable, type VariableValue } from './variables';
+import {
+  cloneScope,
+  isIdentifier,
+  popFuncname,
+  type Scope,
+  sortedElements,
+  type Variable,
+  type VariableValue,
+} from './variables';
 
 class PureReadAbort extends Error {}
 
@@ -163,12 +171,15 @@ function withObservedScopes<T>(shell: Shell, maxScope: number, run: () => T): T 
     },
   };
   const functionScopes = savedState.functionScopes.filter((idx) => idx <= maxScope);
+  const funcname = new Map(savedState.funcname);
+  for (let c = savedState.calls.length - 1; c >= functionScopes.length; c--) popFuncname(funcname, c);
   runtime.steps.recorder = undefined;
   shell.state = {
     ...savedState,
     scopes: savedState.scopes.slice(0, maxScope + 1).map((scope) => cloneScope(scope)),
     functionScopes,
     calls: savedState.calls.slice(0, functionScopes.length).map((call) => ({ ...call })),
+    funcname,
     pipeStatus: new Map(savedState.pipeStatus),
     unsetDynamic: new Set(savedState.unsetDynamic),
     unsetEnv: new Set(savedState.unsetEnv),

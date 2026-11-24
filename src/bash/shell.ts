@@ -53,6 +53,8 @@ import {
   isIdentifier,
   isValidFunctionName,
   maxElementIndex,
+  popFuncname,
+  pushFuncname,
   readAssociativePair,
   resolveNameInScopes,
   SCALAR_DYNAMIC_VARIABLES,
@@ -91,7 +93,7 @@ export interface ShellState {
   /** The positional parameters of the script and of each function call, the innermost last. */
   positional: string[][];
   calls: CallFrameEntry[];
-  mainFuncnameUnset?: boolean;
+  funcname: Map<bigint, string>;
   lastStatus: number;
   pipeStatus: Map<bigint, string>;
   /** `$_`, which starts as the path of Bash itself, so `undefined` until a command sets it. */
@@ -148,6 +150,7 @@ export class Shell implements ArithmeticHost {
       functions: new Map(),
       positional: [[]],
       calls: [],
+      funcname: new Map(),
       lastStatus: 0,
       pipeStatus: new Map(),
       lastArgument: undefined,
@@ -704,7 +707,7 @@ export class Shell implements ArithmeticHost {
     state.positional.push(args);
     // `BASH_LINENO` gives the line Bash numbered the call with; the trace keeps the row of the call's step.
     const reportedRow = this.currentRow;
-    state.mainFuncnameUnset = state.calls.length > 0 && Boolean(state.mainFuncnameUnset);
+    pushFuncname(state.funcname, fn.name, state.calls.length === 0);
     state.calls.push({ name: fn.name, line: reportedRow + 1 });
     const frame: Frame = { callRow, isAtomic: fn.isAtomic, scopeIndex };
     this.runtime.frames.push(frame);
@@ -730,6 +733,7 @@ export class Shell implements ArithmeticHost {
       this.runtime.frames.pop();
       // A subshell's state replaces the caller's while it runs, so the call cleans up the state it started in.
       state.calls.pop();
+      popFuncname(state.funcname, state.calls.length);
       state.positional.pop();
       state.functionScopes.pop();
       state.scopes.length = scopeIndex;
@@ -776,6 +780,7 @@ export class Shell implements ArithmeticHost {
       functions: new Map(parent.functions),
       positional: parent.positional.map((args) => [...args]),
       calls: parent.calls.map((call) => ({ ...call })),
+      funcname: new Map(parent.funcname),
       pipeStatus: new Map(parent.pipeStatus),
       randomSeed: deriveSubshellSeed(parent.randomSeed, ++parent.subshellDraws, parent.subshellLevel + 1),
       lastRandom: 0,
@@ -1051,13 +1056,7 @@ export class Shell implements ArithmeticHost {
   /** Sparse elements of `FUNCNAME`, `BASH_LINENO`, `BASH_SOURCE`, and `PIPESTATUS`. */
   dynamicElements(name: string): Map<bigint, string> | undefined {
     return this.isDynamic(name)
-      ? callStackElements(
-          name,
-          this.state.calls,
-          SCRIPT_NAME,
-          this.state.pipeStatus,
-          Boolean(this.state.mainFuncnameUnset)
-        )
+      ? callStackElements(name, this.state.calls, SCRIPT_NAME, this.state.pipeStatus, this.state.funcname)
       : undefined;
   }
 

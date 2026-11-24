@@ -227,8 +227,33 @@ function fnv1SignedUtf8(text: string): number {
   return hash;
 }
 
+/** Pushes `fnName` onto `FUNCNAME` on function entry, seeding `[0]=fnName, [1]="main"` from top level. */
+export function pushFuncname(funcname: Map<bigint, string>, fnName: string, fromTopLevel: boolean): void {
+  if (fromTopLevel) {
+    funcname.clear();
+    funcname.set(0n, fnName);
+    funcname.set(1n, 'main');
+    return;
+  }
+  const shifted = sortedElements(funcname);
+  funcname.clear();
+  funcname.set(0n, fnName);
+  for (const [index, value] of shifted) funcname.set(index + 1n, value);
+}
+
+/** Shifts `FUNCNAME` left by one element on function return, preserving sparse holes across remaining elements. */
+export function popFuncname(funcname: Map<bigint, string>, remainingCalls: number): void {
+  if (remainingCalls === 0) {
+    funcname.clear();
+    return;
+  }
+  const [, ...rest] = sortedElements(funcname);
+  funcname.clear();
+  for (const [index, value] of rest) funcname.set(index - 1n, value);
+}
+
 /** Indexed-array elements ordered by ascending numeric index. */
-export function sortedElements(elements: Map<bigint, string>): [bigint, string][] {
+export function sortedElements(elements: ReadonlyMap<bigint, string>): [bigint, string][] {
   return [...elements].toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
@@ -327,7 +352,6 @@ export function removeScopedVariable(
 export interface CallFrameEntry {
   name: string;
   line: number;
-  funcnameUnset?: boolean;
 }
 
 /** Sparse indexed-array elements of `FUNCNAME`, `BASH_LINENO`, `BASH_SOURCE`, and `PIPESTATUS`. */
@@ -336,11 +360,11 @@ export function callStackElements(
   calls: readonly CallFrameEntry[],
   scriptName: string,
   pipeStatus: ReadonlyMap<bigint, string>,
-  mainFuncnameUnset = false
+  funcname: ReadonlyMap<bigint, string>
 ): Map<bigint, string> | undefined {
   if (name === 'PIPESTATUS') return new Map(pipeStatus);
+  if (name === 'FUNCNAME') return calls.length === 0 ? undefined : new Map(funcname);
   const reversed = calls.toReversed();
-  if (name === 'FUNCNAME') return buildFuncnameElements(reversed, mainFuncnameUnset);
   if (name === 'BASH_LINENO') {
     return new Map([...reversed.map((c) => String(c.line)), '0'].map((v, i) => [BigInt(i), v]));
   }
@@ -350,19 +374,6 @@ export function callStackElements(
   return undefined;
 }
 
-function buildFuncnameElements(
-  reversed: readonly CallFrameEntry[],
-  mainFuncnameUnset: boolean
-): Map<bigint, string> | undefined {
-  if (reversed.length === 0) return undefined;
-  const elements = new Map<bigint, string>();
-  for (let i = 0; i < reversed.length; i++) {
-    if (!reversed[i].funcnameUnset) elements.set(BigInt(i), reversed[i].name);
-  }
-  if (!mainFuncnameUnset) elements.set(BigInt(reversed.length), 'main');
-  return elements;
-}
-
 /** Negative-index reference length (`maxIndex + 1`) for a non-empty dynamic array, or `undefined` when empty. */
 export function dynamicArrayLength(elements: ReadonlyMap<bigint, string> | undefined): number | undefined {
   return elements && elements.size > 0 ? Number(maxElementIndex(elements) + 1n) : undefined;
@@ -370,24 +381,14 @@ export function dynamicArrayLength(elements: ReadonlyMap<bigint, string> | undef
 
 /** Unsets one element (or `'all'` for `@`/`*`) of `FUNCNAME` or `PIPESTATUS`. */
 export function unsetDynamicArrayElement(
-  state: { calls: CallFrameEntry[]; pipeStatus: Map<bigint, string>; mainFuncnameUnset?: boolean },
+  state: { funcname: Map<bigint, string>; pipeStatus: Map<bigint, string> },
   name: string,
   index: bigint | 'all'
 ): void {
-  if (name === 'PIPESTATUS') {
-    if (index === 'all') state.pipeStatus.clear();
-    else state.pipeStatus.delete(index);
-    return;
-  }
-  if (name !== 'FUNCNAME' || state.calls.length === 0) return;
-  if (index === 'all') {
-    for (const call of state.calls) call.funcnameUnset = true;
-    state.mainFuncnameUnset = true;
-    return;
-  }
-  const count = BigInt(state.calls.length);
-  if (index === count) state.mainFuncnameUnset = true;
-  else if (index >= 0n && index < count) state.calls[Number(count - 1n - index)].funcnameUnset = true;
+  const target = name === 'PIPESTATUS' ? state.pipeStatus : name === 'FUNCNAME' ? state.funcname : undefined;
+  if (!target) return;
+  if (index === 'all') target.clear();
+  else target.delete(index);
 }
 
 /** Picks a nonzero initial Park-Miller seed for a fresh shell from the host random source. */
