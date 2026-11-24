@@ -19,3 +19,5 @@ import './libGenerator';
 import './libUnsupported';
 import './libRegex';
 import './libRandomizer';
+import './libDateTime';
+import './libDate';

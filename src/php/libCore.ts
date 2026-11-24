@@ -7,6 +7,7 @@ import { type ArgValue, backtraceLimit, callStack, frameArguments, setCallableEx
 import * as classesModule from './classes';
 import { classConstant, findDeclaredClass, findMemberClass, requireClassScope } from './classes';
 import { debugType, getType, isNumericString, normalizeKeyString, toBool, valueName } from './conversions';
+import { advanceClock } from './dateSupport';
 import {
   deprecated,
   E_ALL,
@@ -701,10 +702,12 @@ defineFunction('phpversion(?string $extension = null): string|false', ({ args })
 defineFunction('php_sapi_name(): string|false', () => 'cli');
 defineFunction('sleep(int $seconds): int', ({ args }) => {
   checkDelay(args[0] as bigint, 'sleep', 'seconds');
+  advanceClock(Number(args[0] as bigint) * 1_000_000);
   return 0n;
 });
 defineFunction('usleep(int $microseconds): void', ({ args }) => {
   checkDelay(args[0] as bigint, 'usleep', 'microseconds');
+  advanceClock(Number(args[0] as bigint));
   return null;
 });
 defineFunction('gc_enabled(): bool', () => rt().gcEnabled);

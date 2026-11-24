@@ -111,7 +111,7 @@ function acquireDirectIterator(object: PhpObject, byRef: boolean): AcquiredItera
     const handle = newEngineIterator(object);
     return { iterator: object, handle };
   }
-  if (internal?.fixedIterator && object.cls.findMethod('getiterator')?.scope.name === 'SplFixedArray') {
+  if (internal?.fixedIterator && object.cls.findMethod('getiterator')?.fn.kind === 'native') {
     if (byRef) throwError('Error', 'An iterator cannot be used with foreach by reference');
     const iterator = internal.fixedIterator(object);
     return { iterator, handle: iterator };

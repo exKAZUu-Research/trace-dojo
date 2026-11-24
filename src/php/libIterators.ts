@@ -17,11 +17,17 @@ export function innerIteratorOf(object: PhpObject): InnerIterator {
   return acquired ? new InnerIterator(acquired.iterator, acquired.handle) : new InnerIterator(object);
 }
 
+/** The elements an InternalIterator walks, read afresh at each step. */
+interface IteratorSource {
+  count(): number;
+  at(position: number): Value | undefined;
+}
+
 class LiveIteratorState {
   position = 0;
   constructor(
     readonly owner: PhpObject,
-    readonly values: () => Value[],
+    readonly source: IteratorSource,
     private readonly engine?: PhpObject
   ) {}
   held(): Value[] {
@@ -33,12 +39,17 @@ class LiveIteratorState {
 }
 
 export function liveArrayIterator(owner: PhpObject, values: () => Value[], exposed = false): PhpObject {
+  return internalIterator(owner, { count: () => values().length, at: (position) => values()[position] }, exposed);
+}
+
+/** An InternalIterator whose elements `source` makes when the iteration reaches them. */
+export function internalIterator(owner: PhpObject, source: IteratorSource, exposed = false): PhpObject {
   const cls = rt().classes.get('internaliterator') as PhpClass;
   const engine = createObject(cls);
-  engine.internal = new LiveIteratorState(owner, values);
+  engine.internal = new LiveIteratorState(owner, source);
   if (!exposed) return engine;
   const wrapper = createObject(cls);
-  wrapper.internal = new LiveIteratorState(owner, values, engine);
+  wrapper.internal = new LiveIteratorState(owner, source, engine);
   return wrapper;
 }
 
@@ -53,7 +64,7 @@ defineClass({
       signature: 'current(): mixed',
       impl: ({ thisObj }) => {
         const state = liveState(thisObj);
-        const value = state.values()[state.position];
+        const value = state.source.at(state.position);
         if (value === undefined) throwError('OutOfBoundsException', 'Index invalid or out of range');
         return value;
       },
@@ -68,7 +79,7 @@ defineClass({
     },
     {
       signature: 'valid(): bool',
-      impl: ({ thisObj }) => liveState(thisObj).position < liveState(thisObj).values().length,
+      impl: ({ thisObj }) => liveState(thisObj).position < liveState(thisObj).source.count(),
     },
     {
       signature: 'rewind(): void',

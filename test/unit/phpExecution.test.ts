@@ -943,11 +943,6 @@ test.each([
   '<?php mb_strlen("abc","sjis");',
   '<?php echo defined("PHP_OS") ? "y" : "n";',
   '<?php echo constant("PHP_OS");',
-  '<?php echo defined("DateTimeInterface::ATOM") ? "y" : "n";',
-  '<?php var_dump(method_exists("DateTime", "format"));',
-  '<?php echo constant("DateTime::ATOM");',
-  '<?php var_dump(is_subclass_of("DateTime", "DateTimeInterface"));',
-  '<?php var_dump(interface_exists("DateTimeInterface"));',
   '<?php var_dump(class_exists("Attribute"));',
 ])('unsupported arguments produce the unsupported-feature message: %s', (source) => {
   expect(run(source)).toMatchObject({
