@@ -108,7 +108,17 @@ export abstract class OperatorBinder extends ConversionBinder {
     if (operand.kind === 'constant' && !isLifted && operand.value !== undefined) {
       if (kind === 'bool') return this.constant(!(operand.value as boolean), type, row);
       if (kind !== 'enum') {
-        return this.constant(unaryNumeric(operator, kind as OperandKind, operand.value as NumericValue), type, row);
+        // Constant expressions are evaluated in checked mode, as binary ones are in foldBinary.
+        try {
+          return this.constant(
+            unaryNumeric(operator, kind as OperandKind, operand.value as NumericValue, true),
+            type,
+            row
+          );
+        } catch (error) {
+          if (!(error instanceof PendingException)) throw error;
+          this.error(row, 'CS0220', 'この操作はチェック モードでコンパイルしたときにオーバーフローします');
+        }
       }
     }
     return {

@@ -358,12 +358,13 @@ export abstract class ExpressionBinder extends LambdaBinder {
       }
       return this.constant(value, this.specialType('decimal'), position.row);
     }
-    const number = Number(text);
+    const number = suffix === 'f' ? Math.fround(Number(text)) : Number(text);
     if (!Number.isFinite(number)) {
-      this.error(position, 'CS0594', `浮動小数点定数が型 '${suffix === 'f' ? 'float' : 'double'}' の範囲外です`);
-      return this.constant(0, this.specialType('double'), position.row);
+      const type = suffix === 'f' ? 'float' : 'double';
+      this.error(position, 'CS0594', `浮動小数点定数が型 '${type}' の範囲外です`);
+      return this.constant(0, this.specialType(type), position.row);
     }
-    if (suffix === 'f') return this.constant(Math.fround(number), this.specialType('float'), position.row);
+    if (suffix === 'f') return this.constant(number, this.specialType('float'), position.row);
     const literal = this.constant(number, this.specialType('double'), position.row) as BoundExpression & {
       isLiteral?: boolean;
     };
