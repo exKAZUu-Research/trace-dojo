@@ -146,6 +146,37 @@ f() { break; echo after; }; for i in 1; do f; done
   });
 });
 
+test('declare -g and prefixed export propagate globals, elements, and attributes as Bash does', () => {
+  const program = `declare -n r=g
+f() {
+  local g=local a=old
+  declare -g r=updated
+  declare -gi a[0]=2+3
+  echo "$g|$r|$(declare -p a)"
+}
+a=global
+f
+declare -p g a
+export p=old
+p=temp export -n p=new p
+echo "$p|$(declare -p p)"
+p=temp export p+=only p+=last
+declare -p p
+`;
+  expect(executeProgram('bash', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'local|local|declare -a a=([0]="2+3")',
+      'declare -- g="updated"',
+      'declare -ai a=([0]="global")',
+      'new|declare -x p="new"',
+      'declare -x p="last"',
+      '',
+    ].join('\n'),
+    stderr: '',
+  });
+});
+
 test('a syntax error rejects the program before it runs, naming the token and line Bash reports', () => {
   expect(executeProgram('bash', 'echo a\nif then\n  echo b\nfi\n')).toEqual({
     kind: 'compileError',

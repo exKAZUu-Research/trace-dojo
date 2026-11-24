@@ -557,11 +557,6 @@ export class Shell implements ArithmeticHost {
     );
   }
 
-  private removeScope(scope: Scope): void {
-    const index = this.state.scopes.lastIndexOf(scope);
-    if (index !== -1) this.state.scopes.splice(index, 1);
-  }
-
   /** Runs a command with the assignments written before it visible both to later assignments and to the command. */
   private withTemporaryScope(assignments: Assignment[], run: () => number, forDeclaration = false): number {
     const prevPrefix = this.activeDeclarationPrefix;
@@ -578,32 +573,41 @@ export class Shell implements ArithmeticHost {
     this.state.scopes.push(scope);
     this.activeDeclarationPrefix = active;
     try {
-      for (const assignment of assignments) {
-        if (assignment.subscript || assignment.array) {
-          // Bash assigns array elements before a command in the shell itself.
-          if (!this.performAssignment(assignment)) return 1;
-          continue;
-        }
-        const value = assignment.value ? this.expander.expandAssignmentValue(assignment.value) : '';
-        const existing = this.findOwnVariable(assignment.name);
-        if (existing?.attributes.has('r')) {
-          // Bash reports the assignment and runs the command without it.
-          this.reportError(`${assignment.name}: readonly variable`);
-          continue;
-        }
-        const base = assignment.append ? (this.scalarValue(assignment.name) ?? '') : '';
-        scope.set(assignment.name, {
-          name: assignment.name,
-          value: { kind: 'scalar', value: base + value },
-          attributes: new Set(['x']),
-        });
-      }
+      if (!this.populateTemporaryScope(scope, assignments)) return 1;
       return run();
     } finally {
       this.activeDeclarationPrefix = prevPrefix;
       this.removeScope(scope);
       if (active) this.commitPropagatedPrefixes(active);
     }
+  }
+
+  private populateTemporaryScope(scope: Scope, assignments: Assignment[]): boolean {
+    for (const assignment of assignments) {
+      if (assignment.subscript || assignment.array) {
+        // Bash assigns array elements before a command in the shell itself.
+        if (!this.performAssignment(assignment)) return false;
+        continue;
+      }
+      const value = assignment.value ? this.expander.expandAssignmentValue(assignment.value) : '';
+      if (this.findOwnVariable(assignment.name)?.attributes.has('r')) {
+        // Bash reports the assignment and runs the command without it.
+        this.reportError(`${assignment.name}: readonly variable`);
+        continue;
+      }
+      const base = assignment.append ? (this.scalarValue(assignment.name) ?? '') : '';
+      scope.set(assignment.name, {
+        name: assignment.name,
+        value: { kind: 'scalar', value: base + value },
+        attributes: new Set(['x']),
+      });
+    }
+    return true;
+  }
+
+  private removeScope(scope: Scope): void {
+    const index = this.state.scopes.lastIndexOf(scope);
+    if (index !== -1) this.state.scopes.splice(index, 1);
   }
 
   private commitPropagatedPrefixes(active: ActiveDeclarationPrefix): void {

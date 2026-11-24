@@ -195,7 +195,7 @@ export interface ActiveDeclarationPrefix {
   propagated: Set<string>;
 }
 
-/** Marks or unmarks a direct declaration-command prefix binding for end-of-command propagation. */
+/** Marks a direct declaration-command prefix binding for end-of-command propagation when appropriate. */
 export function selectDirectPrefix(
   active: ActiveDeclarationPrefix | undefined,
   name: string,
@@ -204,8 +204,7 @@ export function selectDirectPrefix(
 ): Variable | undefined {
   const tempVar = active?.scope.get(name);
   if (!active || !tempVar) return undefined;
-  if (unsetExport && !assigns) active.propagated.delete(name);
-  else active.propagated.add(name);
+  if (!unsetExport || assigns) active.propagated.add(name);
   return tempVar;
 }
 
