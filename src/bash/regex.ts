@@ -168,7 +168,7 @@ class RegexParser {
         continue;
       }
       this.position++;
-      if (this.chars[this.position] === '-' && (this.chars[this.position + 1] ?? ']') !== ']') {
+      if (this.hasRangeContinuation()) {
         this.position++;
         tests.push(makeCodeRangeTest(c, this.readRangeEndChar()));
         continue;
@@ -176,6 +176,10 @@ class RegexParser {
       tests.push((ch) => ch === c);
     }
     return { kind: 'set', negated, test: (ch) => tests.some((test) => test(ch)) };
+  }
+
+  private hasRangeContinuation(): boolean {
+    return this.chars[this.position] === '-' && (this.chars[this.position + 1] ?? ']') !== ']';
   }
 
   private tryParseSubbracket(c: string): ((ch: string) => boolean) | undefined {
@@ -186,7 +190,7 @@ class RegexParser {
     if (close === -1) throw new RegexSyntaxError('brackets ([ ]) not balanced');
     const name = rest.slice(0, close);
     this.position += 2 + charactersOf(name).length + 2;
-    const hasTrailingRange = this.chars[this.position] === '-' && (this.chars[this.position + 1] ?? ']') !== ']';
+    const hasTrailingRange = this.hasRangeContinuation();
     return type === ':'
       ? parseCharacterClassSubbracket(name, hasTrailingRange)
       : this.parseCollatingSubbracket(type, name, hasTrailingRange);
@@ -204,6 +208,12 @@ class RegexParser {
   }
 
   private readRangeEndChar(): string {
+    const end = this.readRawRangeEndChar();
+    if (this.hasRangeContinuation()) throw new RegexSyntaxError('invalid character range');
+    return end;
+  }
+
+  private readRawRangeEndChar(): string {
     const type = this.chars[this.position + 1];
     if (this.chars[this.position] === '[' && (type === '.' || type === ':' || type === '=')) {
       const rest = this.chars.slice(this.position + 2).join('');
