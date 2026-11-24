@@ -103,6 +103,8 @@ export abstract class PatternMatcher extends EvaluatorBase {
 
   /** The value a pattern's variable of a type receives: the tested box for a reference type, else a copy unboxed. */
   private designated(value: Value, inputType: Type, type: Type): Value {
+    // A struct reaches a variable of a reference type in a box of a copy, as any conversion to one boxes it.
+    if (isReferenceType(type) && value instanceof CsStruct) return new CsBox(value.type, copyValue(value));
     if (isReferenceType(type)) return this.asTestedValue(value, inputType);
     return copyValue(value instanceof CsBox ? value.value : value);
   }
