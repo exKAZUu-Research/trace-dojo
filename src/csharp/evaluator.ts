@@ -332,6 +332,20 @@ export class Evaluator extends StatementExecutor {
     return environment;
   }
 
+  /**
+   * The type arguments a local function runs with: those of the functions around it, which its body may name, as a
+   * delegate to it keeps them, and then its own.
+   */
+  private localFunctionEnvironment(
+    frame: Frame,
+    method: MethodSymbol,
+    typeArgs: Type[]
+  ): Map<TypeParameterSymbol, Type> {
+    const environment = new Map(frame.typeEnvironment);
+    for (const [index, parameter] of method.typeParameters.entries()) environment.set(parameter, typeArgs[index]);
+    return environment;
+  }
+
   /** The constructed type that declares an implementation, as the receiver's runtime type sees it. */
   private ownerOfImplementation(method: MethodSymbol, receiver: Value): NamedType | undefined {
     const type = this.runtime.runtimeTypeOf(receiver);
@@ -741,7 +755,9 @@ export class Evaluator extends StatementExecutor {
         receiver,
         args,
         expression.isImplicit ? undefined : expression.row,
-        this.environmentOf(method, owner, typeArgs),
+        method.kind === 'localFunction'
+          ? this.localFunctionEnvironment(frame, method, typeArgs)
+          : this.environmentOf(method, owner, typeArgs),
         this.localFunctionCells(frame, method)
       );
     } finally {
