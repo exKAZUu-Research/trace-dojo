@@ -183,6 +183,12 @@ export interface FunctionInfo {
   instantiate?: (args: Expr[], templateArgs: Type[] | undefined) => FunctionInfo | undefined;
   /** Whether the function is an instance of a template, which overload resolution likes less than a function. */
   isTemplate?: boolean;
+  /** Whether the function is a conversion function (`operator int() const`). */
+  isConversion?: boolean;
+  /** Whether the function is deleted (`= delete`), which overload resolution may choose but no call may use. */
+  isDeleted?: boolean;
+  /** Whether the function is defaulted on its first declaration (`= default`), which leaves it not user-provided. */
+  isDefaulted?: boolean;
 }
 
 /** The library's implementation of a function: it receives the arguments as the parameters declare them. */
@@ -235,6 +241,8 @@ export class ClassInfo {
   /** The constructor a class without user-declared ones has, when it has anything to initialize. */
   row = -1;
 
+  /** Whether the class declares a constructor that `constructors` leaves out (a defaulted copy constructor). */
+  declaresConstructor = false;
   /** Whether the class has no name, which a typedef that names it gives it (`typedef struct { ... } P;`). */
   isUnnamed = false;
 

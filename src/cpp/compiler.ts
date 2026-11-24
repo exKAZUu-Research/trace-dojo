@@ -16,6 +16,7 @@ import {
   memberConstantOf,
   NO_CONSTANT_MEMBERS,
 } from './expr';
+import { provideProgramOperators, type ValueComparison } from './library/elements';
 import type { Library } from './library/registry';
 import {
   bindRetainedTemporary,
@@ -32,6 +33,7 @@ import {
   zeroMembers,
   zeroOf,
 } from './objectCompiler';
+import { overloadedOperator } from './operatorOverloads';
 import { type CompiledFunction, type Eval, type Exec, type Frame, holdAll, RETURN, type Runtime } from './runtime';
 import { type Entity, FunctionContext } from './scopes';
 import {
@@ -116,6 +118,7 @@ export class Compiler extends StatementCompiler {
   private readonly implicitDefaults = new WeakMap<ClassInfo, () => FunctionInfo | undefined>();
   private readonly delegatedConstructors = new WeakMap<FunctionInfo, FunctionInfo>();
   private pendingObjectUses: (() => void)[] | undefined = [];
+  private readonly programComparisons = new Map<string, ValueComparison<boolean> | undefined>();
   private defaultDependencies?: {
     functions: Map<FunctionInfo, number>;
     staticMembers: Map<GlobalInfo, number>;
@@ -125,6 +128,7 @@ export class Compiler extends StatementCompiler {
   constructor(library: Library, options: CompileOptions = {}) {
     super(library);
     library.compiler = this;
+    provideProgramOperators((cls, operator) => this.programComparison(cls, operator));
     this.recordsSteps = options.trace !== undefined;
     this.atomicRows = options.trace?.atomicAnnotations ?? new Map();
   }
@@ -173,6 +177,41 @@ export class Compiler extends StatementCompiler {
       shownGlobals: this.globals.filter((global) => global.isShown),
       mainTakesArguments: mainFunction.params.length === 2,
     };
+  }
+
+  /**
+   * Compares two objects of a class the program wrote with the `<` or `==` it declares for them, for the library's
+   * containers and algorithms; undefined when it declares none.
+   */
+  private programComparison(cls: ClassInfo, operator: '<' | '=='): ValueComparison<boolean> | undefined {
+    const key = `${cls.id}${operator}`;
+    if (this.programComparisons.has(key)) return this.programComparisons.get(key);
+    const operands: Ptr[][] = [];
+    const operand = (index: number): Expr => ({
+      type: classType(cls, true),
+      isLvalue: true,
+      row: cls.row,
+      run: () => (operands.at(-1) as Ptr[])[index],
+    });
+    let comparison: ValueComparison<boolean> | undefined;
+    try {
+      const overloaded = overloadedOperator(this, operator, [operand(0), operand(1)], cls.row);
+      if (overloaded) {
+        const test = this.condition(overloaded.expr, cls.row);
+        comparison = (a, b, frame) => {
+          operands.push([new Ptr(new Box(a), 0), new Ptr(new Box(b), 0)]);
+          try {
+            return withTemporaries(frame, () => test(frame));
+          } finally {
+            operands.pop();
+          }
+        };
+      }
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+    }
+    this.programComparisons.set(key, comparison);
+    return comparison;
   }
 
   private libcOverrides(): ReadonlyMap<string, FunctionInfo> {
@@ -387,7 +426,9 @@ export class Compiler extends StatementCompiler {
           }
         }
       }
-      for (const { fn, node: definition } of definitions) this.compileFunction(fn, definition);
+      for (const { fn, node: definition } of definitions) {
+        if (!fn.isDefaulted && !fn.isDeleted) this.compileFunction(fn, definition);
+      }
       for (const fn of [...cls.constructors, ...(cls.destructor ? [cls.destructor] : [])]) {
         if (fn.isDefined && !fn.compiled && fn.definition) this.compileFunction(fn, fn.definition);
       }
@@ -532,7 +573,7 @@ export class Compiler extends StatementCompiler {
   private isFunctionDeclarator(declarator: Syntax): boolean {
     let current: Syntax | undefined = declarator;
     while (current) {
-      if (current.type === 'function_declarator') return true;
+      if (current.type === 'function_declarator' || current.type === 'operator_cast') return true;
       if (current.type === 'parenthesized_declarator') return false;
       current = fieldOf(current, 'declarator') ?? current.children.find((child) => child.type.endsWith('declarator'));
     }
@@ -552,7 +593,8 @@ export class Compiler extends StatementCompiler {
     const functionDeclarator = declared.function as Syntax;
     const rawName = declared.name ?? '';
     const isDestructor = rawName.startsWith('~');
-    const isConstructor = !typeNode && !isDestructor;
+    const isConversion = declared.nameNode?.type === 'operator_cast';
+    const isConstructor = !typeNode && !isDestructor && !isConversion;
     if (isConstructor && rawName !== cls.name) return this.error(node.row, `${rawName} の戻り値の型を書いてください。`);
     if (isDestructor && rawName !== `~${cls.name}`)
       return this.error(node.row, `デストラクタの名前は ~${cls.name} です。`);
@@ -588,7 +630,20 @@ export class Compiler extends StatementCompiler {
         this.error(node.row, '= 0 は virtual のメンバ関数にしか付けられません。');
       fn.isPure = true;
     }
-    if (isDefinition) {
+    const clause = isDefinition ? specialDefinition(node) : undefined;
+    if (clause === 'delete') {
+      fn.isDeleted = true;
+      fn.isDefined = true;
+    } else if (clause === 'default') {
+      fn.isDefaulted = true;
+      fn.isDefined = true;
+      this.checkDefaultable(cls, fn, node.row);
+      // A defaulted copy constructor or copy assignment behaves as the implicit one, which the class keeps.
+      if ((isConstructor && fn.params.length > 0) || rawName === 'operator=') {
+        cls.declaresConstructor ||= isConstructor;
+        return fn;
+      }
+    } else if (isDefinition) {
       fn.isDefined = true;
       fn.definition = node;
       this.claimAtomic(fn, node);
@@ -596,6 +651,7 @@ export class Compiler extends StatementCompiler {
     if (isConstructor) {
       this.addOverload(cls.constructors, fn, node.row);
     } else if (isDestructor) {
+      if (fn.isDefaulted) this.defineDefaulted(cls, fn);
       if (cls.destructor) this.error(node.row, `デストラクタ ~${cls.name} はすでに宣言されています。`);
       if (fn.params.length > 0) this.error(node.row, 'デストラクタは引数をとれません。');
       cls.destructor = fn;
@@ -608,6 +664,17 @@ export class Compiler extends StatementCompiler {
       cls.methods.set(rawName, overloads);
     }
     return fn;
+  }
+
+  /** Rejects `= default` on a function that is no special member function (C++20 [dcl.fct.def.default]). */
+  private checkDefaultable(cls: ClassInfo, fn: FunctionInfo, row: number): void {
+    const isCopy = fn.params.length === 1 && isCopyParameter(fn.params[0].type, cls);
+    const isSpecial =
+      (fn.isConstructor && (fn.params.length === 0 || isCopy)) ||
+      fn.isDestructor ||
+      (fn.name === 'operator=' && isCopy);
+    if (!isSpecial)
+      this.error(row, `${fn.displayName} には = default を付けられません（特別なメンバ関数ではありません）。`);
   }
 
   /** Adds a function to an overload set, rejecting a second declaration with the same parameters. */
@@ -649,6 +716,8 @@ export class Compiler extends StatementCompiler {
       params,
       ret,
       owner,
+      isExplicit: this.isExplicitSpecified(node),
+      isConversion: declarator.type === 'abstract_function_declarator' && name.startsWith('operator '),
       isStatic: false,
       isVirtual: false,
       isInline: this.hasSpecifier(node, 'inline'),
@@ -664,6 +733,17 @@ export class Compiler extends StatementCompiler {
       isAtomic: false,
       isDefined: false,
     };
+  }
+
+  /** Whether a declaration says `explicit`, or `explicit(true)` with a constant condition. */
+  private isExplicitSpecified(node: Syntax): boolean {
+    const specifier = node.children.find((child) => child.type === 'explicit_function_specifier');
+    if (!specifier) return false;
+    const condition = specifier.children[0];
+    if (!condition) return true;
+    const value = this.rvalue(this.compileExpression(condition));
+    if (value.constant === undefined) this.error(condition.row, 'explicit(...) の条件は定数式でなければなりません。');
+    return Number(value.constant) !== 0;
   }
 
   private parameters(list: Syntax): ParamInfo[] {
@@ -719,10 +799,18 @@ export class Compiler extends StatementCompiler {
     if (cls.destructor) this.completeVirtual(cls, cls.destructor, '~');
     const copies = this.writtenCopyConstructors(cls);
     if (copies.length === 0) this.completeImplicitCopy(cls);
-    cls.isAssignmentDeleted =
-      cls.base?.isAssignmentDeleted === true || cls.ownFields.some((field) => !allowsMemberAssignment(field.type));
+    const userAssignment = (cls.methods.get('operator=') ?? []).find(
+      (fn) => fn.params.length === 1 && isCopyParameter(fn.params[0].type, cls)
+    );
+    cls.isAssignmentDeleted = userAssignment
+      ? userAssignment.isDeleted === true
+      : cls.base?.isAssignmentDeleted === true || cls.ownFields.some((field) => !allowsMemberAssignment(field.type));
     cls.isComplete = true;
-    if (cls.constructors.length === 0) {
+    for (const constructor of cls.constructors) {
+      if (constructor.isDefaulted) this.defineDefaulted(cls, constructor);
+    }
+    if (cls.constructors.length === 0 && cls.declaresConstructor) cls.isDefaultConstructorDeleted = true;
+    else if (cls.constructors.length === 0) {
       cls.isDefaultConstructorDeleted =
         (cls.base !== undefined && !this.isDefaultInitializable(classType(cls.base), cls, true)) ||
         cls.ownFields.some((field) => !field.initializer && !this.isDefaultInitializable(field.type, cls));
@@ -786,6 +874,23 @@ export class Compiler extends StatementCompiler {
       if (error instanceof CompileError) return false;
       throw error;
     }
+  }
+
+  /** Gives a defaulted default constructor or destructor the body the implicit one would have. */
+  private defineDefaulted(cls: ClassInfo, fn: FunctionInfo): void {
+    if (fn.isDestructor) {
+      fn.compiled = { slotCount: 0, locals: [], body: () => {} };
+      return;
+    }
+    const isDeleted =
+      (cls.base !== undefined && !this.isDefaultInitializable(classType(cls.base), cls, true)) ||
+      cls.ownFields.some((field) => !field.initializer && !this.isDefaultInitializable(field.type, cls));
+    if (isDeleted) {
+      fn.isDeleted = true;
+      return;
+    }
+    const implicit = this.implicitDefaultConstructor(cls);
+    fn.compiled = implicit?.compiled ?? { slotCount: 0, locals: [], body: () => {} };
   }
 
   private bindImplicitDefault(cls: ClassInfo): () => FunctionInfo | undefined {
@@ -1189,7 +1294,20 @@ export class Compiler extends StatementCompiler {
         frame.pending.length = mark;
       }
     };
+    const userAssignment = (cls.methods.get('operator=') ?? []).find(
+      (fn) => fn.params.length === 1 && isCopyParameter(fn.params[0].type, cls)
+    );
     const assignInto = (frame: Frame, target: CObject, source: CObject): void => {
+      if (userAssignment) {
+        if (userAssignment.isDeleted)
+          throw new CppRuntimeError('custom', `${cls.name} のオブジェクトには代入できません（= delete）。`);
+        const parameter = userAssignment.params[0].type;
+        const argument = parameter.kind === 'reference' ? source.receiver(cls) : this.copyArgument(frame, cls, source);
+        withTemporaries(frame, () =>
+          invoke(frame, userAssignment, [argument], target.receiver(cls), userAssignment.row)
+        );
+        return;
+      }
       if (base) base.operations?.assign(frame, target, source);
       for (const field of ownFields) {
         target.values[field.index] = assignValue(
@@ -1214,6 +1332,11 @@ export class Compiler extends StatementCompiler {
       },
       destroy,
     };
+  }
+
+  /** A copy of an object for a parameter that takes it by value. */
+  private copyArgument(frame: Frame, cls: ClassInfo, source: CObject): Value {
+    return cls.operations?.copy(frame, source) ?? source;
   }
 
   private copyMember(
@@ -1269,6 +1392,10 @@ export class Compiler extends StatementCompiler {
   private functionDefinition(node: Syntax): void {
     // A function returning a pointer or a reference wraps its function declarator (`int& f()`).
     const written = fieldOf(node, 'declarator') as Syntax;
+    if (written.type === 'qualified_identifier' && fieldOf(written, 'name')?.type === 'operator_cast') {
+      this.outOfClassDefinition(node, written);
+      return;
+    }
     const declarator = innermostFunctionDeclarator(written);
     if (!declarator) return this.error(node.row, '関数の定義には (...) で引数を書いてください。');
     const inner = fieldOf(declarator, 'declarator') as Syntax;
@@ -1278,7 +1405,18 @@ export class Compiler extends StatementCompiler {
     }
     if (!fieldOf(node, 'type')) return this.error(node.row, '関数の戻り値の型を書いてください。');
     const declared = this.applyDeclarator(this.specifiedType(node, true), written);
-    const fn = this.declareFunction(node, declared, true);
+    const clause = specialDefinition(node);
+    if (clause === 'default')
+      this.error(
+        node.row,
+        `${declared.name ?? ''} には = default を付けられません（特別なメンバ関数ではありません）。`
+      );
+    const fn = this.declareFunction(node, declared, clause === undefined);
+    if (clause === 'delete') {
+      fn.isDeleted = true;
+      fn.isDefined = true;
+      return;
+    }
     this.compileFunction(fn, node);
   }
 
@@ -1365,12 +1503,12 @@ export class Compiler extends StatementCompiler {
       const declarator = fieldOf(node, 'declarator') as Syntax;
       const nameNode = fieldOf(qualified, 'name') as Syntax;
       this.checkSpecialMemberReturnType(cls, nameNode.text, node);
-      const declared = this.applyDeclarator(ret, declarator);
+      const declared = this.applyDeclarator(ret, nameNode.type === 'operator_cast' ? nameNode : declarator);
       const probe = this.functionInfo(declared.name ?? '', declared.type, declared.function as Syntax, node, cls);
       let candidates: FunctionInfo[];
       if (nameNode.type === 'destructor_name') candidates = cls.destructor ? [cls.destructor] : [];
       else if (nameNode.text === cls.name && !typeNode) candidates = cls.constructors;
-      else candidates = cls.methods.get(nameNode.text) ?? [];
+      else candidates = cls.methods.get(this.plainName(nameNode)) ?? [];
       const fn = candidates.find(
         (candidate) => sameParameters(candidate, probe) && candidate.isConst === probe.isConst
       );
@@ -1969,7 +2107,11 @@ export class Compiler extends StatementCompiler {
     if (cls.constructors.length > 0) {
       const resolved = this.resolve(`${cls.name} のコンストラクタ`, cls.constructors, [], undefined, row);
       this.checkListConstructor(resolved.fn, allowsExplicit, row);
-      return this.constructWith(cls, resolved, [], row);
+      const constructed = this.constructWith(cls, resolved, [], row);
+      // A default constructor that is not user-provided zero-initializes the object first (C++20 [dcl.init]p8).
+      if (!isValueInitialized || !resolved.fn.isDefaulted) return constructed;
+      const { run } = constructed;
+      return { ...constructed, run: (frame, _zero, destination, lifetime) => run(frame, true, destination, lifetime) };
     }
     this.requireVirtualDefinitions(cls, row);
     if (cls.isDefaultConstructorDeleted) return this.error(row, deletedDefaultMessage(cls));
@@ -2438,6 +2580,7 @@ export class Compiler extends StatementCompiler {
   }
 
   checkDefined(fn: FunctionInfo, row: number): void {
+    if (fn.isDeleted) this.error(row, `削除された関数 ${fn.displayName} は使えません（= delete）。`);
     if (this.isUnevaluated) return;
     if (fn.native) {
       if (fn.isConstructor && fn.owner) this.checkLibraryStorage(fn.owner, row);
@@ -2698,6 +2841,19 @@ function intMaxOf(type: Extract<Type, { kind: 'int' }>): bigint {
 }
 
 /** The function declarator of a declarator, which pointer and reference declarators may wrap (`int* f()`). */
+/** Whether a function's definition is `= default` or `= delete`. */
+function specialDefinition(node: Syntax): 'default' | 'delete' | undefined {
+  if (node.children.some((child) => child.type === 'default_method_clause')) return 'default';
+  if (node.children.some((child) => child.type === 'delete_method_clause')) return 'delete';
+  return undefined;
+}
+
+/** Whether a parameter's type makes a constructor or an assignment a copy one: `C`, `C&`, or `const C&`. */
+function isCopyParameter(type: Type, cls: ClassInfo): boolean {
+  const target = type.kind === 'reference' ? type.to : type;
+  return target.kind === 'class' && target.cls === cls;
+}
+
 function innermostFunctionDeclarator(declarator: Syntax): Syntax | undefined {
   let current: Syntax | undefined = declarator;
   while (current && current.type !== 'function_declarator') {

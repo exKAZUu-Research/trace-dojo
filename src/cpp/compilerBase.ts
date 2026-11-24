@@ -287,7 +287,8 @@ export abstract class CompilerBase {
   }
 
   plainName(node: Syntax): string {
-    if (node.type === 'operator_name') return this.unsupported(node.row, '演算子のオーバーロード（operator）');
+    if (node.type === 'operator_name') return operatorName(node);
+    if (node.type === 'operator_cast') return this.conversionName(node);
     if (node.type === 'template_function' || node.type === 'template_type') {
       return (fieldOf(node, 'name') as Syntax).text;
     }
@@ -568,8 +569,6 @@ export abstract class CompilerBase {
       case 'destructor_name':
       case 'operator_name':
       case 'template_function': {
-        if (declarator.type === 'operator_name')
-          return this.unsupported(declarator.row, '演算子のオーバーロード（operator）');
         const name = this.declaredName(declarator);
         if (name !== undefined) this.checkHeaderMacro(name.split('::').at(-1) ?? name, declarator.row);
         return { name, nameNode: declarator, type: base };
@@ -598,6 +597,12 @@ export abstract class CompilerBase {
         const length = size ? this.arrayLength(size) : undefined;
         return this.applyInner({ kind: 'array', of: base, length }, declarator);
       }
+      case 'operator_cast': {
+        // A conversion function (`operator int() const`) returns the type it names.
+        const type = this.conversionType(declarator);
+        const functionDeclarator = fieldOf(declarator, 'declarator') as Syntax;
+        return { name: this.conversionName(declarator), nameNode: declarator, type, function: functionDeclarator };
+      }
       case 'function_declarator': {
         const inner = fieldOf(declarator, 'declarator');
         const declared = inner
@@ -622,9 +627,25 @@ export abstract class CompilerBase {
     return this.applyDeclarator(type, inner);
   }
 
+  /** The type a conversion function (`operator int() const`) converts to. */
+  conversionType(node: Syntax): Type {
+    const base = this.specifiedType(node);
+    const inner = fieldOf(node, 'declarator');
+    // The declarator of the type (`operator int*()`) precedes the function's parameters.
+    if (inner && inner.type !== 'abstract_function_declarator') return this.applyDeclarator(base, inner).type;
+    return base;
+  }
+
+  /** The name of a conversion function, such as `operator int`. */
+  conversionName(node: Syntax): string {
+    return `operator ${typeName(this.conversionType(node))}`;
+  }
+
   private declaredName(node: Syntax): string {
     if (node.type === 'qualified_identifier') return this.declaredName(fieldOf(node, 'name') as Syntax);
     if (node.type === 'destructor_name') return `~${node.children[0]?.text ?? ''}`;
+    if (node.type === 'operator_name') return operatorName(node);
+    if (node.type === 'operator_cast') return this.conversionName(node);
     if (node.type === 'template_function') return this.unsupported(node.row, 'テンプレートの特殊化');
     return node.text;
   }
@@ -641,6 +662,15 @@ export abstract class CompilerBase {
   describeType(type: Type): string {
     return typeName(type);
   }
+}
+
+/**
+ * The name of an operator function, with no spaces in its symbol: `operator+`, `operator()`, `operator[]`, or with a
+ * space before a word: `operator new[]`, `operator co_await`, and `operator""_km` for a literal operator.
+ */
+export function operatorName(node: Syntax): string {
+  const symbol = node.text.replace(/^operator/, '').replaceAll(/\s+/g, '');
+  return /^[a-z_]/i.test(symbol) ? `operator ${symbol}` : `operator${symbol}`;
 }
 
 /** The type that `auto` stands for until an initializer decides it. */

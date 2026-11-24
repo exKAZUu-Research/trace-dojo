@@ -488,9 +488,26 @@ export type Compare = (frame: Frame, a: Value, b: Value) => boolean;
 
 export type ValueComparison<T> = (a: Value, b: Value, frame: Frame) => T;
 
+/**
+ * Applies an operator function the program declares to two objects of a class it wrote, or undefined when it declares
+ * none for them; the compiler provides it.
+ */
+type ProgramOperator = (cls: ClassInfo, operator: '<' | '==') => ValueComparison<boolean> | undefined;
+
+let programOperator: ProgramOperator | undefined;
+
+export function provideProgramOperators(provide: ProgramOperator | undefined): void {
+  programOperator = provide;
+}
+
 /** Compares two values of a type with `<` as the library's default comparators do, or undefined when `<` does not apply. */
 export function lessThan(type: Type): ValueComparison<number> | undefined {
   if (type.kind === 'reference') return compareReferences(lessThan(type.to));
+  if (type.kind === 'class' && !type.cls.library) {
+    const less = programOperator?.(type.cls, '<');
+    if (!less) return undefined;
+    return (a, b, frame) => (less(a, b, frame) ? -1 : less(b, a, frame) ? 1 : 0);
+  }
   if (isArithmetic(type)) {
     return (a, b) => {
       const x = a as number | bigint;
@@ -538,6 +555,7 @@ export function lessThan(type: Type): ValueComparison<number> | undefined {
 /** Whether two values of a type are equal, as `==` says, or undefined when `==` does not apply. */
 export function equalTo(type: Type): ValueComparison<boolean> | undefined {
   if (type.kind === 'reference') return compareReferences(equalTo(type.to));
+  if (type.kind === 'class' && !type.cls.library) return programOperator?.(type.cls, '==');
   if (type.kind === 'pointer') return (a, b) => (a as Ptr).equals(b as Ptr);
   if (type.kind === 'class' && type.cls.library?.kind === 'pair') {
     const [first, second] = type.cls.fields;

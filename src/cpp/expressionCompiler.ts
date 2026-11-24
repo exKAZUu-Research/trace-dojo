@@ -8,6 +8,7 @@ import { byteAt } from './bytes';
 import { hasAuto, isAuto } from './compilerBase';
 import {
   classLocation,
+  conversionFunctions,
   type ConversionSequence,
   convertArithmetic,
   implicitConversion,
@@ -35,6 +36,7 @@ import { moveValue } from './library/elements';
 import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
 import { constructArray, initializeAt, ObjectCompiler, zeroOf } from './objectCompiler';
+import { hasUserType, overloadedOperator, withOverloads } from './operatorOverloads';
 import { erasePointee, recoverPointee } from './pointerCasts';
 import { type Eval, type Frame, holdAll } from './runtime';
 import type { Entity } from './scopes';
@@ -423,6 +425,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   /** The object `p->` designates: what a pointer points to, or what an iterator's `->` gives. */
   arrow(pointer: Expr, row: number): Expr {
     const type = pointer.type;
+    if (type.kind === 'class' && !type.cls.library) {
+      // `p->m` calls `p.operator->()` and applies `->` again to its result (C++20 [over.ref]).
+      const overloaded = overloadedOperator(this, '->', [pointer], row);
+      if (!overloaded) return this.error(row, `${typeName(type)} には operator-> がありません。`);
+      return this.arrow(overloaded.expr, row);
+    }
     if (type.kind === 'class' && type.cls.library?.operator) {
       const result = type.cls.library.operator(this, '->', [pointer], row);
       if (result) return result;
@@ -645,6 +653,30 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** Compiles a binary operator on two compiled operands. */
   binary(operator: string, left: Expr, right: Expr, row: number): Expr {
+    if (!left.functions && !right.functions && (hasUserType(left.type) || hasUserType(right.type)))
+      return this.withComparisonRewrites(operator, left, right, row);
+    return this.builtinBinary(operator, left, right, row);
+  }
+
+  /**
+   * A binary operator with the operator functions the program declares, including the comparisons C++20 rewrites:
+   * `a != b` as `!(a == b)` and `a == b` as `b == a` when only those are declared (C++20 [over.match.oper]p3).
+   */
+  private withComparisonRewrites(operator: string, left: Expr, right: Expr, row: number): Expr {
+    const builtin = (): Expr => this.builtinBinary(operator, left, right, row);
+    const direct = overloadedOperator(this, operator, [left, right], row);
+    if (direct) return withOverloads(this, operator, [left, right], row, builtin);
+    if (operator === '==' || operator === '!=') {
+      const equal =
+        overloadedOperator(this, '==', [left, right], row) ?? overloadedOperator(this, '==', [right, left], row);
+      if (equal) return operator === '==' ? equal.expr : this.unary('!', equal.expr, row);
+    }
+    return builtin();
+  }
+
+  private builtinBinary(operator: string, written: Expr, writtenRight: Expr, row: number): Expr {
+    const left = this.builtinOperand(written);
+    const right = this.builtinOperand(writtenRight);
     const libraryResult = this.libraryOperator(operator, [left, right], row);
     if (libraryResult) return libraryResult;
     if (operator === '&&' || operator === '||') return this.logical(operator, left, right, row);
@@ -926,6 +958,23 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   unary(operator: string, operand: Expr, row: number): Expr {
+    if (!operand.functions && hasUserType(operand.type))
+      return withOverloads(this, operator, [operand], row, () => this.builtinUnary(operator, operand, row));
+    return this.builtinUnary(operator, operand, row);
+  }
+
+  /**
+   * The operand a built-in operator takes for an object of a class that the program wrote: the value of its only
+   * implicit conversion function (C++20 [over.built]), or the object itself.
+   */
+  private builtinOperand(expr: Expr): Expr {
+    if (expr.type.kind !== 'class' || expr.type.cls.library) return expr;
+    const [only, ...others] = conversionFunctions(expr.type.cls).filter((fn) => !fn.isExplicit);
+    return only && others.length === 0 ? this.callConversion(expr, only) : expr;
+  }
+
+  private builtinUnary(operator: string, writtenOperand: Expr, row: number): Expr {
+    const operand = this.builtinOperand(writtenOperand);
     const libraryResult = this.libraryOperator(operator, [operand], row);
     if (libraryResult) return libraryResult;
     if (operator === '!') {
@@ -989,8 +1038,21 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return this.increment(target, operator, isPrefix, node.row);
   }
 
-  // code-gauge-allow functionNcss -- The result category and shared update depend on the same operand.
   increment(target: Expr, operator: '++' | '--', isPrefix: boolean, row: number): Expr {
+    if (hasUserType(target.type))
+      return withOverloads(
+        this,
+        operator,
+        [target],
+        row,
+        () => this.builtinIncrement(target, operator, isPrefix, row),
+        !isPrefix
+      );
+    return this.builtinIncrement(target, operator, isPrefix, row);
+  }
+
+  // code-gauge-allow functionNcss -- The result category and shared update depend on the same operand.
+  private builtinIncrement(target: Expr, operator: '++' | '--', isPrefix: boolean, row: number): Expr {
     const libraryResult = this.libraryOperator(isPrefix ? operator : `x${operator}`, [target], row);
     if (libraryResult) return libraryResult;
     this.checkAssignable(target, row, operator);
@@ -1049,6 +1111,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   dereferenceOperator(operand: Expr, row: number): Expr {
+    if (hasUserType(operand.type))
+      return withOverloads(this, '*', [operand], row, () => this.builtinDereference(operand, row));
+    return this.builtinDereference(operand, row);
+  }
+
+  private builtinDereference(operand: Expr, row: number): Expr {
     const libraryResult = this.libraryOperator('*', [operand], row);
     if (libraryResult) return libraryResult;
     const value = this.rvalue(operand);
@@ -1117,6 +1185,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   /** Compiles `target = source` or a compound assignment. */
   // code-gauge-allow functionNcss -- Both assignments share storage tracking and preserve C++ operand order.
   assign(operator: string, target: Expr, source: Expr, row: number): Expr {
+    if (target.type.kind === 'class' && !target.type.cls.library) {
+      const overloaded = overloadedOperator(this, operator, [target, source], row);
+      if (overloaded) return overloaded.expr;
+    } else if (hasUserType(source.type) || (target.type.kind === 'int' && target.type.enumeration)) {
+      const overloaded = overloadedOperator(this, operator, [target, source], row);
+      if (overloaded && operator !== '=') return overloaded.expr;
+    }
     if (target.type.kind === 'class') {
       const libraryResult = this.libraryOperator(operator, [target, source], row);
       if (libraryResult) return libraryResult;
@@ -1400,6 +1475,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   subscript(array: Expr, index: Expr, row: number): Expr {
+    if (array.type.kind === 'class' && !array.type.cls.library) {
+      const overloaded = overloadedOperator(this, '[]', [array, index], row);
+      if (overloaded) return overloaded.expr;
+    }
     const libraryResult = this.libraryOperator('[]', [array, index], row);
     if (libraryResult) return libraryResult;
     if (index.braced) return this.error(row, 'この型の [] の中に {...} は書けません。');
@@ -1482,6 +1561,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         return v !== 0 && v !== 0n;
       };
     if (type.kind === 'pointer' || type.kind === 'nullptr') return (frame) => !(run(frame) as Ptr).isNull;
+    if (type.kind === 'class' && !type.cls.library) {
+      // A condition converts to `bool` contextually, which may use an explicit conversion function.
+      const conversion = implicitConversion(this, expr, BOOL, true, true);
+      if (conversion) return this.condition(conversion.apply(expr), row);
+    }
     const libraryBool = this.libraryBool(expr, row);
     if (libraryBool) {
       const test = libraryBool.run;
@@ -1529,6 +1613,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return this.error(row, `${typeName(expr.type)} を ${typeName(type)} には変換できません。`);
     }
     if (type.kind === 'class') return this.constructObject(type.cls, [expr], row, false);
+    if (expr.type.kind === 'class' && !expr.type.cls.library) {
+      // A cast is a direct-initialization, which may use an explicit conversion function.
+      const conversion = implicitConversion(this, expr, unqualified(type), true, true);
+      if (conversion) return conversion.apply(expr);
+    }
     return this.convert(expr, unqualified(type), row);
   }
 
@@ -1766,6 +1855,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       if (result) return result;
     }
     if (!candidates) {
+      if (callee.type.kind === 'class' && !callee.type.cls.library) {
+        const overloaded = overloadedOperator(this, '()', [callee, ...args], row);
+        if (overloaded) return overloaded.expr;
+        return this.error(
+          row,
+          `${typeName(callee.type)} 型の値は関数として呼び出せません（operator() がありません）。`
+        );
+      }
       if (callee.type.kind === 'class' && callee.type.cls.library?.call) {
         const result = callee.type.cls.library.call(this, callee, args, row);
         if (result) return result;
@@ -1798,6 +1895,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     this.checkDefined(fn, row);
     return this.withLibraryAccess(() => this.callExpr(resolved, args, undefined, row));
+  }
+
+  /** The non-member operator functions an operator expression may call, as unqualified lookup finds them. */
+  nonMemberOperators(name: string, _operands: Expr[]): FunctionInfo[] {
+    const entity = this.findGlobalName(name);
+    if (entity?.kind !== 'functions') return [];
+    return entity.functions.filter((fn) => !fn.owner && !fn.native);
   }
 
   /** Adds the library's functions an unqualified call finds through its arguments' types (C++20 [basic.lookup.argdep]). */

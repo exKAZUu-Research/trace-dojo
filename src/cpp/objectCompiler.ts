@@ -349,7 +349,7 @@ export interface Resolved {
   fn: FunctionInfo;
   conversions: ConversionSequence[];
 }
-type MatchingOverload = Resolved & { objectConversion?: ConversionSequence };
+export type MatchingOverload = Resolved & { objectConversion?: ConversionSequence };
 
 interface ObjectUseContext {
   access?: ClassInfo;
@@ -609,6 +609,11 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     }
   }
 
+  callConversion(expr: Expr, fn: FunctionInfo): Expr {
+    this.checkDefined(fn, expr.row);
+    return this.callExpr({ fn, conversions: [] }, [], expr, expr.row);
+  }
+
   isViableConstructor(constructor: FunctionInfo): boolean {
     return !constructor.isExplicit;
   }
@@ -672,7 +677,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return best;
   }
 
-  protected matchingOverloads(
+  matchingOverloads(
     candidates: FunctionInfo[],
     args: Expr[],
     object?: Expr,

@@ -61,6 +61,8 @@ export interface ConversionHost {
   isViableConstructor(constructor: FunctionInfo): boolean;
   /** The conversion of a braced list argument (`f({1, 2})`) to a type, by list-initialization. */
   bracedConversion(list: Syntax, to: Type): ConversionSequence | undefined;
+  /** A call of a conversion function (`operator int() const`) on an object. */
+  callConversion(expr: Expr, fn: FunctionInfo): Expr;
 }
 
 const identity = (expr: Expr): Expr => expr;
@@ -81,7 +83,62 @@ export function implicitConversion(
   host: ConversionHost,
   expr: Expr,
   to: Type,
-  allowUser = true
+  allowUser = true,
+  allowExplicit = false
+): ConversionSequence | undefined {
+  const standard = convertWithoutFunctions(host, expr, to, allowUser);
+  if (standard || !allowUser || to.kind === 'reference' || expr.type.kind !== 'class' || expr.type.cls.library)
+    return standard;
+  return conversionFunction(host, expr, to, allowExplicit);
+}
+
+/**
+ * The user-defined conversion by a conversion function of the expression's class (C++20 [over.match.conv]), the
+ * explicit ones too when `allowExplicit` (a direct-initialization or a contextual conversion to `bool`).
+ */
+function conversionFunction(
+  host: ConversionHost,
+  expr: Expr,
+  to: Type,
+  allowExplicit: boolean
+): ConversionSequence | undefined {
+  const source = expr.type as Extract<Type, { kind: 'class' }>;
+  const viable: { fn: FunctionInfo; second: ConversionSequence }[] = [];
+  for (const fn of conversionFunctions(source.cls)) {
+    if (fn.isExplicit && !allowExplicit) continue;
+    if (isConstType(source) && !fn.isConst) continue;
+    const result: Expr = {
+      type: unqualified(fn.ret.kind === 'reference' ? fn.ret.to : fn.ret),
+      isLvalue: fn.ret.kind === 'reference',
+      row: expr.row,
+      run: () => {},
+    };
+    const second = convertWithoutFunctions(host, result, to, false);
+    if (second) viable.push({ fn, second });
+  }
+  const best = bestOf(viable, (a, b) => compareSequences(a.second, b.second));
+  if (!best) return undefined;
+  return sequence(Rank.UserDefined, (e) => best.second.apply(host.callConversion(e, best.fn)), {
+    user: best.fn,
+  });
+}
+
+/** The conversion functions a class declares or inherits, the derived class's hiding the base's of the same name. */
+export function conversionFunctions(cls: ClassInfo): FunctionInfo[] {
+  const found = new Map<string, FunctionInfo[]>();
+  for (let current: ClassInfo | undefined = cls; current; current = current.base) {
+    for (const [name, methods] of current.methods) {
+      if (!found.has(name) && methods.some((fn) => fn.isConversion)) found.set(name, methods);
+    }
+  }
+  return [...found.values()].flat().filter((fn) => fn.isConversion);
+}
+
+function convertWithoutFunctions(
+  host: ConversionHost,
+  expr: Expr,
+  to: Type,
+  allowUser: boolean
 ): ConversionSequence | undefined {
   // The library's pseudo-parameter of a callable or a braced list takes the argument as it is.
   if (expr.braced && to.kind === 'function')
