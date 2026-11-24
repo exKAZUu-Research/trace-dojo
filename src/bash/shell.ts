@@ -13,7 +13,7 @@ import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word }
 import { BUILTINS } from './builtins';
 import { capitalize, lowerCase, upperCase } from './characters';
 import { conditionalStatus } from './conditional';
-import { type DeclarationArgument, runDeclaration } from './declare';
+import { expandDeclarationArguments, runDeclaration } from './declare';
 import { Expander } from './expansion';
 import { EXTERNAL_COMMANDS } from './externalCommands';
 import {
@@ -613,28 +613,7 @@ export class Shell implements ArithmeticHost {
   }
 
   private executeDeclaration(statement: Extract<Statement, { kind: 'declaration' }>): number {
-    const args: DeclarationArgument[] = [];
-    for (const arg of statement.args) {
-      if ('append' in arg) {
-        args.push(
-          arg.value
-            ? {
-                ...arg,
-                value: {
-                  parts: [
-                    {
-                      kind: 'single',
-                      text: this.expander.withSpacedStar(() => this.expander.expandAssignmentValue(arg.value as Word)),
-                    },
-                  ],
-                  row: arg.value.row,
-                  text: arg.value.text,
-                },
-              }
-            : arg
-        );
-      } else args.push(...this.expander.expandWords([arg]));
-    }
+    const args = expandDeclarationArguments(this, statement.args);
     return this.withTemporaryScope(
       statement.assignments,
       () =>

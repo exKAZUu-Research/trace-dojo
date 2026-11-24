@@ -37,6 +37,28 @@ interface Options {
   unset: Set<string>;
 }
 
+/** Expands declaration command arguments left-to-right before prefix bindings and `runDeclaration` execute. */
+export function expandDeclarationArguments(shell: Shell, rawArgs: (Word | Assignment)[]): DeclarationArgument[] {
+  const args: DeclarationArgument[] = [];
+  for (const arg of rawArgs) {
+    if ('append' in arg) {
+      const subscript = arg.subscript && literalWord(arg.subscript, shell.expander.expandAssociativeKey(arg.subscript));
+      const value =
+        arg.value &&
+        literalWord(
+          arg.value,
+          shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(arg.value as Word))
+        );
+      args.push({ ...arg, ...(subscript ? { subscript } : {}), ...(value ? { value } : {}) });
+    } else args.push(...shell.expander.expandWords([arg]));
+  }
+  return args;
+}
+
+function literalWord(origin: Word, text: string): Word {
+  return { parts: [{ kind: 'single', text }], row: origin.row, text: origin.text };
+}
+
 /** `declare`, `typeset`, `local`, `readonly`, and `export`. */
 export function runDeclaration(shell: Shell, name: string, args: DeclarationArgument[]): number {
   const parsed = parseOptions(shell, name, args);
@@ -272,10 +294,8 @@ function propagatePrefixedAttributes(
   if (options.set.has('r')) tempVar.attributes.add('r');
   if (options.unset.has('x')) return true;
   const target = ensureEnclosing();
-  if (!isCompound(operand)) {
-    if (!applyAttributes(shell, builtin, target, options, assigns, false)) return false;
-    if (tempVar.value?.kind === 'scalar' && !shell.assignScalarTo(target, tempVar.value.value, false)) return false;
-  }
+  if (!isCompound(operand) && !applyAttributes(shell, builtin, target, options, assigns, false)) return false;
+  if (tempVar.value?.kind === 'scalar' && !shell.assignScalarTo(target, tempVar.value.value, false)) return false;
   for (const attr of tempVar.attributes) target.attributes.add(attr);
   return true;
 }
