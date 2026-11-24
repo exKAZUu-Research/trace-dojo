@@ -1280,6 +1280,7 @@ const exceptionConstructor: NativeMethod = (call, receiver, args) => {
       state.paramNameString = value;
     }
     if (name === 'actualValue') {
+      call.frame.runtime.retainSlots(0, [value as Value]);
       state.actualObject = value;
       state.actualValue = value === undefined ? undefined : textOf(call, value, libraryType(call, 'System.Object'));
     }
