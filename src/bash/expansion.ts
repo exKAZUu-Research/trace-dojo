@@ -28,6 +28,7 @@ export class Expander {
   /** The status of the last command substitution, which a command of assignments alone returns. */
   lastSubstitutionStatus = 0;
   private spacedStar = false;
+  private partialTail = '';
 
   constructor(private readonly shell: Shell) {}
 
@@ -35,65 +36,95 @@ export class Expander {
     this.shell.runtime.spend(cost);
   }
 
+  private withIsolatedTail<T>(run: () => T): T {
+    const saved = this.partialTail;
+    this.partialTail = '';
+    try {
+      return run();
+    } finally {
+      this.partialTail = saved;
+    }
+  }
+
+  private withRestoredTail<T>(run: () => T): T {
+    const saved = this.partialTail;
+    try {
+      return run();
+    } finally {
+      this.partialTail = saved;
+    }
+  }
+
   // ---------------------------------------------------------------- whole words
 
   /** Expands words into fields, as for a command's arguments. */
   expandWords(words: Word[]): string[] {
-    const fields: string[] = [];
-    for (const word of words) {
-      for (const parts of expandBraces(word.parts, () => this.spend())) {
-        this.checkTilde(parts, false);
-        for (const field of this.splitFields(this.expandParts(parts, false))) {
-          fields.push(this.finishField(field));
-          if (fields.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+    return this.withIsolatedTail(() => {
+      const fields: string[] = [];
+      for (const word of words) {
+        for (const parts of expandBraces(word.parts, () => this.spend())) {
+          this.partialTail = '';
+          this.checkTilde(parts, false);
+          for (const field of this.splitFields(this.expandParts(parts, false))) {
+            fields.push(this.finishField(field));
+            if (fields.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+          }
         }
       }
-    }
-    return fields;
+      return fields;
+    });
   }
 
   /** Expands a word to one string without splitting it, as for `case` and the operands of `[[`. */
   expandString(word: Word): string {
-    this.checkTilde(word.parts, false);
-    return this.joinPieces(this.expandParts(word.parts, false));
+    return this.withIsolatedTail(() => {
+      this.checkTilde(word.parts, false);
+      return this.joinPieces(this.expandParts(word.parts, false));
+    });
   }
 
   /** Expands an associative array's subscript, where Bash does not perform tilde expansion. */
   expandAssociativeKey(word: Word): string {
-    return this.joinPieces(this.expandParts(word.parts, false));
+    return this.withIsolatedTail(() => this.joinPieces(this.expandParts(word.parts, false)));
   }
 
   /** Expands an assignment's value, which Bash neither splits nor matches against file names. */
   expandAssignmentValue(word: Word): string {
-    this.checkTilde(word.parts, true);
-    return this.joinPieces(this.expandParts(word.parts, false));
+    return this.withIsolatedTail(() => {
+      this.checkTilde(word.parts, true);
+      return this.joinPieces(this.expandParts(word.parts, false));
+    });
   }
 
   /** Expands a word into a pattern, quoting the characters that quotes protected. */
   expandPattern(word: Word): string {
-    this.checkTilde(word.parts, false);
-    return this.patternOf(this.expandParts(word.parts, false));
+    return this.withIsolatedTail(() => {
+      this.checkTilde(word.parts, false);
+      return this.patternOf(this.expandParts(word.parts, false));
+    });
   }
 
   /** Expands the right side of `=~` into an extended regular expression, escaping what quotes protected. */
   expandRegex(word: Word): string {
-    this.checkTilde(word.parts, false);
-    return this.flatten(this.expandParts(word.parts, false))
-      .map((fragment) =>
-        fragment.quoted ? fragment.text.replaceAll(/[\\^$.|?*+()[\]{}]/g, String.raw`\$&`) : fragment.text
-      )
-      .join('');
+    return this.withIsolatedTail(() => {
+      this.checkTilde(word.parts, false);
+      return this.flatten(this.expandParts(word.parts, false))
+        .map((fragment) =>
+          fragment.quoted ? fragment.text.replaceAll(/[\\^$.|?*+()[\]{}]/g, String.raw`\$&`) : fragment.text
+        )
+        .join('');
+    });
   }
 
   /** The subscript of an indexed array, expanded as text that the arithmetic evaluator then reads. */
   expandSubscriptString(word: Word): string {
-    return this.joinPieces(this.expandParts(word.parts, true));
+    return this.withIsolatedTail(() => this.joinPieces(this.expandParts(word.parts, true)));
   }
 
   /** Expands `$` expansions, command substitutions, and quotes in an associative subscript from arithmetic text. */
   expandSubscriptText(text: string): string {
     if (!/[$`'"\\]/.test(text)) return text;
-    return this.joinPieces(this.expandParts(parseSubscriptWordParts(text), false));
+    return this.withIsolatedTail(() => this.joinPieces(this.expandParts(parseSubscriptWordParts(text), false)));
   }
 
   matches(text: string, pattern: string): boolean {
@@ -203,13 +234,15 @@ export class Expander {
 
   /** The text of an arithmetic expression after its expansions, which the evaluator reads as Bash's does. */
   arithmeticText(source: ArithmeticSource): string {
-    let text = '';
-    for (const piece of source.pieces) {
-      if (typeof piece === 'string') text += piece;
-      else if (piece.kind === 'ansiC') text += `'${piece.text.replaceAll("'", String.raw`'\''`)}'`;
-      else text += this.joinPieces(this.expandPart(piece, true));
-    }
-    return text;
+    return this.withIsolatedTail(() => {
+      let text = '';
+      for (const piece of source.pieces) {
+        if (typeof piece === 'string') text += piece;
+        else if (piece.kind === 'ansiC') text += `'${piece.text.replaceAll("'", String.raw`'\''`)}'`;
+        else text += this.joinPieces(this.expandPart(piece, true));
+      }
+      return text;
+    });
   }
 
   // ---------------------------------------------------------------- parts
@@ -219,11 +252,23 @@ export class Expander {
     const pieces: Piece[] = [];
     for (const part of parts) {
       for (const piece of this.expandPart(part, inDouble)) {
-        if (piece !== EMPTY_LIST && !isFieldBreak(piece)) this.shell.rootValue(piece.text);
+        this.recordPartialPiece(piece, inDouble);
         pieces.push(piece);
       }
     }
     return pieces;
+  }
+
+  private recordPartialPiece(piece: Piece, inDouble: boolean): void {
+    if (piece === EMPTY_LIST) return;
+    if (isFieldBreak(piece)) {
+      this.partialTail = '';
+      return;
+    }
+    if (inDouble && piece === QUOTED_EMPTY) return;
+    this.shell.rootValue(piece.text);
+    this.partialTail = (this.partialTail + piece.text).slice(-32);
+    this.shell.rootValue(this.partialTail);
   }
 
   // code-gauge-allow functionNcss -- Dispatches each WordPart variant during word expansion.
@@ -240,7 +285,7 @@ export class Expander {
         return [{ text: part.text, quoted: true, split: false }];
       }
       case 'double': {
-        const inner = this.expandParts(part.parts, true);
+        const inner = this.withRestoredTail(() => this.expandParts(part.parts, true));
         // `"$@"` and `@`-subscripted array expansions with no elements make no field; any other quoted text makes one.
         if (inner.length > 0 && inner.every((piece) => piece === EMPTY_LIST)) return [];
         const kept = inner.filter((piece) => piece !== EMPTY_LIST);
@@ -253,7 +298,7 @@ export class Expander {
       }
       case 'commandSubstitution': {
         if (part.syntaxError) return this.failBackquoted(part.syntaxError, inDouble);
-        const { output, status } = this.shell.captureSubshell(part.body, part.row);
+        const { output, status } = this.withIsolatedTail(() => this.shell.captureSubshell(part.body, part.row));
         this.lastSubstitutionStatus = status;
         this.shell.state.lastStatus = status;
         if (output.includes('\0')) this.shell.reportError('warning: command substitution: ignored null byte in input');
@@ -310,7 +355,7 @@ export class Expander {
       if (expansion.argument.length > 0) this.shell.discard(`${expansion.text}: bad substitution`);
       return this.valuePieces(value, inDouble);
     }
-    return applyOperator(this, this.shell, expansion, value, name, subscript, inDouble);
+    return this.withRestoredTail(() => applyOperator(this, this.shell, expansion, value, name, subscript, inDouble));
   }
 
   /** `${#a[i]}`: evaluates `i` once, abandons an invalid or empty subscript, and returns the element's length. */
