@@ -658,7 +658,7 @@ export class Expander {
 
   /**
    * Runs an expansion in which an unquoted `$*` joins with spaces when `IFS` is empty, as Bash 5.3 joins it in the
-   * word of `${x:-word}` and `${x:+word}` and in a declaration builtin's assignment, though not `${a[*]}`.
+   * word of `${x:-word}`, `${x:+word}`, and `${x:?word}` and in a declaration builtin's assignment, though not `${a[*]}`.
    */
   withSpacedStar<T>(run: () => T, enabled = true): T {
     const saved = this.spacedStar;
