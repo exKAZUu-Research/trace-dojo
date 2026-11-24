@@ -2385,7 +2385,7 @@ class Renamer {
     let builtin: TypeEntity | undefined;
     if (!name.qualifier && name.name === '~') return { k: 'class', entity: EQUALITY_CLASS, span: name.span };
     if (!name.qualifier) {
-      if (name.name === '*') builtin = TYPE_KIND;
+      if (name.name === '*' && this.module.extensions.has('StarIsType')) builtin = TYPE_KIND;
       else if (name.name === '()') builtin = UNIT_TYPE;
       else if (name.name === '[]') builtin = LIST_TYPE;
       else if (name.name === '->') builtin = FUNCTION_TYPE;
