@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { ExecutionBudget } from '../../interpreter/limits';
 import { memberNameOf } from './enums';
 import { Scope, type Sym, type ValueKind } from './scopes';
-import { assignmentKind, named, patternIdentifiers } from './syntax';
+import { assignmentKind, isWithin, named, patternIdentifiers } from './syntax';
 
 export const functionLikeTypes = new Set([
   'function_declaration',
@@ -67,6 +67,10 @@ export class Binder {
     ['type_alias_declaration', (node, scope) => this.bindTypeDeclaration(node, scope, 'alias')],
     ['ambient_declaration', (node, scope) => this.bindAmbient(node, scope)],
     ['enum_declaration', (node, scope) => this.bindEnum(node, scope)],
+    ['internal_module', (node, scope) => this.bindNamespace(node, scope)],
+    ['module', (node, scope) => this.bindNamespace(node, scope)],
+    ['export_statement', (node, scope) => this.bindExport(node, scope)],
+    ['import_alias', (node, scope) => this.bindImportAlias(node, scope)],
     ['assignment_expression', (node, scope) => this.bindAssignment(node, scope, 'left')],
     ['augmented_assignment_expression', (node, scope) => this.bindAssignment(node, scope, 'left')],
     ['update_expression', (node, scope) => this.bindAssignment(node, scope, 'argument')],
@@ -192,6 +196,82 @@ export class Binder {
     const name = node.childForFieldName('name');
     if (name) scope.declareType(name.text, kind, node, name);
     this.bindTypeParameterOwner(node, scope);
+  }
+
+  /**
+   * `namespace A.B { ... }`: each name of the path is a namespace that the one before exports, and the body declares
+   * its names in a scope of its own, which sees the names every declaration of the namespace exports.
+   */
+  private bindNamespace(node: TreeNode, scope: Scope, isAmbient = scope.isAmbient): void {
+    const name = node.childForFieldName('name');
+    const body = node.childForFieldName('body');
+    if (name?.type === 'string' || !name) {
+      // `declare module "m" { ... }` declares a module only an import could use.
+      if (body) this.bindChildren(body, this.newScope(body, 'block', scope));
+      return;
+    }
+    let outer = scope;
+    let namespace: Sym | undefined;
+    for (const part of namespacePath(name)) {
+      namespace = outer.declareValue(part.text, 'namespace', node, part);
+      if (outer.namespace) this.exportFrom(outer, namespace, 'value');
+      namespace.namespaceExports ??= new Scope('block', outer, node);
+      outer = this.newNamespaceBody(node, namespace, isAmbient);
+    }
+    if (body) this.bindNamespaceBody(body, outer, isAmbient);
+  }
+
+  /** The statements of a namespace's body, where those of a `declare namespace` are ambient and all exported. */
+  private bindNamespaceBody(body: TreeNode, scope: Scope, isAmbient: boolean): void {
+    this.scopes.set(body.id, scope);
+    for (const child of named(body)) {
+      if (!isAmbient) {
+        this.bind(child, scope);
+        continue;
+      }
+      this.bindAmbientChild(child, scope);
+      this.exportDeclared(child, scope);
+    }
+  }
+
+  private newNamespaceBody(node: TreeNode, namespace: Sym, isAmbient: boolean): Scope {
+    const body = new Scope('function', namespace.namespaceExports, node);
+    body.namespace = namespace;
+    body.isAmbient = isAmbient;
+    return body;
+  }
+
+  /** `import X = N.Y` names what `N.Y` names, as a value and as a type. */
+  private bindImportAlias(node: TreeNode, scope: Scope): void {
+    const name = named(node)[0];
+    if (!name) return;
+    scope.declareValue(name.text, 'importAlias', node, name);
+    scope.declareType(name.text, 'importAlias', node, name);
+  }
+
+  /** `export` in a namespace adds the names its declaration declares to the namespace's exports. */
+  private bindExport(node: TreeNode, scope: Scope): void {
+    this.bindChildren(node, scope);
+    const declaration = node.childForFieldName('declaration');
+    if (declaration && scope.namespace) this.exportDeclared(declaration, scope);
+  }
+
+  private exportDeclared(declaration: TreeNode, scope: Scope): void {
+    for (const nameNode of declaredNames(declaration)) {
+      const value = scope.values.get(nameNode.text);
+      if (value && value.valueDeclarations.some((node) => isWithin(node, declaration) || node.id === declaration.id))
+        this.exportFrom(scope, value, 'value');
+      const type = scope.types.get(nameNode.text);
+      if (type && type.typeDeclarations.some((node) => isWithin(node, declaration) || node.id === declaration.id))
+        this.exportFrom(scope, type, 'type');
+    }
+  }
+
+  private exportFrom(scope: Scope, symbol: Sym, meaning: 'value' | 'type'): void {
+    const namespace = scope.namespace as Sym;
+    const exports = namespace.namespaceExports as Scope;
+    (meaning === 'value' ? exports.values : exports.types).set(symbol.name, symbol);
+    if (meaning === 'value') symbol.exportedFrom = namespace;
   }
 
   /** An enum is a value and a type; its initializers see its members by name. */
@@ -321,29 +401,37 @@ export class Binder {
   }
 
   private bindAmbient(node: TreeNode, scope: Scope): void {
-    for (const child of named(node)) {
-      switch (child.type) {
-        case 'variable_declaration':
-        case 'lexical_declaration': {
-          const kind =
-            child.type === 'variable_declaration' ? 'var' : (child.childForFieldName('kind')?.text as 'let' | 'const');
-          for (const declarator of named(child)) this.bindAmbientVariable(declarator, scope, kind);
-          break;
-        }
-        case 'function_signature': {
-          const name = child.childForFieldName('name');
-          if (name) scope.declareValue(name.text, 'function', child, name);
-          this.bindFunction(child, scope);
-          break;
-        }
-        case 'statement_block': {
-          // `declare global { ... }`
-          this.bindAmbient(child, this.newScope(child, 'block', scope, this.moduleScope));
-          break;
-        }
-        default: {
-          this.bind(child, scope);
-        }
+    for (const child of named(node)) this.bindAmbientChild(child, scope);
+  }
+
+  private bindAmbientChild(child: TreeNode, scope: Scope): void {
+    switch (child.type) {
+      case 'variable_declaration':
+      case 'lexical_declaration': {
+        const kind =
+          child.type === 'variable_declaration' ? 'var' : (child.childForFieldName('kind')?.text as 'let' | 'const');
+        for (const declarator of named(child)) this.bindAmbientVariable(declarator, scope, kind);
+        break;
+      }
+      case 'function_signature': {
+        const name = child.childForFieldName('name');
+        if (name) scope.declareValue(name.text, 'function', child, name);
+        this.bindFunction(child, scope);
+        break;
+      }
+      case 'statement_block': {
+        // `declare global { ... }` augments the globals from the library's modules, but nothing from a script.
+        const augments = this.options?.deferLibraryTypes ? this.moduleScope : undefined;
+        this.bindAmbient(child, this.newScope(child, 'block', scope, augments));
+        break;
+      }
+      case 'internal_module':
+      case 'module': {
+        this.bindNamespace(child, scope, true);
+        break;
+      }
+      default: {
+        this.bind(child, scope);
       }
     }
   }
@@ -401,6 +489,29 @@ class SignatureScope extends Scope {
 
 export function symbolDeclaredBy(scope: Scope, name: string): Sym | undefined {
   return scope.values.get(name);
+}
+
+/** The names of a namespace's path, as `A`, `B`, and `C` of `A.B.C`. */
+function namespacePath(name: TreeNode): TreeNode[] {
+  if (name.type !== 'nested_identifier' && name.type !== 'member_expression') return [name];
+  const object = name.childForFieldName('object');
+  const property = name.childForFieldName('property');
+  return [...(object ? namespacePath(object) : []), ...(property ? [property] : [])];
+}
+
+/** The name nodes a declaration declares, as the names of a variable declaration's patterns or a class's name. */
+function declaredNames(declaration: TreeNode): TreeNode[] {
+  if (declaration.type === 'lexical_declaration' || declaration.type === 'variable_declaration')
+    return named(declaration).flatMap((declarator) => {
+      const name = declarator.childForFieldName('name');
+      return name ? patternIdentifiers(name) : [];
+    });
+  if (declaration.type === 'ambient_declaration') return named(declaration).flatMap(declaredNames);
+  if (declaration.type === 'expression_statement') return named(declaration).flatMap(declaredNames);
+  if (declaration.type === 'import_alias') return named(declaration).slice(0, 1);
+  const name = declaration.childForFieldName('name');
+  if (!name) return [];
+  return name.type === 'nested_identifier' ? namespacePath(name).slice(0, 1) : [name];
 }
 
 function assignmentOwner(scope: Scope, budget: ExecutionBudget | undefined): number | undefined {

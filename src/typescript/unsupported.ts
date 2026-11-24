@@ -4,12 +4,7 @@ import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics'
 
 /** Syntax this interpreter does not run yet, by node type, named as learners know it. */
 const unsupportedNodes: Record<string, string> = {
-  ambient_declaration: 'declare による宣言',
-  internal_module: 'namespace',
-  module: 'module による宣言',
   import_statement: 'import や export',
-  export_statement: 'import や export',
-  import_alias: 'import や export',
   import: 'import や export',
   using_declaration: 'using 宣言',
   decorator: 'デコレータ',
@@ -32,7 +27,7 @@ export function rejectUnsupportedSyntax(root: TreeNode): void {
     if (diagnostics.length < 5) diagnostics.push({ row: node.startPosition.row, message: unsupportedMessage(feature) });
   };
   const visit = (node: TreeNode): void => {
-    const feature = unsupportedNodes[node.type] as string | undefined;
+    const feature = node.isNamed ? (unsupportedNodes[node.type] as string | undefined) : undefined;
     if (feature) {
       reject(node, feature);
       return;
@@ -51,9 +46,16 @@ function unsupportedForm(node: TreeNode): string | undefined {
   if (node.type === 'type_parameter' && ['in', 'out'].some((token) => tokens.has(token)))
     return '型パラメーターの in / out による分散指定';
   if (node.type === 'predefined_type' && tokens.has('unique symbol')) return 'unique symbol';
+  if (node.type === 'export_statement' && !isInNamespace(node)) return 'import や export';
   if (node.type === 'meta_property' && node.text.replaceAll(/\s/g, '') === 'import.meta') return 'import.meta';
   if (functionTypes.has(node.type) && tokens.has('async')) return 'async 関数';
   if (node.type === 'for_in_statement' && tokens.has('await')) return 'for await';
   if (node.type === 'field_definition' && tokens.has('accessor')) return 'accessor フィールド';
   return undefined;
+}
+
+function isInNamespace(node: TreeNode): boolean {
+  for (let current = node.parent; current; current = current.parent)
+    if (current.type === 'internal_module' || current.type === 'module') return true;
+  return false;
 }

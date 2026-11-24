@@ -4,7 +4,7 @@ import type { ClassNode, Expression, IterationSource, MemberExpression, Program,
 import { nameOf, type Node, rowOf, unwrapParentheses } from '../javascript/convertNodes';
 import { decodeStringLiteral } from '../javascript/literals';
 import { isConstructorDefinition, ProgramConverter } from '../javascript/programConverter';
-import { PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
+import { PARAMETER_PROPERTY_ASSIGNMENT, unsteppedStatements } from './jsView';
 
 /** Converts a TypeScript program, viewed as JavaScript, to the JavaScript interpreter's AST. */
 export class TypeScriptProgramConverter extends ProgramConverter {
@@ -159,6 +159,10 @@ export class TypeScriptProgramConverter extends ProgramConverter {
         .length ?? 0;
     if (count > 0) cls.afterSuper = (cls.ctor.body as Statement[]).splice(0, count);
     return cls;
+  }
+
+  protected override stepRowOf(node: Node): number | undefined {
+    return unsteppedStatements.has(node) ? undefined : super.stepRowOf(node);
   }
 
   protected override duplicate(node: Node, name: string): never {

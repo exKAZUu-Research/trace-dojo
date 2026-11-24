@@ -447,6 +447,7 @@ export class ExpressionChecker {
     if (this.reportUnavailableValue(node, symbol)) return errorType;
     this.checkUsedBeforeDeclaration(node, symbol);
     if (symbol.valueKind === 'enum') this.c.enums.checkConstEnumUse(node, symbol);
+    if (symbol.valueKind === 'namespace') this.c.namespaces.checkValueUse(node, symbol);
     return this.variableReferenceType(node, symbol, contextual);
   }
 
@@ -741,13 +742,14 @@ export class ExpressionChecker {
 
   /** The type of a value a symbol declares. */
   valueTypeOf(symbol: Sym): Type {
+    const type = this.declaredValueTypeOf(symbol);
+    return symbol.namespaceExports ? this.c.namespaces.withExports(symbol, type) : type;
+  }
+
+  private declaredValueTypeOf(symbol: Sym): Type {
     if (symbol.valueType) return symbol.valueType;
-    if (symbol.valueKind === 'class') {
-      return (symbol.valueType = this.c.classes.valueTypeOf(this.c.classes.classInfoOf(symbol)));
-    }
-    if (symbol.valueKind === 'enum') return (symbol.valueType = this.c.enums.objectType(symbol));
-    if (symbol.valueKind === 'enumMember' && symbol.valueDeclaration)
-      return this.c.enums.memberType(symbol.valueDeclaration);
+    const declared = this.typeOfDeclaredKind(symbol);
+    if (declared) return declared;
     const parameterType = this.c.functions.parameterTypes.get(symbol.id);
     if (parameterType) return parameterType;
     const variableType = this.variableTypes.get(symbol.id);
@@ -770,6 +772,31 @@ export class ExpressionChecker {
       return type;
     } finally {
       symbol.resolving = false;
+    }
+  }
+
+  /** The type of a class, an enum, a namespace, an enum member, or an import alias, which their declarations give. */
+  private typeOfDeclaredKind(symbol: Sym): Type | undefined {
+    switch (symbol.valueKind) {
+      case 'class': {
+        return (symbol.valueType = this.c.classes.valueTypeOf(this.c.classes.classInfoOf(symbol)));
+      }
+      case 'enum': {
+        return (symbol.valueType = this.c.enums.objectType(symbol));
+      }
+      case 'namespace': {
+        return (symbol.valueType = this.c.namespaces.objectType(symbol));
+      }
+      case 'enumMember': {
+        return symbol.valueDeclaration && this.c.enums.memberType(symbol.valueDeclaration);
+      }
+      case 'importAlias': {
+        const target = this.c.namespaces.aliasTarget(symbol, 'value');
+        return target ? this.valueTypeOf(target) : errorType;
+      }
+      default: {
+        return undefined;
+      }
     }
   }
 

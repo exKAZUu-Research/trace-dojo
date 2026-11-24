@@ -93,6 +93,11 @@ export class StatementChecker {
     ['interface_declaration', (node) => this.interfaceDeclaration(node)],
     ['type_alias_declaration', (node) => this.typeAliasDeclaration(node)],
     ['enum_declaration', (node) => this.c.enums.checkDeclaration(node)],
+    ['internal_module', (node) => this.c.namespaces.checkDeclaration(node)],
+    ['module', (node) => this.c.namespaces.checkDeclaration(node)],
+    ['export_statement', (node) => this.exportStatement(node)],
+    ['ambient_declaration', (node) => this.ambientDeclaration(node)],
+    ['import_alias', (node) => this.c.namespaces.checkImportAlias(node)],
   ]);
 
   constructor(private readonly c: Checker) {}
@@ -139,10 +144,32 @@ export class StatementChecker {
   private expressionStatement(node: TreeNode): void {
     const expression = named(node)[0];
     if (!expression) return;
+    if (expression.type === 'internal_module') {
+      this.check(expression);
+      return;
+    }
     const type = this.c.expressions.check(expression);
     const call = skipParentheses(expression);
     if (call.type === 'call_expression' && this.c.expressions.calls.endsFlow(call, type))
       this.c.flow.current = undefined;
+  }
+
+  /** `export` in a namespace, which checks the declaration it exports. */
+  private exportStatement(node: TreeNode): void {
+    const declaration = node.childForFieldName('declaration');
+    if (declaration) this.check(declaration);
+  }
+
+  /** `declare global` augments the globals only from a module, which this program never is. */
+  private ambientDeclaration(node: TreeNode): void {
+    for (const child of named(node)) {
+      if (child.type === 'statement_block')
+        this.c.error(
+          node,
+          'グローバルスコープの拡張は、外部モジュールかアンビエントモジュールの宣言の中に直接書くことしかできません。'
+        );
+      else if (child.type === 'internal_module' || child.type === 'module') this.check(child);
+    }
   }
 
   private throwStatement(node: TreeNode): void {

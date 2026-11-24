@@ -305,8 +305,6 @@ console.log(s.area() as Id, s, Object.keys(s), (s.name() satisfies string).lengt
 });
 
 test.each([
-  ['a namespace', 'namespace N {}', 'namespace は、この採点環境では使えません。'],
-  ['a declare statement', 'declare const x: number;', 'declare による宣言は、この採点環境では使えません。'],
   ['an import', 'import fs from "fs";', 'import や export は、この採点環境では使えません。'],
   ['an async function', 'async function f() {}', 'async 関数は、この採点環境では使えません。'],
   ['a decorator', 'function d(t: unknown) {}\n@d class A {}', 'デコレータは、この採点環境では使えません。'],

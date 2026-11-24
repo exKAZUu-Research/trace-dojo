@@ -34,10 +34,11 @@ function checkValueDuplicates(c: Checker, symbol: Sym): void {
   const entries = symbol.valueEntries;
   if (entries.length < 2) return;
   const name = symbol.name;
-  if (entries.some((entry) => entry.kind === 'enum')) {
-    checkEnumMerges(c, symbol);
+  if (
+    entries.some((entry) => entry.kind === 'enum' || entry.kind === 'namespace') &&
+    !checkNamespaceAndEnumMerges(c, symbol)
+  )
     return;
-  }
   if (entries.some((entry) => blockScopedKinds.has(entry.kind))) {
     const message = namesBlockScopedConflict(c, entries)
       ? `ブロックスコープの変数 ${name} はすでに宣言されています。`
@@ -74,11 +75,18 @@ function checkValueDuplicates(c: Checker, symbol: Sym): void {
     checkVarRedeclarations(c, symbol);
 }
 
-/** Enums merge only with each other. */
-function checkEnumMerges(c: Checker, symbol: Sym): void {
-  if (symbol.valueEntries.every((entry) => entry.kind === 'enum')) return;
+/**
+ * A namespace merges with namespaces, functions, classes, and enums, and an enum only with enums and namespaces; any
+ * other duplicate of a namespace's name is checked as the others are, which this tells by returning true.
+ */
+function checkNamespaceAndEnumMerges(c: Checker, symbol: Sym): boolean {
+  const kinds = symbol.valueEntries.map((entry) => entry.kind);
+  const mergeable = kinds.includes('enum') ? ['enum', 'namespace'] : ['namespace', 'function', 'class', 'enum'];
+  if (kinds.every((kind) => mergeable.includes(kind))) return false;
+  if (!kinds.includes('enum')) return true;
   for (const entry of symbol.valueEntries)
     c.error(entry.name, 'enum の宣言は、namespace かほかの enum の宣言としかマージできません。');
+  return false;
 }
 
 export function checkParameterRedeclarations(c: Checker, scopes: Scope[]): void {

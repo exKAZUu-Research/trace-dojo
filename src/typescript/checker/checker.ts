@@ -21,6 +21,7 @@ import { libraryScope, libraryTree, localeOptionsTree, markUnsupported } from '.
 import { LiteralChecker } from './literals';
 import { MemberChecker } from './members';
 import { intersectConstructSignatures } from './mixinConstructors';
+import { Namespaces } from './namespaces';
 import { OperatorChecker } from './operators';
 import { OverloadContexts } from './overloadContexts';
 import { BindingPatterns } from './patterns';
@@ -123,6 +124,7 @@ export class Checker {
   readonly signatures = new Signatures(this);
   readonly inference = new TypeInference(this);
   readonly enums = new Enums(this);
+  readonly namespaces = new Namespaces(this);
   private readonly referenceCache = new Map<string, ObjectType>();
   private readonly instantiationCache = new Map<string, Type>();
   /** The unions that stand for a union alias, with the mapper that instantiates the alias's type into them. */

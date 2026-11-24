@@ -20,6 +20,9 @@ import {
  */
 export const PARAMETER_PROPERTY_ASSIGNMENT = 'parameter_property_assignment';
 
+/** The statements the view adds that record no step of their own, as the assignments that export a namespace's members. */
+export const unsteppedStatements = new WeakSet<Node>();
+
 /** A node of the view, which may stand for a tree-sitter node or be synthesized from one. */
 class ViewNode implements Node {
   readonly startIndex: number;
@@ -58,6 +61,9 @@ interface Part {
   fieldName: string | null | undefined;
 }
 
+/** The kinds of names a namespace exports as properties that its declarations read and write. */
+const exportedVariableKinds = new Set(['let', 'const', 'var', 'declared']);
+
 /** Fields that hold only types, which running a program ignores. */
 const typeFields = new Set(['type', 'return_type', 'type_parameters', 'type_arguments']);
 const erasedModifierNodes = new Set(['accessibility_modifier', 'override_modifier']);
@@ -88,7 +94,15 @@ export function javaScriptViewOf(root: TreeNode, budget: ExecutionBudget): Node 
   return view(root, binder);
 }
 
+/** The TypeScript declarations that compile to code of their own. */
+const compiledDeclarations: Record<string, (node: TreeNode, binder: Binder) => ViewNode> = {
+  module: (node, binder) => namespaceView(node, binder),
+  import_alias: (node, binder) => importAliasView(node, binder),
+};
+
 function view(node: TreeNode, binder: Binder): ViewNode {
+  const compiled = compiledDeclarations[node.type] as ((node: TreeNode, binder: Binder) => ViewNode) | undefined;
+  if (compiled) return compiled(node, binder);
   if (assertionTypes.has(node.type)) return view(assertedExpression(node) as TreeNode, binder);
   switch (node.type) {
     case 'required_parameter':
@@ -115,19 +129,30 @@ function view(node: TreeNode, binder: Binder): ViewNode {
       const inner = unwrappedName(node);
       return inner ? view(inner, binder) : generic(node, node.type, binder);
     }
+    case 'expression_statement': {
+      const inner = node.namedChildren[0];
+      return inner?.type === 'internal_module' ? namespaceView(inner, binder) : generic(node, node.type, binder);
+    }
     case 'identifier': {
-      const symbol = binder.lookupValue(node, nameOf(node));
-      // An enum's initializers refer to its members by name, which compiles to reading them from the enum object.
-      if (symbol?.valueKind === 'enumMember') return enumMemberReference(node, symbol.valueDeclaration as TreeNode);
-      // esbuild only lowers the unbound global to void 0; local bindings retain their values and assignment targets.
-      return nameOf(node) === 'undefined' && !symbol
-        ? leaf(node, 'undefined', '(void 0)')
-        : generic(node, node.type, binder);
+      return identifierView(node, binder);
     }
     default: {
       return erasedStatementTypes.has(node.type) ? leaf(node, 'empty_statement') : generic(node, node.type, binder);
     }
   }
+}
+
+function identifierView(node: TreeNode, binder: Binder): ViewNode {
+  const symbol = binder.lookupValue(node, nameOf(node));
+  // A namespace's exported variable is a property of the namespace's object, which its declarations read.
+  if (symbol?.exportedFrom && exportedVariableKinds.has(symbol.valueKind ?? ''))
+    return memberReference(node, symbol.exportedFrom.name, nameOf(node));
+  // An enum's initializers refer to its members by name, which compiles to reading them from the enum object.
+  if (symbol?.valueKind === 'enumMember') return enumMemberReference(node, symbol.valueDeclaration as TreeNode);
+  // esbuild only lowers the unbound global to void 0; local bindings retain their values and assignment targets.
+  return nameOf(node) === 'undefined' && !symbol
+    ? leaf(node, 'undefined', '(void 0)')
+    : generic(node, node.type, binder);
 }
 
 /** The name parentheses wrap, through nested parentheses and type assertions, as `((x))` and `(x as any)`. */
@@ -189,18 +214,270 @@ function leaf(node: TreeNode, type: string, text = node.text, isNamed = true): V
 
 /** `E.A` for a member `A` of the enum `E`, which the identifier `A` in an initializer of `E` stands for. */
 function enumMemberReference(node: TreeNode, member: TreeNode): ViewNode {
-  const enumName = member.parent?.parent?.childForFieldName('name')?.text ?? '';
-  const memberName = nameOf(node);
+  return memberReference(node, member.parent?.parent?.childForFieldName('name')?.text ?? '', nameOf(node));
+}
+
+function memberReference(position: TreeNode, objectName: string, memberName: string): ViewNode {
   return assemble(
-    node,
+    position,
     'member_expression',
     [
-      { node: leaf(node, 'identifier', enumName), fieldName: 'object' },
-      { node: leaf(node, '.', '.', false), fieldName: undefined },
-      { node: leaf(node, 'property_identifier', memberName), fieldName: 'property' },
+      { node: leaf(position, 'identifier', objectName), fieldName: 'object' },
+      { node: token(position, '.'), fieldName: undefined },
+      { node: leaf(position, 'property_identifier', memberName), fieldName: 'property' },
     ],
-    `${enumName}.${memberName}`
+    `${objectName}.${memberName}`
   );
+}
+
+function token(position: TreeNode, text: string): ViewNode {
+  return leaf(position, text, text, false);
+}
+
+/**
+ * A namespace as TypeScript compiles it: a function, called once, that adds the namespace's exports to its object,
+ * `var N = ((N) => { ...; return N; })(N || {});`, where `namespace A.B { }` nests `B` in `A`. One that only declares
+ * types compiles to nothing.
+ */
+function namespaceView(node: TreeNode, binder: Binder): ViewNode {
+  const name = node.childForFieldName('name');
+  const body = node.childForFieldName('body');
+  if (!name || !body || name.type === 'string' || !hasRuntimeCode(body)) return leaf(node, 'empty_statement');
+  const path = namespacePathOf(name);
+  const statements = nestedNamespaceStatements(node, body, path, binder);
+  const outermost = path[0].text;
+  const symbol = binder.lookupValue(node, outermost);
+  const declaresObject = symbol?.valueEntries[0]?.kind === 'namespace' && symbol.valueDeclaration?.id === node.id;
+  const call = namespaceCall(
+    node,
+    outermost,
+    statements,
+    declaresObject ? orEmptyObject(node, outermost) : leaf(node, 'identifier', outermost)
+  );
+  return declaresObject ? varDeclaration(node, outermost, call) : expressionStatement(node, call);
+}
+
+/** `import X = N.Y` as TypeScript compiles it, `var X = N.Y;`, or nothing when `N.Y` has no value. */
+function importAliasView(node: TreeNode, binder: Binder): ViewNode {
+  const [name, target] = node.namedChildren;
+  if (!name || !target) return leaf(node, 'empty_statement');
+  const path = namespacePathOf(target);
+  const root = binder.lookupValue(target, path[0].text);
+  const hasValue =
+    root !== undefined &&
+    root.valueDeclarations.some(
+      (declaration) =>
+        !['internal_module', 'module'].includes(declaration.type) ||
+        hasRuntimeCode(declaration.childForFieldName('body') ?? declaration)
+    );
+  if (!hasValue) return leaf(node, 'empty_statement');
+  let value = leaf(path[0], 'identifier', path[0].text);
+  let text = path[0].text;
+  for (const part of path.slice(1)) {
+    text = `${text}.${part.text}`;
+    value = assemble(
+      part,
+      'member_expression',
+      [
+        { node: value, fieldName: 'object' },
+        { node: token(part, '.'), fieldName: undefined },
+        { node: leaf(part, 'property_identifier', part.text), fieldName: 'property' },
+      ],
+      text
+    );
+  }
+  return varDeclaration(node, name.text, value);
+}
+
+/** The statements of the first namespace of a path `A.B.C`, which declare the next ones down to the body's. */
+function nestedNamespaceStatements(node: TreeNode, body: TreeNode, path: TreeNode[], binder: Binder): ViewNode[] {
+  let statements = namespaceBodyStatements(body, path.at(-1)?.text ?? '', binder);
+  for (let index = path.length - 1; index > 0; index--)
+    statements = exportedNamespaceStatements(node, path[index].text, path[index - 1].text, statements, true);
+  return statements;
+}
+
+function namespaceBodyStatements(body: TreeNode, namespaceName: string, binder: Binder): ViewNode[] {
+  const statements: ViewNode[] = [];
+  for (const child of body.namedChildren) {
+    if (!child) continue;
+    const declaration = child.type === 'export_statement' ? child.childForFieldName('declaration') : undefined;
+    if (declaration) statements.push(...exportStatements(declaration, namespaceName, binder));
+    else if (!erasedStatementTypes.has(child.type) && child.type !== 'comment') statements.push(view(child, binder));
+  }
+  return statements;
+}
+
+/** The statements an `export` in a namespace compiles to, which make what it declares properties of the namespace. */
+function exportStatements(declaration: TreeNode, namespaceName: string, binder: Binder): ViewNode[] {
+  if (erasedStatementTypes.has(declaration.type)) return [];
+  const inner = declaration.type === 'expression_statement' ? declaration.namedChildren[0] : declaration;
+  if (inner && (inner.type === 'internal_module' || inner.type === 'module'))
+    return exportedNamespace(inner, namespaceName, binder);
+  if (declaration.type === 'lexical_declaration' || declaration.type === 'variable_declaration')
+    return exportedVariables(declaration, namespaceName, binder);
+  const name =
+    declaration.type === 'import_alias' ? declaration.namedChildren[0] : declaration.childForFieldName('name');
+  const statements = [view(declaration, binder)];
+  if (name) statements.push(unstepped(exportAssignment(declaration, namespaceName, nameOf(name))));
+  return statements;
+}
+
+function exportedNamespace(node: TreeNode, outerName: string, binder: Binder): ViewNode[] {
+  const name = node.childForFieldName('name');
+  const body = node.childForFieldName('body');
+  if (!name || !body || !hasRuntimeCode(body)) return [];
+  const path = namespacePathOf(name);
+  const statements = nestedNamespaceStatements(node, body, path, binder);
+  return exportedNamespaceStatements(node, path[0].text, outerName, statements, false);
+}
+
+/** `export const a = 1, b = 2;` as `N.a = 1, N.b = 2;`, whose variables are only the namespace's properties. */
+function exportedVariables(declaration: TreeNode, namespaceName: string, binder: Binder): ViewNode[] {
+  const assignments = declaration.namedChildren.flatMap((declarator) => {
+    const name = declarator?.childForFieldName('name');
+    const value = declarator?.childForFieldName('value');
+    if (!declarator || name?.type !== 'identifier' || !value) return [];
+    return [assignment(declarator, memberReference(name, namespaceName, nameOf(name)), view(value, binder))];
+  });
+  if (assignments.length <= 1) return assignments.map((expression) => expressionStatement(declaration, expression));
+  const parts = assignments.flatMap((part, index) => [
+    ...(index === 0 ? [] : [{ node: token(declaration, ','), fieldName: undefined }]),
+    { node: part, fieldName: undefined },
+  ]);
+  return [expressionStatement(declaration, assemble(declaration, 'sequence_expression', parts))];
+}
+
+/** `var B = ((B) => { ... })(A.B || {}); A.B = B;` for a namespace `B` that the namespace `A` exports. */
+function exportedNamespaceStatements(
+  node: TreeNode,
+  name: string,
+  outerName: string,
+  statements: ViewNode[],
+  isPathPart: boolean
+): ViewNode[] {
+  const call = namespaceCall(
+    node,
+    name,
+    statements,
+    orEmptyObject(node, `${outerName}.${name}`, memberReference(node, outerName, name))
+  );
+  const declaration = varDeclaration(node, name, call);
+  return [isPathPart ? unstepped(declaration) : declaration, unstepped(exportAssignment(node, outerName, name))];
+}
+
+function namespaceCall(node: TreeNode, name: string, statements: ViewNode[], argument: ViewNode): ViewNode {
+  const returned = unstepped(
+    assemble(node, 'return_statement', [
+      { node: token(node, 'return'), fieldName: undefined },
+      { node: leaf(node, 'identifier', name), fieldName: undefined },
+      { node: token(node, ';'), fieldName: undefined },
+    ])
+  );
+  const block = assemble(node, 'statement_block', [
+    { node: token(node, '{'), fieldName: undefined },
+    ...[...statements, returned].map((statement) => ({ node: statement, fieldName: undefined })),
+    { node: token(node, '}'), fieldName: undefined },
+  ]);
+  const arrow = assemble(node, 'arrow_function', [
+    { node: leaf(node, 'identifier', name), fieldName: 'parameter' },
+    { node: token(node, '=>'), fieldName: undefined },
+    { node: block, fieldName: 'body' },
+  ]);
+  const callee = assemble(node, 'parenthesized_expression', [
+    { node: token(node, '('), fieldName: undefined },
+    { node: arrow, fieldName: undefined },
+    { node: token(node, ')'), fieldName: undefined },
+  ]);
+  const args = assemble(node, 'arguments', [
+    { node: token(node, '('), fieldName: undefined },
+    { node: argument, fieldName: undefined },
+    { node: token(node, ')'), fieldName: undefined },
+  ]);
+  return assemble(node, 'call_expression', [
+    { node: callee, fieldName: 'function' },
+    { node: args, fieldName: 'arguments' },
+  ]);
+}
+
+/** `object || {}`, the namespace's object so far, or a new one. */
+function orEmptyObject(node: TreeNode, text: string, object = leaf(node, 'identifier', text)): ViewNode {
+  return assemble(
+    node,
+    'binary_expression',
+    [
+      { node: object, fieldName: 'left' },
+      { node: token(node, '||'), fieldName: 'operator' },
+      {
+        node: assemble(node, 'object', [
+          { node: token(node, '{'), fieldName: undefined },
+          { node: token(node, '}'), fieldName: undefined },
+        ]),
+        fieldName: 'right',
+      },
+    ],
+    `${text} || {}`
+  );
+}
+
+function varDeclaration(node: TreeNode, name: string, value: ViewNode): ViewNode {
+  const declarator = assemble(node, 'variable_declarator', [
+    { node: leaf(node, 'identifier', name), fieldName: 'name' },
+    { node: token(node, '='), fieldName: undefined },
+    { node: value, fieldName: 'value' },
+  ]);
+  return assemble(node, 'variable_declaration', [
+    { node: token(node, 'var'), fieldName: undefined },
+    { node: declarator, fieldName: undefined },
+    { node: token(node, ';'), fieldName: undefined },
+  ]);
+}
+
+function exportAssignment(node: TreeNode, namespaceName: string, name: string): ViewNode {
+  return expressionStatement(
+    node,
+    assignment(node, memberReference(node, namespaceName, name), leaf(node, 'identifier', name))
+  );
+}
+
+function assignment(node: TreeNode, target: ViewNode, value: ViewNode): ViewNode {
+  return assemble(node, 'assignment_expression', [
+    { node: target, fieldName: 'left' },
+    { node: token(node, '='), fieldName: 'operator' },
+    { node: value, fieldName: 'right' },
+  ]);
+}
+
+function expressionStatement(node: TreeNode, expression: ViewNode): ViewNode {
+  return assemble(node, 'expression_statement', [
+    { node: expression, fieldName: undefined },
+    { node: token(node, ';'), fieldName: undefined },
+  ]);
+}
+
+function unstepped(statement: ViewNode): ViewNode {
+  unsteppedStatements.add(statement);
+  return statement;
+}
+
+/** Whether a namespace's body has code to run, rather than only types and namespaces of types. */
+function hasRuntimeCode(body: TreeNode): boolean {
+  return body.namedChildren.some((child) => {
+    if (!child || child.type === 'comment') return false;
+    const declaration = child.type === 'export_statement' ? child.childForFieldName('declaration') : child;
+    if (!declaration || erasedStatementTypes.has(declaration.type)) return false;
+    const inner = declaration.type === 'expression_statement' ? declaration.namedChildren[0] : declaration;
+    if (inner?.type !== 'internal_module' && inner?.type !== 'module') return true;
+    const innerBody = inner.childForFieldName('body');
+    return innerBody !== null && hasRuntimeCode(innerBody);
+  });
+}
+
+function namespacePathOf(name: TreeNode): TreeNode[] {
+  if (name.type !== 'nested_identifier' && name.type !== 'member_expression') return [name];
+  const object = name.childForFieldName('object');
+  const property = name.childForFieldName('property');
+  return [...(object ? namespacePathOf(object) : []), ...(property ? [property] : [])];
 }
 
 function isThisParameter(node: TreeNode): boolean {

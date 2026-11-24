@@ -13,8 +13,10 @@ export type ValueKind =
   | 'catch'
   | 'declared'
   | 'enum'
-  | 'enumMember';
-export type TypeKind = 'interface' | 'alias' | 'class' | 'typeParameter' | 'enum';
+  | 'enumMember'
+  | 'namespace'
+  | 'importAlias';
+export type TypeKind = 'interface' | 'alias' | 'class' | 'typeParameter' | 'enum' | 'importAlias';
 
 let nextSymbolId = 1;
 
@@ -55,6 +57,10 @@ export class Sym {
   unsupportedCallOnly?: boolean;
   /** For a value whose declaration has no annotation, whose type the initializer gives. */
   isLibrary = false;
+  /** For a namespace, the names its declarations export, which every declaration of it sees. */
+  namespaceExports?: Scope;
+  /** The namespace that exports this name, which its declarations refer to it through. */
+  exportedFrom?: Sym;
 
   constructor(
     readonly name: string,
@@ -74,6 +80,10 @@ export class Scope {
   private readonly augmentedNames = new Set<string>();
   /** The nearest function or module scope, where `var` and function declarations live. */
   readonly functionScope: Scope;
+  /** For the body of a namespace declaration, the namespace, to which its `export` declarations add names. */
+  namespace?: Sym;
+  /** Whether the declarations in it are ambient, as in a `declare namespace`, where every declaration is exported. */
+  isAmbient = false;
 
   /** @param augments For a `declare global` block, the global scope its declarations go to. */
   constructor(

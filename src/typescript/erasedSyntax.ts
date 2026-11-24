@@ -2,7 +2,12 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { named } from './checker/syntax';
 
-export const erasedStatementTypes = new Set(['interface_declaration', 'type_alias_declaration', 'function_signature']);
+export const erasedStatementTypes = new Set([
+  'interface_declaration',
+  'type_alias_declaration',
+  'function_signature',
+  'ambient_declaration',
+]);
 
 export const erasedTypeNodes = new Set([
   'type_annotation',

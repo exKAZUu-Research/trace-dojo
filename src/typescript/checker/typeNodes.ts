@@ -625,26 +625,39 @@ export class TypeNodes {
   }
 
   private qualifiedType(node: TreeNode): Type {
-    if (this.c.isLibrary(node)) {
-      const name = node.text.startsWith('Intl.') ? node.text.slice('Intl.'.length) : undefined;
-      const symbol = name ? this.c.localeOptionsBinder.moduleScope.types.get(name) : undefined;
-      return symbol ? this.declaredTypeOf(symbol) : anyType;
-    }
+    if (this.c.isLibrary(node)) return this.libraryQualifiedType(node);
     let root = node;
     while (root.childForFieldName('module') ?? root.childForFieldName('object'))
       root = (root.childForFieldName('module') ?? root.childForFieldName('object')) as TreeNode;
     const symbol = this.c.scopeOf(root).lookupType(root.text) ?? this.c.scopeOf(root).lookupValue(root.text);
-    const memberName = node.childForFieldName('name')?.text;
-    if (symbol?.valueKind === 'enum' && root.id === node.childForFieldName('module')?.id && memberName !== undefined) {
-      const member = this.c.enums.memberTypeNamed(symbol, memberName);
-      if (member) return member;
-      this.c.error(node, `名前空間 '${root.text}' には、エクスポートされたメンバー '${memberName}' がありません。`);
+    const value = this.c.scopeOf(root).lookupValue(root.text);
+    if (value?.valueKind === 'enum' && root.id === node.childForFieldName('module')?.id)
+      return this.enumMemberTypeNamed(node, value, root.text);
+    if (value?.namespaceExports || value?.valueKind === 'importAlias') {
+      const resolved = this.c.namespaces.qualifiedTypeSymbol(node);
+      if (resolved.symbol) return this.declaredTypeOf(resolved.symbol);
+      if (resolved.error) this.c.error(node, resolved.error);
       return errorType;
     }
     this.c.error(
       node,
       symbol?.unsupported ? unsupportedMessage(symbol.unsupported) : `名前空間 ${root.text} が見つかりません。`
     );
+    return errorType;
+  }
+
+  private libraryQualifiedType(node: TreeNode): Type {
+    const name = node.text.startsWith('Intl.') ? node.text.slice('Intl.'.length) : undefined;
+    const symbol = name ? this.c.localeOptionsBinder.moduleScope.types.get(name) : undefined;
+    return symbol ? this.declaredTypeOf(symbol) : anyType;
+  }
+
+  /** `E.A`, the type of the member `A` of the enum `E`. */
+  private enumMemberTypeNamed(node: TreeNode, symbol: Sym, enumName: string): Type {
+    const memberName = node.childForFieldName('name')?.text ?? '';
+    const member = this.c.enums.memberTypeNamed(symbol, memberName);
+    if (member) return member;
+    this.c.error(node, `名前空間 '${enumName}' には、エクスポートされたメンバー '${memberName}' がありません。`);
     return errorType;
   }
 
@@ -946,6 +959,11 @@ export class TypeNodes {
       }
       case 'enum': {
         symbol.declaredType = this.c.enums.declaredType(symbol);
+        break;
+      }
+      case 'importAlias': {
+        const target = this.c.namespaces.aliasTarget(symbol, 'type');
+        symbol.declaredType = target ? this.declaredTypeOf(target) : errorType;
         break;
       }
       case 'alias': {
