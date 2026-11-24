@@ -888,8 +888,19 @@ defineNativesKeepingStrings({
       e: '\u001B',
       b: '\b',
     };
+    // An escape is a name (\n), \xHH, \uHHHH, up to three octal digits (whose value wraps at a byte, as .NET's
+    // does), or \c with a control letter; any other escaped character stands for itself.
     return keptUnlessChanged(text as string | CsString, (plain) =>
-      plain.replaceAll(/\\(.)/gs, (_match, char: string) => named[char] ?? char)
+      plain.replaceAll(
+        /\\(?:x([\da-fA-F]{2})|u([\da-fA-F]{4})|([0-7]{1,3})|c([A-Za-z])|(.))/gs,
+        (_match, hex?: string, unicode?: string, octal?: string, control?: string, char?: string) => {
+          if (hex !== undefined || unicode !== undefined)
+            return String.fromCharCode(Number.parseInt(hex ?? unicode ?? '', 16));
+          if (octal !== undefined) return String.fromCharCode(Number.parseInt(octal, 8) & 0xff);
+          if (control !== undefined) return String.fromCharCode(control.toUpperCase().charCodeAt(0) - 64);
+          return named[char as string] ?? (char as string);
+        }
+      )
     );
   },
   [`${NAMESPACE}.Capture.get_Value`]: (_call, receiver) => captureString(receiver),
