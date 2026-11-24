@@ -118,12 +118,8 @@ export abstract class VectorCompiler extends ReflectionCompiler {
     this.arity(expression, 4);
     const [childArg, predicateArg, leftArg, rightArg] = expression.args;
     const child = this.compileType(childArg);
-    const predicate = this.compile(predicateArg);
-    if (!isVectorType(predicate.type) || predicate.type.child !== BOOL)
-      return this.error(
-        predicateArg,
-        `@select の条件には bool のベクトルを渡してください（${typeName(predicate.type)} 型です）。`
-      );
+    const predicate = this.asVector(this.compile(predicateArg), BOOL, predicateArg, '@select の条件');
+    if (!isVectorType(predicate.type)) return predicate;
     const vector = vectorOf(predicate.type.length, child);
     const left = this.coerce(this.compile(leftArg, vector), vector, leftArg);
     const right = this.coerce(this.compile(rightArg, vector), vector, rightArg);
@@ -146,24 +142,12 @@ export abstract class VectorCompiler extends ReflectionCompiler {
     const child = this.compileType(childArg);
     const operand = (arg: Expression): TExpr | undefined => {
       if (arg.kind === 'undefined') return undefined;
-      const value = this.compile(arg);
-      if (!isVectorType(value.type) || value.type.child !== child)
-        return this.error(
-          arg,
-          `@shuffle には ${typeName(child)} のベクトルを渡してください（${typeName(value.type)} 型です）。`
-        );
-      return value;
+      return this.asVector(this.compile(arg), child, arg, '@shuffle の値');
     };
     const left = operand(leftArg);
     const right = operand(rightArg);
-    const mask = this.compile(maskArg);
-    if (!isVectorType(mask.type))
-      return this.error(
-        maskArg,
-        `@shuffle のマスクには i32 のベクトルを渡してください（${typeName(mask.type)} 型です）。`
-      );
-    const maskType = vectorOf(mask.type.length, I32);
-    const indexes = (this.knownValue(this.coerce(mask, maskType, maskArg), 'マスク') as ZArray).values() as bigint[];
+    const mask = this.asVector(this.compile(maskArg), I32, maskArg, '@shuffle のマスク');
+    const indexes = (this.knownValue(mask, 'マスク') as ZArray).values() as bigint[];
     const sources = [left, right].filter((each): each is TExpr => each !== undefined);
     return this.elementwise(
       sources,
@@ -185,7 +169,7 @@ export abstract class VectorCompiler extends ReflectionCompiler {
           index: { kind: 'integer', ...span, value: element },
         };
       },
-      Number(mask.type.length),
+      indexes.length,
       child
     );
   }
@@ -275,6 +259,17 @@ export abstract class VectorCompiler extends ReflectionCompiler {
         }
       },
     };
+  }
+
+  /** An operand that a vector builtin takes as a vector of `element`s, which an array of them also gives. */
+  private asVector(value: TExpr, element: Type, span: Span, what: string): TExpr {
+    const type = value.type;
+    if (type.kind !== 'array')
+      return this.error(
+        span,
+        `${what}には ${typeName(element)} のベクトルか配列を渡してください（${typeName(type)} 型です）。`
+      );
+    return this.coerce(value, vectorOf(type.length, element), span);
   }
 
   private arity(expression: ExpressionOf<'builtinCall'>, count: number): void {
