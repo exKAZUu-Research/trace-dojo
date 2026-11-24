@@ -1192,7 +1192,7 @@ function resolveDeclaredTarget(
     const start = globalOnly ? shell.state.scopes[0].get(name) : shell.findOwnVariable(name);
     return { targetName: start?.attributes.has('n') ? findFinalNamerefLink(shell, start, globalOnly).name : name };
   }
-  if (localScope && set.has('I') && !localScope.has(name)) return { targetName: name };
+  if (localScope && !localScope.has(name)) return { targetName: name };
   let current = globalOnly ? shell.state.scopes[0].get(name) : shell.findOwnVariable(name);
   let target = name;
   for (let depth = 0; depth < 8; depth++) {
