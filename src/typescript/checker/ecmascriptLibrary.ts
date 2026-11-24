@@ -1,5 +1,5 @@
 // Declarations from the ECMAScript library files of TypeScript 7.0.2 (`lib.es5.d.ts` through `lib.es2025.*.d.ts`), with
-// comments, typed arrays, and `Intl` removed.
+// comments, typed arrays, `Intl`, and `Proxy` removed.
 // Copyright (c) Microsoft Corporation. Licensed under the Apache License, Version 2.0.
 // oxfmt-ignore
 export const ECMASCRIPT_LIBRARY = `
@@ -1239,6 +1239,48 @@ interface IteratorObject<T, TReturn, TNext> {
         find(predicate: (value: T, index: number) => unknown): T | undefined;
         readonly [Symbol.toStringTag]: string;
     }
+interface AsyncIterator<T, TReturn = any, TNext = any> {
+    next(...[value]: [] | [TNext]): Promise<IteratorResult<T, TReturn>>;
+    return?(value?: TReturn | PromiseLike<TReturn>): Promise<IteratorResult<T, TReturn>>;
+    throw?(e?: any): Promise<IteratorResult<T, TReturn>>;
+}
+interface AsyncIterable<T, TReturn = any, TNext = any> {
+    [Symbol.asyncIterator](): AsyncIterator<T, TReturn, TNext>;
+}
+interface AsyncIterableIterator<T, TReturn = any, TNext = any> extends AsyncIterator<T, TReturn, TNext> {
+    [Symbol.asyncIterator](): AsyncIterableIterator<T, TReturn, TNext>;
+}
+interface AsyncIteratorObject<T, TReturn = unknown, TNext = unknown> extends AsyncIterator<T, TReturn, TNext> {
+    [Symbol.asyncIterator](): AsyncIteratorObject<T, TReturn, TNext>;
+}
+interface AsyncGenerator<T = unknown, TReturn = any, TNext = any> extends AsyncIteratorObject<T, TReturn, TNext> {
+    next(...[value]: [] | [TNext]): Promise<IteratorResult<T, TReturn>>;
+    return(value: TReturn | PromiseLike<TReturn>): Promise<IteratorResult<T, TReturn>>;
+    throw(e: any): Promise<IteratorResult<T, TReturn>>;
+    [Symbol.asyncIterator](): AsyncGenerator<T, TReturn, TNext>;
+}
+interface AsyncGeneratorFunction {
+    new (...args: any[]): AsyncGenerator;
+    (...args: any[]): AsyncGenerator;
+    readonly length: number;
+    readonly name: string;
+    readonly prototype: AsyncGenerator;
+}
+interface AsyncGeneratorFunctionConstructor {
+    new (...args: string[]): AsyncGeneratorFunction;
+    (...args: string[]): AsyncGeneratorFunction;
+    readonly length: number;
+    readonly name: string;
+    readonly prototype: AsyncGeneratorFunction;
+}
+interface PromiseWithResolvers<T> {
+    promise: Promise<T>;
+    resolve: (value: T | PromiseLike<T>) => void;
+    reject: (reason?: any) => void;
+}
+interface PromiseConstructor {
+    withResolvers<T>(): PromiseWithResolvers<T>;
+}
 // The reference library declares the abstract class in a module of its own, which this block stands for.
 {
     declare abstract class Iterator<T, TResult = undefined, TNext = unknown> {

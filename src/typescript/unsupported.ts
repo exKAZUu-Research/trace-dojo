@@ -7,10 +7,7 @@ const unsupportedNodes: Record<string, string> = {
   import_statement: 'import や export',
   import: 'import や export',
   decorator: 'デコレータ',
-  await_expression: 'await',
 };
-
-const functionTypes = new Set(['function_declaration', 'function_expression', 'arrow_function', 'method_definition']);
 
 /** The message for a feature this interpreter does not run, with a space after a name ending in ASCII. */
 export function unsupportedMessage(feature: string): string {
@@ -37,13 +34,10 @@ export function rejectUnsupportedSyntax(root: TreeNode): void {
   if (diagnostics.length > 0) throw new CompileError(diagnostics);
 }
 
-/** A feature that a node of a supported type spells with a keyword or a form this interpreter does not run. */
+/** A feature that a node of a supported type spells in a form this interpreter does not run. */
 function unsupportedForm(node: TreeNode): string | undefined {
-  const tokens = new Set(node.children.filter((child) => child !== null && !child.isNamed).map((child) => child?.type));
   if (node.type === 'export_statement' && !isInNamespace(node)) return 'import や export';
   if (node.type === 'meta_property' && node.text.replaceAll(/\s/g, '') === 'import.meta') return 'import.meta';
-  if (functionTypes.has(node.type) && tokens.has('async')) return 'async 関数';
-  if (node.type === 'for_in_statement' && tokens.has('await')) return 'for await';
   return undefined;
 }
 

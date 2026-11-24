@@ -124,12 +124,6 @@ export function libraryScope(): Scope {
 
 /** Library values that this interpreter does not run yet, with the names learners know them by. */
 const unsupportedValues: Record<string, string> = {
-  Promise: 'Promise',
-  setTimeout: 'setTimeout などのタイマー',
-  setInterval: 'setTimeout などのタイマー',
-  clearTimeout: 'setTimeout などのタイマー',
-  clearInterval: 'setTimeout などのタイマー',
-  queueMicrotask: 'queueMicrotask',
   Date: 'Date（日付と時刻）',
   WeakMap: 'WeakMap',
   WeakSet: 'WeakSet',

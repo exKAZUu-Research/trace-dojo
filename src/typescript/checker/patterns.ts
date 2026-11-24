@@ -1,7 +1,8 @@
-// code-gauge-allow-file fileNcss -- Binding declarations and assignments share property and rest type resolution.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { assert } from 'es-toolkit';
 
+// code-gauge-allow-file fileNcss -- Binding declarations and assignments share property and rest type resolution.
+import { awaitedType } from './awaited';
 import { functionLikeTypes } from './binder';
 import {
   defaultedTarget,
@@ -628,6 +629,30 @@ export class BindingPatterns {
     }
     if (node)
       this.c.error(node, `型 '${this.c.print(type)}' には、反復処理に使う [Symbol.iterator]() メソッドがありません。`);
+    return errorType;
+  }
+
+  /**
+   * The type `for await` gives each element of `type`: what its `[Symbol.asyncIterator]()` iterator yields, or else
+   * what the promises its synchronous iterator yields fulfill with.
+   */
+  asyncIteratedType(node: TreeNode | undefined, type: Type): Type {
+    if (isAnyLike(type)) return anyType;
+    if (type.kind === 'union')
+      return unionOf(
+        type.types.map((member) => this.asyncIteratedType(node, member)),
+        true
+      );
+    const iterator = this.c.propertyOf(type, this.c.typeNodes.librarySymbolKey('asyncIterator'));
+    const iteratorType = iterator && this.c.signaturesOf(iterator.type(), 'call')[0]?.returnType();
+    if (iteratorType?.kind === 'object' && iteratorType.typeArguments?.[0]) return iteratorType.typeArguments[0];
+    const element = this.iteratedType(undefined, type);
+    if (element !== errorType) return awaitedType(this.c, element);
+    if (node)
+      this.c.error(
+        node,
+        `型 '${this.c.print(type)}' には、非同期イテレーターを返す '[Symbol.asyncIterator]()' メソッドが必要です。`
+      );
     return errorType;
   }
 

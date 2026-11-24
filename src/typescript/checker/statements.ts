@@ -2,6 +2,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { assert } from 'es-toolkit';
 
+import { awaitedType, checkAwaitPlace } from './awaited';
 import type { Checker } from './checker';
 import { checkConstraintDeclarations } from './circularConstraints';
 import {
@@ -487,7 +488,7 @@ export class StatementChecker {
     const isOf = header.childForFieldName('operator')?.text === 'of';
     const isConst = header.childForFieldName('kind')?.text === 'const';
     const rightType = this.c.expressions.check(right);
-    const elementType = isOf ? this.iteratedLoopType(right, rightType, false) : stringType;
+    const elementType = isOf ? this.iteratedLoopType(node, right, rightType, false) : stringType;
     if (left.type === 'identifier') return elementType;
     return this.c.patterns.patternType(left, elementType, symbol, {
       isConst,
@@ -652,6 +653,7 @@ export class StatementChecker {
     const isOf = header.childForFieldName('operator')?.text === 'of';
     const kind = header.childForFieldName('kind')?.text;
     const rightType = this.c.expressions.check(right);
+    if (hasToken(node, 'await')) checkAwaitPlace(this.c, node, true);
     const elementType = this.loopElementType(node, rightType);
     if (!isOf) this.forInObjectTypes.set(node.id, rightType);
     const body = node.childForFieldName('body') as TreeNode;
@@ -669,12 +671,14 @@ export class StatementChecker {
     const header = node.childForFieldName('header') ?? node;
     const right = header.childForFieldName('right') as TreeNode;
     return header.childForFieldName('operator')?.text === 'of'
-      ? this.iteratedLoopType(right, rightType, true)
+      ? this.iteratedLoopType(node, right, rightType, true)
       : this.forInKeyType(right, rightType);
   }
 
-  private iteratedLoopType(right: TreeNode, rightType: Type, reportErrors: boolean): Type {
-    const element = this.c.patterns.iteratedType(reportErrors ? right : undefined, rightType);
+  private iteratedLoopType(loop: TreeNode, right: TreeNode, rightType: Type, reportErrors: boolean): Type {
+    const element = hasToken(loop, 'await')
+      ? this.c.patterns.asyncIteratedType(reportErrors ? right : undefined, rightType)
+      : this.c.patterns.iteratedType(reportErrors ? right : undefined, rightType);
     return this.c.literals.inlineBindingType(element, right);
   }
 
@@ -968,7 +972,7 @@ export class StatementChecker {
     if (expression) {
       const declared = context.isConstructor ? this.constructorInstanceType(context.node) : context.declaredReturn;
       context.inReturn = true;
-      const type = this.c.expressions.check(expression, declared ?? context.contextualReturn);
+      const type = this.returnedType(expression, context, declared);
       context.inReturn = false;
       if (hasToken(context.node, 'set')) {
         this.c.error(node, 'set アクセサーは値を返せません。');
@@ -981,6 +985,12 @@ export class StatementChecker {
     } else this.returnWithoutValue(node, context);
     context.returnStates.push(this.c.flow.current?.clone());
     this.c.flow.current = undefined;
+  }
+
+  /** The type a `return` gives, where an async function returns what a promise it returns fulfills with. */
+  private returnedType(expression: TreeNode, context: FunctionContext, declared: Type | undefined): Type {
+    const checked = this.c.expressions.check(expression, declared ?? context.contextualReturn);
+    return context.isAsync ? awaitedType(this.c, checked) : checked;
   }
 
   private returnWithoutValue(node: TreeNode, context: FunctionContext): void {

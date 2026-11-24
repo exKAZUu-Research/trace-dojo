@@ -1,8 +1,9 @@
-// code-gauge-allow-file fileNcss -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { assertedExpression } from '../erasedSyntax';
 import { unsupportedMessage } from '../unsupported';
+// code-gauge-allow-file fileNcss -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+import { awaitedType, checkAwaitPlace } from './awaited';
 import { Calls } from './calls';
 import type { Checker } from './checker';
 import { DeferredContexts } from './deferredContexts';
@@ -138,6 +139,7 @@ export class ExpressionChecker {
     ['meta_property', (node) => this.newTarget(node)],
     ['sequence_expression', (node, contextual) => this.sequenceExpression(node, contextual)],
     ['yield_expression', (node, contextual) => this.c.functions.yieldExpression(node, contextual)],
+    ['await_expression', (node, contextual) => this.awaitExpression(node, contextual)],
     ['instantiation_expression', (node) => this.calls.instantiationExpression(node)],
     ['non_null_expression', (node, contextual) => this.checkWrapped(node, contextual)],
     ['spread_element', (node) => this.check(named(node)[0])],
@@ -205,6 +207,13 @@ export class ExpressionChecker {
       const asserted = nonNullableType(this.c, continued ?? type);
       return continued ? members.chainResult(node, asserted, asserted) : asserted;
     });
+  }
+
+  /** `await value`, which gives what a promise fulfills with, only in an async function. */
+  private awaitExpression(node: TreeNode, contextual: Type | undefined): Type {
+    checkAwaitPlace(this.c, node, false);
+    const operand = named(node).find((child) => child.type !== 'comment');
+    return operand ? awaitedType(this.c, this.check(operand, contextual)) : anyType;
   }
 
   /**

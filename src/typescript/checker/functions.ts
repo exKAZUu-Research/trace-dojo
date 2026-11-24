@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss -- Keeps function signatures, body checking, and parameter flow together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { awaitedType } from './awaited';
 import type { Checker } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
 import { FlowState, type State } from './flow';
@@ -54,6 +55,9 @@ export interface FunctionContext {
   initializer?: boolean;
   enclosingFlow: State;
   generator?: GeneratorContext;
+  /** For an async function, its return type annotation, which must be a `Promise` of what its body returns. */
+  asyncAnnotation?: { type: Type; isPromise: boolean };
+  isAsync: boolean;
 }
 
 /** What a generator's annotation or contextual type says it yields, returns, and receives, and what it yields. */
@@ -75,6 +79,13 @@ export interface IterationTypes {
 
 /** The library types a generator's return type may be, whose type arguments are what it yields, returns, and receives. */
 const generatorReturnTypes = ['Generator', 'Iterator', 'Iterable', 'IterableIterator', 'IteratorObject'];
+const asyncGeneratorReturnTypes = [
+  'AsyncGenerator',
+  'AsyncIterator',
+  'AsyncIterable',
+  'AsyncIterableIterator',
+  'AsyncIteratorObject',
+];
 
 /** Whether a function is a generator: `function*`, or a method written `*m()`. */
 export function isGeneratorFunction(node: TreeNode): boolean {
@@ -377,11 +388,16 @@ export class FunctionChecker {
   }
 
   private checkBodyReturns(context: FunctionContext): void {
-    const { node, declaredReturn, generator } = context;
+    const { node, declaredReturn, generator, asyncAnnotation } = context;
     if (generator?.invalidAnnotation && generator.annotation) {
-      const own = this.c.globalType('Generator', [anyType, anyType, unknownType]);
+      const own = this.c.globalType(context.isAsync ? 'AsyncGenerator' : 'Generator', [anyType, anyType, unknownType]);
       this.c.expressions.reportNotAssignable(node.childForFieldName('return_type') ?? node, own, generator.annotation);
     }
+    if (asyncAnnotation && !asyncAnnotation.isPromise)
+      this.c.error(
+        node.childForFieldName('return_type') ?? node,
+        `async 関数やメソッドの戻り値の型は、グローバルな Promise<T> 型でなければいけません。'Promise<${this.c.print(asyncAnnotation.type)}>' と書くつもりでしたか？`
+      );
     if (declaredReturn) this.checkMissingReturn(node, context, declaredReturn);
     if (hasToken(node, 'get') && context.endReachable && !context.returnStates.some((state) => state && !state.dead))
       this.c.error(node.childForFieldName('name') ?? node, 'get アクセサーは値を返さなければいけません。');
@@ -448,7 +464,8 @@ export class FunctionChecker {
     }
     const { declaredReturn } = context;
     context.inReturn = true;
-    const expressionType = this.c.expressions.check(body, declaredReturn ?? context.contextualReturn);
+    const checked = this.c.expressions.check(body, declaredReturn ?? context.contextualReturn);
+    const expressionType = context.isAsync ? awaitedType(this.c, checked) : checked;
     context.inReturn = false;
     if (declaredReturn) this.c.expressions.checkReturnValue(body, expressionType, declaredReturn);
     context.returnTypes.push(expressionType);
@@ -457,33 +474,61 @@ export class FunctionChecker {
   }
 
   private newContext(node: TreeNode, contextualReturn?: Type, declaredReturn?: Type): FunctionContext {
-    let generator: GeneratorContext | undefined;
-    if (isGeneratorFunction(node)) {
-      const declared = declaredReturn && this.iterationTypesOf(declaredReturn);
-      const contextualTypes = !declaredReturn && contextualReturn ? this.iterationTypesOf(contextualReturn) : undefined;
-      const given = declaredReturn ? (declared ?? anyIterationTypes) : contextualTypes;
-      generator = {
+    const isAsync = hasToken(node, 'async');
+    const returns = isGeneratorFunction(node)
+      ? this.generatorReturns(isAsync, contextualReturn, declaredReturn)
+      : isAsync
+        ? this.asyncReturns(contextualReturn, declaredReturn)
+        : { declaredReturn, contextualReturn };
+    return {
+      ...returns,
+      isAsync,
+      node,
+      returnTypes: [],
+      endReachable: true,
+      isConstructor: isClassConstructor(node),
+      hasReturnWithValue: false,
+      hasReturnWithoutValue: false,
+      returnStates: [],
+      enclosingFlow: this.c.flow.current,
+    };
+  }
+
+  /** What an async function's `return` statements give: what the promise it returns fulfills with. */
+  private asyncReturns(
+    contextualReturn: Type | undefined,
+    declaredReturn: Type | undefined
+  ): Pick<FunctionContext, 'asyncAnnotation' | 'declaredReturn' | 'contextualReturn'> {
+    const contextual = contextualReturn && awaitedType(this.c, contextualReturn);
+    if (!declaredReturn) return { contextualReturn: contextual };
+    const isPromise = isAnyLike(declaredReturn) || this.c.isLibraryType(declaredReturn, 'Promise');
+    return {
+      asyncAnnotation: { type: declaredReturn, isPromise },
+      declaredReturn: isPromise ? awaitedType(this.c, declaredReturn) : anyType,
+      contextualReturn: contextual,
+    };
+  }
+
+  /** What a generator yields, returns, and receives, by its annotation or else its contextual type. */
+  private generatorReturns(
+    isAsync: boolean,
+    contextualReturn: Type | undefined,
+    declaredReturn: Type | undefined
+  ): Pick<FunctionContext, 'generator' | 'declaredReturn' | 'contextualReturn'> {
+    const declared = declaredReturn && this.iterationTypesOf(declaredReturn, isAsync);
+    const contextualTypes =
+      !declaredReturn && contextualReturn ? this.iterationTypesOf(contextualReturn, isAsync) : undefined;
+    const given = declaredReturn ? (declared ?? anyIterationTypes) : contextualTypes;
+    return {
+      generator: {
         annotation: declaredReturn,
         invalidAnnotation: declaredReturn !== undefined && !declared,
         yieldType: given?.yieldType,
         nextType: given?.nextType,
         yieldTypes: [],
-      };
-      declaredReturn = declaredReturn && given?.returnType;
-      contextualReturn = contextualTypes?.returnType;
-    }
-    return {
-      generator,
-      node,
-      returnTypes: [],
-      endReachable: true,
-      declaredReturn,
-      isConstructor: isClassConstructor(node),
-      hasReturnWithValue: false,
-      hasReturnWithoutValue: false,
-      returnStates: [],
-      contextualReturn,
-      enclosingFlow: this.c.flow.current,
+      },
+      declaredReturn: declaredReturn && given?.returnType,
+      contextualReturn: contextualTypes?.returnType,
     };
   }
 
@@ -499,15 +544,17 @@ export class FunctionChecker {
   private returnTypeOf(context: FunctionContext): Type {
     const { generator } = context;
     if (generator?.annotation) return generator.annotation;
+    if (context.asyncAnnotation) return context.asyncAnnotation.type;
     if (generator) {
       const yielded = generator.yieldTypes.length === 0 ? neverType : unionOf(generator.yieldTypes, true);
-      return this.c.globalType('Generator', [
+      return this.c.globalType(context.isAsync ? 'AsyncGenerator' : 'Generator', [
         this.c.widen(this.widenObjectLiteral(yielded)),
         this.inferredReturnOf(context),
         generator.nextType ?? unknownType,
       ]);
     }
     if (context.declaredReturn) return context.declaredReturn;
+    if (context.isAsync) return this.c.globalType('Promise', [this.inferredReturnOf(context)]);
     return this.inferredReturnOf(context);
   }
 
@@ -536,9 +583,10 @@ export class FunctionChecker {
   }
 
   /** What a generator's return type says it yields, returns, and receives, or undefined when it is no iterator. */
-  iterationTypesOf(type: Type): IterationTypes | undefined {
+  iterationTypesOf(type: Type, isAsync = false): IterationTypes | undefined {
     if (isAnyLike(type)) return anyIterationTypes;
-    const name = generatorReturnTypes.find((candidate) => this.c.isLibraryType(type, candidate));
+    const names = isAsync ? asyncGeneratorReturnTypes : generatorReturnTypes;
+    const name = names.find((candidate) => this.c.isLibraryType(type, candidate));
     if (!name || type.kind !== 'object') return undefined;
     const [yieldType = unknownType, returnType = anyType, nextType = anyType] = type.typeArguments ?? [];
     return { yieldType, returnType, nextType };
@@ -549,18 +597,20 @@ export class FunctionChecker {
    * return value of the iterable it delegates to.
    */
   yieldExpression(node: TreeNode, contextual: Type | undefined): Type {
-    const generator = this.contexts.at(-1)?.generator;
+    const context = this.contexts.at(-1);
+    const generator = context?.generator;
+    const isAsync = context?.isAsync === true;
     const operand = named(node).find((child) => child.type !== 'comment');
     const delegated = hasToken(node, '*');
     const operandType = operand
       ? this.c.expressions.check(operand, delegated ? undefined : generator?.yieldType)
       : undefinedType;
     if (!generator) return anyType;
-    const yielded = delegated ? this.c.patterns.iteratedType(operand, operandType) : operandType;
+    const yielded = this.yieldedType(operand, operandType, delegated, isAsync);
     generator.yieldTypes.push(yielded);
     if (generator.yieldType && yielded !== errorType)
       this.c.expressions.checkAssignable(operand ?? node, yielded, generator.yieldType, operand);
-    if (delegated) return this.iterationTypesOf(operandType)?.returnType ?? anyType;
+    if (delegated) return this.iterationTypesOf(operandType, isAsync)?.returnType ?? anyType;
     if (generator.nextType) return generator.nextType;
     if (!isResultUnused(node) && (!contextual || isAnyLike(contextual)))
       this.c.error(
@@ -568,6 +618,12 @@ export class FunctionChecker {
         "'yield' 式の結果が暗黙に any になります。この式を含むジェネレーターに戻り値の型の注釈がないためです。"
       );
     return anyType;
+  }
+
+  /** What a `yield` yields: its operand, or with `yield*` what that iterates, awaited in an async generator. */
+  private yieldedType(operand: TreeNode | undefined, type: Type, delegated: boolean, isAsync: boolean): Type {
+    if (!delegated) return isAsync ? awaitedType(this.c, type) : type;
+    return isAsync ? this.c.patterns.asyncIteratedType(operand, type) : this.c.patterns.iteratedType(operand, type);
   }
 
   private widenObjectLiteral(type: Type): Type {

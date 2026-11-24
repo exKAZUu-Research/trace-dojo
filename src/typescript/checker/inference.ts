@@ -378,7 +378,7 @@ export class TypeInference {
       return;
     }
     if (target.kind === 'conditional') {
-      this.inferToConditional(run, source, target, recurse, covariant);
+      this.inferToNestedConditional(run, source, target, path, recurse, covariant);
       return;
     }
     if (source.kind === 'union') {
@@ -402,6 +402,24 @@ export class TypeInference {
       run.priority | InferencePriority.SubstituteSource
     );
     return true;
+  }
+
+  /** A recursive conditional alias, as `Awaited<T>` is, makes a new conditional type each time it unfolds. */
+  private inferToNestedConditional(
+    run: InferenceRun,
+    source: Type,
+    target: ConditionalType,
+    path: InferencePath,
+    recurse: Recurse,
+    covariant: boolean
+  ): void {
+    path.targets.push(target);
+    try {
+      if (!this.c.relations.isDeeplyNested(target, path.targets))
+        this.inferToConditional(run, source, target, recurse, covariant);
+    } finally {
+      path.targets.pop();
+    }
   }
 
   private inferToConditional(
