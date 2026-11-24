@@ -581,7 +581,10 @@ function isSealedClass(type: Type): boolean {
 }
 
 function asUnsigned(operand: BoundExpression, type: Type, other: Type): Type {
-  return isNonNegativeIntConstant(operand) && ['uint', 'ulong'].includes(specialOf(other) ?? '') ? other : type;
+  const target = specialOf(other);
+  // A non-negative long constant converts implicitly to ulong only, never to uint (C# spec §10.2.11).
+  const takes = target === 'ulong' || (target === 'uint' && specialOf(operand.type) !== 'long');
+  return takes && isNonNegativeIntConstant(operand) ? other : type;
 }
 
 function isNonNegativeIntConstant(operand: BoundExpression): boolean {
