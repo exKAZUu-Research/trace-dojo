@@ -5,7 +5,7 @@ import type { NativeState } from '../runtime';
 import type { Type } from '../types';
 import { CsObject, CsStruct, type Value } from '../values';
 import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
-import { type Comparison, comparisonOf, equalityOf } from './nativesCollections';
+import { type Comparison, comparisonOf, equalityOf, ListState } from './nativesCollections';
 import {
   bufferedElements,
   copyToArray,
@@ -184,13 +184,14 @@ function sortedDictionaryNatives(prefix: string): Record<string, NativeMethod> {
       sortedOf(receiver).insert(key as Value, value as Value, true);
       return;
     },
+    // The views share the dictionary's arrays, so a saved Keys or Values shows later changes, as .NET's views do.
     [`${prefix}.get_Keys`]: (call, receiver) => {
       const state = sortedOf(receiver);
-      return newArray(call, state.keyType, [...state.keys]);
+      return liveView(call, state.keys, state.keyType);
     },
     [`${prefix}.get_Values`]: (call, receiver) => {
       const state = sortedOf(receiver);
-      return newArray(call, state.valueType as Type, [...state.values]);
+      return liveView(call, state.values, state.valueType as Type);
     },
     [`${prefix}.Add`]: (call, receiver, [key, value]) => {
       if (key === undefined) failNull('key');
@@ -216,8 +217,9 @@ function sortedDictionaryNatives(prefix: string): Record<string, NativeMethod> {
     },
     [`${prefix}.Clear`]: (_call, receiver) => {
       const state = sortedOf(receiver);
-      state.keys = [];
-      state.values = [];
+      // The arrays are emptied in place, since the Keys and Values views share them.
+      state.keys.length = 0;
+      state.values.length = 0;
       state.version++;
       return;
     },
@@ -761,3 +763,10 @@ defineNatives({
     return true;
   },
 });
+
+/** A read-only collection over a sorted dictionary's own keys or values, which changes as the dictionary does. */
+function liveView(call: NativeCall, items: Value[], elementType: Type): CsObject {
+  const view = new CsObject(libraryType(call, 'System.Collections.ObjectModel.ReadOnlyCollection', [elementType]), []);
+  view.native = new ListState(items, elementType);
+  return view;
+}
