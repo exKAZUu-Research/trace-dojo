@@ -281,6 +281,8 @@ class Renamer {
   private readonly standaloneDerivings: RStandaloneDeriving[] = [];
   private readonly dataKindSigs: RModule['kindSigs'] = [];
   private readonly declaredCons = new Map<Decl, ConInfo[]>();
+  /** The pattern synonyms, by name, with the names of the functions that match and build their values. */
+  private readonly patternSynonyms = new Map<string, PatternSynonymInfo>();
 
   constructor(
     private readonly module: Module,
@@ -291,7 +293,7 @@ class Renamer {
     this.importModules();
     this.declareTypes(this.module.decls);
     this.declareDataInstances(this.module.decls);
-    const decls = this.expandBindingWildcards(this.module.decls, (name) => {
+    const decls = this.expandBindingWildcards(this.expandPatternSynonyms(this.module.decls), (name) => {
       const own = name.qualifier ? undefined : this.ownValues.get(name.name);
       return own?.con ?? this.lookupCon(name);
     });
@@ -1311,7 +1313,9 @@ class Renamer {
         };
       }
       case 'support': {
-        return { k: 'var', ref: { kind: 'global', entity: this.supportValue(expr.name, span) }, name: expr.name, span };
+        const entity = this.supportValue(expr.name, span);
+        if (entity.con) return { k: 'con', con: entity.con, span };
+        return { k: 'var', ref: { kind: 'global', entity }, name: expr.name, span };
       }
       case 'tyapp': {
         const vars = new Set<string>();
@@ -1324,6 +1328,21 @@ class Renamer {
         };
       }
       case 'con': {
+        const synonym = expr.name.qualifier ? undefined : this.patternSynonyms.get(expr.name.name);
+        if (synonym) {
+          if (!synonym.builder) {
+            throw compileError(
+              span,
+              `パターンシノニム ${synonym.name} は、照合にだけ使えます（<- で定義されています）。`
+            );
+          }
+          return {
+            k: 'var',
+            ref: { kind: 'global', entity: this.ownValues.get(synonym.builder) as ValueEntity },
+            name: synonym.name,
+            span,
+          };
+        }
         return { k: 'con', con: this.lookupCon(expr.name), span };
       }
       case 'lit': {
@@ -1420,6 +1439,17 @@ class Renamer {
         return { k: 'typed', expr: this.renameExpr(expr.expr, scope), sig: this.renameSigType(expr.sig), span };
       }
       case 'recordCon': {
+        const synonym = expr.con.qualifier ? undefined : this.patternSynonyms.get(expr.con.name);
+        if (synonym?.fields) {
+          let result: Expr = { kind: 'con', name: expr.con, span };
+          for (const name of synonym.fields) {
+            const given = expr.fields.find((field) => field.field.name === name);
+            if (!given)
+              throw compileError(span, `パターンシノニム ${synonym.name} のフィールド ${name} がありません。`);
+            result = { kind: 'app', fn: result, arg: given.value, span };
+          }
+          return this.renameExpr(result, scope);
+        }
         const con = this.lookupCon(expr.con);
         const fields = expr.wildcard
           ? [...expr.fields, ...this.wildcardFields(con, expr.fields, expr.wildcard, scope)]
@@ -1541,6 +1571,61 @@ class Renamer {
     return this.options.support?.(name) ?? this.lookupValue({ name, span }, true);
   }
 
+  /**
+   * Replaces pattern synonyms with the functions that implement them: a matcher, `\s -> case s of p -> Just (x, y);
+   * _ -> Nothing` (or a `Bool` for a synonym without parameters), and for a synonym that builds values, a builder.
+   */
+  private expandPatternSynonyms(decls: Decl[]): Decl[] {
+    const result: Decl[] = [];
+    for (const decl of decls) {
+      if (decl.kind === 'patSyn') {
+        const name = decl.name.name;
+        if (this.patternSynonyms.has(name))
+          throw compileError(decl.span, `パターンシノニム ${name} が重複しています。`);
+        const matcher = ` match ${name}`;
+        const builder = decl.direction === 'unidirectional' ? undefined : ` build ${name}`;
+        const fields = decl.fields ? decl.params.map((param) => param.name) : undefined;
+        this.patternSynonyms.set(name, { name, arity: decl.params.length, matcher, builder, fields });
+        result.push(...patternSynonymFunctions(decl, matcher, builder));
+        if (fields) result.push(...patternSynonymSelectors(decl, matcher));
+      } else if (decl.kind === 'patSynSig') {
+        result.push(...decl.names.flatMap((name) => patternSynonymSignatures(decls, name, decl.sig)));
+      } else result.push(decl);
+    }
+    return result;
+  }
+
+  /** Renames a use of a pattern synonym as a view pattern of its matcher. */
+  private renameSynonymPattern(
+    synonym: PatternSynonymInfo,
+    pat: Extract<Pat, { kind: 'pcon' }>,
+    binders: Map<string, LocalVar>,
+    scope: LocalScope | undefined
+  ): RPat {
+    const { span } = pat;
+    if (pat.args.length !== synonym.arity) {
+      throw compileError(span, `パターンシノニム ${synonym.name} には ${synonym.arity} 個の引数が要ります。`);
+    }
+    const args = pat.args.map((arg) => this.renamePat(arg, binders, scope));
+    const conOf = (name: string): ConInfo => this.supportValue(name, span).con as ConInfo;
+    const inner: RPat =
+      args.length === 0
+        ? { k: 'con', con: conOf('True'), args: [], span }
+        : {
+            k: 'con',
+            con: conOf('Just'),
+            args: [args.length === 1 ? args[0] : { k: 'con', con: tupleCon(args.length), args, span }],
+            span,
+          };
+    const matcher = this.ownValues.get(synonym.matcher) as ValueEntity;
+    return {
+      k: 'view',
+      expr: { k: 'var', ref: { kind: 'global', entity: matcher }, name: synonym.name, span },
+      pat: inner,
+      span,
+    };
+  }
+
   /** The fields `..` fills in a construction: each one not given whose name a variable in scope has. */
   private wildcardFields(con: ConInfo, given: FieldBind[], span: Span, scope: LocalScope): FieldBind[] {
     const named = new Set(given.map((bind) => bind.field.name));
@@ -1620,6 +1705,7 @@ class Renamer {
       const local = scope.lookup(op.name);
       if (local) return local.fixity ?? DEFAULT_FIXITY;
     }
+    if (op.isConstructor && !op.qualifier && this.patternSynonyms.has(op.name)) return DEFAULT_FIXITY;
     const entity = op.isConstructor ? this.lookupCon(op).entity : this.lookupValue(op, true);
     return entity.fixity ?? DEFAULT_FIXITY;
   }
@@ -1681,6 +1767,8 @@ class Renamer {
         return { k: 'lit', lit: pat.lit, negative: pat.negative, span };
       }
       case 'pcon': {
+        const synonym = pat.con.qualifier ? undefined : this.patternSynonyms.get(pat.con.name);
+        if (synonym) return this.renameSynonymPattern(synonym, pat, binders, scope);
         const con = this.lookupCon(pat.con);
         if (pat.args.length !== con.arity) {
           throw compileError(
@@ -1709,7 +1797,11 @@ class Renamer {
       }
       case 'pchain': {
         return this.renamePat(
-          resolvePatChain(pat.items, span, (op) => this.lookupCon(op).entity.fixity ?? DEFAULT_FIXITY),
+          resolvePatChain(pat.items, span, (op) =>
+            !op.qualifier && this.patternSynonyms.has(op.name)
+              ? DEFAULT_FIXITY
+              : (this.lookupCon(op).entity.fixity ?? DEFAULT_FIXITY)
+          ),
           binders,
           scope
         );
@@ -1732,6 +1824,30 @@ class Renamer {
     binders: Map<string, LocalVar>,
     scope: LocalScope | undefined
   ): RPat {
+    const synonym = source.con.qualifier ? undefined : this.patternSynonyms.get(source.con.name);
+    if (synonym?.fields) {
+      const fields = synonym.fields;
+      const args = fields.map((name): Pat => {
+        const given = source.fields.find((field) => field.field.name === name);
+        if (given) return given.pat;
+        if (source.wildcard) return { kind: 'pvar', name: { name, span: source.span }, span: source.span };
+        return { kind: 'pwild', span: source.span };
+      });
+      for (const field of source.fields) {
+        if (!fields.includes(field.field.name)) {
+          throw compileError(
+            field.span,
+            `パターンシノニム ${synonym.name} には、フィールド ${field.field.name} がありません。`
+          );
+        }
+      }
+      return this.renameSynonymPattern(
+        synonym,
+        { kind: 'pcon', con: source.con, args, span: source.span },
+        binders,
+        scope
+      );
+    }
     const pat = expandRecordWildcards(source, (name) => this.lookupCon(name)) as typeof source;
     const { span } = pat;
     const con = this.lookupCon(pat.con);
@@ -2159,6 +2275,189 @@ function withRequiredTypeArguments(binding: Extract<RBinding, { k: 'fun' }>): vo
     clause.typeBinders = [...(clause.typeBinders ?? []), ...names];
     clause.pats = clause.pats.slice(required);
   }
+}
+
+interface PatternSynonymInfo {
+  name: string;
+  arity: number;
+  matcher: string;
+  builder?: string;
+  /** A record pattern synonym's fields, which are its parameters in order. */
+  fields?: string[];
+}
+
+/** The field selectors of a record pattern synonym, which match its pattern and take a parameter's value. */
+function patternSynonymSelectors(decl: Extract<Decl, { kind: 'patSyn' }>, matcher: string): Decl[] {
+  const { span } = decl;
+  return decl.params.map((field, position): Decl => {
+    const value: Name = { name: ' value', span };
+    const parts = decl.params.map((_, index): Pat =>
+      index === position ? { kind: 'pvar', name: value, span } : { kind: 'pwild', span }
+    );
+    const matched: Pat = {
+      kind: 'pcon',
+      con: { name: 'Just', span },
+      args: [parts.length === 1 ? parts[0] : { kind: 'ptuple', elems: parts, span }],
+      span,
+    };
+    const scrutinee: Name = { name: ' record', span };
+    const call: Expr = {
+      kind: 'app',
+      fn: { kind: 'var', name: { name: matcher, span }, span },
+      arg: { kind: 'var', name: scrutinee, span },
+      span,
+    };
+    const body: Expr = {
+      kind: 'case',
+      scrutinee: call,
+      alts: [
+        {
+          pat: matched,
+          rhs: { body: { kind: 'plain', expr: { kind: 'var', name: value, span } }, where: [], span },
+          span,
+        },
+      ],
+      span,
+    };
+    return {
+      kind: 'funClause',
+      name: field,
+      args: [{ kind: 'pvar', name: scrutinee, span }],
+      rhs: { body: { kind: 'plain', expr: body }, where: [], span },
+      span,
+    };
+  });
+}
+
+/** The functions that implement a pattern synonym: its matcher and, unless it only matches, its builder. */
+function patternSynonymFunctions(
+  decl: Extract<Decl, { kind: 'patSyn' }>,
+  matcher: string,
+  builder: string | undefined
+): Decl[] {
+  const { span } = decl;
+  const support = (name: string): Expr => ({ kind: 'support', name, span });
+  const vars = decl.params.map((param): Expr => ({ kind: 'var', name: param, span: param.span }));
+  const matched: Expr =
+    vars.length === 0
+      ? support('True')
+      : {
+          kind: 'app',
+          fn: support('Just'),
+          arg: vars.length === 1 ? vars[0] : { kind: 'tuple', elems: vars, span },
+          span,
+        };
+  const scrutinee: Name = { name: ' scrutinee', span };
+  const body: Expr = {
+    kind: 'case',
+    scrutinee: { kind: 'var', name: scrutinee, span },
+    alts: [
+      { pat: decl.pattern, rhs: { body: { kind: 'plain', expr: matched }, where: [], span }, span },
+      {
+        pat: { kind: 'pwild', span },
+        rhs: { body: { kind: 'plain', expr: support(vars.length === 0 ? 'False' : 'Nothing') }, where: [], span },
+        span,
+      },
+    ],
+    span,
+  };
+  const functions: Decl[] = [
+    {
+      kind: 'funClause',
+      name: { name: matcher, span },
+      args: [{ kind: 'pvar', name: scrutinee, span }],
+      rhs: { body: { kind: 'plain', expr: body }, where: [], span },
+      span,
+    },
+  ];
+  if (!builder) return functions;
+  if (decl.builder) {
+    for (const clause of decl.builder) {
+      if (clause.kind === 'funClause') functions.push({ ...clause, name: { ...clause.name, name: builder } });
+    }
+    return functions;
+  }
+  functions.push({
+    kind: 'funClause',
+    name: { name: builder, span },
+    args: decl.params.map((param): Pat => ({ kind: 'pvar', name: param, span: param.span })),
+    rhs: { body: { kind: 'plain', expr: patternAsExpression(decl.pattern) }, where: [], span },
+    span,
+  });
+  return functions;
+}
+
+/** The expression a bidirectional pattern synonym's pattern builds, `(a, b)` for `pattern P a b = (a, b)`. */
+function patternAsExpression(pat: Pat): Expr {
+  const { span } = pat;
+  switch (pat.kind) {
+    case 'pvar': {
+      return { kind: 'var', name: pat.name, span };
+    }
+    case 'plit': {
+      const lit: Expr = { kind: 'lit', lit: pat.lit, span };
+      return pat.negative ? { kind: 'neg', expr: lit, span } : lit;
+    }
+    case 'pcon': {
+      let result: Expr = { kind: 'con', name: pat.con, span };
+      for (const arg of pat.args) result = { kind: 'app', fn: result, arg: patternAsExpression(arg), span };
+      return result;
+    }
+    case 'ptuple': {
+      return { kind: 'tuple', elems: pat.elems.map(patternAsExpression), span };
+    }
+    case 'plist': {
+      return { kind: 'list', elems: pat.elems.map(patternAsExpression), span };
+    }
+    case 'pchain': {
+      return {
+        kind: 'chain',
+        items: pat.items.map((item) =>
+          item.kind === 'operand' ? { kind: 'operand', value: patternAsExpression(item.value) } : item
+        ),
+        span,
+      };
+    }
+    case 'psig': {
+      return { kind: 'typed', expr: patternAsExpression(pat.pat), sig: { context: [], type: pat.type, span }, span };
+    }
+    default: {
+      throw compileError(
+        span,
+        'このパターンシノニムは式として使えないので、<- で定義するか where で作り方を書いてください。'
+      );
+    }
+  }
+}
+
+/**
+ * The signatures of a pattern synonym's functions, from `pattern P :: t1 -> t2 -> T`: the builder's is the same, and
+ * the matcher's is `T -> Maybe (t1, t2)`.
+ */
+function patternSynonymSignatures(decls: Decl[], name: Name, sig: SigType): Decl[] {
+  const { span } = sig;
+  const params: TypeExpr[] = [];
+  let result = sig.type;
+  while (result.kind === 'tfun') {
+    params.push(result.from);
+    result = result.to;
+  }
+  const matched: TypeExpr =
+    params.length === 0
+      ? { kind: 'tcon', name: { name: 'Bool', span }, span }
+      : {
+          kind: 'tapp',
+          fn: { kind: 'tcon', name: { name: 'Maybe', span }, span },
+          arg: params.length === 1 ? params[0] : { kind: 'ttuple', elems: params, span },
+          span,
+        };
+  const matcherSig: SigType = { ...sig, type: { kind: 'tfun', from: result, to: matched, span } };
+  const signatures: Decl[] = [{ kind: 'sig', names: [{ name: ` match ${name.name}`, span }], sig: matcherSig, span }];
+  const synonym = decls.find((decl) => decl.kind === 'patSyn' && decl.name.name === name.name);
+  if (synonym?.kind === 'patSyn' && synonym.direction !== 'unidirectional') {
+    signatures.push({ kind: 'sig', names: [{ name: ` build ${name.name}`, span }], sig, span });
+  }
+  return signatures;
 }
 
 function classParamIndex(decl: Extract<Decl, { kind: 'class' }>, name: Name): number {

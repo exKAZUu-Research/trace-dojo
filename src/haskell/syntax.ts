@@ -282,6 +282,23 @@ export type Decl =
       span: Span;
       associatedWith?: string;
     }
+  /**
+   * `pattern P x y <- p` (matching only), `pattern P x y = p` (also building), or with `where P x y = e` (building
+   * by its own equations); `fields` names a record pattern synonym's fields, which are its parameters.
+   */
+  | {
+      kind: 'patSyn';
+      name: Name;
+      params: Name[];
+      pattern: Pat;
+      direction: 'unidirectional' | 'bidirectional' | 'explicit';
+      builder?: Decl[];
+      fields?: boolean;
+      isInfix: boolean;
+      span: Span;
+    }
+  /** `pattern P, Q :: t`, the type of pattern synonyms. */
+  | { kind: 'patSynSig'; names: Name[]; sig: SigType; span: Span }
   /** A standalone kind signature, `type T :: Type -> Type`. */
   | { kind: 'kindSig'; name: Name; kindSig: TypeExpr; span: Span }
   | { kind: 'instance'; context: Constraint[]; cls: QName; types: TypeExpr[]; decls: Decl[]; span: Span }

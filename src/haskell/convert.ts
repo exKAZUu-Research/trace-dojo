@@ -37,14 +37,10 @@ import type {
 
 /** What each node type stands for, in the message that rejects it. */
 const UNSUPPORTED_NODES: Record<string, string> = {
-  binding_list: 'パターンシノニム',
-  constructor_synonym: 'パターンシノニム',
-  constructor_synonyms: 'パターンシノニム',
   group: 'TransformListComp の内包表記',
   transform: 'TransformListComp の内包表記',
   linear_function: '線形型（%1 ->）',
   modifier: '多重度の注釈（%1）',
-  pattern_synonym: 'パターンシノニム',
   role_annotation: '型の役割の注釈（type role）',
   type_role: '型の役割の注釈（type role）',
   unboxed_sum: 'ボックス化されない和型',
@@ -414,6 +410,9 @@ function convertTopDecl(node: Node): Decl[] {
     case 'deriving_instance': {
       return [convertStandaloneDeriving(node)];
     }
+    case 'pattern_synonym': {
+      return [convertPatternSynonym(node)];
+    }
     case 'kind_signature': {
       if (!extensions.has('StandaloneKindSignatures')) {
         throw syntaxError(spanOf(node), '独立した種類のシグネチャには、StandaloneKindSignatures の拡張が要ります。');
@@ -717,6 +716,70 @@ function convertStandaloneDeriving(node: Node): Decl {
     strategy,
     span: spanOf(node),
   };
+}
+
+/** Converts `pattern P x = p` and its variants, and `pattern P :: t`. */
+function convertPatternSynonym(node: Node): Decl {
+  if (!extensions.has('PatternSynonyms')) {
+    throw syntaxError(spanOf(node), 'パターンシノニムを使うには、PatternSynonyms の拡張が要ります。');
+  }
+  const span = spanOf(node);
+  const inner = namedChildren(node)[0];
+  if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
+  if (inner.type === 'signature') {
+    const synonym = required(inner, 'synonym');
+    const names = synonym.type === 'binding_list' ? fields(synonym, 'name').map(plainName) : [plainName(synonym)];
+    return { kind: 'patSynSig', names, sig: { ...convertSigType(required(inner, 'type')), span }, span };
+  }
+  const head = convertPatternSynonymHead(required(inner, 'synonym'));
+  const constructors = field(inner, 'constructors');
+  const builder = constructors
+    ? namedChildren(constructors).map((clause): Decl => {
+        const pattern = convertPatternSynonymHead(required(clause, 'pattern'));
+        return {
+          kind: 'funClause',
+          name: pattern.name,
+          args: pattern.params.map((param): Pat => ({ kind: 'pvar', name: param, span: param.span })),
+          rhs: convertRhs(clause, '='),
+          span: spanOf(clause),
+        };
+      })
+    : undefined;
+  return {
+    kind: 'patSyn',
+    ...head,
+    pattern: convertPattern(required(inner, 'pattern')),
+    direction: builder ? 'explicit' : hasToken(inner, '<-') ? 'unidirectional' : 'bidirectional',
+    builder,
+    span,
+  };
+}
+
+/** The name and parameters of a pattern synonym's head: `P x y`, `x :> y`, or `P {x, y}`. */
+function convertPatternSynonymHead(node: Node): { name: Name; params: Name[]; fields?: boolean; isInfix: boolean } {
+  switch (node.type) {
+    case 'apply': {
+      const inner = convertPatternSynonymHead(required(node, 'function'));
+      return { ...inner, params: [...inner.params, plainName(required(node, 'argument'))] };
+    }
+    case 'record': {
+      const params = fields(node, 'field').map((fieldNode) => plainName(required(fieldNode, 'field')));
+      return { name: plainName(required(node, 'constructor')), params, fields: true, isInfix: false };
+    }
+    case 'infix':
+    case 'infix_chain': {
+      const operands = [...fields(node, 'operand'), ...fields(node, 'left_operand'), ...fields(node, 'right_operand')];
+      const operator = fields(node, 'operator')[0];
+      if (!operator || operands.length !== 2) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
+      return { name: plainName(operator), params: operands.map((operand) => plainName(operand)), isInfix: true };
+    }
+    case 'parens': {
+      return convertPatternSynonymHead(namedChildren(node)[0] ?? node);
+    }
+    default: {
+      return { name: plainName(node), params: [], isInfix: false };
+    }
+  }
 }
 
 /** Converts the declarations of type families and data families, and their instances. */
