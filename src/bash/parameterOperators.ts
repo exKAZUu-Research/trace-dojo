@@ -4,7 +4,16 @@ import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
 import { declarationText } from './declare';
 import type { Expander, ParameterValue, SubscriptRef } from './expansion';
-import { EMPTY_LIST, FIELD_BREAK, FieldSplitter, type Fragment, isFieldBreak, type Piece, STAR_BREAK } from './fields';
+import {
+  EMPTY_LIST,
+  FIELD_BREAK,
+  FieldSplitter,
+  type Fragment,
+  isFieldBreak,
+  type Piece,
+  POSITIONAL_BREAK,
+  STAR_BREAK,
+} from './fields';
 import { rawLengthSource } from './parse';
 import {
   compileGlob,
@@ -180,14 +189,35 @@ function isProtectedFieldBreak({ piece, keepsFields }: OperatorWordEntry): boole
 }
 
 function joinOperatorWordFields(ifs: string, entries: OperatorWordEntry[]): Piece[] {
+  const hasProtectedBreak = entries.some(isProtectedFieldBreak);
+  const segments = splitOperatorSegments(entries, hasProtectedBreak);
+  const result: Piece[] = [];
+  for (const [index, segment] of segments.entries()) {
+    if (index > 0) result.push(FIELD_BREAK);
+    result.push(...joinOperatorSegment(ifs, segment));
+  }
+  return result;
+}
+
+function splitOperatorSegments(entries: OperatorWordEntry[], hasProtectedBreak: boolean): OperatorWordEntry[][] {
+  const segments: OperatorWordEntry[][] = [[]];
+  for (const entry of entries) {
+    if (isHardOperatorBreak(entry, hasProtectedBreak)) segments.push([]);
+    else (segments.at(-1) as OperatorWordEntry[]).push(entry);
+  }
+  return segments;
+}
+
+function isHardOperatorBreak({ piece, keepsFields }: OperatorWordEntry, hasProtectedBreak: boolean): boolean {
+  return (keepsFields && isFieldBreak(piece)) || (hasProtectedBreak && piece === POSITIONAL_BREAK);
+}
+
+function joinOperatorSegment(ifs: string, entries: OperatorWordEntry[]): Piece[] {
   const splitter = new FieldSplitter(ifs);
   for (const entry of entries) splitter.add(toOperatorSplitterPiece(entry));
   const fields = splitter.finish();
   if (fields.length === 0) return [];
-  const separator: Piece = entries.some(isProtectedFieldBreak)
-    ? FIELD_BREAK
-    : { text: ' ', quoted: false, split: true };
-  return joinNonEmptyOperatorFields(fields, separator);
+  return joinNonEmptyOperatorFields(fields);
 }
 
 function toOperatorSplitterPiece({ piece, keepsFields }: OperatorWordEntry): Piece {
@@ -198,10 +228,10 @@ function toOperatorSplitterPiece({ piece, keepsFields }: OperatorWordEntry): Pie
   return { ...piece, split: true };
 }
 
-function joinNonEmptyOperatorFields(fields: Fragment[][], separator: Piece): Piece[] {
+function joinNonEmptyOperatorFields(fields: Fragment[][]): Piece[] {
   const joined: Piece[] = [];
   for (const [index, field] of fields.entries()) {
-    if (index > 0) joined.push(separator);
+    if (index > 0) joined.push({ text: ' ', quoted: false, split: true });
     if (field.length === 0) {
       joined.push({ text: '', quoted: false, split: true, operatorNull: true });
       continue;

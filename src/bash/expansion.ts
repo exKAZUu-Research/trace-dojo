@@ -3,7 +3,16 @@ import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { ArithmeticSource, BackquoteSyntaxError, ParameterExpansion, Word, WordPart } from './ast';
 import { expandBraces } from './braces';
 import { charactersOf } from './characters';
-import { EMPTY_LIST, FIELD_BREAK, FieldSplitter, type Fragment, isFieldBreak, type Piece, STAR_BREAK } from './fields';
+import {
+  EMPTY_LIST,
+  FIELD_BREAK,
+  FieldSplitter,
+  type Fragment,
+  isFieldBreak,
+  type Piece,
+  POSITIONAL_BREAK,
+  STAR_BREAK,
+} from './fields';
 import { applyOperator } from './parameterOperators';
 import { parseSubscriptWordParts } from './parse';
 import { hasExtendedGlob, hasPatternCharacters, matchesPattern, quotePattern } from './pattern';
@@ -618,7 +627,7 @@ export class Expander {
 
   /** What separates a list's elements: one that joins as `"$*"` does where words are not split, or a plain break. */
   private separatorOf(value: Extract<ParameterValue, { kind: 'list' }>): Piece {
-    if (!value.star) return FIELD_BREAK;
+    if (!value.star) return value.positional ? POSITIONAL_BREAK : FIELD_BREAK;
     return value.positional && this.spacedStar && this.ifsJoiner() === '' ? FIELD_BREAK : STAR_BREAK;
   }
 
@@ -650,7 +659,7 @@ export class Expander {
     let text = '';
     for (const piece of pieces) {
       if (piece === EMPTY_LIST) continue;
-      text += piece === FIELD_BREAK ? ' ' : piece === STAR_BREAK ? this.ifsJoiner() : piece.text;
+      text += isFieldBreak(piece) ? (piece === STAR_BREAK ? this.ifsJoiner() : ' ') : piece.text;
       if (text.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
     }
     return text;

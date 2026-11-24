@@ -14,8 +14,10 @@ export interface Fragment {
   transformedList?: boolean;
 }
 
-/** Separates the fields of `"$@"` and `"${a[@]}"`. */
+/** Separates the fields of `"${a[@]}"` and `${a[@]}`. */
 export const FIELD_BREAK = Symbol('fieldBreak');
+/** Separates the fields of `"$@"` and `$@`, whose unquoted boundaries stay distinct when a quoted `@`-list is present. */
+export const POSITIONAL_BREAK = Symbol('positionalBreak');
 /**
  * Separates the elements of an unquoted `$*` or `${a[*]}`, which split as `FIELD_BREAK` does, but which an expansion
  * that is not split joins with the first character of `IFS`, as `"$*"` does.
@@ -23,10 +25,10 @@ export const FIELD_BREAK = Symbol('fieldBreak');
 export const STAR_BREAK = Symbol('starBreak');
 /** Marks an `@`-subscripted expansion inside double quotes that produced zero elements, so `"${a[@]}"` vanishes. */
 export const EMPTY_LIST = Symbol('emptyList');
-export type Piece = Fragment | typeof FIELD_BREAK | typeof STAR_BREAK | typeof EMPTY_LIST;
+export type Piece = Fragment | typeof FIELD_BREAK | typeof POSITIONAL_BREAK | typeof STAR_BREAK | typeof EMPTY_LIST;
 
-export function isFieldBreak(piece: Piece): piece is typeof FIELD_BREAK | typeof STAR_BREAK {
-  return piece === FIELD_BREAK || piece === STAR_BREAK;
+export function isFieldBreak(piece: Piece): piece is typeof FIELD_BREAK | typeof POSITIONAL_BREAK | typeof STAR_BREAK {
+  return piece === FIELD_BREAK || piece === POSITIONAL_BREAK || piece === STAR_BREAK;
 }
 
 /**
