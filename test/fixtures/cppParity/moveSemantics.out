@@ -1,0 +1,14 @@
+copy
+move
+0[] 3a
+move-assign
+copy-assign
+lvalue hi
+rvalue hi
+rvalue tmp
+lvalue hi
+rvalue fw
+6
+via f3
+moved[]
+made

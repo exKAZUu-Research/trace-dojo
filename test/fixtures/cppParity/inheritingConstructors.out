@@ -1,0 +1,5 @@
+custom failure
+3 8 5
+Base::show(int)
+Base::show(string)
+Derived::show(double)
