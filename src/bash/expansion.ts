@@ -154,8 +154,10 @@ export class Expander {
     for (const word of words) {
       const keyed = splitKeyedElement(word);
       if (!keyed) {
-        const plain = this.expandAssignmentValue(word);
-        return { elements, error: compoundItemValidationError({ plain, rawText: word.text }, false, reportedName) };
+        return {
+          elements,
+          error: compoundItemValidationError({ plain: word.text, rawText: word.text }, false, reportedName),
+        };
       }
       const key = this.joinPieces(this.expandParts(keyed.key, false));
       if (key === '') return { elements, error: `${word.text}: bad array subscript` };
