@@ -37,6 +37,7 @@ import {
 import { Box, type FunctionRef, NULL_PTR, Ptr } from '../values';
 import { algorithmFunctions } from './algorithms';
 import { makePair } from './associative';
+import { bitCastFunctions } from './bitCasts';
 import { cFunctions } from './cFunctions';
 import { orderingClasses, type OrderingName } from './compare';
 import { constantsOf } from './constants';
@@ -114,16 +115,12 @@ const UNSUPPORTED_STD_NAMES: Record<string, string> = {
   forward: '完全転送（std::forward）',
   complex: '複素数（std::complex）',
   valarray: 'std::valarray',
-  span: 'std::span',
   format: '書式（std::format）',
   ranges: 'レンジ（std::ranges）',
   views: 'レンジ（std::views）',
   forward_list: 'std::forward_list',
   wstring: 'ワイド文字列（std::wstring）',
   wcout: 'ワイド文字の出力（std::wcout）',
-  minstd_rand: 'std::minstd_rand',
-  default_random_engine: 'std::default_random_engine',
-  sample: 'std::sample',
 };
 
 const UNSUPPORTED_C_NAMES: Record<string, string> = {
@@ -477,6 +474,7 @@ export class Library {
     this.addFunctions(coroutineFunctions(), this.stdNames);
     this.addFunctions(exceptionPointerFunctions(), this.stdNames);
     this.addFunctions(hashFunctions(), this.stdNames);
+    this.addFunctions(bitCastFunctions(), this.stdNames);
     const exit = native('exit', [INT], VOID, ([status]) => {
       throw new ProgramExit(asNumber(status));
     });

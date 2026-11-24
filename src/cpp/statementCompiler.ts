@@ -372,8 +372,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const declarators = fieldsOf(node, 'declarator');
     if (!typeNode || declarators.length !== 1 || !this.namedClassTemplate(typeNode))
       return this.specifiedType(node, true);
-    const [declarator] = declarators;
-    const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
+    const [written] = declarators;
+    // The grammar reads `S x(raw);` as a function's declaration, which names no type of a parameter.
+    const declarator =
+      written.type === 'function_declarator' ? (this.asDirectInitialization(written, written) ?? written) : written;
+    const value =
+      declarator.type === 'init_declarator' ? (fieldOf(declarator, 'value') ?? declarator.children[1]) : undefined;
     if (!value) return this.specifiedType(node, true);
     const nodes =
       value.type === 'argument_list' || value.type === 'initializer_list' ? expandPacks(this, value.children) : [value];

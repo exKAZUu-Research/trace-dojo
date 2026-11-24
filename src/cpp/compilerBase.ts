@@ -373,8 +373,15 @@ export abstract class CompilerBase {
       else if (entity.kind === 'template' && scope.type === 'template_type') {
         type = this.instantiateTemplate(entity.template, fieldOf(scope, 'arguments') as Syntax, row);
       }
+      const member = fieldOf(nameNode, 'name') as Syntax;
+      // `std::endian::little` names an enumerator of an enumeration of std.
+      if (type?.kind === 'int' && type.enumeration)
+        return (
+          enumeratorEntity(type.enumeration, member.text) ??
+          this.error(row, `列挙 ${type.enumeration.name} に ${member.text} という列挙子はありません。`)
+        );
       if (type?.kind !== 'class') return this.unsupported(row, '入れ子の名前空間');
-      return this.lookupInClass(type.cls, fieldOf(nameNode, 'name') as Syntax, row);
+      return this.lookupInClass(type.cls, member, row);
     }
     const name = this.plainName(nameNode);
     const entity = this.findStdName(name);

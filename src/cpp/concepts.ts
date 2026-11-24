@@ -202,9 +202,11 @@ export function evaluateConstraint(compiler: Compiler, node: Syntax): boolean {
       break;
     }
   }
+  // The grammar reads a variable template's instance (`requires is_small<T>`) as a type.
+  const expression: Syntax = node.type === 'template_type' ? { ...node, type: 'template_function' } : node;
   let constant: number | bigint | undefined;
   try {
-    constant = compiler.unevaluated(() => compiler.constantValueOf(compiler.compileExpression(node)));
+    constant = compiler.unevaluated(() => compiler.constantValueOf(compiler.compileExpression(expression)));
   } catch (error) {
     if (error instanceof CompileError) return false;
     throw error;

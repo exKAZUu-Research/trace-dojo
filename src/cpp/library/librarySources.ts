@@ -1,4 +1,5 @@
 import { ANY } from './sources/any';
+import { BIT } from './sources/bit';
 import { BITSET } from './sources/bitset';
 import { COROUTINE } from './sources/coroutine';
 import { DISTRIBUTIONS } from './sources/distributions';
@@ -10,6 +11,7 @@ import { INVOKE } from './sources/invoke';
 import { MEMORY } from './sources/memory';
 import { NUMBERS } from './sources/numbers';
 import { OPTIONAL } from './sources/optional';
+import { REVERSE_ITERATOR, SPAN } from './sources/span';
 import { STRING_VIEW } from './sources/stringView';
 import { INTEGER_SEQUENCE, TUPLE } from './sources/tuple';
 import { TYPE_INFO } from './sources/typeInfo';
@@ -48,6 +50,9 @@ export const LIBRARY_SOURCES: readonly LibrarySource[] = [
   EXCEPTION_PTR,
   INVOKE,
   HASH,
+  BIT,
+  REVERSE_ITERATOR,
+  SPAN,
 ];
 
 const SOURCE_BY_NAME = new Map(LIBRARY_SOURCES.flatMap((source) => source.names.map((name) => [name, source])));

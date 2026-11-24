@@ -425,6 +425,39 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     });
   });
 
+  define('sample', [[0, 1], [2], [3], [4]], (args) => {
+    const info = rangeAt(args, 0);
+    const output = outputOf(args[2]);
+    const engineArg = args[4];
+    if (!info || !output || args.length !== 5 || !isInteger(unqualified(args[3].type))) return;
+    if (engineArg?.type.kind !== 'class' || engineArg.type.cls.library?.kind !== 'engine') return;
+    if (isConstType(engineArg.type)) return;
+    const engineType = engineArg.isLvalue ? referenceTo(engineArg.type) : engineArg.type;
+    const assign = outputAssignment(compiler(), iteratorOperand(info), output, args[2].row);
+    return native(
+      'sample',
+      [...params(args).slice(0, 4), engineType],
+      unqualified(args[2].type),
+      ([first, last, start, count, engine], { frame }) => {
+        const values = range(first, last, info, frame);
+        const generator = readArg(engine, engineType) as EngineValue;
+        const out = new Output(start as Ptr, output, frame, assign);
+        // libc++'s selection sampling of forward iterators (Knuth's Algorithm S).
+        let unsampled = BigInt(values.length);
+        let wanted = BigInt(count as number | bigint);
+        if (wanted > unsampled) wanted = unsampled;
+        for (let index = 0; wanted > 0n; index++) {
+          unsampled--;
+          if (uniformInteger(generator, 0n, unsampled, 64) < wanted) {
+            out.write(values.location(index));
+            wanted--;
+          }
+        }
+        return out.end;
+      }
+    );
+  });
+
   // Searching and counting ------------------------------------------------------------------------------------------
   for (const name of ['min_element', 'max_element']) {
     define(name, [[0, 1], [2]], (args) => {
