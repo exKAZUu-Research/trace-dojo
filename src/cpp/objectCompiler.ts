@@ -591,9 +591,16 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   /** Whether the code compiled now is a friend of a class: a member of a friend class, or a friend function. */
   private isFriendOf(cls: ClassInfo): boolean {
     if (this.usingLibraryAccess) return false;
-    const here = this.enclosingClass;
     const fn = this.context.fn;
-    return (here !== undefined && cls.friendClasses.has(here)) || (fn !== undefined && cls.friendFunctions.has(fn));
+    if (fn !== undefined && cls.friendFunctions.has(fn)) return true;
+    const here = this.enclosingClass;
+    if (!here) return false;
+    if (cls.friendClasses.has(here)) return true;
+    // A nested class is a member, which may use the private members of the classes it is in.
+    for (let outer = here.outer; outer; outer = outer.outer) {
+      if (outer === cls || cls.friendClasses.has(outer)) return true;
+    }
+    return false;
   }
 
   checkBaseConversion(from: ClassInfo, to: ClassInfo, row: number): void {

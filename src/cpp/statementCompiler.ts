@@ -285,8 +285,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return this.throwStatement(node);
       }
       case 'class_specifier':
-      case 'struct_specifier': {
-        return this.unsupported(node.row, '関数の中のクラスの定義');
+      case 'struct_specifier':
+      case 'union_specifier': {
+        this.resolveTypeSpecifier(node);
+        return () => {};
       }
       case 'enum_specifier': {
         this.resolveTypeSpecifier(node);

@@ -329,39 +329,82 @@ export class Compiler extends StatementCompiler {
     const nameNode = fieldOf(node, 'name');
     if (nameNode) this.checkHeaderMacro(nameNode.text, nameNode.row);
     const body = fieldOf(node, 'body');
+    const key = node.type === 'struct_specifier' ? 'struct' : 'class';
     if (!nameNode) {
       if (!body) return this.error(node.row, 'クラスの名前を書いてください。');
-      if (this.context.fn) return this.unsupported(node.row, '関数の中のクラスの定義');
-      const unnamed = new ClassInfo(
-        `(unnamed ${node.type === 'struct_specifier' ? 'struct' : 'class'})`,
-        node.type === 'struct_specifier' ? 'struct' : 'class'
-      );
+      const unnamed = new ClassInfo(`(unnamed ${key})`, key);
       unnamed.isUnnamed = true;
       unnamed.row = node.row;
+      this.placeClass(unnamed);
       this.defineClass(unnamed, node, body);
       return classType(unnamed);
     }
+    if (nameNode.type === 'qualified_identifier') return this.qualifiedClassDefinition(node, nameNode, body);
     if (nameNode.type !== 'type_identifier') return this.unsupported(node.row, `クラス ${nameNode.text} の定義`);
     const name = nameNode.text;
     let cls: ClassInfo;
-    const existing = this.globalScope.names.get(name);
-    if (existing?.kind === 'class') {
-      cls = existing.cls;
+    // `struct time t;` names a class declared in an enclosing scope, which a library name of the same name hides.
+    const existing =
+      this.findDeclaredHere(name) ??
+      (body
+        ? undefined
+        : (this.context.lookupLocal(name, (entity) => classOfEntity(entity) !== undefined) ??
+          this.globalScope.names.get(name)));
+    const existingClass = existing && classOfEntity(existing);
+    if (existingClass) {
+      cls = existingClass;
       if (body && cls.isComplete) return this.error(node.row, `クラス ${name} はすでに定義されています。`);
     } else {
       if (existing) return this.error(node.row, `${name} はすでに別のものとして宣言されています。`);
-      if (this.context.fn) return this.unsupported(node.row, '関数の中のクラスの定義');
-      if (this.library.global(name)?.kind === 'type')
+      if (!this.context.fn && !this.memberClass && this.library.global(name)?.kind === 'type')
         return this.error(node.row, `${name} はヘッダーで型として宣言されています。`);
-      cls = new ClassInfo(name, node.type === 'struct_specifier' ? 'struct' : 'class');
+      cls = new ClassInfo(name, key);
       cls.row = node.row;
-      this.globalScope.names.set(name, { kind: 'class', cls });
+      this.placeClass(cls);
+      this.declareHere(name, { kind: 'class', cls }, node.row);
     }
     if (body) this.defineClass(cls, node, body);
     return classType(cls);
   }
 
+  /** Records where a new class is declared: in a class (a nested class) or in a function (a local class). */
+  private placeClass(cls: ClassInfo): void {
+    if (this.memberClass && !this.context.fn) cls.outer = this.memberClass;
+    else if (this.context.fn) cls.localScopes = [...this.context.scopes, ...this.context.outerScopes];
+  }
+
+  /** Defines a nested class outside its enclosing class (`class Outer::Inner { ... };`). */
+  private qualifiedClassDefinition(node: Syntax, nameNode: Syntax, body: Syntax | undefined): Type {
+    const scope = this.resolveScope(fieldOf(nameNode, 'scope') as Syntax);
+    const name = (fieldOf(nameNode, 'name') as Syntax).text;
+    if (scope.kind !== 'class') return this.unsupported(node.row, `クラス ${nameNode.text} の定義`);
+    const member = scope.cls.memberTypes.get(name);
+    if (member?.kind !== 'class')
+      return this.error(node.row, `${scope.cls.name} に ${name} というクラスは宣言されていません。`);
+    if (!body) return member;
+    if (member.cls.isComplete) return this.error(node.row, `クラス ${nameNode.text} はすでに定義されています。`);
+    const saved = this.memberClass;
+    this.memberClass = scope.cls;
+    try {
+      this.defineClass(member.cls, node, body);
+    } finally {
+      this.memberClass = saved;
+    }
+    return member;
+  }
+
   private defineClass(cls: ClassInfo, node: Syntax, body: Syntax): void {
+    // The members of a local class are declared in the class, which sees the names of the enclosing blocks.
+    const savedContext = this.context;
+    if (savedContext.fn) this.context = FunctionContext.classBody(savedContext);
+    try {
+      this.defineClassMembers(cls, node, body);
+    } finally {
+      this.context = savedContext;
+    }
+  }
+
+  private defineClassMembers(cls: ClassInfo, node: Syntax, body: Syntax): void {
     const isFinalClass = node.children.some((child) => child.type === 'virtual_specifier' && child.text === 'final');
     const defaultAccess: Access = node.type === 'struct_specifier' ? 'public' : 'private';
     this.baseClause(cls, node, defaultAccess);
@@ -408,8 +451,9 @@ export class Compiler extends StatementCompiler {
             break;
           }
           case 'class_specifier':
-          case 'struct_specifier': {
-            this.unsupported(member.row, '入れ子のクラス');
+          case 'struct_specifier':
+          case 'union_specifier': {
+            this.resolveTypeSpecifier(member);
             break;
           }
           default: {
@@ -523,11 +567,12 @@ export class Compiler extends StatementCompiler {
     const declarators = fieldsOf(node, 'declarator');
     const type = fieldOf(node, 'type');
     if (
-      type &&
-      (type.type === 'class_specifier' || type.type === 'struct_specifier') &&
-      (fieldOf(type, 'body') || declarators.length === 0)
-    )
-      return this.unsupported(type.row, 'クラスの中のクラスの宣言');
+      declarators.length === 0 &&
+      (type?.type === 'class_specifier' || type?.type === 'struct_specifier' || type?.type === 'union_specifier')
+    ) {
+      this.resolveTypeSpecifier(type);
+      return;
+    }
     if (declarators.length === 0 && type?.type === 'enum_specifier') {
       this.resolveTypeSpecifier(type);
       return;
@@ -1640,6 +1685,13 @@ export class Compiler extends StatementCompiler {
   private compileFunctionBody(fn: FunctionInfo, node: Syntax): void {
     const cls = fn.owner;
     const context = new FunctionContext(fn, cls, fn.isConstructor || fn.isDestructor ? VOID : fn.ret);
+    // A member function of a local class sees the names of the blocks around the class.
+    for (let outer = cls; outer; outer = outer.outer) {
+      if (outer.localScopes) {
+        context.outerScopes.push(...outer.localScopes);
+        break;
+      }
+    }
     const saved = this.context;
     this.context = context;
     try {
@@ -2904,6 +2956,13 @@ function intMaxOf(type: Extract<Type, { kind: 'int' }>): bigint {
 }
 
 /** The function declarator of a declarator, which pointer and reference declarators may wrap (`int* f()`). */
+/** The class a name denotes, as a class or as a type. */
+function classOfEntity(entity: Entity): ClassInfo | undefined {
+  if (entity.kind === 'class') return entity.cls;
+  if (entity.kind === 'type' && entity.type.kind === 'class' && !entity.type.cls.library) return entity.type.cls;
+  return undefined;
+}
+
 /** Whether a function's definition is `= default` or `= delete`. */
 function specialDefinition(node: Syntax): 'default' | 'delete' | undefined {
   if (node.children.some((child) => child.type === 'default_method_clause')) return 'default';

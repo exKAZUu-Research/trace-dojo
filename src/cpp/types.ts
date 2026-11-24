@@ -2,6 +2,7 @@ import { type FloatName, INT_PROPERTIES, type IntName } from '../c/types';
 import type { ConstantLocation, Expr, LibraryConstant } from './expr';
 import type { ClassOperations, LibraryClass } from './library/libraryClass';
 import type { CompiledFunction, Eval, Frame } from './runtime';
+import type { Scope } from './scopes';
 import type { Syntax } from './syntax';
 import type { Ptr } from './values';
 
@@ -243,6 +244,10 @@ export class ClassInfo {
   /** The constructor a class without user-declared ones has, when it has anything to initialize. */
   row = -1;
 
+  /** The class this one is nested in. */
+  outer?: ClassInfo;
+  /** The scopes of the blocks a local class is defined in, whose names its members see. */
+  localScopes?: Scope[];
   /** The classes whose code may use this class's private and protected members (`friend class B;`). */
   readonly friendClasses = new Set<ClassInfo>();
   /** The functions that may use this class's private and protected members (`friend void f(A&);`). */
@@ -524,12 +529,17 @@ function baseName(type: Type): string {
       return 'std::nullptr_t';
     }
     case 'class': {
-      return type.cls.name;
+      return classDisplayName(type.cls);
     }
     default: {
       return 'void';
     }
   }
+}
+
+/** A class's name with the classes it is nested in, such as `Outer::Inner`. */
+export function classDisplayName(cls: ClassInfo): string {
+  return cls.outer ? `${classDisplayName(cls.outer)}::${cls.name}` : cls.name;
 }
 
 /** The size in bytes, as `sizeof` gives on arm64 macOS with libc++. */

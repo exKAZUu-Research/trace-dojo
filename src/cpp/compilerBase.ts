@@ -66,10 +66,13 @@ export abstract class CompilerBase {
   findName(name: string, typeOnly = false): Entity | undefined {
     const local = this.context.lookupLocal(name, typeOnly ? isTypeName : undefined);
     if (local) return local;
-    for (let cls = this.enclosingClass; cls; cls = cls.base) {
-      const member = this.memberEntity(cls, name);
-      if (member && (!typeOnly || isTypeName(member))) return member;
-      if (name === cls.name) return { kind: 'class', cls };
+    // A nested class's members see its own members, then those of the classes it is nested in.
+    for (let outer = this.enclosingClass; outer; outer = outer.outer) {
+      for (let cls: ClassInfo | undefined = outer; cls; cls = cls.base) {
+        const member = this.memberEntity(cls, name);
+        if (member && (!typeOnly || isTypeName(member))) return member;
+        if (name === cls.name) return { kind: 'class', cls };
+      }
     }
     if (typeOnly) {
       const global = this.typeOnlyGlobalName(name);
@@ -226,6 +229,14 @@ export abstract class CompilerBase {
     this.checkLibraryLayout(classType(cls), row);
     if (nameNode.type === 'qualified_identifier') {
       const inner = this.lookupInClass(cls, fieldOf(nameNode, 'scope') as Syntax, row);
+      const innerName = fieldOf(nameNode, 'name') as Syntax;
+      if (inner.kind === 'type' && inner.type.kind === 'int' && inner.type.enumeration) {
+        const info = inner.type.enumeration;
+        return (
+          enumeratorEntity(info, innerName.text) ??
+          this.error(row, `列挙 ${info.name} に ${innerName.text} という列挙子はありません。`)
+        );
+      }
       if (inner.kind !== 'class' && !(inner.kind === 'type' && inner.type.kind === 'class')) {
         return this.error(row, `${nameNode.text} はクラスの中にありません。`);
       }

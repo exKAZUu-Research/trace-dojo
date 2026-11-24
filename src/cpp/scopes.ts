@@ -78,11 +78,21 @@ export class FunctionContext {
   /** The labels each statement list around the statement compiled now may jump to, the innermost last. */
   readonly enclosingLabels: ReadonlyMap<string, number>[] = [];
 
+  /** The scopes around a local class, whose names its member functions see after their own. */
+  readonly outerScopes: Scope[] = [];
+
   constructor(
     readonly fn: FunctionInfo | undefined,
     readonly cls: ClassInfo | undefined,
     readonly returnType: Type
   ) {}
+
+  /** The context of a local class's member declarations, which see the names of the function's blocks. */
+  static classBody(enclosing: FunctionContext): FunctionContext {
+    const context = new FunctionContext(undefined, undefined, enclosing.returnType);
+    context.outerScopes.push(...enclosing.scopes.toReversed(), ...enclosing.outerScopes);
+    return context;
+  }
 
   get scope(): Scope {
     return this.scopes.at(-1) as Scope;
@@ -144,6 +154,13 @@ export class FunctionContext {
     for (let index = this.scopes.length - 1; index >= 0; index--) {
       const entity = this.scopes[index].names.get(name);
       if (entity && (!accept || accept(entity))) return entity;
+    }
+    // A local class sees the types and constants of the enclosing blocks, but not their variables.
+    for (const scope of this.outerScopes) {
+      const entity = scope.names.get(name);
+      if (entity && entity.kind !== 'local' && (!accept || accept(entity))) return entity;
+      if (entity?.kind === 'local' && (entity.isConstexpr || entity.staticStorage) && (!accept || accept(entity)))
+        return entity;
     }
   }
 }
