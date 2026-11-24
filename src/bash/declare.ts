@@ -169,14 +169,7 @@ function commitCompoundDeclaration(
     const sub = arg.subscript?.text ?? referencedSubscript ?? '';
     shell.discard(`${arg.name}[${sub}]: cannot assign list to array member`);
   }
-  if (localScope && !localScope.has(targetName) && isReadonlyGlobal(shell, targetName)) return false;
-  const existing = resolveCompoundExisting(shell, targetName, set, localScope);
-  if (existing?.attributes.has('r')) {
-    shell.discard(`${targetName}: readonly variable`);
-  }
-  const kindErr = existing && incompatibleArrayKindError(existing, set);
-  if (kindErr) shell.discard(`${targetName}: ${kindErr}`);
-  if (existing && conversionError(existing, set, unset)) return false;
+  if (!validateCompoundDeclarationTarget(shell, targetName, arg.append, set, unset, localScope)) return false;
   const variable = ensureCompoundTargetVariable(shell, targetName, set, localScope);
   applyAttributes(shell, builtin, variable, options, true, false);
   const { elements, error } = shell.expander.validateCompoundItems(rawItems, variable.attributes.has('A'), true);
@@ -184,6 +177,30 @@ function commitCompoundDeclaration(
   if (error) shell.discard(error);
   if (!ok) throw new DiscardSignal();
   return true;
+}
+
+function validateCompoundDeclarationTarget(
+  shell: Shell,
+  targetName: string,
+  append: boolean,
+  set: Set<string>,
+  unset: Set<string>,
+  localScope: Map<string, Variable> | undefined
+): boolean {
+  const existing = resolveCompoundExisting(shell, targetName, set, localScope);
+  if (!existing && !localScope && append && shell.isUnreadHostEnv(targetName)) {
+    throw new UnsupportedFeatureError(`環境変数（${targetName}）`);
+  }
+  if (
+    existing?.attributes.has('r') ||
+    Boolean(localScope && !localScope.has(targetName) && isReadonlyGlobal(shell, targetName))
+  ) {
+    if (shell.isInFunction) return false;
+    shell.discard(`${targetName}: readonly variable`);
+  }
+  const kindErr = existing && incompatibleArrayKindError(existing, set);
+  if (kindErr) shell.discard(`${targetName}: ${kindErr}`);
+  return !(existing && conversionError(existing, set, unset));
 }
 
 function hasValidCompoundContext(shell: Shell, builtin: string, { set, unset }: Options): boolean {
@@ -378,7 +395,7 @@ function declareOne(
   const isSubscripted =
     parsed?.subscript !== undefined || (typeof operand !== 'string' && operand.subscript !== undefined);
   if (rejectSubscriptedAttributeBuiltin(shell, builtin, name, operand, parsed, isSubscripted)) return false;
-  const assigns = hasValue(operand, parsed);
+  const assignMode = resolveAssignMode(operand, parsed);
   const tempVar =
     !isLocal && (builtin === 'export' || builtin === 'readonly') ? shell.declarationPrefixVariable(name) : undefined;
   if (tempVar) return declarePrefixed(shell, builtin, name, tempVar, operand, parsed, options);
@@ -389,9 +406,9 @@ function declareOne(
   ) {
     return false;
   }
-  const priorKind = shell.findVariable(name, false)?.value?.kind;
-  const destination = declaredDestination(shell, builtin, name, options, isLocal, isSubscripted, assigns);
-  const preUnsetStore = resolvePreUnsetNamerefStore(shell, name, destination?.variable, options, assigns);
+  const priorKind = shell.findVariable(name, !options.set.has('n') && !options.unset.has('n'))?.value?.kind;
+  const destination = declaredDestination(shell, builtin, name, options, isLocal, isSubscripted, assignMode);
+  const preUnsetStore = resolvePreUnsetNamerefStore(shell, name, destination?.variable, options, assignMode !== 'none');
   if (
     !destination ||
     !applyAttributes(
@@ -399,7 +416,7 @@ function declareOne(
       builtin,
       destination.variable,
       options,
-      assigns || isCompound(operand),
+      assignMode !== 'none' || isCompound(operand),
       isSubscripted || destination.referencedSubscript !== undefined
     )
   ) {
@@ -730,8 +747,19 @@ function declareDynamic(
   return true;
 }
 
+type AssignMode = 'none' | 'replace' | 'append';
+
+function resolveAssignMode(
+  operand: DeclarationArgument,
+  parsed: { append: boolean; value?: string } | undefined
+): AssignMode {
+  if (!hasValue(operand, parsed)) return 'none';
+  const append = typeof operand === 'string' ? Boolean(parsed?.append) : operand.append;
+  return append ? 'append' : 'replace';
+}
+
 /** Resolves the target variable and any nameref element subscript for a declaration operand. */
-// code-gauge-allow functionParameterCount -- Needs shell, builtin, operand name, flags, scope mode, subscript presence, and whether a value is assigned.
+// code-gauge-allow functionParameterCount -- Needs shell, builtin, operand name, flags, scope mode, subscript presence, and assignment mode.
 function declaredDestination(
   shell: Shell,
   builtin: string,
@@ -739,7 +767,7 @@ function declaredDestination(
   options: Options,
   isLocal: boolean,
   isSubscripted: boolean,
-  assigns: boolean
+  assignMode: AssignMode
 ): DeclarationDestination | undefined {
   const { set, unset } = options;
   const { scopes } = shell.state;
@@ -755,14 +783,23 @@ function declaredDestination(
   );
   const targetScope = referencedSubscript === undefined ? scope : undefined;
   const variable = lookupDeclaredVariable(shell, targetName, set, targetScope);
-  if (targetScope && !variable && isReadonlyGlobal(shell, targetName)) {
-    // Bash refuses a local copy of a readonly global, though a caller's readonly local may be shadowed.
-    shell.reportError(`${builtin}: ${targetName}: readonly variable`);
+  if (
+    rejectDeclaredTarget(
+      shell,
+      builtin,
+      targetName,
+      referencedSubscript,
+      variable,
+      targetScope,
+      assignMode,
+      isSubscripted
+    )
+  ) {
     return undefined;
   }
   const candidate = variable ?? createNewDeclaredVariable(shell, targetName, set, isSubscripted, targetScope);
   if (!variable && targetScope) targetScope.set(targetName, candidate);
-  if (checkReadonlyConflict(shell, builtin, targetName, candidate, options, assigns)) {
+  if (checkReadonlyConflict(shell, builtin, targetName, candidate, options, assignMode !== 'none')) {
     return undefined;
   }
   if (!variable && !targetScope) scopes[0].set(targetName, candidate);
@@ -770,6 +807,32 @@ function declaredDestination(
     variable: candidate,
     ...(referencedSubscript === undefined ? {} : { referencedSubscript }),
   };
+}
+
+// code-gauge-allow functionParameterCount -- Validates post-dereference element targets, readonly global local-shadows, and unread host variables.
+function rejectDeclaredTarget(
+  shell: Shell,
+  builtin: string,
+  targetName: string,
+  referencedSubscript: string | undefined,
+  variable: Variable | undefined,
+  targetScope: Map<string, Variable> | undefined,
+  assignMode: AssignMode,
+  isSubscripted: boolean
+): boolean {
+  if (referencedSubscript !== undefined && (builtin === 'readonly' || builtin === 'export')) {
+    shell.reportError(`${builtin}: \`${targetName}[${referencedSubscript}]': not a valid identifier`);
+    return true;
+  }
+  if (targetScope && !variable && isReadonlyGlobal(shell, targetName)) {
+    // Bash refuses a local copy of a readonly global, though a caller's readonly local may be shadowed.
+    shell.reportError(`${builtin}: ${targetName}: readonly variable`);
+    return true;
+  }
+  if (!targetScope && !variable && shell.isUnreadHostEnv(targetName) && (assignMode !== 'replace' || isSubscripted)) {
+    throw new UnsupportedFeatureError(`環境変数（${targetName}）`);
+  }
+  return false;
 }
 
 function lookupDeclaredVariable(
@@ -810,6 +873,7 @@ function resolveLocalOrigin(
   if (tempBinding) return { source: tempBinding, inheritAttributes: inheritEnclosing, fromTempEnv: true };
   if (!inheritEnclosing) return undefined;
   const inherited = findEnclosingVariable(shell.state.scopes, targetScope, name);
+  if (!inherited && shell.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
   return inherited
     ? { source: inherited, inheritAttributes: true, fromTempEnv: Boolean(inherited.fromTempEnv) }
     : undefined;
@@ -1126,7 +1190,10 @@ function printDeclarations(shell: Shell, builtin: string, names: DeclarationArgu
 /** The variable `declare -p name` shows; `local -p` shows only the current function's own variables. */
 function declarationToShow(shell: Shell, builtin: string, name: string): Variable | undefined {
   const found = shell.findVariable(name, false);
-  if (builtin !== 'local') return found ?? shell.dynamicDeclaration(name);
+  if (builtin !== 'local') {
+    if (!found && shell.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+    return found ?? shell.dynamicDeclaration(name);
+  }
   const { scopes, functionScopes } = shell.state;
   return scopes[functionScopes.at(-1) as number].get(name) === found ? found : undefined;
 }

@@ -11,7 +11,7 @@ import { singleQuote } from './quoting';
 import { ExitSignal, SCRIPT_NAME } from './runtime';
 import type { CompoundElement, Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
-import { isIdentifier } from './variables';
+import { ENVIRONMENT_VARIABLES, isIdentifier } from './variables';
 
 /** Marks a quoted part that expands to nothing, which still makes a field (`""`), unlike `"$@"` with no elements. */
 const QUOTED_EMPTY: Fragment = { text: '', quoted: true, split: false };
@@ -427,6 +427,11 @@ export class Expander {
         if (variable.value !== undefined) names.add(variable.name);
       }
     }
+    for (const envName of ENVIRONMENT_VARIABLES) {
+      if (envName.startsWith(prefix) && this.shell.isUnreadHostEnv(envName)) {
+        throw new UnsupportedFeatureError(`環境変数（${envName}）`);
+      }
+    }
     if ('BASH'.startsWith(prefix) || prefix.startsWith('BASH') || 'RANDOM'.startsWith(prefix) || prefix === '') {
       throw new UnsupportedFeatureError(`シェルの変数の一覧（\${!${prefix}*}）`);
     }
@@ -530,6 +535,11 @@ export class Expander {
 
   /** Removes the quotes from a field, after checking that it would not expand into file names. */
   finishField(field: Fragment[]): string {
+    let length = 0;
+    for (const fragment of field) {
+      length += fragment.text.length;
+      if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+    }
     const unquoted = field.map((fragment) => (fragment.quoted ? quotePattern(fragment.text) : fragment.text)).join('');
     if (hasPatternCharacters(unquoted)) {
       throw new UnsupportedFeatureError(

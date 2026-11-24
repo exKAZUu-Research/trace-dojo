@@ -18,7 +18,12 @@ export type WriteTargetResult = 'ok' | 'readonly' | 'invalid';
 
 export interface ArithmeticHost {
   /** Resolves a variable or `name[subscript]` once into a reusable target. */
-  resolveTarget(name: string, rawSubscript: string | undefined, willRead: boolean): ArithmeticTarget;
+  resolveTarget(
+    name: string,
+    rawSubscript: string | undefined,
+    willRead: boolean,
+    expandSubscript?: boolean
+  ): ArithmeticTarget;
   /** Reads the current string value of `target`, or `undefined` when unset. */
   readTarget(target: ArithmeticTarget): string | undefined;
   /** Stores `value` into `target`, reporting why a failed store was rejected. */
@@ -167,9 +172,10 @@ export function evaluateArithmetic(
   expression: string,
   host: ArithmeticHost,
   commandName: string | undefined,
-  spend: () => void
+  spend: () => void,
+  preExpanded = false
 ): bigint {
-  return new ExpressionSession(host, commandName, spend).evaluateSubexpression(expression);
+  return new ExpressionSession(host, commandName, spend, preExpanded).evaluateSubexpression(expression);
 }
 
 /** Splits `name[subscript]` into `{ name, subscript }` when `[`...`]` spans to the end of `text`. */
@@ -199,7 +205,8 @@ class ExpressionSession {
   constructor(
     readonly host: ArithmeticHost,
     readonly commandName: string | undefined,
-    readonly spend: () => void
+    readonly spend: () => void,
+    private readonly preExpanded = false
   ) {}
 
   evaluateSubexpression(source: string): bigint {
@@ -216,7 +223,7 @@ class ExpressionSession {
         this.depth++;
         entered++;
         const identMatch = SIMPLE_IDENTIFIER_EXPRESSION.exec(current);
-        if (!identMatch) return new FrameParser(this, current).parseAll();
+        if (!identMatch) return new FrameParser(this, current, !this.preExpanded || entered > 1).parseAll();
         const nextRaw = this.host.readTarget(this.host.resolveTarget(identMatch[1], undefined, true));
         if (!nextRaw) return 0n;
         current = nextRaw;
@@ -254,7 +261,8 @@ class FrameParser {
 
   constructor(
     private readonly session: ExpressionSession,
-    private readonly source: string
+    private readonly source: string,
+    private readonly expandSubscripts = true
   ) {}
 
   parseAll(): bigint {
@@ -294,7 +302,7 @@ class FrameParser {
       const target =
         left.deferred === undefined
           ? left.target
-          : this.session.host.resolveTarget(left.deferred.name, left.deferred.subscript, false);
+          : this.session.host.resolveTarget(left.deferred.name, left.deferred.subscript, false, this.expandSubscripts);
       if (target) this.store(target, value);
     }
     return { value, assignable: false };
@@ -491,7 +499,8 @@ class FrameParser {
       this.fail('identifier expected after pre-increment or pre-decrement');
     }
     const { name, subscript } = this.current;
-    const target = this.suppress > 0 ? undefined : this.session.host.resolveTarget(name, subscript, true);
+    const target =
+      this.suppress > 0 ? undefined : this.session.host.resolveTarget(name, subscript, true, this.expandSubscripts);
     const current = this.readValue(target);
     const updated = wrap64(current + delta);
     if (this.suppress === 0 && target) this.store(target, updated);
@@ -525,7 +534,8 @@ class FrameParser {
       this.advance();
       return { value: 0n, assignable: true, deferred: { name, subscript } };
     }
-    const target = this.suppress > 0 ? undefined : this.session.host.resolveTarget(name, subscript, true);
+    const target =
+      this.suppress > 0 ? undefined : this.session.host.resolveTarget(name, subscript, true, this.expandSubscripts);
     const current = this.readValue(target);
     this.advance();
     if (this.isOp('post++') || this.isOp('post--')) {

@@ -33,7 +33,7 @@ export class SourceText {
   private depth = 0;
   /** The backquoted command substitutions read, from the opening `` ` `` to just after the closing one. */
   readonly backquotes: { start: number; end: number }[] = [];
-  /** Offsets of literal single quotes inside double-quoted non-pattern `${...}` operands. */
+  /** Offsets masked as literal characters for tree-sitter (`'` in `"${...}"` and `$` before non-ASCII text). */
   readonly literalSingleQuotes: number[] = [];
   /** Parses the commands of `$(...)` from just after `$(`, returning the index after its `)`. */
   parseSubstitution: (start: number) => number = () => {
@@ -106,6 +106,7 @@ export function skipWordPiece(text: SourceText, index: number): number {
     return closeEnd;
   }
   if (next === '(') return skipDollarParenthesis(text, index + 1);
+  if ((source.codePointAt(index + 1) ?? 0) > 0x7f) text.literalSingleQuotes.push(index);
   return index + 1;
 }
 
@@ -122,12 +123,19 @@ function skipDoubleQuoted(text: SourceText, open: number): number {
       const c = source[i];
       if (c === '\\') i += 2;
       else if (c === '`') i = skipBackquoted(text, i);
-      else if (c === '$' && source[i + 1] === '{') i = skipBraces(text, i + 1, true);
-      else if (c === '$' && (source[i + 1] === '[' || source[i + 1] === '(')) i = skipWordPiece(text, i);
+      else if (c === '$') i = skipDoubleQuotedDollar(text, i);
       else i++;
     }
     return closeAt(text, open, i < source.length ? i : -1, '"');
   });
+}
+
+function skipDoubleQuotedDollar(text: SourceText, dollar: number): number {
+  const next = text.source[dollar + 1];
+  if (next === '{') return skipBraces(text, dollar + 1, true);
+  if (next === '[' || next === '(') return skipWordPiece(text, dollar);
+  if ((text.source.codePointAt(dollar + 1) ?? 0) > 0x7f) text.literalSingleQuotes.push(dollar);
+  return dollar + 1;
 }
 
 function skipAnsiC(text: SourceText, open: number): number {

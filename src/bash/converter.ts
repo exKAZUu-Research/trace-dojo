@@ -19,6 +19,7 @@ import type {
 import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
 import { isReservedCommand, unexpectedTokenMessage } from './syntaxErrors';
 import { unsupportedMessage } from './unsupported';
+import { isIdentifier } from './variables';
 
 /** The node types that expand inside a word, which arithmetic substitutes into its text. */
 const EXPANSION_TYPES = new Set([
@@ -126,7 +127,7 @@ export class Converter {
         return this.declaration(node);
       }
       case 'variable_assignment': {
-        return { ...base, kind: 'command', assignments: [this.assignment(node)], words: [], redirects: [] };
+        return this.variableAssignment(node, base);
       }
       case 'arithmetic_command': {
         return { ...base, kind: 'arithmetic', expression: this.arithmeticInside(node, '((', '))') };
@@ -241,14 +242,16 @@ export class Converter {
       this.fail(node, unexpectedTokenMessage(node.childForFieldName('name')?.text ?? node.text));
     }
     const row = node.startPosition.row;
+    const { assignments, leadingWords } = this.splitPrefixAssignments(this.fieldNodes(node, 'assignment'));
     const nameNode = node.childForFieldName('name');
-    const words = nameNode ? [this.word(nameNode.namedChildren.at(-1) as Node)] : [];
+    const words = [...leadingWords];
+    if (nameNode) words.push(this.word(nameNode.namedChildren.at(-1) as Node));
     for (const argument of this.fieldNodes(node, 'argument')) words.push(this.word(argument));
     return {
       row,
       lineRow: lineRowOf(node),
       kind: 'command',
-      assignments: this.fieldNodes(node, 'assignment').map((assignment) => this.assignment(assignment)),
+      assignments,
       words,
       redirects: this.fieldNodes(node, 'redirect').map((redirect) => this.redirect(redirect)),
     };
@@ -256,17 +259,78 @@ export class Converter {
 
   private declaration(node: Node): Statement {
     const row = node.startPosition.row;
-    const args = this.fieldNodes(node, 'argument').map((argument) =>
-      argument.type === 'variable_assignment' ? this.assignment(argument) : this.word(argument)
-    );
+    const { assignments, leadingWords } = this.splitPrefixAssignments(this.fieldNodes(node, 'assignment'));
+    const redirects = this.fieldNodes(node, 'redirect').map((redirect) => this.redirect(redirect));
+    if (leadingWords.length > 0) {
+      const words = [...leadingWords];
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) words.push(this.word(nameNode));
+      for (const arg of this.fieldNodes(node, 'argument')) {
+        words.push(arg.type === 'variable_assignment' ? this.assignmentAsWord(arg) : this.word(arg));
+      }
+      return { row, lineRow: lineRowOf(node), kind: 'command', assignments, words, redirects };
+    }
+    const args = this.fieldNodes(node, 'argument').map((argument) => {
+      if (argument.type !== 'variable_assignment') return this.word(argument);
+      return this.isAsciiAssignment(argument) ? this.assignment(argument) : this.assignmentAsWord(argument);
+    });
     return {
       row,
       lineRow: lineRowOf(node),
       kind: 'declaration',
       name: node.childForFieldName('name')?.text ?? '',
-      assignments: this.fieldNodes(node, 'assignment').map((assignment) => this.assignment(assignment)),
+      assignments,
       args,
-      redirects: this.fieldNodes(node, 'redirect').map((redirect) => this.redirect(redirect)),
+      redirects,
+    };
+  }
+
+  private variableAssignment(node: Node, base: { row: number; lineRow: number }): Statement {
+    return this.isAsciiAssignment(node)
+      ? { ...base, kind: 'command', assignments: [this.assignment(node)], words: [], redirects: [] }
+      : { ...base, kind: 'command', assignments: [], words: [this.assignmentAsWord(node)], redirects: [] };
+  }
+
+  private splitPrefixAssignments(nodes: Node[]): { assignments: Assignment[]; leadingWords: Word[] } {
+    const assignments: Assignment[] = [];
+    const leadingWords: Word[] = [];
+    for (let i = 0; i < nodes.length; i++) {
+      if (leadingWords.length === 0 && this.isAsciiAssignment(nodes[i])) {
+        assignments.push(this.assignment(nodes[i]));
+      } else {
+        leadingWords.push(this.assignmentAsWord(nodes[i]));
+      }
+    }
+    return { assignments, leadingWords };
+  }
+
+  private isAsciiAssignment(node: Node): boolean {
+    const nameNode = node.childForFieldName('name') as Node;
+    const base = nameNode.type === 'subscript' ? nameNode.childForFieldName('name') : nameNode;
+    return Boolean(base && isIdentifier(this.restoreQuotes(base.text, base.startIndex)));
+  }
+
+  private assignmentAsWord(node: Node): Word {
+    const valueNode = node.childForFieldName('value');
+    if (valueNode?.type === 'array') this.fail(valueNode, unexpectedTokenMessage('('));
+    const nameNode = node.childForFieldName('name') as Node;
+    const op = this.source.startsWith('+=', nameNode.endIndex) ? '+=' : '=';
+    const parts: WordPart[] = [];
+    if (nameNode.type === 'subscript') {
+      const base = nameNode.childForFieldName('name') as Node;
+      parts.push(
+        { kind: 'literal', text: `${this.restoreQuotes(base.text, base.startIndex)}[` },
+        ...this.subscriptWord(nameNode).parts,
+        { kind: 'literal', text: `]${op}` }
+      );
+    } else {
+      parts.push({ kind: 'literal', text: `${this.restoreQuotes(nameNode.text, nameNode.startIndex)}${op}` });
+    }
+    if (valueNode) parts.push(...this.wordParts(valueNode));
+    return {
+      parts: mergeLiterals(parts),
+      row: node.startPosition.row,
+      text: this.restoreQuotes(node.text, node.startIndex),
     };
   }
 

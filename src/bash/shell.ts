@@ -472,7 +472,7 @@ export class Shell implements ArithmeticHost {
   private executeArithmeticFor(statement: Extract<Statement, { kind: 'arithmeticFor' }>): number {
     const evaluateHeader = (source: ArithmeticSource, stepAfter: boolean): bigint | undefined => {
       this.currentRow = statement.row - this.lineShift;
-      const value = this.tryEvaluate(this.expander.arithmeticText(source), '((');
+      const value = this.tryEvaluate(this.expander.arithmeticText(source), '((', true);
       if (value !== undefined && stepAfter) this.runtime.steps.step(statement.row);
       return value;
     };
@@ -836,12 +836,12 @@ export class Shell implements ArithmeticHost {
   // ---------------------------------------------------------------- arithmetic
 
   evaluate(source: ArithmeticSource, commandName: string | undefined): bigint {
-    return this.evaluateText(this.expander.arithmeticText(source), commandName);
+    return this.evaluateText(this.expander.arithmeticText(source), commandName, true);
   }
 
-  evaluateText(text: string, commandName: string | undefined): bigint {
+  evaluateText(text: string, commandName: string | undefined, preExpanded = false): bigint {
     try {
-      return evaluateArithmetic(text, this, commandName, () => this.runtime.spend());
+      return evaluateArithmetic(text, this, commandName, () => this.runtime.spend(), preExpanded);
     } catch (error) {
       if (error instanceof ArithmeticError) this.discard(error.message);
       if (error instanceof ArithmeticStoreError) throw new DiscardSignal();
@@ -849,9 +849,9 @@ export class Shell implements ArithmeticHost {
     }
   }
 
-  evaluateFatalReadonly(text: string): bigint {
+  evaluateFatalReadonly(text: string, preExpanded = false): bigint {
     try {
-      return evaluateArithmetic(text, this, undefined, () => this.runtime.spend());
+      return evaluateArithmetic(text, this, undefined, () => this.runtime.spend(), preExpanded);
     } catch (error) {
       if (error instanceof ArithmeticError) this.discard(error.message);
       if (error instanceof ArithmeticStoreError) {
@@ -864,14 +864,14 @@ export class Shell implements ArithmeticHost {
 
   /** The status of `((...))`: 0 when the value is not zero; an error reports and gives 1. */
   arithmeticStatus(source: ArithmeticSource, commandName: string): number {
-    const value = this.tryEvaluate(this.expander.arithmeticText(source), commandName);
+    const value = this.tryEvaluate(this.expander.arithmeticText(source), commandName, true);
     return value === undefined || value === 0n ? 1 : 0;
   }
 
   /** Evaluates arithmetic for a command that fails on an error instead of abandoning the line, as `let` does. */
-  tryEvaluate(text: string, commandName: string | undefined): bigint | undefined {
+  tryEvaluate(text: string, commandName: string | undefined, preExpanded = false): bigint | undefined {
     try {
-      return evaluateArithmetic(text, this, commandName, () => this.runtime.spend());
+      return evaluateArithmetic(text, this, commandName, () => this.runtime.spend(), preExpanded);
     } catch (error) {
       if (error instanceof ArithmeticStoreError) return undefined;
       if (!(error instanceof ArithmeticError)) throw error;
@@ -881,7 +881,12 @@ export class Shell implements ArithmeticHost {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Resolves scalar, associative, indexed, and invalid arithmetic subscripts once for reads and writes.
-  resolveTarget(name: string, rawSubscript: string | undefined, willRead: boolean): ArithmeticTarget {
+  resolveTarget(
+    name: string,
+    rawSubscript: string | undefined,
+    willRead: boolean,
+    expandSubscript = true
+  ): ArithmeticTarget {
     if (rawSubscript === undefined) return { kind: 'scalar', name };
     if (rawSubscript === '') {
       if (willRead) {
@@ -892,7 +897,7 @@ export class Shell implements ArithmeticHost {
     }
     const resolved = this.resolveName(name);
     if (this.isAssociative(resolved)) {
-      const key = this.expander.expandSubscriptText(rawSubscript);
+      const key = expandSubscript ? this.expander.expandSubscriptText(rawSubscript) : rawSubscript;
       if (key === '') {
         if (willRead) this.reportError(`${name}[${rawSubscript}]: bad array subscript`);
         return { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` };
@@ -904,9 +909,8 @@ export class Shell implements ArithmeticHost {
         ? { kind: 'indexedElement', name: resolved, index: 0n }
         : { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` };
     }
-    const index = willRead
-      ? this.readIndex(resolved, this.expander.expandSubscriptText(rawSubscript))
-      : this.arrayIndex(resolved, this.expander.expandSubscriptText(rawSubscript), true);
+    const subscript = expandSubscript ? this.expander.expandSubscriptText(rawSubscript) : rawSubscript;
+    const index = willRead ? this.readIndex(resolved, subscript) : this.arrayIndex(resolved, subscript, true);
     if (index === undefined) return { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` };
     return { kind: 'indexedElement', name: resolved, index };
   }
@@ -989,8 +993,8 @@ export class Shell implements ArithmeticHost {
     return this.resolveNameOrUndefined(name, false) ?? name;
   }
 
-  private isUnreadHostEnv(name: string): boolean {
-    return ENVIRONMENT_VARIABLES.has(name) && !this.state.unsetEnv.has(name);
+  isUnreadHostEnv(name: string): boolean {
+    return ENVIRONMENT_VARIABLES.has(name) && !this.state.unsetEnv.has(name) && !this.findVariable(name, false);
   }
 
   /** The value of `$name`: a scalar, or element 0 of an array, or `undefined` when unset. */
@@ -1002,11 +1006,8 @@ export class Shell implements ArithmeticHost {
     const dynamic = this.dynamicValue(resolved);
     if (dynamic !== undefined) return dynamic;
     const variable = this.findVariable(resolved, false);
-    if (!variable) {
-      if (this.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
-      return undefined;
-    }
-    return variableScalarZero(variable.value);
+    if (!variable && this.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
+    return variableScalarZero(variable?.value);
   }
 
   private readReferencedElement(split: { name: string; subscript: string }): string | undefined {
@@ -1115,14 +1116,10 @@ export class Shell implements ArithmeticHost {
 
   elementAtIndex(name: string, index: bigint): string | undefined {
     const variable = this.findVariable(name);
-    if (!variable?.value) {
-      const dynamic = this.dynamicArray(name);
-      if (dynamic) return dynamic[Number(index)];
-      if (this.isScalarDynamic(name)) return index === 0n ? this.dynamicValue(name) : undefined;
-      if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
-      return undefined;
-    }
-    return variableElementAt(variable.value, index);
+    if (variable?.value) return variableElementAt(variable.value, index);
+    if (this.isScalarDynamic(name)) return index === 0n ? this.dynamicValue(name) : undefined;
+    if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+    return this.dynamicArray(name)?.[Number(index)];
   }
 
   /**
@@ -1141,7 +1138,7 @@ export class Shell implements ArithmeticHost {
     dynamicLength?: number,
     allowScalarWrite = false
   ): bigint | undefined {
-    const index = this.evaluateFatalReadonly(subscript);
+    const index = this.evaluateFatalReadonly(subscript, true);
     return index >= 0n ? index : translateNegativeIndex(variable, index, dynamicLength, allowScalarWrite);
   }
 
@@ -1155,27 +1152,19 @@ export class Shell implements ArithmeticHost {
   /** The values of `${name[@]}`: the elements of an array, the value of a scalar, or none when unset. */
   arrayValues(name: string): string[] {
     const variable = this.findVariable(name);
-    if (!variable?.value) {
-      const dynamic = this.dynamicArray(name);
-      if (dynamic) return dynamic;
-      if (this.isScalarDynamic(name)) return [this.dynamicValue(name) as string];
-      if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
-      return [];
-    }
-    return variableElementValues(variable.value);
+    if (variable?.value) return variableElementValues(variable.value);
+    if (this.isScalarDynamic(name)) return [this.dynamicValue(name) as string];
+    if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+    return this.dynamicArray(name) ?? [];
   }
 
   /** The keys of `${!name[@]}`. */
   arrayKeys(name: string): string[] {
     const variable = this.findVariable(name);
-    if (!variable?.value) {
-      const dynamic = this.dynamicArray(name);
-      if (dynamic) return dynamic.map((_, index) => String(index));
-      if (this.isScalarDynamic(name)) return ['0'];
-      if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
-      return [];
-    }
-    return variableElementKeys(variable.value);
+    if (variable?.value) return variableElementKeys(variable.value);
+    if (this.isScalarDynamic(name)) return ['0'];
+    if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+    return this.dynamicArray(name)?.map((_, index) => String(index)) ?? [];
   }
 
   /** Assigns a scalar value, creating a global variable when no scope holds one, as Bash does. */
@@ -1187,6 +1176,7 @@ export class Shell implements ArithmeticHost {
     if (this.assignDynamic(resolved, value)) return true;
     let variable = this.findVariable(resolved, false);
     if (!variable) {
+      if (append && this.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
       variable = { name: resolved, value: undefined, attributes: new Set() };
       this.state.scopes[0].set(resolved, variable);
     }
@@ -1264,6 +1254,7 @@ export class Shell implements ArithmeticHost {
     }
     if (this.isDynamic(name)) return this.assignDynamic(name, value);
     const existing = this.findVariable(name);
+    if (!existing && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
     if (existing?.attributes.has('r')) {
       this.readonlyFailure = true;
       this.reportError(`${name}: readonly variable`);
@@ -1356,6 +1347,7 @@ export class Shell implements ArithmeticHost {
       return false;
     }
     if (!variable) {
+      if (append && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
       variable = { name, value: undefined, attributes: new Set() };
       this.state.scopes[0].set(name, variable);
     }
