@@ -4,7 +4,6 @@ import { fieldOf, type Syntax } from './syntax';
 
 /** The syntax the interpreter leaves out, by node type, with the name learners know it by. */
 const UNSUPPORTED_NODES: Record<string, string> = {
-  union_specifier: '共用体（union）',
   bitfield_clause: 'ビットフィールド',
   variadic_parameter: '可変長引数（...）',
   va_arg_expression: '可変長引数（va_arg）',

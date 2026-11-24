@@ -235,6 +235,8 @@ export class CObject extends Store {
   private receiverStorage?: Store;
   private baseLocations?: Map<ClassInfo, Ptr>;
   private memberStorage?: Map<number, MemberStorage>;
+  /** The member of a union that was written last, or undefined while no access has decided one. */
+  activeMember?: number;
 
   get completeLocation(): Ptr | undefined {
     return this.receiverLocation.location;
@@ -353,12 +355,36 @@ export class CObject extends Store {
 
   get(index: number): Value {
     this.checkAlive();
+    if (this.completeClass.isUnion) this.readUnionMember(index);
     return initializedValue(this.values[index]);
   }
 
   set(index: number, value: Value): void {
     this.checkAlive();
+    if (this.completeClass.isUnion && value !== UNINIT) this.activeMember = index;
     this.values[index] = value;
+  }
+
+  /**
+   * Makes a member of a union the one in use as an access to it does: reading another member than the one written last
+   * would reinterpret its bytes, which depend on the CPU, so only a member that is an object or an array, whose own
+   * members the access goes on to write, takes over.
+   */
+  private readUnionMember(index: number): void {
+    const active = this.activeMember;
+    if (active === undefined || active === index) {
+      this.activeMember = index;
+      return;
+    }
+    const type = this.completeClass.fields[index]?.type;
+    if (type?.kind === 'class' || type?.kind === 'array') {
+      this.activeMember = index;
+      return;
+    }
+    throw new CppRuntimeError(
+      'custom',
+      '共用体で、最後に書き込んだのとは別のメンバーを読むこと（値のメモリ上の表し方は、CPU や OS によって違います）は、この採点環境では使えません。'
+    );
   }
 
   destroyReferenceTemporaries(frame: Frame): void {

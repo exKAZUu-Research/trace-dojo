@@ -209,7 +209,9 @@ export abstract class CompilerBase {
 
   /** The member named `name` that a class itself declares, as an entity. */
   memberEntity(cls: ClassInfo, name: string): Entity | undefined {
-    const field = cls.ownFields.find((candidate) => candidate.name === name);
+    const field =
+      cls.ownFields.find((candidate) => candidate.name === name) ??
+      cls.anonymousFields.find((candidate) => candidate.name === name);
     if (field) return { kind: 'field', field };
     const methods = cls.methods.get(name);
     if (methods) return { kind: 'functions', functions: methods };
@@ -602,7 +604,8 @@ export abstract class CompilerBase {
         return this.templateType(node, this.lookupName((fieldOf(node, 'name') as Syntax).text, node.row, typeOnly));
       }
       case 'class_specifier':
-      case 'struct_specifier': {
+      case 'struct_specifier':
+      case 'union_specifier': {
         return this.classSpecifierType(node);
       }
       case 'enum_specifier': {

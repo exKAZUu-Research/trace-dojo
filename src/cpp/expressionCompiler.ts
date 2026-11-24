@@ -667,7 +667,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     this.checkLibraryLayout(type, row);
     const cls = naming ?? type.cls;
     for (let owner: ClassInfo | undefined = cls; owner; owner = owner.base) {
-      const field = owner.ownFields.find((candidate) => candidate.name === name);
+      const field =
+        owner.ownFields.find((candidate) => candidate.name === name) ??
+        owner.anonymousFields.find((candidate) => candidate.name === name);
       if (field) {
         this.checkAccess(field.access, owner, cls, row, name, type.cls);
         return this.fieldAccess(object, field, row);
@@ -766,6 +768,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** The data member of an object, as an lvalue that is const when the object is. */
   fieldAccess(object: Expr, field: FieldInfo, row: number): Expr {
+    if (field.path) {
+      const [first, ...rest] = field.path;
+      return this.fieldAccess(
+        this.fieldAccess(object, first, row),
+        { ...field, path: rest.length > 0 ? rest : undefined },
+        row
+      );
+    }
     const { index } = field;
     const type = isConstType(object.type) && !field.isMutable ? withConst(field.type) : field.type;
     if (field.type.kind === 'reference') {

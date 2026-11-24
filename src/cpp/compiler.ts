@@ -290,6 +290,7 @@ export class Compiler extends StatementCompiler {
       }
       case 'class_specifier':
       case 'struct_specifier':
+      case 'union_specifier':
       case 'enum_specifier': {
         this.resolveTypeSpecifier(node);
         return;
@@ -435,7 +436,7 @@ export class Compiler extends StatementCompiler {
     const nameNode = fieldOf(node, 'name');
     if (nameNode) this.checkHeaderMacro(nameNode.text, nameNode.row);
     const body = fieldOf(node, 'body');
-    const key = node.type === 'struct_specifier' ? 'struct' : 'class';
+    const key = classKey(node);
     if (!nameNode) {
       if (!body) return this.error(node.row, 'クラスの名前を書いてください。');
       const unnamed = new ClassInfo(`(unnamed ${key})`, key);
@@ -515,7 +516,7 @@ export class Compiler extends StatementCompiler {
     const alignment = node.children.find((child) => child.type === 'alignas_qualifier');
     if (alignment) cls.alignment = this.alignmentOf(alignment);
     const isFinalClass = node.children.some((child) => child.type === 'virtual_specifier' && child.text === 'final');
-    const defaultAccess: Access = node.type === 'struct_specifier' ? 'public' : 'private';
+    const defaultAccess: Access = classKey(node) === 'class' ? 'private' : 'public';
     this.baseClause(cls, node, defaultAccess);
     const savedClass = this.memberClass;
     this.memberClass = cls;
@@ -696,7 +697,9 @@ export class Compiler extends StatementCompiler {
       declarators.length === 0 &&
       (type?.type === 'class_specifier' || type?.type === 'struct_specifier' || type?.type === 'union_specifier')
     ) {
-      this.resolveTypeSpecifier(type);
+      const declared = this.resolveTypeSpecifier(type);
+      if (!fieldOf(type, 'name') && declared.kind === 'class')
+        this.anonymousMember(cls, declared.cls, access, node.row);
       return;
     }
     if (declarators.length === 0 && type?.type === 'enum_specifier') {
@@ -756,7 +759,31 @@ export class Compiler extends StatementCompiler {
         isMutable,
         alignment: alignas && this.alignmentOf(alignas),
       };
+      if (cls.isUnion && !isTrivialUnionMember(declared.type))
+        this.unsupported(declarator.row, '共用体の、コンストラクタやデストラクタを持つ型のメンバー');
       cls.fields.push(field);
+    }
+  }
+
+  /**
+   * Adds an anonymous union (or struct) as a member whose own members the enclosing class names directly
+   * (`union { int i; float f; };`).
+   */
+  private anonymousMember(cls: ClassInfo, member: ClassInfo, access: Access, row: number): void {
+    const field: FieldInfo = {
+      name: `\0anonymous#${cls.fields.length}`,
+      type: classType(member),
+      index: cls.fields.length,
+      access,
+      owner: cls,
+      row,
+    };
+    if (cls.isUnion && !isTrivialUnionMember(field.type))
+      this.unsupported(row, '共用体の、コンストラクタやデストラクタを持つ型のメンバー');
+    cls.fields.push(field);
+    for (const inner of [...member.ownFields, ...member.anonymousFields]) {
+      if (this.memberEntity(cls, inner.name)) this.error(row, `メンバ ${inner.name} はすでに宣言されています。`);
+      cls.anonymousFields.push({ ...inner, owner: cls, access, path: [field, ...(inner.path ?? [])] });
     }
   }
 
@@ -1549,6 +1576,14 @@ export class Compiler extends StatementCompiler {
       }
     }
     if (!hasWork && !list && fn.params.length === 0) return undefined;
+    if (cls.isUnion) {
+      // The members of a union that hold objects are made alike, but only an initialized member is in use.
+      const active = cls.ownFields.find((field) => initializers.has(field.name) || field.initializer)?.index;
+      parts.push((frame) => {
+        (frame.self?.read() as CObject).activeMember = active;
+        return;
+      });
+    }
     return initializeInOrder(parts, base !== undefined, this.undoConstruction(cls));
   }
 
@@ -1797,6 +1832,7 @@ export class Compiler extends StatementCompiler {
             this.copyMember(frame, field.type, member, destination, cls.implicitCopyFromConst)
           );
         }
+        target.activeMember = source.activeMember;
       } catch (error) {
         if (error instanceof CppException) undo(frame, isBaseComplete, target);
         throw error;
@@ -1827,6 +1863,7 @@ export class Compiler extends StatementCompiler {
           source.values[field.index]
         );
       }
+      target.activeMember = source.activeMember;
     };
     const destroy = this.destructionOf(cls);
     return {
@@ -2351,7 +2388,7 @@ export class Compiler extends StatementCompiler {
   private defineClassInstance(info: ClassTemplateInfo, bindings: TemplateBindings, key: string, row: number): Type {
     const chosen = this.chooseSpecialization(info, bindings.args, row);
     const node = chosen?.node ?? info.node;
-    const cls = new ClassInfo(info.name, node?.type === 'struct_specifier' ? 'struct' : 'class');
+    const cls = new ClassInfo(info.name, node ? classKey(node) : 'class');
     cls.row = node?.row ?? row;
     cls.templateOrigin = info;
     cls.templateArgs = bindings.args;
@@ -2784,6 +2821,7 @@ export class Compiler extends StatementCompiler {
       if (
         typeNode?.type === 'class_specifier' ||
         typeNode?.type === 'struct_specifier' ||
+        typeNode?.type === 'union_specifier' ||
         typeNode?.type === 'enum_specifier'
       ) {
         this.resolveTypeSpecifier(typeNode);
@@ -3423,7 +3461,8 @@ export class Compiler extends StatementCompiler {
   }
 
   private aggregateElementTypes(cls: ClassInfo): Type[] {
-    const members = cls.ownFields.map((field) => field.type);
+    // Braces without designators initialize the first member of a union.
+    const members = cls.ownFields.slice(0, cls.isUnion ? 1 : undefined).map((field) => field.type);
     return cls.base ? [classType(cls.base), ...members] : members;
   }
 
@@ -3737,12 +3776,24 @@ export class Compiler extends StatementCompiler {
     const initializeBase = base && (elements[0] ?? this.initializeList(classType(base), [], row));
     const destroyBase = base && this.destroyerOf(classType(base), row);
     const supplied = base ? elements.slice(1) : elements;
+    const made = cls.isUnion
+      ? fields.length > 0
+        ? [unionMemberToInitialize(fields, supplied)]
+        : []
+      : fields.map((_, index) => index);
     const defaults = fields.map((field, index) =>
-      supplied[index] ? undefined : (this.aggregateDefaults.get(field)?.() ?? this.bindAggregateDefault(field, row))
+      supplied[index] || !made.includes(index)
+        ? undefined
+        : (this.aggregateDefaults.get(field)?.() ?? this.bindAggregateDefault(field, row))
     );
     const destroyers = fields.map((field) => this.destroyerOf(field.type));
     const isConstant =
-      (!initializeBase || initializeBase.isConstant === true) && this.constantAggregate(fields, supplied, defaults);
+      (!initializeBase || initializeBase.isConstant === true) &&
+      this.constantAggregate(
+        made.map((index) => fields[index]),
+        made.map((index) => supplied[index]),
+        made.map((index) => defaults[index])
+      );
     return initializerWithConstancy((frame, target, zeroInitialize, referenceLifetime) => {
       const object = newObject(frame, cls, zeroInitialize, asObject(target));
       const owner = referenceLifetime === 'full-expression' ? referenceLifetime : object;
@@ -3760,8 +3811,9 @@ export class Compiler extends StatementCompiler {
         object.cls = cls;
         makeEach(
           frame,
-          fields.length,
-          (index) => {
+          made.length,
+          (position) => {
+            const index = made[position];
             const init = supplied[index];
             const field = fields[index];
             return initializeAt(
@@ -3777,8 +3829,15 @@ export class Compiler extends StatementCompiler {
                     )
             );
           },
-          (index) => destroyers[index]
+          (position) => destroyers[made[position]]
         );
+        if (cls.isUnion) {
+          for (const field of fields) {
+            if (object.values[field.index] === UNINIT && (field.type.kind === 'class' || field.type.kind === 'array'))
+              object.values[field.index] = staticZero(frame.runtime, field.type, object.location(field.index));
+          }
+          object.activeMember = fields[made[0]]?.index;
+        }
         object.needsConstruction = false;
         return object;
       } catch (error) {
@@ -4248,4 +4307,30 @@ function innermostFunctionDeclarator(declarator: Syntax): Syntax | undefined {
     current = fieldOf(current, 'declarator') ?? current.children.find((child) => child.type.endsWith('declarator'));
   }
   return current;
+}
+
+/** The class key a class specifier is written with. */
+function classKey(node: Syntax): ClassInfo['key'] {
+  if (node.type === 'struct_specifier') return 'struct';
+  return node.type === 'union_specifier' ? 'union' : 'class';
+}
+
+/** The member of a union an aggregate initialization initializes: the one given a value, or else the first. */
+function unionMemberToInitialize(fields: readonly FieldInfo[], supplied: readonly unknown[]): number {
+  const given = fields.findIndex((_, index) => supplied[index] !== undefined);
+  return given === -1 ? 0 : given;
+}
+
+/** Whether a type may be a member of a union without the union declaring how to make and destroy it. */
+function isTrivialUnionMember(type: Type): boolean {
+  if (type.kind === 'array') return isTrivialUnionMember(type.of);
+  if (type.kind !== 'class') return true;
+  const { cls } = type;
+  return (
+    !cls.library &&
+    cls.constructors.length === 0 &&
+    !cls.destructor &&
+    !cls.isPolymorphic &&
+    cls.fields.every((field) => !field.initializer && isTrivialUnionMember(field.type))
+  );
 }

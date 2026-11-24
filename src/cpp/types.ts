@@ -100,6 +100,8 @@ export interface FieldInfo {
   /** The alignment `alignas` gives the member, in bytes. */
   alignment?: number;
   directInitializer?: boolean;
+  /** The anonymous union or struct members through which a member of one of them is reached from the class. */
+  path?: readonly FieldInfo[];
 }
 
 export interface StaticFieldInfo {
@@ -296,11 +298,17 @@ export class ClassInfo {
   declaresConstructor = false;
   /** Whether the class has no name, which a typedef that names it gives it (`typedef struct { ... } P;`). */
   isUnnamed = false;
+  /** The members of its anonymous unions and structs, which the class names as its own. */
+  anonymousFields: FieldInfo[] = [];
 
   constructor(
     public name: string,
-    readonly key: 'class' | 'struct'
+    readonly key: 'class' | 'struct' | 'union'
   ) {}
+
+  get isUnion(): boolean {
+    return this.key === 'union';
+  }
 
   get ownFields(): FieldInfo[] {
     return this.fields.filter((field) => field.owner === this);
@@ -715,6 +723,13 @@ function classLayout(cls: ClassInfo): ClassLayout {
     // A reference member takes the room of a pointer, though `sizeof` of a reference type is that of its referent.
     const type = field.type.kind === 'reference' ? pointerTo(field.type.to) : field.type;
     const fieldAlign = Math.max(alignOf(type), field.alignment ?? 1);
+    // Every member of a union starts at its beginning.
+    if (cls.isUnion) {
+      fieldOffsets[field.index] = 0;
+      offset = Math.max(offset, sizeOf(type));
+      align = Math.max(align, fieldAlign);
+      continue;
+    }
     const at = Math.ceil(offset / fieldAlign) * fieldAlign;
     const members = at === 0 ? typesAtOrigin(type) : undefined;
     const hasConflict = members && emptyBase && [...members].some((member) => emptyBase.has(member));
