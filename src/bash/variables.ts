@@ -109,11 +109,13 @@ export function unpackIndexedElement(rawElement: CompoundElement): {
 
 /** Builds compound initializer preparation context from an existing target variable and optional flag overrides. */
 export function compoundPrepareForVariable(
+  targetName: string,
   existing: Variable | undefined,
   append: boolean,
   isAssociative: boolean,
   isInteger: boolean
 ): {
+  targetName: string;
   isAssociative: boolean;
   isInteger: boolean;
   baseIndexed: ReadonlyMap<bigint, string> | undefined;
@@ -126,7 +128,7 @@ export function compoundPrepareForVariable(
         ? new Map([[0n, existing.value.value]])
         : undefined;
   const baseAssociative = append && existing?.value?.kind === 'associative' ? existing.value.table : undefined;
-  return { isAssociative, isInteger, baseIndexed, baseAssociative };
+  return { targetName, isAssociative, isInteger, baseIndexed, baseAssociative };
 }
 
 interface BucketEntry {

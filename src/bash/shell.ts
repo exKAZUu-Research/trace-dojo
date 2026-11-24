@@ -36,7 +36,6 @@ import {
   callStackArray,
   cloneScope,
   type CompoundElement,
-  compoundPrepareForVariable,
   DYNAMIC_VARIABLES,
   ensureWritable,
   ENVIRONMENT_VARIABLES,
@@ -1362,15 +1361,7 @@ export class Shell implements ArithmeticHost {
         return false;
       }
       const resolved = this.resolveName(assignment.name);
-      const isAssoc = this.isAssociative(resolved);
-      const targetVar = this.findVariable(resolved);
-      const prepare = compoundPrepareForVariable(
-        targetVar,
-        assignment.append,
-        isAssoc,
-        Boolean(targetVar?.attributes.has('i'))
-      );
-      const { elements, error } = this.expander.expandCompound(assignment.array, isAssoc, false, prepare);
+      const { elements, error } = this.expander.expandCompound(assignment.array, this.isAssociative(resolved), false);
       const ok = this.assignCompound(resolved, elements, assignment.append);
       if (error) this.discard(error);
       return ok;

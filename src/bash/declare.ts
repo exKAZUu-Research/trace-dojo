@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- Keeps Bash's declaration builtins (declare, typeset, local, readonly, export) and declare -p formatting together.
 import type { Assignment, Word } from './ast';
 import type { CompoundPrepareOptions } from './expansion';
 import { ansicQuote, ansicShouldQuote, containsShellMetas, doubleQuote } from './quoting';
@@ -117,7 +118,7 @@ function buildCompoundPrepareOptions(
     set.has('A') ||
     (!set.has('a') && (existing?.value?.kind === 'associative' || Boolean(existing?.attributes.has('A'))));
   const isInteger = set.has('i') || (Boolean(existing?.attributes.has('i')) && !unset.has('i'));
-  return compoundPrepareForVariable(existing, arg.append, isAssociative, isInteger);
+  return compoundPrepareForVariable(targetName, existing, arg.append, isAssociative, isInteger);
 }
 
 function resolveCompoundExisting(
@@ -312,7 +313,7 @@ function declarePrefixed(
   const assigns = hasValue(operand, parsed);
   let enclosing = shell.findEnclosingForPrefix(name);
   if (
-    checkReadonlyConflict(shell, builtin, name, tempVar.attributes.has('r') ? tempVar : enclosing, options.set, assigns)
+    checkReadonlyConflict(shell, builtin, name, tempVar.attributes.has('r') ? tempVar : enclosing, options, assigns)
   ) {
     return false;
   }
@@ -417,11 +418,12 @@ function declaredDestination(
   shell: Shell,
   builtin: string,
   name: string,
-  { set, unset }: Options,
+  options: Options,
   isLocal: boolean,
   isSubscripted: boolean,
   assigns: boolean
 ): DeclarationDestination | undefined {
+  const { set, unset } = options;
   const { scopes } = shell.state;
   const scope = isLocal ? scopes[shell.state.functionScopes.at(-1) as number] : undefined;
   const { targetName, referencedSubscript } = resolveDeclaredTarget(
@@ -446,7 +448,7 @@ function declaredDestination(
   }
   const inherited =
     targetScope && !variable && set.has('I') ? findEnclosingVariable(scopes, targetScope, targetName) : undefined;
-  if (checkReadonlyConflict(shell, builtin, targetName, variable ?? inherited, set, assigns)) return undefined;
+  if (checkReadonlyConflict(shell, builtin, targetName, variable ?? inherited, options, assigns)) return undefined;
   if (!variable) {
     variable = createDeclaredVariable(targetName, inherited);
     (targetScope ?? scopes[0]).set(targetName, variable);
@@ -488,11 +490,13 @@ function checkReadonlyConflict(
   builtin: string,
   targetName: string,
   variable: Variable | undefined,
-  set: Set<string>,
+  { set, unset }: Options,
   assigns: boolean
 ): boolean {
-  const changes = assigns || [...set].some((a) => a !== 'r' && a !== 'x' && a !== 'p' && a !== 'g' && a !== 'I');
-  if (!variable?.attributes.has('r') || !changes) return false;
+  if (!variable?.attributes.has('r')) return false;
+  const adds = [...set].some((a) => a !== 'r' && a !== 'x' && a !== 'p' && a !== 'g' && a !== 'I');
+  const removes = [...unset].some((a) => a === 'r' || (a !== 'x' && variable.attributes.has(a as Attribute)));
+  if (!assigns && !adds && !removes) return false;
   shell.reportError(`${builtin}: ${targetName}: readonly variable`);
   return true;
 }

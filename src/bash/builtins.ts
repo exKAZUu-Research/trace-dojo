@@ -224,17 +224,19 @@ export function unsetElement(shell: Shell, name: string, subscript: string): boo
   if (variable?.value?.kind === 'associative' || variable?.attributes.has('A')) {
     return unsetAssociativeElement(shell, variable, subscript);
   }
-  if (!variable?.value && !variable?.attributes.has('a')) return true;
+  if (!variable) return true;
   if (subscript === '@' || subscript === '*') return clearIndexedOrScalar(shell, variable, resolved);
   const index = shell.arrayIndex(resolved, subscript);
   if (index === undefined) {
     shell.reportError(`unset: [${subscript}]: bad array subscript`);
     return false;
   }
-  if (!variable.value) return true;
-  ensureWritable(variable);
-  if (variable.value.kind === 'indexed') variable.value.elements.delete(index);
-  else if (index === 0n) shell.unsetVariable(resolved);
+  if (variable.value?.kind === 'indexed') {
+    ensureWritable(variable);
+    variable.value.elements.delete(index);
+  } else if (!variable.attributes.has('a') && index === 0n) {
+    shell.unsetVariable(resolved);
+  }
   return true;
 }
 
@@ -242,7 +244,7 @@ function clearIndexedOrScalar(shell: Shell, variable: Variable, resolved: string
   if (variable.value?.kind === 'indexed') {
     ensureWritable(variable);
     variable.value.elements.clear();
-  } else if (variable.value) {
+  } else if (!variable.attributes.has('a')) {
     shell.unsetVariable(resolved);
   }
   return true;
