@@ -744,7 +744,6 @@ export class HashState implements EnumerableState {
     readonly comparer: Value
   ) {}
 
-  /** Charges a new entry against the run's slot limit, set where the collection is created. */
   /** Charges entries the collection newly keeps, as Runtime.retainSlots does. */
   retain: (baseSlots: number, values: Value[]) => void = () => {};
   /** Charges replacing a kept value, as Runtime.chargeStore does. */

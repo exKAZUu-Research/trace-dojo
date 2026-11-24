@@ -69,7 +69,6 @@ export class CsObject {
   ) {}
 }
 
-/** An instance of a struct, which assignments and calls copy. */
 /**
  * Receives the field count of every struct made while a program runs, which the run charges as work: struct values
  * that locals and closures keep are charged by no storage, so this bounds how many fields a run can make at all.
@@ -81,6 +80,7 @@ export function meterStructs(meter: ((fieldCount: number) => void) | undefined):
   structMeter = meter;
 }
 
+/** An instance of a struct, which assignments and calls copy. */
 export class CsStruct {
   native?: unknown;
 

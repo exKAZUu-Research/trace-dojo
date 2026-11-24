@@ -153,7 +153,6 @@ export class Compiler extends StatementBinder {
     return { library: this.library, types, entry, isTopLevel };
   }
 
-  /** Checks the type arguments of the generic types the program names against their parameters' constraints. */
   /** Reports each instance field of a struct whose type holds that struct by value (CS0523), as Roslyn does. */
   private checkStructLayouts(declared: DeclaredType[]): void {
     const budget = { remaining: MAX_LAYOUT_WORK };
@@ -170,6 +169,7 @@ export class Compiler extends StatementBinder {
     }
   }
 
+  /** Checks the type arguments of the generic types the program names against their parameters' constraints. */
   private checkTypeArguments(): void {
     for (const { symbol, args, row } of this.constraintChecks) {
       const parameters = symbol.allTypeParameters;

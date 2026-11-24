@@ -1401,8 +1401,10 @@ defineNatives({
 
 const tupleNatives: Record<string, NativeMethod> = {};
 
-/** The items of a `Tuple`, which the turtle collector reaches through `references` as it does other native state. */
-/** The items a reference tuple keeps, charged as storage that keeps them. */
+/**
+ * The items of a `Tuple`, charged as storage that keeps them, which the turtle collector reaches through `references` as
+ * it does other native state.
+ */
 function tupleItems(call: NativeCall, values: Value[]): Value[] {
   call.frame.runtime.retainSlots(values.length, values);
   const items = values.map((value) => copyValue(value));

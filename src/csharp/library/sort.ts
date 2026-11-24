@@ -1,13 +1,13 @@
 /**
- * .NET's `ArraySortHelper<T>.IntrospectiveSort` (introsort with insertion sort for small partitions and heapsort past
- * the depth limit), transcribed so that equal elements end up in .NET's order and comparers run in its sequence.
- */
-/**
  * Thrown when a comparer's inconsistent results walk a partition past its range, where .NET's span throws the
  * IndexOutOfRangeException that its sort reports as a bad comparer.
  */
 export class InconsistentComparer extends Error {}
 
+/**
+ * .NET's `ArraySortHelper<T>.IntrospectiveSort` (introsort with insertion sort for small partitions and heapsort past
+ * the depth limit), transcribed so that equal elements end up in .NET's order and comparers run in its sequence.
+ */
 export function introSort<T>(keys: T[], start: number, length: number, compare: (a: T, b: T) => number): void {
   if (length < 2) return;
   introSortRange(keys, start, length, 2 * (Math.floor(Math.log2(length)) + 1), compare);
