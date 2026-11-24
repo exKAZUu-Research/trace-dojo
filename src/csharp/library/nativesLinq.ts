@@ -525,8 +525,10 @@ function average(call: NativeCall, args: Value[]): Value {
 }
 
 /** The element type of an array or a library collection, whose value-type elements it holds unboxed. */
-function elementTypeOf(items: Value): Type | undefined {
+function elementTypeOf(call: NativeCall, items: Value): Type | undefined {
   if (items instanceof CsArray) return items.type.element;
+  // A string enumerates its chars, which come as their codes.
+  if (isString(items)) return libraryType(call, 'System.Char');
   const native = items instanceof CsObject ? (items.native as { elementType?: Type } | undefined) : undefined;
   return native?.elementType;
 }
@@ -848,7 +850,7 @@ const linq: Record<string, NativeMethod> = {
     const all = source(call, items as Value);
     if (isEnumerableOf(call, items as Value, target)) return items as Value;
     // The elements of a collection of a value type come unboxed, which Cast sees in their boxes.
-    const elementType = elementTypeOf(items as Value);
+    const elementType = elementTypeOf(call, items as Value);
     const name = isNonGenericCollection(call, items as Value)
       ? iteratorName('CastICollectionIterator', [target])
       : `System.Linq.Enumerable+<CastIterator>d__36\`1[${runtimeTypeName(target)}]`;
@@ -872,7 +874,7 @@ const linq: Record<string, NativeMethod> = {
     if (isValueType && isEnumerableOf(call, items as Value, target)) return items as Value;
     const isValueTypeOrNullable = target.kind === 'named' && target.symbol.isValueType;
     // The elements of a collection of a value type come unboxed, which OfType tests and yields in their boxes.
-    const elementType = elementTypeOf(items as Value);
+    const elementType = elementTypeOf(call, items as Value);
     return query(call, target, iteratorName('OfTypeIterator', [target]), [items as Value], function* () {
       for (const item of all) {
         const boxed = boxedElement(evaluator, item, elementType);
