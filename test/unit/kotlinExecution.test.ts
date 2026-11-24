@@ -6166,8 +6166,8 @@ test.each([
   ],
   [
     'a Java method mapped to a mutable Kotlin collection',
-    'fun main() { mutableMapOf("a" to 1).putIfAbsent("b", 2) }',
-    'MutableMap<String, Int> の putIfAbsentは、この採点環境では使えません。',
+    'fun main() { mutableListOf(1).parallelStream() }',
+    'MutableList<Int> の parallelStreamは、この採点環境では使えません。',
   ],
   [
     'a Java method inherited by read-only Kotlin collections',
@@ -6299,6 +6299,24 @@ test.each([
   expect(executeProgram('kotlin', program)).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ message }],
+  });
+});
+
+test("runs Java's default map methods with its null rules, and a map's default for getValue", () => {
+  const source = `fun main() {
+    val counts = mutableMapOf<String, Int>()
+    for (w in "a b a c".split(" ")) counts.merge(w, 1, Int::plus)
+    println(counts.merge("c", 1) { _, _ -> null })
+    val groups = mutableMapOf<Int, MutableList<String>>()
+    for (s in listOf("aa", "b", "cc")) groups.computeIfAbsent(s.length) { mutableListOf() }.add(s)
+    println(listOf(counts, groups, counts.putIfAbsent("a", 9), groups.computeIfPresent(9) { _, v -> v }))
+    val withDefault = mutableMapOf<String, Int>().withDefault { 0 }
+    withDefault["k"] = withDefault.getValue("k") + 1
+    println(listOf(withDefault, withDefault["q"], withDefault.getValue("q")))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'null\n[{a=2, b=1}, {2=[aa, cc], 1=[b]}, 2, null]\n[{k=1}, null, 0]\n',
   });
 });
 

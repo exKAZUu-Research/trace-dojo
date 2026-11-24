@@ -548,4 +548,16 @@ inline fun <T> Sequence<T>.partition(predicate: (T) -> Boolean): Pair<List<T>, L
 
 fun <T> Sequence<T>.joinToString(separator: CharSequence = ", ", prefix: CharSequence = "", postfix: CharSequence = "", limit: Int = -1, truncated: CharSequence = "...", transform: ((T) -> CharSequence)? = null): String =
     toList().joinToString(separator, prefix, postfix, limit, truncated, transform)
+
+fun <T, A : StringBuilder> Sequence<T>.joinTo(buffer: A, separator: CharSequence = ", ", prefix: CharSequence = "", postfix: CharSequence = "", limit: Int = -1, truncated: CharSequence = "...", transform: ((T) -> CharSequence)? = null): A =
+    toList().joinTo(buffer, separator, prefix, postfix, limit, truncated, transform)
+
+// The text's lines and parts as sequences, which hold the same strings that \`lines\` and \`split\` give.
+fun CharSequence.lineSequence(): Sequence<String> = lines().asSequence()
+
+fun CharSequence.splitToSequence(vararg delimiters: String, ignoreCase: Boolean = false, limit: Int = 0): Sequence<String> =
+    split(*delimiters, ignoreCase = ignoreCase, limit = limit).asSequence()
+
+fun CharSequence.splitToSequence(vararg delimiters: Char, ignoreCase: Boolean = false, limit: Int = 0): Sequence<String> =
+    split(*delimiters, ignoreCase = ignoreCase, limit = limit).asSequence()
 `;
