@@ -654,6 +654,7 @@ function groupsOf(
       candidate.key === undefined ? key === undefined : key !== undefined && equality.equals(candidate.key, key)
     );
     if (!group) {
+      call.frame.runtime.retainSlots(1, [key]);
       group = { key, elements: [] };
       bucket.push(group);
       index.set(hash, bucket);
