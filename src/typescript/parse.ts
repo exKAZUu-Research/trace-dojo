@@ -154,6 +154,8 @@ function typeScriptSyntaxErrors(root: Node, source: string, parseErrors: SourceD
   const visit = (node: Node): void => {
     const message =
       (node.type === 'jsdoc_unknown_type' ? '型が必要です。' : undefined) ??
+      // tsc reads `unique` only before `symbol`, which the grammar's `unique_type` lacks.
+      (node.type === 'unique_type' ? "'symbol' が必要です。" : undefined) ??
       htmlCommentError(node) ??
       numericEscapeError(node, source) ??
       characterEscapeError(node) ??

@@ -166,6 +166,12 @@ export class Namespaces {
 
   /** Reports a default import of a module without a default export, and a name a module does not export. */
   checkImport(node: TreeNode): void {
+    const attributes = named(node).find((child) => child.type === 'import_attribute');
+    if (attributes)
+      this.c.error(
+        attributes,
+        "インポート属性は、'--module' オプションが 'esnext'、'node18'、'node20'、'nodenext'、'preserve' のどれかのときしか使えません。"
+      );
     const source = node.childForFieldName('source');
     const clause = node.childForFieldName('import_clause');
     if (!source || !clause || clause.type === 'import_require_clause') return;
