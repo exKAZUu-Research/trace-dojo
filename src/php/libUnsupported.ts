@@ -42,7 +42,7 @@ const UNSUPPORTED_FUNCTIONS: [string, string[]][] = [
   ],
   ['セッション', ['session_start', 'session_destroy', 'session_id']],
   ['環境変数', ['getenv', 'putenv']],
-  ['フォームの入力の検査', ['filter_var', 'filter_input', 'filter_var_array', 'filter_input_array', 'filter_has_var']],
+  ['リクエストの入力の検査', ['filter_input', 'filter_input_array']],
   [
     '実行環境の情報と設定',
     ['phpinfo', 'get_defined_functions', 'get_defined_constants', 'get_declared_classes', 'debug_zval_dump'],

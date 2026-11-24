@@ -1,0 +1,300 @@
+FILTER_SANITIZE_STRING
+string(53) "Tom & &#34;Jerry&#34; &#39;x&#39; `y` €  &amp; é"
+string(52) "Tom & &#34;Jerry&#34; &#39;x&#39; `y` €  &amp; é"
+string(47) "Tom & &#34;Jerry&#34; &#39;x&#39; `y`   &amp; "
+string(51) "Tom & &#34;Jerry&#34; &#39;x&#39; y €  &amp; é"
+string(56) "Tom & &#34;Jerry&#34; &#39;x&#39; `y` &#1;€  &amp; é"
+string(83) "Tom & &#34;Jerry&#34; &#39;x&#39; `y` &#127;&#226;&#130;&#172;  &amp; &#195;&#169;"
+string(61) "Tom &#38; &#34;Jerry&#34; &#39;x&#39; `y` €  &#38;amp; é"
+string(37) "Tom & "Jerry" 'x' `y` €  &amp; é"
+string(53) "Tom & &#34;Jerry&#34; &#39;x&#39; `y` €  &amp; é"
+NULL
+NULL
+FILTER_SANITIZE_SPECIAL_CHARS
+string(99) "&#60;b&#62;Tom &#38; &#34;Jerry&#34;&#60;/b&#62; &#39;x&#39; `y` &#1;€ &#60; b&#62; &#38;amp; é"
+string(95) "&#60;b&#62;Tom &#38; &#34;Jerry&#34;&#60;/b&#62; &#39;x&#39; `y` € &#60; b&#62; &#38;amp; é"
+string(93) "&#60;b&#62;Tom &#38; &#34;Jerry&#34;&#60;/b&#62; &#39;x&#39; `y` &#1; &#60; b&#62; &#38;amp; "
+string(97) "&#60;b&#62;Tom &#38; &#34;Jerry&#34;&#60;/b&#62; &#39;x&#39; y &#1;€ &#60; b&#62; &#38;amp; é"
+string(99) "&#60;b&#62;Tom &#38; &#34;Jerry&#34;&#60;/b&#62; &#39;x&#39; `y` &#1;€ &#60; b&#62; &#38;amp; é"
+string(129) "&#60;b&#62;Tom &#38; &#34;Jerry&#34;&#60;/b&#62; &#39;x&#39; `y` &#1;&#127;&#226;&#130;&#172; &#60; b&#62; &#38;amp; &#195;&#169;"
+string(99) "&#60;b&#62;Tom &#38; &#34;Jerry&#34;&#60;/b&#62; &#39;x&#39; `y` &#1;€ &#60; b&#62; &#38;amp; é"
+string(99) "&#60;b&#62;Tom &#38; &#34;Jerry&#34;&#60;/b&#62; &#39;x&#39; `y` &#1;€ &#60; b&#62; &#38;amp; é"
+string(99) "&#60;b&#62;Tom &#38; &#34;Jerry&#34;&#60;/b&#62; &#39;x&#39; `y` &#1;€ &#60; b&#62; &#38;amp; é"
+string(0) ""
+string(0) ""
+FILTER_SANITIZE_FULL_SPECIAL_CHARS
+string(99) "&lt;b&gt;Tom &amp; &quot;Jerry&quot;&lt;/b&gt; &#039;x&#039; `y` &euro; &lt; b&gt; &amp; &eacute;"
+string(99) "&lt;b&gt;Tom &amp; &quot;Jerry&quot;&lt;/b&gt; &#039;x&#039; `y` &euro; &lt; b&gt; &amp; &eacute;"
+string(99) "&lt;b&gt;Tom &amp; &quot;Jerry&quot;&lt;/b&gt; &#039;x&#039; `y` &euro; &lt; b&gt; &amp; &eacute;"
+string(99) "&lt;b&gt;Tom &amp; &quot;Jerry&quot;&lt;/b&gt; &#039;x&#039; `y` &euro; &lt; b&gt; &amp; &eacute;"
+string(99) "&lt;b&gt;Tom &amp; &quot;Jerry&quot;&lt;/b&gt; &#039;x&#039; `y` &euro; &lt; b&gt; &amp; &eacute;"
+string(99) "&lt;b&gt;Tom &amp; &quot;Jerry&quot;&lt;/b&gt; &#039;x&#039; `y` &euro; &lt; b&gt; &amp; &eacute;"
+string(99) "&lt;b&gt;Tom &amp; &quot;Jerry&quot;&lt;/b&gt; &#039;x&#039; `y` &euro; &lt; b&gt; &amp; &eacute;"
+string(79) "&lt;b&gt;Tom &amp; "Jerry"&lt;/b&gt; 'x' `y` &euro; &lt; b&gt; &amp; &eacute;"
+string(99) "&lt;b&gt;Tom &amp; &quot;Jerry&quot;&lt;/b&gt; &#039;x&#039; `y` &euro; &lt; b&gt; &amp; &eacute;"
+string(0) ""
+string(0) ""
+FILTER_SANITIZE_ENCODED
+string(112) "%3Cb%3ETom%20%26%20%22Jerry%22%3C%2Fb%3E%20%27x%27%20%60y%60%20%01%7F%E2%82%AC%20%3C%20b%3E%20%26amp%3B%20%C3%A9"
+string(109) "%3Cb%3ETom%20%26%20%22Jerry%22%3C%2Fb%3E%20%27x%27%20%60y%60%20%7F%E2%82%AC%20%3C%20b%3E%20%26amp%3B%20%C3%A9"
+string(94) "%3Cb%3ETom%20%26%20%22Jerry%22%3C%2Fb%3E%20%27x%27%20%60y%60%20%01%20%3C%20b%3E%20%26amp%3B%20"
+string(106) "%3Cb%3ETom%20%26%20%22Jerry%22%3C%2Fb%3E%20%27x%27%20y%20%01%7F%E2%82%AC%20%3C%20b%3E%20%26amp%3B%20%C3%A9"
+string(112) "%3Cb%3ETom%20%26%20%22Jerry%22%3C%2Fb%3E%20%27x%27%20%60y%60%20%01%7F%E2%82%AC%20%3C%20b%3E%20%26amp%3B%20%C3%A9"
+string(112) "%3Cb%3ETom%20%26%20%22Jerry%22%3C%2Fb%3E%20%27x%27%20%60y%60%20%01%7F%E2%82%AC%20%3C%20b%3E%20%26amp%3B%20%C3%A9"
+string(112) "%3Cb%3ETom%20%26%20%22Jerry%22%3C%2Fb%3E%20%27x%27%20%60y%60%20%01%7F%E2%82%AC%20%3C%20b%3E%20%26amp%3B%20%C3%A9"
+string(112) "%3Cb%3ETom%20%26%20%22Jerry%22%3C%2Fb%3E%20%27x%27%20%60y%60%20%01%7F%E2%82%AC%20%3C%20b%3E%20%26amp%3B%20%C3%A9"
+string(112) "%3Cb%3ETom%20%26%20%22Jerry%22%3C%2Fb%3E%20%27x%27%20%60y%60%20%01%7F%E2%82%AC%20%3C%20b%3E%20%26amp%3B%20%C3%A9"
+string(0) ""
+string(0) ""
+FILTER_UNSAFE_RAW
+string(48) "<b>Tom & "Jerry"</b> 'x' `y` € < b> &amp; é"
+string(47) "<b>Tom & "Jerry"</b> 'x' `y` € < b> &amp; é"
+string(42) "<b>Tom & "Jerry"</b> 'x' `y`  < b> &amp; "
+string(46) "<b>Tom & "Jerry"</b> 'x' y € < b> &amp; é"
+string(51) "<b>Tom & "Jerry"</b> 'x' `y` &#1;€ < b> &amp; é"
+string(78) "<b>Tom & "Jerry"</b> 'x' `y` &#127;&#226;&#130;&#172; < b> &amp; &#195;&#169;"
+string(56) "<b>Tom &#38; "Jerry"</b> 'x' `y` € < b> &#38;amp; é"
+string(48) "<b>Tom & "Jerry"</b> 'x' `y` € < b> &amp; é"
+string(48) "<b>Tom & "Jerry"</b> 'x' `y` € < b> &amp; é"
+NULL
+NULL
+FILTER_SANITIZE_EMAIL
+string(22) "bTom&Jerryb'x'`y`b&amp"
+string(22) "bTom&Jerryb'x'`y`b&amp"
+string(22) "bTom&Jerryb'x'`y`b&amp"
+string(22) "bTom&Jerryb'x'`y`b&amp"
+string(22) "bTom&Jerryb'x'`y`b&amp"
+string(22) "bTom&Jerryb'x'`y`b&amp"
+string(22) "bTom&Jerryb'x'`y`b&amp"
+string(22) "bTom&Jerryb'x'`y`b&amp"
+string(22) "bTom&Jerryb'x'`y`b&amp"
+string(0) ""
+string(0) ""
+FILTER_SANITIZE_URL
+string(32) "<b>Tom&"Jerry"</b>'x'`y`<b>&amp;"
+string(32) "<b>Tom&"Jerry"</b>'x'`y`<b>&amp;"
+string(32) "<b>Tom&"Jerry"</b>'x'`y`<b>&amp;"
+string(32) "<b>Tom&"Jerry"</b>'x'`y`<b>&amp;"
+string(32) "<b>Tom&"Jerry"</b>'x'`y`<b>&amp;"
+string(32) "<b>Tom&"Jerry"</b>'x'`y`<b>&amp;"
+string(32) "<b>Tom&"Jerry"</b>'x'`y`<b>&amp;"
+string(32) "<b>Tom&"Jerry"</b>'x'`y`<b>&amp;"
+string(32) "<b>Tom&"Jerry"</b>'x'`y`<b>&amp;"
+string(0) ""
+string(0) ""
+FILTER_SANITIZE_NUMBER_INT
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+FILTER_SANITIZE_NUMBER_FLOAT
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
+FILTER_SANITIZE_ADD_SLASHES
+string(52) "<b>Tom & \"Jerry\"</b> \'x\' `y` € < b> &amp; é"
+string(52) "<b>Tom & \"Jerry\"</b> \'x\' `y` € < b> &amp; é"
+string(52) "<b>Tom & \"Jerry\"</b> \'x\' `y` € < b> &amp; é"
+string(52) "<b>Tom & \"Jerry\"</b> \'x\' `y` € < b> &amp; é"
+string(52) "<b>Tom & \"Jerry\"</b> \'x\' `y` € < b> &amp; é"
+string(52) "<b>Tom & \"Jerry\"</b> \'x\' `y` € < b> &amp; é"
+string(52) "<b>Tom & \"Jerry\"</b> \'x\' `y` € < b> &amp; é"
+string(52) "<b>Tom & \"Jerry\"</b> \'x\' `y` € < b> &amp; é"
+string(52) "<b>Tom & \"Jerry\"</b> \'x\' `y` € < b> &amp; é"
+string(0) ""
+string(0) ""
+string(11) "-1.5e3,000+"
+
+Deprecated: Constant FILTER_SANITIZE_STRING is deprecated since 8.1, use htmlspecialchars() instead in /main.php on line 13
+string(2) "ac"
+
+Deprecated: Constant FILTER_SANITIZE_STRIPPED is deprecated since 8.1, use htmlspecialchars() instead in /main.php on line 14
+NULL
+string(10) "a\0b\\\'\""
+string(0) ""
+string(25) "&amp; &copy; &copy;&#039;"
+string(2) "'""
+string(13) "JosGarcaa@b.c"
+string(23) "http://example.com/?q=1"
+--- arrays
+array(5) {
+  ["age"]=>
+  int(25)
+  ["email"]=>
+  bool(false)
+  ["tags"]=>
+  array(3) {
+    [0]=>
+    int(1)
+    [1]=>
+    bool(false)
+    [2]=>
+    array(1) {
+      [0]=>
+      int(3)
+    }
+  }
+  ["name"]=>
+  string(26) "&#60;i&#62;Bob&#60;/i&#62;"
+  ["missing"]=>
+  NULL
+}
+array(2) {
+  ["age"]=>
+  int(25)
+  ["tags"]=>
+  bool(false)
+}
+array(4) {
+  ["age"]=>
+  int(25)
+  ["email"]=>
+  bool(false)
+  ["tags"]=>
+  array(3) {
+    [0]=>
+    int(1)
+    [1]=>
+    bool(false)
+    [2]=>
+    array(1) {
+      [0]=>
+      int(3)
+    }
+  }
+  ["name"]=>
+  bool(false)
+}
+array(4) {
+  ["age"]=>
+  string(2) "25"
+  ["email"]=>
+  string(3) "bad"
+  ["tags"]=>
+  array(3) {
+    [0]=>
+    string(1) "1"
+    [1]=>
+    string(1) "x"
+    [2]=>
+    array(1) {
+      [0]=>
+      string(1) "3"
+    }
+  }
+  ["name"]=>
+  string(10) "<i>Bob</i>"
+}
+filter_var_array(): Argument #2 ($options) must contain only string keys
+filter_var_array(): Argument #2 ($options) cannot contain empty keys
+filter_var_array(): Argument #2 ($options) cannot use both FILTER_NULL_ON_FAILURE and FILTER_THROW_ON_FAILURE
+Filter\FilterFailedException: filter validation failed: filter validate_email not satisfied by 'bad'
+array(2) {
+  [0]=>
+  string(1) "a"
+  [1]=>
+  array(1) {
+    [0]=>
+    string(1) "b"
+  }
+}
+bool(false)
+NULL
+array(1) {
+  [0]=>
+  string(1) "a"
+}
+NULL
+array(2) {
+  [0]=>
+  NULL
+  [1]=>
+  int(1)
+}
+bool(false)
+--- throw
+Filter\FilterFailedException: filter validation failed: filter int not satisfied by 'x'
+Filter\FilterFailedException: filter validation failed: not a scalar value (got an array)
+Filter\FilterFailedException: filter validation failed: not an array (got int)
+Filter\FilterFailedException: filter validation failed: object of type stdClass has no __toString() method
+Filter\FilterFailedException: filter validation failed: filter int not satisfied by 'x'
+int(7)
+Filter\FilterFailedException: filter validation failed: not an array (got true)
+Filter\FilterFailedException: filter validation failed: filter int not satisfied by 'a'
+--- objects
+int(42)
+bool(false)
+NULL
+array(2) {
+  [0]=>
+  bool(false)
+  [1]=>
+  int(42)
+}
+string(14) "Resource id #1"
+float(1.5)
+float(0)
+--- callback
+string(1) "x"
+array(2) {
+  [0]=>
+  string(1) "a"
+  [1]=>
+  array(1) {
+    [0]=>
+    string(1) "b"
+  }
+}
+bool(false)
+filter_var(): Option must be a valid callback
+filter_var_array(): Option must be a valid callback
+
+Warning: filter_var(): Unknown filter with ID 0 in /main.php on line 56
+
+Warning: filter_var(): Unknown filter with ID -1 in /main.php on line 56
+string(3) "abc"
+bool(false)
+bool(false)
+filter_var(): Argument #3 ($options) must be of type array|int, string given
+
+Deprecated: Constant FILTER_SANITIZE_STRING is deprecated since 8.1, use htmlspecialchars() instead in /main.php on line 58
+int(513)
+int(258)
+int(268435456)
+
+Warning: filter_var_array(): Unknown filter with ID 999 in /main.php on line 59
+array(1) {
+  ["a"]=>
+  string(1) "1"
+}
+array(2) {
+  ["a"]=>
+  string(1) "1"
+  ["b"]=>
+  bool(false)
+}
+bool(true)
+
+Warning: The float 1.9E+30 is not representable as an int, cast occurred in /main.php on line 63
+bool(false)
+int(5)
+bool(false)
+bool(false)
+float(1000)
+bool(false)
+int(2)

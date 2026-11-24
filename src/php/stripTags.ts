@@ -25,7 +25,8 @@ function wrapAllowedTags(values: PhpArray): string {
   return tags.join('');
 }
 
-export function stripTags(text: string, allowed: string): string {
+/** Strips tags as php_strip_tags_ex does; `allowTagSpaces` lets a tag start with whitespace after `<`, as filters ask. */
+export function stripTags(text: string, allowed: string, allowTagSpaces = false): string {
   const allows = indexAllowedTags(allowed);
   let result = '';
   let tag = '';
@@ -40,7 +41,7 @@ export function stripTags(text: string, allowed: string): string {
     const char = text[index];
     if (state === 'text') {
       if (char === '\0') continue;
-      if (char === '<' && !space(text[index + 1] ?? '')) {
+      if (char === '<' && (allowTagSpaces || !space(text[index + 1] ?? ''))) {
         state = 'tag';
         tag = '<';
         last = '<';
@@ -50,7 +51,7 @@ export function stripTags(text: string, allowed: string): string {
       if (char === '\0') continue;
       if (char === '<') {
         if (!quote) {
-          if (space(text[index + 1] ?? '')) tag += char;
+          if (!allowTagSpaces && space(text[index + 1] ?? '')) tag += char;
           else depth++;
         }
       } else if (char === '>') {

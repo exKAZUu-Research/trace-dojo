@@ -220,7 +220,7 @@ function childTable(table: PhpArray, key: string | undefined): PhpArray {
 
 // URLs ---------------------------------------------------------------------------------------------------------------
 
-interface ParsedUrl {
+export interface ParsedUrl {
   scheme?: string;
   host?: string;
   port?: bigint;
@@ -254,7 +254,7 @@ defineFunction('parse_url(string $url, int $component = -1): mixed', ({ args }) 
 });
 
 /** Splits a URL as php_url_parse_ex2 does, or returns undefined for one it rejects. */
-function parseUrl(text: string): ParsedUrl | undefined {
+export function parseUrl(text: string): ParsedUrl | undefined {
   const colon = text.indexOf(':');
   if (colon > 0 && isScheme(text.slice(0, colon))) return parseAfterScheme(text, colon);
   // A colon that is not after a scheme may start a port, as in `example.com:80`.

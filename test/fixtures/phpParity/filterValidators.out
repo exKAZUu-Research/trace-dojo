@@ -1,0 +1,409 @@
+int 257
+boolean 258
+float 259
+validate_regexp 272
+validate_domain 277
+validate_url 273
+validate_email 274
+validate_ip 275
+validate_mac 276
+string 513
+stripped 513
+encoded 514
+special_chars 515
+full_special_chars 522
+unsafe_raw 516
+email 517
+url 518
+number_int 519
+number_float 520
+add_slashes 523
+callback 1024
+bool(false)
+bool(false)
+bool(false)
+filter_has_var(): Argument #1 ($input_type) must be an INPUT_* constant
+--- int
+"42": int(42)
+int(42)
+" 42 ": int(42)
+int(42)
+"\t-7\n": int(-7)
+int(-7)
+"+0": int(0)
+int(0)
+"-0": int(0)
+int(0)
+"00": bool(false)
+int(0)
+"0": int(0)
+int(0)
+"007": bool(false)
+int(7)
+"0x1A": bool(false)
+int(26)
+"0X1a": bool(false)
+int(26)
+"0x": bool(false)
+bool(false)
+"0o17": bool(false)
+int(15)
+"017": bool(false)
+int(15)
+"0o": bool(false)
+bool(false)
+"1e3": bool(false)
+bool(false)
+"1.0": bool(false)
+bool(false)
+"": bool(false)
+bool(false)
+" ": bool(false)
+bool(false)
+"abc": bool(false)
+bool(false)
+"9223372036854775807": int(9223372036854775807)
+int(9223372036854775807)
+"9223372036854775808": bool(false)
+bool(false)
+"-9223372036854775808": int(-9223372036854775808)
+int(-9223372036854775808)
+"-9223372036854775809": bool(false)
+bool(false)
+"0xFFFFFFFFFFFFFFFF": bool(false)
+int(-1)
+"0x10000000000000000": bool(false)
+bool(false)
+"01777777777777777777777": bool(false)
+int(-1)
+"\f1": bool(false)
+bool(false)
+"12abc": bool(false)
+bool(false)
+"+": bool(false)
+bool(false)
+"-": bool(false)
+bool(false)
+bool(false)
+int(3)
+bool(false)
+string(4) "dflt"
+NULL
+int(12)
+int(12)
+bool(false)
+int(1)
+bool(false)
+--- bool
+"1": bool(true)
+bool(true)
+"true": bool(true)
+bool(true)
+"TRUE": bool(true)
+bool(true)
+" on ": bool(true)
+bool(true)
+"yes": bool(true)
+bool(true)
+"Yes": bool(true)
+bool(true)
+"0": bool(false)
+bool(false)
+"false": bool(false)
+bool(false)
+"off": bool(false)
+bool(false)
+"no": bool(false)
+bool(false)
+"": bool(false)
+bool(false)
+" ": bool(false)
+bool(false)
+"maybe": bool(false)
+NULL
+"2": bool(false)
+NULL
+"nope": bool(false)
+NULL
+null: bool(false)
+bool(false)
+true: bool(true)
+bool(true)
+false: bool(false)
+bool(false)
+1: bool(true)
+bool(true)
+0: bool(false)
+bool(false)
+string(1) "D"
+--- float
+"1.5": float(1.5)
+float(1.5)
+" 1.5 ": float(1.5)
+float(1.5)
+"-1.5e3": float(-1500)
+float(-1500)
+"1e400": bool(false)
+bool(false)
+"1e-400": bool(false)
+bool(false)
+"0e5": bool(false)
+bool(false)
+"0.0": float(0)
+float(0)
+".5": float(0.5)
+float(0.5)
+"5.": float(5)
+float(5)
+"+.5": float(0.5)
+float(0.5)
+"1,000.5": bool(false)
+float(1000.5)
+"1,000,000": bool(false)
+float(1000000)
+"1,00": bool(false)
+bool(false)
+"1.000,5": bool(false)
+bool(false)
+"1'000": bool(false)
+float(1000)
+"1 000": bool(false)
+bool(false)
+"abc": bool(false)
+bool(false)
+"": bool(false)
+bool(false)
+"12": float(12)
+float(12)
+"-0": float(0)
+float(0)
+"1e": bool(false)
+bool(false)
+"1E+2": float(100)
+float(100)
+"0x1A": bool(false)
+bool(false)
+float(1000.5)
+float(1000.5)
+bool(false)
+float(5)
+filter_var(): "decimal" option must be one character long
+filter_var(): "thousand" option must not be empty
+bool(false)
+--- email
+"user@example.com": string(16) "user@example.com"
+string(16) "user@example.com"
+"User.Name+tag@sub.example.co.jp": string(31) "User.Name+tag@sub.example.co.jp"
+string(31) "User.Name+tag@sub.example.co.jp"
+"user@localhost": bool(false)
+bool(false)
+"user@@example.com": bool(false)
+bool(false)
+"user@example": bool(false)
+bool(false)
+"\"quoted user\"@example.com": bool(false)
+bool(false)
+"user@[127.0.0.1]": string(16) "user@[127.0.0.1]"
+string(16) "user@[127.0.0.1]"
+"user@[IPv6:2001:db8::1]": string(23) "user@[IPv6:2001:db8::1]"
+string(23) "user@[IPv6:2001:db8::1]"
+"\u00fcser@example.com": bool(false)
+string(17) "üser@example.com"
+"user@ex\u00e4mple.com": bool(false)
+bool(false)
+"a@b.c": string(5) "a@b.c"
+string(5) "a@b.c"
+".user@example.com": bool(false)
+bool(false)
+"user.@example.com": bool(false)
+bool(false)
+"us..er@example.com": bool(false)
+bool(false)
+"user@-example.com": bool(false)
+bool(false)
+"user@example.com.": bool(false)
+bool(false)
+"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.com": bool(false)
+bool(false)
+"user@xn--exmple-cua.com": string(23) "user@xn--exmple-cua.com"
+string(23) "user@xn--exmple-cua.com"
+" user@example.com": bool(false)
+bool(false)
+"": bool(false)
+bool(false)
+"user@123.com": string(12) "user@123.com"
+string(12) "user@123.com"
+"test@example.c0m": string(16) "test@example.c0m"
+string(16) "test@example.c0m"
+--- url
+"http:\/\/example.com": string(18) "http://example.com"
+bool(false)
+bool(false)
+"https:\/\/example.com\/path?q=1#frag": string(33) "https://example.com/path?q=1#frag"
+string(33) "https://example.com/path?q=1#frag"
+string(33) "https://example.com/path?q=1#frag"
+"http:\/\/localhost:8080\/": string(22) "http://localhost:8080/"
+string(22) "http://localhost:8080/"
+bool(false)
+"example.com": bool(false)
+bool(false)
+bool(false)
+"http:\/\/": bool(false)
+bool(false)
+bool(false)
+"http:\/example.com": bool(false)
+bool(false)
+bool(false)
+"ftp:\/\/ftp.example.com\/file.txt": string(30) "ftp://ftp.example.com/file.txt"
+string(30) "ftp://ftp.example.com/file.txt"
+bool(false)
+"mailto:user@example.com": string(23) "mailto:user@example.com"
+string(23) "mailto:user@example.com"
+bool(false)
+"news:comp.lang.php": string(18) "news:comp.lang.php"
+string(18) "news:comp.lang.php"
+bool(false)
+"file:\/\/\/etc\/passwd": string(18) "file:///etc/passwd"
+string(18) "file:///etc/passwd"
+bool(false)
+"foo:\/\/bar": string(9) "foo://bar"
+bool(false)
+bool(false)
+"http:\/\/exa mple.com": bool(false)
+bool(false)
+bool(false)
+"http:\/\/user:pass@example.com": string(28) "http://user:pass@example.com"
+bool(false)
+bool(false)
+"http:\/\/us%20er@example.com": string(26) "http://us%20er@example.com"
+bool(false)
+bool(false)
+"http:\/\/us%2Fer@example.com": string(26) "http://us%2Fer@example.com"
+bool(false)
+bool(false)
+"http:\/\/-bad.com": bool(false)
+bool(false)
+bool(false)
+"http:\/\/bad-.com": bool(false)
+bool(false)
+bool(false)
+"http:\/\/a_b.com": bool(false)
+bool(false)
+bool(false)
+"http:\/\/[::1]\/": string(13) "http://[::1]/"
+string(13) "http://[::1]/"
+bool(false)
+"http:\/\/[::g]\/": bool(false)
+bool(false)
+bool(false)
+"http:\/\/192.168.0.1\/": string(19) "http://192.168.0.1/"
+string(19) "http://192.168.0.1/"
+bool(false)
+"http:\/\/example.com:99999": bool(false)
+bool(false)
+bool(false)
+"javascript:alert(1)": bool(false)
+bool(false)
+bool(false)
+"http:\/\/\u65e5\u672c.jp": bool(false)
+bool(false)
+bool(false)
+"HTTP:\/\/EXAMPLE.COM": string(18) "HTTP://EXAMPLE.COM"
+bool(false)
+bool(false)
+"https:\/\/a.b": string(11) "https://a.b"
+bool(false)
+bool(false)
+--- ip
+"127.0.0.1": '127.0.0.1' '127.0.0.1' false '127.0.0.1' false false false
+"192.168.1.1": '192.168.1.1' '192.168.1.1' false false '192.168.1.1' false false
+"10.0.0.1": '10.0.0.1' '10.0.0.1' false false '10.0.0.1' false false
+"172.16.0.1": '172.16.0.1' '172.16.0.1' false false '172.16.0.1' false false
+"8.8.8.8": '8.8.8.8' '8.8.8.8' false '8.8.8.8' '8.8.8.8' '8.8.8.8' '8.8.8.8'
+"0.0.0.0": '0.0.0.0' '0.0.0.0' false '0.0.0.0' false false false
+"255.255.255.255": '255.255.255.255' '255.255.255.255' false '255.255.255.255' false false false
+"169.254.1.1": '169.254.1.1' '169.254.1.1' false '169.254.1.1' false false false
+"100.64.0.1": '100.64.0.1' '100.64.0.1' false '100.64.0.1' '100.64.0.1' false '100.64.0.1'
+"192.88.99.1": '192.88.99.1' '192.88.99.1' false '192.88.99.1' '192.88.99.1' '192.88.99.1' '192.88.99.1'
+"192.0.2.1": '192.0.2.1' '192.0.2.1' false '192.0.2.1' '192.0.2.1' false '192.0.2.1'
+"256.1.1.1": false false false false false false false
+"1.2.3": false false false false false false false
+"01.2.3.4": false false false false false false false
+"1.2.3.4.5": false false false false false false false
+"::1": '::1' false '::1' '::1' false false false
+"::": '::' false '::' '::' false false false
+"2001:db8::1": '2001:db8::1' false '2001:db8::1' '2001:db8::1' '2001:db8::1' false '2001:db8::1'
+"fe80::1": 'fe80::1' false 'fe80::1' 'fe80::1' false false false
+"fc00::1": 'fc00::1' false 'fc00::1' false 'fc00::1' false false
+"fd12:3456::1": 'fd12:3456::1' false 'fd12:3456::1' false 'fd12:3456::1' false false
+"2001:4860:4860::8888": '2001:4860:4860::8888' false '2001:4860:4860::8888' '2001:4860:4860::8888' '2001:4860:4860::8888' '2001:4860:4860::8888' '2001:4860:4860::8888'
+"::ffff:192.168.1.1": '::ffff:192.168.1.1' false '::ffff:192.168.1.1' '::ffff:192.168.1.1' false false false
+"1::2::3": false false false false false false false
+"1:2:3:4:5:6:7:8": '1:2:3:4:5:6:7:8' false '1:2:3:4:5:6:7:8' '1:2:3:4:5:6:7:8' '1:2:3:4:5:6:7:8' '1:2:3:4:5:6:7:8' '1:2:3:4:5:6:7:8'
+"1:2:3:4:5:6:7:8:9": false false false false false false false
+"12345::1": false false false false false false false
+":1:2": false false false false false false false
+"1:": false false false false false false false
+"64:ff9b::1.2.3.4": '64:ff9b::1.2.3.4' false '64:ff9b::1.2.3.4' '64:ff9b::1.2.3.4' false false false
+"abc": false false false false false false false
+"": false false false false false false false
+"1:2:3:4:5:6:1.2.3.4": '1:2:3:4:5:6:1.2.3.4' false '1:2:3:4:5:6:1.2.3.4' '1:2:3:4:5:6:1.2.3.4' false false false
+"2001:10::1": '2001:10::1' false '2001:10::1' '2001:10::1' '2001:10::1' false '2001:10::1'
+"2002::1": '2002::1' false '2002::1' '2002::1' '2002::1' false '2002::1'
+"::ffff:1.2.3.4": '::ffff:1.2.3.4' false '::ffff:1.2.3.4' '::ffff:1.2.3.4' false false false
+--- mac
+"01:23:45:67:89:ab": string(17) "01:23:45:67:89:ab"
+bool(false)
+"01-23-45-67-89-AB": string(17) "01-23-45-67-89-AB"
+string(17) "01-23-45-67-89-AB"
+"0123.4567.89ab": string(14) "0123.4567.89ab"
+bool(false)
+"01:23:45:67:89": bool(false)
+bool(false)
+"01:23-45:67:89:ab": bool(false)
+bool(false)
+"gg:23:45:67:89:ab": bool(false)
+bool(false)
+"0123:4567:89ab": bool(false)
+bool(false)
+filter_var(): "separator" option must be one character long
+--- domain
+"example.com": string(11) "example.com"
+string(11) "example.com"
+"example.com.": string(12) "example.com."
+string(12) "example.com."
+"-example.com": string(12) "-example.com"
+bool(false)
+"exa_mple.com": string(12) "exa_mple.com"
+bool(false)
+"a-.com": string(6) "a-.com"
+bool(false)
+"a-.": string(3) "a-."
+string(3) "a-."
+"a..b": bool(false)
+bool(false)
+".": bool(false)
+bool(false)
+"": string(0) ""
+bool(false)
+"localhost": string(9) "localhost"
+string(9) "localhost"
+"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com": bool(false)
+bool(false)
+"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com": string(67) "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com"
+string(67) "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com"
+"ex ample.com": string(12) "ex ample.com"
+bool(false)
+"1.2.3.4": string(7) "1.2.3.4"
+string(7) "1.2.3.4"
+--- regexp
+string(6) "abc123"
+bool(false)
+string(4) "none"
+string(6) "日本"
+bool(false)
+int(0)
+
+Warning: filter_var(): Delimiter must not be alphanumeric, backslash, or NUL byte in /main.php on line 85
+bool(false)
+int(1)

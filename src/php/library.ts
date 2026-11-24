@@ -24,6 +24,7 @@ import './libSplFile';
 import './libGenerator';
 import './libUnsupported';
 import './libRegex';
+import './libFilter';
 import './libRandomizer';
 import './libDateTime';
 import './libDate';
