@@ -169,7 +169,7 @@ function isSubscriptedSet(shell: Shell, split: { name: string; subscript: string
 function regexTest(shell: Shell, text: string, source: string): boolean {
   let compiled;
   try {
-    compiled = compileRegex(source);
+    compiled = compileRegex(source, () => shell.runtime.spend());
   } catch (error) {
     if (!(error instanceof RegexSyntaxError)) throw error;
     shell.reportError(`[[: invalid regular expression \`${source}': ${error.message}`);

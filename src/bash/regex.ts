@@ -29,8 +29,8 @@ export interface CompiledRegex {
 
 const CLASSES = POSIX_CHARACTER_CLASSES;
 
-export function compileRegex(source: string): CompiledRegex {
-  const parser = new RegexParser(charactersOf(source));
+export function compileRegex(source: string, spend?: () => void): CompiledRegex {
+  const parser = new RegexParser(charactersOf(source), spend);
   const root = parser.parseAlternation();
   if (parser.position < parser.chars.length) throw new RegexSyntaxError('parentheses not balanced');
   return { root, groups: parser.groups };
@@ -41,7 +41,10 @@ class RegexParser {
   groups = 0;
   private groupDepth = 0;
 
-  constructor(readonly chars: string[]) {}
+  constructor(
+    readonly chars: string[],
+    private readonly spend?: () => void
+  ) {}
 
   parseAlternation(): RegexNode {
     const options = [this.parseConcat()];
@@ -55,6 +58,7 @@ class RegexParser {
   private parseConcat(): RegexNode {
     const items: RegexNode[] = [];
     for (;;) {
+      this.spend?.();
       const c = this.chars[this.position];
       if (c === undefined || c === '|' || (c === ')' && this.groupDepth > 0)) break;
       items.push(this.parseRepeat());
@@ -84,22 +88,39 @@ class RegexParser {
 
   /** Reads `{n}`, `{n,}`, or `{n,m}`, or leaves a `{` that starts none of them as a literal character. */
   private interval(): { min: number; max: number } | undefined {
-    const rest = this.chars.slice(this.position).join('');
-    const match = /^\{(\d+)(,(\d*))?\}/.exec(rest);
-    if (!match) {
-      if (/^\{\d/.test(rest)) throw new RegexSyntaxError('braces not balanced');
-      return undefined;
+    let pos = this.position + 1;
+    const firstDigits = this.readAsciiDigits(pos);
+    if (firstDigits === '') return undefined;
+    pos += firstDigits.length;
+    let maxDigits: string | undefined;
+    if (this.chars[pos] === ',') {
+      pos++;
+      maxDigits = this.readAsciiDigits(pos);
+      pos += maxDigits.length;
     }
-    this.position += charactersOf(match[0]).length;
-    const min = Number(match[1]);
-    const max = match[2] === undefined ? min : match[3] === '' ? Infinity : Number(match[3]);
+    if (this.chars[pos] !== '}') throw new RegexSyntaxError('braces not balanced');
+    this.position = pos + 1;
+    const min = Number(firstDigits);
+    const max = maxDigits === undefined ? min : maxDigits === '' ? Infinity : Number(maxDigits);
     if (max < min || min > 255 || (max !== Infinity && max > 255))
       throw new RegexSyntaxError('invalid repetition count(s)');
     return { min, max };
   }
 
+  private readAsciiDigits(from: number): string {
+    let digits = '';
+    for (let i = from; i < this.chars.length; i++) {
+      const ch = this.chars[i];
+      if (ch < '0' || ch > '9') break;
+      this.spend?.();
+      digits += ch;
+    }
+    return digits;
+  }
+
   // code-gauge-allow functionNcss -- One case per atom of a POSIX extended regular expression.
   private parseAtom(): RegexNode {
+    this.spend?.();
     const c = this.chars[this.position++];
     switch (c) {
       case '(': {
@@ -155,6 +176,7 @@ class RegexParser {
     if (negated) this.position++;
     let first = true;
     for (;;) {
+      this.spend?.();
       const c = this.chars[this.position];
       if (c === undefined) throw new RegexSyntaxError('brackets ([ ]) not balanced');
       if (c === ']' && !first) {
@@ -185,11 +207,7 @@ class RegexParser {
   private tryParseSubbracket(c: string): ((ch: string) => boolean) | undefined {
     const type = this.chars[this.position + 1];
     if (c !== '[' || (type !== ':' && type !== '=' && type !== '.')) return undefined;
-    const rest = this.chars.slice(this.position + 2).join('');
-    const close = rest.indexOf(`${type}]`);
-    if (close === -1) throw new RegexSyntaxError('brackets ([ ]) not balanced');
-    const name = rest.slice(0, close);
-    this.position += 2 + charactersOf(name).length + 2;
+    const name = this.readSubbracketName(type);
     const hasTrailingRange = this.hasRangeContinuation();
     return type === ':'
       ? parseCharacterClassSubbracket(name, hasTrailingRange)
@@ -216,12 +234,8 @@ class RegexParser {
   private readRawRangeEndChar(): string {
     const type = this.chars[this.position + 1];
     if (this.chars[this.position] === '[' && (type === '.' || type === ':' || type === '=')) {
-      const rest = this.chars.slice(this.position + 2).join('');
-      const close = rest.indexOf(`${type}]`);
-      if (close === -1) throw new RegexSyntaxError('brackets ([ ]) not balanced');
+      const name = this.readSubbracketName(type);
       if (type !== '.') throw new RegexSyntaxError('invalid character range');
-      const name = rest.slice(0, close);
-      this.position += 2 + charactersOf(name).length + 2;
       const element = resolveRegexCollatingElement(name);
       if (element === undefined) throw new RegexSyntaxError('invalid collating element');
       return element;
@@ -229,6 +243,19 @@ class RegexParser {
     const end = this.chars[this.position++];
     if (end === undefined) throw new RegexSyntaxError('brackets ([ ]) not balanced');
     return end;
+  }
+
+  private readSubbracketName(type: ':' | '=' | '.'): string {
+    const start = this.position + 2;
+    for (let i = start; i + 1 < this.chars.length; i++) {
+      this.spend?.();
+      if (this.chars[i] === type && this.chars[i + 1] === ']') {
+        const name = this.chars.slice(start, i).join('');
+        this.position = i + 2;
+        return name;
+      }
+    }
+    throw new RegexSyntaxError('brackets ([ ]) not balanced');
   }
 }
 
