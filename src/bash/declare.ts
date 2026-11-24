@@ -386,18 +386,6 @@ function parseWordOperand(word: string): { name: string; subscript?: string; app
   return { name: lhs, append, value };
 }
 
-function findOperandEquals(word: string): number {
-  for (let i = 0; i < word.length; i++) {
-    if (word[i] === '[') {
-      const close = skipSubscript(word, i);
-      if (close < word.length) i = close;
-      continue;
-    }
-    if (word[i] === '=') return i;
-  }
-  return -1;
-}
-
 interface DeclarationDestination {
   variable: Variable;
   referencedSubscript?: string;
@@ -697,7 +685,7 @@ function extractPendingNamerefValue(
     const value = shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(operand.value as Word));
     return { value, append: operand.append };
   }
-  return operand.text.includes('=') ? { value: '', append: operand.append } : undefined;
+  return findOperandEquals(operand.text) !== -1 ? { value: '', append: operand.append } : undefined;
 }
 
 function validatePendingNamerefTarget(
@@ -825,7 +813,7 @@ function assignPrefixedOperand(
     const target = ensureEnclosing();
     return applyAttributes(shell, builtin, target, options, true, false) && assignLocally(shell, target, operand);
   }
-  if (operand.value === undefined && !operand.text.includes('=')) return true;
+  if (operand.value === undefined && findOperandEquals(operand.text) === -1) return true;
   const rhs = operand.value
     ? shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(operand.value as Word))
     : '';
@@ -1302,7 +1290,7 @@ function assignReferenceTarget(shell: Shell, builtin: string, variable: Variable
 function hasValue(operand: DeclarationArgument, parsed: { value?: string } | undefined): boolean {
   return typeof operand === 'string'
     ? parsed?.value !== undefined
-    : operand.value !== undefined || operand.array !== undefined;
+    : operand.value !== undefined || operand.array !== undefined || findOperandEquals(operand.text) !== -1;
 }
 
 function isCompound(operand: DeclarationArgument): boolean {
@@ -1323,7 +1311,7 @@ function assignLocally(
     if (variable.attributes.has('A') && !variable.value)
       variable.value = { kind: 'associative', table: new AssociativeTable() };
     // `declare x` and `local x` declare a variable with no value; `x=` gives it the empty one.
-    if (assignment.text.includes('=')) {
+    if (findOperandEquals(assignment.text) !== -1) {
       return referencedSubscript === undefined
         ? shell.assignScalarTo(variable, '', append)
         : shell.assignElementTo(variable, expandDeclaredSubscript(shell, variable, referencedSubscript), '', append);
@@ -1352,6 +1340,18 @@ function assignLocally(
     );
   }
   return shell.assignScalarTo(variable, value, append);
+}
+
+function findOperandEquals(word: string): number {
+  for (let i = 0; i < word.length; i++) {
+    if (word[i] === '[') {
+      const close = skipSubscript(word, i);
+      if (close < word.length) i = close;
+      continue;
+    }
+    if (word[i] === '=') return i;
+  }
+  return -1;
 }
 
 function assignLocallyCompound(
