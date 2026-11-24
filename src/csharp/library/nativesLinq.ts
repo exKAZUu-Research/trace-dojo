@@ -95,6 +95,8 @@ function query(
   run: () => Iterable<Value>,
   ordering?: QueryState['ordering']
 ): CsObject {
+  // A query object keeps the values it holds, such as Repeat's element or Append's, charged as kept storage.
+  call.frame.runtime.retainSlots(1 + holds.length, holds);
   const object = new CsObject(libraryType(call, 'System.Linq.Internal.Iterator', [elementType]), []);
   object.native = new QueryState(run, elementType, displayName, holds, ordering);
   return object;
