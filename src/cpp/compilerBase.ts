@@ -51,6 +51,10 @@ export abstract class CompilerBase {
   context: FunctionContext = new FunctionContext(undefined, undefined, VOID);
   /** The class whose member declarations are being compiled, whose members are in scope. */
   memberClass: ClassInfo | undefined;
+  /** The row of the program's statement or declaration compiled last, where errors in the library's code show. */
+  protected userRow = 0;
+  /** The class that a class template's name without arguments, at the type node, denotes after deduction. */
+  private deducedClass?: { node: Syntax; type: Type };
 
   constructor(protected readonly library: Library) {}
 
@@ -178,11 +182,54 @@ export abstract class CompilerBase {
 
   protected findStdName(name: string): Entity | undefined {
     const std = this.library.std(name);
+    if ((!std || std.kind === 'unsupported') && this.library.declaresStd(name)) {
+      const written = this.librarySourceEntity(name);
+      if (written) return written;
+    }
     const local = this.rootScope.names.get(name);
     if (std?.kind === 'functions' && local?.kind === 'functions') {
       return { kind: 'functions', functions: this.library.rebindCOverloads(name, std.functions, local.functions) };
     }
     return std;
+  }
+
+  /**
+   * Resolves a type with a class template's name without arguments at `node` (`std::vector v{1, 2};`) as the class an
+   * initializer's arguments deduce, which `deduce` gives (C++20 [over.match.class.deduct]).
+   */
+  protected withDeducedClass<T>(node: Syntax, args: Expr[], resolve: () => T): T {
+    const template = this.namedClassTemplate(node);
+    if (!template) return resolve();
+    const saved = this.deducedClass;
+    this.deducedClass = { node, type: this.deduceClassTemplate(template, args, node.row) };
+    try {
+      return resolve();
+    } finally {
+      this.deducedClass = saved;
+    }
+  }
+
+  /** The class template a type's name names without template arguments, or undefined when it names none. */
+  protected namedClassTemplate(node: Syntax): LibraryTemplate | undefined {
+    if (node.type !== 'type_identifier' && node.type !== 'identifier' && node.type !== 'qualified_identifier')
+      return undefined;
+    if (node.type === 'qualified_identifier' && fieldOf(node, 'name')?.type !== 'type_identifier') return undefined;
+    let entity: Entity | undefined;
+    try {
+      entity = node.type === 'qualified_identifier' ? this.lookupQualified(node, true) : this.findName(node.text, true);
+    } catch {
+      return undefined;
+    }
+    if (entity?.kind !== 'template') return undefined;
+    const program = entity.template.program;
+    return !program || program.kind === 'class' ? entity.template : undefined;
+  }
+
+  protected abstract deduceClassTemplate(template: LibraryTemplate, args: Expr[], row: number): Type;
+
+  /** What `std::name` denotes when the library defines it in C++ source, which is compiled on its first use. */
+  protected librarySourceEntity(_name: string): Entity | undefined {
+    return undefined;
   }
 
   lookupName(name: string, row: number, typeOnly = false): Entity {
@@ -651,6 +698,8 @@ export abstract class CompilerBase {
         return entity.type;
       }
       case 'template': {
+        const deduced = this.deducedClass;
+        if (deduced && deduced.node.start === node.start && deduced.node.end === node.end) return deduced.type;
         return this.error(node.row, `${entity.template.name} には <...> でテンプレート引数を書いてください。`);
       }
       default: {
@@ -700,6 +749,23 @@ export abstract class CompilerBase {
       if (!fieldOf(argument, 'declarator') && named?.type === 'type_identifier') {
         const entity = this.findName(named.text);
         if (entity?.kind === 'value' || entity?.kind === 'local' || entity?.kind === 'global')
+          return this.valueArgument(named);
+      }
+      // `S<is_small_v<T>>` names a variable template's instance, which the grammar reads as a type.
+      if (!fieldOf(argument, 'declarator') && named?.type === 'template_type') {
+        const entity = this.findName((fieldOf(named, 'name') as Syntax).text);
+        if (entity?.kind === 'template' && entity.template.program?.kind === 'variable')
+          return this.valueArgument({ ...named, type: 'template_function' });
+      }
+      // `S<std::is_integral<T>::value>` names a static member, which the grammar reads as a type.
+      if (!fieldOf(argument, 'declarator') && named?.type === 'qualified_identifier') {
+        const entity = this.lookupQualified(named);
+        if (
+          entity.kind === 'value' ||
+          entity.kind === 'staticField' ||
+          entity.kind === 'global' ||
+          (entity.kind === 'template' && entity.template.program?.kind === 'variable')
+        )
           return this.valueArgument(named);
       }
       return this.typeDescriptor(argument);

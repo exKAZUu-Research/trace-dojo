@@ -14,14 +14,17 @@ import {
   templateValue,
 } from './programTemplates';
 import type { Scope } from './scopes';
-import { fieldOf, type Syntax } from './syntax';
+import { fieldOf, fieldsOf, type Syntax } from './syntax';
 import { type Access, type ClassInfo, type FunctionInfo, type Type, VOID } from './types';
 
 /** A function template the program declares, which a call instantiates from its arguments. */
 interface FunctionTemplateInfo extends ProgramTemplate {
   readonly instances: Map<string, FunctionInfo | undefined>;
-  /** The constraints as written, which tell overloads apart from redeclarations. */
-  readonly constraintText: string;
+  /**
+   * The return type, the qualifiers of the object, and the constraints as written, which tell overloads apart from
+   * redeclarations, as SFINAE on the return type (`std::enable_if_t<...>`) and ref-qualifiers do.
+   */
+  readonly overloadText: string;
   readonly access: Access;
   /** The explicit specializations (`template <> void f<int>(int)`), by their arguments' key once known. */
   readonly specializations: Syntax[];
@@ -47,11 +50,14 @@ export function declareTemplate(compiler: Compiler, node: Syntax, owner?: ClassI
     case 'function_definition':
     case 'declaration':
     case 'field_declaration': {
+      if (isFunctionDeclaration(inner) && declareDeductionGuide(compiler, parameters, inner)) return;
       if (isFunctionDeclaration(inner)) {
         declareFunctionTemplate(compiler, parameters, outer, inner, owner, access, constraint);
         return;
       }
-      return compiler.unsupported(inner.row, '変数テンプレート');
+      if (owner || outer.length > 0) return compiler.unsupported(inner.row, 'メンバの変数テンプレート');
+      declareVariableTemplate(compiler, parameters, inner);
+      return;
     }
     case 'class_specifier':
     case 'struct_specifier':
@@ -160,7 +166,7 @@ export function functionDeclarator(declarator: Syntax): Syntax | undefined {
 function classTemplate(
   compiler: Compiler,
   name: string,
-  kind: 'class' | 'alias',
+  kind: ClassTemplateInfo['kind'],
   parameters: TemplateParameter[],
   node: Syntax | undefined,
   owner: ClassInfo | undefined
@@ -174,9 +180,71 @@ function classTemplate(
     owner,
     enclosing: [...compiler.templateScopes],
     instances: new Map(),
+    variables: new Map(),
+    guides: [],
     specializations: [],
     outOfClassMembers: [],
   };
+}
+
+/**
+ * Declares a deduction guide (`template <class T> Box(T) -> Box<T>;`) when a declaration is one: a function
+ * declaration without a return type, named after a class template, with a trailing result.
+ */
+export function declareDeductionGuide(compiler: Compiler, parameters: TemplateParameter[], node: Syntax): boolean {
+  if (node.type !== 'declaration' || fieldOf(node, 'type')) return false;
+  const declarator = functionDeclarator(fieldOf(node, 'declarator') as Syntax);
+  const name = declarator && fieldOf(declarator, 'declarator');
+  const hasResult = declarator?.children.some((child) => child.type === 'trailing_return_type');
+  if (!name || !hasResult || (name.type !== 'identifier' && name.type !== 'qualified_identifier')) return false;
+  const entity =
+    name.type === 'qualified_identifier' ? compiler.lookupQualified(name, true) : compiler.findName(name.text);
+  const info = entity?.kind === 'template' ? entity.template.program : undefined;
+  if (info?.kind !== 'class') return false;
+  info.guides.push({ parameters, node, enclosing: [...compiler.templateScopes] });
+  return true;
+}
+
+/** Declares a variable template (`template <class T> constexpr T zero = T();`). */
+function declareVariableTemplate(compiler: Compiler, parameters: TemplateParameter[], node: Syntax): void {
+  const declarators = fieldsOf(node, 'declarator');
+  const declarator = declarators[0];
+  if (declarators.length !== 1 || !declarator)
+    return compiler.error(node.row, '変数テンプレートでは、変数を1つだけ宣言してください。');
+  const nameNode = declaratorName(declarator);
+  if (nameNode?.type === 'template_function') {
+    // `template <class T> constexpr bool same<T, T> = true;` specializes a declared variable template.
+    const name = fieldOf(nameNode, 'name') as Syntax;
+    const entity = compiler.findName(name.text);
+    const primary = entity?.kind === 'template' ? entity.template.program : undefined;
+    if (primary?.kind !== 'variable')
+      return compiler.error(node.row, `${name.text} は変数テンプレートではありません。`);
+    const declaration = withPlainName(node, nameNode, name);
+    primary.specializations.push({
+      parameters,
+      node: { ...declaration, all: [{ ...nameNode, field: 'name' }, ...declaration.all] },
+      enclosing: [...compiler.templateScopes],
+    });
+    return;
+  }
+  if (nameNode?.type !== 'identifier') return compiler.error(node.row, '変数テンプレートの名前を書いてください。');
+  const info = classTemplate(compiler, nameNode.text, 'variable', parameters, node, undefined);
+  compiler.declareHere(nameNode.text, compiler.templateEntity(info), node.row);
+}
+
+/** A copy of a declaration whose declarator names `plain` where it named `written`. */
+function withPlainName(node: Syntax, written: Syntax, plain: Syntax): Syntax {
+  if (node === written) return { ...plain, field: written.field };
+  const all = node.all.map((child) => withPlainName(child, written, plain));
+  return { ...node, all, children: all.filter((child) => child.isNamed) };
+}
+
+/** The name a declarator declares, inside its pointer, reference, and initializer parts. */
+function declaratorName(declarator: Syntax): Syntax | undefined {
+  let current: Syntax | undefined = declarator;
+  while (current && current.type !== 'identifier' && current.type !== 'template_function')
+    current = fieldOf(current, 'declarator') ?? current.children[0];
+  return current;
 }
 
 function declareClassTemplate(
@@ -239,14 +307,16 @@ export function declareFunctionTemplate(
     pattern.specializations.push(node);
     return;
   }
-  const constraintText = [
+  const overloadText = [
+    fieldOf(node, 'type'),
+    ...declarator.children.filter((child) => child.type === 'type_qualifier' || child.type === 'ref_qualifier'),
     constraint,
     declarator.children.find((child) => child.type === 'requires_clause'),
     ...parameters.map((parameter) => parameter.constraint),
   ]
     .map((clause) => clause?.text ?? '')
     .join('|');
-  const existing = compiler.functionTemplateIfAny(name, owner, parameters.length, node, constraintText);
+  const existing = compiler.functionTemplateIfAny(name, owner, parameters.length, node, overloadText);
   if (existing) {
     if (node.type === 'function_definition') existing.node = node;
     return;
@@ -257,7 +327,7 @@ export function declareFunctionTemplate(
     name,
     parameters,
     node,
-    constraintText,
+    overloadText,
     namespace: compiler.namespace,
     owner,
     enclosing: [...compiler.templateScopes],
@@ -305,24 +375,9 @@ function instantiateFunction(
   const node = info.node as Syntax;
   const deduction = new Deduction(compiler, info.parameters);
   if (explicit && !bindExplicit(deduction, info.parameters, explicit)) return undefined;
-  const declarator = functionDeclarator(fieldOf(node, 'declarator') as Syntax) as Syntax;
-  const declarations = fieldOf(declarator, 'parameters')?.children ?? [];
-  let index = 0;
-  for (const declaration of declarations) {
-    const pattern = deduction.pattern(declaration, fieldOf(declaration, 'declarator'));
-    if (declaration.type === 'variadic_parameter_declaration') {
-      for (; index < args.length; index++) if (!deduction.matchArgument(pattern, args[index])) return undefined;
-      break;
-    }
-    const arg = args[index];
-    if (!arg) {
-      if (declaration.type === 'optional_parameter_declaration') continue;
-      return undefined;
-    }
-    index++;
-    if (!deduction.matchArgument(pattern, arg)) return undefined;
-  }
-  if (index < args.length) return undefined;
+  // The names in the parameters' types are those the template's declaration sees, not the call's.
+  const deduced = compiler.inTemplate(info, undefined, () => deduceFromArguments(deduction, node, args));
+  if (!deduced) return undefined;
   const bindings = completeBindings(compiler, info, deduction);
   if (!bindings) return undefined;
   const key = argumentsKey(bindings.args);
@@ -340,6 +395,28 @@ function instantiateFunction(
   }
   info.instances.set(key, instance);
   return instance;
+}
+
+/** Deduces a function template's parameters from a call's arguments, telling whether every argument matches. */
+function deduceFromArguments(deduction: Deduction, node: Syntax, args: Expr[]): boolean {
+  const declarator = functionDeclarator(fieldOf(node, 'declarator') as Syntax) as Syntax;
+  const declarations = fieldOf(declarator, 'parameters')?.children ?? [];
+  let index = 0;
+  for (const declaration of declarations) {
+    const pattern = deduction.pattern(declaration, fieldOf(declaration, 'declarator'));
+    if (declaration.type === 'variadic_parameter_declaration') {
+      for (; index < args.length; index++) if (!deduction.matchArgument(pattern, args[index])) return false;
+      break;
+    }
+    const arg = args[index];
+    if (!arg) {
+      if (declaration.type === 'optional_parameter_declaration') continue;
+      return false;
+    }
+    index++;
+    if (!deduction.matchArgument(pattern, arg)) return false;
+  }
+  return index >= args.length;
 }
 
 /** The key of the template arguments an explicit specialization specializes, deduced from its parameters' types. */
@@ -384,7 +461,7 @@ function bindExplicit(deduction: Deduction, parameters: readonly TemplateParamet
 }
 
 /** Binds every parameter to its deduced argument or its default, or undefined when one has neither. */
-function completeBindings(
+export function completeBindings(
   compiler: Compiler,
   info: ProgramTemplate,
   deduction: Deduction

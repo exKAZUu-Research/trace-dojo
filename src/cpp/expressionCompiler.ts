@@ -42,6 +42,7 @@ import { constructArray, initializeAt, invoke, ObjectCompiler, zeroOf } from './
 import { hasUserType, memberOperators, overloadedOperator, withOverloads } from './operatorOverloads';
 import { expandPacks, PACK_ELEMENT, packElements, packsIn, withPackElement } from './packs';
 import { erasePointee, recoverPointee } from './pointerCasts';
+import type { ClassTemplateInfo } from './programTemplates';
 import { type Eval, type Frame, holdAll } from './runtime';
 import type { Entity } from './scopes';
 import { fieldOf, type Syntax, tokenOf } from './syntax';
@@ -81,6 +82,7 @@ import {
   unqualified,
   withConst,
 } from './types';
+import { TYPE_TRAITS } from './typeTraits';
 import {
   ArrayStore,
   Box,
@@ -154,9 +156,15 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       case 'qualified_identifier': {
         const concept = this.conceptId(node);
         if (concept) return concept;
-        const expr = this.entityExpr(this.lookupQualified(node), node, true);
-        // `std::min<long long>` names a function template with its template arguments.
+        const entity = this.lookupQualified(node);
         const name = fieldOf(node, 'name') as Syntax;
+        const variable = entity.kind === 'template' ? entity.template.program : undefined;
+        if (variable?.kind === 'variable' && (name.type === 'template_function' || name.type === 'template_type')) {
+          const written = this.templateArguments(fieldOf(name, 'arguments') as Syntax);
+          return this.entityExpr(this.instantiateVariableTemplate(variable, written, node.row), node, true);
+        }
+        const expr = this.entityExpr(entity, node, true);
+        // `std::min<long long>` names a function template with its template arguments.
         if (name.type !== 'template_function' || !expr.functions) return expr;
         const templateArgs = this.templateArguments(fieldOf(name, 'arguments') as Syntax);
         return { ...expr, functions: { ...expr.functions, templateArgs } };
@@ -510,6 +518,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         ? this.lookupQualified(nameNode)
         : this.lookupName(nameNode.text, node.row);
     const templateArgs = this.templateArguments(fieldOf(node, 'arguments') as Syntax);
+    const variable = entity.kind === 'template' ? entity.template.program : undefined;
+    if (variable?.kind === 'variable')
+      return this.entityExpr(this.instantiateVariableTemplate(variable, templateArgs, node.row), nameNode, true);
     if (entity.kind !== 'functions') return this.error(node.row, `${nameNode.text} は関数テンプレートではありません。`);
     const expr = this.entityExpr(entity, nameNode, nameNode.type === 'qualified_identifier');
     return { ...expr, functions: { ...(expr.functions as FunctionCandidates), templateArgs } };
@@ -523,7 +534,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const type = object.type;
     const written = name.children[0]?.text ?? '';
     const cls = type.kind === 'class' ? type.cls : undefined;
-    if (cls && written !== cls.name && written !== cls.name.replace(/^std::/, '').replace(/<.*$/, ''))
+    // `x.~T()` names the type through a name for it, such as a template parameter.
+    const named = this.findName(written, true);
+    const namesType =
+      (named?.kind === 'type' && sameType(unqualified(named.type), unqualified(type), false)) ||
+      (named?.kind === 'class' && named.cls === cls);
+    if (cls && !namesType && written !== cls.name && written !== cls.name.replace(/^std::/, '').replace(/<.*$/, ''))
       return this.error(row, `デストラクタの名前 ~${written} が ${typeName(type)} と合いません。`);
     const destroy = this.destroyerOf(type, row);
     const call: FunctionInfo = {
@@ -2314,15 +2330,39 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   private bracedCast(node: Syntax): Expr {
     const typeNode = fieldOf(node, 'type') as Syntax;
     // `(T){...}` is a C99 compound literal, which clang++ makes a temporary as `T{...}`.
-    const type =
-      typeNode.type === 'type_descriptor' ? this.typeDescriptor(typeNode) : this.resolveTypeSpecifier(typeNode);
     const list = fieldOf(node, 'value') as Syntax;
+    const type =
+      typeNode.type === 'type_descriptor'
+        ? this.typeDescriptor(typeNode)
+        : this.namedClassTemplate(typeNode)
+          ? this.withDeducedClass(
+              typeNode,
+              expandPacks(this, list.children).map((arg) => this.argument(arg)),
+              () => this.resolveTypeSpecifier(typeNode)
+            )
+          : this.resolveTypeSpecifier(typeNode);
     const value = this.listValue(type, list, true, node.row);
     const object = { ...value, onlyCalls: type.kind === 'class' };
     return list.children.length === 0 ? constantFunctor(type, object) : object;
   }
 
   // Calls -------------------------------------------------------------------------------------------------------------
+
+  /** A type-trait builtin (`__is_class(T)`), a constant that tells whether its types have a property. */
+  private typeTrait(name: string, argNodes: readonly Syntax[], row: number): Expr {
+    const typeOf = (node: Syntax): Type =>
+      this.expressionAsType(node) ?? this.error(row, `${name} の引数には型を書いてください（${node.text}）。`);
+    const types = argNodes.map((arg) => (arg.type === PACK_ELEMENT ? withPackElement(this, arg, typeOf) : typeOf(arg)));
+    return constantExpr(BOOL, Number(TYPE_TRAITS[name](this as never, types, row)), row);
+  }
+
+  /** The expression or initializer that direct-initializes an object of a type from arguments (`T(args...)`). */
+  directInitialization(type: Type, args: Expr[], row: number): Expr | Initializer {
+    if (type.kind === 'class') return this.constructObject(type.cls, args, row, false);
+    if (args.length === 0) return this.valueInitialized(type, row);
+    if (args.length === 1) return this.convert(this.directInitializerArgument(type, args[0]), type, row);
+    return this.error(row, `${typeName(type)} は値1つで初期化してください。`);
+  }
 
   private callExpression(node: Syntax): Expr {
     const functionNode = fieldOf(node, 'function') as Syntax;
@@ -2334,8 +2374,16 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     // The grammar reads the `noexcept(e)` operator as a call.
     if (functionNode.type === 'identifier' && functionNode.text === 'noexcept' && argNodes.length === 1)
       return this.noexceptOperator(argNodes[0], node.row);
+    if (isUnqualified && Object.hasOwn(TYPE_TRAITS, functionNode.text))
+      return this.typeTrait(functionNode.text, argNodes, node.row);
     const cast = this.utilityCast(functionNode, argNodes, node.row);
     if (cast) return cast;
+    // `Box(5)` makes an instance of a class template, deducing its arguments from the call's.
+    if (this.namedClassTemplate(functionNode)) {
+      const args = argNodes.map((arg) => this.argument(arg));
+      const deduced = this.withDeducedClass(functionNode, args, () => this.resolveTypeSpecifier(functionNode));
+      if (deduced.kind === 'class') return this.constructObject(deduced.cls, args, node.row, false);
+    }
     const typeTarget = this.callTypeTarget(functionNode);
     if (typeTarget) {
       if (argNodes.length === 1 && typeTarget.kind !== 'class') {
@@ -2545,6 +2593,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** A concept-id used as an expression (`std::integral<int>`), which is a constant of type `bool`. */
   protected abstract conceptId(node: Syntax): Expr | undefined;
+  protected abstract instantiateVariableTemplate(info: ClassTemplateInfo, written: Type[], row: number): Entity;
 
   /** A lambda expression's closure object. */
   abstract lambdaExpression(node: Syntax): Expr;
@@ -2708,7 +2757,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   private newExpression(node: Syntax): Expr {
     if (this.noexceptProbe) this.noexceptProbe.mayThrow = true;
-    if (fieldOf(node, 'placement')) return this.unsupported(node.row, '配置 new（new (場所) 型）');
+    const placement = this.placementOf(node);
     let baseType = this.specifiedType(node, true);
     let declarator = fieldOf(node, 'declarator');
     for (; declarator?.type === 'abstract_pointer_declarator'; declarator = fieldOf(declarator, 'declarator'))
@@ -2731,6 +2780,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       let elementType = baseType;
       for (const length of lengths.slice(1).toReversed())
         elementType = { kind: 'array', of: elementType, length: this.arrayLength(length) };
+      if (placement) return this.unsupported(node.row, '配列の配置 new（new (場所) 型[要素の数]）');
       return this.newArray(elementType, lengths[0], argsNode, node.row);
     }
     if (baseType.kind === 'void') return this.error(node.row, 'void のオブジェクトは new で作れません。');
@@ -2740,7 +2790,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     else if (argsNode.type === 'initializer_list') {
       initialize = this.listInitializer(type, argsNode, node.row, true);
     } else {
-      const args = argsNode.children.map((arg) => this.argument(arg));
+      const args = expandPacks(this, argsNode.children).map((arg) => this.argument(arg));
       if (type.kind === 'class')
         initialize = this.copyInitializer(type, this.constructObject(type.cls, args, node.row, false), node.row, false);
       else if (args.length === 0) initialize = this.valueInitialized(type, node.row).run as Eval<Value>;
@@ -2748,6 +2798,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         initialize = this.convert(this.directInitializerArgument(type, args[0]), type, node.row).run as Eval<Value>;
       else return this.error(node.row, `new ${typeName(type)}(...) には値を1つだけ書いてください。`);
     }
+    if (placement) return this.placementNew(placement, type, initialize, node.row);
     return {
       type: pointerTo(baseType),
       isLvalue: false,
@@ -2769,6 +2820,45 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
             throw error;
           }
         });
+      },
+    };
+  }
+
+  /**
+   * The pointer a placement `new (p) T` makes its object at, or undefined for an ordinary `new`, which
+   * `new (std::nothrow) T` is too, since allocation never fails.
+   */
+  private placementOf(node: Syntax): Expr | undefined {
+    const placement = fieldOf(node, 'placement');
+    if (!placement) return undefined;
+    const args = placement.children;
+    if (args.length === 1 && /^(?:std::)?nothrow$/.test(args[0].text.replaceAll(/\s/g, ''))) return undefined;
+    if (args.length !== 1) return this.unsupported(node.row, '引数が2つ以上の配置 new');
+    const pointer = this.rvalue(this.compileExpression(args[0]));
+    if (pointer.type.kind !== 'pointer')
+      return this.error(node.row, `配置 new の場所には、ポインタを書いてください（${typeName(pointer.type)}）。`);
+    return pointer;
+  }
+
+  /** `new (p) T(...)`, which makes an object of `T` where `p` points, as the object of `T` that was there. */
+  private placementNew(pointer: Expr, type: Type, initialize: Initializer, row: number): Expr {
+    const pointee = (pointer.type as Extract<Type, { kind: 'pointer' }>).to;
+    if (pointee.kind !== 'void' && !sameType(unqualified(pointee), type, false))
+      return this.unsupported(row, `${typeName(pointee)} の場所に ${typeName(type)} を作る配置 new`);
+    const place = pointer.run;
+    return {
+      type: pointerTo(type),
+      isLvalue: false,
+      row,
+      onlyCalls: type.kind === 'class',
+      run: (frame) => {
+        const written = place(frame) as Ptr;
+        if (written.isNull) throw new CppRuntimeError('nullAccess');
+        const location = pointee.kind === 'void' ? recoverPointee(written, type) : written;
+        initializeAt(frame, type, location, location.readRaw(), (target) =>
+          initialize(frame, target, false, 'full-expression')
+        );
+        return location;
       },
     };
   }

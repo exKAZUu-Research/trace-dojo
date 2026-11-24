@@ -21,7 +21,7 @@ const MISSING_TOKEN_NAMES: Record<string, string> = {
 
 /** Parses a translation unit, throwing a `CompileError` for invalid syntax or syntax the interpreter leaves out. */
 export function parseCpp(written: string): Syntax {
-  const source = preprocessCpp(written);
+  const source = withTemplateGuides(preprocessCpp(written));
   return parseSource(
     parser,
     source,
@@ -36,6 +36,30 @@ export function parseCpp(written: string): Syntax {
       // A bit-field without a name (`int : 0;`) parses as one whose name is missing.
       acceptsMissing: (node) => node.type === 'field_identifier' && node.nextSibling?.type === 'bitfield_clause',
     }
+  );
+}
+
+/**
+ * A deduction guide that is no template (`Name(const char*) -> Name<std::string>;`), which the grammar cannot parse,
+ * with `template <>` before it, which the grammar parses as a template declaration of the same guide.
+ */
+const NON_TEMPLATE_GUIDE =
+  /^([ \t]*)((?:explicit[ \t]+)?([A-Za-z_]\w*)[ \t]*\([^;{}]*\)[ \t]*->[ \t]*(?:\w+::)*\3[ \t]*<[^;{}]*>[ \t]*;)/gm;
+
+function withTemplateGuides(source: string): string {
+  return source.replaceAll(NON_TEMPLATE_GUIDE, '$1template <> $2');
+}
+
+/**
+ * The row the interpreter's own library source starts at, below every row of a program, so that its code records no
+ * steps and shows no calls.
+ */
+export const LIBRARY_ROW = -1_000_000;
+
+/** Parses the C++ source of part of the interpreter's library, whose rows start at `LIBRARY_ROW`. */
+export function parseLibrarySource(source: string): Syntax {
+  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) =>
+    copySyntax(root, undefined, { row: LIBRARY_ROW, index: 0 })
   );
 }
 

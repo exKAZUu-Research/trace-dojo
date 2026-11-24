@@ -4,6 +4,7 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceAnnotations';
 import { isBaseAccessible, isMemberAccessible } from './access';
 import { byteAt } from './bytes';
+import { deduceProgramClass } from './classTemplateDeduction';
 import { type Declared, hasAuto } from './compilerBase';
 import {
   type ConceptInfo,
@@ -29,7 +30,8 @@ import { thisLocation } from './expressionCompiler';
 import { compileLambda } from './lambdas';
 import { type OrderingName, orderingNumber, ORDERINGS } from './library/compare';
 import { provideProgramOperators, type ValueComparison } from './library/elements';
-import type { Library } from './library/registry';
+import { type LibrarySource, librarySourceDeclaring } from './library/librarySources';
+import type { Library, LibraryTemplate } from './library/registry';
 import {
   bindRetainedTemporary,
   constructArray,
@@ -46,12 +48,14 @@ import {
   zeroOf,
 } from './objectCompiler';
 import { expandPacks, packElements, withPackElement } from './packs';
+import { parseLibrarySource } from './parse';
 import {
   argumentsKey,
   argumentsText,
   type ClassTemplateInfo,
   Deduction,
   type ProgramTemplate,
+  type TemplateArgument,
   TemplateBindings,
   type TemplateParameter,
   templateValue,
@@ -69,7 +73,9 @@ import {
 import { isObjectCreation } from './stepRules';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
+  completeBindings,
   declareAbbreviatedTemplate,
+  declareDeductionGuide,
   declareFunctionTemplate,
   declareTemplate,
   functionDeclarator,
@@ -161,6 +167,9 @@ export class Compiler extends StatementCompiler {
   private readonly externGlobals = new Set<GlobalInfo>();
   /** Whether member function bodies wait for their first use, as a class template instance's do. */
   private defersBodies = false;
+  /** The namespace `std` of the library's C++ source. */
+  private readonly libraryNamespace = new NamespaceInfo('std', undefined);
+  private readonly compiledSources = new Set<LibrarySource>();
   private defaultDependencies?: {
     functions: Map<FunctionInfo, number>;
     staticMembers: Map<GlobalInfo, number>;
@@ -176,6 +185,76 @@ export class Compiler extends StatementCompiler {
   }
 
   compile(root: Syntax): CompiledProgram {
+    try {
+      return this.compileProgram(root);
+    } catch (error) {
+      // An error in the library's code that a program's use of it causes is reported where the program uses it.
+      if (error instanceof CompileError && error.diagnostics.some((diagnostic) => diagnostic.row < 0))
+        throw new CompileError(
+          error.diagnostics.map((diagnostic) =>
+            diagnostic.row < 0 ? { ...diagnostic, row: this.userRow } : diagnostic
+          )
+        );
+      throw error;
+    }
+  }
+
+  protected override librarySourceEntity(name: string): Entity | undefined {
+    const source = librarySourceDeclaring(name);
+    if (!source) return undefined;
+    this.compileLibrarySource(source);
+    return this.libraryNamespace.member(name);
+  }
+
+  private compileLibrarySource(source: LibrarySource): void {
+    if (this.compiledSources.has(source)) return;
+    this.compiledSources.add(source);
+    for (const used of source.uses ?? []) this.compileLibrarySource(used);
+    const saved = {
+      context: this.context,
+      memberClass: this.memberClass,
+      namespace: this.namespace,
+      templateScopes: this.templateScopes,
+      usesStd: this.usesStd,
+      defersBodies: this.defersBodies,
+      userRow: this.userRow,
+    };
+    this.context = new FunctionContext(undefined, undefined, VOID);
+    this.memberClass = undefined;
+    this.namespace = this.libraryNamespace;
+    this.templateScopes = [];
+    this.usesStd = false;
+    this.defersBodies = false;
+    try {
+      for (const item of parsedLibrarySource(source).children) this.topLevel(item);
+    } finally {
+      Object.assign(this, saved);
+    }
+  }
+
+  protected override deduceClassTemplate(template: LibraryTemplate, args: Expr[], row: number): Type {
+    const info = template.program;
+    if (info?.kind === 'class') return deduceProgramClass(this, info, args, row);
+    const deduced = info ? undefined : this.library.deduceTemplateArguments(template.name, args);
+    if (deduced && template.takesArrayBound)
+      return template.instantiate(deduced[0], Number(templateValue(deduced[1] as TemplateArgument)));
+    if (deduced && !template.takesArrayBound) return template.instantiate(deduced, row);
+    return this.error(
+      row,
+      `${template.name} のテンプレート引数を、初期値から推論できません（<...> で書いてください）。`
+    );
+  }
+
+  completeTemplateBindings(info: ProgramTemplate, deduction: Deduction): TemplateBindings | undefined {
+    return completeBindings(this, info, deduction);
+  }
+
+  /** A type a template's declaration writes, in one of its instances. */
+  typeInTemplate(template: ProgramTemplate, bindings: TemplateBindings, node: Syntax): Type {
+    return this.inTemplate(template, bindings, () => this.typeDescriptor(node));
+  }
+
+  private compileProgram(root: Syntax): CompiledProgram {
     for (const item of root.children) this.topLevel(item);
     const objectUses = this.pendingObjectUses;
     this.pendingObjectUses = undefined;
@@ -279,6 +358,7 @@ export class Compiler extends StatementCompiler {
   }
 
   private topLevel(node: Syntax): void {
+    if (node.row >= 0) this.userRow = node.row;
     switch (node.type) {
       case 'preproc_include': {
         this.library.include(fieldOf(node, 'path')?.text.slice(1, -1).trim() ?? '');
@@ -592,7 +672,11 @@ export class Compiler extends StatementCompiler {
           }
         }
       }
-      for (const { fn, node: definition } of definitions) {
+      // The bodies that wait for their first use are set up first, so that the others may call them.
+      const ordered = this.defersBodies
+        ? definitions.toSorted((a, b) => Number(!this.defersBody(a.fn)) - Number(!this.defersBody(b.fn)))
+        : definitions;
+      for (const { fn, node: definition } of ordered) {
         if (!fn.isDefaulted && !fn.isDeleted) this.compileFunction(fn, definition);
       }
       for (const fn of [...cls.constructors, ...(cls.destructor ? [cls.destructor] : [])]) {
@@ -767,8 +851,6 @@ export class Compiler extends StatementCompiler {
         alignment: alignas && this.alignmentOf(alignas),
         bitWidth,
       };
-      if (cls.isUnion && !isTrivialUnionMember(declared.type))
-        this.unsupported(declarator.row, '共用体の、コンストラクタやデストラクタを持つ型のメンバー');
       cls.fields.push(field);
     }
   }
@@ -798,8 +880,6 @@ export class Compiler extends StatementCompiler {
       owner: cls,
       row,
     };
-    if (cls.isUnion && !isTrivialUnionMember(field.type))
-      this.unsupported(row, '共用体の、コンストラクタやデストラクタを持つ型のメンバー');
     cls.fields.push(field);
     for (const inner of [...member.ownFields, ...member.anonymousFields]) {
       if (this.memberEntity(cls, inner.name)) this.error(row, `メンバ ${inner.name} はすでに宣言されています。`);
@@ -1370,7 +1450,10 @@ export class Compiler extends StatementCompiler {
     else if (cls.constructors.length === 0) {
       cls.isDefaultConstructorDeleted =
         (cls.base !== undefined && !this.isDefaultInitializable(classType(cls.base), cls, true)) ||
-        cls.ownFields.some((field) => !field.initializer && !this.isDefaultInitializable(field.type, cls));
+        cls.ownFields.some((field) => !field.initializer && !this.isDefaultInitializable(field.type, cls)) ||
+        (cls.isUnion &&
+          cls.ownFields.every((field) => !field.initializer) &&
+          cls.ownFields.some((field) => !isTrivialUnionMember(field.type)));
       if (!cls.isDefaultConstructorDeleted) {
         this.implicitDefaults.set(cls, this.bindImplicitDefault(cls));
       }
@@ -1385,7 +1468,9 @@ export class Compiler extends StatementCompiler {
       cls.ownFields.every((field) => this.hasConstCopyParameter(field.type));
     cls.isNoncopyable =
       (base !== undefined && !this.isCopyInitializable(base, cls, true)) ||
-      cls.ownFields.some((field) => !this.isCopyInitializable(field.type, cls));
+      cls.ownFields.some(
+        (field) => !this.isCopyInitializable(field.type, cls) || (cls.isUnion && !isTrivialUnionMember(field.type))
+      );
   }
 
   private isCopyInitializable(type: Type, owner: ClassInfo, isBase = false): boolean {
@@ -1589,6 +1674,8 @@ export class Compiler extends StatementCompiler {
     let hasWork = base !== undefined;
     for (const field of cls.ownFields) {
       const explicit = initializers.get(field.name);
+      // A union makes a member with a constructor only when told to, since its other members share the room.
+      if (cls.isUnion && !explicit && !field.initializer && !isTrivialUnionMember(field.type)) continue;
       const part = this.fieldInitialization(field, explicit);
       if (part) {
         parts.push(part);
@@ -1612,7 +1699,10 @@ export class Compiler extends StatementCompiler {
    * constructor before the object is complete (C++20 [except.ctor]).
    */
   private undoConstruction(cls: ClassInfo): (frame: Frame, isBaseComplete: boolean, target?: CObject) => void {
-    const destroyers = cls.ownFields.map((field) => ({ field, destroy: this.destroyerOf(field.type) }));
+    const destroyers = (cls.isUnion ? [] : cls.ownFields).map((field) => ({
+      field,
+      destroy: this.destroyerOf(field.type),
+    }));
     const base = cls.base;
     return (frame, isBaseComplete, target) => {
       const object = target ?? (frame.self?.read() as CObject);
@@ -1931,7 +2021,8 @@ export class Compiler extends StatementCompiler {
 
   /** Destroys an object of a class: its destructor's body, then its members, the last first, then its base. */
   private destructionOf(cls: ClassInfo): ((frame: Frame, value: Value) => void) | undefined {
-    const members = cls.ownFields
+    // A union leaves destroying its member in use to the code that knows which one it is.
+    const members = (cls.isUnion ? [] : cls.ownFields)
       .map((field) => ({ index: field.index, destroy: this.destroyerOf(field.type) }))
       .toReversed();
     const baseDestroy = cls.base?.operations?.destroy;
@@ -2148,10 +2239,14 @@ export class Compiler extends StatementCompiler {
     }
   }
 
+  /** Whether a class template's member function compiles when the program uses it (C++20 [temp.inst]). */
+  private defersBody(fn: FunctionInfo): boolean {
+    return !fn.isConstructor && !fn.isDestructor && !fn.isVirtual && fn.name !== 'operator=';
+  }
+
   /** Compiles a function's body, binding its parameters to the first slots of its frame. */
   private compileFunction(fn: FunctionInfo, node: Syntax): void {
-    // A class template's member functions compile when the program uses them (C++20 [temp.inst]).
-    if (this.defersBodies && !fn.isConstructor && !fn.isDestructor && !fn.isVirtual && fn.name !== 'operator=') {
+    if (this.defersBodies && this.defersBody(fn)) {
       const memberClass = this.memberClass;
       fn.lazyCompile = () => {
         const saved = this.memberClass;
@@ -2215,7 +2310,7 @@ export class Compiler extends StatementCompiler {
   }
 
   /** Runs `run` where a template instance's declarations are compiled: its namespace, its class, and its bindings. */
-  private inTemplate<T>(template: ProgramTemplate, bindings: TemplateBindings | undefined, run: () => T): T {
+  inTemplate<T>(template: ProgramTemplate, bindings: TemplateBindings | undefined, run: () => T): T {
     const saved = {
       context: this.context,
       memberClass: this.memberClass,
@@ -2272,14 +2367,14 @@ export class Compiler extends StatementCompiler {
     owner: ClassInfo | undefined,
     count: number,
     declaration?: Syntax,
-    constraintText?: string
+    overloadText?: string
   ): FunctionTemplateInfo | undefined {
     const patterns = this.functionTemplates(name, owner).map((fn) => fn.templatePattern as FunctionTemplateInfo);
     const signature = declaration && parameterSignature(declaration);
     return patterns.find(
       (pattern) =>
         pattern.parameters.length === count &&
-        (constraintText === undefined || pattern.constraintText === constraintText) &&
+        (overloadText === undefined || pattern.overloadText === overloadText) &&
         (signature === undefined || (pattern.node && parameterSignature(pattern.node) === signature))
     );
   }
@@ -2370,6 +2465,44 @@ export class Compiler extends StatementCompiler {
 
   /** The instance of a class template or an alias template for template arguments. */
   instantiateClassTemplate(info: ClassTemplateInfo, written: Type[], row: number): Type {
+    if (info.kind === 'variable') return this.error(row, `${info.name} は変数テンプレートなので、型ではありません。`);
+    const bindings = this.bindTemplateArguments(info, written, row);
+    const key = argumentsKey(bindings.args);
+    const cached = info.instances.get(key);
+    if (cached) return cached;
+    if (!this.satisfies(info, bindings))
+      return this.error(row, `${info.name}${argumentsText(bindings.args)} は、テンプレートの制約を満たしません。`);
+    if (info.kind === 'alias') {
+      const node = info.node as Syntax;
+      const type = this.inTemplate(info, bindings, () => this.typeDescriptor(fieldOf(node, 'type') as Syntax));
+      info.instances.set(key, type);
+      return type;
+    }
+    return this.defineClassInstance(info, bindings, key, row);
+  }
+
+  /** The variable of a variable template's instance, which its first use defines with static storage. */
+  protected override instantiateVariableTemplate(info: ClassTemplateInfo, written: Type[], row: number): Entity {
+    const bindings = this.bindTemplateArguments(info, written, row);
+    const key = argumentsKey(bindings.args);
+    const cached = info.variables.get(key);
+    if (cached) return cached;
+    if (!this.satisfies(info, bindings))
+      return this.error(row, `${info.name}${argumentsText(bindings.args)} は、テンプレートの制約を満たしません。`);
+    const chosen = this.chooseSpecialization(info, bindings.args, row);
+    const template: ProgramTemplate = { ...info, enclosing: chosen?.enclosing ?? info.enclosing };
+    const entity = this.inTemplate(template, chosen?.bindings ?? bindings, () => {
+      // Each instance is declared in a namespace of its own, so that instances of one template do not collide.
+      const instanceNamespace = new NamespaceInfo(`${info.name}${argumentsText(bindings.args)}`, info.namespace);
+      this.namespace = instanceNamespace;
+      this.globalDeclaration(chosen?.node ?? (info.node as Syntax));
+      return instanceNamespace.member(info.name) as Entity;
+    });
+    info.variables.set(key, entity);
+    return entity;
+  }
+
+  private bindTemplateArguments(info: ClassTemplateInfo, written: Type[], row: number): TemplateBindings {
     const bindings = new TemplateBindings();
     for (const [index, parameter] of info.parameters.entries()) {
       if (parameter.isPack) {
@@ -2391,18 +2524,7 @@ export class Compiler extends StatementCompiler {
     }
     if (!info.parameters.some((parameter) => parameter.isPack) && written.length > info.parameters.length)
       return this.error(row, `${info.name} のテンプレート引数が多すぎます。`);
-    const key = argumentsKey(bindings.args);
-    const cached = info.instances.get(key);
-    if (cached) return cached;
-    if (!this.satisfies(info, bindings))
-      return this.error(row, `${info.name}${argumentsText(bindings.args)} は、テンプレートの制約を満たしません。`);
-    if (info.kind === 'alias') {
-      const node = info.node as Syntax;
-      const type = this.inTemplate(info, bindings, () => this.typeDescriptor(fieldOf(node, 'type') as Syntax));
-      info.instances.set(key, type);
-      return type;
-    }
-    return this.defineClassInstance(info, bindings, key, row);
+    return bindings;
   }
 
   private defineClassInstance(info: ClassTemplateInfo, bindings: TemplateBindings, key: string, row: number): Type {
@@ -2454,21 +2576,35 @@ export class Compiler extends StatementCompiler {
         continue;
       }
       const deduction = new Deduction(this, spec.parameters);
-      const matches = list.children.every((argument, index) => {
-        const actual = args[index];
-        if (!actual) return false;
-        const value = templateValue(actual);
-        if (argument.type === 'type_descriptor') {
-          const named = fieldOf(argument, 'type') as Syntax;
-          const parameter = spec.parameters.find((candidate) => candidate.name === named.text);
-          if (parameter?.kind === 'value' && !fieldOf(argument, 'declarator'))
-            return value !== undefined && deduction.bindValue(named.text, value);
-          return (
-            value === undefined && deduction.match(deduction.pattern(argument, fieldOf(argument, 'declarator')), actual)
+      // The names in the specialization's arguments are those its declaration sees.
+      const matches = this.inTemplate({ ...info, enclosing: spec.enclosing }, undefined, () =>
+        list.children.every((argument, index) => {
+          const actual = args[index];
+          if (!actual) return false;
+          const value = templateValue(actual);
+          if (argument.type === 'type_descriptor') {
+            const named = fieldOf(argument, 'type') as Syntax;
+            const parameter = spec.parameters.find((candidate) => candidate.name === named.text);
+            if (parameter?.kind === 'value' && !fieldOf(argument, 'declarator'))
+              return value !== undefined && deduction.bindValue(named.text, value);
+            return (
+              value === undefined &&
+              deduction.matchSpecializationArgument(
+                deduction.pattern(argument, fieldOf(argument, 'declarator')),
+                actual
+              )
+            );
+          }
+          if (value === undefined) return false;
+          if (argument.type === 'identifier' && spec.parameters.some((parameter) => parameter.name === argument.text))
+            return deduction.bindValue(argument.text, value);
+          // A specialization for a value (`template <class T> struct S<true, T>`) matches that value.
+          const fixed = this.inTemplate({ ...info, enclosing: spec.enclosing }, undefined, () =>
+            templateValue(this.templateArguments({ ...list, children: [argument], all: [argument] })[0])
           );
-        }
-        return value !== undefined && argument.type === 'identifier' && deduction.bindValue(argument.text, value);
-      });
+          return fixed !== undefined && BigInt(fixed) === BigInt(value);
+        })
+      );
       if (!matches || list.children.length !== args.length) continue;
       const bindings = new TemplateBindings();
       let complete = true;
@@ -2835,6 +2971,7 @@ export class Compiler extends StatementCompiler {
   // Global variables ------------------------------------------------------------------------------------------------
 
   private globalDeclaration(node: Syntax): void {
+    if (declareDeductionGuide(this, [], node)) return;
     const typeNode = fieldOf(node, 'type');
     const declarators = fieldsOf(node, 'declarator');
     if (declarators.length === 0) {
@@ -2850,7 +2987,7 @@ export class Compiler extends StatementCompiler {
       return this.error(node.row, '宣言する名前を書いてください。');
     }
     // The specified type defines the class of `struct P { ... } origin;`.
-    const base = this.specifiedType(node, true);
+    const base = this.declarationType(node);
     let firstDeduced: AutoDeduction | undefined;
     for (const written of declarators) {
       const declarator = this.variableOrFunctionDeclarator(base, written);
@@ -3448,6 +3585,10 @@ export class Compiler extends StatementCompiler {
   }
 
   /** Whether a class is an aggregate, which braces initialize member by member (C++20 [dcl.init.aggr]). */
+  isAggregateClass(cls: ClassInfo): boolean {
+    return this.isAggregate(cls);
+  }
+
   private isAggregate(cls: ClassInfo): boolean {
     if (cls.library || cls.constructors.length > 0 || cls.isPolymorphic) return false;
     if (cls.base && cls.baseAccess !== 'public') return false;
@@ -3853,7 +3994,11 @@ export class Compiler extends StatementCompiler {
         );
         if (cls.isUnion) {
           for (const field of fields) {
-            if (object.values[field.index] === UNINIT && (field.type.kind === 'class' || field.type.kind === 'array'))
+            if (
+              object.values[field.index] === UNINIT &&
+              (field.type.kind === 'class' || field.type.kind === 'array') &&
+              isTrivialUnionMember(field.type)
+            )
               object.values[field.index] = staticZero(frame.runtime, field.type, object.location(field.index));
           }
           object.activeMember = fields[made[0]]?.index;
@@ -4278,6 +4423,9 @@ function parameterSpecificity(node: Syntax): number {
 /** How much a partial specialization's argument list constrains its arguments, for choosing the most specialized. */
 function specificity(node: Syntax): number {
   if (node.type === 'type_identifier' || node.type === 'identifier') return 0;
+  // A parameter's name alone, which the grammar reads as a type, is as general as an argument gets.
+  if (node.type === 'type_descriptor' && node.children.length === 1 && node.children[0].type === 'type_identifier')
+    return 0;
   return 1 + node.children.reduce((sum, child) => sum + specificity(child), 0);
 }
 
@@ -4353,4 +4501,15 @@ function isTrivialUnionMember(type: Type): boolean {
     !cls.isPolymorphic &&
     cls.fields.every((field) => !field.initializer && isTrivialUnionMember(field.type))
   );
+}
+
+const parsedSources = new WeakMap<LibrarySource, Syntax>();
+
+function parsedLibrarySource(source: LibrarySource): Syntax {
+  let parsed = parsedSources.get(source);
+  if (!parsed) {
+    parsed = parseLibrarySource(source.source);
+    parsedSources.set(source, parsed);
+  }
+  return parsed;
 }

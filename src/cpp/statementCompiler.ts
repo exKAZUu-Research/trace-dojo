@@ -103,7 +103,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   /** Records the step of a statement after it runs, as `StepTracker.runStatement` says. */
   withStep(row: number, exec: Exec, isOnlyCall = false): Exec {
-    if (!this.recordsSteps) return exec;
+    if (!this.recordsSteps || row < 0) return exec;
     return (frame) => frame.runtime.steps.runStatement(row, isOnlyCall, () => exec(frame));
   }
 
@@ -198,6 +198,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   compileStatement(node: Syntax): Exec {
+    if (node.row >= 0) this.userRow = node.row;
     return this.budgeted(this.compileStatementBody(node));
   }
 
@@ -322,6 +323,25 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   // Declarations -----------------------------------------------------------------------------------------------------
 
+  /**
+   * The type a variable declaration's specifiers give, where a class template's name without arguments takes the
+   * arguments its only declarator's initializer deduces.
+   */
+  protected declarationType(node: Syntax): Type {
+    const typeNode = fieldOf(node, 'type');
+    const declarators = fieldsOf(node, 'declarator');
+    if (!typeNode || declarators.length !== 1 || !this.namedClassTemplate(typeNode))
+      return this.specifiedType(node, true);
+    const [declarator] = declarators;
+    const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
+    if (!value) return this.specifiedType(node, true);
+    const args =
+      value.type === 'argument_list' || value.type === 'initializer_list'
+        ? expandPacks(this, value.children).map((arg) => this.argument(arg))
+        : [this.compileExpression(value)];
+    return this.withDeducedClass(typeNode, args, () => this.specifiedType(node, true));
+  }
+
   private localDeclaration(
     node: Syntax,
     recordStep = true
@@ -332,7 +352,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       this.hasSpecifier(node, 'thread_local') ||
       this.hasSpecifier(node, '__thread');
     if (this.hasSpecifier(node, 'extern')) return this.blockExtern(node);
-    const base = this.specifiedType(node, true);
+    const base = this.declarationType(node);
     const declarators = fieldsOf(node, 'declarator');
     if (declarators.length === 0) return this.error(node.row, '変数の名前を書いてください。');
     let recordsStep = false;
@@ -1089,9 +1109,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return;
       });
       const body = this.loopBody(fieldOf(node, 'body') as Syntax, scope);
-      const stepInit = this.recordsSteps && initRecords;
-      const stepUpdate = this.recordsSteps && updates.length > 0;
       const { row } = node;
+      const stepInit = this.recordsSteps && row >= 0 && initRecords;
+      const stepUpdate = this.recordsSteps && row >= 0 && updates.length > 0;
       loop = (frame) => {
         init(frame);
         if (stepInit) frame.runtime.steps.step(row);
@@ -1189,7 +1209,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
     const iteration = this.withScopeExit((frame) => {
       bind(frame);
-      if (this.recordsSteps) frame.runtime.steps.stepBinding(row, this.isAnswered(variableType));
+      if (this.recordsSteps && row >= 0) frame.runtime.steps.stepBinding(row, this.isAnswered(variableType));
       return body(frame);
     }, bodyScope);
     const saveIterator = (local: LocalInfo, run: Expr['run']): Eval<void> =>

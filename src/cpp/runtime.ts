@@ -371,6 +371,9 @@ export class Runtime implements TracedRuntime<Frame> {
   ): Frame {
     this.spend();
     if (this.frames.length >= LIMITS.maxCallDepth) throw new CppRuntimeError('stackOverflow');
+    // A call from the library's code (a negative row) shows as the program's call that ran that code.
+    if (callRow !== undefined && callRow < 0)
+      callRow = this.frames.findLast((frame) => (frame.callRow ?? 0) >= 0)?.callRow;
     const frame = new Frame(this, fn, callRow, compiled?.slotCount ?? 0, self, compiled);
     this.frames.push(frame);
     return frame;

@@ -2,6 +2,7 @@ import { FileSystemError } from '../../interpreter/programIo';
 import { byteArray } from '../bytes';
 import type { ConceptInfo } from '../concepts';
 import { CppRuntimeError, ProgramExit } from '../errors';
+import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import type { ClassTemplateInfo } from '../programTemplates';
 import type { Frame } from '../runtime';
@@ -10,12 +11,15 @@ import {
   CHAR,
   ClassInfo,
   classType,
+  decay,
   type FunctionInfo,
   INT,
   LLONG,
   LONG,
+  nonReference,
   referenceTo,
   sameParameters,
+  sameType,
   SCHAR,
   SHORT,
   type Type,
@@ -23,6 +27,7 @@ import {
   UINT,
   ULLONG,
   ULONG,
+  unqualified,
   USHORT,
   VOID,
 } from '../types';
@@ -277,6 +282,40 @@ export class Library {
       cls.isComplete = true;
       this.incomplete.delete(cls);
     }
+  }
+
+  /**
+   * The template arguments of a library class template that an initializer's arguments deduce, as its deduction
+   * guides do (`std::vector v{1, 2}`, `std::pair p(1, 2.5)`, `std::array a{1, 2, 3}`), or undefined when they deduce
+   * none. A class template that takes an array bound gives its element type, then its bound.
+   */
+  deduceTemplateArguments(name: string, args: readonly Expr[]): Type[] | undefined {
+    if (args.some((arg) => arg.braced)) return undefined;
+    const types = args.map((arg) => decay(unqualified(nonReference(arg.type))));
+    const [first, second] = types;
+    if (!first) return undefined;
+    // An instance of the template deduces itself.
+    const library = first.kind === 'class' ? first.cls.library : undefined;
+    if (types.length === 1 && library?.kind === name) {
+      const bound = library.aggregateArray?.type.length;
+      return bound === undefined ? [...library.args] : [library.args[0], arrayBound(bound)];
+    }
+    const allSame = types.every((type) => sameType(type, first, false));
+    if (name === 'pair') return types.length === 2 ? types : undefined;
+    if (name === 'array') return allSame ? [first, arrayBound(types.length)] : undefined;
+    if (!DEDUCIBLE_CONTAINERS.has(name)) return undefined;
+    const isMap = MAP_CONTAINERS.has(name);
+    if (allSame && !isMap) return [first];
+    // `std::vector v(3, 2.5)` takes a count, then the value of each element.
+    if (types.length === 2 && first.kind === 'int' && second && !isMap) return [second];
+    const pair = first.kind === 'class' && first.cls.library?.kind === 'pair' ? first.cls.library.args : undefined;
+    if (isMap && allSame && pair) return [unqualified(pair[0]), pair[1]];
+    return undefined;
+  }
+
+  /** Whether the included headers declare `std::name`. */
+  declaresStd(name: string): boolean {
+    return isVisible(name, this.headers, 'std');
   }
 
   std(name: string): Entity | undefined {
@@ -601,3 +640,24 @@ const MANIPULATORS: Record<string, (stream: StreamValue, frame: Frame) => void> 
   skipws: (stream) => (stream.flags |= FLAGS.skipws),
   noskipws: (stream) => (stream.flags &= ~FLAGS.skipws),
 };
+
+/** The library's class templates whose deduction guides take the elements of an initializer list. */
+const DEDUCIBLE_CONTAINERS = new Set([
+  'vector',
+  'deque',
+  'list',
+  'forward_list',
+  'set',
+  'multiset',
+  'unordered_set',
+  'unordered_multiset',
+  'map',
+  'multimap',
+  'unordered_map',
+  'unordered_multimap',
+]);
+const MAP_CONTAINERS = new Set(['map', 'multimap', 'unordered_map', 'unordered_multimap']);
+
+function arrayBound(length: number): Type {
+  return { kind: 'int', name: 'ulong', templateValue: BigInt(length) };
+}

@@ -21,6 +21,8 @@ export function traceCppProgram(program: string, trace: TraceOptions, input?: Pr
   const snapshotter = new Snapshotter(compiled);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.fn?.isAtomic === true,
+    // The library's code, which the interpreter writes in C++ at negative rows, shows no call of its own.
+    hidesCallRow: (frame) => (frame.fn?.row ?? 0) < 0,
     recordItem: (item) => snapshotter.recordItem(item),
     scalarVarsOf: (frame) => snapshotter.variablesOf(frame, true, false).vars,
     variablesOf: (frame) => snapshotter.variablesOf(frame, true, true),

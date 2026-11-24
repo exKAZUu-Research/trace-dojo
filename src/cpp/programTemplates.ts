@@ -1,4 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
+import type { DeductionGuide } from './classTemplateDeduction';
 import type { Compiler } from './compiler';
 import { constantExpr, type Expr } from './expr';
 import { typeKey } from './library/templates';
@@ -8,6 +9,7 @@ import {
   type ClassInfo,
   type FunctionInfo,
   type IntType,
+  isConstType,
   pointerTo,
   referenceTo,
   type Type,
@@ -154,6 +156,21 @@ export class Deduction {
   readonly packs = new Map<string, Type[]>();
   /** The parameters explicit template arguments bind, which deduction leaves as they are. */
   readonly fixed = new Set<string>();
+  /**
+   * Whether patterns match types as a partial specialization's arguments do, where `T&&` matches only an rvalue
+   * reference and `const T` only a const type, unlike a function parameter's type, which an argument's type adjusts.
+   */
+  private isExact = false;
+
+  /** Matches a pattern against a template argument of a partial specialization. */
+  matchSpecializationArgument(pattern: Pattern, type: Type): boolean {
+    this.isExact = true;
+    try {
+      return this.match(pattern, type);
+    } finally {
+      this.isExact = false;
+    }
+  }
 
   constructor(
     private readonly compiler: Compiler,
@@ -277,18 +294,24 @@ export class Deduction {
     switch (pattern.kind) {
       case 'parameter': {
         let bound = type;
-        if (pattern.isConst) bound = unqualified(bound);
+        if (pattern.isConst) {
+          if (this.isExact && !isConstType(type)) return false;
+          bound = unqualified(bound);
+        }
         return this.bind(pattern.name, bound);
       }
       case 'pointer': {
         if (type.kind !== 'pointer') return false;
+        if (this.isExact && pattern.isConst !== isConstType(type)) return false;
         return this.match(pattern.to, type.to);
       }
       case 'reference': {
+        if (this.isExact && (type.kind !== 'reference' || (type.isRvalue === true) !== pattern.isRvalue)) return false;
         return this.match(pattern.to, type.kind === 'reference' ? type.to : type);
       }
       case 'array': {
         if (type.kind !== 'array') return false;
+        if (this.isExact && (pattern.size === undefined) !== (type.length === undefined)) return false;
         if (typeof pattern.size === 'string' && type.length !== undefined && !this.bindValue(pattern.size, type.length))
           return false;
         return this.match(pattern.of, type.of);
@@ -374,8 +397,12 @@ export interface ProgramTemplate {
 }
 
 export interface ClassTemplateInfo extends ProgramTemplate {
-  readonly kind: 'class' | 'alias';
+  readonly kind: 'class' | 'alias' | 'variable';
   readonly instances: Map<string, Type>;
+  /** The variables of a variable template's instances, by their arguments' key. */
+  readonly variables: Map<string, Entity>;
+  /** The deduction guides the program declares for the class template. */
+  readonly guides: DeductionGuide[];
   /** The explicit and partial specializations (`template <class T> class Box<T*>`). */
   readonly specializations: { parameters: TemplateParameter[]; node: Syntax; enclosing: Scope[] }[];
   /** The members the program defines outside the class (`template <class T> T Box<T>::get() const`). */
