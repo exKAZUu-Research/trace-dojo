@@ -741,7 +741,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       const name = member.key.kind === 'private' ? member.key.name : key;
       if (member.kind === 'field') {
         const { field, property } = member.isAutoAccessor
-          ? this.autoAccessor(member, key, target, classScope)
+          ? this.autoAccessor(member, key, target, classScope, behavior.fields)
           : { field: this.classField(member, key, name, target, classScope), property: undefined };
         if (member.isStatic) staticInitializers.push(() => this.initializeField(fn, field, member.isTraceConstant));
         else behavior.fields.push(field);
@@ -779,7 +779,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
     member: Extract<ClassMember, { kind: 'field' }>,
     key: Key,
     target: JsObject,
-    classScope: Scope
+    classScope: Scope,
+    instanceFields: ClassField[]
   ): { field: ClassField; property: Property } {
     const { runtime } = this;
     const storage = `${String(key)}\0accessor\0${nextPrivateId++}\0field`;
@@ -802,7 +803,17 @@ export class Evaluator extends SuspendableStatementEvaluator {
       enumerable: false,
       configurable: true,
     };
-    if (member.key.kind === 'private') mergePrivate(runtime, target, privateIdentity(key), property);
+    // A private instance accessor belongs to each instance, which gets it before its fields as a private method does.
+    if (member.key.kind === 'private' && !member.isStatic)
+      instanceFields.unshift({
+        key,
+        isPrivate: true,
+        initialize: undefined,
+        stepRow: undefined,
+        onlyCalls: false,
+        property,
+      });
+    else if (member.key.kind === 'private') mergePrivate(runtime, target, privateIdentity(key), property);
     else target.properties.set(key, property);
     return { field, property };
   }

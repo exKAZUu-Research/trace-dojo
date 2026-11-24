@@ -1,0 +1,20 @@
+function logged(target: ClassAccessorDecoratorTarget<Counter, number>, context: ClassAccessorDecoratorContext<Counter, number>) {
+  return {
+    get(this: Counter) {
+      console.log('get', String(context.name), context.private);
+      return target.get.call(this);
+    },
+  };
+}
+class Counter {
+  accessor count = 0;
+  static accessor total = 10;
+  accessor #hidden = 7;
+  @logged accessor #logged = 3;
+  read() {
+    return this.#hidden + this.#logged;
+  }
+}
+const counter = new Counter();
+counter.count++;
+console.log(counter.count, Counter.total, counter.read(), new Counter().read(), Object.keys(counter));
