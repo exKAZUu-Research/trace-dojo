@@ -309,6 +309,7 @@ function pad(bytes: number[], spec: Specification): number[] {
 // code-gauge-allow functionCognitiveComplexity -- strtoimax's syntax with Bash's character-code arguments and its two kinds of conversion error.
 // code-gauge-allow functionNcss -- strtoimax's syntax with Bash's character-code arguments and its two kinds of conversion error.
 function parseInteger(arg: string, signed: boolean, host: PrintfHost, conversionError: () => void): bigint {
+  if (arg === '') return 0n;
   if (arg.startsWith("'") || arg.startsWith('"')) {
     const [, c] = charactersOf(arg);
     return c === undefined ? 0n : BigInt(c.codePointAt(0) as number);
@@ -359,6 +360,7 @@ function invalidNumber(arg: string, host: PrintfHost): void {
 // code-gauge-allow functionCognitiveComplexity -- strtod's syntax (infinities, NaN, hexadecimal, decimal) with Bash's conversion errors.
 // code-gauge-allow functionNcss -- strtod's syntax (infinities, NaN, hexadecimal, decimal) with Bash's conversion errors.
 function parseFloatArgument(arg: string, host: PrintfHost, conversionError: () => void): number {
+  if (arg === '') return 0;
   if (arg.startsWith("'") || arg.startsWith('"')) {
     const [, c] = charactersOf(arg);
     return c === undefined ? 0 : (c.codePointAt(0) as number);
