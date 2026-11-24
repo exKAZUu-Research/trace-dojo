@@ -10,6 +10,7 @@ import { compileMacro } from './compilerMacros';
 import { compileBinary, compileCompoundAssign, compileUnary } from './compilerOperators';
 import { compileConstant, compileMatcher, compilePatternInput, type Matcher, takesWhole } from './compilerPatterns';
 import { compileField, compileIndex, compilePlace, userDerefCall } from './compilerPlaces';
+import type { Dropper } from './drops';
 import type { Formatter } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
@@ -69,6 +70,7 @@ export interface CallSupport {
   formatter: Formatter;
   convertError(value: Value, from: Type, to: Type, frame: Frame): Value;
   strSlice(text: string, range: RangeValue | undefined, span: Span): string;
+  dropper: Dropper;
 }
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
@@ -250,9 +252,12 @@ export class Compiler {
       }
       case 'expr': {
         const value = stmt.hidden ? this.value(stmt.expr, true) : this.statement(stmt.expr, stmt.span);
+        // The value of an expression statement is a temporary, which goes at the statement's end.
+        const dropped = this.droppedType(stmt.expr.ty);
         return (frame) => {
           frame.runtime.spend();
-          value(frame);
+          const result = value(frame);
+          if (dropped) frame.runtime.dropper?.drop(result, dropped(frame));
           return UNIT_VALUE;
         };
       }
@@ -296,9 +301,13 @@ export class Compiler {
     const local =
       stmt.pattern.kind === 'binding' && !stmt.pattern.sub ? this.annotations.bindings.get(stmt.pattern) : undefined;
     const init = this.bindingValue(stmt.init, local?.slot);
+    // `let _ = value;` binds nothing, so the value goes at once.
+    const dropped = stmt.pattern.kind === 'wild' ? this.droppedType(stmt.init.ty) : undefined;
     const run: Eval = (frame) => {
       frame.runtime.spend();
-      bind(frame, init(frame));
+      const value = init(frame);
+      bind(frame, value);
+      if (dropped) frame.runtime.dropper?.drop(value, dropped(frame));
       return UNIT_VALUE;
     };
     return this.withStep(stmt.span, run, isObjectCreation(stmt.init, this.annotations));
@@ -620,12 +629,24 @@ export class Compiler {
   assign(expr: Extract<Expr, { kind: 'assign' }>): Eval {
     const value = this.value(expr.value);
     const res = expr.target.kind === 'path' ? this.annotations.paths.get(expr.target) : undefined;
-    if (res?.kind === 'discard') return (frame) => (value(frame), UNIT_VALUE);
+    const dropped = this.droppedType(expr.target.ty);
+    if (res?.kind === 'discard') {
+      const discarded = this.droppedType(expr.value.ty);
+      return (frame) => {
+        const v = value(frame);
+        if (discarded) frame.runtime.dropper?.drop(v, discarded(frame));
+        return UNIT_VALUE;
+      };
+    }
     if (res?.kind === 'local' && res.local.mode === 'move') {
       const slot = res.local.slot;
       const assigned = this.bindingValue(expr.value, slot);
       return (frame) => {
-        frame.locals[slot] = assigned(frame);
+        const v = assigned(frame);
+        const old = frame.locals[slot];
+        frame.locals[slot] = v;
+        // Assigning replaces the old value, which goes as the variable's value would.
+        if (dropped && old !== UNASSIGNED) frame.runtime.dropper?.drop(old, dropped(frame));
         return UNIT_VALUE;
       };
     }
@@ -633,9 +654,21 @@ export class Compiler {
     return (frame) => {
       const v = value(frame);
       // Evaluating the place can run the program's code, during which only this assignment holds the value.
-      frame.runtime.withRoots([v], () => place(frame).set(v));
+      frame.runtime.withRoots([v], () => {
+        const target = place(frame);
+        const old = dropped ? target.get() : undefined;
+        target.set(v);
+        if (dropped) frame.runtime.dropper?.drop(old, dropped(frame));
+      });
       return UNIT_VALUE;
     };
+  }
+
+  /** The concrete type of a value that may need dropping where code discards it, or undefined when none can. */
+  droppedType(type: Type | undefined): ((frame: Frame) => Type) | undefined {
+    if (!type || !this.support.dropper.active) return undefined;
+    const runtime = runtimeType(type);
+    return (frame) => runtime(frame);
   }
 
   closure(expr: Extract<Expr, { kind: 'closure' }>): Eval {

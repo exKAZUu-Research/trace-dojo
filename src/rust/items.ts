@@ -864,6 +864,7 @@ const STD_TRAITS_LEARNERS_IMPLEMENT = new Set([
   'Iterator',
   'Deref',
   'DerefMut',
+  'Drop',
 ]);
 
 const REQUIRED_STD_METHODS: Record<string, string[]> = {

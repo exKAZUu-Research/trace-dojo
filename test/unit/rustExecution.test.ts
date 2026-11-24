@@ -8842,6 +8842,29 @@ fn main() {
   });
 });
 
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('Drop impls run when values go out of scope, are replaced, discarded, or dropped', () => {
+  const program = `struct D(i32);
+impl Drop for D { fn drop(&mut self) { println!("drop {}", self.0); } }
+fn take(d: D) { println!("took {}", d.0); }
+fn main() {
+    let _a = D(1);
+    { let _b = D(2); }
+    take(D(3));
+    D(4);
+    let mut r = D(5);
+    r = D(6);
+    let mut v = vec![D(7), D(8)];
+    v.pop();
+    drop(r);
+    println!("end {}", v.len());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'drop 2\ntook 3\ndrop 3\ndrop 4\ndrop 5\ndrop 8\ndrop 6\nend 1\ndrop 7\ndrop 1\n',
+  });
+});
+
 test('an empty match covers the uninhabited Infallible', () => {
   const program = rustMain(
     '    println!("{:?}", widen(5));',

@@ -344,6 +344,9 @@ export function checkMethodCall(
     );
   }
   checkArgs(c, expr.args, sig.params, expectations(c, sig.ret, sig.params, expected), iterableParams(fn));
+  if (fn.trait?.builtin === 'Drop' || fn.impl?.trait?.trait.builtin === 'Drop') {
+    compileError(expr.methodSpan, 'drop メソッドは直接呼べません（std::mem::drop(x) を使ってください。E0040）。');
+  }
   c.annotations.methods.set(expr, { fn, typeArgs: found.typeArgs, receiver: found.adjust });
   const adjusted = typeAfter(receiverType, found.adjust.derefs) ?? found.selfType;
   if (fn.selfMode === 'value') checkMoveOutOfRef(c, expr, found.adjust, adjusted);

@@ -64,7 +64,7 @@ pub mod ops {
     pub trait IndexMut<Idx>: Index<Idx> { fn index_mut(&mut self, index: Idx) -> &mut Self::Output; }
     pub trait Deref { type Target; fn deref(&self) -> &Self::Target; }
     pub trait DerefMut: Deref { fn deref_mut(&mut self) -> &mut Self::Target; }
-    pub trait Drop {}
+    pub trait Drop { fn drop(&mut self); }
     pub trait Fn {}
     pub trait FnMut {}
     pub trait FnOnce {}

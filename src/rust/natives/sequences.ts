@@ -485,6 +485,14 @@ function joinStrings(ctx: NativeContext, self: Value, sep: Value): string {
   return parts.join(separator);
 }
 
+/** Drops the elements a collection removes, as their owner does. */
+function dropRemoved(ctx: NativeContext, removed: Value[]): void {
+  const { dropper } = ctx.interp;
+  if (!dropper.active) return;
+  const type = elemType(ctx);
+  for (const item of removed) dropper.drop(item, type);
+}
+
 const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   new: () => [],
   from_iter: ([iter], ctx) => collectVec(ctx, deref(iter) as IterValue, ctx.typeArgs[1], elemType(ctx)),
@@ -526,14 +534,14 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     swapOwnedElements(items, position, items.length - 1);
     return items.pop();
   },
-  truncate: ([self, len]) => {
+  truncate: ([self, len], ctx) => {
     const items = vec(self);
     const length = Number(len as bigint);
-    if (length < items.length) items.length = length;
+    if (length < items.length) dropRemoved(ctx, items.splice(length));
     return UNIT_VALUE;
   },
-  clear: ([self]) => {
-    vec(self).length = 0;
+  clear: ([self], ctx) => {
+    dropRemoved(ctx, vec(self).splice(0));
     return UNIT_VALUE;
   },
   extend: ([self, iter], ctx) => {

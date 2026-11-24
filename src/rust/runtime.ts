@@ -4,6 +4,7 @@ import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { Span } from './ast';
+import type { Dropper } from './drops';
 import { canReachTurtle, turtleCaptureRoots } from './turtleTypes';
 import { shallow, type Type, type TypeParam } from './types';
 import { utf8Reader } from './utf8';
@@ -60,8 +61,9 @@ export class Frame implements TracedFrame {
    */
   readonly referents = new Map<number, { place: Place; root: number; view?: (value: Value) => Value }>();
 
-  /** Ends the scope of variables, which leave the trace with the references to them. */
+  /** Ends the scope of variables, which leave the trace with the references to them, dropping their values. */
   endScope(slots: readonly number[]): void {
+    this.runtime.dropper?.dropSlots(this, slots);
     for (const slot of slots) {
       this.locals[slot] = UNASSIGNED;
       this.referents.delete(slot);
@@ -235,6 +237,9 @@ export class Runtime implements TracedRuntime<Frame> {
     this.write('stdout', '');
     this.write('stderr', '');
   }
+
+  /** Drops the values of variables whose scope ends, for programs with `Drop` impls. */
+  dropper: Dropper | undefined;
 
   pushFrame(frame: Frame): void {
     if (this.frames.length >= LIMITS.maxCallDepth) throw new StackOverflow();

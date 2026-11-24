@@ -3,6 +3,7 @@ import type { Checker } from './checker';
 import { type CallSupport, type ClosureCapture, type CompiledFn, Compiler } from './compiler';
 import { derefAll } from './compilerCommon';
 import type { WriteChunk } from './debugText';
+import { Dropper } from './drops';
 import { Formatter, type Spec } from './fmt';
 import { normalize } from './infer';
 import { compileError, type Module, type Program } from './items';
@@ -16,6 +17,7 @@ import {
   Frame,
   type FunctionInfo,
   OutOfMemory,
+  ProcessExit,
   type Runtime,
   RustPanic,
   StackOverflow,
@@ -73,6 +75,7 @@ export class Interpreter implements CallSupport {
   private readonly dispatchCache = new Map<string, Dispatch | undefined>();
   private readonly constValues = new Map<ConstDef, Map<string, Value>>();
   private readonly constFns = new Map<ConstDef, CompiledFn>();
+  readonly dropper: Dropper;
 
   constructor(
     readonly program: Program,
@@ -80,6 +83,10 @@ export class Interpreter implements CallSupport {
     tracing: boolean,
     private readonly beforeConstant?: (def: ConstDef) => void
   ) {
+    this.dropper = new Dropper(program, (fn, typeArgs, args) => {
+      const frame = this.runtime.frames.at(-1) as Frame;
+      return this.callFn(fn, typeArgs, args, undefined, { row: 0, col: 1 }, frame);
+    });
     this.compiler = new Compiler(program, checker, this, tracing);
     this.formatter = new Formatter({
       userFmt: (trait, type, value, spec, write) => this.userFmt(trait, type, value, spec, write),
@@ -240,17 +247,27 @@ export class Interpreter implements CallSupport {
     onEnd?: (frame: Frame, result: Value | undefined) => void
   ): Value {
     const { runtime } = this;
+    if (this.dropper.active) runtime.dropper ??= this.dropper;
     const frame = new Frame(runtime, compiled.info, callRow, typeArgs, captures);
     runtime.pushFrame(frame);
     let result: Value | undefined;
+    let exiting = false;
     try {
       runtime.withRoots(args, () => compiled.bind(frame, args));
       result = compiled.body(frame);
     } catch (error) {
+      exiting = error instanceof ProcessExit;
       if (!(error instanceof ControlSignal) || error.kind !== 'return') throw error;
       result = error.value;
     } finally {
       try {
+        // The parameters go when the function ends, after its body's variables; `process::exit` drops nothing.
+        if (!exiting && runtime.dropper) {
+          runtime.dropper.dropSlots(
+            frame,
+            compiled.info.locals.map((local) => local.slot).toSorted((a, b) => a - b)
+          );
+        }
         onEnd?.(frame, result);
       } finally {
         runtime.popFrame();

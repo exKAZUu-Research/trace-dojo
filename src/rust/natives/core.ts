@@ -340,7 +340,10 @@ define({
     place.set(defaultValue(ctx, ctx.typeArgs[0]));
     return old;
   },
-  'std::mem::drop': () => UNIT_VALUE,
+  'std::mem::drop': ([value], ctx) => {
+    ctx.interp.dropper.drop(value, ctx.typeArgs[0]);
+    return UNIT_VALUE;
+  },
   'std::convert::identity': ([x]) => x,
   'std::process::exit': ([code]) => {
     throw new ProcessExit(Number(code as bigint));
