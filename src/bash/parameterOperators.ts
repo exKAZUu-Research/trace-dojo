@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- Keeps Bash's parameter expansion operators and transformations in one module.
 import type { ParameterExpansion, WordPart } from './ast';
 import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
@@ -176,13 +177,32 @@ function defaultValue(
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || subscript === '@' || subscript === '*') {
     shell.discard(`$${name}: cannot assign in this way`);
   }
-  const resolved = subscript === undefined ? name : shell.resolveNameOrUndefined(name);
-  const assigned =
-    subscript === undefined
-      ? shell.assignScalar(name, text)
-      : resolved !== undefined && shell.assignElement(resolved, subscript, text, false);
-  if (!assigned) throw new DiscardSignal();
+  if (!assignDefaultTarget(shell, name, subscript, text)) throw new DiscardSignal();
   return expander.valuePieces({ kind: 'scalar', value: shell.lastStored }, inDouble);
+}
+
+function assignDefaultTarget(shell: Shell, name: string, subscript: string | undefined, text: string): boolean {
+  const resolved = shell.resolveNameOrUndefined(name);
+  if (resolved === undefined) return false;
+  if (subscript !== undefined) return shell.assignElement(resolved, subscript, text, false);
+  const split = shell.splitSubscript(resolved);
+  if (!split) return shell.assignScalar(name, text);
+  const arr = shell.resolveNameOrUndefined(split.name);
+  if (arr === undefined) return false;
+  if (split.subscript === '@' || split.subscript === '*')
+    return failDefaultSubscript(shell, `${arr}[${split.subscript}]`);
+  const sub = shell.expandDynamicSubscript(split.subscript);
+  if (shell.isAssociative(arr)) {
+    return sub === ''
+      ? failDefaultSubscript(shell, `${split.name}[${split.subscript}]`)
+      : shell.assignElement(arr, sub, text, false, true);
+  }
+  return shell.assignElement(arr, sub === '' && split.subscript !== '' ? '0' : sub, text, false);
+}
+
+function failDefaultSubscript(shell: Shell, label: string): false {
+  shell.reportError(`${label}: bad array subscript`);
+  return false;
 }
 
 function mapPatternRemoval(
