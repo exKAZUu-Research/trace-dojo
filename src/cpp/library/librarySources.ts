@@ -5,6 +5,7 @@ import { COMPLEX } from './sources/complex';
 import { COROUTINE } from './sources/coroutine';
 import { DISTRIBUTIONS } from './sources/distributions';
 import { EXCEPTION_PTR } from './sources/exceptionPtr';
+import { FILESYSTEM } from './sources/filesystem';
 import { FUNCTION } from './sources/functional';
 import { HASH } from './sources/hash';
 import { INITIALIZER_LIST } from './sources/initializerList';
@@ -57,6 +58,7 @@ export const LIBRARY_SOURCES: readonly LibrarySource[] = [
   SPAN,
   COMPLEX,
   RANGES,
+  FILESYSTEM,
 ];
 
 const SOURCES_BY_NAME = new Map<string, LibrarySource[]>();

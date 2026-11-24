@@ -44,6 +44,7 @@ import { constantsOf } from './constants';
 import { containerTemplates } from './containers';
 import { exceptionPointerFunctions } from './exceptionPointers';
 import { exceptionClasses } from './exceptions';
+import { filesystemFunctions } from './filesystem';
 import { formatFunctions } from './format';
 import {
   FLAGS,
@@ -92,7 +93,6 @@ const UNSUPPORTED_STD_NAMES: Record<string, string> = {
   new_handler: 'メモリ不足時のハンドラ（std::new_handler）',
   set_new_handler: 'メモリ不足時のハンドラ（std::set_new_handler）',
   get_new_handler: 'メモリ不足時のハンドラ（std::get_new_handler）',
-  filesystem: 'ファイルシステム（std::filesystem）',
   thread: 'スレッド（std::thread）',
   jthread: 'スレッド（std::jthread）',
   mutex: '排他制御（std::mutex）',
@@ -281,13 +281,21 @@ export class Library {
 
   /** Whether the included headers declare `std::name`. */
   declaresStd(name: string): boolean {
-    return isVisible(name, this.headers, 'std');
+    return this.isCompilingLibrary || isVisible(name, this.headers, 'std');
+  }
+
+  /**
+   * Whether the code being compiled is the library's C++ source, which sees all of `std` whatever headers the program
+   * includes, as a header of libc++ sees what it includes itself.
+   */
+  private get isCompilingLibrary(): boolean {
+    return this.compiler.isLibraryCode;
   }
 
   std(name: string): Entity | undefined {
     // The interpreter's own names, which only the library's C++ source uses, are not in the SDK's headers.
     if (name.startsWith(INTERNAL_PREFIX)) return this.stdNames.get(name);
-    if (!isVisible(name, this.headers, 'std')) return undefined;
+    if (!this.declaresStd(name)) return undefined;
     const entity = this.stdNames.get(name);
     if (entity?.kind === 'class') this.trackDefinition(name, classType(entity.cls));
     if (entity && entity.kind !== 'functions') return entity;
@@ -306,8 +314,8 @@ export class Library {
   }
 
   private stdFunctions(name: string, registered: FunctionInfo[]): FunctionInfo[] {
-    const templates = isSdkStdDeclared(name, this.headers, 'template');
-    const ordinary = isSdkStdDeclared(name, this.headers, 'function');
+    const templates = this.isCompilingLibrary || isSdkStdDeclared(name, this.headers, 'template');
+    const ordinary = this.isCompilingLibrary || isSdkStdDeclared(name, this.headers, 'function');
     const visible = registered.filter((fn) =>
       fn.isTemplate || this.nativeStdTemplates.has(fn) ? templates : ordinary
     );
@@ -473,6 +481,7 @@ export class Library {
     this.addFunctions(exceptionPointerFunctions(), this.stdNames);
     this.addFunctions(hashFunctions(), this.stdNames);
     this.addFunctions(bitCastFunctions(), this.stdNames);
+    this.addFunctions(filesystemFunctions(this), this.stdNames);
     const format = formatFunctions(this);
     this.addFunctions(format.functions, this.stdNames);
     this.addStd('format_args', { kind: 'class', cls: format.formatArgs });

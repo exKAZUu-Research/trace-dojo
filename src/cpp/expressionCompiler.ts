@@ -3388,6 +3388,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   /** `std::hash<T>` for a type, which the program may specialize. */
   abstract stdHash(type: Type): Type;
   abstract instantiateClassTemplate(info: ClassTemplateInfo, written: Type[], row: number): Type;
+  /** Whether the code being compiled is the library's C++ source, in `std`. */
+  abstract readonly isLibraryCode: boolean;
 
   /** The value default-initialization gives an object of a type. */
   abstract defaultInitializer(type: Type, row: number): Initializer;

@@ -3974,6 +3974,11 @@ export class Compiler extends CoroutineCompiler {
     return this.isLibraryInstance(cls, 'initializer_list');
   }
 
+  get isLibraryCode(): boolean {
+    for (let ns = this.namespace; ns; ns = ns.parent) if (ns === this.libraryNamespace) return true;
+    return false;
+  }
+
   stdHash(type: Type): Type {
     const entity = this.findStdName('hash');
     const template = entity?.kind === 'template' ? entity.template.program : undefined;

@@ -492,13 +492,17 @@ export abstract class CompilerBase {
   nestedNamespace(node: Syntax): Entity {
     let entity: Entity | undefined;
     for (const part of node.children) {
-      const found =
-        entity?.kind === 'namespace' && entity.ns
-          ? entity.ns.member(part.text)
-          : entity
-            ? undefined
+      let found: Entity | undefined;
+      if (entity?.kind === 'namespace')
+        // `std::filesystem` names a namespace of the library's C++ source.
+        found = entity.ns ? entity.ns.member(part.text) : this.findStdName(part.text);
+      else if (!entity)
+        found =
+          part.text === 'std' && !this.findInNamespaces('std')
+            ? { kind: 'namespace', name: 'std' }
             : this.findName(part.text, true);
-      if (found?.kind !== 'namespace' || !found.ns)
+      const isLast = part === node.children.at(-1);
+      if (found?.kind !== 'namespace' || (!found.ns && (isLast || entity)))
         return this.error(part.row, `${part.text} は名前空間ではありません。`);
       entity = found;
     }

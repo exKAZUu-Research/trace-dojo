@@ -16,7 +16,7 @@ import {
   NO_CONSTANT_MEMBERS,
   type TemporaryBinding,
 } from './expr';
-import { ExpressionCompiler } from './expressionCompiler';
+import { ExpressionCompiler, hasMemberNamed } from './expressionCompiler';
 import { SequenceValue } from './library/containerValues';
 import { bindRetainedTemporary, constructArray, initializeAt, withTemporaries, zeroOf } from './objectCompiler';
 import { expandPacks } from './packs';
@@ -1361,8 +1361,14 @@ export abstract class StatementCompiler extends ExpressionCompiler {
           };
       end = this.pointerOffset(begin, length, 1, row);
     } else if (rangeType.kind === 'class') {
-      begin = this.callWith(this.member(rangeRef, 'begin', row), [], row);
-      end = this.callWith(this.member(rangeRef, 'end', row), [], row);
+      // A class without the members takes the functions argument-dependent lookup finds (C++20 [stmt.ranged]p1).
+      const hasMembers = hasMemberNamed(rangeType.cls, 'begin') && hasMemberNamed(rangeType.cls, 'end');
+      begin = hasMembers
+        ? this.callWith(this.member(rangeRef, 'begin', row), [], row)
+        : this.rangeCall('begin', rangeRef, row);
+      end = hasMembers
+        ? this.callWith(this.member(rangeRef, 'end', row), [], row)
+        : this.rangeCall('end', rangeRef, row);
     } else {
       return this.error(row, `範囲 for 文では、${typeName(rangeType)} 型の値の要素を順に取り出せません。`);
     }
@@ -1418,6 +1424,29 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       body,
       bodyScope,
     };
+  }
+
+  /** `begin(range)` or `end(range)`, the functions of the range's namespace a range `for` calls. */
+  private rangeCall(name: string, range: Expr, row: number): Expr {
+    const functions = this.withArgumentDependentLookup(name, [], [range]);
+    if (functions.length === 0)
+      return this.error(
+        row,
+        `範囲 for 文では、${typeName(range.type)} 型の値の要素を順に取り出せません（${name} がありません）。`
+      );
+    const nameNode: Syntax = {
+      type: 'identifier',
+      text: name,
+      row,
+      endRow: row,
+      start: 0,
+      end: 0,
+      isNamed: true,
+      field: undefined,
+      all: [],
+      children: [],
+    };
+    return this.callWith(this.entityExpr({ kind: 'functions', functions }, nameNode, false), [range], row);
   }
 
   private bindRangeFor(range: Expr, row: number): { initializeRange: Eval<void>; rangeRef: Expr } {

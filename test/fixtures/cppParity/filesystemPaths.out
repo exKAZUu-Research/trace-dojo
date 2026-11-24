@@ -1,0 +1,17 @@
+"data/reports/2024.summary.txt" "2024.summary.txt" "2024.summary" ".txt" "data/reports"
+"data" 110
+"/usr/local/bin/" "" "/usr/local/bin" "/""usr/local/bin/"
+"a/c/d/" ".." "/a" "."
+"notes.txt" "dir/other" "x.tar"
+[/][a][b][c.txt]
+11
+1110
+811
+a.txt b.txt sub/ 
+work/a.txt work/b.txt work/sub work/sub/c.log work/sub/deep 
+10
+01
+10
+11
+6 6 0
+101
