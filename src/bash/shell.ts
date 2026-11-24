@@ -19,13 +19,17 @@ import { EXTERNAL_COMMANDS } from './externalCommands';
 import {
   BreakSignal,
   ContinueSignal,
+  createInitialShellState,
   DiscardSignal,
   ExitSignal,
   type Frame,
+  type FunctionDefinition,
   ObservationAbortError,
+  type OutputTarget,
   ReturnSignal,
   type Runtime,
   SCRIPT_NAME,
+  type ShellState,
 } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import {
@@ -33,12 +37,10 @@ import {
   applyCaseAttributes,
   AssociativeTable,
   buildDynamicDeclaration,
-  type CallFrameEntry,
   callStackElements,
   cloneScope,
   collectReachableStrings,
   type CompoundElement,
-  createInitialGlobalScope,
   deriveSubshellSeed,
   DYNAMIC_VARIABLES,
   dynamicArrayLength,
@@ -49,7 +51,6 @@ import {
   findOwnVariableInScopes,
   findVariableInScopes,
   hasNamerefCycleInScopes,
-  initialRandomSeed,
   isArrayVariable,
   isAssociativeVariable,
   isIdentifier,
@@ -73,47 +74,8 @@ import {
   type VariableValue,
 } from './variables';
 
+export { BASH_VERSION, type FunctionDefinition, type OutputTarget, type ShellState } from './runtime';
 export type { CompoundElement } from './variables';
-
-/** Where a file descriptor writes: the run's standard output or error, or the text a command substitution captures. */
-export interface OutputTarget {
-  write(text: string): void;
-}
-
-export interface FunctionDefinition {
-  name: string;
-  body: Statement;
-  isAtomic: boolean;
-  /** How far the lines Bash numbered the function with are behind its rows (see `Shell.lineShift`). */
-  lineShift: number;
-}
-
-export interface ShellState {
-  scopes: Scope[];
-  /** The scope index of each function call's own locals, the innermost last. */
-  functionScopes: number[];
-  functions: Map<string, FunctionDefinition>;
-  /** The positional parameters of the script and of each function call, the innermost last. */
-  positional: string[][];
-  calls: CallFrameEntry[];
-  funcname: Map<bigint, string>;
-  lastStatus: number;
-  pipeStatus: Map<bigint, string>;
-  /** `$_`, which starts as the path of Bash itself, so `undefined` until a command sets it. */
-  lastArgument: string | undefined;
-  randomSeed: number;
-  lastRandom: number;
-  subshellDraws: number;
-  /** The dynamic variables the program unset, which then lose their special meaning, as in Bash. */
-  unsetDynamic: Set<string>;
-  /** Host environment variable names explicitly cleared by `unset`, which then read as unset rather than unsupported. */
-  unsetEnv: Set<string>;
-  subshellLevel: number;
-  fd1: OutputTarget;
-  fd2: OutputTarget;
-}
-
-export const BASH_VERSION = '5.3.0(1)-release';
 
 /** Runs a parsed program as Bash 5.3 does. */
 export class Shell implements ArithmeticHost {
@@ -147,25 +109,7 @@ export class Shell implements ArithmeticHost {
   private readonlyFailure = false;
 
   constructor(readonly runtime: Runtime) {
-    this.state = {
-      scopes: [createInitialGlobalScope(BASH_VERSION)],
-      functionScopes: [],
-      functions: new Map(),
-      positional: [[]],
-      calls: [],
-      funcname: new Map([[0n, 'main']]),
-      lastStatus: 0,
-      pipeStatus: new Map(),
-      lastArgument: undefined,
-      randomSeed: initialRandomSeed(),
-      lastRandom: 0,
-      subshellDraws: 0,
-      unsetDynamic: new Set(),
-      unsetEnv: new Set(),
-      subshellLevel: 0,
-      fd1: runtime.io.stdout,
-      fd2: runtime.io.stderr,
-    };
+    this.state = createInitialShellState(runtime);
     this.expander = new Expander(this);
     runtime.reachableStrings = () =>
       collectReachableStrings([...this.suspended, this.state], this.activeOutputs, this.inFlight);
@@ -1427,13 +1371,24 @@ export class Shell implements ArithmeticHost {
         this.reportError(entry.error);
         continue;
       }
-      const base = entry.append ? (baseTable?.get(entry.key) ?? '') : '';
-      const converted = this.convertForAttributes(variable, entry.value, base, entry.append);
-      if (converted === undefined) return false;
-      this.checkLength(converted);
-      if (!table.has(entry.key)) this.chargeSlot();
-      table.set(entry.key, converted);
+      if (!this.storeAssociativeEntry(variable, table, baseTable, entry.key, entry.value, entry.append)) return false;
     }
+    return true;
+  }
+
+  private storeAssociativeEntry(
+    variable: Variable,
+    table: AssociativeTable,
+    baseTable: AssociativeTable | undefined,
+    key: string,
+    value: string,
+    append: boolean
+  ): boolean {
+    const converted = this.convertForAttributes(variable, value, append ? (baseTable?.get(key) ?? '') : '', append);
+    if (converted === undefined) return false;
+    this.checkLength(converted);
+    if (!table.has(key)) this.chargeSlot();
+    table.set(key, converted);
     return true;
   }
 
@@ -1463,6 +1418,9 @@ export class Shell implements ArithmeticHost {
       return false;
     }
     if (existing && this.rejectReadonlyElement(existing, resolved)) return false;
+    if (assignment.append && existing && isAssociativeVariable(existing)) {
+      return this.appendAssociativeCompound(existing, assignment.array as Word[], assignment.name);
+    }
     const { elements, error } = this.expander.expandCompound(
       assignment.array as Word[],
       isAssociativeVariable(existing),
@@ -1470,6 +1428,21 @@ export class Shell implements ArithmeticHost {
       assignment.name
     );
     const ok = this.assignCompound(resolved, elements, assignment.append);
+    if (error) this.discard(error);
+    return ok;
+  }
+
+  private appendAssociativeCompound(variable: Variable, words: Word[], reportedName: string): boolean {
+    ensureWritable(variable);
+    const table = variable.value?.kind === 'associative' ? variable.value.table : new AssociativeTable();
+    variable.value = { kind: 'associative', table };
+    variable.attributes.add('A');
+    variable.userAssigned = true;
+    let ok = true;
+    const error = this.expander.expandAssociativeAppend(words, reportedName, (key, value, append) => {
+      ok = this.storeAssociativeEntry(variable, table, table, key, value, append);
+      return ok;
+    });
     if (error) this.discard(error);
     return ok;
   }

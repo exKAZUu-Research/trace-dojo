@@ -3,9 +3,73 @@ import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
+import type { Statement } from './ast';
+import { type CallFrameEntry, createInitialGlobalScope, initialRandomSeed, type Scope } from './variables';
 
 /** The name Bash reports the program by, in `$0` and in its error messages. */
 export const SCRIPT_NAME = 'main.sh';
+
+export const BASH_VERSION = '5.3.0(1)-release';
+
+/** Where a file descriptor writes: the run's standard output or error, or the text a command substitution captures. */
+export interface OutputTarget {
+  write(text: string): void;
+}
+
+export interface FunctionDefinition {
+  name: string;
+  body: Statement;
+  isAtomic: boolean;
+  /** How far the lines Bash numbered the function with are behind its rows (see `Shell.lineShift`). */
+  lineShift: number;
+}
+
+export interface ShellState {
+  scopes: Scope[];
+  /** The scope index of each function call's own locals, the innermost last. */
+  functionScopes: number[];
+  functions: Map<string, FunctionDefinition>;
+  /** The positional parameters of the script and of each function call, the innermost last. */
+  positional: string[][];
+  calls: CallFrameEntry[];
+  funcname: Map<bigint, string>;
+  lastStatus: number;
+  pipeStatus: Map<bigint, string>;
+  /** `$_`, which starts as the path of Bash itself, so `undefined` until a command sets it. */
+  lastArgument: string | undefined;
+  randomSeed: number;
+  lastRandom: number;
+  subshellDraws: number;
+  /** The dynamic variables the program unset, which then lose their special meaning, as in Bash. */
+  unsetDynamic: Set<string>;
+  /** Host environment variable names explicitly cleared by `unset`, which then read as unset rather than unsupported. */
+  unsetEnv: Set<string>;
+  subshellLevel: number;
+  fd1: OutputTarget;
+  fd2: OutputTarget;
+}
+
+export function createInitialShellState(runtime: Runtime): ShellState {
+  return {
+    scopes: [createInitialGlobalScope(BASH_VERSION)],
+    functionScopes: [],
+    functions: new Map(),
+    positional: [[]],
+    calls: [],
+    funcname: new Map([[0n, 'main']]),
+    lastStatus: 0,
+    pipeStatus: new Map(),
+    lastArgument: undefined,
+    randomSeed: initialRandomSeed(),
+    lastRandom: 0,
+    subshellDraws: 0,
+    unsetDynamic: new Set(),
+    unsetEnv: new Set(),
+    subshellLevel: 0,
+    fd1: runtime.io.stdout,
+    fd2: runtime.io.stderr,
+  };
+}
 
 /** A frame of the trace: the program's top level, or a call of a function the program defines. */
 export interface Frame extends TracedFrame {

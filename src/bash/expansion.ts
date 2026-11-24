@@ -212,7 +212,22 @@ export class Expander {
     );
   }
 
-  private expandKeyedAssociative(words: Word[], reportedName: string): { elements: CompoundElement[]; error?: string } {
+  expandAssociativeAppend(
+    words: Word[],
+    reportedName: string,
+    onPair: (key: string, value: string, append: boolean) => boolean
+  ): string | undefined {
+    if (words.length === 0) return undefined;
+    if (splitKeyedElement(words[0])) return this.expandKeyedAssociative(words, reportedName, onPair).error;
+    this.expandAlternatingAssociative(words, onPair);
+    return undefined;
+  }
+
+  private expandKeyedAssociative(
+    words: Word[],
+    reportedName: string,
+    onPair?: (key: string, value: string, append: boolean) => boolean
+  ): { elements: CompoundElement[]; error?: string } {
     const elements: CompoundElement[] = [];
     for (const word of words) {
       const keyed = splitKeyedElement(word);
@@ -226,12 +241,17 @@ export class Expander {
       if (key === '') return { elements, error: `${word.text}: bad array subscript` };
       this.checkTilde(keyed.value, true);
       const value = this.joinPieces(this.expandParts(keyed.value, false));
-      elements.push({ key, value, append: keyed.append, rawText: word.text });
+      if (onPair) {
+        if (!onPair(key, value, keyed.append)) return { elements };
+      } else elements.push({ key, value, append: keyed.append, rawText: word.text });
     }
     return { elements };
   }
 
-  private expandAlternatingAssociative(words: Word[]): { elements: CompoundElement[] } {
+  private expandAlternatingAssociative(
+    words: Word[],
+    onPair?: (key: string, value: string, append: boolean) => boolean
+  ): { elements: CompoundElement[] } {
     const elements: CompoundElement[] = [];
     for (let i = 0; i < words.length; i += 2) {
       const key = this.expandAssignmentValue(words[i]);
@@ -239,9 +259,12 @@ export class Expander {
         this.shell.reportError(`${words[i].text}: bad array subscript`);
         continue;
       }
-      elements.push({ plain: key, rawText: words[i].text });
-      if (i + 1 < words.length) {
-        elements.push({ plain: this.expandAssignmentValue(words[i + 1]), rawText: words[i + 1].text });
+      const value = i + 1 < words.length ? this.expandAssignmentValue(words[i + 1]) : '';
+      if (onPair) {
+        if (!onPair(key, value, false)) return { elements };
+      } else {
+        elements.push({ plain: key, rawText: words[i].text });
+        if (i + 1 < words.length) elements.push({ plain: value, rawText: words[i + 1].text });
       }
     }
     return { elements };
