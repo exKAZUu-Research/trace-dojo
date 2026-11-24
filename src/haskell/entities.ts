@@ -36,6 +36,8 @@ export interface TypeEntity {
   fixity?: Fixity;
   /** For a type-level literal, the string or number it is. */
   literal?: string | bigint;
+  /** Whether a standalone kind signature specifies the type's kind variables with `forall`, which `T @k` sets. */
+  kindSpecified?: boolean;
   /** For a data constructor used as a type, as DataKinds promotes it, the constructor. */
   promotedFrom?: ConInfo;
   /** How the type prints when it is special syntax: lists, tuples, unit, functions, and a class's arguments. */

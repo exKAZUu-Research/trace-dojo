@@ -55,6 +55,15 @@ export type RExpr = (
   | { k: 'recordUpdate'; expr: RExpr; fields: RFieldBind[]; span: Span; cons?: ConInfo[] }
   | { k: 'hole'; name: string; span: Span }
   | { k: 'tyapp'; expr: RExpr; typeArg: RType | undefined; span: Span }
+  | { k: 'implicit'; name: string; span: Span; evidence?: Evidence }
+  | {
+      k: 'implicitLet';
+      binds: { name: string; expr: RExpr; span: Span }[];
+      body: RExpr;
+      span: Span;
+      /** The dictionaries the bindings give the body, one per binding, which hold their values. */
+      dictParams?: DictParam[];
+    }
   /** `e.field`, whose evidence selects the field of the record `e`. */
   | { k: 'projection'; expr: RExpr; field: string; span: Span; evidence?: Evidence }
   /** An expression checked against a polymorphic type with constraints, which takes their dictionaries. */
@@ -145,7 +154,8 @@ export type RType =
   | { k: 'fun'; from: RType; to: RType; span: Span }
   /** A type with a kind annotation, `(t :: k)`; kinds are types whose constructors are `Type` and `Constraint`. */
   | { k: 'kinded'; type: RType; kind: RType; span: Span }
-  | { k: 'forall'; binders: RBinder[]; context: RConstraint[]; body: RType; span: Span };
+  | { k: 'forall'; binders: RBinder[]; context: RConstraint[]; body: RType; span: Span }
+  | { k: 'kindapp'; type: RType; kind: RType; span: Span };
 
 export type RConstraint = RType;
 
@@ -161,6 +171,7 @@ export interface RBinder {
   name: string;
   kind?: RType;
   inferred?: boolean;
+  required?: boolean;
 }
 
 export interface RGuarded {
@@ -192,6 +203,8 @@ export type RStmt =
   | { k: 'exp'; expr: RExpr; span: Span };
 
 export interface RClause {
+  /** The type variables `@a` binds before the clause's patterns, in order. */
+  typeBinders?: string[];
   pats: RPat[];
   rhs: RRhs;
   span: Span;

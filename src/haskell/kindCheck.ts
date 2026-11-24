@@ -137,6 +137,7 @@ function prepareDeclarations(checker: Checker, module: RModule): KindDeclaration
     declarations.push({ kind: 'class', decl });
   }
   for (const { entity, kind, span } of module.kindSigs) {
+    if (kind.k === 'forall' && 'sort' in entity) entity.kindSpecified = true;
     const given = checker.kindOf(kind, new Map());
     const actual = 'tyvarKind' in entity ? arrowKind(classParamKinds(entity), CONSTRAINT) : (entity as TypeEntity).kind;
     if (!unifyKinds(actual, given)) {
@@ -370,7 +371,7 @@ function* typeEntities(types: readonly RType[]): Generator<TypeEntity | ClassEnt
     if (type.k === 'con' || type.k === 'class') yield type.entity;
     else if (type.k === 'app') work.push(type.fn, type.arg);
     else if (type.k === 'fun') work.push(type.from, type.to);
-    else if (type.k === 'kinded') work.push(type.type);
+    else if (type.k === 'kinded' || type.k === 'kindapp') work.push(type.type);
     else if (type.k === 'forall') work.push(type.body, ...type.context);
     else if (type.k === 'tuple') for (const elem of type.elems) work.push(elem);
   }

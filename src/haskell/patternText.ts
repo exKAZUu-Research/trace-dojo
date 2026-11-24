@@ -51,6 +51,9 @@ export function surfacePatternText(pat: Pat): string {
     case 'psig': {
       return surfacePatternText(pat.pat);
     }
+    case 'ptybinder': {
+      return `@${pat.name.name}`;
+    }
   }
 }
 

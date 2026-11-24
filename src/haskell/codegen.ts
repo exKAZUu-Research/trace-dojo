@@ -812,6 +812,18 @@ export class Codegen {
       case 'tyapp': {
         return this.compileExpr(expr.expr);
       }
+      case 'implicit': {
+        return this.compileEvidence(expr.evidence as Evidence);
+      }
+      case 'implicitLet': {
+        const binds = (expr.dictParams ?? []).map((param, index) => {
+          const slot = this.frame.alloc();
+          const code = this.compileExpr(expr.binds[index].expr);
+          this.frame.slots.set(param, slot);
+          return { index: slot, expr: code };
+        });
+        return { k: 'let', binds, body: this.compileExpr(expr.body) };
+      }
       case 'projection': {
         return { k: 'app', fn: this.compileEvidence(expr.evidence as Evidence), args: [this.compileExpr(expr.expr)] };
       }

@@ -143,6 +143,23 @@ HAS_FIELD_TYPES.kind = kindArrow(
   kindArrow(STAR, kindArrow(STAR, STAR))
 );
 
+/** The types an implicit parameter's constraint `?x :: t` packs: its name and its type. */
+export const IMPLICIT_TYPES: TypeEntity = { ...primType('?', 2), special: 'classArguments' };
+
+/** The class of implicit parameters, whose evidence is the parameter's value, which `let ?x = e` gives. */
+export const IMPLICIT_CLASS: ClassEntity = {
+  id: nextId(),
+  name: '?',
+  module: BUILTIN_MODULE,
+  tyvarKind: STAR,
+  packed: IMPLICIT_TYPES,
+  supers: [],
+  methods: [],
+  defaults: [],
+  fundeps: [{ from: [0], to: [1] }],
+};
+IMPLICIT_TYPES.kind = kindArrow({ tag: 'data', entity: SYMBOL_TYPE, args: [] }, kindArrow(STAR, STAR));
+
 /** The kind of types, `Type` (or `*`), which Data.Kind exports and kind signatures name. */
 export const TYPE_KIND: TypeEntity = primType('Type', 0);
 /** The kind of constraints, `Constraint`, which Data.Kind exports. */

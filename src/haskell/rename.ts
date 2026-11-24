@@ -3,6 +3,7 @@ import {
   CONS_CON,
   EQUALITY_CLASS,
   FUNCTION_TYPE,
+  IMPLICIT_CLASS,
   LIST_TYPE,
   naturalType,
   NIL_CON,
@@ -765,6 +766,15 @@ class Renamer {
     const like = this.ownTypes.get(decl.name.name) as { kind: 'type'; entity: TypeEntity };
     const entity = like.entity;
     const params = checkTypeParams(decl.params);
+    if (
+      decl.invisibleBinders &&
+      !this.module.decls.some((other) => other.kind === 'kindSig' && other.name.name === decl.name.name)
+    ) {
+      throw compileError(
+        decl.span,
+        `@ で種類の変数を束縛する ${decl.name.name} には、独立した種類のシグネチャが要ります。`
+      );
+    }
     const extra = Array.from({ length: entity.arity - decl.params.length }, (_, index) => ` p${index}`);
     const cons = decl.cons.map((conDecl, index): RConDecl => {
       const con = entity.cons[index];
@@ -1121,6 +1131,7 @@ class Renamer {
         const entity = binding.entities[0];
         const renamed = this.renameFunBinding(binding, { kind: 'global', entity }, scope);
         renamed.sig = sigs.get(binding.names[0].name);
+        withRequiredTypeArguments(renamed);
         return renamed;
       }
       const renamed = this.renamePatBinding(binding, scope, (name) => this.ownValues.get(name.name) as ValueEntity);
@@ -1151,9 +1162,19 @@ class Renamer {
     const clauses: RClause[] = raw.clauses.map((clause) => {
       const clauseScope = new LocalScope(scope);
       const binders = new Map<string, LocalVar>();
-      const pats = clause.args.map((pat) => this.renamePat(pat, binders, scope));
+      let leading = 0;
+      while (clause.args[leading]?.kind === 'ptybinder') leading++;
+      const typeBinders = clause.args
+        .slice(0, leading)
+        .map((pat) => (pat as Extract<Pat, { kind: 'ptybinder' }>).name.name);
+      const pats = clause.args.slice(leading).map((pat) => this.renamePat(pat, binders, scope));
       for (const [name, local] of binders) clauseScope.define(name, local);
-      return { pats, rhs: this.renameRhs(clause.rhs, clauseScope), span: clause.span };
+      return {
+        ...(typeBinders.length > 0 ? { typeBinders } : {}),
+        pats,
+        rhs: this.renameRhs(clause.rhs, clauseScope),
+        span: clause.span,
+      };
     });
     return { k: 'fun', binder, clauses, span: raw.span };
   }
@@ -1209,6 +1230,7 @@ class Renamer {
         const local = scope.vars.get(binding.names[0].name) as LocalVar;
         const renamed = this.renameFunBinding(binding, { kind: 'local', local }, scope);
         renamed.sig = sigs.get(local.name);
+        withRequiredTypeArguments(renamed);
         return renamed;
       }
       const renamed = this.renamePatBinding(binding, scope);
@@ -1267,6 +1289,26 @@ class Renamer {
       }
       case 'projection': {
         return { k: 'projection', expr: this.renameExpr(expr.expr, scope), field: expr.field, span };
+      }
+      case 'implicit': {
+        return { k: 'implicit', name: expr.name, span };
+      }
+      case 'implicitLet': {
+        const names = new Set<string>();
+        for (const bind of expr.binds) {
+          if (names.has(bind.name)) throw compileError(bind.span, `暗黙のパラメータ ?${bind.name} が重複しています。`);
+          names.add(bind.name);
+        }
+        return {
+          k: 'implicitLet',
+          binds: expr.binds.map((bind) => ({
+            name: bind.name,
+            expr: this.renameExpr(bind.expr, scope),
+            span: bind.span,
+          })),
+          body: this.renameExpr(expr.body, scope),
+          span,
+        };
       }
       case 'support': {
         return { k: 'var', ref: { kind: 'global', entity: this.supportValue(expr.name, span) }, name: expr.name, span };
@@ -1594,6 +1636,9 @@ class Renamer {
       case 'pbang': {
         return { k: 'bang', pat: this.renamePat(pat.pat, binders, scope), span };
       }
+      case 'ptybinder': {
+        throw unsupportedError(span, '関数の最初の引数以外での @ による型の束縛');
+      }
       case 'psig': {
         const vars = new Set<string>();
         collectTypeVars(pat.type, vars);
@@ -1720,7 +1765,12 @@ class Renamer {
     for (const constraint of sig.context) collectTypeVars(constraint, vars);
     const forall = sig.forall?.map((binder) => {
       vars.add(binder.name.name);
-      return { name: binder.name.name, kind: binder.kind && this.renameKind(binder.kind), inferred: binder.inferred };
+      return {
+        name: binder.name.name,
+        kind: binder.kind && this.renameKind(binder.kind),
+        inferred: binder.inferred,
+        required: binder.required,
+      };
     });
     return {
       context: sig.context.map((constraint) => this.renameType(constraint, vars)),
@@ -1786,6 +1836,22 @@ class Renamer {
         let result: RType = { k: 'con', entity: promotedType(tupleCon(type.elems.length)), span };
         for (const elem of type.elems) result = { k: 'app', fn: result, arg: this.renameType(elem, vars), span };
         return result;
+      }
+      case 'tkindapp': {
+        return { k: 'kindapp', type: this.renameType(type.type, vars), kind: this.renameKind(type.kindArg), span };
+      }
+      case 'timplicit': {
+        return {
+          k: 'app',
+          fn: {
+            k: 'app',
+            fn: { k: 'class', entity: IMPLICIT_CLASS, span },
+            arg: { k: 'con', entity: symbolType(type.name), span },
+            span,
+          },
+          arg: this.renameType(type.type, vars),
+          span,
+        };
       }
       case 'tlit': {
         return {
@@ -2077,6 +2143,24 @@ function rtypeKey(type: RType): string {
   return walk(type);
 }
 
+/**
+ * Reads the patterns at the positions of a signature's `forall a ->` binders as the type variables they bind, as
+ * RequiredTypeArguments does: the arguments there are types, which run time does not pass.
+ */
+function withRequiredTypeArguments(binding: Extract<RBinding, { k: 'fun' }>): void {
+  const required = binding.sig?.forall?.filter((binder) => binder.required).length ?? 0;
+  if (required === 0) return;
+  for (const clause of binding.clauses) {
+    const names = clause.pats.slice(0, required).map((pat) => {
+      if (pat.k === 'var') return pat.local.name;
+      if (pat.k === 'wild') return '_';
+      throw compileError(pat.span, '型を受け取る引数には、変数を書いてください。');
+    });
+    clause.typeBinders = [...(clause.typeBinders ?? []), ...names];
+    clause.pats = clause.pats.slice(required);
+  }
+}
+
 function classParamIndex(decl: Extract<Decl, { kind: 'class' }>, name: Name): number {
   const index = decl.params.findIndex((param) => param.name === name.name);
   if (index === -1) throw compileError(name.span, `関数従属性の ${name.name} は、クラスの型変数ではありません。`);
@@ -2363,6 +2447,14 @@ export function collectTypeVars(type: TypeExpr, into: Set<string>): void {
       collectTypeVars(type.type, into);
       break;
     }
+    case 'timplicit': {
+      collectTypeVars(type.type, into);
+      break;
+    }
+    case 'tkindapp': {
+      collectTypeVars(type.type, into);
+      break;
+    }
     case 'tforall': {
       const inner = new Set<string>();
       collectTypeVars(type.body, inner);
@@ -2395,7 +2487,8 @@ function rtypeMentions(type: RType, name: string): boolean {
     case 'fun': {
       return rtypeMentions(type.from, name) || rtypeMentions(type.to, name);
     }
-    case 'kinded': {
+    case 'kinded':
+    case 'kindapp': {
       return rtypeMentions(type.type, name);
     }
     case 'forall': {

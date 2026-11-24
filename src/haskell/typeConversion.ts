@@ -151,6 +151,19 @@ export class TypeConversion {
         const kind = this.kindOf(type.kind, new Map());
         return { type: this.convert(type.type, vars, varKinds, kind), kind };
       }
+      case 'kindapp': {
+        let base: RType = type.type;
+        while (base.k === 'app' || base.k === 'kindapp') base = base.k === 'app' ? base.fn : base.type;
+        if (base.k !== 'con' || !base.entity.kindSpecified) {
+          throw compileError(type.span, '種類の変数を決めていない型には、@ で種類を渡せません。');
+        }
+        const head = this.convertTypeKind(type.type, vars, varKinds);
+        const parameter = pruneKind(head.kind);
+        if (parameter.tag !== 'arrow' || !unifyKinds(parameter.from, this.kindOf(type.kind, new Map()))) {
+          throw compileError(type.span, '型の種類（カインド）が合いません（種類の適用）。');
+        }
+        return head;
+      }
       case 'forall': {
         const kindVars = new Map<string, Kind>();
         const bound = type.binders.map((binder): TVar => ({
@@ -194,6 +207,10 @@ export class TypeConversion {
       }
       case 'kinded': {
         return this.kindOf(type.type, kindVars);
+      }
+      case 'forall': {
+        for (const binder of type.binders) kindVars.set(binder.name, freshKindVar());
+        return this.kindOf(type.body, kindVars);
       }
       case 'con':
       case 'app': {

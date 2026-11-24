@@ -7,6 +7,8 @@ import {
   FUNCTION_TYPE,
   HAS_FIELD_CLASS,
   HAS_FIELD_TYPES,
+  IMPLICIT_CLASS,
+  IMPLICIT_TYPES,
   LIST_TYPE,
   symbolType,
   tupleCon,
@@ -261,6 +263,18 @@ export class Checker {
           continue;
         }
         if (literal.tag === 'tcon' || literal.tag === 'tap') this.noInstance(hole);
+      }
+      if (pred.cls === IMPLICIT_CLASS) {
+        const [name, type] = splitApp(pred.type).args;
+        const given = givens.find(
+          (candidate) =>
+            candidate.pred.cls === IMPLICIT_CLASS && typesEqual(splitApp(candidate.pred.type).args[0], name)
+        );
+        if (given) {
+          this.unify(type, splitApp(given.pred.type).args[1], hole.span, `暗黙のパラメータ（${hole.origin}）`);
+          hole.solution = given.evidence;
+          continue;
+        }
       }
       if (pred.cls === HAS_FIELD_CLASS) {
         const solution = this.solveHasField(pred, hole.span);
@@ -567,6 +581,28 @@ export class Checker {
       }
       case 'poly': {
         return this.inferExpr(expr.expr);
+      }
+      case 'implicit': {
+        const type = this.freshVar();
+        expr.evidence = this.want(
+          { cls: IMPLICIT_CLASS, type: tap(tcon(IMPLICIT_TYPES), tcon(symbolType(expr.name)), type) },
+          expr.span,
+          `?${expr.name} の使用`
+        );
+        return type;
+      }
+      case 'implicitLet': {
+        const params = expr.binds.map((bind) =>
+          newDictParam({
+            cls: IMPLICIT_CLASS,
+            type: tap(tcon(IMPLICIT_TYPES), tcon(symbolType(bind.name)), this.inferExpr(bind.expr)),
+          })
+        );
+        expr.dictParams = params;
+        return this.withGivens(
+          params.map((param) => ({ pred: param.pred, evidence: { kind: 'param', param } as Evidence })),
+          () => this.inferExpr(expr.body)
+        );
       }
       case 'projection': {
         const record = this.inferExpr(expr.expr);
@@ -1136,7 +1172,15 @@ export class Checker {
     }
   }
 
-  private inferBindingBody(binding: RBinding, type: Type): void {
+  /**
+   * @param signature The signature's scheme and its rigid types, which the type variables `@a` of the clauses bind, in
+   * the order the signature specifies its variables.
+   */
+  private inferBindingBody(
+    binding: RBinding,
+    type: Type,
+    signature?: { scheme: Scheme; skolems: readonly Type[] }
+  ): void {
     if (binding.k === 'pat') {
       this.inferPat(binding.pat, type);
       this.checkRhs(binding.rhs, type);
@@ -1144,15 +1188,23 @@ export class Checker {
     }
     binding.type = type;
     for (const clause of binding.clauses) {
-      this.inPatternScope(() => {
-        let remaining = type;
-        for (const pat of clause.pats) {
-          const { param, result } = this.splitFunction(remaining, clause.span, `${bindingLabel(binding)} の引数`);
-          this.inferPat(pat, param);
-          remaining = result;
-        }
-        this.checkRhs(clause.rhs, remaining);
-      });
+      const bound = new Map<string, Type>();
+      for (const [position, name] of (clause.typeBinders ?? []).entries()) {
+        const index = signature?.scheme.specified?.[position];
+        if (index === undefined) typeError(clause.span, '@ で型変数を束縛するには、型シグネチャに forall が要ります。');
+        if (name !== '_') bound.set(name, signature?.skolems[index] as Type);
+      }
+      this.withScopedTypes(bound, () =>
+        this.inPatternScope(() => {
+          let remaining = type;
+          for (const pat of clause.pats) {
+            const { param, result } = this.splitFunction(remaining, clause.span, `${bindingLabel(binding)} の引数`);
+            this.inferPat(pat, param);
+            remaining = result;
+          }
+          this.checkRhs(clause.rhs, remaining);
+        })
+      );
     }
   }
 
@@ -1171,7 +1223,9 @@ export class Checker {
     for (const scc of dependencyOrder(implicit)) this.inferImplicit(scc);
     for (const { binding, scheme } of explicit) {
       binding.dictParams = this.checkAgainstScheme(scheme, (type, skolems) =>
-        this.withScopedTypes(this.forallScope(binding.sig, skolems), () => this.inferBindingBody(binding, type))
+        this.withScopedTypes(this.forallScope(binding.sig, skolems), () =>
+          this.inferBindingBody(binding, type, { scheme, skolems })
+        )
       );
     }
   }
@@ -1412,6 +1466,25 @@ export class Checker {
     return params;
   }
 
+  /** Checks a construct under given constraints, solving what it wants with them, as `let ?x = e` does. */
+  private withGivens<T>(givens: { pred: Pred; evidence: Evidence }[], run: () => T): T {
+    const outer = this.level;
+    const saved = this.wanted;
+    this.wanted = [];
+    this.level++;
+    const result = run();
+    this.level = outer;
+    const inner = this.wanted;
+    this.wanted = saved;
+    const { retained, deferred } = this.simplify(inner, outer, givens);
+    for (const hole of [...retained, ...deferred]) {
+      const evidence = entailByGivens(givens, hole.pred);
+      if (evidence) hole.solution = evidence;
+      else this.wanted.push(hole);
+    }
+    return result;
+  }
+
   /**
    * Assumes a given equality `a ~ t` while the constraints of its scope are checked: a rigid variable on one side
    * stands for the other side. The returned variables are the ones to restore afterwards.
@@ -1546,7 +1619,7 @@ export function typeVarNames(types: readonly RType[]): string[] {
     } else if (type.k === 'fun') {
       collect(type.from);
       collect(type.to);
-    } else if (type.k === 'kinded') {
+    } else if (type.k === 'kinded' || type.k === 'kindapp') {
       collect(type.type);
     } else if (type.k === 'forall') {
       const inner = typeVarNames([type.body, ...type.context]);

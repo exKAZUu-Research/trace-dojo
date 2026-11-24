@@ -72,6 +72,10 @@ export type Expr =
   | { kind: 'paren'; expr: Expr; span: Span }
   /** A visible type application, `f @Int`, or `f @_`, which leaves the argument to inference. */
   | { kind: 'tyapp'; expr: Expr; type?: TypeExpr; span: Span }
+  /** An implicit parameter, `?x`. */
+  | { kind: 'implicit'; name: string; span: Span }
+  /** `let ?x = e in body`, which gives the body the implicit parameters. */
+  | { kind: 'implicitLet'; binds: { name: string; expr: Expr; span: Span }[]; body: Expr; span: Span }
   /** `e.field`, which OverloadedRecordDot reads as `getField @"field" e`. */
   | { kind: 'projection'; expr: Expr; field: string; span: Span }
   /** A library value that code the conversion generates refers to, whatever the program's scope has. */
@@ -106,7 +110,9 @@ export type Pat =
   | { kind: 'pview'; expr: Expr; exprText: string; pat: Pat; span: Span }
   | { kind: 'por'; alts: Pat[]; span: Span }
   /** A pattern with a type signature, `(x :: Int)`, which may bind the type variables it names. */
-  | { kind: 'psig'; pat: Pat; type: TypeExpr; span: Span };
+  | { kind: 'psig'; pat: Pat; type: TypeExpr; span: Span }
+  /** `@a` among a function's arguments, which binds the type variable the signature's `forall` has there. */
+  | { kind: 'ptybinder'; name: Name; span: Span };
 
 /** A type variable a `forall` or a declaration binds, with the kind it gives, as `(f :: Type -> Type)`. */
 export interface TyVarBinder {
@@ -114,6 +120,8 @@ export interface TyVarBinder {
   kind?: TypeExpr;
   /** Whether the binder is `{a}`, which type applications skip. */
   inferred?: boolean;
+  /** Whether the binder is of `forall a ->`, whose argument callers pass visibly, `f (type Int)`. */
+  required?: boolean;
 }
 
 export type TypeExpr =
@@ -124,6 +132,10 @@ export type TypeExpr =
   | { kind: 'tpromoted'; name: QName; span: Span }
   /** A type-level list, `'[a, b]`, or tuple, `'(a, b)`. */
   | { kind: 'tpromotedList' | 'tpromotedTuple'; elems: TypeExpr[]; span: Span }
+  /** A type applied to a kind, `Proxy @Type`, which fixes the kind of its parameter. */
+  | { kind: 'tkindapp'; type: TypeExpr; kindArg: TypeExpr; span: Span }
+  /** An implicit parameter's constraint, `?x :: t`. */
+  | { kind: 'timplicit'; name: string; type: TypeExpr; span: Span }
   /** A type-level literal, `3` or `"name"`. */
   | { kind: 'tlit'; value: bigint | string; span: Span }
   /** Types joined by type operators, `a :+: b`, before fixity resolution. */
@@ -217,6 +229,8 @@ export type Decl =
       paramKinds?: (TypeExpr | undefined)[];
       /** The kind `data T :: k where` gives the type. */
       kindSig?: TypeExpr;
+      /** Whether the head binds a kind variable invisibly, `data T @k (a :: k)`, which needs a kind signature. */
+      invisibleBinders?: boolean;
       cons: ConDecl[];
       deriving: DerivingClause[];
       span: Span;

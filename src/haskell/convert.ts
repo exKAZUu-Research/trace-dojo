@@ -40,20 +40,13 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   binding_list: 'パターンシノニム',
   constructor_synonym: 'パターンシノニム',
   constructor_synonyms: 'パターンシノニム',
-  explicit_type: 'type を付けた型引数（RequiredTypeArguments）',
-  forall_required: 'forall',
   group: 'TransformListComp の内包表記',
   transform: 'TransformListComp の内包表記',
-  implicit_parameter: '暗黙のパラメータ（?x）',
-  implicit_variable: '暗黙のパラメータ（?x）',
-  invisible: '型変数の明示的な束縛（@a）',
-  kind_application: '種類の適用（@k）',
   linear_function: '線形型（%1 ->）',
   modifier: '多重度の注釈（%1）',
   pattern_synonym: 'パターンシノニム',
   role_annotation: '型の役割の注釈（type role）',
   type_role: '型の役割の注釈（type role）',
-  type_binder: 'パターンの型の束縛（@a）',
   unboxed_sum: 'ボックス化されない和型',
   unboxed_tuple: 'ボックス化されないタプル',
   unboxed_unit: 'ボックス化されないタプル',
@@ -554,10 +547,10 @@ function convertFunction(node: Node): Decl {
 }
 
 function convertBind(node: Node): Decl {
-  for (const name of ['implicit', 'multiplicity']) {
-    const child = field(node, name);
-    if (child) throw unsupported(child);
-  }
+  const implicitName = field(node, 'implicit');
+  if (implicitName) throw syntaxError(spanOf(implicitName), '暗黙のパラメータは、let ... in の中でだけ束縛できます。');
+  const multiplicity = field(node, 'multiplicity');
+  if (multiplicity) throw unsupported(multiplicity);
   if (field(node, 'arrow')) throw syntaxError(spanOf(node), '<- は、do の中にだけ書けます。');
   const rhs = convertRhs(node, '=');
   const nameNode = field(node, 'name');
@@ -658,6 +651,7 @@ function convertData(node: Node, isInstance = false): Decl {
   }
   return {
     ...(kindNode ? { kindSig: convertKind(kindNode) } : {}),
+    ...(hasInvisibleBinder(node) ? { invisibleBinders: true } : {}),
     kind: 'data',
     name: typeDeclName(node),
     params: isInstance ? [] : typeParams(node),
@@ -899,6 +893,11 @@ function typeDeclName(node: Node): Name {
   return plainName(nameNode);
 }
 
+function requireImplicitParams(span: Span): void {
+  if (!extensions.has('ImplicitParams'))
+    throw syntaxError(span, '暗黙のパラメータを使うには、ImplicitParams の拡張が要ります。');
+}
+
 function requireDataKinds(span: Span): void {
   if (!extensions.has('DataKinds'))
     throw syntaxError(span, '型の中で構成子やリテラルを使うには、DataKinds の拡張が要ります。');
@@ -948,9 +947,28 @@ function typeParamBinders(node: Node): TyVarBinder[] {
     ...headBinders,
     ...fields(node, 'patterns').flatMap((patterns) => {
       if (patterns.type !== 'type_params') throw unsupported(patterns);
-      return namedChildren(patterns).map(convertBinder);
+      // `@k` binds a kind variable, which the kinds of the other parameters name.
+      return namedChildren(patterns)
+        .filter((param) => {
+          if (param.type !== 'invisible') return true;
+          requireTypeAbstractions(spanOf(param));
+          return false;
+        })
+        .map(convertBinder);
     }),
   ];
+}
+
+function hasInvisibleBinder(node: Node): boolean {
+  return fields(node, 'patterns').some((patterns) =>
+    namedChildren(patterns).some((param) => param.type === 'invisible')
+  );
+}
+
+function requireTypeAbstractions(span: Span): void {
+  if (!extensions.has('TypeAbstractions')) {
+    throw syntaxError(span, '@ による型変数の束縛には、TypeAbstractions の拡張が要ります。');
+  }
 }
 
 /** A type variable binder: `a`, `(a :: k)`, or `{a}`, which a `forall` or a declaration's head binds. */
@@ -1271,6 +1289,19 @@ function convertInstance(node: Node): Decl {
 // Types
 
 function convertSigType(node: Node): SigType {
+  if (node.type === 'forall_required') {
+    if (!extensions.has('RequiredTypeArguments')) {
+      throw syntaxError(spanOf(node), 'forall a -> を使うには、RequiredTypeArguments の拡張が要ります。');
+    }
+    const variables = required(node, 'variables');
+    const inner = convertSigType(required(node, 'type'));
+    if (inner.forall) throw unsupportedError(spanOf(node), '入れ子の forall');
+    return {
+      ...inner,
+      forall: namedChildren(variables).map((binder) => ({ ...convertBinder(binder), required: true })),
+      span: spanOf(node),
+    };
+  }
   if (node.type === 'forall') {
     if (!extensions.has('ExplicitForAll')) {
       throw syntaxError(spanOf(node), 'forall を使うには、ExplicitForAll の拡張が要ります。');
@@ -1322,6 +1353,17 @@ function constraintsOf(node: Node): Constraint[] {
     case 'infix_chain': {
       return [convertType(node)];
     }
+    case 'implicit_parameter': {
+      requireImplicitParams(spanOf(node));
+      return [
+        {
+          kind: 'timplicit',
+          name: required(node, 'name').text.slice(1),
+          type: convertType(required(node, 'type')),
+          span: spanOf(node),
+        },
+      ];
+    }
     default: {
       throw unsupportedError(spanOf(node), 'この形の制約');
     }
@@ -1365,7 +1407,17 @@ function convertType(node: Node): TypeExpr {
     }
     case 'apply': {
       const constructor = field(node, 'constructor') ?? required(node, 'function');
-      return { kind: 'tapp', fn: convertType(constructor), arg: convertType(required(node, 'argument')), span };
+      const argument = required(node, 'argument');
+      if (argument.type === 'kind_application') {
+        requireTypeAbstractions(spanOf(argument));
+        return {
+          kind: 'tkindapp',
+          type: convertType(constructor),
+          kindArg: convertKind(required(argument, 'type')),
+          span,
+        };
+      }
+      return { kind: 'tapp', fn: convertType(constructor), arg: convertType(argument), span };
     }
     case 'function': {
       const parameter = required(node, 'parameter');
@@ -1474,6 +1526,15 @@ export function convertExpr(node: Node): Expr {
     case 'apply': {
       const fn = required(node, 'function');
       const argument = required(node, 'argument');
+      if (argument.type === 'explicit_type') {
+        if (!extensions.has('RequiredTypeArguments') || !extensions.has('ExplicitNamespaces')) {
+          throw syntaxError(
+            spanOf(argument),
+            '(type t) を使うには、RequiredTypeArguments と ExplicitNamespaces の拡張が要ります。'
+          );
+        }
+        return { kind: 'tyapp', expr: convertExpr(fn), type: convertType(required(argument, 'type')), span };
+      }
       if (argument.type === 'type_application') {
         if (!extensions.has('TypeApplications')) {
           throw syntaxError(spanOf(argument), '型の適用（@）を使うには、TypeApplications の拡張が要ります。');
@@ -1551,12 +1612,34 @@ export function convertExpr(node: Node): Expr {
       return lambdaOf([name], body, span);
     }
     case 'let_in': {
+      const bindsNode = field(node, 'binds');
+      const implicitBinds = bindsNode ? namedChildren(bindsNode).filter((decl) => field(decl, 'implicit')) : [];
+      if (implicitBinds.length > 0) {
+        requireImplicitParams(span);
+        if (implicitBinds.length !== namedChildren(bindsNode as Node).length) {
+          throw syntaxError(span, '暗黙のパラメータの束縛と、ふつうの束縛は、同じ let には書けません。');
+        }
+        return {
+          kind: 'implicitLet',
+          binds: implicitBinds.map((decl) => ({
+            name: (field(decl, 'implicit') as Node).text.slice(1),
+            expr: convertExpr(required(required(decl, 'match'), 'expression')),
+            span: spanOf(decl),
+          })),
+          body: convertExpr(required(node, 'expression')),
+          span,
+        };
+      }
       return {
         kind: 'let',
-        decls: convertLocalBinds(field(node, 'binds')),
+        decls: convertLocalBinds(bindsNode),
         body: convertExpr(required(node, 'expression')),
         span,
       };
+    }
+    case 'implicit_variable': {
+      requireImplicitParams(span);
+      return { kind: 'implicit', name: node.text.slice(1), span };
     }
     case 'record': {
       return convertRecordExpr(node);
@@ -2230,6 +2313,12 @@ export function convertPattern(node: Node): Pat {
       if (!extensions.has('OrPatterns'))
         throw syntaxError(span, 'or パターンを使うには、OrPatterns の拡張が要ります。');
       return { kind: 'por', alts: fields(node, 'alternative').map(convertPattern), span };
+    }
+    case 'type_binder': {
+      requireTypeAbstractions(span);
+      const typeNode = required(node, 'type');
+      if (typeNode.type !== 'variable') throw unsupportedError(span, 'この形の型の束縛');
+      return { kind: 'ptybinder', name: plainName(typeNode), span };
     }
     case 'signature': {
       if (!extensions.has('ScopedTypeVariables')) {
