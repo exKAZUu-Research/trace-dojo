@@ -26,7 +26,8 @@ export type Type =
   | ({ kind: 'float'; name: FloatName } & Qualified)
   | ({ kind: 'nullptr' } & Qualified)
   | ({ kind: 'pointer'; to: Type } & Qualified)
-  | { kind: 'reference'; to: Type }
+  /** An lvalue reference, or an rvalue reference (`T&&`) when `isRvalue`. */
+  | { kind: 'reference'; to: Type; isRvalue?: boolean }
   /** An array, whose length is undefined while it is incomplete (`int a[]` before its initializer). */
   | ({ kind: 'array'; of: Type; length?: number } & Qualified)
   | ({ kind: 'class'; cls: ClassInfo } & Qualified)
@@ -341,8 +342,8 @@ export function pointerTo(type: Type, isConst = false): PointerType {
   return isConst ? { kind: 'pointer', to: type, isConst } : { kind: 'pointer', to: type };
 }
 
-export function referenceTo(type: Type): ReferenceType {
-  return { kind: 'reference', to: type };
+export function referenceTo(type: Type, isRvalue = false): ReferenceType {
+  return isRvalue ? { kind: 'reference', to: type, isRvalue } : { kind: 'reference', to: type };
 }
 
 export function classType(cls: ClassInfo, isConst = false): ClassType {
@@ -478,7 +479,8 @@ export function sameType(a: Type, b: Type, withQualifiers = true): boolean {
       return sameType(a.to, (b as typeof a).to, true);
     }
     case 'reference': {
-      return sameType(a.to, (b as typeof a).to, true);
+      const other = b as typeof a;
+      return a.isRvalue === other.isRvalue && sameType(a.to, other.to, true);
     }
     case 'array': {
       const other = b as typeof a;
@@ -534,8 +536,9 @@ export function typeName(type: Type, inner = ''): string {
       return typeName(type.to, star);
     }
     case 'reference': {
-      if (type.to.kind === 'array') return typeName(type.to, `(&${inner})`);
-      return typeName(type.to, `&${inner}`);
+      const ampersands = type.isRvalue ? '&&' : '&';
+      if (type.to.kind === 'array') return typeName(type.to, `(${ampersands}${inner})`);
+      return typeName(type.to, `${ampersands}${inner}`);
     }
     case 'array': {
       return typeName(type.of, `${inner}[${type.length ?? ''}]`);

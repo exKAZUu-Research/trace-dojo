@@ -792,10 +792,12 @@ export abstract class CompilerBase {
       }
       case 'reference_declarator':
       case 'abstract_reference_declarator': {
-        if (hasToken(declarator, '&&')) return this.unsupported(declarator.row, '右辺値参照（&&）');
-        if (base.kind === 'reference') return this.error(declarator.row, '参照への参照は作れません。');
+        const isRvalue = hasToken(declarator, '&&');
+        // A reference to a reference that a template argument or an alias names collapses (C++20 [dcl.ref]p6).
+        if (base.kind === 'reference')
+          return this.applyInner(referenceTo(base.to, base.isRvalue === true && isRvalue), declarator);
         if (base.kind === 'void') return this.error(declarator.row, 'void への参照は作れません。');
-        return this.applyInner(referenceTo(base), declarator);
+        return this.applyInner(referenceTo(base, isRvalue), declarator);
       }
       case 'array_declarator':
       case 'abstract_array_declarator': {

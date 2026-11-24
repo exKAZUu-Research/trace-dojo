@@ -1925,6 +1925,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const isUnqualified = functionNode.type === 'identifier';
     if (isUnqualified && this.library.isFunctionMacro(functionNode.text))
       return this.unsupported(functionNode.row, `マクロ（${functionNode.text}）`);
+    const cast = this.utilityCast(functionNode, argNodes, node.row);
+    if (cast) return cast;
     const typeTarget = this.callTypeTarget(functionNode);
     if (typeTarget) {
       if (argNodes.length === 1 && typeTarget.kind !== 'class') {
@@ -1949,6 +1951,38 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const callee = this.compileExpression(functionNode);
     const args = argNodes.map((arg) => this.argument(arg));
     return this.callWith(callee, args, node.row, isUnqualified);
+  }
+
+  /**
+   * `std::move(x)`, `std::forward<T>(x)`, and `std::as_const(x)` of `<utility>`, which only change the value category
+   * or the constness of their argument (C++20 [utility]).
+   */
+  private utilityCast(functionNode: Syntax, argNodes: readonly Syntax[], row: number): Expr | undefined {
+    const qualified = functionNode.type === 'qualified_identifier' && fieldOf(functionNode, 'scope')?.text === 'std';
+    const named = qualified ? (fieldOf(functionNode, 'name') as Syntax) : functionNode;
+    const plain = named.type === 'template_function' ? (fieldOf(named, 'name') as Syntax) : named;
+    if (!['move', 'forward', 'as_const'].includes(plain.text) || argNodes.length !== 1) return undefined;
+    // An unqualified name means std's only through `using namespace std;` with nothing else of that name.
+    if (!qualified) {
+      const entity = this.findName(plain.text);
+      if (entity?.kind !== 'functions' || entity.functions.some((fn) => !fn.native)) return undefined;
+    }
+    const arg = this.compileExpression(argNodes[0]);
+    if (arg.functions) return undefined;
+    if (plain.text === 'as_const') {
+      if (!arg.isLvalue || arg.isXvalue) return this.error(row, 'std::as_const には左辺値を渡してください。');
+      return { ...arg, type: withConst(arg.type), onlyCalls: true };
+    }
+    if (plain.text === 'move') {
+      if (!arg.isLvalue) return { ...this.materialize(arg), isXvalue: true, onlyCalls: true };
+      return { ...arg, isXvalue: true, onlyCalls: true };
+    }
+    const list = named.type === 'template_function' ? fieldOf(named, 'arguments') : undefined;
+    if (!list) return this.error(row, 'std::forward には <型> でテンプレート引数を書いてください。');
+    const [type] = this.templateArguments(list);
+    const isLvalue = type?.kind === 'reference' && !type.isRvalue;
+    const value = arg.isLvalue ? arg : this.materialize(arg);
+    return { ...value, isXvalue: isLvalue ? undefined : true, onlyCalls: true };
   }
 
   /** The type a call's function names, when the call is a functional cast `T(...)` rather than a function call. */

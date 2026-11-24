@@ -868,6 +868,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return {
       type,
       isLvalue: isReference,
+      // A call of a function returning an rvalue reference is an xvalue.
+      isXvalue: fn.ret.kind === 'reference' && fn.ret.isRvalue === true ? true : undefined,
       row,
       run,
       ...(object ? memberCallConstancy(fn, object, converted) : this.callConstancy(fn, args, converted)),

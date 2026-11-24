@@ -36,8 +36,11 @@ export interface ConversionSequence {
   baseDistance: number;
   convertsToVoidPointer?: boolean;
   isInitializerList?: boolean;
-  /** How the sequence binds a reference, when the target is one. */
-  reference?: { toConst: boolean };
+  /**
+   * How the sequence binds a reference, when the target is one: to const or not, as an rvalue reference or not, and
+   * whether the source is an rvalue, which overload resolution compares (C++20 [over.ics.rank]p3.2.3).
+   */
+  reference?: { toConst: boolean; isRvalue?: boolean; fromRvalue?: boolean };
   /** The converting constructor of a user-defined conversion. */
   user?: FunctionInfo;
   scalarSource?: ClassInfo;
@@ -154,7 +157,10 @@ function convertWithoutFunctions(
   if (to.kind === 'function' || expr.functions) {
     return to.kind === 'function' && expr.functions ? sequence(Rank.Exact, (e) => e) : undefined;
   }
-  if (to.kind === 'reference') return referenceBinding(host, expr, to.to, allowUser);
+  if (to.kind === 'reference')
+    return to.isRvalue
+      ? rvalueReferenceBinding(host, expr, to.to, allowUser)
+      : referenceBinding(host, expr, to.to, allowUser);
   if (to.kind === 'class') return classConversion(host, expr, to.cls, allowUser);
   if (allowUser && expr.type.kind === 'class' && expr.type.cls.library?.scalarValue) {
     const scalar = scalarValue(host, expr);
@@ -235,33 +241,64 @@ function referenceBinding(
   if (!toConst && expr.isXvalue) return undefined;
   const from = expr.type;
   if (expr.isLvalue && (toConst || !isConstType(from))) {
+    const fromRvalue = expr.isXvalue === true;
     if (
       sameType(unqualified(from), unqualified(target), false) &&
       (from.kind !== 'array' || sameType(from, target, false))
     ) {
-      return sequence(Rank.Exact, identity, { reference: { toConst } });
+      return sequence(Rank.Exact, identity, { reference: { toConst, fromRvalue } });
     }
     const distance = baseDistance(from, target);
     if (distance > 0) {
       return sequence(Rank.Conversion, (e) => toBase(host, e, target), {
-        reference: { toConst },
+        reference: { toConst, fromRvalue },
         baseDistance: distance,
       });
     }
   }
   if (!toConst) return undefined;
+  const fromRvalue = !expr.isLvalue || expr.isXvalue === true;
   if (!expr.isLvalue && from.kind === 'class' && target.kind === 'class') {
     const distance = from.cls === target.cls ? 0 : baseDistance(from, target);
     if (from.cls === target.cls || distance > 0) {
       return sequence(distance > 0 ? Rank.Conversion : Rank.Exact, (e) => toBase(host, host.materialize(e), target), {
-        reference: { toConst },
+        reference: { toConst, fromRvalue },
         baseDistance: distance,
       });
     }
   }
   const converted = implicitConversion(host, expr, unqualified(target), allowUser);
   if (!converted) return undefined;
-  return { ...converted, reference: { toConst }, apply: (e) => host.materialize(converted.apply(e)) };
+  return { ...converted, reference: { toConst, fromRvalue }, apply: (e) => host.materialize(converted.apply(e)) };
+}
+
+/** Binds an rvalue reference (`T&&`), which only an rvalue may bind: an xvalue directly, a prvalue as a temporary. */
+function rvalueReferenceBinding(
+  host: ConversionHost,
+  expr: Expr,
+  target: Type,
+  allowUser: boolean
+): ConversionSequence | undefined {
+  if (expr.isLvalue && !expr.isXvalue) return undefined;
+  const from = expr.type;
+  const reference = { toConst: isConstType(target), isRvalue: true, fromRvalue: true };
+  if (isConstType(from) && !isConstType(target)) return undefined;
+  const related = sameType(unqualified(from), unqualified(target), false) || baseDistance(from, target) > 0;
+  if (related) {
+    const distance = baseDistance(from, target);
+    return sequence(
+      distance > 0 ? Rank.Conversion : Rank.Exact,
+      (e) => toBase(host, e.isLvalue ? e : host.materialize(e), target),
+      { reference, baseDistance: distance }
+    );
+  }
+  const converted = implicitConversion(host, { ...expr, isXvalue: false }, unqualified(target), allowUser);
+  if (!converted) return undefined;
+  return { ...converted, reference, apply: (e) => markXvalue(host.materialize(converted.apply(e))) };
+}
+
+function markXvalue(expr: Expr): Expr {
+  return { ...expr, isXvalue: true };
 }
 
 function classConversion(
@@ -484,6 +521,13 @@ export function compareSequences(a: ConversionSequence, b: ConversionSequence): 
   }
   const qualification = compareQualificationTargets(a.qualificationTarget, b.qualificationTarget);
   if (qualification) return qualification;
+  // An rvalue binds an rvalue reference better than an lvalue reference.
+  if (
+    a.reference?.fromRvalue &&
+    b.reference?.fromRvalue &&
+    Boolean(a.reference.isRvalue) !== Boolean(b.reference.isRvalue)
+  )
+    return a.reference.isRvalue ? 1 : -1;
   if (a.reference && b.reference && a.reference.toConst !== b.reference.toConst) return a.reference.toConst ? -1 : 1;
   return 0;
 }

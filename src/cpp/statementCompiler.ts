@@ -700,7 +700,13 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     } else {
       target = this.compileExpression(value);
     }
-    const type = isDeduced ? referenceTo(this.deduceAutoReference(declared.to, target)) : declared;
+    // `auto&&` is a forwarding reference: an lvalue reference for an lvalue, else an rvalue reference.
+    const isForwarding = isDeduced && declared.isRvalue === true && isAuto(declared.to) && !isConstType(declared.to);
+    const type = isForwarding
+      ? referenceTo(target.type, !target.isLvalue || target.isXvalue === true)
+      : isDeduced
+        ? referenceTo(this.deduceAutoReference(declared.to, target), declared.isRvalue)
+        : declared;
     // A const reference bound to a temporary extends the temporary's lifetime to the reference's, whether the
     // temporary is the initializer's object or a converted value (C++20 [class.temporary]).
     return this.referenceBinding(type, target, row);
@@ -712,7 +718,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const isDirect = target.isLvalue && isReferenceRelated(source, to);
     const isTemporaryClass =
       !target.isLvalue && source.kind === 'class' && to.kind === 'class' && source.cls.isDerivedFrom(to.cls);
-    if (!isDirect && isConstType(to) && !target.functions && source.kind !== 'void') {
+    if (type.isRvalue && target.isLvalue && !target.isXvalue)
+      return this.error(
+        row,
+        `右辺値参照（${typeName(type)}）は、左辺値（変数など）には束縛できません（std::move で xvalue にしてください）。`
+      );
+    if (!isDirect && (isConstType(to) || type.isRvalue === true) && !target.functions && source.kind !== 'void') {
       if (isTemporaryClass) this.checkBaseConversion(source.cls, to.cls, row);
       const bound = isTemporaryClass ? target : this.convert(target, unqualified(to), row);
       return {
