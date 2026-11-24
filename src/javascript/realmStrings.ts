@@ -37,7 +37,7 @@ export function defineStringBuiltins(builder: RealmBuilder): void {
       })
       .join('');
   });
-  builder.realm.stringRaw = builder.method(stringConstructor, 'raw', 1, ({ runtime, args }) => {
+  builder.method(stringConstructor, 'raw', 1, ({ runtime, args }) => {
     const raw = runtime.toObject(runtime.get(runtime.toObject(args[0]), 'raw'));
     const length = Math.max(0, Math.min(Math.trunc(runtime.toNumber(runtime.get(raw, 'length'))) || 0, 2 ** 53 - 1));
     let text = '';
