@@ -11,6 +11,7 @@ import {
   conversionFunctions,
   type ConversionSequence,
   convertArithmetic,
+  functionTypeOf,
   implicitConversion,
   Rank,
   scalarValue,
@@ -35,7 +36,7 @@ import { type FloatingValue, fusedNaN, negateFloat } from './floatSign';
 import { moveValue } from './library/elements';
 import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
-import { constructArray, initializeAt, ObjectCompiler, zeroOf } from './objectCompiler';
+import { constructArray, initializeAt, invoke, ObjectCompiler, zeroOf } from './objectCompiler';
 import { hasUserType, memberOperators, overloadedOperator, withOverloads } from './operatorOverloads';
 import { erasePointee, recoverPointee } from './pointerCasts';
 import { type Eval, type Frame, holdAll } from './runtime';
@@ -1143,7 +1144,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   private builtinDereference(operand: Expr, row: number): Expr {
     const libraryResult = this.libraryOperator('*', [operand], row);
     if (libraryResult) return libraryResult;
+    if (operand.functions) return operand;
     const value = this.rvalue(operand);
+    // `*fp` designates the function, which a call uses as it uses the pointer.
+    if (value.type.kind === 'pointer' && value.type.to.kind === 'function') return value;
     if (value.type.kind !== 'pointer')
       return this.error(row, `* はポインタにしか使えません（${typeName(value.type)}）。`);
     return this.dereference(value, row);
@@ -1171,7 +1175,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   addressOf(operand: Expr, row: number): Expr {
-    if (operand.functions) return this.unsupported(row, '関数ポインタ');
+    if (operand.functions) {
+      if (operand.functions.object || operand.functions.candidates.some((fn) => fn.owner && !fn.isStatic))
+        return this.unsupported(row, 'メンバ関数へのポインタ');
+      return operand;
+    }
     if (!operand.isLvalue || operand.isXvalue)
       return this.error(row, '& は、変数などの場所を持つ値（左辺値）にしか使えません。');
     if (operand.type.kind === 'class' && operand.type.cls.library?.operator) {
@@ -1879,6 +1887,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       if (result) return result;
     }
     if (!candidates) {
+      const pointee = callee.type.kind === 'pointer' ? callee.type.to : callee.type;
+      if (pointee.kind === 'function') return this.callThroughPointer(callee, pointee, args, row);
       if (callee.type.kind === 'class' && !callee.type.cls.library) {
         const overloaded = overloadedOperator(this, '()', [callee, ...args], row);
         if (overloaded) return overloaded.expr;
@@ -1910,6 +1920,45 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     // A virtual call never reaches a pure virtual function, but a qualified call needs its definition.
     if (!resolved.fn.isPure || candidates.isQualified) this.checkDefined(resolved.fn, row);
     return this.callExpr(resolved, args, object, row, candidates.isQualified === true);
+  }
+
+  /** Calls the function a pointer to a function points to, with the arguments its type takes. */
+  private callThroughPointer(callee: Expr, type: Extract<Type, { kind: 'function' }>, args: Expr[], row: number): Expr {
+    const signature: FunctionInfo = {
+      name: '(関数ポインタ)',
+      displayName: typeName(callee.type),
+      params: type.params.map((param) => ({ name: undefined, type: param, row })),
+      ret: type.ret,
+      isStatic: true,
+      isVirtual: false,
+      isConst: false,
+      isPure: false,
+      isConstructor: false,
+      isDestructor: false,
+      isOverride: false,
+      isFinal: false,
+      access: 'public',
+      row,
+      isAtomic: false,
+      isDefined: true,
+    };
+    const resolved = this.resolve(`関数ポインタ（${typeName(callee.type)}）`, [signature], args, undefined, row);
+    const argRuns = this.callArguments(signature, this.convertArguments(resolved, args), row);
+    const target = this.rvalue(callee).run;
+    const isReference = type.ret.kind === 'reference';
+    const result = nonReference(type.ret);
+    return {
+      type: result,
+      isLvalue: isReference,
+      row,
+      onlyCalls: true,
+      isTemporaryObject: !isReference && result.kind === 'class',
+      run: (frame) =>
+        holdAll(frame, [target, ...argRuns], ([pointer, ...values]) => {
+          if (!(pointer instanceof FunctionRef)) throw new CppRuntimeError('nullAccess');
+          return invoke(frame, pointer.candidates[0], values, undefined, row, true);
+        }),
+    };
   }
 
   callCallback(candidates: FunctionCandidates, args: Expr[], row: number): Expr {
@@ -2271,7 +2320,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   /** The type of an `auto` variable, deduced from its initializer as a function template parameter would be. */
   deduceAuto(declared: Type, init: Expr, row: number): Type {
     if (!hasAuto(declared)) return declared;
-    if (init.functions) return this.unsupported(row, '関数ポインタ');
+    if (init.functions) {
+      // A function's name decays to a pointer to the function, which must be the only one of that name.
+      const [fn, ...others] = init.functions.candidates;
+      if (others.length > 0)
+        return this.error(row, `${init.functions.name} はオーバーロードされているので、auto の型が決まりません。`);
+      if (fn.owner && !fn.isStatic) return this.unsupported(row, 'メンバ関数へのポインタ');
+      return this.deduceAutoPattern(declared, pointerTo(functionTypeOf(fn)), row);
+    }
     if (init.type.kind === 'void')
       return this.error(row, 'auto の変数の初期値に、値を返さない関数（void）の結果は使えません。');
     const decayed = init.type.kind === 'array' ? pointerTo(init.type.of) : unqualified(init.type);
@@ -2354,7 +2410,9 @@ function combinedPointee(left: Type, right: Type): Type | undefined {
 
 const isPointerLike = (type: Type): boolean => type.kind === 'pointer' || type.kind === 'nullptr';
 
-const asPointer = (value: unknown): Ptr => (value instanceof Ptr ? value : NULL_PTR);
+/** A pointer's value; a pointer to a function, which only `==` and `!=` compare, keeps its function. */
+const asPointer = (value: unknown): Ptr =>
+  value instanceof Ptr || value instanceof FunctionRef ? (value as Ptr) : NULL_PTR;
 
 const ALTERNATIVE_TOKENS: Record<string, string> = {
   and: '&&',

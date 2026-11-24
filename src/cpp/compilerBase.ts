@@ -586,6 +586,16 @@ export abstract class CompilerBase {
         if (name !== undefined) this.checkHeaderMacro(name.split('::').at(-1) ?? name, declarator.row);
         return { name, nameNode: declarator, type: base };
       }
+      case 'parenthesized_declarator':
+      case 'abstract_parenthesized_declarator': {
+        const inner = declarator.children[0];
+        return inner ? this.applyDeclarator(base, inner) : { name: undefined, nameNode: undefined, type: base };
+      }
+      case 'abstract_function_declarator': {
+        const type = this.functionType(base, declarator);
+        const inner = fieldOf(declarator, 'declarator');
+        return inner ? this.applyDeclarator(type, inner) : { name: undefined, nameNode: undefined, type };
+      }
       case 'pointer_declarator':
       case 'abstract_pointer_declarator': {
         const isConst = declarator.children.some((child) => child.type === 'type_qualifier' && child.text === 'const');
@@ -625,6 +635,9 @@ export abstract class CompilerBase {
           base = this.typeDescriptor(trailing.children[0]);
         }
         const inner = fieldOf(declarator, 'declarator');
+        // `int (*fp)(int)` declares a pointer to a function type rather than a function.
+        if (inner?.type === 'parenthesized_declarator')
+          return this.applyDeclarator(this.functionType(base, declarator), inner);
         const declared = inner
           ? this.applyDeclarator(base, inner)
           : { name: undefined, nameNode: undefined, type: base };
@@ -646,6 +659,17 @@ export abstract class CompilerBase {
     if (!inner) return { name: undefined, nameNode: undefined, type };
     return this.applyDeclarator(type, inner);
   }
+
+  /** The function type a function declarator gives a return type: `int(int, char)`. */
+  private functionType(ret: Type, declarator: Syntax): Type {
+    if (ret.kind === 'array') this.error(declarator.row, '関数は配列を返せません。');
+    if (ret.kind === 'function') this.error(declarator.row, '関数は関数を返せません。');
+    const parameters = fieldOf(declarator, 'parameters');
+    return { kind: 'function', ret, params: parameters ? this.parameterTypes(parameters) : [] };
+  }
+
+  /** The types of a parameter list's parameters, after arrays and functions decay to pointers. */
+  protected abstract parameterTypes(list: Syntax): Type[];
 
   /** The type a conversion function (`operator int() const`) converts to. */
   conversionType(node: Syntax): Type {

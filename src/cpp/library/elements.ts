@@ -23,6 +23,7 @@ import {
   isConstType,
   isCopyConstructor,
   type Type,
+  unqualified,
   withConst,
 } from '../types';
 import {
@@ -613,11 +614,25 @@ export const callablePositions = new WeakMap<Expr, number>();
  * received as an argument, for calling it; undefined for other arguments.
  */
 export function programCallable(arg: Expr | undefined): Expr | undefined {
-  if (!arg || arg.type.kind !== 'class' || arg.type.cls.library) return undefined;
+  if (!arg) return undefined;
+  const { type } = arg;
+  const isFunctionPointer = type.kind === 'pointer' && type.to.kind === 'function';
+  if (!isFunctionPointer && (type.kind !== 'class' || type.cls.library)) return undefined;
   const position = callablePositions.get(arg);
   if (position === undefined) return undefined;
+  if (isFunctionPointer)
+    return {
+      type: unqualified(type),
+      isLvalue: false,
+      row: arg.row,
+      run: (frame) => {
+        const value = frame.runtime.nativeArguments.at(-1)?.[position];
+        return value instanceof Ptr && !value.isNull ? value.read() : (value as Value);
+      },
+    };
+  if (type.kind !== 'class') return undefined;
   return {
-    type: unqualifiedClass(arg.type),
+    type: unqualifiedClass(type),
     isLvalue: true,
     row: arg.row,
     run: (frame) => {

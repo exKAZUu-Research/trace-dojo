@@ -568,7 +568,8 @@ export class Ptr {
     return length;
   }
 
-  equals(other: Ptr): boolean {
+  equals(other: Ptr | FunctionRef): boolean {
+    if (other instanceof FunctionRef) return false;
     const a = this.address;
     const b = other.address;
     return a.store === b.store && a.index === b.index;
@@ -665,6 +666,13 @@ class CompleteObjectPointer extends Ptr {
 }
 
 /** A function used as a value, which a library algorithm calls. */
+/** A function's name, or the value of a pointer to a function, which designates the first candidate. */
 export class FunctionRef {
   constructor(readonly candidates: FunctionInfo[]) {}
+
+  readonly isNull = false;
+
+  equals(other: Ptr | FunctionRef): boolean {
+    return other instanceof FunctionRef && other.candidates[0] === this.candidates[0];
+  }
 }

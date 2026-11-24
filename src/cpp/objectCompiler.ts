@@ -631,6 +631,10 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     }
   }
 
+  useFunction(fn: FunctionInfo, row: number): void {
+    this.checkDefined(fn, row);
+  }
+
   callConversion(expr: Expr, fn: FunctionInfo): Expr {
     this.checkDefined(fn, expr.row);
     return this.callExpr({ fn, conversions: [] }, [], expr, expr.row);
@@ -642,8 +646,11 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 
   /** Converts an expression to a type as initialization does, or stops with a message naming `what`. */
   convert(expr: Expr, to: Type, row: number, what = '値'): Expr {
-    if (expr.functions) this.error(row, `関数 ${expr.functions.name} の後に (...) を書いて呼び出してください。`);
-    if (expr.type.kind === 'void' && !expr.braced) this.error(row, '値を返さない関数（void）の結果は使えません。');
+    const target = nonReference(to);
+    if (expr.functions && !(target.kind === 'pointer' && target.to.kind === 'function'))
+      this.error(row, `関数 ${expr.functions.name} の後に (...) を書いて呼び出してください。`);
+    if (expr.type.kind === 'void' && !expr.braced && !expr.functions)
+      this.error(row, '値を返さない関数（void）の結果は使えません。');
     const conversion = implicitConversion(this, expr, to);
     if (!conversion) return this.error(row, this.conversionMessage(expr, to, what));
     return conversion.apply(expr);

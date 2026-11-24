@@ -845,6 +845,10 @@ export class Compiler extends StatementCompiler {
     };
   }
 
+  protected parameterTypes(list: Syntax): Type[] {
+    return this.parameters(list).map((param) => param.type);
+  }
+
   /** Whether a declaration says `explicit`, or `explicit(true)` with a constant condition. */
   private isExplicitSpecified(node: Syntax): boolean {
     const specifier = node.children.find((child) => child.type === 'explicit_function_specifier');
@@ -872,6 +876,7 @@ export class Compiler extends StatementCompiler {
       if (hasAuto(type)) this.unsupported(param.row, '引数の型の auto（省略形の関数テンプレート）');
       // An array parameter is a pointer (C++20 [dcl.fct]).
       if (type.kind === 'array') type = { kind: 'pointer', to: type.of };
+      if (type.kind === 'function') type = { kind: 'pointer', to: type };
       const defaultValue =
         param.type === 'optional_parameter_declaration' ? fieldOf(param, 'default_value') : undefined;
       params.push({

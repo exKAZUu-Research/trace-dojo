@@ -15,7 +15,7 @@ import {
   unqualified,
 } from './types';
 import type { Ptr } from './values';
-import { NULL_PTR } from './values';
+import { FunctionRef, NULL_PTR } from './values';
 
 /** The ranks of implicit conversion sequences, better first. */
 export const enum Rank {
@@ -63,6 +63,8 @@ export interface ConversionHost {
   bracedConversion(list: Syntax, to: Type): ConversionSequence | undefined;
   /** A call of a conversion function (`operator int() const`) on an object. */
   callConversion(expr: Expr, fn: FunctionInfo): Expr;
+  /** Notes that the program uses a function, which it must then define. */
+  useFunction(fn: FunctionInfo, row: number): void;
 }
 
 const identity = (expr: Expr): Expr => expr;
@@ -144,6 +146,10 @@ function convertWithoutFunctions(
   if (expr.braced && to.kind === 'function')
     return sequence(Rank.Exact, (e) => ({ ...e, constantInitialization: true }), { isInitializerList: true });
   if (expr.braced) return host.bracedConversion(expr.braced, to);
+  const pointee = to.kind === 'pointer' && to.to.kind === 'function' ? to.to : undefined;
+  if (pointee && expr.functions) return functionPointer(host, expr, to as Extract<Type, { kind: 'pointer' }>, pointee);
+  if (pointee && allowUser && expr.type.kind === 'class' && expr.type.cls.isLambda)
+    return lambdaPointer(host, expr, to as Extract<Type, { kind: 'pointer' }>, pointee);
   // A function's name converts only to a parameter that takes a callable, as the library's algorithms have.
   if (to.kind === 'function' || expr.functions) {
     return to.kind === 'function' && expr.functions ? sequence(Rank.Exact, (e) => e) : undefined;
@@ -160,6 +166,55 @@ function convertWithoutFunctions(
       });
   }
   return standardConversion(host, expr, to);
+}
+
+/** The type of a function, which a pointer to it points to. */
+export function functionTypeOf(fn: FunctionInfo): Type {
+  return { kind: 'function', ret: fn.ret, params: fn.params.map((param) => unqualified(param.type)) };
+}
+
+/** A function's name converted to a pointer to the overload whose type is the pointee's (C++20 [over.over]). */
+function functionPointer(
+  host: ConversionHost,
+  expr: Expr,
+  to: Extract<Type, { kind: 'pointer' }>,
+  pointee: Type
+): ConversionSequence | undefined {
+  const candidates = expr.functions?.candidates ?? [];
+  const fn = candidates.find(
+    (candidate) => (!candidate.owner || candidate.isStatic) && sameType(functionTypeOf(candidate), pointee, false)
+  );
+  if (!fn) return undefined;
+  return sequence(Rank.Exact, (e) => {
+    host.useFunction(fn, e.row);
+    const value = new FunctionRef([fn]);
+    return { type: to, isLvalue: false, row: e.row, run: () => value, staticAddress: true };
+  });
+}
+
+/** A lambda without captures converted to a pointer to its function call operator (C++20 [expr.prim.lambda.closure]). */
+function lambdaPointer(
+  host: ConversionHost,
+  expr: Expr,
+  to: Extract<Type, { kind: 'pointer' }>,
+  pointee: Type
+): ConversionSequence | undefined {
+  const { cls } = expr.type as Extract<Type, { kind: 'class' }>;
+  const [call] = cls.methods.get('operator()') ?? [];
+  if (!call || cls.fields.length > 0 || !sameType(functionTypeOf(call), pointee, false)) return undefined;
+  const value = new FunctionRef([call]);
+  return sequence(Rank.UserDefined, (e) => {
+    const { run } = e;
+    return {
+      type: to,
+      isLvalue: false,
+      row: e.row,
+      run: (frame) => {
+        run(frame);
+        return value;
+      },
+    };
+  });
 }
 
 export function scalarValue(host: ConversionHost, expr: Expr): Expr {

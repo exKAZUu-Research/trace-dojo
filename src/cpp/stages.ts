@@ -16,8 +16,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   namespace_alias_definition: '名前空間の別名（namespace 名前 = ...;）',
   ref_qualifier: '参照修飾子（& や &&）の付いたメンバ関数',
   throw_specifier: '例外の指定（throw(...)）',
-  parenthesized_declarator: '括弧で囲んだ宣言子（関数ポインタ・配列へのポインタなど）',
-  abstract_parenthesized_declarator: '括弧で囲んだ宣言子（関数ポインタ・配列へのポインタなど）',
   template_declaration: 'テンプレートの定義（template）',
   template_instantiation: 'テンプレートの明示的な実体化',
   template_method: 'メンバ関数テンプレートへのテンプレート引数の指定（obj.f<int>() など）',
