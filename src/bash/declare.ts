@@ -476,7 +476,8 @@ function declareOne(
     destination,
     preUnsetStore,
     options,
-    isSubscripted
+    isSubscripted,
+    assignMode !== 'none' && !isCompound(operand)
   );
   const ok =
     explicitRefTarget !== undefined
@@ -558,21 +559,33 @@ function rejectSubscriptedAttributeBuiltin(
   return true;
 }
 
+// code-gauge-allow functionParameterCount -- Selects the destination or visible local element store for a declaration operand.
 function selectDeclarationStore(
   shell: Shell,
   name: string,
   destination: DeclarationDestination,
   preUnsetStore: DeclarationDestination | undefined,
   { set, unset }: Options,
-  isSubscripted: boolean
+  isSubscripted: boolean,
+  assignsNonCompound: boolean
 ): { storeVariable: Variable; effectiveSubscript: string | undefined } {
+  if (preUnsetStore) {
+    return { storeVariable: preUnsetStore.variable, effectiveSubscript: preUnsetStore.referencedSubscript };
+  }
   const { variable, referencedSubscript } = destination;
+  const implicitIndexedZero =
+    assignsNonCompound && !isSubscripted && referencedSubscript === undefined && isIndexedCell(variable);
   const storeVariable =
-    preUnsetStore?.variable ??
-    (set.has('g') && (isSubscripted || referencedSubscript !== undefined)
+    set.has('g') && (isSubscripted || referencedSubscript !== undefined || implicitIndexedZero)
       ? resolveElementStoreVariable(shell, name, variable.name, set, unset, isSubscripted)
-      : variable);
-  return { storeVariable, effectiveSubscript: preUnsetStore?.referencedSubscript ?? referencedSubscript };
+      : variable;
+  const effectiveSubscript =
+    referencedSubscript ?? (implicitIndexedZero && storeVariable !== variable ? '0' : undefined);
+  return { storeVariable, effectiveSubscript };
+}
+
+function isIndexedCell(variable: Variable): boolean {
+  return !variable.attributes.has('n') && (variable.value?.kind === 'indexed' || variable.attributes.has('a'));
 }
 
 function notifyIfArrayMaterialized(
