@@ -348,6 +348,13 @@ export class Library {
     });
   }
 
+  /** The C library's function that a declaration declares, with the same name and parameters, whatever the headers. */
+  cLibraryFunction(declaration: FunctionInfo): FunctionInfo | undefined {
+    const entity = this.globalNames.get(declaration.name);
+    if (entity?.kind !== 'functions') return undefined;
+    return entity.functions.find((fn) => fn.native && fn.libcGlobal && sameParameters(fn, declaration));
+  }
+
   sameCFunction(declaration: FunctionInfo, library: FunctionInfo): boolean {
     return library.libcGlobal === true && redeclaresLibcFunction(declaration, this.headers);
   }

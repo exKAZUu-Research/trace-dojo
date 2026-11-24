@@ -248,6 +248,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       case 'declaration': {
         return this.localDeclaration(node).exec;
       }
+      case 'pragma_operator': {
+        return () => {};
+      }
       case 'expression_statement': {
         const declaration = this.misreadDeclaration(node);
         if (declaration) return this.localDeclaration(declaration).exec;

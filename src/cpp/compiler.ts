@@ -305,6 +305,9 @@ export class Compiler extends StatementCompiler {
     if (!mainFunction) return this.error(0, 'main 関数の本体がありません。');
     if (main.functions.length > 1) return this.error(mainFunction.row, 'main 関数はオーバーロードできません。');
     for (const [fn, row] of this.usedFunctions) {
+      // A declaration of a C library function (`extern "C" int abs(int);`) links to the library's.
+      const linked = !fn.isDefined && !fn.native && !fn.owner ? this.library.cLibraryFunction(fn) : undefined;
+      if (linked) fn.native = linked.native;
       if (!fn.isDefined && !fn.native) {
         this.error(row, `関数 ${fn.displayName} は宣言だけで、定義（本体）がありません。`);
       }
@@ -431,6 +434,16 @@ export class Compiler extends StatementCompiler {
       }
       case 'namespace_definition': {
         this.namespaceDefinition(node);
+        return;
+      }
+      case 'linkage_specification': {
+        // `extern "C"` gives declarations C's linkage, which a program of one file needs no different handling for.
+        const body = fieldOf(node, 'body');
+        for (const item of body?.type === 'declaration_list' ? body.children : body ? [body] : []) this.topLevel(item);
+        return;
+      }
+      case 'pragma_operator': {
+        // clang++ ignores the pragmas a program of the interpreter's subset may write, as `#pragma` lines.
         return;
       }
       case 'template_declaration': {

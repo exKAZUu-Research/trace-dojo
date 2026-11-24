@@ -5,7 +5,6 @@ import { fieldOf, type Syntax } from './syntax';
 /** The syntax the interpreter leaves out, by node type, with the name learners know it by. */
 const UNSUPPORTED_NODES: Record<string, string> = {
   bit_int_specifier: '_BitInt',
-  linkage_specification: '外部の関数の宣言（extern "C"）',
   co_await_expression: 'コルーチン（co_await・co_yield・co_return）',
   co_return_statement: 'コルーチン（co_await・co_yield・co_return）',
   co_yield_statement: 'コルーチン（co_await・co_yield・co_return）',
