@@ -1150,7 +1150,7 @@ function commitNamerefTarget(
   const converted = convertNamerefTarget(shell, variable, target);
   if (!shell.isValidNamerefTarget(converted)) {
     variable.attributes.delete('n');
-    return true;
+    return false;
   }
   if (!isLocal && converted === variable.name) {
     shell.reportError(`${builtin}: ${variable.name}: nameref variable self reference not allowed`);
