@@ -7,7 +7,7 @@ import { EMPTY_LIST, FIELD_BREAK, FieldSplitter, type Fragment, isFieldBreak, ty
 import { applyOperator } from './parameterOperators';
 import { parseSubscriptWordParts } from './parse';
 import { hasPatternCharacters, matchesPattern, quotePattern } from './pattern';
-import { singleQuote } from './quoting';
+import { quoteReusable, singleQuote } from './quoting';
 import { ExitSignal, SCRIPT_NAME } from './runtime';
 import type { CompoundElement, Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
@@ -572,12 +572,12 @@ export class Expander {
       if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
     }
     const unquoted = field.map((fragment) => (fragment.quoted ? quotePattern(fragment.text) : fragment.text)).join('');
+    const result = field.map((fragment) => fragment.text).join('');
     if (hasPatternCharacters(unquoted)) {
       throw new UnsupportedFeatureError(
-        `ファイル名の展開（引用符で囲まれていない * ? [ ]。文字として使うときは "${field.map((f) => f.text).join('')}" のように引用符で囲む）`
+        `ファイル名の展開（引用符で囲まれていない * ? [ ]。文字として使うときは ${quoteReusable(result)} のように引用符で囲む）`
       );
     }
-    const result = field.map((fragment) => fragment.text).join('');
     this.shell.rootValue(result);
     return result;
   }
