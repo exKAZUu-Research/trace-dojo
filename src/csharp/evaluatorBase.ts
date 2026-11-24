@@ -355,9 +355,10 @@ export abstract class EvaluatorBase {
       return underlying === 'long' || underlying === 'ulong' ? 0n : 0;
     }
     if (type.symbol.kind !== 'struct') return undefined;
-    // No struct is larger than the slot limit, so a value of one, wherever it lives, stays within it; storage that
-    // keeps structs charges their layouts besides.
-    if (this.defaultSlotCount(type) > LIMITS.maxSlots)
+    // No struct is larger than MAX_STRUCT_SLOTS, far beyond any a learner writes, so the struct values that locals and
+    // frames hold, which no charge counts since the slot count only grows, stay within a constant factor of the call
+    // depth; storage that keeps structs charges their layouts besides.
+    if (this.defaultSlotCount(type) > MAX_STRUCT_SLOTS)
       throw new PendingException(
         'System.OutOfMemoryException',
         "Exception of type 'System.OutOfMemoryException' was thrown."
@@ -406,3 +407,6 @@ function numericKindOf(type: Type): SpecialType {
 function enumUnderlyingOf(type: Type): Type {
   return type.kind === 'named' && type.symbol.kind === 'enum' ? (type.symbol.enumUnderlying as Type) : type;
 }
+
+/** The most slots a struct's layout may hold, its nested structs' included. */
+const MAX_STRUCT_SLOTS = 4096;
