@@ -53,7 +53,11 @@ export function overflowError(typeName: string): CppRuntimeError {
 
 /** Ends the program as `std::exit` does, running no more of it. */
 export class ProgramExit extends Error {
-  constructor(readonly status: number) {
+  /** @param skipsStatics Whether the program ends without destroying its static objects, as `quick_exit` does. */
+  constructor(
+    readonly status: number,
+    readonly skipsStatics = false
+  ) {
     super(`exit(${status})`);
     this.name = 'ProgramExit';
   }

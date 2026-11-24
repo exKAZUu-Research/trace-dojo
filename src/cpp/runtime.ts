@@ -9,7 +9,7 @@ import { type CppException, CppRuntimeError, ProgramAbort } from './errors';
 import { OPEN_MODE, StreamValue } from './library/iostream';
 import { utf8 } from './literals';
 import type { FunctionInfo, Type } from './types';
-import { Box, childValues, CObject, endLifetime, Liveness, Ptr, Store, type Value } from './values';
+import { Box, childValues, CObject, endLifetime, type FunctionRef, Liveness, Ptr, Store, type Value } from './values';
 
 /** How a statement ended: normally (undefined), or by `break`, `continue`, or `return`. */
 export const BREAK = 1;
@@ -215,6 +215,10 @@ export class Runtime implements TracedRuntime<Frame> {
   libcOverrides: ReadonlyMap<string, FunctionInfo> = new Map();
   private allocatedSlots = 0;
   private readonly writers: Record<'stdout' | 'stderr', ByteStream>;
+  /** The functions `at_quick_exit` registered, which `quick_exit` calls, the last registered first. */
+  readonly quickExitHandlers: FunctionRef[] = [];
+  /** The function `std::set_terminate` installed, which `std::terminate` calls. */
+  terminateHandler: FunctionRef | undefined;
   /** The state of `rand`. */
   randomState = 1;
   /** The objects with static storage duration that have destructors, in the order their construction completed. */

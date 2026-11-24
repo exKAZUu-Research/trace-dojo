@@ -1,9 +1,10 @@
 import { FileSystemError } from '../../interpreter/programIo';
 import { byteArray } from '../bytes';
 import type { ConceptInfo } from '../concepts';
-import { CppRuntimeError, ProgramExit } from '../errors';
+import { CppRuntimeError, ProgramAbort, ProgramExit } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
+import { invoke } from '../objectCompiler';
 import type { ClassTemplateInfo } from '../programTemplates';
 import type { Frame } from '../runtime';
 import type { Entity } from '../scopes';
@@ -17,6 +18,7 @@ import {
   LLONG,
   LONG,
   nonReference,
+  pointerTo,
   referenceTo,
   sameParameters,
   sameType,
@@ -31,7 +33,7 @@ import {
   USHORT,
   VOID,
 } from '../types';
-import { Box, Ptr } from '../values';
+import { Box, type FunctionRef, NULL_PTR, Ptr } from '../values';
 import { algorithmFunctions } from './algorithms';
 import { makePair } from './associative';
 import { cFunctions } from './cFunctions';
@@ -124,8 +126,6 @@ const UNSUPPORTED_STD_NAMES: Record<string, string> = {
   minstd_rand: 'std::minstd_rand',
   default_random_engine: 'std::default_random_engine',
   sample: 'std::sample',
-  terminate: 'std::terminate',
-  addressof: 'std::addressof',
 };
 
 const UNSUPPORTED_C_NAMES: Record<string, string> = {
@@ -146,9 +146,6 @@ const UNSUPPORTED_C_NAMES: Record<string, string> = {
   fsetpos: 'ファイルの読み書き（fsetpos）',
   tmpfile: 'ファイルの読み書き（tmpfile）',
   tmpnam: 'ファイルの読み書き（tmpnam）',
-  abort: 'std::abort',
-  atexit: 'std::atexit',
-  quick_exit: 'std::quick_exit',
 };
 
 /** The library a program compiles against: what `#include` and `std::` give it, and `Turtle`. */
@@ -473,8 +470,10 @@ export class Library {
     const exit = native('exit', [INT], VOID, ([status]) => {
       throw new ProgramExit(asNumber(status));
     });
-    this.addFunctions(new Map([['exit', [exit]]]), this.stdNames);
-    this.addFunctions(new Map([['exit', [exit]]]), this.globalNames);
+    for (const [name, functions] of [['exit', [exit]], ...programEndings()] as const) {
+      this.addFunctions(new Map([[name, [...functions]]]), this.stdNames);
+      this.addFunctions(new Map([[name, [...functions]]]), this.globalNames);
+    }
     for (const [name, type] of [
       ['size_t', ULONG],
       ['ptrdiff_t', LONG],
@@ -638,4 +637,86 @@ const MAP_CONTAINERS = new Set(['map', 'multimap', 'unordered_map', 'unordered_m
 
 function arrayBound(length: number): Type {
   return { kind: 'int', name: 'ulong', templateValue: BigInt(length) };
+}
+
+const HANDLER: Type = pointerTo({ kind: 'function', ret: VOID, params: [] });
+
+function callHandler(frame: Frame, handler: unknown, row: number): void {
+  const [fn] = (handler as FunctionRef).candidates;
+  if (fn) invoke(frame, fn, [], undefined, row);
+}
+
+function abort(): never {
+  throw new ProgramAbort('std::abort でプログラムが止まりました。');
+}
+
+/**
+ * The functions of `<cstdlib>` and `<exception>` that end the program besides `exit`: `abort`, `terminate` with its
+ * handler, `quick_exit` and `_Exit`, and the functions they and `exit` call (`atexit`, `at_quick_exit`).
+ */
+function programEndings(): [string, FunctionInfo[]][] {
+  return [
+    ['abort', [native('abort', [], VOID, abort)]],
+    [
+      'atexit',
+      [
+        native('atexit', [HANDLER], INT, ([handler], { frame, row }) => {
+          // exit calls the functions and destroys the static objects in the reverse order of their registrations.
+          frame.runtime.staticObjects.push({
+            box: new Box(),
+            destroy: (current) => callHandler(current, handler, row),
+          });
+          return 0;
+        }),
+      ],
+    ],
+    [
+      'at_quick_exit',
+      [
+        native('at_quick_exit', [HANDLER], INT, ([handler], { frame }) => {
+          frame.runtime.quickExitHandlers.push(handler as FunctionRef);
+          return 0;
+        }),
+      ],
+    ],
+    [
+      'quick_exit',
+      [
+        native('quick_exit', [INT], VOID, ([status], { frame, row }) => {
+          const handlers = frame.runtime.quickExitHandlers;
+          while (handlers.length > 0) callHandler(frame, handlers.pop(), row);
+          throw new ProgramExit(asNumber(status), true);
+        }),
+      ],
+    ],
+    [
+      '_Exit',
+      [
+        native('_Exit', [INT], VOID, ([status]) => {
+          throw new ProgramExit(asNumber(status), true);
+        }),
+      ],
+    ],
+    [
+      'set_terminate',
+      [
+        native('set_terminate', [HANDLER], HANDLER, ([handler], { frame }) => {
+          const previous = frame.runtime.terminateHandler;
+          frame.runtime.terminateHandler = handler as FunctionRef | undefined;
+          return previous ?? NULL_PTR;
+        }),
+      ],
+    ],
+    [
+      'terminate',
+      [
+        native('terminate', [], VOID, (_, { frame, row }) => {
+          const handler = frame.runtime.terminateHandler;
+          if (handler && !handler.isNull) callHandler(frame, handler, row);
+          else frame.runtime.write('stderr', 'libc++abi: terminating\n');
+          return abort();
+        }),
+      ],
+    ],
+  ];
 }

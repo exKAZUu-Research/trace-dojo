@@ -77,7 +77,7 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
   } catch (error) {
     uncaughtException = describeFailure(error);
     // std::exit destroys the objects with static storage duration too.
-    if (error instanceof ProgramExit) uncaughtException = exitWithStatics(runtime);
+    if (error instanceof ProgramExit && !error.skipsStatics) uncaughtException = exitWithStatics(runtime);
   }
   runtime.flushOutput();
   return {

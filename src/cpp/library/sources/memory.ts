@@ -13,9 +13,15 @@ export const MEMORY: LibrarySource = {
     'static_pointer_cast',
     'dynamic_pointer_cast',
     'const_pointer_cast',
+    'addressof',
   ],
   uses: [TYPE_TRAITS],
   source: String.raw`
+template <class T>
+constexpr T* addressof(T& value) noexcept {
+  return &value;
+}
+
 template <class T>
 struct default_delete {
   constexpr default_delete() noexcept = default;
