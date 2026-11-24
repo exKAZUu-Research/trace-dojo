@@ -693,6 +693,9 @@ defineNatives({
   'System.Nullable`1.Equals': (call, receiver, [other]) => {
     if (receiver === undefined) return other === undefined;
     if (other === undefined) return false;
+    // The underlying type's Equals(object) holds only for a box of that same type, as `1.Equals(1.0)` is false.
+    const underlying = call.owner?.args[0];
+    if (other instanceof CsBox && underlying && !sameType(other.type, call.frame.resolve(underlying))) return false;
     return valuesEqual(evaluatorOf(call), unboxed(receiver), unboxed(other as Value), call.frame);
   },
   'System.Nullable`1.GetHashCode': (call, receiver) =>
