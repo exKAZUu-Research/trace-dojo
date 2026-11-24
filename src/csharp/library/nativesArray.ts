@@ -4,6 +4,7 @@ import { copyValue, CsArray, CsBox, CsObject, type Value } from '../values';
 import { LibraryEnumerator } from './iteration';
 import {
   binarySearch,
+  comparerNameOf,
   comparisonOf,
   equalityOf,
   failDestinationIndex,
@@ -379,7 +380,9 @@ defineNatives({
       );
     const pairs = keyArray.values.map((key, index) => ({ key, item: itemArray.values[index] }));
     const compare = guardedComparison(call, comparisonOf(call, undefined));
-    sortChecked(call, undefined, () => introSort(pairs, 0, pairs.length, (a, b) => compare(a.key, b.key)));
+    sortChecked(call, comparerNameOf(call, undefined), () =>
+      introSort(pairs, 0, pairs.length, (a, b) => compare(a.key, b.key))
+    );
     for (const [index, pair] of pairs.entries()) {
       keyArray.values[index] = pair.key;
       itemArray.values[index] = pair.item;

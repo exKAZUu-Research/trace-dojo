@@ -17,7 +17,15 @@ import {
   type Value,
 } from '../values';
 import { isEnumerableState, iterate, LibraryEnumerator } from './iteration';
-import { comparisonOf, type Equality, equalityOf, HashState, ListState, newList } from './nativesCollections';
+import {
+  comparisonOf,
+  type Equality,
+  equalityOf,
+  HashState,
+  ListState,
+  newList,
+  sortChecked,
+} from './nativesCollections';
 import { stableSort } from './sort';
 import {
   arrayOfBuffer,
@@ -728,17 +736,21 @@ function ordered(call: NativeCall, args: Value[], descending: boolean, isThen: b
       call.frame.runtime.allocateSlots(items.length * (keys.length + 2));
       const keyed = keys.map((sortKey) => items.map((item) => sortKey.select(item)));
       const step = stepMeter(call);
-      const indices = stableSort(
-        items.map((_item, index) => index),
-        (a, b) => {
-          step();
-          for (const [level, sortKey] of keys.entries()) {
-            const order = sortKey.compare(keyed[level][a], keyed[level][b]);
-            if (order !== 0) return sortKey.descending ? -order : order;
+      let indices: number[] = [];
+      // .NET's EnumerableSorter sorts its index map with a Comparison<int>, which its error names.
+      sortChecked(call, 'System.Comparison`1[System.Int32]', () => {
+        indices = stableSort(
+          items.map((_item, index) => index),
+          (a, b) => {
+            step();
+            for (const [level, sortKey] of keys.entries()) {
+              const order = sortKey.compare(keyed[level][a], keyed[level][b]);
+              if (order !== 0) return sortKey.descending ? -order : order;
+            }
+            return 0;
           }
-          return 0;
-        }
-      );
+        );
+      });
       return indices.map((index) => items[index]);
     },
     { source: root, keys }
