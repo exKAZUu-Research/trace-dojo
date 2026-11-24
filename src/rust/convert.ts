@@ -244,6 +244,9 @@ export class Converter extends ExpressionConverter {
       if (child.type === 'self_parameter') {
         if (selfParam || params.length > 0) syntaxError(this.span(child), 'self は、最初の引数に一度だけ書けます。');
         selfParam = this.selfParam(child);
+      } else if (child.type === 'parameter' && this.field(child, 'pattern').type === 'self') {
+        if (selfParam || params.length > 0) syntaxError(this.span(child), 'self は、最初の引数に一度だけ書けます。');
+        selfParam = this.typedSelfParam(child);
       } else if (child.type === 'parameter') {
         params.push(this.param(child));
       } else if (child.type === 'variadic_parameter') {
@@ -290,6 +293,18 @@ export class Converter extends ExpressionConverter {
     return { mode: 'value', mutable: isMut, span };
   }
 
+  /** `self: Self`, `self: &Self`, `self: &mut Self`, or `self: Box<Self>`. */
+  private typedSelfParam(node: Node): SelfParam {
+    const span = this.span(node);
+    const type = this.field(node, 'type').text.replaceAll(/\s+/g, '');
+    const mutable = node.namedChildren.some((child) => child.type === 'mutable_specifier');
+    if (type === 'Self') return { mode: 'value', mutable, span };
+    if (/^&('\w+)?Self$/.test(type)) return { mode: 'ref', mutable: false, span };
+    if (/^&('\w+)?mutSelf$/.test(type)) return { mode: 'mutRef', mutable: false, span };
+    if (type === 'Box<Self>') return { mode: 'value', boxed: true, mutable, span };
+    return unavailable(span, `型を書いた self（self: ${type}）`);
+  }
+
   private param(node: Node): Param {
     const span = this.span(node);
     const patternNode = this.field(node, 'pattern');
@@ -310,15 +325,26 @@ export class Converter extends ExpressionConverter {
       if (isComment(child)) continue;
       const span = this.span(child);
       if (child.type === 'lifetime_parameter') {
+        const name = this.field(child, 'name').text;
         const bounds = child.childForFieldName('bounds');
-        if (bounds) unavailable(span, "ライフタイムの境界（'a: 'b）");
-        generics.lifetimes.push(this.field(child, 'name').text);
+        const outlives =
+          bounds?.namedChildren.filter((part) => part.type === 'lifetime').map((part) => part.text) ?? [];
+        if (outlives.length > 0) (generics.lifetimeBounds ??= []).push({ name, outlives });
+        generics.lifetimes.push(name);
         continue;
       }
-      if (child.type === 'const_parameter') unavailable(span, '定数のジェネリクス（const N: usize）');
+      if (child.type === 'const_parameter') {
+        if (child.childForFieldName('value')) unavailable(span, '定数のジェネリクスの既定の値');
+        generics.params.push({
+          name: this.identifier(this.field(child, 'name')),
+          span,
+          bounds: [],
+          constType: this.type(this.field(child, 'type')),
+        });
+        continue;
+      }
       if (child.type !== 'type_parameter') unavailable(span, `型引数の書き方（${child.text}）`);
       const defaultType = child.childForFieldName('default_type');
-      if (defaultType && !this.isStd) unavailable(span, '型引数の既定の型');
       const bounds = child.childForFieldName('bounds');
       generics.params.push({
         name: this.identifier(this.field(child, 'name')),
@@ -331,8 +357,25 @@ export class Converter extends ExpressionConverter {
     for (const predicate of where?.namedChildren ?? []) {
       if (predicate.type !== 'where_predicate') continue;
       const left = this.field(predicate, 'left');
-      if (left.type === 'lifetime') unavailable(this.span(predicate), "ライフタイムの境界（'a: 'b）");
-      if (left.type === 'higher_ranked_trait_bound') unavailable(this.span(predicate), "for<'a> の境界");
+      if (left.type === 'lifetime') {
+        const outlives =
+          predicate
+            .childForFieldName('bounds')
+            ?.namedChildren.filter((part) => part.type === 'lifetime')
+            .map((part) => part.text) ?? [];
+        (generics.lifetimeBounds ??= []).push({ name: left.text, outlives });
+        continue;
+      }
+      if (left.type === 'higher_ranked_trait_bound') {
+        // `for<'a> F: Fn(&'a T)`: the bound holds for every lifetime, which the borrow checker's own rules give.
+        const bounds = predicate.childForFieldName('bounds');
+        generics.where.push({
+          type: this.type(this.field(left, 'type')),
+          bounds: bounds ? this.bounds(bounds) : [],
+          span: this.span(predicate),
+        });
+        continue;
+      }
       const bounds = predicate.childForFieldName('bounds');
       generics.where.push({
         type: this.type(left),
@@ -357,7 +400,7 @@ export class Converter extends ExpressionConverter {
     switch (node.type) {
       case 'lifetime': {
         if (node.text === "'static") return { kind: 'static', span };
-        return unavailable(span, `型のライフタイム境界（${node.text}）`);
+        return { kind: 'lifetime', name: node.text, span };
       }
       case 'type_identifier':
       case 'scoped_type_identifier':
@@ -383,16 +426,20 @@ export class Converter extends ExpressionConverter {
         };
       }
       case 'modified_trait_bound': {
-        return unavailable(span, `境界の修飾（${node.text}）`);
-      }
-      case 'removed_trait_bound': {
         return syntaxError(span, `境界 ${node.text} は、不安定な機能なので使えません（E0658）。`);
       }
+      case 'removed_trait_bound': {
+        const trait = node.namedChildren.find((child) => !isComment(child));
+        if (trait?.text !== 'Sized') syntaxError(span, `${node.text} の ? は、Sized にだけ付けられます。`);
+        return { kind: 'maybeSized', span };
+      }
       case 'higher_ranked_trait_bound': {
-        return unavailable(span, "for<'a> の境界");
+        // `for<'a> F: Fn(&'a T)`: the bound holds for every lifetime, which the borrow checker's own rules give.
+        return this.bound(this.field(node, 'type'));
       }
       case 'use_bounds': {
-        return unavailable(span, 'use<...> の境界');
+        // `use<'a, T>` names what an `impl Trait` captures; edition 2024 captures everything in scope already.
+        return { kind: 'lifetime', name: "'_", span };
       }
       default: {
         return unavailable(span, `境界の書き方（${node.text}）`);
@@ -847,8 +894,9 @@ export class Converter extends ExpressionConverter {
         if (allowBindings) continue;
         unavailable(this.span(child), `関連型の指定（${child.text}）`);
       }
-      if (child.type === 'block' || child.type.endsWith('_literal')) {
-        unavailable(this.span(child), '定数の型引数');
+      if (child.type === 'block' || child.type.endsWith('_literal') || child.type === 'negative_literal') {
+        args.push({ kind: 'constArg', value: this.expr(child), span: this.span(child) });
+        continue;
       }
       args.push(this.type(child));
     }

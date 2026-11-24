@@ -47,6 +47,8 @@ export interface Generics {
   params: GenericParamAst[];
   /** The lifetime parameters' names (`'a`). */
   lifetimes: string[];
+  /** The lifetimes each lifetime outlives (`'b: 'a` in the parameters or the `where` clause). */
+  lifetimeBounds?: { name: string; outlives: string[] }[];
   where: WherePredicate[];
 }
 
@@ -55,6 +57,8 @@ export interface GenericParamAst {
   span: Span;
   bounds: BoundAst[];
   defaultType?: TypeAst;
+  /** For a const parameter (`const N: usize`), its type. */
+  constType?: TypeAst;
 }
 
 export interface WherePredicate {
@@ -67,6 +71,10 @@ export interface WherePredicate {
 export type BoundAst =
   | { kind: 'trait'; path: PathAst; span: Span }
   | { kind: 'static'; span: Span }
+  /** `?Sized`, which lets the parameter be a type of unknown size (`str`, `[T]`, `dyn Trait`). */
+  | { kind: 'maybeSized'; span: Span }
+  /** A lifetime bound (`T: 'a`), which only the borrow checker reads. */
+  | { kind: 'lifetime'; name: string; span: Span }
   | { kind: 'fn'; trait: 'Fn' | 'FnMut' | 'FnOnce'; params: TypeAst[]; ret: TypeAst | undefined; span: Span };
 
 export interface FnItem {
@@ -92,6 +100,8 @@ export interface FnItem {
 
 export interface SelfParam {
   mode: 'value' | 'ref' | 'mutRef';
+  /** `self: Box<Self>`, which takes the receiver's box, and which a `Box<dyn Trait>` can call. */
+  boxed?: boolean;
   mutable: boolean;
   /** The lifetime that `&'a self` names. */
   lifetime?: string;
@@ -213,6 +223,8 @@ export type TypeAst =
   | { kind: 'dyn'; bounds: BoundAst[]; lifetime?: string; span: Span }
   | { kind: 'impl'; bounds: BoundAst[]; span: Span }
   | { kind: 'fnBound'; bound: BoundAst & { kind: 'fn' }; span: Span }
+  /** A value given to a const parameter (`3` of `Matrix<2, 3>`, `{ N + 1 }`). */
+  | { kind: 'constArg'; value: Expr; span: Span }
   /** A raw pointer type (`*const T`, `*mut T`). */
   | { kind: 'pointer'; mutable: boolean; target: TypeAst; span: Span }
   /** A function pointer type (`fn(i32) -> i32`). */

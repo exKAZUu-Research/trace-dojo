@@ -26,11 +26,13 @@ import {
   adt,
   type AdtDef,
   allSupertraits,
+  arrayOfLength,
   type AssocTypeDef,
   BOOL,
   type BuiltinAdt,
   CHAR,
   type ConstDef,
+  constValueType,
   defaultTraitArguments,
   F32,
   F64,
@@ -82,7 +84,12 @@ function declareTypeParams(generics: Generics, enclosing: readonly TypeParam[] =
     if (names.has(param.name)) compileError(param.span, `型引数 ${param.name} が2回宣言されています。`);
     names.add(param.name);
   }
-  return generics.params.map((param) => newTypeParam(param.name));
+  return generics.params.map((param) => {
+    const declared = newTypeParam(param.name);
+    if (param.constType) declared.constType = param.constType;
+    if (param.bounds.some((bound) => bound.kind === 'maybeSized')) declared.maybeUnsized = true;
+    return declared;
+  });
 }
 
 export function compileError(span: Span, message: string): never {
@@ -401,6 +408,7 @@ export class ItemCollector {
     if (item.shape !== 'named') {
       this.declareValue(module, item.name, { kind: 'ctor', def, variant: 0 }, item.vis, item.span);
     }
+    this.adtDefaults(def, module, item.generics);
     this.lowering.push(() => {
       const scope = this.adtScope(def, module, item.generics);
       def.variants.push({
@@ -485,6 +493,7 @@ export class ItemCollector {
       def.variants.push({ name: variant.name, index, shape: variant.shape, fields: [], discriminant });
       next = discriminant + 1n;
     }
+    this.adtDefaults(def, module, item.generics);
     this.lowering.push(() => {
       const scope = this.adtScope(def, module, item.generics);
       for (const [index, variant] of item.variants.entries()) {
@@ -497,6 +506,18 @@ export class ItemCollector {
         checkDuplicateFields(variant.fields);
       }
     });
+  }
+
+  /** Lowers the default types of a type's parameters (`struct P<T = i32>`), before any signature uses the type. */
+  private adtDefaults(def: AdtDef, module: Module, generics: Generics): void {
+    const params = new Map(def.params.map((param) => [param.name, param]));
+    for (const [index, param] of generics.params.entries()) {
+      const written = param.defaultType;
+      if (!written) continue;
+      this.traitDefaults.push(() => {
+        def.params[index].defaultType = lowerType(written, { module, params, selfType: undefined });
+      });
+    }
   }
 
   private adtScope(def: AdtDef, module: Module, generics: Generics): TypeScope {
@@ -574,7 +595,7 @@ export class ItemCollector {
     }
     this.lowering.unshift(() => {
       lowerTypeParamBounds(def.params, item.generics, scope);
-      def.supertraits = item.supertraits.map((bound) => lowerBound(bound, scope, selfType));
+      def.supertraits = item.supertraits.flatMap((bound) => lowerBoundIfTrait(bound, scope, selfType));
       addWherePredicates(item.generics, scope, (param, bounds) => {
         if (param !== self) return false;
         def.supertraits.push(...bounds);
@@ -719,6 +740,7 @@ export class ItemCollector {
       params: [...parentParams, ...own],
       parentParamCount: parentParams.length,
       selfMode: item.selfParam?.mode,
+      boxedSelf: item.selfParam?.boxed,
       paramTypes: [],
       ret: UNIT,
       ast: item,
@@ -745,7 +767,9 @@ export class ItemCollector {
     const assocParams: TypeParam[] = [];
     const scope: TypeScope = { module, params, selfType, assocParams, implTrait: impl?.trait };
     for (const [index, param] of item.generics.params.entries()) {
-      own[index].bounds = param.bounds.map((bound) => lowerBound(bound, scope, { kind: 'param', param: own[index] }));
+      own[index].bounds = param.bounds.flatMap((bound) =>
+        lowerBoundIfTrait(bound, scope, { kind: 'param', param: own[index] })
+      );
     }
     addWherePredicates(item.generics, scope, (param, bounds) => {
       // A method's bounds on its impl's parameters constrain only the method.
@@ -817,7 +841,7 @@ function describeImplType(type: Type): string {
 function lowerTypeParamBounds(params: TypeParam[], generics: Generics, scope: TypeScope): void {
   for (const [index, param] of generics.params.entries()) {
     const target = params[index];
-    target.bounds = param.bounds.map((bound) => lowerBound(bound, scope, { kind: 'param', param: target }));
+    target.bounds = param.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, { kind: 'param', param: target }));
   }
 }
 
@@ -835,7 +859,7 @@ function addWherePredicates(
     if (type.kind !== 'param') {
       compileError(predicate.span, 'where には、型引数の境界だけを書いてください。');
     }
-    const bounds = predicate.bounds.map((bound) => lowerBound(bound, scope, type));
+    const bounds = predicate.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, type));
     if (elsewhere?.(type.param, bounds)) continue;
     type.param.bounds.push(...bounds);
   }
@@ -1557,6 +1581,8 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
       return { kind: 'tuple', elems: ast.elems.map((elem) => lowerType(elem, scope)) };
     }
     case 'array': {
+      const lengthParam = constParamOf(ast.len, scope);
+      if (lengthParam) return arrayOfLength(lowerType(ast.elem, scope), { kind: 'param', param: lengthParam });
       const length = constInteger(ast.len, scope);
       if (length === undefined || length < 0n) {
         compileError(ast.span, '配列の長さには、整数のリテラルか定数の式を書いてください。');
@@ -1580,7 +1606,7 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
       if (scope.implParams) {
         const param = newTypeParam(`impl ${describeBound(ast.bounds[0])}`);
         const type: Type = { kind: 'param', param };
-        param.bounds = ast.bounds.map((bound) => lowerBound(bound, scope, type));
+        param.bounds = ast.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, type));
         scope.implParams.push(param);
         return type;
       }
@@ -1588,10 +1614,17 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
         const opaque = newOpaque(scope.returnOf.params.map((param) => ({ kind: 'param', param })));
         if (scope.returnOf.trait) opaque.method = scope.returnOf;
         const type: Type = { kind: 'opaque', opaque };
-        opaque.bounds = ast.bounds.map((bound) => lowerBound(bound, scope, type));
+        opaque.bounds = ast.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, type));
         return type;
       }
       return compileError(ast.span, 'impl Trait は、関数の引数と戻り値の型にだけ書けます。');
+    }
+    case 'constArg': {
+      const param = constParamOf(ast.value, scope);
+      if (param) return { kind: 'param', param };
+      const value = constInteger(ast.value, scope);
+      if (value === undefined) compileError(ast.span, '定数の型引数には、整数のリテラルか定数の式を書いてください。');
+      return constValueType(value);
     }
     case 'pointer': {
       return scope.module.program.builtinType(ast.mutable ? 'MutPtr' : 'ConstPtr', [lowerType(ast.target, scope)]);
@@ -1613,7 +1646,7 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
 }
 
 function lowerDynType(ast: Extract<TypeAst, { kind: 'dyn' }>, scope: TypeScope): Type {
-  const bounds = ast.bounds.map((bound) => lowerBound(bound, scope, undefined));
+  const bounds = ast.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, undefined));
   const auto = new Set(
     bounds.filter(({ trait }) => trait.builtin === 'Send' || trait.builtin === 'Sync').map(({ trait }) => trait)
   );
@@ -1647,6 +1680,8 @@ function assocItem(param: TypeParam, scope: TypeScope): Type | undefined {
 function describeBound(bound: BoundAst): string {
   if (bound.kind === 'fn') return bound.trait;
   if (bound.kind === 'static') return "'static";
+  if (bound.kind === 'maybeSized') return '?Sized';
+  if (bound.kind === 'lifetime') return bound.name;
   return bound.path.segments.map((segment) => segment.name).join('::');
 }
 
@@ -1837,8 +1872,9 @@ function renameAliasLifetimes(type: Type, names: ReadonlyMap<string, string | un
   return mapped;
 }
 
-function lowerAdtPath(path: PathAst, def: AdtDef, args: Type[], scope: TypeScope): Type {
+function lowerAdtPath(path: PathAst, def: AdtDef, written: Type[], scope: TypeScope): Type {
   const last = path.segments.at(-1)!;
+  const args = withDefaultArgs(def, written);
   if (args.length !== def.params.length) {
     if (args.length === 0 && scope.inferOmittedArgs)
       return adt(
@@ -1856,10 +1892,42 @@ function lowerAdtPath(path: PathAst, def: AdtDef, args: Type[], scope: TypeScope
   return last.lifetimes?.length ? { kind: 'adt', def, args, lifetimes: last.lifetimes } : adt(def, args);
 }
 
-/** The standard library's operator traits, which learning programs neither implement nor use as bounds here. */
+/** The type arguments of a type, the omitted ones that have defaults (`struct P<T = i32>`) given those. */
+function withDefaultArgs(def: AdtDef, written: Type[]): Type[] {
+  if (written.length >= def.params.length || def.builtin) return written;
+  const missing = def.params.slice(written.length);
+  if (!missing.every((param) => param.defaultType)) return written;
+  const subst = new Map(def.params.slice(0, written.length).map((param, index) => [param, written[index]]));
+  const args = [...written];
+  for (const param of missing) {
+    const type = substitute(param.defaultType as Type, subst);
+    subst.set(param, type);
+    args.push(type);
+  }
+  return args;
+}
 
-/** Lowers a bound on `self`, which closure traits complete with their signature. */
+/** The const parameter an expression names (`N` of `[T; N]`), if it names one. */
+export function constParamOf(expr: Expr, scope: Pick<TypeScope, 'params'>): TypeParam | undefined {
+  const inner = expr.kind === 'block' && expr.stmts.length === 0 ? expr.tail : expr;
+  if (inner?.kind !== 'path' || inner.path.segments.length !== 1) return undefined;
+  const param = scope.params.get(inner.path.segments[0].name);
+  return param?.constType ? param : undefined;
+}
+
+/**
+ * Lowers a bound that constrains the type's traits; `?Sized` and lifetime bounds lower to none, as the interpreter
+ * lets type parameters be unsized and the borrow checker reads lifetimes from the types.
+ */
+function lowerBoundIfTrait(bound: BoundAst, scope: TypeScope, self: Type | undefined): TraitRef[] {
+  if (bound.kind === 'maybeSized' || bound.kind === 'lifetime') return [];
+  return [lowerBound(bound, scope, self)];
+}
+
 export function lowerBound(bound: BoundAst, scope: TypeScope, self: Type | undefined): TraitRef {
+  if (bound.kind === 'maybeSized' || bound.kind === 'lifetime') {
+    return compileError(bound.span, `${describeBound(bound)} は、型引数の境界にだけ書けます。`);
+  }
   if (bound.kind === 'static') return { trait: scope.module.program.staticBound, args: [] };
   if (bound.kind === 'fn') {
     const trait = scope.module.program.traitDef(bound.trait);

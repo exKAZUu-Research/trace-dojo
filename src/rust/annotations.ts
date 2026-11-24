@@ -1,7 +1,7 @@
 import type { Expr, Pattern, Span } from './ast';
 import type { Known } from './constLint';
 import type { ProjectedCapture } from './loanCaptures';
-import type { AdtDef, ClosureType, ConstDef, DerefKind, FnDef, TraitRef, Type } from './types';
+import type { AdtDef, ClosureType, ConstDef, DerefKind, FnDef, TraitRef, Type, TypeParam } from './types';
 
 /** A variable of a function or closure: a `let` binding, a parameter, or a binding of a pattern. */
 export interface LocalVar {
@@ -47,7 +47,9 @@ export type PathRes =
   /** A constant of a primitive type, such as `i32::MAX` or `f64::consts::PI`. */
   | { kind: 'builtinConst'; type: Type; name: string }
   /** `_` on the left of an assignment. */
-  | { kind: 'discard' };
+  | { kind: 'discard' }
+  /** A const parameter (`N` of `const N: usize`), whose value each instantiation gives. */
+  | { kind: 'constParam'; param: TypeParam; type: Type };
 
 /** How a method call reaches its receiver: through derefs, then by reference or by value. */
 export interface ReceiverAdjust {

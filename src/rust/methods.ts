@@ -308,7 +308,7 @@ function traitCandidates(
     if (!trait.builtin || !inScope(trait)) continue;
     const fn = trait.methods.get(name);
     if (!fn?.selfMode) continue;
-    const selfType = selfForMode(fn.selfMode, receiverType);
+    const selfType = selfForMode(fn.selfMode, receiverType, fn.boxedSelf);
     if (!selfType) continue;
     candidates.push({
       trait,
@@ -335,9 +335,11 @@ function applies(solver: TraitSolver, attempt: () => unknown): boolean {
 }
 
 /** The type `Self` must be for a method with this receiver mode to take `receiverType`. */
-function selfForMode(mode: 'value' | 'ref' | 'mutRef', receiverType: Type): Type | undefined {
+function selfForMode(mode: 'value' | 'ref' | 'mutRef', receiverType: Type, boxed = false): Type | undefined {
   if (mode === 'value') {
     const t = normalize(shallow(receiverType));
+    // A `dyn Trait` in a `Box` is the `Self` of a method taking `self: Box<Self>`.
+    if (t.kind === 'dyn' && boxed) return receiverType;
     return t.kind === 'str' || t.kind === 'slice' || t.kind === 'dyn' ? undefined : receiverType;
   }
   const t = shallow(receiverType);
@@ -397,7 +399,7 @@ function matchSelf(
   fn: FnDef,
   receiverType: Type
 ): Omit<MethodMatch, 'adjust'> | undefined {
-  const selfType = selfForMode(fn.selfMode!, receiverType);
+  const selfType = selfForMode(fn.selfMode!, receiverType, fn.boxedSelf);
   if (!selfType) return undefined;
   const subst = solver.matchImpl(impl, arrayAsSlice(fn, selfType));
   if (!subst) return undefined;
@@ -426,7 +428,7 @@ function matchDefault(
   fn: FnDef,
   receiverType: Type
 ): Omit<MethodMatch, 'adjust'> | undefined {
-  const selfType = selfForMode(fn.selfMode!, receiverType);
+  const selfType = selfForMode(fn.selfMode!, receiverType, fn.boxedSelf);
   if (!selfType) return undefined;
   const subst = solver.matchImpl(impl, selfType);
   if (!subst) return undefined;
@@ -441,7 +443,7 @@ function matchTraitSelf(
   target: Type,
   receiverType: Type
 ): Omit<MethodMatch, 'adjust'> | undefined {
-  const selfType = selfForMode(fn.selfMode!, receiverType);
+  const selfType = selfForMode(fn.selfMode!, receiverType, fn.boxedSelf);
   if (!selfType || !solver.unifier.tryUnify(selfType, target)) return undefined;
   return { fn, typeArgs: [target, ...bound.args, ...ownParams(fn)], selfType: target };
 }

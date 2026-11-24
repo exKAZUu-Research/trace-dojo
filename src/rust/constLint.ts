@@ -444,7 +444,7 @@ export class ConstLint {
     const index = this.expr(expr.index);
     const type = checkedType(expr.operand.ty);
     const array = type?.kind === 'ref' ? checkedType(type.target) : type;
-    if (array?.kind === 'array' && typeof index === 'bigint' && index >= BigInt(array.len)) {
+    if (array?.kind === 'array' && array.len >= 0 && typeof index === 'bigint' && index >= BigInt(array.len)) {
       compileError(
         expr.span,
         `この添字（${index}）は、長さ ${array.len} の配列の範囲外なので、実行すると必ず panic します。`

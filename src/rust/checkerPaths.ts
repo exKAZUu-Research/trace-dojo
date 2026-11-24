@@ -84,7 +84,8 @@ export function typeOfRes(c: Checker, res: PathRes, span: Span, expected: Type |
     case 'const': {
       return res.type;
     }
-    case 'builtinConst': {
+    case 'builtinConst':
+    case 'constParam': {
       return res.type;
     }
     case 'discard': {
@@ -173,6 +174,8 @@ function singleNameRes(c: Checker, segment: PathAst['segments'][number], span: S
   if (name === '_') return { kind: 'discard' };
   const local = c.findLocal(name);
   if (local) return c.localRes(local);
+  const constParam = c.body.typeParams.get(name);
+  if (constParam?.constType) return { kind: 'constParam', param: constParam, type: c.lowerType(constParam.constType) };
   if (name === 'self') compileError(span, 'self は、self を引数に取るメソッドの中にだけ書けます。');
   if (name === 'Self') return selfCtor(c, span);
   const binding = lookupValue(c.body.module, name, span);

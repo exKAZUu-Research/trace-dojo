@@ -18,9 +18,9 @@ import { type CaptureMode, captureStoragePlaces } from './loanCaptures';
 import { derefOnce } from './methods';
 import { castValue, copyValue, needsCopy } from './ops';
 import { ControlSignal, type Frame, type FunctionInfo, MOVED, UNASSIGNED } from './runtime';
-import { runtimeType } from './runtimeTypes';
+import { concreteType, runtimeType } from './runtimeTypes';
 import { trackCollectionStorage } from './turtleTypes';
-import { type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
+import { type ConstDef, constValueOf, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
 import {
   AccessorPlace,
   CellPlace,
@@ -605,6 +605,14 @@ export class Compiler {
       case 'builtinConst': {
         const value = this.support.builtinConst(res.name);
         return () => value;
+      }
+      case 'constParam': {
+        const { param } = res;
+        return (frame) => {
+          const value = constValueOf(concreteType({ kind: 'param', param }, frame.typeArgs));
+          if (value === undefined) throw new Error(`No value for the const parameter ${param.name}`);
+          return value;
+        };
       }
       case 'discard': {
         return () => UNIT_VALUE;

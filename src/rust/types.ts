@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss -- Defines Rust types, their substitutions and their shared structural operations.
-import type { ConstItem, FieldAst, FnItem, Span } from './ast';
+import type { ConstItem, FieldAst, FnItem, Span, TypeAst } from './ast';
 import type { Module } from './items';
 
 /**
@@ -19,7 +19,11 @@ export type Type =
   | { kind: 'str' }
   | { kind: 'never' }
   | { kind: 'tuple'; elems: Type[] }
-  | { kind: 'array'; elem: Type; len: number }
+  /**
+   * `lenType`: for an array whose length is a const parameter (`[T; N]`) or not inferred yet, that parameter or
+   * variable, while `len` is -1; once it is a `ConstValue`, the length is `len`.
+   */
+  | { kind: 'array'; elem: Type; len: number; lenType?: Type }
   | { kind: 'slice'; elem: Type }
   /** `lifetime`: the name a declared signature gives the reference's lifetime (`'a`), which only the borrow checker reads. */
   | { kind: 'ref'; mutable: boolean; target: Type; lifetime?: string }
@@ -53,6 +57,10 @@ export interface TypeParam {
   defaultType?: Type;
   /** Whether this is the `Self` of a trait, which stands for the implementing type. */
   isSelf?: boolean;
+  /** For a const parameter (`const N: usize`), its type as written, which makes it a value in expressions. */
+  constType?: TypeAst;
+  /** `T: ?Sized`, which a type of unknown size (`str`, `[T]`, `dyn Trait`) may be. */
+  maybeUnsized?: boolean;
 }
 
 export interface ClosureType {
@@ -173,7 +181,9 @@ export type BuiltinAdt =
   | 'Cell'
   /** `*const T` and `*mut T`. */
   | 'ConstPtr'
-  | 'MutPtr';
+  | 'MutPtr'
+  /** The value of a const parameter, as a type argument. */
+  | 'ConstValue';
 
 export interface AdtDef {
   name: string;
@@ -278,6 +288,8 @@ export interface FnDef {
   isDefault?: boolean;
   /** For a function of the standard library without a body, the key of its native implementation. */
   nativeKey?: string;
+  /** `self: Box<Self>`, whose `self` is the box the receiver is. */
+  boxedSelf?: boolean;
   /** Bounds that a method's `where` clause puts on its impl's or trait's type parameters. */
   extraBounds?: { param: TypeParam; bound: TraitRef }[];
 }
@@ -399,7 +411,8 @@ export function mapChildren(t: Type, f: (child: Type) => Type): Type {
       return { kind: 'tuple', elems: t.elems.map(f) };
     }
     case 'array': {
-      return { kind: 'array', elem: f(t.elem), len: t.len };
+      if (!t.lenType) return { kind: 'array', elem: f(t.elem), len: t.len };
+      return arrayOfLength(f(t.elem), f(t.lenType));
     }
     case 'slice': {
       return { kind: 'slice', elem: f(t.elem) };
@@ -438,7 +451,9 @@ export function childTypes(t: Type): Type[] {
     case 'tuple': {
       return t.elems;
     }
-    case 'array':
+    case 'array': {
+      return t.lenType ? [t.elem, t.lenType] : [t.elem];
+    }
     case 'slice': {
       return [t.elem];
     }
@@ -632,6 +647,12 @@ export function sameType(a: Type, b: Type): boolean {
     }
     case 'array': {
       const other = y as typeof x;
+      if (x.lenType || other.lenType) {
+        return (
+          sameType(x.lenType ?? constValueType(x.len), other.lenType ?? constValueType(other.len)) &&
+          sameType(x.elem, other.elem)
+        );
+      }
       return x.len === other.len && sameType(x.elem, other.elem);
     }
     case 'slice': {
@@ -708,7 +729,7 @@ export function typeToString(type: Type): string {
       return `(${t.elems.map(typeToString).join(', ')})`;
     }
     case 'array': {
-      return `[${typeToString(t.elem)}; ${t.len}]`;
+      return `[${typeToString(t.elem)}; ${t.lenType ? typeToString(t.lenType) : t.len}]`;
     }
     case 'slice': {
       return `[${typeToString(t.elem)}]`;
@@ -851,4 +872,38 @@ function shapeName(name: string): string {
   if (renamed[name]) return renamed[name];
   const collection = /^(?:HashMap|BTreeMap|HashSet|BTreeSet|VecDeque|BinaryHeap)(\w+)Shape$/.exec(name);
   return collection ? collection[1] : name.replace(/Shape$/, '');
+}
+
+const constValues = new Map<string, AdtDef>();
+
+/** A value of a const parameter (`3` of `[T; 3]` or `Matrix<2, 3>`) as the type argument it is. */
+export function constValueType(value: bigint | number): Type {
+  const name = String(value);
+  let def = constValues.get(name);
+  if (!def) {
+    def = {
+      name,
+      path: name,
+      kind: 'struct',
+      params: [],
+      variants: [],
+      derives: new Set(),
+      span: { row: 0, col: 1 },
+      builtin: 'ConstValue',
+    };
+    constValues.set(name, def);
+  }
+  return { kind: 'adt', def, args: [] };
+}
+
+/** The value a type argument of a const parameter stands for, once it is one. */
+export function constValueOf(type: Type): bigint | undefined {
+  const t = shallow(type);
+  return t.kind === 'adt' && t.def.builtin === 'ConstValue' ? BigInt(t.def.name) : undefined;
+}
+
+/** An array of a length a const parameter or a variable may give, which is known once it is a `ConstValue`. */
+export function arrayOfLength(elem: Type, lenType: Type): Type {
+  const known = constValueOf(lenType);
+  return known === undefined ? { kind: 'array', elem, len: -1, lenType } : { kind: 'array', elem, len: Number(known) };
 }

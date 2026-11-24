@@ -614,7 +614,8 @@ export class Checker {
     if (item.isUnsafe) this.body.unsafeDepth = 1;
     if (item.selfParam && selfType) {
       const mode = item.selfParam.mode;
-      const type = mode === 'value' ? selfType : ref(selfType, mode === 'mutRef');
+      const value = item.selfParam.boxed ? this.program.builtinType('Box', [selfType]) : selfType;
+      const type = mode === 'value' ? value : ref(selfType, mode === 'mutRef');
       const local = this.declareLocal('self', type, item.selfParam.mutable, item.selfParam.span);
       local.isSelf = true;
     }
@@ -1139,7 +1140,7 @@ export class Checker {
     for (const [index, param] of trait.params.entries()) {
       const arg = args[index];
       this.checkWrittenType(arg, span);
-      if (implicitSized) this.requireTrait(arg, 'Sized', span);
+      if (implicitSized && !param.maybeUnsized) this.requireTrait(arg, 'Sized', span);
       for (const bound of param.bounds) this.require(arg, substituteTraitRef(bound, parameters), span);
     }
   }
@@ -1168,8 +1169,10 @@ export class Checker {
         compileError(span, `${typeToString(arg)} にトレイト ${bound.trait.name} が実装されていません。`);
       }
     }
-    if (t.def.builtin !== 'Box') {
-      for (const arg of t.args) {
+    const unsizedArgs = ['Box', 'Rc', 'Weak', 'RefCell', 'Ref', 'RefMut', 'Cell', 'ConstPtr', 'MutPtr'];
+    if (!unsizedArgs.includes(t.def.builtin ?? '')) {
+      for (const [index, arg] of t.args.entries()) {
+        if (t.def.params[index]?.maybeUnsized) continue;
         const a = shallow(arg);
         if (a.kind === 'dyn' || a.kind === 'str' || a.kind === 'slice') {
           compileError(
@@ -1328,7 +1331,7 @@ export class Checker {
         for (const bound of bounds) {
           this.obligations.push({ type: arg, ref: bound, span });
         }
-        if (!(fn.module as Module).isStd && !param.isSelf) this.requireTrait(arg, 'Sized', span);
+        if (!(fn.module as Module).isStd && !param.isSelf && !param.maybeUnsized) this.requireTrait(arg, 'Sized', span);
       }
     }
     if (span) {
@@ -1348,7 +1351,10 @@ export class Checker {
   }
 
   requireAdtArguments(def: AdtDef, args: Type[], span: Span): void {
-    if (!(def.module as Module | undefined)?.isStd) for (const arg of args) this.requireTrait(arg, 'Sized', span);
+    if (!(def.module as Module | undefined)?.isStd) {
+      for (const [index, arg] of args.entries())
+        if (!def.params[index]?.maybeUnsized) this.requireTrait(arg, 'Sized', span);
+    }
     for (const [arg, bound] of adtArgumentBounds(def, args)) {
       this.recordTypeBounds(arg, [bound]);
       this.require(arg, bound, span);

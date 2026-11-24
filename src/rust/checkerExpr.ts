@@ -12,10 +12,11 @@ import { constInteger } from './constExpressions';
 import { checkConstOperations } from './constLint';
 import { lowerPattern, missingPattern } from './exhaustiveness';
 import { isPseudo, normalize } from './infer';
-import { compileError } from './items';
+import { compileError, constParamOf } from './items';
 import { intoIterItem } from './iterTypes';
 import { RANGE_TYPES } from './traits';
 import {
+  arrayOfLength,
   BOOL,
   CHAR,
   F32,
@@ -247,6 +248,19 @@ function arrayRepeatExpr(c: Checker, expr: Extract<Expr, { kind: 'arrayRepeat' }
   const e = expected ? shallow(expected) : undefined;
   const elem = e?.kind === 'array' ? e.elem : freshVar();
   c.coerceExpr(expr.value, elem);
+  const lengthParam = constParamOf(expr.count, { params: c.body.typeParams });
+  if (lengthParam) {
+    c.coerceExpr(expr.count, USIZE);
+    c.deferredChecks.push(() => {
+      if (!c.solver.isCopy(resolve(elem, true))) {
+        compileError(
+          expr.span,
+          `[値; 個数] の値は Copy の型にしてください（${typeToString(resolve(elem))} は Copy ではありません）。`
+        );
+      }
+    });
+    return arrayOfLength(elem, { kind: 'param', param: lengthParam });
+  }
   const len = constUsize(c, expr.count);
   if (len === 0 && c.annotations.paths.get(expr.value)?.kind === 'const') {
     c.annotations.unevaluatedRepeatOperands.add(expr.value);

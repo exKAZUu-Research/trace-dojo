@@ -71,7 +71,7 @@ function callFn(
   }
   const iterable = fn.selfMode ? [false, ...iterableParams(fn)] : iterableParams(fn);
   checkArgs(c, expr.args, params, expectations(c, sig.ret, params, expected), iterable);
-  if (fn.selfMode === 'value') c.requireTrait(params[0], 'Sized', expr.args[0].span);
+  if (fn.selfMode === 'value' && !fn.boxedSelf) c.requireTrait(params[0], 'Sized', expr.args[0].span);
   expr.callee.ty = { kind: 'fn', params, ret: sig.ret };
   return sig.ret;
 }
@@ -79,7 +79,9 @@ function callFn(
 export function selfParamType(fn: FnDef, subst: Subst): Type {
   const self = fn.trait ? ({ kind: 'param', param: fn.trait.self } as Type) : (fn.impl?.selfType ?? UNIT);
   const selfType = substitute(self, subst);
-  if (fn.selfMode === 'value') return selfType;
+  if (fn.selfMode === 'value') {
+    return fn.boxedSelf ? (fn.module as Module).program.builtinType('Box', [selfType]) : selfType;
+  }
   return ref(selfType, fn.selfMode === 'mutRef');
 }
 
@@ -351,7 +353,7 @@ export function checkMethodCall(
   }
   c.annotations.methods.set(expr, { fn, typeArgs: found.typeArgs, receiver: found.adjust });
   const adjusted = typeAfter(receiverType, found.adjust.derefs) ?? found.selfType;
-  if (fn.selfMode === 'value') checkMoveOutOfRef(c, expr, found.adjust, adjusted);
+  if (fn.selfMode === 'value' && !fn.boxedSelf) checkMoveOutOfRef(c, expr, found.adjust, adjusted);
   if (expr.method === 'map') return arrayMapResult(adjusted, found.selfType, sig.ret);
   return sig.ret;
 }

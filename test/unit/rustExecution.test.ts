@@ -8922,6 +8922,28 @@ fn main() {
   });
 });
 
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('generic parameters take const values, defaults, ?Sized, lifetime bounds, and self: Box<Self>', () => {
+  const program = `use std::fmt::Display;
+fn show<T: ?Sized + Display>(t: &T) -> String { format!("<{}>", t) }
+fn longest<'a, 'b: 'a>(x: &'a str, y: &'b str) -> &'a str { if x.len() > y.len() { x } else { y } }
+fn sum<const N: usize>(a: [i32; N]) -> i32 { let mut s = 0; for i in 0..N { s += a[i]; } s }
+struct Buf<const N: usize> { data: [u8; N] }
+impl<const N: usize> Buf<N> { fn new() -> Self { Buf { data: [0; N] } } }
+struct Pt<T = i32> { x: T }
+trait State { fn next(self: Box<Self>) -> Box<dyn State>; fn name(&self) -> &'static str; }
+struct A;
+struct B;
+impl State for A { fn next(self: Box<Self>) -> Box<dyn State> { Box::new(B) } fn name(&self) -> &'static str { "A" } }
+impl State for B { fn next(self: Box<Self>) -> Box<dyn State> { self } fn name(&self) -> &'static str { "B" } }
+fn main() {
+    let p: Pt = Pt { x: 3 };
+    let s: Box<dyn State> = Box::new(A);
+    println!("{} {} {} {} {} {}", show("str"), longest("ab", "abc"), sum([5; 4]), Buf::<8>::new().data.len(), p.x, s.next().name());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '<str> abc 20 8 3 B\n' });
+});
+
 test('an empty match covers the uninhabited Infallible', () => {
   const program = rustMain(
     '    println!("{:?}", widen(5));',

@@ -1,6 +1,7 @@
 import {
   type AdtDef,
   childTypes,
+  constValueType,
   intType,
   mapChildren,
   sameAutoTraits,
@@ -75,6 +76,10 @@ export class Unifier {
       }
       case 'array': {
         const other = y as typeof x;
+        if (x.lenType || other.lenType) {
+          const lengths = this.unify(x.lenType ?? constValueType(x.len), other.lenType ?? constValueType(other.len));
+          return lengths && this.unify(x.elem, other.elem);
+        }
         return x.len === other.len && this.unify(x.elem, other.elem);
       }
       case 'slice': {
