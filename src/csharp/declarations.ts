@@ -846,6 +846,14 @@ export class DeclarationBinder extends BinderBase {
         `'${displayTypeSymbol(symbol)}.${shown}': 仮想または抽象メンバーには、private を指定できません`
       );
     }
+    if (modifiers.has('sealed') && !property.isOverride && symbol.kind !== 'interface' && !this.isLibraryUnit) {
+      const shown = isIndexer ? 'this' : name;
+      this.error(
+        member,
+        'CS0238',
+        `'${displayTypeSymbol(symbol)}.${shown}' はオーバーライドではないため、シールドにできません`
+      );
+    }
     property.row = member.row;
     property.column = member.column;
     if (member.kind === 'property') property.declaration = member;
@@ -1065,6 +1073,8 @@ export class DeclarationBinder extends BinderBase {
       const keyword = method.isVirtual ? 'virtual' : method.isOverride ? 'override' : 'abstract';
       this.error(position, 'CS0112', `静的なメンバーを '${keyword}' とマークすることはできません。`);
     }
+    if (method.isSealed && !method.isOverride && method.owner.kind !== 'interface')
+      this.error(position, 'CS0238', `'${display()}' はオーバーライドではないため、シールドにできません`);
     if (method.isVirtual && method.isOverride)
       this.error(
         position,
