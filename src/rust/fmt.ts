@@ -6,6 +6,7 @@ import { floatNumber } from './floatBits';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
 import { normalize } from './infer';
 import { iteratorDebug } from './iterDebug';
+import { ioErrorDebug, ioErrorDisplay } from './natives/io';
 import { wrap } from './ops';
 import { FmtFailure } from './runtime';
 import { ERROR_TYPES } from './traits';
@@ -179,6 +180,9 @@ export class Formatter {
             if (write) for (const char of text) write(char);
             return text;
           }
+          case 'IoError': {
+            return padString(ioErrorDisplay(v), spec, write);
+          }
           default: {
             if (ERROR_TYPES.has(t.def.builtin as string))
               return padString(errorDisplay(t.def.builtin as string, v), spec, write);
@@ -342,6 +346,13 @@ export class Formatter {
       }
       case 'Turtle': {
         return 'Turtle';
+      }
+      case 'IoError': {
+        return emit(ioErrorDebug(v, indent), write);
+      }
+      case 'Path':
+      case 'PathBuf': {
+        return quotedDebug(textOf(v), false, write);
       }
       case 'Rc': {
         return this.debug((v as SharedBox).value, t.args[0], spec, indent, write);

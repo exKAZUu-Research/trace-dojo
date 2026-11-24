@@ -2896,7 +2896,6 @@ test.each([
   ],
   ['available-in-Rust deque append', 'let mut a = std::collections::VecDeque::from([1]); a.append(&mut a.clone());'],
   ['threads (stage D)', '    std::thread::spawn(|| {});'],
-  ['standard input (stage D)', '    let mut s = String::new();\n    std::io::stdin().read_line(&mut s).unwrap();'],
 ])('%s are unavailable', (_name, body, items = '') => {
   const execution = executeProgram('rust', rustMain(body, items));
   expect(execution.kind).toBe('compileError');
@@ -7414,7 +7413,7 @@ fn main() {
   });
 });
 
-test('an iterator has {:?} when the iterators it writes do, and names of std::io are reported for what they are', () => {
+test('an iterator has {:?} when the iterators it writes do, and unavailable names of std::io are reported', () => {
   const shown = `#[derive(Debug)]
 struct Shown(i32);
 struct Hidden;
@@ -7446,8 +7445,8 @@ Peekable { iter: Map { iter: Iter([2]) }, peeked: Some(Some(2)) } Skip { iter: C
     });
   }
   for (const [use, message] of [
-    ['use std::io::BufWriter;', 'std::io::BufWriter は、この採点環境では使えません。'],
-    ['use std::io::BufRead;', '標準入力・ファイルの入出力は、この採点環境では使えません。'],
+    ['use std::io::Cursor;', 'std::io::Cursor は、この採点環境では使えません。'],
+    ['use std::io::Seek;', 'std::io::Seek は、この採点環境では使えません。'],
   ]) {
     expect(executeProgram('rust', `${use}\nfn main() {}`)).toMatchObject({
       kind: 'compileError',
@@ -8942,6 +8941,29 @@ fn main() {
     println!("{} {} {} {} {} {}", show("str"), longest("ab", "abc"), sum([5; 4]), Buf::<8>::new().data.len(), p.x, s.next().name());
 }`;
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '<str> abc 20 8 3 B\n' });
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program and input.
+test("programs read standard input and read and write files of the run's file system", () => {
+  const program = `use std::fs::{self, File, OpenOptions};
+use std::io::{self, BufRead, BufReader, Write};
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut name = String::new();
+    io::stdin().read_line(&mut name)?;
+    let nums: Vec<i32> = io::stdin().lock().lines().map(|l| l.unwrap().trim().parse().unwrap()).collect();
+    println!("Hello, {}! {:?}", name.trim(), nums);
+    fs::write("poem.txt", "one\\n")?;
+    let mut f = OpenOptions::new().append(true).open("poem.txt")?;
+    writeln!(f, "two")?;
+    for line in BufReader::new(File::open("poem.txt")?).lines() { println!("{}", line?); }
+    if let Err(e) = File::open("missing.txt") { println!("{} {:?}", e, e.kind()); }
+    Ok(())
+}`;
+  expect(executeProgram('rust', program, { stdin: 'Ferris\n3\n4\n' })).toMatchObject({
+    kind: 'executed',
+    stdout: 'Hello, Ferris! [3, 4]\none\ntwo\nNo such file or directory (os error 2) NotFound\n',
+    finalFiles: { 'poem.txt': 'one\ntwo\n' },
+  });
 });
 
 test('an empty match covers the uninhabited Infallible', () => {

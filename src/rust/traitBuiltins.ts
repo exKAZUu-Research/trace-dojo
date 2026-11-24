@@ -51,6 +51,9 @@ const CLONE_CONTAINERS = new Set([
 ]);
 
 const DEBUG_TYPES = new Set([
+  'Path',
+  'PathBuf',
+  'IoErrorKind',
   'ConstPtr',
   'MutPtr',
   'Cell',
@@ -207,6 +210,8 @@ const RULES: Record<string, Rule> = {
       : t.kind === 'ref' && t.mutable
         ? 'yes'
         : 'no',
+  AsPath: ({ t }) => (isPathLike(t) ? 'yes' : 'no'),
+  AsBytes: ({ t }) => (isBytesLike(t) ? 'yes' : 'no'),
   Neg: ({ t }) => {
     const n = operatorNumber(t);
     return n && (n.kind === 'float' || (n.kind === 'int' && n.name.startsWith('i'))) ? 'yes' : 'no';
@@ -216,6 +221,29 @@ const RULES: Record<string, Rule> = {
     return n && (n.kind === 'int' || n.kind === 'bool') ? 'yes' : 'no';
   },
 };
+
+/** What names a file: text, a `Path`, or a `PathBuf`, or a reference to one. */
+function isPathLike(type: Type): boolean {
+  const t = normalize(shallow(type));
+  if (t.kind === 'ref') return isPathLike(t.target);
+  if (t.kind === 'str') return true;
+  return t.kind === 'adt' && ['String', 'Path', 'PathBuf'].includes(t.def.builtin ?? '');
+}
+
+/** What `fs::write` writes: text, or bytes in a slice, an array, or a `Vec`, or a reference to one. */
+function isBytesLike(type: Type): boolean {
+  const t = normalize(shallow(type));
+  if (t.kind === 'ref') return isBytesLike(t.target);
+  if (t.kind === 'str' || (t.kind === 'adt' && t.def.builtin === 'String')) return true;
+  const elem =
+    t.kind === 'slice' || t.kind === 'array'
+      ? t.elem
+      : t.kind === 'adt' && t.def.builtin === 'Vec'
+        ? t.args[0]
+        : undefined;
+  const e = elem && normalize(shallow(elem));
+  return e?.kind === 'int' && e.name === 'u8';
+}
 
 /** A number or `bool`, or a shared reference to one, which std's operator impls take. */
 function operatorNumber(type: Type | undefined): (Type & { kind: 'int' | 'float' | 'bool' }) | undefined {
@@ -362,7 +390,7 @@ function cloneAdt(goal: Goal, t: AdtType): Answer {
   const d = derived(goal);
   if (d) return d;
   if (t.def.builtin === 'Iter') return all([t.args[1]]);
-  if (t.def.builtin === 'Rc' || t.def.builtin === 'Weak') return 'yes';
+  if (t.def.builtin === 'Rc' || t.def.builtin === 'Weak' || t.def.builtin === 'PathBuf') return 'yes';
   if (t.def.builtin === 'RefCell') return all(t.args);
   if (t.def.builtin === 'Cell') {
     return goal.solver.implements(t.args[0], { trait: goal.solver.program.traitDef('Copy'), args: [] });
@@ -511,7 +539,7 @@ function comparisonAdt(goal: Goal, t: AdtType): Answer {
   if (d) return d;
   const builtin = t.def.builtin as string;
   const equality = name === 'PartialEq' || name === 'Eq';
-  if (builtin === 'String' || builtin === 'Ordering' || builtin === 'ConstPtr' || builtin === 'MutPtr') return 'yes';
+  if (['String', 'Ordering', 'ConstPtr', 'MutPtr', 'Path', 'PathBuf'].includes(builtin)) return 'yes';
   if (ERROR_TYPES.has(builtin)) return equality ? 'yes' : 'no';
   if (builtin === 'HashMap' || builtin === 'HashSet') {
     if (!equality) return 'no';

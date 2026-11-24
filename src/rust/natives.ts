@@ -5,6 +5,7 @@ import './natives/numbers';
 import './natives/operators';
 import './natives/pointers';
 import './natives/rawPointers';
+import './natives/io';
 import './natives/strings';
 import './natives/sequences';
 import './natives/collections';

@@ -988,6 +988,14 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   ParseCharError: 'ParseCharError',
   Rc: 'Rc',
   Weak: 'Weak',
+  Stdin: 'Stdin',
+  StdinLock: 'StdinLock',
+  BufReader: 'BufReader',
+  BufWriter: 'BufWriter',
+  File: 'File',
+  OpenOptions: 'OpenOptions',
+  Path: 'Path',
+  PathBuf: 'PathBuf',
   RefCell: 'RefCell',
   Ref: 'Ref',
   RefMut: 'RefMut',
@@ -997,6 +1005,7 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
 };
 
 const BUILTIN_ENUMS: Record<string, BuiltinAdt> = {
+  ErrorKind: 'IoErrorKind',
   Bound: 'Bound',
   Option: 'Option',
   ControlFlow: 'ControlFlow',
@@ -1486,7 +1495,6 @@ export function unavailableStdItem(segments: string[], span: Span): never {
 function checkUnavailableStd(segments: string[], span: Span): void {
   const [, module, name] = segments;
   const unavailable: Record<string, string> = {
-    fs: 'ファイルの読み書き（std::fs）',
     net: 'ネットワーク（std::net）',
     thread: 'スレッド（std::thread）',
     sync: 'スレッドの同期（std::sync）',
@@ -1497,7 +1505,6 @@ function checkUnavailableStd(segments: string[], span: Span): void {
     any: 'std::any',
     ffi: '外部の関数との連携（std::ffi）',
     os: 'OS の機能（std::os）',
-    path: 'ファイルのパス（std::path）',
     alloc: 'メモリの割り当て（std::alloc）',
     arch: 'CPU 固有の命令（std::arch）',
     simd: 'SIMD（std::simd）',
@@ -1505,16 +1512,7 @@ function checkUnavailableStd(segments: string[], span: Span): void {
     panic: 'std::panic',
     hint: 'std::hint',
   };
-  if (module === 'io' && name) {
-    // The other names of `std::io` (`BufWriter`, `Cursor`) neither read standard input nor touch files.
-    const reads = /^(?:stdin|Stdin|StdinLock|Read|BufRead|BufReader|Lines|Bytes|read_to_string)$/.test(name);
-    compileError(
-      span,
-      reads
-        ? '標準入力・ファイルの入出力は、この採点環境では使えません。'
-        : `std::io::${name} は、この採点環境では使えません。`
-    );
-  }
+  if (module === 'io' && name) compileError(span, `std::io::${name} は、この採点環境では使えません。`);
   if (module && unavailable[module]) compileError(span, `${unavailable[module]}は、この採点環境では使えません。`);
   if (module === 'process' && name && name !== 'exit') {
     compileError(span, `外部のプロセス（std::process::${name}）は、この採点環境では使えません。`);

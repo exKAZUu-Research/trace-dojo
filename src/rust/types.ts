@@ -183,7 +183,16 @@ export type BuiltinAdt =
   | 'ConstPtr'
   | 'MutPtr'
   /** The value of a const parameter, as a type argument. */
-  | 'ConstValue';
+  | 'ConstValue'
+  | 'Stdin'
+  | 'StdinLock'
+  | 'BufReader'
+  | 'BufWriter'
+  | 'File'
+  | 'OpenOptions'
+  | 'Path'
+  | 'PathBuf'
+  | 'IoErrorKind';
 
 export interface AdtDef {
   name: string;

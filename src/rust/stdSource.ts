@@ -1034,6 +1034,7 @@ pub mod iter {
         pub struct CharsShape;
         pub struct BytesShape;
         pub struct DynIteratorShape<D>;
+        pub struct IoLinesShape;
         pub struct UserIterShape<I>;
         pub struct CharIndicesShape;
         pub struct SplitWhitespaceShape;
@@ -1478,6 +1479,47 @@ pub mod io {
     #[derive(Debug)]
     pub struct Error { inner: () }
     pub type Result<T> = core::result::Result<T, Error>;
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+    pub enum ErrorKind {
+        NotFound, PermissionDenied, ConnectionRefused, ConnectionReset, HostUnreachable, NetworkUnreachable,
+        ConnectionAborted, NotConnected, AddrInUse, AddrNotAvailable, NetworkDown, BrokenPipe, AlreadyExists,
+        WouldBlock, NotADirectory, IsADirectory, DirectoryNotEmpty, ReadOnlyFilesystem, StaleNetworkFileHandle,
+        InvalidInput, InvalidData, TimedOut, WriteZero, StorageFull, NotSeekable, QuotaExceeded, FileTooLarge,
+        ResourceBusy, ExecutableFileBusy, Deadlock, CrossesDevices, TooManyLinks, InvalidFilename,
+        ArgumentListTooLong, Interrupted, Unsupported, UnexpectedEof, OutOfMemory, Other,
+    }
+    impl Error {
+        pub fn new<E: super::fmt::Display>(kind: ErrorKind, error: E) -> Error;
+        pub fn other<E: super::fmt::Display>(error: E) -> Error;
+        pub fn kind(&self) -> ErrorKind;
+    }
+    pub trait Read {
+        fn read_to_string(&mut self, buf: &mut String) -> Result<usize>;
+        fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize>;
+    }
+    pub trait BufRead: Read {
+        fn read_line(&mut self, buf: &mut String) -> Result<usize>;
+        fn lines(self) -> IterImpl<Result<String>, super::iter::shape::IoLinesShape> where Self: Sized;
+    }
+    pub struct Stdin { inner: () }
+    pub struct StdinLock { inner: () }
+    pub fn stdin() -> Stdin;
+    impl Stdin {
+        pub fn lock(&self) -> StdinLock;
+        pub fn read_line(&self, buf: &mut String) -> Result<usize>;
+        pub fn lines(self) -> IterImpl<Result<String>, super::iter::shape::IoLinesShape>;
+    }
+    impl Read for Stdin {}
+    impl Read for StdinLock {}
+    impl BufRead for StdinLock {}
+    pub fn read_to_string<R: Read>(reader: R) -> Result<String>;
+    pub struct BufReader<R> { inner: R }
+    impl<R> BufReader<R> { pub fn new(inner: R) -> BufReader<R>; }
+    impl<R> Read for BufReader<R> {}
+    impl<R> BufRead for BufReader<R> {}
+    pub struct BufWriter<W> { inner: W }
+    impl<W> BufWriter<W> { pub fn new(inner: W) -> BufWriter<W>; }
+    impl<W> Write for BufWriter<W> {}
     pub trait Write {
         fn write(&mut self, buf: &[u8]) -> Result<usize>;
         fn write_all(&mut self, buf: &[u8]) -> Result<()>;
@@ -1495,6 +1537,67 @@ pub mod io {
     impl Write for StdoutLock {}
     impl Write for Stderr {}
     impl Write for StderrLock {}
+}
+pub mod fs {
+    use super::io::Result;
+    use super::pseudo::{AsPath, AsBytes};
+    pub struct File { inner: () }
+    impl File {
+        pub fn open<P: AsPath>(path: P) -> Result<File>;
+        pub fn create<P: AsPath>(path: P) -> Result<File>;
+        pub fn create_new<P: AsPath>(path: P) -> Result<File>;
+        pub fn options() -> OpenOptions;
+    }
+    impl super::io::Read for File {}
+    impl super::io::Write for File {}
+    pub struct OpenOptions { inner: () }
+    impl OpenOptions {
+        pub fn new() -> OpenOptions;
+        pub fn read(&mut self, read: bool) -> &mut OpenOptions;
+        pub fn write(&mut self, write: bool) -> &mut OpenOptions;
+        pub fn append(&mut self, append: bool) -> &mut OpenOptions;
+        pub fn truncate(&mut self, truncate: bool) -> &mut OpenOptions;
+        pub fn create(&mut self, create: bool) -> &mut OpenOptions;
+        pub fn create_new(&mut self, create_new: bool) -> &mut OpenOptions;
+        pub fn open<P: AsPath>(&self, path: P) -> Result<File>;
+    }
+    pub fn read_to_string<P: AsPath>(path: P) -> Result<String>;
+    pub fn read<P: AsPath>(path: P) -> Result<Vec<u8>>;
+    pub fn write<P: AsPath, C: AsBytes>(path: P, contents: C) -> Result<()>;
+    pub fn remove_file<P: AsPath>(path: P) -> Result<()>;
+    pub fn create_dir<P: AsPath>(path: P) -> Result<()>;
+    pub fn create_dir_all<P: AsPath>(path: P) -> Result<()>;
+    pub fn remove_dir<P: AsPath>(path: P) -> Result<()>;
+    pub fn rename<P: AsPath, Q: AsPath>(from: P, to: Q) -> Result<()>;
+    pub fn copy<P: AsPath, Q: AsPath>(from: P, to: Q) -> Result<u64>;
+    pub fn exists<P: AsPath>(path: P) -> Result<bool>;
+}
+pub mod path {
+    use super::pseudo::AsPath;
+    pub struct Path { inner: () }
+    pub struct PathBuf { inner: () }
+    impl Path {
+        pub fn new<S: AsPath>(s: &S) -> &Path;
+        pub fn exists(&self) -> bool;
+        pub fn is_file(&self) -> bool;
+        pub fn is_dir(&self) -> bool;
+        pub fn to_str(&self) -> Option<&str>;
+        pub fn display(&self) -> &str;
+        pub fn join<P: AsPath>(&self, path: P) -> PathBuf;
+        pub fn file_name(&self) -> Option<&str>;
+        pub fn extension(&self) -> Option<&str>;
+        pub fn to_path_buf(&self) -> PathBuf;
+    }
+    impl PathBuf {
+        pub fn new() -> PathBuf;
+        pub fn from<S: AsPath>(s: S) -> PathBuf;
+        pub fn push<P: AsPath>(&mut self, path: P);
+        pub fn as_path(&self) -> &Path;
+        pub fn exists(&self) -> bool;
+        pub fn to_str(&self) -> Option<&str>;
+        pub fn display(&self) -> &str;
+        pub fn join<P: AsPath>(&self, path: P) -> PathBuf;
+    }
 }
 pub mod process {
     pub fn exit(code: i32) -> !;
@@ -1651,6 +1754,8 @@ pub mod prelude {
     pub use super::dojo::Turtle;
 }
 pub mod pseudo {
+    pub trait AsPath {}
+    pub trait AsBytes {}
     pub trait Integer {}
     pub trait SignedInteger {}
     pub trait UnsignedInteger {}

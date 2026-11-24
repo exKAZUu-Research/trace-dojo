@@ -1,3 +1,4 @@
+import type { FileHandle, TextReader } from '../interpreter/programIo';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { CollectionEntries, type CollectionKey } from './collectionEntries';
 import type { DebugPart } from './debugText';
@@ -36,6 +37,7 @@ export type Value =
   | CellBox
   | BorrowGuard
   | RawPtr
+  | IoStream
   | undefined;
 
 export const UNIT_VALUE: Value[] = Object.freeze([]) as unknown as Value[];
@@ -378,4 +380,12 @@ export class RawPtr {
   constructor(readonly place: Place | undefined) {
     this.address = place ? (nextAddress += 16) : 0;
   }
+}
+
+/** Standard input, a file, or a buffered reader or writer of one: what it reads from and writes to. */
+export class IoStream {
+  constructor(
+    readonly reader: TextReader | undefined,
+    readonly writer: FileHandle | undefined
+  ) {}
 }

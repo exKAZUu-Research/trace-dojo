@@ -8,6 +8,7 @@ import type { Spec } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
 import { allocVecElements } from './natives/capacityNatives';
+import { writesFile, writeToStream } from './natives/io';
 import { sizeOf } from './natives/layout';
 import { cloneValue, valuesEqual } from './ops';
 import { FmtFailure, type Frame, RustPanic, writtenText } from './runtime';
@@ -114,6 +115,14 @@ function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
   }
   const stream = outputStream(inner);
   if (stream) return writeStream(c, macro, target, format, stream, newline);
+  if (writesFile(inner)) {
+    return (frame) => {
+      const file = target(frame);
+      const { text } = formatPartly(format, frame);
+      writeToStream(file, text + newline);
+      return writeResult(c.program, false);
+    };
+  }
   const { program } = c;
   return (frame) => {
     let formatter = target(frame);
