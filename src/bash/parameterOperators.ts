@@ -113,7 +113,7 @@ function isEmptyParameterValue(expander: Expander, value: ParameterValue, inDoub
 }
 
 /**
- * Expands the parts after an operator. Inside double quotes, the word of `-`, `+`, `=`, and `?` expands as double-quoted
+ * Expands the parts after an operator. Inside double quotes, the word of `-`, `+`, and `=` expands as double-quoted
  * text, where single quotes are literal; the pattern and the replacement of the pattern operators expand as unquoted
  * words, whose quotes and backslashes quote, as Bash 5.3 does.
  */
@@ -257,21 +257,37 @@ function defaultValue(
   inDouble: boolean
 ): Piece[] {
   if (kind === '-') return expander.withSpacedStar(() => expandArgument(expander, expansion.argument, inDouble, false));
-  const word = expander.withSpacedStar(
-    () => expandArgument(expander, expansion.argument, inDouble, false),
-    kind !== '='
-  );
-  const text = expander.joinPieces(word);
   if (kind === '?') {
-    const message = text === '' ? (colon ? 'parameter null or not set' : 'parameter not set') : text;
+    const message =
+      expansion.argument.length === 0
+        ? colon
+          ? 'parameter null or not set'
+          : 'parameter not set'
+        : expandErrorWord(expander, shell, expansion.argument);
     expander.failParameter(subscript === undefined ? name : `${name}[${subscript.text}]`, message);
   }
+  const word = expander.withSpacedStar(() => expandArgument(expander, expansion.argument, inDouble, false), false);
+  const text = expander.joinPieces(word);
   // `:=` and `=` assign to variables only.
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || subscript?.wholeArray) {
     shell.discard(`$${name}: cannot assign in this way`);
   }
   if (!assignDefaultTarget(shell, name, subscript?.text, text)) throw new DiscardSignal();
   return expander.valuePieces({ kind: 'scalar', value: shell.lastStored }, inDouble);
+}
+
+function expandErrorWord(expander: Expander, shell: Shell, parts: WordPart[]): string {
+  expander.checkTilde(parts, false);
+  const pieces = expander.withSpacedStar(() => expander.expandParts(parts, false));
+  const spend = (cost?: number): void => shell.runtime.spend(cost);
+  const fields = expander.splitFields(pieces).map((field) =>
+    joinBounded(
+      field.map((fragment) => fragment.text),
+      '',
+      spend
+    )
+  );
+  return joinBounded(fields, ' ', spend);
 }
 
 function assignDefaultTarget(shell: Shell, name: string, subscript: string | undefined, text: string): boolean {
