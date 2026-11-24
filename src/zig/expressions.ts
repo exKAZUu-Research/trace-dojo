@@ -383,7 +383,11 @@ export abstract class ExpressionCompiler extends SemaBase {
       const value = copyForStorage(cell.slots[0]);
       return {
         ...known(binding.type, value, span),
-        place: { isConst: false, locate: place.locate },
+        place: {
+          isConst: false,
+          locate: place.locate,
+          address: () => known(pointerOf('one', binding.type, { isConst: false }), new Pointer(cell, 0), span),
+        },
         local: binding,
       };
     }
@@ -834,7 +838,8 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   protected knownAddress(expression: TExpr): Pointer | undefined {
-    if (!expression.known) return undefined;
+    // A comptime var's value read here is a copy, whose parts must not follow the variable's later stores.
+    if (!expression.known || expression.local?.comptimeCell) return undefined;
     const address = this.addressOf(expression);
     return address.known && address.value instanceof Pointer ? address.value : undefined;
   }

@@ -64,8 +64,8 @@ import {
   storeInto,
   type Value,
   ZArray,
-  type ZStruct,
-  type ZUnion,
+  ZStruct,
+  ZUnion,
 } from './values';
 
 /** Runs a statement, returning the jump that leaves it, if any. */
@@ -490,7 +490,17 @@ export abstract class StatementCompiler extends CallCompiler {
     return { exec: () => {}, noreturn: false };
   }
 
-  /** The `comptime var` that an assignment's target names or reaches into, as `x`, `x.f`, or `x[i]` do. */
+  /** The `comptime var` in scope whose storage holds `target`, which a pointer taken from the variable points into. */
+  private comptimeVariableHolding(target: Slots): LocalBinding | undefined {
+    for (let scope: Scope | undefined = this.scope; scope; scope = scope.parent)
+      for (const binding of scope.locals?.values() ?? []) {
+        this.spendCompilation();
+        if (binding.comptimeCell && holdsStorage(binding.comptimeCell, target)) return binding;
+      }
+    return undefined;
+  }
+
+  /** The `comptime var` that an assignment's target names or reaches into, as `x`, `x.f`, `x[i]`, or `p.*` do. */
   private comptimeVariableOf(target: Expression): LocalBinding | undefined {
     switch (target.kind) {
       case 'identifier': {
@@ -503,6 +513,13 @@ export abstract class StatementCompiler extends CallCompiler {
       }
       case 'paren': {
         return this.comptimeVariableOf(target.operand);
+      }
+      case 'deref': {
+        if (target.operand.kind !== 'identifier') return undefined;
+        const binding = this.lookup(target.operand.name);
+        return binding?.kind === 'local' && binding.known && binding.value instanceof Pointer
+          ? this.comptimeVariableHolding(binding.value.target)
+          : undefined;
       }
       default: {
         return undefined;
@@ -3317,4 +3334,14 @@ function errorUnionCannotFail(value: TExpr): boolean {
   return result
     ? !(result.value instanceof ErrorValue)
     : value.type.errorSet.resolved !== false && value.type.errorSet.names?.size === 0;
+}
+
+function holdsStorage(storage: Slots, target: Slots): boolean {
+  return (
+    storage === target ||
+    storage.slots.some(
+      (value) =>
+        (value instanceof ZStruct || value instanceof ZArray || value instanceof ZUnion) && holdsStorage(value, target)
+    )
+  );
 }
