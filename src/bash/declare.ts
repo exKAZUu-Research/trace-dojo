@@ -773,6 +773,7 @@ function commitNamerefTarget(
   isLocal: boolean
 ): boolean {
   variable.value = { kind: 'scalar', value: target };
+  variable.userAssigned = true;
   if ((isLocal && target === variable.name) || shell.hasNamerefCycle(variable)) {
     shell.reportError(`${builtin}: warning: ${variable.name}: circular name reference`);
   }
@@ -1288,12 +1289,16 @@ function applyArrayKindAttributes(
       const table = new AssociativeTable(CONVERTED_BUCKETS);
       table.set('0', variable.value.value);
       variable.value = { kind: 'associative', table };
+      variable.userAssigned = true;
     }
     if (!variable.value && assigns) variable.value = { kind: 'associative', table: new AssociativeTable() };
   }
   if (becomesIndexed) {
     variable.attributes.add('a');
-    if (variable.value?.kind === 'scalar') shell.indexedElements(variable);
+    if (variable.value?.kind === 'scalar') {
+      shell.indexedElements(variable);
+      variable.userAssigned = true;
+    }
     if (!variable.value && assigns) variable.value = { kind: 'indexed', elements: new Map() };
   }
 }
@@ -1344,6 +1349,7 @@ function assignReferenceTarget(shell: Shell, builtin: string, variable: Variable
     return false;
   }
   variable.value = { kind: 'scalar', value: target };
+  variable.userAssigned = true;
   if (shell.hasNamerefCycle(variable)) {
     shell.reportError(`${builtin}: warning: ${variable.name}: circular name reference`);
   }

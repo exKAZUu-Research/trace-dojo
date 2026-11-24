@@ -184,7 +184,10 @@ function regexTest(shell: Shell, text: string, source: string): boolean {
   const elements = match ? match.map(([start, end]) => (start === -1 ? '' : chars.slice(start, end).join(''))) : [];
   shell.assignCompound('BASH_REMATCH', elements, false);
   const variable = shell.findOwnVariable('BASH_REMATCH');
-  if (variable) variable.isSystem = true;
+  if (variable) {
+    variable.isSystem = true;
+    variable.userAssigned = false;
+  }
   return match !== undefined;
 }
 

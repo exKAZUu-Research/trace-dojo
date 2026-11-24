@@ -16,8 +16,10 @@ export interface Variable {
   /** Stored value, or `undefined` when declared without an initial value (such as `local x`). */
   value: VariableValue | undefined;
   attributes: Set<Attribute>;
-  /** Whether the variable is a built-in shell variable omitted from learner traces. */
+  /** Whether the variable is a built-in shell variable omitted from learner traces unless user-assigned. */
   isSystem?: boolean;
+  /** Whether the program explicitly assigned or converted this variable cell. */
+  userAssigned?: boolean;
   /** Whether `value` is shared copy-on-write with a suspended parent or child subshell scope. */
   shared?: boolean;
   /** Whether an empty scalar value represents a `null` object binding from a `for` loop over turtles/structures. */
@@ -332,6 +334,7 @@ export function removeScopedVariable(
       variable.value = undefined;
       variable.shared = false;
       variable.fromTempEnv = false;
+      variable.userAssigned = false;
       variable.attributes.clear();
     } else scopes[i].delete(target);
     return i > 0 ? 'local' : 'global';
@@ -692,4 +695,20 @@ export function ensureIndexedElements(variable: Variable): Map<bigint, string> {
   variable.shared = false;
   variable.attributes.add('a');
   return elements;
+}
+
+export function isArrayVariable(variable: Variable): boolean {
+  return (
+    variable.value?.kind === 'indexed' ||
+    variable.value?.kind === 'associative' ||
+    variable.attributes.has('a') ||
+    variable.attributes.has('A')
+  );
+}
+
+export function storeScalarCell(variable: Variable, value: string): void {
+  variable.value = { kind: 'scalar', value };
+  variable.shared = false;
+  variable.nullReference = false;
+  variable.userAssigned = true;
 }

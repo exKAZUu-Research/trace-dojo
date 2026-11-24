@@ -50,6 +50,7 @@ import {
   findVariableInScopes,
   hasNamerefCycleInScopes,
   initialRandomSeed,
+  isArrayVariable,
   isIdentifier,
   isValidFunctionName,
   maxElementIndex,
@@ -59,6 +60,7 @@ import {
   resolveNameInScopes,
   SCALAR_DYNAMIC_VARIABLES,
   type Scope,
+  storeScalarCell,
   translateNegativeIndex,
   unpackIndexedElement,
   unsetNamedVariable,
@@ -460,6 +462,7 @@ export class Shell implements ArithmeticHost {
         return false;
       }
       reference.value = { kind: 'scalar', value };
+      reference.userAssigned = true;
       if (this.hasNamerefCycle(reference)) {
         this.reportError(`warning: ${reference.name}: circular name reference`);
       }
@@ -1231,26 +1234,13 @@ export class Shell implements ArithmeticHost {
   }
 
   assignScalarTo(variable: Variable, value: string, append = false): boolean {
-    if (variable.attributes.has('r')) {
-      this.readonlyFailure = true;
-      this.reportError(`${variable.name}: readonly variable`);
-      return false;
-    }
-    if (
-      variable.value?.kind === 'indexed' ||
-      variable.value?.kind === 'associative' ||
-      variable.attributes.has('a') ||
-      variable.attributes.has('A')
-    ) {
-      return this.assignElementTo(variable, '0', value, append);
-    }
+    if (this.rejectReadonlyElement(variable, variable.name)) return false;
+    if (isArrayVariable(variable)) return this.assignElementTo(variable, '0', value, append);
     const base = append && variable.value?.kind === 'scalar' ? variable.value.value : '';
     const converted = this.convertForAttributes(variable, value, base, append);
     if (converted === undefined) return false;
     this.checkLength(converted);
-    variable.value = { kind: 'scalar', value: converted };
-    variable.shared = false;
-    variable.nullReference = false;
+    storeScalarCell(variable, converted);
     this.lastStored = converted;
     return true;
   }
@@ -1310,6 +1300,7 @@ export class Shell implements ArithmeticHost {
       if (converted === undefined) return false;
       this.checkLength(converted);
       table.set(subscript, converted);
+      variable.userAssigned = true;
       this.lastStored = converted;
       return true;
     }
@@ -1332,6 +1323,7 @@ export class Shell implements ArithmeticHost {
     this.checkLength(converted);
     if (!elements.has(index)) this.chargeSlot();
     elements.set(index, converted);
+    variable.userAssigned = true;
     this.lastStored = converted;
     return true;
   }
@@ -1400,6 +1392,7 @@ export class Shell implements ArithmeticHost {
       const ok = this.assignAssociative(variable, table, baseTable, elements, reportedName);
       variable.value = { kind: 'associative', table };
       variable.attributes.add('A');
+      variable.userAssigned = true;
       return ok;
     }
     const existing = append ? this.indexedElements(variable) : new Map<bigint, string>();
@@ -1407,6 +1400,7 @@ export class Shell implements ArithmeticHost {
       variable.value = { kind: 'indexed', elements: existing };
       variable.attributes.add('a');
     }
+    variable.userAssigned = true;
     let next = append ? maxElementIndex(existing) + 1n : 0n;
     for (const rawElement of elements) {
       const item = unpackIndexedElement(rawElement);

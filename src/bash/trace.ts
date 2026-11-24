@@ -68,7 +68,9 @@ function visibleVariables(shell: Shell, frame: Frame): Variable[] {
     for (const variable of scopes[i].values()) {
       if (seen.has(variable.name)) continue;
       seen.add(variable.name);
-      if (!variable.isSystem && isIdentifier(variable.name) && variable.value) result.push(variable);
+      if ((!variable.isSystem || variable.userAssigned) && isIdentifier(variable.name) && variable.value) {
+        result.push(variable);
+      }
     }
   }
   return result.toSorted((a, b) => scopeRank(scopes, b) - scopeRank(scopes, a));
