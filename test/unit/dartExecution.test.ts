@@ -3003,8 +3003,15 @@ void main() {
 }
 `;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'Stdout\na1\n' });
-  for (const statement of ['print(stdout.hasTerminal)', 'print(stdout.terminalColumns)', 'print(stdin.echoMode)']) {
-    const result = executeProgram('dart', `import 'dart:io'; void main() { ${statement}; }`);
+  // Members the SDK has and the interpreter does not implement: instance, inherited, static, and constructor.
+  for (const statement of [
+    'print(stdout.nonBlocking)',
+    'print(utf8.encoder.startChunkedConversion)',
+    "File('a.txt').statSync()",
+    'print(Directory.systemTemp)',
+    'Map.unmodifiableOf({})',
+  ]) {
+    const result = executeProgram('dart', `import 'dart:convert'; import 'dart:io'; void main() { ${statement}; }`);
     expect(result.kind).toBe('compileError');
     if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toMatch(/この採点環境では使えません。$/);
   }

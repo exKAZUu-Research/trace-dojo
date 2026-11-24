@@ -320,6 +320,7 @@ export abstract class CallCompiler extends OperatorCompiler {
           (target.alias ? this.aliasConstructor(target.alias, undefined, callee, true).types : undefined);
         return this.compileConstructorCall(target.cls, name, types, args, typeArguments, expression, context, false);
       }
+      this.checkUnavailableStaticMember(target.cls, callee.name, callee);
       return this.error(
         callee,
         `クラス ${target.cls.name} に ${callee.name} という static なメソッドやコンストラクタはありません。`
@@ -460,7 +461,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
     const resolved = this.memberFor(receiver, lookupType, name, span);
     if (!resolved) {
-      this.checkUnavailableIoMember(lookupType, name, span);
+      this.checkUnimplementedMember(lookupType, name, span);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメソッドがありません。`);
     }
     if (
@@ -1192,7 +1193,10 @@ export abstract class CallCompiler extends OperatorCompiler {
       );
     }
     const member = cls.staticMembers.get(name);
-    if (!member) return this.error(expression, `クラス ${cls.name} に static なメンバー ${name} がありません。`);
+    if (!member) {
+      this.checkUnavailableStaticMember(cls, name, expression);
+      return this.error(expression, `クラス ${cls.name} に static なメンバー ${name} がありません。`);
+    }
     return this.readStatic(member, expression);
   }
 }

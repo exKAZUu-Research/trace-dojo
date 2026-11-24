@@ -270,6 +270,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     if (staticTarget) {
       const owner = staticTarget.kind === 'class' ? staticTarget.cls : staticTarget.ext;
       const member = owner.staticSetters.get(expression.name) ?? owner.staticMembers.get(expression.name);
+      if (staticTarget.kind === 'class')
+        this.checkUnavailableStaticMember(staticTarget.cls, expression.name, expression);
       if (!member)
         return this.error(
           expression,
@@ -437,7 +439,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
     const setter = this.memberFor(receiver, lookupType, name, span, true);
     if (!setter) {
-      this.checkUnavailableIoMember(lookupType, name, span);
+      this.checkUnimplementedMember(lookupType, name, span);
       const getter = this.memberFor(receiver, lookupType, name, span);
       if (getter) return this.error(span, `${name} は final か getter だけなので、代入できません。`);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメンバーがありません。`);

@@ -68,6 +68,16 @@ class StdinException implements IOException {
   String toString() => "StdinException: " + message + (osError == null ? "" : ", " + osError.toString());
 }
 
+class StdoutException implements IOException {
+  final String message;
+  final OSError? osError;
+  const StdoutException(this.message, [this.osError]);
+  String toString() => "StdoutException: " + message + (osError == null ? "" : ", " + osError.toString());
+}
+
+/** A run's standard input and output are pipes, not a terminal, so the VM's terminal queries fail with ENOTTY. */
+const OSError _notTerminal = OSError("Inappropriate ioctl for device", 25);
+
 abstract interface class IOSink implements StreamSink<List<int>>, StringSink {
   Encoding get encoding;
   void add(List<int> data);
@@ -86,6 +96,10 @@ class Stdout implements IOSink {
   final bool _isError;
   Stdout._(this._isError);
   Encoding get encoding => utf8;
+  bool get hasTerminal => false;
+  bool get supportsAnsiEscapes => false;
+  int get terminalColumns => throw const StdoutException("Could not get terminal size", _notTerminal);
+  int get terminalLines => throw const StdoutException("Could not get terminal size", _notTerminal);
   external void write(Object? object);
   external void writeln([Object? object = ""]);
   external void writeAll(Iterable<dynamic> objects, [String separator = ""]);
@@ -107,6 +121,15 @@ final Stdout stderr = Stdout._(true);
 
 class Stdin extends Stream<List<int>> {
   Stdin._();
+  bool get hasTerminal => false;
+  bool get supportsAnsiEscapes => false;
+  bool get echoMode => throw const StdinException("Error getting terminal echo mode", _notTerminal);
+  set echoMode(bool enabled) => throw const StdinException("Error setting terminal echo mode", _notTerminal);
+  bool get echoNewlineMode => throw const StdinException("Error getting terminal echo newline mode", _notTerminal);
+  set echoNewlineMode(bool enabled) =>
+      throw const StdinException("Error setting terminal echo newline mode", _notTerminal);
+  bool get lineMode => throw const StdinException("Error getting terminal line mode", _notTerminal);
+  set lineMode(bool enabled) => throw const StdinException("Error setting terminal line mode", _notTerminal);
   String? readLineSync({Encoding encoding = utf8, bool retainNewlines = false}) => _readLine(retainNewlines);
   int readByteSync() => _readByte();
   StreamSubscription<List<int>> listen(void onData(List<int> event)?,

@@ -12,6 +12,7 @@ import { declaredMemberNames } from './astWalk';
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
 import type { ExtensionInfo, GlobalVariable, LibraryEnv, TypeAlias } from './environment';
 import { eraseExtensionTypes } from './eraseExtensionTypes';
+import { isSdkInstanceMember, isSdkStaticMember } from './library/sdkExports';
 import type { Frame, FunctionInfo, Runtime, TypeEnv } from './runtime';
 import { Flow, type FunctionContext, LocalScope, LocalVar } from './scope';
 import { inferExtensionReceiver, inferTearOffTypes } from './typeInference';
@@ -107,16 +108,6 @@ const UNAVAILABLE_NAMES: Record<string, string> = {
   ByteData: 'ByteData（dart:typed_data）',
 };
 
-const UNAVAILABLE_SINK_MEMBERS = new Set([
-  'hasTerminal',
-  'terminalColumns',
-  'terminalLines',
-  'supportsAnsiEscapes',
-  'nonBlocking',
-  'lineMode',
-  'echoMode',
-  'echoNewlineMode',
-]);
 const UNAVAILABLE_STATIC_MEMBERS = new Set(['dart:core.StackTrace.current']);
 const SPECIAL_TYPES = new Map<string, DartType>([
   ['dynamic', DYNAMIC],
@@ -164,10 +155,10 @@ export abstract class CompilerBase {
     return this.error(span, `${what}は、この採点環境では使えません。`);
   }
 
-  protected checkUnavailableIoMember(receiver: DartType, name: string, span: Span): void {
+  /** Rejects as unavailable an instance member the SDK has but the interpreter does not implement. */
+  protected checkUnimplementedMember(receiver: DartType, name: string, span: Span): void {
     const type = resolveBound(receiver);
-    if (type.kind !== 'interface' || type.cls.library !== 'dart:io') return;
-    if (['Stdout', 'Stdin', 'IOSink'].includes(type.cls.name) && UNAVAILABLE_SINK_MEMBERS.has(name))
+    if (type.kind === 'interface' && isSdkInstanceMember(type.cls, name))
       this.unsupported(span, type.cls.name + '.' + name);
   }
 
@@ -178,6 +169,9 @@ export abstract class CompilerBase {
     if (UNAVAILABLE_STATIC_MEMBERS.has(`${cls.library}.${cls.name}.${name}`)) {
       this.unsupported(span, `${cls.name}.${name}`);
     }
+    const isImplemented =
+      cls.staticMembers.has(name) || cls.staticSetters.has(name) || cls.constructors.has(name === 'new' ? '' : name);
+    if (!isImplemented && isSdkStaticMember(cls, name)) this.unsupported(span, `${cls.name}.${name}`);
   }
 
   protected checkMixinConstraints(base: InterfaceType, mixin: InterfaceType, span: Span): void {

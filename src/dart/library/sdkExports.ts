@@ -1,3 +1,9 @@
+import type { ClassInfo } from '../classes';
+import { SDK_MEMBERS } from './sdkMembers';
+
+/** The library of dart:core's Uri, apart from the rest because it encodes with dart:convert. */
+export const URI_LIBRARY = 'dart:_uri';
+
 // Dart SDK 3.13.7 public declarations and explicit re-exports. Keep unavailable names visible to diagnostics.
 const SDK_EXPORTS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   [
@@ -89,4 +95,33 @@ const SDK_EXPORTS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
 
 export function isSdkExport(library: string, name: string): boolean {
   return SDK_EXPORTS.get(library)?.has(name) ?? false;
+}
+
+/** The SDK's members of a class of the interpreter's libraries, by the library the SDK declares the class in. */
+function sdkMembersOf(cls: ClassInfo): readonly [string, string, string] | undefined {
+  return SDK_MEMBERS[cls.library === URI_LIBRARY ? 'dart:core' : cls.library]?.[cls.name];
+}
+
+function hasName(names: string, name: string): boolean {
+  return ` ${names} `.includes(` ${name} `);
+}
+
+/**
+ * Whether the SDK gives instances of a class a member, through the nearest SDK classes it is or extends; the
+ * interpreter's own supertypes of an SDK class are not consulted, since its hierarchy may differ from the SDK's.
+ */
+export function isSdkInstanceMember(cls: ClassInfo, name: string, visited = new Set<ClassInfo>()): boolean {
+  if (visited.has(cls)) return false;
+  visited.add(cls);
+  const members = cls.library ? sdkMembersOf(cls) : undefined;
+  if (members) return hasName(members[0], name);
+  return [cls.superclass, ...cls.interfaces, ...cls.mixins, ...cls.onTypes].some(
+    (type) => type !== undefined && isSdkInstanceMember(type.cls, name, visited)
+  );
+}
+
+/** Whether the SDK's class has a static member or named constructor of the name. */
+export function isSdkStaticMember(cls: ClassInfo, name: string): boolean {
+  const members = cls.library ? sdkMembersOf(cls) : undefined;
+  return members !== undefined && (hasName(members[1], name) || hasName(members[2], name));
 }
