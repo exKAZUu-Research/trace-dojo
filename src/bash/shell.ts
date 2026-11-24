@@ -797,8 +797,9 @@ export class Shell implements ArithmeticHost {
     this.loopDepth = 0;
     this.conditionDepth = 0;
     this.listConditionDepth = 0;
-    if (startRow !== undefined) {
-      this.lineShift = startRow - this.currentRow;
+    const firstRow = body[0]?.row ?? startRow;
+    if (firstRow !== undefined) {
+      this.lineShift = firstRow - this.currentRow;
       this.readShift = this.lineShift;
     }
     let status: number;
