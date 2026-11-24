@@ -177,42 +177,60 @@ class ShellTokenStream {
     return content;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Scans shell words including process substitutions, subscripted prefixes, compound array literals, line continuations, and quoting.
   private scanWord(context: WordContext): ShellToken {
     const { source } = this.text;
     const start = this.position;
+    const unclosedBrackets: number[] = [];
     let quoted = false;
     while (this.position < source.length) {
       const ch = source[this.position];
-      if ((ch === '<' || ch === '>') && source[this.position + 1] === '(') {
-        this.position = this.text.parseSubstitution(this.position + 2);
-        continue;
-      }
-      if (ch === '[' && context === 'command' && isIdentifier(source.slice(start, this.position))) {
-        const close = skipSubscript(source, this.position);
-        const hasEquals =
-          close < source.length && (source.startsWith('=', close + 1) || source.startsWith('+=', close + 1));
-        if (close < source.length) {
-          this.consumeSubscriptInWord(close, !hasEquals);
-          continue;
-        }
-      }
-      if (ch === '(' && context !== 'argument' && isCompoundAssignmentPrefix(source.slice(start, this.position))) {
-        this.position = this.scanCompoundArrayBody(this.position);
-        continue;
-      }
+      if (this.tryScanSpecialWordSegment(start, context, ch, unclosedBrackets)) continue;
       if (WORD_BREAK_CHARS.has(ch)) break;
-      if (ch === '\\' && source[this.position + 1] === '\n') {
-        this.position += 2;
-        continue;
-      }
       if (`'"\\\`$`.includes(ch)) quoted ||= ch !== '$';
       this.position = skipWordPiece(this.text, this.position);
     }
+    for (const bracket of unclosedBrackets) this.text.literalSingleQuotes.push(bracket);
     const value = source.slice(start, this.position);
     const nextChar = source[this.position];
     const kind: ShellTokenKind = /^\d+$/.test(value) && (nextChar === '<' || nextChar === '>') ? 'ioNumber' : 'word';
     return this.makeToken(kind, value, this.text.rowAt(start), start, quoted);
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- Handles process substitutions, command subscripts, compound array bodies, line continuations, and declaration brackets.
+  private tryScanSpecialWordSegment(
+    start: number,
+    context: WordContext,
+    ch: string,
+    unclosedBrackets: number[]
+  ): boolean {
+    const { source } = this.text;
+    if ((ch === '<' || ch === '>') && source[this.position + 1] === '(') {
+      this.position = this.text.parseSubstitution(this.position + 2);
+      return true;
+    }
+    if (ch === '[' && context === 'command' && isIdentifier(source.slice(start, this.position))) {
+      const close = skipSubscript(source, this.position);
+      if (close < source.length) {
+        const hasEquals = source.startsWith('=', close + 1) || source.startsWith('+=', close + 1);
+        this.consumeSubscriptInWord(close, !hasEquals);
+        return true;
+      }
+    }
+    if (ch === '(' && context !== 'argument' && isCompoundAssignmentPrefix(source.slice(start, this.position))) {
+      this.position = this.scanCompoundArrayBody(this.position);
+      return true;
+    }
+    if (ch === '\\' && source[this.position + 1] === '\n') {
+      this.position += 2;
+      return true;
+    }
+    if (context === 'declaration' && (ch === '[' || ch === ']')) {
+      if (ch === '[') unclosedBrackets.push(this.position);
+      else unclosedBrackets.pop();
+      this.position++;
+      return true;
+    }
+    return false;
   }
 
   private consumeSubscriptInWord(close: number, maskBreaks: boolean): void {
@@ -717,8 +735,7 @@ class ShellGrammarValidator {
   private needsAssignmentRescan(token: ShellToken): boolean {
     if (token.kind !== 'word') return false;
     if (this.text.source[token.end] === '(' && isCompoundAssignmentPrefix(token.value)) return true;
-    const open = token.value.indexOf('[');
-    return open > 0 && isIdentifier(token.value.slice(0, open));
+    return token.value.includes('[');
   }
 
   private advance(): ShellToken {
