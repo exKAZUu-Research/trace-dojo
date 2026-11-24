@@ -351,9 +351,7 @@ function checkClauses(checker: Checker, binding: Extract<RBinding, { k: 'fun' }>
     checker.inPatternScope(() => {
       let remaining = type;
       for (const pat of clause.pats) {
-        const param = checker.freshVar();
-        const result = checker.freshVar();
-        checker.unify(remaining, tap(tcon(FUNCTION_TYPE), param, result), clause.span, 'メソッドの引数');
+        const { param, result } = checker.splitFunction(remaining, clause.span, 'メソッドの引数');
         checker.inferPat(pat, param);
         remaining = result;
       }

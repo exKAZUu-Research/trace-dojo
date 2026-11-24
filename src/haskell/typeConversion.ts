@@ -18,9 +18,13 @@ import {
   STAR,
   tap,
   tcon,
+  type TVar,
   type Type,
   unifyKinds,
 } from './types';
+
+/** The ids of the variables polymorphic types bind, which count down to stay apart from other variables'. */
+let nextBoundId = -1;
 
 export class TypeConversion {
   private kindInstances: { kind: Kind; expected: Kind; span: Span }[] = [];
@@ -114,6 +118,27 @@ export class TypeConversion {
       case 'kinded': {
         const kind = this.kindOf(type.kind, new Map());
         return { type: this.convert(type.type, vars, varKinds, kind), kind };
+      }
+      case 'forall': {
+        const kindVars = new Map<string, Kind>();
+        const bound = type.binders.map((binder): TVar => ({
+          tag: 'tvar',
+          id: nextBoundId--,
+          kind: binder.kind ? this.kindOf(binder.kind, kindVars) : freshKindVar(),
+          level: Number.MAX_SAFE_INTEGER,
+          name: binder.name,
+          skolem: true,
+          bound: true,
+        }));
+        const innerVars = new Map(vars);
+        const innerKinds = new Map(varKinds);
+        for (const [index, binder] of type.binders.entries()) {
+          innerVars.set(binder.name, bound[index]);
+          innerKinds.set(binder.name, bound[index].kind);
+        }
+        const body = this.convert(type.body, innerVars, innerKinds, STAR);
+        const preds = this.predicates(type.context, innerVars, innerKinds);
+        return { type: { tag: 'forall', vars: bound, preds, body }, kind: STAR };
       }
     }
   }

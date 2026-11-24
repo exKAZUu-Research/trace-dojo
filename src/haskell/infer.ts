@@ -43,8 +43,10 @@ import {
   type Scheme,
   splitApp,
   STAR,
+  substituteBound,
   tap,
   tcon,
+  type TForall,
   type TVar,
   type Type,
   typeChildren,
@@ -386,6 +388,12 @@ export class Checker {
         return type;
       }
       if (!local.type) typeError(span, `${name} の型が決まっていません。`);
+      const polymorphic = prune(local.type);
+      if (polymorphic.tag === 'forall') {
+        const { type, evidence } = this.instantiate(polytypeScheme(polymorphic), span, `${name} の使用`);
+        expr.evidence = evidence;
+        return type;
+      }
       return local.type;
     }
     const entity = ref.entity;
@@ -418,6 +426,9 @@ export class Checker {
       }
       case 'tyapp': {
         return this.inferTypeApplication(expr);
+      }
+      case 'poly': {
+        return this.inferExpr(expr.expr);
       }
       case 'var': {
         return this.typeOfRef(expr.ref, expr.span, expr.name, expr);
@@ -660,7 +671,13 @@ export class Checker {
     const fn = prune(this.inferExpr(expr.fn));
     const { head, args } = splitApp(fn);
     if (head.tag === 'tcon' && head.entity === FUNCTION_TYPE && args.length === 2) {
-      this.checkExpr(expr.arg, args[0], argumentContext(expr.fn));
+      const param = prune(args[0]);
+      if (param.tag === 'forall') {
+        const dictParams = this.checkAgainstScheme(polytypeScheme(param), (type) =>
+          this.checkExpr(expr.arg, type, argumentContext(expr.fn))
+        );
+        if (dictParams.length > 0) expr.arg = { k: 'poly', expr: expr.arg, dictParams, span: expr.arg.span };
+      } else this.checkExpr(expr.arg, args[0], argumentContext(expr.fn));
       return args[1];
     }
     const argType = this.inferExpr(expr.arg);
@@ -713,6 +730,21 @@ export class Checker {
       const position = fieldBind.field.positions.get(con) as number;
       this.checkExpr(fieldBind.value, fieldTypes[position], `フィールド ${fieldBind.field.name}`);
     }
+  }
+
+  /**
+   * The argument and result types of a function type, which a signature may give polymorphic arguments, as
+   * RankNTypes allows; a type not yet known becomes a function of fresh types.
+   */
+  splitFunction(type: Type, span: Span, context: string): { param: Type; result: Type } {
+    const { head, args } = splitApp(prune(type));
+    if (head.tag === 'tcon' && head.entity === FUNCTION_TYPE && args.length === 2) {
+      return { param: args[0], result: args[1] };
+    }
+    const param = this.freshVar();
+    const result = this.freshVar();
+    this.unify(type, fnType(param, result), span, context);
+    return { param, result };
   }
 
   private matchConstructor(con: ConInfo, type: Type, span: Span): Type[] {
@@ -946,9 +978,7 @@ export class Checker {
       this.inPatternScope(() => {
         let remaining = type;
         for (const pat of clause.pats) {
-          const param = this.freshVar();
-          const result = this.freshVar();
-          this.unify(remaining, fnType(param, result), clause.span, `${bindingLabel(binding)} の引数`);
+          const { param, result } = this.splitFunction(remaining, clause.span, `${bindingLabel(binding)} の引数`);
           this.inferPat(pat, param);
           remaining = result;
         }
@@ -1251,6 +1281,18 @@ function setBinderScheme(binder: Binder, scheme: Scheme): void {
   else binder.entity.scheme = scheme;
 }
 
+/** A polymorphic type inside another as a scheme, with its variables as `TGen` indices. */
+export function polytypeScheme(type: TForall): Scheme {
+  const generics = type.vars.map((_, index): Type => ({ tag: 'tgen', index }));
+  const { body, preds } = substituteBound(type, generics);
+  return {
+    kinds: type.vars.map((variable) => variable.kind),
+    names: type.vars.map((variable) => variable.name ?? 'a'),
+    preds,
+    type: body,
+  };
+}
+
 export function conScheme(con: ConInfo): Scheme {
   const params = typeParamKinds(con.type);
   const kinds = [...params, ...(con.exKinds ?? [])];
@@ -1308,6 +1350,11 @@ export function typeVarNames(types: readonly RType[]): string[] {
       collect(type.to);
     } else if (type.k === 'kinded') {
       collect(type.type);
+    } else if (type.k === 'forall') {
+      const inner = typeVarNames([type.body, ...type.context]);
+      for (const name of inner) {
+        if (!type.binders.some((binder) => binder.name === name) && !names.includes(name)) names.push(name);
+      }
     }
   };
   for (const type of types) collect(type);

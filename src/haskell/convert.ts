@@ -47,7 +47,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   equations: '型族',
   explicit_type: 'type を付けた型引数（RequiredTypeArguments）',
   field_path: '入れ子のレコードの更新（OverloadedRecordUpdate）',
-  forall: 'forall',
   forall_required: 'forall',
   group: 'TransformListComp の内包表記',
   transform: 'TransformListComp の内包表記',
@@ -1167,9 +1166,16 @@ function constraintsOf(node: Node): Constraint[] {
   }
 }
 
+/** Converts a type that may be polymorphic itself, `forall a. C a => t`, as a function's argument may be. */
 function convertQuantifiedType(node: Node): TypeExpr {
+  if (node.type === 'forall' || node.type === 'context') {
+    if (!extensions.has('RankNTypes')) {
+      throw syntaxError(spanOf(node), '型の内側の forall や制約には、RankNTypes の拡張が要ります。');
+    }
+    const sig = convertSigType(node);
+    return { kind: 'tforall', binders: sig.forall ?? [], context: sig.context, body: sig.type, span: spanOf(node) };
+  }
   rejectUnsupported(node);
-  if (node.type === 'context') throw unsupportedError(spanOf(node), '型の内側の制約（RankNTypes）');
   return convertType(node);
 }
 
@@ -1180,6 +1186,7 @@ function convertType(node: Node): TypeExpr {
   if (node.type === 'prefix_tuple') {
     return { kind: 'tcon', name: { name: node.text.replaceAll(/\s+/g, ''), span }, span };
   }
+  if (node.type === 'forall') return convertQuantifiedType(node);
   rejectUnsupported(node);
   switch (node.type) {
     case 'prefix_list': {
@@ -1201,10 +1208,7 @@ function convertType(node: Node): TypeExpr {
     case 'function': {
       const parameter = required(node, 'parameter');
       const result = required(node, 'result');
-      if (parameter.type === 'context' || result.type === 'context') {
-        throw unsupportedError(span, '型の内側の制約（RankNTypes）');
-      }
-      return { kind: 'tfun', from: convertType(parameter), to: convertType(result), span };
+      return { kind: 'tfun', from: convertQuantifiedType(parameter), to: convertQuantifiedType(result), span };
     }
     case 'list': {
       const elements = fields(node, 'element');

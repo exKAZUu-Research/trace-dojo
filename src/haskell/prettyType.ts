@@ -41,6 +41,17 @@ export class TypePrinter {
       case 'tap': {
         return this.showApp(pruned, precedence);
       }
+      case 'forall': {
+        const vars = pruned.vars.map((variable) => this.nameOf(variable)).join(' ');
+        const context =
+          pruned.preds.length === 0
+            ? ''
+            : pruned.preds.length === 1
+              ? `${this.showPred(pruned.preds[0])} => `
+              : `(${pruned.preds.map((pred) => this.showPred(pred)).join(', ')}) => `;
+        const text = `forall ${vars}. ${context}${this.show(pruned.body)}`;
+        return precedence > 0 ? `(${text})` : text;
+      }
     }
   }
 

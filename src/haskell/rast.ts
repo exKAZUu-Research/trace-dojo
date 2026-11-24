@@ -55,6 +55,8 @@ export type RExpr = (
   | { k: 'recordUpdate'; expr: RExpr; fields: RFieldBind[]; span: Span; cons?: ConInfo[] }
   | { k: 'hole'; name: string; span: Span }
   | { k: 'tyapp'; expr: RExpr; typeArg: RType | undefined; span: Span }
+  /** An expression checked against a polymorphic type with constraints, which takes their dictionaries. */
+  | { k: 'poly'; expr: RExpr; dictParams: DictParam[]; span: Span }
 ) & { type?: Type };
 
 export interface RFieldBind {
@@ -140,7 +142,8 @@ export type RType =
   | { k: 'app'; fn: RType; arg: RType; span: Span }
   | { k: 'fun'; from: RType; to: RType; span: Span }
   /** A type with a kind annotation, `(t :: k)`; kinds are types whose constructors are `Type` and `Constraint`. */
-  | { k: 'kinded'; type: RType; kind: RType; span: Span };
+  | { k: 'kinded'; type: RType; kind: RType; span: Span }
+  | { k: 'forall'; binders: RBinder[]; context: RConstraint[]; body: RType; span: Span };
 
 export type RConstraint = RType;
 

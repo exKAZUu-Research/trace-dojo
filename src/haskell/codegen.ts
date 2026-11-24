@@ -809,6 +809,9 @@ export class Codegen {
       case 'tyapp': {
         return this.compileExpr(expr.expr);
       }
+      case 'poly': {
+        return this.compileDictionaryLambda(expr.dictParams, 0, () => this.compileExpr(expr.expr));
+      }
       case 'var': {
         return this.compileVar(expr);
       }

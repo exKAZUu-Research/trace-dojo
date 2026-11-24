@@ -114,6 +114,8 @@ export type TypeExpr =
   | { kind: 'tvar'; name: string; span: Span }
   /** A type with a kind annotation, `(t :: k)`. */
   | { kind: 'tkinded'; type: TypeExpr; kindSig: TypeExpr; span: Span }
+  /** A polymorphic type inside another, `forall a. C a => t`, as RankNTypes allows. */
+  | { kind: 'tforall'; binders: TyVarBinder[]; context: Constraint[]; body: TypeExpr; span: Span }
   | { kind: 'tcon'; name: QName; span: Span }
   | { kind: 'tapp'; fn: TypeExpr; arg: TypeExpr; span: Span }
   | { kind: 'tfun'; from: TypeExpr; to: TypeExpr; span: Span }

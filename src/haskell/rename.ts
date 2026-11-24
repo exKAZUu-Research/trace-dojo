@@ -1544,6 +1544,20 @@ class Renamer {
       case 'tkinded': {
         return { k: 'kinded', type: this.renameType(type.type, vars), kind: this.renameKind(type.kindSig), span };
       }
+      case 'tforall': {
+        const inner = new Set([...vars, ...type.binders.map((binder) => binder.name.name)]);
+        return {
+          k: 'forall',
+          binders: type.binders.map((binder) => ({
+            name: binder.name.name,
+            kind: binder.kind && this.renameKind(binder.kind),
+            inferred: binder.inferred,
+          })),
+          context: type.context.map((constraint) => this.renameType(constraint, inner)),
+          body: this.renameType(type.body, inner),
+          span,
+        };
+      }
     }
   }
 
@@ -1944,6 +1958,14 @@ export function collectTypeVars(type: TypeExpr, into: Set<string>): void {
       collectTypeVars(type.type, into);
       break;
     }
+    case 'tforall': {
+      const inner = new Set<string>();
+      collectTypeVars(type.body, inner);
+      for (const constraint of type.context) collectTypeVars(constraint, inner);
+      for (const binder of type.binders) inner.delete(binder.name.name);
+      for (const name of inner) into.add(name);
+      break;
+    }
     default: {
       break;
     }
@@ -1970,6 +1992,12 @@ function rtypeMentions(type: RType, name: string): boolean {
     }
     case 'kinded': {
       return rtypeMentions(type.type, name);
+    }
+    case 'forall': {
+      return (
+        !type.binders.some((binder) => binder.name === name) &&
+        (rtypeMentions(type.body, name) || type.context.some((constraint) => rtypeMentions(constraint, name)))
+      );
     }
   }
 }

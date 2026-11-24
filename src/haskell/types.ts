@@ -114,7 +114,18 @@ function printKind(kind: Kind, depth: number): string {
   }
 }
 
-export type Type = TVar | TCon | TAp | TGen;
+export type Type = TVar | TCon | TAp | TGen | TForall;
+
+/**
+ * A polymorphic type inside another type, `forall a. C a => t`, as RankNTypes allows: an argument or a field that
+ * must be polymorphic. Its variables are rigid variables marked `bound`, which only its own parts refer to.
+ */
+export interface TForall {
+  tag: 'forall';
+  vars: TVar[];
+  preds: Pred[];
+  body: Type;
+}
 
 export interface TVar {
   tag: 'tvar';
@@ -126,6 +137,8 @@ export interface TVar {
   /** The name a signature gave the variable, for messages. */
   name?: string;
   skolem?: boolean;
+  /** Whether the variable is one a `TForall` binds, which is no free variable of the types around it. */
+  bound?: boolean;
 }
 
 export interface TCon {
@@ -190,11 +203,39 @@ export function zonk(type: Type): Type {
 }
 
 export function mapType(type: Type, leaf: (node: Type) => Type): Type {
-  return mapGraph(type, prune, typeChildren, (node, mapped) => {
+  return mapGraph(type, prune, typeParts, (node, mapped) => {
+    if (node.tag === 'forall') {
+      const [body, ...predTypes] = mapped;
+      if (body === node.body && predTypes.every((predType, index) => predType === node.preds[index].type)) return node;
+      return {
+        tag: 'forall',
+        vars: node.vars,
+        preds: node.preds.map((pred, index) => ({ cls: pred.cls, type: predTypes[index] })),
+        body,
+      };
+    }
     if (node.tag !== 'tap') return leaf(node);
     const [fn, arg] = mapped;
     return fn === node.fn && arg === node.arg ? node : { tag: 'tap', fn, arg };
   });
+}
+
+/** The types inside a type, including the parts of a `TForall`, which unification compares apart. */
+export function typeParts(type: Type): Type[] {
+  if (type.tag === 'tap') return [type.fn, type.arg];
+  if (type.tag === 'forall') return [type.body, ...type.preds.map((pred) => pred.type)];
+  return [];
+}
+
+/** Replaces the variables a `TForall` binds, as instantiating or comparing it does. */
+export function substituteBound(type: TForall, replacements: readonly Type[]): { body: Type; preds: Pred[] } {
+  const indices = new Map(type.vars.map((variable, index) => [variable, index]));
+  const replace = (inner: Type): Type =>
+    mapType(inner, (node) => {
+      const index = node.tag === 'tvar' ? indices.get(node) : undefined;
+      return index === undefined ? node : replacements[index];
+    });
+  return { body: replace(type.body), preds: type.preds.map((pred) => ({ cls: pred.cls, type: replace(pred.type) })) };
 }
 
 export function splitApp(type: Type): { head: Type; args: Type[] } {
@@ -225,12 +266,12 @@ export function kindOfType(type: Type): Kind {
 }
 
 export function typeVarsOf(type: Type, into = new Set<TVar>()): Set<TVar> {
-  for (const node of walkGraph(type, prune, typeChildren)) if (node.tag === 'tvar') into.add(node);
+  for (const node of walkGraph(type, prune, typeParts)) if (node.tag === 'tvar' && !node.bound) into.add(node);
   return into;
 }
 
 export function occursIn(variable: TVar, type: Type): boolean {
-  for (const node of walkGraph(type, prune, typeChildren)) if (node === variable) return true;
+  for (const node of walkGraph(type, prune, typeParts)) if (node === variable) return true;
   return false;
 }
 
@@ -274,10 +315,24 @@ type BindVariable = (variable: TVar, type: Type) => undefined | Exclude<Unificat
 
 export function unifyTypes(a: Type, b: Type, bind: BindVariable): UnificationFailure | undefined {
   for (const [x, y] of walkGraphPairs(a, b, prune, typeChildren)) {
-    const failure = unifyTypeNode(x, y, bind);
+    const failure = x.tag === 'forall' && y.tag === 'forall' ? unifyForalls(x, y, bind) : unifyTypeNode(x, y, bind);
     if (failure) return failure;
   }
   return undefined;
+}
+
+/** Unifies two polymorphic types, which must bind the same number of variables and agree with them replaced alike. */
+function unifyForalls(x: TForall, y: TForall, bind: BindVariable): UnificationFailure | undefined {
+  if (x.vars.length !== y.vars.length || x.preds.length !== y.preds.length) return 'mismatch';
+  const shared = x.vars.map((variable) => freshSkolem(variable.kind, Number.MAX_SAFE_INTEGER, variable.name ?? 'a'));
+  const left = substituteBound(x, shared);
+  const right = substituteBound(y, shared);
+  for (const [index, pred] of left.preds.entries()) {
+    if (pred.cls !== right.preds[index].cls) return 'mismatch';
+    const failure = unifyTypes(pred.type, right.preds[index].type, bind);
+    if (failure) return failure;
+  }
+  return unifyTypes(left.body, right.body, bind);
 }
 
 function unifyTypeNode(x: Type, y: Type, bind: BindVariable): UnificationFailure | undefined {
@@ -291,6 +346,12 @@ function unifyTypeNode(x: Type, y: Type, bind: BindVariable): UnificationFailure
 export function typesEqual(a: Type, b: Type): boolean {
   for (const [x, y] of walkGraphPairs(a, b, prune, typeChildren)) {
     if (x === y) continue;
+    if (x.tag === 'forall' && y.tag === 'forall') {
+      if (x.vars.length !== y.vars.length) return false;
+      const shared = x.vars.map((variable) => freshTypeVar(variable.kind, 0));
+      if (!typesEqual(substituteBound(x, shared).body, substituteBound(y, shared).body)) return false;
+      continue;
+    }
     if (x.tag === 'tcon' && y.tag === 'tcon' && x.entity === y.entity) continue;
     if (x.tag === 'tgen' && y.tag === 'tgen' && x.index === y.index) continue;
     if (x.tag !== 'tap' || y.tag !== 'tap') return false;

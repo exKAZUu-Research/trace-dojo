@@ -306,6 +306,7 @@ function* typeEntities(types: readonly RType[]): Generator<TypeEntity | ClassEnt
     else if (type.k === 'app') work.push(type.fn, type.arg);
     else if (type.k === 'fun') work.push(type.from, type.to);
     else if (type.k === 'kinded') work.push(type.type);
+    else if (type.k === 'forall') work.push(type.body, ...type.context);
     else if (type.k === 'tuple') for (const elem of type.elems) work.push(elem);
   }
 }
