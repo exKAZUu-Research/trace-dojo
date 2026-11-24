@@ -201,6 +201,7 @@ export function readExtensions(source: string): Extensions {
  */
 const UNSUPPORTED_EXTENSIONS: Record<string, string> = {
   RebindableSyntax: '構文の読み替え（RebindableSyntax）',
+  NPlusKPatterns: 'n+k パターン（NPlusKPatterns。Haskell 2010 で言語から外された書き方）',
   ParallelArrays: '並列配列（ParallelArrays）',
   Arrows: 'アロー記法（Arrows）',
   StaticPointers: '静的ポインタ（StaticPointers）',

@@ -283,6 +283,8 @@ class Renamer {
   private readonly ownValues = new Map<string, ValueEntity>();
   private readonly importOrigins = new Map<object, Map<string | undefined, Set<string>>>();
   private readonly ownTypes = new Map<string, TypeLike>();
+  /** The fields DuplicateRecordFields lets share the name of a field of another type. */
+  private readonly duplicateFields: ValueEntity[] = [];
   private readonly ownTypeChildren = new Map<TypeLike, ValueEntity[]>();
   private readonly dataDecls: RDataDecl[] = [];
   private readonly synonyms: RSynonymDecl[] = [];
@@ -647,6 +649,17 @@ class Renamer {
   }
 
   private declareOwnValue(name: Name, entity: ValueEntity): void {
+    const existing = this.ownValues.get(name.name);
+    // DuplicateRecordFields lets records of different types have fields of the same name.
+    if (
+      existing?.sort === 'field' &&
+      entity.sort === 'field' &&
+      existing.field?.type !== entity.field?.type &&
+      this.module.extensions.has('DuplicateRecordFields')
+    ) {
+      this.duplicateFields.push(entity);
+      return;
+    }
     if (this.ownValues.has(name.name)) {
       throw compileError(name.span, `${name.name} が重複して定義されています。`);
     }
@@ -728,7 +741,10 @@ class Renamer {
   }
 
   private addOwnToScope(): void {
-    for (const [name, entity] of this.ownValues) {
+    for (const [name, entity] of [
+      ...this.ownValues,
+      ...this.duplicateFields.map((field) => [field.name, field] as const),
+    ]) {
       this.scope.addValue(undefined, name, entity);
       this.scope.addValue(this.module.name, name, entity);
     }
@@ -1700,8 +1716,9 @@ class Renamer {
 
   private renameFieldBinds(fields: FieldBind[], scope: LocalScope, cons: ConInfo[] | undefined): RFieldBind[] {
     const seen = new Set<string>();
+    const types = cons ? [cons[0].type] : this.updatedTypes(fields);
     return fields.map((fieldBind) => {
-      const field = this.lookupField(fieldBind.field);
+      const field = this.lookupField(fieldBind.field, types);
       if (seen.has(field.name)) throw compileError(fieldBind.span, `フィールド ${field.name} が重複しています。`);
       seen.add(field.name);
       if (cons && !cons.every((con) => field.positions.has(con))) {
@@ -1709,6 +1726,29 @@ class Renamer {
       }
       return { field, value: this.renameExpr(fieldBind.value, scope), span: fieldBind.span };
     });
+  }
+
+  /**
+   * The type an update of fields shared by several types' records updates: the one type that has all of them, or
+   * none to choose when no field is shared. GHC reports an update that more than one type fits as ambiguous.
+   */
+  private updatedTypes(fields: FieldBind[]): TypeEntity[] | undefined {
+    const fieldTypes = fields.map((fieldBind) =>
+      (fieldBind.field.qualifier
+        ? (this.scope.qualifiedValues.get(fieldBind.field.qualifier)?.get(fieldBind.field.name) ?? [])
+        : this.scope.values.get(fieldBind.field.name)
+      ).flatMap((entity) => (entity.sort === 'field' && entity.field ? [entity.field.type] : []))
+    );
+    if (fieldTypes.every((types) => types.length <= 1)) return undefined;
+    const common = (fieldTypes[0] ?? []).filter((type) => fieldTypes.every((types) => types.includes(type)));
+    if (common.length !== 1) {
+      const shared = fields.find((_, index) => fieldTypes[index].length > 1) as FieldBind;
+      throw compileError(
+        shared.span,
+        `フィールド ${shared.field.name} を持つ型が複数あるので、どの型のレコードを更新するか決まりません。`
+      );
+    }
+    return common;
   }
 
   private renameOperator(op: Operator, scope: LocalScope): RExpr {
@@ -1916,7 +1956,7 @@ class Renamer {
     const seen = new Set<string>();
     const order: number[] = [];
     for (const fieldPat of pat.fields) {
-      const field = this.lookupField(fieldPat.field);
+      const field = this.lookupField(fieldPat.field, [con.type]);
       const position = field.positions.get(con);
       if (position === undefined) {
         throw compileError(fieldPat.span, `構成子 ${con.name} には、フィールド ${field.name} がありません。`);
@@ -2257,12 +2297,17 @@ class Renamer {
     return this.pickOne(candidates, name, 'value').con as ConInfo;
   }
 
-  private lookupField(name: QName): FieldInfo {
-    const candidates = (
+  private lookupField(name: QName, types?: readonly TypeEntity[]): FieldInfo {
+    let candidates = (
       name.qualifier
         ? (this.scope.qualifiedValues.get(name.qualifier)?.get(name.name) ?? [])
         : this.scope.values.get(name.name)
     ).filter((entity) => entity.sort === 'field' || entity.unsupportedField);
+    // A constructor or an update decides which type's field a name shared by fields of several types is.
+    if (types && candidates.length > 1) {
+      const ofTypes = candidates.filter((entity) => entity.field && types.includes(entity.field.type));
+      if (ofTypes.length > 0) candidates = ofTypes;
+    }
     if (candidates.length === 0) {
       throw compileError(name.span, `フィールド ${describeName(name)} がスコープにありません。`);
     }
