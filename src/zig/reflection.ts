@@ -14,6 +14,7 @@ import {
   ENUM_LITERAL,
   intType,
   isComptimeOnly,
+  NORETURN,
   optionalOf,
   sliceOf,
   type StructField,
@@ -147,7 +148,10 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
   private builtinCompileError(expression: ExpressionOf<'builtinCall'>): TExpr {
     const { args } = expression;
     this.builtinArity(expression, 1);
-    return this.error(expression, this.comptimeText(args[0]));
+    const message = this.comptimeText(args[0]);
+    // Code that the compiler runs reaches the call only on the path that runs it.
+    if (this.comptimeDepth > 0) return runtime(NORETURN, () => this.error(expression, message), expression);
+    return this.error(expression, message);
   }
 
   private builtinCompileLog(expression: ExpressionOf<'builtinCall'>): TExpr {
