@@ -624,14 +624,12 @@ function substitute(output: MeteredText, replacement: string, state: MatchState)
     const digits = /^\d+/.exec(rest)?.[0];
     if (digits) {
       output.read(digits.length);
-      // .NET takes the longest prefix of the digits that names a group, which has no more significant digits than the
-      // group count.
-      const zeros = /^0*/.exec(digits)?.[0].length ?? 0;
-      let length = Math.min(digits.length, zeros + String(state.groups.length).length);
-      while (length > 0 && Number(digits.slice(0, length)) >= state.groups.length) length--;
-      if (length > 0) {
-        output.append(groupValue(Number(digits.slice(0, length))));
-        index += length;
+      // .NET reads all the digits as one group number, and leaves the text as it is when that group does not exist
+      // (only RegexOptions.ECMAScript, which this grader rejects, takes the longest prefix that names a group).
+      const number = Number(digits);
+      if (number < state.groups.length) {
+        output.append(groupValue(number));
+        index += digits.length;
         continue;
       }
       output.append(char);
