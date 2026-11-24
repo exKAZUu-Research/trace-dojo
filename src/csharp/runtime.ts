@@ -302,7 +302,11 @@ export class Runtime {
       .filter((field) => field.isStatic && !field.isConst)
       .map((field): [number, Type] => [field.slot, substitute(field.type, substitutionOf(type))]);
     // A static field of a struct type keeps the fields its default value allocates, charged before they exist.
-    this.allocateSlots(fieldTypes.reduce((sum, [, fieldType]) => sum + this.evaluator.defaultSlotCount(fieldType), 0));
+    // The static fields are slots themselves, besides the default layouts of struct ones.
+    this.allocateSlots(
+      symbol.staticFieldCount +
+        fieldTypes.reduce((sum, [, fieldType]) => sum + this.evaluator.defaultSlotCount(fieldType), 0)
+    );
     const values: Value[] = Array.from({ length: symbol.staticFieldCount });
     for (const [slot, fieldType] of fieldTypes) values[slot] = this.evaluator.defaultOf(fieldType);
     const storage = { values };
