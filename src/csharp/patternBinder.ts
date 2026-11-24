@@ -138,7 +138,7 @@ export abstract class PatternBinder extends ExpressionBinder {
   }
 
   private checkPatternType(type: Type, inputType: Type, position: Position): void {
-    if (type.kind === 'error' || inputType.kind === 'error') return;
+    if (type.kind === 'error' || inputType.kind === 'error' || this.isTypeTestOperator) return;
     if (type.kind === 'named' && type.symbol.special === 'nullable') {
       this.error(
         position,
@@ -148,7 +148,6 @@ export abstract class PatternBinder extends ExpressionBinder {
       return;
     }
     const input = nullableUnderlying(inputType) ?? inputType;
-    if (this.isTypeTestOperator) return;
     if (!this.conversions.explicit(input, type) && !this.conversions.explicit(inputType, type)) {
       this.error(
         position,
