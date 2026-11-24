@@ -768,6 +768,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (value.type === 'string_literal' || value.type === 'concatenated_string') {
       const literal = this.compileExpression(value);
       if (literal.literalBytes !== undefined) return { ...type, length: literal.literalBytes.length + 1 };
+      // A wide or Unicode string literal (`L"abc"`) initializes an array of its character type.
+      if (literal.type.kind === 'array' && sameType(unqualified(literal.type.of), unqualified(type.of)))
+        return { ...type, length: literal.type.length };
     }
     return this.error(value.row, '配列の初期値には {...} か文字列リテラルを書いてください。');
   }

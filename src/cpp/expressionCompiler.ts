@@ -38,7 +38,15 @@ import { type FloatingValue, fusedNaN, negateFloat } from './floatSign';
 import { orderingOf, UNORDERED } from './library/compare';
 import { lessThan, moveValue } from './library/elements';
 import { cStringStore, throwLibrary } from './library/support';
-import { checkLiteralPrefix, literalBytes, numberLiteral, utf8 } from './literals';
+import {
+  codeUnits,
+  LITERAL_TYPES,
+  literalBytes,
+  type LiteralPrefix,
+  literalPrefix,
+  numberLiteral,
+  utf8,
+} from './literals';
 import { typeInfoName } from './mangling';
 import { constructArray, initializeAt, invoke, ObjectCompiler, outermostOwner, zeroOf } from './objectCompiler';
 import { hasUserType, memberOperators, overloadedOperator, withOverloads } from './operatorOverloads';
@@ -290,7 +298,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   // Literals ---------------------------------------------------------------------------------------------------------
 
   private charLiteral(node: Syntax): Expr {
-    checkLiteralPrefix(node);
+    const prefix = literalPrefix(node);
+    if (prefix) return this.wideCharLiteral(node, prefix);
     const bytes = literalBytes(node.children);
     if (bytes.length === 1) {
       const code = byteAt(bytes);
@@ -308,11 +317,53 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return constantExpr(INT, value, node.row);
   }
 
+  /** `L'a'`, `u'a'`, `U'a'`, and `u8'a'`: a character of a character type, which must fit one code unit of it. */
+  private wideCharLiteral(node: Syntax, prefix: LiteralPrefix): Expr {
+    const units = codeUnits(literalBytes(node.children), prefix);
+    const { character } = LITERAL_TYPES[prefix];
+    if (units.length !== 1)
+      return this.error(node.row, `文字リテラル ${node.text} は、${character} の1文字に収まりません。`);
+    return constantExpr(LITERAL_TYPES[prefix], units[0], node.row);
+  }
+
+  /** A string literal with a prefix: an array of the code units of its character type, with a null one at the end. */
+  private wideStringLiteral(node: Syntax, parts: readonly Syntax[], prefix: LiteralPrefix): Expr {
+    let bytes = '';
+    for (const part of parts) {
+      const own = literalPrefix(part);
+      if (own && own !== prefix) return this.error(part.row, '接頭辞の違う文字列リテラルはつなげられません。');
+      bytes +=
+        part.type === 'raw_string_literal'
+          ? utf8(part.children.find((child) => child.type === 'raw_string_content')?.text ?? '')
+          : literalBytes(part.children);
+    }
+    const element = LITERAL_TYPES[prefix];
+    const units = [...codeUnits(bytes, prefix), 0];
+    const key = `${prefix}\0${bytes}`;
+    let box = this.literalStores.get(key);
+    if (!box) {
+      const store = new ArrayStore(units, element);
+      store.isLiteral = true;
+      box = new Box(store);
+      this.literalStores.set(key, box);
+    }
+    const location = new Ptr(box, 0);
+    return {
+      type: { kind: 'array', of: withConst(element), length: units.length },
+      isLvalue: true,
+      row: node.row,
+      run: () => location,
+      staticAddress: true,
+    };
+  }
+
   private stringLiteral(node: Syntax): Expr {
     const parts = node.type === 'concatenated_string' ? node.children : [node];
     let bytes = '';
+    // A literal with a prefix (`L"..."`, `u8"..."`), or that concatenates with one, has the prefix's character type.
+    const prefix = parts.map((part) => literalPrefix(part)).find(Boolean);
+    if (prefix) return this.wideStringLiteral(node, parts, prefix);
     for (const part of parts) {
-      checkLiteralPrefix(part);
       if (part.type === 'raw_string_literal') {
         // A raw string literal holds its characters as written, with no escape sequences (C++20 [lex.string]).
         bytes += utf8(part.children.find((child) => child.type === 'raw_string_content')?.text ?? '');

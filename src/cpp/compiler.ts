@@ -3564,6 +3564,26 @@ export class Compiler extends StatementCompiler {
         return initializerWithConstancy(this.charArrayFromLiteral(type, expr.literalBytes, row), true);
       if (this.deducesArrays && sameType(unqualified(expr.type), unqualified(type), false))
         return this.arrayCopy(type, expr, row);
+      // A wide or Unicode string literal initializes an array of its character type, padded with null characters.
+      const literalType = expr.type;
+      if (
+        expr.staticAddress &&
+        literalType.kind === 'array' &&
+        type.of.kind === 'int' &&
+        type.of.character !== undefined &&
+        sameType(unqualified(literalType.of), unqualified(type.of)) &&
+        (literalType.length ?? 0) <= (type.length ?? 0)
+      ) {
+        const source = expr.run;
+        const length = type.length ?? 0;
+        return (frame) => {
+          const units = ((source(frame) as Ptr).read() as ArrayStore).values;
+          return new ArrayStore(
+            Array.from({ length }, (_, index) => units[index] ?? 0),
+            type.of
+          );
+        };
+      }
       return this.error(row, `配列は ${typeName(expr.type)} 型の値では初期化できません。{...} を使ってください。`);
     }
     if (isList) this.checkNarrowing(expr, type, row);

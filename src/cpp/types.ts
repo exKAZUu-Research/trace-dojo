@@ -22,6 +22,8 @@ export type Type =
       enumeration?: EnumInfo;
       /** The value of a non-type template argument this type carries (`Array<int, 3>`). */
       templateValue?: number | bigint;
+      /** The character type whose values the integer type `name` holds (`wchar_t` holds `int`'s on arm64 macOS). */
+      character?: CharacterTypeName;
     } & Qualified)
   | ({ kind: 'float'; name: FloatName } & Qualified)
   | ({ kind: 'nullptr' } & Qualified)
@@ -38,6 +40,16 @@ export type Type =
    * type, which a pointer to a member has, says whether the function is const.
    */
   | { kind: 'function'; ret: Type; params: Type[]; isConstMember?: boolean };
+
+/** The character types besides `char`, each a distinct type with the representation of an integer type. */
+export type CharacterTypeName = 'wchar_t' | 'char8_t' | 'char16_t' | 'char32_t';
+
+export const CHARACTER_TYPES: Readonly<Record<CharacterTypeName, IntName>> = {
+  wchar_t: 'int',
+  char8_t: 'uchar',
+  char16_t: 'ushort',
+  char32_t: 'uint',
+};
 
 export type IntType = Extract<Type, { kind: 'int' }>;
 export type FloatType = Extract<Type, { kind: 'float' }>;
@@ -517,7 +529,7 @@ export function sameType(a: Type, b: Type, withQualifiers = true): boolean {
   switch (a.kind) {
     case 'int': {
       const other = b as typeof a;
-      return a.name === other.name && a.enumeration === other.enumeration;
+      return a.name === other.name && a.enumeration === other.enumeration && a.character === other.character;
     }
     case 'float': {
       return a.name === (b as typeof a).name;
@@ -609,7 +621,7 @@ export function typeName(type: Type, inner = ''): string {
 function baseName(type: Type): string {
   switch (type.kind) {
     case 'int': {
-      return type.enumeration?.name ?? INT_NAMES[type.name];
+      return type.enumeration?.name ?? type.character ?? INT_NAMES[type.name];
     }
     case 'float': {
       return type.name === 'ldouble' ? 'long double' : type.name;

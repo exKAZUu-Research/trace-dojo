@@ -8,6 +8,8 @@ import type { Eval } from './runtime';
 import { type Entity, FunctionContext, type NamespaceInfo, Scope } from './scopes';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
+  CHARACTER_TYPES,
+  type CharacterTypeName,
   ClassInfo,
   classType,
   type EnumInfo,
@@ -645,7 +647,10 @@ export abstract class CompilerBase {
   resolveTypeSpecifier(node: Syntax, allowAuto = false, typeOnly = false): Type {
     switch (node.type) {
       case 'primitive_type': {
-        if (WIDE_CHARACTER_TYPES.has(node.text)) return this.unsupported(node.row, `ワイド文字の型（${node.text}）`);
+        if (Object.hasOwn(CHARACTER_TYPES, node.text)) {
+          const character = node.text as CharacterTypeName;
+          return { kind: 'int', name: CHARACTER_TYPES[character], character };
+        }
         return primitiveType(node.text) ?? this.typeOfEntity(this.lookupName(node.text, node.row), node);
       }
       case 'sized_type_specifier': {
@@ -1098,8 +1103,6 @@ export function hasAuto(type: Type): boolean {
   if (type.kind === 'pointer' || type.kind === 'reference') return hasAuto(type.to);
   return isAuto(type);
 }
-
-const WIDE_CHARACTER_TYPES = new Set(['wchar_t', 'char8_t', 'char16_t', 'char32_t']);
 
 const PRIMITIVE_TYPES: Record<string, Type> = {
   void: VOID,

@@ -654,6 +654,14 @@ export class Streams {
     if (((operator === '<<' && isOutput) || (operator === '>>' && isInput)) && isConstType(left.type))
       return compiler.error(row, `const の ${typeName(left.type)} には演算子 ${operator} を使えません。`);
     if (operator === '<<' && isOutput) {
+      // C++20 deletes the insertions of the other character types and their strings into a narrow stream.
+      const value =
+        right.type.kind === 'array' ? right.type.of : right.type.kind === 'pointer' ? right.type.to : right.type;
+      if (value.kind === 'int' && value.character)
+        return compiler.error(
+          row,
+          `C++20 では、${typeName(right.type)} の値は ${typeName(left.type)} に << で出力できません。`
+        );
       const named = this.namedManipulator(compiler, left, right, row, true);
       return named ?? this.streamResult(left, this.insertion(compiler, left, right, row), this.ostream);
     }
