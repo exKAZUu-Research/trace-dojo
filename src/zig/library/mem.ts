@@ -18,7 +18,7 @@ import {
   fnType,
   optionalOf,
   pointerTo,
-  type Sentinel,
+  Sentinel,
   sliceOf,
   type StructType,
   TYPE,
@@ -534,16 +534,37 @@ function sentinelSpan(name: string, kind: 'span' | 'len' | 'sliceTo'): () => Mem
   return fnMember(name, (sema, call) => {
     const args = expectArgs(sema, call, kind === 'sliceTo' ? 2 : 1, name);
     const operand = sema.compile(args[0]);
-    const { type, optional, array, child, sentinel } = pointerOperand(sema, operand.type, call.span, name);
-    const end =
+    const { type, optional, array, child, sentinel: written } = pointerOperand(sema, operand.type, call.span, name);
+    const knownElement = (expression: Expression): Value =>
+      sema.knownValue(sema.coerce(sema.compile(expression, child), child, expression), '終わりの値');
+    const sentinel =
+      type.size === 'c'
+        ? new Sentinel(
+            knownElement({
+              kind: 'integer',
+              row: call.span.row,
+              col: call.span.col,
+              endRow: call.span.endRow,
+              value: 0n,
+            })
+          )
+        : written;
+    const end = kind === 'sliceTo' ? knownElement(args[1]) : undefined;
+    const unbounded = type.size === 'many' || type.size === 'c';
+    if (
       kind === 'sliceTo'
-        ? sema.knownValue(sema.coerce(sema.compile(args[1], child), child, args[1]), '終わりの値')
-        : undefined;
-    if (kind !== 'sliceTo' && sentinel === undefined && type.size !== 'slice')
+        ? type.size === 'one' && !array
+        : !unbounded || sentinel === undefined || (kind === 'len' && optional)
+    )
       return sema.error(call.span, `${name} には、番兵付きのポインタ（[*:0]u8 など）を渡してください。`);
     const stop = end ?? sentinel?.value;
-    const keepsSentinel = sentinel !== undefined && (end === undefined || scalarValuesEqual(end, sentinel.value));
-    const sliceType = sliceOf(child, type.isConst, keepsSentinel ? sentinel : undefined);
+    const resultSentinel =
+      end === undefined
+        ? sentinel?.value
+        : type.size === 'c' || (sentinel ? scalarValuesEqual(end, sentinel.value) : type.size === 'many')
+          ? end
+          : undefined;
+    const sliceType = sliceOf(child, type.isConst, resultSentinel);
     const resultType = kind === 'len' ? USIZE : optional ? optionalOf(sliceType) : sliceType;
     const evaluate = operand.eval;
     const span = (value: Value, frame: Frame): Value => {
