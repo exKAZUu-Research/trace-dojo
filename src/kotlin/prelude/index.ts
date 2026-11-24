@@ -8,6 +8,7 @@ import { COMPARISONS_SOURCE, MATH_SOURCE, RANDOM_SOURCE } from './comparisonsRan
 import { CORE_SOURCE } from './core';
 import { PROPERTIES_SOURCE } from './properties';
 import { RANGES_SOURCE } from './ranges';
+import { REGEX_SOURCE } from './regex';
 import { RESULT_SOURCE, SYSTEM_EXIT_SOURCE } from './result';
 import {
   exceptionSources,
@@ -46,6 +47,7 @@ export const PRELUDE_SOURCES = [
   UTIL_SOURCE,
   TEXT_SOURCE,
   TEXT_COLLECTIONS_SOURCE,
+  REGEX_SOURCE,
   PROPERTIES_SOURCE,
   TIME_SOURCE,
   JAVA_IO_SOURCE,

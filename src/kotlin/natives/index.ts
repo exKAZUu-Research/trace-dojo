@@ -5,3 +5,4 @@ import './arrays';
 import './duration';
 import './reflection';
 import './files';
+import './regex';

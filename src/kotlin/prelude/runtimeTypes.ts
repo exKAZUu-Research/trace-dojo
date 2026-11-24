@@ -415,6 +415,7 @@ export const EXCEPTIONS: [kotlinPackage: string, name: string, parent: string, j
   ['kotlin', 'InstantiationError', 'Error', 'java.lang.InstantiationError'],
   ['java.lang', 'LinkageError', 'Error', 'java.lang.LinkageError'],
   ['java.io', 'IOException', 'Exception', 'java.io.IOException'],
+  ['java.util.regex', 'PatternSyntaxException', 'IllegalArgumentException', 'java.util.regex.PatternSyntaxException'],
   ['java.io', 'FileNotFoundException', 'IOException', 'java.io.FileNotFoundException'],
   ['kotlin.io', 'ReadAfterEOFException', 'RuntimeException', 'kotlin.io.ReadAfterEOFException'],
   ['java.lang', 'ExceptionInInitializerError', 'LinkageError', 'java.lang.ExceptionInInitializerError'],
