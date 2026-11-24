@@ -360,6 +360,19 @@ export abstract class EvaluatorBase {
     }
     return new CsStruct(type, fields);
   }
+
+  /** The slots that defaultOf allocates for a value of the type beyond the one holding it: a struct's fields, nested. */
+  defaultSlotCount(type: Type): number {
+    if (type.kind !== 'named' || type.symbol.kind !== 'struct') return 0;
+    const special = type.symbol.special;
+    if (special === 'nullable' || (special !== undefined && SPECIAL_DEFAULTS[special] !== undefined)) return 0;
+    const substitution = substitutionOf(type);
+    let count = type.symbol.instanceFieldCount;
+    for (const field of type.symbol.fields) {
+      if (!field.isStatic && !field.isConst) count += this.defaultSlotCount(substitute(field.type, substitution));
+    }
+    return count;
+  }
 }
 
 function numericKindOf(type: Type): SpecialType {

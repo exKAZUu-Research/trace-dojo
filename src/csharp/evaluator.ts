@@ -1105,11 +1105,13 @@ export class Evaluator extends StatementExecutor {
       return value;
     });
     const total = lengths.reduce((product, length) => product * length, 1);
-    this.runtime.allocateSlots(total);
     if (expression.elements) {
+      this.runtime.allocateSlots(total);
       return new CsArray(type, lengths, this.evaluateHeld(expression.elements, frame));
     }
     const element = type.element;
+    // Each element of a struct type also holds the fields its default value allocates.
+    this.runtime.allocateSlots(total * (1 + this.defaultSlotCount(element)));
     const values: Value[] = Array.from({ length: total }, () => this.defaultOf(element));
     return new CsArray(type, lengths, values);
   }
