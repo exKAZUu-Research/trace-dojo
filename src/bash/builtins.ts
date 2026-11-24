@@ -121,9 +121,10 @@ function printf(shell: Shell, args: string[]): number {
     error: (message) => shell.reportError(`printf: ${message}`),
     spend: (cost) => shell.runtime.spend(cost),
   });
-  const text = decodeBytes(output);
-  if (target === undefined) shell.state.fd1.write(text);
+  if (target === undefined) shell.state.fd1.write(decodeBytes(output));
   else {
+    const nul = output.indexOf(0);
+    const text = decodeBytes(nul === -1 ? output : output.slice(0, nul));
     const split = shell.splitSubscript(target);
     const stored = split
       ? assignSubscriptedBuiltinTarget(shell, 'printf', split.name, split.subscript, text)
@@ -214,7 +215,7 @@ function unsetName(shell: Shell, name: string, mode: UnsetMode): boolean {
 }
 
 /** `unset 'name[subscript]'`, which clears an indexed array for `@` or `*` and expands an associative key. */
-export function unsetElement(shell: Shell, name: string, subscript: string): boolean {
+export function unsetElement(shell: Shell, name: string, subscript: string, viaReference = false): boolean {
   const resolved = shell.resolveName(name);
   const variable = shell.findVariable(resolved);
   if (variable?.attributes.has('r')) {
@@ -225,7 +226,7 @@ export function unsetElement(shell: Shell, name: string, subscript: string): boo
     return unsetAssociativeElement(shell, variable, subscript);
   }
   if (!variable) return true;
-  if (subscript === '@' || subscript === '*') return clearIndexedOrScalar(shell, variable, resolved);
+  if (subscript === '@' || subscript === '*') return clearIndexedOrScalar(shell, variable, resolved, viaReference);
   const index = shell.arrayIndex(resolved, subscript);
   if (index === undefined) {
     shell.reportError(`unset: [${subscript}]: bad array subscript`);
@@ -240,12 +241,19 @@ export function unsetElement(shell: Shell, name: string, subscript: string): boo
   return true;
 }
 
-function clearIndexedOrScalar(shell: Shell, variable: Variable, resolved: string): boolean {
+function clearIndexedOrScalar(shell: Shell, variable: Variable, resolved: string, viaReference: boolean): boolean {
   if (variable.value?.kind === 'indexed') {
     ensureWritable(variable);
     variable.value.elements.clear();
-  } else if (!variable.attributes.has('a')) {
+    return true;
+  }
+  if (variable.value?.kind === 'scalar') {
     shell.unsetVariable(resolved);
+    return true;
+  }
+  if (!variable.attributes.has('a') && !viaReference) {
+    shell.reportError(`unset: ${resolved}: not an array variable`);
+    return false;
   }
   return true;
 }

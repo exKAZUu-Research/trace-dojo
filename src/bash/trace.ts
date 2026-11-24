@@ -125,6 +125,7 @@ function observeElement(shell: Shell, name: string, subscript: string, maxScope:
     scopes: savedState.scopes.slice(0, maxScope + 1).map((scope) => cloneScope(scope)),
     functionScopes: savedState.functionScopes.filter((idx) => idx <= maxScope),
     unsetDynamic: new Set(savedState.unsetDynamic),
+    unsetEnv: new Set(savedState.unsetEnv),
     fd1: silentAbort,
     fd2: silentAbort,
   };

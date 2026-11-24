@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss -- Keeps Bash's declaration builtins (declare, typeset, local, readonly, export) and declare -p formatting together.
 import type { Assignment, Word } from './ast';
-import type { CompoundPrepareOptions } from './expansion';
 import { ansicQuote, ansicShouldQuote, containsShellMetas, doubleQuote } from './quoting';
+import { DiscardSignal } from './runtime';
 import type { CompoundElement, Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
 import {
@@ -9,7 +9,6 @@ import {
   type Attribute,
   ATTRIBUTE_ORDER,
   cloneValue,
-  compoundPrepareForVariable,
   CONVERTED_BUCKETS,
   findEnclosingVariable,
   isIdentifier,
@@ -18,7 +17,9 @@ import {
 } from './variables';
 
 /** An argument of a declaration builtin: an assignment the shell parsed, or a word it expanded. */
-export type DeclarationArgument = string | (Assignment & { expandedElements?: CompoundElement[] });
+export type DeclarationArgument =
+  | string
+  | (Assignment & { expandedElements?: CompoundElement[]; committedCompound?: boolean });
 
 const USAGES: Record<string, string> = {
   declare: 'declare [-aAfFgiIlnrtux] [name[=value] ...] or declare -p [-aAfFilnrtux] [name ...]',
@@ -91,27 +92,31 @@ function expandDeclarationAssignment(
       arg.value,
       shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(arg.value as Word))
     );
-  let expandedElements: CompoundElement[] | undefined;
-  let preparedElements = false;
   if (arg.array) {
-    const prepare = buildCompoundPrepareOptions(shell, builtin, arg, options);
-    expandedElements = shell.expander.expandCompoundItems(arg.array, prepare);
-    preparedElements = prepare !== undefined;
+    const rawItems = shell.expander.expandRawCompoundItems(arg.array);
+    const committedCompound = commitCompoundDeclaration(shell, builtin, arg, options, rawItems);
+    return {
+      ...arg,
+      ...(subscript ? { subscript } : {}),
+      ...(committedCompound ? { committedCompound: true } : { expandedElements: rawItems }),
+    };
   }
   return {
     ...arg,
     ...(subscript ? { subscript } : {}),
     ...(value ? { value } : {}),
-    ...(expandedElements ? { expandedElements, preparedElements } : {}),
   };
 }
 
-function buildCompoundPrepareOptions(
+function commitCompoundDeclaration(
   shell: Shell,
   builtin: string,
   arg: Assignment,
-  { set, unset }: Options
-): CompoundPrepareOptions | undefined {
+  options: Options,
+  rawItems: CompoundElement[]
+): boolean {
+  const { set, unset } = options;
+  if (!hasValidCompoundContext(shell, builtin, options)) return false;
   const isLocal =
     shell.isInFunction && !set.has('g') && (builtin === 'local' || builtin === 'declare' || builtin === 'typeset');
   const { scopes, functionScopes } = shell.state;
@@ -125,6 +130,10 @@ function buildCompoundPrepareOptions(
     set.has('g'),
     localScope
   );
+  if (arg.subscript || referencedSubscript !== undefined) {
+    const sub = arg.subscript?.text ?? referencedSubscript ?? '';
+    shell.discard(`${arg.name}[${sub}]: cannot assign list to array member`);
+  }
   const existing = resolveCompoundExisting(shell, targetName, set, localScope);
   if (
     existing?.attributes.has('r') ||
@@ -132,14 +141,42 @@ function buildCompoundPrepareOptions(
   ) {
     shell.discard(`${targetName}: readonly variable`);
   }
-  if (arg.subscript || referencedSubscript !== undefined || (existing && conversionError(existing, set, unset))) {
-    return undefined;
+  const convErr = existing && conversionError(existing, set, unset);
+  if (convErr) shell.discard(`${targetName}: ${convErr}`);
+  const variable = ensureCompoundTargetVariable(shell, targetName, set, localScope);
+  applyAttributes(shell, builtin, variable, options, true, false);
+  const { elements, error } = shell.expander.validateCompoundItems(rawItems, variable.attributes.has('A'), true);
+  const ok = shell.assignCompoundTo(variable, elements, arg.append, arg.name);
+  if (error) shell.discard(error);
+  if (!ok) throw new DiscardSignal();
+  return true;
+}
+
+function hasValidCompoundContext(shell: Shell, builtin: string, { set, unset }: Options): boolean {
+  if (builtin === 'local' && !shell.isInFunction) return false;
+  if (set.has('A') && set.has('a')) return false;
+  const allowed = OPTIONS[builtin] ?? '';
+  return [...set, ...unset].every((opt) => allowed.includes(opt) || (builtin === 'export' && opt === 'x'));
+}
+
+function ensureCompoundTargetVariable(
+  shell: Shell,
+  targetName: string,
+  set: Set<string>,
+  localScope: Map<string, Variable> | undefined
+): Variable {
+  const { scopes } = shell.state;
+  let variable = localScope
+    ? localScope.get(targetName)
+    : set.has('n') || set.has('g')
+      ? scopes[0].get(targetName)
+      : shell.findVariable(targetName, false);
+  if (!variable) {
+    const inherited = localScope && set.has('I') ? findEnclosingVariable(scopes, localScope, targetName) : undefined;
+    variable = createDeclaredVariable(targetName, inherited);
+    (localScope ?? scopes[0]).set(targetName, variable);
   }
-  const isAssociative =
-    set.has('A') ||
-    (!set.has('a') && (existing?.value?.kind === 'associative' || Boolean(existing?.attributes.has('A'))));
-  const isInteger = set.has('i') || (Boolean(existing?.attributes.has('i')) && !unset.has('i'));
-  return compoundPrepareForVariable(targetName, arg.name, existing, arg.append, isAssociative, isInteger);
+  return variable;
 }
 
 function resolveCompoundExisting(
@@ -543,7 +580,7 @@ function checkReadonlyConflict(
 ): boolean {
   if (!variable?.attributes.has('r')) return false;
   const adds = [...set].some((a) => a !== 'r' && a !== 'x' && a !== 'p' && a !== 'g' && a !== 'I');
-  const removes = [...unset].some((a) => a === 'r' || (a !== 'x' && variable.attributes.has(a as Attribute)));
+  const removes = [...unset].some((a) => a !== 'x');
   if (!assigns && !adds && !removes) return false;
   shell.reportError(`${builtin}: ${targetName}: readonly variable`);
   return true;
@@ -722,9 +759,10 @@ function assignLocally(
 function assignLocallyCompound(
   shell: Shell,
   variable: Variable,
-  assignment: Assignment & { expandedElements?: CompoundElement[]; preparedElements?: boolean },
+  assignment: Assignment & { expandedElements?: CompoundElement[]; committedCompound?: boolean },
   referencedSubscript?: string
 ): boolean {
+  if (assignment.committedCompound) return true;
   if (assignment.subscript || referencedSubscript !== undefined) {
     const sub = assignment.subscript?.text ?? referencedSubscript ?? '';
     shell.reportError(`${variable.name}[${sub}]: cannot assign list to array member`);
@@ -735,7 +773,7 @@ function assignLocallyCompound(
     : shell.expander.expandCompound(assignment.array as Word[], variable.attributes.has('A'), true);
   if (variable.attributes.has('A') && !variable.value)
     variable.value = { kind: 'associative', table: new AssociativeTable() };
-  const ok = shell.assignCompoundTo(variable, elements, assignment.preparedElements ? false : assignment.append);
+  const ok = shell.assignCompoundTo(variable, elements, assignment.append);
   if (error) shell.discard(error);
   return ok;
 }

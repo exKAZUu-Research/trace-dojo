@@ -33,22 +33,30 @@ export class FieldSplitter {
   private started = false;
   private afterWhite = false;
   private afterDelimiter = false;
+  private sawEmptyElement = false;
+  private readonly hasNonWhitePrimaryIfs: boolean;
 
-  constructor(private readonly ifs: string) {}
+  constructor(private readonly ifs: string) {
+    this.hasNonWhitePrimaryIfs = ifs !== '' && ifs[0] !== ' ' && ifs[0] !== '\t' && ifs[0] !== '\n';
+  }
 
   add(piece: Piece): void {
     if (piece === EMPTY_LIST) return;
     if (isFieldBreak(piece)) {
       if (this.started) this.end();
-      else if (this.afterDelimiter) this.fields.push([]);
+      else if (this.afterDelimiter || this.sawEmptyElement) this.fields.push([]);
       this.afterWhite = false;
       this.afterDelimiter = false;
+      this.sawEmptyElement = false;
     } else if (!piece.split || this.ifs === '') {
       if (piece.text === '' && !piece.quoted) return;
       this.field.push({ ...piece, split: false });
       this.started = true;
       this.afterWhite = false;
       this.afterDelimiter = false;
+      this.sawEmptyElement = false;
+    } else if (piece.text === '') {
+      if (this.hasNonWhitePrimaryIfs) this.sawEmptyElement = true;
     } else this.split(piece.text);
   }
 
@@ -71,6 +79,7 @@ export class FieldSplitter {
         this.started = true;
         this.afterWhite = false;
         this.afterDelimiter = false;
+        this.sawEmptyElement = false;
         continue;
       }
       if (run) this.field.push({ text: run, quoted: false, split: false });
@@ -81,6 +90,7 @@ export class FieldSplitter {
   }
 
   private separate(c: string): void {
+    this.sawEmptyElement = false;
     if (c === ' ' || c === '\t' || c === '\n') {
       if (!this.started) return;
       this.end();

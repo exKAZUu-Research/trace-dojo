@@ -176,11 +176,41 @@ class TestReader {
   private parseGrouped(): boolean {
     this.index++;
     if (this.atEnd) this.fail('argument expected');
+    const close = this.findGroupClose();
+    if (close !== undefined) {
+      if (close === this.index) this.fail('argument expected');
+      const innerTokens = this.tokens.slice(this.index, close);
+      const sub = new TestReader(this.shell, this.name, innerTokens);
+      const inner = sub.evaluateSpan(innerTokens.length);
+      if (!sub.atEnd) {
+        const rest = sub.peek() as string;
+        if (rest.startsWith('-')) this.fail(`syntax error: \`${rest}' unexpected`);
+        this.fail('too many arguments');
+      }
+      this.index = close + 1;
+      return inner;
+    }
     const inner = this.parseDisjunction();
     if (this.atEnd) this.fail("`)' expected");
     if (this.peek() !== ')') this.fail(`\`)' expected, found ${this.peek()}`);
     this.index++;
     return inner;
+  }
+
+  private findGroupClose(): number | undefined {
+    let depth = 1;
+    for (let i = this.index; i < this.tokens.length; i++) {
+      const tok = this.tokens[i];
+      if (tok === '(') {
+        depth++;
+      } else if (tok === ')') {
+        if (depth === 1 && UNARY_FLAGS.has(this.tokens[i - 1] ?? '') && this.tokens[i + 1] === ')') {
+          continue;
+        }
+        if (--depth === 0) return i;
+      }
+    }
+    return undefined;
   }
 
   private applyUnary(): boolean {

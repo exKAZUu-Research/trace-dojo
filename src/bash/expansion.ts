@@ -11,36 +11,10 @@ import { singleQuote } from './quoting';
 import { ExitSignal, SCRIPT_NAME } from './runtime';
 import type { CompoundElement, Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
-import {
-  AssociativeTable,
-  type Attribute,
-  isIdentifier,
-  maxElementIndex,
-  type Scope,
-  sortedElements,
-  type Variable,
-} from './variables';
+import { isIdentifier } from './variables';
 
 /** Marks a quoted part that expands to nothing, which still makes a field (`""`), unlike `"$@"` with no elements. */
 const QUOTED_EMPTY: Fragment = { text: '', quoted: true, split: false };
-
-/** Target array/integer context for evaluating compound initializer subscripts and values after shell expansion. */
-export interface CompoundPrepareOptions {
-  targetName: string;
-  reportedName: string;
-  isAssociative: boolean;
-  isInteger: boolean;
-  baseIndexed?: ReadonlyMap<bigint, string> | undefined;
-  baseAssociative?: AssociativeTable | undefined;
-}
-
-interface CompoundPrepareState {
-  nextIndex: bigint;
-  stagedIndexed: Map<bigint, string>;
-  stagedAssoc: AssociativeTable;
-  pendingAssocKey: string | undefined;
-  pendingAssocRaw?: string | undefined;
-}
 
 /** A parameter's value before its operator: one string, or the elements of `$@`, `$*`, or `${a[@]}`. */
 export type ParameterValue =
@@ -126,16 +100,8 @@ export class Expander {
     return matchesPattern(pattern, text, () => this.spend());
   }
 
-  /**
-   * Expands the elements of `name=(...)` in two phases matching Bash 5.3: shell expansion across all items first,
-   * followed by left-to-right subscript/integer arithmetic evaluation with the staged array visible when `prepare` is set.
-   */
-  expandCompoundItems(words: Word[], prepare?: CompoundPrepareOptions): CompoundElement[] {
-    const rawItems = this.expandRawCompoundItems(words);
-    return prepare ? this.evaluatePreparedCompoundItems(rawItems, prepare) : rawItems;
-  }
-
-  private expandRawCompoundItems(words: Word[]): CompoundElement[] {
+  /** Expands the raw elements of `name=(...)` before destination subscript/integer evaluation. */
+  expandRawCompoundItems(words: Word[]): CompoundElement[] {
     const elements: CompoundElement[] = [];
     for (const word of words) {
       const keyed = splitKeyedElement(word);
@@ -153,94 +119,6 @@ export class Expander {
     return elements;
   }
 
-  private evaluatePreparedCompoundItems(
-    rawItems: CompoundElement[],
-    prepare: CompoundPrepareOptions
-  ): CompoundElement[] {
-    const state = createCompoundPrepareState(prepare);
-    const stagingScope = createCompoundStagingScope(prepare, state);
-    this.shell.state.scopes.push(stagingScope);
-    try {
-      let stoppedEmptyKey: CompoundElement | undefined;
-      const emptyPlainItems: CompoundElement[] = [];
-      for (const item of rawItems) {
-        if (typeof item === 'string') continue;
-        if ('plain' in item) {
-          this.preparePlainCompoundItem(item.plain, item.rawText, prepare, state, emptyPlainItems);
-        } else if (prepare.isAssociative && item.key === '') {
-          state.pendingAssocKey = undefined;
-          stoppedEmptyKey = { key: '', value: item.value, append: item.append, rawText: item.rawText };
-          break;
-        } else {
-          this.prepareKeyedCompoundItem(item, prepare, state);
-        }
-      }
-      return finalizePreparedCompoundItems(prepare, state, emptyPlainItems, stoppedEmptyKey);
-    } finally {
-      const scopeIdx = this.shell.state.scopes.lastIndexOf(stagingScope);
-      if (scopeIdx !== -1) this.shell.state.scopes.splice(scopeIdx, 1);
-    }
-  }
-
-  private prepareKeyedCompoundItem(
-    item: { key: string; value: string; append: boolean; rawText?: string },
-    prepare: CompoundPrepareOptions,
-    state: CompoundPrepareState
-  ): void {
-    const { key, value, append } = item;
-    state.pendingAssocKey = undefined;
-    if (prepare.isAssociative) {
-      const base = append ? (state.stagedAssoc.get(key) ?? '') : '';
-      const converted = prepare.isInteger ? this.evaluateCompoundInteger(value, base, append) : base + value;
-      state.stagedAssoc.set(key, converted);
-      return;
-    }
-    if (key === '') this.shell.discard(`${prepare.reportedName}[]: bad array subscript`);
-    const rawIdx = this.shell.evaluateFatalReadonly(key);
-    const idx = rawIdx >= 0n ? rawIdx : maxElementIndex(state.stagedIndexed) + 1n + rawIdx;
-    if (idx < 0n) this.shell.discard(`${prepare.reportedName}[${key}]: bad array subscript`);
-    state.nextIndex = idx + 1n;
-    const base = append ? (state.stagedIndexed.get(idx) ?? '') : '';
-    const converted = prepare.isInteger ? this.evaluateCompoundInteger(value, base, append) : base + value;
-    state.stagedIndexed.set(idx, converted);
-  }
-
-  private preparePlainCompoundItem(
-    field: string,
-    rawText: string,
-    prepare: CompoundPrepareOptions,
-    state: CompoundPrepareState,
-    emptyPlainItems: CompoundElement[]
-  ): void {
-    if (prepare.isAssociative) {
-      if (state.pendingAssocKey === undefined) {
-        state.pendingAssocKey = field;
-        state.pendingAssocRaw = rawText;
-        return;
-      }
-      const key = state.pendingAssocKey;
-      const keyRaw = state.pendingAssocRaw ?? '';
-      state.pendingAssocKey = undefined;
-      state.pendingAssocRaw = undefined;
-      if (key === '') {
-        emptyPlainItems.push({ plain: '', rawText: keyRaw }, { plain: field, rawText });
-        return;
-      }
-      const converted = prepare.isInteger ? this.evaluateCompoundInteger(field, '', false) : field;
-      state.stagedAssoc.set(key, converted);
-      return;
-    }
-    const idx = state.nextIndex++;
-    const converted = prepare.isInteger ? this.evaluateCompoundInteger(field, '', false) : field;
-    state.stagedIndexed.set(idx, converted);
-  }
-
-  private evaluateCompoundInteger(value: string, base: string, append: boolean): string {
-    const number = this.shell.evaluateFatalReadonly(value);
-    const sum = append ? this.shell.evaluateFatalReadonly(base || '0') + number : number;
-    return String(BigInt.asIntN(64, sum));
-  }
-
   /**
    * The elements of `name=(...)` up to the first empty key of an associative array, which Bash reports after it
    * assigns the elements before it. A declaration builtin gets the elements quoted again, as its error shows them.
@@ -248,10 +126,9 @@ export class Expander {
   expandCompound(
     words: Word[],
     isAssociative: boolean,
-    declared: boolean,
-    prepare?: CompoundPrepareOptions
+    declared: boolean
   ): { elements: CompoundElement[]; error?: string } {
-    return this.validateCompoundItems(this.expandCompoundItems(words, prepare), isAssociative, declared);
+    return this.validateCompoundItems(this.expandRawCompoundItems(words), isAssociative, declared);
   }
 
   validateCompoundItems(
@@ -549,7 +426,7 @@ export class Expander {
     for (const [index, element] of value.values.entries()) {
       if (index > 0) pieces.push(separator);
       if (element !== '') pieces.push({ text: element, quoted: inDouble, split: !inDouble });
-      else if (inDouble) pieces.push(QUOTED_EMPTY);
+      else pieces.push(inDouble ? QUOTED_EMPTY : { text: '', quoted: false, split: true });
     }
     if (inDouble && value.values.length > 0) pieces.unshift(QUOTED_EMPTY);
     return pieces;
@@ -705,66 +582,6 @@ function literalFragments(text: string): Fragment[] {
 /** Removes the backslashes that quote `$`, `` ` ``, `"`, `\`, and newlines inside double quotes. */
 export function unescapeDoubleQuoted(text: string): string {
   return text.replaceAll(/\\([$`"\\\n])/g, (_, c: string) => (c === '\n' ? '' : c));
-}
-
-function finalizePreparedCompoundItems(
-  prepare: CompoundPrepareOptions,
-  state: CompoundPrepareState,
-  emptyPlainItems: CompoundElement[],
-  stoppedEmptyKey: CompoundElement | undefined
-): CompoundElement[] {
-  if (!prepare.isAssociative) {
-    return sortedElements(state.stagedIndexed).map(([idx, value]) => ({
-      key: String(idx),
-      value,
-      append: false,
-      evaluatedIndex: idx,
-      preconvertedInteger: prepare.isInteger,
-    }));
-  }
-  if (state.pendingAssocKey !== undefined) {
-    if (state.pendingAssocKey === '') {
-      emptyPlainItems.push({ plain: '', rawText: state.pendingAssocRaw ?? '' });
-    } else {
-      state.stagedAssoc.set(state.pendingAssocKey, prepare.isInteger ? '0' : '');
-    }
-  }
-  const elements: CompoundElement[] = [
-    ...emptyPlainItems,
-    ...state.stagedAssoc.entries().map(([key, value]) => ({
-      key,
-      value,
-      append: false,
-      preconvertedInteger: prepare.isInteger,
-    })),
-  ];
-  if (stoppedEmptyKey) elements.push(stoppedEmptyKey);
-  return elements;
-}
-
-function createCompoundPrepareState(prepare: CompoundPrepareOptions): CompoundPrepareState {
-  const stagedIndexed = new Map(prepare.baseIndexed);
-  return {
-    nextIndex: maxElementIndex(stagedIndexed) + 1n,
-    stagedIndexed,
-    stagedAssoc: prepare.baseAssociative ? prepare.baseAssociative.clone() : new AssociativeTable(),
-    pendingAssocKey: undefined,
-  };
-}
-
-function createCompoundStagingScope(prepare: CompoundPrepareOptions, state: CompoundPrepareState): Scope {
-  const attributes = new Set<Attribute>([
-    ...(prepare.isAssociative ? ['A' as const] : ['a' as const]),
-    ...(prepare.isInteger ? ['i' as const] : []),
-  ]);
-  const stagingVar: Variable = {
-    name: prepare.targetName,
-    attributes,
-    value: prepare.isAssociative
-      ? { kind: 'associative', table: state.stagedAssoc }
-      : { kind: 'indexed', elements: state.stagedIndexed },
-  };
-  return new Map([[prepare.targetName, stagingVar]]);
 }
 
 /** Splits an array element written `[key]=value` or `[key]+=value` into its parts. */

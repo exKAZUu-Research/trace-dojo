@@ -119,7 +119,32 @@ function collectArithmeticRegions(source: string): Region[] {
   } catch {
     // Unclosed quotes or excessive nesting are reported by the main syntax/tree checks.
   }
+  for (const bq of text.backquotes) collectBackquoteRegions(source, bq.start + 1, bq.end - 1, regions);
   return regions.toSorted((a, b) => a.openStart - b.openStart);
+}
+
+function collectBackquoteRegions(source: string, bodyStart: number, bodyEnd: number, regions: Region[]): void {
+  let inner = '';
+  const offsets: number[] = [];
+  for (let i = bodyStart; i < bodyEnd; i++) {
+    if (source[i] === '\\' && i + 1 < bodyEnd && '$`\\'.includes(source[i + 1])) {
+      i++;
+    }
+    offsets.push(i);
+    inner += source[i];
+  }
+  offsets.push(bodyEnd);
+  if (!inner.trim()) return;
+  for (const sub of collectArithmeticRegions(inner)) {
+    regions.push({
+      opener: sub.opener,
+      openStart: offsets[sub.openStart],
+      start: offsets[sub.start],
+      end: offsets[sub.end],
+      closeEnd: offsets[sub.closeEnd],
+      keepsSemicolons: sub.keepsSemicolons,
+    });
+  }
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Scans shell comments, boundaries, ((...)) constructs, and word pieces with bounded nesting.

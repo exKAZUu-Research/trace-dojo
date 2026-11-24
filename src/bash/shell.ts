@@ -93,6 +93,8 @@ export interface ShellState {
   lastRandom: number;
   /** The dynamic variables the program unset, which then lose their special meaning, as in Bash. */
   unsetDynamic: Set<string>;
+  /** Host environment variable names explicitly cleared by `unset`, which then read as unset rather than unsupported. */
+  unsetEnv: Set<string>;
   subshellLevel: number;
   fd1: OutputTarget;
   fd2: OutputTarget;
@@ -148,6 +150,7 @@ export class Shell implements ArithmeticHost {
       randomSeed: 0,
       lastRandom: 0,
       unsetDynamic: new Set(),
+      unsetEnv: new Set(),
       subshellLevel: 0,
       fd1: runtime.io.stdout,
       fd2: runtime.io.stderr,
@@ -720,6 +723,7 @@ export class Shell implements ArithmeticHost {
       calls: [...parent.calls],
       pipeStatus: [...parent.pipeStatus],
       unsetDynamic: new Set(parent.unsetDynamic),
+      unsetEnv: new Set(parent.unsetEnv),
       subshellLevel: parent.subshellLevel + 1,
       fd1: capture,
     };
@@ -927,6 +931,10 @@ export class Shell implements ArithmeticHost {
     return target;
   }
 
+  private isUnreadHostEnv(name: string): boolean {
+    return ENVIRONMENT_VARIABLES.has(name) && !this.state.unsetEnv.has(name);
+  }
+
   /** The value of `$name`: a scalar, or element 0 of an array, or `undefined` when unset. */
   scalarValue(name: string): string | undefined {
     const resolved = this.resolveName(name);
@@ -936,7 +944,7 @@ export class Shell implements ArithmeticHost {
     if (dynamic !== undefined) return dynamic;
     const variable = this.findVariable(resolved, false);
     if (!variable) {
-      if (ENVIRONMENT_VARIABLES.has(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
+      if (this.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
       return undefined;
     }
     const { value } = variable;
@@ -1022,7 +1030,7 @@ export class Shell implements ArithmeticHost {
         const index = this.readIndex(name, subscript);
         return index === 0n ? this.dynamicValue(name) : undefined;
       }
-      if (!variable && ENVIRONMENT_VARIABLES.has(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+      if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
       if (variable === undefined || !variable.attributes.has('A')) this.readIndex(name, subscript);
       return undefined;
     }
@@ -1040,7 +1048,7 @@ export class Shell implements ArithmeticHost {
       const dynamic = this.dynamicArray(name);
       if (dynamic) return dynamic[Number(index)];
       if (this.isScalarDynamic(name)) return index === 0n ? this.dynamicValue(name) : undefined;
-      if (!variable && ENVIRONMENT_VARIABLES.has(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+      if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
       return undefined;
     }
     if (value.kind === 'scalar') return index === 0n ? value.value : undefined;
@@ -1085,7 +1093,7 @@ export class Shell implements ArithmeticHost {
       const dynamic = this.dynamicArray(name);
       if (dynamic) return dynamic;
       if (this.isScalarDynamic(name)) return [this.dynamicValue(name) as string];
-      if (!variable && ENVIRONMENT_VARIABLES.has(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+      if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
       return [];
     }
     const { value } = variable;
@@ -1101,7 +1109,7 @@ export class Shell implements ArithmeticHost {
       const dynamic = this.dynamicArray(name);
       if (dynamic) return dynamic.map((_, index) => String(index));
       if (this.isScalarDynamic(name)) return ['0'];
-      if (!variable && ENVIRONMENT_VARIABLES.has(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+      if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
       return [];
     }
     const { value } = variable;
@@ -1302,8 +1310,11 @@ export class Shell implements ArithmeticHost {
     if (variable.value?.kind === 'associative' || variable.attributes.has('A')) {
       const previous = variable.value?.kind === 'associative' ? variable.value.table : undefined;
       const table = append && previous ? previous : new AssociativeTable(previous?.bucketCount);
+      if (append) variable.value = { kind: 'associative', table };
+      const ok = this.assignAssociative(variable, table, elements);
       variable.value = { kind: 'associative', table };
-      return this.assignAssociative(variable, table, elements);
+      variable.attributes.add('A');
+      return ok;
     }
     const existing = append ? this.indexedElements(variable) : new Map<bigint, string>();
     if (!append) {
@@ -1397,7 +1408,7 @@ export class Shell implements ArithmeticHost {
   unsetVariable(name: string, followReference = true): boolean {
     const target = followReference ? this.resolveName(name) : name;
     const split = followReference ? this.splitSubscript(target) : undefined;
-    if (split && isIdentifier(split.name)) return unsetElement(this, split.name, split.subscript);
+    if (split && isIdentifier(split.name)) return unsetElement(this, split.name, split.subscript, true);
     if (this.isDynamic(target)) {
       if (PERMANENT_DYNAMIC_VARIABLES.has(target)) {
         this.reportError(`unset: ${target}: cannot unset`);
@@ -1410,6 +1421,7 @@ export class Shell implements ArithmeticHost {
       this.reportError(`unset: ${target}: cannot unset: readonly variable`);
       return false;
     }
+    if (ENVIRONMENT_VARIABLES.has(target)) this.state.unsetEnv.add(target);
     return true;
   }
 

@@ -103,8 +103,9 @@ interface ScannerSnapshot {
   current: LexToken;
 }
 
-const MAX_RECURSION_DEPTH = 1024;
+const MAX_RECURSION_DEPTH = 256;
 const MIN_INT64 = -(2n ** 63n);
+const SIMPLE_IDENTIFIER_EXPRESSION = /^[ \t\n]*([A-Za-z_][A-Za-z0-9_]*)[ \t\n]*$/;
 
 const COMPOUND_OPERATORS = new Map<string, OperatorText>([
   ['+=', '+='],
@@ -194,19 +195,45 @@ class ExpressionSession {
   ) {}
 
   evaluateSubexpression(source: string): bigint {
-    let first = 0;
-    while (first < source.length && isSpace(source[first])) first++;
-    if (first >= source.length) return 0n;
-    if (this.depth >= MAX_RECURSION_DEPTH) {
-      throw formatError(this.commandName, source, undefined, first, 'expression recursion level exceeded');
-    }
-    this.depth++;
+    let current = source;
+    let entered = 0;
     try {
-      return new FrameParser(this, source).parseAll();
+      for (;;) {
+        this.spend();
+        const first = firstNonSpace(current);
+        if (first >= current.length) return 0n;
+        if (this.depth >= MAX_RECURSION_DEPTH) {
+          throw formatError(this.commandName, current, undefined, first, 'expression recursion level exceeded');
+        }
+        this.depth++;
+        entered++;
+        const identMatch = SIMPLE_IDENTIFIER_EXPRESSION.exec(current);
+        if (!identMatch) return new FrameParser(this, current).parseAll();
+        const nextRaw = this.host.readTarget(this.host.resolveTarget(identMatch[1], undefined, true));
+        if (!nextRaw) return 0n;
+        current = nextRaw;
+      }
+    } catch (error) {
+      if (error instanceof RangeError) {
+        throw formatError(
+          this.commandName,
+          current,
+          undefined,
+          firstNonSpace(current),
+          'expression recursion level exceeded'
+        );
+      }
+      throw error;
     } finally {
-      this.depth--;
+      this.depth -= entered;
     }
   }
+}
+
+function firstNonSpace(text: string): number {
+  let i = 0;
+  while (i < text.length && isSpace(text[i])) i++;
+  return i;
 }
 
 class FrameParser {
