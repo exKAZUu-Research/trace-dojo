@@ -182,11 +182,13 @@ function regexTest(shell: Shell, text: string, source: string): boolean {
   const match = searchRegex(compiled, text, () => shell.runtime.spend());
   const chars = charactersOf(text);
   const elements = match ? match.map(([start, end]) => (start === -1 ? '' : chars.slice(start, end).join(''))) : [];
-  shell.assignCompound('BASH_REMATCH', elements, false);
-  const variable = shell.findOwnVariable('BASH_REMATCH');
-  if (variable) {
-    variable.isSystem = true;
-    variable.userAssigned = false;
+  const resolved = shell.resolveNameOrUndefined('BASH_REMATCH');
+  if (resolved !== undefined && shell.assignCompound(resolved, elements, false) && resolved === 'BASH_REMATCH') {
+    const variable = shell.findOwnVariable('BASH_REMATCH');
+    if (variable) {
+      variable.isSystem = true;
+      variable.userAssigned = false;
+    }
   }
   return match !== undefined;
 }

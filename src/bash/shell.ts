@@ -1302,6 +1302,10 @@ export class Shell implements ArithmeticHost {
   assignCompound(name: string, elements: CompoundElement[], append: boolean): boolean {
     if (this.isDynamic(name)) return true;
     let variable = this.findOwnVariable(name);
+    if (!isIdentifier(name) && !variable) {
+      this.reportError(`\`${name}': not a valid identifier`);
+      return false;
+    }
     if (variable && this.rejectReadonlyElement(variable, name)) return false;
     if (!variable) {
       if (append && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
