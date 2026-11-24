@@ -112,7 +112,11 @@ function skipDoubleQuoted(text: SourceText, open: number): number {
     let i = open + 1;
     while (i < source.length && source[i] !== '"') {
       const c = source[i];
-      i = c === '\\' ? i + 2 : c === '$' || c === '`' ? skipWordPiece(text, i) : i + 1;
+      if (c === '\\') i += 2;
+      else if (c === '`') i = skipBackquoted(text, i);
+      else if (c === '$' && (source[i + 1] === '{' || source[i + 1] === '[' || source[i + 1] === '(')) {
+        i = skipWordPiece(text, i);
+      } else i++;
     }
     return closeAt(text, open, i < source.length ? i : -1, '"');
   });
@@ -138,18 +142,15 @@ function skipBackquoted(text: SourceText, open: number): number {
 function skipBraces(text: SourceText, open: number): number {
   return text.nested(() => {
     const { source } = text;
-    let depth = 0;
-    for (let i = open; i < source.length;) {
-      const c = source[i];
-      if (c === '{') depth++;
-      else if (c === '}' && --depth === 0) return i + 1;
-      i = c === '{' || c === '}' ? i + 1 : skipWordPiece(text, i);
+    for (let i = open + 1; i < source.length;) {
+      if (source[i] === '}') return i + 1;
+      i = skipWordPiece(text, i);
     }
     return text.unclosed(open, '}');
   });
 }
 
-/** Skips text from an opening delimiter to its match, as Bash's `parse_matched_pair` does. */
+/** Skips text from an opening delimiter to its matching closing delimiter. */
 export function skipBalanced(text: SourceText, open: number, opener: string, closer: string): number {
   return text.nested(() => {
     const { source } = text;
@@ -173,8 +174,8 @@ function skipDollarParenthesis(text: SourceText, open: number): number {
 }
 
 /**
- * The index after the `))` that closes the `((` at `open`, as Bash's `parse_arith_cmd` finds it, or `undefined` when
- * its parentheses close with a single `)`, which makes it a nested subshell for Bash.
+ * The index after the `))` that closes the `((` at `open`, or `undefined` when its parentheses close with a single
+ * `)`, which makes it a nested subshell for Bash.
  */
 export function arithmeticEnd(text: SourceText, open: number): number | undefined {
   const { source } = text;
