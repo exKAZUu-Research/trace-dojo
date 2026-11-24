@@ -591,6 +591,7 @@ defineNatives({
     return;
   },
   [`${NODE}..ctor`]: (call, receiver, [value]) => {
+    call.frame.runtime.retainSlots(1, [value as Value]);
     const node: LinkNode = {
       value: value as Value,
       previous: undefined,
@@ -604,8 +605,10 @@ defineNatives({
   [`${NODE}.get_Next`]: (_call, receiver) => nodeOf(receiver).next?.object,
   [`${NODE}.get_Previous`]: (_call, receiver) => nodeOf(receiver).previous?.object,
   [`${NODE}.get_Value`]: (_call, receiver) => nodeOf(receiver).value,
-  [`${NODE}.set_Value`]: (_call, receiver, [value]) => {
-    nodeOf(receiver).value = value as Value;
+  [`${NODE}.set_Value`]: (call, receiver, [value]) => {
+    const node = nodeOf(receiver);
+    call.frame.runtime.chargeStore(node.value, value as Value);
+    node.value = value as Value;
     return;
   },
 });
