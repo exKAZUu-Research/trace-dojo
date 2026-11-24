@@ -54,6 +54,7 @@ export class DiscardSignal {
 
 /** A turtle's handle, which a variable holds as a string, since every Bash value is one. */
 const TURTLE_HANDLE_PREFIX = 'Turtle@';
+const TURTLE_HANDLE_PATTERN = /Turtle@\d+/g;
 
 /** What every part of the interpreter shares while a program runs: the board, the trace, and the limits. */
 export class Runtime implements TracedRuntime<Frame> {
@@ -92,8 +93,10 @@ export class Runtime implements TracedRuntime<Frame> {
     if (!this.world.hasTurtles) return;
     const reached = new Set<TurtleState>();
     for (const text of this.reachableStrings()) {
-      const turtle = this.turtles.get(text);
-      if (turtle) reached.add(turtle);
+      for (const [handle] of text.matchAll(TURTLE_HANDLE_PATTERN)) {
+        const turtle = this.turtles.get(handle);
+        if (turtle) reached.add(turtle);
+      }
     }
     this.world.retain((turtle) => reached.has(turtle));
     for (const [handle, turtle] of this.turtles) if (!turtle.isAlive) this.turtles.delete(handle);

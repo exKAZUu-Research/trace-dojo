@@ -1604,18 +1604,8 @@ export class Shell implements ArithmeticHost {
       }
       for (const args of state.positional) yield* args;
     }
-    yield* this.inFlightHandles();
-  }
-
-  private *inFlightHandles(): Iterable<string> {
-    for (const { text } of this.activeOutputs) {
-      for (const [handle] of text.matchAll(/Turtle@\d+/g)) yield handle;
-    }
-    for (const { values } of this.inFlight) {
-      for (const text of values) {
-        for (const [handle] of text.matchAll(/Turtle@\d+/g)) yield handle;
-      }
-    }
+    for (const { text } of this.activeOutputs) yield text;
+    for (const { values } of this.inFlight) yield* values;
   }
 
   /** Copies a value for `local` to inherit, as `declare -I` does; plain `local` starts unset. */
