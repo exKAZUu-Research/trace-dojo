@@ -534,6 +534,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (staticMember) return staticMember;
     const property = this.topLevelPlainProperty(name);
     if (property) return this.readTopLevelProperty(context, property, row);
+    const enumClass = this.file.importedEnumEntries.get(name);
+    if (enumClass) return this.readEnumEntry(enumClass, name);
     const cls = this.findClass(scope, name);
     if (cls) this.checkNestedAccessible(scope, cls, row);
     const value = cls && this.classAsValue(cls, row);
@@ -1511,7 +1513,13 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (receiver && call.candidate.kind === 'member') {
       this.requireNonNullReceiver(receiver, row, false);
     }
-    const receiverEval: Eval = receiver ? convertRepr(receiver.eval, receiver.repr, call.receiverRepr) : () => NULL;
+    // A function imported from an object, as `describe` of `import demo.Config.describe`, runs on that object.
+    const owner = symbol.owner;
+    const holder =
+      !receiver && owner?.isObject && call.candidate.kind === 'function' ? this.objectInstance(owner) : undefined;
+    const receiverEval: Eval = receiver
+      ? convertRepr(receiver.eval, receiver.repr, call.receiverRepr)
+      : (holder ?? (() => NULL));
     const invoke = call.call;
     this.applyContracts(call);
     return {

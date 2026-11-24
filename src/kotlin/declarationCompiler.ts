@@ -254,6 +254,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     return entry;
   }
 
+  /** Whether the classes' members are declared, which imports of the program's own classes' members need. */
+  protected membersDeclared = false;
+
   /** The names of the suspend functions the program and a sequence builder's scope declare, whose calls may suspend. */
   protected readonly suspendFunctionNames = new Set(['yield', 'yieldAll']);
 
@@ -335,6 +338,12 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       const { path, row } = declaration;
       if (declaration.isWildcard) {
         const name = path.join('.');
+        const owner = this.packages.has(name) ? undefined : this.findQualifiedClass(path);
+        if (owner) {
+          if (owner.isObject) this.error(row, `object ${owner.name} からは、* で import できません。`);
+          this.importClassMembers(context, owner);
+          continue;
+        }
         if (!this.packages.has(name) && !isKnownLibraryPackage(name)) this.rejectImport(row, name);
         context.starPackages.push(name);
         continue;
@@ -350,6 +359,13 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       if (packageScope) this.importFromPackage(context, packageScope, name, declaration);
       else this.importFromClass(context, name, declaration);
     }
+  }
+
+  /** `import a.Owner.*`, which imports an object's members, an enum's entries, and the nested classes. */
+  private importClassMembers(context: FileContext, owner: ClassSymbol): void {
+    for (const [name, nested] of owner.nested) context.importedClasses.set(name, nested);
+    for (const entry of owner.enumEntries) context.importedEnumEntries.set(entry.name, owner);
+    if (owner.isObject) for (const [name, members] of owner.members) this.importObjectMembers(context, name, members);
   }
 
   /** Imports a class, functions, or properties of a package by their name. */
@@ -389,9 +405,13 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       context.importedTypeAliases.set(name, nestedAlias);
       return;
     }
+    if (owner?.kind === 'enum' && owner.enumEntries.some((entry) => entry.name === original)) {
+      context.importedEnumEntries.set(name, owner);
+      return;
+    }
+    // The program's own classes declare their members after the first pass of the imports, which the second resolves.
+    if (owner && !owner.isLibrary && !this.membersDeclared) return;
     if (owner) {
-      // The program's own objects reach their members as `Obj.member`; importing them is left to a later change.
-      if (!owner.isLibrary) this.unavailable(row, 'オブジェクトのメンバーのインポート');
       const members = owner.members.get(original) ?? [];
       if (members.length === 0 || !owner.isObject) this.rejectImport(row, path.join('.'));
       this.importObjectMembers(context, name, members);
@@ -432,6 +452,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   /** Resolves the supertypes and members' signatures of every class, and declares the top-level functions and properties. */
   protected declareHeaders(files: { file: KotlinFile; context: FileContext }[]): ClassEntry[] {
+    this.membersDeclared = false;
     const classOrder = this.checkTypeBoundsAfter(() => this.resolveClassHierarchy());
     for (const alias of this.typeAliasSymbols) this.typeAliasExpansion(alias, alias.row);
     for (const entry of this.classEntries) {
@@ -444,6 +465,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       const fileScope = new Scope(undefined, undefined);
       for (const declaration of file.declarations) this.declareTopLevel(declaration, fileScope, context, packageScope);
     }
+    this.membersDeclared = true;
     return classOrder;
   }
 
@@ -900,6 +922,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.typeParameters = this.declareTypeParameters(scope, decl.typeParameters);
     const { keywords } = decl.modifiers;
     this.applyMemberModifiers(symbol, decl.modifiers, cls?.symbol);
+    if (!file.isLibrary && !cls?.symbol.isObject && decl.modifiers.annotations.some(({ name }) => name === 'JvmStatic'))
+      this.error(decl.row, '@JvmStatic は、object と companion object のメンバーにだけ付けられます。');
     symbol.isInline = keywords.has('inline');
     symbol.isTailrec = keywords.has('tailrec');
     symbol.isSuspend = keywords.has('suspend');
@@ -1724,6 +1748,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       isLibrary,
       importedClasses: new Map(),
       importedTypeAliases: new Map(),
+      importedEnumEntries: new Map(),
       importedAnnotations: new Map(),
       importedFunctions: new Map(),
       importedProperties: new Map(),

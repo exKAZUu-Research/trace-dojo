@@ -71,6 +71,8 @@ export interface FileContext {
   isLibrary: boolean;
   importedClasses: Map<string, ClassSymbol>;
   importedTypeAliases: Map<string, TypeAliasSymbol>;
+  /** The enum entries the file imports by name, as `RED` of `import demo.Color.RED`, with their classes. */
+  importedEnumEntries: Map<string, ClassSymbol>;
   importedAnnotations: Map<string, string>;
   importedFunctions: Map<string, FunctionSymbol[]>;
   importedProperties: Map<string, PropertySymbol[]>;
