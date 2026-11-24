@@ -1004,7 +1004,6 @@ export class Evaluator extends SuspendableStatementEvaluator {
   }
 }
 
-/** The key of a private member, which is the string identity of its private name rather than a property key. */
 /** A field's initial value: its initializer's, passed through the functions its decorators added. */
 function initialValue(runtime: Evaluator['runtime'], target: JsObject, field: ClassField): Value {
   let value = field.initialize ? field.initialize(target) : undefined;
@@ -1012,6 +1011,7 @@ function initialValue(runtime: Evaluator['runtime'], target: JsObject, field: Cl
   return value;
 }
 
+/** The key of a private member, which is the string identity of its private name rather than a property key. */
 function privateIdentity(key: Key): string {
   if (typeof key !== 'string') throw new TypeError('A private name has a string identity');
   return key;
