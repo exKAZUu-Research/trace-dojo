@@ -292,6 +292,23 @@ export function callStackArray(
   return undefined;
 }
 
+/** Picks a nonzero initial Park-Miller seed for a fresh shell from the host random source. */
+export function initialRandomSeed(): number {
+  return Math.floor(Math.random() * 0x7f_ff_ff_fe) + 1;
+}
+
+/** Derives a distinct nonzero Park-Miller seed for a command-substitution subshell without advancing the parent stream. */
+export function deriveSubshellSeed(parentSeed: number, subshellIndex: number, subshellLevel: number): number {
+  let h =
+    (Math.imul(parentSeed, 0x9e_37_79_b1) ^
+      Math.imul(subshellIndex, 0x85_eb_ca_6b) ^
+      Math.imul(subshellLevel, 0xc2_b2_ae_35)) >>>
+    0;
+  h = Math.imul(h ^ (h >>> 16), 0x7f_eb_35_2d) >>> 0;
+  h = (h ^ (h >>> 15)) >>> 0;
+  return (h % 0x7f_ff_ff_fe) + 1;
+}
+
 /** Advances Bash's Park-Miller `RANDOM` generator until it produces a 15-bit value distinct from `lastRandom`. */
 export function advanceRandomState(randomSeed: number, lastRandom: number): { seed: number; value: number } {
   let seed = randomSeed;

@@ -137,26 +137,32 @@ export function unaryTest(shell: Shell, operator: string, operand: string): bool
 /** `-v name`: whether a variable, an array element, or a positional parameter is set. */
 function isSet(shell: Shell, operand: string): boolean {
   const split = shell.splitSubscript(operand);
-  if (split && isIdentifier(split.name)) {
-    const resolved = shell.resolveName(split.name);
-    if (split.subscript === '@' || split.subscript === '*') return shell.arrayValues(resolved).length > 0;
-    if (shell.isAssociative(resolved)) {
-      const key = shell.expander.expandSubscriptText(split.subscript);
-      if (key === '') {
-        shell.reportError(`${resolved}: bad array subscript`);
-        return false;
-      }
-      return shell.elementValue(resolved, key) !== undefined;
-    }
-    const index = shell.arrayIndex(resolved, split.subscript);
-    return index !== undefined && shell.elementValue(resolved, String(index)) !== undefined;
-  }
+  if (split && isIdentifier(split.name)) return isSubscriptedSet(shell, split);
   if (/^\s*[-+]?\d+\s*$/.test(operand)) {
     const index = Number(operand);
     return index >= 0 && index <= (shell.state.positional.at(-1) as string[]).length;
   }
   if (!isIdentifier(operand)) return false;
   return shell.scalarValue(operand) !== undefined;
+}
+
+function isSubscriptedSet(shell: Shell, split: { name: string; subscript: string }): boolean {
+  const resolved = shell.resolveName(split.name);
+  if (split.subscript === '@' || split.subscript === '*') return shell.arrayValues(resolved).length > 0;
+  if (shell.isAssociative(resolved)) {
+    const key = shell.expander.expandSubscriptText(split.subscript);
+    if (key === '') {
+      shell.reportError(`${resolved}: bad array subscript`);
+      return false;
+    }
+    return shell.elementValue(resolved, key) !== undefined;
+  }
+  if (split.subscript === '') {
+    shell.reportError(`${resolved}: bad array subscript`);
+    return false;
+  }
+  const index = shell.arrayIndex(resolved, shell.expandDynamicSubscript(split.subscript));
+  return index !== undefined && shell.elementValue(resolved, String(index)) !== undefined;
 }
 
 /** `[[ text =~ regex ]]`, which sets `BASH_REMATCH` and gives 2 for a regex macOS rejects. */

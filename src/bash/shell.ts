@@ -37,6 +37,7 @@ import {
   collectReachableStrings,
   type CompoundElement,
   createInitialGlobalScope,
+  deriveSubshellSeed,
   DYNAMIC_VARIABLES,
   ensureIndexedElements,
   ensureWritable,
@@ -45,6 +46,7 @@ import {
   findOwnVariableInScopes,
   findVariableInScopes,
   hasNamerefCycleInScopes,
+  initialRandomSeed,
   isIdentifier,
   isValidFunctionName,
   maxElementIndex,
@@ -100,6 +102,7 @@ export interface ShellState {
   lastArgument: string | undefined;
   randomSeed: number;
   lastRandom: number;
+  subshellDraws: number;
   /** The dynamic variables the program unset, which then lose their special meaning, as in Bash. */
   unsetDynamic: Set<string>;
   /** Host environment variable names explicitly cleared by `unset`, which then read as unset rather than unsupported. */
@@ -152,8 +155,9 @@ export class Shell implements ArithmeticHost {
       lastStatus: 0,
       pipeStatus: [],
       lastArgument: undefined,
-      randomSeed: 0,
+      randomSeed: initialRandomSeed(),
       lastRandom: 0,
+      subshellDraws: 0,
       unsetDynamic: new Set(),
       unsetEnv: new Set(),
       subshellLevel: 0,
@@ -772,6 +776,9 @@ export class Shell implements ArithmeticHost {
       positional: parent.positional.map((args) => [...args]),
       calls: [...parent.calls],
       pipeStatus: [...parent.pipeStatus],
+      randomSeed: deriveSubshellSeed(parent.randomSeed, ++parent.subshellDraws, parent.subshellLevel + 1),
+      lastRandom: 0,
+      subshellDraws: 0,
       unsetDynamic: new Set(parent.unsetDynamic),
       unsetEnv: new Set(parent.unsetEnv),
       subshellLevel: parent.subshellLevel + 1,
@@ -810,7 +817,6 @@ export class Shell implements ArithmeticHost {
       this.readShift = savedReadShift;
     }
     this.inFlight.at(-1)?.values.push(buffer.text);
-    // Bash keeps the random generator's state across command substitutions only when they reseed it.
     return { output: buffer.text, status };
   }
 
@@ -898,7 +904,9 @@ export class Shell implements ArithmeticHost {
         ? { kind: 'indexedElement', name: resolved, index: 0n }
         : { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` };
     }
-    const index = willRead ? this.readIndex(resolved, rawSubscript) : this.arrayIndex(resolved, rawSubscript, true);
+    const index = willRead
+      ? this.readIndex(resolved, this.expander.expandSubscriptText(rawSubscript))
+      : this.arrayIndex(resolved, this.expander.expandSubscriptText(rawSubscript), true);
     if (index === undefined) return { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` };
     return { kind: 'indexedElement', name: resolved, index };
   }
@@ -924,8 +932,9 @@ export class Shell implements ArithmeticHost {
 
   /** Whether a name holds an associative array, including one declared with `-A` that has no elements yet. */
   isAssociative(name: string): boolean {
-    const variable = this.findVariable(name);
-    return variable?.value?.kind === 'associative' || variable?.attributes.has('A') === true;
+    return (
+      this.findVariable(name)?.value?.kind === 'associative' || this.findVariable(name)?.attributes.has('A') === true
+    );
   }
 
   // ---------------------------------------------------------------- variables
@@ -1077,6 +1086,7 @@ export class Shell implements ArithmeticHost {
     if (seed === undefined) return;
     this.state.randomSeed = Number(BigInt.asUintN(32, seed));
     this.state.lastRandom = 0;
+    this.state.subshellDraws = 0;
   }
 
   /** The value of `${name[subscript]}`, where the subscript is already expanded text. */
