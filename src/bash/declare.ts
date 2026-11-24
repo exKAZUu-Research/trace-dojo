@@ -455,7 +455,13 @@ function parseOptions(
 /** Splits a word like `x=1`, `a[2]+=x`, or `y` that a declaration builtin got from an expansion. */
 function parseWordOperand(word: string): { name: string; subscript?: string; append: boolean; value?: string } {
   const eqIndex = findOperandEquals(word);
-  if (eqIndex === -1) return { name: word, append: false };
+  if (eqIndex === -1) {
+    const open = word.indexOf('[');
+    if (open !== -1 && open + 1 < word.length - 1 && skipSubscript(word, open) === word.length - 1) {
+      return { name: word.slice(0, open), subscript: word.slice(open + 1, -1), append: false };
+    }
+    return { name: word, append: false };
+  }
   const append = eqIndex > 0 && word[eqIndex - 1] === '+';
   const lhsEnd = append ? eqIndex - 1 : eqIndex;
   const lhs = word.slice(0, lhsEnd);
