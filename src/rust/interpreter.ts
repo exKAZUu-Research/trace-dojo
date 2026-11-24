@@ -1,7 +1,7 @@
 import type { Span } from './ast';
 import type { Checker } from './checker';
 import { type CallSupport, type ClosureCapture, type CompiledFn, Compiler } from './compiler';
-import { derefAll } from './compilerCommon';
+import { derefAll, stripRefs } from './compilerCommon';
 import type { WriteChunk } from './debugText';
 import { Dropper } from './drops';
 import { Formatter, type Spec } from './fmt';
@@ -10,12 +10,14 @@ import { compileError, type Module, type Program } from './items';
 import { isUserIterator } from './iterTypes';
 import { type NativeContext, NATIVES } from './natives';
 import { toIterator } from './natives/iterators';
+import { receiverIter } from './natives/threads';
 import { cloneValue, compareValues, type OrderMethod, setUserImpls, valuesEqual } from './ops';
 import {
   ControlSignal,
   FmtFailure,
   Frame,
   type FunctionInfo,
+  MOVED,
   OutOfMemory,
   ProcessExit,
   type Runtime,
@@ -318,6 +320,14 @@ export class Interpreter implements CallSupport {
       '{closure}',
       roots
     );
+    fn.dropCaptures = () => {
+      for (const { place, owned } of captures) {
+        if (!owned) continue;
+        const value = place.get();
+        place.set(MOVED);
+        this.dropper.drop(value, owned);
+      }
+    };
     fn.duplicate = (copy) =>
       this.makeClosure(
         compiled,
@@ -341,6 +351,12 @@ export class Interpreter implements CallSupport {
   toIter(value: Value, from: Type): Value {
     const type = this.revealType(from);
     if (!(value instanceof IterValue) && isUserIterator(type)) return this.userIterator(value, type);
+    const receiver = stripRefs(type);
+    if (receiver.kind === 'adt' && receiver.def.builtin === 'Receiver') {
+      const frame = this.runtime.frames.at(-1) as Frame;
+      const ctx = { interp: this, runtime: this.runtime, frame, span: { row: 0, col: 1 }, typeArgs: [] };
+      return receiverIter(ctx, value, true);
+    }
     return toIterator(value, type);
   }
 

@@ -51,6 +51,17 @@ const CLONE_CONTAINERS = new Set([
 ]);
 
 const DEBUG_TYPES = new Set([
+  'Arc',
+  'Mutex',
+  'RwLock',
+  'MutexGuard',
+  'RwLockReadGuard',
+  'RwLockWriteGuard',
+  'Duration',
+  'Thread',
+  'Sender',
+  'Receiver',
+  'JoinHandle',
   'Path',
   'PathBuf',
   'IoErrorKind',
@@ -134,6 +145,21 @@ export const RANGE_TYPES = new Set([
   'RangeFull',
 ]);
 
+/** The types of std with `Deref` impls (and `DerefMut` impls). */
+const DEREF_TYPES = new Set([
+  'Rc',
+  'Ref',
+  'RefMut',
+  'Box',
+  'String',
+  'Vec',
+  'Arc',
+  'MutexGuard',
+  'RwLockReadGuard',
+  'RwLockWriteGuard',
+]);
+const DEREF_MUT_TYPES = new Set(['RefMut', 'Box', 'String', 'Vec', 'MutexGuard', 'RwLockWriteGuard']);
+
 const RULES: Record<string, Rule> = {
   Sized: sized,
   Static: () => 'yes',
@@ -199,17 +225,9 @@ const RULES: Record<string, Rule> = {
     ])
   ),
   Deref: ({ t }) =>
-    t.kind === 'adt' && ['Rc', 'Ref', 'RefMut', 'Box', 'String', 'Vec'].includes(t.def.builtin ?? '')
-      ? 'yes'
-      : t.kind === 'ref'
-        ? 'yes'
-        : 'no',
+    t.kind === 'adt' && DEREF_TYPES.has(t.def.builtin ?? '') ? 'yes' : t.kind === 'ref' ? 'yes' : 'no',
   DerefMut: ({ t }) =>
-    t.kind === 'adt' && ['RefMut', 'Box', 'String', 'Vec'].includes(t.def.builtin ?? '')
-      ? 'yes'
-      : t.kind === 'ref' && t.mutable
-        ? 'yes'
-        : 'no',
+    t.kind === 'adt' && DEREF_MUT_TYPES.has(t.def.builtin ?? '') ? 'yes' : t.kind === 'ref' && t.mutable ? 'yes' : 'no',
   AsPath: ({ t }) => (isPathLike(t) ? 'yes' : 'no'),
   AsBytes: ({ t }) => (isBytesLike(t) ? 'yes' : 'no'),
   Neg: ({ t }) => {
@@ -324,6 +342,23 @@ function autoTrait({ solver, t, name, all }: Goal): Answer {
   if (t.kind === 'closure') return all(t.closure.captures?.map(({ type }) => type) ?? []);
   // `Rc` shares its count between threads unsynchronized, and `Cell`, `RefCell`, and their guards may not be shared.
   if (t.kind === 'adt' && ['Rc', 'Weak'].includes(t.def.builtin ?? '')) return 'no';
+  if (t.kind === 'adt' && t.def.builtin === 'Arc') {
+    // `Arc<T>` shares `T` between threads, which needs it both `Send` and `Sync`.
+    const sync = solver.implements(t.args[0], { trait: solver.program.traitDef('Sync'), args: [] });
+    const send = solver.implements(t.args[0], { trait: solver.program.traitDef('Send'), args: [] });
+    return sync === 'no' || send === 'no' ? 'no' : sync === 'yes' && send === 'yes' ? 'yes' : 'unknown';
+  }
+  if (t.kind === 'adt' && ['Mutex', 'RwLock'].includes(t.def.builtin ?? '')) {
+    return solver.implements(t.args[0], { trait: solver.program.traitDef('Send'), args: [] });
+  }
+  if (
+    t.kind === 'adt' &&
+    name === 'Send' &&
+    ['MutexGuard', 'RwLockReadGuard', 'RwLockWriteGuard'].includes(t.def.builtin ?? '')
+  ) {
+    return 'no';
+  }
+  if (t.kind === 'adt' && name === 'Sync' && t.def.builtin === 'Receiver') return 'no';
   if (t.kind === 'adt' && name === 'Sync' && ['Cell', 'RefCell', 'Ref', 'RefMut'].includes(t.def.builtin ?? ''))
     return 'no';
   if (t.kind === 'adt') return all(t.args);
@@ -343,6 +378,7 @@ function copy(goal: Goal): Answer {
 /** What `Copy` and `Clone` share: primitives, shared references, and what is made of copies. */
 function plainCopy({ t, all }: Goal): Answer | undefined {
   if (isPrimitive(t) || t.kind === 'fn' || t.kind === 'never') return 'yes';
+  if (t.kind === 'adt' && t.def.builtin === 'Duration') return 'yes';
   if (t.kind === 'adt' && (t.def.builtin === 'ConstPtr' || t.def.builtin === 'MutPtr')) return 'yes';
   if (t.kind === 'ref') return t.mutable ? 'no' : 'yes';
   if (t.kind === 'tuple') return all(t.elems);
@@ -390,7 +426,7 @@ function cloneAdt(goal: Goal, t: AdtType): Answer {
   const d = derived(goal);
   if (d) return d;
   if (t.def.builtin === 'Iter') return all([t.args[1]]);
-  if (t.def.builtin === 'Rc' || t.def.builtin === 'Weak' || t.def.builtin === 'PathBuf') return 'yes';
+  if (['Rc', 'Weak', 'PathBuf', 'Arc', 'Sender', 'Duration', 'Thread'].includes(t.def.builtin ?? '')) return 'yes';
   if (t.def.builtin === 'RefCell') return all(t.args);
   if (t.def.builtin === 'Cell') {
     return goal.solver.implements(t.args[0], { trait: goal.solver.program.traitDef('Copy'), args: [] });
@@ -440,7 +476,13 @@ function display({ solver, t, all }: Goal): Answer {
     ERROR_TYPES.has(t.def.builtin as string)
   )
     return 'yes';
-  if (['Box', 'Rc', 'Ref', 'RefMut'].includes(t.def.builtin ?? '')) return all(t.args);
+  if (
+    ['Box', 'Rc', 'Ref', 'RefMut', 'Arc', 'MutexGuard', 'RwLockReadGuard', 'RwLockWriteGuard'].includes(
+      t.def.builtin ?? ''
+    )
+  ) {
+    return all(t.args);
+  }
   return 'no';
 }
 
@@ -549,7 +591,10 @@ function comparisonAdt(goal: Goal, t: AdtType): Answer {
     return values === 'no' ? 'no' : keys;
   }
   if (builtin === 'BTreeMap' || builtin === 'BTreeSet') return all(t.args);
-  if (['Vec', 'VecDeque', 'Box', 'Option', 'Result', 'Reverse', 'Rc', 'RefCell', 'Ref', 'RefMut'].includes(builtin)) {
+  if (builtin === 'Duration') return 'yes';
+  if (
+    ['Vec', 'VecDeque', 'Box', 'Option', 'Result', 'Reverse', 'Rc', 'RefCell', 'Ref', 'RefMut', 'Arc'].includes(builtin)
+  ) {
     return name === 'Hash' && builtin === 'RefCell' ? 'no' : all(t.args);
   }
   if (builtin === 'Cell')
@@ -578,7 +623,8 @@ function defaultValue(goal: Goal): Answer {
     const content = normalize(shallow(t.args[0]));
     return content.kind === 'str' || content.kind === 'slice' ? 'yes' : all([content]);
   }
-  if (['Rc', 'RefCell', 'Cell'].includes(builtin)) return all(t.args);
+  if (['Rc', 'RefCell', 'Cell', 'Arc', 'Mutex', 'RwLock'].includes(builtin)) return all(t.args);
+  if (builtin === 'Duration') return 'yes';
   return 'no';
 }
 

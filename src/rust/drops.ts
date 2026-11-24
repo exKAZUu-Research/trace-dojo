@@ -9,6 +9,7 @@ import {
   CellPlace,
   DynValue,
   EnumValue,
+  FnValue,
   isPlace,
   type MapValue,
   type SetValue,
@@ -103,6 +104,11 @@ export class Dropper {
       this.dropAdt(value, t);
       return;
     }
+    if (t.kind === 'closure') {
+      const target = isPlace(value) ? value.get() : value;
+      if (target instanceof FnValue) target.dropCaptures?.();
+      return;
+    }
     if (t.kind === 'dyn') {
       const target = isPlace(value) ? value.get() : value;
       if (target instanceof DynValue) this.drop(target.value, target.type);
@@ -119,7 +125,8 @@ export class Dropper {
   private dropAdt(value: Value, t: Type & { kind: 'adt' }): void {
     const target = isPlace(value) ? value.get() : value;
     switch (t.def.builtin) {
-      case 'Rc': {
+      case 'Rc':
+      case 'Arc': {
         const box = target as SharedBox;
         if (box.strong === 0) return;
         box.strong--;
@@ -132,12 +139,17 @@ export class Dropper {
         return;
       }
       case 'Ref':
-      case 'RefMut': {
+      case 'RefMut':
+      case 'MutexGuard':
+      case 'RwLockReadGuard':
+      case 'RwLockWriteGuard': {
         (target as BorrowGuard).release();
         return;
       }
       case 'RefCell':
-      case 'Cell': {
+      case 'Cell':
+      case 'Mutex':
+      case 'RwLock': {
         this.drop((target as CellBox).value, t.args[0]);
         return;
       }
@@ -200,7 +212,7 @@ export class Dropper {
 }
 
 /** The types whose drop counts (an `Rc`'s strong count) or ends a borrow (a `RefCell`'s guard). */
-const COUNTED = new Set(['Rc', 'Weak', 'Ref', 'RefMut']);
+const COUNTED = new Set(['Rc', 'Weak', 'Ref', 'RefMut', 'Arc', 'MutexGuard', 'RwLockReadGuard', 'RwLockWriteGuard']);
 
 function argsOf(t: Type & { kind: 'adt' }): Map<TypeParam, Type> {
   return new Map(t.def.params.map((param, index) => [param, t.args[index]]));

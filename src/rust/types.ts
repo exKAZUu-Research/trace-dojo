@@ -192,7 +192,20 @@ export type BuiltinAdt =
   | 'OpenOptions'
   | 'Path'
   | 'PathBuf'
-  | 'IoErrorKind';
+  | 'IoErrorKind'
+  | 'Arc'
+  | 'Mutex'
+  | 'MutexGuard'
+  | 'RwLock'
+  | 'RwLockReadGuard'
+  | 'RwLockWriteGuard'
+  | 'Sender'
+  | 'Receiver'
+  | 'JoinHandle'
+  | 'ScopedJoinHandle'
+  | 'Thread'
+  | 'Duration'
+  | 'ThreadScope';
 
 export interface AdtDef {
   name: string;

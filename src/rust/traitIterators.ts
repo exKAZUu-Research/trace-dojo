@@ -9,6 +9,7 @@ const CAPABILITY_TRAITS = { back: 'DoubleEndedIterator', exact: 'ExactSizeIterat
 /** The capabilities of std's iterators that take no other iterator. */
 const LEAF_SHAPES: Record<string, Capability[]> = {
   UserIterShape: [],
+  ReceiverShape: [],
   SliceIterShape: ['back', 'exact'],
   SliceIterMutShape: ['back', 'exact'],
   VecIntoIterShape: ['back', 'exact'],

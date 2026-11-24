@@ -989,6 +989,19 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   Rc: 'Rc',
   Weak: 'Weak',
   Stdin: 'Stdin',
+  Arc: 'Arc',
+  Mutex: 'Mutex',
+  MutexGuard: 'MutexGuard',
+  RwLock: 'RwLock',
+  RwLockReadGuard: 'RwLockReadGuard',
+  RwLockWriteGuard: 'RwLockWriteGuard',
+  Sender: 'Sender',
+  Receiver: 'Receiver',
+  JoinHandle: 'JoinHandle',
+  ScopedJoinHandle: 'ScopedJoinHandle',
+  Thread: 'Thread',
+  Duration: 'Duration',
+  Scope: 'ThreadScope',
   StdinLock: 'StdinLock',
   BufReader: 'BufReader',
   BufWriter: 'BufWriter',
@@ -1496,8 +1509,6 @@ function checkUnavailableStd(segments: string[], span: Span): void {
   const [, module, name] = segments;
   const unavailable: Record<string, string> = {
     net: 'ネットワーク（std::net）',
-    thread: 'スレッド（std::thread）',
-    sync: 'スレッドの同期（std::sync）',
     env: '環境変数とコマンドラインの引数（std::env）',
     time: '時刻（std::time）',
     future: 'async/await（std::future）',
@@ -1513,6 +1524,8 @@ function checkUnavailableStd(segments: string[], span: Span): void {
     hint: 'std::hint',
   };
   if (module === 'io' && name) compileError(span, `std::io::${name} は、この採点環境では使えません。`);
+  if (module === 'sync' && name === 'atomic')
+    compileError(span, 'アトミック型（std::sync::atomic）は、この採点環境では使えません。');
   if (module && unavailable[module]) compileError(span, `${unavailable[module]}は、この採点環境では使えません。`);
   if (module === 'process' && name && name !== 'exit') {
     compileError(span, `外部のプロセス（std::process::${name}）は、この採点環境では使えません。`);

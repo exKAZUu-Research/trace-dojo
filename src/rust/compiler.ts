@@ -55,6 +55,8 @@ type CaptureCopy = (value: Value, type: Type) => Value;
 export interface ClosureCapture {
   place: Place;
   duplicate?: (copy: CaptureCopy) => ClosureCapture;
+  /** For a variable the closure owns, its type, by which the closure drops it when it goes. */
+  owned?: Type;
 }
 
 interface FieldCapture {
@@ -769,7 +771,7 @@ export class Compiler {
 
   private ownedValue(value: Value, type: Type): ClosureCapture {
     const place = new CellPlace(value);
-    return { place, duplicate: (copy) => this.ownedValue(copy(place.get(), type), type) };
+    return { place, owned: type, duplicate: (copy) => this.ownedValue(copy(place.get(), type), type) };
   }
 
   private ownedCapture(frame: Frame, value: Value, type: Type, fields: FieldCapture[]): ClosureCapture {

@@ -2895,7 +2895,7 @@ test.each([
     '    let mut values = vec![1, 1, 2]; let _ = values.select_nth_unstable(1);',
   ],
   ['available-in-Rust deque append', 'let mut a = std::collections::VecDeque::from([1]); a.append(&mut a.clone());'],
-  ['threads (stage D)', '    std::thread::spawn(|| {});'],
+  ['atomics (stage D)', '    let n = std::sync::atomic::AtomicUsize::new(0);'],
 ])('%s are unavailable', (_name, body, items = '') => {
   const execution = executeProgram('rust', rustMain(body, items));
   expect(execution.kind).toBe('compileError');
@@ -8964,6 +8964,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     stdout: 'Hello, Ferris! [3, 4]\none\ntwo\nNo such file or directory (os error 2) NotFound\n',
     finalFiles: { 'poem.txt': 'one\ntwo\n' },
   });
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program; threads run in a fixed order.
+test('threads run when joined, waited for on a channel, or let run by sleep, sharing data through Arc and Mutex', () => {
+  const program = `use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+fn main() {
+    let (tx, rx) = mpsc::channel();
+    let tx1 = tx.clone();
+    thread::spawn(move || { for v in [1, 2] { tx1.send(v).unwrap(); thread::sleep(Duration::from_millis(1)); } });
+    thread::spawn(move || tx.send(3).unwrap());
+    let mut got: Vec<i32> = rx.iter().collect();
+    got.sort();
+    let counter = Arc::new(Mutex::new(0));
+    let handles: Vec<_> = (0..10).map(|_| { let c = Arc::clone(&counter); thread::spawn(move || *c.lock().unwrap() += 1) }).collect();
+    for h in handles { h.join().unwrap(); }
+    let total = thread::scope(|s| s.spawn(|| (1..=10).sum::<i32>()).join().unwrap());
+    println!("{:?} {} {} {} {:?}", got, *counter.lock().unwrap(), Arc::strong_count(&counter), total, Duration::from_millis(1500));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 3] 10 1 55 1.5s\n' });
 });
 
 test('an empty match covers the uninhabited Infallible', () => {

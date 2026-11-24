@@ -66,7 +66,8 @@ export function intoIterItem(type: Type): Type | undefined {
     case 'BinaryHeap':
     case 'Iter':
     case 'Option':
-    case 'Result': {
+    case 'Result':
+    case 'Receiver': {
       return t.args[0];
     }
     case 'Range':
@@ -85,6 +86,7 @@ export function intoIterItem(type: Type): Type | undefined {
 
 function borrowedIterItem(type: Extract<Type, { kind: 'ref' }>): Type | undefined {
   const target = normalize(shallow(type.target));
+  if (target.kind === 'adt' && target.def.builtin === 'Receiver') return target.args[0];
   // `impl Iterator for &mut I` of std makes a `&mut` of the program's iterator one too.
   if (type.mutable && target.kind === 'adt' && !target.def.builtin) return userIteratorItem(target);
   if (target.kind === 'array' || target.kind === 'slice') return ref(target.elem, type.mutable);
@@ -125,6 +127,8 @@ export function intoIterShape(program: Program, type: Type): Type | undefined {
   if (t.kind === 'param' || t.kind === 'opaque') return iterationBound(t) && adt(program.adtDef('IntoShape'), [t]);
   if (t.kind === 'array') return program.shapeType('ArrayIntoIterShape', [t.elem]);
   if (isUserIterator(t)) return program.shapeType('UserIterShape', [t]);
+  const receiver = t.kind === 'ref' ? normalize(shallow(t.target)) : t;
+  if (receiver.kind === 'adt' && receiver.def.builtin === 'Receiver') return program.shapeType('ReceiverShape');
   if (t.kind === 'ref') return borrowedIterShape(program, t.target, t.mutable);
   if (t.kind !== 'adt') return undefined;
   if (t.def.builtin === 'Iter') return t.args[1];

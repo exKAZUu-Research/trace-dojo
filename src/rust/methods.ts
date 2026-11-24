@@ -62,7 +62,11 @@ export function derefOnce(program: Program, type: Type): { type: Type; kind: Der
     }
     case 'Rc':
     case 'Ref':
-    case 'RefMut': {
+    case 'RefMut':
+    case 'Arc':
+    case 'MutexGuard':
+    case 'RwLockReadGuard':
+    case 'RwLockWriteGuard': {
       return { type: t.args[0], kind: 'user' };
     }
     default: {

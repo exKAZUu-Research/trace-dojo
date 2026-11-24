@@ -1035,6 +1035,7 @@ pub mod iter {
         pub struct BytesShape;
         pub struct DynIteratorShape<D>;
         pub struct IoLinesShape;
+        pub struct ReceiverShape;
         pub struct UserIterShape<I>;
         pub struct CharIndicesShape;
         pub struct SplitWhitespaceShape;
@@ -1538,6 +1539,116 @@ pub mod io {
     impl Write for Stderr {}
     impl Write for StderrLock {}
 }
+pub mod time {
+    pub struct Duration { inner: () }
+    impl Duration {
+        pub const ZERO: Duration;
+        pub const fn new(secs: u64, nanos: u32) -> Duration;
+        pub const fn from_secs(secs: u64) -> Duration;
+        pub const fn from_millis(millis: u64) -> Duration;
+        pub const fn from_micros(micros: u64) -> Duration;
+        pub const fn from_nanos(nanos: u64) -> Duration;
+        pub fn from_secs_f64(secs: f64) -> Duration;
+        pub const fn as_secs(&self) -> u64;
+        pub const fn as_millis(&self) -> u128;
+        pub const fn as_micros(&self) -> u128;
+        pub const fn as_nanos(&self) -> u128;
+        pub fn as_secs_f64(&self) -> f64;
+        pub const fn subsec_millis(&self) -> u32;
+        pub const fn subsec_nanos(&self) -> u32;
+        pub fn checked_add(self, rhs: Duration) -> Option<Duration>;
+        pub fn checked_sub(self, rhs: Duration) -> Option<Duration>;
+        pub fn mul_f64(self, rhs: f64) -> Duration;
+    }
+    impl super::ops::Add for Duration { type Output = Duration; fn add(self, rhs: Duration) -> Duration; }
+    impl super::ops::Sub for Duration { type Output = Duration; fn sub(self, rhs: Duration) -> Duration; }
+    impl super::ops::Mul<u32> for Duration { type Output = Duration; fn mul(self, rhs: u32) -> Duration; }
+}
+pub mod thread {
+    use super::pseudo::Any;
+    pub struct JoinHandle<T> { inner: () }
+    impl<T> JoinHandle<T> {
+        pub fn join(self) -> Result<T, Box<dyn Any + Send>>;
+        pub fn is_finished(&self) -> bool;
+        pub fn thread(&self) -> &Thread;
+    }
+    pub fn spawn<F: FnOnce() -> T + Send + 'static, T: Send + 'static>(f: F) -> JoinHandle<T>;
+    pub fn sleep(dur: super::time::Duration);
+    pub fn yield_now();
+    pub fn current() -> Thread;
+    pub fn scope<F: FnOnce(&Scope) -> T, T>(f: F) -> T;
+    pub struct Scope { inner: () }
+    impl Scope {
+        pub fn spawn<F: FnOnce() -> T + Send, T: Send>(&self, f: F) -> ScopedJoinHandle<T>;
+    }
+    pub struct ScopedJoinHandle<T> { inner: () }
+    impl<T> ScopedJoinHandle<T> {
+        pub fn join(self) -> Result<T, Box<dyn Any + Send>>;
+        pub fn is_finished(&self) -> bool;
+    }
+    pub struct Thread { inner: () }
+    impl Thread {
+        pub fn id(&self) -> ThreadId;
+        pub fn name(&self) -> Option<&str>;
+    }
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+    pub struct ThreadId(u64);
+}
+pub mod sync {
+    pub struct Arc<T>;
+    impl<T> Arc<T> {
+        pub fn new(value: T) -> Arc<T>;
+        pub fn strong_count(this: &Arc<T>) -> usize;
+        pub fn ptr_eq(this: &Arc<T>, other: &Arc<T>) -> bool;
+        pub fn try_unwrap(this: Arc<T>) -> Result<T, Arc<T>>;
+        pub fn into_inner(this: Arc<T>) -> Option<T>;
+        pub fn as_ref(&self) -> &T;
+    }
+    pub struct Mutex<T>;
+    impl<T> Mutex<T> {
+        pub fn new(value: T) -> Mutex<T>;
+        pub fn lock(&self) -> LockResult<MutexGuard<T>>;
+        pub fn try_lock(&self) -> Result<MutexGuard<T>, TryLockError<MutexGuard<T>>>;
+        pub fn into_inner(self) -> LockResult<T>;
+        pub fn get_mut(&mut self) -> LockResult<&mut T>;
+        pub fn is_poisoned(&self) -> bool;
+    }
+    pub struct MutexGuard<T>;
+    pub struct RwLock<T>;
+    impl<T> RwLock<T> {
+        pub fn new(value: T) -> RwLock<T>;
+        pub fn read(&self) -> LockResult<RwLockReadGuard<T>>;
+        pub fn write(&self) -> LockResult<RwLockWriteGuard<T>>;
+        pub fn into_inner(self) -> LockResult<T>;
+        pub fn get_mut(&mut self) -> LockResult<&mut T>;
+    }
+    pub struct RwLockReadGuard<T>;
+    pub struct RwLockWriteGuard<T>;
+    pub type LockResult<G> = Result<G, PoisonError<G>>;
+    #[derive(Debug)]
+    pub struct PoisonError<T> { guard: T }
+    impl<T> PoisonError<T> { pub fn into_inner(self) -> T; }
+    #[derive(Debug)]
+    pub enum TryLockError<T> { Poisoned(PoisonError<T>), WouldBlock }
+    pub mod mpsc {
+        pub struct Sender<T>;
+        impl<T> Sender<T> { pub fn send(&self, t: T) -> Result<(), SendError<T>>; }
+        pub struct Receiver<T>;
+        impl<T> Receiver<T> {
+            pub fn recv(&self) -> Result<T, RecvError>;
+            pub fn try_recv(&self) -> Result<T, TryRecvError>;
+            pub fn iter(&self) -> IterImpl<T, super::super::iter::shape::ReceiverShape>;
+            pub fn try_iter(&self) -> IterImpl<T, super::super::iter::shape::ReceiverShape>;
+        }
+        pub fn channel<T>() -> (Sender<T>, Receiver<T>);
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub struct SendError<T>(pub T);
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub struct RecvError;
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum TryRecvError { Empty, Disconnected }
+    }
+}
 pub mod fs {
     use super::io::Result;
     use super::pseudo::{AsPath, AsBytes};
@@ -1754,6 +1865,7 @@ pub mod prelude {
     pub use super::dojo::Turtle;
 }
 pub mod pseudo {
+    pub trait Any: super::fmt::Debug {}
     pub trait AsPath {}
     pub trait AsBytes {}
     pub trait Integer {}

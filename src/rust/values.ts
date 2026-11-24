@@ -38,6 +38,9 @@ export type Value =
   | BorrowGuard
   | RawPtr
   | IoStream
+  | ChannelEnd
+  | ThreadHandle
+  | DurationValue
   | undefined;
 
 export const UNIT_VALUE: Value[] = Object.freeze([]) as unknown as Value[];
@@ -188,6 +191,8 @@ export class FnValue {
    * concrete type), and what it captures by reference stays shared.
    */
   duplicate: ((copy: (value: Value, type: Type) => Value) => FnValue) | undefined;
+  /** For a closure, drops what it captured by value, as the closure going does. */
+  dropCaptures: (() => void) | undefined;
 }
 
 export const DONE: unique symbol = Symbol('done');
@@ -388,4 +393,24 @@ export class IoStream {
     readonly reader: TextReader | undefined,
     readonly writer: FileHandle | undefined
   ) {}
+}
+
+/** The queue of an `mpsc` channel, which its `Sender`s and its `Receiver` share. */
+export class ChannelEnd {
+  constructor(readonly queue: Value[]) {}
+}
+
+/** A spawned thread: its function, and whether it has run, with its result or the panic that ended it. */
+export class ThreadHandle {
+  state: 'pending' | 'running' | 'done' | 'panicked' = 'pending';
+  result: Value;
+  constructor(
+    readonly id: number,
+    readonly run: () => Value
+  ) {}
+}
+
+/** A `Duration`, in nanoseconds. */
+export class DurationValue {
+  constructor(readonly nanos: bigint) {}
 }

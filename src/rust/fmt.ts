@@ -7,6 +7,7 @@ import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
 import { normalize } from './infer';
 import { iteratorDebug } from './iterDebug';
 import { ioErrorDebug, ioErrorDisplay } from './natives/io';
+import { durationDebug } from './natives/threads';
 import { wrap } from './ops';
 import { FmtFailure } from './runtime';
 import { ERROR_TYPES } from './traits';
@@ -62,6 +63,9 @@ export interface FormatHooks {
   allocateString(length: number, written?: number): void;
   withActiveBorrows<T>(values: Value[], use: () => T): T;
 }
+
+/** A lock's `poisoned` field in `Debug`: no thread here panics while it holds a lock. */
+const NOT_POISONED: DebugPart = (_inner, sink) => emit('false', sink);
 
 export class Formatter {
   constructor(private readonly hooks: FormatHooks) {}
@@ -354,8 +358,51 @@ export class Formatter {
       case 'PathBuf': {
         return quotedDebug(textOf(v), false, write);
       }
-      case 'Rc': {
+      case 'Rc':
+      case 'Arc': {
         return this.debug((v as SharedBox).value, t.args[0], spec, indent, write);
+      }
+      case 'MutexGuard':
+      case 'RwLockReadGuard':
+      case 'RwLockWriteGuard': {
+        return this.debug((v as BorrowGuard).cell.value, t.args[0], spec, indent, write);
+      }
+      case 'Mutex':
+      case 'RwLock': {
+        const cell = v as CellBox;
+        const data: DebugPart = (inner, sink) => this.debug(cell.value, t.args[0], spec, inner, sink);
+        return structText(
+          def.builtin,
+          [
+            ['data', data],
+            ['poisoned', NOT_POISONED],
+          ],
+          indent,
+          true,
+          write
+        );
+      }
+      case 'Duration': {
+        return padString(durationDebug(v, spec.precision), spec, write);
+      }
+      case 'Thread': {
+        const id: DebugPart = (_inner, sink) => emit(`ThreadId(${String(v)})`, sink);
+        const name: DebugPart = (_inner, sink) => emit(v === 1 ? 'Some("main")' : 'None', sink);
+        return structText(
+          'Thread',
+          [
+            ['id', id],
+            ['name', name],
+          ],
+          indent,
+          true,
+          write
+        );
+      }
+      case 'Sender':
+      case 'Receiver':
+      case 'JoinHandle': {
+        return emit(`${def.builtin} { .. }`, write);
       }
       case 'Ref':
       case 'RefMut': {

@@ -5,6 +5,7 @@ import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { Span } from './ast';
 import type { Dropper } from './drops';
+import type { Scheduler } from './natives/threads';
 import { canReachTurtle, turtleCaptureRoots } from './turtleTypes';
 import { shallow, type Type, type TypeParam } from './types';
 import { utf8Reader } from './utf8';
@@ -244,6 +245,8 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** Drops the values of variables whose scope ends, for programs with `Drop` impls. */
   dropper: Dropper | undefined;
+  /** The threads the program spawned, once it spawns one. */
+  scheduler: Scheduler | undefined;
   /** The guards of `RefCell` borrows made so far, whose temporaries go at the end of their statement. */
   readonly liveGuards: BorrowGuard[] = [];
 

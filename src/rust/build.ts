@@ -145,7 +145,8 @@ function builtinAssocType(program: Program, trait: TraitDef, name: string, self:
   if (name === 'Target' && (builtin === 'Deref' || builtin === 'DerefMut')) {
     if (self.kind === 'ref') return self.target;
     if (self.kind === 'adt') {
-      if (['Box', 'Rc', 'Ref', 'RefMut'].includes(self.def.builtin ?? '')) return self.args[0];
+      const pointers = ['Box', 'Rc', 'Ref', 'RefMut', 'Arc', 'MutexGuard', 'RwLockReadGuard', 'RwLockWriteGuard'];
+      if (pointers.includes(self.def.builtin ?? '')) return self.args[0];
       if (self.def.builtin === 'String') return { kind: 'str' };
       if (self.def.builtin === 'Vec') return { kind: 'slice', elem: self.args[0] };
     }

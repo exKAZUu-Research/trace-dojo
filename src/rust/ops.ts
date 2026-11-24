@@ -9,6 +9,7 @@ import {
   BorrowGuard,
   CellBox,
   DONE,
+  type DurationValue,
   EnumValue,
   FnValue,
   isPlace,
@@ -316,11 +317,15 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boo
       return compareSequence(t.args[0], x, y, rhs);
     }
     case 'Rc':
+    case 'Arc':
     case 'RefCell':
     case 'Cell':
     case 'Ref':
     case 'RefMut': {
       return valuesEqual(t.args[0], pointee(x), pointee(y));
+    }
+    case 'Duration': {
+      return (x as DurationValue).nanos === (y as DurationValue).nanos;
     }
     case 'Box':
     case 'Reverse': {
@@ -504,11 +509,17 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: bool
       return compareValues(t.args[0], x, y, partial);
     }
     case 'Rc':
+    case 'Arc':
     case 'RefCell':
     case 'Cell':
     case 'Ref':
     case 'RefMut': {
       return compareValues(t.args[0], pointee(x), pointee(y), partial);
+    }
+    case 'Duration': {
+      const a = (x as DurationValue).nanos;
+      const b = (y as DurationValue).nanos;
+      return a < b ? -1 : a > b ? 1 : 0;
     }
     case 'Reverse': {
       return compareValues(t.args[0], (y as StructValue).fields[0], (x as StructValue).fields[0], partial);
@@ -714,7 +725,8 @@ function clonePart(type: Type, value: Value): Value {
         case 'Box': {
           return clonePart(t.args[0], value);
         }
-        case 'Rc': {
+        case 'Rc':
+        case 'Arc': {
           const box = derefAll(value) as SharedBox;
           box.strong++;
           return box;
