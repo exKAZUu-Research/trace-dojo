@@ -245,10 +245,14 @@ export class Printer {
       },
       thisParameter
     );
-    const predicate = signature.predicate
-      ? `${signature.predicate.index === -1 ? 'this' : (signature.parameters[signature.predicate.index]?.name ?? 'x')} is ${this.print(signature.predicate.type)}`
-      : undefined;
+    const predicate = signature.predicate ? this.printPredicate(signature, signature.predicate) : undefined;
     return `${typeParameters}(${parameters})${arrow}${predicate ?? this.print(signature.returnType())}`;
+  }
+
+  private printPredicate(signature: Signature, predicate: NonNullable<Signature['predicate']>): string {
+    const name = predicate.index === -1 ? 'this' : (signature.parameters[predicate.index]?.name ?? 'x');
+    if (predicate.asserts === 'truthy') return `asserts ${name}`;
+    return `${predicate.asserts ? 'asserts ' : ''}${name} is ${this.print(predicate.type)}`;
   }
 }
 

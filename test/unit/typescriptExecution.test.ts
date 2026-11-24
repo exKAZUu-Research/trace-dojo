@@ -308,31 +308,6 @@ test.each([
   ['an import', 'import fs from "fs";', 'import や export は、この採点環境では使えません。'],
   ['an async function', 'async function f() {}', 'async 関数は、この採点環境では使えません。'],
   ['a decorator', 'function d(t: unknown) {}\n@d class A {}', 'デコレータは、この採点環境では使えません。'],
-  [
-    'a String.raw replaced by a value that is not a function',
-    'String.raw = 1 as any;\nString.raw`x${(() => { throw new Error("bad"); })()}`;',
-    'タグ付きテンプレートは、この採点環境では使えません。',
-  ],
-  [
-    'a String.raw replaced by the program',
-    'String.raw = (...a: any[]) => 42 as any;\nconsole.log(String.raw`x`);',
-    'タグ付きテンプレートは、この採点環境では使えません。',
-  ],
-  [
-    'a tag spelled String.raw that names a parameter',
-    'const raw = (...a: unknown[]) => 1;\nfunction f(String: { raw: typeof raw }) { return String.raw`x`; }',
-    'タグ付きテンプレートは、この採点環境では使えません。',
-  ],
-  [
-    'a computed String.raw tag replaced by the program',
-    'String["raw"] = (...a: any[]) => 42 as any;\nconsole.log((String["raw"])`x`);',
-    'タグ付きテンプレートは、この採点環境では使えません。',
-  ],
-  [
-    'a parenthesized computed tag that names a String parameter',
-    'const raw = (...a: unknown[]) => 1;\nfunction f(String: { raw: typeof raw }) { return (String["raw"])`x`; }',
-    'タグ付きテンプレートは、この採点環境では使えません。',
-  ],
   ['a Promise', 'Promise.resolve(1);', 'Promise は、この採点環境では使えません。'],
   ['a timer', 'setTimeout(() => {}, 1);', 'setTimeout などのタイマーは、この採点環境では使えません。'],
   ['a Date', 'new Date();', 'Date（日付と時刻）は、この採点環境では使えません。'],
@@ -621,11 +596,8 @@ test('legacy HTML builders enforce string limits before escaping and wrapping', 
   }
 });
 
-test('unsupported type syntax and omitted host globals stop execution before effects', () => {
+test('omitted host globals stop execution before effects', () => {
   for (const source of [
-    'console.log("never"); const value: unique symbol = Symbol();',
-    'console.log("never"); const value: unique  symbol = Symbol();',
-    'console.log("never"); const value: unique /* type */ symbol = Symbol();',
     'console.log("never"); const make = Uint8Array; make(3);',
     'console.log("never"); let values: Uint8Array;',
     'console.log("never"); type Constructor = typeof Uint8Array;',

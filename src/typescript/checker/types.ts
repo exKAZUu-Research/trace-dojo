@@ -124,8 +124,11 @@ export interface Signature {
   checkImmediateBody?: () => void;
   thisType?: Type;
   returnType: () => Type;
-  /** A type predicate `x is T`, by the index of the parameter it narrows (-1 for `this`). */
-  predicate?: { index: number; type: Type };
+  /**
+   * A type predicate `x is T`, by the index of the parameter it narrows (-1 for `this`), or an assertion: `asserts x is
+   * T`, or `asserts x`, which narrows `x` to where it is truthy, and whose type is then `unknown`.
+   */
+  predicate?: { index: number; type: Type; asserts?: 'type' | 'truthy' };
   declaration?: TreeNode;
   /** Whether it constructs an abstract class. */
   isAbstract?: boolean;
@@ -263,6 +266,8 @@ export interface TypeParameter {
   substitution?: { base: TypeParameter; constraint: Type };
   /** A `this` type, whose constraint is the class or interface it belongs to. */
   isThisType?: boolean;
+  /** The variance its `in` and `out` annotations declare, which relates instantiations by their type arguments. */
+  variance?: 'in' | 'out' | 'in out';
 }
 
 export function thisParameter(type: ObjectType): TypeParameter {

@@ -208,7 +208,7 @@ export class ConditionChecker {
       : undefined;
     const type = cached ? booleanType : this.c.expressions.check(expression);
     const predicate = cached ?? this.c.expressions.calls.predicateOf(expression);
-    if (!predicate) return { ...this.truthiness(expression), type };
+    if (!predicate || predicate.asserts) return { ...this.truthiness(expression), type };
     const { target, type: predicateType } = predicate;
     const { whenTrue, whenFalse } = this.narrowed(target, (current, assumeTrue) =>
       assumeTrue
@@ -217,6 +217,25 @@ export class ConditionChecker {
     );
     const excludesUndefined = !this.c.relations.isAssignable(undefinedType, predicateType);
     return { whenTrue: excludesUndefined ? this.chainEvaluated(whenTrue, target) : whenTrue, whenFalse, type };
+  }
+
+  /**
+   * Narrows the flow after a call to an assertion function, `asserts x is T` or `asserts x`, to where the assertion
+   * holds, as a condition that is true there would.
+   */
+  applyAssertion(call: TreeNode): void {
+    const predicate = this.c.expressions.calls.predicateOf(call);
+    if (!predicate?.asserts) return;
+    if (!this.c.expressions.calls.hasExplicitCalleeType(call))
+      this.c.error(
+        call.childForFieldName('function') ?? call,
+        'アサーションを使うには、呼び出し先のすべての名前が、明示的な型注釈を付けて宣言されている必要があります。'
+      );
+    const { target, type } = predicate;
+    this.c.flow.current =
+      predicate.asserts === 'truthy'
+        ? this.c.silently(() => this.condition(target, false)).whenTrue
+        : this.narrowed(target, (current) => this.c.flow.narrowByPredicate(current, type)).whenTrue;
   }
 
   /** Reports a tested expression that is `void`, or that is always truthy or always falsy by its syntax. */

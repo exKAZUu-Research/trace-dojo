@@ -76,6 +76,8 @@ const MAX_RECURSION_IDENTITY_COUNT = 3;
 
 /** Whether one type is assignable to, or comparable with, another, as TypeScript decides it. */
 export class Relations {
+  /** While positive, instantiations of a generic are related by their members, not by its variance annotations. */
+  private ignoresVariance = 0;
   /** Pairs assumed related while comparing their members, which recursive types revisit. */
   private readonly assumed = new Set<string>();
   /**
@@ -781,6 +783,7 @@ export class Relations {
     }
     const byElements = this.elementsRelated(source, target, relation);
     if (byElements !== undefined) return byElements;
+    if (this.violatesAnnotatedVariance(source, target, relation)) return false;
     const sourceStructure = this.c.structureOf(source);
     const targetStructure = this.c.structureOf(target);
     if (
@@ -796,6 +799,52 @@ export class Relations {
         this.indexRelated(sourceStructure, source, index.type, index.keyType, relation, state)
       )
     );
+  }
+
+  /** Compares the members' structures alone, as checking a variance annotation does, which must not assume it. */
+  structurally<T>(run: () => T): T {
+    this.ignoresVariance++;
+    try {
+      return run();
+    } finally {
+      this.ignoresVariance--;
+    }
+  }
+
+  /**
+   * Whether two instantiations of a generic class, interface, or alias are unrelated by the variance the `in` and
+   * `out` annotations of its type parameters declare, as tsc relates them before their members.
+   */
+  private violatesAnnotatedVariance(source: Type, target: ObjectType, relation: Relation): boolean {
+    if (this.ignoresVariance > 0 || source.kind !== 'object') return false;
+    const generic = this.instantiationsOfOneGeneric(source, target);
+    if (!generic) return false;
+    const { parameters, sourceArguments, targetArguments } = generic;
+    return parameters.some((parameter, index) => {
+      const [from, to] = [sourceArguments[index], targetArguments[index]];
+      if (!parameter.variance || !from || !to) return false;
+      const covariant = parameter.variance === 'in' || this.isRelated(from, to, relation);
+      const contravariant = parameter.variance === 'out' || this.isRelated(to, from, relation);
+      return !(covariant && contravariant);
+    });
+  }
+
+  /** The type parameters and arguments of two instantiations of the same generic class, interface, or alias. */
+  private instantiationsOfOneGeneric(
+    source: ObjectType,
+    target: ObjectType
+  ): { parameters: TypeParameter[]; sourceArguments: Type[]; targetArguments: Type[] } | undefined {
+    if (source.objectKind === 'reference' && target.objectKind === 'reference' && source.target === target.target) {
+      const parameters = source.target?.typeParameters;
+      return parameters && source.typeArguments && target.typeArguments
+        ? { parameters, sourceArguments: source.typeArguments, targetArguments: target.typeArguments }
+        : undefined;
+    }
+    if (source.aliasId === undefined || source.aliasId !== target.aliasId) return undefined;
+    const parameters = this.c.aliasTypeParameters.get(source.aliasId);
+    return parameters && source.aliasArguments && target.aliasArguments
+      ? { parameters, sourceArguments: source.aliasArguments, targetArguments: target.aliasArguments }
+      : undefined;
   }
 
   private literalSubtypeProperties(source: Type, from: Structure, target: ObjectType, to: Structure): boolean {

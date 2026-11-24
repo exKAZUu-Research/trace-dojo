@@ -393,15 +393,20 @@ export class Signatures {
       this.c.errorWhileResolving(parameterNode, '残余引数の型は配列型にしてください。');
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Reads each form of predicate, `x is T`, `asserts x is T`, and `asserts x`, and reports what names no parameter.
   private predicateOf(node: TreeNode, returnNode: TreeNode, parameters: Parameter[]): Signature['predicate'] {
+    const assertion = returnNode.type === 'asserts_annotation' ? named(returnNode)[0] : returnNode;
+    const asserts = assertion?.type === 'asserts' ? named(assertion)[0] : undefined;
     // A function type spells its predicate without the annotation's colon.
-    if (returnNode.type !== 'type_predicate_annotation' && returnNode.type !== 'type_predicate') return undefined;
-    const predicateNode = returnNode.type === 'type_predicate' ? returnNode : named(returnNode)[0];
-    const nameNode = predicateNode?.childForFieldName('name');
-    const typeNode = predicateNode?.childForFieldName('type');
-    if (!nameNode || !typeNode) return undefined;
-    const type = this.c.typeNodes.typeFromNode(typeNode);
-    if (nameNode.text === 'this') return { index: -1, type };
+    if (returnNode.type !== 'type_predicate_annotation' && returnNode.type !== 'type_predicate' && !asserts)
+      return undefined;
+    const predicateNode = asserts ?? (returnNode.type === 'type_predicate' ? returnNode : named(returnNode)[0]);
+    const nameNode = predicateNode?.type === 'type_predicate' ? predicateNode.childForFieldName('name') : predicateNode;
+    const typeNode = predicateNode?.type === 'type_predicate' ? predicateNode.childForFieldName('type') : undefined;
+    if (!nameNode || (!typeNode && !asserts)) return undefined;
+    const type = typeNode ? this.c.typeNodes.typeFromNode(typeNode) : unknownType;
+    const kind = asserts ? (typeNode ? 'type' : 'truthy') : undefined;
+    if (nameNode.text === 'this') return { index: -1, type, asserts: kind };
     const index = parameters.findIndex((parameter) => parameter.name === nameNode.text);
     const parameter = parameters.at(index);
     if (!parameter || index === -1) {
@@ -409,9 +414,9 @@ export class Signatures {
       return undefined;
     }
     if (parameter.rest) this.c.error(nameNode, '型述語では、残余引数を参照できません。');
-    else if (!this.c.isLibrary(typeNode) && !this.c.relations.isAssignable(type, parameter.type))
+    else if (typeNode && !this.c.isLibrary(typeNode) && !this.c.relations.isAssignable(type, parameter.type))
       this.c.error(typeNode, '型述語の型は、その引数の型に代入できる型にしてください。');
-    return { index, type };
+    return { index, type, asserts: kind };
   }
 
   /** Reports a type predicate naming no parameter: a name in a parameter's binding pattern, or no name at all. */
@@ -621,6 +626,7 @@ export class Signatures {
       id: newTypeId(),
       name: node.childForFieldName('name')?.text ?? 'T',
       isConst: hasToken(node, 'const'),
+      variance: varianceOf(node),
       constraint: constraintNode ? () => this.declaredConstraint(constraintNode) : undefined,
       default: defaultNode ? () => this.declaredDefault(defaultNode) : undefined,
     };
@@ -831,6 +837,14 @@ function signatureSubject(node: TreeNode): string {
   if (node.type === 'call_signature') return '呼び出しシグネチャ';
   if (node.type === 'construct_signature') return 'コンストラクトシグネチャ';
   return node.childForFieldName('name')?.text ?? '';
+}
+
+function varianceOf(node: TreeNode): TypeParameter['variance'] {
+  const isIn = hasToken(node, 'in');
+  const isOut = hasToken(node, 'out');
+  if (isIn && isOut) return 'in out';
+  if (isIn) return 'in';
+  return isOut ? 'out' : undefined;
 }
 
 function returnTypeNode(node: TreeNode): TreeNode | undefined {

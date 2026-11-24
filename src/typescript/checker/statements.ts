@@ -41,6 +41,7 @@ import {
   unknownType,
 } from './types';
 import { unionStructure } from './unionMembers';
+import { checkVarianceAnnotations } from './varianceAnnotations';
 import { checkWrittenType } from './writtenTypes';
 
 interface JumpTarget {
@@ -64,6 +65,7 @@ export class StatementChecker {
   private readonly jumpTargets: JumpTarget[] = [];
   /** The labels of the loop about to be checked, which its jump target takes. */
   private pendingLabels: string[] = [];
+  private readonly reportedMissingTypes = new Set<string>();
   /** The types of the objects `for...in` loops iterate, by loop. */
   private readonly forInObjectTypes = new Map<number, Type>();
   /** How each kind of statement is checked; the others need no checks. */
@@ -98,6 +100,7 @@ export class StatementChecker {
     ['export_statement', (node) => this.exportStatement(node)],
     ['ambient_declaration', (node) => this.ambientDeclaration(node)],
     ['import_alias', (node) => this.c.namespaces.checkImportAlias(node)],
+    ['using_declaration', (node) => this.usingDeclaration(node)],
   ]);
 
   constructor(private readonly c: Checker) {}
@@ -150,8 +153,25 @@ export class StatementChecker {
     }
     const type = this.c.expressions.check(expression);
     const call = skipParentheses(expression);
-    if (call.type === 'call_expression' && this.c.expressions.calls.endsFlow(call, type))
-      this.c.flow.current = undefined;
+    if (call.type !== 'call_expression') return;
+    if (this.c.expressions.calls.endsFlow(call, type)) this.c.flow.current = undefined;
+    else this.c.conditions.applyAssertion(call);
+  }
+
+  /**
+   * `using` and `await using`, which need the `Disposable` and `AsyncDisposable` types that the ES2025 library the
+   * reference checks with lacks: tsc reports each missing type once, without a location, here the first declaration's.
+   */
+  private usingDeclaration(node: TreeNode): void {
+    const name = hasToken(node, 'await') ? 'AsyncDisposable' : 'Disposable';
+    if (!this.reportedMissingTypes.has(name)) {
+      this.reportedMissingTypes.add(name);
+      this.c.error(node, `グローバル型 '${name}' が見つかりません。`);
+    }
+    for (const declarator of named(node)) {
+      const value = declarator.childForFieldName('value');
+      if (value) this.c.expressions.check(value);
+    }
   }
 
   /** `export` in a namespace, which checks the declaration it exports. */
@@ -231,6 +251,7 @@ export class StatementChecker {
     this.c.signatures.typeParametersOf(node);
     if (symbol) this.c.typeNodes.declaredTypeOf(symbol);
     checkWrittenType(this.c, node.childForFieldName('value'));
+    checkVarianceAnnotations(this.c, node);
   }
 
   private interfaceDeclaration(node: TreeNode): void {
@@ -247,6 +268,7 @@ export class StatementChecker {
     if (type.kind === 'object') this.checkInterfaceMembers(node, symbol, type.resolve());
     for (const child of named(node)) if (child.type === 'extends_type_clause') checkWrittenType(this.c, child);
     checkWrittenType(this.c, node.childForFieldName('body'));
+    checkVarianceAnnotations(this.c, node);
   }
 
   private checkInterfaceMembers(node: TreeNode, symbol: Sym, structure: Structure): void {

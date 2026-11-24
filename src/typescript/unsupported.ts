@@ -6,11 +6,8 @@ import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics'
 const unsupportedNodes: Record<string, string> = {
   import_statement: 'import や export',
   import: 'import や export',
-  using_declaration: 'using 宣言',
   decorator: 'デコレータ',
   await_expression: 'await',
-  asserts: 'asserts による型の表明',
-  asserts_annotation: 'asserts による型の表明',
 };
 
 const functionTypes = new Set(['function_declaration', 'function_expression', 'arrow_function', 'method_definition']);
@@ -43,14 +40,10 @@ export function rejectUnsupportedSyntax(root: TreeNode): void {
 /** A feature that a node of a supported type spells with a keyword or a form this interpreter does not run. */
 function unsupportedForm(node: TreeNode): string | undefined {
   const tokens = new Set(node.children.filter((child) => child !== null && !child.isNamed).map((child) => child?.type));
-  if (node.type === 'type_parameter' && ['in', 'out'].some((token) => tokens.has(token)))
-    return '型パラメーターの in / out による分散指定';
-  if (node.type === 'predefined_type' && tokens.has('unique symbol')) return 'unique symbol';
   if (node.type === 'export_statement' && !isInNamespace(node)) return 'import や export';
   if (node.type === 'meta_property' && node.text.replaceAll(/\s/g, '') === 'import.meta') return 'import.meta';
   if (functionTypes.has(node.type) && tokens.has('async')) return 'async 関数';
   if (node.type === 'for_in_statement' && tokens.has('await')) return 'for await';
-  if (node.type === 'field_definition' && tokens.has('accessor')) return 'accessor フィールド';
   return undefined;
 }
 

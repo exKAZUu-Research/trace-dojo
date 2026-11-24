@@ -69,7 +69,6 @@ export class Runtime {
   currentRow: number | undefined;
   /** Set from the program: whether turning a function into text ends it as unavailable. */
   rejectsFunctionText = false;
-  allowsOnlyStringRawTag = false;
   /** Set from the program: names a library member the realm leaves out, which a read then ends the program for. */
   unavailableMember: UnavailableMemberCheck | undefined;
   readonly steps = new StepTracker();
@@ -394,14 +393,6 @@ export class Runtime {
     const { behavior } = fn;
     if (behavior.kind === 'native') return `function ${this.functionName(fn)}() { [native code] }`;
     return behavior.node.source;
-  }
-
-  /** Ends a program that may call only `String.raw` as a tag when a tagged template calls another function. */
-  checkTag(fn: Value): void {
-    if (!this.allowsOnlyStringRawTag || fn === this.realm.stringRaw) return;
-    throw new CompileError([
-      { row: this.currentRow ?? 0, message: 'タグ付きテンプレートは、この採点環境では使えません。' },
-    ]);
   }
 
   /** V8 describes receivers for errors without invoking program code. */

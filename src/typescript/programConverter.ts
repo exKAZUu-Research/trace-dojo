@@ -131,7 +131,6 @@ export class TypeScriptProgramConverter extends ProgramConverter {
       ...program,
       hasCommonJsReceiver: true,
       rejectsFunctionText: true,
-      allowsOnlyStringRawTag: true,
       rejectsUnavailableMembers: true,
     };
   }

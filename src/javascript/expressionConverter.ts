@@ -207,7 +207,6 @@ export abstract class ExpressionConverter extends ConverterBase {
       args: [strings, ...expressions],
       optional: false,
       calleeText: calleeText(functionNode),
-      isTaggedTemplate: true,
       row,
     };
   }

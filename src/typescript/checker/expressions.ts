@@ -82,7 +82,7 @@ export class ExpressionChecker {
   readonly expandos: Expandos;
   readonly elaboration: Elaboration;
   private readonly silentTypes: ExpressionTypeCache;
-  private readonly uniqueSymbols: UniqueSymbols;
+  readonly uniqueSymbols: UniqueSymbols;
   /** Types of variables computed from their declarations, by symbol. */
   private readonly variableTypes = new Map<number, Type>();
 

@@ -91,7 +91,13 @@ export class TypeNodes {
   private readonly pendingArgumentChecks: (() => void)[] = [];
   /** The type each kind of type syntax denotes; the others are `any`. */
   private readonly typeSyntaxes = new Map<string, (node: TreeNode) => Type>([
-    ['predefined_type', (node) => predefinedTypes[node.text] ?? anyType],
+    [
+      'predefined_type',
+      (node) =>
+        hasToken(node, 'unique symbol')
+          ? this.c.expressions.uniqueSymbols.typeOfAnnotation(node)
+          : (predefinedTypes[node.text] ?? anyType),
+    ],
     ['type_identifier', (node) => this.typeReference(node, node, [])],
     ['nested_type_identifier', (node) => this.qualifiedType(node)],
     ['identifier', (node) => this.typeReference(node, node, [])],
@@ -212,6 +218,7 @@ export class TypeNodes {
       return inner ? this.typeFromNode(inner) : undefined;
     }
     if (node.type === 'type_predicate_annotation') return booleanType;
+    if (node.type === 'asserts_annotation' || node.type === 'asserts') return voidType;
     return this.typeFromNode(node);
   }
 
@@ -1014,12 +1021,9 @@ export class TypeNodes {
       type = errorType;
     }
     if (pending) pending.types = type.kind === 'union' ? type.types : [type];
-    const declared = aliasedDeclaredType(
-      type,
-      symbol.name,
-      this.c.signatures.typeParametersOfSymbol(symbol),
-      symbol.id
-    );
+    const typeParameters = this.c.signatures.typeParametersOfSymbol(symbol);
+    this.c.aliasTypeParameters.set(symbol.id, typeParameters);
+    const declared = aliasedDeclaredType(type, symbol.name, typeParameters, symbol.id);
     return this.recursiveAliases.complete(symbol, declared);
   }
 

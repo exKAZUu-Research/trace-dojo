@@ -30,6 +30,7 @@ import {
   unknownType,
   voidType,
 } from './types';
+import { checkVarianceAnnotations } from './varianceAnnotations';
 import { checkWrittenType } from './writtenTypes';
 
 /** What checking a function's body found about how it returns. */
@@ -654,6 +655,7 @@ export class FunctionChecker {
 
   checkFunctionLike(node: TreeNode, signature: Signature, contextual?: Signature): Type | undefined {
     if (this.c.silent > 0) return undefined;
+    checkVarianceAnnotations(this.c, node);
     this.withInitializerFlow(node, 'parameters', () => {
       this.checkSignatureAnnotations(node);
       const parameters = node.childForFieldName('parameters');

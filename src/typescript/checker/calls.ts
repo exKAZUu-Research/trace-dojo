@@ -1,7 +1,6 @@
 // code-gauge-allow-file fileNcss -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import { unsupportedMessage } from '../unsupported';
 import { CallArity, ExpressionListFlow, minimumArguments, tupleArgumentContexts, tupleTypeAt } from './callArity';
 import { CallTypeArguments } from './callTypeArguments';
 import type { Checker, Mapper } from './checker';
@@ -405,31 +404,55 @@ export class Calls {
   }
 
   /** A tagged template, `String.raw\`...\``, which calls the tag with the template's strings and substitutions. */
+  /**
+   * `` tag`a${x}b` ``, a call of `tag` with a `TemplateStringsArray` of the strings and then the substitutions, which
+   * `String.raw` turns into text.
+   */
   private taggedTemplate(node: TreeNode, callee: TreeNode, template: TreeNode): Type {
-    if (!this.isStringRawTag(callee)) {
-      this.c.error(callee, unsupportedMessage('タグ付きテンプレート'));
-      return errorType;
-    }
+    const substitutions = named(template)
+      .filter((part) => part.type === 'template_substitution')
+      .map((part) => named(part)[0]);
+    const isStringRaw = this.isStringRawTag(callee);
     const calleeType = this.c.expressions.check(callee);
     const typeArguments = this.typeArguments.written(node);
-    for (const part of named(template)) {
-      if (part.type !== 'template_substitution') continue;
-      const substitution = named(part)[0];
-      this.c.expressions.checkFunctionText(substitution, this.c.expressions.check(substitution));
-    }
-    if (calleeType === errorType) return errorType;
-    if (isAnyLike(calleeType)) return this.untypedCall(node, [], typeArguments);
+    if (calleeType === errorType) return this.checkArgumentsOnly(substitutions, errorType);
+    if (isAnyLike(calleeType)) return this.untypedCall(node, substitutions, typeArguments);
     const signatures = this.c.signaturesOf(calleeType, 'call');
-    if (signatures.length === 0) return this.uncallableType(callee, calleeType);
-    if (!typeArguments) return signatures[0].returnType();
-    const eligible = this.typeArguments.candidates(node, signatures, typeArguments);
-    let mismatch: TypeArgumentMismatch | undefined;
-    for (const signature of eligible) {
-      mismatch = this.typeArguments.firstMismatch(signature, typeArguments);
-      if (!mismatch) return this.typeArguments.instantiate(signature, typeArguments).returnType();
+    if (signatures.length === 0) {
+      this.checkArgumentsOnly(substitutions, errorType);
+      return this.uncallableType(callee, calleeType);
     }
-    if (mismatch) this.typeArguments.reportMismatch(node, mismatch);
-    return errorType;
+    const strings = this.c.globalType('TemplateStringsArray');
+    const fitting = signatures.filter((signature) => this.takesStrings(signature, strings));
+    if (fitting.length === 0) {
+      const parameter = signatures[0].parameters[0];
+      this.c.error(
+        template,
+        `型 'TemplateStringsArray' の引数を型 '${this.c.print(parameter?.type ?? anyType)}' のパラメーターに渡すことはできません。`
+      );
+      return this.checkArgumentsOnly(substitutions, errorType);
+    }
+    const rest = fitting.map((signature) =>
+      signature.parameters[0]?.rest ? signature : { ...signature, parameters: signature.parameters.slice(1) }
+    );
+    const resolution = isStringRaw
+      ? this.resolveWithTextConversions(node, callee, rest, substitutions, { typeArguments })
+      : this.resolve(node, callee, rest, substitutions, typeArguments, undefined);
+    if (isStringRaw)
+      for (const substitution of substitutions)
+        this.c.expressions.checkFunctionText(
+          substitution,
+          this.c.silently(() => this.c.expressions.check(substitution))
+        );
+    return resolution?.returnType ?? errorType;
+  }
+
+  /** Whether a signature's first parameter takes the strings of a tagged template. */
+  private takesStrings(signature: Signature, strings: Type): boolean {
+    const parameter = signature.parameters[0];
+    if (!parameter) return true;
+    const type = parameter.rest ? this.c.restElementType(parameter.type) : parameter.type;
+    return this.c.relations.isAssignable(strings, type);
   }
 
   private isStringRawTag(callee: TreeNode): boolean {
@@ -538,18 +561,27 @@ export class Calls {
   }
 
   /** The type predicate a call's resolved signature has, with the expression it narrows. */
-  predicateOf(node: TreeNode): { target: TreeNode; type: Type } | undefined {
+  predicateOf(
+    node: TreeNode
+  ): { target: TreeNode; type: Type; asserts?: NonNullable<Signature['predicate']>['asserts'] } | undefined {
     const signature = this.resolved.get(node.id);
     const predicate = signature?.predicate;
     if (!predicate) return undefined;
+    const { type, asserts } = predicate;
     if (predicate.index === -1) {
       const callee = skipParentheses(node.childForFieldName('function') as TreeNode);
       const object = callee.type === 'member_expression' ? callee.childForFieldName('object') : undefined;
-      return object ? { target: object, type: predicate.type } : undefined;
+      return object ? { target: object, type, asserts } : undefined;
     }
     const argumentsNode = node.childForFieldName('arguments');
     const target = argumentsNode ? named(argumentsNode)[predicate.index] : undefined;
-    return target ? { target, type: predicate.type } : undefined;
+    return target ? { target, type, asserts } : undefined;
+  }
+
+  /** Whether every name of a callee has a declared type, which a call to an assertion function needs. */
+  hasExplicitCalleeType(node: TreeNode): boolean {
+    const callee = node.childForFieldName('function');
+    return callee !== null && this.c.silently(() => this.explicitPathType(callee)) !== undefined;
   }
 
   // Resolution ---------------------------------------------------------------------------------------------------

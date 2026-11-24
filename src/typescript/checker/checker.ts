@@ -126,6 +126,8 @@ export class Checker {
   readonly enums = new Enums(this);
   readonly namespaces = new Namespaces(this);
   private readonly referenceCache = new Map<string, ObjectType>();
+  /** The type parameters of each generic alias, by its id, which relating its instantiations by variance needs. */
+  readonly aliasTypeParameters = new Map<number, TypeParameter[]>();
   private readonly instantiationCache = new Map<string, Type>();
   /** The unions that stand for a union alias, with the mapper that instantiates the alias's type into them. */
   private readonly aliasUnions = new Map<UnionType, { alias: UnionAlias; mapper: Mapper }>();

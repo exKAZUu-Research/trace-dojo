@@ -317,7 +317,6 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     if (resolved === SHORT_CIRCUIT) return SHORT_CIRCUIT;
     const { fn, thisValue } = resolved;
     if (expression.optional && (fn === undefined || fn === null)) return SHORT_CIRCUIT;
-    if (expression.isTaggedTemplate) runtime.checkTag(fn);
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
     temporaries.push(fn, thisValue);

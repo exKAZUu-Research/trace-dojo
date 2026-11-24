@@ -19,6 +19,7 @@ import {
   undefinedType,
   unionOf,
 } from './types';
+import { checkVarianceAnnotations } from './varianceAnnotations';
 import { checkWrittenType } from './writtenTypes';
 
 /** Checks class declarations: their members, constructors, and the types they implement and extend. */
@@ -53,7 +54,13 @@ export class ClassDeclarationChecker {
     this.checkAbstractMembers(node, info);
     this.checkBaseCompatibility(node, info);
     this.checkStaticCompatibility(node, info);
+    this.checkModifiers(node, members);
+  }
+
+  /** The `override` modifiers of the members, and the `in` and `out` annotations of the type parameters. */
+  private checkModifiers(node: TreeNode, members: TreeNode[]): void {
     this.checkOverrideModifiers(node, members);
+    checkVarianceAnnotations(this.c, node);
   }
 
   /** A member marked `override`, including a parameter property, must override a member of the base class. */

@@ -161,7 +161,8 @@ export class TypeInference {
   }
 
   private isTopLevelInReturn(signature: Signature, parameter: TypeParameter): boolean {
-    const returnType = signature.predicate ? signature.predicate.type : signature.returnType();
+    const returnType =
+      signature.predicate && !signature.predicate.asserts ? signature.predicate.type : signature.returnType();
     return !!returnType && isTopLevelTypeParameter(returnType, parameter);
   }
 
