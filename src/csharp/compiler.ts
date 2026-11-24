@@ -938,6 +938,9 @@ function holdsByValue(
   const key = typeKey(type);
   const known = finished.get(key);
   if (known !== undefined) return known;
+  // Constructions that wrap type arguments differently on every path share no results, so the check stops after a
+  // bounded number of them, taking the layout as free of cycles; one it misses ends at run time as a stack overflow.
+  if (finished.size >= MAX_LAYOUT_CONSTRUCTIONS) return false;
   if (path.some((entry) => entry.key === key)) return false;
   if (path.filter((entry) => entry.symbol === type.symbol).length >= MAX_GENERIC_NESTING) return true;
   const substitution = substitutionOf(type);
@@ -951,3 +954,4 @@ function holdsByValue(
 }
 
 const MAX_GENERIC_NESTING = 16;
+const MAX_LAYOUT_CONSTRUCTIONS = 4096;
