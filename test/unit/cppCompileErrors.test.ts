@@ -553,13 +553,9 @@ int main() { cout << ${name}; }`;
 );
 
 test.each([
-  ['cstdio', 'int value; scanf("%d", &value);'],
-  ['cstdio', 'std::scanf("%*d");'],
-  ['stdio.h', 'getchar();'],
   ['cstdio', 'FILE* file = fopen("example.txt", "r");'],
-  ['cstdio', 'char buffer[8]; fgets(buffer, 8, stdin);'],
   ['cstdio', 'std::remove("example.txt");'],
-])('rejects unavailable C input and file access with an explicit diagnostic: %s %s', (header, body) => {
+])('rejects unavailable C file access with an explicit diagnostic: %s %s', (header, body) => {
   const program = `#include <${header}>
 int main() { ${body} }`;
   expect(executeProgram('cpp', program)).toMatchObject({

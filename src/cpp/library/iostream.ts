@@ -62,8 +62,8 @@ export const FLAGS = {
   floatfield: 0x1_00 | 0x4,
 } as const;
 
-const OPEN_MODE = { app: 0x01, ate: 0x02, binary: 0x04, in: 0x08, out: 0x10, trunc: 0x20 } as const;
-const IO_STATE = { goodbit: 0, badbit: 1, eofbit: 2, failbit: 4 } as const;
+export const OPEN_MODE = { app: 0x01, ate: 0x02, binary: 0x04, in: 0x08, out: 0x10, trunc: 0x20 } as const;
+export const IO_STATE = { goodbit: 0, badbit: 1, eofbit: 2, failbit: 4 } as const;
 
 const STREAM_SIZES = {
   ios_base: 136,
@@ -101,7 +101,7 @@ export class StreamValue extends Store {
   precision = 6;
   fill = ' ';
   flags: number = FLAGS.skipws | FLAGS.dec;
-  private readonly content = new StringValue('');
+  private content = new StringValue('');
   /** Where reading continues in the buffer. */
   position = 0;
   /** Where writing continues in the buffer, overwriting what is there, as `basic_stringbuf`'s put area does. */
@@ -148,6 +148,11 @@ export class StreamValue extends Store {
 
   get buffer(): string {
     return this.content.bytes;
+  }
+
+  /** Starts the stream with the bytes it reads, before the program runs (standard input). */
+  startWith(bytes: string): void {
+    this.content = new StringValue(bytes);
   }
 
   resetBuffer(frame: Frame, bytes: string): void {

@@ -6,7 +6,8 @@ import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import { byteAt } from './bytes';
 import { type CppException, CppRuntimeError, ProgramAbort } from './errors';
-import { StreamValue } from './library/iostream';
+import { OPEN_MODE, StreamValue } from './library/iostream';
+import { utf8 } from './literals';
 import type { FunctionInfo, Type } from './types';
 import { Box, childValues, CObject, endLifetime, Liveness, Ptr, Store, type Value } from './values';
 
@@ -250,6 +251,21 @@ export class Runtime implements TracedRuntime<Frame> {
   onMainEnd: ((frame: Frame) => void) | undefined;
 
   private readonly streams = new Map<string, StreamValue>();
+
+  private stdinStream: StreamValue | undefined;
+
+  /**
+   * Standard input as a stream of the bytes the run reads, which `std::cin` and the C functions (`scanf`, `getchar`)
+   * read from in turn, as when they are synchronized (C++20 [ios.members.static]).
+   */
+  standardInput(): StreamValue {
+    if (!this.stdinStream) {
+      this.stdinStream = new StreamValue('istream', 'buffer', OPEN_MODE.in);
+      this.stdinStream.startWith(utf8(this.io.stdin.reader.readRest()));
+      this.stdinStream.tied = new Ptr(this.standardStream('stdout'), 0);
+    }
+    return this.stdinStream;
+  }
 
   /** `std::cout` or `std::cerr` of this run, whose formatting state persists across the run. */
   standardStream(target: 'stdout' | 'stderr' | 'clog'): StreamValue {

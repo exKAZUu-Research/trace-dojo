@@ -19,7 +19,9 @@ import {
 import type { Ptr } from '../values';
 import { NULL_PTR } from '../values';
 import { formatPrintf, type PrintfArgument } from './formatting';
+import { IO_STATE, type StreamValue } from './iostream';
 import type { Library } from './registry';
+import { scanFormat } from './scanf';
 import {
   asNumber,
   checkByteWrite,
@@ -133,6 +135,7 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
     );
   }
   add(native('fflush', [streamType], INT, () => 0));
+  addInputFunctions(library, add, streamType);
   add(
     native('rand', [], INT, (_args, { frame }) => {
       // macOS's rand: the "minimal standard" generator of Park and Miller, computed with Schrage's method.
@@ -335,4 +338,93 @@ function characterReader(frame: Frame, pointer: Ptr): (offset: number) => number
     if (start < 0 || start + offset >= store.length) throw new CppRuntimeError('unterminatedString');
     return asNumber(store.get(start + offset)) & 0xff;
   };
+}
+
+/**
+ * The functions of `<cstdio>` that read: from standard input (`scanf`, `getchar`), from a `FILE*` (`fscanf`, `fgets`,
+ * `getc`), and from a string (`sscanf`). Standard input is the stream `std::cin` reads, as when the two are
+ * synchronized.
+ */
+function addInputFunctions(library: Library, add: (fn: FunctionInfo) => void, streamType: Type): void {
+  add(
+    native(
+      'scanf',
+      [CONST_CHAR_PTR],
+      INT,
+      ([format, ...args], { frame }) => scanFrom(frame.runtime.standardInput(), frame, format as Ptr, args),
+      { isVariadic: true }
+    )
+  );
+  add(
+    native(
+      'fscanf',
+      [streamType, CONST_CHAR_PTR],
+      INT,
+      ([file, format, ...args], { frame }) =>
+        scanFrom(library.inputStream(file as Ptr, frame), frame, format as Ptr, args),
+      { isVariadic: true }
+    )
+  );
+  add(
+    native(
+      'sscanf',
+      [CONST_CHAR_PTR, CONST_CHAR_PTR],
+      INT,
+      ([text, format, ...args], { frame }) =>
+        scanFormat(frame, readCString(text as Ptr, frame.runtime), readCString(format as Ptr, frame.runtime), args)
+          .count,
+      { isVariadic: true }
+    )
+  );
+  add(native('getchar', [], INT, (_args, { frame }) => readByte(frame.runtime.standardInput())));
+  for (const name of ['getc', 'fgetc'])
+    add(native(name, [streamType], INT, ([file], { frame }) => readByte(library.inputStream(file as Ptr, frame))));
+  add(
+    native('ungetc', [INT, streamType], INT, ([char, file], { frame }) => {
+      const stream = library.inputStream(file as Ptr, frame);
+      const value = asNumber(char);
+      if (value === -1 || stream.position === 0) return -1;
+      stream.position--;
+      stream.state &= ~IO_STATE.eofbit;
+      return value & 0xff;
+    })
+  );
+  add(
+    native('fgets', [CHAR_POINTER, INT, streamType], CHAR_POINTER, ([target, size, file], { frame }) => {
+      const stream = library.inputStream(file as Ptr, frame);
+      const limit = asNumber(size) - 1;
+      const buffer = target as Ptr;
+      if (limit < 0 || stream.position >= stream.buffer.length) {
+        stream.state |= IO_STATE.eofbit;
+        return limit < 0 ? buffer : NULL_PTR;
+      }
+      let count = 0;
+      while (count < limit && stream.position < stream.buffer.length) {
+        frame.runtime.spend();
+        const byte = byteAt(stream.buffer, stream.position++);
+        buffer.offset(count++).write(byte >= 128 ? byte - 256 : byte);
+        if (byte === 0x0a) break;
+      }
+      buffer.offset(count).write(0);
+      return buffer;
+    })
+  );
+}
+
+/** Reads what a `scanf` format describes from where a stream's reading continues. */
+function scanFrom(stream: StreamValue, frame: Frame, format: Ptr, args: unknown[]): number {
+  const input = stream.buffer.slice(stream.position);
+  const { count, consumed } = scanFormat(frame, input, readCString(format, frame.runtime), args);
+  stream.position += consumed;
+  if (stream.position >= stream.buffer.length) stream.state |= IO_STATE.eofbit;
+  return count;
+}
+
+/** Reads one byte of a stream as `getc` does, or `EOF` (-1) at its end. */
+function readByte(stream: StreamValue): number {
+  if (stream.position >= stream.buffer.length) {
+    stream.state |= IO_STATE.eofbit;
+    return -1;
+  }
+  return byteAt(stream.buffer, stream.position++);
 }

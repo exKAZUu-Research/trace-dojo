@@ -64,7 +64,6 @@ export type LibraryTemplate =
 
 /** The names the library declares that the interpreter leaves out, with the feature they belong to. */
 const UNSUPPORTED_STD_NAMES: Record<string, string> = {
-  cin: '標準入力（std::cin）',
   wcin: '標準入力（std::wcin）',
   ifstream: 'ファイルの読み書き（std::ifstream）',
   ofstream: 'ファイルの読み書き（std::ofstream）',
@@ -151,16 +150,8 @@ const UNSUPPORTED_C_NAMES: Record<string, string> = {
   raise: 'シグナル（std::raise）',
   setjmp: '大域的な脱出（setjmp）',
   longjmp: '大域的な脱出（longjmp）',
-  scanf: '標準入力（scanf）',
   vscanf: '標準入力（vscanf）',
-  getchar: '標準入力（getchar）',
-  stdin: '標準入力（stdin）',
-  getc: '標準入力・ファイル（getc）',
-  fgetc: '標準入力・ファイル（fgetc）',
-  fgets: '標準入力・ファイル（fgets）',
-  fscanf: '標準入力・ファイル（fscanf）',
   vfscanf: '標準入力・ファイル（vfscanf）',
-  ungetc: '標準入力・ファイル（ungetc）',
   fopen: 'ファイルの読み書き（fopen）',
   freopen: 'ファイルの読み書き（freopen）',
   fclose: 'ファイルの読み書き（fclose）',
@@ -200,7 +191,7 @@ export class Library {
   private readonly incomplete = new Map<ClassInfo, string>();
   /** `FILE`, which only `stdout` and `stderr` point to. */
   readonly fileClass: ClassInfo;
-  private readonly files = new Map<'stdout' | 'stderr', Box>();
+  private readonly files = new Map<'stdin' | 'stdout' | 'stderr', Box>();
   private readonly removeFile = native('remove', [CONST_CHAR_PTR], INT, () => {}, {
     uses: (row) => this.compiler.unsupported(row, 'ファイルの削除（remove）'),
   });
@@ -211,7 +202,7 @@ export class Library {
     this.fileClass.isNoncopyable = true;
     this.fileClass.isAssignmentDeleted = true;
     this.fileClass.library = { kind: 'FILE', args: [], size: 152, align: 8 };
-    for (const name of ['stdout', 'stderr'] as const) this.files.set(name, new Box(undefined));
+    for (const name of ['stdin', 'stdout', 'stderr'] as const) this.files.set(name, new Box(undefined));
     this.stringClass = stringClass(this);
     this.exceptions = exceptionClasses(() => this.stringType);
     this.turtle = turtleClass(
@@ -226,8 +217,15 @@ export class Library {
     return classType(this.stringClass);
   }
 
-  fileStore(name: 'stdout' | 'stderr'): Box {
+  fileStore(name: 'stdin' | 'stdout' | 'stderr'): Box {
     return this.files.get(name) as Box;
+  }
+
+  /** The stream a `FILE*` reads from: standard input, or else none the program may read. */
+  inputStream(pointer: Ptr, frame: Frame): StreamValue {
+    if (pointer.isNull) throw new CppRuntimeError('nullAccess');
+    if (pointer.store === this.files.get('stdin')) return frame.runtime.standardInput();
+    throw new CppRuntimeError('custom', '書き込み用のストリームからは読めません。');
   }
 
   /** The standard stream a `FILE*` points to. */
@@ -479,6 +477,16 @@ export class Library {
         }),
       });
     }
+    const istreamType = classType(streams.istream);
+    this.addStd('cin', {
+      kind: 'value',
+      make: (row) => ({
+        type: istreamType,
+        isLvalue: true,
+        row,
+        run: (frame) => new Ptr(frame.runtime.standardInput(), 0),
+      }),
+    });
     for (const [name, cls] of [
       ['ostream', streams.ostream],
       ['istream', streams.istream],
