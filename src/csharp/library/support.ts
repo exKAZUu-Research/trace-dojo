@@ -17,16 +17,7 @@ import {
   type Type,
   type TypeParameterSymbol,
 } from '../types';
-import {
-  copyValue,
-  CsArray,
-  CsBox,
-  CsObject,
-  plainString,
-  structFieldSlots,
-  type Value,
-  type VariableReference,
-} from '../values';
+import { copyValue, CsArray, CsBox, CsObject, plainString, type Value, type VariableReference } from '../values';
 
 /** The evaluator that runs the call. */
 export function evaluatorOf(call: NativeCall): Evaluator {
@@ -245,16 +236,16 @@ function valueElement(evaluator: Evaluator, item: Value, sourceElement: Type | u
  */
 export function bufferedElements(call: NativeCall, items: Iterable<Value>): Value[] {
   const buffer: Value[] = [];
-  let pending = 0;
+  // Each batch is charged as it fills, so a sequence without end meets the slot limit while it is read.
+  let batchStart = 0;
   for (const item of items) {
     buffer.push(item);
-    pending += 1 + structFieldSlots(item);
-    if (pending >= 64) {
-      call.frame.runtime.allocateSlots(pending);
-      pending = 0;
+    if (buffer.length - batchStart === 64) {
+      call.frame.runtime.retainSlots(64, buffer.slice(batchStart));
+      batchStart = buffer.length;
     }
   }
-  call.frame.runtime.allocateSlots(pending);
+  call.frame.runtime.retainSlots(buffer.length - batchStart, buffer.slice(batchStart));
   return buffer;
 }
 
@@ -285,8 +276,7 @@ export function newArrayOf(
     const value = valueAt(index);
     // A struct element's fields are charged before the next element is made, so defaults that the source makes, as
     // Array.Resize's, cannot run far past the limit.
-    const fieldSlots = structFieldSlots(value);
-    if (fieldSlots > 0) call.frame.runtime.allocateSlots(fieldSlots);
+    call.frame.runtime.retainSlots(0, [value]);
     values.push(copyValue(value));
   }
   return new CsArray({ kind: 'array', element, rank: 1 }, [length], values);
@@ -294,9 +284,7 @@ export function newArrayOf(
 
 /** Charges the fields of the struct values among elements a native keeps reachable, beyond their one slot each. */
 export function chargeStructFields(call: NativeCall, values: Iterable<Value>): void {
-  let count = 0;
-  for (const value of values) count += structFieldSlots(value);
-  if (count > 0) call.frame.runtime.allocateSlots(count);
+  call.frame.runtime.retainSlots(0, values);
 }
 
 /** The elements of a `params` array argument, which may be null. */

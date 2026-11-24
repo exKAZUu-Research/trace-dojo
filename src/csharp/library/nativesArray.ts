@@ -19,7 +19,6 @@ import {
 import { introSort } from './sort';
 import {
   chargeElements,
-  chargeStructFields,
   checkArrayStore,
   evaluatorOf,
   fail,
@@ -129,8 +128,7 @@ defineNatives({
   },
   [`${ARRAY}.Clone`]: (call, receiver) => {
     const array = arrayOf(receiver);
-    call.frame.runtime.allocateSlots(array.values.length);
-    chargeStructFields(call, array.values);
+    call.frame.runtime.retainSlots(array.values.length, array.values);
     return new CsArray(
       array.type,
       [...array.lengths],

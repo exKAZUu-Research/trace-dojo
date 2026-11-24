@@ -31,8 +31,7 @@ import {
   CsStruct,
   freshString,
   isString,
-  settleBoxCharges,
-  storeGrowth,
+  structFieldSlots,
   UNASSIGNED,
   type Value,
   type VariableReference,
@@ -203,18 +202,30 @@ export class Runtime {
    * or a box enters an `object` field, so a struct kept by any store counts against the slot limit.
    */
   chargeStore(previous: Value, next: Value): void {
-    this.allocateSlots(storeGrowth(previous, next));
+    const boxes = new Set<CsBox>();
+    const growth = structFieldSlots(next, boxes) - structFieldSlots(previous, new Set());
+    this.allocateSlots(Math.max(0, growth));
+    for (const box of boxes) box.isCharged = true;
+  }
+
+  /**
+   * Charges storage that newly keeps values: `baseSlots` and each value's struct fields, a box's only the first time
+   * any storage keeps it. The boxes counted are marked as charged only once the charge succeeds, so storage a failed
+   * or abandoned operation counted is charged again when a later store keeps it.
+   */
+  retainSlots(baseSlots: number, values: Iterable<Value>): void {
+    const boxes = new Set<CsBox>();
+    let count = baseSlots;
+    for (const value of values) count += structFieldSlots(value, boxes);
+    this.allocateSlots(count);
+    for (const box of boxes) box.isCharged = true;
   }
 
   /** Charges for array elements or object fields before they are allocated. */
   allocateSlots(count: number): void {
     this.allocatedSlots += count;
     this.spend(Math.ceil(count / 64));
-    // The boxes counted into the charge are charged only when it succeeds, so a store retried after a caught
-    // OutOfMemoryException charges them again.
-    const isWithinLimit = this.allocatedSlots <= LIMITS.maxSlots;
-    settleBoxCharges(isWithinLimit);
-    if (!isWithinLimit)
+    if (this.allocatedSlots > LIMITS.maxSlots)
       throw new PendingException(
         'System.OutOfMemoryException',
         "Exception of type 'System.OutOfMemoryException' was thrown."
@@ -492,7 +503,10 @@ export class Runtime {
 
   anonymousConstruct(receiver: Value, args: (Value | VariableReference)[]): Value {
     const object = receiver as CsObject;
-    for (const [index, arg] of args.entries()) object.fields[index] = arg as Value;
+    for (const [index, arg] of args.entries()) {
+      this.chargeStore(object.fields[index], arg as Value);
+      object.fields[index] = arg as Value;
+    }
     return undefined;
   }
 

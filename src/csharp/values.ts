@@ -154,32 +154,19 @@ export interface VariableReference {
 /**
  * The slots that storage newly keeping a value is charged for beyond the slot holding it: a struct's fields, nested
  * structs included, since storing a struct copies them, and a box's struct the first time any storage keeps the box,
- * since every reference shares it; 0 for other values.
+ * since every reference shares it; 0 for other values. The boxes it counts are added to `boxes`, which the charge
+ * marks as charged only once it succeeds.
  */
-export function structFieldSlots(value: Value): number {
+export function structFieldSlots(value: Value, boxes: Set<CsBox>): number {
   if (value instanceof CsBox) {
-    if (value.isCharged || pendingBoxes.has(value)) return 0;
-    pendingBoxes.add(value);
-    return structFieldSlots(value.value);
+    if (value.isCharged || boxes.has(value)) return 0;
+    boxes.add(value);
+    return structFieldSlots(value.value, boxes);
   }
   if (!(value instanceof CsStruct)) return 0;
   let count = value.fields.length;
-  for (const field of value.fields) count += structFieldSlots(field);
+  for (const field of value.fields) count += structFieldSlots(field, boxes);
   return count;
-}
-
-/** The boxes that structFieldSlots has counted, which a charge marks as charged only once it succeeds. */
-const pendingBoxes = new Set<CsBox>();
-
-/** Marks the counted boxes as charged when their charge succeeded, or forgets them when it failed. */
-export function settleBoxCharges(isCharged: boolean): void {
-  if (isCharged) for (const box of pendingBoxes) box.isCharged = true;
-  pendingBoxes.clear();
-}
-
-/** The struct fields a store of a value adds over the value it replaces, which the store is charged for. */
-export function storeGrowth(previous: Value, next: Value): number {
-  return Math.max(0, structFieldSlots(next) - structFieldSlots(previous));
 }
 
 /** Copies a struct, as reading a variable of a value type into another does. */

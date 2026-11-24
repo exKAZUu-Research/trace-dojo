@@ -3,7 +3,7 @@ import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import type { NativeState } from '../runtime';
 import type { Type } from '../types';
-import { CsObject, CsStruct, storeGrowth, structFieldSlots, type Value } from '../values';
+import { CsObject, CsStruct, type Value } from '../values';
 import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { type Comparison, comparisonOf, equalityOf } from './nativesCollections';
 import {
@@ -71,18 +71,21 @@ class SortedState implements EnumerableState {
   }
 
   /** Charges a new entry against the run's slot limit, set where the collection is created. */
-  allocate: (count: number) => void = () => {};
+  /** Charges entries the collection newly keeps, as Runtime.retainSlots does. */
+  retain: (baseSlots: number, values: Value[]) => void = () => {};
+  /** Charges replacing a kept value, as Runtime.chargeStore does. */
+  store: (previous: Value, next: Value) => void = () => {};
 
   insert(key: Value, value: Value, replace: boolean): boolean {
     const { index, isFound } = this.position(key);
     if (isFound) {
       if (!replace) return false;
-      this.allocate(storeGrowth(this.values[index], value));
+      this.store(this.values[index], value);
       this.values[index] = value;
       this.version++;
       return true;
     }
-    this.allocate(1 + structFieldSlots(key) + structFieldSlots(value));
+    this.retain(1, [key, value]);
     this.keys.splice(index, 0, key);
     this.values.splice(index, 0, value);
     this.version++;
@@ -135,7 +138,8 @@ function newSorted(call: NativeCall, comparer: Value, keyType: Type, valueType: 
     pairType ? (key, value) => new CsStruct(pairType, [key, value]) : undefined,
     (key) => textOf(call, key, keyType)
   );
-  state.allocate = (count) => call.frame.runtime.allocateSlots(count);
+  state.retain = (baseSlots, values) => call.frame.runtime.retainSlots(baseSlots, values);
+  state.store = (previous, next) => call.frame.runtime.chargeStore(previous, next);
   return state;
 }
 
@@ -473,7 +477,7 @@ function nodeOf(value: Value, name = 'node'): LinkNode {
 }
 
 function newNode(call: NativeCall, elementType: Type, value: Value): LinkNode {
-  call.frame.runtime.allocateSlots(1 + structFieldSlots(value));
+  call.frame.runtime.retainSlots(1, [value]);
   const object = new CsObject(libraryType(call, 'System.Collections.Generic.LinkedListNode', [elementType]), []);
   const node: LinkNode = { value, previous: undefined, next: undefined, list: undefined, object };
   object.native = new LinkNodeState(node);
@@ -711,7 +715,7 @@ defineNatives({
     return;
   },
   [`${PRIORITY_QUEUE}.Enqueue`]: (call, receiver, [element, priority]) => {
-    call.frame.runtime.allocateSlots(2 + structFieldSlots(element as Value) + structFieldSlots(priority as Value));
+    call.frame.runtime.retainSlots(2, [element as Value, priority as Value]);
     heapOf(receiver).enqueue(element as Value, priority as Value);
     return;
   },

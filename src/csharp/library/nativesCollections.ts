@@ -4,17 +4,7 @@ import { PendingException } from '../numeric';
 import { defaultCompare, environmentOf, hashOf, runtimeTypeName, stringOf, valuesEqual } from '../objects';
 import { CsThrow } from '../runtime';
 import { type MethodSymbol, specialOf, substitute, substitutionOf, type Type } from '../types';
-import {
-  copyValue,
-  CsArray,
-  CsDelegate,
-  CsObject,
-  CsStruct,
-  storeGrowth,
-  structFieldSlots,
-  type Value,
-  type VariableReference,
-} from '../values';
+import { copyValue, CsArray, CsDelegate, CsObject, CsStruct, type Value, type VariableReference } from '../values';
 import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { InconsistentComparer, introSort } from './sort';
 import {
@@ -380,7 +370,7 @@ const listNatives: Record<string, NativeMethod> = {
   },
   [`${LIST}.Add`]: (call, receiver, [value]) => {
     const list = listOf(receiver);
-    call.frame.runtime.allocateSlots(1 + structFieldSlots(value as Value));
+    call.frame.runtime.retainSlots(1, [value as Value]);
     list.ensureCapacity(list.items.length + 1);
     list.items.push(value as Value);
     list.version++;
@@ -553,7 +543,7 @@ const listNatives: Record<string, NativeMethod> = {
     const list = listOf(receiver);
     if ((index as number) < 0 || (index as number) > list.items.length)
       failOutOfRange(call, 'index', 'Index must be within the bounds of the List.');
-    call.frame.runtime.allocateSlots(1 + structFieldSlots(value as Value));
+    call.frame.runtime.retainSlots(1, [value as Value]);
     list.ensureCapacity(list.items.length + 1);
     list.items.splice(index as number, 0, value as Value);
     list.version++;
@@ -750,7 +740,10 @@ export class HashState implements EnumerableState {
   ) {}
 
   /** Charges a new entry against the run's slot limit, set where the collection is created. */
-  allocate: (count: number) => void = () => {};
+  /** Charges entries the collection newly keeps, as Runtime.retainSlots does. */
+  retain: (baseSlots: number, values: Value[]) => void = () => {};
+  /** Charges replacing a kept value, as Runtime.chargeStore does. */
+  store: (previous: Value, next: Value) => void = () => {};
 
   /** Charges work against the run's operations budget, set where the collection is created. */
   spend: (count: number) => void = () => {};
@@ -782,11 +775,11 @@ export class HashState implements EnumerableState {
     if (existing >= 0) {
       if (!replace) return false;
       // Since .NET Core 3.0, only adding a key invalidates an enumeration; setting, removing, and clearing do not.
-      this.allocate(storeGrowth(this.entries[existing].value, value));
+      this.store(this.entries[existing].value, value);
       this.entries[existing].value = value;
       return true;
     }
-    this.allocate(1 + structFieldSlots(key) + structFieldSlots(value));
+    this.retain(1, [key, value]);
     const hash = this.equality.hash(key);
     const entry: Entry = { hash, key, value, isFree: false };
     let index: number;
@@ -869,7 +862,8 @@ function hashOfState(value: Value): HashState {
 
 function newHashState(call: NativeCall, comparer: Value, keyType: Type, valueType: Type | undefined): HashState {
   const state = new HashState(equalityOf(call, comparer), keyType, valueType, comparer);
-  state.allocate = (count) => call.frame.runtime.allocateSlots(count);
+  state.retain = (baseSlots, values) => call.frame.runtime.retainSlots(baseSlots, values);
+  state.store = (previous, next) => call.frame.runtime.chargeStore(previous, next);
   state.spend = (count) => call.frame.runtime.spend(count);
   if (valueType) {
     const pairType = libraryType(call, 'System.Collections.Generic.KeyValuePair', [keyType, valueType]);
@@ -1423,7 +1417,7 @@ for (const [name, isStack] of [
       indexOfValue(call, sequenceOf(receiver).items, value as Value, sequenceOf(receiver).head) >= 0,
     [`${prefix}.${isStack ? 'Push' : 'Enqueue'}`]: (call, receiver, [value]) => {
       const state = sequenceOf(receiver);
-      call.frame.runtime.allocateSlots(1 + structFieldSlots(value as Value));
+      call.frame.runtime.retainSlots(1, [value as Value]);
       state.items.push(value as Value);
       state.version++;
       return;

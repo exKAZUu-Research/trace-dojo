@@ -59,7 +59,6 @@ import {
   freshString,
   isString,
   stringText,
-  structFieldSlots,
   type Value,
   type VariableReference,
 } from '../values';
@@ -142,7 +141,7 @@ defineNatives({
   // A struct calls it in its box, whose copy is a new box of a copy of the value.
   'System.Object.MemberwiseClone': (call, receiver) => {
     if (!(receiver instanceof CsBox)) return evaluatorOf(call).cloneObject(receiver as CsObject);
-    call.frame.runtime.allocateSlots(1 + structFieldSlots(receiver.value));
+    call.frame.runtime.retainSlots(1, [receiver.value]);
     const copy = new CsBox(receiver.type, copyValue(receiver.value));
     copy.isCharged = true;
     return copy;

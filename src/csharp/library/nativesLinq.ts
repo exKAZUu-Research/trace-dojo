@@ -5,17 +5,7 @@ import { arithmetic, decimalArithmetic, PendingException } from '../numeric';
 import { runtimeTypeName } from '../objects';
 import type { NativeState } from '../runtime';
 import { type NamedType, nullableUnderlying, specialOf, type SpecialType, type Type } from '../types';
-import {
-  copyValue,
-  CsArray,
-  CsBox,
-  CsObject,
-  CsStruct,
-  isString,
-  stringText,
-  structFieldSlots,
-  type Value,
-} from '../values';
+import { copyValue, CsArray, CsBox, CsObject, CsStruct, isString, stringText, type Value } from '../values';
 import { isEnumerableState, iterate, LibraryEnumerator } from './iteration';
 import {
   comparisonOf,
@@ -634,7 +624,7 @@ function groupsOf(
       groups.push(group);
     }
     const element = elementOf(item);
-    call.frame.runtime.allocateSlots(1 + structFieldSlots(element));
+    call.frame.runtime.retainSlots(1, [element]);
     group.elements.push(element);
   }
   return groups;
@@ -693,7 +683,7 @@ function seenSet(call: NativeCall, equality: Equality): { add(value: Value): boo
     add(value) {
       const bucket = bucketOf(value);
       if (indexIn(bucket, value) >= 0) return false;
-      call.frame.runtime.allocateSlots(1 + structFieldSlots(value));
+      call.frame.runtime.retainSlots(1, [value]);
       bucket.push(value);
       return true;
     },
@@ -868,7 +858,7 @@ const linq: Record<string, NativeMethod> = {
         // Each element is charged as the chunk takes it, so a huge chunk size meets the slot limit while it fills.
         let chunk: Value[] = [];
         for (const item of all) {
-          call.frame.runtime.allocateSlots(1 + structFieldSlots(item));
+          call.frame.runtime.retainSlots(1, [item]);
           chunk.push(item);
           if (chunk.length === size) {
             yield arrayOfBuffer(elementType, chunk);
@@ -1253,7 +1243,8 @@ const linq: Record<string, NativeMethod> = {
   [`${ENUMERABLE}.ToHashSet`]: (call, _receiver, [items]) => {
     const set = new CsObject(libraryType(call, 'System.Collections.Generic.HashSet', [call.typeArgs[0]]), []);
     const state = new HashState(equalityOf(call, undefined), call.typeArgs[0], undefined, undefined);
-    state.allocate = (count) => call.frame.runtime.allocateSlots(count);
+    state.retain = (baseSlots, values) => call.frame.runtime.retainSlots(baseSlots, values);
+    state.store = (previous, next) => call.frame.runtime.chargeStore(previous, next);
     state.spend = (count) => call.frame.runtime.spend(count);
     for (const item of source(call, items as Value)) state.insert(item, undefined, false);
     set.native = state;
@@ -1277,7 +1268,8 @@ const linq: Record<string, NativeMethod> = {
       []
     );
     const state = new HashState(equalityOf(call, undefined, keyType), keyType, valueType, undefined);
-    state.allocate = (count) => call.frame.runtime.allocateSlots(count);
+    state.retain = (baseSlots, values) => call.frame.runtime.retainSlots(baseSlots, values);
+    state.store = (previous, next) => call.frame.runtime.chargeStore(previous, next);
     state.spend = (count) => call.frame.runtime.spend(count);
     const pairType = libraryType(call, 'System.Collections.Generic.KeyValuePair', [keyType, valueType]);
     state.pairOf = (key, value) => new CsStruct(pairType, [key, value]);

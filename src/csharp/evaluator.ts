@@ -55,7 +55,6 @@ import {
   freshString,
   plainString,
   stringText,
-  structFieldSlots,
   UNASSIGNED,
   type Value,
   type VariableReference,
@@ -153,7 +152,9 @@ export class Evaluator extends StatementExecutor {
         ? this.runtime.staticsOf(this.ownerFromEnvironment(method, typeEnvironment) as NamedType)
         : this.fieldsOf(self);
       if (method.kind === 'getter') return fields[backingField.slot];
-      fields[backingField.slot] = args.at(-1) as Value;
+      const value = args.at(-1) as Value;
+      this.runtime.chargeStore(fields[backingField.slot], value);
+      fields[backingField.slot] = value;
       return undefined;
     }
     if (!body) {
@@ -937,6 +938,7 @@ export class Evaluator extends StatementExecutor {
           set: (value) => {
             const self = frame.thisValue as CsStruct;
             const source = value as CsStruct;
+            this.runtime.chargeStore(self, source);
             for (const [index, field] of source.fields.entries()) self.fields[index] = field;
           },
         };
@@ -1024,6 +1026,7 @@ export class Evaluator extends StatementExecutor {
               call(property.setter, [value]);
               return;
             }
+            this.runtime.chargeStore(fields[field.slot], value);
             fields[field.slot] = value;
           },
         };
@@ -1120,8 +1123,7 @@ export class Evaluator extends StatementExecutor {
 
   /** A shallow copy of an object, as `with` and `MemberwiseClone` make, charged as an allocation like `new`. */
   cloneObject(source: CsObject): CsObject {
-    const structSlots = source.fields.reduce((sum: number, field) => sum + structFieldSlots(field), 0);
-    this.runtime.allocateSlots(source.fields.length + 1 + structSlots);
+    this.runtime.retainSlots(source.fields.length + 1, source.fields);
     const copy = new CsObject(
       source.type,
       source.fields.map((field) => copyValue(field))
