@@ -36,6 +36,7 @@ import {
   substitute,
   substitutionOf,
   type Type,
+  typeKey,
   TypeParameterSymbol,
   TypeSymbol,
   VOID_TYPE,
@@ -158,7 +159,7 @@ export class Compiler extends StatementBinder {
     for (const { symbol } of declared) {
       if (symbol.kind !== 'struct') continue;
       for (const field of symbol.fields) {
-        if (field.isStatic || field.isConst || !holdsByValue(field.type, symbol, new Set())) continue;
+        if (field.isStatic || field.isConst || !holdsByValue(field.type, symbol, [])) continue;
         this.error(
           field.row,
           'CS0523',
@@ -920,15 +921,22 @@ function calleesFirst(locals: MethodSymbol[], callees: Map<MethodSymbol, MethodS
   return order;
 }
 
-/** Whether a value of the type holds a struct by value, through its instance fields and theirs. */
-function holdsByValue(type: Type, target: TypeSymbol, seen: Set<TypeSymbol>): boolean {
+/**
+ * Whether a value of the type holds a struct by value, through its instance fields and theirs. The path holds the
+ * constructed types it passes through, so a construction repeated on it ends that path, and a path longer than any
+ * real layout counts as the cycle that a layout growing without end is, as Roslyn reports it.
+ */
+function holdsByValue(type: Type, target: TypeSymbol, path: string[]): boolean {
   if (type.kind !== 'named' || type.symbol.kind !== 'struct') return false;
   if (type.symbol === target) return true;
-  // A generic struct is expanded once per definition, which also stops layouts that grow without end.
-  if (seen.has(type.symbol)) return false;
-  seen.add(type.symbol);
+  const key = typeKey(type);
+  if (path.includes(key)) return false;
+  if (path.length >= MAX_LAYOUT_DEPTH) return true;
   const substitution = substitutionOf(type);
   return type.symbol.fields.some(
-    (field) => !field.isStatic && !field.isConst && holdsByValue(substitute(field.type, substitution), target, seen)
+    (field) =>
+      !field.isStatic && !field.isConst && holdsByValue(substitute(field.type, substitution), target, [...path, key])
   );
 }
+
+const MAX_LAYOUT_DEPTH = 64;

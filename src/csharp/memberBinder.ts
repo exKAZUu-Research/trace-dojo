@@ -545,7 +545,6 @@ export abstract class MemberBinder extends CallBinder {
       const { field } = found;
       const type = substitute(field.type, substitution);
       if (field.isConst) return this.constantField(field, type, position);
-      if (field.isStatic) return { kind: 'staticField', field, owner: found.owner, type, row: position.row };
       // Outside its declaring type, an event may only be subscribed to or unsubscribed from.
       if (field.isEvent && context.fn.typeContext.type !== field.owner && !this.isEventSubscriptionTarget) {
         const owner = displayTypeSymbol(field.owner);
@@ -555,6 +554,7 @@ export abstract class MemberBinder extends CallBinder {
           `イベント '${owner}.${field.name}' は、+= または -= の左側にのみ表示されます (型 '${owner}' 内で使用する場合を除きます)`
         );
       }
+      if (field.isStatic) return { kind: 'staticField', field, owner: found.owner, type, row: position.row };
       return { kind: 'field', receiver: receiver as BoundExpression, field, type, row: position.row };
     }
     const { property } = found;
