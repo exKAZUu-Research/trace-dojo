@@ -503,68 +503,45 @@ function elementsUntil(
 }
 
 /** A pointer or slice that `std.mem.span` and the like take, seen through an optional, and what it points to. */
-function pointerOperand(
-  sema: SemaApi,
-  operandType: Type,
-  span: Span,
-  name: string
-): {
+function pointerOperand(sema: SemaApi, operandType: Type, span: Span, name: string): PointerOperand {
+  const optional = operandType.kind === 'optional';
+  const type = operandType.kind === 'optional' ? operandType.child : operandType;
+  if (type.kind !== 'pointer') return sema.error(span, `${name} にはポインタかスライスを渡してください。`);
+  const array = type.size === 'one' && type.child.kind === 'array' ? type.child : undefined;
+  const child = array ? array.child : type.child;
+  // `std.mem` takes a C pointer to end at 0.
+  const zero: Expression = { kind: 'integer', row: span.row, col: span.col, endRow: span.endRow, value: 0n };
+  const sentinel =
+    type.size === 'c'
+      ? new Sentinel(sema.knownValue(sema.coerce(sema.compile(zero, child), child, span), '番兵'))
+      : (array ?? type).sentinel;
+  return { type, optional, array, child, sentinel };
+}
+
+interface PointerOperand {
   type: Extract<Type, { kind: 'pointer' }>;
   optional: boolean;
   array: Extract<Type, { kind: 'array' }> | undefined;
   child: Type;
   sentinel: Sentinel | undefined;
-} {
-  const optional = operandType.kind === 'optional';
-  const type = operandType.kind === 'optional' ? operandType.child : operandType;
-  if (type.kind !== 'pointer') return sema.error(span, `${name} にはポインタかスライスを渡してください。`);
-  const array = type.size === 'one' && type.child.kind === 'array' ? type.child : undefined;
-  return {
-    type,
-    optional,
-    array,
-    child: array ? array.child : type.child,
-    sentinel: array ? array.sentinel : type.sentinel,
-  };
 }
 
 /** The elements from a pointer up to a sentinel value, for `std.mem.span`, `len`, and `sliceTo`. */
 // code-gauge-allow functionCognitiveComplexity -- Checks the operand and the end value as Zig's std.mem does before scanning.
-function sentinelSpan(name: string, kind: 'span' | 'len' | 'sliceTo'): () => Member {
+function sentinelSpan(name: string, kind: SentinelSpanKind): () => Member {
   return fnMember(name, (sema, call) => {
     const args = expectArgs(sema, call, kind === 'sliceTo' ? 2 : 1, name);
     const operand = sema.compile(args[0]);
-    const { type, optional, array, child, sentinel: written } = pointerOperand(sema, operand.type, call.span, name);
-    const knownElement = (expression: Expression): Value =>
-      sema.knownValue(sema.coerce(sema.compile(expression, child), child, expression), '終わりの値');
-    const sentinel =
-      type.size === 'c'
-        ? new Sentinel(
-            knownElement({
-              kind: 'integer',
-              row: call.span.row,
-              col: call.span.col,
-              endRow: call.span.endRow,
-              value: 0n,
-            })
-          )
-        : written;
-    const end = kind === 'sliceTo' ? knownElement(args[1]) : undefined;
-    const unbounded = type.size === 'many' || type.size === 'c';
-    if (
+    const pointer = pointerOperand(sema, operand.type, call.span, name);
+    const { type, optional, array, child, sentinel } = pointer;
+    const end =
       kind === 'sliceTo'
-        ? type.size === 'one' && !array
-        : !unbounded || sentinel === undefined || (kind === 'len' && optional)
-    )
+        ? sema.knownValue(sema.coerce(sema.compile(args[1], child), child, args[1]), '終わりの値')
+        : undefined;
+    if (!acceptsOperand(kind, pointer))
       return sema.error(call.span, `${name} には、番兵付きのポインタ（[*:0]u8 など）を渡してください。`);
     const stop = end ?? sentinel?.value;
-    const resultSentinel =
-      end === undefined
-        ? sentinel?.value
-        : type.size === 'c' || (sentinel ? scalarValuesEqual(end, sentinel.value) : type.size === 'many')
-          ? end
-          : undefined;
-    const sliceType = sliceOf(child, type.isConst, resultSentinel);
+    const sliceType = sliceOf(child, type.isConst, resultSentinel(pointer, end));
     const resultType = kind === 'len' ? USIZE : optional ? optionalOf(sliceType) : sliceType;
     const evaluate = operand.eval;
     const span = (value: Value, frame: Frame): Value => {
@@ -574,6 +551,26 @@ function sentinelSpan(name: string, kind: 'span' | 'len' | 'sliceTo'): () => Mem
     };
     return runtime(resultType, (frame) => span(evaluate(frame), frame), call.span);
   });
+}
+
+type SentinelSpanKind = 'span' | 'len' | 'sliceTo';
+
+/**
+ * Whether `std.mem` takes the pointer: `span` and `len` take a many-item pointer with a sentinel or a C pointer, and
+ * only `span` sees through an optional; `sliceTo` also takes a slice or a pointer to an array.
+ */
+function acceptsOperand(kind: SentinelSpanKind, { type, optional, array, sentinel }: PointerOperand): boolean {
+  if (kind === 'sliceTo') return type.size !== 'one' || array !== undefined;
+  if (kind === 'len' && optional) return false;
+  return type.size === 'c' || (type.size === 'many' && sentinel !== undefined);
+}
+
+/** The sentinel of the slice that `std.mem.span` or `sliceTo(…, end)` returns, which only an end it can rely on gets. */
+function resultSentinel({ type, sentinel }: PointerOperand, end: Value | undefined): Value | undefined {
+  if (end === undefined) return sentinel?.value;
+  if (type.size === 'c') return end;
+  if (sentinel) return scalarValuesEqual(end, sentinel.value) ? end : undefined;
+  return type.size === 'many' ? end : undefined;
 }
 
 const MEMBERS: Record<string, () => Member> = {

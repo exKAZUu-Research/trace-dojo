@@ -507,10 +507,8 @@ class AstChecker {
     if (statement.alignment) this.expression(statement.alignment, 'value');
     if (statement.type) this.typeExpression(statement.type);
     const { value } = statement;
-    if (value) {
-      if (statement.isComptime) this.withComptime(statement, () => this.expression(value, 'value'));
-      else this.expression(value, 'value');
-    } else this.error(statement, '変数は初期化してください（値が決まらないときは = undefined と書きます）。');
+    if (value) this.initializer(statement, value);
+    else this.error(statement, '変数は初期化してください（値が決まらないときは = undefined と書きます）。');
     if (!statement.type && statement.value?.kind === 'undefined') {
       this.error(statement, 'undefined で初期化する変数には、型を書いてください。');
     }
@@ -522,6 +520,12 @@ class AstChecker {
     } else {
       this.error(statement, '「_」という名前の変数は宣言できません。');
     }
+  }
+
+  /** A local's initializer, which runs at compile time for a `comptime var`. */
+  private initializer(statement: Extract<Statement, { kind: 'var' }>, value: Expression): void {
+    if (statement.isComptime) this.withComptime(statement, () => this.expression(value, 'value'));
+    else this.expression(value, 'value');
   }
 
   private comptimeKeyword(span: Span): void {

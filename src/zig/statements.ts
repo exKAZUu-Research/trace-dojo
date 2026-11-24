@@ -1370,18 +1370,10 @@ export abstract class StatementCompiler extends CallCompiler {
           resultType,
           asStatement
         );
-      const queriesComptime = asksInComptime(expression.condition);
-      if (queriesComptime) this.inComptimeBranchDepth++;
-      let then: ReturnType<typeof this.branch>;
-      let otherwise: ReturnType<typeof this.branch> | undefined;
-      try {
-        then = this.branch(expression.consequent, undefined, resultType, asStatement);
-        otherwise = expression.otherwise
-          ? this.branch(expression.otherwise, undefined, resultType, asStatement)
-          : undefined;
-      } finally {
-        if (queriesComptime) this.inComptimeBranchDepth--;
-      }
+      const [then, otherwise] = this.onInComptime(expression.condition, () => [
+        this.branch(expression.consequent, undefined, resultType, asStatement),
+        expression.otherwise ? this.branch(expression.otherwise, undefined, resultType, asStatement) : undefined,
+      ]);
       const evaluateTest = test.eval;
       return this.combineBranches(expression, then, otherwise, resultType, asStatement, (frame) =>
         evaluateTest(frame) ? 0 : 1
@@ -1477,6 +1469,17 @@ export abstract class StatementCompiler extends CallCompiler {
       },
       [binding?.binding, errorBinding?.binding]
     );
+  }
+
+  /** Compiles the branches of a condition, counting them as branches on `@inComptime()` when the condition asks it. */
+  private onInComptime<T>(condition: Expression, compileBranches: () => T): T {
+    if (!asksInComptime(condition)) return compileBranches();
+    this.inComptimeBranchDepth++;
+    try {
+      return compileBranches();
+    } finally {
+      this.inComptimeBranchDepth--;
+    }
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Keeps known capture facts and their lexical runtime initialization together.
