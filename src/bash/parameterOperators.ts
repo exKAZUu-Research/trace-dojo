@@ -324,8 +324,8 @@ function mapValues(
 /** `${x#p}`, `${x##p}`, `${x%p}`, and `${x%%p}`, matching by characters. */
 function removePattern(text: string, pattern: string, operator: string, shell: Shell): string {
   const chars = charactersOf(text);
-  const glob = compileGlob(pattern);
   const spend = (): void => shell.runtime.spend();
+  const glob = compileGlob(pattern, spend);
   if (operator === '#') {
     const end = shortestPrefixMatch(glob, chars, 0, spend);
     return end === undefined ? text : chars.slice(end).join('');
@@ -390,8 +390,8 @@ function replacementFor(replacement: Piece[], matched: string): string {
 function substitute(text: string, pattern: string, replacement: Piece[], operator: string, shell: Shell): string {
   if (pattern === '' && operator !== '/#' && operator !== '/%') return text;
   const chars = charactersOf(text);
-  const glob = compileGlob(pattern);
   const spend = (): void => shell.runtime.spend();
+  const glob = compileGlob(pattern, spend);
   const replace = (start: number, end: number): string => replacementFor(replacement, chars.slice(start, end).join(''));
   if (operator === '/#') {
     const end = longestPrefixMatch(glob, chars, 0, spend);
@@ -552,9 +552,9 @@ function splitSubstring(parts: WordPart[]): {
 /** `${x^p}`, `${x^^p}`, `${x,p}`, `${x,,p}`, `${x~p}`, and `${x~~p}`, changing the characters that match `p`. */
 function changeCase(text: string, pattern: string, operator: string, shell: Shell): string {
   const chars = charactersOf(text);
-  const glob = compileGlob(pattern);
-  const all = operator.length === 2;
   const spend = (): void => shell.runtime.spend();
+  const glob = compileGlob(pattern, spend);
+  const all = operator.length === 2;
   for (let i = 0; i < chars.length; i++) {
     if (!all && i > 0) break;
     if (!matchesSlice(glob, chars, i, i + 1, spend)) continue;

@@ -66,7 +66,7 @@ export function evaluateConditional(shell: Shell, expression: TestExpression): b
       const { operator } = expression;
       const left = expander.expandString(expression.left);
       if (operator === '==' || operator === '=' || operator === '!=') {
-        const matched = expander.matches(left, expander.expandPattern(expression.right));
+        const matched = expander.matches(left, expander.expandPattern(expression.right), true);
         return operator === '!=' ? !matched : matched;
       }
       const right = expander.expandString(expression.right);

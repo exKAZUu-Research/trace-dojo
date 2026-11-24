@@ -5,7 +5,7 @@
  */
 
 import { charactersOf, POSIX_CHARACTER_CLASSES } from './characters';
-import { matchesGlobEquivalenceClass, resolveCollatingElement } from './collation';
+import { compareCollated, matchesGlobEquivalenceClass, resolveCollatingElement } from './collation';
 
 type BracketSpec =
   | { kind: 'char'; c: string }
@@ -29,59 +29,26 @@ const CHARACTER_CLASSES: Record<string, (c: string) => boolean> = {
   word: (c) => /^[\p{L}\p{N}_]$/u.test(c),
 };
 
+interface BracketScanMemo {
+  readonly failedAfterFirst: Uint8Array;
+  readonly failedSubbracket: Uint8Array;
+}
+
 /** Whether the entire `text` matches `pattern`. */
-export function matchesPattern(pattern: string, text: string, spend: () => void): boolean {
+export function matchesPattern(pattern: string, text: string, spend: () => void, extmatch = false): boolean {
   const chars = charactersOf(text);
-  return matchesSlice(compileGlob(pattern), chars, 0, chars.length, spend);
+  return matchesSlice(compileGlob(pattern, spend, extmatch), chars, 0, chars.length, spend);
 }
 
 /** Whether `pattern` contains any unescaped `*`, `?`, or closed `[...]` wildcard. */
-export function hasPatternCharacters(pattern: string): boolean {
-  return compileGlob(pattern).atoms.some((atom) => atom.kind !== 'char');
+export function hasPatternCharacters(pattern: string, spend?: () => void): boolean {
+  return compileGlob(pattern, spend).atoms.some((atom) => atom.kind !== 'char');
 }
 
 /** Whether `pattern` contains an unescaped extended-glob operator (`?(...)`, `*(...)`, `+(...)`, `@(...)`, `!(...)`) outside `[...]`. */
-export function hasExtendedGlob(pattern: string): boolean {
+export function hasExtendedGlob(pattern: string, spend?: () => void): boolean {
   const chars = charactersOf(pattern);
-  for (let i = 0; i < chars.length;) {
-    const c = chars[i];
-    if (c === '\\') {
-      i += 2;
-      continue;
-    }
-    if (c === '[') {
-      const bracket = readBracketExpression(chars, i + 1);
-      if (bracket) {
-        i = bracket.next;
-        continue;
-      }
-    } else if ('?*+@!'.includes(c) && chars[i + 1] === '(' && findExtglobClose(chars, i + 2) !== undefined) {
-      return true;
-    }
-    i++;
-  }
-  return false;
-}
-
-function findExtglobClose(chars: readonly string[], from: number): number | undefined {
-  let depth = 1;
-  for (let i = from; i < chars.length;) {
-    const c = chars[i];
-    if (c === '\\') {
-      i += 2;
-      continue;
-    }
-    if (c === '[') {
-      const bracket = readBracketExpression(chars, i + 1);
-      if (bracket) {
-        i = bracket.next;
-        continue;
-      }
-    } else if (c === '(') depth++;
-    else if (c === ')' && --depth === 0) return i;
-    i++;
-  }
-  return undefined;
+  return scanExtendedGlob(chars, spend, createBracketScanMemo(chars.length)).closed;
 }
 
 /** Escapes shell glob and bracket-expression operators so `text` matches literally. */
@@ -90,12 +57,20 @@ export function quotePattern(text: string): string {
 }
 
 /** Compiles a shell pattern into a sequence of wildcard, literal, and bracket atoms. */
-export function compileGlob(pattern: string): CompiledGlob {
+export function compileGlob(pattern: string, spend?: () => void, extmatch = false): CompiledGlob {
   const chars = charactersOf(pattern);
+  const memo = createBracketScanMemo(chars.length);
+  const literalFrom = extmatch ? scanExtendedGlob(chars, spend, memo).firstUnclosedOpener : undefined;
   const atoms: GlobAtom[] = [];
   let hasStar = false;
   for (let i = 0; i < chars.length;) {
-    const { atom, next } = readGlobAtom(chars, i);
+    spend?.();
+    if (literalFrom !== undefined && i >= literalFrom) {
+      atoms.push({ kind: 'char', c: chars[i] });
+      i++;
+      continue;
+    }
+    const { atom, next } = readGlobAtom(chars, i, spend, memo);
     if (atom.kind === 'star') {
       hasStar = true;
       if (atoms.at(-1)?.kind !== 'star') atoms.push(atom);
@@ -107,13 +82,58 @@ export function compileGlob(pattern: string): CompiledGlob {
   return { atoms, hasStar };
 }
 
-function readGlobAtom(chars: readonly string[], i: number): { atom: GlobAtom; next: number } {
+function createBracketScanMemo(length: number): BracketScanMemo {
+  return {
+    failedAfterFirst: new Uint8Array(length + 1),
+    failedSubbracket: new Uint8Array(length + 1),
+  };
+}
+
+function scanExtendedGlob(
+  chars: readonly string[],
+  spend: (() => void) | undefined,
+  memo: BracketScanMemo
+): { closed: boolean; firstUnclosedOpener: number | undefined } {
+  const stack: (number | undefined)[] = [];
+  for (let i = 0; i < chars.length;) {
+    spend?.();
+    const c = chars[i];
+    if (c === '\\') {
+      i += 2;
+      continue;
+    }
+    if (c === '[') {
+      const bracket = readBracketExpression(chars, i + 1, spend, memo);
+      if (bracket) {
+        i = bracket.next;
+        continue;
+      }
+    } else if ('?*+@!'.includes(c) && chars[i + 1] === '(') {
+      stack.push(i);
+      i += 2;
+      continue;
+    } else if (c === '(') {
+      stack.push(undefined);
+    } else if (c === ')' && stack.length > 0 && stack.pop() !== undefined) {
+      return { closed: true, firstUnclosedOpener: undefined };
+    }
+    i++;
+  }
+  return { closed: false, firstUnclosedOpener: stack.find((opener) => opener !== undefined) };
+}
+
+function readGlobAtom(
+  chars: readonly string[],
+  i: number,
+  spend: (() => void) | undefined,
+  memo: BracketScanMemo
+): { atom: GlobAtom; next: number } {
   const c = chars[i];
   if (c === '*') return { atom: { kind: 'star' }, next: i + 1 };
   if (c === '?') return { atom: { kind: 'any' }, next: i + 1 };
   if (c === '\\') return { atom: { kind: 'char', c: i + 1 < chars.length ? chars[i + 1] : '\\' }, next: i + 2 };
   if (c === '[') {
-    const bracket = readBracketExpression(chars, i + 1);
+    const bracket = readBracketExpression(chars, i + 1, spend, memo);
     if (bracket)
       return { atom: { kind: 'bracket', negated: bracket.negated, specs: bracket.specs }, next: bracket.next };
   }
@@ -355,48 +375,87 @@ function matchesAtom(atom: GlobAtom, ch: string): boolean {
   return hit !== atom.negated;
 }
 
+interface BracketAtom {
+  c: string | undefined;
+  collating: boolean;
+  next: number;
+}
+
 /** Parses `[...]` starting just after `[`, or returns `undefined` if unclosed. */
-// code-gauge-allow functionCognitiveComplexity -- Parses optional negation, leading `]`, POSIX sub-brackets, and character ranges.
+// code-gauge-allow functionCognitiveComplexity -- Parses optional negation, leading `]`, POSIX sub-brackets, and character ranges with linear failure memoization.
 // code-gauge-allow functionNcss -- Parses optional negation, leading `]`, POSIX sub-brackets, and character ranges.
 function readBracketExpression(
   chars: readonly string[],
-  start: number
+  start: number,
+  spend: (() => void) | undefined,
+  memo: BracketScanMemo
 ): { negated: boolean; specs: BracketSpec[]; next: number } | undefined {
   let pos = start;
   const negated = chars[pos] === '!' || chars[pos] === '^';
   if (negated) pos++;
   const specs: BracketSpec[] = [];
+  const visited: number[] = [];
   let first = true;
   while (pos < chars.length) {
+    spend?.();
+    if (!first) {
+      if (memo.failedAfterFirst[pos]) return markBracketFailure(memo, visited);
+      visited.push(pos);
+    }
     if (chars[pos] === ']' && !first) return { negated, specs, next: pos + 1 };
     first = false;
-    const subbracket = tryReadSubbracketSpec(chars, pos);
+    const subbracket = tryReadSubbracketSpec(chars, pos, spend, memo);
     if (subbracket) {
       specs.push(subbracket.spec);
       pos = subbracket.next;
       continue;
     }
-    const startAtom = readBracketAtom(chars, pos);
-    if (!startAtom) return undefined;
+    const startAtom = readBracketAtom(chars, pos, spend, memo);
+    if (!startAtom) return markBracketFailure(memo, visited);
     pos = startAtom.next;
     if (chars[pos] === '-' && pos + 1 < chars.length && chars[pos + 1] !== ']') {
-      const endAtom = readBracketAtom(chars, pos + 1);
-      if (!endAtom) return undefined;
+      const endAtom = readBracketAtom(chars, pos + 1, spend, memo);
+      if (!endAtom) return markBracketFailure(memo, visited);
       pos = endAtom.next;
-      const low = startAtom.c.codePointAt(0) as number;
-      const high = endAtom.c.codePointAt(0) as number;
-      if (low <= high) specs.push({ kind: 'range', low, high });
+      const rangeSpec = buildRangeSpec(startAtom, endAtom);
+      if (rangeSpec) specs.push(rangeSpec);
       continue;
     }
-    specs.push({ kind: 'char', c: startAtom.c });
+    if (startAtom.c !== undefined) specs.push({ kind: 'char', c: startAtom.c });
   }
+  return markBracketFailure(memo, visited);
+}
+
+function markBracketFailure(memo: BracketScanMemo, visited: readonly number[]): undefined {
+  for (const pos of visited) memo.failedAfterFirst[pos] = 1;
   return undefined;
 }
 
-function tryReadSubbracketSpec(chars: readonly string[], pos: number): { spec: BracketSpec; next: number } | undefined {
+function buildRangeSpec(startAtom: BracketAtom, endAtom: BracketAtom): BracketSpec | undefined {
+  const startChar = startAtom.c;
+  const endChar = endAtom.c;
+  if (startChar === undefined || endChar === undefined) return undefined;
+  if (startAtom.collating || endAtom.collating) {
+    if (compareCollated(startChar, endChar) > 0) return undefined;
+    return {
+      kind: 'class',
+      test: (ch) => compareCollated(startChar, ch) <= 0 && compareCollated(ch, endChar) <= 0,
+    };
+  }
+  const low = startChar.codePointAt(0) as number;
+  const high = endChar.codePointAt(0) as number;
+  return low <= high ? { kind: 'range', low, high } : undefined;
+}
+
+function tryReadSubbracketSpec(
+  chars: readonly string[],
+  pos: number,
+  spend: (() => void) | undefined,
+  memo: BracketScanMemo
+): { spec: BracketSpec; next: number } | undefined {
   const kind = chars[pos + 1];
   if (chars[pos] !== '[' || (kind !== ':' && kind !== '=')) return undefined;
-  const end = findSubbracketClose(chars, pos + 2, kind);
+  const end = findSubbracketClose(chars, pos + 2, kind, spend, memo);
   if (end === undefined) return undefined;
   const name = chars
     .slice(pos + 2, end)
@@ -411,28 +470,49 @@ function tryReadSubbracketSpec(chars: readonly string[], pos: number): { spec: B
   return { spec: { kind: 'class', test }, next: end + 2 };
 }
 
-function readBracketAtom(chars: readonly string[], pos: number): { c: string; next: number } | undefined {
+function readBracketAtom(
+  chars: readonly string[],
+  pos: number,
+  spend: (() => void) | undefined,
+  memo: BracketScanMemo
+): BracketAtom | undefined {
   if (pos >= chars.length) return undefined;
   if (chars[pos] === '[' && chars[pos + 1] === '.') {
-    const end = findSubbracketClose(chars, pos + 2, '.');
+    const end = findSubbracketClose(chars, pos + 2, '.', spend, memo);
     if (end !== undefined) {
       const name = chars
         .slice(pos + 2, end)
         .join('')
         .replaceAll(/\\(.)/g, '$1');
-      return { c: resolveCollatingElement(name) ?? name, next: end + 2 };
+      return { c: resolveCollatingElement(name), collating: true, next: end + 2 };
     }
   }
   if (chars[pos] === '\\') {
-    return pos + 1 < chars.length ? { c: chars[pos + 1], next: pos + 2 } : undefined;
+    return pos + 1 < chars.length ? { c: chars[pos + 1], collating: false, next: pos + 2 } : undefined;
   }
-  return { c: chars[pos], next: pos + 1 };
+  return { c: chars[pos], collating: false, next: pos + 1 };
 }
 
-function findSubbracketClose(chars: readonly string[], from: number, delimiter: string): number | undefined {
+function findSubbracketClose(
+  chars: readonly string[],
+  from: number,
+  delimiter: ':' | '=' | '.',
+  spend: (() => void) | undefined,
+  memo: BracketScanMemo
+): number | undefined {
+  const bit = delimiter === ':' ? 1 : delimiter === '=' ? 2 : 4;
+  if (memo.failedSubbracket[from] & bit) return undefined;
   for (let i = from; i + 1 < chars.length; i++) {
-    if (i > from && delimiter !== '.' && chars[i] === ']') return undefined;
+    spend?.();
+    if (i > from && delimiter !== '.' && chars[i] === ']') {
+      return markSubbracketFailure(memo.failedSubbracket, from, i, bit);
+    }
     if (chars[i] === delimiter && chars[i + 1] === ']') return i;
   }
+  return markSubbracketFailure(memo.failedSubbracket, from, chars.length, bit);
+}
+
+function markSubbracketFailure(failed: Uint8Array, from: number, to: number, bit: number): undefined {
+  for (let k = from; k <= to; k++) failed[k] |= bit;
   return undefined;
 }

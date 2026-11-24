@@ -142,8 +142,8 @@ export class Expander {
     return this.withIsolatedTail(() => this.joinPieces(this.expandParts(parseSubscriptWordParts(text), false)));
   }
 
-  matches(text: string, pattern: string): boolean {
-    return matchesPattern(pattern, text, () => this.spend());
+  matches(text: string, pattern: string, extmatch = false): boolean {
+    return matchesPattern(pattern, text, () => this.spend(), extmatch);
   }
 
   /** Expands the raw elements of `name=(...)` before destination subscript/integer evaluation. */
@@ -682,7 +682,8 @@ export class Expander {
       .map((fragment) => (fragment.quoted ? quotePattern(fragment.text) : fragment.text))
       .join('');
     // `[[ == ]]` matches extended patterns even without `shopt -s extglob`, so they cannot pass as literal text.
-    if (hasExtendedGlob(pattern)) throw new UnsupportedFeatureError('拡張パターン（@( ... ) など）');
+    if (hasExtendedGlob(pattern, () => this.spend()))
+      throw new UnsupportedFeatureError('拡張パターン（@( ... ) など）');
     return pattern;
   }
 
@@ -706,7 +707,7 @@ export class Expander {
     }
     const unquoted = field.map((fragment) => (fragment.quoted ? quotePattern(fragment.text) : fragment.text)).join('');
     const result = field.map((fragment) => fragment.text).join('');
-    if (hasPatternCharacters(unquoted)) {
+    if (hasPatternCharacters(unquoted, () => this.spend())) {
       throw new UnsupportedFeatureError(
         `ファイル名の展開（引用符で囲まれていない * ? [ ]。文字として使うときは ${quoteReusable(result)} のように引用符で囲む）`
       );
