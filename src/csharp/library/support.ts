@@ -184,11 +184,13 @@ export function storeInArray(
 }
 
 /**
- * Fails as a covariant array (a `string[]` seen as `object[]`) does on a store of a value its runtime element type
- * cannot hold, so the array never holds a value of the wrong type.
+ * Stores a value into an array's element as a program's store does: checked as a covariant array (a `string[]` seen
+ * as `object[]`) checks it, so the array never holds a value of the wrong type, charged for what it adds, and copied.
  */
-export function checkArrayStore(call: NativeCall, array: CsArray, value: Value): void {
+export function storeArrayElement(call: NativeCall, array: CsArray, index: number, value: Value): void {
   checkElementStore(evaluatorOf(call), array, value);
+  call.frame.runtime.chargeStore(array.values[index], value);
+  array.values[index] = copyValue(value);
 }
 
 /**

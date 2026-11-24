@@ -19,7 +19,6 @@ import {
 import { introSort } from './sort';
 import {
   chargeElements,
-  checkArrayStore,
   evaluatorOf,
   fail,
   failIndex,
@@ -30,6 +29,7 @@ import {
   newArray,
   newArrayOf,
   refOf,
+  storeArrayElement,
   storeInArray,
   typeArgument,
 } from './support';
@@ -122,8 +122,7 @@ defineNatives({
     const array = arrayOf(receiver);
     checkValueIndex(array, index as number);
     const stored = evaluatorOf(call).unbox(value as Value, elementTypeOf(array));
-    checkArrayStore(call, array, stored);
-    array.values[index as number] = stored;
+    storeArrayElement(call, array, index as number, stored);
     return;
   },
   [`${ARRAY}.Clone`]: (call, receiver) => {
@@ -239,10 +238,9 @@ defineNatives({
   [`${ARRAY}.Exists`]: (call, _receiver, [array, match]) =>
     arrayOf(array as Value).values.some(predicateOf(call, match as Value)),
   [`${ARRAY}.Fill(T[], T)`]: (call, _receiver, [array, value]) => {
-    const values = arrayOf(array as Value).values;
-    checkArrayStore(call, array as CsArray, value as Value);
-    chargeElements(call, values.length);
-    for (let index = 0; index < values.length; index++) values[index] = copyValue(value as Value);
+    const target = arrayOf(array as Value);
+    chargeElements(call, target.values.length);
+    for (let index = 0; index < target.values.length; index++) storeArrayElement(call, target, index, value as Value);
     return;
   },
   [`${ARRAY}.Fill(T[], T, int, int)`]: (call, _receiver, [array, value, start, count]) => {
@@ -255,11 +253,10 @@ defineNatives({
         'Count must be positive and count must refer to a location within the string/array/collection.'
       );
     }
-    const values = arrayOf(array as Value).values;
-    checkArrayStore(call, array as CsArray, value as Value);
+    const target = arrayOf(array as Value);
     chargeElements(call, count as number);
     for (let index = start as number; index < (start as number) + (count as number); index++)
-      values[index] = copyValue(value as Value);
+      storeArrayElement(call, target, index, value as Value);
     return;
   },
   [`${ARRAY}.Find`]: (call, _receiver, [array, match]) => {
@@ -453,8 +450,7 @@ defineNatives({
     (receiver as CsArray).values[checkedArrayIndex(call, receiver as CsArray, index as number)],
   [`${ARRAY_HELPER}.set_Item`]: (call, receiver, [index, value]) => {
     const position = checkedArrayIndex(call, receiver as CsArray, index as number);
-    checkArrayStore(call, receiver as CsArray, value as Value);
-    (receiver as CsArray).values[position] = value as Value;
+    storeArrayElement(call, receiver as CsArray, position, value as Value);
     return;
   },
   [`${ARRAY_HELPER}.Add`]: fixedSize,

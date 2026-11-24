@@ -1143,7 +1143,10 @@ export class Evaluator extends StatementExecutor {
     const total = lengths.reduce((product, length) => product * length, 1);
     if (expression.elements) {
       this.runtime.allocateSlots(total);
-      return new CsArray(type, lengths, this.evaluateHeld(expression.elements, frame));
+      const elements = this.evaluateHeld(expression.elements, frame);
+      // Each element also keeps the struct fields it holds, a box's the first time any storage keeps it.
+      this.runtime.retainSlots(0, elements);
+      return new CsArray(type, lengths, elements);
     }
     const element = type.element;
     // Each element of a struct type also holds the fields its default value allocates.
