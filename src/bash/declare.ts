@@ -16,6 +16,7 @@ import {
   isIdentifier,
   sortedElements,
   type Variable,
+  type VariableValue,
 } from './variables';
 
 /** An argument of a declaration builtin: an assignment the shell parsed, or a word it expanded. */
@@ -168,11 +169,9 @@ function commitCompoundDeclaration(
     const sub = arg.subscript?.text ?? referencedSubscript ?? '';
     shell.discard(`${arg.name}[${sub}]: cannot assign list to array member`);
   }
+  if (localScope && !localScope.has(targetName) && isReadonlyGlobal(shell, targetName)) return false;
   const existing = resolveCompoundExisting(shell, targetName, set, localScope);
-  if (
-    existing?.attributes.has('r') ||
-    Boolean(localScope && !localScope.has(targetName) && isReadonlyGlobal(shell, targetName))
-  ) {
+  if (existing?.attributes.has('r')) {
     shell.discard(`${targetName}: readonly variable`);
   }
   const kindErr = existing && incompatibleArrayKindError(existing, set);
@@ -378,11 +377,10 @@ function declareOne(
   if (!isLocal && shell.isDynamic(name)) return declareDynamic(shell, operand, parsed);
   const isSubscripted =
     parsed?.subscript !== undefined || (typeof operand !== 'string' && operand.subscript !== undefined);
+  if (rejectSubscriptedAttributeBuiltin(shell, builtin, name, operand, parsed, isSubscripted)) return false;
   const assigns = hasValue(operand, parsed);
   const tempVar =
-    !isLocal && !isSubscripted && (builtin === 'export' || builtin === 'readonly')
-      ? shell.declarationPrefixVariable(name)
-      : undefined;
+    !isLocal && (builtin === 'export' || builtin === 'readonly') ? shell.declarationPrefixVariable(name) : undefined;
   if (tempVar) return declarePrefixed(shell, builtin, name, tempVar, operand, parsed, options);
   const explicitRefTarget = resolvePendingNamerefTarget(shell, name, operand, parsed, options, isLocal, isSubscripted);
   if (
@@ -391,9 +389,9 @@ function declareOne(
   ) {
     return false;
   }
-  const existingCells = new Set(shell.state.scopes.flatMap((s) => [...s.values()]));
+  const priorKind = shell.findVariable(name, false)?.value?.kind;
   const destination = declaredDestination(shell, builtin, name, options, isLocal, isSubscripted, assigns);
-  const wasScalar = destination?.variable.value?.kind === 'scalar';
+  const preUnsetStore = resolvePreUnsetNamerefStore(shell, name, destination?.variable, options, assigns);
   if (
     !destination ||
     !applyAttributes(
@@ -407,26 +405,105 @@ function declareOne(
   ) {
     return false;
   }
-  const { variable, referencedSubscript } = destination;
-  const storeVariable =
-    options.set.has('g') && (isSubscripted || destination.referencedSubscript !== undefined)
-      ? resolveElementStoreVariable(shell, name, variable.name, options.set, options.unset, isSubscripted)
-      : variable;
+  const { storeVariable, effectiveSubscript } = selectDeclarationStore(
+    shell,
+    name,
+    destination,
+    preUnsetStore,
+    options,
+    isSubscripted
+  );
   const ok =
     explicitRefTarget !== undefined
-      ? commitNamerefTarget(shell, builtin, variable, explicitRefTarget, shell.isInFunction)
-      : assignDeclaredOperand(shell, builtin, variable, storeVariable, operand, parsed, referencedSubscript);
-  if (options.set.has('r')) variable.attributes.add('r');
+      ? commitNamerefTarget(shell, builtin, destination.variable, explicitRefTarget, shell.isInFunction)
+      : assignDeclaredOperand(shell, builtin, destination.variable, storeVariable, operand, parsed, effectiveSubscript);
+  if (options.set.has('r')) destination.variable.attributes.add('r');
+  notifyIfArrayMaterialized(ok, destination.variable, priorKind, onMaterialize);
+  return ok;
+}
+
+function rejectSubscriptedAttributeBuiltin(
+  shell: Shell,
+  builtin: string,
+  name: string,
+  operand: DeclarationArgument,
+  parsed: { subscript?: string } | undefined,
+  isSubscripted: boolean
+): boolean {
+  if (!isSubscripted || (builtin !== 'readonly' && builtin !== 'export')) return false;
+  shell.reportError(`${builtin}: \`${name}[${operandSubscriptText(operand, parsed)}]': not a valid identifier`);
+  return true;
+}
+
+function selectDeclarationStore(
+  shell: Shell,
+  name: string,
+  destination: DeclarationDestination,
+  preUnsetStore: DeclarationDestination | undefined,
+  { set, unset }: Options,
+  isSubscripted: boolean
+): { storeVariable: Variable; effectiveSubscript: string | undefined } {
+  const { variable, referencedSubscript } = destination;
+  const storeVariable =
+    preUnsetStore?.variable ??
+    (set.has('g') && (isSubscripted || referencedSubscript !== undefined)
+      ? resolveElementStoreVariable(shell, name, variable.name, set, unset, isSubscripted)
+      : variable);
+  return { storeVariable, effectiveSubscript: preUnsetStore?.referencedSubscript ?? referencedSubscript };
+}
+
+function notifyIfArrayMaterialized(
+  ok: boolean,
+  variable: Variable,
+  priorKind: VariableValue['kind'] | undefined,
+  onMaterialize: (() => void) | undefined
+): void {
   if (
     ok &&
     !variable.attributes.has('n') &&
-    ((!existingCells.has(variable) && !options.set.has('I')) || wasScalar) &&
     variable.value !== undefined &&
-    variable.value.kind !== 'scalar'
+    variable.value.kind !== 'scalar' &&
+    priorKind !== variable.value.kind
   ) {
     onMaterialize?.();
   }
-  return ok;
+}
+
+function operandSubscriptText(operand: DeclarationArgument, parsed: { subscript?: string } | undefined): string {
+  if (typeof operand === 'string') return parsed?.subscript ?? '';
+  const first = operand.subscript?.parts[0];
+  return first?.kind === 'single' && operand.subscript?.parts.length === 1
+    ? first.text
+    : (operand.subscript?.text ?? '');
+}
+
+function resolvePreUnsetNamerefStore(
+  shell: Shell,
+  name: string,
+  aliasVariable: Variable | undefined,
+  { set, unset }: Options,
+  assigns: boolean
+): DeclarationDestination | undefined {
+  if (!assigns || !unset.has('n') || !aliasVariable?.attributes.has('n')) return undefined;
+  const globalOnly = set.has('g');
+  const { targetName, referencedSubscript } = resolveDeclaredTarget(
+    shell,
+    name,
+    new Set(),
+    new Set(),
+    false,
+    globalOnly
+  );
+  if (targetName === name && referencedSubscript === undefined) return undefined;
+  let storeVariable = globalOnly ? shell.state.scopes[0].get(targetName) : shell.findVariable(targetName, false);
+  if (!storeVariable) {
+    storeVariable = { name: targetName, value: undefined, attributes: new Set() };
+    shell.state.scopes[0].set(targetName, storeVariable);
+  }
+  return {
+    variable: storeVariable,
+    ...(referencedSubscript === undefined ? {} : { referencedSubscript }),
+  };
 }
 
 // code-gauge-allow functionParameterCount -- Inspects operand, parsed string form, options, scope mode, and subscript presence.
@@ -444,12 +521,29 @@ function resolvePendingNamerefTarget(
   const localScope = isLocal ? scopes[functionScopes.at(-1) as number] : undefined;
   const existing = localScope ? localScope.get(name) : set.has('g') ? scopes[0].get(name) : shell.findOwnVariable(name);
   if (!set.has('n') && !(existing?.attributes.has('n') && existing.value === undefined)) return undefined;
-  if (typeof operand === 'string') return parsed?.value;
+  const pending = extractPendingNamerefValue(shell, operand, parsed);
+  if (!pending) return undefined;
+  if (!pending.append) return pending.value;
+  const origin = !existing && localScope ? resolveLocalOrigin(shell, localScope, name, set.has('I')) : undefined;
+  const baseSource = existing ?? origin?.source;
+  const base = baseSource?.value?.kind === 'scalar' ? baseSource.value.value : '';
+  return base + pending.value;
+}
+
+function extractPendingNamerefValue(
+  shell: Shell,
+  operand: DeclarationArgument,
+  parsed: { append: boolean; value?: string } | undefined
+): { value: string; append: boolean } | undefined {
+  if (typeof operand === 'string') {
+    return parsed?.value === undefined ? undefined : { value: parsed.value, append: parsed.append };
+  }
   if (operand.array) return undefined;
   if (operand.value !== undefined) {
-    return shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(operand.value as Word));
+    const value = shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(operand.value as Word));
+    return { value, append: operand.append };
   }
-  return operand.text.includes('=') ? '' : undefined;
+  return operand.text.includes('=') ? { value: '', append: operand.append } : undefined;
 }
 
 function validatePendingNamerefTarget(
@@ -741,7 +835,7 @@ function createDeclaredVariable(
     ? new Set([...source.attributes].filter((a) => a !== 'n'))
     : new Set<Attribute>(source.attributes.has('x') ? ['x'] : []);
   let value: Variable['value'];
-  if (!inheritAttributes && arrayKind !== undefined) {
+  if (arrayKind !== undefined && (!inheritAttributes || !isArrayCell(source))) {
     attributes.add(arrayKind === 'associative' ? 'A' : 'a');
     value =
       arrayKind === 'associative'
@@ -756,6 +850,15 @@ function createDeclaredVariable(
     attributes,
     ...(fromTempEnv ? { fromTempEnv: true } : {}),
   };
+}
+
+function isArrayCell(variable: Variable): boolean {
+  return (
+    variable.value?.kind === 'indexed' ||
+    variable.value?.kind === 'associative' ||
+    variable.attributes.has('a') ||
+    variable.attributes.has('A')
+  );
 }
 
 function resolveElementStoreVariable(

@@ -425,8 +425,9 @@ export class Converter {
       if (item?.type !== 'case_item') continue;
       const patterns = this.fieldNodes(item, 'pattern').map((pattern) => this.word(pattern));
       const terminator = (item.childForFieldName('terminator')?.type ?? ';;') as CaseItem['terminator'];
+      const patternEnd = lastPatternIndex(item);
       const bodyNodes = item.children.filter(
-        (child) => child.isNamed && item.children.indexOf(child) > lastPatternIndex(item)
+        (child, index) => index > patternEnd && (child.isNamed || child.type === '&')
       );
       items.push({ patterns, body: this.statements(bodyNodes), terminator });
     }

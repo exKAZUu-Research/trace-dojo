@@ -143,6 +143,10 @@ export function assignSubscriptedBuiltinTarget(
 ): boolean {
   const resolved = shell.resolveNameOrUndefined(name);
   if (resolved === undefined) return false;
+  if (!isIdentifier(resolved)) {
+    shell.reportError(`${builtin}: \`${resolved}': not a valid identifier`);
+    return false;
+  }
   if (!shell.isAssociative(resolved)) {
     const expanded = shell.expandDynamicSubscript(subscript);
     return shell.assignElement(resolved, expanded === '' && subscript !== '' ? '0' : expanded, value, false);
@@ -229,6 +233,10 @@ function unsetNameref(shell: Shell, name: string): boolean {
 export function unsetElement(shell: Shell, name: string, subscript: string, viaReference = false): boolean {
   const resolved = shell.resolveNameOrUndefined(name);
   if (resolved === undefined) return false;
+  if (!isIdentifier(resolved)) {
+    shell.reportError(`unset: \`${resolved}': not a valid identifier`);
+    return false;
+  }
   const variable = shell.findVariable(resolved);
   if (variable?.attributes.has('r')) {
     shell.reportError(`unset: ${resolved}: cannot unset: readonly variable`);
@@ -245,13 +253,22 @@ export function unsetElement(shell: Shell, name: string, subscript: string, viaR
     shell.reportError(`unset: [${subscript}]: bad array subscript`);
     return false;
   }
+  return deleteIndexedOrScalarElement(shell, variable, resolved, index);
+}
+
+function deleteIndexedOrScalarElement(shell: Shell, variable: Variable, resolved: string, index: bigint): boolean {
   if (variable.value?.kind === 'indexed') {
     ensureWritable(variable);
     variable.value.elements.delete(index);
-  } else if (!variable.attributes.has('a') && index === 0n) {
-    shell.unsetVariable(resolved);
+    return true;
   }
-  return true;
+  if (variable.attributes.has('a')) return true;
+  if (index === 0n) {
+    shell.unsetVariable(resolved);
+    return true;
+  }
+  shell.reportError(`unset: ${resolved}: not an array variable`);
+  return false;
 }
 
 function clearIndexedOrScalar(shell: Shell, variable: Variable, resolved: string, viaReference: boolean): boolean {

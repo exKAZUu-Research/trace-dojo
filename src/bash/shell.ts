@@ -564,6 +564,7 @@ export class Shell implements ArithmeticHost {
     conditionalStep: boolean;
     ranFunction: boolean;
   } {
+    this.expander.lastSubstitutionStatus = 0;
     const argv = this.expander.expandWords(statement.words);
     if (argv.length === 0) {
       return { status: this.executeAssignmentOnlyCommand(statement), conditionalStep: false, ranFunction: false };
@@ -601,7 +602,6 @@ export class Shell implements ArithmeticHost {
 
   private executeAssignmentOnlyCommand(statement: Extract<Statement, { kind: 'command' }>): number {
     // A command of assignments alone expands and commits before redirections and takes its last substitution status.
-    this.expander.lastSubstitutionStatus = 0;
     for (const assignment of statement.assignments) {
       if (!this.performAssignment(assignment)) throw new DiscardSignal();
     }
@@ -1258,6 +1258,10 @@ export class Shell implements ArithmeticHost {
    * is expanded text, which an indexed array evaluates as arithmetic.
    */
   assignElement(name: string, subscript: string, value: string, append: boolean, evaluated = false): boolean {
+    if (!isIdentifier(name)) {
+      this.reportError(`\`${name}': not a valid identifier`);
+      return false;
+    }
     if (this.isDynamic(name)) return this.assignDynamic(name, value);
     const existing = this.findVariable(name);
     if (existing?.attributes.has('r')) {
@@ -1453,25 +1457,23 @@ export class Shell implements ArithmeticHost {
       return ok;
     }
     const value = assignment.value ? this.expander.expandAssignmentValue(assignment.value) : '';
-    if (assignment.subscript)
-      return this.assignElementWord(assignment.name, assignment.subscript, value, assignment.append);
-    return this.assignScalar(assignment.name, value, assignment.append);
+    return assignment.subscript
+      ? this.assignElementWord(assignment.name, assignment.subscript, value, assignment.append)
+      : this.assignScalar(assignment.name, value, assignment.append);
   }
 
   /** `name[subscript]=value`, whose error shows the subscript as written. */
   private assignElementWord(name: string, subscript: Word, value: string, append: boolean): boolean {
     const resolved = this.resolveName(name);
-    if (this.isAssociative(resolved)) {
-      const key = this.expander.expandAssociativeKey(subscript);
-      if (key === '') {
-        this.reportError(`${name}[${subscript.text}]: bad array subscript`);
-        return false;
-      }
-      return this.assignElement(resolved, key, value, append);
+    if (!this.isAssociative(resolved)) {
+      // Only a subscript written empty is an error; one that expands to nothing evaluates to 0.
+      const index = this.expander.expandSubscriptString(subscript);
+      return this.assignElement(resolved, index === '' && subscript.text !== '' ? '0' : index, value, append);
     }
-    // Only a subscript written empty is an error; one that expands to nothing evaluates to 0.
-    const index = this.expander.expandSubscriptString(subscript);
-    return this.assignElement(resolved, index === '' && subscript.text !== '' ? '0' : index, value, append);
+    const key = this.expander.expandAssociativeKey(subscript);
+    if (key !== '') return this.assignElement(resolved, key, value, append);
+    this.reportError(`${name}[${subscript.text}]: bad array subscript`);
+    return false;
   }
 
   /** Unsets a variable, as `unset` does. */
@@ -1480,20 +1482,18 @@ export class Shell implements ArithmeticHost {
     const split = followReference ? this.splitSubscript(target) : undefined;
     if (split && isIdentifier(split.name)) return unsetElement(this, split.name, split.subscript, true);
     if (this.isDynamic(target)) {
-      if (PERMANENT_DYNAMIC_VARIABLES.has(target)) {
-        this.reportError(`unset: ${target}: cannot unset`);
-        return false;
+      if (!PERMANENT_DYNAMIC_VARIABLES.has(target)) {
+        this.state.unsetDynamic.add(target);
+        return true;
       }
-      this.state.unsetDynamic.add(target);
-      return true;
-    }
-    const removed = removeScopedVariable(this.state.scopes, this.state.functionScopes.at(-1), target);
-    if (removed === 'readonly') {
-      this.reportError(`unset: ${target}: cannot unset: readonly variable`);
+      this.reportError(`unset: ${target}: cannot unset`);
       return false;
     }
+    const removed = removeScopedVariable(this.state.scopes, this.state.functionScopes.at(-1), target);
     if (removed === 'global' && ENVIRONMENT_VARIABLES.has(target)) this.state.unsetEnv.add(target);
-    return true;
+    if (removed !== 'readonly') return true;
+    this.reportError(`unset: ${target}: cannot unset: readonly variable`);
+    return false;
   }
 
   /** Evaluates a subscript of a name like `a[i+1]`, as `printf -v` and `unset` read one. */
