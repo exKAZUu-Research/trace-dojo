@@ -1,3 +1,4 @@
+import type { ConceptInfo } from '../concepts';
 import { CppRuntimeError, ProgramExit } from '../errors';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import type { ClassTemplateInfo } from '../programTemplates';
@@ -56,7 +57,7 @@ export type LibraryTemplate =
       takesArrayBound?: false;
       instantiate: (args: Type[], row: number) => Type;
       /** The class template or alias template the program declares, when the template is the program's. */
-      program?: ClassTemplateInfo;
+      program?: ClassTemplateInfo | ConceptInfo;
     }
   | { name: string; takesArrayBound: true; instantiate: (element: Type, bound: number) => Type; program?: undefined };
 

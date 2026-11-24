@@ -141,6 +141,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         return this.identifier(node);
       }
       case 'qualified_identifier': {
+        const concept = this.conceptId(node);
+        if (concept) return concept;
         const expr = this.entityExpr(this.lookupQualified(node), node, true);
         // `std::min<long long>` names a function template with its template arguments.
         const name = fieldOf(node, 'name') as Syntax;
@@ -400,6 +402,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   private templateFunction(node: Syntax): Expr {
     const nameNode = fieldOf(node, 'name') as Syntax;
+    const concept = this.conceptId(node);
+    if (concept) return concept;
     const entity =
       nameNode.type === 'qualified_identifier'
         ? this.lookupQualified(nameNode)
@@ -2077,6 +2081,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     this.checkDefined(fn, row);
     return this.withLibraryAccess(() => this.callExpr(resolved, args, undefined, row));
   }
+
+  /** A concept-id used as an expression (`std::integral<int>`), which is a constant of type `bool`. */
+  protected abstract conceptId(node: Syntax): Expr | undefined;
 
   /** A lambda expression's closure object. */
   abstract lambdaExpression(node: Syntax): Expr;

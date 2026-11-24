@@ -5,10 +5,18 @@ import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceA
 import { isBaseAccessible, isMemberAccessible } from './access';
 import { byteAt } from './bytes';
 import { type Declared, hasAuto } from './compilerBase';
+import {
+  type ConceptInfo,
+  conceptNamed,
+  evaluateConstraint,
+  satisfiesConcept,
+  satisfiesTypeConstraint,
+} from './concepts';
 import { implicitConversion } from './conversions';
 import { enumeratorEntity } from './enums';
 import { CppException, CppRuntimeError, NarrowingConversionError } from './errors';
 import {
+  constantExpr,
   type Expr,
   type Initializer,
   type InitializerTarget,
@@ -69,6 +77,7 @@ import {
 import {
   type Access,
   allowsMemberAssignment,
+  BOOL,
   ClassInfo,
   classType,
   type FieldInfo,
@@ -1947,13 +1956,15 @@ export class Compiler extends StatementCompiler {
     name: string,
     owner: ClassInfo | undefined,
     count: number,
-    declaration?: Syntax
+    declaration?: Syntax,
+    constraintText?: string
   ): FunctionTemplateInfo | undefined {
     const patterns = this.functionTemplates(name, owner).map((fn) => fn.templatePattern as FunctionTemplateInfo);
     const signature = declaration && parameterSignature(declaration);
     return patterns.find(
       (pattern) =>
         pattern.parameters.length === count &&
+        (constraintText === undefined || pattern.constraintText === constraintText) &&
         (signature === undefined || (pattern.node && parameterSignature(pattern.node) === signature))
     );
   }
@@ -2068,6 +2079,8 @@ export class Compiler extends StatementCompiler {
     const key = argumentsKey(bindings.args);
     const cached = info.instances.get(key);
     if (cached) return cached;
+    if (!this.satisfies(info, bindings))
+      return this.error(row, `${info.name}${argumentsText(bindings.args)} は、テンプレートの制約を満たしません。`);
     if (info.kind === 'alias') {
       const node = info.node as Syntax;
       const type = this.inTemplate(info, bindings, () => this.typeDescriptor(fieldOf(node, 'type') as Syntax));
@@ -2251,13 +2264,87 @@ export class Compiler extends StatementCompiler {
     }
   }
 
-  /** Whether a template's arguments satisfy its `requires` clause. */
-  satisfies(_info: ProgramTemplate, _bindings: TemplateBindings, constraint: Syntax): boolean {
-    return this.unsupported(constraint.row, 'requires');
+  /**
+   * Whether a template's arguments satisfy its constraints: its parameters' type constraints and its `requires`
+   * clauses (C++20 [temp.constr.decl]).
+   */
+  satisfies(info: ProgramTemplate, bindings: TemplateBindings): boolean {
+    return this.inTemplate(info, bindings, () => {
+      for (const parameter of info.parameters) {
+        if (!parameter.constraint || !parameter.name) continue;
+        const entity = bindings.scope.names.get(parameter.name);
+        const types = entity?.kind === 'pack' ? entity.items : entity ? [entity] : [];
+        for (const item of types) {
+          if (item.kind === 'type' && !satisfiesTypeConstraint(this, parameter.constraint, item.type)) return false;
+        }
+      }
+      return (info.constraints ?? []).every((constraint) => evaluateConstraint(this, constraint));
+    });
   }
 
-  declareConcept(_parameters: TemplateParameter[], node: Syntax): void {
-    this.unsupported(node.row, 'コンセプト（concept）');
+  protected conceptId(node: Syntax): Expr | undefined {
+    const named = node.type === 'qualified_identifier' ? fieldOf(node, 'name') : node;
+    if (named?.type !== 'template_function') return undefined;
+    const nameNode =
+      node.type === 'qualified_identifier'
+        ? { ...node, all: node.all.map((child) => (child === named ? (fieldOf(named, 'name') as Syntax) : child)) }
+        : (fieldOf(named, 'name') as Syntax);
+    const concept = conceptNamed(this, nameNode);
+    if (!concept) return undefined;
+    const args = this.templateArguments(fieldOf(named, 'arguments') as Syntax);
+    return constantExpr(BOOL, satisfiesConcept(this, concept, args, node.row) ? 1 : 0, node.row);
+  }
+
+  /** Runs `run` where a template's parameters are bound, as checking a constraint does. */
+  inTemplateOf<T>(template: ProgramTemplate, bindings: TemplateBindings, run: () => T): T {
+    return this.inTemplate(template, bindings, run);
+  }
+
+  /** Runs `run` in an unevaluated operand, which compiles expressions without running them. */
+  unevaluated<T>(run: () => T): T {
+    const previous = this.isUnevaluated;
+    this.isUnevaluated = true;
+    try {
+      return run();
+    } finally {
+      this.isUnevaluated = previous;
+    }
+  }
+
+  /** Runs `run` where a requires expression's parameters are declared. */
+  withRequiresParameters<T>(list: Syntax | undefined, run: () => T): T {
+    let result: T | undefined;
+    this.withNames((declare) => {
+      if (list) this.declareParameterNames(list, declare);
+      result = run();
+    });
+    return result as T;
+  }
+
+  declareConcept(parameters: TemplateParameter[], node: Syntax): void {
+    const name = (fieldOf(node, 'name') as Syntax).text;
+    const expression = node.children.find((child) => child.field !== 'name') as Syntax;
+    const info: ConceptInfo = {
+      kind: 'concept',
+      name,
+      parameters,
+      node: expression,
+      namespace: this.namespace,
+      owner: undefined,
+      enclosing: [...this.templateScopes],
+    };
+    this.declareHere(
+      name,
+      {
+        kind: 'template',
+        template: {
+          name,
+          program: info,
+          instantiate: (_args, row) => this.error(row, `コンセプト ${name} は型ではありません。`),
+        },
+      },
+      node.row
+    );
   }
 
   lambdaExpression(node: Syntax): Expr {

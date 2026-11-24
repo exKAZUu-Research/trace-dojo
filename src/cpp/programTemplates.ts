@@ -25,6 +25,8 @@ export interface TemplateParameter {
   valueType?: Syntax;
   valueDeclaration?: Syntax;
   defaultValue?: Syntax;
+  /** The concept a constrained type parameter's argument must satisfy (`template <std::integral T>`). */
+  constraint?: Syntax;
 }
 
 /**
@@ -367,8 +369,8 @@ export interface ProgramTemplate {
   readonly owner: ClassInfo | undefined;
   /** The bindings of the templates the template is declared in, such as a class template's for a member template. */
   readonly enclosing: Scope[];
-  /** The `requires` clause the declaration's arguments must satisfy. */
-  readonly constraint?: Syntax;
+  /** The `requires` clauses the declaration's arguments must satisfy. */
+  readonly constraints?: readonly Syntax[];
 }
 
 export interface ClassTemplateInfo extends ProgramTemplate {

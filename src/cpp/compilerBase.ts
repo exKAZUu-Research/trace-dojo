@@ -579,7 +579,6 @@ export abstract class CompilerBase {
         return this.sizedType(node);
       }
       case 'placeholder_type_specifier': {
-        if (fieldOf(node, 'constraint')) return this.unsupported(node.row, 'コンセプトで制約した auto');
         if (!allowAuto) return this.error(node.row, 'auto は、この場所では型として使えません。');
         return AUTO;
       }

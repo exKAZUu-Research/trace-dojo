@@ -1,4 +1,5 @@
 import type { Compiler } from './compiler';
+import { constrainedParameters } from './concepts';
 import type { Expr } from './expr';
 import {
   argumentsKey,
@@ -19,6 +20,8 @@ import { type Access, type ClassInfo, type FunctionInfo, type Type, VOID } from 
 /** A function template the program declares, which a call instantiates from its arguments. */
 interface FunctionTemplateInfo extends ProgramTemplate {
   readonly instances: Map<string, FunctionInfo | undefined>;
+  /** The constraints as written, which tell overloads apart from redeclarations. */
+  readonly constraintText: string;
   readonly access: Access;
   /** The explicit specializations (`template <> void f<int>(int)`), by their arguments' key once known. */
   readonly specializations: Syntax[];
@@ -29,7 +32,7 @@ interface FunctionTemplateInfo extends ProgramTemplate {
  * template, a specialization, or the out-of-class definition of a class template's member.
  */
 export function declareTemplate(compiler: Compiler, node: Syntax, owner?: ClassInfo, access: Access = 'public'): void {
-  const parameters = templateParameters(fieldOf(node, 'parameters') as Syntax);
+  const parameters = constrainedParameters(compiler, templateParameters(fieldOf(node, 'parameters') as Syntax));
   const constraint = node.children.find((child) => child.type === 'requires_clause');
   let inner = node.children.find((child) => child.field !== 'parameters' && child.type !== 'requires_clause');
   if (!inner) return compiler.error(node.row, 'template の後に宣言を書いてください。');
@@ -37,7 +40,7 @@ export function declareTemplate(compiler: Compiler, node: Syntax, owner?: ClassI
   const outer: TemplateParameter[][] = [];
   while (inner.type === 'template_declaration') {
     outer.push(parameters.splice(0));
-    parameters.push(...templateParameters(fieldOf(inner, 'parameters') as Syntax));
+    parameters.push(...constrainedParameters(compiler, templateParameters(fieldOf(inner, 'parameters') as Syntax)));
     inner = inner.children.find((child) => child.field !== 'parameters' && child.type !== 'requires_clause') as Syntax;
   }
   switch (inner.type) {
@@ -53,7 +56,7 @@ export function declareTemplate(compiler: Compiler, node: Syntax, owner?: ClassI
     case 'class_specifier':
     case 'struct_specifier':
     case 'union_specifier': {
-      declareClassTemplate(compiler, parameters, inner, owner);
+      declareClassTemplate(compiler, parameters, inner, owner, constraint);
       return;
     }
     case 'alias_declaration': {
@@ -114,8 +117,13 @@ export function inventParameters(
       const all = current.all.map((parameter) => {
         if (!parameter.isNamed || !hasPlaceholder(parameter)) return parameter;
         const name = `\0auto${invented.length}`;
-        invented.push({ name, kind: 'type', isPack: parameter.type === 'variadic_parameter_declaration' });
         const type = fieldOf(parameter, 'type') as Syntax;
+        invented.push({
+          name,
+          kind: 'type',
+          isPack: parameter.type === 'variadic_parameter_declaration',
+          constraint: fieldOf(type, 'constraint'),
+        });
         const named: Syntax = { ...type, type: 'type_identifier', text: name, all: [], children: [] };
         const parts = parameter.all.map((child) => (child === type ? named : child));
         return { ...parameter, all: parts, children: parts.filter((child) => child.isNamed) };
@@ -175,7 +183,8 @@ function declareClassTemplate(
   compiler: Compiler,
   parameters: TemplateParameter[],
   node: Syntax,
-  owner: ClassInfo | undefined
+  owner: ClassInfo | undefined,
+  constraint: Syntax | undefined
 ): void {
   const nameNode = fieldOf(node, 'name');
   const body = fieldOf(node, 'body');
@@ -196,7 +205,10 @@ function declareClassTemplate(
     if (body) info.node = node;
     return;
   }
-  const info = classTemplate(compiler, name, 'class', parameters, body ? node : undefined, owner);
+  const info = {
+    ...classTemplate(compiler, name, 'class', parameters, body ? node : undefined, owner),
+    constraints: constraint ? [constraint] : [],
+  };
   compiler.declareHere(name, compiler.templateEntity(info), node.row);
 }
 
@@ -227,19 +239,29 @@ export function declareFunctionTemplate(
     pattern.specializations.push(node);
     return;
   }
-  const existing = compiler.functionTemplateIfAny(name, owner, parameters.length, node);
+  const constraintText = [
+    constraint,
+    declarator.children.find((child) => child.type === 'requires_clause'),
+    ...parameters.map((parameter) => parameter.constraint),
+  ]
+    .map((clause) => clause?.text ?? '')
+    .join('|');
+  const existing = compiler.functionTemplateIfAny(name, owner, parameters.length, node, constraintText);
   if (existing) {
     if (node.type === 'function_definition') existing.node = node;
     return;
   }
+  // A trailing requires clause (`void f(T) requires C<T>`) constrains the template as the leading one does.
+  const trailing = declarator.children.find((child) => child.type === 'requires_clause');
   const info: FunctionTemplateInfo = {
     name,
     parameters,
     node,
+    constraintText,
     namespace: compiler.namespace,
     owner,
     enclosing: [...compiler.templateScopes],
-    constraint,
+    constraints: [constraint, trailing].filter((clause): clause is Syntax => clause !== undefined),
     instances: new Map(),
     access,
     specializations: [],
@@ -307,7 +329,7 @@ function instantiateFunction(
   if (info.instances.has(key)) return info.instances.get(key);
   let instance: FunctionInfo | undefined;
   try {
-    if (info.constraint && !compiler.satisfies(info, bindings, info.constraint)) return undefined;
+    if (!compiler.satisfies(info, bindings)) return undefined;
     const specialization = info.specializations.find((spec) => specializationKey(compiler, info, spec) === key);
     instance = specialization
       ? compiler.declareTemplateFunction(info, new TemplateBindings(), specialization)
