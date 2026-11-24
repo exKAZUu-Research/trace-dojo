@@ -57,7 +57,6 @@ const UNSUPPORTED_FUNCTIONS: [string, string[]][] = [
       'class_alias',
     ],
   ],
-  ['直列化', ['serialize', 'unserialize']],
 ];
 
 for (const [what, names] of UNSUPPORTED_FUNCTIONS) {

@@ -16,6 +16,7 @@ import './libArrayUser';
 import './libJson';
 import './libOutputControl';
 import './libRuntimeInfo';
+import './libSerialize';
 import './libSpl';
 import './libGenerator';
 import './libUnsupported';

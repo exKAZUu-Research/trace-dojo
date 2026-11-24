@@ -72,7 +72,8 @@ const SETTINGS = new Map<string, Setting>([
   ['memory_limit', { initial: '128M', apply: (_, value) => checkMemoryLimit(value) }],
   ['max_execution_time', { initial: '0' }],
   ['date.timezone', { initial: 'UTC', apply: (_, value) => checkTimezone(value) }],
-  ['default_charset', { initial: 'utf8' }],
+  // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- PHP reports this canonical encoding name.
+  ['default_charset', { initial: 'UTF-8' }],
 ]);
 
 /** Settings PHP has whose effects this grader does not reproduce, which it rejects instead of ignoring. */
