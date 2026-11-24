@@ -353,7 +353,6 @@ export class Converter extends ExpressionConverter {
       modifiers,
       typeParameters: this.convertTypeParameters(
         firstOfType(node, 'type_parameters'),
-        // code-gauge-allow duplicateLines -- the copies compile the same Kotlin construct in different contexts, whose differences sit between the shared lines.
         firstOfType(node, 'type_constraints')
       ),
       primaryConstructor: primaryNode ? this.convertPrimaryConstructor(primaryNode) : undefined,
