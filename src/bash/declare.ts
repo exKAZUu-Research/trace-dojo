@@ -25,6 +25,7 @@ export type DeclarationArgument =
   | (Assignment & {
       expandedElements?: CompoundElement[];
       committedCompound?: boolean;
+      failedCompound?: boolean;
       committedTarget?: { variable: Variable; priorKind: VariableValue['kind'] | undefined };
     });
 
@@ -125,9 +126,10 @@ function expandDeclarationAssignment(
   arg: Assignment,
   rawOptions: Options
 ): DeclarationArgument {
-  const options = isLocalDeclaration(shell, builtin, rawOptions)
-    ? rawOptions
-    : normalizeArrayNamerefPrecedence(rawOptions);
+  const builtinOptions = withBuiltinImpliedOptions(builtin, rawOptions);
+  const options = isLocalDeclaration(shell, builtin, builtinOptions)
+    ? builtinOptions
+    : normalizeArrayNamerefPrecedence(builtinOptions);
   const subscript = arg.subscript && literalWord(arg.subscript, shell.expander.expandAssociativeKey(arg.subscript));
   const value =
     arg.value &&
@@ -137,11 +139,15 @@ function expandDeclarationAssignment(
     );
   if (arg.array) {
     const rawItems = shell.expander.expandRawCompoundItems(arg.array, options.set.has('A') && !options.set.has('a'));
-    const committedTarget = commitCompoundDeclaration(shell, builtin, arg, options, rawItems);
+    const committed = commitCompoundDeclaration(shell, builtin, arg, builtinOptions, options, rawItems);
     return {
       ...arg,
       ...(subscript ? { subscript } : {}),
-      ...(committedTarget ? { committedCompound: true, committedTarget } : { expandedElements: rawItems }),
+      ...(committed === 'failed'
+        ? { failedCompound: true }
+        : committed
+          ? { committedCompound: true, committedTarget: committed }
+          : { expandedElements: rawItems }),
     };
   }
   return {
@@ -151,123 +157,143 @@ function expandDeclarationAssignment(
   };
 }
 
+function withBuiltinImpliedOptions(builtin: string, rawOptions: Options): Options {
+  if (builtin !== 'readonly' && builtin !== 'export') return rawOptions;
+  const set = new Set(rawOptions.set);
+  const unset = new Set(rawOptions.unset);
+  if (builtin === 'readonly') set.add('r');
+  else if (set.delete('n')) unset.add('x');
+  else set.add('x');
+  return { ...rawOptions, set, unset };
+}
+
 function commitCompoundDeclaration(
   shell: Shell,
   builtin: string,
   arg: Assignment,
+  rawOptions: Options,
   options: Options,
   rawItems: CompoundElement[]
-): { variable: Variable; priorKind: VariableValue['kind'] | undefined } | undefined {
-  const { set } = options;
+): { variable: Variable; priorKind: VariableValue['kind'] | undefined } | 'failed' | undefined {
   if (!hasValidCompoundContext(shell, builtin, options)) return undefined;
-  const { localScope, targetName, referencedSubscript } = resolveCompoundTargetContext(shell, builtin, arg, options);
+  if (isLocalDeclaration(shell, builtin, rawOptions) && rawOptions.attemptedSet.has('n')) return undefined;
+  if (options.set.has('n')) return undefined;
+  const phase1Options = buildPhase1CompoundOptions(options);
+  const { localScope, targetName, referencedSubscript, fromNameref } = resolvePhase1CompoundTarget(
+    shell,
+    builtin,
+    arg,
+    phase1Options
+  );
   if (arg.subscript || referencedSubscript !== undefined) {
-    const sub = arg.subscript?.text ?? referencedSubscript ?? '';
-    shell.discard(`${arg.name}[${sub}]: cannot assign list to array member`);
+    return rejectCompoundArrayMember(shell, builtin, { arg, rawOptions, localScope, targetName, referencedSubscript });
   }
-  if (localScope !== undefined && options.attemptedSet.has('n')) return undefined;
-  if (!validateCompoundDeclarationTarget(shell, builtin, targetName, arg.append, options, localScope)) {
+  const visibleStore = Boolean(fromNameref);
+  if (
+    !validateCompoundDeclarationTarget(shell, builtin, targetName, arg.append, phase1Options, localScope, visibleStore)
+  ) {
     return undefined;
   }
-  const variable = ensureCompoundTargetVariable(shell, targetName, set, localScope);
-  const preUnsetStore = resolveCompoundPreUnsetStore(shell, variable, options, localScope !== undefined);
-  return executeCompoundCommit(shell, builtin, arg, variable, preUnsetStore, options, rawItems);
-}
-
-// code-gauge-allow functionParameterCount -- Commits compound attributes, items, readonly flag, and deferred +n removal.
-function executeCompoundCommit(
-  shell: Shell,
-  builtin: string,
-  arg: Assignment,
-  variable: Variable,
-  preUnsetStore: PreUnsetNamerefStore | undefined,
-  options: Options,
-  rawItems: CompoundElement[]
-): { variable: Variable; priorKind: VariableValue['kind'] | undefined } | undefined {
-  if (preUnsetStore?.referencedSubscript !== undefined) {
-    preUnsetStore.finalLink.attributes.delete('n');
-    shell.discard(
-      `${preUnsetStore.variable.name}[${preUnsetStore.referencedSubscript}]: cannot assign list to array member`
-    );
-  }
-  const storeVariable = preUnsetStore?.variable ?? variable;
-  if (preUnsetStore && !validatePreUnsetCompoundStore(shell, builtin, storeVariable, options)) return undefined;
+  const storeVariable = ensureCompoundTargetVariable(shell, targetName, phase1Options.set, localScope, visibleStore);
   const priorKind = storeVariable.value?.kind;
-  const storeOptions = preUnsetStore ? withoutUnsetN(options) : options;
-  if (!applyAttributes(shell, builtin, storeVariable, storeOptions, true, false, false, true)) return undefined;
+  if (!applyAttributes(shell, builtin, storeVariable, phase1Options, true, false, false, true)) return undefined;
   const isAssoc = storeVariable.attributes.has('A') || storeVariable.value?.kind === 'associative';
   const { elements, error } = shell.expander.validateCompoundItems(rawItems, isAssoc, true, arg.name);
   const ok = shell.assignCompoundTo(storeVariable, elements, arg.append, arg.name);
-  if (ok && preUnsetStore?.deferUnsetN) preUnsetStore.finalLink.attributes.delete('n');
-  if (options.set.has('r')) storeVariable.attributes.add('r');
   if (error) shell.discard(error);
   if (!ok) throw new DiscardSignal();
   return { variable: storeVariable, priorKind };
 }
 
-function validatePreUnsetCompoundStore(
+function rejectCompoundArrayMember(
   shell: Shell,
   builtin: string,
-  storeVariable: Variable,
-  { set, unset }: Options
-): boolean {
-  if (storeVariable.attributes.has('r')) {
-    if (shell.isInFunction && builtin !== 'readonly' && builtin !== 'export') return false;
-    shell.discard(`${storeVariable.name}: readonly variable`);
+  ctx: {
+    arg: Assignment;
+    rawOptions: Options;
+    localScope: Map<string, Variable> | undefined;
+    targetName: string;
+    referencedSubscript: string | undefined;
   }
-  const kindErr = incompatibleArrayKindError(storeVariable, set);
-  if (kindErr) shell.discard(`${storeVariable.name}: ${kindErr}`);
-  return !conversionError(storeVariable, set, withoutUnsetSet(unset));
+): 'failed' {
+  unlinkElementNamerefOnCompoundError(shell, ctx.arg.name, ctx.rawOptions, ctx.localScope);
+  const sub = ctx.arg.subscript?.text ?? ctx.referencedSubscript ?? '';
+  const errBase = ctx.referencedSubscript === undefined ? ctx.arg.name : ctx.targetName;
+  const message = `${errBase}[${sub}]: cannot assign list to array member`;
+  if (shell.isInFunction && builtin !== 'readonly' && builtin !== 'export') {
+    shell.reportError(message);
+    return 'failed';
+  }
+  shell.discard(message);
 }
 
-function withoutUnsetN(options: Options): Options {
-  return { ...options, unset: withoutUnsetSet(options.unset) };
+function buildPhase1CompoundOptions(options: Options): Options {
+  const set = new Set([...options.set].filter((f) => f !== 'n' && f !== 'r'));
+  const unset = new Set([...options.unset].filter((f) => f !== 'n' && f !== 'a' && f !== 'A'));
+  return { set, unset, attemptedSet: new Set() };
 }
 
-function withoutUnsetSet(unset: Set<string>): Set<string> {
-  const copy = new Set(unset);
-  copy.delete('n');
-  return copy;
+function unlinkElementNamerefOnCompoundError(
+  shell: Shell,
+  name: string,
+  rawOptions: Options,
+  localScope: Map<string, Variable> | undefined
+): void {
+  if (!rawOptions.unset.has('n')) return;
+  if (localScope) {
+    localScope.get(name)?.attributes.delete('n');
+    return;
+  }
+  const globalOnly = rawOptions.set.has('g');
+  const start = globalOnly ? shell.state.scopes[0].get(name) : shell.findOwnVariable(name);
+  if (start?.attributes.has('n')) findFinalNamerefLink(shell, start, globalOnly).attributes.delete('n');
 }
 
-function resolveCompoundTargetContext(
+function resolvePhase1CompoundTarget(
   shell: Shell,
   builtin: string,
   arg: Assignment,
-  options: Options
-): { localScope: Map<string, Variable> | undefined; targetName: string; referencedSubscript?: string } {
-  const { set, unset } = options;
-  const isLocal =
-    shell.isInFunction && !set.has('g') && (builtin === 'local' || builtin === 'declare' || builtin === 'typeset');
+  phase1Options: Options
+): {
+  localScope: Map<string, Variable> | undefined;
+  targetName: string;
+  referencedSubscript?: string;
+  fromNameref?: boolean;
+} {
+  const { set, unset } = phase1Options;
+  const isLocal = isLocalDeclaration(shell, builtin, phase1Options);
   const { scopes, functionScopes } = shell.state;
   const localScope = isLocal ? scopes[functionScopes.at(-1) as number] : undefined;
-  const { targetName, referencedSubscript } = resolveDeclaredTarget(
-    shell,
-    arg.name,
-    options.suppressedNameref ? new Set([...set, 'n']) : set,
-    unset,
-    Boolean(arg.subscript),
-    set.has('g'),
-    localScope
-  );
-  return { localScope, targetName, ...(referencedSubscript === undefined ? {} : { referencedSubscript }) };
+  if (!localScope && set.has('g') && !arg.subscript) {
+    const globalStart = scopes[0].get(arg.name);
+    if (globalStart?.attributes.has('n')) {
+      const finalLink = findFinalNamerefLink(shell, globalStart, true);
+      const firstHop = finalLink.value?.kind === 'scalar' ? finalLink.value.value : '';
+      if (firstHop !== '') {
+        return { localScope, ...resolveVisibleReferentTarget(shell, firstHop), fromNameref: true };
+      }
+    }
+  }
+  const resolved = resolveDeclaredTarget(shell, arg.name, set, unset, Boolean(arg.subscript), set.has('g'), localScope);
+  return { localScope, ...resolved };
 }
 
+// code-gauge-allow functionParameterCount -- Checks host-env append, readonly boundary, array-kind clash, and conversion error for compound targets.
 function validateCompoundDeclarationTarget(
   shell: Shell,
   builtin: string,
   targetName: string,
   append: boolean,
   options: Options,
-  localScope: Map<string, Variable> | undefined
+  localScope: Map<string, Variable> | undefined,
+  visibleStore = false
 ): boolean {
   const { set, unset } = options;
-  const lookupSet = options.suppressedNameref ? new Set([...set, 'n']) : set;
+  const lookupSet = visibleStore ? new Set([...set].filter((f) => f !== 'g')) : set;
   const existing = resolveCompoundExisting(shell, targetName, lookupSet, localScope);
   if (!existing && !localScope && append && shell.isUnreadHostEnv(targetName)) {
     throw new UnsupportedFeatureError(`環境変数（${targetName}）`);
   }
-  if (!localScope && options.suppressedNameref && existing && isArrayCell(existing)) return false;
   if (
     existing?.attributes.has('r') ||
     Boolean(localScope && !localScope.has(targetName) && isReadonlyGlobal(shell, targetName))
@@ -292,12 +318,13 @@ function ensureCompoundTargetVariable(
   shell: Shell,
   targetName: string,
   set: Set<string>,
-  localScope: Map<string, Variable> | undefined
+  localScope: Map<string, Variable> | undefined,
+  visibleStore = false
 ): Variable {
   const { scopes } = shell.state;
   let variable = localScope
     ? localScope.get(targetName)
-    : set.has('n') || set.has('g')
+    : !visibleStore && (set.has('n') || set.has('g'))
       ? scopes[0].get(targetName)
       : shell.findVariable(targetName, false);
   if (!variable) {
@@ -373,7 +400,7 @@ export function runDeclaration(
   const options = isLocal ? parsed.options : normalizeArrayNamerefPrecedence(parsed.options);
   let status = 0;
   for (const operand of operands) {
-    if (!declareOne(shell, name, operand, options, isLocal, onMaterialize)) status = 1;
+    if (!declareOperand(shell, name, operand, options, isLocal, onMaterialize)) status = 1;
   }
   return status;
 }
@@ -447,6 +474,22 @@ interface DeclarationDestination {
   referencedSubscript?: string;
 }
 
+function declareOperand(
+  shell: Shell,
+  builtin: string,
+  operand: DeclarationArgument,
+  options: Options,
+  isLocal: boolean,
+  onMaterialize?: () => void
+): boolean {
+  if (typeof operand !== 'string' && operand.failedCompound) return false;
+  if (typeof operand !== 'string' && operand.committedTarget) {
+    notifyIfArrayMaterialized(true, operand.committedTarget.variable, operand.committedTarget.priorKind, onMaterialize);
+    return declareOne(shell, builtin, operand.name, options, isLocal);
+  }
+  return declareOne(shell, builtin, operand, options, isLocal, onMaterialize);
+}
+
 // code-gauge-allow functionCognitiveComplexity -- Bash's declaration of one operand: its name, a dynamic variable, its attributes, and its value.
 function declareOne(
   shell: Shell,
@@ -456,10 +499,6 @@ function declareOne(
   isLocal: boolean,
   onMaterialize?: () => void
 ): boolean {
-  if (typeof operand !== 'string' && operand.committedTarget) {
-    notifyIfArrayMaterialized(true, operand.committedTarget.variable, operand.committedTarget.priorKind, onMaterialize);
-    return true;
-  }
   const parsed = typeof operand === 'string' ? parseWordOperand(operand) : undefined;
   const name = typeof operand === 'string' ? (parsed as { name: string }).name : operand.name;
   const isSubscripted =
@@ -483,7 +522,7 @@ function declareOne(
     assignMode,
     isCompound(operand)
   );
-  if (!destination) return false;
+  if (!destination || rejectUnsetArrayThroughNameref(shell, builtin, name, destination.variable, options)) return false;
   if (isElementAliasAttributeBuiltin(builtin, isSubscripted, destination)) {
     return finishElementAliasAttributeBuiltin(shell, builtin, destination, operand, parsed, assignMode);
   }
@@ -752,22 +791,25 @@ interface PreUnsetNamerefStore extends DeclarationDestination {
   deferUnsetN: boolean;
 }
 
-function resolveCompoundPreUnsetStore(
+function rejectUnsetArrayThroughNameref(
   shell: Shell,
-  finalLink: Variable,
-  { unset }: Options,
-  isLocal: boolean
-): PreUnsetNamerefStore | undefined {
-  if (isLocal || !unset.has('n') || !finalLink.attributes.has('n')) return undefined;
-  const firstHop = finalLink.value?.kind === 'scalar' ? finalLink.value.value : '';
-  if (firstHop === '') return undefined;
+  builtin: string,
+  operandName: string,
+  variable: Variable,
+  { unset }: Options
+): boolean {
+  if (!unset.has('n') || !variable.attributes.has('n') || (!unset.has('a') && !unset.has('A'))) return false;
+  const firstHop = variable.value?.kind === 'scalar' ? variable.value.value : '';
+  if (firstHop === '') return false;
   const { targetName, referencedSubscript } = resolveVisibleReferentTarget(shell, firstHop);
-  return {
-    variable: ensureStoreVariable(shell, targetName),
-    finalLink,
-    deferUnsetN: referencedSubscript === undefined,
-    ...(referencedSubscript === undefined ? {} : { referencedSubscript }),
-  };
+  if (referencedSubscript !== undefined) return false;
+  const referent = shell.findVariable(targetName, false);
+  const destroysArray =
+    (unset.has('a') && referent?.value?.kind === 'indexed') ||
+    (unset.has('A') && referent?.value?.kind === 'associative');
+  if (!destroysArray) return false;
+  shell.reportError(`${builtin}: ${operandName}: cannot destroy array variables in this way`);
+  return true;
 }
 
 function resolveVisibleReferentTarget(
@@ -1417,7 +1459,9 @@ function applyAttributes(
   const becomesIndexed =
     set.has('a') ||
     (impliesIndexed && !set.has('A') && !variable.attributes.has('A') && variable.value?.kind !== 'associative');
-  if ((set.has('A') || becomesIndexed) && variable.attributes.delete('n')) variable.value = undefined;
+  if ((set.has('A') || becomesIndexed) && variable.attributes.delete('n') && !set.has('a') && !set.has('A')) {
+    variable.value = { kind: 'indexed', elements: new Map() };
+  }
   for (const attribute of ['i', 'l', 'u', 'c', 'n', 'x', 't'] as Attribute[]) {
     if (set.has(attribute)) variable.attributes.add(attribute);
     if (unset.has(attribute) && !(attribute === 'n' && deferUnsetN)) variable.attributes.delete(attribute);
