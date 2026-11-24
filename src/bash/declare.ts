@@ -492,6 +492,7 @@ function storeSelectedDeclaration(
     parsed?.subscript !== undefined || (typeof operand !== 'string' && operand.subscript !== undefined);
   const selected = selectDeclarationStore(
     shell,
+    builtin,
     name,
     destination,
     preUnsetStore,
@@ -578,6 +579,7 @@ function rejectSubscriptedAttributeBuiltin(
 // code-gauge-allow functionParameterCount -- Selects the destination or visible local element store for a declaration operand.
 function selectDeclarationStore(
   shell: Shell,
+  builtin: string,
   name: string,
   destination: DeclarationDestination,
   preUnsetStore: DeclarationDestination | undefined,
@@ -590,7 +592,7 @@ function selectDeclarationStore(
   const implicitIndexedZero =
     assignsNonCompound && !isSubscripted && referencedSubscript === undefined && isIndexedCell(variable);
   if (set.has('g') && implicitIndexedZero) {
-    return resolveImplicitIndexedStore(shell, variable.name);
+    return resolveImplicitIndexedStore(shell, builtin, variable.name);
   }
   if (preUnsetStore) {
     return { storeVariable: variable, effectiveSubscript: referencedSubscript };
@@ -604,18 +606,15 @@ function selectDeclarationStore(
 
 function resolveImplicitIndexedStore(
   shell: Shell,
+  builtin: string,
   baseName: string
 ): { storeVariable: Variable; effectiveSubscript: string } | undefined {
   const resolved = shell.resolveNameOrUndefined(baseName);
   if (resolved === undefined) return undefined;
   const direct = resolved.includes('[') ? shell.findOwnVariable(resolved) : undefined;
-  if (!direct) {
-    const split = shell.splitSubscript(resolved);
-    if (split) {
-      const arrName = shell.resolveNameOrUndefined(split.name);
-      if (arrName === undefined) return undefined;
-      return { storeVariable: ensureStoreVariable(shell, arrName), effectiveSubscript: split.subscript };
-    }
+  if (!direct && !isIdentifier(resolved)) {
+    shell.reportError(`${builtin}: \`${resolved}': not a valid identifier`);
+    return undefined;
   }
   const storeVariable = direct ?? ensureStoreVariable(shell, resolved);
   materializeRedirectedIndexedCell(storeVariable);
