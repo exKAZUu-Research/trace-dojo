@@ -14,7 +14,8 @@ interface Qualified {
 /** A C++ type; a reference type appears only where a variable, parameter, or function result is declared. */
 export type Type =
   | ({ kind: 'void' } & Qualified)
-  | ({ kind: 'int'; name: IntName } & Qualified)
+  /** An integer type, or an enumeration whose values have the type `name` underlies. */
+  | ({ kind: 'int'; name: IntName; enumeration?: EnumInfo } & Qualified)
   | ({ kind: 'float'; name: FloatName } & Qualified)
   | ({ kind: 'nullptr' } & Qualified)
   | ({ kind: 'pointer'; to: Type } & Qualified)
@@ -56,6 +57,25 @@ export const CONST_CHAR: IntType = { kind: 'int', name: 'char', isConst: true };
 export const CHAR_POINTER: PointerType = { kind: 'pointer', to: CHAR };
 
 export type Access = 'public' | 'protected' | 'private';
+
+/** An enumeration (`enum Color { RED };`, `enum class Dir : char { N };`). */
+export class EnumInfo {
+  readonly enumerators = new Map<string, number | bigint>();
+  isComplete = false;
+
+  constructor(
+    readonly name: string,
+    readonly isScoped: boolean,
+    /** The underlying type, which the enumerators decide unless the declaration fixes it. */
+    public underlying: IntName,
+    readonly hasFixedType: boolean
+  ) {}
+}
+
+/** The scoped enumeration a type is, which converts to no other type implicitly. */
+export function isScopedEnum(type: Type): boolean {
+  return type.kind === 'int' && type.enumeration?.isScoped === true;
+}
 
 export interface FieldInfo {
   name: string;
@@ -396,7 +416,10 @@ export function sameType(a: Type, b: Type, withQualifiers = true): boolean {
   if (a.kind !== b.kind) return false;
   if (withQualifiers && isConstType(a) !== isConstType(b) && a.kind !== 'array') return false;
   switch (a.kind) {
-    case 'int':
+    case 'int': {
+      const other = b as typeof a;
+      return a.name === other.name && a.enumeration === other.enumeration;
+    }
     case 'float': {
       return a.name === (b as typeof a).name;
     }
@@ -475,7 +498,7 @@ export function typeName(type: Type, inner = ''): string {
 function baseName(type: Type): string {
   switch (type.kind) {
     case 'int': {
-      return INT_NAMES[type.name];
+      return type.enumeration?.name ?? INT_NAMES[type.name];
     }
     case 'float': {
       return type.name === 'ldouble' ? 'long double' : type.name;

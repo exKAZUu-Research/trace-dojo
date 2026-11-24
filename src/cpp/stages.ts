@@ -10,7 +10,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   field_designator: '指示付きの初期化子（{.x = 1} など）',
   subscript_designator: '指示付きの初期化子（{[1] = 2} など）',
   subscript_range_designator: '指示付きの初期化子（{[1] = 2} など）',
-  enum_specifier: '列挙（enum）',
   union_specifier: '共用体（union）',
   bitfield_clause: 'ビットフィールド',
   type_definition: 'typedef',

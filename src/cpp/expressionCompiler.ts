@@ -54,6 +54,7 @@ import {
   isCopyConstructor,
   isInteger,
   isReferenceRelated,
+  isScopedEnum,
   isWide,
   LONG,
   nonReference,
@@ -662,6 +663,15 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const rightValue = this.rvalue(right);
     const lt = leftValue.type;
     const rt = rightValue.type;
+    // A scoped enumeration takes part only in comparisons with its own type (C++20 [expr.rel], [expr.eq]).
+    if (
+      (isScopedEnum(lt) || isScopedEnum(rt)) &&
+      (!COMPARISONS.has(operator) || !sameType(unqualified(lt), unqualified(rt)))
+    )
+      return this.error(
+        row,
+        `演算子 ${operator} は ${typeName(lt)} と ${typeName(rt)} には使えません（enum class の値は整数として計算できません）。`
+      );
     if (isArithmetic(lt) && isArithmetic(rt)) return this.arithmetic(operator, leftValue, rightValue, row);
     return this.pointerOperation(operator, leftValue, rightValue, row);
   }
@@ -930,7 +940,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const value = this.rvalue(operand);
     const type = value.type;
     if (operator === '+' && type.kind === 'pointer') return value;
-    if (!isArithmetic(type) || (operator === '~' && !isInteger(type))) {
+    if (!isArithmetic(type) || (operator === '~' && !isInteger(type)) || isScopedEnum(type)) {
       return this.error(row, `演算子 ${operator} は ${typeName(type)} には使えません。`);
     }
     const promoted = isInteger(type)
@@ -993,6 +1003,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     } else if (isArithmetic(type)) {
       if (type.kind === 'int' && type.name === 'bool')
         return this.error(row, `bool の変数には ${operator} を使えません（C++17 から）。`);
+      if (type.kind === 'int' && type.enumeration)
+        return this.error(row, `列挙 ${type.enumeration.name} の変数には ${operator} を使えません。`);
       const common = commonType(unqualified(type) as never, INT as never) as ArithmeticType;
       const add = arithmeticOperation('+', common);
       const one = common.kind === 'int' && isWide(common) ? BigInt(delta) : delta;
@@ -1463,6 +1475,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const value = this.rvalue(expr);
     const type = value.type;
     const run = value.run;
+    if (isScopedEnum(type)) return this.error(row, `enum class（${typeName(type)}）の値は条件に使えません。`);
     if (isArithmetic(type))
       return (frame) => {
         const v = run(frame);

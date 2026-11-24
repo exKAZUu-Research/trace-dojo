@@ -204,12 +204,27 @@ function arithmeticConversion(
   host: ConversionHost,
   from: Extract<Type, { kind: 'int' | 'float' }>,
   to: Extract<Type, { kind: 'int' | 'float' }>
-): ConversionSequence {
+): ConversionSequence | undefined {
   const target = unqualified(to);
   const apply = (e: Expr): Expr => convertArithmetic(host.rvalue(e), target);
+  const fromEnum = from.kind === 'int' ? from.enumeration : undefined;
+  const toEnum = to.kind === 'int' ? to.enumeration : undefined;
+  // No integer converts to an enumeration implicitly, and a scoped enumeration converts to nothing (C++20 [conv.integral]).
+  if (toEnum || fromEnum?.isScoped) return toEnum === fromEnum ? sequence(Rank.Exact, apply) : undefined;
+  if (fromEnum) {
+    // An unscoped enumeration promotes to its underlying type and to that type's promotion (C++20 [conv.prom]).
+    const promoted = enumPromotion(from as Extract<Type, { kind: 'int' }>);
+    if (to.kind === 'int' && (to.name === promoted || (fromEnum.hasFixedType && to.name === fromEnum.underlying)))
+      return sequence(Rank.Promotion, apply);
+    return sequence(Rank.Conversion, apply);
+  }
   if (from.kind === to.kind && from.name === to.name) return sequence(Rank.Exact, apply);
   if (isPromotion(from, to)) return sequence(Rank.Promotion, apply);
   return sequence(Rank.Conversion, apply);
+}
+
+function enumPromotion(type: Extract<Type, { kind: 'int' }>): string {
+  return intRank(type.name) < intRank('int') ? 'int' : type.name;
 }
 
 /** Converts an arithmetic prvalue to another arithmetic type, folding constants. */

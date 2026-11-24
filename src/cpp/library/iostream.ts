@@ -590,8 +590,10 @@ export class Streams {
     const run = value.run;
     const valueType = value.type;
     if (valueType.kind === 'void') return compiler.error(row, '値を返さない関数（void）の結果は表示できません。');
+    if (valueType.kind === 'int' && valueType.enumeration?.isScoped)
+      return compiler.error(row, `演算子 << は std::ostream と ${typeName(type)} には使えません。`);
     if (valueType.kind === 'int') {
-      if (isCharType(valueType)) {
+      if (isCharType(valueType) && !valueType.enumeration) {
         return (frame, stream) => stream.writeField(frame, String.fromCodePoint(asNumber(run(frame)) & 0xff));
       }
       if (valueType.name === 'bool') return (frame, stream) => writeBool(frame, stream, asNumber(run(frame)) !== 0);
@@ -624,6 +626,8 @@ export class Streams {
       return compiler.error(row, '>> の右には、値を入れられる変数を書いてください。');
     }
     const type = right.type;
+    if (type.kind === 'int' && type.enumeration)
+      return compiler.error(row, `演算子 >> は ${typeName(left.type)} と ${typeName(type)} には使えません。`);
     let read: (stream: StreamValue, frame: Frame) => Value | undefined;
     if (type.kind === 'class' && type.cls === this.library.stringClass) {
       return this.extractWith(compiler, left, right, row, (stream, target, frame) => {

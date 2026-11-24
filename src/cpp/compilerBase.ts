@@ -1,3 +1,4 @@
+import { enumeratorEntity, enumSpecifierType } from './enums';
 import { compileError, unsupported } from './errors';
 import type { Expr } from './expr';
 import { isSdkMemberDeclared } from './library/libcGlobals';
@@ -7,6 +8,7 @@ import { fieldOf, hasToken, type Syntax } from './syntax';
 import {
   ClassInfo,
   classType,
+  type EnumInfo,
   type GlobalInfo,
   type IntName,
   pointerTo,
@@ -171,6 +173,12 @@ export abstract class CompilerBase {
     if (!scopeNode) return this.lookupInGlobal(nameNode, typeOnly);
     const scope = this.resolveScope(scopeNode);
     if (scope.kind === 'namespace') return this.lookupInNamespace(nameNode, node.row);
+    if (scope.kind === 'enum') {
+      const enumerator = enumeratorEntity(scope.info, nameNode.text);
+      return (
+        enumerator ?? this.error(node.row, `列挙 ${scope.info.name} に ${nameNode.text} という列挙子はありません。`)
+      );
+    }
     return this.lookupInClass(scope.cls, nameNode, node.row);
   }
 
@@ -254,12 +262,16 @@ export abstract class CompilerBase {
   }
 
   /** The namespace or class a qualified name's scope names. */
-  resolveScope(node: Syntax): { kind: 'namespace' } | { kind: 'class'; cls: ClassInfo } {
+  resolveScope(
+    node: Syntax
+  ): { kind: 'namespace' } | { kind: 'class'; cls: ClassInfo } | { kind: 'enum'; info: EnumInfo } {
     if (node.type === 'namespace_identifier' && node.text === 'std') return { kind: 'namespace' };
     if (node.type === 'namespace_identifier' || node.type === 'type_identifier' || node.type === 'identifier') {
       const entity = this.findName(node.text, true);
       if (entity?.kind === 'class') return { kind: 'class', cls: entity.cls };
       if (entity?.kind === 'type' && entity.type.kind === 'class') return { kind: 'class', cls: entity.type.cls };
+      if (entity?.kind === 'type' && entity.type.kind === 'int' && entity.type.enumeration)
+        return { kind: 'enum', info: entity.type.enumeration };
       if (!entity) {
         this.checkUnimplementedSdkName(node.text, node.row, 'global');
         if (this.hasUsingStd) this.checkUnimplementedSdkName(node.text, node.row, 'std');
@@ -278,6 +290,43 @@ export abstract class CompilerBase {
       return (fieldOf(node, 'name') as Syntax).text;
     }
     return node.text;
+  }
+
+  /** What a name declared in the innermost scope (a block, a class, or the global scope) denotes, if anything. */
+  findDeclaredHere(name: string): Entity | undefined {
+    if (this.context.fn) return this.context.scope.names.get(name);
+    if (this.memberClass) return this.memberEntity(this.memberClass, name);
+    return this.globalScope.names.get(name);
+  }
+
+  /** Declares a type or a constant in the innermost scope: a block, a class, or the global scope. */
+  declareHere(name: string, entity: Entity, row: number): void {
+    this.checkHeaderMacro(name, row);
+    if (this.findDeclaredHere(name)) this.error(row, `${name} はすでに宣言されています。`);
+    if (this.context.fn) {
+      this.context.scope.names.set(name, entity);
+      return;
+    }
+    const cls = this.memberClass;
+    if (cls) {
+      if (entity.kind === 'type') cls.memberTypes.set(name, entity.type);
+      else if (entity.kind === 'class') cls.memberTypes.set(name, classType(entity.cls));
+      else if (entity.kind === 'value') cls.constants.set(name, entity.make);
+      else this.error(row, `${name} はクラスの中では宣言できません。`);
+      return;
+    }
+    this.globalScope.names.set(name, entity);
+  }
+
+  /** Runs `compile` with a scope of names it declares, which only it sees. */
+  withNames(compile: (declare: (name: string, entity: Entity) => void) => void): void {
+    const scope = new Scope();
+    this.context.scopes.push(scope);
+    try {
+      compile((name, entity) => scope.names.set(name, entity));
+    } finally {
+      this.context.scopes.pop();
+    }
   }
 
   // Types ----------------------------------------------------------------------------------------------------------
@@ -340,6 +389,9 @@ export abstract class CompilerBase {
       case 'class_specifier':
       case 'struct_specifier': {
         return this.classSpecifierType(node);
+      }
+      case 'enum_specifier': {
+        return enumSpecifierType(this, node);
       }
       case 'type_descriptor': {
         return this.typeDescriptor(node);
@@ -533,6 +585,9 @@ export abstract class CompilerBase {
 
   /** Compiles an expression of the program, for the parts of the base that evaluate constants. */
   abstract compileExpression(node: Syntax): Expr;
+
+  /** The prvalue of an expression. */
+  abstract rvalue(expr: Expr): Expr;
 
   describeType(type: Type): string {
     return typeName(type);

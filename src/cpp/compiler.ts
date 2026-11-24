@@ -6,6 +6,7 @@ import { isBaseAccessible, isMemberAccessible } from './access';
 import { byteAt } from './bytes';
 import { type Declared, hasAuto } from './compilerBase';
 import { implicitConversion } from './conversions';
+import { enumeratorEntity } from './enums';
 import { CppException, CppRuntimeError, NarrowingConversionError } from './errors';
 import {
   type Expr,
@@ -207,8 +208,9 @@ export class Compiler extends StatementCompiler {
         return;
       }
       case 'class_specifier':
-      case 'struct_specifier': {
-        this.classSpecifierType(node);
+      case 'struct_specifier':
+      case 'enum_specifier': {
+        this.resolveTypeSpecifier(node);
         return;
       }
       case 'function_definition': {
@@ -234,6 +236,14 @@ export class Compiler extends StatementCompiler {
     const isNamespace = hasToken(node, 'namespace');
     const target = node.children[0];
     if (!target) return;
+    if (hasToken(node, 'enum')) {
+      const type = this.resolveTypeSpecifier(target);
+      const info = type.kind === 'int' ? type.enumeration : undefined;
+      if (!info) return this.error(node.row, `${target.text} は列挙ではありません。`);
+      for (const name of info.enumerators.keys())
+        this.declareHere(name, enumeratorEntity(info, name) as Entity, node.row);
+      return;
+    }
     if (isNamespace) {
       if (target.text !== 'std') return this.unsupported(node.row, `名前空間 ${target.text}`);
       if (this.context.fn) this.context.scope.usesStd = true;
@@ -327,6 +337,10 @@ export class Compiler extends StatementCompiler {
             this.unsupported(member.row, 'クラスの中の using 宣言（using Base::Base; など）');
             break;
           }
+          case 'enum_specifier': {
+            this.resolveTypeSpecifier(member);
+            break;
+          }
           case 'class_specifier':
           case 'struct_specifier': {
             this.unsupported(member.row, '入れ子のクラス');
@@ -391,6 +405,10 @@ export class Compiler extends StatementCompiler {
       (fieldOf(type, 'body') || declarators.length === 0)
     )
       return this.unsupported(type.row, 'クラスの中のクラスの宣言');
+    if (declarators.length === 0 && type?.type === 'enum_specifier') {
+      this.resolveTypeSpecifier(type);
+      return;
+    }
     if (declarators.length === 0) return this.error(node.row, 'メンバの名前を書いてください。');
     const isStatic = this.hasSpecifier(node, 'static');
     const isConstexpr = this.isConstexpr(node);
@@ -1495,8 +1513,12 @@ export class Compiler extends StatementCompiler {
     const typeNode = fieldOf(node, 'type');
     const declarators = fieldsOf(node, 'declarator');
     if (declarators.length === 0) {
-      if (typeNode?.type === 'class_specifier' || typeNode?.type === 'struct_specifier') {
-        this.classSpecifierType(typeNode);
+      if (
+        typeNode?.type === 'class_specifier' ||
+        typeNode?.type === 'struct_specifier' ||
+        typeNode?.type === 'enum_specifier'
+      ) {
+        this.resolveTypeSpecifier(typeNode);
         return;
       }
       return this.error(node.row, '宣言する名前を書いてください。');

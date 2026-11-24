@@ -1,7 +1,7 @@
 import { promote } from '../c/types';
 import { isBaseAccessible } from './access';
 import { AUTO, hasAuto } from './compilerBase';
-import { permitsQualificationConversion } from './conversions';
+import { convertArithmetic, permitsQualificationConversion } from './conversions';
 import { CppException, CppRuntimeError } from './errors';
 import {
   type ConstantLocation,
@@ -33,6 +33,7 @@ import {
   isInteger,
   isLibraryClass,
   isReferenceRelated,
+  isScopedEnum,
   nonReference,
   pointerTo,
   referenceTo,
@@ -207,6 +208,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       case 'class_specifier':
       case 'struct_specifier': {
         return this.unsupported(node.row, '関数の中のクラスの定義');
+      }
+      case 'enum_specifier': {
+        this.resolveTypeSpecifier(node);
+        return () => {};
       }
       case 'function_definition': {
         const assignment = asZeroAssignment(node);
@@ -1088,19 +1093,25 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (!isInteger(subject.type))
       return this.error(node.row, `switch 文の () には整数を書いてください（${typeName(subject.type)}）。`);
     const promoted = promote(subject.type);
-    const value = this.fullExpression(this.convert(subject, promoted, node.row).run);
+    const value = this.fullExpression(convertArithmetic(subject, promoted).run);
     const body = fieldOf(node, 'body') as Syntax;
+    const scoped = isScopedEnum(subject.type) ? subject.type : undefined;
     return this.inScope(() => {
       this.context.switchDepth++;
       try {
-        return this.compileSwitchBody(body, promoted, value);
+        return this.compileSwitchBody(body, promoted, value, scoped);
       } finally {
         this.context.switchDepth--;
       }
     });
   }
 
-  private compileSwitchBody(body: Syntax, promoted: Extract<Type, { kind: 'int' }>, value: Eval<unknown>): Exec {
+  private compileSwitchBody(
+    body: Syntax,
+    promoted: Extract<Type, { kind: 'int' }>,
+    value: Eval<unknown>,
+    scoped: Type | undefined
+  ): Exec {
     const labels = new Map<string, number>();
     let defaultIndex: number | undefined;
     const statements: Exec[] = [];
@@ -1130,6 +1141,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
           const label = this.compileExpression(caseValue);
           if (!isInteger(label.type) || label.constant === undefined)
             this.error(node.row, 'case の値には整数の定数を書いてください。');
+          if (scoped && !sameType(unqualified(label.type), unqualified(scoped)))
+            this.error(node.row, `case の値 ${caseValue.text} は ${typeName(scoped)} 型の列挙子でなければなりません。`);
           const integer = BigInt(label.constant);
           if (integer < intMin(promoted.name) || integer > intMax(promoted.name))
             this.error(node.row, `case の値が ${typeName(promoted)} 型の範囲を超えています。`);
