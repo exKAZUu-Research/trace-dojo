@@ -520,6 +520,18 @@ export class DeclarationBinder extends BinderBase {
                 `'${displayType(constraintType)}' は有効な制約ではありません。制約として使用された型はインターフェイス、非シール クラス、または型パラメーターでなければなりません。`
               );
             }
+            // A constraint that leads back to its own parameter, as `where T : U where U : T`, is circular (CS0454).
+            if (
+              constraintType.kind === 'typeParameter' &&
+              constrainsBackTo(constraintType.symbol, parameter, new Set())
+            ) {
+              this.error(
+                constraint,
+                'CS0454',
+                `'${constraintType.symbol.name}' と '${parameter.name}' を含む、循環制約の依存関係です`
+              );
+              break;
+            }
             if (constraintType.kind !== 'error') parameter.constraintTypes.push(constraintType);
             break;
           }
@@ -1765,4 +1777,18 @@ function reachesInterface(start: TypeSymbol, target: TypeSymbol): boolean {
     pending.push(...current.interfaces.map((face) => face.symbol));
   }
   return false;
+}
+
+/** Whether a type parameter is, or is constrained through other type parameters to, the target. */
+function constrainsBackTo(
+  from: TypeParameterSymbol,
+  target: TypeParameterSymbol,
+  seen: Set<TypeParameterSymbol>
+): boolean {
+  if (from === target) return true;
+  if (seen.has(from)) return false;
+  seen.add(from);
+  return from.constraintTypes.some(
+    (constraint) => constraint.kind === 'typeParameter' && constrainsBackTo(constraint.symbol, target, seen)
+  );
 }
