@@ -18,6 +18,8 @@ export interface Variable {
   isSystem?: boolean;
   /** Whether `value` is shared copy-on-write with a suspended parent or child subshell scope. */
   shared?: boolean;
+  /** Whether an empty scalar value represents a `null` object binding from a `for` loop over turtles/structures. */
+  nullReference?: boolean;
 }
 
 /** A lexical/dynamic variable scope (global scope at index 0, followed by function and temporary scopes). */
@@ -457,3 +459,50 @@ export const ENVIRONMENT_VARIABLES = new Set([
   'PS2',
   '_',
 ]);
+
+/** Creates the initial global scope pre-populated with Bash 5.3's built-in system variables. */
+export function createInitialGlobalScope(bashVersion: string): Scope {
+  const global: Scope = new Map();
+  const system = (name: string, value: VariableValue, attributes: Attribute[] = []): void => {
+    global.set(name, { name, value, attributes: new Set(attributes), isSystem: true });
+  };
+  system('IFS', { kind: 'scalar', value: ' \t\n' });
+  system('PS4', { kind: 'scalar', value: '+ ' });
+  system('OPTIND', { kind: 'scalar', value: '1' });
+  system('OPTERR', { kind: 'scalar', value: '1' });
+  system('BASH_VERSION', { kind: 'scalar', value: bashVersion });
+  system(
+    'BASH_VERSINFO',
+    {
+      kind: 'indexed',
+      elements: new Map(
+        ['5', '3', '0', '1', 'release', 'aarch64-apple-darwin20.0.0'].map((value, index) => [BigInt(index), value])
+      ),
+    },
+    ['a', 'r']
+  );
+  return global;
+}
+
+/** Yields every string value reachable across running/suspended scopes, positional lists, and active buffers. */
+// code-gauge-allow functionCognitiveComplexity -- Walks every value kind across active and suspended shell scopes and buffers.
+export function* collectReachableStrings(
+  states: readonly { scopes: Scope[]; positional: string[][] }[],
+  activeOutputs: readonly { text: string }[],
+  inFlight: readonly { values: string[] }[]
+): Iterable<string> {
+  for (const state of states) {
+    for (const scope of state.scopes) {
+      for (const variable of scope.values()) {
+        const { value } = variable;
+        if (!value) continue;
+        if (value.kind === 'scalar') yield value.value;
+        else if (value.kind === 'indexed') yield* value.elements.values();
+        else for (const [, element] of value.table.entries()) yield element;
+      }
+    }
+    for (const args of state.positional) yield* args;
+  }
+  for (const { text } of activeOutputs) yield text;
+  for (const { values } of inFlight) yield* values;
+}

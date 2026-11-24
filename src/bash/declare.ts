@@ -92,15 +92,17 @@ function expandDeclarationAssignment(
       shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(arg.value as Word))
     );
   let expandedElements: CompoundElement[] | undefined;
+  let preparedElements = false;
   if (arg.array) {
     const prepare = buildCompoundPrepareOptions(shell, builtin, arg, options);
     expandedElements = shell.expander.expandCompoundItems(arg.array, prepare);
+    preparedElements = prepare !== undefined;
   }
   return {
     ...arg,
     ...(subscript ? { subscript } : {}),
     ...(value ? { value } : {}),
-    ...(expandedElements ? { expandedElements } : {}),
+    ...(expandedElements ? { expandedElements, preparedElements } : {}),
   };
 }
 
@@ -157,6 +159,33 @@ function resolveCompoundExisting(
 
 function literalWord(origin: Word, text: string): Word {
   return { parts: [{ kind: 'single', text }], row: origin.row, text: origin.text };
+}
+
+/** Whether an executed declaration explicitly assigns a non-nameref value (`declare x=1`, `declare "x=3"`). */
+export function declarationAssignsAnswer(builtin: string, args: readonly DeclarationArgument[]): boolean {
+  let optionsDone = false;
+  let setsNameref = false;
+  let hasAssignment = false;
+  for (const arg of args) {
+    if (typeof arg !== 'string') {
+      optionsDone = true;
+      hasAssignment = true;
+      continue;
+    }
+    if (!optionsDone && (arg === '--' || /^[-+]./.test(arg))) {
+      optionsDone = arg === '--';
+      setsNameref = updateNamerefOption(builtin, arg, setsNameref);
+      continue;
+    }
+    optionsDone = true;
+    hasAssignment ||= arg.includes('=');
+  }
+  return hasAssignment && !setsNameref;
+}
+
+function updateNamerefOption(builtin: string, flagWord: string, current: boolean): boolean {
+  if (flagWord === '--' || !flagWord.includes('n')) return current;
+  return flagWord.startsWith('-') ? builtin !== 'export' || current : false;
 }
 
 /** `declare`, `typeset`, `local`, `readonly`, and `export`. */
@@ -693,7 +722,7 @@ function assignLocally(
 function assignLocallyCompound(
   shell: Shell,
   variable: Variable,
-  assignment: Assignment & { expandedElements?: CompoundElement[] },
+  assignment: Assignment & { expandedElements?: CompoundElement[]; preparedElements?: boolean },
   referencedSubscript?: string
 ): boolean {
   if (assignment.subscript || referencedSubscript !== undefined) {
@@ -706,7 +735,7 @@ function assignLocallyCompound(
     : shell.expander.expandCompound(assignment.array as Word[], variable.attributes.has('A'), true);
   if (variable.attributes.has('A') && !variable.value)
     variable.value = { kind: 'associative', table: new AssociativeTable() };
-  const ok = shell.assignCompoundTo(variable, elements, assignment.append);
+  const ok = shell.assignCompoundTo(variable, elements, assignment.preparedElements ? false : assignment.append);
   if (error) shell.discard(error);
   return ok;
 }

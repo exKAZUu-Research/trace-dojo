@@ -28,10 +28,12 @@ export function parseBash(source: string, trace?: TraceOptions): Program {
 }
 
 function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
-  const { error, backquotes } = checkBashSyntax(source);
+  const { error, backquotes, literalSingleQuotes } = checkBashSyntax(source);
   if (error && error !== 'unknown')
     throw new CompileError([{ row: error.row, message: syntaxErrorMessage(error.text) }]);
-  const hidden = hideInvalidBackquotes(source, backquotes);
+  const quoteSet = new Set(literalSingleQuotes);
+  const quoteNormalized = maskLiteralSingleQuotes(source, quoteSet);
+  const hidden = hideInvalidBackquotes(quoteNormalized, backquotes);
   const { source: parsedSource, masked } = maskInvalidArithmetic(parser, hidden.source);
   return parseSource(
     parser,
@@ -44,7 +46,8 @@ function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
         masked,
         rawArithmeticPieces,
         reparseBackquoted,
-        hidden.errors
+        hidden.errors,
+        quoteSet
       );
       const program = converter.convertProgram(root);
       for (const row of atomicRows) {
@@ -59,6 +62,13 @@ function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
       isBenignError: isEmptySubscript,
     }
   );
+}
+
+function maskLiteralSingleQuotes(source: string, offsets: ReadonlySet<number>): string {
+  if (offsets.size === 0) return source;
+  let out = '';
+  for (let i = 0; i < source.length; i++) out += offsets.has(i) ? '\u001F' : source[i];
+  return out;
 }
 
 /** An empty subscript (`a[]`), which the grammar fills with a missing token but Bash rejects only when it runs. */
@@ -78,9 +88,15 @@ function rawArithmeticPieces(raw: string): (string | WordPart)[] {
   try {
     const string = tree.rootNode.descendantsOfType('string')[0];
     if (tree.rootNode.hasError || !string) return [raw];
-    const [part] = new Converter(wrapped, new Set(), new Map(), () => [raw], reparseBackquoted, new Map()).word(
-      string
-    ).parts;
+    const [part] = new Converter(
+      wrapped,
+      new Set(),
+      new Map(),
+      () => [raw],
+      reparseBackquoted,
+      new Map(),
+      new Set()
+    ).word(string).parts;
     if (part?.kind !== 'double') return [raw];
     return part.parts.map((inner) => (inner.kind === 'literal' ? inner.text.replaceAll(String.raw`\"`, '"') : inner));
   } finally {

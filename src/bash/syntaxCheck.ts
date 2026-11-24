@@ -18,10 +18,15 @@ import {
 export function checkBashSyntax(source: string): {
   error: BashSyntaxError | 'unknown' | undefined;
   backquotes: { start: number; end: number }[];
+  literalSingleQuotes: number[];
 } {
   const text = new SourceText(source);
   text.parseSubstitution = (start) => new ShellGrammarValidator(text, start, true).validateSubstitution();
-  return { error: detectSyntaxError(text), backquotes: text.backquotes };
+  return {
+    error: detectSyntaxError(text),
+    backquotes: text.backquotes,
+    literalSingleQuotes: text.literalSingleQuotes,
+  };
 }
 
 function detectSyntaxError(text: SourceText): BashSyntaxError | 'unknown' | undefined {

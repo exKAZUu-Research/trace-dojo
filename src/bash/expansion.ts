@@ -17,6 +17,7 @@ import {
   isIdentifier,
   maxElementIndex,
   type Scope,
+  sortedElements,
   type Variable,
 } from './variables';
 
@@ -38,6 +39,7 @@ interface CompoundPrepareState {
   stagedIndexed: Map<bigint, string>;
   stagedAssoc: AssociativeTable;
   pendingAssocKey: string | undefined;
+  pendingAssocRaw?: string | undefined;
 }
 
 /** A parameter's value before its operator: one string, or the elements of `$@`, `$*`, or `${a[@]}`. */
@@ -159,16 +161,21 @@ export class Expander {
     const stagingScope = createCompoundStagingScope(prepare, state);
     this.shell.state.scopes.push(stagingScope);
     try {
-      const evaluated: CompoundElement[] = [];
+      let stoppedEmptyKey: CompoundElement | undefined;
+      const emptyPlainItems: CompoundElement[] = [];
       for (const item of rawItems) {
         if (typeof item === 'string') continue;
         if ('plain' in item) {
-          evaluated.push(this.preparePlainCompoundItem(item.plain, item.rawText, prepare, state));
+          this.preparePlainCompoundItem(item.plain, item.rawText, prepare, state, emptyPlainItems);
+        } else if (prepare.isAssociative && item.key === '') {
+          state.pendingAssocKey = undefined;
+          stoppedEmptyKey = { key: '', value: item.value, append: item.append, rawText: item.rawText };
+          break;
         } else {
-          evaluated.push(this.prepareKeyedCompoundItem(item, prepare, state));
+          this.prepareKeyedCompoundItem(item, prepare, state);
         }
       }
-      return evaluated;
+      return finalizePreparedCompoundItems(prepare, state, emptyPlainItems, stoppedEmptyKey);
     } finally {
       const scopeIdx = this.shell.state.scopes.lastIndexOf(stagingScope);
       if (scopeIdx !== -1) this.shell.state.scopes.splice(scopeIdx, 1);
@@ -179,65 +186,53 @@ export class Expander {
     item: { key: string; value: string; append: boolean; rawText?: string },
     prepare: CompoundPrepareOptions,
     state: CompoundPrepareState
-  ): CompoundElement {
-    const { key, value, append, rawText } = item;
+  ): void {
+    const { key, value, append } = item;
     state.pendingAssocKey = undefined;
     if (prepare.isAssociative) {
-      if (key === '') return { key, value, append, rawText };
       const base = append ? (state.stagedAssoc.get(key) ?? '') : '';
-      if (!prepare.isInteger) {
-        state.stagedAssoc.set(key, base + value);
-        return { key, value, append, rawText };
-      }
-      const converted = this.evaluateCompoundInteger(value, base, append);
+      const converted = prepare.isInteger ? this.evaluateCompoundInteger(value, base, append) : base + value;
       state.stagedAssoc.set(key, converted);
-      return { key, value: converted, append: false, rawText, preconvertedInteger: true };
+      return;
     }
-    if (key === '') return this.shell.discard(`${prepare.reportedName}[]: bad array subscript`);
+    if (key === '') this.shell.discard(`${prepare.reportedName}[]: bad array subscript`);
     const rawIdx = this.shell.evaluateFatalReadonly(key);
     const idx = rawIdx >= 0n ? rawIdx : maxElementIndex(state.stagedIndexed) + 1n + rawIdx;
-    if (idx < 0n) return this.shell.discard(`${prepare.reportedName}[${key}]: bad array subscript`);
+    if (idx < 0n) this.shell.discard(`${prepare.reportedName}[${key}]: bad array subscript`);
     state.nextIndex = idx + 1n;
     const base = append ? (state.stagedIndexed.get(idx) ?? '') : '';
-    if (!prepare.isInteger) {
-      state.stagedIndexed.set(idx, base + value);
-      return { key, value, append, rawText, evaluatedIndex: idx };
-    }
-    const converted = this.evaluateCompoundInteger(value, base, append);
+    const converted = prepare.isInteger ? this.evaluateCompoundInteger(value, base, append) : base + value;
     state.stagedIndexed.set(idx, converted);
-    return { key, value: converted, append: false, rawText, evaluatedIndex: idx, preconvertedInteger: true };
   }
 
   private preparePlainCompoundItem(
     field: string,
     rawText: string,
     prepare: CompoundPrepareOptions,
-    state: CompoundPrepareState
-  ): CompoundElement {
+    state: CompoundPrepareState,
+    emptyPlainItems: CompoundElement[]
+  ): void {
     if (prepare.isAssociative) {
       if (state.pendingAssocKey === undefined) {
         state.pendingAssocKey = field;
-        return { plain: field, rawText };
+        state.pendingAssocRaw = rawText;
+        return;
       }
       const key = state.pendingAssocKey;
+      const keyRaw = state.pendingAssocRaw ?? '';
       state.pendingAssocKey = undefined;
-      if (key === '') return { plain: field, rawText };
-      if (!prepare.isInteger) {
-        state.stagedAssoc.set(key, field);
-        return { plain: field, rawText };
+      state.pendingAssocRaw = undefined;
+      if (key === '') {
+        emptyPlainItems.push({ plain: '', rawText: keyRaw }, { plain: field, rawText });
+        return;
       }
-      const converted = this.evaluateCompoundInteger(field, '', false);
+      const converted = prepare.isInteger ? this.evaluateCompoundInteger(field, '', false) : field;
       state.stagedAssoc.set(key, converted);
-      return { plain: converted, rawText, preconvertedInteger: true };
+      return;
     }
     const idx = state.nextIndex++;
-    if (!prepare.isInteger) {
-      state.stagedIndexed.set(idx, field);
-      return { plain: field, rawText, evaluatedIndex: idx };
-    }
-    const converted = this.evaluateCompoundInteger(field, '', false);
+    const converted = prepare.isInteger ? this.evaluateCompoundInteger(field, '', false) : field;
     state.stagedIndexed.set(idx, converted);
-    return { plain: converted, rawText, evaluatedIndex: idx, preconvertedInteger: true };
   }
 
   private evaluateCompoundInteger(value: string, base: string, append: boolean): string {
@@ -321,7 +316,7 @@ export class Expander {
       }
       case 'commandSubstitution': {
         if (part.syntaxError) return this.failBackquoted(part.syntaxError, inDouble);
-        const { output, status } = this.shell.captureSubshell(part.body);
+        const { output, status } = this.shell.captureSubshell(part.body, part.row);
         this.lastSubstitutionStatus = status;
         this.shell.state.lastStatus = status;
         if (output.includes('\0')) this.shell.reportError('warning: command substitution: ignored null byte in input');
@@ -710,6 +705,41 @@ function literalFragments(text: string): Fragment[] {
 /** Removes the backslashes that quote `$`, `` ` ``, `"`, `\`, and newlines inside double quotes. */
 export function unescapeDoubleQuoted(text: string): string {
   return text.replaceAll(/\\([$`"\\\n])/g, (_, c: string) => (c === '\n' ? '' : c));
+}
+
+function finalizePreparedCompoundItems(
+  prepare: CompoundPrepareOptions,
+  state: CompoundPrepareState,
+  emptyPlainItems: CompoundElement[],
+  stoppedEmptyKey: CompoundElement | undefined
+): CompoundElement[] {
+  if (!prepare.isAssociative) {
+    return sortedElements(state.stagedIndexed).map(([idx, value]) => ({
+      key: String(idx),
+      value,
+      append: false,
+      evaluatedIndex: idx,
+      preconvertedInteger: prepare.isInteger,
+    }));
+  }
+  if (state.pendingAssocKey !== undefined) {
+    if (state.pendingAssocKey === '') {
+      emptyPlainItems.push({ plain: '', rawText: state.pendingAssocRaw ?? '' });
+    } else {
+      state.stagedAssoc.set(state.pendingAssocKey, prepare.isInteger ? '0' : '');
+    }
+  }
+  const elements: CompoundElement[] = [
+    ...emptyPlainItems,
+    ...state.stagedAssoc.entries().map(([key, value]) => ({
+      key,
+      value,
+      append: false,
+      preconvertedInteger: prepare.isInteger,
+    })),
+  ];
+  if (stoppedEmptyKey) elements.push(stoppedEmptyKey);
+  return elements;
 }
 
 function createCompoundPrepareState(prepare: CompoundPrepareOptions): CompoundPrepareState {

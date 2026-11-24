@@ -37,6 +37,7 @@ export class Converter {
   /** The rows of the `# atomic` annotations that a function's header holds. */
   readonly claimedAtomicRows = new Set<number>();
 
+  // code-gauge-allow functionParameterCount -- Carries source, annotations, masked arithmetic, backquote hooks, and literal-quote offsets.
   constructor(
     private readonly source: string,
     private readonly atomicRows: ReadonlySet<number>,
@@ -45,7 +46,8 @@ export class Converter {
     /** Parses the text of a backquoted command substitution that Bash reads again after removing backslashes. */
     private readonly reparse: (text: string, row: number) => Statement[],
     /** The syntax errors of backquoted bodies, which Bash reports when it runs them, by the index of their `` ` ``. */
-    private readonly backquoteErrors: ReadonlyMap<number, BackquoteSyntaxError>
+    private readonly backquoteErrors: ReadonlyMap<number, BackquoteSyntaxError>,
+    private readonly literalQuotes: ReadonlySet<number> = new Set()
   ) {}
 
   convertProgram(root: Node): Program {
@@ -516,9 +518,22 @@ export class Converter {
     return { pieces, row: owner.startPosition.row };
   }
 
+  private restoreQuotes(text: string, startIndex: number): string {
+    if (this.literalQuotes.size === 0 || !text.includes('\u001F')) return text;
+    let out = '';
+    for (let i = 0; i < text.length; i++) {
+      out += text[i] === '\u001F' && this.literalQuotes.has(startIndex + i) ? "'" : text[i];
+    }
+    return out;
+  }
+
   /** Converts a word-like node: a word, a concatenation, a quoted string, or an expansion. */
   word(node: Node): Word {
-    return { parts: mergeLiterals(this.wordParts(node)), row: node.startPosition.row, text: node.text };
+    return {
+      parts: mergeLiterals(this.wordParts(node)),
+      row: node.startPosition.row,
+      text: this.restoreQuotes(node.text, node.startIndex),
+    };
   }
 
   // code-gauge-allow functionNcss -- One case per word part node of the grammar.
@@ -528,7 +543,7 @@ export class Converter {
       case 'regex':
       case 'number':
       case 'variable_name': {
-        return [{ kind: 'literal', text: node.text }];
+        return [{ kind: 'literal', text: this.restoreQuotes(node.text, node.startIndex) }];
       }
       case 'concatenation': {
         return node.children.flatMap((child) => (child.isNamed ? this.wordParts(child) : []));
@@ -580,8 +595,9 @@ export class Converter {
     const parts: WordPart[] = [];
     for (const child of node.children) {
       if (!child.isNamed) continue;
-      if (child.type === 'string_content') parts.push({ kind: 'literal', text: child.text });
-      else parts.push(...this.wordParts(child));
+      if (child.type === 'string_content') {
+        parts.push({ kind: 'literal', text: this.restoreQuotes(child.text, child.startIndex) });
+      } else parts.push(...this.wordParts(child));
     }
     return parts;
   }
@@ -591,14 +607,16 @@ export class Converter {
     if (opening && opening.type !== '$(' && opening.type !== '`') {
       this.unsupported(node, '現在のシェルで実行するコマンド置換（${ ...; }）');
     }
+    const row = node.startPosition.row;
+    const text = this.restoreQuotes(node.text, node.startIndex);
     const syntaxError = opening?.type === '`' ? this.backquoteErrors.get(node.startIndex) : undefined;
-    if (syntaxError) return { kind: 'commandSubstitution', body: [], text: node.text, syntaxError };
+    if (syntaxError) return { kind: 'commandSubstitution', body: [], text, row, syntaxError };
     // Bash removes the backslashes before `$`, `` ` ``, and `\` in a backquoted body before reading it as commands.
-    const inner = opening?.type === '`' ? node.text.slice(1, -1) : '';
+    const inner = opening?.type === '`' ? text.slice(1, -1) : '';
     const body = /\\[$`\\]/.test(inner)
-      ? this.reparse(inner.replaceAll(/\\([$`\\])/g, '$1'), node.startPosition.row)
+      ? this.reparse(inner.replaceAll(/\\([$`\\])/g, '$1'), row)
       : this.statements(node.children.filter((child) => child.isNamed || child.type === '&'));
-    return { kind: 'commandSubstitution', body, text: node.text };
+    return { kind: 'commandSubstitution', body, text, row };
   }
 
   private expansion(node: Node): ParameterExpansion {
@@ -610,7 +628,7 @@ export class Converter {
       kind: 'parameter',
       name: '',
       argument: mergeLiterals(argument),
-      text: node.text,
+      text: this.restoreQuotes(node.text, node.startIndex),
       braced: true,
     };
     if (operator !== undefined) expansion.operator = operator;

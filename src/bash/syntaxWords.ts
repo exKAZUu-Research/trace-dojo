@@ -33,6 +33,8 @@ export class SourceText {
   private depth = 0;
   /** The backquoted command substitutions read, from the opening `` ` `` to just after the closing one. */
   readonly backquotes: { start: number; end: number }[] = [];
+  /** Offsets of literal single quotes inside double-quoted non-pattern `${...}` operands. */
+  readonly literalSingleQuotes: number[] = [];
   /** Parses the commands of `$(...)` from just after `$(`, returning the index after its `)`. */
   parseSubstitution: (start: number) => number = () => {
     throw new Error('No parser for command substitutions');
@@ -120,9 +122,9 @@ function skipDoubleQuoted(text: SourceText, open: number): number {
       const c = source[i];
       if (c === '\\') i += 2;
       else if (c === '`') i = skipBackquoted(text, i);
-      else if (c === '$' && (source[i + 1] === '{' || source[i + 1] === '[' || source[i + 1] === '(')) {
-        i = skipWordPiece(text, i);
-      } else i++;
+      else if (c === '$' && source[i + 1] === '{') i = skipBraces(text, i + 1, true);
+      else if (c === '$' && (source[i + 1] === '[' || source[i + 1] === '(')) i = skipWordPiece(text, i);
+      else i++;
     }
     return closeAt(text, open, i < source.length ? i : -1, '"');
   });
@@ -145,15 +147,55 @@ function skipBackquoted(text: SourceText, open: number): number {
   return end;
 }
 
-function skipBraces(text: SourceText, open: number): number {
+function skipBraces(text: SourceText, open: number, inDouble = false): number {
   return text.nested(() => {
     const { source } = text;
-    for (let i = open + 1; i < source.length;) {
+    let i = open + 1;
+    if (inDouble) {
+      i = skipParameterHeader(text, i);
+      const op = source[i];
+      if (op !== '#' && op !== '%' && op !== '/' && op !== '^' && op !== ',') {
+        return skipDoubleQuotedBraceBody(text, open, i);
+      }
+    }
+    while (i < source.length) {
       if (source[i] === '}') return i + 1;
       i = skipWordPiece(text, i);
     }
     return text.unclosed(open, '}');
   });
+}
+
+function skipParameterHeader(text: SourceText, start: number): number {
+  const { source } = text;
+  let i = start;
+  if (source[i] === '!' || (source[i] === '#' && source[i + 1] !== '}')) i++;
+  if (/[A-Za-z_]/.test(source[i] ?? '')) {
+    while (/[A-Za-z0-9_]/.test(source[i] ?? '')) i++;
+    if (source[i] === '[') i = skipBalanced(text, i, '[', ']');
+  } else if (/\d/.test(source[i] ?? '')) {
+    while (/\d/.test(source[i] ?? '')) i++;
+  } else if ('@#?*!$_-'.includes(source[i] ?? '')) {
+    i++;
+  }
+  return i;
+}
+
+function skipDoubleQuotedBraceBody(text: SourceText, open: number, start: number): number {
+  const { source } = text;
+  for (let i = start; i < source.length;) {
+    const c = source[i];
+    if (c === '}') return i + 1;
+    if (c === "'") {
+      text.literalSingleQuotes.push(i);
+      i++;
+    } else if (c === '\\') i = Math.min(i + 2, source.length);
+    else if (c === '"') i = skipDoubleQuoted(text, i);
+    else if (c === '`') i = skipBackquoted(text, i);
+    else if (c === '$') i = skipWordPiece(text, i);
+    else i++;
+  }
+  return text.unclosed(open, '}');
 }
 
 /** Skips text from an opening delimiter to its matching closing delimiter. */

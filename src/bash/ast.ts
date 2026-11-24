@@ -17,7 +17,7 @@ export type WordPart =
   /** Double-quoted parts; `$"..."` is the same in the C and UTF-8 locales without message catalogs. */
   | { kind: 'double'; parts: WordPart[] }
   | ParameterExpansion
-  | { kind: 'commandSubstitution'; body: Statement[]; text: string; syntaxError?: BackquoteSyntaxError }
+  | { kind: 'commandSubstitution'; body: Statement[]; text: string; row: number; syntaxError?: BackquoteSyntaxError }
   | { kind: 'arithmeticExpansion'; expression: ArithmeticSource };
 
 /** A syntax error in a backquoted body, which Bash reports when it runs the substitution, with the line it shows. */

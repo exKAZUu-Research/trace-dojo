@@ -39,7 +39,7 @@ function variablesOf(shell: Shell, frame: Frame): TraceVariables {
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   for (const variable of visibleVariables(shell, frame)) {
     const value = shownValueOf(shell, frame, variable);
-    addVariable(shell, variables, variable.name, value);
+    addVariable(shell, variables, variable.name, value, variable.nullReference === true);
     // A function receives a structure through a name reference (`local -n this=$1`), as a Java method receives
     // `this`, so its fields show among the values learners answer, as Java shows `this.x`.
     if (variable.attributes.has('n') && value?.kind === 'associative') {
@@ -167,12 +167,21 @@ function define(record: object, name: string, value: unknown): void {
   Object.defineProperty(record, name, { value, enumerable: true, configurable: true, writable: true });
 }
 
+// oxlint-disable-next-line unicorn/no-null -- Trace format represents null references as null.
+const NULL_NODE: DisplayNode = { kind: 'value', value: null };
+
 // code-gauge-allow functionCognitiveComplexity -- One case per kind of value the trace shows: turtles, scalars, dense and sparse arrays, and structures.
-function addVariable(shell: Shell, variables: TraceVariables, name: string, value: VariableValue | undefined): void {
+function addVariable(
+  shell: Shell,
+  variables: TraceVariables,
+  name: string,
+  value: VariableValue | undefined,
+  nullReference = false
+): void {
   if (!value) return;
   if (value.kind === 'scalar') {
-    const turtle = turtleNode(shell, value.value);
-    if (turtle) define(variables.referenceVars, name, turtle);
+    const node = nullReference && value.value === '' ? NULL_NODE : turtleNode(shell, value.value);
+    if (node) define(variables.referenceVars, name, node);
     else define(variables.vars, name, value.value);
     return;
   }

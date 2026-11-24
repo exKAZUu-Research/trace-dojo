@@ -13,7 +13,7 @@ import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word }
 import { BUILTINS, unsetElement } from './builtins';
 import { capitalize, lowerCase, upperCase } from './characters';
 import { conditionalStatus } from './conditional';
-import { expandDeclarationArguments, runDeclaration } from './declare';
+import { declarationAssignsAnswer, expandDeclarationArguments, runDeclaration } from './declare';
 import { Expander } from './expansion';
 import { EXTERNAL_COMMANDS } from './externalCommands';
 import {
@@ -31,11 +31,12 @@ import { UnsupportedFeatureError } from './unsupported';
 import {
   advanceRandomState,
   AssociativeTable,
-  type Attribute,
   buildDynamicDeclaration,
   callStackArray,
   cloneScope,
+  collectReachableStrings,
   type CompoundElement,
+  createInitialGlobalScope,
   DYNAMIC_VARIABLES,
   ensureWritable,
   ENVIRONMENT_VARIABLES,
@@ -131,29 +132,12 @@ export class Shell implements ArithmeticHost {
   /** Prefix-assignment scope owned by the currently executing declaration command, if any. */
   private activeDeclarationPrefix: Scope | undefined;
   private readonlyFailure = false;
+  private declarationAssigned = false;
+  private executedTestCommand = false;
 
   constructor(readonly runtime: Runtime) {
-    const global: Scope = new Map();
-    const system = (name: string, value: VariableValue, attributes: Attribute[] = []): void => {
-      global.set(name, { name, value, attributes: new Set(attributes), isSystem: true });
-    };
-    system('IFS', { kind: 'scalar', value: ' \t\n' });
-    system('PS4', { kind: 'scalar', value: '+ ' });
-    system('OPTIND', { kind: 'scalar', value: '1' });
-    system('OPTERR', { kind: 'scalar', value: '1' });
-    system('BASH_VERSION', { kind: 'scalar', value: BASH_VERSION });
-    system(
-      'BASH_VERSINFO',
-      {
-        kind: 'indexed',
-        elements: new Map(
-          ['5', '3', '0', '1', 'release', 'aarch64-apple-darwin20.0.0'].map((value, index) => [BigInt(index), value])
-        ),
-      },
-      ['a', 'r']
-    );
     this.state = {
-      scopes: [global],
+      scopes: [createInitialGlobalScope(BASH_VERSION)],
       functionScopes: [],
       functions: new Map(),
       positional: [[]],
@@ -169,7 +153,8 @@ export class Shell implements ArithmeticHost {
       fd2: runtime.io.stderr,
     };
     this.expander = new Expander(this);
-    runtime.reachableStrings = () => this.reachableStrings();
+    runtime.reachableStrings = () =>
+      collectReachableStrings([...this.suspended, this.state], this.activeOutputs, this.inFlight);
   }
 
   // ---------------------------------------------------------------- running
@@ -184,7 +169,7 @@ export class Shell implements ArithmeticHost {
           this.runStatements(unit);
         } catch (error) {
           if (!(error instanceof DiscardSignal)) throw error;
-          this.state.lastStatus = error.status;
+          this.setCommandStatus(error.status);
           // The line after the unit is numbered one after the line the counter was left at.
           if (error.leftRow !== undefined) this.readShift = (program.unitEndRows[index] as number) - error.leftRow;
         }
@@ -302,11 +287,10 @@ export class Shell implements ArithmeticHost {
 
   /** Runs a command that records a step after it completes, unless it is part of a condition. */
   private executeSimple(statement: Statement): number {
-    const recordsStep =
-      this.conditionDepth === 0 &&
-      (statement.kind !== 'declaration' || statement.args.some((arg) => 'name' in arg && 'append' in arg));
     const run = (): number => {
       this.ranFunction = false;
+      this.declarationAssigned = false;
+      this.executedTestCommand = false;
       switch (statement.kind) {
         case 'command': {
           return this.executeCommand(statement);
@@ -325,27 +309,29 @@ export class Shell implements ArithmeticHost {
         }
       }
     };
-    if (!recordsStep) return this.withRoots(() => this.withStatus(run));
-    if (this.listConditionDepth > 0 || (statement.kind === 'declaration' && declaresReferences(statement))) {
-      // A list's left command (which may be a pure test) or a name reference records a step only when shown state changed.
-      const status = this.withRoots(() => this.withStatus(run));
-      this.runtime.steps.stepBinding(statement.row, false);
-      return status;
-    }
-    return this.runtime.steps.runStatement(
-      statement.row,
-      () => this.ranFunction,
-      () => this.withRoots(() => this.withStatus(run))
-    );
+    if (this.conditionDepth > 0) return this.withRoots(() => this.withStatus(run));
+    const mark = this.runtime.steps.statementMark();
+    const status = this.withRoots(() => this.withStatus(run));
+    const isConditionOrMeta =
+      (statement.kind === 'declaration' && !this.declarationAssigned) ||
+      (this.listConditionDepth > 0 &&
+        (statement.kind === 'test' || statement.kind === 'arithmetic' || this.executedTestCommand));
+    if (isConditionOrMeta) this.runtime.steps.stepBinding(statement.row, false);
+    else this.runtime.steps.completeStatement(statement.row, () => this.ranFunction, mark);
+    return status;
   }
 
   /** Runs a command and sets `$?`, before a step records its state. */
   private withStatus(run: () => number): number {
     const status = run();
+    this.setCommandStatus(status);
+    return status;
+  }
+
+  setCommandStatus(status: number): void {
     this.state.lastStatus = status;
     this.state.unsetDynamic.delete('PIPESTATUS');
     this.state.pipeStatus = [String(status)];
-    return status;
   }
 
   private executeIf(statement: Extract<Statement, { kind: 'if' }>): number {
@@ -363,11 +349,13 @@ export class Shell implements ArithmeticHost {
     } catch (error) {
       if (error instanceof BreakSignal) {
         last.status = error.status;
+        this.setCommandStatus(error.status);
         if (--error.count > 0) throw error;
         return 'stop';
       }
       if (error instanceof ContinueSignal) {
         last.status = 0;
+        this.setCommandStatus(0);
         if (--error.count > 0) throw error;
         return 'next';
       }
@@ -419,16 +407,7 @@ export class Shell implements ArithmeticHost {
           for (const value of values) {
             this.runtime.spend();
             this.currentRow = statement.row - this.lineShift;
-            // A name reference as the loop variable refers to each word in turn, as Bash's `for` makes it.
-            const reference = this.findVariable(statement.variable, false);
-            if (reference?.attributes.has('n')) {
-              if (reference.attributes.has('r')) {
-                this.reportError(`${statement.variable}: readonly variable`);
-                last.status = 1;
-                return;
-              }
-              reference.value = { kind: 'scalar', value };
-            } else if (!this.assignScalar(statement.variable, value)) {
+            if (!this.bindLoopVariable(statement.variable, value, bindsObjects)) {
               last.status = 1;
               return;
             }
@@ -438,6 +417,22 @@ export class Shell implements ArithmeticHost {
         })
       );
     });
+  }
+
+  private bindLoopVariable(name: string, value: string, bindsObjects: boolean): boolean {
+    const reference = this.findVariable(name, false);
+    if (reference?.attributes.has('n')) {
+      if (reference.attributes.has('r')) {
+        this.reportError(`${name}: readonly variable`);
+        return false;
+      }
+      reference.value = { kind: 'scalar', value };
+      return true;
+    }
+    if (!this.assignScalar(name, value)) return false;
+    const targetVar = this.findVariable(name);
+    if (targetVar) targetVar.nullReference = bindsObjects && value === '';
+    return true;
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Runs C-style for init, condition, body, and update while keeping arithmetic errors local to the loop.
@@ -533,41 +528,24 @@ export class Shell implements ArithmeticHost {
 
   private executeCommand(statement: Extract<Statement, { kind: 'command' }>): number {
     const argv = this.expander.expandWords(statement.words);
-    if (argv.length === 0) {
-      // A command of assignments alone expands and commits before redirections and takes its last substitution status.
-      this.expander.lastSubstitutionStatus = 0;
-      for (const assignment of statement.assignments) {
-        if (!this.performAssignment(assignment)) throw new DiscardSignal();
-      }
-      this.state.lastArgument = '';
-      const status = this.expander.lastSubstitutionStatus;
-      return this.withRedirects(statement.redirects, () => status);
-    }
+    if (argv.length === 0) return this.executeAssignmentOnlyCommand(statement);
     const [name] = argv;
     const fn = this.state.functions.get(name);
-    if (fn) {
-      return this.withTemporaryScope(statement.assignments, () =>
-        this.withRedirects(statement.redirects, () => {
+    const builtin = !fn && Object.hasOwn(BUILTINS, name) ? BUILTINS[name] : undefined;
+    return this.withTemporaryScope(statement.assignments, () =>
+      this.withRedirects(statement.redirects, () => {
+        if (fn) {
           const status = this.callFunction(fn, argv.slice(1), statement.row);
-          // The commands in the function reset the flag, so the call sets it after they ran.
           this.ranFunction = true;
           this.state.lastArgument = argv.at(-1) as string;
           return status;
-        })
-      );
-    }
-    const builtin = Object.hasOwn(BUILTINS, name) ? BUILTINS[name] : undefined;
-    if (builtin) {
-      return this.withTemporaryScope(statement.assignments, () =>
-        this.withRedirects(statement.redirects, () => {
+        }
+        if (builtin) {
           const status = builtin(this, argv.slice(1), name);
+          this.executedTestCommand = statement.assignments.length === 0 && (name === 'test' || name === '[');
           this.state.lastArgument = argv.at(-1) as string;
           return status;
-        })
-      );
-    }
-    return this.withTemporaryScope(statement.assignments, () =>
-      this.withRedirects(statement.redirects, () => {
+        }
         if (EXTERNAL_COMMANDS.has(name) || name.includes('/')) {
           throw new UnsupportedFeatureError(`外部コマンド（${name}）`);
         }
@@ -576,6 +554,17 @@ export class Shell implements ArithmeticHost {
         return 127;
       })
     );
+  }
+
+  private executeAssignmentOnlyCommand(statement: Extract<Statement, { kind: 'command' }>): number {
+    // A command of assignments alone expands and commits before redirections and takes its last substitution status.
+    this.expander.lastSubstitutionStatus = 0;
+    for (const assignment of statement.assignments) {
+      if (!this.performAssignment(assignment)) throw new DiscardSignal();
+    }
+    this.state.lastArgument = '';
+    const status = this.expander.lastSubstitutionStatus;
+    return this.withRedirects(statement.redirects, () => status);
   }
 
   /** Runs a command with the assignments written before it visible both to later assignments and to the command. */
@@ -636,6 +625,7 @@ export class Shell implements ArithmeticHost {
       () =>
         this.withRedirects(statement.redirects, () => {
           const status = runDeclaration(this, statement.name, args);
+          this.declarationAssigned = declarationAssignsAnswer(statement.name, args);
           const last = args.at(-1);
           this.state.lastArgument = last === undefined ? statement.name : typeof last === 'string' ? last : last.text;
           return status;
@@ -711,7 +701,7 @@ export class Shell implements ArithmeticHost {
 
   /** Runs statements in a copy of the shell, capturing what they write to standard output. */
   // code-gauge-allow functionNcss -- Copies and restores every part of the shell state a command substitution changes.
-  captureSubshell(body: Statement[]): { output: string; status: number } {
+  captureSubshell(body: Statement[], startRow?: number): { output: string; status: number } {
     if (this.runtime.observing) throw new ObservationAbortError();
     const buffer = { text: '' };
     const capture: OutputTarget = {
@@ -740,8 +730,14 @@ export class Shell implements ArithmeticHost {
     const savedCondition = this.conditionDepth;
     const savedListCondition = this.listConditionDepth;
     const savedRow = this.currentRow;
+    const savedLineShift = this.lineShift;
+    const savedReadShift = this.readShift;
     const savedRanFunction = this.ranFunction;
     this.loopDepth = 0;
+    if (startRow !== undefined) {
+      this.lineShift = startRow - this.currentRow;
+      this.readShift = this.lineShift;
+    }
     let status: number;
     try {
       status = this.runStatements(body);
@@ -757,6 +753,8 @@ export class Shell implements ArithmeticHost {
       this.conditionDepth = savedCondition;
       this.listConditionDepth = savedListCondition;
       this.currentRow = savedRow;
+      this.lineShift = savedLineShift;
+      this.readShift = savedReadShift;
       this.ranFunction = savedRanFunction;
     }
     this.inFlight.at(-1)?.values.push(buffer.text);
@@ -797,7 +795,10 @@ export class Shell implements ArithmeticHost {
     try {
       return evaluateArithmetic(text, this, undefined, () => this.runtime.spend());
     } catch (error) {
-      if (error instanceof ArithmeticError) this.discard(error.message);
+      if (error instanceof ArithmeticError) {
+        this.reportError(error.message);
+        throw new ExitSignal(1);
+      }
       if (error instanceof ArithmeticStoreError) {
         if (error.isReadonly) throw new ExitSignal(1);
         throw new DiscardSignal();
@@ -1143,6 +1144,7 @@ export class Shell implements ArithmeticHost {
     this.checkLength(converted);
     variable.value = { kind: 'scalar', value: converted };
     variable.shared = false;
+    variable.nullReference = false;
     this.lastStored = converted;
     return true;
   }
@@ -1411,24 +1413,6 @@ export class Shell implements ArithmeticHost {
     return true;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Walks every value kind of every scope of the running and suspended shells.
-  private *reachableStrings(): Iterable<string> {
-    for (const state of [...this.suspended, this.state]) {
-      for (const scope of state.scopes) {
-        for (const variable of scope.values()) {
-          const { value } = variable;
-          if (!value) continue;
-          if (value.kind === 'scalar') yield value.value;
-          else if (value.kind === 'indexed') yield* value.elements.values();
-          else for (const [, element] of value.table.entries()) yield element;
-        }
-      }
-      for (const args of state.positional) yield* args;
-    }
-    for (const { text } of this.activeOutputs) yield text;
-    for (const { values } of this.inFlight) yield* values;
-  }
-
   /** Evaluates a subscript of a name like `a[i+1]`, as `printf -v` and `unset` read one. */
   splitSubscript(text: string): { name: string; subscript: string } | undefined {
     const open = text.indexOf('[');
@@ -1437,9 +1421,4 @@ export class Shell implements ArithmeticHost {
     if (close !== text.length - 1) return undefined;
     return { name: text.slice(0, open), subscript: text.slice(open + 1, close) };
   }
-}
-
-/** Whether a declaration declares name references (`local -n this=$1`), which hold no value of their own. */
-function declaresReferences(statement: Extract<Statement, { kind: 'declaration' }>): boolean {
-  return statement.args.some((arg) => !('append' in arg) && /^-[A-Za-z]*n[A-Za-z]*$/.test(arg.text));
 }
