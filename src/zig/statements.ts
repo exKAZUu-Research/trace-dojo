@@ -374,7 +374,7 @@ export abstract class StatementCompiler extends CallCompiler {
     alignment?: number
   ): LocalBinding {
     this.resolveStorage(type, value.span);
-    if (!isConst && this.requiresComptime(type, value.span))
+    if (!isConst && this.comptimeDepth === 0 && this.requiresComptime(type, value.span))
       this.error(
         value.span,
         `変数「${name}」の型 ${typeName(type)} は、コンパイルのときだけの型なので、const で宣言してください。`

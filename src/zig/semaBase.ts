@@ -980,6 +980,13 @@ export abstract class SemaBase implements SemaApi {
   private coerceToInt(expression: TExpr, to: IntType, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'comptime_int' || (from.kind === 'int' && expression.known)) {
+      // Code the compiler runs reads a `comptime var` as it runs, and checks the value fits then.
+      if (!expression.known && this.comptimeDepth > 0)
+        return this.derived(expression, to, (value) =>
+          fitsInt(value as bigint, to)
+            ? value
+            : panic(`${typeName(to)} cannot represent integer value ${value as bigint}`)
+        );
       if (!expression.known) return undefined;
       const value = expression.value as bigint;
       if (!fitsInt(value, to)) this.error(span, `${typeName(to)} 型では、整数 ${value} を表せません。`);
