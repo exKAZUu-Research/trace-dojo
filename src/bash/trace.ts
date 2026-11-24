@@ -99,20 +99,29 @@ function shownValueOf(
     const split = shell.splitSubscript(ref);
     return split
       ? observeElement(shell, split.name, split.subscript, maxScope)
-      : { value: undefined, nullReference: false };
+      : observeDynamicVariable(shell, ref, maxScope);
   }
   return { value: undefined, nullReference: false };
 }
 
+function observeDynamicVariable(
+  shell: Shell,
+  name: string,
+  maxScope: number
+): { value: VariableValue | undefined; nullReference: boolean } {
+  const dynamic = withObservedScopes(shell, maxScope, () => shell.dynamicDeclaration(name));
+  return { value: dynamic?.value, nullReference: false };
+}
+
 /** Evaluates `name[subscript]` against a discarded copy-on-write snapshot of `frame`'s visible scopes. */
-// code-gauge-allow functionCognitiveComplexity -- Resolves chained namerefs, whole-array `@`/`*` subscripts, and isolated CoW element reads.
-// code-gauge-allow functionNcss -- Resolves chained namerefs and evaluates element subscripts against a discarded CoW ShellState.
+// code-gauge-allow functionCognitiveComplexity -- Resolves chained namerefs, dynamic arrays, whole-array `@`/`*` subscripts, and isolated CoW element reads.
 function observeElement(
   shell: Shell,
   name: string,
   subscript: string,
   maxScope: number
 ): { value: VariableValue | undefined; nullReference: boolean } {
+  let targetName = name;
   let target: Variable | undefined = findOwnVariableIn(shell, name, maxScope);
   const visited = new Set<Variable>();
   for (let depth = 0; depth < 16 && target?.attributes.has('n') && target.value?.kind === 'scalar'; depth++) {
@@ -120,11 +129,26 @@ function observeElement(
     visited.add(target);
     const ref = target.value.value;
     if (ref === '' || ref.includes('[')) return { value: undefined, nullReference: false };
+    targetName = ref;
     target = findOwnVariableIn(shell, ref, maxScope);
   }
-  if (!target?.value) return { value: undefined, nullReference: false };
-  const targetIsNullScalar = target.value.kind === 'scalar' && target.nullReference === true;
-  if (subscript === '@' || subscript === '*') return { value: target.value, nullReference: targetIsNullScalar };
+  const effective = target?.value
+    ? target
+    : withObservedScopes(shell, maxScope, () => shell.dynamicDeclaration(targetName));
+  if (!effective?.value) return { value: undefined, nullReference: false };
+  const targetIsNullScalar = effective.value.kind === 'scalar' && effective.nullReference === true;
+  if (subscript === '@' || subscript === '*') return { value: effective.value, nullReference: targetIsNullScalar };
+  const observed = withObservedScopes(shell, maxScope, () => {
+    const expanded = shell.expandDynamicSubscript(subscript);
+    const normalized = expanded === '' && subscript !== '' && effective.value?.kind !== 'associative' ? '0' : expanded;
+    return shell.elementValue(effective.name, normalized);
+  });
+  return observed === undefined
+    ? { value: undefined, nullReference: false }
+    : { value: { kind: 'scalar', value: observed }, nullReference: targetIsNullScalar };
+}
+
+function withObservedScopes<T>(shell: Shell, maxScope: number, run: () => T): T | undefined {
   const { runtime } = shell;
   const savedState = shell.state;
   const savedLastStored = shell.lastStored;
@@ -138,12 +162,13 @@ function observeElement(
       throw new PureReadAbort();
     },
   };
+  const functionScopes = savedState.functionScopes.filter((idx) => idx <= maxScope);
   runtime.steps.recorder = undefined;
   shell.state = {
     ...savedState,
     scopes: savedState.scopes.slice(0, maxScope + 1).map((scope) => cloneScope(scope)),
-    functionScopes: savedState.functionScopes.filter((idx) => idx <= maxScope),
-    calls: savedState.calls.map((call) => ({ ...call })),
+    functionScopes,
+    calls: savedState.calls.slice(0, functionScopes.length).map((call) => ({ ...call })),
     pipeStatus: new Map(savedState.pipeStatus),
     unsetDynamic: new Set(savedState.unsetDynamic),
     unsetEnv: new Set(savedState.unsetEnv),
@@ -151,12 +176,7 @@ function observeElement(
     fd2: silentAbort,
   };
   try {
-    const expanded = shell.expandDynamicSubscript(subscript);
-    const normalized = expanded === '' && subscript !== '' && target.value.kind !== 'associative' ? '0' : expanded;
-    const element = shell.elementValue(target.name, normalized);
-    return element === undefined
-      ? { value: undefined, nullReference: false }
-      : { value: { kind: 'scalar', value: element }, nullReference: targetIsNullScalar };
+    return run();
   } catch (error) {
     if (
       error instanceof PureReadAbort ||
@@ -166,7 +186,7 @@ function observeElement(
       error instanceof ExitSignal ||
       error instanceof UnsupportedFeatureError
     ) {
-      return { value: undefined, nullReference: false };
+      return undefined;
     }
     throw error;
   } finally {
