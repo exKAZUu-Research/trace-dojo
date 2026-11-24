@@ -1380,7 +1380,37 @@ function backInserter(library: Library, container: Type, appendMethod: FunctionI
   const cls = new ClassInfo(`std::back_insert_iterator<${typeName(container)}>`, 'class');
   cls.isComplete = true;
   const element = unqualified(nonReference(appendMethod.params[0].type));
-  cls.library = { kind: 'back_insert_iterator', args: [element], size: 8, align: 8, outputContainer: container };
+  cls.library = {
+    kind: 'back_insert_iterator',
+    args: [element],
+    size: 8,
+    align: 8,
+    outputContainer: container,
+    // `*it = value` appends the value, and `*it` and `++it` give the iterator itself (C++20 [back.insert.iter.ops]).
+    operator: (compiler, operator, operands, row) => {
+      const [iterator, value] = operands;
+      if (!iterator || iterator.type.kind !== 'class' || iterator.type.cls !== cls) return;
+      if ((operator === '*' || operator === '++' || operator === 'x++') && operands.length === 1) return iterator;
+      if (operator !== '=' || !value || !iterator.isLvalue) return;
+      const location = iterator.run;
+      const target: Expr = {
+        type: container,
+        isLvalue: true,
+        row,
+        run: (frame) => (location(frame) as Ptr).read() as Ptr,
+      };
+      const append = compiler.callWith(compiler.member(target, 'push_back', row), [value], row).run;
+      return {
+        type: iterator.type,
+        isLvalue: true,
+        row,
+        run: (frame) => {
+          append(frame);
+          return location(frame);
+        },
+      };
+    },
+  };
   cls.operations = {
     copyIsNoexcept: true,
     copy: (_frame, value) => value,

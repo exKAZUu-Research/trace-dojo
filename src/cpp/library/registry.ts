@@ -116,8 +116,6 @@ const UNSUPPORTED_STD_NAMES: Record<string, string> = {
   move: 'ムーブ（std::move）',
   forward: '完全転送（std::forward）',
   valarray: 'std::valarray',
-  ranges: 'レンジ（std::ranges）',
-  views: 'レンジ（std::views）',
   forward_list: 'std::forward_list',
   wstring: 'ワイド文字列（std::wstring）',
   wcout: 'ワイド文字の出力（std::wcout）',

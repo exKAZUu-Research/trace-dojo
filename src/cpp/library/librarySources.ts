@@ -12,6 +12,7 @@ import { INVOKE } from './sources/invoke';
 import { MEMORY } from './sources/memory';
 import { NUMBERS } from './sources/numbers';
 import { OPTIONAL } from './sources/optional';
+import { RANGES } from './sources/ranges';
 import { REVERSE_ITERATOR, SPAN } from './sources/span';
 import { STRING_VIEW } from './sources/stringView';
 import { INTEGER_SEQUENCE, TUPLE } from './sources/tuple';
@@ -55,6 +56,7 @@ export const LIBRARY_SOURCES: readonly LibrarySource[] = [
   REVERSE_ITERATOR,
   SPAN,
   COMPLEX,
+  RANGES,
 ];
 
 const SOURCES_BY_NAME = new Map<string, LibrarySource[]>();
