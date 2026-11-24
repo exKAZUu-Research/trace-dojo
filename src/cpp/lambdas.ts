@@ -27,6 +27,8 @@ interface Capture {
   byReference: boolean;
   /** The initializer of an init-capture (`[x = 1]`), else the variable's name. */
   source: Syntax;
+  /** The element of a pack the capture holds, which compiles in place of `source`. */
+  element?: () => Expr;
 }
 
 /**
@@ -50,10 +52,30 @@ class LambdaCaptures implements CaptureLookup {
 
   /** Adds a capture the lambda names: `x`, `&x`, `x = e`, or `&x = e`. */
   addExplicit(name: string, type: Type, byReference: boolean, source: Syntax, row: number): void {
-    if (this.explicit.has(name)) this.compiler.error(row, `${name} はすでに取り込んでいます。`);
+    if (this.explicit.has(name) || this.packs.has(name)) this.compiler.error(row, `${name} はすでに取り込んでいます。`);
     const capture = this.addField(name, type, byReference, source, row);
     this.explicit.set(name, capture);
   }
+
+  /**
+   * Adds the captures of a pack's elements (`[args...]`, `[...xs = args]`), which the body names as a pack, each
+   * initialized from the element of `pack` at its position.
+   */
+  addPack(name: string, pack: Extract<Entity, { kind: 'pack' }>, byReference: boolean, source: Syntax): void {
+    if (this.explicit.has(name) || this.packs.has(name))
+      this.compiler.error(source.row, `${name} はすでに取り込んでいます。`);
+    const captures = pack.items.map((item, index) => {
+      const element = (): Expr => this.compiler.entityExpr(item, source, false);
+      const value = element();
+      const type = byReference ? value.type : unqualified(this.compiler.deduceAuto(AUTO, value, source.row));
+      const capture = this.addField(`${name}#${index}`, type, byReference, source, source.row);
+      capture.element = element;
+      return capture;
+    });
+    this.packs.set(name, captures);
+  }
+
+  private readonly packs = new Map<string, Capture[]>();
 
   captureThis(byCopy: boolean, row: number): void {
     const owner = this.enclosingClass;
@@ -70,6 +92,8 @@ class LambdaCaptures implements CaptureLookup {
   lookup(name: string): Entity | undefined {
     const capture = this.explicit.get(name);
     if (capture) return { kind: 'field', field: capture.field };
+    const pack = this.packs.get(name);
+    if (pack) return { kind: 'pack', items: pack.map((element) => ({ kind: 'field', field: element.field })) };
     const outer = this.enclosing.lookupLocal(name) ?? this.enclosing.captures?.lookup(name);
     const variableType = outer && capturableType(outer);
     if (!outer || !variableType) return outer;
@@ -308,10 +332,24 @@ function readCaptureList(compiler: Compiler, captures: LambdaCaptures, list: Syn
         captures.addExplicit(child.text, type, byReference, child, child.row);
         break;
       }
+      case 'parameter_pack_expansion': {
+        const pattern = fieldOf(child, 'pattern') as Syntax;
+        const entity = compiler.findName(pattern.text);
+        if (pattern.type !== 'identifier' || entity?.kind !== 'pack')
+          return compiler.error(child.row, `${child.text} には、取り込む関数の引数のパックを書いてください。`);
+        captures.addPack(pattern.text, entity, byReference, pattern);
+        break;
+      }
       case 'lambda_capture_initializer': {
         const left = fieldOf(child, 'left') as Syntax;
         const right = fieldOf(child, 'right') as Syntax;
         const isReference = child.all.some((token) => token.type === '&');
+        // `[...xs = args]` captures each element of a pack.
+        const packEntity = child.all.some((token) => token.type === '...') ? compiler.findName(right.text) : undefined;
+        if (packEntity?.kind === 'pack') {
+          captures.addPack(left.text, packEntity, isReference, right);
+          break;
+        }
         const expr = compiler.compileExpression(right);
         const type = isReference ? expr.type : compiler.deduceAuto(AUTO, expr, child.row);
         if (isReference && !expr.isLvalue)
@@ -328,7 +366,7 @@ function readCaptureList(compiler: Compiler, captures: LambdaCaptures, list: Syn
 
 /** Initializes a capture's member from the variable or the init-capture's expression, in the enclosing scope. */
 function captureInitializer(compiler: Compiler, capture: Capture): Initializer {
-  const expr = compiler.compileExpression(capture.source);
+  const expr = capture.element ? capture.element() : compiler.compileExpression(capture.source);
   const { type } = capture.field;
   if (type.kind === 'reference') return compiler.referenceInitializer(type, expr, capture.source.row);
   return compiler.copyInitializer(type, expr, capture.source.row, false);

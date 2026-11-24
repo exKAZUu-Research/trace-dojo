@@ -2,6 +2,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { Compiler } from './compiler';
 import { implicitConversion } from './conversions';
 import type { Expr } from './expr';
+import { parseExpressionAt } from './parse';
 import { type ProgramTemplate, TemplateBindings, type TemplateParameter } from './programTemplates';
 import { fieldOf, type Syntax } from './syntax';
 import { isArithmetic, isSigned, nonReference, sameType, type Type, typeName, unqualified } from './types';
@@ -226,6 +227,14 @@ function requirementHolds(compiler: Compiler, requirement: Syntax): boolean {
     case 'simple_requirement': {
       const expression = requirement.children[0];
       if (!expression) return true;
+      // The grammar reads a nested requirement (`requires sizeof(T) >= 4;`) as an expression starting with a clause.
+      const nested = /^requires\b([\s\S]*);$/.exec(requirement.text.trim());
+      if (nested) {
+        const constraint = parseExpressionAt(nested[1], requirement);
+        if (!constraint)
+          return compiler.error(requirement.row, `requires の後の条件 ${nested[1].trim()} を読めません。`);
+        return evaluateConstraint(compiler, constraint);
+      }
       return compiles(compiler, () => compiler.compileExpression(expression));
     }
     case 'type_requirement': {

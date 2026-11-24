@@ -154,6 +154,8 @@ export class Deduction {
   readonly types = new Map<string, Type>();
   readonly values = new Map<string, number | bigint>();
   readonly packs = new Map<string, Type[]>();
+  /** The types of the values explicit template arguments give, which `auto` parameters take. */
+  readonly valueTypes = new Map<string, Type>();
   /** The parameters explicit template arguments bind, which deduction leaves as they are. */
   readonly fixed = new Set<string>();
   /**

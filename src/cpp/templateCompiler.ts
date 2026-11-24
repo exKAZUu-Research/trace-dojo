@@ -471,6 +471,7 @@ function bindExplicit(deduction: Deduction, parameters: readonly TemplateParamet
     const value = templateValue(argument);
     if (parameter.kind === 'value') {
       if (value === undefined || !deduction.bindValue(parameter.name, value)) return false;
+      deduction.valueTypes.set(parameter.name, argument);
     } else if (value !== undefined || !deduction.bind(parameter.name, argument)) return false;
     // An explicit argument is no deduced one: the call's arguments convert to it.
     if (!parameter.isPack) deduction.fixed.add(parameter.name);
@@ -495,7 +496,10 @@ export function completeBindings(
     let argument: TemplateArgument | undefined;
     if (parameter.kind === 'value') {
       const value = deduction.values.get(name);
-      argument = value === undefined ? undefined : compiler.valueTemplateArgument(info, bindings, parameter, value);
+      argument =
+        value === undefined
+          ? undefined
+          : compiler.valueTemplateArgument(info, bindings, parameter, value, deduction.valueTypes.get(name));
     } else argument = deduction.types.get(name);
     if (!argument && parameter.defaultValue) {
       try {

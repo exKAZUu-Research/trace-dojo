@@ -85,6 +85,23 @@ export function parseAsDeclaration(statement: Syntax): Syntax | undefined {
   }
 }
 
+/** Parses the text of an expression that starts at a node, as the grammar would parse it alone in parentheses. */
+export function parseExpressionAt(text: string, at: Syntax): Syntax | undefined {
+  const prefix = 'void expression_probe() { (';
+  const tree = parser.parse(`${prefix}${text}); }`);
+  if (!tree) return undefined;
+  try {
+    const { rootNode } = tree;
+    if (rootNode.hasError) return undefined;
+    const statement = rootNode.namedChild(0)?.childForFieldName('body')?.namedChild(0);
+    const expression = statement?.namedChild(0)?.namedChild(0);
+    if (!expression) return undefined;
+    return copySyntax(expression, undefined, { row: at.row, index: at.start - prefix.length });
+  } finally {
+    tree.delete();
+  }
+}
+
 export function parseInitializerArguments(parameters: Syntax): Syntax | undefined {
   const prefix = 'void initializer_probe() { initializer_probe';
   const tree = parser.parse(`${prefix}${parameters.text}; }`);

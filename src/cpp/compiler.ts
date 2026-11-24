@@ -2535,8 +2535,12 @@ export class Compiler extends StatementCompiler {
     info: ProgramTemplate,
     bindings: TemplateBindings,
     parameter: TemplateParameter,
-    value: number | bigint
+    value: number | bigint,
+    written?: Type
   ): Type {
+    // `template <auto V>` takes the argument's type.
+    if (fieldOf(parameter.valueDeclaration as Syntax, 'type')?.text === 'auto')
+      return written?.kind === 'int' ? written : { kind: 'int', name: 'int', templateValue: Number(value) };
     const type = this.inTemplate(info, bindings, () =>
       this.typeDescriptor({
         ...(parameter.valueDeclaration as Syntax),
@@ -2545,8 +2549,7 @@ export class Compiler extends StatementCompiler {
         ),
       })
     );
-    if (type.kind !== 'int' || type.enumeration)
-      return this.unsupported(info.node?.row ?? 0, `${typeName(type)} 型のテンプレート引数`);
+    if (type.kind !== 'int') return this.unsupported(info.node?.row ?? 0, `${typeName(type)} 型のテンプレート引数`);
     const { isConst: _, ...plain } = type;
     return {
       ...plain,
@@ -2570,7 +2573,7 @@ export class Compiler extends StatementCompiler {
               }
         );
       const [argument] = this.templateArguments({ ...node, all: [node], children: [node] });
-      return this.valueTemplateArgument(info, bindings, parameter, templateValue(argument) ?? 0);
+      return this.valueTemplateArgument(info, bindings, parameter, templateValue(argument) ?? 0, argument);
     });
   }
 
@@ -2630,7 +2633,7 @@ export class Compiler extends StatementCompiler {
           `${info.name} の ${index + 1} 番目のテンプレート引数には、${parameter.kind === 'value' ? '値' : '型'}を書いてください。`
         );
       if (parameter.kind === 'value')
-        argument = this.valueTemplateArgument(info, bindings, parameter, value as number | bigint);
+        argument = this.valueTemplateArgument(info, bindings, parameter, value as number | bigint, argument);
       bindings.bind(parameter, argument);
     }
     if (!info.parameters.some((parameter) => parameter.isPack) && written.length > info.parameters.length)
@@ -2825,7 +2828,16 @@ export class Compiler extends StatementCompiler {
   /** `template class Box<int>;`, which instantiates a class template's members. */
   private explicitInstantiation(node: Syntax): void {
     const typeNode = fieldOf(node, 'type');
-    if (!typeNode) return this.unsupported(node.row, '関数テンプレートの明示的な実体化');
+    const declarator = fieldOf(node, 'declarator');
+    const written = declarator && functionDeclarator(declarator);
+    if (written) {
+      // `template int twice<int>(int);` names an instance of a function template, which its first use makes.
+      const name = fieldOf(written, 'declarator') as Syntax;
+      const plain = name.type === 'template_function' ? (fieldOf(name, 'name') as Syntax) : name;
+      this.functionTemplateNamed(this.plainName(plain), undefined, node.row);
+      return;
+    }
+    if (!typeNode) return this.error(node.row, '実体化するクラスか関数を書いてください。');
     const nameNode = fieldOf(typeNode, 'name') ?? typeNode;
     const type = this.resolveTypeSpecifier(nameNode, false, true);
     if (type.kind !== 'class') return this.error(node.row, `${typeNode.text} はクラスではありません。`);
