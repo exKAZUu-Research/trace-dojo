@@ -413,7 +413,13 @@ class ShellGrammarValidator {
   private parseCompoundWithRedirections(): void {
     const requiresSeparator = this.parseCompoundConstruct();
     this.parseTrailingRedirections();
-    if (requiresSeparator && this.peek().kind === 'word') this.failUnexpected(this.peek());
+    const next = this.peek();
+    const closesEnclosing =
+      next.kind === 'word' &&
+      this.isKeywordToken(next) &&
+      CONTINUATION_OR_CLOSING_KEYWORDS.has(next.value) &&
+      next.value !== 'in';
+    if (requiresSeparator && next.kind === 'word' && !closesEnclosing) this.failUnexpected(next);
   }
 
   // code-gauge-allow functionNcss -- Dispatches each compound shell construct in the grammar.
