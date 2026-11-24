@@ -23,6 +23,8 @@ export interface TypeEntity {
   /** What a synonym stands for, with its parameters as `TGen` indices. */
   synonym?: Type;
   span?: Span;
+  /** The fixity a type operator was declared with, if any. */
+  fixity?: Fixity;
   /** How the type prints when it is special syntax: lists, tuples, unit, functions, and a class's arguments. */
   special?: 'list' | 'tuple' | 'unit' | 'function' | 'classArguments';
   traceKind?: 'bool' | 'ratio' | 'maybe' | 'map' | 'set';
@@ -108,6 +110,8 @@ export interface ClassEntity {
   superTypes?: Type[];
   /** The functional dependencies, by parameter position. */
   fundeps?: { from: number[]; to: number[] }[];
+  /** The fixity a class operator was declared with, if any. */
+  fixity?: Fixity;
   supers: ClassEntity[];
   methods: ValueEntity[];
   exportedMethods?: ValueEntity[];
@@ -124,6 +128,8 @@ export interface ClassEntity {
 /** How a class constraint is satisfied: a dictionary parameter, an instance, or a superclass of another. */
 export type Evidence =
   | { kind: 'param'; param: DictParam }
+  /** The evidence of a type equality, `a ~ b`, which holds no value at run time. */
+  | { kind: 'equality' }
   | { kind: 'instance'; instance: InstanceInfo; args: Evidence[] }
   | { kind: 'super'; of: Evidence; index: number }
   | { kind: 'hole'; hole: EvidenceHole };

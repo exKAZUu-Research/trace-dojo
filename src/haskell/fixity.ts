@@ -1,7 +1,7 @@
 import type { Fixity } from './entities';
 import { compileError } from './errors';
 import { RecursionBudget } from './recursionBudget';
-import type { ChainItem, Expr, Operator, Pat, Span } from './syntax';
+import type { ChainItem, Expr, Operator, Pat, Span, TypeExpr } from './syntax';
 
 export const DEFAULT_FIXITY: Fixity = { assoc: 'infixl', prec: 9 };
 /** Prefix minus binds like a left-associative operator of precedence 6. */
@@ -127,6 +127,48 @@ export function resolvePatChain(items: ChainItem<Pat>[], span: Span, conFixity: 
         args: [current, right],
         span: { row: current.span.row, col: current.span.col, endRow: right.span.endRow, endCol: right.span.endCol },
       };
+    }
+  };
+  const result = parse1({ assoc: 'infix', prec: -1 }, '', parseOperand());
+  if (position !== items.length) throw compileError(span, '書き方に誤りがあります。');
+  return result;
+}
+
+/** Resolves `a :+: b :*: c` by the type operators' fixities into applications of the operators. */
+export function resolveTypeChain(
+  items: ChainItem<TypeExpr>[],
+  span: Span,
+  fixityOf: (op: Operator) => Fixity
+): TypeExpr {
+  const recursion = new RecursionBudget();
+  let position = 0;
+  const parseOperand = (): TypeExpr => {
+    const token = items[position];
+    if (token?.kind !== 'operand') throw compileError(span, '書き方に誤りがあります。');
+    position++;
+    return token.value;
+  };
+  const parse1 = (op1: Fixity, op1Name: string, left: TypeExpr): TypeExpr => {
+    let current = left;
+    for (;;) {
+      const token = items[position];
+      if (!token) return current;
+      if (token.kind !== 'operator') throw compileError(span, '書き方に誤りがあります。');
+      const op2 = fixityOf(token.op);
+      if (op1.prec === op2.prec && (op1.assoc !== op2.assoc || op1.assoc === 'infix')) {
+        throw compileError(token.op.span, `演算子 ${op1Name} と ${token.op.name} は、括弧なしでは並べられません。`);
+      }
+      if (op1.prec > op2.prec || (op1.prec === op2.prec && op1.assoc === 'infixl')) return current;
+      position++;
+      const right = recursion.run(() => parse1(op2, token.op.name, parseOperand()));
+      const whole = {
+        row: current.span.row,
+        col: current.span.col,
+        endRow: right.span.endRow,
+        endCol: right.span.endCol,
+      };
+      const op: TypeExpr = { kind: 'tcon', name: token.op, span: token.op.span };
+      current = { kind: 'tapp', fn: { kind: 'tapp', fn: op, arg: current, span: whole }, arg: right, span: whole };
     }
   };
   const result = parse1({ assoc: 'infix', prec: -1 }, '', parseOperand());

@@ -645,11 +645,10 @@ function convertLocalBinds(node: Node | undefined): Decl[] {
 
 // code-gauge-allow functionCognitiveComplexity -- Each branch rejects one unsupported form of a data declaration.
 function convertData(node: Node): Decl {
-  for (const name of ['context', 'forall', 'head']) {
+  for (const name of ['context', 'forall']) {
     const child = field(node, name);
     if (child) {
       if (name === 'context') throw unsupportedError(spanOf(child), 'data 宣言の文脈（DatatypeContexts）');
-      if (name === 'head') throw unsupportedError(spanOf(child), '演算子の型の宣言（TypeOperators）');
       throw unsupported(child);
     }
   }
@@ -735,11 +734,10 @@ function convertStandaloneDeriving(node: Node): Decl {
 }
 
 function convertNewtype(node: Node): Decl {
-  for (const name of ['context', 'forall', 'kind', 'head']) {
+  for (const name of ['context', 'forall', 'kind']) {
     const child = field(node, name);
     if (child) {
       if (name === 'context') throw unsupportedError(spanOf(child), 'newtype 宣言の文脈（DatatypeContexts）');
-      if (name === 'head') throw unsupportedError(spanOf(child), '演算子の型の宣言（TypeOperators）');
       throw unsupported(child);
     }
   }
@@ -805,12 +803,23 @@ function derivingClasses(node: Node): QName[] {
 }
 
 function typeDeclName(node: Node): Name {
+  const head = field(node, 'head');
+  if (head) {
+    requireTypeOperators(head);
+    return plainName(required(head, 'operator'));
+  }
   const nameNode = required(node, 'name');
   if (nameNode.type !== 'name') {
     rejectUnsupported(nameNode);
-    throw unsupportedError(spanOf(nameNode), '演算子の型の宣言（TypeOperators）');
+    requireTypeOperators(nameNode);
   }
   return plainName(nameNode);
+}
+
+function requireTypeOperators(node: Node): void {
+  if (!extensions.has('TypeOperators')) {
+    throw syntaxError(spanOf(node), '演算子の型を使うには、TypeOperators の拡張が要ります。');
+  }
 }
 
 function typeParams(node: Node): Name[] {
@@ -824,10 +833,15 @@ function typeParamKinds(node: Node): (TypeExpr | undefined)[] | undefined {
 }
 
 function typeParamBinders(node: Node): TyVarBinder[] {
-  return fields(node, 'patterns').flatMap((patterns) => {
-    if (patterns.type !== 'type_params') throw unsupported(patterns);
-    return namedChildren(patterns).map(convertBinder);
-  });
+  const head = field(node, 'head');
+  const headBinders = head ? fields(head, 'bind').map(convertBinder) : [];
+  return [
+    ...headBinders,
+    ...fields(node, 'patterns').flatMap((patterns) => {
+      if (patterns.type !== 'type_params') throw unsupported(patterns);
+      return namedChildren(patterns).map(convertBinder);
+    }),
+  ];
 }
 
 /** A type variable binder: `a`, `(a :: k)`, or `{a}`, which a `forall` or a declaration's head binds. */
@@ -1014,8 +1028,6 @@ function isStrictField(node: Node): boolean {
 }
 
 function convertTypeSynonym(node: Node): Decl {
-  const head = field(node, 'head');
-  if (head) throw unsupportedError(spanOf(head), '演算子の型の宣言（TypeOperators）');
   const typeNode = required(node, 'type');
   if (typeNode.type === 'signature') throw unsupported(typeNode);
   return {
@@ -1029,8 +1041,6 @@ function convertTypeSynonym(node: Node): Decl {
 }
 
 function convertClass(node: Node): Decl {
-  const head = field(node, 'head');
-  if (head) throw unsupportedError(spanOf(head), '演算子のクラスの宣言');
   const binders = typeParamBinders(node);
   const params = binders.map((binder) => binder.name);
   if (params.length !== 1 && !extensions.has('MultiParamTypeClasses')) {
@@ -1158,7 +1168,7 @@ function constraintsOf(node: Node): Constraint[] {
       return [convertType(node)];
     }
     case 'infix_chain': {
-      throw unsupportedError(spanOf(node), '型の等しさの制約（~）');
+      return [convertType(node)];
     }
     default: {
       throw unsupportedError(spanOf(node), 'この形の制約');
@@ -1244,11 +1254,17 @@ function convertType(node: Node): TypeExpr {
     case 'prefix_id': {
       const inner = namedChildren(node)[0];
       if (inner?.text === '->') return { kind: 'tcon', name: { name: '->', span }, span };
-      throw unsupportedError(span, '演算子の型（TypeOperators）');
+      if (inner?.text !== '~') requireTypeOperators(node);
+      return { kind: 'tcon', name: qualifiedName(inner ?? node).name, span };
     }
     case 'infix_chain':
     case 'infix': {
-      throw unsupportedError(span, '演算子の型（TypeOperators）');
+      const items = chainItems(node, convertQuantifiedType);
+      for (const item of items) {
+        if (item.kind === 'operator' && item.op.name !== '~') requireTypeOperators(node);
+        if (item.kind === 'negate') throw syntaxError(item.span, '書き方に誤りがあります。');
+      }
+      return { kind: 'tchain', items, span };
     }
     case 'literal': {
       throw unsupportedError(span, '型のリテラル（DataKinds）');

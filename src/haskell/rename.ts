@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss -- The renamer resolves every construct of the language against one scope structure.
 import {
   CONS_CON,
+  EQUALITY_CLASS,
   FUNCTION_TYPE,
   LIST_TYPE,
   NIL_CON,
@@ -22,7 +23,7 @@ import {
 import { compileError, unsupportedError } from './errors';
 import { ExportTableBuilder } from './exportTable';
 import type { Extensions } from './extensions';
-import { DEFAULT_FIXITY, resolveExprChain, resolvePatChain, sectionOperand } from './fixity';
+import { DEFAULT_FIXITY, resolveExprChain, resolvePatChain, resolveTypeChain, sectionOperand } from './fixity';
 import { LocalScope } from './localScope';
 import { emptyExports, type ExportTable, type TypeLike } from './modules';
 import type {
@@ -660,8 +661,11 @@ class Renamer {
         if (seen.has(op.name)) throw compileError(op.span, `${op.name} の結合性が重複して宣言されています。`);
         seen.add(op.name);
         const entity = lookup(op.name);
-        if (!entity) throw compileError(op.span, `結合性を宣言した ${op.name} の定義がありません。`);
-        entity.fixity = { assoc: fixityDecl.assoc, prec: fixityDecl.prec };
+        const type = fixityDecl === undefined ? undefined : this.ownTypes.get(op.name);
+        if (!entity && !type) throw compileError(op.span, `結合性を宣言した ${op.name} の定義がありません。`);
+        const fixity = { assoc: fixityDecl.assoc, prec: fixityDecl.prec };
+        if (entity) entity.fixity = fixity;
+        if (type) type.entity.fixity = fixity;
       }
     };
     for (const decl of decls) {
@@ -1544,6 +1548,12 @@ class Renamer {
       case 'tkinded': {
         return { k: 'kinded', type: this.renameType(type.type, vars), kind: this.renameKind(type.kindSig), span };
       }
+      case 'tchain': {
+        return this.renameType(
+          resolveTypeChain(type.items, span, (op) => this.typeFixityOf(op)),
+          vars
+        );
+      }
       case 'tforall': {
         const inner = new Set([...vars, ...type.binders.map((binder) => binder.name.name)]);
         return {
@@ -1691,8 +1701,16 @@ class Renamer {
     return picked.candidate;
   }
 
+  private typeFixityOf(op: Operator): Fixity {
+    if (op.name === '~' && !op.qualifier) return EQUALITY_CLASS.fixity as Fixity;
+    const own = op.qualifier ? undefined : this.ownTypes.get(op.name);
+    const entity = own ?? this.lookupType(op);
+    return entity.entity.fixity ?? DEFAULT_FIXITY;
+  }
+
   private renameTypeName(name: QName): RType {
     let builtin: TypeEntity | undefined;
+    if (!name.qualifier && name.name === '~') return { k: 'class', entity: EQUALITY_CLASS, span: name.span };
     if (!name.qualifier) {
       if (name.name === '*') builtin = TYPE_KIND;
       else if (name.name === '()') builtin = UNIT_TYPE;

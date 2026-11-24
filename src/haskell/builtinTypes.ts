@@ -1,6 +1,7 @@
-import { type ConInfo, nextId, type TypeEntity, type ValueEntity } from './entities';
+import { type ClassEntity, type ConInfo, nextId, type TypeEntity, type ValueEntity } from './entities';
 import { compileError } from './errors';
-import { simpleKind, type Type } from './types';
+import { rememberKind } from './kindTemplates';
+import { freshKindVar, kindArrow, simpleKind, STAR, type Type } from './types';
 
 /** The module that owns the primitive types and the special syntax types (lists, tuples, unit, functions). */
 export const BUILTIN_MODULE = 'GHC.Types';
@@ -51,6 +52,29 @@ CONS_CON.entity.fixity = { assoc: 'infixr', prec: 5 };
 
 export const UNIT_TYPE: TypeEntity = { ...primType('()', 0, 'unit'), sort: 'data' };
 export const UNIT_CON = addConstructor(UNIT_TYPE, '()', []);
+
+/** The types an equality constraint `a ~ b` compares, packed as a constraint of the class `~` applies to. */
+export const EQUALITY_TYPES: TypeEntity = { ...primType('~', 2), special: 'classArguments' };
+
+/** The class of type equality constraints, `a ~ b`, which the type checker solves by unification. */
+export const EQUALITY_CLASS: ClassEntity = {
+  id: nextId(),
+  name: '~',
+  module: BUILTIN_MODULE,
+  tyvarKind: STAR,
+  packed: EQUALITY_TYPES,
+  supers: [],
+  methods: [],
+  defaults: [],
+  fixity: { assoc: 'infix', prec: 4 },
+};
+
+{
+  // Both sides of an equality have one kind, whichever it is.
+  const kind = freshKindVar();
+  EQUALITY_TYPES.kind = kindArrow(kind, kindArrow(kind, STAR));
+  rememberKind(EQUALITY_TYPES, EQUALITY_TYPES.kind);
+}
 
 /** The kind of types, `Type` (or `*`), which Data.Kind exports and kind signatures name. */
 export const TYPE_KIND: TypeEntity = primType('Type', 0);

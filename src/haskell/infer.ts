@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss -- The type checker keeps its inference rules beside the substitution state they share.
 import { LIMITS } from '../interpreter/limits';
-import { CHAR_TYPE, FUNCTION_TYPE, LIST_TYPE, tupleCon, UNIT_TYPE } from './builtinTypes';
+import { CHAR_TYPE, EQUALITY_CLASS, FUNCTION_TYPE, LIST_TYPE, tupleCon, UNIT_TYPE } from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, impliedBySuperclasses, predsEqual } from './classEnv';
 import { dependencyOrder } from './dependencies';
 import type { ClassEntity, ConInfo, DictParam, Evidence, EvidenceHole, TypeEntity, ValueEntity } from './entities';
@@ -203,6 +203,12 @@ export class Checker {
       if (hole.solution) continue;
       const pred = { cls: hole.pred.cls, type: zonk(hole.pred.type) };
       hole.pred = pred;
+      if (pred.cls === EQUALITY_CLASS) {
+        const [left, right] = splitApp(pred.type).args;
+        this.unify(left, right, hole.span, `型の等しさの制約（${hole.origin}）`);
+        hole.solution = { kind: 'equality' };
+        continue;
+      }
       const given = entailByGivens(givens, pred);
       if (given) {
         hole.solution = given;
@@ -778,7 +784,10 @@ export class Checker {
     pat.dictParams = (con.context ?? []).map((pred) =>
       newDictParam({ cls: pred.cls, type: instantiateType(pred.type, all) })
     );
-    for (const param of pat.dictParams) scope.givens.push({ pred: param.pred, evidence: { kind: 'param', param } });
+    for (const param of pat.dictParams) {
+      scope.assumed.push(...this.assumeEquality(param.pred));
+      scope.givens.push({ pred: param.pred, evidence: { kind: 'param', param } });
+    }
     return con.fieldTypes.map((fieldType) => instantiateType(fieldType, all));
   }
 
@@ -1206,6 +1215,7 @@ export class Checker {
     const params = scheme.preds.map((pred) =>
       newDictParam({ cls: pred.cls, type: instantiateType(pred.type, skolems) })
     );
+    const assumed = params.flatMap((param) => this.assumeEquality(param.pred));
     const givens = [
       ...extraGivens,
       ...params.map((param) => ({ pred: param.pred, evidence: { kind: 'param', param } as Evidence })),
@@ -1235,8 +1245,28 @@ export class Checker {
         `${printer.showPred(hole.pred)} を導けません（${hole.origin}）。型シグネチャの文脈に制約を加えてください。`
       );
     }
+    for (const variable of assumed) variable.ref = undefined;
     this.wanted.push(...deferred);
     return params;
+  }
+
+  /**
+   * Assumes a given equality `a ~ t` while the constraints of its scope are checked: a rigid variable on one side
+   * stands for the other side. The returned variables are the ones to restore afterwards.
+   */
+  assumeEquality(pred: Pred): TVar[] {
+    if (pred.cls !== EQUALITY_CLASS) return [];
+    const [left, right] = splitApp(pred.type).args.map(prune);
+    if (left.tag === 'tvar' && left.skolem && left !== right) {
+      left.ref = right;
+      return [left];
+    }
+    if (right.tag === 'tvar' && right.skolem && left !== right) {
+      right.ref = left;
+      return [right];
+    }
+    this.unify(left, right, { row: 0, col: 0, endRow: 0, endCol: 0 }, '型の等しさの制約');
+    return [];
   }
 
   classKind(entity: ClassEntity, span: Span): Kind {

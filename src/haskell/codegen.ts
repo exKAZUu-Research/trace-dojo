@@ -1469,6 +1469,9 @@ export class Codegen {
           case 'super': {
             return { k: 'super', dict: mapped[0], index: node.index };
           }
+          case 'equality': {
+            return { k: 'con', con: UNIT_CON, args: [] };
+          }
           case 'hole': {
             throw new Error(`Unsolved constraint ${node.hole.pred.cls.name}`);
           }
