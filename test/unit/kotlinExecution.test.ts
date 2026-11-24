@@ -6165,16 +6165,6 @@ test.each([
     'Java のクラスの直接の利用（java.lang.StringBuffer）は、この採点環境では使えません。',
   ],
   [
-    'a recognized static System method',
-    'fun main() { println(System.currentTimeMillis()) }',
-    'System.currentTimeMillisは、この採点環境では使えません。',
-  ],
-  [
-    'an imported standard time function',
-    'import kotlin.system.measureTimeMillis\nfun main() { println(measureTimeMillis { }) }',
-    'kotlin.system.measureTimeMillisは、この採点環境では使えません。',
-  ],
-  [
     'a Java method mapped to a mutable Kotlin collection',
     'fun main() { mutableMapOf("a" to 1).putIfAbsent("b", 2) }',
     'MutableMap<String, Int> の putIfAbsentは、この採点環境では使えません。',

@@ -79,6 +79,8 @@ export interface FileContext {
   importedProperties: Map<string, PropertySymbol[]>;
   /** The packages of the file's `import p.*`, which come before the default imports. */
   starPackages: string[];
+  /** The opt-in markers that `@file:OptIn` opts the whole file in to. */
+  optIns: ClassSymbol[];
 }
 
 /** A member found on a receiver's type, with the type arguments that the receiver gives its class. */
@@ -130,6 +132,41 @@ export abstract class CompilerCore {
 
   protected abstract checkAnnotations(scope: Scope, annotations: Annotation[], site: AnnotationSite): void;
 
+  /** The opt-in markers among annotations: annotation classes that `@RequiresOptIn` marks with an error level. */
+  protected abstract optInMarkersOf(scope: Scope, annotations: Annotation[]): ClassSymbol[];
+
+  /** The markers annotations opt their declaration in to: those `@OptIn` names and the markers it carries. */
+  protected abstract optInsOf(scope: Scope, annotations: Annotation[]): ClassSymbol[];
+
+  /** The opt-in markers the code being compiled is opted in to. */
+  protected currentOptIns: ReadonlySet<ClassSymbol> = new Set();
+
+  protected withOptIns<T>(added: Iterable<ClassSymbol>, run: () => T): T {
+    const saved = this.currentOptIns;
+    this.currentOptIns = new Set([...saved, ...added]);
+    try {
+      return run();
+    } finally {
+      this.currentOptIns = saved;
+    }
+  }
+
+  /** The markers code in a class is opted in to: the file's, and each enclosing class's. */
+  protected classOptIns(cls: ClassSymbol | undefined): ClassSymbol[] {
+    const optIns = [...this.file.optIns];
+    for (let current = cls; current; current = current.outer) optIns.push(...current.optIns);
+    return optIns;
+  }
+
+  /** Rejects a use of a declaration that an opt-in marker marks, in code that is not opted in to the marker. */
+  protected requireOptIn(markers: readonly ClassSymbol[], name: string, row: number): void {
+    if (this.file.isLibrary) return;
+    for (const marker of markers) {
+      if (!this.currentOptIns.has(marker))
+        this.error(row, `${name} を使うには、@OptIn(${marker.name}::class) か @${marker.name} が必要です。`);
+    }
+  }
+
   /** The level of a declaration's `@Deprecated`, whose `ERROR` and `HIDDEN` reject uses of the declaration. */
   protected abstract deprecationLevel(scope: Scope, modifiers: Modifiers): 'WARNING' | 'ERROR' | 'HIDDEN' | undefined;
 
@@ -153,8 +190,6 @@ export abstract class CompilerCore {
   // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   // code-gauge-allow functionNcss -- the type is resolved and checked in the order the written name and arguments determine it.
   resolveType(scope: Scope, ref: TypeRef, allowsBareClass = false): KType {
-    if (ref.kind === 'function' && ref.contextTypes.length > 0)
-      this.unavailable(ref.row, 'コンテキスト引数を持つ関数型（context(A) () -> Unit）');
     if (ref.kind === 'function') {
       return {
         kind: 'function',
@@ -163,6 +198,8 @@ export abstract class CompilerCore {
         returnType: this.resolveType(scope, ref.returnType),
         nullable: ref.nullable,
         isSuspend: ref.isSuspend || undefined,
+        contextTypes:
+          ref.contextTypes.length > 0 ? ref.contextTypes.map((each) => this.resolveType(scope, each)) : undefined,
       };
     }
     const [first, ...rest] = ref.parts;
@@ -213,6 +250,7 @@ export abstract class CompilerCore {
           : this.resolveArguments(scope, cls, part.args, ref.row);
     }
     this.checkNestedAccessible(scope, cls, ref.row);
+    this.requireOptIn(cls.optInMarkers, cls.name, ref.row);
     return { kind: 'class', cls, args, nullable: ref.nullable };
   }
 

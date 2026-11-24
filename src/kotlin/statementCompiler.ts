@@ -231,6 +231,12 @@ export abstract class StatementCompiler extends OperatorCompiler {
   // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
   // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileLocalProperty(scope: Scope, context: FunctionContext, statement: PropertyDecl): Exec {
+    return this.withOptIns(this.optInsOf(scope, statement.modifiers.annotations), () =>
+      this.compileLocalPropertyOpted(scope, context, statement)
+    );
+  }
+
+  private compileLocalPropertyOpted(scope: Scope, context: FunctionContext, statement: PropertyDecl): Exec {
     this.validateAnnotations(
       scope,
       statement.modifiers,

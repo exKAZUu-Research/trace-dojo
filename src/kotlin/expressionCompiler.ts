@@ -755,6 +755,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   protected readTopLevelProperty(context: FunctionContext, symbol: PropertySymbol, row: number): Compiled {
+    this.requireMemberOptIn(symbol, row);
     this.checkGlobalInitialized(context, symbol, row);
     const type = this.ensurePropertyType(symbol, row);
     const key = keyOf(symbol);
@@ -1939,7 +1940,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
       const converted = this.expectType(compiled, paramType, argument.row);
       return convertRepr(converted, reprOf(this.core, paramType), 'ref');
     });
-    const evals = receiverEval ? [receiverEval, ...argumentEvals] : argumentEvals;
+    // A function type's context arguments come from the call's context, after the receiver.
+    const contextEvals = (type.contextTypes ?? []).map((contextType) => {
+      const argument = this.contextArgument(scope, context, contextType, row);
+      return convertRepr(argument.eval, argument.repr, 'ref');
+    });
+    const evals = [...(receiverEval ? [receiverEval] : []), ...contextEvals, ...argumentEvals];
     const target = functionValue.eval;
     if (type.isSuspend && !this.file.isLibrary && !allowsSuspendCalls(context))
       this.error(row, 'suspend 関数型の値は、suspend 関数かコルーチンの中でだけ呼べます。');
@@ -2211,11 +2217,15 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const outerFlow = this.flow;
     this.flow = outerFlow.copy();
     if (!invokesExactlyOnce) this.forgetAssignedIn(scope, lambda.statements);
-    const variables = params.map((param) => {
-      const variable = this.newParameter(lambdaScope, lambdaContext, param.name, param.type, param.row);
-      this.flow.assigned.add(variable);
-      return variable;
-    });
+    const contextTypes = expected?.contextTypes ?? [];
+    const variables = [
+      ...this.contextVariables(lambdaScope, lambdaContext, contextTypes, lambda.row),
+      ...params.map((param) => {
+        const variable = this.newParameter(lambdaScope, lambdaContext, param.name, param.type, param.row);
+        this.flow.assigned.add(variable);
+        return variable;
+      }),
+    ];
     const expectedReturn = expected ? resolved(expected.returnType) : undefined;
     const returnsUnit = isNonNullClass(expectedReturn, this.core.unit);
     lambdaContext.lambdaResult = {
@@ -2263,11 +2273,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
       params: params.map((param) => param.type),
       returnType: resultType,
       nullable: false,
+      contextTypes: contextTypes.length > 0 ? contextTypes : undefined,
     };
     const evaluate = lambdaValue({
       captureBuilder: this.captureBuilder(context, lambdaContext),
       info: lambdaContext.info,
-      arity: params.length + (hasReceiver ? 1 : 0),
+      arity: variables.length + (hasReceiver ? 1 : 0),
       hasReceiver,
       receiverIsUnboxed: hasReceiver && reprOf(this.core, receiverType) !== 'ref',
       paramReprs: variables.map((variable) => reprOf(this.core, variable.type)),
@@ -2395,6 +2406,20 @@ export abstract class ExpressionCompiler extends CallCompiler {
       },
       expected
     );
+  }
+
+  /**
+   * The parameters a lambda of `context(A) () -> R` receives first, after its receiver, which its body reaches as the
+   * context of calls that need one.
+   */
+  protected contextVariables(scope: Scope, context: FunctionContext, types: KType[], row: number): VariableSymbol[] {
+    return types.map((type, index) => {
+      const variable = this.newParameter(scope, context, undefined, type, row);
+      variable.isContextParameter = true;
+      scope.variables.set(`\0context${index}`, variable);
+      this.flow.assigned.add(variable);
+      return variable;
+    });
   }
 
   /** A lambda of a suspend function type, whose body runs as a coroutine's steps. */

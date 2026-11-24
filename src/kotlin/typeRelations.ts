@@ -177,6 +177,10 @@ function constrainSubtype(sub: KType, sup: KType): boolean {
 
 function isFunctionSubtype(sub: FunctionType, sup: FunctionType): boolean {
   if ((sub.isSuspend ?? false) !== (sup.isSuspend ?? false)) return false;
+  const subContexts = sub.contextTypes ?? [];
+  const supContexts = sup.contextTypes ?? [];
+  if (subContexts.length !== supContexts.length) return false;
+  if (!supContexts.every((type, index) => isSubtype(type, subContexts[index] as KType))) return false;
   const subParams = sub.receiver ? [sub.receiver, ...sub.params] : sub.params;
   const supParams = sup.receiver ? [sup.receiver, ...sup.params] : sup.params;
   if (subParams.length !== supParams.length) return false;

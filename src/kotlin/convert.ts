@@ -1,5 +1,6 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
+import { convertAnnotationEntry } from './annotationArguments';
 import type {
   Accessor,
   Annotation,
@@ -67,12 +68,8 @@ export class Converter extends ExpressionConverter {
           break;
         }
         case 'file_annotation': {
-          for (const annotation of namedOfType(child, 'annotation')) {
-            const converted = this.convertAnnotation(annotation);
-            if (converted.useSiteTarget !== 'file')
-              throw syntaxError(annotation, 'ファイルへのアノテーションは @file:名前 の形で書いてください。');
-            annotations.push(converted);
-          }
+          for (const entry of named(child))
+            annotations.push(convertAnnotationEntry(entry, 'file', (argument) => this.convertArgument(argument)));
           break;
         }
         case 'package_header': {

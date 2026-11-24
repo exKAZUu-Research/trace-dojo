@@ -4,6 +4,10 @@ import { type Frame, ProgramExit } from '../runtime';
 import { KObject, NULL, type Value } from '../values';
 import { defineNative, defineNativeProperty, libraryClass, newItems, throwError } from './registry';
 
+// The host's clocks, as the Java interpreter's System gives them.
+defineNative('java.lang.System.currentTimeMillis()', () => BigInt(Date.now()));
+defineNative('java.lang.System.nanoTime()', () => BigInt(Math.round(performance.now() * 1_000_000)));
+
 defineNative('kotlin.system.exitProcess(Int)', (_frame, _receiver, [status]) => {
   throw new ProgramExit(status as number);
 });

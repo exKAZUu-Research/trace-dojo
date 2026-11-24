@@ -206,7 +206,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     this.startFlow();
     this.uninitializedProperties = undefined;
     try {
-      return compile();
+      return this.withOptIns([...this.classOptIns(entry.cls?.symbol), ...entry.symbol.optIns], compile);
     } catch (error) {
       entry.state = 'pending';
       throw error;
@@ -795,6 +795,10 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   // code-gauge-allow functionNcss -- the parts of a class's initializer, from the defaults to the constructor, which follow one another.
   // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileClassInitializer(entry: ClassEntry): void {
+    this.withOptIns(this.classOptIns(entry.symbol), () => this.compileClassInitializerOpted(entry));
+  }
+
+  private compileClassInitializerOpted(entry: ClassEntry): void {
     const { symbol } = entry;
     if (symbol.isInterface || symbol.isNative) return;
     const owner = { cls: entry, scope: entry.scope, file: entry.file };

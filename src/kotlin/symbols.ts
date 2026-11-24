@@ -70,6 +70,10 @@ export class ClassSymbol {
   isAnonymous = false;
   /** Whether the class is an `annotation class`. */
   isAnnotation = false;
+  /** The opt-in markers on the class, as `@Exp` of `@RequiresOptIn annotation class Exp`, which its uses need. */
+  optInMarkers: ClassSymbol[] = [];
+  /** The markers the class's code is opted in to: those its `@OptIn` names and those it carries. */
+  optIns: ClassSymbol[] = [];
   /** Whether the class is `inner`, whose instances hold an instance of the class around it. */
   isInner = false;
   /** For an inner class, the slot of the field that holds the instance of the class around it. */
@@ -202,6 +206,10 @@ export class FunctionSymbol implements MemberBase {
   passesDispatchReceiver = false;
   /** Whether calls pass the type arguments of the function's reified type parameters after its arguments. */
   passesTypeArguments = false;
+  /** The opt-in markers on the function, which its calls need. */
+  optInMarkers: ClassSymbol[] = [];
+  /** The markers the function's code is opted in to. */
+  optIns: ClassSymbol[] = [];
   /** Whether the function is `suspend`, which only coroutines and other suspend functions call. */
   isSuspend = false;
   /** Runs a suspend function as a coroutine's step, which suspends where the generator yields. */
@@ -258,6 +266,10 @@ export class PropertySymbol implements MemberBase {
   constantInitializer: Value | undefined;
   /** The visibility of a `var`'s setter, such as `private set`. */
   setterVisibility: Visibility = 'public';
+  /** The opt-in markers on the property, which its uses need. */
+  optInMarkers: ClassSymbol[] = [];
+  /** The markers the property's code is opted in to. */
+  optIns: ClassSymbol[] = [];
   /** Whether the property is `lateinit`, whose read before its first assignment throws. */
   isLateinit = false;
   /** Whether the property is a `const val`, a compile-time constant. */

@@ -15,7 +15,7 @@ import { returnRepr } from './dispatch';
 import { LocalCompiler } from './localCompiler';
 import { framedInstanceTest } from './reified';
 import { type Frame, KotlinThrow, LoopSignal, MISSING, ReturnSignal, SuspendCall, type Suspension } from './runtime';
-import type { ClassSymbol } from './symbols';
+import type { ClassSymbol, FunctionSymbol } from './symbols';
 import { type FunctionType, isNonNullClass, type KType, resolved } from './types';
 import { KObject, UNIT, type Value } from './values';
 
@@ -62,6 +62,39 @@ export abstract class SuspendCompiler extends LocalCompiler {
     defaults: (Eval | undefined)[]
   ): void {
     const { decl, symbol } = entry;
+    const run = withDefaults(defaults, this.compileSuspendBody(scope, context, decl, symbol));
+    const { info } = context;
+    const local = this.localCapture(symbol.owner, context);
+    const none: unknown[] = [];
+    symbol.invokeSuspend = (caller, receiver, args, callRow) => {
+      const { captured, enclosing } = local?.(caller, receiver) ?? { captured: none, enclosing: undefined };
+      return caller.runtime.callSuspend(info, caller, captured, receiver, args, callRow, run, enclosing);
+    };
+    symbol.invoke = suspendOnly(symbol.name);
+  }
+
+  /** A local suspend function's body with its parameters' defaults, which its declaration's frame runs as a coroutine's step. */
+  protected compileLocalSuspendBody(
+    scope: Scope,
+    context: FunctionContext,
+    decl: FunctionDecl,
+    symbol: FunctionSymbol
+  ): (frame: Frame) => Suspension {
+    context.isSuspend = true;
+    this.suspendFunctionNames.add(symbol.name);
+    const variables = symbol.params.map((param, index) => {
+      const type = param.isVararg ? this.varargType(param.type) : param.type;
+      const variable = this.newParameter(scope, context, param.name, type, decl.params[index].row);
+      this.flow.assigned.add(variable);
+      return variable;
+    });
+    const defaults = this.compileParameterDefaults(decl.params, symbol.params, variables, scope, context);
+    symbol.invoke = suspendOnly(symbol.name);
+    return withDefaults(defaults, this.compileSuspendBody(scope, context, decl, symbol));
+  }
+
+  /** A suspend function's body, which returns its value as the function's result representation. */
+  private compileSuspendBody(scope: Scope, context: FunctionContext, decl: FunctionDecl, symbol: FunctionSymbol): Gen {
     const body = decl.body as NonNullable<FunctionDecl['body']>;
     context.restrictedScope = this.restrictedScopeOf(symbol.extensionReceiver);
     let gen: Gen;
@@ -88,21 +121,7 @@ export abstract class SuspendCompiler extends LocalCompiler {
         return UNIT;
       };
     }
-    const run: Gen = function* (frame) {
-      for (const [index, evaluate] of defaults.entries()) {
-        if (evaluate && frame.locals[index] === MISSING) frame.locals[index] = evaluate(frame);
-      }
-      return yield* gen(frame);
-    };
-    const { info } = context;
-    const local = this.localCapture(symbol.owner, context);
-    const none: unknown[] = [];
-    symbol.invokeSuspend = (caller, receiver, args, callRow) => {
-      const { captured, enclosing } = local?.(caller, receiver) ?? { captured: none, enclosing: undefined };
-      return caller.runtime.callSuspend(info, caller, captured, receiver, args, callRow, run, enclosing);
-    };
-    symbol.invoke = (caller) =>
-      caller.runtime.throwError(caller, 'java.lang.IllegalStateException', `${symbol.name} is a suspend function`);
+    return gen;
   }
 
   // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
@@ -124,6 +143,7 @@ export abstract class SuspendCompiler extends LocalCompiler {
     const outerFlow = this.flow;
     this.flow = outerFlow.copy();
     this.forgetAssignedIn(scope, lambda.statements);
+    this.contextVariables(lambdaScope, lambdaContext, expected.contextTypes ?? [], lambda.row);
     for (const param of params) {
       const variable = this.newParameter(lambdaScope, lambdaContext, param.name, param.type, param.row);
       this.flow.assigned.add(variable);
@@ -168,6 +188,7 @@ export abstract class SuspendCompiler extends LocalCompiler {
       returnType: resultType,
       nullable: false,
       isSuspend: true,
+      contextTypes: expected.contextTypes,
     };
     const functionClass = this.core.function;
     return {
@@ -605,6 +626,22 @@ export abstract class SuspendCompiler extends LocalCompiler {
 }
 
 type Eval = (frame: Frame) => Value;
+
+/** Fills the defaults of the arguments a call leaves out before a function's body runs. */
+function withDefaults(defaults: (Eval | undefined)[], gen: Gen): Gen {
+  return function* (frame) {
+    for (const [index, evaluate] of defaults.entries()) {
+      if (evaluate && frame.locals[index] === MISSING) frame.locals[index] = evaluate(frame);
+    }
+    return yield* gen(frame);
+  };
+}
+
+/** The ordinary call of a suspend function, which only a coroutine's suspend call reaches, as kotlinc rules out others. */
+function suspendOnly(name: string): NonNullable<FunctionSymbol['invoke']> {
+  return (caller) =>
+    caller.runtime.throwError(caller, 'java.lang.IllegalStateException', `${name} is a suspend function`);
+}
 
 function isLoopingCall(call: Extract<Expression, { kind: 'call' }>): boolean {
   const name = call.callee.kind === 'name' || call.callee.kind === 'member' ? call.callee.name : undefined;

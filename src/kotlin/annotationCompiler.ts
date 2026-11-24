@@ -147,6 +147,37 @@ export abstract class AnnotationCompiler extends BodyCompiler {
     }
   }
 
+  protected optInMarkersOf(scope: Scope, annotations: Annotation[]): ClassSymbol[] {
+    if (this.file.isLibrary) return [];
+    return annotations.map((annotation) => this.resolvedAnnotationClass(scope, annotation)).filter(isOptInMarker);
+  }
+
+  protected optInsOf(scope: Scope, annotations: Annotation[]): ClassSymbol[] {
+    if (this.file.isLibrary) return [];
+    const optIns: ClassSymbol[] = [];
+    for (const annotation of annotations) {
+      const cls = this.resolvedAnnotationClass(scope, annotation);
+      if (isOptInMarker(cls)) optIns.push(cls);
+      if (cls?.kotlinName !== 'kotlin.OptIn') continue;
+      for (const argument of annotation.args ?? []) {
+        const values = argument.value.kind === 'collectionLiteral' ? argument.value.elements : [argument.value];
+        for (const value of values) {
+          const receiver = value.kind === 'reference' && value.name === 'class' ? value.receiver : undefined;
+          const path = receiver?.kind === 'expression' ? qualifiedPath(receiver.expression) : undefined;
+          const marker = path && (path.length > 1 ? this.findQualifiedClass(path) : this.findClass(scope, path[0]));
+          if (marker) optIns.push(marker);
+        }
+      }
+    }
+    return optIns;
+  }
+
+  /** The class an annotation names, without reporting one that is missing, which `checkAnnotations` reports. */
+  private resolvedAnnotationClass(scope: Scope, annotation: Annotation): ClassSymbol | undefined {
+    const { path, name } = annotation;
+    return path.length > 1 ? this.findQualifiedClass(path) : this.findClass(scope, name);
+  }
+
   /** Checks one value of an annotation's argument, which must be a constant of the parameter's type. */
   // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private checkAnnotationValue(scope: Scope, value: Expression, type: KType, row: number): void {
@@ -317,6 +348,16 @@ function qualifiedPath(expression: Expression): string[] | undefined {
   if (expression.kind !== 'member' || expression.isSafe) return undefined;
   const receiver = qualifiedPath(expression.receiver);
   return receiver && [...receiver, expression.name];
+}
+
+/** Whether a class is an opt-in marker whose uses kotlinc rejects without an opt-in: `@RequiresOptIn` at its error level. */
+function isOptInMarker(cls: ClassSymbol | undefined): cls is ClassSymbol {
+  const requires = cls?.isAnnotation ? cls.ownAnnotations.find(({ name }) => name === 'RequiresOptIn') : undefined;
+  if (!requires) return false;
+  const level =
+    (requires.args ?? []).find((argument) => (argument as { name?: string }).name === 'level') ?? requires.args?.[1];
+  const value = level?.value as Expression | undefined;
+  return !(value && (value.kind === 'member' || value.kind === 'name') && value.name === 'WARNING');
 }
 
 const CONSTANT_INFIX_OPERATORS = new Set(['shl', 'shr', 'ushr', 'and', 'or', 'xor']);

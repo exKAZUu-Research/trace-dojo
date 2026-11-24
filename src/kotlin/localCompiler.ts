@@ -19,7 +19,7 @@ import { returnRepr, runtimeClassOf } from './dispatch';
 import { lambdaValue } from './lambdaValue';
 import { type ClassReference, classReference } from './natives/reflection';
 import { mentionsReified, runtimeType } from './reified';
-import { type Frame, MISSING } from './runtime';
+import { type Frame, MISSING, type Suspension } from './runtime';
 import type { Exec } from './statementCompiler';
 import { type ClassSymbol, FunctionSymbol, type ParameterSymbol, type PropertySymbol } from './symbols';
 import { isSameType, isSubtype } from './typeRelations';
@@ -595,8 +595,8 @@ export abstract class LocalCompiler extends AnnotationCompiler {
   protected compileLocalFunction(scope: Scope, context: FunctionContext, decl: FunctionDecl): Exec {
     this.validateAnnotations(scope, decl.modifiers, annotationSite(['FUNCTION'], decl.receiver ? ['receiver'] : []));
     this.rejectLocalModifiers(decl.modifiers.keywords, decl.row, 'ローカル関数');
-    if (decl.modifiers.keywords.has('suspend')) this.unavailable(decl.row, '関数の中の suspend 関数');
     const symbol = new FunctionSymbol(decl.name);
+    symbol.isSuspend = decl.modifiers.keywords.has('suspend');
     symbol.row = decl.row;
     symbol.isLibrary = context.info.isLibrary;
     symbol.isInline = false;
@@ -635,9 +635,11 @@ export abstract class LocalCompiler extends AnnotationCompiler {
       scope,
       decl.body?.kind === 'block' ? decl.body.block.statements : (decl.body?.expression as Expression)
     );
-    let run: Eval;
+    let run: Eval | undefined;
+    let suspendRun: ((frame: Frame) => Suspension) | undefined;
     try {
-      run = this.compileLocalFunctionBody(functionScope, functionContext, decl, symbol);
+      if (symbol.isSuspend) suspendRun = this.compileLocalSuspendBody(functionScope, functionContext, decl, symbol);
+      else run = this.compileLocalFunctionBody(functionScope, functionContext, decl, symbol);
     } finally {
       this.flow = outerFlow;
     }
@@ -645,11 +647,21 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     const declaringInfo = context.info;
     const { info } = functionContext;
     symbol.defaultsInfo = info;
-    symbol.invoke = (caller, receiver, args, callRow) => {
-      const declaring = declaringFrame(caller, declaringInfo);
-      const env = declaring.locals[envSlot] as unknown as unknown[];
-      return caller.runtime.call(info, caller, env, receiver, args, callRow, run, declaring);
-    };
+    if (suspendRun) {
+      const body = suspendRun;
+      symbol.invokeSuspend = (caller, receiver, args, callRow) => {
+        const declaring = declaringFrame(caller, declaringInfo);
+        const env = declaring.locals[envSlot] as unknown as unknown[];
+        return caller.runtime.callSuspend(info, caller, env, receiver, args, callRow, body, declaring);
+      };
+    } else {
+      const body = run as Eval;
+      symbol.invoke = (caller, receiver, args, callRow) => {
+        const declaring = declaringFrame(caller, declaringInfo);
+        const env = declaring.locals[envSlot] as unknown as unknown[];
+        return caller.runtime.call(info, caller, env, receiver, args, callRow, body, declaring);
+      };
+    }
     return (frame) => {
       frame.locals[envSlot] = build(frame) as unknown as Value;
     };
@@ -806,6 +818,13 @@ export abstract class LocalCompiler extends AnnotationCompiler {
       },
     };
   }
+
+  protected abstract compileLocalSuspendBody(
+    scope: Scope,
+    context: FunctionContext,
+    decl: FunctionDecl,
+    symbol: FunctionSymbol
+  ): (frame: Frame) => Suspension;
 
   /** Rejects the modifiers that a declaration in a function body cannot have. */
   protected rejectLocalModifiers(keywords: ReadonlySet<string>, row: number, what: string): void {

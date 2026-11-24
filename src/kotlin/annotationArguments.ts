@@ -22,15 +22,24 @@ export function convertAnnotation(node: Node, convertArgument: (node: Node) => A
   const parts = named(node);
   const targetNode = parts.find((part) => part.type === 'use_site_target');
   const target = required(parts.find((part) => part.type !== 'use_site_target'));
+  const useSiteTarget = targetNode ? (children(targetNode)[0]?.type ?? targetNode.text.replace(/:$/, '')) : undefined;
+  return convertAnnotationEntry(target, useSiteTarget, convertArgument);
+}
+
+/** An annotation from what follows its `@` and use-site target: its class, with arguments when it has them. */
+export function convertAnnotationEntry(
+  target: Node,
+  useSiteTarget: string | undefined,
+  convertArgument: (node: Node) => Argument
+): Annotation {
   const typeNode = target.type === 'constructor_invocation' ? named(target)[0] : target;
   const path = namedOfType(typeNode, 'identifier').map(identifierName);
   const name = path.at(-1) as string;
   const qualifiedName = path.length > 1 ? path.join('.') : undefined;
   const argumentsNode = firstOfType(target, 'value_arguments');
   const argumentNodes = argumentsNode ? namedOfType(argumentsNode, 'value_argument') : undefined;
-  const useSiteTarget = targetNode ? (children(targetNode)[0]?.type ?? targetNode.text.replace(/:$/, '')) : undefined;
   return {
-    row: rowOf(node),
+    row: rowOf(target),
     name,
     qualifiedName,
     path,

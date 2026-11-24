@@ -187,6 +187,9 @@ object System {
 
     fun lineSeparator(): String = "\\n"
 
+    external fun currentTimeMillis(): Long
+    external fun nanoTime(): Long
+
     /** Checks its arrays and range in HotSpot's order, with its messages, as the Java interpreter's does. */
     fun arraycopy(src: Any?, srcPos: Int, dest: Any?, destPos: Int, length: Int) {
         if (src == null || dest == null) throw NullPointerException()

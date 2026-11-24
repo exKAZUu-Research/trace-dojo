@@ -32,6 +32,8 @@ class Result<out T> internal constructor(internal val value: Any?) {
     }
 }
 
+context(value: A) fun <A> contextOf(): A = value
+
 inline fun <R> runCatching(block: () -> R): Result<R> =
     try {
         Result.success(block())
@@ -104,4 +106,16 @@ export const SYSTEM_EXIT_SOURCE = kotlin`
 package kotlin.system
 
 external fun exitProcess(status: Int): Nothing
+
+inline fun measureTimeMillis(block: () -> Unit): Long {
+    val start = System.currentTimeMillis()
+    block()
+    return System.currentTimeMillis() - start
+}
+
+inline fun measureNanoTime(block: () -> Unit): Long {
+    val start = System.nanoTime()
+    block()
+    return System.nanoTime() - start
+}
 `;

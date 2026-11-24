@@ -533,6 +533,13 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private declareSupertypes(entry: ClassEntry): void {
     const { symbol } = entry;
+    symbol.optInMarkers = this.optInMarkersOf(entry.scope, entry.decl.modifiers.annotations);
+    symbol.optIns = this.optInsOf(entry.scope, entry.decl.modifiers.annotations);
+    this.withOptIns(this.classOptIns(symbol), () => this.declareSupertypesOpted(entry));
+  }
+
+  private declareSupertypesOpted(entry: ClassEntry): void {
+    const { symbol } = entry;
     this.validateAnnotations(
       entry.scope,
       entry.decl.modifiers,
@@ -640,6 +647,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   private declareMembers(entry: ClassEntry): void {
+    this.withOptIns(this.classOptIns(entry.symbol), () => this.declareMembersOpted(entry));
+  }
+
+  private declareMembersOpted(entry: ClassEntry): void {
     const { symbol, decl } = entry;
     const primary = decl.primaryConstructor;
     if (primary && symbol.isObject) this.error(decl.row, 'object にはコンストラクタを書けません。');
@@ -912,6 +923,22 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     cls: ClassEntry | undefined,
     file: FileContext
   ): FunctionEntry {
+    const markers = this.optInMarkersOf(ownerScope, decl.modifiers.annotations);
+    const optIns = this.optInsOf(ownerScope, decl.modifiers.annotations);
+    const entry = this.withOptIns([...this.classOptIns(cls?.symbol), ...optIns], () =>
+      this.declareFunctionOpted(decl, ownerScope, cls, file)
+    );
+    entry.symbol.optInMarkers = markers;
+    entry.symbol.optIns = optIns;
+    return entry;
+  }
+
+  private declareFunctionOpted(
+    decl: FunctionDecl,
+    ownerScope: Scope,
+    cls: ClassEntry | undefined,
+    file: FileContext
+  ): FunctionEntry {
     this.validateAnnotations(
       ownerScope,
       decl.modifiers,
@@ -1055,6 +1082,22 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   // code-gauge-allow functionNcss -- The parts of a property declaration and their checks.
   // code-gauge-allow functionCognitiveComplexity -- modifier, backing-field, and initialization rules share one declaration check.
   private declareProperty(
+    decl: PropertyDecl,
+    ownerScope: Scope,
+    cls: ClassEntry | undefined,
+    file: FileContext
+  ): PropertyEntry {
+    const markers = this.optInMarkersOf(ownerScope, decl.modifiers.annotations);
+    const optIns = this.optInsOf(ownerScope, decl.modifiers.annotations);
+    const entry = this.withOptIns([...this.classOptIns(cls?.symbol), ...optIns], () =>
+      this.declarePropertyOpted(decl, ownerScope, cls, file)
+    );
+    entry.symbol.optInMarkers = markers;
+    entry.symbol.optIns = optIns;
+    return entry;
+  }
+
+  private declarePropertyOpted(
     decl: PropertyDecl,
     ownerScope: Scope,
     cls: ClassEntry | undefined,
@@ -1754,6 +1797,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       importedClasses: new Map(),
       importedTypeAliases: new Map(),
       importedEnumEntries: new Map(),
+      optIns: [],
       importedAnnotations: new Map(),
       importedFunctions: new Map(),
       importedProperties: new Map(),

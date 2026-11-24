@@ -26,6 +26,8 @@ export interface FunctionType {
   nullable: boolean;
   /** Whether the type is `suspend () -> R`, whose values only coroutines and suspend functions call. */
   isSuspend?: boolean;
+  /** The types of `context(A) () -> R`, whose values a call passes from its context, after the receiver. */
+  contextTypes?: KType[];
 }
 
 /** `Nothing`, whose nullable form `Nothing?` is the type of `null`. */
@@ -129,6 +131,7 @@ export function substitute(type: KType, substitution: Substitution): KType {
       return {
         ...type,
         receiver: type.receiver ? substitute(type.receiver, substitution) : undefined,
+        contextTypes: type.contextTypes?.map((each) => substitute(each, substitution)),
         params: type.params.map((param) => substitute(param, substitution)),
         returnType: substitute(type.returnType, substitution),
       };
@@ -161,6 +164,7 @@ export function resolved(type: KType): KType {
       return {
         ...type,
         receiver: type.receiver ? resolved(type.receiver) : undefined,
+        contextTypes: type.contextTypes?.map(resolved),
         params: type.params.map(resolved),
         returnType: resolved(type.returnType),
       };
@@ -221,7 +225,8 @@ export function typeToString(type: KType): string {
     }
     case 'function': {
       const receiver = type.receiver ? `${typeToString(type.receiver)}.` : '';
-      const text = `${type.isSuspend ? 'suspend ' : ''}${receiver}(${type.params.map(typeToString).join(', ')}) -> ${typeToString(type.returnType)}`;
+      const contexts = type.contextTypes?.length ? `context(${type.contextTypes.map(typeToString).join(', ')}) ` : '';
+      const text = `${contexts}${type.isSuspend ? 'suspend ' : ''}${receiver}(${type.params.map(typeToString).join(', ')}) -> ${typeToString(type.returnType)}`;
       return type.nullable ? `(${text})?` : text;
     }
     case 'nothing': {

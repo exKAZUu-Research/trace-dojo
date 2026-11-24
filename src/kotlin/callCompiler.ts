@@ -842,7 +842,7 @@ export abstract class CallCompiler extends CompilerCore {
    * The value a call passes a context parameter of a type: the nearest implicit receiver or context parameter around
    * the call that is of the type.
    */
-  private contextArgument(scope: Scope, context: FunctionContext, type: KType, row: number): Compiled {
+  protected contextArgument(scope: Scope, context: FunctionContext, type: KType, row: number): Compiled {
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       const { receiver } = current;
       if (receiver && isSubtype(this.receiverTypeOf(receiver), type))
@@ -1113,12 +1113,26 @@ export abstract class CallCompiler extends CompilerCore {
    * Rejects a use of a `private` or `protected` member outside the code that may see it, as kotlinc does. A subclass
    * uses a protected member only through a receiver of the subclass, or through `super`, whose receiver is undefined.
    */
+  /** Rejects a use of a member whose opt-in markers, or its class's, the code is not opted in to. */
+  protected requireMemberOptIn(symbol: FunctionSymbol | PropertySymbol, row: number): void {
+    const owner = symbol.owner;
+    this.requireOptIn(
+      [
+        ...symbol.optInMarkers,
+        ...(symbol.kind === 'function' && symbol.isConstructor ? (owner?.optInMarkers ?? []) : []),
+      ],
+      symbol.name,
+      row
+    );
+  }
+
   protected checkAccessible(
     scope: Scope,
     member: FunctionSymbol | PropertySymbol,
     row: number,
     receiverType: KType | undefined
   ): void {
+    this.requireMemberOptIn(member, row);
     const { owner, visibility } = member;
     if (!owner || visibility === 'public' || visibility === 'internal') return;
     const classes = this.enclosingClasses(scope);
