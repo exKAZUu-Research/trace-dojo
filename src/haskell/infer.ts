@@ -22,7 +22,7 @@ import { dependencyOrder } from './dependencies';
 import type { ClassEntity, ConInfo, DictParam, Evidence, EvidenceHole, TypeEntity, ValueEntity } from './entities';
 import { compileError } from './errors';
 import { freshKinds } from './kindTemplates';
-import { checkLinearUses } from './linearity';
+import { checkLinearUses, linearLocals } from './linearity';
 import { TypePrinter } from './prettyType';
 import {
   type Binder,
@@ -33,7 +33,6 @@ import {
   type RExpr,
   type RFieldBind,
   type RPat,
-  rpatLocals,
   type RRhs,
   type RSigType,
   type RStmt,
@@ -852,7 +851,7 @@ export class Checker {
       for (const pat of expr.pats) {
         const { param, result, multiplicity } = this.splitFunction(remaining, expr.span, context ?? 'ラムダ式');
         this.inferPat(pat, param);
-        if (multiplicity) linear.push(...rpatLocals(pat));
+        if (multiplicity) linear.push(...linearLocals(pat));
         remaining = result;
       }
       this.checkExpr(expr.body, remaining, context);
@@ -1333,7 +1332,7 @@ export class Checker {
               `${bindingLabel(binding)} の引数`
             );
             this.inferPat(pat, param);
-            if (multiplicity) linear.push(...rpatLocals(pat));
+            if (multiplicity) linear.push(...linearLocals(pat));
             remaining = result;
           }
           this.checkRhs(clause.rhs, remaining);

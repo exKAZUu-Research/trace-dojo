@@ -1,5 +1,5 @@
 import { compileError } from './errors';
-import { type LocalVar, type RBindGroup, type RBinding, type RExpr, rpatLocals, type RRhs } from './rast';
+import { type LocalVar, type RBindGroup, type RBinding, type RExpr, type RPat, rpatChildren, type RRhs } from './rast';
 import { functionParts, zonk } from './types';
 
 /** How many times an expression uses a variable: not at all, exactly once, or any other number of times. */
@@ -47,12 +47,33 @@ export function checkLinearUses(locals: readonly LocalVar[], rhs: RRhs): void {
   while (pending.length > 0) {
     const item = pending.pop() as Pending;
     for (const local of item.locals) {
-      if (local.name.startsWith('_') || local.name.includes(' ')) continue;
+      if (local.name.includes(' ')) continue;
       if (new UsageCounter(local, pending).rhs(item.rhs) !== 1) {
         throw compileError(local.span, `線形の引数 ${local.name} は、どの場合もちょうど 1 回使わなければなりません。`);
       }
     }
   }
+}
+
+/**
+ * The variables a pattern matching a linear value binds, each of which must then be used once. A wildcard there
+ * discards part of the value, which a linear value may not have, so it is an error as in GHC.
+ */
+export function linearLocals(pat: RPat): LocalVar[] {
+  const result: LocalVar[] = [];
+  const pending = [pat];
+  while (pending.length > 0) {
+    const current = pending.pop() as RPat;
+    if (current.k === 'wild') {
+      throw compileError(
+        current.span,
+        '線形の値を _ で捨てることはできません。どの場合もちょうど 1 回使ってください。'
+      );
+    }
+    if (current.k === 'var' || current.k === 'as') result.push(current.local);
+    pending.push(...rpatChildren(current).toReversed());
+  }
+  return result;
 }
 
 class UsageCounter {
@@ -123,7 +144,7 @@ class UsageCounter {
           expr.scrutinee.ref.kind === 'local' &&
           expr.scrutinee.ref.local === this.local
         ) {
-          for (const alt of expr.alts) this.pending.push({ locals: rpatLocals(alt.pat), rhs: alt.rhs });
+          for (const alt of expr.alts) this.pending.push({ locals: linearLocals(alt.pat), rhs: alt.rhs });
         }
         return add(scrutinee, branches(expr.alts.map((alt) => this.rhs(alt.rhs))));
       }
