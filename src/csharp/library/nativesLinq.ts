@@ -219,6 +219,9 @@ function collectionContains(call: NativeCall, items: Value): ((value: Value) => 
   const face = call.frame.runtime.library.typeNamed('System.Collections.Generic.ICollection', 1);
   const method = face.methods.find((candidate) => candidate.name === 'Contains') as MethodSymbol;
   const implementation = call.frame.runtime.dispatch(method, items);
+  // A library collection that implements the interface without declaring Contains, as the dictionaries do for their
+  // pairs, is searched as any sequence is.
+  if (implementation === method || implementation.isAbstract) return undefined;
   return (value) =>
     evaluator.invoke(
       call.frame,
