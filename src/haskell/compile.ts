@@ -29,6 +29,8 @@ import {
   LIBRARY_SOURCES,
   PUBLIC_MODULES,
   TEMPLATE_HASKELL_UNSUPPORTED,
+  UNIMPLEMENTED_LIBRARY_TYPES,
+  UNIMPLEMENTED_LIBRARY_VALUES,
   UNSUPPORTED_MODULES,
   UNSUPPORTED_VALUES,
 } from './library';
@@ -313,6 +315,37 @@ class LibraryCompiler {
             children: [],
           });
         }
+      }
+      // The names GHC's module has that this one leaves out, which the program learns are unavailable.
+      for (const value of UNIMPLEMENTED_LIBRARY_VALUES[name] ?? []) {
+        if (exports.values.has(value)) continue;
+        exports.values.set(value, {
+          id: nextId(),
+          name: value,
+          module: name,
+          sort: 'var',
+          unsupported: `ライブラリ関数（${name}.${value}）`,
+        });
+      }
+      for (const type of UNIMPLEMENTED_LIBRARY_TYPES[name] ?? []) {
+        if (exports.types.has(type)) continue;
+        exports.types.set(type, {
+          entity: {
+            kind: 'type',
+            entity: {
+              id: nextId(),
+              name: type,
+              module: name,
+              sort: 'prim',
+              kind: STAR,
+              arity: 0,
+              cons: [],
+              fields: new Map(),
+              unsupported: `ライブラリの型（${name}.${type}）`,
+            },
+          },
+          children: [],
+        });
       }
       attachKnownTypeChildren(exports);
       assertPublicExports(name, exports);

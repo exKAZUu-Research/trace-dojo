@@ -4,9 +4,12 @@ import { BASE_MISC } from './baseMisc';
 import { BASE_TEXT } from './baseText';
 import { MAP_SOURCE, SET_SOURCE, STRICT_MAP_SOURCE, STRICT_MAP_VALUES } from './containers';
 import { BASE_EXTRA } from './extra';
+import { BASE_SMALL_MODULES, TREE_SOURCE } from './extraModules';
+import { FIXED_WIDTH_LIFT, FIXED_WIDTH_PRINTF, FIXED_WIDTH_SOURCE } from './fixedWidth';
 import { BASE_MONOID, NON_EMPTY_SOURCE, SEMIGROUP_SOURCE } from './monoid';
 import { OVERLOADED_SOURCE, OVERLOADED_SUPPORT } from './overloaded';
 import { PRINTF_SOURCE } from './printf';
+import { SEQUENCE_SOURCE, SEQUENCE_VALUES } from './sequence';
 import { SYSTEM_IO } from './systemIo';
 import { TEMPLATE_HASKELL_SOURCE } from './templateHaskell';
 import { BASE_TUPLES } from './tuples';
@@ -15,15 +18,28 @@ import { BASE_TUPLES } from './tuples';
 export const LIBRARY_SOURCES: { name: string; source: string }[] = [
   {
     name: 'Base',
-    source: [BASE_CORE, BASE_LIST, BASE_TEXT, BASE_MISC, SYSTEM_IO, BASE_MONOID, BASE_TUPLES, BASE_EXTRA].join('\n'),
+    source: [
+      BASE_CORE,
+      BASE_LIST,
+      BASE_TEXT,
+      BASE_MISC,
+      FIXED_WIDTH_SOURCE,
+      BASE_SMALL_MODULES,
+      SYSTEM_IO,
+      BASE_MONOID,
+      BASE_TUPLES,
+      BASE_EXTRA,
+    ].join('\n'),
   },
   { name: 'Data.Semigroup.Internal', source: SEMIGROUP_SOURCE },
   { name: 'Data.List.NonEmpty.Internal', source: NON_EMPTY_SOURCE },
-  { name: 'Language.Haskell.TH.Internal', source: TEMPLATE_HASKELL_SOURCE },
+  { name: 'Data.Tree.Internal', source: TREE_SOURCE },
+  { name: 'Language.Haskell.TH.Internal', source: TEMPLATE_HASKELL_SOURCE + FIXED_WIDTH_LIFT },
   { name: 'Data.Set.Internal', source: SET_SOURCE },
   { name: 'Data.Map.Internal', source: MAP_SOURCE },
   { name: 'Data.Map.Strict.Internal', source: STRICT_MAP_SOURCE },
-  { name: 'Text.Printf.Internal', source: PRINTF_SOURCE },
+  { name: 'Data.Sequence.Internal', source: SEQUENCE_SOURCE },
+  { name: 'Text.Printf.Internal', source: PRINTF_SOURCE + FIXED_WIDTH_PRINTF },
   { name: 'GHC.Overloaded.Internal', source: OVERLOADED_SOURCE + OVERLOADED_SUPPORT },
 ];
 
@@ -1052,6 +1068,28 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
     types: [],
     values: ['runSplice', 'runDecSplice', 'runTypedSplice', 'quoteExp', 'mkNameG_v', 'mkNameG_d', 'mkNameG_tc'],
   },
+  'Data.Word': {
+    from: 'Base',
+    types: [
+      ['Word', 'none'],
+      ['Word8', 'none'],
+      ['Word16', 'none'],
+      ['Word32', 'none'],
+      ['Word64', 'none'],
+    ],
+    values: [],
+  },
+  'Data.Int': {
+    from: 'Base',
+    types: [
+      ['Int', 'none'],
+      ['Int8', 'none'],
+      ['Int16', 'none'],
+      ['Int32', 'none'],
+      ['Int64', 'none'],
+    ],
+    values: [],
+  },
   'Data.Coerce': {
     from: 'Base',
     types: [['Coercible', 'none']],
@@ -1108,6 +1146,65 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
     overrides: { from: 'Data.Map.Strict.Internal', values: STRICT_MAP_VALUES },
   },
   'Data.Set': { from: 'Data.Set.Internal', types: [['Set', 'none']], values: SET_VALUES },
+  'Data.IntMap': {
+    from: 'Data.Map.Internal',
+    types: [
+      ['IntMap', 'none'],
+      ['Key', 'none'],
+    ],
+    values: MAP_VALUES,
+  },
+  'Data.IntMap.Strict': {
+    from: 'Data.Map.Internal',
+    types: [
+      ['IntMap', 'none'],
+      ['Key', 'none'],
+    ],
+    values: MAP_VALUES,
+    overrides: { from: 'Data.Map.Strict.Internal', values: STRICT_MAP_VALUES },
+  },
+  'Data.IntSet': {
+    from: 'Data.Set.Internal',
+    types: [
+      ['IntSet', 'none'],
+      ['Key', 'none'],
+    ],
+    values: SET_VALUES,
+  },
+  'Data.Tree': {
+    from: 'Data.Tree.Internal',
+    types: [
+      ['Tree', 'all'],
+      ['Forest', 'none'],
+    ],
+    values: [
+      'rootLabel',
+      'subForest',
+      'flatten',
+      'levels',
+      'foldTree',
+      'unfoldTree',
+      'unfoldForest',
+      'drawTree',
+      'drawForest',
+    ],
+  },
+  'Data.Sequence': {
+    from: 'Data.Sequence.Internal',
+    types: [
+      ['Seq', 'none'],
+      ['ViewL', 'all'],
+      ['ViewR', 'all'],
+    ],
+    values: SEQUENCE_VALUES,
+  },
+  'Data.Void': { from: 'Base', types: [['Void', 'none']], values: ['absurd', 'vacuous'] },
+  'Data.Complex': {
+    from: 'Base',
+    types: [['Complex', 'all']],
+    values: ['realPart', 'imagPart', 'conjugate', 'mkPolar', 'cis', 'polar', 'magnitude', 'phase'],
+  },
+  'Data.Fixed': { from: 'Base', types: [], values: ["div'", "mod'", "divMod'"] },
   'Text.Printf': {
     from: 'Text.Printf.Internal',
     types: [
@@ -1151,20 +1248,10 @@ export const UNSUPPORTED_MODULES: Record<string, string> = {
   'System.Process': '外部のプロセス（System.Process）',
   'System.Random': '乱数（System.Random。base 以外のパッケージ）',
   'Data.Array': '配列（Data.Array。base・containers 以外のパッケージ）',
-  'Data.Word': '符号なし整数の型（Data.Word）',
-  'Data.Int': '大きさを指定した整数の型（Data.Int）',
-  'Data.Complex': '複素数（Data.Complex）',
-  'Data.Fixed': 'Data.Fixed',
-  'Data.Void': 'Data.Void',
   'Data.Typeable': 'リフレクション（Data.Typeable）',
   'Data.Dynamic': 'リフレクション（Data.Dynamic）',
   'Data.Data': 'リフレクション（Data.Data）',
   'GHC.Generics': 'GHC.Generics',
-  'Data.Sequence': 'Data.Sequence',
-  'Data.IntMap': 'Data.IntMap',
-  'Data.IntMap.Strict': 'Data.IntMap.Strict',
-  'Data.IntSet': 'Data.IntSet',
-  'Data.Tree': 'Data.Tree',
   'Data.Graph': 'Data.Graph',
   'Data.Text': '文字列の型 Text（text パッケージ）',
   'Data.ByteString': 'ByteString（bytestring パッケージ）',
@@ -1173,4 +1260,95 @@ export const UNSUPPORTED_MODULES: Record<string, string> = {
   'Control.Monad.Writer': 'mtl のモナド変換子（Control.Monad.Writer）',
   Foreign: '外部の関数（Foreign）',
   'Foreign.C': '外部の関数（Foreign.C）',
+};
+
+/**
+ * The names of modules this environment provides that GHC's modules have beyond what it implements, which a
+ * program that uses them learns are unavailable rather than missing.
+ */
+export const UNIMPLEMENTED_LIBRARY_VALUES: Record<string, readonly string[]> = {
+  'Data.Sequence': [
+    'Empty',
+    ':<|',
+    ':|>',
+    'scanr',
+    'scanl1',
+    'scanr1',
+    'unzip',
+    'unzipWith',
+    'zip3',
+    'zipWith3',
+    'zip4',
+    'zipWith4',
+    'cycleTaking',
+    'elemIndexR',
+    'findIndexR',
+    'elemIndicesL',
+    'elemIndicesR',
+    'findIndicesL',
+    'findIndicesR',
+    'takeWhileR',
+    'dropWhileR',
+    'spanr',
+    'breakr',
+    'unstableSortBy',
+    'unstableSortOn',
+    'foldMapWithIndex',
+    'traverseWithIndex',
+    'fromArray',
+    'iterateN',
+  ],
+  'Data.Word': [
+    'byteSwap16',
+    'byteSwap32',
+    'byteSwap64',
+    'bitReverse8',
+    'bitReverse16',
+    'bitReverse32',
+    'bitReverse64',
+  ],
+  'Data.Tree': [
+    'unfoldTreeM',
+    'unfoldForestM',
+    'unfoldTreeM_BF',
+    'unfoldForestM_BF',
+    'leaves',
+    'edges',
+    'pathsToRoot',
+    'pathsFromRoot',
+  ],
+  'Data.Fixed': ['resolution', 'showFixed', "mod'", 'MkFixed'],
+  'Data.List.NonEmpty': [
+    'prependList',
+    'appendList',
+    'inits1',
+    'tails1',
+    'permutations',
+    'permutations1',
+    'groupAllWith1',
+    'groupWith1',
+    'sortWith',
+  ],
+};
+
+export const UNIMPLEMENTED_LIBRARY_TYPES: Record<string, readonly string[]> = {
+  'Data.Fixed': [
+    'Fixed',
+    'HasResolution',
+    'E0',
+    'E1',
+    'E2',
+    'E3',
+    'E6',
+    'E9',
+    'E12',
+    'Uni',
+    'Deci',
+    'Centi',
+    'Milli',
+    'Micro',
+    'Nano',
+    'Pico',
+  ],
+  'Data.Tree': ['PostOrder'],
 };

@@ -8,6 +8,11 @@ import qualified Base as B
 
 infixl 9 \\
 
+-- Data.IntSet's sets, which are sets of Int.
+type IntSet = Set Int
+
+type Key = Int
+
 type role Set nominal
 data Set a = SBin !Int !a !(Set a) !(Set a) | STip
 
@@ -493,6 +498,11 @@ import qualified Base as B
 import qualified Data.Set.Internal as S
 
 infixl 9 !, !?, \\
+
+-- Data.IntMap's maps, which are maps from Int.
+type IntMap = Map Int
+
+type Key = Int
 
 type role Map nominal representational
 data Map k a = Bin !Int !k a !(Map k a) !(Map k a) | Tip
