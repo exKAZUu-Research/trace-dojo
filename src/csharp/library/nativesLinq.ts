@@ -2,9 +2,16 @@
 import { CsDecimal } from '../decimal';
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { arithmetic, decimalArithmetic, PendingException } from '../numeric';
-import { runtimeTypeName } from '../objects';
+import { environmentOf, runtimeTypeName } from '../objects';
 import type { NativeState } from '../runtime';
-import { type NamedType, nullableUnderlying, specialOf, type SpecialType, type Type } from '../types';
+import {
+  type MethodSymbol,
+  type NamedType,
+  nullableUnderlying,
+  specialOf,
+  type SpecialType,
+  type Type,
+} from '../types';
 import { copyValue, CsArray, CsBox, CsObject, CsStruct, isString, stringText, type Value } from '../values';
 import { isEnumerableState, iterate, LibraryEnumerator } from './iteration';
 import {
@@ -197,6 +204,26 @@ function iteratorParts(value: Value): { name: string; sourceType: string } | und
 /** Whether a value is a `List<T>` itself, which LINQ specializes apart from other lists. */
 function isGenericList(value: Value): boolean {
   return value instanceof CsObject && value.type.symbol.fullName === 'System.Collections.Generic.List`1';
+}
+
+/** `ICollection<T>.Contains` of a collection object, which `Enumerable.Contains` without a comparer calls. */
+function collectionContains(call: NativeCall, items: Value): ((value: Value) => boolean) | undefined {
+  if (!(items instanceof CsObject)) return undefined;
+  const evaluator = evaluatorOf(call);
+  if (!evaluator.isInstanceOf(items, libraryType(call, 'System.Collections.Generic.ICollection', [call.typeArgs[0]])))
+    return undefined;
+  const face = call.frame.runtime.library.typeNamed('System.Collections.Generic.ICollection', 1);
+  const method = face.methods.find((candidate) => candidate.name === 'Contains') as MethodSymbol;
+  const implementation = call.frame.runtime.dispatch(method, items);
+  return (value) =>
+    evaluator.invoke(
+      call.frame,
+      implementation,
+      items,
+      [value],
+      undefined,
+      environmentOf(evaluator, implementation, items)
+    ) as boolean;
 }
 
 function isEmptyArray(value: Value): boolean {
@@ -884,6 +911,11 @@ const linq: Record<string, NativeMethod> = {
     );
   },
   [`${ENUMERABLE}.Contains`]: (call, _receiver, [items, value, comparer]) => {
+    // Without a comparer, .NET asks a collection itself, which uses its own comparer, as a case-insensitive set does.
+    if (call.method.parameters.length === 2) {
+      const member = collectionContains(call, items as Value);
+      if (member) return member(value as Value);
+    }
     const equality = equalityOf(call, (comparer as Value | undefined) ?? undefined);
     for (const item of source(call, items as Value))
       if (item === undefined ? value === undefined : value !== undefined && equality.equals(item, value as Value))
