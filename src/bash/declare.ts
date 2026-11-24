@@ -1055,7 +1055,7 @@ function resolveDeclaredTarget(
 ): { targetName: string; referencedSubscript?: string } {
   if (set.has('n') || (globalOnly && isSubscripted)) return { targetName: name };
   if (unset.has('n')) {
-    if (localScope) return { targetName: name };
+    if (localScope) return { targetName: resolveLocalElementNamerefTarget(shell, name) ?? name };
     const start = globalOnly ? shell.state.scopes[0].get(name) : shell.findOwnVariable(name);
     return { targetName: start?.attributes.has('n') ? findFinalNamerefLink(shell, start, globalOnly).name : name };
   }
@@ -1065,6 +1065,8 @@ function resolveDeclaredTarget(
   for (let depth = 0; depth < 8; depth++) {
     if (!current?.attributes.has('n') || current.value?.kind !== 'scalar' || current.value.value === '') break;
     target = current.value.value;
+    const direct = target.includes('[') ? shell.findOwnVariable(target) : undefined;
+    if (direct) return { targetName: target };
     const split = shell.splitSubscript(target);
     if (split) {
       return { targetName: split.name, ...(isSubscripted ? {} : { referencedSubscript: split.subscript }) };
@@ -1072,6 +1074,19 @@ function resolveDeclaredTarget(
     current = globalOnly ? shell.state.scopes[0].get(target) : shell.findOwnVariable(target);
   }
   return { targetName: target };
+}
+
+function resolveLocalElementNamerefTarget(shell: Shell, name: string): string | undefined {
+  let current = shell.findOwnVariable(name);
+  const seen = new Set<Variable>();
+  while (current?.attributes.has('n') && current.value?.kind === 'scalar' && current.value.value !== '') {
+    if (seen.has(current)) return undefined;
+    seen.add(current);
+    const target = current.value.value;
+    if (shell.splitSubscript(target)) return target;
+    current = shell.findOwnVariable(target);
+  }
+  return undefined;
 }
 
 function findFinalNamerefLink(shell: Shell, start: Variable, globalOnly: boolean): Variable {

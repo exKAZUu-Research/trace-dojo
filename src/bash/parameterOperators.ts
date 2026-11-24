@@ -131,7 +131,7 @@ function expandUnquotedOperatorWord(expander: Expander, parts: WordPart[]): Piec
       part.kind === 'double' ||
       (part.kind === 'parameter' && part.operator !== undefined && /^:?[-+]$/.test(part.operator));
     for (const piece of expander.expandParts([part], false)) {
-      const mapped = mapUnquotedOperatorPiece(piece, keepsFields, ifs === '', hasNonWhitePrimaryIfs);
+      const mapped = mapUnquotedOperatorPiece(piece, keepsFields, hasNonWhitePrimaryIfs);
       if (mapped !== undefined) pieces.push(mapped);
     }
   }
@@ -141,12 +141,11 @@ function expandUnquotedOperatorWord(expander: Expander, parts: WordPart[]): Piec
 function mapUnquotedOperatorPiece(
   piece: Piece,
   keepsFields: boolean,
-  emptyIfs: boolean,
   hasNonWhitePrimaryIfs: boolean
 ): Piece | undefined {
   if (piece === EMPTY_LIST) return undefined;
   if (piece === FIELD_BREAK) {
-    return !keepsFields && !emptyIfs ? { text: ' ', quoted: false, split: true } : FIELD_BREAK;
+    return !keepsFields && hasNonWhitePrimaryIfs ? { text: ' ', quoted: false, split: true } : FIELD_BREAK;
   }
   if (isFieldBreak(piece) || piece.quoted) return piece;
   if (piece.atListElement && hasNonWhitePrimaryIfs) {

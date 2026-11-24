@@ -52,14 +52,13 @@ import {
   isIdentifier,
   isValidFunctionName,
   maxElementIndex,
-  PERMANENT_DYNAMIC_VARIABLES,
   readAssociativePair,
-  removeScopedVariable,
   resolveNameInScopes,
   SCALAR_DYNAMIC_VARIABLES,
   type Scope,
   translateNegativeIndex,
   unpackIndexedElement,
+  unsetNamedVariable,
   type Variable,
   variableElementAt,
   variableElementKeys,
@@ -1001,6 +1000,8 @@ export class Shell implements ArithmeticHost {
   scalarValue(name: string): string | undefined {
     const resolved = this.resolveNameOrUndefined(name);
     if (resolved === undefined) return undefined;
+    const direct = resolved.includes('[') ? this.findVariable(resolved, false) : undefined;
+    if (direct) return variableScalarZero(direct.value);
     const split = this.splitSubscript(resolved);
     if (split) return this.readReferencedElement(split);
     const dynamic = this.dynamicValue(resolved);
@@ -1178,6 +1179,8 @@ export class Shell implements ArithmeticHost {
   assignScalar(name: string, value: string, append = false): boolean {
     const resolved = this.resolveNameOrUndefined(name);
     if (resolved === undefined) return false;
+    const direct = resolved.includes('[') ? this.findVariable(resolved, false) : undefined;
+    if (direct) return this.assignScalarTo(direct, value, append);
     const split = this.splitSubscript(resolved);
     if (split) return this.assignReferencedElement(split, value, append);
     if (this.assignDynamic(resolved, value)) return true;
@@ -1483,21 +1486,11 @@ export class Shell implements ArithmeticHost {
   /** Unsets a variable, as `unset` does. */
   unsetVariable(name: string, followReference = true): boolean {
     const target = followReference ? this.resolveName(name) : name;
-    const split = followReference ? this.splitSubscript(target) : undefined;
+    const split = followReference && !this.findOwnVariable(target) ? this.splitSubscript(target) : undefined;
     if (split && isIdentifier(split.name)) return unsetElement(this, split.name, split.subscript, true);
-    if (this.isDynamic(target)) {
-      if (!PERMANENT_DYNAMIC_VARIABLES.has(target)) {
-        this.state.unsetDynamic.add(target);
-        return true;
-      }
-      this.reportError(`unset: ${target}: cannot unset`);
-      return false;
-    }
-    const removed = removeScopedVariable(this.state.scopes, this.state.functionScopes.at(-1), target);
-    if (removed === 'global' && ENVIRONMENT_VARIABLES.has(target)) this.state.unsetEnv.add(target);
-    if (removed !== 'readonly') return true;
-    this.reportError(`unset: ${target}: cannot unset: readonly variable`);
-    return false;
+    const error = unsetNamedVariable(this.state, target, this.isDynamic(target));
+    if (error !== undefined) this.reportError(error);
+    return error === undefined;
   }
 
   /** Evaluates a subscript of a name like `a[i+1]`, as `printf -v` and `unset` read one. */

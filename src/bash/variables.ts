@@ -285,6 +285,22 @@ export function findEnclosingVariable(scopes: Scope[], excludedScope: Scope, nam
   return undefined;
 }
 
+/** Unsets a dynamic or scoped variable `target`, returning an error message when it cannot be unset. */
+export function unsetNamedVariable(
+  state: { scopes: Scope[]; functionScopes: number[]; unsetDynamic: Set<string>; unsetEnv: Set<string> },
+  target: string,
+  isDynamic: boolean
+): string | undefined {
+  if (isDynamic) {
+    if (PERMANENT_DYNAMIC_VARIABLES.has(target)) return `unset: ${target}: cannot unset`;
+    state.unsetDynamic.add(target);
+    return undefined;
+  }
+  const removed = removeScopedVariable(state.scopes, state.functionScopes.at(-1), target);
+  if (removed === 'global' && ENVIRONMENT_VARIABLES.has(target)) state.unsetEnv.add(target);
+  return removed === 'readonly' ? `unset: ${target}: cannot unset: readonly variable` : undefined;
+}
+
 /** Removes `target` from the innermost scope holding it (leaving a running-function local declared without a value). */
 export function removeScopedVariable(
   scopes: Scope[],
@@ -576,9 +592,12 @@ export function findVariableInScopes(
     if (!variable?.attributes.has('n') || variable.value?.kind !== 'scalar') return variable;
     if (seen.has(variable)) return undefined;
     seen.add(variable);
-    if (variable.value.value === '') return variable;
-    const open = variable.value.value.indexOf('[');
-    target = open === -1 ? variable.value.value : variable.value.value.slice(0, open);
+    const ref = variable.value.value;
+    if (ref === '') return variable;
+    const direct = ref.includes('[') ? findOwnVariableInScopes(scopes, ref) : undefined;
+    if (direct) return direct;
+    const open = ref.indexOf('[');
+    target = open === -1 ? ref : ref.slice(0, open);
   }
 }
 

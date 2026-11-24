@@ -9,7 +9,7 @@ import { DiscardSignal, ExitSignal, type Frame, ObservationAbortError, Runtime }
 import { type OutputTarget, Shell } from './shell';
 import { TurtleError } from './turtle';
 import { UnsupportedFeatureError } from './unsupported';
-import { cloneScope, type Scope, sortedElements, type Variable, type VariableValue } from './variables';
+import { cloneScope, isIdentifier, type Scope, sortedElements, type Variable, type VariableValue } from './variables';
 
 class PureReadAbort extends Error {}
 
@@ -60,7 +60,7 @@ function visibleVariables(shell: Shell, frame: Frame): Variable[] {
     for (const variable of scopes[i].values()) {
       if (seen.has(variable.name)) continue;
       seen.add(variable.name);
-      if (!variable.isSystem && variable.value) result.push(variable);
+      if (!variable.isSystem && isIdentifier(variable.name) && variable.value) result.push(variable);
     }
   }
   return result.toSorted((a, b) => scopeRank(scopes, b) - scopeRank(scopes, a));
@@ -80,9 +80,6 @@ function shownValueOf(
   frame: Frame,
   variable: Variable
 ): { value: VariableValue | undefined; nullReference: boolean } {
-  if (!variable.attributes.has('n') || variable.value?.kind !== 'scalar') {
-    return { value: variable.value, nullReference: variable.nullReference === true };
-  }
   const maxScope = frame.scopeIndex;
   const visited = new Set<Variable>();
   let current: Variable | undefined = variable;
@@ -94,9 +91,15 @@ function shownValueOf(
     visited.add(current);
     const ref = current.value.value;
     if (ref === '') return { value: current.value, nullReference: false };
+    const direct = findOwnVariableIn(shell, ref, maxScope);
+    if (direct) {
+      current = direct;
+      continue;
+    }
     const split = shell.splitSubscript(ref);
-    if (split) return observeElement(shell, split.name, split.subscript, maxScope);
-    current = findOwnVariableIn(shell, ref, maxScope);
+    return split
+      ? observeElement(shell, split.name, split.subscript, maxScope)
+      : { value: undefined, nullReference: false };
   }
   return { value: undefined, nullReference: false };
 }
