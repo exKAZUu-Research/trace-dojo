@@ -324,7 +324,7 @@ function floatStringToInt(text: string, value: number, pending?: PhpThrow): bigi
 }
 
 export function formatFloatForMessage(value: number): string {
-  return formatFloatRepr(value);
+  return formatFloatRepr(value, 'E', false, { precision: -1 });
 }
 
 export function mergeArrayUnion(target: PhpArray, right: PhpArray): PhpArray {

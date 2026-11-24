@@ -922,8 +922,6 @@ function* iterateObject(
 
 /** The constants that describe the machine running PHP, which differ between this grader and a learner's PHP. */
 const ENVIRONMENT_CONSTANTS = new Set([
-  'PHP_OS',
-  'PHP_OS_FAMILY',
   'PHP_BINARY',
   'PHP_BINDIR',
   'PHP_LIBDIR',

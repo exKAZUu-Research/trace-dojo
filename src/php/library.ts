@@ -14,6 +14,8 @@ import './libMultibyte';
 import './libArray';
 import './libArrayUser';
 import './libJson';
+import './libOutputControl';
+import './libRuntimeInfo';
 import './libSpl';
 import './libGenerator';
 import './libUnsupported';

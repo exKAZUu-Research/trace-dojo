@@ -47,7 +47,7 @@ export class Stream {
     readonly mode: StreamMode,
     private readonly store?: ByteStore,
     /** The standard stream that writes go to, for a stream that only writes there. */
-    readonly sink?: 'stdout' | 'stderr',
+    readonly sink?: 'stdout' | 'output' | 'stderr',
     readonly isSeekable = true
   ) {}
 
@@ -104,7 +104,8 @@ export class Stream {
   }
 
   write(data: string): void {
-    if (this.sink === 'stdout') rt().echo(data);
+    // PHP writes to standard output past the output buffers, which only `php://output` goes through.
+    if (this.sink === 'stdout' || this.sink === 'output') rt().echo(data, this.sink === 'output');
     else if (this.sink === 'stderr') rt().echoError(data);
     else {
       const store = this.storeOf();
@@ -206,7 +207,7 @@ export function standardInputStream(): Stream {
   return new Stream({ read: true, write: false, append: false }, new InputStore(), undefined, false);
 }
 
-export function standardOutputStream(sink: 'stdout' | 'stderr'): Stream {
+export function standardOutputStream(sink: 'stdout' | 'output' | 'stderr'): Stream {
   return new Stream({ read: false, write: true, append: false }, undefined, sink, false);
 }
 

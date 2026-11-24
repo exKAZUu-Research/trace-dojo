@@ -279,7 +279,9 @@ function integerSpec(spec: Spec): Spec {
 function intArg(value: Value): bigint {
   if (typeof value === 'number') {
     if (floatFitsInt(value)) return BigInt(Math.trunc(value));
-    warn(`The float ${formatFloatRepr(value)} is not representable as an int, cast occurred`);
+    warn(
+      `The float ${formatFloatRepr(value, 'E', false, { precision: -1 })} is not representable as an int, cast occurred`
+    );
     return Number.isFinite(value) ? BigInt.asIntN(64, BigInt(Math.trunc(value))) : 0n;
   }
   if (typeof value !== 'string') return toInt(value);
@@ -350,6 +352,6 @@ function floatDigits(value: number, specifier: string, precision: number): strin
 
 /** Formats `%g` digits, where precision -1 asks `zend_gcvt` for the shortest digits that read back. */
 function generalBody(value: number, precision: number, upper: boolean): string {
-  if (precision === -1) return formatFloatRepr(value, upper ? 'E' : 'e');
+  if (precision === -1) return formatFloatRepr(value, upper ? 'E' : 'e', false, { precision: -1 });
   return generalText(value, precision === 0 ? 1 : precision, upper);
 }

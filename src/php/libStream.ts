@@ -91,7 +91,7 @@ function phpStream(path: string): Stream | undefined {
   const name = (match[1] as string).toLowerCase();
   if (name === 'stdin' && path.length === match[0].length) return standardInputStream();
   if ((name === 'stdout' || name === 'output') && path.length === match[0].length) {
-    return standardOutputStream('stdout');
+    return standardOutputStream(name);
   }
   if (name === 'stderr' && path.length === match[0].length) return standardOutputStream('stderr');
   if (name === 'memory' || name === 'temp') return memoryStream();

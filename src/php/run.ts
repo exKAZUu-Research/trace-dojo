@@ -11,6 +11,7 @@ import { E_DEPRECATED, E_ERROR, E_WARNING, emitError, throwableLocation } from '
 import { throwableText, traceText } from './exceptions';
 import { releaseDropped, releaseGlobalObject } from './garbage';
 import { holderCounts } from './holderCounts';
+import { endAllBuffers } from './outputControl';
 import { type ParsedProgram, parsePhp } from './parse';
 import { ExitSignal, FatalError, type Frame, PhpThrow, Runtime, SCRIPT_PATH, withRuntime } from './runtime';
 import { mayDestruct, runStatements } from './statements';
@@ -54,7 +55,13 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
       onEnd?.(runtime.globalFrame);
       runtime.world.recordFinalTurtles();
       // A rejection of an unsupported feature ends the run outside PHP, so PHP's shutdown does not run after it.
-      if (!rejectedRuns.has(runtime)) uncaughtException = shutdown(runtime) ?? uncaughtException;
+      if (rejectedRuns.has(runtime)) {
+        for (const buffer of runtime.outputBuffers.splice(0)) runtime.echo(buffer.data);
+      } else {
+        uncaughtException = shutdown(runtime) ?? uncaughtException;
+        const handlerException = endAllBuffers(runtime);
+        if (handlerException) uncaughtException ??= dec(`Uncaught ${throwableText(handlerException.object)}`);
+      }
     } finally {
       runtime.flush();
     }
@@ -103,7 +110,7 @@ function report(runtime: Runtime, error: unknown, inShutdown = false): ReportOut
     const trace = traceText(error.record ? [error.record] : []);
     restoreStack(runtime);
     const message = `Fatal error: ${error.message} in ${SCRIPT_PATH} on line ${(error.row ?? 0) + 1}\nStack trace:\n${trace}`;
-    runtime.echo(`\n${message}\n`);
+    runtime.displayError(`\n${message}\n`);
     return { kind: 'failure', failure: dec(message) };
   }
   if (error instanceof FatalError) {
@@ -112,7 +119,7 @@ function report(runtime: Runtime, error: unknown, inShutdown = false): ReportOut
     restoreStack(runtime);
     const file = error.row < 0 ? 'Unknown' : SCRIPT_PATH;
     const message = `Fatal error: ${error.message ? `${error.message} in ${file} on line ${error.row + 1}${error.withTrace ? `\nStack trace:\n${trace}` : ''}` : ''}`;
-    if (error.message) runtime.echo(`\n${message}\n`);
+    if (error.message) runtime.displayError(`\n${message}\n`);
     return { kind: 'failure', failure: dec(message) };
   }
   throw error;
@@ -167,7 +174,7 @@ function printUncaught(runtime: Runtime, object: PhpObject): ReportOutcome {
     try {
       const text = throwableText(object);
       const message = `Fatal error: Uncaught ${text}\n  thrown in ${throwableLocation(object)}`;
-      if ((runtime.errorReporting & E_ERROR) !== 0n) runtime.echo(`\n${message}\n`);
+      if ((runtime.errorReporting & E_ERROR) !== 0n) runtime.displayError(`\n${message}\n`);
       return { kind: 'failure', failure: dec(message) };
     } catch (error) {
       if (!(error instanceof PhpThrow)) return report(runtime, error);

@@ -217,7 +217,7 @@ class JsonEncoder {
   }
 
   private encodeFloat(value: number): string {
-    const text = formatFloatRepr(value, 'e');
+    const text = formatFloatRepr(value, 'e', false, { literalZero: true });
     if (has(this.flags, 1024n) && Number.isInteger(value) && !/[.e]/.test(text)) return `${text}.0`;
     return text;
   }

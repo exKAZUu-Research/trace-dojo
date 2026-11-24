@@ -46,13 +46,6 @@ const UNSUPPORTED_FUNCTIONS: [string, string[]][] = [
   [
     '実行環境の情報と設定',
     [
-      'ini_set',
-      'ini_get',
-      'set_time_limit',
-      'memory_get_usage',
-      'memory_get_peak_usage',
-      'getmypid',
-      'php_uname',
       'phpinfo',
       'get_defined_functions',
       'get_defined_constants',
@@ -65,8 +58,6 @@ const UNSUPPORTED_FUNCTIONS: [string, string[]][] = [
     ],
   ],
   ['直列化', ['serialize', 'unserialize']],
-  ['乱数の種によらない一意の値', ['uniqid', 'password_hash', 'password_verify', 'random_bytes']],
-  ['出力のバッファ', ['ob_start', 'ob_get_clean', 'ob_get_contents', 'ob_end_clean', 'ob_end_flush']],
 ];
 
 for (const [what, names] of UNSUPPORTED_FUNCTIONS) {

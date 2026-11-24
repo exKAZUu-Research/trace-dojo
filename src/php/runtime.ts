@@ -12,6 +12,7 @@ import type { CompileNotice } from './converter';
 import { arrayHasHolders, collectGarbage, releaseDropped, type ReleaseMode } from './garbage';
 import { GC_THRESHOLD_DEFAULT, GcRoots } from './gcRoots';
 import { ObjectHeap } from './objectHeap';
+import type { OutputBuffer } from './outputControl';
 import { setArraySharingCheck } from './places';
 import { MersenneTwister } from './random';
 import {
@@ -41,6 +42,13 @@ export class PhpThrow {
     // The exception holds itself while it unwinds the statements it leaves, until a catch takes it.
     if (current) current.thrown = object;
   }
+}
+
+/** Passes output through the output buffers, which the output control functions implement. */
+let bufferOutput: (runtime: Runtime, bytes: string) => void = () => {};
+
+export function setOutputBuffering(write: typeof bufferOutput): void {
+  bufferOutput = write;
 }
 
 /** Captures the calls running when a fatal error happens, which the call machinery provides. */
@@ -285,6 +293,10 @@ export class Runtime {
   /** The array elements and object properties allocated so far, which only grows: a run pays for what it dropped too. */
   private slots = 0;
 
+  get allocatedSlots(): number {
+    return this.slots;
+  }
+
   /** Charges for `count` new array elements or object properties, added to a structure that then holds `size`. */
   allocate(count: number, size = count): void {
     if (!Number.isFinite(count) || count < 0) throw this.memoryExhausted(2_097_152);
@@ -507,10 +519,37 @@ export class Runtime {
     );
   }
 
-  /** Writes bytes to standard output, decoding complete UTF-8 sequences as they arrive. */
-  echo(bytes: string): void {
+  /** The significant digits of floats converted to strings, which the `precision` setting changes. */
+  precision = 14;
+  /** The significant digits of floats `var_dump` and `serialize` write, which `serialize_precision` changes. */
+  serializePrecision = -1;
+  /** Where PHP prints errors, which the `display_errors` setting changes. */
+  displayErrors: 'stdout' | 'stderr' | 'off' = 'stdout';
+  /** The values `ini_set` gave settings, by name. */
+  readonly iniSettings = new Map<string, string>();
+
+  /** Prints an error message that starts with a newline, as the `display_errors` setting asks. */
+  displayError(text: string): void {
+    if (this.displayErrors === 'stdout') this.echo(text);
+    else if (this.displayErrors === 'stderr') this.echoError(text.slice(1));
+  }
+
+  /** The output buffers `ob_start` opened, innermost last. */
+  readonly outputBuffers: OutputBuffer[] = [];
+  /** The output buffer whose handler is running. */
+  runningOutputBuffer: OutputBuffer | undefined;
+
+  /** Writes bytes to standard output, through the open output buffers unless `buffered` is false. */
+  echo(bytes: string, buffered = true): void {
     if (bytes.length === 0) return;
     this.spend(Math.ceil(bytes.length / 64));
+    if (buffered && this.outputBuffers.length > 0) bufferOutput(this, bytes);
+    else this.writeStdout(bytes);
+  }
+
+  /** Writes bytes to standard output past the output buffers, decoding complete UTF-8 sequences as they arrive. */
+  writeStdout(bytes: string): void {
+    if (bytes.length === 0) return;
     const text = this.pendingOutput + bytes;
     const cut = completePrefix(text);
     this.pendingOutput = text.slice(cut);

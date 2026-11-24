@@ -673,7 +673,10 @@ defineFunction('error_reporting(?int $error_level = null): int', ({ args }) => {
   // While `@` silences errors, PHP reports only the fatal levels (E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR,
   // E_USER_ERROR, E_RECOVERABLE_ERROR).
   const previous = runtime.silence > 0 ? runtime.errorReporting & 4437n : runtime.errorReporting;
-  if (args[0] !== undefined && args[0] !== null) runtime.errorReporting = args[0] as bigint;
+  if (args[0] !== undefined && args[0] !== null) {
+    runtime.errorReporting = args[0] as bigint;
+    runtime.iniSettings.set('error_reporting', String(runtime.errorReporting));
+  }
   return previous;
 });
 defineFunction(
