@@ -194,7 +194,7 @@ export class Shell implements ArithmeticHost {
     return status;
   }
 
-  /** Runs a function while keeping any command-substitution outputs it produces rooted for turtle GC. */
+  /** Runs a function while keeping any command-substitution outputs and expanded handles rooted for turtle GC. */
   private withRoots<T>(run: (roots: string[]) => T): T {
     const frame = { values: [] as string[] };
     this.inFlight.push(frame);
@@ -203,6 +203,10 @@ export class Shell implements ArithmeticHost {
     } finally {
       this.inFlight.pop();
     }
+  }
+
+  rootValue(text: string): void {
+    if (text.includes('Turtle@')) this.inFlight.at(-1)?.values.push(text);
   }
 
   /** Runs statements whose exit status decides a branch, recording no steps for their commands. */
@@ -517,7 +521,7 @@ export class Shell implements ArithmeticHost {
   }
 
   private executeCase(statement: Extract<Statement, { kind: 'case' }>): number {
-    const value = this.leavingLine(() => this.expander.expandString(statement.value));
+    const value = this.withRoots(() => this.leavingLine(() => this.expander.expandString(statement.value)));
     let status = 0;
     let falling = false;
     for (const item of statement.items) {
@@ -814,7 +818,7 @@ export class Shell implements ArithmeticHost {
       this.lineShift = savedLineShift;
       this.readShift = savedReadShift;
     }
-    this.inFlight.at(-1)?.values.push(buffer.text);
+    this.rootValue(buffer.text);
     return { output: buffer.text, status };
   }
 

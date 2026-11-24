@@ -175,7 +175,12 @@ export class Expander {
   /** Expands parts in order; `inDouble` tells whether they are inside double quotes. */
   expandParts(parts: WordPart[], inDouble: boolean): Piece[] {
     const pieces: Piece[] = [];
-    for (const part of parts) pieces.push(...this.expandPart(part, inDouble));
+    for (const part of parts) {
+      for (const piece of this.expandPart(part, inDouble)) {
+        if (piece !== EMPTY_LIST && !isFieldBreak(piece)) this.shell.rootValue(piece.text);
+        pieces.push(piece);
+      }
+    }
     return pieces;
   }
 
@@ -572,7 +577,9 @@ export class Expander {
         `ファイル名の展開（引用符で囲まれていない * ? [ ]。文字として使うときは "${field.map((f) => f.text).join('')}" のように引用符で囲む）`
       );
     }
-    return field.map((fragment) => fragment.text).join('');
+    const result = field.map((fragment) => fragment.text).join('');
+    this.shell.rootValue(result);
+    return result;
   }
 
   /** A backquoted body Bash cannot parse: it reports the error as it runs the substitution, which gives nothing. */
