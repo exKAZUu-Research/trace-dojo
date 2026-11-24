@@ -10,7 +10,7 @@ import {
 } from './arithmetic';
 import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word } from './ast';
 import { BUILTINS } from './builtins';
-import { charactersOf } from './characters';
+import { capitalize, lowerCase, upperCase } from './characters';
 import { conditionalStatus } from './conditional';
 import { type DeclarationArgument, runDeclaration } from './declare';
 import { Expander } from './expansion';
@@ -32,6 +32,7 @@ import {
   cloneScope,
   cloneValue,
   ensureWritable,
+  ENVIRONMENT_VARIABLES,
   isIdentifier,
   type Scope,
   sortedElements,
@@ -58,8 +59,6 @@ interface CallInfo {
   line: number;
 }
 
-class PureReadAbort extends Error {}
-
 /** The state that a subshell copies and discards: variables, functions, positional parameters, and descriptors. */
 export interface ShellState {
   scopes: Scope[];
@@ -80,60 +79,6 @@ export interface ShellState {
   fd1: OutputTarget;
   fd2: OutputTarget;
 }
-
-/** The shell variables that hold the shell's environment, which this environment does not have. */
-const ENVIRONMENT_VARIABLES = new Set([
-  'HOME',
-  'PATH',
-  'USER',
-  'LOGNAME',
-  'PWD',
-  'OLDPWD',
-  'SHELL',
-  'TERM',
-  'LANG',
-  'LC_ALL',
-  'LC_CTYPE',
-  'LC_COLLATE',
-  'LC_MESSAGES',
-  'TMPDIR',
-  'HOSTNAME',
-  'HOSTTYPE',
-  'OSTYPE',
-  'MACHTYPE',
-  'UID',
-  'EUID',
-  'PPID',
-  'BASHPID',
-  'BASH',
-  'SHLVL',
-  'SECONDS',
-  'EPOCHSECONDS',
-  'EPOCHREALTIME',
-  'SRANDOM',
-  'GROUPS',
-  'DIRSTACK',
-  'MAIL',
-  'MAILCHECK',
-  'BASH_ARGV',
-  'BASH_ARGC',
-  'BASH_ARGV0',
-  'BASH_COMMAND',
-  'BASH_EXECUTION_STRING',
-  'BASHOPTS',
-  'SHELLOPTS',
-  'BASH_ALIASES',
-  'BASH_CMDS',
-  'BASH_LOADABLES_PATH',
-  'COMP_WORDBREAKS',
-  'HISTCMD',
-  'COLUMNS',
-  'LINES',
-  'EDITOR',
-  'PS1',
-  'PS2',
-  '_',
-]);
 
 /** The variables Bash computes whenever a program reads them. */
 const DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'FUNCNAME', 'BASH_LINENO', 'BASH_SOURCE', 'BASH_SUBSHELL']);
@@ -171,6 +116,8 @@ export class Shell implements ArithmeticHost {
   /** Outputs of running and pending command substitutions and loop word lists, whose turtle handles stay live. */
   private readonly inFlight: { values: string[] }[] = [];
   private readonly activeOutputs: { text: string }[] = [];
+  /** Prefix-assignment scopes active for the running command, distinct from persistent local/global scopes. */
+  private readonly tempScopes = new WeakSet<Scope>();
 
   constructor(readonly runtime: Runtime) {
     const global: Scope = new Map();
@@ -558,47 +505,51 @@ export class Shell implements ArithmeticHost {
 
   // ---------------------------------------------------------------- simple commands
 
-  // code-gauge-allow functionCognitiveComplexity -- Bash's order of expansion, assignment, and lookup of functions, builtins, and external commands.
-  // code-gauge-allow functionNcss -- Bash's order of expansion, assignment, and lookup of functions, builtins, and external commands.
   private executeCommand(statement: Extract<Statement, { kind: 'command' }>): number {
     const argv = this.expander.expandWords(statement.words);
-    return this.withRedirects(statement.redirects, () => {
-      if (argv.length === 0) {
-        // A command of assignments alone takes the status of its last command substitution.
-        this.expander.lastSubstitutionStatus = 0;
-        // A failed assignment, as to a readonly variable, abandons the line, as it does in Bash.
-        for (const assignment of statement.assignments) {
-          if (!this.performAssignment(assignment)) throw new DiscardSignal();
-        }
-        this.state.lastArgument = '';
-        return this.expander.lastSubstitutionStatus;
+    if (argv.length === 0) {
+      // A command of assignments alone expands and commits before redirections and takes its last substitution status.
+      this.expander.lastSubstitutionStatus = 0;
+      for (const assignment of statement.assignments) {
+        if (!this.performAssignment(assignment)) throw new DiscardSignal();
       }
-      const [name] = argv;
-      const fn = this.state.functions.get(name);
-      if (fn) {
-        return this.withTemporaryScope(statement.assignments, () => {
+      this.state.lastArgument = '';
+      const status = this.expander.lastSubstitutionStatus;
+      return this.withRedirects(statement.redirects, () => status);
+    }
+    const [name] = argv;
+    const fn = this.state.functions.get(name);
+    if (fn) {
+      return this.withTemporaryScope(statement.assignments, () =>
+        this.withRedirects(statement.redirects, () => {
           const status = this.callFunction(fn, argv.slice(1), statement.row);
           // The commands in the function reset the flag, so the call sets it after they ran.
           this.ranFunction = true;
           this.state.lastArgument = argv.at(-1) as string;
           return status;
-        });
-      }
-      const builtin = Object.hasOwn(BUILTINS, name) ? BUILTINS[name] : undefined;
-      if (builtin) {
-        return this.withTemporaryScope(statement.assignments, () => {
+        })
+      );
+    }
+    const builtin = Object.hasOwn(BUILTINS, name) ? BUILTINS[name] : undefined;
+    if (builtin) {
+      return this.withTemporaryScope(statement.assignments, () =>
+        this.withRedirects(statement.redirects, () => {
           const status = builtin(this, argv.slice(1), name);
           this.state.lastArgument = argv.at(-1) as string;
           return status;
-        });
-      }
-      if (EXTERNAL_COMMANDS.has(name) || name.includes('/')) {
-        throw new UnsupportedFeatureError(`外部コマンド（${name}）`);
-      }
-      this.reportError(`${name}: command not found`);
-      this.state.lastArgument = argv.at(-1) as string;
-      return 127;
-    });
+        })
+      );
+    }
+    return this.withTemporaryScope(statement.assignments, () =>
+      this.withRedirects(statement.redirects, () => {
+        if (EXTERNAL_COMMANDS.has(name) || name.includes('/')) {
+          throw new UnsupportedFeatureError(`外部コマンド（${name}）`);
+        }
+        this.reportError(`${name}: command not found`);
+        this.state.lastArgument = argv.at(-1) as string;
+        return 127;
+      })
+    );
   }
 
   private removeScope(scope: Scope): void {
@@ -610,6 +561,7 @@ export class Shell implements ArithmeticHost {
   private withTemporaryScope(assignments: Assignment[], run: () => number): number {
     if (assignments.length === 0) return run();
     const scope: Scope = new Map();
+    this.tempScopes.add(scope);
     this.state.scopes.push(scope);
     try {
       for (const assignment of assignments) {
@@ -661,8 +613,8 @@ export class Shell implements ArithmeticHost {
         );
       } else args.push(...this.expander.expandWords([arg]));
     }
-    return this.withRedirects(statement.redirects, () =>
-      this.withTemporaryScope(statement.assignments, () => {
+    return this.withTemporaryScope(statement.assignments, () =>
+      this.withRedirects(statement.redirects, () => {
         const status = runDeclaration(this, statement.name, args);
         const last = args.at(-1);
         this.state.lastArgument = last === undefined ? statement.name : typeof last === 'string' ? last : last.text;
@@ -913,6 +865,38 @@ export class Shell implements ArithmeticHost {
     return undefined;
   }
 
+  /**
+   * When `name` is bound in an active command-prefix temporary scope, promotes that binding into the enclosing
+   * persistent variable scope (as `export` and `readonly` require) and returns it.
+   */
+  promoteTemporaryVariable(name: string): Variable | undefined {
+    const { scopes } = this.state;
+    let tempIndex = -1;
+    for (let i = scopes.length - 1; i >= 0; i--) {
+      const scope = scopes[i];
+      if (!scope.has(name)) continue;
+      if (this.tempScopes.has(scope)) tempIndex = i;
+      break;
+    }
+    if (tempIndex === -1) return undefined;
+    const tempVar = scopes[tempIndex].get(name) as Variable;
+    scopes[tempIndex].delete(name);
+    let target: Variable | undefined;
+    for (let i = tempIndex - 1; i >= 0; i--) {
+      if (this.tempScopes.has(scopes[i])) continue;
+      target = scopes[i].get(name);
+      if (target) break;
+    }
+    if (!target) {
+      target = { name, value: undefined, attributes: new Set() };
+      scopes[0].set(name, target);
+    }
+    target.value = tempVar.value;
+    target.shared = false;
+    for (const attr of tempVar.attributes) target.attributes.add(attr);
+    return target;
+  }
+
   /** The name a name reference finally names, or the name itself. */
   resolveName(name: string): string {
     let target = name;
@@ -1101,7 +1085,7 @@ export class Shell implements ArithmeticHost {
     return index;
   }
 
-  private maxIndex(elements: Map<bigint, string>): bigint {
+  maxIndex(elements: Map<bigint, string>): bigint {
     let max = -1n;
     for (const key of elements.keys()) if (key > max) max = key;
     return max;
@@ -1213,7 +1197,6 @@ export class Shell implements ArithmeticHost {
 
   // code-gauge-allow functionCognitiveComplexity -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
   // code-gauge-allow functionNcss -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
-  // code-gauge-allow functionParameterCount -- Carries the target variable, subscript, value, append mode, pre-evaluated flag, and reported name.
   assignElementTo(
     variable: Variable,
     subscript: string,
@@ -1426,170 +1409,6 @@ export class Shell implements ArithmeticHost {
     return true;
   }
 
-  // ---------------------------------------------------------------- traces
-
-  /** The variables a frame sees: its locals and its callers', then the globals, the innermost first. */
-  visibleVariables(frame: Frame): Variable[] {
-    const scopes = this.state.scopes.slice(0, frame.scopeIndex + 1);
-    const seen = new Set<string>();
-    const result: Variable[] = [];
-    for (let i = scopes.length - 1; i >= 0; i--) {
-      for (const variable of scopes[i].values()) {
-        if (seen.has(variable.name)) continue;
-        seen.add(variable.name);
-        if (!variable.isSystem && variable.value) result.push(variable);
-      }
-    }
-    return result.toSorted((a, b) => scopeRank(scopes, b) - scopeRank(scopes, a));
-  }
-
-  /**
-   * The value a variable shows in `frame`, resolving name references (including `arr[sub]` targets) within `frame`'s
-   * visible scopes without executing side effects.
-   */
-  // code-gauge-allow functionCognitiveComplexity -- Follows chained namerefs within a frame's scopes and resolves associative or indexed element targets cleanly.
-  shownValueOf(frame: Frame, variable: Variable): VariableValue | undefined {
-    if (!variable.attributes.has('n') || variable.value?.kind !== 'scalar') return variable.value;
-    const maxScope = frame.scopeIndex;
-    let current: Variable | undefined = variable;
-    for (let depth = 0; depth < 8; depth++) {
-      if (!current?.attributes.has('n') || current.value?.kind !== 'scalar') return current?.value;
-      const ref = current.value.value;
-      if (ref === '') return current.value;
-      const split = this.splitSubscript(ref);
-      if (split) return this.shownElementOf(split.name, split.subscript, maxScope);
-      const next = this.findOwnVariableIn(ref, maxScope);
-      if (!next || next === current) return undefined;
-      current = next;
-    }
-    return undefined;
-  }
-
-  private shownElementOf(name: string, subscript: string, maxScope: number): VariableValue | undefined {
-    let target: Variable | undefined = this.findOwnVariableIn(name, maxScope);
-    for (let depth = 0; depth < 8 && target?.attributes.has('n') && target.value?.kind === 'scalar'; depth++) {
-      const ref = target.value.value;
-      if (ref === '' || ref.includes('[')) return undefined;
-      const next = this.findOwnVariableIn(ref, maxScope);
-      if (!next || next === target) return undefined;
-      target = next;
-    }
-    const value = target?.value;
-    if (!value) return undefined;
-    if (subscript === '@' || subscript === '*') return value;
-    if (value.kind === 'associative') {
-      const element = value.table.get(subscript);
-      return element === undefined ? undefined : { kind: 'scalar', value: element };
-    }
-    const index = this.pureSubscriptIndex(value, subscript, maxScope);
-    if (index === undefined) return undefined;
-    if (value.kind === 'scalar') return index === 0n ? value : undefined;
-    const element = value.elements.get(index);
-    return element === undefined ? undefined : { kind: 'scalar', value: element };
-  }
-
-  private pureSubscriptIndex(value: VariableValue, subscript: string, maxScope: number): bigint | undefined {
-    const overlay = new Map<string, string>();
-    const evalPure = (expr: string): bigint | undefined => {
-      try {
-        return evaluateArithmetic(
-          expr,
-          {
-            resolveTarget: (name, rawSubscript) => this.pureResolveTarget(name, rawSubscript, maxScope, evalPure),
-            readTarget: (target) => this.pureReadTarget(target, maxScope, overlay),
-            writeTarget: (target, written) => {
-              if (target.kind === 'invalidElement') return false;
-              overlay.set(this.pureTargetKey(target), written);
-              return true;
-            },
-            reportError: () => {
-              throw new PureReadAbort();
-            },
-          },
-          undefined,
-          () => this.runtime.spend()
-        );
-      } catch (error) {
-        if (
-          error instanceof ArithmeticError ||
-          error instanceof ArithmeticStoreError ||
-          error instanceof PureReadAbort
-        ) {
-          return undefined;
-        }
-        throw error;
-      }
-    };
-    const raw = evalPure(subscript);
-    if (raw === undefined) return undefined;
-    if (raw >= 0n) return raw;
-    const length = value.kind === 'indexed' ? this.maxIndex(value.elements) + 1n : 1n;
-    const resolved = length + raw;
-    return resolved < 0n ? undefined : resolved;
-  }
-
-  private pureResolveTarget(
-    name: string,
-    rawSubscript: string | undefined,
-    maxScope: number,
-    evalPure: (expr: string) => bigint | undefined
-  ): ArithmeticTarget {
-    if (rawSubscript === undefined) return { kind: 'scalar', name };
-    if (rawSubscript === '') return { kind: 'invalidElement', raw: `${name}[]` };
-    const variable = this.findOwnVariableIn(name, maxScope);
-    if (variable?.value?.kind === 'associative' || variable?.attributes.has('A')) {
-      return { kind: 'associativeElement', name, key: rawSubscript };
-    }
-    const raw = evalPure(rawSubscript);
-    if (raw === undefined) return { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` };
-    const length = variable?.value?.kind === 'indexed' ? this.maxIndex(variable.value.elements) + 1n : 1n;
-    const resolved = raw < 0n ? length + raw : raw;
-    return resolved < 0n
-      ? { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` }
-      : { kind: 'indexedElement', name, index: resolved };
-  }
-
-  private pureTargetKey(target: Exclude<ArithmeticTarget, { kind: 'invalidElement' }>): string {
-    if (target.kind === 'scalar') return target.name;
-    if (target.kind === 'associativeElement') return `${target.name}[${target.key}]`;
-    return `${target.name}[${target.index}]`;
-  }
-
-  private pureReadTarget(
-    target: ArithmeticTarget,
-    maxScope: number,
-    overlay: ReadonlyMap<string, string>
-  ): string | undefined {
-    if (target.kind === 'invalidElement') return undefined;
-    const shadowed = overlay.get(this.pureTargetKey(target));
-    if (shadowed !== undefined) return shadowed;
-    if (target.kind === 'associativeElement') {
-      const element = this.shownElementOf(target.name, target.key, maxScope);
-      return element?.kind === 'scalar' ? element.value : undefined;
-    }
-    if (target.kind === 'indexedElement') {
-      const element = this.shownElementOf(target.name, String(target.index), maxScope);
-      return element?.kind === 'scalar' ? element.value : undefined;
-    }
-    const variable = this.findOwnVariableIn(target.name, maxScope);
-    const val = variable
-      ? this.shownValueOf({ callRow: undefined, isAtomic: false, scopeIndex: maxScope }, variable)
-      : undefined;
-    if (!val) return undefined;
-    if (val.kind === 'scalar') return val.value;
-    if (val.kind === 'indexed') return val.elements.get(0n);
-    return val.table.get('0');
-  }
-
-  private findOwnVariableIn(name: string, maxScope: number): Variable | undefined {
-    const { scopes } = this.state;
-    for (let i = Math.min(maxScope, scopes.length - 1); i >= 0; i--) {
-      const variable = scopes[i].get(name);
-      if (variable) return variable;
-    }
-    return undefined;
-  }
-
   // code-gauge-allow functionCognitiveComplexity -- Walks every value kind of every scope of the running and suspended shells.
   private *reachableStrings(): Iterable<string> {
     for (const state of [...this.suspended, this.state]) {
@@ -1631,34 +1450,7 @@ function declaresReferences(statement: Extract<Statement, { kind: 'declaration' 
   return statement.args.some((arg) => !('append' in arg) && /^-[A-Za-z]*n[A-Za-z]*$/.test(arg.text));
 }
 
-function scopeRank(scopes: Scope[], variable: Variable): number {
-  for (let i = scopes.length - 1; i >= 0; i--) if (scopes[i].get(variable.name) === variable) return i;
-  return -1;
-}
-
-/** Whether a function's name is one Bash accepts outside POSIX mode: any word without `$` or a slash at its start. */
+/** Whether a function's name is non-empty, contains no `$`, and is not purely digits. */
 function isValidFunctionName(name: string): boolean {
   return name !== '' && !name.includes('$') && !/^[0-9]+$/.test(name);
-}
-
-export function upperCase(text: string): string {
-  return charactersOf(text)
-    .map((c) => mapCase(c, c.toUpperCase()))
-    .join('');
-}
-
-export function lowerCase(text: string): string {
-  return charactersOf(text)
-    .map((c) => mapCase(c, c.toLowerCase()))
-    .join('');
-}
-
-function capitalize(text: string): string {
-  const [first = '', ...rest] = charactersOf(text);
-  return upperCase(first) + lowerCase(rest.join(''));
-}
-
-/** A character's case mapping as `towupper` gives it: one character for one, or the character itself. */
-function mapCase(c: string, mapped: string): string {
-  return charactersOf(mapped).length === 1 ? mapped : c;
 }

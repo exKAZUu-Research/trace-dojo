@@ -113,7 +113,13 @@ function parseWordOperand(word: string): { name: string; subscript?: string; app
   };
 }
 
+interface DeclarationDestination {
+  variable: Variable;
+  referencedSubscript?: string;
+}
+
 // code-gauge-allow functionCognitiveComplexity -- Bash's declaration of one operand: its name, a dynamic variable, its attributes, and its value.
+// code-gauge-allow functionNcss -- Validates, resolves destination, applies attributes, and assigns scalar/element/reference values.
 function declareOne(
   shell: Shell,
   builtin: string,
@@ -128,27 +134,39 @@ function declareOne(
     return false;
   }
   if (!isLocal && shell.isDynamic(name)) return declareDynamic(shell, operand, parsed);
-  const variable = declaredVariable(shell, builtin, name, options, isLocal, hasValue(operand, parsed));
+  const isSubscripted =
+    parsed?.subscript !== undefined || (typeof operand !== 'string' && operand.subscript !== undefined);
+  const destination = declaredDestination(
+    shell,
+    builtin,
+    name,
+    options,
+    isLocal,
+    isSubscripted,
+    hasValue(operand, parsed)
+  );
   if (
-    !variable ||
-    !applyAttributes(shell, builtin, variable, options, hasValue(operand, parsed) || isCompound(operand))
+    !destination ||
+    !applyAttributes(shell, builtin, destination.variable, options, hasValue(operand, parsed) || isCompound(operand))
   ) {
     return false;
   }
+  const { variable, referencedSubscript } = destination;
   let ok = true;
   if (parsed?.value !== undefined) {
     if (variable.attributes.has('n') && parsed.subscript === undefined) {
       ok = assignReferenceTarget(shell, builtin, variable, parsed.value);
+    } else if (parsed.subscript !== undefined) {
+      ok = shell.assignElementTo(variable, parsed.subscript, parsed.value, parsed.append);
+    } else if (referencedSubscript !== undefined) {
+      ok = shell.assignElementTo(variable, referencedSubscript, parsed.value, parsed.append);
     } else {
-      ok =
-        parsed.subscript === undefined
-          ? shell.assignScalarTo(variable, parsed.value, parsed.append)
-          : shell.assignElementTo(variable, parsed.subscript, parsed.value, parsed.append);
+      ok = shell.assignScalarTo(variable, parsed.value, parsed.append);
     }
   } else if (typeof operand !== 'string') {
     ok = variable.attributes.has('n')
       ? assignReference(shell, builtin, variable, operand)
-      : assignLocally(shell, variable, operand);
+      : assignLocally(shell, variable, operand, referencedSubscript);
   }
   if (options.set.has('r')) variable.attributes.add('r');
   return ok;
@@ -167,40 +185,74 @@ function declareDynamic(
   return true;
 }
 
-/** The variable a declaration declares: a new local, an existing global, or the variable the name finds. */
-function declaredVariable(
+/** Resolves the target variable and any nameref element subscript for a declaration operand. */
+// code-gauge-allow functionCognitiveComplexity -- Handles local vs global (-g), nameref chains (including element targets), prefix propagation, and readonly checks.
+// code-gauge-allow functionParameterCount -- Needs shell, builtin, operand name, flags, scope mode, subscript presence, and whether a value is assigned.
+function declaredDestination(
   shell: Shell,
   builtin: string,
   name: string,
-  { set }: Options,
+  { set, unset }: Options,
   isLocal: boolean,
+  isSubscripted: boolean,
   assigns: boolean
-): Variable | undefined {
+): DeclarationDestination | undefined {
   const { scopes } = shell.state;
   const scope = isLocal ? scopes[shell.state.functionScopes.at(-1) as number] : undefined;
-  let variable = scope
-    ? scope.get(name)
-    : set.has('n') || set.has('g')
-      ? scopes[0].get(name)
-      : shell.findVariable(name);
-  if (!scope && !variable && (set.has('g') || builtin === 'readonly' || builtin === 'export')) {
-    variable = shell.findVariable(name);
-  }
-  if (scope && !variable && isReadonlyGlobal(shell, name)) {
+  const resolved = resolveDeclaredTarget(shell, name, scope, set, unset, isSubscripted);
+  const { targetName, referencedSubscript } = resolved;
+  const targetScope = scope && targetName === name ? scope : undefined;
+  let variable =
+    !targetScope && (builtin === 'export' || builtin === 'readonly')
+      ? shell.promoteTemporaryVariable(targetName)
+      : undefined;
+  variable ??= targetScope
+    ? targetScope.get(targetName)
+    : set.has('n') || (set.has('g') && !isSubscripted && targetName === name)
+      ? scopes[0].get(targetName)
+      : shell.findVariable(targetName, false);
+  if (targetScope && !variable && isReadonlyGlobal(shell, targetName)) {
     // Bash refuses a local copy of a readonly global, though a caller's readonly local may be shadowed.
-    shell.reportError(`${builtin}: ${name}: readonly variable`);
+    shell.reportError(`${builtin}: ${targetName}: readonly variable`);
     return undefined;
   }
   const changes = assigns || [...set].some((a) => a !== 'r' && a !== 'x' && a !== 'p' && a !== 'g');
   if (variable?.attributes.has('r') && changes) {
-    shell.reportError(`${builtin}: ${name}: readonly variable`);
+    shell.reportError(`${builtin}: ${targetName}: readonly variable`);
     return undefined;
   }
   if (!variable) {
-    variable = { name, value: undefined, attributes: new Set() };
-    (scope ?? scopes[0]).set(name, variable);
+    variable = { name: targetName, value: undefined, attributes: new Set() };
+    (targetScope ?? scopes[0]).set(targetName, variable);
   }
-  return variable;
+  return { variable, ...(referencedSubscript === undefined ? {} : { referencedSubscript }) };
+}
+
+function resolveDeclaredTarget(
+  shell: Shell,
+  name: string,
+  scope: Map<string, Variable> | undefined,
+  set: Set<string>,
+  unset: Set<string>,
+  isSubscripted: boolean
+): { targetName: string; referencedSubscript?: string } {
+  if (set.has('n') || unset.has('n')) return { targetName: name };
+  let current = scope
+    ? scope.get(name)
+    : set.has('g') && !isSubscripted
+      ? shell.state.scopes[0].get(name)
+      : shell.findOwnVariable(name);
+  let target = name;
+  for (let depth = 0; depth < 8; depth++) {
+    if (!current?.attributes.has('n') || current.value?.kind !== 'scalar' || current.value.value === '') break;
+    target = current.value.value;
+    const split = shell.splitSubscript(target);
+    if (split) {
+      return { targetName: split.name, ...(isSubscripted ? {} : { referencedSubscript: split.subscript }) };
+    }
+    current = shell.findOwnVariable(target);
+  }
+  return { targetName: target };
 }
 
 function isReadonlyGlobal(shell: Shell, name: string): boolean {
@@ -292,13 +344,22 @@ function isCompound(operand: DeclarationArgument): boolean {
 
 /** Assigns a declaration's value to the variable it declared, which may be a local shadowing a global or vice versa. */
 // code-gauge-allow functionCognitiveComplexity -- Bash's assignment kinds for a declared variable: none, empty, compound, element, and scalar.
-function assignLocally(shell: Shell, variable: Variable, assignment: Assignment): boolean {
+function assignLocally(
+  shell: Shell,
+  variable: Variable,
+  assignment: Assignment,
+  referencedSubscript?: string
+): boolean {
   if (assignment.value === undefined && !assignment.array) {
     if (variable.attributes.has('a') && !variable.value) variable.value = { kind: 'indexed', elements: new Map() };
     if (variable.attributes.has('A') && !variable.value)
       variable.value = { kind: 'associative', table: new AssociativeTable() };
     // `declare x` and `local x` declare a variable with no value; `x=` gives it the empty one.
-    if (assignment.text.includes('=')) return shell.assignScalarTo(variable, '', assignment.append);
+    if (assignment.text.includes('=')) {
+      return referencedSubscript === undefined
+        ? shell.assignScalarTo(variable, '', assignment.append)
+        : shell.assignElementTo(variable, referencedSubscript, '', assignment.append);
+    }
     return true;
   }
   const { scopes } = shell.state;
@@ -320,6 +381,9 @@ function assignLocally(shell: Shell, variable: Variable, assignment: Assignment)
       ? shell.expander.expandAssociativeKey(assignment.subscript)
       : shell.expander.expandSubscriptString(assignment.subscript);
     return shell.assignElementTo(variable, subscript, value, assignment.append);
+  }
+  if (referencedSubscript !== undefined) {
+    return shell.assignElementTo(variable, referencedSubscript, value, assignment.append);
   }
   return shell.assignScalarTo(variable, value, assignment.append);
 }
