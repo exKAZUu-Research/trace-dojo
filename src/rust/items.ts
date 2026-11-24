@@ -1641,6 +1641,7 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
     case 'constArg': {
       const param = constParamOf(ast.value, scope);
       if (param) return { kind: 'param', param };
+      if (ast.value.kind === 'bool' || ast.value.kind === 'char') return constValueType(ast.value.value);
       const value = constInteger(ast.value, scope);
       if (value === undefined) compileError(ast.span, '定数の型引数には、整数のリテラルか定数の式を書いてください。');
       return constValueType(value);

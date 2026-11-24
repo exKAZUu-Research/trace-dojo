@@ -909,8 +909,9 @@ function shapeName(name: string): string {
 const constValues = new Map<string, AdtDef>();
 
 /** A value of a const parameter (`3` of `[T; 3]` or `Matrix<2, 3>`) as the type argument it is. */
-export function constValueType(value: bigint | number): Type {
-  const name = String(value);
+/** The value given to a const parameter, as a type argument: an integer, a `bool`, or a `char` (`'z'`). */
+export function constValueType(value: bigint | number | boolean | string): Type {
+  const name = typeof value === 'string' ? `'${value}'` : String(value);
   let def = constValues.get(name);
   if (!def) {
     def = {
@@ -929,9 +930,18 @@ export function constValueType(value: bigint | number): Type {
 }
 
 /** The value a type argument of a const parameter stands for, once it is one. */
+/** The integer a const argument is, such as an array's length. */
 export function constValueOf(type: Type): bigint | undefined {
+  const value = constArgValue(type);
+  return typeof value === 'bigint' ? value : undefined;
+}
+
+export function constArgValue(type: Type): bigint | boolean | string | undefined {
   const t = shallow(type);
-  return t.kind === 'adt' && t.def.builtin === 'ConstValue' ? BigInt(t.def.name) : undefined;
+  if (t.kind !== 'adt' || t.def.builtin !== 'ConstValue') return undefined;
+  const { name } = t.def;
+  if (name === 'true' || name === 'false') return name === 'true';
+  return name.startsWith("'") ? name.slice(1, -1) : BigInt(name);
 }
 
 /** An array of a length a const parameter or a variable may give, which is known once it is a `ConstValue`. */

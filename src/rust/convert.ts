@@ -544,36 +544,57 @@ export class Converter extends ExpressionConverter {
     };
   }
 
+  /**
+   * Requires the parameters of a generic associated type to be lifetimes (`type Item<'a> where Self: 'a;`), which the
+   * borrow checker reads from the types that use them, so that the type stands for one type as an associated type does.
+   */
+  private requireLifetimeParamsOnly(node: Node): void {
+    const parameters = node.childForFieldName('type_parameters');
+    if (parameters?.namedChildren.some((child) => !isComment(child) && child.type !== 'lifetime_parameter')) {
+      unavailable(this.span(node), '型引数を持つ関連型（type Item<T>;）');
+    }
+  }
+
   private traitItem(node: Node): TraitItem {
     const span = this.span(node);
     const methods: FnItem[] = [];
     const assocTypes: TraitItem['assocTypes'] = [];
     const consts: TraitItem['consts'] = [];
-    for (const syntax of this.field(node, 'body').namedChildren) {
-      if (isComment(syntax)) continue;
-      const { attributes, target: child } = splitAttributes(syntax);
-      const attrs = this.attributes.read(attributes);
-      if (!attrs || !child) continue;
-      if (child.type === 'function_item' || child.type === 'function_signature_item') {
-        const method = this.fnItem(child, child.type === 'function_signature_item', attrs);
-        if (method.isConst) syntaxError(method.span, 'トレイトの関数は const にできません（E0379）。');
-        methods.push(method);
-      } else if (child.type === 'associated_type') {
-        if (child.childForFieldName('type_parameters')) {
-          unavailable(this.span(child), '型引数を持つ関連型（type Item<T>;）');
-        }
-        const typeBounds = child.childForFieldName('bounds');
-        assocTypes.push({
-          name: this.identifier(this.field(child, 'name')),
-          bounds: typeBounds ? this.bounds(typeBounds) : [],
-          span: this.span(child),
-        });
-      } else if (child.type === 'type_item') {
-        syntaxError(this.span(child), '関連型の既定の型は、不安定な機能なので使えません（E0658）。');
-      } else if (child.type === 'const_item') consts.push(this.constItem(child, true));
-      else if (child.type === 'macro_invocation') unavailable(this.span(child), 'トレイトの中のマクロ');
-      else this.unsupportedAssociatedItem(child);
-    }
+    const members = (body: Node | null | undefined): void => {
+      for (const syntax of body?.namedChildren ?? []) {
+        // The `;` that ends a macro invocation (`getter!(x);`) is a statement of its own in the tree.
+        if (isComment(syntax) || syntax.type === 'empty_statement') continue;
+        const { attributes, target: child } = splitAttributes(syntax);
+        const attrs = this.attributes.read(attributes);
+        if (!attrs || !child) continue;
+        if (child.type === 'function_item' || child.type === 'function_signature_item') {
+          const method = this.fnItem(child, child.type === 'function_signature_item', attrs);
+          if (method.isConst) syntaxError(method.span, 'トレイトの関数は const にできません（E0379）。');
+          methods.push(method);
+        } else if (child.type === 'associated_type') {
+          this.requireLifetimeParamsOnly(child);
+          const typeBounds = child.childForFieldName('bounds');
+          assocTypes.push({
+            name: this.identifier(this.field(child, 'name')),
+            bounds: typeBounds ? this.bounds(typeBounds) : [],
+            span: this.span(child),
+          });
+        } else if (child.type === 'type_item') {
+          syntaxError(this.span(child), '関連型の既定の型は、不安定な機能なので使えません（E0658）。');
+        } else if (child.type === 'const_item') consts.push(this.constItem(child, true));
+        else if (child.type === 'macro_invocation' && this.isUserMacro(child)) {
+          this.expandUserMacro(
+            child,
+            (code) => `trait MacroExpansion { ${code} }`,
+            (root) => {
+              members(root.namedChildren.find((item) => item.type === 'trait_item')?.childForFieldName('body'));
+            }
+          );
+        } else if (child.type === 'macro_invocation') unavailable(this.span(child), 'トレイトの中のマクロ');
+        else this.unsupportedAssociatedItem(child);
+      }
+    };
+    members(this.field(node, 'body'));
     const bounds = node.childForFieldName('bounds');
     return {
       kind: 'trait',
@@ -597,27 +618,37 @@ export class Converter extends ExpressionConverter {
     const methods: FnItem[] = [];
     const consts: ImplItem['consts'] = [];
     const assocTypes: ImplItem['assocTypes'] = [];
-    for (const syntax of node.childForFieldName('body')?.namedChildren ?? []) {
-      if (isComment(syntax)) continue;
-      const { attributes, target: child } = splitAttributes(syntax);
-      const attrs = this.attributes.read(attributes);
-      if (!attrs || !child) continue;
-      if (child.type === 'function_item') methods.push(this.fnItem(child, false, attrs));
-      else if (child.type === 'function_signature_item' && this.isStd) methods.push(this.fnItem(child, true, attrs));
-      else if (child.type === 'const_item') consts.push(this.item(child) as ImplItem['consts'][number]);
-      else if (child.type === 'type_item') {
-        if (child.childForFieldName('type_parameters')) {
-          unavailable(this.span(child), '型引数を持つ関連型（type Item<T> = ...;）');
-        }
-        assocTypes.push({
-          name: this.identifier(this.field(child, 'name')),
-          type: this.type(this.field(child, 'type')),
-          span: this.span(child),
-        });
-      } else if (child.type === 'function_signature_item') syntaxError(this.span(child), '関数の本体が足りません。');
-      else if (child.type === 'macro_invocation') unavailable(this.span(child), 'impl の中のマクロ');
-      else this.unsupportedAssociatedItem(child);
-    }
+    const members = (body: Node | null | undefined): void => {
+      for (const syntax of body?.namedChildren ?? []) {
+        // The `;` that ends a macro invocation (`getter!(x);`) is a statement of its own in the tree.
+        if (isComment(syntax) || syntax.type === 'empty_statement') continue;
+        const { attributes, target: child } = splitAttributes(syntax);
+        const attrs = this.attributes.read(attributes);
+        if (!attrs || !child) continue;
+        if (child.type === 'function_item') methods.push(this.fnItem(child, false, attrs));
+        else if (child.type === 'function_signature_item' && this.isStd) methods.push(this.fnItem(child, true, attrs));
+        else if (child.type === 'const_item') consts.push(this.item(child) as ImplItem['consts'][number]);
+        else if (child.type === 'type_item') {
+          this.requireLifetimeParamsOnly(child);
+          assocTypes.push({
+            name: this.identifier(this.field(child, 'name')),
+            type: this.type(this.field(child, 'type')),
+            span: this.span(child),
+          });
+        } else if (child.type === 'function_signature_item') syntaxError(this.span(child), '関数の本体が足りません。');
+        else if (child.type === 'macro_invocation' && this.isUserMacro(child)) {
+          this.expandUserMacro(
+            child,
+            (code) => `impl MacroExpansion { ${code} }`,
+            (root) => {
+              members(root.namedChildren.find((item) => item.type === 'impl_item')?.childForFieldName('body'));
+            }
+          );
+        } else if (child.type === 'macro_invocation') unavailable(this.span(child), 'impl の中のマクロ');
+        else this.unsupportedAssociatedItem(child);
+      }
+    };
+    members(node.childForFieldName('body'));
     return {
       kind: 'impl',
       span,

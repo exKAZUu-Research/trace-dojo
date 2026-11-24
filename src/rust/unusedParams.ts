@@ -15,7 +15,8 @@ interface Usage {
 export function checkParamsUsed(def: AdtDef): void {
   const usage = usageOf(def);
   for (const [index, param] of def.params.entries()) {
-    if (usage.params[index]) continue;
+    // A const parameter needs no field: its value is part of the type.
+    if (usage.params[index] || param.constType) continue;
     const mentioned = fieldTypes(def).some((field) => someType(field, (t) => t.kind === 'param' && t.param === param));
     compileError(
       def.span,

@@ -20,7 +20,7 @@ import { castValue, copyValue, needsCopy } from './ops';
 import { ControlSignal, type Frame, type FunctionInfo, MOVED, RustPanic, UNASSIGNED } from './runtime';
 import { concreteType, runtimeType } from './runtimeTypes';
 import { trackCollectionStorage } from './turtleTypes';
-import { type ConstDef, constValueOf, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
+import { constArgValue, type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
 import {
   AccessorPlace,
   CellPlace,
@@ -612,7 +612,7 @@ export class Compiler {
       case 'constParam': {
         const { param } = res;
         return (frame) => {
-          const value = constValueOf(concreteType({ kind: 'param', param }, frame.typeArgs));
+          const value = constArgValue(concreteType({ kind: 'param', param }, frame.typeArgs));
           if (value === undefined) throw new Error(`No value for the const parameter ${param.name}`);
           return value;
         };
