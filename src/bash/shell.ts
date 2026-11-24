@@ -618,7 +618,10 @@ export class Shell implements ArithmeticHost {
     if (!append) return value;
     const base = this.scalarValue(name) ?? '';
     const variable = this.findVariable(name);
-    return variable ? (this.convertForAttributes(variable, value, base, true) ?? base + value) : base + value;
+    const raw = variable?.attributes.has('i')
+      ? String(BigInt.asIntN(64, this.evaluateFatalReadonly(base || '0') + this.evaluateFatalReadonly(value)))
+      : base + value;
+    return variable ? applyCaseAttributes(variable, raw) : raw;
   }
 
   private removeScope(scope: Scope): void {
