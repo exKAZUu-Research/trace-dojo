@@ -120,7 +120,9 @@ function expandDeclarationAssignment(
   arg: Assignment,
   rawOptions: Options
 ): DeclarationArgument {
-  const options = normalizeArrayNamerefPrecedence(rawOptions);
+  const options = isLocalDeclaration(shell, builtin, rawOptions)
+    ? rawOptions
+    : normalizeArrayNamerefPrecedence(rawOptions);
   const subscript = arg.subscript && literalWord(arg.subscript, shell.expander.expandAssociativeKey(arg.subscript));
   const value =
     arg.value &&
@@ -158,6 +160,7 @@ function commitCompoundDeclaration(
     const sub = arg.subscript?.text ?? referencedSubscript ?? '';
     shell.discard(`${arg.name}[${sub}]: cannot assign list to array member`);
   }
+  if (localScope !== undefined && options.attemptedSet.has('n')) return false;
   if (!validateCompoundDeclarationTarget(shell, builtin, targetName, arg.append, set, unset, localScope)) return false;
   const variable = ensureCompoundTargetVariable(shell, targetName, set, localScope);
   applyAttributes(shell, builtin, variable, options, true, false);
@@ -269,13 +272,6 @@ function literalWord(origin: Word, text: string): Word {
   return { parts: [{ kind: 'single', text }], row: origin.row, text: origin.text };
 }
 
-function normalizeArrayNamerefPrecedence(options: Options): Options {
-  if (!options.set.has('n') || (!options.set.has('a') && !options.set.has('A'))) return options;
-  const set = new Set(options.set);
-  set.delete('n');
-  return { ...options, set };
-}
-
 /** Whether an executed declaration explicitly assigns a non-nameref value (`declare x=1`, `declare "x=3"`). */
 export function declarationAssignsAnswer(builtin: string, args: readonly DeclarationArgument[]): boolean {
   const options: Options = { set: new Set(), unset: new Set(), attemptedSet: new Set() };
@@ -304,24 +300,37 @@ export function runDeclaration(
 ): number {
   const parsed = parseOptions(shell, name, args);
   if (!parsed) return 2;
-  const { options, operands } = parsed;
+  const { operands } = parsed;
   if (name === 'local' && !shell.isInFunction) {
     shell.reportError('local: can only be used in a function');
     return 1;
   }
-  if (options.set.has('f') || options.set.has('F') || options.unset.has('f')) {
+  if (parsed.options.set.has('f') || parsed.options.set.has('F') || parsed.options.unset.has('f')) {
     throw new UnsupportedFeatureError(`${name} -f（関数の一覧）`);
   }
   if (operands.length === 0) throw new UnsupportedFeatureError(`${name} の変数の一覧`);
   // `readonly -p` and `export -p` print only without names; with names, they set the attribute as without `-p`.
-  if (options.set.has('p') && name !== 'readonly' && name !== 'export') return printDeclarations(shell, name, operands);
-  const isLocal =
-    shell.isInFunction && !options.set.has('g') && (name === 'local' || name === 'declare' || name === 'typeset');
+  if (parsed.options.set.has('p') && name !== 'readonly' && name !== 'export') {
+    return printDeclarations(shell, name, operands);
+  }
+  const isLocal = isLocalDeclaration(shell, name, parsed.options);
+  const options = isLocal ? parsed.options : normalizeArrayNamerefPrecedence(parsed.options);
   let status = 0;
   for (const operand of operands) {
     if (!declareOne(shell, name, operand, options, isLocal, onMaterialize)) status = 1;
   }
   return status;
+}
+
+function isLocalDeclaration(shell: Shell, builtin: string, { set }: Options): boolean {
+  return shell.isInFunction && !set.has('g') && (builtin === 'local' || builtin === 'declare' || builtin === 'typeset');
+}
+
+function normalizeArrayNamerefPrecedence(options: Options): Options {
+  if (!options.set.has('n') || (!options.set.has('a') && !options.set.has('A'))) return options;
+  const set = new Set(options.set);
+  set.delete('n');
+  return { ...options, set };
 }
 
 /** Reads the options before the operands, reporting an invalid one with the builtin's usage as Bash does. */
@@ -353,7 +362,6 @@ function parseOptions(
     shell.reportError(`${name}: -a: invalid option`);
     return undefined;
   }
-  if (options.set.has('a') || options.set.has('A')) options.set.delete('n');
   if (name === 'readonly') options.set.add('r');
   if (name === 'export') {
     // `export -n` removes the export attribute instead of setting a name reference.
@@ -905,6 +913,9 @@ function declaredDestination(
   if (rejectDeclaredTarget(shell, builtin, targetName, variable, targetScope, assignMode, isSubscripted)) {
     return undefined;
   }
+  if (rejectLocalArrayNameref(shell, builtin, targetName, variable, targetScope, options)) {
+    return undefined;
+  }
   const candidate = variable ?? createNewDeclaredVariable(shell, targetName, set, isSubscripted, targetScope);
   if (!variable) {
     const newVarErr = conversionError(candidate, set, unset, isSubscripted || assignsCompound);
@@ -922,6 +933,33 @@ function declaredDestination(
     variable: candidate,
     ...(referencedSubscript === undefined ? {} : { referencedSubscript }),
   };
+}
+
+function rejectLocalArrayNameref(
+  shell: Shell,
+  builtin: string,
+  targetName: string,
+  variable: Variable | undefined,
+  targetScope: Map<string, Variable> | undefined,
+  options: Options
+): boolean {
+  const { set, attemptedSet } = options;
+  if (!targetScope || !attemptedSet.has('n') || (!set.has('a') && !set.has('A'))) return false;
+  if (!variable) {
+    const kindAttr: Attribute = set.has('A') ? 'A' : 'a';
+    targetScope.set(targetName, { name: targetName, value: undefined, attributes: new Set([kindAttr]) });
+  } else if (checkReadonlyConflict(shell, builtin, targetName, variable, options, false)) {
+    return true;
+  } else {
+    const kindErr = incompatibleArrayKindError(variable, set);
+    if (kindErr) {
+      shell.reportError(`${builtin}: ${targetName}: ${kindErr}`);
+      return true;
+    }
+    applyArrayKindAttributes(shell, variable, set.has('A'), set.has('a'), false);
+  }
+  shell.reportError(`${builtin}: ${targetName}: reference variable cannot be an array`);
+  return true;
 }
 
 // code-gauge-allow functionParameterCount -- Validates readonly global local-shadows and unread host variables.
