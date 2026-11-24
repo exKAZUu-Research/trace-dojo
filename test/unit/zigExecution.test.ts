@@ -245,19 +245,16 @@ pub fn main() !void {
     const t = try std.Thread.spawn(.{}, work, .{});
     t.join();
 }`;
-  const comptimeParameter = `fn zero(comptime T: type) T {
-    return 0;
-}
-pub fn main() void {
-    _ = zero(i32);
+  const assembly = `pub fn main() void {
+    asm volatile ("nop");
 }`;
   expect(executeProgram('zig', thread)).toEqual({
     kind: 'compileError',
     diagnostics: [{ row: 3, message: 'スレッド（std.Thread）は、この採点環境では使えません。' }],
   });
-  expect(executeProgram('zig', comptimeParameter)).toEqual({
+  expect(executeProgram('zig', assembly)).toEqual({
     kind: 'compileError',
-    diagnostics: [{ row: 0, message: 'comptime の引数は、この採点環境では使えません。' }],
+    diagnostics: [{ row: 1, message: 'インラインアセンブリ（asm）は、この採点環境では使えません。' }],
   });
 });
 

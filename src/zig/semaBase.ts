@@ -30,10 +30,10 @@ import {
   truncateToBigInt,
 } from './floats';
 import { FunctionInstance } from './functions';
-import { bitSizeOf, hasResolvedLayout, resolveTypeLayout, sizeOf } from './layout';
+import { alignOf, bitSizeOf, hasResolvedLayout, resolveTypeLayout, sizeOf } from './layout';
 import { spendMemory } from './memoryAccounting';
 import { MemoryFault, UNDEFINED_MEMORY } from './memoryFault';
-import { type Frame, ZigPanic } from './runtime';
+import { type BranchCount, type Frame, ZigPanic } from './runtime';
 import { singleValueOf } from './singleValue';
 import {
   arrayOf,
@@ -100,6 +100,8 @@ export interface Place {
   readonly locate: (frame: Frame) => Pointer;
   readonly compileTimePointer?: Pointer;
   readonly address?: () => TExpr;
+  /** The alignment that `align(n)` gives the variable, which a pointer to it carries. */
+  readonly alignment?: number;
 }
 
 /** An analyzed expression: its type, its value when the compiler knows it, and the code that computes it. */
@@ -129,6 +131,14 @@ export interface LocalBinding {
   /** The value of a constant that the compiler knows. */
   readonly known: boolean;
   readonly value?: Value;
+  /** The storage of a `comptime var`, which the compiler reads and writes as it analyzes the code after it. */
+  readonly comptimeCell?: ComptimeCell;
+  readonly alignment?: number;
+}
+
+export interface ComptimeCell extends Slots {
+  /** How many branches on runtime conditions enclose the declaration, inside which no more may enclose a store. */
+  readonly conditionDepth: number;
 }
 
 /** A lexical scope: the locals of a block, or the declarations of a container. */
@@ -251,6 +261,12 @@ export abstract class SemaBase implements SemaApi {
   private readonly indexedFields = new WeakMap<readonly { name: string }[], ReadonlyMap<string, number>>();
   /** How many structs' fields are being resolved, during which function bodies wait to compile. */
   protected resolvingFields = 0;
+  /** How deep the compiler is in code that it runs itself, such as a `comptime` block. */
+  protected comptimeDepth = 0;
+  /** How many branches on runtime conditions and runtime loop bodies enclose the code being compiled. */
+  protected runtimeConditionDepth = 0;
+  /** The backward branches that the analysis of the current function or declaration has evaluated. */
+  protected evalBranches: BranchCount = { count: 0, quota: 1000 };
   private resolvingUnionFields = 0;
 
   constructor(
@@ -340,7 +356,14 @@ export abstract class SemaBase implements SemaApi {
   abstract findDecl(type: Type, name: string): Decl | undefined;
   abstract tupleType(fields: StructField[]): StructType;
   /** Evaluates a function call at compile time, as a container-level constant's initializer does. */
-  protected abstract evaluateAtCompileTime(expression: TExpr): Value;
+  protected abstract evaluateAtCompileTime(expression: TExpr, ownSlots?: { from: number; count: number }): Value;
+  /** Compiles code that the compiler runs as it analyzes, such as a `comptime` block, and gives its value. */
+  protected abstract comptimeValue(compileCode: () => TExpr, span: Span): TExpr;
+  /** Runs an analysis of its own, as Zig analyzes each function and declaration apart from the one that uses it. */
+  protected abstract separateAnalysis<T>(run: () => T): T;
+  protected abstract explicitAlignment(expression: Expression, type: Type): number | undefined;
+  protected abstract alignmentValue(expression: Expression): number;
+  protected abstract addressSpace(expression: Expression): void;
   /** Whether `set` is the inferred error set (`!T`) of the function being analyzed, which takes in any error. */
   protected abstract growsErrorSet(set: ErrorSetType): boolean;
 
@@ -421,7 +444,9 @@ export abstract class SemaBase implements SemaApi {
       scope: this.scope,
     };
     let type: Type;
-    if (container.containerKind === 'struct') {
+    if (container.containerKind === 'opaque') {
+      type = { kind: 'struct', isTuple: false, namespace, layout: 'auto', fields: [] };
+    } else if (container.containerKind === 'struct') {
       // `struct { u32, u32 }`, whose fields have types only, declares a tuple.
       const isTuple = container.fields.length > 0 && container.fields.every((field) => field.name === undefined);
       type = { kind: 'struct', isTuple, namespace, layout: container.layout, fields: undefined };
@@ -439,7 +464,21 @@ export abstract class SemaBase implements SemaApi {
     types.set(container, type);
     this.namespaceTypes.set(namespace, type);
     addDecls(namespace, container.members);
+    this.runComptimeBlocks(container.comptimeBlocks, namespace);
     return type;
+  }
+
+  /** Runs `comptime { ... }` declarations, as Zig does when it analyzes their container. */
+  protected runComptimeBlocks(blocks: readonly Expression[], namespace: Namespace): void {
+    for (const block of blocks) {
+      this.inContainerScope(namespace, () =>
+        this.separateAnalysis(() => {
+          const value = this.comptimeValue(() => this.compile(block), block);
+          if (value.type.kind !== 'void' && value.type.kind !== 'noreturn')
+            this.error(block, `${typeName(value.type)} 型の値を使っていません（捨てるときは _ = ... と書きます）。`);
+        })
+      );
+    }
   }
 
   /** Resolves a declaration: a constant's type and value, a variable's type and storage, or a function. */
@@ -460,11 +499,12 @@ export abstract class SemaBase implements SemaApi {
       }
       default: {
         this.resolveVariable(decl);
+        const { alignment } = decl;
         if (decl.kind === 'const') {
           const pointer = new Pointer(decl.cell as Slots, 0);
           return {
             ...known(decl.type as Type, decl.value, span),
-            place: { isConst: true, locate: () => pointer, compileTimePointer: pointer },
+            place: { isConst: true, locate: () => pointer, compileTimePointer: pointer, alignment },
           };
         }
         const cell = decl.cell as Slots;
@@ -473,6 +513,7 @@ export abstract class SemaBase implements SemaApi {
           isConst: false,
           locate: () => new Pointer(cell, 0),
           compileTimePointer: new Pointer(cell, 0),
+          alignment,
         });
       }
     }
@@ -495,11 +536,12 @@ export abstract class SemaBase implements SemaApi {
         const { syntax } = decl;
         const declared = syntax.type ? this.compileType(syntax.type) : undefined;
         const value = syntax.value as Expression;
-        let compiled = this.compileDeclValue(value, declared, syntax.name);
-        if (declared) compiled = this.coerce(compiled, declared, value);
-        if (!compiled.known) {
-          compiled = known(compiled.type, this.evaluateAtCompileTime(compiled), value);
-        }
+        const compiled = this.separateAnalysis(() =>
+          this.comptimeValue(() => {
+            const compiled = this.compileDeclValue(value, declared, syntax.name);
+            return declared ? this.coerce(compiled, declared, value) : compiled;
+          }, value)
+        );
         if (decl.kind === 'var' && this.requiresComptime(compiled.type, syntax)) {
           this.error(
             syntax,
@@ -508,6 +550,8 @@ export abstract class SemaBase implements SemaApi {
         }
         decl.cell = { slots: [this.copyForCompilation(compiled.value, compiled.type, syntax)] };
         decl.type = compiled.type;
+        if (syntax.addressSpace) this.addressSpace(syntax.addressSpace);
+        if (syntax.alignment) decl.alignment = this.explicitAlignment(syntax.alignment, compiled.type);
         if (decl.kind === 'const') {
           decl.value = compiled.value;
           markConstantStorage(decl.cell, compiled.type);
@@ -563,6 +607,8 @@ export abstract class SemaBase implements SemaApi {
           type: fieldType,
           defaultValue,
           hasDefault: field.value !== undefined,
+          ...(field.isComptime ? { comptimeValue: { value: defaultValue } } : {}),
+          ...(field.alignment ? { alignment: this.alignmentValue(field.alignment) || undefined } : {}),
         });
       }
     });
@@ -596,6 +642,9 @@ export abstract class SemaBase implements SemaApi {
   /** Resolves the fields of the structs and unions a value of `type` holds in place, which its undefined value needs. */
   // code-gauge-allow functionCognitiveComplexity -- Resolves the by-value type graph before validating and caching layouts.
   private resolveLayout(type: Type, span: Span, seen: Set<Type>): void {
+    if (type.kind === 'struct' && type.namespace.syntax?.containerKind === 'opaque')
+      this.error(span, `opaque 型 ${typeName(type)} の値は持てません（ポインタにしてください）。`);
+    if (type.kind === 'anyopaque') this.error(span, 'anyopaque 型の値は持てません（ポインタにしてください）。');
     if (seen.has(type) || hasResolvedLayout(type)) return;
     this.spendCompilation();
     seen.add(type);
@@ -872,7 +921,7 @@ export abstract class SemaBase implements SemaApi {
           signature.returnType.kind === 'error_union' && signature.returnType.errorSet.resolved === false
             ? this.functionOf(expression, span)
             : signature;
-        if (!fnTypeCoercible(fn.params, fn.returnType, to)) return undefined;
+        if (!fnTypeCoercible(fn.params, fn.returnType, to, signature.callingConvention)) return undefined;
         return { ...expression, type: to };
       }
       case 'pointer': {
@@ -1035,10 +1084,16 @@ export abstract class SemaBase implements SemaApi {
     if (from.kind === 'fn') {
       if (!to.isConst || to.size !== 'one' || to.child.kind !== 'fn') return undefined;
       const fn = this.functionOf(expression, span);
-      if (!fnTypeCoercible(fn.params, fn.returnType, to.child)) return undefined;
+      if (!fnTypeCoercible(fn.params, fn.returnType, to.child, from.callingConvention)) return undefined;
       return known(to, this.knownFunctionValue(expression, span), span);
     }
+    if (to.size === 'c' && from.kind === 'null') return known(to, NULL, span);
+    if (to.size === 'c' && from.kind === 'optional' && from.child.kind === 'pointer' && from.child.size !== 'slice') {
+      const inner = this.tryCoerce({ ...expression, type: from.child }, to, span);
+      return inner && { ...expression, type: to };
+    }
     if (from.kind !== 'pointer') return undefined;
+    if (!pointerQualifiersCoercible(from, to)) return undefined;
     const empty =
       to.size === 'slice' &&
       to.sentinel === undefined &&
@@ -1050,6 +1105,27 @@ export abstract class SemaBase implements SemaApi {
       if (!pointerChildCoercible(from.child, to.child, to.isConst)) return undefined;
       if (to.sentinel !== undefined && !sameSentinel(from.sentinel, to.sentinel)) return undefined;
       return { ...expression, type: to };
+    }
+    // `*[N]T` to `[*]T` or `[*c]T`, which point to the array's first element.
+    if (from.size === 'one' && from.child.kind === 'array' && (to.size === 'many' || to.size === 'c')) {
+      const array = from.child;
+      if (!pointerChildCoercible(array.child, to.child, to.isConst)) return undefined;
+      if (to.sentinel !== undefined && !sameSentinel(array.sentinel, to.sentinel)) return undefined;
+      return this.derived(expression, to, (value) => {
+        const view = arrayPointerView(value as Pointer, array, sizeOf(array.child));
+        return new Pointer(view, view.offset);
+      });
+    }
+    // A C pointer converts to and from the other single-item and many-item pointers.
+    const cPointer =
+      (to.size === 'c' && (from.size === 'one' || from.size === 'many')) ||
+      (from.size === 'c' && (to.size === 'one' || to.size === 'many'));
+    if (cPointer) {
+      if (!pointerChildCoercible(from.child, to.child, to.isConst)) return undefined;
+      if (from.size !== 'c') return { ...expression, type: to };
+      return this.derived(expression, to, (value) =>
+        value === NULL ? panic('cast causes pointer to be null') : value
+      );
     }
     // `*[N]T` to `[]T`
     if (from.size === 'one' && to.size === 'slice' && from.child.kind === 'array') {
@@ -1453,7 +1529,8 @@ export function inMemoryCoercible(from: Type, to: Type): boolean {
     if (Boolean(sourcePointer) !== Boolean(targetPointer)) return false;
     return inMemoryCoercible(from.child, to.child);
   }
-  if (from.kind === 'fn' && to.kind === 'fn') return fnTypeCoercible(from.params, from.returnType, to);
+  if (from.kind === 'fn' && to.kind === 'fn')
+    return fnTypeCoercible(from.params, from.returnType, to, from.callingConvention);
   if (from.kind === 'error_set' && to.kind === 'error_set') return errorSetIncludes(to, from);
   if (from.kind === 'error_union' && to.kind === 'error_union') {
     return errorSetIncludes(to.errorSet, from.errorSet) && inMemoryCoercible(from.payload, to.payload);
@@ -1467,6 +1544,19 @@ export function inMemoryCoercible(from: Type, to: Type): boolean {
   }
   if (from.kind === 'int' && to.kind === 'int') return from.bits === to.bits && from.signed === to.signed;
   return false;
+}
+
+/** Whether a pointer keeps the guarantees of another: no volatile, zero address, or weaker alignment it lacks. */
+function pointerQualifiersCoercible(
+  from: Extract<Type, { kind: 'pointer' }>,
+  to: Extract<Type, { kind: 'pointer' }>
+): boolean {
+  if (from.isVolatile && !to.isVolatile) return false;
+  if ((from.allowZero || from.size === 'c') && !(to.allowZero || to.size === 'c')) return false;
+  if (from.alignment === undefined && to.alignment === undefined) return true;
+  const fromChild =
+    from.size === 'one' && from.child.kind === 'array' && to.size !== 'one' ? from.child.child : from.child;
+  return (from.alignment ?? alignOf(fromChild)) >= (to.alignment ?? alignOf(to.child));
 }
 
 function pointerRepresentation(type: Type): Extract<Type, { kind: 'pointer' }> | undefined {
@@ -1483,6 +1573,7 @@ function pointerRepresentationCoercible(
 ): boolean {
   if (from.kind === 'optional' && to.kind !== 'optional') return false;
   if (source.size !== target.size || (source.isConst && !target.isConst)) return false;
+  if (!pointerQualifiersCoercible(source, target)) return false;
   if (target.sentinel !== undefined && !sameSentinel(source.sentinel, target.sentinel)) return false;
   return pointerChildCoercible(source.child, target.child, target.isConst);
 }
@@ -1545,8 +1636,14 @@ function elementOf(pointer: Extract<Type, { kind: 'pointer' }>): Type | undefine
   return pointer.child.kind === 'array' ? pointer.child.child : undefined;
 }
 
-function fnTypeCoercible(params: readonly Type[], returnType: Type, fn: Extract<Type, { kind: 'fn' }>): boolean {
+function fnTypeCoercible(
+  params: readonly Type[],
+  returnType: Type,
+  fn: Extract<Type, { kind: 'fn' }>,
+  callingConvention?: 'c'
+): boolean {
   return (
+    callingConvention === fn.callingConvention &&
     params.length === fn.params.length &&
     params.every((param, index) => functionValueCoercible(fn.params[index], param)) &&
     (returnType.kind === 'noreturn' || functionValueCoercible(returnType, fn.returnType))

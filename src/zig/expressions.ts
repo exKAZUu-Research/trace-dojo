@@ -29,8 +29,9 @@ import {
   parseFloatLiteral,
 } from './floats';
 import { integerOperationWork, type IntegerWork, spendIntegerOperation, spendIntegerShift } from './integerWork';
-import { errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
+import { alignOf, errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
 import { memorySpace, spendMemory } from './memoryAccounting';
+import { MemoryFault } from './memoryFault';
 import { callableNative } from './nativeAdapter';
 import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
 import { sliceLengthPointer } from './pointerViews';
@@ -80,6 +81,7 @@ import {
   minInt,
   NULL_TYPE,
   optionalOf,
+  pointerOf,
   pointerTo,
   primitiveType,
   sameSentinel,
@@ -94,6 +96,7 @@ import {
   U8,
   UNDEFINED_TYPE,
   USIZE,
+  withPointerAttributes,
   wrapInt,
 } from './types';
 import { concatenatedFacts, fieldFacts, payloadFacts, valueFactsOf } from './valueFacts';
@@ -242,13 +245,9 @@ export abstract class ExpressionCompiler extends SemaBase {
       case 'optionalType': {
         return known(TYPE, optionalOf(this.compileType(expression.child)), expression);
       }
-      case 'pointerType': {
-        return known(TYPE, pointerTo(this.compileType(expression.child), expression.isConst), expression);
-      }
+      case 'pointerType':
       case 'sliceType': {
-        const child = this.compileType(expression.child);
-        const sentinel = expression.sentinel ? this.sentinelValue(expression.sentinel, child) : undefined;
-        return known(TYPE, sliceOf(child, expression.isConst, sentinel), expression);
+        return known(TYPE, this.pointerTypeExpression(expression), expression);
       }
       case 'arrayType': {
         return this.arrayTypeExpression(expression);
@@ -267,7 +266,10 @@ export abstract class ExpressionCompiler extends SemaBase {
           if (!param.type) this.error(param, '関数の型の引数に anytype は書けません。');
           return this.compileType(param.type);
         });
-        return known(TYPE, fnType(params, this.compileType(expression.returnType)), expression);
+        const returnType = this.compileType(expression.returnType);
+        const callingConvention = this.callingConvention(expression.callingConvention);
+        if (callingConvention) this.checkCAbi(params, returnType, expression.params, expression);
+        return known(TYPE, fnType(params, returnType, callingConvention), expression);
       }
       case 'container': {
         return known(TYPE, this.containerType(expression, undefined), expression);
@@ -278,7 +280,82 @@ export abstract class ExpressionCompiler extends SemaBase {
       case 'assign': {
         return this.error(expression, '代入は式の中には書けません。');
       }
+      case 'comptime': {
+        return this.comptimeValue(() => this.compile(expression.operand, resultType), expression);
+      }
+      case 'nosuspend': {
+        return this.compile(expression.operand, resultType);
+      }
+      case 'async': {
+        return this.error(
+          expression,
+          'async の機能（suspend・resume・anyframe）は、Zig 0.17 の処理系でまだ実装されていません。'
+        );
+      }
     }
+  }
+
+  private pointerTypeExpression(expression: ExpressionOf<'pointerType' | 'sliceType'>): Type {
+    const child = this.compileType(expression.child);
+    const size = expression.kind === 'sliceType' ? 'slice' : expression.size;
+    if (expression.bitRange)
+      this.error(
+        expression,
+        'packed struct のフィールドへのポインタの型（align(a:b:c)）は、この採点環境では使えません。'
+      );
+    if (expression.addressSpace) this.addressSpace(expression.addressSpace);
+    const sentinel = expression.sentinel ? this.sentinelValue(expression.sentinel, child) : undefined;
+    return pointerOf(size, child, {
+      isConst: expression.isConst,
+      isVolatile: expression.isVolatile,
+      allowZero: expression.allowZero,
+      alignment: expression.alignment ? this.explicitAlignment(expression.alignment, child) : undefined,
+      sentinel,
+    });
+  }
+
+  /** The alignment that `align(n)` gives a pointer to or a variable of `type`, or undefined when it is the type's own. */
+  protected explicitAlignment(expression: Expression, type: Type): number | undefined {
+    const value = this.alignmentValue(expression);
+    if (value === 0) return undefined;
+    this.resolveStorage(type, expression);
+    return value === alignOf(type) ? undefined : value;
+  }
+
+  protected alignmentValue(expression: Expression): number {
+    const value = this.knownValue(this.coerce(this.compile(expression, USIZE), USIZE, expression), '整列') as bigint;
+    if (value !== 0n && (value & (value - 1n)) !== 0n)
+      this.error(expression, `整列の値 ${value} は、2 のべき乗ではありません。`);
+    if (value > 1n << 32n) this.error(expression, `整列の値 ${value} が大きすぎます。`);
+    return Number(value);
+  }
+
+  /** `addrspace(.generic)`; the others name address spaces of particular CPUs. */
+  protected addressSpace(expression: Expression): void {
+    if (expression.kind !== 'enumLiteral' || expression.name !== 'generic')
+      this.error(expression, 'generic 以外のアドレス空間（CPU ごとに異なるもの）は、この採点環境では使えません。');
+  }
+
+  /** The calling convention that `callconv(.x)` names: Zig's own (`.auto`), or the C one (`.c`). */
+  protected callingConvention(expression: Expression | undefined): 'c' | undefined {
+    if (!expression) return undefined;
+    if (expression.kind === 'enumLiteral' && (expression.name === 'auto' || expression.name === 'inline'))
+      return undefined;
+    if (expression.kind === 'enumLiteral' && expression.name === 'c') return 'c';
+    return this.error(
+      expression,
+      'auto と c 以外の呼び出し規約（CPU ごとに異なるもの）は、この採点環境では使えません。'
+    );
+  }
+
+  /** Rejects the parameter and return types that the C calling convention cannot pass, as Zig does. */
+  protected checkCAbi(params: readonly Type[], returnType: Type, spans: readonly Span[], span: Span): void {
+    for (const [index, param] of params.entries()) {
+      if (param.kind === 'anytype' || !cAbiType(param, false))
+        this.error(spans[index] ?? span, `引数の型 ${typeName(param)} は、C の呼び出し規約の関数には使えません。`);
+    }
+    if (!cAbiType(returnType, true))
+      this.error(span, `戻り値の型 ${typeName(returnType)} は、C の呼び出し規約の関数には使えません。`);
   }
 
   // Names -----------------------------------------------------------------------------------------------------------
@@ -296,6 +373,17 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   protected localReference(binding: LocalBinding, span: Span): TExpr {
+    const cell = binding.comptimeCell;
+    if (cell) {
+      const place: Place = {
+        isConst: false,
+        locate: () => new Pointer(cell, 0),
+        compileTimePointer: new Pointer(cell, 0),
+      };
+      // Code that the compiler runs reads the variable when it runs; other code, its value where the code stands.
+      if (this.comptimeDepth > 0) return { ...runtime(binding.type, () => cell.slots[0], span, place), local: binding };
+      return { ...known(binding.type, cell.slots[0], span), place, local: binding };
+    }
     const fact = binding.known
       ? { value: binding.value }
       : binding.isConst
@@ -314,7 +402,11 @@ export abstract class ExpressionCompiler extends SemaBase {
       crossedNamespace ||= scope.namespace !== undefined;
     }
     const { slot } = binding;
-    const place: Place = { isConst: binding.isConst, locate: (frame) => new Pointer(frame, slot) };
+    const place: Place = {
+      isConst: binding.isConst,
+      locate: (frame) => new Pointer(frame, slot),
+      alignment: binding.alignment,
+    };
     if (fact) return { ...known(binding.type, fact.value, span), place, local: binding };
     return {
       ...runtime(binding.type, (frame) => frame.slots[slot], span, place),
@@ -422,7 +514,16 @@ export abstract class ExpressionCompiler extends SemaBase {
             };
             return runtime(USIZE, (frame) => (evaluate(frame) as Slice).lengthValue, expression, lengthPlace);
           }
-          if (name === 'ptr') this.error(expression, '多要素のポインタ（.ptr）は、この採点環境では使えません。');
+          if (name === 'ptr') {
+            this.checkMemoryHeader(base, expression);
+            const many = pointerOf('many', type.child, {
+              isConst: type.isConst,
+              isVolatile: type.isVolatile,
+              alignment: type.alignment,
+              sentinel: type.sentinel,
+            });
+            return this.derived(base, many, (value) => new Pointer((value as Slice).target, (value as Slice).start));
+          }
         }
         break;
       }
@@ -612,7 +713,16 @@ export abstract class ExpressionCompiler extends SemaBase {
   /** `p.*`, or a pointer that a field access or an index goes through. */
   protected dereferenced(pointer: TExpr, span: Span, load = true): TExpr {
     const type = pointer.type;
+    if (type.kind === 'pointer' && type.size === 'c') {
+      const single = this.derived(pointer, pointerOf('one', type.child, { isConst: type.isConst }), (value) => {
+        if (!(value instanceof Pointer)) throw new MemoryFault();
+        return value;
+      });
+      return this.dereferenced(single, span, load);
+    }
     if (type.kind !== 'pointer' || type.size !== 'one') {
+      if (type.kind === 'pointer' && type.size === 'many')
+        return this.error(span, '多要素のポインタは .* で参照できません（p[0] のように添字を使います）。');
       return this.error(span, `${typeName(type)} 型はポインタではないので、.* で参照できません。`);
     }
     if (type.child.kind === 'fn') return { ...pointer, type: type.child, place: undefined, local: undefined };
@@ -701,13 +811,13 @@ export abstract class ExpressionCompiler extends SemaBase {
       );
     }
     if (place?.address) return place.address();
-    if (place?.compileTimePointer)
-      return known(pointerTo(expression.type, place.isConst), place.compileTimePointer, span);
-    if (place && !expression.local)
-      return runtime(pointerTo(expression.type, place.isConst), (frame) => place.locate(frame), span);
-    if (expression.known)
+    const placeType = (): Type =>
+      pointerOf('one', expression.type, { isConst: place?.isConst ?? true, alignment: place?.alignment });
+    if (place?.compileTimePointer) return known(placeType(), place.compileTimePointer, span);
+    if (place && !expression.local) return runtime(placeType(), (frame) => place.locate(frame), span);
+    if (expression.known && !expression.local?.alignment)
       return known(pointerTo(expression.type, true), this.constantPointer(expression.type, expression.value), span);
-    if (place) return runtime(pointerTo(expression.type, place.isConst), (frame) => place.locate(frame), span);
+    if (place) return runtime(placeType(), (frame) => place.locate(frame), span);
     const result = staticResultOf(expression);
     if (result)
       return this.fixedResult(
@@ -727,7 +837,8 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   private functionType(expression: TExpr, span: Span): Type {
     const fn = this.functionOf(expression, span);
-    return fnType(fn.params, fn.returnType);
+    const type = expression.type;
+    return fnType(fn.params, fn.returnType, type.kind === 'fn' ? type.callingConvention : undefined);
   }
 
   knownFunctionValue(expression: TExpr, span: Span): FnValue {
@@ -919,6 +1030,15 @@ export abstract class ExpressionCompiler extends SemaBase {
         return { slots: target, position: target.offset + Number(index) };
       };
     }
+    if (type.kind === 'pointer' && (type.size === 'many' || type.size === 'c')) {
+      // A many-item pointer has no length: reading past the memory it points into crashes, as Zig's would.
+      return (value, index) => {
+        const pointer = manyPointer(value);
+        const position = pointer.index + Number(index);
+        if (position < 0 || position >= pointer.target.slots.length) throw new MemoryFault();
+        return { slots: pointer.target, position };
+      };
+    }
     const sentinel = type.kind === 'pointer' ? type.sentinel : undefined;
     return (value, index) => {
       const slice = value as Slice;
@@ -945,7 +1065,26 @@ export abstract class ExpressionCompiler extends SemaBase {
     let isConst: boolean;
     let staticLen: bigint | undefined;
     let sourceSentinel: Sentinel | undefined;
-    if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') {
+    const many = type.kind === 'pointer' && (type.size === 'many' || type.size === 'c');
+    if (type.kind === 'pointer' && many) {
+      child = type.child;
+      isConst = type.isConst;
+      sourceSentinel = type.sentinel;
+      if (!end) {
+        if (expression.sentinel)
+          this.error(expression, '終わりのない多要素のポインタのスライスには、番兵を書けません。');
+        const result = withPointerAttributes(type, { sentinel: undefined });
+        return this.combine(
+          [operand, start],
+          result,
+          ([pointer, offset]) => {
+            const { target, index } = manyPointer(pointer);
+            return new Pointer(target, index + Number(offset as bigint));
+          },
+          expression
+        );
+      }
+    } else if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') {
       child = type.child.child;
       isConst = type.isConst;
       staticLen = type.child.length;
@@ -1011,6 +1150,12 @@ export abstract class ExpressionCompiler extends SemaBase {
         target = array;
         offset = array.offset;
         length = staticLen as bigint;
+      } else if (many) {
+        const pointer = manyPointer(value);
+        target = pointer.target;
+        offset = pointer.index;
+        length = BigInt(Math.max(target.slots.length - offset, 0));
+        if (BigInt(offset) + (last as bigint) + extra > BigInt(target.slots.length)) throw new MemoryFault();
       } else {
         const slice = value as Slice;
         target = slice.target;
@@ -1208,6 +1353,24 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
   }
 
+  /** `p + n` and `p - n` on a many-item pointer, which moves it by `n` elements. */
+  private pointerArithmetic(pointer: TExpr, expression: ExpressionOf<'binary'>): TExpr {
+    const { operator } = expression;
+    if (operator !== '+' && operator !== '-')
+      return this.error(expression, `多要素のポインタには、${operator} は使えません（+ と - だけです）。`);
+    const offset = this.coerce(this.compile(expression.right, USIZE), USIZE, expression.right);
+    const sign = operator === '+' ? 1 : -1;
+    return this.combine(
+      [pointer, offset],
+      pointer.type.kind === 'pointer' ? withPointerAttributes(pointer.type, { sentinel: undefined }) : pointer.type,
+      ([value, count]) => {
+        if (!(value instanceof Pointer)) throw new MemoryFault();
+        return new Pointer(value.target, value.index + sign * Number(count as bigint));
+      },
+      expression
+    );
+  }
+
   private logical(expression: ExpressionOf<'binary'>): TExpr {
     const left = this.coerce(this.compile(expression.left, BOOL), BOOL, expression.left);
     const isAnd = expression.operator === 'and';
@@ -1295,6 +1458,11 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (right.type.kind === 'null' || left.type.kind === 'null') {
       if (operator !== '==' && operator !== '!=') this.error(expression, 'null とは == と != でだけ比べられます。');
       const optional = right.type.kind === 'null' ? left : right;
+      if (optional.type.kind === 'pointer' && optional.type.size === 'c') {
+        const evaluate = optional.eval;
+        const isNull = operator === '==';
+        return runtime(BOOL, (frame) => (evaluate(frame) === NULL) === isNull, expression);
+      }
       if (optional.type.kind !== 'optional' && optional.type.kind !== 'null') {
         this.error(expression, `${typeName(optional.type)} 型は optional ではないので、null と比べられません。`);
       }
@@ -1398,6 +1566,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     // Zig gives the operands of arithmetic no result type, so `@floatFromInt(x) / 2` is an error.
     void resultType;
     let left = this.compile(expression.left);
+    if (left.type.kind === 'pointer' && (left.type.size === 'many' || left.type.size === 'c'))
+      return this.pointerArithmetic(left, expression);
     let right = this.compile(expression.right);
     const bitwise = operator === '&' || operator === '|' || operator === '^';
     if (bitwise && (left.type.kind === 'bool' || right.type.kind === 'bool')) {
@@ -2083,6 +2253,45 @@ function hasSentinel(type: Type): boolean {
       ? type.child.sentinel !== undefined
       : type.sentinel !== undefined;
   return false;
+}
+
+/** Whether a value of a type passes as it does in C, as `callconv(.c)` requires of parameters and results. */
+function cAbiType(type: Type, isReturn: boolean): boolean {
+  switch (type.kind) {
+    case 'int': {
+      return type.bits === 0 ? false : [8, 16, 32, 64, 128].includes(type.bits);
+    }
+    case 'float':
+    case 'bool': {
+      return true;
+    }
+    case 'void':
+    case 'noreturn': {
+      return isReturn;
+    }
+    case 'pointer': {
+      return type.size !== 'slice';
+    }
+    case 'optional': {
+      return type.child.kind === 'pointer' && type.child.size !== 'slice';
+    }
+    case 'enum': {
+      return type.namespace.syntax?.argument !== undefined;
+    }
+    case 'struct':
+    case 'union': {
+      return type.layout !== 'auto';
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/** A many-item or C pointer's value, which must not be null. */
+function manyPointer(value: Value): Pointer {
+  if (!(value instanceof Pointer)) throw new MemoryFault();
+  return value;
 }
 
 function isConstIndexable(type: Type, place: Place | undefined): boolean {

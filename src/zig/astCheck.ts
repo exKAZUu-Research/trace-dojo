@@ -3,6 +3,7 @@ import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { isDiscardName } from './ast';
 import type {
+  Block,
   Capture,
   Container,
   ContainerField,
@@ -14,6 +15,7 @@ import type {
   SourceFile,
   Span,
   Statement,
+  TestDeclaration,
 } from './ast';
 import { primitiveType } from './types';
 
@@ -33,7 +35,7 @@ export function checkSource(
     names: new Set(predeclared),
     parent: undefined,
   };
-  checker.checkContainer(file.members, file.fields, environment, undefined);
+  checker.checkContainer(file, environment, undefined);
   return { errors: checker.errors, fatal: checker.fatal };
 }
 
@@ -104,7 +106,14 @@ interface FunctionScope {
   parent: Scope | undefined;
 }
 
-type Scope = NamespaceScope | BlockScope | LabelScope | LoopScope | DeferScope | FunctionScope;
+/** Code that runs at compile time, where another `comptime` is redundant, or a `nosuspend` block. */
+interface MarkerScope {
+  kind: 'comptime' | 'nosuspend';
+  span: Span;
+  parent: Scope | undefined;
+}
+
+type Scope = NamespaceScope | BlockScope | LabelScope | LoopScope | DeferScope | FunctionScope | MarkerScope;
 
 /** How an expression's value is used: read, referred to by address (which counts as mutating a `var`), or discarded. */
 type Use = 'value' | 'ref' | 'discard';
@@ -134,11 +143,16 @@ class AstChecker {
   // code-gauge-allow functionCognitiveComplexity -- Mirrors one AstGen check over the constructs it covers.
   // code-gauge-allow functionNcss -- Checks declarations and fields in their shared container scope.
   checkContainer(
-    members: readonly ContainerMember[],
-    fields: readonly ContainerField[],
+    body: {
+      members: readonly ContainerMember[];
+      fields: readonly ContainerField[];
+      tests: readonly TestDeclaration[];
+      comptimeBlocks: readonly Block[];
+    },
     parent: Scope | undefined,
     container: Container | undefined
   ): void {
+    const { members, fields } = body;
     const names = new Set<string>();
     const seen = new Map<string, Span>();
     for (const member of members) {
@@ -174,10 +188,16 @@ class AstChecker {
     const outer = this.scope;
     this.scope = namespace;
     try {
-      this.checkFields(fields, container);
+      this.withComptime(container ?? { row: 0, col: 0, endRow: 0 }, () => this.checkFields(fields, container));
       for (const member of members) {
         if (member.kind === 'fn') this.checkFunction(member);
-        else this.checkContainerVariable(member);
+        else this.withComptime(member, () => this.checkContainerVariable(member));
+      }
+      for (const block of body.comptimeBlocks)
+        this.checkBody(block, () => this.withComptime(block, () => this.expression(block, 'value')));
+      for (const test of body.tests) {
+        if (test.decl && !names.has(test.decl.name)) this.reference(test.decl.name, test.decl, 'value');
+        this.checkBody(test.body, () => this.blockStatements(test.body.statements), true);
       }
     } finally {
       this.scope = outer;
@@ -213,9 +233,13 @@ class AstChecker {
       }
       return;
     }
+    if (container?.containerKind === 'opaque' && fields.length > 0)
+      this.error(fields[0], 'opaque 型にはフィールドを書けません。');
     for (const field of fields) {
       if (field.type) this.expression(field.type, 'value');
       if (field.value) this.expression(field.value, 'value');
+      if (field.alignment) this.expression(field.alignment, 'value');
+      if (field.isComptime && !field.value) this.error(field, 'comptime のフィールドには初期値を書いてください。');
       if (container?.containerKind === 'struct' && !field.type && field.name !== undefined) {
         this.error(field, '構造体のフィールドには型を書いてください。');
       }
@@ -233,6 +257,46 @@ class AstChecker {
     }
   }
 
+  /** Checks the body of a test or a `comptime` declaration, which AstGen checks as it checks a function's. */
+  private checkBody(span: Span, check: () => void, isFunction = false): void {
+    const outer = this.scope;
+    if (isFunction) this.scope = { kind: 'function', parent: outer };
+    this.functionDepth++;
+    try {
+      this.withBlock(check);
+    } catch (error) {
+      if (error !== FATAL) throw error;
+    } finally {
+      this.functionDepth--;
+      this.scope = outer;
+    }
+    void span;
+  }
+
+  private withComptime<T>(span: Span, run: () => T): T {
+    return this.withScope({ kind: 'comptime', span, parent: this.scope }, run);
+  }
+
+  /** Whether code runs at compile time: in a `comptime` block or expression, or outside any function. */
+  private inComptime(): boolean {
+    for (let scope = this.scope; scope; scope = scope.parent) {
+      this.budget.spend();
+      if (scope.kind === 'comptime') return true;
+      if (scope.kind === 'function') return false;
+      if (scope.kind === 'namespace') return true;
+    }
+    return true;
+  }
+
+  private nosuspendScope(): MarkerScope | undefined {
+    for (let scope = this.scope; scope; scope = scope.parent) {
+      this.budget.spend();
+      if (scope.kind === 'nosuspend') return scope;
+      if (scope.kind === 'function' || scope.kind === 'namespace') return undefined;
+    }
+    return undefined;
+  }
+
   private checkFunction(fn: FunctionDeclaration): void {
     const outer = this.scope;
     this.scope = { kind: 'function', parent: outer };
@@ -244,7 +308,10 @@ class AstChecker {
       for (const param of fn.params) {
         if (param.type) this.expression(param.type, 'value');
         if (!isDiscardName(param)) this.declare(param.name, 'function parameter', param);
+        if (param.isComptime && param.isNoalias) this.error(param, 'comptime と noalias は一緒に書けません。');
       }
+      for (const attribute of [fn.alignment, fn.addressSpace, fn.callingConvention])
+        if (attribute) this.expression(attribute, 'value');
       this.expression(fn.returnType, 'value');
       this.blockStatements(fn.body.statements);
       this.checkUsed(params);
@@ -385,6 +452,8 @@ class AstChecker {
     this.budget.spend();
     switch (statement.kind) {
       case 'var': {
+        if (statement.isComptime) this.comptimeKeyword(statement);
+        if (statement.alignment) this.expression(statement.alignment, 'value');
         if (statement.type) this.expression(statement.type, 'value');
         if (statement.value) this.expression(statement.value, 'value');
         else this.error(statement, '変数は初期化してください（値が決まらないときは = undefined と書きます）。');
@@ -428,7 +497,16 @@ class AstChecker {
         );
         break;
       }
+      case 'comptime': {
+        this.comptimeKeyword(statement);
+        this.withComptime(statement, () => this.expression(statement.body, 'value'));
+        break;
+      }
     }
+  }
+
+  private comptimeKeyword(span: Span): void {
+    if (this.inComptime()) this.error(span, 'すでにコンパイルのときに実行される場所なので、comptime は要りません。');
   }
 
   // Expressions -----------------------------------------------------------------------------------------------------
@@ -570,7 +648,32 @@ class AstChecker {
       case 'pointerType':
       case 'sliceType': {
         this.expression(expression.child, 'value');
-        if (expression.kind === 'sliceType' && expression.sentinel) this.expression(expression.sentinel, 'value');
+        for (const part of [
+          expression.sentinel,
+          expression.alignment,
+          ...(expression.bitRange ?? []),
+          expression.addressSpace,
+        ])
+          if (part) this.expression(part, 'value');
+        break;
+      }
+      case 'comptime': {
+        this.comptimeKeyword(expression);
+        this.withComptime(expression, () => this.expression(expression.operand, use));
+        break;
+      }
+      case 'nosuspend': {
+        const outer = this.nosuspendScope();
+        if (outer) this.error(expression, 'nosuspend の中に、もう一度 nosuspend を書いています。');
+        this.withScope({ kind: 'nosuspend', span: expression, parent: this.scope }, () =>
+          this.expression(expression.operand, use)
+        );
+        break;
+      }
+      case 'async': {
+        if (!expression.operand && this.nosuspendScope())
+          this.error(expression, 'nosuspend の中には suspend を書けません。');
+        if (expression.operand) this.expression(expression.operand, 'value');
         break;
       }
       case 'arrayType': {
@@ -587,10 +690,11 @@ class AstChecker {
       case 'fnType': {
         for (const param of expression.params) if (param.type) this.expression(param.type, 'value');
         this.expression(expression.returnType, 'value');
+        if (expression.callingConvention) this.expression(expression.callingConvention, 'value');
         break;
       }
       case 'container': {
-        this.checkContainer(expression.members, expression.fields, this.scope, expression);
+        this.checkContainer(expression, this.scope, expression);
         if (expression.argument) this.expression(expression.argument, 'value');
         break;
       }

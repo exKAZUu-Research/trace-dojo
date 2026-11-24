@@ -5,13 +5,15 @@ import { isDiscardName } from './ast';
 import type { Capture, Expression, ExpressionOf, Label, Span, Statement, SwitchCase } from './ast';
 import { activeUnionIndex, physicalUnion } from './bufferMemory';
 import { CallCompiler, type FunctionCompilation } from './calls';
+import { constantText } from './constantText';
 import { enumLookup } from './enumLookup';
-import type { FunctionInstance } from './functions';
+import { FunctionInstance } from './functions';
 import { hasValueDependentWrites, sizeOf } from './layout';
 import { memorySpace } from './memoryAccounting';
 import { type Frame, Jump, withHeldValues } from './runtime';
 import {
   copyForFrame,
+  copyForStorage,
   errorSetIncludes,
   evaluateHeld,
   hasUndefinedMemory,
@@ -38,6 +40,7 @@ import {
   minInt,
   NORETURN,
   pointerTo,
+  TYPE,
   type Type,
   typeName,
   U8,
@@ -81,6 +84,8 @@ interface FnContext {
   readonly target: object;
   recordsSteps: boolean;
   targets: JumpTarget[];
+  /** The name that a struct, enum, or union the function returns takes, as `main.List(i32)` for a generic one. */
+  typeName?: string;
 }
 
 interface SwitchMatch {
@@ -140,10 +145,80 @@ export abstract class StatementCompiler extends CallCompiler {
   // code-gauge-allow functionNcss -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   // code-gauge-allow functionCognitiveComplexity -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected compileFunctionBody(compilation: FunctionCompilation): void {
+    this.separateAnalysis(() => this.compileFunctionBodyAlone(compilation));
+  }
+
+  protected separateAnalysis<T>(run: () => T): T {
+    const { fn, comptimeDepth, runtimeConditionDepth, evalBranches } = this;
+    this.fn = undefined;
+    this.comptimeDepth = 0;
+    this.runtimeConditionDepth = 0;
+    this.evalBranches = { count: 0, quota: 1000 };
+    try {
+      return run();
+    } finally {
+      this.fn = fn;
+      this.comptimeDepth = comptimeDepth;
+      this.runtimeConditionDepth = runtimeConditionDepth;
+      this.evalBranches = evalBranches;
+    }
+  }
+
+  protected comptimeValue(compileCode: () => TExpr, span: Span): TExpr {
+    const outer = this.fn;
+    // Code outside a function, such as a container-level declaration's value, declares its locals in a frame of its own.
+    const fn: FnContext = outer ?? {
+      instance: new FunctionInstance('comptime', [], VOID),
+      returnType: VOID,
+      target: {},
+      recordsSteps: false,
+      targets: [],
+    };
+    const from = fn.instance.slotCount;
+    this.fn = fn;
+    this.comptimeDepth++;
+    let compiled: TExpr;
+    try {
+      compiled = compileCode();
+    } finally {
+      this.comptimeDepth--;
+      this.fn = outer;
+    }
+    if (compiled.known) return compiled;
+    return known(
+      compiled.type,
+      this.evaluateAtCompileTime(compiled, { from, count: fn.instance.slotCount - from }),
+      span
+    );
+  }
+
+  /** Compiles code inside a branch on a runtime condition or a runtime loop's body, where a `comptime var` is fixed. */
+  private underRuntimeCondition<T>(run: () => T): T {
+    this.runtimeConditionDepth++;
+    try {
+      return run();
+    } finally {
+      this.runtimeConditionDepth--;
+    }
+  }
+
+  /** Counts an iteration that `inline for` or `inline while` unrolls, against the evaluation quota. */
+  private countUnrolledIteration(span: Span): void {
+    if (++this.evalBranches.count > this.evalBranches.quota)
+      this.error(
+        span,
+        `コンパイルのときの計算で、ループの繰り返しと関数の呼び出しが合わせて ${this.evalBranches.quota} 回を超えました（@setEvalBranchQuota で上限を上げられます）。`
+      );
+  }
+
+  private compileFunctionBodyAlone(compilation: FunctionCompilation): void {
     const { instance, syntax, namespace } = compilation;
     instance.state = 'compiling';
     instance.recordsSteps = this.tracing && !namespace.internal;
     const outerFn = this.fn;
+    const comptimeArgs = compilation.comptimeArgs.flatMap((arg, index) =>
+      arg?.known ? [constantText(arg.value, compilation.paramTypes[index], typeName)] : []
+    );
     const fn: FnContext = {
       instance,
       returnType: compilation.returnType,
@@ -151,6 +226,7 @@ export abstract class StatementCompiler extends CallCompiler {
       target: {},
       recordsSteps: instance.recordsSteps,
       targets: [],
+      typeName: comptimeArgs.length > 0 ? `${namespace.name}.${syntax.name}(${comptimeArgs.join(',')})` : undefined,
     };
     this.fn = fn;
     const locals = new Map<string, LocalBinding>();
@@ -205,6 +281,10 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     instance.state = 'compiled';
     if (compilation.inferredErrors) compilation.inferredErrors.resolved = true;
+  }
+
+  protected functionName(): string | undefined {
+    return this.fn?.instance.name;
   }
 
   private currentFn(span: Span): FnContext {
@@ -284,7 +364,14 @@ export abstract class StatementCompiler extends CallCompiler {
     });
   }
 
-  private declareLocal(name: string, type: Type, isConst: boolean, value: TExpr, quotedName = false): LocalBinding {
+  private declareLocal(
+    name: string,
+    type: Type,
+    isConst: boolean,
+    value: TExpr,
+    quotedName = false,
+    alignment?: number
+  ): LocalBinding {
     this.resolveStorage(type, value.span);
     if (!isConst && this.requiresComptime(type, value.span))
       this.error(
@@ -303,10 +390,11 @@ export abstract class StatementCompiler extends CallCompiler {
       valueFacts: isConst ? valueFactsOf(value) : undefined,
       known: Boolean(isConst && (value.known || value.staticResult)),
       value: isConst ? (value.known ? value.value : value.staticResult?.value) : undefined,
+      alignment,
     };
     if (!isDiscardName({ name, quotedName })) {
       this.scope.locals?.set(name, binding);
-      fn.instance.locals.push({ name, slot, type, isReceiver: false });
+      if (this.comptimeDepth === 0) fn.instance.locals.push({ name, slot, type, isReceiver: false });
     }
     return binding;
   }
@@ -327,10 +415,20 @@ export abstract class StatementCompiler extends CallCompiler {
       case 'defer': {
         return this.deferStatement(statement);
       }
+      case 'comptime': {
+        const value = this.comptimeValue(() => this.compile(statement.body), statement);
+        if (value.type.kind !== 'void' && value.type.kind !== 'noreturn')
+          this.error(
+            statement.body,
+            `${typeName(value.type)} 型の値を使っていません（捨てるときは _ = ... と書きます）。`
+          );
+        return { exec: () => {}, noreturn: false };
+      }
     }
   }
 
   private variableDeclaration(statement: Extract<Statement, { kind: 'var' }>): Stmt {
+    if (statement.isComptime) return this.comptimeVariable(statement);
     const declared = statement.type ? this.compileType(statement.type) : undefined;
     const valueSyntax = statement.value as Expression;
     const isUndefined = valueSyntax.kind === 'undefined';
@@ -338,7 +436,9 @@ export abstract class StatementCompiler extends CallCompiler {
     if (declared) value = this.coerce(value, declared, valueSyntax);
     const type = value.type;
     if (type.kind === 'noreturn') return { exec: this.valueExec(value), noreturn: true };
-    const binding = this.declareLocal(statement.name, type, statement.isConst, value, statement.quotedName);
+    if (statement.addressSpace) this.addressSpace(statement.addressSpace);
+    const alignment = statement.alignment ? this.explicitAlignment(statement.alignment, type) : undefined;
+    const binding = this.declareLocal(statement.name, type, statement.isConst, value, statement.quotedName, alignment);
     const { slot } = binding;
     const evaluate = value.eval;
     const row = isUndefined ? undefined : this.stepRow(statement);
@@ -346,6 +446,56 @@ export abstract class StatementCompiler extends CallCompiler {
       frame.slots[slot] = copyForFrame(frame, evaluate(frame), type);
     };
     return { exec: this.simple(row, isObjectCreation(valueSyntax), run), noreturn: false };
+  }
+
+  /** `comptime var x = v;`, whose value the compiler holds and changes as it compiles the statements after it. */
+  private comptimeVariable(statement: Extract<Statement, { kind: 'var' }>): Stmt {
+    const value = this.comptimeValue(() => {
+      const declared = statement.type ? this.compileType(statement.type) : undefined;
+      const value = this.compileDeclValue(statement.value as Expression, declared, statement.name);
+      return declared ? this.coerce(value, declared, statement.value as Expression) : value;
+    }, statement);
+    const binding: LocalBinding = statement.isConst
+      ? {
+          kind: 'local',
+          name: statement.name,
+          slot: -1,
+          type: value.type,
+          isConst: true,
+          known: true,
+          value: value.value,
+        }
+      : {
+          kind: 'local',
+          name: statement.name,
+          slot: -1,
+          type: value.type,
+          isConst: false,
+          known: false,
+          comptimeCell: { slots: [copyForStorage(value.value)], conditionDepth: this.runtimeConditionDepth },
+        };
+    if (!isDiscardName(statement)) this.scope.locals?.set(statement.name, binding);
+    return { exec: () => {}, noreturn: false };
+  }
+
+  /** The `comptime var` that an assignment's target names or reaches into, as `x`, `x.f`, or `x[i]` do. */
+  private comptimeVariableOf(target: Expression): LocalBinding | undefined {
+    switch (target.kind) {
+      case 'identifier': {
+        const binding = this.lookup(target.name);
+        return binding?.kind === 'local' && binding.comptimeCell ? binding : undefined;
+      }
+      case 'field':
+      case 'index': {
+        return this.comptimeVariableOf(target.object);
+      }
+      case 'paren': {
+        return this.comptimeVariableOf(target.operand);
+      }
+      default: {
+        return undefined;
+      }
+    }
   }
 
   // code-gauge-allow functionNcss -- Keeps aggregate target analysis and generated assignment order together.
@@ -585,6 +735,17 @@ export abstract class StatementCompiler extends CallCompiler {
     const row = this.stepRow(span);
     if (expression.targets.length !== 1) return this.error(expression, '書き方に誤りがあります。');
     const [target] = expression.targets;
+    const variable = this.comptimeDepth === 0 ? this.comptimeVariableOf(target) : undefined;
+    if (variable?.comptimeCell) {
+      // Zig stores to a `comptime var` as it analyzes the assignment, which runs no code when the program runs.
+      if (this.runtimeConditionDepth > variable.comptimeCell.conditionDepth)
+        this.error(expression, `comptime var「${variable.name}」への代入が、実行時に決まる条件の中にあります。`);
+      this.comptimeValue(() => {
+        const exec = this.assignment(expression, span).exec;
+        return runtime(VOID, (frame) => void exec(frame), expression);
+      }, expression);
+      return { exec: () => {}, noreturn: false };
+    }
     if (target.kind === 'identifier' && isDiscardName(target)) {
       const discarded = unwrapParens(expression.value);
       const value =
@@ -647,7 +808,9 @@ export abstract class StatementCompiler extends CallCompiler {
     const binding = this.declareTemporary(holder, current);
     const position = { row: span.row, col: span.col, endRow: span.endRow };
     const isShift = operator.startsWith('<<') || operator.startsWith('>>');
-    const right = isShift ? undefined : this.coerce(this.compile(value, current.type), current.type, value);
+    const movesPointer = current.type.kind === 'pointer' && (current.type.size === 'many' || current.type.size === 'c');
+    const right =
+      isShift || movesPointer ? undefined : this.coerce(this.compile(value, current.type), current.type, value);
     const rightHolder = '\u0000compoundValue';
     const rightBinding = right ? this.declareTemporary(rightHolder, right) : undefined;
     const synthetic: Expression = {
@@ -958,8 +1121,14 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private returnMaker(expression: ExpressionOf<'return'>): (frame: Frame) => Jump {
+    if (this.comptimeDepth > 0)
+      this.error(expression, '実行時に呼ばれる関数は、コンパイルのときに実行するブロックの中から return できません。');
     const fn = this.currentFn(expression);
     const { target, returnType } = fn;
+    if (expression.value?.kind === 'container' && fn.typeName) {
+      const type = known(TYPE, this.containerType(expression.value, fn.typeName), expression.value);
+      return () => new Jump('return', target, type.value, TYPE);
+    }
     if (!expression.value) {
       const payload = returnType.kind === 'error_union' ? returnType.payload : returnType;
       if (payload.kind !== 'void') this.error(expression, `${typeName(returnType)} 型の値を返してください。`);
@@ -1293,7 +1462,7 @@ export abstract class StatementCompiler extends CallCompiler {
         };
       }
     }
-    const chosen = this.withCapture(capture, () => this.branch(expression, undefined, resultType, asStatement));
+    const chosen = this.withCapture(capture, () => this.branch(expression, undefined, resultType, asStatement, false));
     const run = <T>(frame: Frame, evaluate: (frame: Frame) => T): T => {
       try {
         const pointer = capture?.locate?.(frame);
@@ -1326,10 +1495,14 @@ export abstract class StatementCompiler extends CallCompiler {
     expression: Expression,
     _capture: undefined,
     resultType: Type | undefined,
-    asStatement: boolean
+    asStatement: boolean,
+    runtimeCondition = true
   ): { stmt?: Stmt; value?: TExpr } {
-    if (asStatement) return { stmt: this.statementExpression(expression, expression) };
-    return { value: this.compile(expression, resultType) };
+    if (!runtimeCondition) {
+      if (asStatement) return { stmt: this.statementExpression(expression, expression) };
+      return { value: this.compile(expression, resultType) };
+    }
+    return this.underRuntimeCondition(() => this.branch(expression, undefined, resultType, asStatement, false));
   }
 
   // code-gauge-allow functionParameterCount -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
@@ -1491,8 +1664,8 @@ export abstract class StatementCompiler extends CallCompiler {
     resultType: Type | undefined,
     asStatement: boolean
   ): { stmt: Stmt; value: TExpr } {
+    if (expression.isInline) return this.inlineWhile(expression, resultType, asStatement);
     const fn = this.currentFn(expression);
-    if (expression.isInline) this.error(expression, 'inline while は、この採点環境では使えません。');
     const target: JumpTarget = {
       id: {},
       label: expression.label?.name,
@@ -1570,8 +1743,11 @@ export abstract class StatementCompiler extends CallCompiler {
               : fact.value instanceof ErrorValue);
         const continuation =
           !neverRuns && expression.continueExpression
-            ? this.withoutSteps(() => this.statementExpression(expression.continueExpression as Expression, expression))
-                .exec
+            ? this.withoutSteps(() =>
+                this.underRuntimeCondition(() =>
+                  this.statementExpression(expression.continueExpression as Expression, expression)
+                )
+              ).exec
             : undefined;
         const body: Stmt = neverRuns ? { exec: () => {}, noreturn: false } : this.loopBody(expression.body);
         return { body, continueExec: continuation };
@@ -1591,6 +1767,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const valueType = asStatement ? VOID : this.loopType(target, otherwise?.value, infinite, expression);
     const otherwiseValue = otherwise?.value ? this.coerce(otherwise.value, valueType, expression).eval : undefined;
     const hasBinding = binding !== undefined;
+    const loopRow = expression.row;
     const captureSlots = [binding?.binding.slot, errorBinding?.binding.slot].filter((slot) => slot !== undefined);
     const loop = clearingLocals(captureSlots, (frame: Frame): Jump | { value: Value } | undefined => {
       for (;;) {
@@ -1605,6 +1782,7 @@ export abstract class StatementCompiler extends CallCompiler {
           if (completion) return completion;
           frame.runtime.steps.step(row);
         }
+        frame.runtime.backwardBranch(loopRow);
       }
       failure?.(frame);
       if (binding) frame.slots[binding.binding.slot] = UNASSIGNED;
@@ -1641,6 +1819,110 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
+  /**
+   * `inline while`, which the compiler unrolls: it evaluates the condition as it compiles each iteration, so that a
+   * `comptime var` that the continue expression changes can stand in the body as a constant.
+   */
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the unrolling and the generated code of one construct together.
+  private inlineWhile(
+    expression: ExpressionOf<'while'>,
+    resultType: Type | undefined,
+    asStatement: boolean
+  ): { stmt: Stmt; value: TExpr } {
+    const fn = this.currentFn(expression);
+    if (expression.capture) this.error(expression.capture, 'inline while の条件からは値を受け取れません。');
+    const target: JumpTarget = {
+      id: {},
+      label: expression.label?.name,
+      kind: 'loop',
+      resultType: asStatement ? undefined : resultType,
+      breaks: [],
+      broken: false,
+    };
+    const row = this.stepRow(expression);
+    const iterations: { body: Exec; continuation?: Exec }[] = [];
+    let noreturn = false;
+    let exhausted = false;
+    for (;;) {
+      const condition = this.coerce(this.compile(expression.condition), BOOL, expression.condition);
+      const fact = staticResultOf(condition);
+      if (!fact) this.error(expression.condition, 'inline while の条件が、コンパイルのときに決まりません。');
+      if (fact.value === false) {
+        exhausted = true;
+        break;
+      }
+      this.countUnrolledIteration(expression);
+      target.continued = false;
+      fn.targets.push(target);
+      let body: Stmt;
+      try {
+        body = this.withScope({ locals: new Map(), parent: this.scope }, () => this.loopBody(expression.body, false));
+      } finally {
+        fn.targets.pop();
+      }
+      if (body.noreturn && !target.continued) {
+        iterations.push({ body: body.exec });
+        noreturn = !target.broken;
+        break;
+      }
+      const continuation = expression.continueExpression
+        ? this.withoutSteps(() => this.statementExpression(expression.continueExpression as Expression, expression))
+            .exec
+        : undefined;
+      iterations.push({ body: body.exec, continuation });
+    }
+    const otherwise =
+      exhausted && expression.otherwise
+        ? this.branch(expression.otherwise, undefined, target.resultType, asStatement, false)
+        : undefined;
+    const valueType = asStatement ? VOID : this.loopType(target, otherwise?.value, false, expression);
+    const otherwiseExec = otherwise?.stmt?.exec;
+    const otherwiseValue = otherwise?.value ? this.coerce(otherwise.value, valueType, expression).eval : undefined;
+    const { id } = target;
+    const loop = (frame: Frame): Jump | { value: Value } | undefined => {
+      for (const iteration of iterations) {
+        frame.runtime.spend();
+        frame.runtime.steps.step(row);
+        const completion = loopExit(runBody(iteration.body, frame, id), id);
+        if (completion) return completion;
+        if (iteration.continuation) {
+          const completion = loopExit(runBody(iteration.continuation, frame, id), id);
+          if (completion) return completion;
+        }
+      }
+      if (otherwiseExec) {
+        const completion = otherwiseExec(frame);
+        if (completion) return completion;
+      }
+      if (otherwiseValue) return { value: otherwiseValue(frame) };
+      return undefined;
+    };
+    const stmt: Stmt = {
+      exec: (frame) => {
+        const result = loop(frame);
+        return result instanceof Jump ? result : undefined;
+      },
+      noreturn: noreturn || otherwise?.stmt?.noreturn === true,
+    };
+    return {
+      stmt,
+      value: this.loopResult(
+        target,
+        otherwise?.value,
+        false,
+        runtime(
+          stmt.noreturn ? NORETURN : valueType,
+          (frame) => {
+            const result = loop(frame);
+            if (result instanceof Jump) throw result;
+            return result?.value;
+          },
+          expression
+        )
+      ),
+    };
+  }
+
   private loopType(target: JumpTarget, otherwise: TExpr | undefined, infinite: boolean, span: Span): Type {
     const values = target.breaks.map((site) => site.value);
     if (otherwise) values.push(otherwise);
@@ -1655,7 +1937,8 @@ export abstract class StatementCompiler extends CallCompiler {
     return type;
   }
 
-  private loopBody(body: Expression): Stmt {
+  private loopBody(body: Expression, runtimeLoop = true): Stmt {
+    if (runtimeLoop) return this.underRuntimeCondition(() => this.statementExpression(body, body));
     return this.statementExpression(body, body);
   }
 
@@ -1754,6 +2037,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const valueType = asStatement ? VOID : this.loopType(target, otherwise?.value, false, expression);
     const otherwiseValue = otherwise?.value ? this.coerce(otherwise.value, valueType, expression).eval : undefined;
     const slots = bindings.map((binding) => binding?.slot);
+    const loopRow = expression.row;
     const loop = (frame: Frame): Jump | { value: Value } | undefined => {
       const values = evaluateHeld(
         frame,
@@ -1772,6 +2056,7 @@ export abstract class StatementCompiler extends CallCompiler {
         }
         for (let position = 0; BigInt(position) < (count as bigint); position++) {
           frame.runtime.spend();
+          frame.runtime.backwardBranch(loopRow);
           for (const [index, slot] of slots.entries()) {
             if (slot !== undefined) frame.slots[slot] = operands[index].element(values[index], position, frame);
           }
@@ -1943,6 +2228,7 @@ export abstract class StatementCompiler extends CallCompiler {
     for (const element of elements) {
       target.continued = false;
       this.compilationBudget.spend();
+      this.countUnrolledIteration(expression);
       const locals = new Map<string, LocalBinding>();
       let binding: LocalBinding | undefined;
       if (capture && !isDiscardName(capture)) {
@@ -1952,7 +2238,7 @@ export abstract class StatementCompiler extends CallCompiler {
       }
       fn.targets.push(target);
       try {
-        const body = this.withScope({ locals, parent: this.scope }, () => this.loopBody(expression.body));
+        const body = this.withScope({ locals, parent: this.scope }, () => this.loopBody(expression.body, false));
         iterations.push({
           body: clearingLocals(binding ? [binding.slot] : [], body.exec),
           slot: binding?.slot,
@@ -2243,11 +2529,13 @@ export abstract class StatementCompiler extends CallCompiler {
     const needsPointer = expression.cases.some((each) => each.capture?.byPointer);
     const locate = selectedPointer ? selectedAddress?.eval : needsPointer ? place?.locate : undefined;
     const { id } = target;
+    const switchRow = expression.row;
     const run = (frame: Frame): Jump | { value: Value } | undefined => {
       let pointer = locate?.(frame) as Pointer | undefined;
       let value = pointer ? pointer.load() : evaluateOperand(frame);
-      for (;;) {
+      for (let first = true; ; first = false) {
         frame.runtime.spend();
+        if (!first) frame.runtime.backwardBranch(switchRow);
         const key = keyOf(value);
         const prong = find(key, frame);
         if (!prong) return panic(PANIC.unreachable);

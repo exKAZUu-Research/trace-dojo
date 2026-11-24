@@ -59,11 +59,23 @@ export interface ArrayType {
 
 export interface PointerType {
   readonly kind: 'pointer';
-  /** `one` for `*T`, `slice` for `[]T`. */
-  readonly size: 'one' | 'slice';
+  /** `one` for `*T`, `many` for `[*]T`, `slice` for `[]T`, and `c` for `[*c]T`. */
+  readonly size: 'one' | 'many' | 'slice' | 'c';
   readonly child: Type;
   readonly isConst: boolean;
   readonly sentinel?: Sentinel;
+  readonly isVolatile?: boolean;
+  readonly allowZero?: boolean;
+  /** The alignment that `align(n)` gives, when it differs from the child type's own. */
+  readonly alignment?: number;
+}
+
+export interface PointerAttributes {
+  isConst: boolean;
+  isVolatile?: boolean;
+  allowZero?: boolean;
+  alignment?: number;
+  sentinel?: Value | Sentinel;
 }
 
 export interface OptionalType {
@@ -96,6 +108,8 @@ export interface StructField {
   hasDefault: boolean;
   /** Whether a tuple's field holds a value known at compile time, which the tuple's type carries. */
   comptimeValue?: { value: Value };
+  /** The alignment that `align(n)` gives the field. */
+  alignment?: number;
 }
 
 /** What struct, enum, and union types share: their declarations, which the compiler analyzes on demand. */
@@ -164,6 +178,8 @@ export interface FnType {
   readonly kind: 'fn';
   readonly params: readonly Type[];
   readonly returnType: Type;
+  /** `c` for `callconv(.c)`, which `export` also gives; undefined for Zig's own convention. */
+  readonly callingConvention?: 'c';
 }
 
 /** A container-level declaration, which the compiler analyzes when the program first refers to it. */
@@ -178,6 +194,7 @@ export type Decl =
       value?: Value;
       /** A variable's storage, which lives as long as the program runs. */
       cell?: { slots: Value[] };
+      alignment?: number;
     }
   | { kind: 'fn'; syntax: FunctionDeclaration; namespace: Namespace }
   | { kind: 'native'; name: string; resolve: () => { type: Type; value: Value; unavailable?: string } };
@@ -364,23 +381,42 @@ export function arrayOf(length: number | bigint, child: Type, sentinel?: Value |
 }
 
 export function pointerTo(child: Type, isConst: boolean): PointerType {
-  return intern(`pointer one ${typeId(child)} ${isConst}`, () => ({
-    kind: 'pointer',
-    size: 'one',
-    child,
-    isConst,
-  }));
+  return pointerOf('one', child, { isConst });
 }
 
 export function sliceOf(child: Type, isConst: boolean, sentinel?: Value | Sentinel): PointerType {
-  const canonical = canonicalSentinel(child, sentinel);
-  return intern(`pointer slice ${typeId(child)} ${isConst}${sentinelKey(canonical)}`, () => ({
+  return pointerOf('slice', child, { isConst, sentinel });
+}
+
+/** A pointer type; pass `alignment` only when it differs from the child type's own, as Zig drops it otherwise. */
+export function pointerOf(size: PointerType['size'], child: Type, attributes: PointerAttributes): PointerType {
+  const canonical = size === 'one' ? undefined : canonicalSentinel(child, attributes.sentinel);
+  const isVolatile = attributes.isVolatile === true;
+  const allowZero = attributes.allowZero === true && size !== 'c';
+  const { alignment } = attributes;
+  const key = `pointer ${size} ${typeId(child)} ${attributes.isConst}${sentinelKey(canonical)} ${isVolatile} ${allowZero} ${alignment ?? ''}`;
+  return intern(key, () => ({
     kind: 'pointer',
-    size: 'slice',
+    size,
     child,
-    isConst,
-    sentinel: canonical,
+    isConst: attributes.isConst,
+    ...(canonical === undefined ? {} : { sentinel: canonical }),
+    ...(isVolatile ? { isVolatile } : {}),
+    ...(allowZero ? { allowZero } : {}),
+    ...(alignment === undefined ? {} : { alignment }),
   }));
+}
+
+/** The same kind of pointer with other attributes, such as `@constCast`'s result. */
+export function withPointerAttributes(type: PointerType, changes: Partial<PointerAttributes>): PointerType {
+  return pointerOf(type.size, type.child, {
+    isConst: type.isConst,
+    isVolatile: type.isVolatile,
+    allowZero: type.allowZero,
+    alignment: type.alignment,
+    sentinel: type.sentinel,
+    ...changes,
+  });
 }
 
 function canonicalSentinel(type: Type, sentinel: Value | Sentinel): Sentinel | undefined {
@@ -406,11 +442,13 @@ export function errorUnionOf(errorSet: ErrorSetType, payload: Type): ErrorUnionT
   }));
 }
 
-export function fnType(params: readonly Type[], returnType: Type): FnType {
-  return intern(`fn ${params.map((param) => typeId(param)).join(',')} ${typeId(returnType)}`, () => ({
+export function fnType(params: readonly Type[], returnType: Type, callingConvention?: 'c'): FnType {
+  const key = `fn ${params.map((param) => typeId(param)).join(',')} ${typeId(returnType)} ${callingConvention ?? ''}`;
+  return intern(key, () => ({
     kind: 'fn',
     params,
     returnType,
+    ...(callingConvention ? { callingConvention } : {}),
   }));
 }
 
@@ -530,7 +568,7 @@ export function wrapInt(value: bigint, type: IntType): bigint {
 export function indexableChild(type: Type): Type | undefined {
   if (type.kind === 'array') return type.child;
   if (type.kind === 'pointer') {
-    if (type.size === 'slice') return type.child;
+    if (type.size !== 'one') return type.child;
     if (type.child.kind === 'array') return type.child.child;
   }
   return undefined;
@@ -554,13 +592,11 @@ export function typeName(type: Type): string {
       return `[${type.length}${sentinel}]${typeName(type.child)}`;
     }
     case 'pointer': {
-      const qualifier = type.isConst ? 'const ' : '';
-      if (type.size === 'slice') {
-        const sentinel =
-          type.sentinel === undefined ? '' : `:${constantText(type.sentinel.value, type.child, typeName)}`;
-        return `[${sentinel}]${qualifier}${typeName(type.child)}`;
-      }
-      return `*${qualifier}${typeName(type.child)}`;
+      const sentinel = type.sentinel === undefined ? '' : `:${constantText(type.sentinel.value, type.child, typeName)}`;
+      const prefix = { one: '*', many: `[*${sentinel}]`, slice: `[${sentinel}]`, c: '[*c]' }[type.size];
+      const alignment = type.alignment === undefined ? '' : `align(${type.alignment}) `;
+      const qualifiers = `${type.allowZero ? 'allowzero ' : ''}${type.isConst ? 'const ' : ''}${type.isVolatile ? 'volatile ' : ''}`;
+      return `${prefix}${alignment}${qualifiers}${typeName(type.child)}`;
     }
     case 'optional': {
       return `?${typeName(type.child)}`;
@@ -592,7 +628,8 @@ export function typeName(type: Type): string {
       return type.namespace.name;
     }
     case 'fn': {
-      return `fn (${type.params.map((param) => typeName(param)).join(', ')}) ${typeName(type.returnType)}`;
+      const callingConvention = type.callingConvention ? `callconv(.${type.callingConvention}) ` : '';
+      return `fn (${type.params.map((param) => typeName(param)).join(', ')}) ${callingConvention}${typeName(type.returnType)}`;
     }
     case 'enum_literal': {
       return '@EnumLiteral()';

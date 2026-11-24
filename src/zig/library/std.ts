@@ -23,6 +23,7 @@ import {
 import { decodeUtf8 } from '../utf8';
 import { ErrorValue, NativeHandle, Pointer, type Slice, type Value, ZArray, ZStruct } from '../values';
 import { ALLOCATOR, allocatorMembers, ARENA_ALLOCATOR, arenaValue, heapNamespace } from './heap';
+import { langNamespace } from './lang';
 import {
   addMembers,
   compileArgs,
@@ -74,6 +75,8 @@ export function importStd(): StructType {
     meta: typeMember(() => lazyNamespace('meta')),
     enums: typeMember(() => lazyNamespace('enums')),
     Random: typeMember(() => lazyNamespace('Random')),
+    lang: typeMember(() => langNamespace()),
+    builtin: typeMember(() => langNamespace()),
     ArrayList: lazyMember('ArrayList'),
     ArrayListUnmanaged: lazyMember('ArrayList'),
     AutoHashMap: lazyMember('AutoHashMap'),
@@ -101,7 +104,6 @@ export function importStd(): StructType {
       crypto: '暗号（std.crypto）',
       compress: '圧縮（std.compress）',
       zig: 'std.zig',
-      builtin: 'std.builtin',
       start: 'std.start',
       log: 'ログ（std.log）',
       Target: 'std.Target',

@@ -27,6 +27,23 @@ export class ProgramExit extends Error {
   }
 }
 
+/** How many backward branches (loop iterations and calls) one analysis has evaluated at compile time, and its limit. */
+export interface BranchCount {
+  count: number;
+  quota: number;
+}
+
+/** Compile-time evaluation that took more backward branches than `@setEvalBranchQuota` allows. */
+export class BranchQuotaExceeded extends Error {
+  constructor(
+    readonly row: number | undefined,
+    readonly quota: number
+  ) {
+    super(`evaluation exceeded ${quota} backwards branches`);
+    this.name = 'BranchQuotaExceeded';
+  }
+}
+
 /** A `break`, `continue`, or `return` inside an expression, which unwinds to the construct it leaves. */
 export class Jump {
   constructor(
@@ -75,6 +92,8 @@ export class Runtime {
   private readonly turtleReachability = new TurtleReachability((cost) => this.spend(cost));
   private allocated = 0;
   private activeFrameSlots = 0;
+  /** The backward branches of the analysis that evaluates code at compile time, which a run of the program lacks. */
+  branchCount: BranchCount | undefined;
 
   constructor(input?: ProgramInput, budget = new ExecutionBudget()) {
     this.budget = budget;
@@ -87,6 +106,12 @@ export class Runtime {
 
   spend(cost = 1): void {
     this.budget.spend(cost);
+  }
+
+  /** Counts a loop's iteration or a call while the compiler evaluates code, as Zig's evaluation quota does. */
+  backwardBranch(row: number | undefined): void {
+    const count = this.branchCount;
+    if (count && ++count.count > count.quota) throw new BranchQuotaExceeded(row, count.quota);
   }
 
   writeOutput(fd: number, bytes: readonly number[]): void {

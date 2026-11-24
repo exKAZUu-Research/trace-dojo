@@ -6,6 +6,7 @@ import { zeroPhysicalValue } from '../bufferMemory';
 import { enumLookup } from '../enumLookup';
 import { type AnyFloat, BigFloat, compareFloats, floatFromBigInt, minMaxFloat } from '../floats';
 import { sizeOf } from '../layout';
+import { MemoryFault } from '../memoryFault';
 import { isArithmeticType } from '../operands';
 import type { Frame } from '../runtime';
 import { copyForStorage, known, newArray, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
@@ -31,6 +32,7 @@ import {
   isUndefinedMemory,
   NULL,
   type Pointer,
+  scalarValuesEqual,
   Slice,
   storageByteLocation,
   storageLocation,
@@ -463,8 +465,66 @@ function iteratorFactory(name: string, kind: 'split' | 'token', delimiter: Delim
 
 // The namespace ---------------------------------------------------------------------------------------------------------
 
+/** The elements from a pointer up to a sentinel value, for `std.mem.span`, `len`, and `sliceTo`. */
+function sentinelSpan(name: string, kind: 'span' | 'len' | 'sliceTo'): () => Member {
+  return fnMember(name, (sema, call) => {
+    const args = expectArgs(sema, call, kind === 'sliceTo' ? 2 : 1, name);
+    const operand = sema.compile(args[0]);
+    let type = operand.type;
+    const optional = type.kind === 'optional';
+    if (type.kind === 'optional') type = type.child;
+    if (type.kind !== 'pointer') return sema.error(call.span, `${name} にはポインタかスライスを渡してください。`);
+    const array = type.size === 'one' && type.child.kind === 'array' ? type.child : undefined;
+    const child = array ? array.child : type.child;
+    const sentinel = array ? array.sentinel : type.sentinel;
+    const end =
+      kind === 'sliceTo'
+        ? sema.knownValue(sema.coerce(sema.compile(args[1], child), child, args[1]), '終わりの値')
+        : undefined;
+    if (kind !== 'sliceTo' && sentinel === undefined && type.size !== 'slice')
+      return sema.error(call.span, `${name} には、番兵付きのポインタ（[*:0]u8 など）を渡してください。`);
+    const stop = end ?? sentinel?.value;
+    const keepsSentinel = sentinel !== undefined && (end === undefined || scalarValuesEqual(end, sentinel.value));
+    const sliceType = sliceOf(child, type.isConst, keepsSentinel ? sentinel : undefined);
+    const resultType = kind === 'len' ? USIZE : optional ? optionalOf(sliceType) : sliceType;
+    const evaluate = operand.eval;
+    const span = (value: Value, frame: Frame): Value => {
+      if (value === NULL) return NULL;
+      let target: { slots: Value[] };
+      let start: number;
+      let limit: number;
+      if (value instanceof Slice) {
+        target = value.target;
+        start = value.start;
+        limit = start + value.length;
+      } else if (array) {
+        const view = (value as Pointer).load() as ZArray;
+        target = view;
+        start = view.offset;
+        limit = start + view.length;
+      } else {
+        target = (value as Pointer).target;
+        start = (value as Pointer).index;
+        limit = target.slots.length;
+      }
+      let position = start;
+      while (position < limit && (stop === undefined || !scalarValuesEqual(target.slots[position], stop))) {
+        frame.runtime.spend();
+        position++;
+      }
+      if (position >= target.slots.length && !(value instanceof Slice) && !array) throw new MemoryFault();
+      if (kind === 'len') return BigInt(position - start);
+      return new Slice(target, start, position - start);
+    };
+    return runtime(resultType, (frame) => span(evaluate(frame), frame), call.span);
+  });
+}
+
 const MEMBERS: Record<string, () => Member> = {
   Allocator: typeMember(() => ALLOCATOR),
+  span: sentinelSpan('std.mem.span', 'span'),
+  len: sentinelSpan('std.mem.len', 'len'),
+  sliceTo: sentinelSpan('std.mem.sliceTo', 'sliceTo'),
   eql: generic('std.mem.eql', 3, (sema, call, type, [a, b]) => {
     const left = constSlice(sema, a, type);
     const right = constSlice(sema, b, type);

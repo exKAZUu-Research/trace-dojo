@@ -1,10 +1,10 @@
 import { PANIC, panic } from './arith';
 import { isDiscardName } from './ast';
 import type { Expression, ExpressionOf, FunctionDeclaration, SourceFile, Span } from './ast';
-import { BuiltinCompiler } from './builtins';
 import { constantKey, unwrapResult } from './expressions';
 import { FunctionInstance } from './functions';
 import { callableNative } from './nativeAdapter';
+import { ReflectionCompiler } from './reflection';
 import { type Frame, Jump } from './runtime';
 import {
   addDecls,
@@ -51,7 +51,7 @@ export interface FunctionCompilation {
   isMethod: boolean;
 }
 
-export abstract class CallCompiler extends BuiltinCompiler {
+export abstract class CallCompiler extends ReflectionCompiler {
   private readonly instances = new Map<string, FunctionInstance>();
   private readonly parameterScopes = new Map<string, Scope>();
   private readonly instanceIds = new WeakMap<object, number>();
@@ -199,13 +199,20 @@ export abstract class CallCompiler extends BuiltinCompiler {
         ref.decl,
         index,
         args.map((each) => each.type),
-        args.map((arg) => this.comptimeArgument(arg))
+        args.map((arg, position) => this.comptimeArgument(arg, params[position].isComptime))
       );
       declaredTypes.push(declared);
       const compiled = isTExpr(arg) ? arg : this.compile(arg, declared);
-      if (index === 0 && receiver) args.push(this.bindReceiver(compiled, declared, expression));
-      else if (declared) args.push(this.coerce(compiled, declared, isTExpr(arg) ? arg.span : arg));
-      else args.push(compiled);
+      let bound: TExpr;
+      if (index === 0 && receiver) bound = this.bindReceiver(compiled, declared, expression);
+      else if (declared) bound = this.coerce(compiled, declared, isTExpr(arg) ? arg.span : arg);
+      else bound = compiled;
+      if (params[index].isComptime && !staticResultOf(bound))
+        this.error(
+          bound.span,
+          `comptime の引数「${params[index].name}」には、コンパイルのときに決まる値を渡してください。`
+        );
+      args.push(bound);
     }
     const argTypes = args.map((arg) => arg.type);
     void resultType;
@@ -279,13 +286,28 @@ export abstract class CallCompiler extends BuiltinCompiler {
       const unknown = new Set<string>();
       const params: Type[] = [];
       for (const [index, param] of decl.syntax.params.entries()) {
-        const generic = !param.type || this.dependsOnParameters(param.type, unknown);
+        if (param.isVarargs)
+          this.error(param, '可変個の引数（...）は、C の呼び出し規約（callconv(.c)）の関数にだけ書けます。');
+        const generic = !param.type || param.isComptime || this.dependsOnParameters(param.type, unknown);
         params.push(generic ? ANYTYPE : (this.parameterType(decl, index, params) as Type));
         if (generic) unknown.add(param.name);
+        if (param.isNoalias) {
+          const type = params[index] === ANYTYPE ? undefined : params[index];
+          if (type && type.kind !== 'pointer') this.error(param, 'noalias は、ポインタの引数にだけ書けます。');
+        }
       }
       let result = this.dependsOnParameters(decl.syntax.returnType, unknown)
         ? ANYTYPE
         : this.inParameterScope(decl, params, () => this.compileType(decl.syntax.returnType));
+      const syntax = decl.syntax;
+      const callingConvention = syntax.isExport ? 'c' : this.callingConvention(syntax.callingConvention);
+      if (syntax.alignment) this.alignmentValue(syntax.alignment);
+      if (syntax.addressSpace) this.addressSpace(syntax.addressSpace);
+      if (callingConvention) {
+        if (unknown.size > 0)
+          this.error(syntax, 'C の呼び出し規約の関数には、comptime や anytype の引数を書けません。');
+        this.checkCAbi(params, result, syntax.params, syntax);
+      }
       if (decl.syntax.inferredErrorSet && result !== ANYTYPE)
         result = errorUnionOf(
           {
@@ -296,7 +318,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
           },
           result
         );
-      const type = fnType(params, result);
+      const type = fnType(params, result, callingConvention);
       this.declarationTypes.set(decl, type);
       return type;
     } finally {
@@ -367,7 +389,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     const { decl } = ref;
     const syntax = decl.syntax;
     const paramTypes: Type[] = [];
-    const comptimeArgs = args.map((arg) => this.comptimeArgument(arg));
+    const comptimeArgs = args.map((arg, index) => this.comptimeArgument(arg, syntax.params[index]?.isComptime));
     for (const [index, param] of syntax.params.entries()) {
       const type = param.type ? this.parameterType(decl, index, paramTypes, comptimeArgs) : argTypes[index];
       if (!type)
@@ -425,8 +447,8 @@ export abstract class CallCompiler extends BuiltinCompiler {
     return instance;
   }
 
-  private comptimeArgument(argument: TExpr): TExpr | undefined {
-    if (!this.requiresComptime(argument.type, argument.span)) return undefined;
+  private comptimeArgument(argument: TExpr, isComptime = false): TExpr | undefined {
+    if (!isComptime && !this.requiresComptime(argument.type, argument.span)) return undefined;
     const fact = staticResultOf(argument);
     return fact ? known(argument.type, fact.value, argument.span) : undefined;
   }
@@ -546,6 +568,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
   ): Value {
     const { runtime: rt } = caller;
     rt.spend();
+    rt.backwardBranch(callRow);
     if (fn.native) return copyForFrame(caller, fn.native(args, caller), fn.returnType);
     const body = fn.body;
     if (!body) return panic('関数がまだ準備できていません。');
