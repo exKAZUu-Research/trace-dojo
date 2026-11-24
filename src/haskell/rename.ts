@@ -7,6 +7,7 @@ import {
   LIST_TYPE,
   naturalType,
   NIL_CON,
+  ONE_TYPE,
   promotedType,
   symbolType,
   tupleCon,
@@ -49,7 +50,7 @@ import type {
   RType,
   VarRef,
 } from './rast';
-import { rpatChildren, rpatLocals } from './rast';
+import { rpatChildren, rpatLocals, substituteRType } from './rast';
 import { RecursionBudget } from './recursionBudget';
 import type {
   Alt,
@@ -65,6 +66,7 @@ import type {
   Pat,
   QName,
   Rhs,
+  Role,
   SigType,
   Span,
   Stmt,
@@ -84,7 +86,7 @@ export interface RDataDecl {
   /** The kinds the parameters' annotations give, by position. */
   paramKinds?: (RType | undefined)[];
   cons: RConDecl[];
-  deriving: { type: RType; cls?: ClassEntity; strategy?: DerivingStrategy; span: Span }[];
+  deriving: { type: RType; cls?: ClassEntity; strategy?: DerivingStrategy; via?: RType; span: Span }[];
   span: Span;
 }
 
@@ -127,6 +129,7 @@ export interface RStandaloneDeriving {
   type: RType;
   context: RConstraint[];
   strategy?: DerivingStrategy;
+  via?: RType;
   span: Span;
 }
 
@@ -165,6 +168,8 @@ export interface RModule {
   classes: RClassDecl[];
   instances: RInstanceDecl[];
   standaloneDerivings: RStandaloneDeriving[];
+  /** The roles `type role` declares for the module's own types. */
+  roleAnnotations: { entity: TypeEntity; roles: (Role | undefined)[]; span: Span }[];
   typeFamilies: RTypeFamily[];
   /** The equations of open type families, including the associated types' defaults that instances use. */
   typeInstances: RTypeEquation[];
@@ -317,6 +322,7 @@ class Renamer {
       classes: this.classes,
       instances: this.instances,
       standaloneDerivings: this.standaloneDerivings,
+      roleAnnotations: this.renameRoleAnnotations(decls),
       defaultDecls: this.renameDefaultDecls(decls),
       kindSigs: [...this.renameKindSigs(decls), ...this.dataKindSigs],
       ...this.renameFamilies(decls),
@@ -802,9 +808,11 @@ class Renamer {
         result: conDecl.result && this.renameType(conDecl.result, vars),
       };
     });
+    const paramNames = new Set(decl.params.map((param) => param.name));
     const deriving = decl.deriving.map((clause) => ({
       type: this.renameTypeName(clause.cls),
       strategy: clause.strategy,
+      via: clause.via && this.renameType(clause.via, paramNames),
       span: clause.span,
     }));
     this.dataDecls.push({
@@ -839,6 +847,7 @@ class Renamer {
     const deriving = decl.deriving.map((clause) => ({
       type: this.renameTypeName(clause.cls),
       strategy: clause.strategy,
+      via: clause.via && this.renameType(clause.via, vars),
       span: clause.span,
     }));
     this.dataDecls.push({
@@ -1119,7 +1128,30 @@ class Renamer {
     collectTypeVars(decl.type, vars);
     const type = this.renameType(decl.type, vars);
     const context = decl.context.map((constraint) => this.renameType(constraint, vars));
-    this.standaloneDerivings.push({ cls, type, context, strategy: decl.strategy, span: decl.span });
+    const via = decl.via && this.renameType(decl.via, vars);
+    this.standaloneDerivings.push({ cls, type, context, strategy: decl.strategy, via, span: decl.span });
+  }
+
+  /** The roles `type role` annotations give the module's own data types, which the type checker checks. */
+  private renameRoleAnnotations(decls: Decl[]): RModule['roleAnnotations'] {
+    const seen = new Set<TypeEntity>();
+    return decls.flatMap((decl) => {
+      if (decl.kind !== 'roleAnnotation') return [];
+      const owner = decl.name.qualifier ? undefined : this.ownTypes.get(decl.name.name);
+      if (!owner) throw compileError(decl.span, `役割の注釈を書いた型 ${decl.name.name} の宣言がありません。`);
+      if (owner.kind !== 'type' || owner.entity.sort !== 'data' || owner.entity.dataFamily) {
+        throw compileError(decl.span, `${decl.name.name} には、役割の注釈を書けません。`);
+      }
+      if (seen.has(owner.entity)) throw compileError(decl.span, `${decl.name.name} の役割の注釈が重複しています。`);
+      seen.add(owner.entity);
+      if (decl.roles.length !== owner.entity.arity) {
+        throw compileError(
+          decl.span,
+          `${decl.name.name} の役割の注釈には、役割を ${owner.entity.arity} 個書いてください（${decl.roles.length} 個あります）。`
+        );
+      }
+      return [{ entity: owner.entity, roles: decl.roles, span: decl.span }];
+    });
   }
 
   private renameTopBindings(decls: Decl[], raw: RawBinding[]): RBindGroup {
@@ -1933,7 +1965,19 @@ class Renamer {
         return { k: 'app', fn: this.renameType(type.fn, vars), arg: this.renameType(type.arg, vars), span };
       }
       case 'tfun': {
-        return { k: 'fun', from: this.renameType(type.from, vars), to: this.renameType(type.to, vars), span };
+        const multiplicity: RType | undefined =
+          type.multiplicity?.kind === 'one'
+            ? { k: 'con', entity: ONE_TYPE, span }
+            : type.multiplicity?.kind === 'var'
+              ? this.renameType({ kind: 'tvar', name: type.multiplicity.name, span: type.multiplicity.span }, vars)
+              : undefined;
+        return {
+          k: 'fun',
+          from: this.renameType(type.from, vars),
+          to: this.renameType(type.to, vars),
+          ...(multiplicity ? { multiplicity } : {}),
+          span,
+        };
       }
       case 'tlist': {
         return { k: 'app', fn: { k: 'con', entity: LIST_TYPE, span }, arg: this.renameType(type.elem, vars), span };
@@ -2211,29 +2255,6 @@ function rtypeArgs(type: RType): RType[] {
   return args;
 }
 
-function substituteRType(type: RType, substitution: ReadonlyMap<string, RType>): RType {
-  switch (type.k) {
-    case 'var': {
-      return substitution.get(type.name) ?? type;
-    }
-    case 'app': {
-      return { ...type, fn: substituteRType(type.fn, substitution), arg: substituteRType(type.arg, substitution) };
-    }
-    case 'fun': {
-      return { ...type, from: substituteRType(type.from, substitution), to: substituteRType(type.to, substitution) };
-    }
-    case 'tuple': {
-      return { ...type, elems: type.elems.map((elem) => substituteRType(elem, substitution)) };
-    }
-    case 'kinded': {
-      return { ...type, type: substituteRType(type.type, substitution) };
-    }
-    default: {
-      return type;
-    }
-  }
-}
-
 function collectRTypeVars(type: RType, into: Set<string>): void {
   if (type.k === 'var') into.add(type.name);
   else if (type.k === 'app') {
@@ -2241,6 +2262,7 @@ function collectRTypeVars(type: RType, into: Set<string>): void {
     collectRTypeVars(type.arg, into);
   } else if (type.k === 'fun') {
     collectRTypeVars(type.from, into);
+    if (type.multiplicity) collectRTypeVars(type.multiplicity, into);
     collectRTypeVars(type.to, into);
   } else if (type.k === 'tuple') for (const elem of type.elems) collectRTypeVars(elem, into);
 }
@@ -2262,7 +2284,7 @@ function rtypeKey(type: RType): string {
         return `(${walk(node.fn)} ${walk(node.arg)})`;
       }
       case 'fun': {
-        return `(${walk(node.from)}->${walk(node.to)})`;
+        return `(${walk(node.from)}${node.multiplicity ? `%${walk(node.multiplicity)}` : ''}->${walk(node.to)})`;
       }
       case 'tuple': {
         return `(${node.elems.map(walk).join(',')})`;
@@ -2808,6 +2830,7 @@ export function collectTypeVars(type: TypeExpr, into: Set<string>): void {
     }
     case 'tfun': {
       collectTypeVars(type.from, into);
+      if (type.multiplicity?.kind === 'var') into.add(type.multiplicity.name);
       collectTypeVars(type.to, into);
       break;
     }
@@ -2861,7 +2884,11 @@ function rtypeMentions(type: RType, name: string): boolean {
       return rtypeMentions(type.fn, name) || rtypeMentions(type.arg, name);
     }
     case 'fun': {
-      return rtypeMentions(type.from, name) || rtypeMentions(type.to, name);
+      return (
+        rtypeMentions(type.from, name) ||
+        rtypeMentions(type.to, name) ||
+        (type.multiplicity !== undefined && rtypeMentions(type.multiplicity, name))
+      );
     }
     case 'kinded':
     case 'kindapp': {

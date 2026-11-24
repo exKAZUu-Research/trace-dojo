@@ -8,6 +8,7 @@ import qualified Base as B
 
 infixl 9 \\
 
+type role Set nominal
 data Set a = SBin !Int !a !(Set a) !(Set a) | STip
 
 empty :: Set a
@@ -493,6 +494,7 @@ import qualified Data.Set.Internal as S
 
 infixl 9 !, !?, \\
 
+type role Map nominal representational
 data Map k a = Bin !Int !k a !(Map k a) !(Map k a) | Tip
 
 empty :: Map k a

@@ -2,6 +2,8 @@
 import { LIMITS } from '../interpreter/limits';
 import {
   CHAR_TYPE,
+  COERCIBLE_CLASS,
+  CONSTRAINT_TYPE_CLASS,
   EQUALITY_CLASS,
   EQUALITY_TYPES,
   FUNCTION_TYPE,
@@ -9,6 +11,7 @@ import {
   HAS_FIELD_TYPES,
   IMPLICIT_CLASS,
   IMPLICIT_TYPES,
+  IO_TYPE,
   LIST_TYPE,
   symbolType,
   tupleCon,
@@ -16,27 +19,40 @@ import {
 } from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, impliedBySuperclasses, predsEqual } from './classEnv';
 import { dependencyOrder } from './dependencies';
-import type { ClassEntity, ConInfo, DictParam, Evidence, EvidenceHole, TypeEntity, ValueEntity } from './entities';
+import type {
+  ClassEntity,
+  CoercionSpec,
+  ConInfo,
+  DictParam,
+  Evidence,
+  EvidenceHole,
+  TypeEntity,
+  ValueEntity,
+} from './entities';
 import { compileError } from './errors';
 import { freshKinds } from './kindTemplates';
+import { checkLinearUses } from './linearity';
 import { TypePrinter } from './prettyType';
-import type {
-  Binder,
-  RBindGroup,
-  RBinding,
-  RConstraint,
-  RExpr,
-  RFieldBind,
-  RPat,
-  RRhs,
-  RSigType,
-  RStmt,
-  RType,
-  VarRef,
+import {
+  type Binder,
+  type LocalVar,
+  type RBindGroup,
+  type RBinding,
+  type RConstraint,
+  type RExpr,
+  type RFieldBind,
+  type RPat,
+  rpatLocals,
+  type RRhs,
+  type RSigType,
+  type RStmt,
+  type RType,
+  type VarRef,
 } from './rast';
 import { RecursionBudget } from './recursionBudget';
+import { rolesOf } from './roles';
 import type { Span } from './syntax';
-import { TypeConversion } from './typeConversion';
+import { constraintPreds, TypeConversion } from './typeConversion';
 import { walkGraph } from './typeGraph';
 import {
   couldMatch,
@@ -44,6 +60,7 @@ import {
   freshKindVar,
   freshSkolem,
   freshTypeVar,
+  functionParts,
   instantiateType,
   isFamilyApplication,
   type Kind,
@@ -241,6 +258,7 @@ export class Checker {
   ): { retained: EvidenceHole[]; deferred: EvidenceHole[] } {
     const retained: EvidenceHole[] = [];
     const deferred: EvidenceHole[] = [];
+    givens = normalizeGivens(givens);
     const work = [...holes];
     const depths = new Map<EvidenceHole, number>();
     for (let index = 0; index < work.length; index++) {
@@ -275,6 +293,26 @@ export class Checker {
           hole.solution = given.evidence;
           continue;
         }
+      }
+      if (pred.cls === CONSTRAINT_TYPE_CLASS) {
+        const preds = constraintPreds(pred.type);
+        if (preds.length !== 1) {
+          typeError(hole.span, '制約のタプルを型変数の制約に当てはめることは、この採点環境では使えません。');
+        }
+        if (preds[0].cls !== CONSTRAINT_TYPE_CLASS) {
+          hole.pred = preds[0];
+          index--;
+          continue;
+        }
+      }
+      if (pred.cls === COERCIBLE_CLASS) {
+        const solution = this.solveCoercible(pred, givens, hole.span);
+        if (solution) {
+          hole.solution = solution;
+          continue;
+        }
+        retained.push(hole);
+        continue;
       }
       if (pred.cls === HAS_FIELD_CLASS) {
         const solution = this.solveHasField(pred, hole.span);
@@ -374,6 +412,94 @@ export class Checker {
     }
     this.unify(field, instantiateType(info.fieldType, args), span, `フィールド ${info.name} の型`);
     return { kind: 'field', field: info };
+  }
+
+  /**
+   * Solves `Coercible a b` by how values of the two types are represented: the same types, a given constraint, a
+   * newtype and its field, or applications of the same type whose arguments convert as the type's roles allow.
+   * Types not yet known leave the constraint for later.
+   */
+  private solveCoercible(
+    pred: Pred,
+    givens: readonly { pred: Pred; evidence: Evidence }[],
+    span: Span
+  ): Evidence | undefined {
+    const [from, to] = splitApp(pred.type).args;
+    const leaves: Evidence[] = [];
+    const coercibleGivens = givens.filter((given) => given.pred.cls === COERCIBLE_CLASS);
+    const fail = (a: Type, b: Type): never => {
+      const printer = new TypePrinter();
+      typeError(span, `型 ${printer.show(a)} と型 ${printer.show(b)} は表現が同じではないので、coerce できません。`);
+    };
+    const solve = (a: Type, b: Type, depth: number): CoercionSpec | 'stuck' => {
+      if (depth > 200) typeError(span, '型の表現の計算が上限を超えました。');
+      const left = prune(this.reduceFamilies(a));
+      const right = prune(this.reduceFamilies(b));
+      if (typesEqual(left, right)) return { k: 'refl' };
+      for (const given of coercibleGivens) {
+        const [givenFrom, givenTo] = splitApp(zonk(given.pred.type)).args;
+        const forward = typesEqual(givenFrom, left) && typesEqual(givenTo, right);
+        if (forward || (typesEqual(givenFrom, right) && typesEqual(givenTo, left))) {
+          let index = leaves.indexOf(given.evidence);
+          if (index < 0) index = leaves.push(given.evidence) - 1;
+          return { k: 'leaf', index, flipped: !forward };
+        }
+      }
+      const l = splitApp(left);
+      const r = splitApp(right);
+      // An unknown type stands for the other one when that is no newtype, which no other type is represented as.
+      for (const [variable, other] of [
+        [left, r],
+        [right, l],
+      ] as const) {
+        if (flexible(variable) && other.head.tag === 'tcon' && !unwrappable(other.head)) {
+          this.unify(left, right, span, '型の表現（coerce）');
+          return { k: 'refl' };
+        }
+      }
+      if (flexible(l.head) || flexible(r.head)) return 'stuck';
+      const sameHead =
+        l.args.length === r.args.length &&
+        (l.head.tag === 'tcon' && r.head.tag === 'tcon' ? l.head.entity === r.head.entity : typesEqual(l.head, r.head));
+      const roles = l.head.tag === 'tcon' ? rolesOf(l.head.entity) : l.args.map(() => 'nominal' as const);
+      const nominalEqual =
+        sameHead &&
+        l.args.every((arg, index) => (roles[index] ?? 'nominal') !== 'nominal' || typesEqual(arg, r.args[index]));
+      if (sameHead && (!unwrappable(l.head) || nominalEqual)) {
+        const params: CoercionSpec[] = [];
+        for (const [index, arg] of l.args.entries()) {
+          const role = roles[index] ?? 'nominal';
+          if (role === 'nominal') {
+            this.unify(arg, r.args[index], span, '型の表現（coerce）');
+            params.push({ k: 'refl' });
+          } else if (role === 'phantom') params.push({ k: 'refl' });
+          else {
+            const inner = solve(arg, r.args[index], depth + 1);
+            if (inner === 'stuck') return 'stuck';
+            params.push(inner);
+          }
+        }
+        if (params.every((param) => param.k === 'refl')) return { k: 'refl' };
+        if (l.head.tag === 'tcon' && l.head.entity === FUNCTION_TYPE)
+          return { k: 'fun', arg: params[0], res: params[1] };
+        if (l.head.tag === 'tcon' && l.head.entity === IO_TYPE) return { k: 'io', res: params[0] };
+        return { k: 'data', params };
+      }
+      const fromNewtype = unwrappable(l.head);
+      if (fromNewtype) {
+        const inner = solve(instantiateType(fromNewtype.fieldTypes[0], l.args), right, depth + 1);
+        return inner === 'stuck' ? 'stuck' : { k: 'unwrap', con: fromNewtype, inner };
+      }
+      const toNewtype = unwrappable(r.head);
+      if (toNewtype) {
+        const inner = solve(left, instantiateType(toNewtype.fieldTypes[0], r.args), depth + 1);
+        return inner === 'stuck' ? 'stuck' : { k: 'wrap', con: toNewtype, inner };
+      }
+      if ([...typeVarsOf(left), ...typeVarsOf(right)].some((variable) => !variable.skolem)) return 'stuck';
+      return fail(left, right);
+    };
+    const spec = solve(from, to, 0);
+    return spec === 'stuck' ? undefined : { kind: 'coercion', spec, leaves };
   }
 
   /** Reduces the type family applications of a type by their equations, as far as its known parts allow. */
@@ -564,6 +690,10 @@ export class Checker {
   }
 
   checkExpr(expr: RExpr, expected: Type, context?: string): void {
+    if (expr.k === 'lambda' && functionParts(expected)?.multiplicity) {
+      this.checkLinearLambda(expr, expected, context);
+      return;
+    }
     const actual = this.inferExpr(expr);
     this.unify(actual, expected, expr.span, context);
   }
@@ -747,6 +877,24 @@ export class Checker {
     return type;
   }
 
+  /** Checks a lambda against a function type of LinearTypes, whose linear arguments it must use exactly once. */
+  private checkLinearLambda(expr: Extract<RExpr, { k: 'lambda' }>, expected: Type, context?: string): void {
+    this.inPatternScope(() => {
+      let remaining = expected;
+      const linear: LocalVar[] = [];
+      for (const pat of expr.pats) {
+        const { param, result, multiplicity } = this.splitFunction(remaining, expr.span, context ?? 'ラムダ式');
+        this.inferPat(pat, param);
+        if (multiplicity) linear.push(...rpatLocals(pat));
+        remaining = result;
+      }
+      this.checkExpr(expr.body, remaining, context);
+      const body = { body: { k: 'plain', expr: expr.body } as const, where: { bindings: [] }, span: expr.span };
+      if (linear.length > 0) checkLinearUses(linear, body);
+    });
+    expr.type = expected;
+  }
+
   private inferLambda(expr: Extract<RExpr, { k: 'lambda' }>): Type {
     return this.inPatternScope(() => {
       const paramTypes = expr.pats.map((pat) => {
@@ -835,7 +983,7 @@ export class Checker {
     this.wanted = scope.savedWanted as EvidenceHole[];
     const { retained, deferred } = this.simplify(inner, scope.outer, scope.givens);
     for (const hole of retained) {
-      const evidence = entailByGivens(scope.givens, hole.pred);
+      const evidence = entailByGivens(normalizeGivens(scope.givens), hole.pred);
       if (evidence) {
         hole.solution = evidence;
         continue;
@@ -853,8 +1001,9 @@ export class Checker {
 
   private inferApp(expr: Extract<RExpr, { k: 'app' }>): Type {
     const fn = prune(this.inferExpr(expr.fn));
-    const { head, args } = splitApp(fn);
-    if (head.tag === 'tcon' && head.entity === FUNCTION_TYPE && args.length === 2) {
+    const parts = functionParts(fn);
+    if (parts) {
+      const args = [parts.param, parts.result];
       const param = prune(args[0]);
       if (param.tag === 'forall') {
         const dictParams = this.checkAgainstScheme(polytypeScheme(param), (type) =>
@@ -920,11 +1069,9 @@ export class Checker {
    * The argument and result types of a function type, which a signature may give polymorphic arguments, as
    * RankNTypes allows; a type not yet known becomes a function of fresh types.
    */
-  splitFunction(type: Type, span: Span, context: string): { param: Type; result: Type } {
-    const { head, args } = splitApp(prune(type));
-    if (head.tag === 'tcon' && head.entity === FUNCTION_TYPE && args.length === 2) {
-      return { param: args[0], result: args[1] };
-    }
+  splitFunction(type: Type, span: Span, context: string): { param: Type; result: Type; multiplicity?: Type } {
+    const parts = functionParts(type);
+    if (parts) return parts;
     const param = this.freshVar();
     const result = this.freshVar();
     this.unify(type, fnType(param, result), span, context);
@@ -1197,12 +1344,19 @@ export class Checker {
       this.withScopedTypes(bound, () =>
         this.inPatternScope(() => {
           let remaining = type;
+          const linear: LocalVar[] = [];
           for (const pat of clause.pats) {
-            const { param, result } = this.splitFunction(remaining, clause.span, `${bindingLabel(binding)} の引数`);
+            const { param, result, multiplicity } = this.splitFunction(
+              remaining,
+              clause.span,
+              `${bindingLabel(binding)} の引数`
+            );
             this.inferPat(pat, param);
+            if (multiplicity) linear.push(...rpatLocals(pat));
             remaining = result;
           }
           this.checkRhs(clause.rhs, remaining);
+          if (linear.length > 0) checkLinearUses(linear, clause.rhs);
         })
       );
     }
@@ -1513,6 +1667,26 @@ export class Checker {
   }
 }
 
+/** Givens with their constraints written as types made the classes' constraints, once their heads are classes. */
+function flexible(head: Type): boolean {
+  return head.tag === 'tvar' && !head.skolem;
+}
+
+/** The constructor of a newtype at the head of a type, whose field `Coercible` may take the value as. */
+function unwrappable(head: Type): ConInfo | undefined {
+  if (head.tag !== 'tcon') return undefined;
+  const con = head.entity.cons.length === 1 ? head.entity.cons[0] : undefined;
+  return con?.isNewtype && !con.instanceArgs ? con : undefined;
+}
+
+function normalizeGivens(givens: readonly { pred: Pred; evidence: Evidence }[]): { pred: Pred; evidence: Evidence }[] {
+  return givens.map((given) => {
+    if (given.pred.cls !== CONSTRAINT_TYPE_CLASS) return given;
+    const preds = constraintPreds(zonk(given.pred.type));
+    return preds.length === 1 ? { pred: preds[0], evidence: given.evidence } : given;
+  });
+}
+
 function holesByVariable(holes: readonly EvidenceHole[]): Map<TVar, EvidenceHole[]> {
   const byVar = new Map<TVar, EvidenceHole[]>();
   for (const hole of holes) {
@@ -1618,6 +1792,7 @@ export function typeVarNames(types: readonly RType[]): string[] {
       for (const elem of type.elems) collect(elem);
     } else if (type.k === 'fun') {
       collect(type.from);
+      if (type.multiplicity) collect(type.multiplicity);
       collect(type.to);
     } else if (type.k === 'kinded' || type.k === 'kindapp') {
       collect(type.type);

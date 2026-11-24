@@ -233,9 +233,15 @@ instance Monad ((->) r) where
 
 class Semigroup a where
   (<>) :: a -> a -> a
+  sconcat :: NonEmpty a -> a
   stimes :: Integral b => b -> a -> a
+  sconcat (a :| as) = sconcatList a as
   stimes n x = if n <= fromInteger 0 then errorWithoutStackTrace "stimes: positive multiplier expected"
                else if n == fromInteger 1 then x else x <> stimes (n - fromInteger 1) x
+
+sconcatList :: Semigroup a => a -> [a] -> a
+sconcatList b (c : cs) = b <> sconcatList c cs
+sconcatList b [] = b
 
 class Semigroup a => Monoid a where
   mempty :: a

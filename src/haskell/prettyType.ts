@@ -60,6 +60,12 @@ export class TypePrinter {
     const { head, args } = splitApp(type);
     if (head.tag === 'tcon') {
       const entity = head.entity;
+      if (entity.name === 'FUN' && entity.module === 'GHC.Types' && args.length === 3) {
+        const multiplicity = prune(args[0]);
+        const mark = multiplicity.tag === 'tcon' && multiplicity.entity.name === 'One' ? '1' : this.show(args[0], 2);
+        const text = `${this.show(args[1], 1)} %${mark} -> ${this.show(args[2], 0)}`;
+        return precedence > 0 ? `(${text})` : text;
+      }
       if (entity.special === 'function' && args.length === 2) {
         const text = `${this.show(args[0], 1)} -> ${this.show(args[1], 0)}`;
         return precedence > 0 ? `(${text})` : text;

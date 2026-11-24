@@ -38,6 +38,13 @@ export interface TypeEntity {
   literal?: string | bigint;
   /** Whether a standalone kind signature specifies the type's kind variables with `forall`, which `T @k` sets. */
   kindSpecified?: boolean;
+  /**
+   * The roles of a data type's parameters, as far as they are known: what `Coercible` needs of two applications of
+   * the type to convert one to the other, argument by argument.
+   */
+  roles?: Role[];
+  /** For a class used as a type, as ConstraintKinds allows, the class. */
+  classOf?: ClassEntity;
   /** For a data constructor used as a type, as DataKinds promotes it, the constructor. */
   promotedFrom?: ConInfo;
   /** How the type prints when it is special syntax: lists, tuples, unit, functions, and a class's arguments. */
@@ -153,6 +160,11 @@ export type Evidence =
   | { kind: 'equality' }
   /** The evidence of `HasField "f" r a`: the selector of the field. */
   | { kind: 'field'; field: FieldInfo }
+  /**
+   * The evidence of `Coercible a b`: how to convert a value of one type to the other and back, with the evidence of
+   * the given `Coercible` constraints it uses as `leaves`.
+   */
+  | { kind: 'coercion'; spec: CoercionSpec; leaves: Evidence[] }
   /** The evidence of `KnownNat n` or `KnownSymbol s`: the literal's value. */
   | { kind: 'literal'; value: string | bigint }
   | { kind: 'instance'; instance: InstanceInfo; args: Evidence[] }
@@ -198,3 +210,26 @@ export function resolveEvidence(evidence: Evidence): Evidence {
   while (current.kind === 'hole' && current.hole.solution) current = current.hole.solution;
   return current;
 }
+
+/** A parameter's role: whether `Coercible` may convert it (representational), ignores it (phantom), or not (nominal). */
+export type Role = 'nominal' | 'representational' | 'phantom';
+
+/**
+ * How `Coercible a b` converts a value of type `a` to type `b`, which run time follows forward, and back from `b` to
+ * `a`, which reverses each step.
+ */
+export type CoercionSpec =
+  /** The types are the same. */
+  | { k: 'refl' }
+  /** A given constraint's conversion, reversed when `flipped`. */
+  | { k: 'leaf'; index: number; flipped: boolean }
+  /** `a` is the newtype of the constructor, whose field converts to `b`. */
+  | { k: 'unwrap'; con: ConInfo; inner: CoercionSpec }
+  /** `b` is the newtype of the constructor, whose field `a` converts to. */
+  | { k: 'wrap'; con: ConInfo; inner: CoercionSpec }
+  /** Both are functions, of arguments and results that convert. */
+  | { k: 'fun'; arg: CoercionSpec; res: CoercionSpec }
+  /** Both are `IO` actions, of results that convert. */
+  | { k: 'io'; res: CoercionSpec }
+  /** Both apply the same data type, to arguments that convert by position; its fields convert by their types. */
+  | { k: 'data'; params: CoercionSpec[] };

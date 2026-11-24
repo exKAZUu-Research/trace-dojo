@@ -14,6 +14,7 @@ import {
   UNIT_CON,
   WORD_TYPE,
 } from './builtinTypes';
+import { coercionPrimitive } from './coercion';
 import type { CaseCore, Core, FunctionInfo, GlobalDef, IODoCore, IOStmt, LamCore } from './core';
 import {
   type ClassEntity,
@@ -1475,9 +1476,20 @@ export class Codegen {
     return mapGraph<Evidence, Core>(
       evidence,
       resolveEvidence,
-      (node) => (node.kind === 'super' ? [node.of] : node.kind === 'instance' ? node.args : []),
+      (node) =>
+        node.kind === 'super'
+          ? [node.of]
+          : node.kind === 'instance'
+            ? node.args
+            : node.kind === 'coercion'
+              ? node.leaves
+              : [],
       (node, mapped) => {
         switch (node.kind) {
+          case 'coercion': {
+            const prim: Core = { k: 'prim', prim: coercionPrimitive(node.spec, node.leaves.length) };
+            return mapped.length === 0 ? prim : { k: 'app', fn: prim, args: mapped };
+          }
           case 'param': {
             return this.paramRef(node.param);
           }

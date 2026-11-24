@@ -3,6 +3,7 @@ import { assert } from 'es-toolkit';
 import { CompileError } from '../interpreter/diagnostics';
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import {
+  COERCIBLE_CLASS,
   CONSTRAINT_KIND,
   DOUBLE_TYPE,
   HAS_FIELD_CLASS,
@@ -66,6 +67,7 @@ function primitiveExports(): ExportTable {
   for (const type of PRIMITIVE_TYPES)
     table.types.set(type.name, { entity: { kind: 'type', entity: type }, children: [] });
   table.types.set('HasField', { entity: { kind: 'class', entity: HAS_FIELD_CLASS }, children: [] });
+  table.types.set('Coercible', { entity: { kind: 'class', entity: COERCIBLE_CLASS }, children: [] });
   return table;
 }
 
@@ -377,7 +379,9 @@ function exportType(
     ? { entity: { kind: 'type', entity: primitive } as TypeLike, children: [] }
     : typeName === 'HasField'
       ? { entity: { kind: 'class', entity: HAS_FIELD_CLASS } as TypeLike, children: [] }
-      : source.types.get(typeName);
+      : typeName === 'Coercible'
+        ? { entity: { kind: 'class', entity: COERCIBLE_CLASS } as TypeLike, children: [] }
+        : source.types.get(typeName);
   if (!entry) throw new Error(`The library has no type ${typeName} for ${moduleName}`);
   const selected =
     children === 'all'

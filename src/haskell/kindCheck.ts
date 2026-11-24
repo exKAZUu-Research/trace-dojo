@@ -4,7 +4,14 @@ import { compileError } from './errors';
 import type { Checker } from './infer';
 import { checkSchemeAmbiguity, typeVarNames } from './infer';
 import { rememberKind } from './kindTemplates';
-import type { RType } from './rast';
+import {
+  CONSTRAINT_SYNONYMS,
+  directClassConstraint,
+  expandSynonymHead,
+  isConstraintType,
+  type RType,
+  SYNONYM_RHS,
+} from './rast';
 import type { RClassDecl, RConDecl, RDataDecl, RModule, RSynonymDecl, RTypeEquation } from './rename';
 import {
   CONSTRAINT,
@@ -31,6 +38,7 @@ type KindDeclaration =
 
 export function inferKinds(checker: Checker, module: RModule): void {
   prepareFamilies(checker, module);
+  for (const decl of module.synonyms) SYNONYM_RHS.set(decl.entity, { params: decl.params, rhs: decl.rhs });
   const declarations = prepareDeclarations(checker, module);
   const owner = new Map<object, number>(declarations.map((entry, index) => [entry.decl.entity, index]));
   const edges = declarations.map((entry) =>
@@ -151,7 +159,7 @@ function kindDependencies(entry: KindDeclaration): Set<object> {
   const found = new Set<object>();
   const work: RType[] = [];
   if (entry.kind === 'data') {
-    for (const con of entry.decl.cons) work.push(...con.fields);
+    for (const con of entry.decl.cons) work.push(...con.fields, ...(con.context ?? []));
   } else if (entry.kind === 'synonym') work.push(entry.decl.rhs);
   else {
     work.push(...entry.decl.supers);
@@ -180,12 +188,13 @@ function inferGroup(checker: Checker, group: KindDeclaration[]): void {
 }
 
 /**
- * Gives the kind variables nothing determined the kind `Type`, as Haskell 98 does; with PolyKinds, a data type or
- * synonym keeps them, so that its kind is polymorphic.
+ * Gives the kind variables nothing determined the kind `Type`, as Haskell 98 does; with PolyKinds, a data type,
+ * synonym, or class keeps them, so that its kind is polymorphic.
  */
 function defaultDeclarations(group: KindDeclaration[], polyKinds: boolean): void {
   for (const entry of group) {
     if (entry.kind === 'class') {
+      if (polyKinds) continue;
       entry.decl.entity.tyvarKind = defaultKind(entry.decl.entity.tyvarKind);
       const { packed } = entry.decl.entity;
       if (packed) packed.kind = defaultKind(packed.kind);
@@ -206,6 +215,17 @@ function inferTypeDeclaration(checker: Checker, entry: Exclude<KindDeclaration, 
       if (conDecl.ownVars) inferConstructorVariables(checker, entry.decl, conDecl, kinds);
       else conDecl.con.fieldTypes = conDecl.fields.map((field) => checker.convertType(field, vars, varKinds, STAR));
     }
+  } else if (isConstraintType(entry.decl.rhs)) {
+    // A synonym of constraints stands for them in contexts; its parameters take the kinds the constraints give them.
+    CONSTRAINT_SYNONYMS.add(entry.decl.entity);
+    let resultKind = entry.decl.entity.kind;
+    for (let index = 0; index < decl.params.length; index++) resultKind = (resultKind as { tag: 'arrow'; to: Kind }).to;
+    const expanded = expandSynonymHead(entry.decl.rhs);
+    // A synonym of a class itself, `type C = Show`, is a class too, to apply to types where it is used.
+    if (expanded.k === 'tuple' || directClassConstraint(expanded)) {
+      unifyKinds(resultKind, CONSTRAINT);
+      checker.convertConstraints([entry.decl.rhs], vars, varKinds);
+    } else checker.convertType(expanded, vars, varKinds, resultKind);
   } else {
     let resultKind = entry.decl.entity.kind;
     for (let index = 0; index < decl.params.length; index++) resultKind = (resultKind as { tag: 'arrow'; to: Kind }).to;

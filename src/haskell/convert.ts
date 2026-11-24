@@ -21,11 +21,13 @@ import type {
   Import,
   ImportItem,
   Module,
+  Multiplicity,
   Name,
   Operator,
   Pat,
   QName,
   Rhs,
+  Role,
   SigType,
   SourceLiteral,
   Span,
@@ -37,10 +39,6 @@ import type {
 
 /** What each node type stands for, in the message that rejects it. */
 const UNSUPPORTED_NODES: Record<string, string> = {
-  linear_function: '線形型（%1 ->）',
-  modifier: '多重度の注釈（%1）',
-  role_annotation: '型の役割の注釈（type role）',
-  type_role: '型の役割の注釈（type role）',
   unboxed_sum: 'ボックス化されない和型',
   unboxed_tuple: 'ボックス化されないタプル',
   unboxed_unit: 'ボックス化されないタプル',
@@ -49,7 +47,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   special: '特別な構成子の宣言',
   pragma: 'プラグマ（{-# ... #-}）',
   cpp: 'C プリプロセッサの指令',
-  via: 'deriving via',
   calling_convention: '外部の関数の宣言（foreign）',
   entity: '外部の関数の宣言（foreign）',
   safety: '外部の関数の宣言（foreign）',
@@ -408,6 +405,9 @@ function convertTopDecl(node: Node): Decl[] {
     case 'deriving_instance': {
       return [convertStandaloneDeriving(node)];
     }
+    case 'role_annotation': {
+      return [convertRoleAnnotation(node)];
+    }
     case 'pattern_synonym': {
       return [convertPatternSynonym(node)];
     }
@@ -662,23 +662,23 @@ function convertData(node: Node, isInstance = false): Decl {
 function convertDerivingClauses(node: Node): DerivingClause[] {
   const deriving: DerivingClause[] = [];
   for (const derivingNode of fields(node, 'deriving')) {
-    const strategy = derivingStrategy(derivingNode);
+    const { strategy, via } = derivingStrategy(derivingNode);
     const classes = required(derivingNode, 'classes');
-    for (const cls of derivingClasses(classes)) deriving.push({ cls, strategy, span: cls.span });
+    for (const cls of derivingClasses(classes)) deriving.push({ cls, strategy, via, span: cls.span });
   }
   return deriving;
 }
 
 /** The strategy a `deriving` clause or standalone declaration names, if any. */
-function derivingStrategy(node: Node): DerivingStrategy | undefined {
+function derivingStrategy(node: Node): { strategy?: DerivingStrategy; via?: TypeExpr } {
   const via = field(node, 'via');
   if (via) {
     if (!extensions.has('DerivingVia'))
       throw syntaxError(spanOf(via), 'deriving via を使うには、DerivingVia の拡張が要ります。');
-    throw unsupported(via);
+    return { strategy: 'via', via: convertType(required(via, 'type')) };
   }
   const strategyNode = field(node, 'strategy');
-  if (!strategyNode) return undefined;
+  if (!strategyNode) return {};
   if (!extensions.has('DerivingStrategies')) {
     throw syntaxError(spanOf(strategyNode), 'deriving の戦略を書くには、DerivingStrategies の拡張が要ります。');
   }
@@ -686,9 +686,36 @@ function derivingStrategy(node: Node): DerivingStrategy | undefined {
   if (strategy === 'anyclass' && !extensions.has('DeriveAnyClass')) {
     throw syntaxError(spanOf(strategyNode), 'deriving anyclass を使うには、DeriveAnyClass の拡張が要ります。');
   }
-  if (strategy === 'newtype')
-    throw unsupportedError(spanOf(strategyNode), 'newtype の deriving（GeneralizedNewtypeDeriving）');
-  return strategy;
+  if (strategy === 'newtype' && !extensions.has('GeneralizedNewtypeDeriving')) {
+    throw syntaxError(
+      spanOf(strategyNode),
+      'deriving newtype を使うには、GeneralizedNewtypeDeriving の拡張が要ります。'
+    );
+  }
+  return { strategy };
+}
+
+/** The multiplicity of LinearTypes' arrow: `%1` or `⊸` (no modifier), `%Many`, `%One`, or a variable. */
+function convertMultiplicity(node: Node | null | undefined): Multiplicity {
+  if (!node) return { kind: 'one' };
+  const inner = namedChildren(node)[0];
+  const text = inner?.text.trim() ?? '';
+  if (text === '1' || text === 'One') return { kind: 'one' };
+  if (text === 'Many') return { kind: 'many' };
+  if (inner?.type === 'variable') return { kind: 'var', name: text, span: spanOf(inner) };
+  throw syntaxError(spanOf(node), `多重度 ${text} は書けません（%1・%Many・型変数のどれかを書いてください）。`);
+}
+
+/** Converts `type role T nominal _`. */
+function convertRoleAnnotation(node: Node): Decl {
+  if (!extensions.has('RoleAnnotations')) {
+    throw syntaxError(spanOf(node), '型の役割の注釈には、RoleAnnotations の拡張が要ります。');
+  }
+  const roles = fields(node, 'role').map((roleNode) => {
+    const text = roleNode.text.trim();
+    return text === '_' ? undefined : (text as Role);
+  });
+  return { kind: 'roleAnnotation', name: qualifiedName(required(node, 'type')).name, roles, span: spanOf(node) };
 }
 
 function convertStandaloneDeriving(node: Node): Decl {
@@ -699,7 +726,7 @@ function convertStandaloneDeriving(node: Node): Decl {
     const child = field(node, name);
     if (child) throw unsupported(child);
   }
-  const strategy = derivingStrategy(node);
+  const { strategy, via } = derivingStrategy(node);
   const contextNode = field(node, 'context');
   const nameNode = required(node, 'name');
   const types = fields(node, 'patterns').flatMap((patternsNode) => namedChildren(patternsNode));
@@ -712,6 +739,7 @@ function convertStandaloneDeriving(node: Node): Decl {
     cls: qualifiedName(nameNode).name,
     type: convertType(types[0]),
     strategy,
+    via,
     span: spanOf(node),
   };
 }
@@ -1106,7 +1134,8 @@ function convertGadtConstructor(node: Node): ConDecl[] {
     result = convertType(required(typeNode, 'type'));
   } else {
     let current = typeNode.type === 'prefix' ? required(typeNode, 'type') : typeNode;
-    while (current.type === 'function') {
+    // A constructor's fields are linear, so an arrow of a multiplicity separates them like any other.
+    while (current.type === 'function' || current.type === 'linear_function') {
       const parameter = required(current, 'parameter');
       if (isStrictField(parameter)) strictFields.push(fieldTypes.length);
       fieldTypes.push(convertFieldType(parameter));
@@ -1484,6 +1513,20 @@ function convertType(node: Node): TypeExpr {
       const parameter = required(node, 'parameter');
       const result = required(node, 'result');
       return { kind: 'tfun', from: convertQuantifiedType(parameter), to: convertQuantifiedType(result), span };
+    }
+    case 'linear_function': {
+      if (!extensions.has('LinearTypes')) {
+        throw syntaxError(span, '線形型の矢印を使うには、LinearTypes の拡張が要ります。');
+      }
+      const parameter = required(node, 'parameter');
+      const result = required(node, 'result');
+      return {
+        kind: 'tfun',
+        from: convertQuantifiedType(parameter),
+        to: convertQuantifiedType(result),
+        multiplicity: convertMultiplicity(field(node, 'multiplicity')),
+        span,
+      };
     }
     case 'list': {
       const elements = fields(node, 'element');

@@ -1,6 +1,6 @@
 import { assert } from 'es-toolkit';
 
-import { EQUALITY_CLASS, FUNCTION_TYPE } from './builtinTypes';
+import { COERCIBLE_CLASS, COERCIBLE_TYPES, EQUALITY_CLASS, FUNCTION_TYPE } from './builtinTypes';
 import { type ClassEnv, superPred } from './classEnv';
 import { deriveInstance, FUNCTOR_LIKE_CLASSES } from './deriving';
 import { type ClassEntity, type Evidence, type InstanceInfo, nextId, type ValueEntity } from './entities';
@@ -10,6 +10,7 @@ import { inferKinds } from './kindCheck';
 import { TypePrinter } from './prettyType';
 import type { RBinding, RExpr, RType } from './rast';
 import type { RClassDecl, RDataDecl, RInstanceDecl, RModule } from './rename';
+import { annotateRoles, atLeastAsStrict, inferredRoles } from './roles';
 import type { DerivingStrategy, Span } from './syntax';
 import {
   defaultKind,
@@ -19,6 +20,7 @@ import {
   type Kind,
   mapType,
   matchType,
+  parameterKinds,
   type Pred,
   prune,
   quantifyType,
@@ -64,9 +66,10 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
   inferKinds(checker, module);
   applyDefaultDecls(checker, module);
   for (const decl of module.dataDecls) defineConstructors(decl);
+  checkRoleAnnotations(module);
   for (const decl of module.classes) defineClassMethods(decl, module.extensions.has('UndecidableSuperClasses'));
-  const instanceDecls = module.instances.map((decl) =>
-    declareInstance(checker, decl, module.name, module.extensions.has('UndecidableInstances'))
+  const instanceDecls = module.instances.map(
+    (decl) => declareInstance(checker, decl, module.name, module.extensions.has('UndecidableInstances')).declared
   );
   const derived = [
     ...deriveInstances(checker, module, options),
@@ -77,8 +80,12 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
     checkInstanceSupers(checker, declared.info, declared.span);
   }
   checker.inferBindGroup(module.values);
-  for (const declared of [...instanceDecls, ...derived])
-    instances.push({ ...checkInstanceMethods(checker, declared), sourceDefined: instanceDecls.includes(declared) });
+  for (const declared of [...instanceDecls, ...derived]) {
+    instances.push({
+      ...checkInstanceMethods(checker, declared, options.derivingSupport('coerce')),
+      sourceDefined: instanceDecls.includes(declared),
+    });
+  }
   const defaults = module.classes.flatMap((decl) => checkDefaults(checker, decl));
   const main = options.isProgram ? checkMain(checker, module, options.builtins) : undefined;
   const hole = checker.holes[0];
@@ -90,6 +97,23 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
   }
   checker.solveTop();
   return { instances, defaults, main };
+}
+
+/** Applies the module's `type role` annotations, which may only make a parameter's role stricter. */
+function checkRoleAnnotations(module: RModule): void {
+  for (const { entity, roles } of module.roleAnnotations) annotateRoles(entity, roles);
+  for (const { entity, roles, span } of module.roleAnnotations) {
+    const required = inferredRoles(entity);
+    const params = module.dataDecls.find((decl) => decl.entity === entity)?.params ?? [];
+    for (const [index, role] of roles.entries()) {
+      if (role && !atLeastAsStrict(role, required[index])) {
+        throw compileError(
+          span,
+          `型 ${entity.name} の型変数 ${params[index] ?? index + 1} の役割は、${required[index]} より緩くできません（注釈は ${role} です）。`
+        );
+      }
+    }
+  }
 }
 
 function applyDefaultDecls(checker: Checker, module: RModule): void {
@@ -150,19 +174,26 @@ interface DeclaredInstance {
   typeNames: string[];
   bindings: RBinding[];
   span: Span;
+  /**
+   * For an instance that `deriving newtype` or `deriving via` derives, the type whose instance it reuses, with the
+   * instance's variables as `TGen` indices: each method is that instance's, coerced.
+   */
+  rep?: Type;
 }
 
 function declareInstance(
   checker: Checker,
   decl: RInstanceDecl,
   moduleName: string,
-  undecidable: boolean
-): DeclaredInstance {
+  undecidable: boolean,
+  via?: RType
+): { declared: DeclaredInstance; vars: Map<string, Type>; varKinds: Map<string, Kind> } {
   const names = typeVarNames([decl.type]);
   const kinds: Kind[] = names.map(() => freshKindVar());
   const vars = new Map<string, Type>(names.map((name, index) => [name, { tag: 'tgen', index }]));
   const varKinds = new Map<string, Kind>(names.map((name, index) => [name, kinds[index]]));
   const head = checker.convertType(decl.type, vars, varKinds, checker.classKind(decl.cls, decl.span));
+  const rep = via && checker.convertType(via, vars, varKinds, checker.classKind(decl.cls, decl.span));
   const context = checker.convertConstraints(decl.context, vars, varKinds);
   if (splitApp(head).head.tag !== 'tcon') {
     throw unsupportedError(decl.span, '型変数だけを型に書いたインスタンス');
@@ -171,7 +202,7 @@ function declareInstance(
   const info = makeInstance(decl.cls, kinds.map(defaultKind), head, context, moduleName, decl.span);
   if (!undecidable) validateInstanceTermination(info, decl.span);
   registerInstance(checker, info, decl.span);
-  return { info, typeNames: names, bindings: decl.bindings, span: decl.span };
+  return { declared: { info, typeNames: names, bindings: decl.bindings, span: decl.span, rep }, vars, varKinds };
 }
 
 function validateInstanceTermination(info: InstanceInfo, span: Span): void {
@@ -222,8 +253,13 @@ function checkInstanceSupers(checker: Checker, info: InstanceInfo, span: Span): 
   });
 }
 
-function checkInstanceMethods(checker: Checker, declared: DeclaredInstance): Omit<CheckedInstance, 'sourceDefined'> {
+function checkInstanceMethods(
+  checker: Checker,
+  declared: DeclaredInstance,
+  coerce: ValueEntity
+): Omit<CheckedInstance, 'sourceDefined'> {
   const { info } = declared;
+  if (declared.rep) return { info, bindings: coercedMethods(checker, declared, declared.rep, coerce) };
   const bindings: RBinding[] = [];
   for (const binding of [...declared.bindings, ...genericDefaultBindings(declared)]) {
     if (binding.k !== 'fun' || binding.binder.kind !== 'global') continue;
@@ -268,6 +304,101 @@ function checkInstanceMethods(checker: Checker, declared: DeclaredInstance): Omi
     bindings.push(implementationBinding);
   }
   return { info, bindings };
+}
+
+/**
+ * The methods of an instance that `deriving newtype` or `deriving via` derives: each the method of the instance of
+ * the type it reuses, coerced to the instance's own type, as `m = coerce (m :: method type at rep)`.
+ */
+function coercedMethods(
+  checker: Checker,
+  declared: DeclaredInstance,
+  repTemplate: Type,
+  coerce: ValueEntity
+): RBinding[] {
+  const { info, span } = declared;
+  const { cls } = info;
+  return cls.methods.map((method, index) => {
+    const implementation: ValueEntity = { id: nextId(), name: method.name, module: info.module, sort: 'var', span };
+    info.methods[index] = implementation;
+    const skolems = info.kinds.map((kind, position) =>
+      freshSkolem(kind, checker.level + 1, declared.typeNames[position])
+    );
+    const head = instantiateType(info.head, skolems);
+    const rep = instantiateType(repTemplate, skolems);
+    const contextParams = info.context.map((pred) =>
+      newDictParam({ cls: pred.cls, type: instantiateType(pred.type, skolems) })
+    );
+    const methodScheme = method.scheme as Scheme;
+    const ownPreds = methodScheme.preds.slice(1);
+    if (ownPreds.some((pred) => mentionsGen(pred.type, 0))) {
+      throw unsupportedError(
+        span,
+        `クラスの型に制約を付けたメソッド ${method.name} を持つクラスの、coerce による deriving`
+      );
+    }
+    const shifted = (classArg: Type): Scheme => ({
+      kinds: methodScheme.kinds.slice(1),
+      names: methodScheme.names?.slice(1),
+      preds: ownPreds.map((pred) => ({ cls: pred.cls, type: shiftGens(pred.type, [classArg]) })),
+      type: shiftGens(methodScheme.type, [classArg]),
+    });
+    const rest = shifted(head);
+    const repScheme = shifted(rep);
+    const givens = contextParams.map((param) => ({ pred: param.pred, evidence: { kind: 'param', param } as Evidence }));
+    let body: RExpr | undefined;
+    let bodyType: Type | undefined;
+    const origin = `${cls.name} の deriving`;
+    const ownParams = checker.checkAgainstScheme(
+      rest,
+      (type, ownSkolems) => {
+        const repType = instantiateType(repScheme.type, ownSkolems);
+        const classEvidence = checker.want({ cls, type: rep }, span, origin);
+        const ownEvidence = repScheme.preds.map((pred) =>
+          checker.want({ cls: pred.cls, type: instantiateType(pred.type, ownSkolems) }, span, origin)
+        );
+        const coercible = checker.want(
+          { cls: COERCIBLE_CLASS, type: tap(tcon(COERCIBLE_TYPES), repType, type) },
+          span,
+          origin
+        );
+        const methodExpr: RExpr = {
+          k: 'var',
+          ref: { kind: 'global', entity: method },
+          name: method.name,
+          span,
+          evidence: [classEvidence, ...ownEvidence],
+          type: repType,
+        };
+        const coerceExpr: RExpr = {
+          k: 'var',
+          ref: { kind: 'global', entity: coerce },
+          name: 'coerce',
+          span,
+          evidence: [coercible],
+          type: tap(tcon(FUNCTION_TYPE), repType, type),
+        };
+        body = { k: 'app', fn: coerceExpr, arg: methodExpr, span, type };
+        bodyType = type;
+      },
+      givens
+    );
+    return {
+      k: 'fun',
+      binder: { kind: 'global', entity: implementation },
+      clauses: [{ pats: [], rhs: { body: { k: 'plain', expr: body as RExpr }, where: { bindings: [] }, span }, span }],
+      span,
+      type: bodyType,
+      dictParams: [...contextParams, ...ownParams],
+    } satisfies RBinding;
+  });
+}
+
+function mentionsGen(type: Type, index: number): boolean {
+  const current = prune(type);
+  if (current.tag === 'tgen') return current.index === index;
+  if (current.tag === 'tap') return mentionsGen(current.fn, index) || mentionsGen(current.arg, index);
+  return false;
 }
 
 /**
@@ -365,9 +496,16 @@ function checkClauses(checker: Checker, binding: Extract<RBinding, { k: 'fun' }>
 
 // code-gauge-allow functionCognitiveComplexity -- Each branch checks one condition GHC places on a derivable class.
 function deriveInstances(checker: Checker, module: RModule, options: TypecheckOptions): DeclaredInstance[] {
-  const pending: { decl: RDataDecl; cls: ClassEntity; info: InstanceInfo; span: Span; anyclass: boolean }[] = [];
+  const pending: {
+    decl: RDataDecl;
+    cls: ClassEntity;
+    info: InstanceInfo;
+    span: Span;
+    how: DerivingHow;
+    rep?: Type;
+  }[] = [];
   for (const decl of module.dataDecls) {
-    for (const { cls, span, strategy } of decl.deriving) {
+    for (const { cls, span, strategy, via } of decl.deriving) {
       assert(cls, 'The derived class is unresolved');
       const special = decl.cons.find(({ con }) => con.exKinds)?.con;
       if (special) {
@@ -376,8 +514,15 @@ function deriveInstances(checker: Checker, module: RModule, options: TypecheckOp
           `構成子 ${special.name} に存在型の型変数・文脈・特定の結果の型があるので、${cls.name} を deriving できません。`
         );
       }
-      const anyclass = derivingStrategy(module, options, decl, cls, strategy, span) === 'anyclass';
-      const functorLike = !anyclass && FUNCTOR_LIKE_CLASSES.has(cls.name);
+      const how = derivingStrategy(module, options, decl, cls, strategy, span);
+      if (how === 'newtype' || how === 'via') {
+        const coerced = coercedDerivingHead(checker, decl, cls, how, via, span);
+        const info = makeInstance(cls, coerced.headKinds, coerced.head, [], module.name, span);
+        registerInstance(checker, info, span);
+        pending.push({ decl, cls, info, span, how, rep: coerced.rep });
+        continue;
+      }
+      const functorLike = how === 'stock' && FUNCTOR_LIKE_CLASSES.has(cls.name);
       const { kinds, head: fullHead } = declHead(decl);
       const headKinds = functorLike ? kinds.slice(0, -1) : kinds;
       const head = functorLike
@@ -385,15 +530,15 @@ function deriveInstances(checker: Checker, module: RModule, options: TypecheckOp
         : fullHead;
       const info = makeInstance(cls, headKinds, head, [], module.name, span);
       registerInstance(checker, info, span);
-      pending.push({ decl, cls, info, span, anyclass });
+      pending.push({ decl, cls, info, span, how });
     }
   }
   // Infer the contexts together, since derived instances of mutually recursive types depend on each other.
   for (let round = 0; round < 50; round++) {
     let changed = false;
     for (const item of pending) {
-      if (item.anyclass) continue;
-      const context = inferDerivedContext(checker, item.decl, item.cls, item.span);
+      if (item.how === 'anyclass') continue;
+      const context = inferDerivedContext(checker, item.decl, item.cls, item.span, item.rep);
       if (!sameContext(context, item.info.context)) {
         item.info.context = context;
         changed = true;
@@ -404,25 +549,91 @@ function deriveInstances(checker: Checker, module: RModule, options: TypecheckOp
   return pending.map((item) => ({
     info: item.info,
     typeNames: item.decl.params,
-    bindings: item.anyclass ? [] : deriveInstance(item.decl, item.cls, options.derivingSupport),
+    bindings: item.how === 'stock' ? deriveInstance(item.decl, item.cls, options.derivingSupport) : [],
     span: item.span,
+    rep: item.rep,
   }));
+}
+
+type DerivingHow = 'stock' | 'anyclass' | 'newtype' | 'via';
+
+/**
+ * The head of an instance that `deriving newtype` or `deriving via` derives for a data type, which leaves out as
+ * many of the type's last parameters as the class's argument takes, and the type whose instance it reuses: the
+ * newtype's field without those parameters, or the `via` type.
+ */
+function coercedDerivingHead(
+  checker: Checker,
+  decl: RDataDecl,
+  cls: ClassEntity,
+  how: 'newtype' | 'via',
+  via: RType | undefined,
+  span: Span
+): { headKinds: Kind[]; head: Type; rep: Type } {
+  if (cls.packed) throw unsupportedError(span, '多引数の型クラスの、newtype・via による deriving');
+  if (decl.instanceArgs) throw unsupportedError(span, 'データ族のインスタンスの、newtype・via による deriving');
+  const { kinds } = declHead(decl);
+  const dropped = parameterKinds(cls.tyvarKind).length;
+  if (dropped > kinds.length) {
+    throw compileError(span, `${decl.entity.name} の型引数が足りないので、${cls.name} を deriving できません。`);
+  }
+  const headKinds = kinds.slice(0, kinds.length - dropped);
+  const head = tap(tcon(decl.entity), ...headKinds.map((_, index): Type => ({ tag: 'tgen', index })));
+  if (how === 'via') {
+    const names = decl.params.slice(0, headKinds.length);
+    const vars = new Map(names.map((name, index): [string, Type] => [name, { tag: 'tgen', index }]));
+    const varKinds = new Map(names.map((name, index) => [name, headKinds[index]]));
+    const rep = checker.convertType(via as RType, vars, varKinds, cls.tyvarKind);
+    checker.checkKinds();
+    return { headKinds, head, rep };
+  }
+  const rep = etaReduce(decl.cons[0].con.fieldTypes[0], kinds.length, dropped);
+  if (!rep) {
+    throw compileError(
+      span,
+      `${decl.entity.name} の中身の型から最後の型引数を外せないので、${cls.name} を newtype で deriving できません。`
+    );
+  }
+  return { headKinds, head, rep };
+}
+
+/** A newtype's field type without the type's last `dropped` parameters, which must be its last arguments. */
+function etaReduce(field: Type, arity: number, dropped: number): Type | undefined {
+  let type = prune(field);
+  for (let index = arity - 1; index >= arity - dropped; index--) {
+    if (type.tag !== 'tap') return undefined;
+    const arg = prune(type.arg);
+    if (arg.tag !== 'tgen' || arg.index !== index || mentionsGen(type.fn, index)) return undefined;
+    type = prune(type.fn);
+  }
+  for (let index = arity - dropped; index < arity; index++) if (mentionsGen(type, index)) return undefined;
+  return type;
 }
 
 /** Instances that `deriving instance` declares, with the contexts they state. */
 function deriveStandaloneInstances(checker: Checker, module: RModule, options: TypecheckOptions): DeclaredInstance[] {
   return module.standaloneDerivings.map((standalone) => {
+    const instanceDecl = {
+      cls: standalone.cls,
+      type: standalone.type,
+      context: standalone.context,
+      bindings: [],
+      span: standalone.span,
+    };
+    const undecidable = module.extensions.has('UndecidableInstances');
+    if (standalone.strategy === 'via') {
+      return declareInstance(checker, instanceDecl, module.name, undecidable, standalone.via).declared;
+    }
     const { head } = splitRType(standalone.type);
     const decl = head.k === 'con' ? module.dataDecls.find((candidate) => candidate.entity === head.entity) : undefined;
     if (!decl) throw unsupportedError(standalone.span, 'このプログラムで定義していない型の deriving');
-    const strategy = derivingStrategy(module, options, decl, standalone.cls, standalone.strategy, standalone.span);
-    const declared = declareInstance(
-      checker,
-      { cls: standalone.cls, type: standalone.type, context: standalone.context, bindings: [], span: standalone.span },
-      module.name,
-      module.extensions.has('UndecidableInstances')
-    );
-    declared.bindings = strategy === 'anyclass' ? [] : deriveInstance(decl, standalone.cls, options.derivingSupport);
+    const how = derivingStrategy(module, options, decl, standalone.cls, standalone.strategy, standalone.span);
+    const { declared } = declareInstance(checker, instanceDecl, module.name, undecidable);
+    if (how === 'newtype') {
+      const { rep } = coercedDerivingHead(checker, decl, standalone.cls, 'newtype', undefined, standalone.span);
+      declared.rep = instantiateType(rep, splitApp(declared.info.head).args);
+    }
+    declared.bindings = how === 'stock' ? deriveInstance(decl, standalone.cls, options.derivingSupport) : [];
     return declared;
   });
 }
@@ -435,13 +646,21 @@ function derivingStrategy(
   cls: ClassEntity,
   strategy: DerivingStrategy | undefined,
   span: Span
-): 'stock' | 'anyclass' {
-  if (strategy === 'anyclass') return 'anyclass';
+): DerivingHow {
+  if (strategy === 'anyclass' || strategy === 'via') return strategy;
+  const isNewtype = decl.cons.length === 1 && decl.cons[0].con.isNewtype === true;
+  if (strategy === 'newtype') {
+    if (!isNewtype) {
+      throw compileError(span, `${decl.entity.name} は newtype ではないので、deriving newtype を使えません。`);
+    }
+    return 'newtype';
+  }
   const stock = options.builtins.derivableClasses.has(cls);
   if (!stock) {
     if (strategy === undefined && module.extensions.has('DeriveAnyClass')) return 'anyclass';
     if (['Generic', 'Data', 'Lift', 'Typeable'].includes(cls.name))
       throw unsupportedError(span, `${cls.name} の deriving`);
+    if (strategy === undefined && isNewtype && module.extensions.has('GeneralizedNewtypeDeriving')) return 'newtype';
     throw compileError(span, `クラス ${cls.name} は deriving できません。`);
   }
   const extension = { Functor: 'DeriveFunctor', Foldable: 'DeriveFoldable', Traversable: 'DeriveTraversable' }[
@@ -542,11 +761,11 @@ function checkDerivable(decl: RDataDecl, cls: ClassEntity, span: Span): void {
   }
 }
 
-function inferDerivedContext(checker: Checker, decl: RDataDecl, cls: ClassEntity, span: Span): Pred[] {
+function inferDerivedContext(checker: Checker, decl: RDataDecl, cls: ClassEntity, span: Span, rep?: Type): Pred[] {
   const { kinds } = declHead(decl);
   const params = kinds.map((kind, index) => freshSkolem(kind, 1_000_000, decl.params[index] ?? `t${index}`));
-  const work: Pred[] = [];
-  for (const { con } of decl.cons) {
+  const work: Pred[] = rep ? [{ cls, type: instantiateType(rep, params) }] : [];
+  for (const { con } of rep ? [] : decl.cons) {
     for (const field of con.fieldTypes) {
       if (FUNCTOR_LIKE_CLASSES.has(cls.name)) {
         for (const type of functorLikeConstraints(field, kinds.length - 1)) {

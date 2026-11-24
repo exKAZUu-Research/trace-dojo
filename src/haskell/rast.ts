@@ -151,7 +151,8 @@ export type RType =
   | { k: 'class'; entity: ClassEntity; span: Span }
   | { k: 'tuple'; elems: RType[]; span: Span }
   | { k: 'app'; fn: RType; arg: RType; span: Span }
-  | { k: 'fun'; from: RType; to: RType; span: Span }
+  /** A function type; LinearTypes' arrows give it a multiplicity other than `Many`: `One` or a variable. */
+  | { k: 'fun'; from: RType; to: RType; multiplicity?: RType; span: Span }
   /** A type with a kind annotation, `(t :: k)`; kinds are types whose constructors are `Type` and `Constraint`. */
   | { k: 'kinded'; type: RType; kind: RType; span: Span }
   | { k: 'forall'; binders: RBinder[]; context: RConstraint[]; body: RType; span: Span }
@@ -255,4 +256,71 @@ export function directClassConstraint(constraint: RType): { cls: ClassEntity; ty
   let type: RType = { k: 'con', entity: packed, span: constraint.span };
   for (const arg of args) type = { k: 'app', fn: type, arg, span: constraint.span };
   return { cls: head.entity, type, span: constraint.span };
+}
+
+/** Replaces the type variables of a type by name. */
+export function substituteRType(type: RType, substitution: ReadonlyMap<string, RType>): RType {
+  switch (type.k) {
+    case 'var': {
+      return substitution.get(type.name) ?? type;
+    }
+    case 'app': {
+      return { ...type, fn: substituteRType(type.fn, substitution), arg: substituteRType(type.arg, substitution) };
+    }
+    case 'fun': {
+      return {
+        ...type,
+        from: substituteRType(type.from, substitution),
+        to: substituteRType(type.to, substitution),
+        ...(type.multiplicity ? { multiplicity: substituteRType(type.multiplicity, substitution) } : {}),
+      };
+    }
+    case 'tuple': {
+      return { ...type, elems: type.elems.map((elem) => substituteRType(elem, substitution)) };
+    }
+    case 'kinded': {
+      return { ...type, type: substituteRType(type.type, substitution) };
+    }
+    default: {
+      return type;
+    }
+  }
+}
+
+/**
+ * The synonyms of constraints, as ConstraintKinds allows (`type C a = (Show a, Eq a)`), with their parameters and
+ * what they stand for; a context that names one has the constraints it stands for.
+ */
+export const CONSTRAINT_SYNONYMS = new WeakSet<object>();
+
+/** The parameters and right sides of a program's type synonyms, which contexts expand as written. */
+export const SYNONYM_RHS = new WeakMap<object, { params: string[]; rhs: RType }>();
+
+/** A type with the synonym it applies expanded, as long as its head is a synonym applied to enough types. */
+export function expandSynonymHead(type: RType): RType {
+  let current = type;
+  for (let count = 0; count < 1000; count++) {
+    const args: RType[] = [];
+    let head: RType = current;
+    while (head.k === 'app') {
+      args.unshift(head.arg);
+      head = head.fn;
+    }
+    const synonym = head.k === 'con' ? SYNONYM_RHS.get(head.entity) : undefined;
+    if (!synonym || args.length < synonym.params.length) return current;
+    const substitution = new Map(synonym.params.map((name, index) => [name, args[index]]));
+    let expanded = substituteRType(synonym.rhs, substitution);
+    for (const arg of args.slice(synonym.params.length)) expanded = { k: 'app', fn: expanded, arg, span: arg.span };
+    current = expanded;
+  }
+  return current;
+}
+
+/** Whether a synonym's right side is a constraint: a class applied to types, a tuple of them, or such a synonym. */
+export function isConstraintType(type: RType): boolean {
+  const expanded = expandSynonymHead(type);
+  if (expanded.k === 'tuple') return expanded.elems.length > 0 && expanded.elems.every(isConstraintType);
+  let head: RType = expanded;
+  while (head.k === 'app') head = head.fn;
+  return head.k === 'class' || (head.k === 'con' && CONSTRAINT_SYNONYMS.has(head.entity));
 }

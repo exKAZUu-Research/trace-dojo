@@ -1,13 +1,22 @@
-import { CONSTRAINT_KIND, FUNCTION_TYPE, tupleType, TYPE_KIND } from './builtinTypes';
+import {
+  classType,
+  CONSTRAINT_KIND,
+  CONSTRAINT_TYPE_CLASS,
+  constraintTupleType,
+  FUNCTION_TYPE,
+  MULTIPLICITY_FUNCTION_TYPE,
+  MULTIPLICITY_KIND,
+  tupleType,
+  TYPE_KIND,
+} from './builtinTypes';
 import type { ClassEntity, ConInfo, TypeEntity } from './entities';
 import { compileError, unsupportedError } from './errors';
 import { freshKind, instantiateKind, rememberKind } from './kindTemplates';
-import { directClassConstraint, type RConstraint, type RType } from './rast';
+import { directClassConstraint, expandSynonymHead, type RConstraint, type RType } from './rast';
 import type { Span } from './syntax';
 import {
   CONSTRAINT,
   freshKindVar,
-  freshTypeVar,
   instantiateType,
   type Kind,
   kindArrow,
@@ -64,17 +73,14 @@ export class TypeConversion {
     varKinds: ReadonlyMap<string, Kind>
   ): Pred[] {
     const predicates: Pred[] = [];
-    for (const constraint of context) {
+    for (const constraint of expandConstraintSynonyms(context)) {
       const direct = directClassConstraint(constraint);
       if (direct)
         predicates.push({
           cls: direct.cls,
           type: this.convert(direct.type, vars, varKinds, this.classKind(direct.cls, direct.span)),
         });
-      else {
-        this.convert(constraint, vars, varKinds, CONSTRAINT);
-        this.markUnsupported(constraint.span);
-      }
+      else predicates.push(...constraintPreds(this.convert(constraint, vars, varKinds, CONSTRAINT)));
     }
     return predicates;
   }
@@ -87,7 +93,8 @@ export class TypeConversion {
   }
 
   derivingClass(type: RType): ClassEntity | undefined {
-    if (type.k === 'class') return type.entity;
+    const expanded = expandSynonymHead(type);
+    if (expanded.k === 'class') return expanded.entity;
     this.convert(type, new Map(), new Map(), kindArrow(freshKindVar(), CONSTRAINT));
     this.markUnsupported(type.span);
     return;
@@ -109,7 +116,8 @@ export class TypeConversion {
 
   checkKinds(specialize = false): void {
     for (const { kind, expected, span } of this.kindInstances) {
-      if (this.polyKinds && !specialize) continue;
+      // With PolyKinds, a type of an earlier group has a polymorphic kind, which each use instantiates on its own.
+      if (this.polyKinds) continue;
       if (!unifyKinds(specialize ? expected : freshKind(expected).kind, kind)) {
         throw unsupportedError(span, '多相カインド（PolyKinds）');
       }
@@ -131,9 +139,11 @@ export class TypeConversion {
         return { type: found, kind: varKinds.get(type.name) as Kind };
       }
       case 'class': {
-        const kind = kindArrow(this.classKind(type.entity, type.span), CONSTRAINT);
-        this.markUnsupported(type.span);
-        return { type: freshTypeVar(kind, 0), kind };
+        const { entity } = type;
+        const paramKinds = entity.packed ? parameterKinds(entity.packed.kind) : [this.classKind(entity, type.span)];
+        let kind: Kind = CONSTRAINT;
+        for (const paramKind of paramKinds.toReversed()) kind = kindArrow(paramKind, kind);
+        return { type: tcon(classType(entity, kind)), kind };
       }
       case 'tuple': {
         return this.convertTuple(type, vars, varKinds);
@@ -141,6 +151,10 @@ export class TypeConversion {
       case 'fun': {
         const from = this.convert(type.from, vars, varKinds, STAR);
         const to = this.convert(type.to, vars, varKinds, STAR);
+        if (type.multiplicity) {
+          const multiplicity = this.convert(type.multiplicity, vars, varKinds, MULTIPLICITY_KIND);
+          return { type: tap(tcon(MULTIPLICITY_FUNCTION_TYPE), multiplicity, from, to), kind: STAR };
+        }
         return { type: tap(tcon(FUNCTION_TYPE), from, to), kind: STAR };
       }
       case 'con':
@@ -266,10 +280,8 @@ export class TypeConversion {
     for (const [index, part] of parts.entries())
       if (!unifyKinds(part.kind, kind))
         throw compileError(type.elems[index].span, 'タプルの型の種類（カインド）が合いません。');
-    if (kind === CONSTRAINT) {
-      this.markUnsupported(type.span);
-      return { type: freshTypeVar(kind, 0), kind };
-    }
+    if (kind === CONSTRAINT)
+      return { type: tap(tcon(constraintTupleType(parts.length)), ...parts.map((part) => part.type)), kind };
     let result: Type = tcon(tupleType(parts.length));
     for (const part of parts) result = tap(result, part.type);
     return { type: result, kind };
@@ -285,6 +297,11 @@ export class TypeConversion {
     while (head.k === 'app') {
       args.unshift(head.arg);
       head = head.fn;
+    }
+    if (head.k === 'con' && head.entity.sort === 'synonym' && !head.entity.synonym) {
+      // A synonym of constraints stands for what it is written as.
+      const expanded = expandSynonymHead(type);
+      if (expanded !== type) return this.convertTypeKind(expanded, vars, varKinds);
     }
     if (head.k === 'con' && head.entity.sort === 'synonym') {
       const entity = head.entity;
@@ -360,4 +377,34 @@ export class TypeConversion {
   private markUnsupported(span: Span, feature = '制約を型として扱う機能（ConstraintKinds）'): void {
     this.unsupportedFeature ??= { span, feature };
   }
+}
+
+/** The constraints a context stands for, with its tuples of constraints and its synonyms expanded. */
+function expandConstraintSynonyms(context: readonly RConstraint[]): RConstraint[] {
+  const result: RConstraint[] = [];
+  const pending = [...context].toReversed();
+  while (pending.length > 0) {
+    const constraint = expandSynonymHead(pending.pop() as RConstraint);
+    if (constraint.k === 'tuple') pending.push(...constraint.elems.toReversed());
+    else result.push(constraint);
+  }
+  return result;
+}
+
+/**
+ * The constraints a constraint written as a type stands for: a class's when its head is a class, those of a tuple's
+ * parts, or one of the class of constraint types when its head is a variable, which instantiating it makes a class.
+ */
+export function constraintPreds(type: Type): Pred[] {
+  const { head, args } = splitApp(prune(type));
+  if (head.tag === 'tcon' && head.entity.classOf) {
+    const cls = head.entity.classOf;
+    if (args.length === (cls.packed?.arity ?? 1)) {
+      return [{ cls, type: cls.packed ? tap(tcon(cls.packed), ...args) : args[0] }];
+    }
+  }
+  if (head.tag === 'tcon' && args.length > 0 && head.entity === constraintTupleType(args.length)) {
+    return args.flatMap(constraintPreds);
+  }
+  return [{ cls: CONSTRAINT_TYPE_CLASS, type }];
 }

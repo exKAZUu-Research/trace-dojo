@@ -1,7 +1,7 @@
 import { type ClassEntity, type ConInfo, nextId, type TypeEntity, type ValueEntity } from './entities';
 import { compileError } from './errors';
 import { rememberKind } from './kindTemplates';
-import { freshKindVar, type Kind, kindArrow, simpleKind, STAR, type Type } from './types';
+import { freshKindVar, type Kind, kindArrow, setMultiplicityArrows, simpleKind, STAR, type Type } from './types';
 
 /** The module that owns the primitive types and the special syntax types (lists, tuples, unit, functions). */
 export const BUILTIN_MODULE = 'GHC.Types';
@@ -39,6 +39,22 @@ export const CHAR_TYPE = primType('Char', 0);
 export const IO_TYPE = primType('IO', 1);
 export const TURTLE_TYPE = primType('Turtle', 0);
 export const FUNCTION_TYPE = primType('->', 2, 'function');
+
+/** The kind of multiplicities, which LinearTypes' arrows take: `One` and `Many`. */
+export const MULTIPLICITY_TYPE = primType('Multiplicity', 0);
+export const MULTIPLICITY_KIND: Kind = { tag: 'data', entity: MULTIPLICITY_TYPE, args: [] };
+export const ONE_TYPE: TypeEntity = { ...primType('One', 0), kind: MULTIPLICITY_KIND };
+export const MANY_TYPE: TypeEntity = { ...primType('Many', 0), kind: MULTIPLICITY_KIND };
+
+/**
+ * The arrow of a multiplicity other than `Many`, `FUN m a b`, which `a %1 -> b` and `a %m -> b` write; an arrow of
+ * `Many` is the ordinary function type.
+ */
+export const MULTIPLICITY_FUNCTION_TYPE: TypeEntity = {
+  ...primType('FUN', 3),
+  kind: kindArrow(MULTIPLICITY_KIND, simpleKind(2)),
+};
+setMultiplicityArrows(MULTIPLICITY_FUNCTION_TYPE, FUNCTION_TYPE, MANY_TYPE);
 
 export const LIST_TYPE: TypeEntity = { ...primType('[]', 1, 'list'), sort: 'data' };
 export const NIL_CON = addConstructor(LIST_TYPE, '[]', []);
@@ -142,6 +158,22 @@ HAS_FIELD_TYPES.kind = kindArrow(
   { tag: 'data', entity: SYMBOL_TYPE, args: [] },
   kindArrow(STAR, kindArrow(STAR, STAR))
 );
+
+/** The types `Coercible a b` packs: two types of the same representation. */
+export const COERCIBLE_TYPES: TypeEntity = { ...primType('Coercible', 2), special: 'classArguments' };
+COERCIBLE_TYPES.kind = kindArrow(STAR, kindArrow(STAR, STAR));
+
+/** The class of types of the same representation, which `coerce` converts between and the type checker solves. */
+export const COERCIBLE_CLASS: ClassEntity = {
+  id: nextId(),
+  name: 'Coercible',
+  module: 'Data.Coerce',
+  tyvarKind: STAR,
+  packed: COERCIBLE_TYPES,
+  supers: [],
+  methods: [],
+  defaults: [],
+};
 
 /** The types an implicit parameter's constraint `?x :: t` packs: its name and its type. */
 export const IMPLICIT_TYPES: TypeEntity = { ...primType('?', 2), special: 'classArguments' };
@@ -304,4 +336,44 @@ for (const [name, entity] of Object.entries(TYPE_LIT_FAMILIES)) {
   else if (name === '*') entity.fixity = { assoc: 'infixl', prec: 7 };
   else if (name === '^') entity.fixity = { assoc: 'infixr', prec: 8 };
   else if (name === '<=?') entity.fixity = { assoc: 'infix', prec: 4 };
+}
+
+/**
+ * The class of constraints written as types, `c a` for a variable `c :: Type -> Constraint`, as ConstraintKinds
+ * allows; once `c` is known to be a class, the constraint is that class's, whose dictionary is its evidence.
+ */
+export const CONSTRAINT_TYPE_CLASS: ClassEntity = {
+  id: nextId(),
+  name: 'Constraint',
+  module: BUILTIN_MODULE,
+  tyvarKind: { tag: 'constraint' },
+  supers: [],
+  methods: [],
+  defaults: [],
+};
+
+const classTypes = new Map<ClassEntity, TypeEntity>();
+
+/** A class used as a type, `Show` in `Proxy Show`, of kind `Type -> Constraint` for a class of one parameter. */
+export function classType(cls: ClassEntity, kind: Kind): TypeEntity {
+  let entity = classTypes.get(cls);
+  if (!entity) {
+    entity = { ...primType(cls.name, cls.packed?.arity ?? 1), module: cls.module, kind, classOf: cls };
+    classTypes.set(cls, entity);
+  }
+  return entity;
+}
+
+const constraintTuples = new Map<number, TypeEntity>();
+
+/** The type of a tuple of constraints, `(Show a, Eq a)`, which a constraint synonym's application may stand for. */
+export function constraintTupleType(arity: number): TypeEntity {
+  let entity = constraintTuples.get(arity);
+  if (!entity) {
+    let kind: Kind = { tag: 'constraint' };
+    for (let index = 0; index < arity; index++) kind = kindArrow({ tag: 'constraint' }, kind);
+    entity = { ...primType(`(${','.repeat(arity - 1)})`, arity, 'tuple'), kind };
+    constraintTuples.set(arity, entity);
+  }
+  return entity;
 }

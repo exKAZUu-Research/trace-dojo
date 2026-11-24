@@ -332,6 +332,49 @@ type BindVariable = (variable: TVar, type: Type) => undefined | Exclude<Unificat
  * Unifies two types. A pair where either side applies a type family goes to `family`, which reduces or defers it,
  * instead of being compared by its parts.
  */
+let multiplicityArrows: { fun: TypeEntity; arrow: TypeEntity; many: TypeEntity } | undefined;
+
+/** Registers LinearTypes' arrow `FUN m a b`, which unifies with the ordinary arrow when `m` is `Many`. */
+export function setMultiplicityArrows(fun: TypeEntity, arrow: TypeEntity, many: TypeEntity): void {
+  multiplicityArrows = { fun, arrow, many };
+}
+
+/** The parts of a function type: its argument, its result, and, for an arrow of LinearTypes, its multiplicity. */
+export function functionParts(type: Type): { param: Type; result: Type; multiplicity?: Type } | undefined {
+  const { head, args } = splitApp(prune(type));
+  if (head.tag !== 'tcon') return undefined;
+  if (head.entity === multiplicityArrows?.arrow && args.length === 2) return { param: args[0], result: args[1] };
+  if (head.entity === multiplicityArrows?.fun && args.length === 3) {
+    const multiplicity = prune(args[0]);
+    if (multiplicity.tag === 'tcon' && multiplicity.entity === multiplicityArrows.many) {
+      return { param: args[1], result: args[2] };
+    }
+    return { param: args[1], result: args[2], multiplicity };
+  }
+  return undefined;
+}
+
+/** For a function type of LinearTypes against an ordinary one, the pairs that must unify: `m ~ Many` and the rest. */
+function multiplicityPairs(x: Type, y: Type): [Type, Type][] | undefined {
+  if (!multiplicityArrows) return undefined;
+  const left = splitApp(x);
+  const right = splitApp(y);
+  const isFun = (side: { head: Type; args: Type[] }): boolean =>
+    side.head.tag === 'tcon' && side.head.entity === multiplicityArrows?.fun && side.args.length === 3;
+  const isArrow = (side: { head: Type; args: Type[] }): boolean =>
+    side.head.tag === 'tcon' && side.head.entity === multiplicityArrows?.arrow && side.args.length === 2;
+  const many: Type = { tag: 'tcon', entity: multiplicityArrows.many };
+  if (isFun(left) && isArrow(right)) {
+    return [
+      [left.args[0], many],
+      [left.args[1], right.args[0]],
+      [left.args[2], right.args[1]],
+    ];
+  }
+  if (isArrow(left) && isFun(right)) return multiplicityPairs(y, x);
+  return undefined;
+}
+
 export function unifyTypes(
   a: Type,
   b: Type,
@@ -356,6 +399,11 @@ export function unifyTypes(
     if (family && (isFamilyApplication(x) || isFamilyApplication(y))) {
       const failure = family(x, y);
       if (failure) return failure;
+      continue;
+    }
+    const pairs = x.tag === 'tap' && y.tag === 'tap' ? multiplicityPairs(x, y) : undefined;
+    if (pairs) {
+      work.push(...pairs);
       continue;
     }
     const failure = x.tag === 'forall' && y.tag === 'forall' ? unifyForalls(x, y, bind) : unifyTypeNode(x, y, bind);

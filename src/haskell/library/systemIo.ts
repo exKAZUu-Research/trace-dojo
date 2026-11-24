@@ -671,6 +671,9 @@ symbolVal = primitive "literalOf"
 getField :: HasField x r a => r -> a
 getField = primitive "applyField"
 
+coerce :: Coercible a b => a -> b
+coerce = primitive "coerceApply"
+
 -- Recursive monadic bindings, which mdo and rec blocks use.
 
 class Monad m => MonadFix m where

@@ -144,7 +144,8 @@ export type TypeExpr =
   | { kind: 'tforall'; binders: TyVarBinder[]; context: Constraint[]; body: TypeExpr; span: Span }
   | { kind: 'tcon'; name: QName; span: Span }
   | { kind: 'tapp'; fn: TypeExpr; arg: TypeExpr; span: Span }
-  | { kind: 'tfun'; from: TypeExpr; to: TypeExpr; span: Span }
+  /** A function type; LinearTypes' `a %1 -> b` and `a %m -> b` give its multiplicity, which is otherwise `Many`. */
+  | { kind: 'tfun'; from: TypeExpr; to: TypeExpr; multiplicity?: Multiplicity; span: Span }
   | { kind: 'tlist'; elem: TypeExpr; span: Span }
   | { kind: 'ttuple'; elems: TypeExpr[]; span: Span };
 
@@ -312,8 +313,14 @@ export type Decl =
       cls: QName;
       type: TypeExpr;
       strategy?: DerivingStrategy;
+      /** For `deriving via V instance ...`, the type `V` whose instance the derived one reuses. */
+      via?: TypeExpr;
       span: Span;
-    };
+    }
+  /** `type role T nominal representational`, the roles of a type's parameters; `undefined` is `_`, inferred. */
+  | { kind: 'roleAnnotation'; name: QName; roles: (Role | undefined)[]; span: Span };
+
+export type Role = 'nominal' | 'representational' | 'phantom';
 
 export type DerivingStrategy = 'stock' | 'anyclass' | 'newtype' | 'via';
 
@@ -329,6 +336,8 @@ export interface TypeEquation {
 export interface DerivingClause {
   cls: QName;
   strategy?: DerivingStrategy;
+  /** For `deriving C via V`, the type `V` whose instance the derived one reuses. */
+  via?: TypeExpr;
   span: Span;
 }
 
@@ -357,3 +366,6 @@ export interface Module {
   decls: Decl[];
   span: Span;
 }
+
+/** The multiplicity LinearTypes writes on an arrow: `%1` (or `⊸`), `%Many`, or a variable `%m`. */
+export type Multiplicity = { kind: 'one' } | { kind: 'many' } | { kind: 'var'; name: string; span: Span };
