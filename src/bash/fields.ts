@@ -15,7 +15,9 @@ export const FIELD_BREAK = Symbol('fieldBreak');
  * that is not split joins with the first character of `IFS`, as `"$*"` does.
  */
 export const STAR_BREAK = Symbol('starBreak');
-export type Piece = Fragment | typeof FIELD_BREAK | typeof STAR_BREAK;
+/** Marks an `@`-subscripted expansion inside double quotes that produced zero elements, so `"${a[@]}"` vanishes. */
+export const EMPTY_LIST = Symbol('emptyList');
+export type Piece = Fragment | typeof FIELD_BREAK | typeof STAR_BREAK | typeof EMPTY_LIST;
 
 export function isFieldBreak(piece: Piece): piece is typeof FIELD_BREAK | typeof STAR_BREAK {
   return piece === FIELD_BREAK || piece === STAR_BREAK;
@@ -34,6 +36,7 @@ export class FieldSplitter {
   constructor(private readonly ifs: string) {}
 
   add(piece: Piece): void {
+    if (piece === EMPTY_LIST) return;
     if (isFieldBreak(piece)) {
       if (this.started) this.end();
       this.afterWhite = false;

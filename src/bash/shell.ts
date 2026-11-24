@@ -786,7 +786,7 @@ export class Shell implements ArithmeticHost {
       return { value: this.elementValue(name, '0'), index: -1n };
     }
     const index = this.readIndex(name, subscript);
-    return index === undefined ? { value: undefined, index: -1n } : { value: this.indexedElement(name, index), index };
+    return index === undefined ? { value: undefined, index: -1n } : { value: this.elementAtIndex(name, index), index };
   }
 
   assign(lhs: string, value: string): void {
@@ -976,15 +976,17 @@ export class Shell implements ArithmeticHost {
     const index = this.readIndex(name, subscript);
     if (index === undefined) return undefined;
     if (variable.value.kind === 'scalar') return index === 0n ? variable.value.value : undefined;
-    return this.indexedElement(name, index);
+    return this.elementAtIndex(name, index);
   }
 
-  private indexedElement(name: string, index: bigint): string | undefined {
+  elementAtIndex(name: string, index: bigint): string | undefined {
     const variable = this.findVariable(name);
     const value = variable?.value;
     if (!value) {
       const dynamic = this.dynamicArray(name);
-      return dynamic?.[Number(index)];
+      if (dynamic) return dynamic[Number(index)];
+      if (!variable && ENVIRONMENT_VARIABLES.has(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+      return undefined;
     }
     if (value.kind === 'scalar') return index === 0n ? value.value : undefined;
     if (value.kind === 'associative') return value.table.get(String(index));

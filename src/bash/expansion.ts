@@ -2,7 +2,7 @@ import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { ArithmeticSource, BackquoteSyntaxError, ParameterExpansion, Word, WordPart } from './ast';
 import { expandBraces } from './braces';
 import { charactersOf } from './characters';
-import { FIELD_BREAK, FieldSplitter, type Fragment, isFieldBreak, type Piece, STAR_BREAK } from './fields';
+import { EMPTY_LIST, FIELD_BREAK, FieldSplitter, type Fragment, isFieldBreak, type Piece, STAR_BREAK } from './fields';
 import { applyOperator } from './parameterOperators';
 import { hasPatternCharacters, matchesPattern, quotePattern } from './pattern';
 import { singleQuote } from './quoting';
@@ -152,11 +152,12 @@ export class Expander {
       }
       case 'double': {
         const inner = this.expandParts(part.parts, true);
-        // `"$@"` with no elements makes no field, but any other quoted text, even empty, makes one.
-        const onlyEmptyLists = part.parts.length > 0 && part.parts.every((inPart) => isListExpansion(inPart));
-        if (inner.length === 0 && !onlyEmptyLists) return [QUOTED_EMPTY];
-        if (onlyEmptyLists && inner.every((piece) => isFieldBreak(piece))) return inner;
-        return [QUOTED_EMPTY, ...inner];
+        // `"$@"` and `@`-subscripted array expansions with no elements make no field; any other quoted text makes one.
+        if (inner.length > 0 && inner.every((piece) => piece === EMPTY_LIST)) return [];
+        const kept = inner.filter((piece) => piece !== EMPTY_LIST);
+        if (kept.length === 0) return [QUOTED_EMPTY];
+        if (kept.every((piece) => isFieldBreak(piece))) return kept;
+        return [QUOTED_EMPTY, ...kept];
       }
       case 'parameter': {
         return this.expandParameter(part, inDouble);
@@ -194,7 +195,7 @@ export class Expander {
     const subscript = expansion.subscript ? this.subscriptText(name, expansion.subscript) : undefined;
     if (expansion.prefix === '!') return this.expandIndirect(expansion, subscript, inDouble);
     if (expansion.prefix === '#' && subscript !== undefined && subscript !== '@' && subscript !== '*') {
-      this.checkLengthSubscript(expansion, subscript);
+      return this.valuePieces(this.elementLengthValue(expansion, subscript), inDouble);
     }
     const value = this.parameterValue(name, subscript, expansion);
     if (expansion.prefix === '#') return this.valuePieces(lengthOf(value), inDouble);
@@ -205,14 +206,17 @@ export class Expander {
     return applyOperator(this, this.shell, expansion, value, name, subscript, inDouble);
   }
 
-  /** Abandons `${#a[i]}` for an element no index can name: an empty key, or a negative index before the first. */
-  private checkLengthSubscript(expansion: ParameterExpansion, subscript: string): void {
+  /** `${#a[i]}`: evaluates `i` once, abandons an invalid or empty subscript, and returns the element's length. */
+  private elementLengthValue(expansion: ParameterExpansion, subscript: string): ParameterValue {
+    if (expansion.subscript?.text === '') this.shell.discard(`${expansion.text}: bad substitution`);
     const resolved = this.shell.resolveName(expansion.name);
     if (this.shell.isAssociative(resolved)) {
       if (subscript === '') this.shell.discard(`[${expansion.subscript?.text}]: bad array subscript`);
-    } else if (this.shell.arrayIndex(resolved, subscript) === undefined) {
-      this.shell.discard(`[${subscript}]: bad array subscript`);
+      return lengthOf({ kind: 'scalar', value: this.shell.elementValue(resolved, subscript) });
     }
+    const index = this.shell.arrayIndex(resolved, subscript === '' ? '0' : subscript);
+    if (index === undefined) this.shell.discard(`[${subscript}]: bad array subscript`);
+    return lengthOf({ kind: 'scalar', value: this.shell.elementAtIndex(resolved, index) });
   }
 
   /** The text of a subscript: `@` and `*` as written, an associative array's key, or an indexed one's expression. */
@@ -363,14 +367,17 @@ export class Expander {
   valuePieces(value: ParameterValue, inDouble: boolean): Piece[] {
     if (value.kind === 'scalar') {
       return value.value === undefined || value.value === ''
-        ? []
+        ? inDouble
+          ? [QUOTED_EMPTY]
+          : []
         : [{ text: value.value, quoted: inDouble, split: !inDouble }];
     }
     if (value.star && inDouble) {
       return value.values.length === 0
-        ? []
+        ? [QUOTED_EMPTY]
         : [{ text: value.values.join(this.ifsJoiner()), quoted: true, split: false }];
     }
+    if (inDouble && value.values.length === 0) return [EMPTY_LIST];
     const pieces: Piece[] = [];
     const separator = this.separatorOf(value);
     for (const [index, element] of value.values.entries()) {
@@ -415,6 +422,7 @@ export class Expander {
   joinPieces(pieces: Piece[]): string {
     let text = '';
     for (const piece of pieces) {
+      if (piece === EMPTY_LIST) continue;
       text += piece === FIELD_BREAK ? ' ' : piece === STAR_BREAK ? this.ifsJoiner() : piece.text;
       if (text.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
     }
@@ -423,9 +431,13 @@ export class Expander {
 
   /** The fragments of pieces joined into one field, as patterns need. */
   flatten(pieces: Piece[]): Fragment[] {
-    return pieces.map((piece) =>
-      isFieldBreak(piece) ? { text: piece === STAR_BREAK ? this.ifsJoiner() : ' ', quoted: true, split: false } : piece
-    );
+    return pieces
+      .filter((piece): piece is Exclude<Piece, typeof EMPTY_LIST> => piece !== EMPTY_LIST)
+      .map((piece) =>
+        isFieldBreak(piece)
+          ? { text: piece === STAR_BREAK ? this.ifsJoiner() : ' ', quoted: true, split: false }
+          : piece
+      );
   }
 
   /** The pattern pieces make, with the quoted characters escaped. */
@@ -471,12 +483,6 @@ export class Expander {
     this.shell.reportError(`${name}: ${message}`);
     throw new ExitSignal(1);
   }
-}
-
-/** Whether a part is `$@`, `$*`-like `${a[@]}`, which make no field when they have no elements. */
-function isListExpansion(part: WordPart): boolean {
-  if (part.kind !== 'parameter' || part.operator !== undefined || part.prefix !== undefined) return false;
-  return part.name === '@' || part.subscript?.text === '@';
 }
 
 function isValidParameterName(name: string): boolean {

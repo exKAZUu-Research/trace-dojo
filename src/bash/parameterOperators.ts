@@ -3,7 +3,7 @@ import { charactersOf } from './characters';
 import { decodeAnsiC } from './converter';
 import { declarationText } from './declare';
 import type { Expander, ParameterValue } from './expansion';
-import { isFieldBreak, type Piece } from './fields';
+import { EMPTY_LIST, isFieldBreak, type Piece } from './fields';
 import { matchesPattern } from './pattern';
 import { quoteReusable } from './quoting';
 import { ExitSignal } from './runtime';
@@ -41,7 +41,8 @@ export function applyOperator(
       const isNull = isUnset || (colon && joined(value) === '');
       const kind = operator.at(-1) as string;
       if (kind === '+') {
-        return isNull ? [] : expander.withSpacedStar(() => expandArgument(expander, argument, inDouble, false));
+        if (isNull) return value.kind === 'list' && !value.star && inDouble ? [EMPTY_LIST] : [];
+        return expander.withSpacedStar(() => expandArgument(expander, argument, inDouble, false));
       }
       if (!isNull) return expander.valuePieces(value, inDouble);
       return defaultValue(expander, shell, expansion, kind, colon, name, subscript, inDouble);
@@ -94,14 +95,21 @@ function joined(value: ParameterValue): string {
  * words, whose quotes and backslashes quote, as Bash 5.3 does.
  */
 function expandArgument(expander: Expander, parts: WordPart[], inDouble: boolean, isPattern: boolean): Piece[] {
-  if (!inDouble || isPattern) return expander.expandParts(parts, false);
+  if (isPattern) return expander.expandParts(parts, false);
+  if (!inDouble) {
+    return expander
+      .expandParts(parts, false)
+      .map((piece) =>
+        piece === EMPTY_LIST || isFieldBreak(piece) || piece.quoted ? piece : { ...piece, split: true }
+      );
+  }
   const pieces: Piece[] = [];
   for (const part of parts) {
     if (part.kind === 'single') pieces.push({ text: `'${part.text}'`, quoted: true, split: false });
     else if (part.kind === 'double') pieces.push(...expander.expandParts([part], false));
     else pieces.push(...expander.expandParts([part], true));
   }
-  return pieces;
+  return pieces.length === 0 ? [{ text: '', quoted: true, split: false }] : pieces;
 }
 
 // code-gauge-allow functionParameterCount -- The default and assignment operators need the expansion, the parameter, and how it is quoted.
@@ -196,6 +204,7 @@ function splitReplacement(parts: WordPart[]): { pattern: WordPart[]; replacement
 function replacementFor(replacement: Piece[], matched: string): string {
   let text = '';
   for (const piece of replacement) {
+    if (piece === EMPTY_LIST) continue;
     if (isFieldBreak(piece)) {
       text += ' ';
       continue;
@@ -287,7 +296,7 @@ function substring(
   }
   if (length !== undefined && length < 0n) negativeLength();
   const values = sliceList(shell, name, value, offset);
-  if (values === undefined) return [];
+  if (values === undefined) return expander.valuePieces({ ...value, values: [] }, inDouble);
   return expander.valuePieces(
     { ...value, values: length === undefined ? values : values.slice(0, Number(length)) },
     inDouble
@@ -460,7 +469,8 @@ function transform(
     case 'A': {
       const text = assignmentText(shell, name, value);
       // An array's declaration comes as three words, `declare`, its flags, and its assignment, even when quoted.
-      if (value.kind === 'list' && text !== '') {
+      if (value.kind === 'list') {
+        if (text === '') return expander.valuePieces({ ...value, values: [] }, inDouble);
         const [declare, flags, ...assignment] = text.split(' ');
         return expander.valuePieces(
           { kind: 'list', values: [declare, flags, assignment.join(' ')], star: false },
@@ -510,6 +520,7 @@ function keyValuePairs(
     if (value.value === undefined) return [];
     return expander.valuePieces({ kind: 'scalar', value: quoted ? quoteReusable(value.value) : value.value }, inDouble);
   }
+  if (value.values.length === 0) return expander.valuePieces({ ...value, values: [] }, inDouble);
   const keys = shell.arrayKeys(shell.resolveName(name));
   if (!quoted) {
     return expander.valuePieces(
