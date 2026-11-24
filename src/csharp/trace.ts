@@ -334,7 +334,8 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
     return { kind: 'value', value: shownText(String(value)) };
   if (seen.has(value)) return undefined;
   if (value instanceof CsObject && value.turtle) return turtleNodeOf(value.turtle);
-  if (value instanceof CsDelegate) return undefined;
+  // A delegate shows as the Java interpreter shows a lambda: an object without fields.
+  if (value instanceof CsDelegate) return { kind: 'object', entries: {} };
   seen.add(value);
   try {
     if (value instanceof CsArray) {
