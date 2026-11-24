@@ -48,7 +48,8 @@ function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
         reparseBackquoted,
         hidden.errors,
         quoteSet,
-        source
+        source,
+        parseSubscriptWordParts
       );
       const program = converter.convertProgram(root);
       for (const row of atomicRows) {

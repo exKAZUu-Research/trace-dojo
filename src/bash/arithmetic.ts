@@ -170,17 +170,52 @@ export function evaluateArithmetic(
   return new ExpressionSession(host, commandName, spend).evaluateSubexpression(expression);
 }
 
-/** Finds the index of the `]` matching the `[` at `start`, skipping backslash-escaped characters and nested `[...]`. */
+/** Finds the index of the `]` matching the `[` at `start`, skipping quotes, escapes, expansions, and nested `[...]`. */
 export function skipSubscript(text: string, start: number): number {
   let depth = 0;
   for (let i = start; i < text.length; i++) {
     const c = text[i];
-    if (c === '\\' && i + 1 < text.length) {
-      i++;
-      continue;
-    }
-    if (c === '[') depth++;
+    if (c === '\\' && i + 1 < text.length) i++;
+    else if (depth > 0 && c === '$' && text[i + 1] === "'") i = skipAnsiQuoteInSubscript(text, i + 2);
+    else if (depth > 0 && (c === "'" || c === '"')) i = skipQuoteInSubscript(text, i + 1, c);
+    else if (c === '[') depth++;
     else if (c === ']' && --depth === 0) return i;
+  }
+  return text.length;
+}
+
+function skipAnsiQuoteInSubscript(text: string, from: number): number {
+  for (let i = from; i < text.length; i++) {
+    if (text[i] === '\\') i++;
+    else if (text[i] === "'") return i;
+  }
+  return text.length;
+}
+
+function skipQuoteInSubscript(text: string, from: number, quote: "'" | '"'): number {
+  if (quote === "'") {
+    const close = text.indexOf("'", from);
+    return close === -1 ? text.length : close;
+  }
+  for (let i = from; i < text.length; i++) {
+    const c = text[i];
+    if (c === '\\' && i + 1 < text.length) i++;
+    else if (c === '"') return i;
+    else if (c === '$' && (text[i + 1] === '{' || text[i + 1] === '(')) {
+      i = skipDelimitedInSubscript(text, i + 2, text[i + 1], text[i + 1] === '{' ? '}' : ')');
+    }
+  }
+  return text.length;
+}
+
+function skipDelimitedInSubscript(text: string, from: number, opener: string, closer: string): number {
+  let depth = 1;
+  for (let i = from; i < text.length; i++) {
+    const c = text[i];
+    if (c === '\\' && i + 1 < text.length) i++;
+    else if (c === "'" || c === '"') i = skipQuoteInSubscript(text, i + 1, c);
+    else if (c === opener) depth++;
+    else if (c === closer && --depth === 0) return i;
   }
   return text.length;
 }

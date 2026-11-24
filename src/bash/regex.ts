@@ -62,23 +62,20 @@ class RegexParser {
   }
 
   private parseRepeat(): RegexNode {
-    let node = this.parseAtom();
-    for (;;) {
-      const c = this.chars[this.position];
-      if (c === '*' || c === '+' || c === '?') {
-        this.position++;
-        node = { kind: 'repeat', body: node, min: c === '+' ? 1 : 0, max: c === '?' ? 1 : Infinity };
-        continue;
-      }
-      if (c === '{') {
-        const interval = this.interval();
-        if (!interval) break;
-        node = { kind: 'repeat', body: node, ...interval };
-        continue;
-      }
-      break;
+    const atom = this.parseAtom();
+    const first = this.readQuantifier();
+    if (!first) return atom;
+    if (this.readQuantifier()) throw new RegexSyntaxError('repetition-operator operand invalid');
+    return { kind: 'repeat', body: atom, ...first };
+  }
+
+  private readQuantifier(): { min: number; max: number } | undefined {
+    const c = this.chars[this.position];
+    if (c === '*' || c === '+' || c === '?') {
+      this.position++;
+      return { min: c === '+' ? 1 : 0, max: c === '?' ? 1 : Infinity };
     }
-    return node;
+    return c === '{' ? this.interval() : undefined;
   }
 
   /** Reads `{n}`, `{n,}`, or `{n,m}`, or leaves a `{` that starts none of them as a literal character. */

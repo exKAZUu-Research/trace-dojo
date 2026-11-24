@@ -1,5 +1,7 @@
 // code-gauge-allow-file fileNcss -- Keeps Bash's declaration builtins (declare, typeset, local, readonly, export) and declare -p formatting together.
+import { skipSubscript } from './arithmetic';
 import type { Assignment, Word } from './ast';
+import { expandBraces } from './braces';
 import { ansicQuote, ansicShouldQuote, containsShellMetas, doubleQuote } from './quoting';
 import { DiscardSignal } from './runtime';
 import type { CompoundElement, Shell } from './shell';
@@ -55,7 +57,9 @@ export function expandDeclarationArguments(
   for (const arg of rawArgs) {
     if ('append' in arg) {
       optionsDone = true;
-      args.push(expandDeclarationAssignment(shell, builtin, arg, options));
+      for (const braced of braceExpandDeclarationAssignment(shell, arg)) {
+        args.push(expandDeclarationAssignment(shell, builtin, braced, options));
+      }
       continue;
     }
     const words = shell.expander.expandWords([arg]);
@@ -67,16 +71,37 @@ export function expandDeclarationArguments(
   return args;
 }
 
-function recordOptionWord(word: string, options: Options): boolean {
-  if (word === '--') return true;
-  if (!/^[-+]./.test(word)) return true;
-  const adding = word.startsWith('-') ? options.set : options.unset;
-  const removing = word.startsWith('-') ? options.unset : options.set;
-  for (const ch of word.slice(1)) {
-    adding.add(ch);
-    removing.delete(ch);
+function braceExpandDeclarationAssignment(shell: Shell, arg: Assignment): Assignment[] {
+  if (arg.array) return [arg];
+  const spend = (): void => shell.runtime.spend();
+  const subPartsList = arg.subscript ? expandBraces(arg.subscript.parts, spend) : [undefined];
+  const valPartsList = arg.value ? expandBraces(arg.value.parts, spend) : [undefined];
+  const expanded: Assignment[] = [];
+  for (const subParts of subPartsList) {
+    for (const valParts of valPartsList) {
+      expanded.push({
+        ...arg,
+        ...(subParts && arg.subscript ? { subscript: { ...arg.subscript, parts: subParts } } : {}),
+        ...(valParts && arg.value ? { value: { ...arg.value, parts: valParts } } : {}),
+      });
+    }
   }
+  return expanded;
+}
+
+function recordOptionWord(word: string, options: Options): boolean {
+  if (word === '--' || !/^[-+]./.test(word)) return true;
+  for (const ch of word.slice(1)) applyOptionSign(options, word[0] as '-' | '+', ch);
   return false;
+}
+
+function applyOptionSign(options: Options, sign: '-' | '+', ch: string): void {
+  if (sign === '+') {
+    options.unset.add(ch);
+    options.set.delete(ch);
+  } else if (!options.unset.has(ch)) {
+    options.set.add(ch);
+  }
 }
 
 function expandDeclarationAssignment(
@@ -266,14 +291,13 @@ function parseOptions(
       index++;
       break;
     }
-    const target = arg.startsWith('-') ? options.set : options.unset;
     for (const option of arg.slice(1)) {
       if (!OPTIONS[name].includes(option)) {
         shell.reportError(`${name}: ${arg[0]}${option}: invalid option`);
         shell.state.fd2.write(`${name}: usage: ${USAGES[name]}\n`);
         return undefined;
       }
-      target.add(option);
+      applyOptionSign(options, arg[0] as '-' | '+', option);
     }
   }
   if (options.set.has('A') && options.set.has('a')) {
@@ -291,15 +315,29 @@ function parseOptions(
 
 /** Splits a word like `x=1`, `a[2]+=x`, or `y` that a declaration builtin got from an expansion. */
 function parseWordOperand(word: string): { name: string; subscript?: string; append: boolean; value?: string } {
-  const match = /^([^=[]+)(\[[^\]]*\])?(\+?=)([\s\S]*)$/.exec(word);
-  if (!match) return { name: word, append: false };
-  const [, name, subscript, operator, value] = match;
-  return {
-    name,
-    ...(subscript ? { subscript: subscript.slice(1, -1) } : {}),
-    append: operator === '+=',
-    value,
-  };
+  const eqIndex = findOperandEquals(word);
+  if (eqIndex === -1) return { name: word, append: false };
+  const append = eqIndex > 0 && word[eqIndex - 1] === '+';
+  const lhsEnd = append ? eqIndex - 1 : eqIndex;
+  const lhs = word.slice(0, lhsEnd);
+  const value = word.slice(eqIndex + 1);
+  const open = lhs.indexOf('[');
+  if (open !== -1 && skipSubscript(lhs, open) === lhs.length - 1) {
+    return { name: lhs.slice(0, open), subscript: lhs.slice(open + 1, -1), append, value };
+  }
+  return { name: lhs, append, value };
+}
+
+function findOperandEquals(word: string): number {
+  for (let i = 0; i < word.length; i++) {
+    if (word[i] === '[') {
+      const close = skipSubscript(word, i);
+      if (close < word.length) i = close;
+      continue;
+    }
+    if (word[i] === '=') return i;
+  }
+  return -1;
 }
 
 interface DeclarationDestination {
@@ -605,11 +643,13 @@ function declaredDestination(
     shell.reportError(`${builtin}: ${targetName}: readonly variable`);
     return undefined;
   }
-  const inherited =
-    targetScope && !variable && set.has('I') ? findEnclosingVariable(scopes, targetScope, targetName) : undefined;
-  if (checkReadonlyConflict(shell, builtin, targetName, variable ?? inherited, options, assigns)) return undefined;
+  const origin =
+    targetScope && !variable ? resolveLocalOrigin(shell, targetScope, targetName, set.has('I')) : undefined;
+  if (checkReadonlyConflict(shell, builtin, targetName, variable ?? origin?.source, options, assigns)) {
+    return undefined;
+  }
   if (!variable) {
-    variable = createDeclaredVariable(targetName, inherited);
+    variable = createDeclaredVariable(targetName, origin?.source, origin?.keepAllAttributes ?? false);
     (targetScope ?? scopes[0]).set(targetName, variable);
   }
   return {
@@ -618,12 +658,36 @@ function declaredDestination(
   };
 }
 
-function createDeclaredVariable(name: string, inherited: Variable | undefined): Variable {
+function resolveLocalOrigin(
+  shell: Shell,
+  targetScope: Map<string, Variable>,
+  name: string,
+  inheritEnclosing: boolean
+): { source: Variable; keepAllAttributes: boolean } | undefined {
+  const tempBinding = findCallPrefixBinding(shell, targetScope, name);
+  if (tempBinding) return { source: tempBinding, keepAllAttributes: true };
+  if (!inheritEnclosing) return undefined;
+  const inherited = findEnclosingVariable(shell.state.scopes, targetScope, name);
+  return inherited ? { source: inherited, keepAllAttributes: false } : undefined;
+}
+
+function findCallPrefixBinding(shell: Shell, targetScope: Map<string, Variable>, name: string): Variable | undefined {
+  const { scopes, functionScopes } = shell.state;
+  const fnScopes = new Set(functionScopes);
+  for (let i = scopes.indexOf(targetScope) - 1; i >= 1; i--) {
+    const found = scopes[i].get(name);
+    if (!found) continue;
+    return fnScopes.has(i) ? undefined : found;
+  }
+  return undefined;
+}
+
+function createDeclaredVariable(name: string, inherited: Variable | undefined, keepAllAttributes = false): Variable {
   if (!inherited) return { name, value: undefined, attributes: new Set() };
   return {
     name,
     value: cloneValue(inherited.value),
-    attributes: new Set([...inherited.attributes].filter((attr) => attr !== 'n')),
+    attributes: new Set(keepAllAttributes ? inherited.attributes : [...inherited.attributes].filter((a) => a !== 'n')),
   };
 }
 

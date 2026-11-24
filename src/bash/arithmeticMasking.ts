@@ -1,6 +1,6 @@
 import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
-import { arithmeticEnd, skipWordPiece, SourceText } from './syntaxWords';
+import { arithmeticEnd, skipBalanced, skipBlanks, skipWordPiece, SourceText } from './syntaxWords';
 
 /**
  * The text of arithmetic expressions that the grammar cannot read, by the offset where each one's text starts. Bash
@@ -11,9 +11,10 @@ export type MaskedArithmetic = Map<number, string>;
 
 const MAX_PASSES = 50;
 const BOUNDARY_CHARS = new Set([' ', '\t', '\n', ';', '&', '|', '(', ')', '<', '>']);
+const COMPOUND_ARRAY_LHS = /(?:^|[ \t\n;&|()])(?:[A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]]*\])?\+?=$/;
 
 interface Region {
-  opener: '((' | '$((' | '$[';
+  opener: '((' | '$((' | '$[' | '[';
   openStart: number;
   start: number;
   end: number;
@@ -147,7 +148,7 @@ function collectBackquoteRegions(source: string, bodyStart: number, bodyEnd: num
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Scans shell comments, boundaries, ((...)) constructs, and word pieces with bounded nesting.
+// code-gauge-allow functionCognitiveComplexity -- Scans shell comments, boundaries, ((...)) constructs, compound subscripts, and word pieces with bounded nesting.
 function scanPlain(text: SourceText, from: number, stopChar: string | undefined, regions: Region[]): number {
   return text.nested(() => {
     const { source } = text;
@@ -175,6 +176,11 @@ function scanPlain(text: SourceText, from: number, stopChar: string | undefined,
           continue;
         }
       }
+      if (c === '(' && !atBoundary && COMPOUND_ARRAY_LHS.test(source.slice(0, i))) {
+        i = scanCompoundSubscripts(text, i + 1, regions);
+        atBoundary = false;
+        continue;
+      }
       if (BOUNDARY_CHARS.has(c)) {
         atBoundary = true;
         i++;
@@ -185,6 +191,41 @@ function scanPlain(text: SourceText, from: number, stopChar: string | undefined,
     }
     return source.length;
   });
+}
+
+// code-gauge-allow functionCognitiveComplexity -- Scans compound array elements for balanced [subscript]= and [subscript]+= headers.
+function scanCompoundSubscripts(text: SourceText, from: number, regions: Region[]): number {
+  const { source } = text;
+  for (let i = from; i < source.length;) {
+    i = skipBlanks(source, i);
+    if (i >= source.length) return i;
+    const c = source[i];
+    if (c === '\n') {
+      i++;
+      continue;
+    }
+    if (c === ')') return i + 1;
+    if (c === '[') {
+      const closeEnd = tryFindSubscriptEnd(text, i);
+      if (closeEnd !== undefined && (source.startsWith('=', closeEnd) || source.startsWith('+=', closeEnd))) {
+        regions.push({ opener: '[', openStart: i, start: i + 1, end: closeEnd - 1, closeEnd, keepsSemicolons: false });
+        i = closeEnd + (source.startsWith('+=', closeEnd) ? 2 : 1);
+        while (i < source.length && !BOUNDARY_CHARS.has(source[i])) i = skipWordPiece(text, i);
+        continue;
+      }
+    }
+    if (BOUNDARY_CHARS.has(c)) i++;
+    else while (i < source.length && !BOUNDARY_CHARS.has(source[i])) i = skipWordPiece(text, i);
+  }
+  return source.length;
+}
+
+function tryFindSubscriptEnd(text: SourceText, openBracket: number): number | undefined {
+  try {
+    return skipBalanced(text, openBracket, '[', ']');
+  } catch {
+    return undefined;
+  }
 }
 
 function tryFindParenArithmeticEnd(text: SourceText, openParens: number): number | undefined {

@@ -27,15 +27,8 @@ export type Scope = Map<string, Variable>;
 
 /** An element of a compound assignment: a plain word, or `[key]=value`. */
 export type CompoundElement =
-  | {
-      key: string;
-      value: string;
-      append: boolean;
-      rawText?: string;
-      evaluatedIndex?: bigint;
-      preconvertedInteger?: boolean;
-    }
-  | { plain: string; rawText: string; evaluatedIndex?: bigint; preconvertedInteger?: boolean }
+  | { key: string; value: string; append: boolean; rawText?: string }
+  | { plain: string; rawText: string }
   | string;
 
 /** Reads one `[key]=value` item or alternating `key value` pair from an associative compound assignment. */
@@ -49,7 +42,6 @@ export function readAssociativePair(
   value: string;
   append: boolean;
   consumedNext: boolean;
-  preconvertedInteger: boolean;
 } {
   if (typeof element !== 'string' && !('plain' in element)) {
     return {
@@ -58,16 +50,13 @@ export function readAssociativePair(
       value: element.value,
       append: element.append,
       consumedNext: false,
-      preconvertedInteger: Boolean(element.preconvertedInteger),
     };
   }
   const key = typeof element === 'string' ? element : element.plain;
   const rawKey = typeof element === 'string' ? element : element.rawText;
   const next = elements[index + 1];
   const value = next === undefined ? '' : typeof next === 'string' ? next : 'plain' in next ? next.plain : '';
-  const preconvertedInteger =
-    next !== undefined && typeof next !== 'string' && 'plain' in next && Boolean(next.preconvertedInteger);
-  return { key, rawKey, value, append: false, consumedNext: true, preconvertedInteger };
+  return { key, rawKey, value, append: false, consumedNext: true };
 }
 
 /** Normalizes one indexed compound element for `assignCompoundTo`. */
@@ -75,34 +64,10 @@ export function unpackIndexedElement(rawElement: CompoundElement): {
   key: string | undefined;
   value: string;
   append: boolean;
-  evaluatedIndex: bigint | undefined;
-  preconvertedInteger: boolean;
 } {
-  if (typeof rawElement === 'string') {
-    return {
-      key: undefined,
-      value: rawElement,
-      append: false,
-      evaluatedIndex: undefined,
-      preconvertedInteger: false,
-    };
-  }
-  if ('plain' in rawElement) {
-    return {
-      key: undefined,
-      value: rawElement.plain,
-      append: false,
-      evaluatedIndex: rawElement.evaluatedIndex,
-      preconvertedInteger: Boolean(rawElement.preconvertedInteger),
-    };
-  }
-  return {
-    key: rawElement.key,
-    value: rawElement.value,
-    append: rawElement.append,
-    evaluatedIndex: rawElement.evaluatedIndex,
-    preconvertedInteger: Boolean(rawElement.preconvertedInteger),
-  };
+  if (typeof rawElement === 'string') return { key: undefined, value: rawElement, append: false };
+  if ('plain' in rawElement) return { key: undefined, value: rawElement.plain, append: false };
+  return { key: rawElement.key, value: rawElement.value, append: rawElement.append };
 }
 
 interface BucketEntry {
@@ -472,7 +437,12 @@ export function* collectReachableStrings(
         if (!value) continue;
         if (value.kind === 'scalar') yield value.value;
         else if (value.kind === 'indexed') yield* value.elements.values();
-        else for (const [, element] of value.table.entries()) yield element;
+        else {
+          for (const [key, element] of value.table.entries()) {
+            yield key;
+            yield element;
+          }
+        }
       }
     }
     for (const args of state.positional) yield* args;
@@ -558,14 +528,17 @@ export function variableElementAt(value: VariableValue, index: bigint): string |
 export function translateNegativeIndex(
   variable: Variable | undefined,
   index: bigint,
-  dynamicLength?: number
+  dynamicLength?: number,
+  allowScalarWrite = false
 ): bigint | undefined {
   const length =
     variable?.value?.kind === 'indexed'
       ? maxElementIndex(variable.value.elements) + 1n
-      : variable?.attributes.has('a')
-        ? 0n
-        : BigInt(dynamicLength ?? 1);
+      : dynamicLength !== undefined
+        ? BigInt(dynamicLength)
+        : allowScalarWrite && variable?.value?.kind === 'scalar'
+          ? 1n
+          : 0n;
   const resolved = length + index;
   return resolved < 0n ? undefined : resolved;
 }

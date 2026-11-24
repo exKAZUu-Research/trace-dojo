@@ -101,6 +101,7 @@ interface Specification {
   width: number | undefined;
   precision: number | undefined;
   conversion: string;
+  wide?: boolean;
 }
 
 /**
@@ -190,11 +191,15 @@ class Printf {
     } else ({ value: width, end: i } = this.digits(i));
     let precision: number | undefined;
     if (fmt[i] === 46) ({ precision, end: i } = this.precision(i + 1));
-    while (i < fmt.length && LENGTH_MODIFIERS.includes(String.fromCodePoint(fmt[i]))) i++;
+    let wide = false;
+    while (i < fmt.length && LENGTH_MODIFIERS.includes(String.fromCodePoint(fmt[i]))) {
+      if (fmt[i] === 108) wide = true;
+      i++;
+    }
     if (i >= fmt.length) this.fail(`\`${decodeBytes(fmt.slice(start))}': missing format character`);
     const conversion = String.fromCodePoint(fmt[i]);
     checkFieldSize(width, NUMERIC_CONVERSIONS.includes(conversion) ? precision : undefined);
-    this.format({ flags, width, precision, conversion });
+    this.format({ flags, width, precision, conversion, wide });
     return i;
   }
 
@@ -238,6 +243,10 @@ class Printf {
       const arg = this.takeArgument();
       const value = arg === undefined ? 0 : parseFloatArgument(arg, this.host, this.conversionError);
       this.push(encodeText(formatFloat(value, spec)));
+    } else if (conversion === 'C' || (conversion === 'c' && spec.wide)) {
+      this.formatWideChar(spec);
+    } else if (conversion === 'S' || (conversion === 's' && spec.wide)) {
+      this.formatWideString(spec);
     } else if (conversion === 'c') {
       const arg = this.takeArgument();
       this.push(padPrintfBytes(arg === undefined || arg === '' ? [0] : [encodeText(arg)[0]], spec));
@@ -252,6 +261,29 @@ class Printf {
     else if (conversion === 'n') throw new UnsupportedFeatureError('printf の %n');
     else if (conversion === '(') throw new UnsupportedFeatureError('printf の時刻の書式（%(...)T）');
     else this.fail(`\`${conversion}': invalid format character`);
+  }
+
+  private formatWideChar(spec: Specification): void {
+    const arg = this.takeArgument();
+    if (arg === undefined || arg === '') {
+      this.push(padPrintfBytes([0], spec));
+      return;
+    }
+    const [ch] = charactersOf(arg);
+    this.push(padWideCharacters([ch], spec, true));
+  }
+
+  private formatWideString(spec: Specification): void {
+    const raw = this.takeArgument() ?? '';
+    if (spec.flags.includes('#')) {
+      const { out, stop } = expandB(raw, this.host);
+      const chars = charactersOf(decodeBytes(out));
+      this.push(padWideCharacters(spec.precision === undefined ? chars : chars.slice(0, spec.precision), spec, false));
+      if (stop) throw new StopOutput();
+      return;
+    }
+    const chars = charactersOf(raw);
+    this.push(padWideCharacters(spec.precision === undefined ? chars : chars.slice(0, spec.precision), spec, true));
   }
 
   /** `%q` and `%Q`, the latter applying the precision to the argument before quoting it. */
@@ -278,6 +310,13 @@ function checkFieldSize(width: number | undefined, precision: number | undefined
   if ((width ?? 0) > LIMITS.maxStringLength || (precision ?? 0) > LIMITS.maxStringLength) {
     throw new ExecutionLimitError('storage');
   }
+}
+
+function padWideCharacters(chars: string[], spec: Specification, allowZeroPad: boolean): number[] {
+  const padCount = Math.max(0, (spec.width ?? 0) - chars.length);
+  const pad = (allowZeroPad && spec.flags.includes('0') && !spec.flags.includes('-') ? '0' : ' ').repeat(padCount);
+  const body = chars.join('');
+  return encodeText(spec.flags.includes('-') ? body + pad : pad + body);
 }
 
 function truncate(bytes: number[], precision: number | undefined): number[] {

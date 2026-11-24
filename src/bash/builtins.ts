@@ -215,7 +215,10 @@ function unsetName(shell: Shell, name: string, mode: UnsetMode): boolean {
   if (!shell.findOwnVariable(name) && mode === 'any' && shell.state.functions.has(name)) {
     return shell.state.functions.delete(name);
   }
-  return shell.unsetVariable(name, mode !== 'n');
+  if (mode === 'n') {
+    return shell.findOwnVariable(name)?.attributes.has('n') ? shell.unsetVariable(name, false) : true;
+  }
+  return shell.unsetVariable(name, true);
 }
 
 /** `unset 'name[subscript]'`, which clears an indexed array for `@` or `*` and expands an associative key. */
@@ -251,10 +254,6 @@ function clearIndexedOrScalar(shell: Shell, variable: Variable, resolved: string
   if (variable.value?.kind === 'indexed') {
     ensureWritable(variable);
     variable.value.elements.clear();
-    return true;
-  }
-  if (variable.value?.kind === 'scalar') {
-    shell.unsetVariable(resolved);
     return true;
   }
   if (!variable.attributes.has('a') && !viaReference) {

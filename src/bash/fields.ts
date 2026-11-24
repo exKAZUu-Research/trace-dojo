@@ -43,11 +43,7 @@ export class FieldSplitter {
   add(piece: Piece): void {
     if (piece === EMPTY_LIST) return;
     if (isFieldBreak(piece)) {
-      if (this.started) this.end();
-      else if (this.afterDelimiter || this.sawEmptyElement) this.fields.push([]);
-      this.afterWhite = false;
-      this.afterDelimiter = false;
-      this.sawEmptyElement = false;
+      this.onFieldBreak();
     } else if (!piece.split || this.ifs === '') {
       if (piece.text === '' && !piece.quoted) return;
       this.field.push({ ...piece, split: false });
@@ -58,6 +54,18 @@ export class FieldSplitter {
     } else if (piece.text === '') {
       if (this.hasNonWhitePrimaryIfs) this.sawEmptyElement = true;
     } else this.split(piece.text);
+  }
+
+  private onFieldBreak(): void {
+    if (!this.hasNonWhitePrimaryIfs && this.ifs !== '') {
+      this.separate(this.ifs[0]);
+      return;
+    }
+    if (this.started) this.end();
+    else if (this.afterDelimiter || this.sawEmptyElement) this.fields.push([]);
+    this.afterWhite = false;
+    this.afterDelimiter = false;
+    this.sawEmptyElement = false;
   }
 
   finish(): Fragment[][] {

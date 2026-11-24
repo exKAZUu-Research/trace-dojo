@@ -8,6 +8,7 @@ import { parseConditional } from './conditionalSyntax';
 import {
   arithmeticEnd,
   type BashSyntaxError,
+  skipBalanced,
   skipBlanks,
   skipWordPiece,
   SourceText,
@@ -169,8 +170,14 @@ class ShellTokenStream {
   }
 
   private scanCompoundArrayBody(openIndex: number): number {
+    const { source } = this.text;
     this.position = openIndex + 1;
     for (;;) {
+      this.position = skipBlanks(source, this.position);
+      if (source[this.position] === '[') {
+        this.consumeBracketedCompoundElement();
+        continue;
+      }
       const inner = this.readNext(false);
       if (inner.kind === 'eof') this.text.unclosed(openIndex, ')');
       if (inner.kind === 'operator' && inner.value === ')') return this.position;
@@ -178,6 +185,17 @@ class ShellTokenStream {
         const shown = inner.value === '((' ? '(' : inner.value;
         this.text.fail(inner.row, `syntax error near unexpected token \`${shown}'`);
       }
+    }
+  }
+
+  private consumeBracketedCompoundElement(): void {
+    const { source } = this.text;
+    const closeEnd = skipBalanced(this.text, this.position, '[', ']');
+    if (source.startsWith('+=', closeEnd)) this.position = closeEnd + 2;
+    else if (source.startsWith('=', closeEnd)) this.position = closeEnd + 1;
+    else this.position = closeEnd;
+    if (this.position < source.length && !WORD_BREAK_CHARS.has(source[this.position])) {
+      this.scanWord(false);
     }
   }
 

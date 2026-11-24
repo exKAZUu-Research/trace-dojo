@@ -642,14 +642,21 @@ export class Shell implements ArithmeticHost {
         this.reportError(`${assignment.name}: readonly variable`);
         continue;
       }
-      const base = assignment.append ? (this.scalarValue(assignment.name) ?? '') : '';
+      const combined = this.combineTemporaryValue(assignment.name, value, assignment.append);
       scope.set(assignment.name, {
         name: assignment.name,
-        value: { kind: 'scalar', value: base + value },
+        value: { kind: 'scalar', value: combined },
         attributes: new Set(['x']),
       });
     }
     return true;
+  }
+
+  private combineTemporaryValue(name: string, value: string, append: boolean): string {
+    if (!append) return value;
+    const base = this.scalarValue(name) ?? '';
+    if (!this.findVariable(name)?.attributes.has('i')) return base + value;
+    return String(BigInt.asIntN(64, this.evaluateFatalReadonly(base || '0') + this.evaluateFatalReadonly(value)));
   }
 
   private removeScope(scope: Scope): void {
@@ -837,10 +844,7 @@ export class Shell implements ArithmeticHost {
     try {
       return evaluateArithmetic(text, this, undefined, () => this.runtime.spend());
     } catch (error) {
-      if (error instanceof ArithmeticError) {
-        this.reportError(error.message);
-        throw new ExitSignal(1);
-      }
+      if (error instanceof ArithmeticError) this.discard(error.message);
       if (error instanceof ArithmeticStoreError) {
         if (error.isReadonly) throw new ExitSignal(1);
         throw new DiscardSignal();
@@ -891,7 +895,7 @@ export class Shell implements ArithmeticHost {
         ? { kind: 'indexedElement', name: resolved, index: 0n }
         : { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` };
     }
-    const index = willRead ? this.readIndex(resolved, rawSubscript) : this.arrayIndex(resolved, rawSubscript);
+    const index = willRead ? this.readIndex(resolved, rawSubscript) : this.arrayIndex(resolved, rawSubscript, true);
     if (index === undefined) return { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` };
     return { kind: 'indexedElement', name: resolved, index };
   }
@@ -1108,15 +1112,20 @@ export class Shell implements ArithmeticHost {
    * Evaluates an indexed array's subscript, counting a negative one from the end, as Bash does, or `undefined` for a
    * negative one before the first element, which each caller reports in its own way.
    */
-  arrayIndex(name: string, subscript: string): bigint | undefined {
+  arrayIndex(name: string, subscript: string, allowScalarWrite = false): bigint | undefined {
     const dynamicLen =
       this.isDynamic(name) && !SCALAR_DYNAMIC_VARIABLES.has(name) ? this.dynamicArray(name)?.length : undefined;
-    return this.arrayIndexFor(this.findVariable(name), subscript, dynamicLen);
+    return this.arrayIndexFor(this.findVariable(name), subscript, dynamicLen, allowScalarWrite);
   }
 
-  private arrayIndexFor(variable: Variable | undefined, subscript: string, dynamicLength?: number): bigint | undefined {
+  private arrayIndexFor(
+    variable: Variable | undefined,
+    subscript: string,
+    dynamicLength?: number,
+    allowScalarWrite = false
+  ): bigint | undefined {
     const index = this.evaluateFatalReadonly(subscript);
-    return index >= 0n ? index : translateNegativeIndex(variable, index, dynamicLength);
+    return index >= 0n ? index : translateNegativeIndex(variable, index, dynamicLength, allowScalarWrite);
   }
 
   /** An index to read an element at, reporting one before the first element, which reads as unset. */
@@ -1209,15 +1218,9 @@ export class Shell implements ArithmeticHost {
   }
 
   /** Applies the integer and case attributes to a value about to be stored, or `undefined` after an error. */
-  private convertForAttributes(
-    variable: Variable,
-    value: string,
-    base: string,
-    append: boolean,
-    preconvertedInteger = false
-  ): string | undefined {
+  private convertForAttributes(variable: Variable, value: string, base: string, append: boolean): string | undefined {
     let result: string;
-    if (variable.attributes.has('i') && !preconvertedInteger) {
+    if (variable.attributes.has('i')) {
       const number = this.evaluateFatalReadonly(value);
       result = append ? String(this.evaluateFatalReadonly(base || '0') + number) : String(number);
       result = String(BigInt.asIntN(64, BigInt(result)));
@@ -1239,8 +1242,16 @@ export class Shell implements ArithmeticHost {
    */
   assignElement(name: string, subscript: string, value: string, append: boolean, evaluated = false): boolean {
     if (this.isDynamic(name)) return this.assignDynamic(name, value);
-    const variable = this.writableContainerVariable(name, true);
-    return variable ? this.assignElementTo(variable, subscript, value, append, evaluated, name) : false;
+    const existing = this.findVariable(name);
+    if (existing?.attributes.has('r')) {
+      this.readonlyFailure = true;
+      this.reportError(`${name}: readonly variable`);
+      return false;
+    }
+    const target = existing ?? { name, value: undefined, attributes: new Set() };
+    const ok = this.assignElementTo(target, subscript, value, append, evaluated, name);
+    if (ok && !existing) this.state.scopes[0].set(name, target);
+    return ok;
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
@@ -1278,7 +1289,7 @@ export class Shell implements ArithmeticHost {
       this.reportError(`${reportedName}[]: bad array subscript`);
       return false;
     }
-    const index = evaluated ? BigInt(subscript) : this.arrayIndexFor(variable, subscript);
+    const index = evaluated ? BigInt(subscript) : this.arrayIndexFor(variable, subscript, undefined, true);
     if (index === undefined) {
       this.reportError(`${reportedName}[${subscript}]: bad array subscript`);
       return false;
@@ -1317,22 +1328,16 @@ export class Shell implements ArithmeticHost {
   /** Assigns the words of `name=(...)` or `name+=(...)`, already expanded into keyed and plain elements. */
   assignCompound(name: string, elements: CompoundElement[], append: boolean): boolean {
     if (this.isDynamic(name)) return true;
-    const variable = this.writableContainerVariable(name, false);
-    return variable ? this.assignCompoundTo(variable, elements, append, name) : false;
-  }
-
-  private writableContainerVariable(name: string, markReadonlyFailure: boolean): Variable | undefined {
     let variable = this.findVariable(name);
     if (variable?.attributes.has('r')) {
-      if (markReadonlyFailure) this.readonlyFailure = true;
       this.reportError(`${name}: readonly variable`);
-      return undefined;
+      return false;
     }
     if (!variable) {
       variable = { name, value: undefined, attributes: new Set() };
       this.state.scopes[0].set(name, variable);
     }
-    return variable;
+    return this.assignCompoundTo(variable, elements, append, name);
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Bash's compound assignments for associative and indexed arrays, keyed and plain elements.
@@ -1351,8 +1356,9 @@ export class Shell implements ArithmeticHost {
     if (variable.value?.kind === 'associative' || variable.attributes.has('A')) {
       const previous = variable.value?.kind === 'associative' ? variable.value.table : undefined;
       const table = append && previous ? previous : new AssociativeTable(previous?.bucketCount);
+      const baseTable = append ? table : previous;
       if (append) variable.value = { kind: 'associative', table };
-      const ok = this.assignAssociative(variable, table, elements);
+      const ok = this.assignAssociative(variable, table, baseTable, elements);
       variable.value = { kind: 'associative', table };
       variable.attributes.add('A');
       return ok;
@@ -1365,13 +1371,13 @@ export class Shell implements ArithmeticHost {
     let next = append ? maxElementIndex(existing) + 1n : 0n;
     for (const rawElement of elements) {
       const item = unpackIndexedElement(rawElement);
-      const index = item.evaluatedIndex ?? (item.key === undefined ? next : this.arrayIndexFor(variable, item.key));
+      const index = item.key === undefined ? next : this.arrayIndexFor(variable, item.key);
       if (index === undefined) {
         this.reportError(`${reportedName}[${item.key ?? ''}]: bad array subscript`);
         return false;
       }
       const base = item.append ? (existing.get(index) ?? '') : '';
-      const converted = this.convertForAttributes(variable, item.value, base, item.append, item.preconvertedInteger);
+      const converted = this.convertForAttributes(variable, item.value, base, item.append);
       if (converted === undefined) return false;
       this.checkLength(converted);
       if (!existing.has(index)) this.chargeSlot();
@@ -1382,7 +1388,12 @@ export class Shell implements ArithmeticHost {
   }
 
   /** Assigns an associative array's elements, reading its plain words as alternating keys and values, as Bash 5.1 does. */
-  private assignAssociative(variable: Variable, table: AssociativeTable, elements: CompoundElement[]): boolean {
+  private assignAssociative(
+    variable: Variable,
+    table: AssociativeTable,
+    baseTable: AssociativeTable | undefined,
+    elements: CompoundElement[]
+  ): boolean {
     for (let i = 0; i < elements.length; i++) {
       const element = elements[i];
       const entry = readAssociativePair(elements, i, element);
@@ -1391,8 +1402,8 @@ export class Shell implements ArithmeticHost {
         this.reportError(`${entry.rawKey}: bad array subscript`);
         continue;
       }
-      const base = entry.append ? (table.get(entry.key) ?? '') : '';
-      const converted = this.convertForAttributes(variable, entry.value, base, entry.append, entry.preconvertedInteger);
+      const base = entry.append ? (baseTable?.get(entry.key) ?? '') : '';
+      const converted = this.convertForAttributes(variable, entry.value, base, entry.append);
       if (converted === undefined) return false;
       this.checkLength(converted);
       if (!table.has(entry.key)) this.chargeSlot();

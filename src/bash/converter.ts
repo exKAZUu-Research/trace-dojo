@@ -37,7 +37,7 @@ export class Converter {
   /** The rows of the `# atomic` annotations that a function's header holds. */
   readonly claimedAtomicRows = new Set<number>();
 
-  // code-gauge-allow functionParameterCount -- Carries parsed/original sources, annotations, masked arithmetic, backquote hooks, and literal-quote offsets.
+  // code-gauge-allow functionParameterCount -- Carries parsed/original sources, annotations, masked arithmetic, backquote/subscript hooks, and literal-quote offsets.
   constructor(
     private readonly source: string,
     private readonly atomicRows: ReadonlySet<number>,
@@ -48,7 +48,8 @@ export class Converter {
     /** The syntax errors of backquoted bodies, which Bash reports when it runs them, by the index of their `` ` ``. */
     private readonly backquoteErrors: ReadonlyMap<number, BackquoteSyntaxError>,
     private readonly literalQuotes: ReadonlySet<number> = new Set(),
-    private readonly originalSource: string = source
+    private readonly originalSource: string = source,
+    private readonly parseSubscriptParts: (raw: string) => WordPart[] = (raw) => [{ kind: 'single', text: raw }]
   ) {}
 
   convertProgram(root: Node): Program {
@@ -297,7 +298,7 @@ export class Converter {
     for (let i = 0; i < words.length; i++) {
       const end = keyedSpanEnd(words, i);
       if (end === undefined || end === i) {
-        elements.push(words[i]);
+        elements.push(this.restoreMaskedKeyedElement(words[i], nodes[i].startIndex, nodes[i].endIndex));
         continue;
       }
       const parts: WordPart[] = [...words[i].parts];
@@ -306,14 +307,35 @@ export class Converter {
         if (gap) parts.push({ kind: 'literal', text: gap });
         parts.push(...words[j].parts);
       }
-      elements.push({
+      const joined: Word = {
         parts: mergeLiterals(parts),
         row: words[i].row,
         text: this.source.slice(nodes[i].startIndex, nodes[end].endIndex),
-      });
+      };
+      elements.push(this.restoreMaskedKeyedElement(joined, nodes[i].startIndex, nodes[end].endIndex));
       i = end;
     }
     return elements;
+  }
+
+  private restoreMaskedKeyedElement(word: Word, startIndex: number, endIndex: number): Word {
+    if (this.source[startIndex] !== '[') return word;
+    const maskedSub = this.masked.get(startIndex + 1);
+    const [first, ...restParts] = word.parts;
+    if (maskedSub === undefined || first?.kind !== 'literal') return word;
+    const prefixLen = 1 + maskedSub.length;
+    if (first.text.length <= prefixLen || first.text[prefixLen] !== ']') return word;
+    const restoredSub = this.restoreQuotes(maskedSub, startIndex + 1);
+    return {
+      parts: [
+        { kind: 'literal', text: '[' },
+        ...this.parseSubscriptParts(restoredSub),
+        { kind: 'literal', text: first.text.slice(prefixLen) },
+        ...restParts,
+      ],
+      row: word.row,
+      text: this.originalSource.slice(startIndex, endIndex),
+    };
   }
 
   /** The index of a subscript node, from its first `[` to its last `]`, including any nested brackets. */
