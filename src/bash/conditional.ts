@@ -5,7 +5,7 @@ import { compareCollated } from './collation';
 import { compileRegex, RegexSyntaxError, searchRegex } from './regex';
 import type { Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
-import { isIdentifier } from './variables';
+import { isIdentifier, variableScalarZero } from './variables';
 
 /** The file tests, which read the file system this environment does not have. */
 export const FILE_TEST_OPERATORS = new Set([
@@ -143,7 +143,11 @@ function isSet(shell: Shell, operand: string): boolean {
     return index >= 0n && index <= BigInt((shell.state.positional.at(-1) as string[]).length);
   }
   if (!isIdentifier(operand)) return false;
-  return shell.scalarValue(operand) !== undefined;
+  const resolved = shell.resolveNameOrUndefined(operand);
+  if (resolved === undefined) return false;
+  if (!isIdentifier(resolved)) return variableScalarZero(shell.findVariable(resolved, false)?.value) !== undefined;
+  if (shell.findVariable(resolved, false)?.attributes.has('n')) return false;
+  return shell.scalarValue(resolved) !== undefined;
 }
 
 function isSubscriptedSet(shell: Shell, split: { name: string; subscript: string }): boolean {
