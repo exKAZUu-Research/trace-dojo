@@ -215,6 +215,8 @@ export class Runtime implements TracedRuntime<Frame> {
   libcOverrides: ReadonlyMap<string, FunctionInfo> = new Map();
   private allocatedSlots = 0;
   private readonly writers: Record<'stdout' | 'stderr', ByteStream>;
+  /** The objects whose secondary bases' subobjects are being constructed, the innermost last. */
+  readonly constructionOwners: CObject[] = [];
   /** The functions `at_quick_exit` registered, which `quick_exit` calls, the last registered first. */
   readonly quickExitHandlers: FunctionRef[] = [];
   /** The function `std::set_terminate` installed, which `std::terminate` calls. */

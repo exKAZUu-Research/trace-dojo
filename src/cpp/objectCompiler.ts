@@ -50,6 +50,7 @@ import {
   holdValues,
   Liveness,
   NULL_PTR,
+  outermostObject,
   Ptr,
   Store,
   UNINIT,
@@ -958,7 +959,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
         const target = location.read();
         if (target instanceof CObject) {
           // A secondary base's subobject calls the final overrider of the object it is a base of.
-          const owner = outermostOwner(target);
+          const owner = outermostObject(target);
           callee = owner.cls.virtuals.get(key) ?? fn;
           if (owner !== target && callee.owner && owner.cls.isDerivedFrom(callee.owner))
             self = owner.receiver(callee.owner);
@@ -1304,11 +1305,4 @@ function copyAs(
   const operations = cls.operations;
   if (!operations) throw new Error(`${cls.name} cannot be copied`);
   return operations.copy(frame, source, destination, sourceIsConst);
-}
-
-/** The complete object that an object is a secondary base subobject of, through every level, or the object itself. */
-export function outermostOwner(object: CObject): CObject {
-  let owner = object;
-  while (owner.secondaryOwner && owner.secondaryOwner.liveness === Liveness.Alive) owner = owner.secondaryOwner;
-  return owner;
 }

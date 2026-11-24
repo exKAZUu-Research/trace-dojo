@@ -48,7 +48,7 @@ import {
   utf8,
 } from './literals';
 import { typeInfoName } from './mangling';
-import { constructArray, initializeAt, invoke, ObjectCompiler, outermostOwner, zeroOf } from './objectCompiler';
+import { constructArray, initializeAt, invoke, ObjectCompiler, zeroOf } from './objectCompiler';
 import { hasUserType, memberOperators, overloadedOperator, withOverloads } from './operatorOverloads';
 import { expandPacks, PACK_ELEMENT, packElements, packsIn, withPackElement } from './packs';
 import { erasePointee, recoverPointee } from './pointerCasts';
@@ -84,6 +84,7 @@ import {
   PTRDIFF_T,
   referenceTo,
   sameType,
+  type SecondaryBase,
   SIZE_T,
   sizeOf,
   type StaticFieldInfo,
@@ -103,6 +104,7 @@ import {
   Liveness,
   MemberPointer,
   NULL_PTR,
+  outermostObject,
   Ptr,
   Store,
   UNINIT,
@@ -662,8 +664,18 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         found = cls.secondaryBases.find((secondary) => secondary.cls.isDerivedFrom(owner));
       }
       if (!found) return current;
-      current = this.fieldAccess(current, found.field, row);
+      current = this.baseSubobject(current, found, row);
     }
+  }
+
+  /**
+   * The subobject of a secondary base that an object holds; a virtual base's is the complete object's, which only
+   * converting the object at run time reaches.
+   */
+  private baseSubobject(object: Expr, secondary: SecondaryBase, row: number): Expr {
+    if (!secondary.isVirtual) return this.fieldAccess(object, secondary.field, row);
+    const view = classLocation(this.materialize(object), secondary.cls);
+    return { ...view, type: classType(secondary.cls, isConstType(object.type)), isLvalue: true };
   }
 
   private implicitThis(row: number, name: string, owner?: ClassInfo): Expr {
@@ -829,9 +841,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const found: Expr[] = [];
     for (let owner: ClassInfo | undefined = cls; owner; owner = owner.base) {
       for (const secondary of owner.secondaryBases) {
-        if (!hasMemberNamed(secondary.cls, name)) continue;
+        // A member of a virtual base is one member, which the virtual base's own entry reaches.
+        if (!hasMemberNamed(secondary.cls, name, secondary.isVirtual === true)) continue;
         this.checkBaseConversion(cls, secondary.cls, row);
-        found.push(this.member(this.fieldAccess(object, secondary.field, row), name, row));
+        found.push(this.member(this.baseSubobject(object, secondary, row), name, row));
       }
     }
     if (found.length > 1) return this.error(row, `${name} は複数の親クラスにあるので、どれを指すのか決まりません。`);
@@ -2357,7 +2370,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         run: (frame) => {
           const location = run(frame) as Ptr;
           const object = location.read();
-          if (!(object instanceof CObject) || !outermostOwner(object).cls.isDerivedFrom(cls))
+          if (!(object instanceof CObject) || !outermostObject(object).cls.isDerivedFrom(cls))
             throwLibrary(frame, badCast, 'std::bad_cast');
           return location.forClass(cls);
         },
@@ -2372,7 +2385,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         const location = run(frame) as Ptr;
         if (location.isNull) return NULL_PTR;
         const object = location.read();
-        return object instanceof CObject && outermostOwner(object).cls.isDerivedFrom(cls)
+        return object instanceof CObject && outermostObject(object).cls.isDerivedFrom(cls)
           ? location.forClass(cls)
           : NULL_PTR;
       },
@@ -2653,7 +2666,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       ...result,
       run: (frame) => {
         const object = (operand(frame) as Ptr).read();
-        const dynamic = object instanceof CObject ? classType(outermostOwner(object).cls) : operandType;
+        const dynamic = object instanceof CObject ? classType(outermostObject(object).cls) : operandType;
         return typeInfoObject(frame, cls, dynamic, row);
       },
     };
@@ -3555,7 +3568,7 @@ function downcastLocation(location: Ptr, to: ClassInfo): Ptr {
   const object = location.read();
   let view: Ptr | undefined;
   if (object instanceof CObject)
-    view = outermostOwner(object).cls.isDerivedFrom(to) ? location.forClass(to) : undefined;
+    view = outermostObject(object).cls.isDerivedFrom(to) ? location.forClass(to) : undefined;
   else if (object instanceof Store) view = object.classView(location, to);
   if (!view) throw new CppRuntimeError('custom', `${to.name} 型ではないオブジェクトをキャストしました。`);
   return view;
@@ -3590,12 +3603,14 @@ function promoteBitField(expr: Expr): Expr {
   return { ...convertArithmetic(expr, promotion), bitFieldPromotion: undefined };
 }
 
-/** Whether a class or one of its bases declares a member of a name. */
-function hasMemberNamed(cls: ClassInfo, name: string): boolean {
+/** Whether a class or one of its bases declares a member of a name, through its virtual bases only `withVirtual`. */
+function hasMemberNamed(cls: ClassInfo, name: string, withVirtual = true): boolean {
   for (let owner: ClassInfo | undefined = cls; owner; owner = owner.base) {
     if (owner.ownFields.some((field) => field.name === name) || owner.methods.has(name)) return true;
     if (owner.staticFields.has(name) || owner.constants.has(name) || owner.memberTypes.has(name)) return true;
-    if (owner.secondaryBases.some((secondary) => hasMemberNamed(secondary.cls, name))) return true;
+    for (const secondary of owner.secondaryBases)
+      if ((withVirtual || !secondary.isVirtual) && hasMemberNamed(secondary.cls, name, withVirtual)) return true;
+    if (withVirtual && owner.directVirtualBases.some((base) => hasMemberNamed(base.cls, name))) return true;
   }
   return false;
 }

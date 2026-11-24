@@ -11,6 +11,7 @@ import {
   fieldSubobjectOffset,
   type FunctionInfo,
   isArithmetic,
+  type SecondaryBase,
   sizeOf,
   type Type,
 } from './types';
@@ -290,10 +291,12 @@ export class CObject extends Store {
   receiver(asClass = this.cls): Ptr {
     if (this.completeClass === asClass)
       return new CompleteObjectPointer(this.receiverLocation, this.fallbackReceiver());
-    // A secondary base's subobject is a member's object, which knows the object it is a base of.
-    const secondary = this.completeClass.secondaryBaseOf(asClass);
-    if (secondary) {
-      const subobject = this.values[secondary.field.index];
+    // A base off the chain of first bases is a member's subobject, which knows the object it is a base of; a virtual
+    // base's subobject is the complete object's.
+    if (!isFirstBase(this.completeClass, asClass)) {
+      const secondary = secondaryBaseReaching(this.completeClass, asClass);
+      if (secondary?.isVirtual && this.secondaryOwner) return outermostObject(this).receiver(asClass);
+      const subobject = secondary && this.values[secondary.field.index];
       if (subobject instanceof CObject) {
         subobject.secondaryOwner = this;
         return subobject.receiver(asClass);
@@ -765,3 +768,31 @@ export class MemberPointer {
 }
 
 export const NULL_MEMBER = new MemberPointer();
+
+/** Whether a class is a base of another through first bases only, whose subobjects begin at their object. */
+function isFirstBase(cls: ClassInfo, base: ClassInfo): boolean {
+  for (let current: ClassInfo | undefined = cls; current; current = current.base) if (current === base) return true;
+  return false;
+}
+
+/** The secondary or virtual base of a class or of its first bases through which the class derives from `base`. */
+function secondaryBaseReaching(cls: ClassInfo, base: ClassInfo): SecondaryBase | undefined {
+  // A virtual base reached through any path is the complete object's one subobject.
+  for (const virtual of cls.virtualBases) {
+    const field = cls.virtualBaseField(virtual);
+    if (field && (virtual === base || virtual.isDerivedFrom(base)))
+      return { cls: virtual, access: 'public', field, isVirtual: true };
+  }
+  for (let current: ClassInfo | undefined = cls; current; current = current.base) {
+    const found = current.secondaryBases.find((secondary) => secondary.cls.isDerivedFrom(base));
+    if (found) return found.isVirtual ? { ...found, field: cls.virtualBaseField(found.cls) ?? found.field } : found;
+  }
+  return undefined;
+}
+
+/** The complete object an object is a subobject of, through the members that hold its secondary bases. */
+export function outermostObject(object: CObject): CObject {
+  let owner = object;
+  while (owner.secondaryOwner && owner.secondaryOwner.liveness === Liveness.Alive) owner = owner.secondaryOwner;
+  return owner;
+}

@@ -714,6 +714,7 @@ export class Compiler extends StatementCompiler {
           }
         }
       }
+      this.completeVirtualBases(cls);
       this.completeClass(cls, isFinalClass);
       this.defineDefaultedComparisons(cls);
       for (const fn of cls.constructors) this.bindDefaultArguments(fn);
@@ -847,9 +848,13 @@ export class Compiler extends StatementCompiler {
   private baseClause(cls: ClassInfo, node: Syntax, defaultAccess: Access): void {
     const clause = node.children.find((child) => child.type === 'base_class_clause');
     if (!clause) return;
-    if (hasToken(clause, 'virtual')) return this.unsupported(clause.row, '仮想継承（virtual で継承すること）');
-    const bases = this.writtenBases(clause, defaultAccess);
-    const [first, ...others] = bases;
+    const written = this.writtenBases(clause, defaultAccess);
+    for (const { type, access, node: base } of written.filter((candidate) => candidate.isVirtual)) {
+      if (type.kind !== 'class' || type.cls.library)
+        return this.error(base.row, `${base.text} は、virtual で継承できるクラスではありません。`);
+      cls.directVirtualBases.push({ cls: type.cls, access });
+    }
+    const [first, ...others] = written.filter((candidate) => !candidate.isVirtual);
     if (!first) return;
     for (const { type, access, node: written } of others) this.secondaryBase(cls, clause, written, type, access);
     const baseType = first.type;
@@ -872,23 +877,53 @@ export class Compiler extends StatementCompiler {
    * The bases a base clause names, in order, with the access each has; a pack expansion (`: Ts...`) names a base for
    * each type of its pack.
    */
-  private writtenBases(clause: Syntax, defaultAccess: Access): { node: Syntax; type: Type; access: Access }[] {
-    const bases: { node: Syntax; type: Type; access: Access }[] = [];
+  private writtenBases(
+    clause: Syntax,
+    defaultAccess: Access
+  ): { node: Syntax; type: Type; access: Access; isVirtual: boolean }[] {
+    const bases: { node: Syntax; type: Type; access: Access; isVirtual: boolean }[] = [];
     let access = defaultAccess;
+    let isVirtual = false;
     for (const [index, child] of clause.all.entries()) {
       if (child.type === 'access_specifier') access = child.text as Access;
-      if (child.type === ',') access = defaultAccess;
-      if (!child.isNamed || child.type === 'access_specifier') continue;
+      if (child.type === 'virtual') isVirtual = true;
+      if (child.type === ',') {
+        access = defaultAccess;
+        isVirtual = false;
+      }
+      if (!child.isNamed || child.type === 'access_specifier' || child.type === 'virtual') continue;
       if (clause.all[index + 1]?.type === '...') {
         const pack = this.findName(child.text);
         if (pack?.kind !== 'pack')
           return this.error(child.row, `${child.text}... の ${child.text} はパックではありません。`);
-        for (const item of pack.items) bases.push({ node: child, type: this.typeOfEntity(item, child), access });
+        for (const item of pack.items)
+          bases.push({ node: child, type: this.typeOfEntity(item, child), access, isVirtual });
         continue;
       }
-      bases.push({ node: child, type: this.resolveTypeSpecifier(child, false, true), access });
+      bases.push({ node: child, type: this.resolveTypeSpecifier(child, false, true), access, isVirtual });
     }
     return bases;
+  }
+
+  /**
+   * Adds a member for each virtual base of a class that no first base already holds, once the class's own members
+   * are declared, so that the complete objects of the class hold its subobject after their other members.
+   */
+  private completeVirtualBases(cls: ClassInfo): void {
+    for (const base of cls.virtualBases) {
+      if (cls.virtualBaseField(base)) continue;
+      const access = cls.directVirtualBases.find((direct) => direct.cls === base)?.access ?? 'public';
+      const field: FieldInfo = {
+        name: `\0virtual base ${base.name}`,
+        type: classType(base),
+        index: cls.fields.length,
+        access: 'public',
+        owner: cls,
+        row: cls.row,
+      };
+      cls.fields.push(field);
+      cls.secondaryBases.push({ cls: base, access, field, isVirtual: true });
+    }
   }
 
   /**
@@ -1603,8 +1638,15 @@ export class Compiler extends StatementCompiler {
   completeClass(cls: ClassInfo, isFinalClass: boolean): void {
     cls.isFinal = isFinalClass;
     if (cls.base) for (const [key, fn] of cls.base.virtuals) cls.virtuals.set(key, fn);
-    for (const { cls: base } of cls.secondaryBases)
-      for (const [key, fn] of base.virtuals) if (!cls.virtuals.has(key) || key === '~') cls.virtuals.set(key, fn);
+    // A function a base overrides in a more derived class than another base's is the final overrider.
+    for (const { cls: base } of cls.secondaryBases) {
+      for (const [key, fn] of base.virtuals) {
+        const existing = cls.virtuals.get(key);
+        const isMoreDerived =
+          fn.owner && existing?.owner && fn.owner !== existing.owner && fn.owner.isDerivedFrom(existing.owner);
+        if (!existing || key === '~' || isMoreDerived) cls.virtuals.set(key, fn);
+      }
+    }
     for (const overloads of cls.methods.values()) {
       for (const fn of overloads) this.completeVirtual(cls, fn, virtualKey(fn));
     }
@@ -1816,6 +1858,8 @@ export class Compiler extends StatementCompiler {
   // code-gauge-allow functionCognitiveComplexity -- A constructor initializes its base, then each member, from three possible sources.
   private memberInitialization(cls: ClassInfo, fn: FunctionInfo, list: Syntax | undefined): Exec | undefined {
     const initializers = new Map<string, Syntax>();
+    const virtualInitializers = new Map<ClassInfo, Syntax>();
+    const virtualBases = cls.virtualBases;
     let baseInitializer: Syntax | undefined;
     let delegate: Syntax | undefined;
     for (const initializer of list?.children ?? []) {
@@ -1824,6 +1868,12 @@ export class Compiler extends StatementCompiler {
       const { text: name } = nameNode;
       if (name === cls.name) {
         delegate = initializer;
+        continue;
+      }
+      // A virtual base, direct or not, takes the initializer of the constructor of the complete object's class.
+      const virtualBase = virtualBases.find((candidate) => this.namesClass(nameNode, candidate));
+      if (virtualBase) {
+        virtualInitializers.set(virtualBase, initializer);
         continue;
       }
       if (cls.base && this.namesClass(nameNode, cls.base)) {
@@ -1852,20 +1902,46 @@ export class Compiler extends StatementCompiler {
     }
     const parts: Exec[] = [];
     const base = cls.base;
-    if (base) parts.push(this.baseInitialization(cls, base, baseInitializer));
-    else if (baseInitializer) this.error(baseInitializer.row, `${cls.name} には親クラスがありません。`);
+    const virtualPart = this.virtualBaseInitialization(cls, virtualInitializers);
+    if (base) {
+      const baseInitialization = this.baseInitialization(cls, base, baseInitializer);
+      parts.push(
+        virtualPart
+          ? (frame) => {
+              virtualPart(frame);
+              return baseInitialization(frame);
+            }
+          : baseInitialization
+      );
+    } else if (baseInitializer) this.error(baseInitializer.row, `${cls.name} には親クラスがありません。`);
+    else if (virtualPart) parts.push(virtualPart);
     parts.push((frame) => {
       (frame.self?.read() as CObject).cls = cls;
       return;
     });
-    let hasWork = base !== undefined;
+    let hasWork = base !== undefined || virtualPart !== undefined;
     for (const field of cls.ownFields) {
       const explicit = initializers.get(field.name);
       // A union makes a member with a constructor only when told to, since its other members share the room.
       if (cls.isUnion && !explicit && !field.initializer && !isTrivialUnionMember(field.type)) continue;
+      const secondary = cls.secondaryBases.find((candidate) => candidate.field === field);
+      if (secondary?.isVirtual) continue;
       const part = this.fieldInitialization(field, explicit);
       if (part) {
-        parts.push(part);
+        // A secondary base's constructor runs for a subobject, which initializes no virtual base of its own.
+        parts.push(
+          secondary
+            ? (frame) => {
+                const owners = frame.runtime.constructionOwners;
+                owners.push(frame.self?.read() as CObject);
+                try {
+                  return part(frame);
+                } finally {
+                  owners.pop();
+                }
+              }
+            : part
+        );
         hasWork = true;
       }
     }
@@ -1879,6 +1955,23 @@ export class Compiler extends StatementCompiler {
       });
     }
     return initializeInOrder(parts, base !== undefined, this.undoConstruction(cls));
+  }
+
+  /**
+   * Initializes the virtual bases of a class's complete object, before its other bases, from the initializers of the
+   * constructor of the complete object's class; a constructor for a subobject leaves them (C++20 [class.base.init]).
+   */
+  private virtualBaseInitialization(cls: ClassInfo, initializers: ReadonlyMap<ClassInfo, Syntax>): Exec | undefined {
+    const bases = cls.virtualBases;
+    if (bases.length === 0) return undefined;
+    const parts = bases.map((base) =>
+      this.fieldInitialization(cls.virtualBaseField(base) as FieldInfo, initializers.get(base))
+    );
+    return (frame) => {
+      if (!isCompleteObject(frame.runtime, frame.self?.read() as CObject, cls)) return;
+      for (const part of parts) part?.(frame);
+      return;
+    };
   }
 
   /**
@@ -2228,13 +2321,28 @@ export class Compiler extends StatementCompiler {
   /** Destroys an object of a class: its destructor's body, then its members, the last first, then its base. */
   private destructionOf(cls: ClassInfo): ((frame: Frame, value: Value) => void) | undefined {
     // A union leaves destroying its member in use to the code that knows which one it is.
-    const members = (cls.isUnion ? [] : cls.ownFields)
+    const isVirtualField = (field: FieldInfo): boolean =>
+      cls.secondaryBases.some((secondary) => secondary.isVirtual && secondary.field === field);
+    const members = (cls.isUnion ? [] : cls.ownFields.filter((field) => !isVirtualField(field)))
       .map((field) => ({ index: field.index, destroy: this.destroyerOf(field.type) }))
+      .toReversed();
+    // The complete object's virtual bases are destroyed last, after every other base (C++20 [class.dtor]).
+    const virtualBases = cls.virtualBases
+      .map((base) => ({
+        index: (cls.virtualBaseField(base) as FieldInfo).index,
+        destroy: this.destroyerOf(classType(base)),
+      }))
       .toReversed();
     const baseDestroy = cls.base?.operations?.destroy;
     const destructor = cls.destructor;
     const mayOwnReferenceTemporaries = cls.ownFields.some((field) => field.type.kind === 'reference');
-    if (!destructor && !members.some((member) => member.destroy) && !baseDestroy && !mayOwnReferenceTemporaries)
+    if (
+      !destructor &&
+      !members.some((member) => member.destroy) &&
+      !virtualBases.some((member) => member.destroy) &&
+      !baseDestroy &&
+      !mayOwnReferenceTemporaries
+    )
       return undefined;
     return (frame, value) => {
       const object = value as CObject;
@@ -2247,6 +2355,13 @@ export class Compiler extends StatementCompiler {
         endLifetime(member);
       }
       if (baseDestroy) baseDestroy(frame, object);
+      if (object.completeClass === cls && !object.secondaryOwner) {
+        for (const { index, destroy } of virtualBases) {
+          const member = object.values[index];
+          if (member !== UNINIT) destroy?.(frame, member);
+          endLifetime(member);
+        }
+      }
       object.destroyReferenceTemporaries(frame);
     };
   }
@@ -4878,4 +4993,11 @@ function hasConversionFunction(cls: ClassInfo): boolean {
   for (let current: ClassInfo | undefined = cls; current; current = current.base)
     for (const overloads of current.methods.values()) if (overloads.some((fn) => fn.isConversion)) return true;
   return false;
+}
+
+/** Whether a constructor of a class runs for a complete object of it, not for a subobject of another class's. */
+function isCompleteObject(runtime: Runtime, object: CObject, cls: ClassInfo): boolean {
+  if (object.completeClass !== cls || object.secondaryOwner) return false;
+  const owner = runtime.constructionOwners.at(-1);
+  return !owner || owner === object || !owner.completeClass.isDerivedFrom(cls);
 }

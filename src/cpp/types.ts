@@ -123,6 +123,15 @@ export interface FieldInfo {
   bitWidth?: number;
 }
 
+/** A base that the objects of a class hold in a member: a base after the first, or a virtual base. */
+export interface SecondaryBase {
+  cls: ClassInfo;
+  access: Access;
+  field: FieldInfo;
+  /** Whether the base is virtual, whose subobject the complete object holds once for every class that names it. */
+  isVirtual?: boolean;
+}
+
 export interface StaticFieldInfo {
   name: string;
   type: Type;
@@ -325,12 +334,39 @@ export class ClassInfo {
    * The bases after the first (`class C : A, B`), each of which an object holds as a subobject in a member of its
    * own, which conversions to the base and the base's members reach.
    */
-  secondaryBases: { cls: ClassInfo; access: Access; field: FieldInfo }[] = [];
+  secondaryBases: SecondaryBase[] = [];
+  /** The virtual bases the class's base clause names, whose members the class adds once its members are declared. */
+  directVirtualBases: { cls: ClassInfo; access: Access }[] = [];
 
-  /** The secondary base whose subobject holds the subobject of `other`, a base of this class through it. */
-  secondaryBaseOf(other: ClassInfo): { cls: ClassInfo; access: Access; field: FieldInfo } | undefined {
-    if (this.base?.isDerivedFrom(other)) return undefined;
-    return this.secondaryBases.find((secondary) => secondary.cls.isDerivedFrom(other));
+  /**
+   * The virtual bases of the class and of its bases (`class B : virtual public A`), each of which only the complete
+   * object holds, in a member of the class whose objects are complete.
+   */
+  get virtualBases(): ClassInfo[] {
+    const found: ClassInfo[] = [];
+    const add = (cls: ClassInfo): void => {
+      if (!found.includes(cls)) found.push(cls);
+    };
+    for (const current of firstBaseChain(this)) {
+      for (const { cls } of current.directVirtualBases) {
+        for (const inner of cls.virtualBases) add(inner);
+        add(cls);
+      }
+      for (const secondary of current.secondaryBases) {
+        for (const inner of secondary.cls.virtualBases) add(inner);
+        if (secondary.isVirtual) add(secondary.cls);
+      }
+    }
+    return found;
+  }
+
+  /** The member that holds a virtual base's subobject in this class's complete objects. */
+  virtualBaseField(base: ClassInfo): FieldInfo | undefined {
+    for (const current of firstBaseChain(this)) {
+      const secondary = current.secondaryBases.find((candidate) => candidate.isVirtual && candidate.cls === base);
+      if (secondary) return secondary.field;
+    }
+    return undefined;
   }
 
   /** The members of its anonymous unions and structs, which the class names as its own. */
@@ -365,6 +401,10 @@ export class ClassInfo {
 
   distanceToBase(other: ClassInfo): number | undefined {
     if (this === other) return 0;
+    for (const { cls: base } of this.directVirtualBases) {
+      const distance = base.distanceToBase(other);
+      if (distance !== undefined) return distance + 1;
+    }
     const primary = this.base?.distanceToBase(other);
     if (primary !== undefined) return primary + 1;
     for (const { cls: base } of this.secondaryBases) {
@@ -840,4 +880,11 @@ function isPodType(type: Type): boolean {
   if (type.kind === 'array') return isPodType(type.of);
   if (type.kind === 'class') return isPodForLayout(type.cls);
   return type.kind !== 'reference';
+}
+
+/** A class and its first bases, the class first. */
+function firstBaseChain(cls: ClassInfo): ClassInfo[] {
+  const chain: ClassInfo[] = [];
+  for (let current: ClassInfo | undefined = cls; current; current = current.base) chain.push(current);
+  return chain;
 }
