@@ -154,16 +154,23 @@ export class Runtime {
     return !file?.read || file.position >= new TextEncoder().encode(file.read()).length;
   }
 
-  writeOutput(fd: number, bytes: readonly number[]): void {
+  /**
+   * Writes to standard output (1), standard error (2), or a file open for writing, telling whether the descriptor
+   * accepts writes: a closed descriptor or a file opened only to read does not, as the OS refuses them.
+   */
+  writeOutput(fd: number, bytes: readonly number[]): boolean {
     rejectRuntimeEffect();
-    const file = this.openFiles.get(fd);
-    if (file) {
-      file.write?.write(file.decoder.decode(new Uint8Array(bytes), { stream: true }));
-      return;
+    if (fd === 1 || fd === 2) {
+      const index = fd - 1;
+      const text = this.outputDecoders[index].decode(new Uint8Array(bytes), { stream: true });
+      (index === 1 ? this.io.stderr : this.io.stdout).write(text);
+      return true;
     }
-    const index = fd === 2 ? 1 : 0;
-    const text = this.outputDecoders[index].decode(new Uint8Array(bytes), { stream: true });
-    (index === 1 ? this.io.stderr : this.io.stdout).write(text);
+    const write = this.openFiles.get(fd)?.write;
+    if (!write) return false;
+    const file = this.openFiles.get(fd) as OpenFile;
+    write.write(file.decoder.decode(new Uint8Array(bytes), { stream: true }));
+    return true;
   }
 
   finishOutput(): void {

@@ -323,8 +323,8 @@ function addIoMembers(): void {
             const file = evaluate(frame) as NativeHandle;
             io.eval(frame);
             const value = bytes.eval(frame);
-            frame.runtime.writeOutput(file.state.fd as number, writerBytes(frame, value as Slice));
-            return;
+            const written = frame.runtime.writeOutput(file.state.fd as number, writerBytes(frame, value as Slice));
+            return written ? undefined : ErrorValue.of('NotOpenForWriting');
           },
           call.span
         );
@@ -476,15 +476,7 @@ function addWriterMembers(): void {
       (sema, call) => {
         const writer = writerOf(sema, call);
         expectArgs(sema, call, 0, 'flush');
-        return runtime(
-          errorUnionOf(WRITE_ERROR, VOID),
-          (frame) => {
-            const state = writer(frame);
-            flushWriter(frame, state);
-            return;
-          },
-          call.span
-        );
+        return runtime(errorUnionOf(WRITE_ERROR, VOID), (frame) => flushWriter(frame, writer(frame)), call.span);
       },
       () => ({ type: fnType([pointerTo(WRITER, false)], errorUnionOf(WRITE_ERROR, VOID)), receiver: true })
     ),

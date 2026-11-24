@@ -300,7 +300,11 @@ export function writeTo(frame: Frame, state: WriterState, bytes: WriteBytes): Va
     }
     checkOutputSize(end);
     frame.runtime.spend(state.end + length);
-    frame.runtime.writeOutput(state.fd, [...bufferedBytes(frame, state), ...materializeBytes(frame, bytes)]);
+    const written = frame.runtime.writeOutput(state.fd, [
+      ...bufferedBytes(frame, state),
+      ...materializeBytes(frame, bytes),
+    ]);
+    if (!written) return ErrorValue.of('WriteFailed');
     state.end = 0;
     return undefined;
   }
@@ -348,17 +352,19 @@ function materializeBytes(frame: Frame, bytes: WriteBytes): readonly number[] {
   return Array.from({ length }, (_, index) => bytes.get(index));
 }
 
-export function flushWriter(frame: Frame, state: WriterState): void {
+/** Writes what a writer buffered to its file, giving `error.WriteFailed` when the file does not accept writes. */
+export function flushWriter(frame: Frame, state: WriterState): Value {
   if (isDiscardingWriter(state)) {
     frame.runtime.spend();
     addDiscarded(state, writerEnd(state));
     state.end = 0;
-    return;
+    return undefined;
   }
-  if (state.fd === undefined) return;
+  if (state.fd === undefined) return undefined;
   checkOutputSize(state.end);
-  frame.runtime.writeOutput(state.fd, bufferedBytes(frame, state));
+  if (!frame.runtime.writeOutput(state.fd, bufferedBytes(frame, state))) return ErrorValue.of('WriteFailed');
   state.end = 0;
+  return undefined;
 }
 
 export function writerEndAfter(state: WriterState, length: bigint): number {
