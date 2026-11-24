@@ -182,15 +182,25 @@ function regexTest(shell: Shell, text: string, source: string): boolean {
   const match = searchRegex(compiled, text, () => shell.runtime.spend());
   const chars = charactersOf(text);
   const elements = match ? match.map(([start, end]) => (start === -1 ? '' : chars.slice(start, end).join(''))) : [];
+  storeRegexMatch(shell, elements);
+  return match !== undefined;
+}
+
+function storeRegexMatch(shell: Shell, elements: string[]): void {
   const resolved = shell.resolveNameOrUndefined('BASH_REMATCH');
-  if (resolved !== undefined && shell.assignCompound(resolved, elements, false) && resolved === 'BASH_REMATCH') {
+  if (resolved === undefined) return;
+  const target = shell.findOwnVariable(resolved);
+  if (target?.value?.kind === 'associative' || target?.attributes.has('A')) {
+    shell.reportError('[[: BASH_REMATCH: not an indexed array');
+    return;
+  }
+  if (shell.assignCompound(resolved, elements, false) && resolved === 'BASH_REMATCH') {
     const variable = shell.findOwnVariable('BASH_REMATCH');
     if (variable) {
       variable.isSystem = true;
       variable.userAssigned = false;
     }
   }
-  return match !== undefined;
 }
 
 /** Ends `[[ =~ ]]` with status 2 after an invalid regular expression. */
