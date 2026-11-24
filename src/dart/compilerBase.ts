@@ -99,8 +99,6 @@ const UNAVAILABLE_NAMES: Record<string, string> = {
   HttpClient: 'HttpClient（ネットワーク）',
   HttpServer: 'HttpServer（ネットワーク）',
   Socket: 'Socket（ネットワーク）',
-  Uri: 'Uri',
-  Expando: 'Expando',
   WeakReference: 'WeakReference',
   Finalizer: 'Finalizer',
   Uint8List: 'Uint8List（dart:typed_data）',
@@ -119,7 +117,7 @@ const UNAVAILABLE_SINK_MEMBERS = new Set([
   'echoMode',
   'echoNewlineMode',
 ]);
-const UNAVAILABLE_STATIC_MEMBERS = new Set(['dart:math.Random.secure', 'dart:core.StackTrace.current']);
+const UNAVAILABLE_STATIC_MEMBERS = new Set(['dart:core.StackTrace.current']);
 const SPECIAL_TYPES = new Map<string, DartType>([
   ['dynamic', DYNAMIC],
   ['Never', NEVER],

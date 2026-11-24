@@ -450,3 +450,20 @@ defineTurtle('remove', (runtime, state) => {
 });
 
 export { asciiNames, formatDouble, identityOf };
+
+/** Each Expando's entries; the weak table drops an entry once its key object is no longer reachable, as the VM's does. */
+const expandoEntries = new WeakMap<DartObject, WeakMap<object, Value>>();
+
+define('Expando._get', (_runtime, receiver, [object]) =>
+  expandoEntries.get(receiver as DartObject)?.get(object as object)
+);
+define('Expando._set', (_runtime, receiver, [object, value]) => {
+  let entries = expandoEntries.get(receiver as DartObject);
+  if (!entries) {
+    entries = new WeakMap();
+    expandoEntries.set(receiver as DartObject, entries);
+  }
+  if (value === undefined) entries.delete(object as object);
+  else entries.set(object as object, value);
+  return;
+});

@@ -167,6 +167,7 @@ abstract class FileSystemEntity {
   String get path;
   FileSystemEntity get absolute;
   bool get isAbsolute => path.startsWith("/");
+  Uri get uri => Uri.file(path);
   Directory get parent => Directory(parentOf(path));
   bool existsSync();
   Future<bool> exists() => Future(existsSync);
@@ -219,6 +220,7 @@ abstract class FileSystemEntity {
 
 abstract interface class File implements FileSystemEntity {
   factory File(String path) => _File(path);
+  factory File.fromUri(Uri uri) => File(uri.toFilePath());
   File get absolute;
   File renameSync(String newPath);
   Future<File> rename(String newPath);
@@ -371,6 +373,8 @@ class _FileSink implements IOSink {
 
 abstract interface class Directory implements FileSystemEntity {
   factory Directory(String path) => _Directory(path);
+  factory Directory.fromUri(Uri uri) => Directory(uri.toFilePath());
+  Uri get uri;
   static Directory get current => _Directory("/");
   Directory get absolute;
   Directory renameSync(String newPath);
@@ -386,6 +390,7 @@ class _Directory extends FileSystemEntity implements Directory {
   final String path;
   _Directory(this.path);
   String toString() => "Directory: '" + path + "'";
+  Uri get uri => Uri.directory(path);
   Directory get absolute => isAbsolute ? this : _Directory(FileSystemEntity._absolutePath(path));
   bool existsSync() => FileSystemEntity._kindOf(path) == 1;
   Directory renameSync(String newPath) {

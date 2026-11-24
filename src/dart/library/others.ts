@@ -26,7 +26,7 @@ external int _systemHash(int first, int second, [int? third, int? fourth]);
 
 abstract interface class Random {
   external factory Random([int? seed]);
-  external factory Random.secure();
+  factory Random.secure() => _SecureRandom();
   int nextInt(int max);
   double nextDouble();
   bool nextBool();
@@ -36,6 +36,41 @@ final class _Random implements Random {
   external int nextInt(int max);
   external double nextDouble();
   external bool nextBool();
+}
+
+class _SecureRandom implements Random {
+  _SecureRandom() {
+    _getBytes(1);
+  }
+
+  /** Returns count bytes of entropy as a positive integer; count <= 8. */
+  external static int _getBytes(int count);
+
+  int nextInt(int max) {
+    RangeError.checkValueInInterval(max, 1, _POW2_32, "max", "Must be positive and <= 2^32");
+    final byteCount = ((max - 1).bitLength + 7) >> 3;
+    if (byteCount == 0) {
+      return 0;
+    }
+    var rnd;
+    var result;
+    do {
+      rnd = _getBytes(byteCount);
+      result = rnd % max;
+    } while ((rnd - result + max) > (1 << (byteCount << 3)));
+    return result;
+  }
+
+  double nextDouble() {
+    return (_getBytes(7) >> 3) / _POW2_53_D;
+  }
+
+  bool nextBool() {
+    return _getBytes(1).isEven;
+  }
+
+  static const _POW2_32 = 1 << 32;
+  static const _POW2_53_D = 1.0 * (1 << 53);
 }
 
 class Point<T extends num> {

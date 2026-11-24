@@ -1,4 +1,4 @@
-/** dart:convert as the interpreter declares it: JSON, UTF-8, Base64, and line splitting. The source must not contain `${`. */
+/** dart:convert as the interpreter declares it: JSON, UTF-8, ASCII, Latin-1, Base64, and line splitting. The source must not contain `${`. */
 export const CONVERT_SOURCE = String.raw`
 abstract mixin class Codec<S, T> {
   const Codec();
@@ -6,18 +6,187 @@ abstract mixin class Codec<S, T> {
   Converter<T, S> get decoder;
   T encode(S input) => encoder.convert(input);
   S decode(T encoded) => decoder.convert(encoded);
+  Codec<S, R> fuse<R>(Codec<T, R> other) {
+    return _FusedCodec<S, T, R>(this, other);
+  }
+  Codec<T, S> get inverted => _InvertedCodec<T, S>(this);
+}
+
+class _FusedCodec<S, M, T> extends Codec<S, T> {
+  final Codec<S, M> _first;
+  final Codec<M, T> _second;
+  Converter<S, T> get encoder => _first.encoder.fuse<T>(_second.encoder);
+  Converter<T, S> get decoder => _second.decoder.fuse<S>(_first.decoder);
+  _FusedCodec(this._first, this._second);
+}
+
+class _InvertedCodec<T, S> extends Codec<T, S> {
+  final Codec<S, T> _codec;
+  _InvertedCodec(Codec<S, T> codec) : _codec = codec;
+  Converter<T, S> get encoder => _codec.decoder;
+  Converter<S, T> get decoder => _codec.encoder;
+  Codec<S, T> get inverted => _codec;
 }
 
 abstract mixin class Converter<S, T> implements StreamTransformer<S, T> {
   const Converter();
   T convert(S input);
+  Converter<S, TT> fuse<TT>(Converter<T, TT> other) {
+    return _FusedConverter<S, T, TT>(this, other);
+  }
   Stream<T> bind(Stream<S> stream) => stream.map(convert);
   StreamTransformer<RS, RT> cast<RS, RT>() => StreamTransformer.castFrom<S, T, RS, RT>(this);
 }
 
+class _FusedConverter<S, M, T> extends Converter<S, T> {
+  final Converter<S, M> _first;
+  final Converter<M, T> _second;
+  _FusedConverter(this._first, this._second);
+  T convert(S input) => _second.convert(_first.convert(input));
+}
+
 abstract class Encoding extends Codec<String, List<int>> {
   const Encoding();
+  Converter<String, List<int>> get encoder;
+  Converter<List<int>, String> get decoder;
+  Future<String> decodeStream(Stream<List<int>> byteStream) {
+    return decoder
+        .bind(byteStream)
+        .fold(StringBuffer(), (StringBuffer buffer, String string) => buffer..write(string))
+        .then((StringBuffer buffer) => buffer.toString());
+  }
   String get name;
+  static const Map<String, Encoding> _nameToEncoding = <String, Encoding>{
+    "iso_8859-1:1987": latin1,
+    "iso-ir-100": latin1,
+    "iso_8859-1": latin1,
+    "iso-8859-1": latin1,
+    "latin1": latin1,
+    "l1": latin1,
+    "ibm819": latin1,
+    "cp819": latin1,
+    "csisolatin1": latin1,
+    "iso-ir-6": ascii,
+    "ansi_x3.4-1968": ascii,
+    "ansi_x3.4-1986": ascii,
+    "iso_646.irv:1991": ascii,
+    "iso646-us": ascii,
+    "us-ascii": ascii,
+    "us": ascii,
+    "ibm367": ascii,
+    "cp367": ascii,
+    "csascii": ascii,
+    "ascii": ascii,
+    "csutf8": utf8,
+    "utf-8": utf8,
+  };
+  static Encoding? getByName(String? name) {
+    if (name == null) return null;
+    return _nameToEncoding[name.toLowerCase()];
+  }
+}
+
+const AsciiCodec ascii = AsciiCodec();
+const int _asciiMask = 0x7F;
+
+final class AsciiCodec extends Encoding {
+  final bool _allowInvalid;
+  const AsciiCodec({bool allowInvalid = false}) : _allowInvalid = allowInvalid;
+  String get name => "us-ascii";
+  _Uint8List encode(String source) => encoder.convert(source);
+  String decode(List<int> bytes, {bool? allowInvalid}) {
+    if (allowInvalid ?? _allowInvalid) {
+      return const AsciiDecoder(allowInvalid: true).convert(bytes);
+    } else {
+      return const AsciiDecoder(allowInvalid: false).convert(bytes);
+    }
+  }
+  AsciiEncoder get encoder => const AsciiEncoder();
+  AsciiDecoder get decoder =>
+      _allowInvalid ? const AsciiDecoder(allowInvalid: true) : const AsciiDecoder(allowInvalid: false);
+}
+
+class _UnicodeSubsetEncoder extends Converter<String, List<int>> {
+  final int _subsetMask;
+  const _UnicodeSubsetEncoder(this._subsetMask);
+  _Uint8List convert(String string, [int start = 0, int? end]) {
+    var stringLength = string.length;
+    end = RangeError.checkValidRange(start, end, stringLength);
+    var length = end - start;
+    var result = _Uint8List(length);
+    for (var i = 0; i < length; i++) {
+      var codeUnit = string.codeUnitAt(start + i);
+      if ((codeUnit & ~_subsetMask) != 0) {
+        throw ArgumentError.value(string, "string", "Contains invalid characters.");
+      }
+      result[i] = codeUnit;
+    }
+    return result;
+  }
+}
+
+final class AsciiEncoder extends _UnicodeSubsetEncoder {
+  const AsciiEncoder() : super(_asciiMask);
+}
+
+abstract class _UnicodeSubsetDecoder extends Converter<List<int>, String> {
+  final bool _allowInvalid;
+  final int _subsetMask;
+  const _UnicodeSubsetDecoder(this._allowInvalid, this._subsetMask);
+  String convert(List<int> bytes, [int start = 0, int? end]) {
+    end = RangeError.checkValidRange(start, end, bytes.length);
+    for (var i = start; i < end; i++) {
+      var byte = bytes[i];
+      if ((byte & ~_subsetMask) != 0) {
+        if (!_allowInvalid) {
+          throw FormatException("Invalid value in input: $byte");
+        }
+        return _convertInvalid(bytes, start, end);
+      }
+    }
+    return String.fromCharCodes(bytes, start, end);
+  }
+  String _convertInvalid(List<int> bytes, int start, int end) {
+    var buffer = StringBuffer();
+    for (var i = start; i < end; i++) {
+      var value = bytes[i];
+      if ((value & ~_subsetMask) != 0) value = 0xFFFD;
+      buffer.writeCharCode(value);
+    }
+    return buffer.toString();
+  }
+}
+
+final class AsciiDecoder extends _UnicodeSubsetDecoder {
+  const AsciiDecoder({bool allowInvalid = false}) : super(allowInvalid, _asciiMask);
+}
+
+const Latin1Codec latin1 = Latin1Codec();
+const int _latin1Mask = 0xFF;
+
+final class Latin1Codec extends Encoding {
+  final bool _allowInvalid;
+  const Latin1Codec({bool allowInvalid = false}) : _allowInvalid = allowInvalid;
+  String get name => "iso-8859-1";
+  _Uint8List encode(String source) => encoder.convert(source);
+  String decode(List<int> bytes, {bool? allowInvalid}) {
+    if (allowInvalid ?? _allowInvalid) {
+      return const Latin1Decoder(allowInvalid: true).convert(bytes);
+    } else {
+      return const Latin1Decoder(allowInvalid: false).convert(bytes);
+    }
+  }
+  Latin1Encoder get encoder => const Latin1Encoder();
+  Latin1Decoder get decoder =>
+      _allowInvalid ? const Latin1Decoder(allowInvalid: true) : const Latin1Decoder(allowInvalid: false);
+}
+
+final class Latin1Encoder extends _UnicodeSubsetEncoder {
+  const Latin1Encoder() : super(_latin1Mask);
+}
+
+final class Latin1Decoder extends _UnicodeSubsetDecoder {
+  const Latin1Decoder({bool allowInvalid = false}) : super(allowInvalid, _latin1Mask);
 }
 
 class JsonUnsupportedObjectError extends Error {

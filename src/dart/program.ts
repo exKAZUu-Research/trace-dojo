@@ -12,6 +12,7 @@ import { CORE_SOURCE } from './library/core';
 import { startAsync, startAsyncStar } from './library/nativeAsync';
 import { addAllToMap, listIterator, newMap, newSet, quickCopySet, syncStarIterable } from './library/nativeCollections';
 import { COLLECTION_SOURCE, CONVERT_SOURCE, IO_SOURCE, MATH_SOURCE } from './library/others';
+import { URI_SOURCE } from './library/uri';
 import './library/nativeCore';
 import './library/nativeNumbers';
 import './library/nativeStrings';
@@ -37,6 +38,8 @@ import {
 import { DartList, DartObject, DartRecord, DartTypeValue, type Value } from './values';
 import { assignVmClassIds } from './vmClassIds';
 
+const URI_LIBRARY = 'dart:_uri';
+
 interface LibrarySource {
   uri: string;
   source: string;
@@ -50,6 +53,8 @@ const LIBRARY_SOURCES: LibrarySource[] = [
   { uri: 'dart:collection', source: COLLECTION_SOURCE, imports: ['dart:math'] },
   { uri: 'dart:convert', source: CONVERT_SOURCE, imports: ['dart:async', 'dart:collection'] },
   { uri: 'dart:io', source: IO_SOURCE, imports: ['dart:async', 'dart:convert'] },
+  // dart:core's Uri, apart from the rest of dart:core because it encodes with dart:convert.
+  { uri: URI_LIBRARY, source: URI_SOURCE, imports: ['dart:collection', 'dart:convert'] },
 ];
 
 /** The libraries a program may import, and why the others are unavailable. */
@@ -127,18 +132,15 @@ function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
     futureOr: asyncClass('FutureOr'),
     stream: asyncClass('Stream'),
   });
-  // dart:core exports these declarations of dart:async.
-  for (const name of [
+  reexport(asyncLibrary, core, [
     'Future',
     'Stream',
     'FutureExtensions',
     'FutureIterable',
     ...Array.from({ length: 8 }, (_, index) => `FutureRecord${index + 2}`),
     'ParallelWaitError',
-  ]) {
-    const declaration = asyncLibrary.declarations.get(name);
-    if (declaration) core.reexports.set(name, declaration);
-  }
+  ]);
+  reexport(envs.get(URI_LIBRARY) as LibraryEnv, core, ['Uri', 'UriData']);
   for (const name of [
     'MappedIterable',
     'MappedListIterable',
@@ -197,14 +199,19 @@ function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
     (envs.get('dart:collection') as LibraryEnv).hiddenNames.add(name);
   const collection = envs.get('dart:collection') as LibraryEnv;
   for (const name of ['LinkedHashMap', 'LinkedHashSet']) core.hiddenNames.add(name);
-  for (const name of ['LinkedHashMap', 'LinkedHashSet', 'IterableExtensions', 'NullableIterableExtensions']) {
-    const declaration = core.declarations.get(name);
-    if (declaration) collection.reexports.set(name, declaration);
-  }
+  reexport(core, collection, ['LinkedHashMap', 'LinkedHashSet', 'IterableExtensions', 'NullableIterableExtensions']);
   (core.declarations.get('_Symbol') as { cls: ClassInfo }).cls.vmName = 'Symbol';
   asyncClass('_Future').vmName = 'Future';
   (collection.declarations.get('_QueueIterator') as { cls: ClassInfo }).cls.vmName = '_ListQueueIterator';
   (collection.declarations.get('_Uint8List') as { cls: ClassInfo }).cls.vmName = 'Uint8List';
+}
+
+/** Makes a library export declarations of another, as the SDK's libraries export each other's. */
+function reexport(from: LibraryEnv, to: LibraryEnv, names: readonly string[]): void {
+  for (const name of names) {
+    const declaration = from.declarations.get(name);
+    if (declaration) to.reexports.set(name, declaration);
+  }
 }
 
 function assignCoreTypes(core: LibraryEnv): void {
@@ -276,7 +283,8 @@ function libraryAt(envs: Map<string, LibraryEnv>, directive: { uri: string; row:
   const unavailable = UNAVAILABLE_LIBRARIES[directive.uri];
   if (unavailable)
     throw new CompileError([{ row: directive.row, message: `${unavailable}は、この採点環境では使えません。` }]);
-  const library = envs.get(directive.uri);
+  // The SDK's own private libraries are not for programs to import.
+  const library = directive.uri.startsWith('dart:_') ? undefined : envs.get(directive.uri);
   if (!library) throw new CompileError([{ row: directive.row, message: `ライブラリ ${directive.uri} はありません。` }]);
   return library;
 }

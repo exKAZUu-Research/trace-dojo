@@ -1141,6 +1141,33 @@ class _Symbol implements Symbol {
   String toString() => 'Symbol("' + _name + '")';
 }
 
+final class Expando<T extends Object> {
+  final String? name;
+
+  Expando([String? name]) : name = name;
+
+  String toString() => "Expando:" + name.toString();
+
+  T? operator [](Object object) {
+    _checkValidWeakTarget(object, 'object');
+    return _get(object) as T?;
+  }
+
+  void operator []=(Object object, T? value) {
+    _checkValidWeakTarget(object, 'object');
+    _set(object, value);
+  }
+
+  external Object? _get(Object object);
+  external void _set(Object object, Object? value);
+}
+
+void _checkValidWeakTarget(Object? object, String name) {
+  if ((object == null) || (object is bool) || (object is num) || (object is String) || (object is Record)) {
+    throw ArgumentError.value(object, name, "Cannot be a string, number, boolean, record, null, Pointer, Struct or Union");
+  }
+}
+
 abstract interface class StackTrace {
   static const StackTrace empty = _StringStackTrace();
   external static StackTrace get current;

@@ -9,6 +9,7 @@ import { appendJsonQuoted, StringParts } from './boundedStringParts';
 import { forEachEntry, newMap } from './nativeCollections';
 import {
   define,
+  defineConstructor,
   index,
   intArg,
   listElement,
@@ -451,6 +452,12 @@ define('_jsonDecode', (runtime, _receiver, [source, reviver]) =>
 // UTF-8 and Base64
 
 registerPackedList('_Uint8List');
+defineConstructor('_Uint8List.new', (runtime, _instance, args) => {
+  const size = intArg(runtime, args.positional[0], 'length');
+  if (size < 0n) runtime.throwError('RangeError', 'range', [size, 0n, undefined, 'length']);
+  runtime.allocate(Number(size) + 1);
+  return new DartPackedList(runtime.links.classNamed('_Uint8List'), new Uint8Array(Number(size)));
+});
 define('_Uint8List.[]=', (runtime, receiver, [position, value]) => {
   const list = receiver as DartPackedList;
   const at = intArg(runtime, position, 'index');

@@ -3316,14 +3316,6 @@ test.each([
   { name: 'isolates', program: "import 'dart:isolate';\n\nvoid main() {\n  print(Isolate.current);\n}\n" },
   { name: 'zones', program: "import 'dart:async';\n\nvoid main() {\n  runZoned(() => print('zoned'));\n}\n" },
   { name: 'platform details', program: "import 'dart:io';\n\nvoid main() {\n  print(Platform.operatingSystem);\n}\n" },
-  {
-    name: 'secure random constructors',
-    program: "import 'dart:math'; void main() { print('before'); try { Random.secure(); } catch (_) {} }",
-  },
-  {
-    name: 'secure random constructor tear-offs',
-    program: "import 'dart:math' as m; typedef RandomAlias = m.Random; void main() { print(RandomAlias.secure); }",
-  },
   { name: 'stack-trace inspection', program: 'void main() { print(StackTrace.current); }' },
 ])('$name are rejected as unavailable before running', ({ program }) => {
   const result = executeProgram('dart', program);
@@ -5285,10 +5277,10 @@ void main() {
 
 test('unsupported SDK exports respect import prefixes and visibility', () => {
   for (const [declaration, body] of [
-    ["import 'dart:convert';", "print(ascii.encode('A'));"],
+    ["import 'dart:convert';", 'print(JsonUtf8Encoder());'],
     ["import 'dart:convert' as codec show htmlEscape;", "print(codec.htmlEscape.convert('<'));"],
     ["import 'dart:collection' as collections;", 'collections.LinkedList<collections.LinkedListEntry>();'],
-    ['', 'Expando? value; print(value);'],
+    ['', 'WeakReference<Object>? value; print(value);'],
     ["import 'dart:io' as io;", 'print(io.HttpDate);'],
   ]) {
     const result = executeProgram('dart', `${declaration} void main() { ${body} }`);
@@ -10088,5 +10080,47 @@ void main() async {
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     stdout: 'later 0\nlater 1\nnumbers\nlater 1\nlater 2\n[0, 10, 10, 20]\nlater 1\n[0, 10, 2]\n',
+  });
+});
+
+// Dart SDK 3.13.7 (`dart run`) prints the expected output, except Uri.base, which there is the shell's directory.
+test('Dart parses, resolves, and encodes URIs, holds Expando entries, and draws secure random numbers', () => {
+  const program = `import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+void main() {
+  final uri = Uri.parse('https://user@dart.dev:8080/a/./b/../c%20d?x=1&x=2&y=%E3%81%82#top');
+  print([uri.host, uri.port, uri.path, uri.pathSegments, uri.queryParametersAll, uri.normalizePath(), uri.runtimeType]);
+  print([Uri.parse('http://a/b/c/d;p?q').resolve('../../g'), Uri.https('dart.dev', '/q', {'k': 'a b'})]);
+  print([Uri.encodeComponent('a b&é'), Uri.decodeQueryComponent('a+b%2B'), Uri.dataFromBytes([0, 255]), Uri.base]);
+  print([File.fromUri(Uri.file('/tmp/a b.txt')), Directory('d').uri, ascii.encode('A'), latin1.decode([233])]);
+  try {
+    Uri.parse('http://[::1');
+  } on FormatException catch (error) {
+    print(error.message);
+  }
+  final tags = Expando<String>('tag');
+  final key = Object();
+  tags[key] = 'kept';
+  print([tags[key], tags[Object()], tags]);
+  try {
+    tags[1] = 'number';
+  } on ArgumentError catch (error) {
+    print(error.message);
+  }
+  final random = Random.secure();
+  print([List.generate(50, (_) => random.nextInt(6)).every((value) => value >= 0 && value < 6), random.runtimeType]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[dart.dev, 8080, /a/c%20d, [a, c d], {x: [1, 2], y: [あ]}, https://user@dart.dev:8080/a/c%20d?x=1&x=2&y=%E3%81%82#top, _Uri]\n' +
+      '[http://a/g, https://dart.dev/q?k=a+b]\n' +
+      '[a%20b%26%C3%A9, a b+, data:application/octet-stream;base64,AP8=, file:///]\n' +
+      "[File: '/tmp/a b.txt', d/, [65], é]\n" +
+      'Missing end `]` to match `[` in host\n' +
+      '[kept, null, Expando:tag]\n' +
+      'Cannot be a string, number, boolean, record, null, Pointer, Struct or Union\n' +
+      '[true, _SecureRandom]\n',
   });
 });

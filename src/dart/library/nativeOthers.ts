@@ -145,9 +145,12 @@ defineConstructor('Random.new', (runtime, _instance, args) => {
   ) as unknown as DartObject['native'];
   return object;
 });
-defineConstructor('Random.secure', (runtime) =>
-  runtime.throwError('UnsupportedError', '', ['Random.secure は、この採点環境では使えません。'])
-);
+define('_SecureRandom._getBytes', (runtime, _self, [count]) => {
+  const bytes = crypto.getRandomValues(new Uint8Array(Number(intArg(runtime, count, 'count'))));
+  let result = 0n;
+  for (const byte of bytes) result = (result << 8n) | BigInt(byte);
+  return result;
+});
 define('_Random.nextInt', (runtime, receiver, [max]) =>
   randomOf(receiver).nextInt(runtime, intArg(runtime, max, 'max'))
 );
