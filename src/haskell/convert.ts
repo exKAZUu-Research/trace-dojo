@@ -4,7 +4,7 @@ import type { Node, Tree } from '@willbooster/web-tree-sitter';
 import type { CompileError } from '../interpreter/diagnostics';
 import { compileError as syntaxError, unsupportedError } from './errors';
 import { Extensions } from './extensions';
-import { parseCharLiteral, parseFloatLiteral, parseIntegerLiteral, parseStringLiteral } from './literals';
+import { parseCharLiteral, parseNumberLiteral, parseStringLiteral } from './literals';
 import { sourceColumns } from './sourceCoordinates';
 import type {
   Alt,
@@ -1542,6 +1542,24 @@ function chainItems<T>(node: Node, convertOperand: (operand: Node) => T): ChainI
     const child = node.child(index);
     if (!child || isComment(child)) continue;
     const fieldName = node.fieldNameForChild(index);
+    const negated = fieldName === 'operator' ? tightNegation(child, node.child(index + 1)) : undefined;
+    if (negated && convertOperand === (convertExpr as unknown)) {
+      // NegativeLiterals and LexicalNegation read `f -1` as `f (-1)`: the minus belongs to what follows it.
+      const operand = negated as unknown as T;
+      const previous = items.at(-1);
+      if (previous?.kind === 'operand') {
+        const fn = previous.value as unknown as Expr;
+        const arg = operand as unknown as Expr;
+        previous.value = {
+          kind: 'app',
+          fn,
+          arg,
+          span: { ...fn.span, endRow: arg.span.endRow, endCol: arg.span.endCol },
+        } as unknown as T;
+      } else items.push({ kind: 'operand', value: operand });
+      index++;
+      continue;
+    }
     if (child.type === 'prefix_negation' || fieldName === 'prefix_operator') {
       items.push({ kind: 'negate', span: spanOf(child) });
     } else if (fieldName === 'operator') {
@@ -1554,20 +1572,41 @@ function chainItems<T>(node: Node, convertOperand: (operand: Node) => T): ChainI
   return items;
 }
 
+/**
+ * The negation a minus right before its operand stands for, as NegativeLiterals reads `-1` and LexicalNegation reads
+ * `-x`, when the minus is not right after another token.
+ */
+function tightNegation(operator: Node, next: Node | null): Expr | undefined {
+  if (!next || operator.text !== '-' || next.startIndex !== operator.endIndex) return undefined;
+  const before = operator.tree.rootNode.text[operator.startIndex - 1] ?? ' ';
+  if (!/[\s([,;]/.test(before)) return undefined;
+  const isNumber = next.type === 'literal' && ['integer', 'float'].includes(namedChildren(next)[0]?.type ?? '');
+  if (!(extensions.has('LexicalNegation') || (isNumber && extensions.has('NegativeLiterals')))) return undefined;
+  const span = { ...spanOf(operator), endRow: spanOf(next).endRow, endCol: spanOf(next).endCol };
+  const operand = convertExpr(next);
+  if (operand.kind === 'lit' && operand.lit.kind === 'int') {
+    return { kind: 'lit', lit: { kind: 'int', value: -operand.lit.value }, span };
+  }
+  return { kind: 'paren', expr: { kind: 'neg', expr: operand, span }, span };
+}
+
 function convertLiteral(node: Node): SourceLiteral {
   const span = spanOf(node);
   switch (node.type) {
-    case 'integer': {
-      return { kind: 'int', value: parseIntegerLiteral(node.text, span), text: node.text };
-    }
+    case 'integer':
     case 'float': {
-      return { kind: 'frac', value: parseFloatLiteral(node.text, span), text: node.text };
+      const literal = parseNumberLiteral(node.text, span, extensions);
+      return literal.kind === 'int' ? { ...literal, text: node.text } : literal;
     }
     case 'char': {
       return { kind: 'char', value: parseCharLiteral(node.text, span), text: node.text };
     }
     case 'string': {
-      return { kind: 'string', value: parseStringLiteral(node.text, span), text: node.text };
+      return {
+        kind: 'string',
+        value: parseStringLiteral(node.text, span, extensions.has('MultilineStrings')),
+        text: node.text,
+      };
     }
     default: {
       throw syntaxError(span, '書き方に誤りがあります。');
