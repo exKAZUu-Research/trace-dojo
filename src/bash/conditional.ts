@@ -1,4 +1,4 @@
-import { ArithmeticError, evaluateArithmetic } from './arithmetic';
+import { ArithmeticError, ArithmeticStoreError, evaluateArithmetic } from './arithmetic';
 import type { TestExpression } from './ast';
 import { charactersOf } from './characters';
 import { compareCollated } from './collation';
@@ -88,6 +88,7 @@ function conditionalNumber(shell: Shell, text: string): bigint {
   try {
     return evaluateArithmetic(text, shell, undefined, () => shell.runtime.spend());
   } catch (error) {
+    if (error instanceof ArithmeticStoreError) throw new ConditionalArithmeticError();
     if (!(error instanceof ArithmeticError)) throw error;
     shell.reportError(error.message);
     throw new ConditionalArithmeticError();

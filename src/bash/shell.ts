@@ -1,6 +1,13 @@
 // code-gauge-allow-file fileNcss -- Bash's execution, variables, and scopes share the shell state that subshells copy, so they stay in one class.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { ArithmeticError, type ArithmeticHost, evaluateArithmetic, skipSubscript } from './arithmetic';
+import {
+  ArithmeticError,
+  type ArithmeticHost,
+  ArithmeticStoreError,
+  type ArithmeticTarget,
+  evaluateArithmetic,
+  skipSubscript,
+} from './arithmetic';
 import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word } from './ast';
 import { BUILTINS } from './builtins';
 import { charactersOf } from './characters';
@@ -806,6 +813,7 @@ export class Shell implements ArithmeticHost {
       return evaluateArithmetic(text, this, commandName, () => this.runtime.spend());
     } catch (error) {
       if (error instanceof ArithmeticError) this.discard(error.message);
+      if (error instanceof ArithmeticStoreError) throw new DiscardSignal();
       throw error;
     }
   }
@@ -821,40 +829,57 @@ export class Shell implements ArithmeticHost {
     try {
       return evaluateArithmetic(text, this, commandName, () => this.runtime.spend());
     } catch (error) {
+      if (error instanceof ArithmeticStoreError) return undefined;
       if (!(error instanceof ArithmeticError)) throw error;
       this.reportError(error.message);
       return undefined;
     }
   }
 
-  valueOf(token: string, isElement: boolean): { value: string | undefined; index: bigint } {
-    if (!isElement) return { value: this.scalarValue(token), index: -1n };
-    const open = token.indexOf('[');
-    const name = token.slice(0, open);
-    const subscript = token.slice(open + 1, -1);
-    if (subscript === '') {
-      // Bash checks the subscript twice before it reads an element, reporting an empty one each time, and reads 0.
-      this.reportError(`${name}[]: bad array subscript`);
-      this.reportError(`${name}[]: bad array subscript`);
-      return { value: undefined, index: -1n };
+  // code-gauge-allow functionCognitiveComplexity -- Resolves scalar, associative, indexed, and invalid arithmetic subscripts once for reads and writes.
+  resolveTarget(name: string, rawSubscript: string | undefined, willRead: boolean): ArithmeticTarget {
+    if (rawSubscript === undefined) return { kind: 'scalar', name };
+    if (rawSubscript === '') {
+      if (willRead) {
+        this.reportError(`${name}[]: bad array subscript`);
+        this.reportError(`${name}[]: bad array subscript`);
+      }
+      return { kind: 'invalidElement', raw: `${name}[]`, emptyWrite: !willRead };
     }
-    if (this.isAssociative(name)) {
-      return { value: this.elementValue(name, this.expander.expandSubscriptText(subscript)), index: -1n };
+    const resolved = this.resolveName(name);
+    if (this.isAssociative(resolved)) {
+      const key = this.expander.expandSubscriptText(rawSubscript);
+      if (key === '') {
+        if (willRead) this.reportError(`${name}[${rawSubscript}]: bad array subscript`);
+        return { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` };
+      }
+      return { kind: 'associativeElement', name: resolved, key };
     }
-    if (subscript === '@' || subscript === '*') {
-      return { value: this.elementValue(name, '0'), index: -1n };
+    if (rawSubscript === '@' || rawSubscript === '*') {
+      return willRead
+        ? { kind: 'indexedElement', name: resolved, index: 0n }
+        : { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` };
     }
-    const index = this.readIndex(name, subscript);
-    return index === undefined ? { value: undefined, index: -1n } : { value: this.elementAtIndex(name, index), index };
+    const index = willRead ? this.readIndex(resolved, rawSubscript) : this.arrayIndex(resolved, rawSubscript);
+    if (index === undefined) return { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` };
+    return { kind: 'indexedElement', name: resolved, index };
   }
 
-  assign(lhs: string, value: string): void {
-    const open = lhs.indexOf('[');
-    if (open === -1) {
-      this.assignScalar(lhs, value);
-      return;
+  readTarget(target: ArithmeticTarget): string | undefined {
+    if (target.kind === 'scalar') return this.scalarValue(target.name);
+    if (target.kind === 'associativeElement') return this.elementValue(target.name, target.key);
+    if (target.kind === 'indexedElement') return this.elementAtIndex(target.name, target.index);
+    return undefined;
+  }
+
+  writeTarget(target: ArithmeticTarget, value: string): boolean {
+    if (target.kind === 'scalar') return this.assignScalar(target.name, value);
+    if (target.kind === 'associativeElement') return this.assignElement(target.name, target.key, value, false, true);
+    if (target.kind === 'indexedElement') {
+      return this.assignElement(target.name, String(target.index), value, false, true);
     }
-    this.assignElement(lhs.slice(0, open), lhs.slice(open + 1, -1), value, false, true);
+    this.reportError(`${target.raw}: bad array subscript`);
+    return false;
   }
 
   /** Whether a name holds an associative array, including one declared with `-A` that has no elements yet. */
@@ -1464,51 +1489,96 @@ export class Shell implements ArithmeticHost {
   }
 
   private pureSubscriptIndex(value: VariableValue, subscript: string, maxScope: number): bigint | undefined {
-    let raw: bigint;
-    try {
-      raw = evaluateArithmetic(
-        subscript,
-        {
-          valueOf: (token, isElement) => this.pureValueOf(token, isElement, maxScope),
-          assign: () => {
-            throw new PureReadAbort();
+    const overlay = new Map<string, string>();
+    const evalPure = (expr: string): bigint | undefined => {
+      try {
+        return evaluateArithmetic(
+          expr,
+          {
+            resolveTarget: (name, rawSubscript) => this.pureResolveTarget(name, rawSubscript, maxScope, evalPure),
+            readTarget: (target) => this.pureReadTarget(target, maxScope, overlay),
+            writeTarget: (target, written) => {
+              if (target.kind === 'invalidElement') return false;
+              overlay.set(this.pureTargetKey(target), written);
+              return true;
+            },
+            reportError: () => {
+              throw new PureReadAbort();
+            },
           },
-          isAssociative: (name) => this.findOwnVariableIn(name, maxScope)?.attributes.has('A') === true,
-          reportError: () => {
-            throw new PureReadAbort();
-          },
-        },
-        undefined,
-        () => this.runtime.spend()
-      );
-    } catch (error) {
-      if (error instanceof ArithmeticError || error instanceof PureReadAbort) return undefined;
-      throw error;
-    }
+          undefined,
+          () => this.runtime.spend()
+        );
+      } catch (error) {
+        if (
+          error instanceof ArithmeticError ||
+          error instanceof ArithmeticStoreError ||
+          error instanceof PureReadAbort
+        ) {
+          return undefined;
+        }
+        throw error;
+      }
+    };
+    const raw = evalPure(subscript);
+    if (raw === undefined) return undefined;
     if (raw >= 0n) return raw;
     const length = value.kind === 'indexed' ? this.maxIndex(value.elements) + 1n : 1n;
     const resolved = length + raw;
     return resolved < 0n ? undefined : resolved;
   }
 
-  private pureValueOf(
-    token: string,
-    isElement: boolean,
-    maxScope: number
-  ): { value: string | undefined; index: bigint } {
-    if (isElement) {
-      const open = token.indexOf('[');
-      const element = this.shownElementOf(token.slice(0, open), token.slice(open + 1, -1), maxScope);
-      return { value: element?.kind === 'scalar' ? element.value : undefined, index: -1n };
+  private pureResolveTarget(
+    name: string,
+    rawSubscript: string | undefined,
+    maxScope: number,
+    evalPure: (expr: string) => bigint | undefined
+  ): ArithmeticTarget {
+    if (rawSubscript === undefined) return { kind: 'scalar', name };
+    if (rawSubscript === '') return { kind: 'invalidElement', raw: `${name}[]` };
+    const variable = this.findOwnVariableIn(name, maxScope);
+    if (variable?.value?.kind === 'associative' || variable?.attributes.has('A')) {
+      return { kind: 'associativeElement', name, key: rawSubscript };
     }
-    const variable = this.findOwnVariableIn(token, maxScope);
+    const raw = evalPure(rawSubscript);
+    if (raw === undefined) return { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` };
+    const length = variable?.value?.kind === 'indexed' ? this.maxIndex(variable.value.elements) + 1n : 1n;
+    const resolved = raw < 0n ? length + raw : raw;
+    return resolved < 0n
+      ? { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` }
+      : { kind: 'indexedElement', name, index: resolved };
+  }
+
+  private pureTargetKey(target: Exclude<ArithmeticTarget, { kind: 'invalidElement' }>): string {
+    if (target.kind === 'scalar') return target.name;
+    if (target.kind === 'associativeElement') return `${target.name}[${target.key}]`;
+    return `${target.name}[${target.index}]`;
+  }
+
+  private pureReadTarget(
+    target: ArithmeticTarget,
+    maxScope: number,
+    overlay: ReadonlyMap<string, string>
+  ): string | undefined {
+    if (target.kind === 'invalidElement') return undefined;
+    const shadowed = overlay.get(this.pureTargetKey(target));
+    if (shadowed !== undefined) return shadowed;
+    if (target.kind === 'associativeElement') {
+      const element = this.shownElementOf(target.name, target.key, maxScope);
+      return element?.kind === 'scalar' ? element.value : undefined;
+    }
+    if (target.kind === 'indexedElement') {
+      const element = this.shownElementOf(target.name, String(target.index), maxScope);
+      return element?.kind === 'scalar' ? element.value : undefined;
+    }
+    const variable = this.findOwnVariableIn(target.name, maxScope);
     const val = variable
       ? this.shownValueOf({ callRow: undefined, isAtomic: false, scopeIndex: maxScope }, variable)
       : undefined;
-    if (!val) return { value: undefined, index: -1n };
-    if (val.kind === 'scalar') return { value: val.value, index: -1n };
-    if (val.kind === 'indexed') return { value: val.elements.get(0n), index: -1n };
-    return { value: val.table.get('0'), index: -1n };
+    if (!val) return undefined;
+    if (val.kind === 'scalar') return val.value;
+    if (val.kind === 'indexed') return val.elements.get(0n);
+    return val.table.get('0');
   }
 
   private findOwnVariableIn(name: string, maxScope: number): Variable | undefined {

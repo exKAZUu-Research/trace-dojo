@@ -4,6 +4,7 @@ import { expandBraces } from './braces';
 import { charactersOf } from './characters';
 import { EMPTY_LIST, FIELD_BREAK, FieldSplitter, type Fragment, isFieldBreak, type Piece, STAR_BREAK } from './fields';
 import { applyOperator } from './parameterOperators';
+import { parseSubscriptWordParts } from './parse';
 import { hasPatternCharacters, matchesPattern, quotePattern } from './pattern';
 import { singleQuote } from './quoting';
 import { ExitSignal, SCRIPT_NAME } from './runtime';
@@ -89,9 +90,10 @@ export class Expander {
     return this.joinPieces(this.expandParts(word.parts, true));
   }
 
-  /** An associative array's subscript within arithmetic text, whose expansions arithmetic already substituted. */
+  /** Expands `$` expansions, command substitutions, and quotes in an associative subscript from arithmetic text. */
   expandSubscriptText(text: string): string {
-    return text;
+    if (!/[$`'"\\]/.test(text)) return text;
+    return this.joinPieces(this.expandParts(parseSubscriptWordParts(text), false));
   }
 
   matches(text: string, pattern: string): boolean {
