@@ -377,3 +377,45 @@ export function constraintTupleType(arity: number): TypeEntity {
   }
   return entity;
 }
+
+const unboxedTuples = new Map<number, TypeEntity>();
+
+/** The name of the unboxed tuple type of a size and of its constructor: `(# #)`, `(#_#)`, `(#,#)`, `(#,,#)`. */
+export function unboxedTupleName(size: number): string {
+  if (size === 0) return '(# #)';
+  return size === 1 ? '(#_#)' : `(#${','.repeat(size - 1)}#)`;
+}
+
+/** An unboxed tuple, `(# a, b #)`, as UnboxedTuples writes it, which holds its parts like a tuple does. */
+export function unboxedTupleType(size: number): TypeEntity {
+  let type = unboxedTuples.get(size);
+  if (!type) {
+    const name = unboxedTupleName(size);
+    type = { ...primType(name, size, 'unboxedTuple'), sort: 'data' };
+    addConstructor(
+      type,
+      name,
+      Array.from({ length: size }, (_, index) => gen(index))
+    );
+    unboxedTuples.set(size, type);
+  }
+  return type;
+}
+
+const unboxedSums = new Map<number, TypeEntity>();
+
+/** The name of an alternative of an unboxed sum, `(#_|#)` for the first of two. */
+export function unboxedSumConName(alternative: number, arity: number): string {
+  return `(#${'|'.repeat(alternative)}_${'|'.repeat(arity - 1 - alternative)}#)`;
+}
+
+/** An unboxed sum, `(# a | b #)`, as UnboxedSums writes it, whose alternatives are its constructors. */
+export function unboxedSumType(arity: number): TypeEntity {
+  let type = unboxedSums.get(arity);
+  if (!type) {
+    type = { ...primType(`(#${'|'.repeat(arity - 1)}#)`, arity, 'unboxedSum'), sort: 'data' };
+    for (let index = 0; index < arity; index++) addConstructor(type, unboxedSumConName(index, arity), [gen(index)]);
+    unboxedSums.set(arity, type);
+  }
+  return type;
+}

@@ -75,6 +75,12 @@ export class TypePrinter {
         if (elem.tag === 'tcon' && elem.entity.name === 'Char' && elem.entity.module === 'GHC.Types') return 'String';
         return `[${this.show(args[0])}]`;
       }
+      if (entity.special === 'unboxedTuple' && args.length === entity.arity) {
+        return args.length === 0 ? '(# #)' : `(# ${args.map((arg) => this.show(arg)).join(', ')} #)`;
+      }
+      if (entity.special === 'unboxedSum' && args.length === entity.arity) {
+        return `(# ${args.map((arg) => this.show(arg)).join(' | ')} #)`;
+      }
       if (entity.special === 'tuple' && args.length === entity.arity) {
         return `(${args.map((arg) => this.show(arg)).join(', ')})`;
       }

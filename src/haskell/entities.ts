@@ -48,7 +48,7 @@ export interface TypeEntity {
   /** For a data constructor used as a type, as DataKinds promotes it, the constructor. */
   promotedFrom?: ConInfo;
   /** How the type prints when it is special syntax: lists, tuples, unit, functions, and a class's arguments. */
-  special?: 'list' | 'tuple' | 'unit' | 'function' | 'classArguments';
+  special?: 'list' | 'tuple' | 'unit' | 'function' | 'classArguments' | 'unboxedTuple' | 'unboxedSum';
   traceKind?: 'bool' | 'ratio' | 'maybe' | 'map' | 'set';
 }
 

@@ -1,6 +1,8 @@
 import type { Node, Tree } from '@willbooster/web-tree-sitter';
 
 import type { CompileError } from '../interpreter/diagnostics';
+// code-gauge-allow-file fileNcss -- The syntax-tree conversion covers every node kind of the grammar in one pass.
+import { unboxedSumConName, unboxedTupleName } from './builtinTypes';
 import { compileError as syntaxError, unsupportedError } from './errors';
 import { Extensions } from './extensions';
 import { parseCharLiteral, parseNumberLiteral, parseStringLiteral } from './literals';
@@ -36,16 +38,10 @@ import type {
   TypeExpr,
   TyVarBinder,
 } from './syntax';
-// code-gauge-allow-file fileNcss -- The syntax-tree conversion covers every node kind of the grammar in one pass.
 import { QuoteBuilder } from './thQuote';
 
 /** What each node type stands for, in the message that rejects it. */
 const UNSUPPORTED_NODES: Record<string, string> = {
-  unboxed_sum: 'ボックス化されない和型',
-  unboxed_tuple: 'ボックス化されないタプル',
-  unboxed_unit: 'ボックス化されないタプル',
-  prefix_unboxed_sum: 'ボックス化されない和型',
-  prefix_unboxed_tuple: 'ボックス化されないタプル',
   cpp: 'C プリプロセッサの指令',
   calling_convention: '外部の関数の宣言（foreign）',
   entity: '外部の関数の宣言（foreign）',
@@ -1556,6 +1552,16 @@ function convertType(node: Node): TypeExpr {
     case 'unit': {
       return { kind: 'tcon', name: { name: '()', span }, span };
     }
+    case 'unboxed_unit':
+    case 'unboxed_tuple':
+    case 'unboxed_sum':
+    case 'prefix_unboxed_tuple':
+    case 'prefix_unboxed_sum': {
+      const { name, elems } = unboxedParts(node, true);
+      let type: TypeExpr = { kind: 'tcon', name: { name, span }, span };
+      for (const elem of elems) type = { kind: 'tapp', fn: type, arg: convertType(elem), span };
+      return type;
+    }
     case 'star': {
       if (!extensions.has('StarIsType'))
         throw syntaxError(span, '* を種類として使うには、StarIsType の拡張が要ります。');
@@ -1701,6 +1707,15 @@ export function convertExpr(node: Node): Expr {
     }
     case 'unit': {
       return { kind: 'con', name: { name: '()', span }, span };
+    }
+    case 'unboxed_unit':
+    case 'unboxed_tuple':
+    case 'unboxed_sum':
+    case 'prefix_unboxed_tuple': {
+      const { name, elems } = unboxedParts(node, false);
+      let expr: Expr = { kind: 'con', name: { name, span }, span };
+      for (const elem of elems) expr = { kind: 'app', fn: expr, arg: convertExpr(elem), span };
+      return expr;
     }
     case 'prefix_tuple': {
       return { kind: 'con', name: { name: node.text.replaceAll(/\s+/g, ''), span }, span };
@@ -1959,6 +1974,31 @@ function convertMultiWayIf(node: Node, span: Span): Expr {
     span,
     what: 'multi-way if',
   };
+}
+
+/**
+ * The constructor (or, in a type, the type) an unboxed tuple or sum names, with its parts: `(# a, b #)` is `(#,#)`
+ * applied to `a` and `b`; `(# | x #)` is the second alternative of two, `(#|_#)`, applied to `x`.
+ */
+function unboxedParts(node: Node, inType: boolean): { name: string; elems: Node[] } {
+  const span = spanOf(node);
+  const sum = node.type === 'unboxed_sum' || node.type === 'prefix_unboxed_sum';
+  if (!extensions.has(sum ? 'UnboxedSums' : 'UnboxedTuples')) {
+    const extension = sum ? 'UnboxedSums' : 'UnboxedTuples';
+    throw syntaxError(span, `ボックス化されない${sum ? '和型' : 'タプル'}を使うには、${extension} の拡張が要ります。`);
+  }
+  const text = node.text.replaceAll(/\s+/g, '');
+  if (node.type === 'prefix_unboxed_tuple') return { name: text === '(##)' ? '(# #)' : text, elems: [] };
+  if (node.type === 'prefix_unboxed_sum') return { name: text, elems: [] };
+  const elems = fields(node, 'element');
+  if (node.type === 'unboxed_unit') return { name: unboxedTupleName(0), elems: [] };
+  if (node.type === 'unboxed_tuple') return { name: unboxedTupleName(elems.length), elems };
+  const bars = node.children.filter((child) => child?.type === '|').length;
+  if (inType) return { name: `(#${'|'.repeat(bars)}#)`, elems };
+  if (elems.length !== 1) throw syntaxError(span, 'ボックス化されない和型の値には、要素を 1 つ書いてください。');
+  const element = elems[0];
+  const before = node.children.filter((child) => child?.type === '|' && child.startIndex < element.startIndex).length;
+  return { name: unboxedSumConName(before, bars + 1), elems };
 }
 
 function requireTemplateHaskell(span: Span, quotes?: string): void {
@@ -2366,6 +2406,8 @@ function tightNegation(operator: Node, next: Node | null): Expr | undefined {
 
 function convertLiteral(node: Node): SourceLiteral {
   const span = spanOf(node);
+  // MagicHash's literals are values of the machine's own types, Int# and the like, whose size depends on the CPU.
+  if (node.text.endsWith('#')) throw unsupportedError(span, `ボックス化されない値のリテラル（${node.text}）`);
   switch (node.type) {
     case 'integer':
     case 'float': {
@@ -2451,6 +2493,12 @@ export function convertPattern(node: Node): Pat {
     }
     case 'unit': {
       return { kind: 'pcon', con: { name: '()', span }, args: [], span };
+    }
+    case 'unboxed_unit':
+    case 'unboxed_tuple':
+    case 'unboxed_sum': {
+      const { name, elems } = unboxedParts(node, false);
+      return { kind: 'pcon', con: { name, span }, args: elems.map(convertPattern), span };
     }
     case 'prefix_tuple': {
       return { kind: 'pcon', con: { name: node.text.replaceAll(/\s+/g, ''), span }, args: [], span };

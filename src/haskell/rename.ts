@@ -13,6 +13,8 @@ import {
   tupleCon,
   tupleType,
   TYPE_KIND,
+  unboxedSumType,
+  unboxedTupleType,
   UNIT_CON,
   UNIT_TYPE,
 } from './builtinTypes';
@@ -2235,6 +2237,8 @@ class Renamer {
       if (name.name === ':') return CONS_CON;
       const tuple = /^\((,+)\)$/.exec(name.name);
       if (tuple) return tupleCon(tuple[1].length + 1);
+      const unboxed = unboxedConstructor(name.name);
+      if (unboxed) return unboxed;
     }
     let candidates: ValueEntity[];
     if (name.qualifier) {
@@ -2321,6 +2325,9 @@ class Renamer {
       else {
         const tuple = /^\((,+)\)$/.exec(name.name);
         if (tuple) builtin = tupleType(tuple[1].length + 1);
+        builtin ??= unboxedConstructor(name.name)?.type;
+        const sum = /^\(#(\|+)#\)$/.exec(name.name);
+        if (sum) builtin = unboxedSumType(sum[1].length + 1);
       }
     }
     if (builtin) return { k: 'con', entity: builtin, span: name.span };
@@ -3040,4 +3047,15 @@ function specialTypeName(name: string): [string, string] | undefined {
   if (name === '->') return ['GHC.Internal.Types', '->'];
   const tuple = /^\((,+)\)$/.exec(name);
   return tuple ? ['GHC.Internal.Tuple', `Tuple${tuple[1].length + 1}`] : undefined;
+}
+
+/** The constructor of an unboxed tuple, `(#,#)`, or of an alternative of an unboxed sum, `(#_|#)`. */
+function unboxedConstructor(name: string): ConInfo | undefined {
+  if (name === '(# #)') return unboxedTupleType(0).cons[0];
+  if (name === '(#_#)') return unboxedTupleType(1).cons[0];
+  const tuple = /^\(#(,+)#\)$/.exec(name);
+  if (tuple) return unboxedTupleType(tuple[1].length + 1).cons[0];
+  const sum = /^\(#(\|*)_(\|*)#\)$/.exec(name);
+  if (sum) return unboxedSumType(sum[1].length + sum[2].length + 1).cons[sum[1].length];
+  return undefined;
 }
