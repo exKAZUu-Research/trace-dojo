@@ -37,11 +37,9 @@ import type {
 
 /** What each node type stands for, in the message that rejects it. */
 const UNSUPPORTED_NODES: Record<string, string> = {
-  abstract_family: '型族',
   binding_list: 'パターンシノニム',
   constructor_synonym: 'パターンシノニム',
   constructor_synonyms: 'パターンシノニム',
-  do_module: '修飾つきの do（QualifiedDo）',
   explicit_type: 'type を付けた型引数（RequiredTypeArguments）',
   field_path: '入れ子のレコードの更新（OverloadedRecordUpdate）',
   forall_required: 'forall',
@@ -764,7 +762,9 @@ function convertFamilyDecl(node: Node): Decl {
           return index;
         });
       }
-      if (equationsNode?.type === 'abstract_family') throw unsupported(equationsNode);
+      if (equationsNode?.type === 'abstract_family') {
+        throw syntaxError(spanOf(equationsNode), '中身を書かない閉じた型族は、hs-boot ファイルにだけ書けます。');
+      }
       return {
         kind: 'typeFamily',
         name: typeDeclName(node),
@@ -1706,7 +1706,7 @@ function convertBlock(node: Node, span: Span): Expr {
     }
     case 'do': {
       const doModule = namedChildren(node).find((child) => child.type === 'do_module');
-      if (doModule) throw unsupported(doModule);
+      if (doModule) return convertQualifiedDo(node, moduleName(required(doModule, 'module')), span);
       if (hasToken(node, 'mdo')) throw unsupportedError(span, 'mdo（RecursiveDo）');
       const statements = fields(node, 'statement').map(convertStatement);
       if (statements.length === 0) throw syntaxError(span, 'do の中に文がありません。');
@@ -1714,6 +1714,114 @@ function convertBlock(node: Node, span: Span): Expr {
     }
     default: {
       throw syntaxError(span, '書き方に誤りがあります。');
+    }
+  }
+}
+
+/**
+ * Converts `M.do`, which QualifiedDo reads with the `>>=`, `>>`, and `fail` of the module `M`: `x <- e; s` as
+ * `e M.>>= \x -> s`, `e; s` as `e M.>> s`, and a bind whose pattern can fail as one that calls `M.fail` then.
+ */
+function convertQualifiedDo(node: Node, module: string, span: Span): Expr {
+  if (!extensions.has('QualifiedDo'))
+    throw syntaxError(span, '修飾つきの do を使うには、QualifiedDo の拡張が要ります。');
+  if (hasToken(node, 'mdo')) throw unsupportedError(span, '修飾つきの mdo');
+  const statements = fields(node, 'statement').map(convertStatement);
+  if (statements.length === 0) throw syntaxError(span, 'do の中に文がありません。');
+  const qualified = (name: string, at: Span): Expr => ({
+    kind: 'var',
+    name: { name, qualifier: module, span: at },
+    span: at,
+  });
+  let result: Expr | undefined;
+  for (const [index, stmt] of statements.entries().toArray().toReversed()) {
+    const isLast = index === statements.length - 1;
+    if (isLast) {
+      if (stmt.kind !== 'exp') throw syntaxError(stmt.span, 'do の最後の文は、式にしてください。');
+      result = stmt.expr;
+      continue;
+    }
+    const rest = result as Expr;
+    if (stmt.kind === 'exp') {
+      result = {
+        kind: 'app',
+        fn: { kind: 'app', fn: qualified('>>', stmt.span), arg: stmt.expr, span: stmt.span },
+        arg: rest,
+        span,
+      };
+    } else if (stmt.kind === 'let') {
+      result = { kind: 'let', decls: stmt.decls, body: rest, span };
+    } else {
+      const name = generatedName('bind', index);
+      const failMessage: Expr = {
+        kind: 'lit',
+        lit: {
+          kind: 'string',
+          value: [
+            ...`Pattern match failure in qualified 'do' block at ${PROGRAM_SOURCE}:${stmt.span.row + 1}:${stmt.span.col + 1}`,
+          ],
+        },
+        span: stmt.span,
+      };
+      const body: Expr = irrefutableSurface(stmt.pat)
+        ? {
+            kind: 'case',
+            scrutinee: varOf(name, stmt.span),
+            alts: [{ pat: stmt.pat, rhs: plainRhs(rest, span), span }],
+            span,
+          }
+        : {
+            kind: 'case',
+            scrutinee: varOf(name, stmt.span),
+            alts: [
+              { pat: stmt.pat, rhs: plainRhs(rest, span), span },
+              {
+                pat: { kind: 'pwild', span },
+                rhs: plainRhs({ kind: 'app', fn: qualified('fail', stmt.span), arg: failMessage, span }, span),
+                span,
+              },
+            ],
+            span,
+          };
+      const lambda = lambdaOf([name], body, span);
+      result = {
+        kind: 'app',
+        fn: { kind: 'app', fn: qualified('>>=', stmt.span), arg: stmt.expr, span: stmt.span },
+        arg: lambda,
+        span,
+      };
+    }
+  }
+  return result as Expr;
+}
+
+/** The file name GHC's messages show for the program. */
+const PROGRAM_SOURCE = 'Main.hs';
+
+function plainRhs(expr: Expr, span: Span): Rhs {
+  return { body: { kind: 'plain', expr }, where: [], span };
+}
+
+/** Whether a pattern always matches, judging by its form alone. */
+function irrefutableSurface(pat: Pat): boolean {
+  switch (pat.kind) {
+    case 'pvar':
+    case 'pwild':
+    case 'plazy': {
+      return true;
+    }
+    case 'pbang':
+    case 'psig': {
+      return irrefutableSurface(pat.pat);
+    }
+    case 'pas': {
+      return irrefutableSurface(pat.pat);
+    }
+    case 'ptuple': {
+      return pat.elems.every(irrefutableSurface);
+    }
+    default: {
+      return false;
     }
   }
 }
