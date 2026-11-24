@@ -170,6 +170,12 @@ export class Evaluator extends StatementExecutor {
       const arg = args[index] instanceof CsStruct ? copyValue(args[index]) : args[index];
       frame.slots[local.slot] = local.isCaptured ? new Cell(arg as Value) : arg;
     }
+    // An instance constructor, a base class's called from a derived one's included, first runs its class's static
+    // constructor, as .NET does before the class's first instance.
+    if (method.kind === 'constructor' && !method.isStatic && method.owner.staticConstructor) {
+      const owner = this.ownerFromEnvironment(method, typeEnvironment);
+      if (owner) this.runtime.ensureInitialized(owner);
+    }
     this.runtime.pushFrame(frame);
     try {
       if (method.kind === 'constructor') this.runConstructorPrologue(frame, method);
