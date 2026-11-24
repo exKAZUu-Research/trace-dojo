@@ -22,6 +22,7 @@ pub mod marker {
     pub trait Copy: Clone {}
     pub trait Send {}
     pub trait Sync {}
+    pub trait Unpin {}
 }
 pub mod clone {
     pub trait Clone: Sized {
@@ -978,6 +979,8 @@ pub mod boxed {
     pub struct Box<T>;
     impl<T> Box<T> {
         pub fn new(x: T) -> Box<T>;
+        pub fn pin(x: T) -> super::pin::Pin<Box<T>>;
+        pub fn into_pin(boxed: Box<T>) -> super::pin::Pin<Box<T>>;
         pub fn as_ref(&self) -> &T;
         pub fn as_mut(&mut self) -> &mut T;
     }
@@ -1539,6 +1542,81 @@ pub mod io {
     impl Write for Stderr {}
     impl Write for StderrLock {}
 }
+pub mod future {
+    use super::pin::Pin;
+    use super::task::{Context, Poll};
+    pub trait Future {
+        type Output;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output>;
+    }
+    /** The future of an \`async\` block or function, or of \`ready\` or \`poll_fn\`. */
+    pub struct AsyncFuture<T>;
+    impl<T> Future for AsyncFuture<T> {
+        type Output = T;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<T>;
+    }
+    impl<F: Future + Unpin + ?Sized> Future for Box<F> {
+        type Output = F::Output;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<F::Output>;
+    }
+    impl<'a, F: Future + Unpin + ?Sized> Future for &'a mut F {
+        type Output = F::Output;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<F::Output>;
+    }
+    impl<F: Future + ?Sized> Future for Pin<Box<F>> {
+        type Output = F::Output;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<F::Output>;
+    }
+    impl<'a, F: Future + ?Sized> Future for Pin<&'a mut F> {
+        type Output = F::Output;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<F::Output>;
+    }
+    pub fn ready<T>(t: T) -> AsyncFuture<T>;
+    pub fn pending<T>() -> AsyncFuture<T>;
+    pub fn poll_fn<T, F: FnMut(&mut Context) -> Poll<T>>(f: F) -> AsyncFuture<T>;
+}
+pub mod task {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub enum Poll<T> { Ready(T), Pending }
+    impl<T> Poll<T> {
+        pub fn is_ready(&self) -> bool;
+        pub fn is_pending(&self) -> bool;
+        pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Poll<U>;
+    }
+    pub struct Context { inner: () }
+    impl Context {
+        pub fn from_waker(waker: &Waker) -> Context;
+        pub fn waker(&self) -> &Waker;
+    }
+    #[derive(Debug)]
+    pub struct Waker { inner: () }
+    impl Waker {
+        pub fn noop() -> &'static Waker;
+        pub fn wake(self);
+        pub fn wake_by_ref(&self);
+        pub fn will_wake(&self, other: &Waker) -> bool;
+    }
+    impl Clone for Waker { fn clone(&self) -> Waker; }
+}
+pub mod pin {
+    pub struct Pin<P>;
+    impl<'a, T: ?Sized + super::marker::Unpin> Pin<&'a mut T> {
+        pub fn new(pointer: &'a mut T) -> Pin<&'a mut T>;
+    }
+    impl<P> Pin<P> {
+        pub unsafe fn new_unchecked(pointer: P) -> Pin<P>;
+        pub fn into_inner(pin: Pin<P>) -> P;
+    }
+    impl<'a, T> Pin<&'a mut T> {
+        pub fn as_mut(&mut self) -> Pin<&mut T>;
+        pub fn get_mut(self) -> &'a mut T;
+        pub fn set(&mut self, value: T);
+    }
+    impl<T> Pin<Box<T>> {
+        pub fn as_mut(&mut self) -> Pin<&mut T>;
+    }
+    pub fn pin_value<T>(value: T) -> Pin<&'static mut T>;
+}
 pub mod time {
     pub struct Duration { inner: () }
     impl Duration {
@@ -1840,6 +1918,7 @@ pub mod prelude {
     pub use super::marker::Copy;
     pub use super::marker::Send;
     pub use super::marker::Sync;
+    pub use super::marker::Unpin;
     pub use super::marker::Sized;
     pub use super::cmp::PartialEq;
     pub use super::cmp::Eq;

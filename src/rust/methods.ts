@@ -13,6 +13,7 @@ import {
   isBuiltin,
   ref,
   resolve,
+  type SelfWrapper,
   shallow,
   substitute,
   substituteTraitRef,
@@ -51,7 +52,8 @@ export function derefOnce(program: Program, type: Type): { type: Type; kind: Der
   if (t.kind === 'ref') return { type: t.target, kind: t.mutable ? 'mutRef' : 'ref' };
   if (t.kind !== 'adt') return undefined;
   switch (t.def.builtin) {
-    case 'Box': {
+    case 'Box':
+    case 'Pin': {
       return { type: t.args[0], kind: 'own' };
     }
     case 'String': {
@@ -312,7 +314,7 @@ function traitCandidates(
     if (!trait.builtin || !inScope(trait)) continue;
     const fn = trait.methods.get(name);
     if (!fn?.selfMode) continue;
-    const selfType = selfForMode(fn.selfMode, receiverType, fn.boxedSelf);
+    const selfType = selfForMode(fn.selfMode, receiverType, fn.selfWrapper);
     if (!selfType) continue;
     candidates.push({
       trait,
@@ -339,11 +341,12 @@ function applies(solver: TraitSolver, attempt: () => unknown): boolean {
 }
 
 /** The type `Self` must be for a method with this receiver mode to take `receiverType`. */
-function selfForMode(mode: 'value' | 'ref' | 'mutRef', receiverType: Type, boxed = false): Type | undefined {
+function selfForMode(mode: 'value' | 'ref' | 'mutRef', receiverType: Type, wrapper?: SelfWrapper): Type | undefined {
   if (mode === 'value') {
     const t = normalize(shallow(receiverType));
     // A `dyn Trait` in a `Box` is the `Self` of a method taking `self: Box<Self>`.
-    if (t.kind === 'dyn' && boxed) return receiverType;
+    if (t.kind === 'dyn' && wrapper === 'Box') return receiverType;
+    if (wrapper && wrapper !== 'Box') return wrappedSelf(t, wrapper);
     return t.kind === 'str' || t.kind === 'slice' || t.kind === 'dyn' ? undefined : receiverType;
   }
   const t = shallow(receiverType);
@@ -351,6 +354,14 @@ function selfForMode(mode: 'value' | 'ref' | 'mutRef', receiverType: Type, boxed
   if (mode === 'mutRef' && !t.mutable) return undefined;
   if (mode === 'ref' && t.mutable) return undefined;
   return t.target;
+}
+
+/** `Self` for a method taking `self: Rc<Self>`, `self: Arc<Self>`, or `self: Pin<&mut Self>`, called on that pointer. */
+function wrappedSelf(t: Type, wrapper: SelfWrapper): Type | undefined {
+  if (t.kind !== 'adt' || t.def.builtin !== wrapper) return undefined;
+  if (wrapper !== 'Pin') return t.args[0];
+  const pointer = shallow(t.args[0]);
+  return pointer.kind === 'ref' && pointer.mutable ? pointer.target : undefined;
 }
 
 function ownParams(fn: FnDef): Type[] {
@@ -403,7 +414,7 @@ function matchSelf(
   fn: FnDef,
   receiverType: Type
 ): Omit<MethodMatch, 'adjust'> | undefined {
-  const selfType = selfForMode(fn.selfMode!, receiverType, fn.boxedSelf);
+  const selfType = selfForMode(fn.selfMode!, receiverType, fn.selfWrapper);
   if (!selfType) return undefined;
   const subst = solver.matchImpl(impl, arrayAsSlice(fn, selfType));
   if (!subst) return undefined;
@@ -432,7 +443,7 @@ function matchDefault(
   fn: FnDef,
   receiverType: Type
 ): Omit<MethodMatch, 'adjust'> | undefined {
-  const selfType = selfForMode(fn.selfMode!, receiverType, fn.boxedSelf);
+  const selfType = selfForMode(fn.selfMode!, receiverType, fn.selfWrapper);
   if (!selfType) return undefined;
   const subst = solver.matchImpl(impl, selfType);
   if (!subst) return undefined;
@@ -447,7 +458,7 @@ function matchTraitSelf(
   target: Type,
   receiverType: Type
 ): Omit<MethodMatch, 'adjust'> | undefined {
-  const selfType = selfForMode(fn.selfMode!, receiverType, fn.boxedSelf);
+  const selfType = selfForMode(fn.selfMode!, receiverType, fn.selfWrapper);
   if (!selfType || !solver.unifier.tryUnify(selfType, target)) return undefined;
   return { fn, typeArgs: [target, ...bound.args, ...ownParams(fn)], selfType: target };
 }

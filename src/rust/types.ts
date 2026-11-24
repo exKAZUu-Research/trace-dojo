@@ -205,7 +205,15 @@ export type BuiltinAdt =
   | 'ScopedJoinHandle'
   | 'Thread'
   | 'Duration'
-  | 'ThreadScope';
+  | 'ThreadScope'
+  | 'Pin'
+  | 'AsyncFuture'
+  | 'Context'
+  | 'Waker'
+  | 'Poll';
+
+/** The pointer a typed `self` is in: `Box<Self>`, `Rc<Self>`, `Arc<Self>`, or `Pin<&mut Self>`. */
+export type SelfWrapper = 'Box' | 'Rc' | 'Arc' | 'Pin';
 
 export interface AdtDef {
   name: string;
@@ -310,8 +318,8 @@ export interface FnDef {
   isDefault?: boolean;
   /** For a function of the standard library without a body, the key of its native implementation. */
   nativeKey?: string;
-  /** `self: Box<Self>`, whose `self` is the box the receiver is. */
-  boxedSelf?: boolean;
+  /** `self: Box<Self>` and the like, whose `self` is the pointer the receiver is. */
+  selfWrapper?: SelfWrapper;
   /** Bounds that a method's `where` clause puts on its impl's or trait's type parameters. */
   extraBounds?: { param: TypeParam; bound: TraitRef }[];
 }

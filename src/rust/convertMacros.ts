@@ -164,6 +164,15 @@ export abstract class MacroConverter extends PatternConverter {
         if (!tree) syntaxError(span, 'cfg! には条件を書いてください。');
         return { kind: 'bool', value: this.attributes.cfgMacro(tree, span), span };
       }
+      case 'pin':
+      case 'pin::pin': {
+        // `pin!(value)` pins the value in a place of its own, which lives as long as the reference to it.
+        const args = tree ? this.macroArgs(tree) : [];
+        if (args.length !== 1) syntaxError(span, 'pin! には値を1つ書いてください。');
+        const segments = ['std', 'pin', 'pin_value'].map((part) => ({ name: part, args: undefined, span }));
+        const callee: Expr = { kind: 'path', path: { segments, span }, span };
+        return { kind: 'call', callee, args: [this.expr(args[0])], span };
+      }
       case 'line': {
         return { kind: 'int', value: BigInt(span.row + 1), suffix: 'u32', span };
       }

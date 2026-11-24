@@ -178,7 +178,7 @@ function constructorsOf(type: Type): { ctor: string; types: Type[] }[] | undefin
       return target?.length === 0 ? undefined : target;
     }
     case 'adt': {
-      if (t.def.builtin && !['Option', 'Result', 'Ordering', 'Reverse', 'Infallible'].includes(t.def.builtin)) {
+      if (t.def.builtin && !['Option', 'Result', 'Ordering', 'Reverse', 'Infallible', 'Poll'].includes(t.def.builtin)) {
         return undefined;
       }
       const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));

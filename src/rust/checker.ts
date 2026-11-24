@@ -7,6 +7,7 @@ import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes
 import type { Block, Expr, FnItem, Pattern, Span, Stmt, TypeAst } from './ast';
 import { forEachResult } from './astWalk';
 import { BorrowChecker } from './borrowck';
+import { wrapSelf } from './checkerCalls';
 import { settleClosures } from './checkerClosures';
 import { exprInner } from './checkerExpr';
 import { settleBinaries } from './checkerOperators';
@@ -614,7 +615,7 @@ export class Checker {
     if (item.isUnsafe) this.body.unsafeDepth = 1;
     if (item.selfParam && selfType) {
       const mode = item.selfParam.mode;
-      const value = item.selfParam.boxed ? this.program.builtinType('Box', [selfType]) : selfType;
+      const value = wrapSelf(this.program, item.selfParam.wrapper, selfType);
       const type = mode === 'value' ? value : ref(selfType, mode === 'mutRef');
       const local = this.declareLocal('self', type, item.selfParam.mutable, item.selfParam.span);
       local.isSelf = true;
@@ -1050,6 +1051,11 @@ export class Checker {
     if (a.kind === 'never') return;
     if (this.unifier.tryUnify(a, t)) return;
     if (a.kind === 'ref' && t.kind === 'ref' && (!t.mutable || a.mutable) && this.coerceRef(expr, a, t)) return;
+    // `Pin<Box<T>>` unsizes as the `Box<T>` it holds does.
+    if (a.kind === 'adt' && a.def.builtin === 'Pin' && t.kind === 'adt' && t.def.builtin === 'Pin') {
+      this.coerce(expr, a.args[0], t.args[0]);
+      return;
+    }
     if (a.kind === 'adt' && a.def.builtin === 'Box' && t.kind === 'adt' && t.def.builtin === 'Box') {
       const target = shallow(t.args[0]);
       // `Box<[T; N]>` unsizes to `Box<[T]>`, which holds the same elements.

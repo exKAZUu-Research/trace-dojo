@@ -1,4 +1,4 @@
-import type { Type } from './types';
+import type { SelfWrapper, Type } from './types';
 
 /** A 0-based source row and the 1-based scalar column used by `dbg!`. Panic locations use the display column. */
 export interface Span {
@@ -96,12 +96,14 @@ export interface FnItem {
   /** The row of the opening brace, through which a `// atomic` annotation marks the function. */
   headerEndRow: number;
   trackCaller?: boolean;
+  /** An `async fn`, whose `ret` and `body` are already those of the function returning the future. */
+  isAsync?: boolean;
 }
 
 export interface SelfParam {
   mode: 'value' | 'ref' | 'mutRef';
-  /** `self: Box<Self>`, which takes the receiver's box, and which a `Box<dyn Trait>` can call. */
-  boxed?: boolean;
+  /** `self: Box<Self>` and the like, which take the receiver's pointer, and which a `Box<dyn Trait>` can call. */
+  wrapper?: SelfWrapper;
   mutable: boolean;
   /** The lifetime that `&'a self` names. */
   lifetime?: string;
@@ -360,6 +362,8 @@ export type Expr = ExprBase &
         params: { pattern: Pattern; type: TypeAst | undefined; span: Span }[];
         ret: TypeAst | undefined;
         body: Expr;
+        /** An `async` block (of an `async fn`), which the checker types as the future of running the closure's body. */
+        isAsync?: 'block' | 'fn';
       }
     | { kind: 'try'; operand: Expr }
     | { kind: 'macro'; macro: MacroCall }

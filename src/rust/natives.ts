@@ -7,6 +7,7 @@ import './natives/pointers';
 import './natives/rawPointers';
 import './natives/io';
 import './natives/threads';
+import './natives/futures';
 import './natives/strings';
 import './natives/sequences';
 import './natives/collections';

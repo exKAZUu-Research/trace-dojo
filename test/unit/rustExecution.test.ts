@@ -8987,6 +8987,49 @@ fn main() {
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 3] 10 1 55 1.5s\n' });
 });
 
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('async functions and blocks run under an executor the program writes, with futures it implements', () => {
+  const program = String.raw`use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll, Waker};
+struct Countdown(u32);
+impl Future for Countdown {
+    type Output = &'static str;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<&'static str> {
+        if self.0 == 0 { return Poll::Ready("go"); }
+        self.0 -= 1;
+        cx.waker().wake_by_ref();
+        Poll::Pending
+    }
+}
+async fn half(n: u32) -> Result<u32, String> {
+    if n % 2 == 0 { Ok(n / 2) } else { Err(format!("{} is odd", n)) }
+}
+async fn quarter(n: u32) -> Result<u32, String> {
+    let h = half(n).await?;
+    half(h).await
+}
+fn block_on<F: Future>(fut: F) -> F::Output {
+    let mut fut = std::pin::pin!(fut);
+    let mut cx = Context::from_waker(Waker::noop());
+    let mut polls = 0;
+    loop {
+        polls += 1;
+        if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) { println!("{} polls", polls); return v; }
+    }
+}
+fn main() {
+    println!("{:?} {:?}", block_on(quarter(12)), block_on(quarter(6)));
+    println!("{}", block_on(Countdown(2)));
+    let jobs: Vec<Pin<Box<dyn Future<Output = String>>>> = vec![Box::pin(async { String::from("a") }), Box::pin(async move { block_on(Countdown(0)).to_string() })];
+    for job in jobs { println!("{}", block_on(job)); }
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 polls\n1 polls\nOk(3) Err("3 is odd")\n3 polls\ngo\n1 polls\na\n1 polls\n1 polls\ngo\n',
+  });
+});
+
 test('an empty match covers the uninhabited Infallible', () => {
   const program = rustMain(
     '    println!("{:?}", widen(5));',

@@ -1,6 +1,6 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
-import type { BinaryOp, Block, Condition, Expr, Item, MatchArm, Pattern, Span, Stmt, TypeAst } from './ast';
+import type { BinaryOp, Block, Condition, Expr, Item, MatchArm, PathAst, Pattern, Span, Stmt, TypeAst } from './ast';
 import { forEachDirect } from './astWalk';
 import { MacroConverter } from './convertMacros';
 import { isComment, splitAttributes, syntaxError, unavailable } from './convertSyntax';
@@ -15,14 +15,15 @@ import {
 } from './literals';
 
 const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
-  await_expression: '.await',
-  async_block: 'async ブロック',
   attribute_item: '式に付けた属性',
   attributed_expression: '式に付けた属性',
 };
 
 /** Converts statements and expressions. */
 export abstract class ExpressionConverter extends MacroConverter {
+  /** Whether the expressions being converted are in an `async` block, where `.await` may be written. */
+  protected inAsync = false;
+
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
   // code-gauge-allow functionNcss -- One case per kind of syntax node.
   block(node: Node): Block {
@@ -216,6 +217,17 @@ export abstract class ExpressionConverter extends MacroConverter {
       }
       case 'closure_expression': {
         return this.closure(node);
+      }
+      case 'async_block': {
+        const isMove = node.children.some((child) => child.type === 'move');
+        const body = this.inContext(true, () =>
+          this.block(node.namedChildren.find((child) => child.type === 'block') as Node)
+        );
+        return asyncBlock(body, isMove, span);
+      }
+      case 'await_expression': {
+        if (!this.inAsync) syntaxError(span, '.await は、async 関数か async ブロックの中でしか使えません（E0728）。');
+        return awaitLoop(this.expr(node.namedChildren.find((child) => !isComment(child)) as Node), span);
       }
       case 'macro_invocation': {
         if (this.isUserMacro(node)) return { ...this.userMacroExpr(node), span };
@@ -769,7 +781,7 @@ export abstract class ExpressionConverter extends MacroConverter {
     const span = this.span(node);
     if (/^\s*static\b/.test(node.text))
       syntaxError(span, 'static クロージャは、不安定な機能なので使えません（E0658）。');
-    if (/^\s*async\b/.test(node.text)) unavailable(span, 'async クロージャ');
+    const isAsync = /^\s*async\b/.test(node.text);
     const isMove = node.children.some((child) => child.type === 'move');
     const params: { pattern: Pattern; type: TypeAst | undefined; span: Span }[] = [];
     // `_` is an anonymous token among the parameters.
@@ -788,7 +800,23 @@ export abstract class ExpressionConverter extends MacroConverter {
     const ret = node.childForFieldName('return_type');
     const body = this.field(node, 'body');
     if (ret && body.type !== 'block') syntaxError(span, '戻り値の型を書いたクロージャの本体は { } で囲んでください。');
-    return { kind: 'closure', isMove, params, ret: ret ? this.type(ret) : undefined, body: this.expr(body), span };
+    const retType = ret ? this.type(ret) : undefined;
+    const bodyExpr = this.inContext(isAsync, () => this.expr(body));
+    if (!isAsync) return { kind: 'closure', isMove, params, ret: retType, body: bodyExpr, span };
+    // `async |x| body` runs as `|x| async { body }`, whose future borrows what the closure captures.
+    const inner: Expr = { kind: 'closure', isMove, params: [], ret: retType, body: bodyExpr, isAsync: 'block', span };
+    return { kind: 'closure', isMove, params, ret: undefined, body: inner, span };
+  }
+
+  /** Converts with `.await` allowed or not, as in an `async` block or a closure or function. */
+  protected inContext<T>(inAsync: boolean, convert: () => T): T {
+    const outer = this.inAsync;
+    this.inAsync = inAsync;
+    try {
+      return convert();
+    } finally {
+      this.inAsync = outer;
+    }
   }
 
   /** An untyped closure parameter, which may be `mut x` as a function's parameter may. */
@@ -808,6 +836,78 @@ const UNSTABLE_EXPRESSIONS: Record<string, string> = {
   yield_expression: 'yield',
   become_expression: 'become',
 };
+
+function asyncBlock(body: Block, isMove: boolean, span: Span): Expr {
+  return { kind: 'closure', isMove, params: [], ret: undefined, body, isAsync: 'block', span };
+}
+
+/**
+ * `future.await` as `{ let mut f = future; loop { match Future::poll(unsafe { Pin::new_unchecked(&mut f) }, &mut cx) { Ready(v) => break v,
+ * Pending => thread::yield_now() } } }`: it polls the future until it is ready, letting waiting threads run between
+ * polls, so the `async` block it is in never returns `Pending` itself.
+ */
+function awaitLoop(future: Expr, span: Span): Expr {
+  const name = `fut#${span.row}:${span.col}`;
+  const value = `ready#${span.row}:${span.col}`;
+  const local: Expr = pathExpr([name], span);
+  const pin = callExpr(
+    ['std', 'pin', 'Pin', 'new_unchecked'],
+    [{ kind: 'ref', mutable: true, operand: local, span }],
+    span
+  );
+  const pinned: Expr = { ...blockOf([], pin, span), isUnsafe: true };
+  const waker = callExpr(['std', 'task', 'Waker', 'noop'], [], span);
+  const context = callExpr(['std', 'task', 'Context', 'from_waker'], [waker], span);
+  const poll = callExpr(
+    ['std', 'future', 'Future', 'poll'],
+    [pinned, { kind: 'ref', mutable: true, operand: context, span }],
+    span
+  );
+  const binding: Pattern = { kind: 'binding', name: value, mutable: false, sub: undefined, span };
+  const arms: MatchArm[] = [
+    {
+      pattern: { kind: 'tupleStruct', path: pathAst(['std', 'task', 'Poll', 'Ready'], span), elems: [binding], span },
+      guard: undefined,
+      body: { kind: 'break', label: undefined, value: pathExpr([value], span), span },
+      span,
+    },
+    {
+      pattern: { kind: 'path', path: pathAst(['std', 'task', 'Poll', 'Pending'], span), span },
+      guard: undefined,
+      body: callExpr(['std', 'thread', 'yield_now'], [], span),
+      span,
+    },
+  ];
+  const match: Expr = { kind: 'match', scrutinee: poll, arms, endRow: span.row, span };
+  const loop: Expr = { kind: 'loop', label: undefined, body: blockOf([], match, span), span };
+  const binder: Pattern = { kind: 'binding', name, mutable: true, sub: undefined, span };
+  const let_: Stmt = {
+    kind: 'let',
+    pattern: binder,
+    type: undefined,
+    init: future,
+    else: undefined,
+    span,
+    hidden: true,
+  };
+  return blockOf([let_], loop, span);
+}
+
+function blockOf(stmts: Stmt[], tail: Expr, span: Span): Block {
+  return { kind: 'block', stmts, tail, span, endRow: span.row, items: [] };
+}
+
+function callExpr(names: string[], args: Expr[], span: Span): Expr {
+  return { kind: 'call', callee: pathExpr(names, span), args, span };
+}
+
+function pathExpr(names: string[], span: Span): Expr {
+  return { kind: 'path', path: pathAst(names, span), span };
+}
+
+function pathAst(names: string[], span: Span): PathAst {
+  return { segments: names.map((name) => ({ name, args: undefined, span })), span };
+}
 
 function unsupportedExpr(node: Node, span: Span): never {
   if (Object.hasOwn(UNSTABLE_EXPRESSIONS, node.type)) {

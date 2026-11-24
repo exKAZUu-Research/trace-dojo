@@ -3,10 +3,12 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
   Attributes,
+  Block,
   BoundAst,
   ConstItem,
   Crate,
   EnumItem,
+  Expr,
   FieldAst,
   FnItem,
   Generics,
@@ -26,6 +28,7 @@ import type {
 } from './ast';
 import { ExpressionConverter } from './convertExpressions';
 import { isComment, splitAttributes, syntaxError, unavailable } from './convertSyntax';
+import type { SelfWrapper } from './types';
 
 export { type Reparse, syntaxError, unavailable } from './convertSyntax';
 
@@ -229,11 +232,11 @@ export class Converter extends ExpressionConverter {
     const words = modifiers?.text.split(/\s+/) ?? [];
     const isConst = words.includes('const');
     const isUnsafe = words.includes('unsafe');
+    const isAsync = words.includes('async');
     if (modifiers) {
       const text = modifiers.text;
-      if (words.includes('async')) unavailable(span, 'async fn');
       if (words.includes('extern')) unavailable(span, '外部から呼べる関数（extern fn）');
-      if (words.some((word) => word && word !== 'const' && word !== 'unsafe')) {
+      if (words.some((word) => word && word !== 'const' && word !== 'unsafe' && word !== 'async')) {
         unavailable(span, `関数の修飾子（${text}）`);
       }
     }
@@ -258,8 +261,11 @@ export class Converter extends ExpressionConverter {
     const bodyNode = node.childForFieldName('body');
     if (!bodyNode && !allowMissingBody) syntaxError(span, '関数の本体（{ ... }）が足りません。');
     const ret = node.childForFieldName('return_type');
-    const body = bodyNode ? this.block(bodyNode) : undefined;
+    const body = bodyNode ? this.inContext(isAsync, () => this.block(bodyNode)) : undefined;
+    const retType = ret ? this.returnType(ret) : undefined;
     return {
+      ...(isAsync ? asyncFunction(retType, body, span) : { ret: retType, body }),
+      isAsync,
       kind: 'fn',
       isConst,
       isUnsafe,
@@ -269,8 +275,6 @@ export class Converter extends ExpressionConverter {
       generics: this.generics(node),
       selfParam,
       params,
-      ret: ret ? this.returnType(ret) : undefined,
-      body,
       endRow: node.endPosition.row,
       headerEndRow: bodyNode ? bodyNode.startPosition.row : node.endPosition.row,
       trackCaller: attrs?.trackCaller,
@@ -293,7 +297,7 @@ export class Converter extends ExpressionConverter {
     return { mode: 'value', mutable: isMut, span };
   }
 
-  /** `self: Self`, `self: &Self`, `self: &mut Self`, or `self: Box<Self>`. */
+  /** `self: Self`, `self: &Self`, `self: &mut Self`, `self: Box<Self>`, `self: Rc<Self>`, `self: Arc<Self>`, or `self: Pin<&mut Self>`. */
   private typedSelfParam(node: Node): SelfParam {
     const span = this.span(node);
     const type = this.field(node, 'type').text.replaceAll(/\s+/g, '');
@@ -301,7 +305,8 @@ export class Converter extends ExpressionConverter {
     if (type === 'Self') return { mode: 'value', mutable, span };
     if (/^&('\w+)?Self$/.test(type)) return { mode: 'ref', mutable: false, span };
     if (/^&('\w+)?mutSelf$/.test(type)) return { mode: 'mutRef', mutable: false, span };
-    if (type === 'Box<Self>') return { mode: 'value', boxed: true, mutable, span };
+    const wrapper = /^(Box|Rc|Arc)<Self>$/.exec(type)?.[1] ?? (/^Pin<&('\w+)?mutSelf>$/.test(type) ? 'Pin' : undefined);
+    if (wrapper) return { mode: 'value', wrapper: wrapper as SelfWrapper, mutable, span };
     return unavailable(span, `型を書いた self（self: ${type}）`);
   }
 
@@ -941,4 +946,18 @@ export class Converter extends ExpressionConverter {
       }
     }
   }
+}
+
+/** `async fn f() -> T { body }` as `fn f() -> impl Future<Output = T> { async move { body } }`. */
+function asyncFunction(ret: TypeAst | undefined, body: Block | undefined, span: Span): Pick<FnItem, 'ret' | 'body'> {
+  const output: TypeAst = ret ?? { kind: 'tuple', elems: [], span };
+  const segments: PathSegment[] = ['std', 'future', 'Future'].map((name) => ({ name, args: undefined, span }));
+  segments[2] = { ...segments[2], args: [], bindings: [{ name: 'Output', type: output, span }] };
+  const future: TypeAst = { kind: 'impl', bounds: [{ kind: 'trait', path: { segments, span }, span }], span };
+  if (!body) return { ret: future, body };
+  const block: Expr = { kind: 'closure', isMove: true, params: [], ret: output, body, isAsync: 'fn', span: body.span };
+  return {
+    ret: future,
+    body: { kind: 'block', stmts: [], tail: block, span: body.span, endRow: body.endRow, items: [] },
+  };
 }

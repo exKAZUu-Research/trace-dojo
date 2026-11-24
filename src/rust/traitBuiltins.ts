@@ -165,6 +165,7 @@ const RULES: Record<string, Rule> = {
   Static: () => 'yes',
   Send: autoTrait,
   Sync: autoTrait,
+  Unpin: unpin,
   Copy: copy,
   Clone: clone,
   Debug: debug,
@@ -363,6 +364,16 @@ function autoTrait({ solver, t, name, all }: Goal): Answer {
     return 'no';
   if (t.kind === 'adt') return all(t.args);
   return 'yes';
+}
+
+/** Every type may move after it is pinned, except the futures of `async` blocks and what holds one. */
+function unpin({ t, all }: Goal): Answer {
+  if (t.kind === 'dyn') return 'no';
+  if (t.kind === 'tuple') return all(t.elems);
+  if (t.kind === 'array' || t.kind === 'slice') return all([t.elem]);
+  if (t.kind === 'closure') return all(t.closure.captures?.map(({ type }) => type) ?? []);
+  if (t.kind !== 'adt' || ['Box', 'Pin', 'Rc', 'Arc', 'ConstPtr', 'MutPtr'].includes(t.def.builtin ?? '')) return 'yes';
+  return t.def.builtin === 'AsyncFuture' ? 'no' : all(t.args);
 }
 
 function copy(goal: Goal): Answer {

@@ -254,6 +254,8 @@ export interface TypeScope {
    * a type parameter here that the bound sets as `Item`, as if written `I: Iterator<Item = J>`.
    */
   assocParams?: TypeParam[];
+  /** In a function's signature, its own type parameters, whose associated types may become `assocParams`. */
+  ownParams?: TypeParam[];
   /** In a trait impl, its trait, whose associated types `Self::Name` names. */
   implTrait?: TraitRef;
 }
@@ -740,7 +742,7 @@ export class ItemCollector {
       params: [...parentParams, ...own],
       parentParamCount: parentParams.length,
       selfMode: item.selfParam?.mode,
-      boxedSelf: item.selfParam?.boxed,
+      selfWrapper: item.selfParam?.wrapper,
       paramTypes: [],
       ret: UNIT,
       ast: item,
@@ -765,7 +767,7 @@ export class ItemCollector {
     if (trait) params.delete('Self');
     const selfType: Type | undefined = trait ? { kind: 'param', param: trait.self } : impl?.selfType;
     const assocParams: TypeParam[] = [];
-    const scope: TypeScope = { module, params, selfType, assocParams, implTrait: impl?.trait };
+    const scope: TypeScope = { module, params, selfType, assocParams, ownParams: own, implTrait: impl?.trait };
     for (const [index, param] of item.generics.params.entries()) {
       own[index].bounds = param.bounds.flatMap((bound) =>
         lowerBoundIfTrait(bound, scope, { kind: 'param', param: own[index] })
@@ -822,6 +824,7 @@ export class ItemCollector {
 function checkMainSignature(item: FnItem): void {
   if (item.generics.params.length > 0) compileError(item.span, 'main 関数には型引数を書けません。');
   if (item.params.length > 0) compileError(item.span, 'main 関数には引数を書けません。');
+  if (item.isAsync) compileError(item.span, 'main 関数を async にはできません（E0752）。');
 }
 
 function checkDuplicateFields(fields: { name: string; span: Span }[]): void {
@@ -868,6 +871,7 @@ function addWherePredicates(
 /** The traits of the standard library that learning programs implement for their own types. */
 const STD_TRAITS_LEARNERS_IMPLEMENT = new Set([
   'Display',
+  'Future',
   'Debug',
   'Clone',
   'Copy',
@@ -1015,9 +1019,14 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   Cell: 'Cell',
   ConstPtr: 'ConstPtr',
   MutPtr: 'MutPtr',
+  Pin: 'Pin',
+  AsyncFuture: 'AsyncFuture',
+  Context: 'Context',
+  Waker: 'Waker',
 };
 
 const BUILTIN_ENUMS: Record<string, BuiltinAdt> = {
+  Poll: 'Poll',
   ErrorKind: 'IoErrorKind',
   Bound: 'Bound',
   Option: 'Option',
@@ -1511,8 +1520,6 @@ function checkUnavailableStd(segments: string[], span: Span): void {
     net: 'ネットワーク（std::net）',
     env: '環境変数とコマンドラインの引数（std::env）',
     time: '時刻（std::time）',
-    future: 'async/await（std::future）',
-    task: 'async/await（std::task）',
     any: 'std::any',
     ffi: '外部の関数との連携（std::ffi）',
     os: 'OS の機能（std::os）',
@@ -1801,7 +1808,13 @@ function assocTypeOf(self: Type, name: string, trait: TraitRef | undefined, scop
     return compileError(span, `トレイト ${bound.trait.name} に関連型 ${name} がありません。`);
   }
   // In a signature, the associated type of a parameter's bound becomes a parameter of its own that callers infer.
-  if (t.kind === 'param' && !t.param.isSelf && scope.assocParams && t.param.bounds.includes(bound)) {
+  if (
+    t.kind === 'param' &&
+    !t.param.isSelf &&
+    scope.assocParams &&
+    scope.ownParams?.includes(t.param) !== false &&
+    t.param.bounds.includes(bound)
+  ) {
     const param = newTypeParam(`${t.param.name}::${name}`);
     scope.assocParams.push(param);
     (bound as { assoc?: Map<string, Type> }).assoc = new Map([

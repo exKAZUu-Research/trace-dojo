@@ -17,7 +17,7 @@ import type { Program } from './items';
 import { type CaptureMode, captureStoragePlaces } from './loanCaptures';
 import { derefOnce } from './methods';
 import { castValue, copyValue, needsCopy } from './ops';
-import { ControlSignal, type Frame, type FunctionInfo, MOVED, UNASSIGNED } from './runtime';
+import { ControlSignal, type Frame, type FunctionInfo, MOVED, RustPanic, UNASSIGNED } from './runtime';
 import { concreteType, runtimeType } from './runtimeTypes';
 import { trackCollectionStorage } from './turtleTypes';
 import { type ConstDef, constValueOf, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
@@ -27,6 +27,7 @@ import {
   DynValue,
   EnumValue,
   FnValue,
+  FutureValue,
   isPlace,
   type Place,
   RangeValue,
@@ -723,12 +724,23 @@ export class Compiler {
       const fields = places.map(({ proj, mode }) => ({ path: captureFieldIndices(local.type, proj), mode }));
       return { res, local, fields };
     });
-    return (frame) =>
+    const make = (frame: Frame): Value =>
       this.support.makeClosure(
         compiled,
         frame,
         captures.map((capture) => this.capturePlace(frame, capture, context))
       );
+    if (!expr.isAsync) return make;
+    const kind = expr.isAsync === 'fn' ? '`async fn`' : '`async block`';
+    return (frame) => {
+      const closure = make(frame);
+      let done = false;
+      return new FutureValue(() => {
+        if (done) throw new RustPanic(`${kind} resumed after completion`, expr.span);
+        done = true;
+        return this.support.callValue(closure, [], undefined);
+      }, [closure]);
+    };
   }
 
   private capturePlace(

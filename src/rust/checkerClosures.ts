@@ -21,7 +21,7 @@ import {
 } from './types';
 
 export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }>, expected: Type | undefined): Type {
-  const expectedSig = expected && closureSignature(c, expected);
+  const expectedSig = expected && !expr.isAsync ? closureSignature(c, expected) : undefined;
   const parentBody = c.body;
   const fn: FnContext = {
     name: '{closure}',
@@ -34,7 +34,9 @@ export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }
     isMove: expr.isMove,
     closureKind: 'Fn',
   };
-  const retType = expr.ret ? c.lowerType(expr.ret) : (expectedSig?.ret ?? freshVar());
+  const retType = expr.ret
+    ? c.lowerType(expr.ret)
+    : (expectedSig?.ret ?? (expr.isAsync && expected ? futureOutput(expected) : undefined) ?? freshVar());
   if (expectedSig && expectedSig.params.length !== expr.params.length) {
     compileError(expr.span, `クロージャの引数の数が合いません（${expectedSig.params.length} 個が必要です）。`);
   }
@@ -71,7 +73,13 @@ export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }
       c.annotations.bindings.get(param.pattern) ? [c.annotations.bindings.get(param.pattern)!] : []
     ),
   });
-  return closureType;
+  return expr.isAsync ? c.program.builtinType('AsyncFuture', [retType]) : closureType;
+}
+
+/** The output an expected future type gives an `async` block. */
+function futureOutput(expected: Type): Type | undefined {
+  const t = shallow(expected);
+  return t.kind === 'adt' && t.def.builtin === 'AsyncFuture' ? t.args[0] : undefined;
 }
 
 /** Decides how a closure captures and which closure trait it implements, again later while a type it needs is unknown. */

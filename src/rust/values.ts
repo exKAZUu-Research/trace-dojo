@@ -41,6 +41,7 @@ export type Value =
   | ChannelEnd
   | ThreadHandle
   | DurationValue
+  | FutureValue
   | undefined;
 
 export const UNIT_VALUE: Value[] = Object.freeze([]) as unknown as Value[];
@@ -407,6 +408,18 @@ export class ThreadHandle {
   constructor(
     readonly id: number,
     readonly run: () => Value
+  ) {}
+}
+
+export const PENDING: unique symbol = Symbol('pending');
+
+/** A future of the standard library (an `async` block's or function's, `ready`, `pending`, `poll_fn`). */
+export class FutureValue {
+  constructor(
+    /** Polls the future: its output, or `PENDING`. */
+    readonly poll: (context: Value) => Value | typeof PENDING,
+    /** What the future keeps alive, such as its closure, for garbage collection. */
+    readonly roots: unknown[] = []
   ) {}
 }
 
