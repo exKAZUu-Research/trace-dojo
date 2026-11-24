@@ -889,10 +889,11 @@ defineNativesKeepingStrings({
       b: '\b',
     };
     // An escape is a name (\n), \xHH, \uHHHH, up to three octal digits (whose value wraps at a byte, as .NET's
-    // does), or \c with a control letter; any other escaped character stands for itself.
+    // does), or \c with a control designator from @ to _ (a letter in either case); any other escaped character
+    // stands for itself.
     return keptUnlessChanged(text as string | CsString, (plain) =>
       plain.replaceAll(
-        /\\(?:x([\da-fA-F]{2})|u([\da-fA-F]{4})|([0-7]{1,3})|c([A-Za-z])|(.))/gs,
+        /\\(?:x([\da-fA-F]{2})|u([\da-fA-F]{4})|([0-7]{1,3})|c([@-_a-z])|(.))/gs,
         (_match, hex?: string, unicode?: string, octal?: string, control?: string, char?: string) => {
           if (hex !== undefined || unicode !== undefined)
             return String.fromCharCode(Number.parseInt(hex ?? unicode ?? '', 16));
