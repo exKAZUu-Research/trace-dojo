@@ -349,8 +349,8 @@ export class Compiler extends SuspendCompiler {
 
   /**
    * A `fun interface`'s constructor takes its type arguments from the call or from a complete expected type, as
-   * `Comparator<Int> { ... }` and `sortedWith(Comparator { ... })` do; inferring them from the lambda's parameter types or
-   * a delegated property, which kotlinc also does, is not supported.
+   * `Comparator<Int> { ... }` and `sortedWith(Comparator { ... })` do, or else infers them as kotlinc does: from the
+   * types the lambda declares for its parameters, as `Comparator { a: Int, b: Int -> ... }`, and from its result.
    */
   private compileSamConstructor(
     scope: Scope,
@@ -369,16 +369,13 @@ export class Compiler extends SuspendCompiler {
       expectedType.args.every((typeArgument) => typeArgument.variance !== 'star')
     )
       type = { ...expectedType, nullable: false };
-    else
-      return this.unavailable(
-        argument.row,
-        `型引数を書かない ${cls.name} { ... }（${cls.name}<型> { ... } と書いてください）`
-      );
+    else type = this.inferredSamType(scope, cls, argument);
     const sam = this.samOf(type) as NonNullable<ReturnType<Compiler['samOf']>>;
     // The lambda's parameters need their types, which variables of an expected type such as `Comparator<in T>` give.
     for (const param of sam.functionType.params) {
       const actual = resolved(param);
-      if (actual.kind === 'variable' && !actual.variable.fixed) fixVariable(actual.variable);
+      if (actual.kind === 'variable' && !actual.variable.fixed && !fixVariable(actual.variable))
+        this.error(argument.row, `${cls.name} の型引数を推論できません。${cls.name}<型> { ... } と書いてください。`);
     }
     const compiled = this.compileSamFunction(scope, context, argument, sam.functionType);
     for (const typeArgument of type.args) {
@@ -387,6 +384,27 @@ export class Compiler extends SuspendCompiler {
         actual.variable.fixed = fixVariable(actual.variable) ?? anyType(true);
     }
     return { ...this.samWrap(compiled, sam, type), isCreation: true };
+  }
+
+  /**
+   * The type of a `fun interface`'s constructor written without type arguments: a type variable for each, which the
+   * types the lambda declares for the parameters of the interface's function fix.
+   */
+  private inferredSamType(scope: Scope, cls: ClassSymbol, argument: Expression): ClassType {
+    const variables = cls.typeParameters.map((param) => ({ param, lower: [], upper: [], fixed: undefined }));
+    const type = classType(
+      cls,
+      variables.map((variable) => ({ kind: 'variable', variable, nullable: false }) as KType)
+    );
+    const sam = this.samOf(type);
+    const declared = argument.kind === 'lambda' ? (argument.params ?? []) : [];
+    for (const [index, param] of (sam?.functionType.params ?? []).entries()) {
+      const actual = resolved(param);
+      const declaredType = declared[index]?.type;
+      if (actual.kind === 'variable' && !actual.variable.fixed && declaredType)
+        actual.variable.fixed = this.resolveType(scope, declaredType);
+    }
+    return type;
   }
 
   /** The function a `fun interface`'s constructor wraps: a lambda, or a value of a function type such as `(Int, Int) -> Int`. */

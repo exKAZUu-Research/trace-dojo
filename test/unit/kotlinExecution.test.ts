@@ -6415,6 +6415,24 @@ test('suspends a sequence builder inside the inline lambdas and branches its blo
   });
 });
 
+test('increments through a safe call and infers a fun interface from its lambda', () => {
+  const source = `class C { var n = 1 }
+fun interface Mapper<A, B> { fun map(a: A): B }
+fun main() {
+    var c: C? = C()
+    println(c?.n++)
+    println(++c?.n)
+    c = null
+    println(c?.n++)
+    println(listOf(3, 1, 2).sortedWith(Comparator { a: Int, b: Int -> b - a }))
+    println(Mapper { s: String -> s.length }.map("abc"))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '1\n3\nnull\n[3, 2, 1]\n3\n' });
+  expect(executeProgram('kotlin', 'fun main() { println(Comparator { a, b -> 0 }) }')).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
 test('runs a sequence builder only as far as its consumer asks, suspending at each yield', () => {
   const source = `suspend fun SequenceScope<Int>.countTo(n: Int) { for (i in 1..n) yield(i) }
 fun main() {

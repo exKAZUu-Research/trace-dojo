@@ -39,7 +39,7 @@ import { type ClassSymbol, type TypeParameterSymbol } from './symbols';
 import { throwCastFailure } from './typeChecks';
 import { branchHint, commonSupertype, isSubtype } from './typeRelations';
 import { isNullable, type KType, nonNull, nullable, resolved, substitute, typeToString } from './types';
-import { box, Boxed, type PrimitiveKind, type Value } from './values';
+import { box, Boxed, NULL, type PrimitiveKind, type Value } from './values';
 
 /** Compiles the operators, the conditions, and the `in`, `is`, and `as` tests. */
 export abstract class OperatorCompiler extends ExpressionCompiler {
@@ -155,24 +155,48 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     isPrefix: boolean,
     row: number
   ): Compiled {
-    if (target.kind === 'member' && target.isSafe) this.unavailable(row, '?. を使った ++・--');
     const place = this.compilePlace(scope, context, target, row, true);
+    // `a?.n++` does nothing and gives null when `a` is null.
+    const skipped = place.canSkip ? this.flow.copy() : undefined;
     const readType = place.readType ?? place.type;
     const kind = this.primitiveOf(readType);
-    if (!kind) return this.compileIncrementOperator(scope, context, place, readType, delta, isPrefix, row);
+    const compiled = kind
+      ? this.compilePrimitiveIncrement(place, kind, delta, isPrefix)
+      : this.compileIncrementOperator(scope, context, place, readType, delta, isPrefix, row);
+    const { update } = compiled;
+    if (!skipped)
+      return {
+        type: compiled.type,
+        repr: compiled.repr,
+        eval: (frame) => place.withBound(frame, (bound) => update(frame, bound)),
+      };
+    this.flow = Flow.merge([skipped, this.flow]);
+    const repr = compiled.repr;
+    return {
+      type: nullable(compiled.type),
+      repr: 'ref',
+      eval: (frame) =>
+        place.withBound(frame, (bound) => {
+          if (bound.isSkipped) return NULL;
+          const value = update(frame, bound);
+          return repr === 'ref' ? value : box(repr, value as number | bigint);
+        }),
+    };
+  }
+
+  private compilePrimitiveIncrement(place: Place, kind: PrimitiveKind, delta: 1 | -1, isPrefix: boolean): Increment {
     const type = this.primitiveType(kind);
     place.recordAssignment?.(type);
     const toPlace = (value: number | bigint): Value => (place.repr === 'ref' ? box(kind, value) : value);
     return {
       type,
       repr: kind,
-      eval: (frame) =>
-        place.withBound(frame, (bound) => {
-          const old = unboxNumber(bound.get());
-          const next = step(kind, old, delta);
-          bound.set(toPlace(next));
-          return isPrefix ? next : old;
-        }),
+      update: (_frame, bound) => {
+        const old = unboxNumber(bound.get());
+        const next = step(kind, old, delta);
+        bound.set(toPlace(next));
+        return isPrefix ? next : old;
+      },
     };
   }
 
@@ -186,7 +210,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     delta: 1 | -1,
     isPrefix: boolean,
     row: number
-  ): Compiled {
+  ): Increment {
     const shown = delta === 1 ? '++' : '--';
     const current = new Handoff<Value>();
     const receiver: Compiled = { type: readType, repr: place.repr, eval: () => current.get() };
@@ -197,13 +221,12 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     return {
       type: isPrefix ? call.type : readType,
       repr: place.repr,
-      eval: (frame) =>
-        place.withBound(frame, (bound) => {
-          const old = bound.get();
-          const value = current.run(frame, old, () => next(frame));
-          bound.set(value);
-          return isPrefix ? value : old;
-        }),
+      update: (frame, bound) => {
+        const old = bound.get();
+        const value = current.run(frame, old, () => next(frame));
+        bound.set(value);
+        return isPrefix ? value : old;
+      },
     };
   }
 
@@ -1058,4 +1081,11 @@ function isSameCachedBox(a: Value, b: Value): boolean {
 }
 function unboxNumber(value: Value): number | bigint {
   return value instanceof Boxed ? value.value : (value as number | bigint);
+}
+
+/** `++` or `--` of a place that the caller has bound, giving the value the expression has. */
+interface Increment {
+  type: KType;
+  repr: Compiled['repr'];
+  update: (frame: Frame, bound: Parameters<Parameters<Place['withBound']>[1]>[0]) => Value;
 }
