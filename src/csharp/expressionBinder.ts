@@ -471,11 +471,18 @@ export abstract class ExpressionBinder extends LambdaBinder {
       if (isTypelessConditional(left) && isStringValue(right)) left = this.convert(left, this.objectType, node.left);
       if (isTypelessConditional(right) && isStringValue(left)) right = this.convert(right, this.objectType, node.right);
     }
+    // `d + lambda` and `d - Method` combine delegates, converting the untyped operand to the other's delegate type.
+    const other = left.kind === 'unbound' ? right : left;
+    const combinesDelegates =
+      (operator === '+' || operator === '-') &&
+      other.kind !== 'unbound' &&
+      other.type.kind === 'named' &&
+      other.type.symbol.kind === 'delegate';
     for (const [operand, syntax] of [
       [left, node.left],
       [right, node.right],
     ] as const) {
-      if (operand.kind === 'unbound' && !(syntax.kind === 'default' && !syntax.type)) {
+      if (operand.kind === 'unbound' && !combinesDelegates && !(syntax.kind === 'default' && !syntax.type)) {
         this.reportBinary(operator, left, right, row);
         return { kind: 'default', type: ERROR_TYPE, row: node.row };
       }
