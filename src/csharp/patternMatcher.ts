@@ -140,7 +140,7 @@ export abstract class PatternMatcher extends EvaluatorBase {
       this.storeLocal(
         frame,
         pattern.local,
-        this.designated(value, frame.resolve(pattern.inputType), pattern.local.type)
+        this.designated(value, frame.resolve(pattern.inputType), frame.resolve(pattern.local.type))
       );
     return true;
   }
