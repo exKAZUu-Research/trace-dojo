@@ -255,7 +255,7 @@ function defaultValue(
   inDouble: boolean
 ): Piece[] {
   if (kind === '-') return expander.withSpacedStar(() => expandArgument(expander, expansion.argument, inDouble, false));
-  const word = expandArgument(expander, expansion.argument, inDouble, false);
+  const word = expander.withSpacedStar(() => expandArgument(expander, expansion.argument, inDouble, false), false);
   const text = expander.joinPieces(word);
   if (kind === '?') {
     const message = text === '' ? (colon ? 'parameter null or not set' : 'parameter not set') : text;

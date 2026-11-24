@@ -61,6 +61,19 @@ export class Expander {
     }
   }
 
+  private withSubshellContext<T>(run: () => T): T {
+    const savedTail = this.partialTail;
+    const savedSpacedStar = this.spacedStar;
+    this.partialTail = '';
+    this.spacedStar = false;
+    try {
+      return run();
+    } finally {
+      this.partialTail = savedTail;
+      this.spacedStar = savedSpacedStar;
+    }
+  }
+
   private withRestoredTail<T>(run: () => T): T {
     const saved = this.partialTail;
     try {
@@ -313,7 +326,7 @@ export class Expander {
       }
       case 'commandSubstitution': {
         if (part.syntaxError) return this.failBackquoted(part.syntaxError, inDouble);
-        const { output, status } = this.withIsolatedTail(() => this.shell.captureSubshell(part.body, part.row));
+        const { output, status } = this.withSubshellContext(() => this.shell.captureSubshell(part.body, part.row));
         this.lastSubstitutionStatus = status;
         this.shell.state.lastStatus = status;
         if (output.includes('\0')) this.shell.reportError('warning: command substitution: ignored null byte in input');
@@ -635,9 +648,9 @@ export class Expander {
    * Runs an expansion in which an unquoted `$*` joins with spaces when `IFS` is empty, as Bash 5.3 joins it in the
    * word of `${x:-word}` and `${x:+word}` and in a declaration builtin's assignment, though not `${a[*]}`.
    */
-  withSpacedStar<T>(run: () => T): T {
+  withSpacedStar<T>(run: () => T, enabled = true): T {
     const saved = this.spacedStar;
-    this.spacedStar = true;
+    this.spacedStar = enabled;
     try {
       return run();
     } finally {
