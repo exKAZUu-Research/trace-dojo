@@ -1910,7 +1910,7 @@ export abstract class StatementCompiler extends CallCompiler {
       value: this.loopResult(
         target,
         otherwise?.value,
-        false,
+        !exhausted,
         runtime(
           stmt.noreturn ? NORETURN : valueType,
           (frame) => {
@@ -2312,7 +2312,7 @@ export abstract class StatementCompiler extends CallCompiler {
       value: this.loopResult(
         target,
         otherwise?.value,
-        false,
+        !exhausted,
         runtime(
           stmt.noreturn ? NORETURN : valueType,
           (frame) => {
@@ -2486,23 +2486,26 @@ export abstract class StatementCompiler extends CallCompiler {
     fn.targets.push(target);
     try {
       for (const { each, match } of matches) {
-        const prong = this.switchProng(
-          each,
-          {
-            skipped: reached !== undefined && each !== reached,
-            knownOperand: each === reached && selection ? { ...selection, pointer: selectedPointer } : undefined,
-            operand,
-            operandType,
-            tagType,
-            union,
-            unionFields,
-            fieldForTag: (key) => fieldsByTag.get(key),
-            resultType: target.resultType,
-            asStatement,
-            seen,
-          },
-          match
-        );
+        const compileProng = (): unknown =>
+          this.switchProng(
+            each,
+            {
+              skipped: reached !== undefined && each !== reached,
+              knownOperand: each === reached && selection ? { ...selection, pointer: selectedPointer } : undefined,
+              operand,
+              operandType,
+              tagType,
+              union,
+              unionFields,
+              fieldForTag: (key) => fieldsByTag.get(key),
+              resultType: target.resultType,
+              asStatement,
+              seen,
+            },
+            match
+          );
+        // A switch on a runtime value branches on a runtime condition, where a `comptime var` must not change.
+        const prong = reached ? compileProng() : this.underRuntimeCondition(compileProng);
         if (each.isElse) {
           if (elseProng) this.error(each, 'else の枝が2つあります。');
           elseProng = prong as Prong;

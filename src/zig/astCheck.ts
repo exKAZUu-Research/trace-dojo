@@ -273,6 +273,11 @@ class AstChecker {
     void span;
   }
 
+  /** A type, which Zig evaluates at compile time wherever it stands. */
+  private typeExpression(expression: Expression): void {
+    this.withComptime(expression, () => this.expression(expression, 'value'));
+  }
+
   private withComptime<T>(span: Span, run: () => T): T {
     return this.withScope({ kind: 'comptime', span, parent: this.scope }, run);
   }
@@ -306,13 +311,13 @@ class AstChecker {
       // Each parameter is in scope for the types of the later ones and the return type.
       this.scope = params;
       for (const param of fn.params) {
-        if (param.type) this.expression(param.type, 'value');
+        if (param.type) this.typeExpression(param.type);
         if (!isDiscardName(param)) this.declare(param.name, 'function parameter', param);
         if (param.isComptime && param.isNoalias) this.error(param, 'comptime と noalias は一緒に書けません。');
       }
       for (const attribute of [fn.alignment, fn.addressSpace, fn.callingConvention])
         if (attribute) this.expression(attribute, 'value');
-      this.expression(fn.returnType, 'value');
+      this.typeExpression(fn.returnType);
       this.blockStatements(fn.body.statements);
       this.checkUsed(params);
     } catch (error) {
@@ -454,7 +459,7 @@ class AstChecker {
       case 'var': {
         if (statement.isComptime) this.comptimeKeyword(statement);
         if (statement.alignment) this.expression(statement.alignment, 'value');
-        if (statement.type) this.expression(statement.type, 'value');
+        if (statement.type) this.typeExpression(statement.type);
         if (statement.value) this.expression(statement.value, 'value');
         else this.error(statement, '変数は初期化してください（値が決まらないときは = undefined と書きます）。');
         if (!statement.type && statement.value?.kind === 'undefined') {
@@ -474,7 +479,7 @@ class AstChecker {
         this.expression(statement.value, 'value');
         for (const target of statement.targets) {
           if (target.declaration) {
-            if (target.declaration.type) this.expression(target.declaration.type, 'value');
+            if (target.declaration.type) this.typeExpression(target.declaration.type);
             if (!isDiscardName(target.declaration)) {
               this.declare(target.declaration.name, target.declaration.isConst ? 'local constant' : 'local variable', {
                 ...target,
