@@ -64,6 +64,7 @@ import {
   isInteger,
   isReferenceRelated,
   isScopedEnum,
+  isSigned,
   isWide,
   LONG,
   nonReference,
@@ -790,10 +791,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     const cls = object.type.kind === 'class' ? object.type.cls : field.owner;
     const locate = (location: Ptr): Ptr => new Ptr(location.read() as CObject, index, { location, cls });
+    const isBitField = field.bitWidth !== undefined;
+    const bitFieldPromotion = isBitField ? bitFieldPromotionOf(type, field.bitWidth as number) : undefined;
     if (object.isLvalue) {
       const { run, temporaryBinding } = object;
       return {
         type,
+        bitFieldPromotion,
+        isBitField,
         isLvalue: true,
         isXvalue: object.isXvalue,
         staticAddress: object.staticAddress,
@@ -809,6 +814,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const materialized = this.temporaryLocation(object);
     return {
       type,
+      bitFieldPromotion,
+      isBitField,
       isLvalue: true,
       isXvalue: true,
       row,
@@ -899,8 +906,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const overloaded = overloadedOperator(this, '<=>', [left, right], row);
       if (overloaded) return overloaded.expr;
     }
-    const a = this.rvalue(left);
-    const b = this.rvalue(right);
+    const a = promoteBitField(this.rvalue(left));
+    const b = promoteBitField(this.rvalue(right));
     if (isArithmetic(a.type) && isArithmetic(b.type) && !isScopedEnum(a.type)) {
       const common = commonType(unqualified(a.type) as never, unqualified(b.type) as never) as ArithmeticType;
       const x = convertArithmetic(a, common).run;
@@ -1012,7 +1019,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   /** An arithmetic operator on two arithmetic prvalues, after the usual arithmetic conversions. */
-  arithmetic(operator: string, left: Expr, right: Expr, row: number): Expr {
+  arithmetic(operator: string, written: Expr, right: Expr, row: number): Expr {
+    const left = promoteBitField(written);
+    right = promoteBitField(right);
     const lt = left.type as ArithmeticType;
     const rt = right.type as ArithmeticType;
     if (['%', '<<', '>>', '&', '|', '^'].includes(operator) && (!isInteger(lt) || !isInteger(rt))) {
@@ -1092,7 +1101,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
   }
 
-  private shift(operator: '<<' | '>>', left: Expr, right: Expr, row: number): Expr {
+  private shift(operator: '<<' | '>>', written: Expr, right: Expr, row: number): Expr {
+    const left = promoteBitField(written);
     const type = promote(unqualified(left.type) as never) as Extract<Type, { kind: 'int' }>;
     const a = convertArithmetic(left, type);
     const b = this.rvalue(right);
@@ -1258,7 +1268,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       if (constant !== undefined) expr.constant = Number(constant) === 0 ? 1 : 0;
       return expr;
     }
-    const value = this.rvalue(operand);
+    const value = promoteBitField(this.rvalue(operand));
     const type = value.type;
     if (operator === '+' && type.kind === 'pointer') return value;
     if (!isArithmetic(type) || (operator === '~' && !isInteger(type)) || isScopedEnum(type)) {
@@ -1429,6 +1439,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     if (!operand.isLvalue || operand.isXvalue)
       return this.error(row, '& は、変数などの場所を持つ値（左辺値）にしか使えません。');
+    if (operand.isBitField) return this.error(row, 'ビットフィールドのアドレスは取れません。');
     if (operand.type.kind === 'class' && operand.type.cls.library?.operator) {
       const result = operand.type.cls.library.operator(this, '&', [operand], row);
       if (result) return result;
@@ -3084,4 +3095,23 @@ function virtualBaseBetween(derived: ClassInfo, base: ClassInfo): ClassInfo | un
     const found = virtualBaseBetween(parent, base);
     if (found) return found;
   }
+}
+
+/**
+ * The promotion of a bit-field's type that its width allows: int when int holds every value of the width, else
+ * unsigned int when that does, else none beyond its type's own (C++20 [conv.prom]).
+ */
+function bitFieldPromotionOf(type: Type, width: number): Extract<Type, { kind: 'int' }> | undefined {
+  if (type.kind !== 'int' || type.enumeration || sizeOf(type) < 4) return undefined;
+  const signed = isSigned(type);
+  if (width < 32 || (signed && width === 32)) return INT;
+  if (width === 32) return { kind: 'int', name: 'uint' };
+  return undefined;
+}
+
+/** A bit-field's value after the promotion its width allows, or another value as it is. */
+function promoteBitField(expr: Expr): Expr {
+  const promotion = expr.bitFieldPromotion;
+  if (!promotion || expr.isLvalue) return expr;
+  return { ...convertArithmetic(expr, promotion), bitFieldPromotion: undefined };
 }

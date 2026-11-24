@@ -238,9 +238,10 @@ function referenceBinding(
   allowUser: boolean
 ): ConversionSequence | undefined {
   const toConst = isConstType(target);
-  if (!toConst && expr.isXvalue) return undefined;
+  if (!toConst && (expr.isXvalue || expr.isBitField)) return undefined;
   const from = expr.type;
-  if (expr.isLvalue && (toConst || !isConstType(from))) {
+  // A const reference to a bit-field binds to a temporary holding its value.
+  if (expr.isLvalue && !expr.isBitField && (toConst || !isConstType(from))) {
     const fromRvalue = expr.isXvalue === true;
     if (
       sameType(unqualified(from), unqualified(target), false) &&

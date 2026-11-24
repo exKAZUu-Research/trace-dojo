@@ -720,6 +720,13 @@ export class Compiler extends StatementCompiler {
       base ??= this.specifiedType(node);
       const declared = this.applyDeclarator(base, declarator);
       const name = declared.name as string;
+      const clause = node.all[node.all.indexOf(declarator) + 1];
+      const bitWidth = clause?.type === 'bitfield_clause' ? this.bitFieldWidth(declared.type, clause, name) : undefined;
+      if (!name && bitWidth !== undefined) {
+        cls.unnamedBitFields.push({ before: cls.ownFields.length, type: declared.type, width: bitWidth });
+        continue;
+      }
+      if (bitWidth === 0) this.error(declarator.row, `名前のあるビットフィールド ${name} の幅を 0 にはできません。`);
       if (this.memberEntity(cls, name)) this.error(declarator.row, `メンバ ${name} はすでに宣言されています。`);
       const initializer = this.defaultValueOf(node, declarator);
       const directInitializer =
@@ -758,11 +765,24 @@ export class Compiler extends StatementCompiler {
         directInitializer,
         isMutable,
         alignment: alignas && this.alignmentOf(alignas),
+        bitWidth,
       };
       if (cls.isUnion && !isTrivialUnionMember(declared.type))
         this.unsupported(declarator.row, '共用体の、コンストラクタやデストラクタを持つ型のメンバー');
       cls.fields.push(field);
     }
+  }
+
+  /** The width of a bit-field of a type, which its clause (`: 3`) gives as an integral constant. */
+  private bitFieldWidth(type: Type, clause: Syntax, name: string): number {
+    const expr = this.rvalue(this.compileExpression(clause.children[0]));
+    const width = this.constantValueOf(expr);
+    if (!isInteger(type))
+      return this.error(clause.row, `ビットフィールド ${name} の型は整数型か列挙型にしてください。`);
+    if (!isInteger(expr.type) || width === undefined || width < 0)
+      return this.error(clause.row, `ビットフィールド ${name} の幅には、0 以上の整数の定数式を書いてください。`);
+    if (width > sizeOf(type) * 8) this.unsupported(clause.row, '型の幅より広いビットフィールド');
+    return Number(width);
   }
 
   /**

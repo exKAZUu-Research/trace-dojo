@@ -102,6 +102,8 @@ export interface FieldInfo {
   directInitializer?: boolean;
   /** The anonymous union or struct members through which a member of one of them is reached from the class. */
   path?: readonly FieldInfo[];
+  /** The width in bits of a bit-field. */
+  bitWidth?: number;
 }
 
 export interface StaticFieldInfo {
@@ -300,6 +302,8 @@ export class ClassInfo {
   isUnnamed = false;
   /** The members of its anonymous unions and structs, which the class names as its own. */
   anonymousFields: FieldInfo[] = [];
+  /** The bit-fields without names, which only take room, each before the own member at position `before`. */
+  unnamedBitFields: { before: number; type: Type; width: number }[] = [];
 
   constructor(
     public name: string,
@@ -719,17 +723,37 @@ function classLayout(cls: ClassInfo): ClassLayout {
     align = Math.max(align, base.align);
   }
   const fieldOffsets: number[] = [];
-  for (const field of cls.ownFields) {
+  // The bit at which the next bit-field may start while bit-fields follow one another.
+  let bits: number | undefined;
+  const placeBits = (type: Type, width: number): number => {
+    const unit = sizeOf(type) * 8;
+    let at = bits ?? offset * 8;
+    // A bit-field starts a new unit of its type when it would straddle one; a zero-width one ends the unit.
+    if (width === 0 || Math.floor(at / unit) !== Math.floor((at + width - 1) / unit)) at = Math.ceil(at / unit) * unit;
+    bits = at + width;
+    return at;
+  };
+  const ownFields = cls.ownFields;
+  for (const [position, field] of [...ownFields, undefined].entries()) {
+    for (const padding of cls.unnamedBitFields) if (padding.before === position) placeBits(padding.type, padding.width);
+    if (!field) break;
     // A reference member takes the room of a pointer, though `sizeof` of a reference type is that of its referent.
     const type = field.type.kind === 'reference' ? pointerTo(field.type.to) : field.type;
     const fieldAlign = Math.max(alignOf(type), field.alignment ?? 1);
     // Every member of a union starts at its beginning.
     if (cls.isUnion) {
       fieldOffsets[field.index] = 0;
-      offset = Math.max(offset, sizeOf(type));
+      offset = Math.max(offset, field.bitWidth === undefined ? sizeOf(type) : Math.ceil(field.bitWidth / 8));
       align = Math.max(align, fieldAlign);
       continue;
     }
+    if (field.bitWidth !== undefined) {
+      fieldOffsets[field.index] = Math.floor(placeBits(type, field.bitWidth) / 8);
+      align = Math.max(align, fieldAlign);
+      continue;
+    }
+    if (bits !== undefined) offset = Math.ceil(bits / 8);
+    bits = undefined;
     const at = Math.ceil(offset / fieldAlign) * fieldAlign;
     const members = at === 0 ? typesAtOrigin(type) : undefined;
     const hasConflict = members && emptyBase && [...members].some((member) => emptyBase.has(member));
@@ -739,6 +763,7 @@ function classLayout(cls: ClassInfo): ClassLayout {
     offset = fieldOffset + sizeOf(type);
     align = Math.max(align, fieldAlign);
   }
+  if (bits !== undefined) offset = Math.ceil(bits / 8);
   const size = Math.ceil(offset / align) * align;
   const layout = { size: size === 0 ? 1 : size, align, dataSize: offset, baseOffset, fieldOffsets, atOrigin };
   if (cls.isComplete && !cls.library) completedLayouts.set(cls, layout);

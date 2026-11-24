@@ -44,6 +44,10 @@ export function initializerWithConstancy(run: Initializer, isConstant: boolean, 
  */
 export interface Expr extends ConstantValue {
   isAssignmentList?: boolean;
+  /** The type a bit-field's value promotes to when int (or unsigned int) holds every value its width allows. */
+  bitFieldPromotion?: Extract<Type, { kind: 'int' }>;
+  /** Whether the lvalue designates a bit-field, which has no address and no non-const reference binds to. */
+  isBitField?: boolean;
   type: Type;
   isLvalue: boolean;
   isXvalue?: boolean;

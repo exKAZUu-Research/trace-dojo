@@ -759,7 +759,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   protected referenceBinding(type: Extract<Type, { kind: 'reference' }>, target: Expr, row: number): ReferenceBinding {
     const { type: source } = target;
     const { to } = type;
-    const isDirect = target.isLvalue && isReferenceRelated(source, to);
+    const isDirect = target.isLvalue && !target.isBitField && isReferenceRelated(source, to);
     const isTemporaryClass =
       !target.isLvalue && source.kind === 'class' && to.kind === 'class' && source.cls.isDerivedFrom(to.cls);
     if (type.isRvalue && target.isLvalue && !target.isXvalue)

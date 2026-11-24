@@ -31,7 +31,11 @@ export function parseCpp(written: string): Syntax {
       rejectUnsupportedSyntax(syntax);
       return stripAttributes(syntax);
     },
-    { locateErrors: (root, errors) => locateErrors(root, errors, source) }
+    {
+      locateErrors: (root, errors) => locateErrors(root, errors, source),
+      // A bit-field without a name (`int : 0;`) parses as one whose name is missing.
+      acceptsMissing: (node) => node.type === 'field_identifier' && node.nextSibling?.type === 'bitfield_clause',
+    }
   );
 }
 

@@ -440,6 +440,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       memberConstant: expr.memberConstant,
       constant: expr.constant,
       foldedValue: expr.foldedValue,
+      bitFieldPromotion: expr.bitFieldPromotion,
       row: expr.row,
       run: size === 0 ? (frame) => (run(frame) as Ptr).read() : (frame) => frame.readScalar(run(frame) as Ptr, size),
       onlyCalls: expr.onlyCalls,

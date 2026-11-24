@@ -1,3 +1,4 @@
+import { INT_PROPERTIES } from '../c/types';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { CppRuntimeError } from './errors';
 import type { FloatNaN } from './floatSign';
@@ -362,7 +363,8 @@ export class CObject extends Store {
   set(index: number, value: Value): void {
     this.checkAlive();
     if (this.completeClass.isUnion && value !== UNINIT) this.activeMember = index;
-    this.values[index] = value;
+    const field = this.completeClass.fields[index];
+    this.values[index] = field?.bitWidth === undefined ? value : fitBitField(value, field.type, field.bitWidth);
   }
 
   /**
@@ -701,4 +703,17 @@ export class FunctionRef {
   equals(other: Ptr | FunctionRef): boolean {
     return other instanceof FunctionRef && other.candidates[0] === this.candidates[0];
   }
+}
+
+/** The value a bit-field holds after storing a value of its type: the value's low bits, signed for a signed type. */
+function fitBitField(value: Value, type: Type, width: number): Value {
+  if (type.kind !== 'int' || (typeof value !== 'number' && typeof value !== 'bigint')) return value;
+  // An enumeration without a fixed type keeps a sign bit only when it has a negative enumerator, as clang does.
+  const info = type.enumeration;
+  const signed =
+    info && !info.hasFixedType
+      ? [...info.enumerators.values()].some((enumerator) => enumerator < 0)
+      : INT_PROPERTIES[type.name].signed;
+  const fitted = signed ? BigInt.asIntN(width, BigInt(value)) : BigInt.asUintN(width, BigInt(value));
+  return typeof value === 'bigint' ? fitted : Number(fitted);
 }
