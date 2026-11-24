@@ -59,15 +59,15 @@ export class Converter {
         continue;
       }
       if (child.type === 'comment') continue;
-      // Bash reads and runs a program one line at a time, so an error that discards a command discards its line.
-      if (previousEnd !== undefined && this.source.slice(previousEnd, child.startIndex).includes('\n')) {
+      // Bash removes backslash-newline continuations before reading a logical line, and discards that line on error.
+      if (previousEnd !== undefined && hasLogicalNewline(this.source.slice(previousEnd, child.startIndex))) {
         units.push(unit);
         unitEndRows.push(previousEndRow);
         unit = [];
       }
       unit.push(this.statement(child));
       previousEnd = child.endIndex;
-      previousEndRow = child.endPosition.row;
+      previousEndRow = logicalLineEndRow(this.source, child.endIndex, child.endPosition.row);
     }
     if (unit.length > 0) {
       units.push(unit);
@@ -706,6 +706,34 @@ function lastPatternIndex(item: Node): number {
     if (item.fieldNameForChild(i) === 'pattern') index = i;
   }
   return index;
+}
+
+/** Whether source text between two top-level statements crosses an unescaped newline (ending a logical line). */
+function hasLogicalNewline(gap: string): boolean {
+  for (let i = 0; i < gap.length; i++) {
+    if (gap[i] === '\\') i++;
+    else if (gap[i] === '#') {
+      while (i < gap.length && gap[i] !== '\n') i++;
+      if (i < gap.length) return true;
+    } else if (gap[i] === '\n') return true;
+  }
+  return false;
+}
+
+/** Advances a statement's end row across any trailing `\\\n` continuations before its logical line ends. */
+function logicalLineEndRow(source: string, endIndex: number, endRow: number): number {
+  let row = endRow;
+  for (let i = endIndex; i < source.length; i++) {
+    const c = source[i];
+    if (c === ' ' || c === '\t' || c === ';') continue;
+    if (c === '\\' && source[i + 1] === '\n') {
+      row++;
+      i++;
+      continue;
+    }
+    break;
+  }
+  return row;
 }
 
 /** Joins adjacent literal parts, which the parser splits around zero-width tokens. */
