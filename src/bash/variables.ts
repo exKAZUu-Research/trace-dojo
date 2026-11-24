@@ -1,3 +1,5 @@
+import { capitalize, lowerCase, upperCase } from './characters';
+
 /** Variable attribute flags recognized by `declare` and listed by `declare -p`. */
 export type Attribute = 'a' | 'A' | 'i' | 'n' | 'r' | 't' | 'x' | 'c' | 'l' | 'u';
 
@@ -679,6 +681,14 @@ export function variableElementKeys(value: VariableValue): string[] {
   if (value.kind === 'scalar') return ['0'];
   if (value.kind === 'indexed') return sortedElements(value.elements).map(([key]) => String(key));
   return value.table.entries().map(([key]) => key);
+}
+
+/** Applies `u`, `l`, or `c` case-modification attributes to `text`. */
+export function applyCaseAttributes(variable: Variable, text: string): string {
+  if (variable.attributes.has('u')) return upperCase(text);
+  if (variable.attributes.has('l')) return lowerCase(text);
+  if (variable.attributes.has('c')) return capitalize(text);
+  return text;
 }
 
 /** Materializes `variable` as a writable indexed array, converting a scalar into element `0`. */

@@ -11,7 +11,6 @@ import {
 } from './arithmetic';
 import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word } from './ast';
 import { BUILTINS, unsetElement } from './builtins';
-import { capitalize, lowerCase, upperCase } from './characters';
 import { conditionalStatus } from './conditional';
 import { declarationAssignsAnswer, expandDeclarationArguments, runDeclaration } from './declare';
 import { Expander } from './expansion';
@@ -30,6 +29,7 @@ import {
 import { UnsupportedFeatureError } from './unsupported';
 import {
   advanceRandomState,
+  applyCaseAttributes,
   AssociativeTable,
   buildDynamicDeclaration,
   type CallFrameEntry,
@@ -1245,16 +1245,10 @@ export class Shell implements ArithmeticHost {
 
   /** Applies the integer and case attributes to a value about to be stored, or `undefined` after an error. */
   private convertForAttributes(variable: Variable, value: string, base: string, append: boolean): string | undefined {
-    let result: string;
-    if (variable.attributes.has('i')) {
-      const number = this.evaluateFatalReadonly(value);
-      result = append ? String(this.evaluateFatalReadonly(base || '0') + number) : String(number);
-      result = String(BigInt.asIntN(64, BigInt(result)));
-    } else result = base + value;
-    if (variable.attributes.has('u')) result = upperCase(result);
-    else if (variable.attributes.has('l')) result = lowerCase(result);
-    else if (variable.attributes.has('c')) result = capitalize(result);
-    return result;
+    if (!variable.attributes.has('i')) return applyCaseAttributes(variable, base + value);
+    const number = this.evaluateFatalReadonly(value);
+    const total = append ? this.evaluateFatalReadonly(base || '0') + number : number;
+    return applyCaseAttributes(variable, String(BigInt.asIntN(64, total)));
   }
 
   private checkLength(value: string): void {
@@ -1274,11 +1268,6 @@ export class Shell implements ArithmeticHost {
     }
     if (this.isDynamic(name)) return this.assignDynamic(name, value);
     if (!existing && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
-    if (existing?.attributes.has('r')) {
-      this.readonlyFailure = true;
-      this.reportError(`${name}: readonly variable`);
-      return false;
-    }
     const target = existing ?? { name, value: undefined, attributes: new Set() };
     const ok = this.assignElementTo(target, subscript, value, append, evaluated, name);
     if (ok && !existing) this.state.scopes[0].set(name, target);
@@ -1295,19 +1284,15 @@ export class Shell implements ArithmeticHost {
     evaluated = false,
     reportedName = variable.name
   ): boolean {
-    if (variable.attributes.has('r')) {
-      this.readonlyFailure = true;
-      this.reportError(`${reportedName}: readonly variable`);
-      return false;
-    }
-    ensureWritable(variable);
     if (variable.value?.kind === 'associative' || variable.attributes.has('A')) {
-      variable.value ??= { kind: 'associative', table: new AssociativeTable() };
-      const table = (variable.value as Extract<VariableValue, { kind: 'associative' }>).table;
       if (subscript === '' && !evaluated) {
         this.reportError(`${reportedName}[${subscript}]: bad array subscript`);
         return false;
       }
+      if (this.rejectReadonlyElement(variable, reportedName)) return false;
+      ensureWritable(variable);
+      variable.value ??= { kind: 'associative', table: new AssociativeTable() };
+      const table = (variable.value as Extract<VariableValue, { kind: 'associative' }>).table;
       const base = append ? (table.get(subscript) ?? '') : '';
       const converted = this.convertForAttributes(variable, value, base, append);
       if (converted === undefined) return false;
@@ -1326,6 +1311,8 @@ export class Shell implements ArithmeticHost {
       this.reportError(`${reportedName}[${subscript}]: bad array subscript`);
       return false;
     }
+    if (this.rejectReadonlyElement(variable, reportedName)) return false;
+    ensureWritable(variable);
     const elements = this.indexedElements(variable);
     const base = append ? (elements.get(index) ?? '') : '';
     const converted = this.convertForAttributes(variable, value, base, append);
@@ -1334,6 +1321,13 @@ export class Shell implements ArithmeticHost {
     if (!elements.has(index)) this.chargeSlot();
     elements.set(index, converted);
     this.lastStored = converted;
+    return true;
+  }
+
+  private rejectReadonlyElement(variable: Variable, reportedName: string): boolean {
+    if (!variable.attributes.has('r')) return false;
+    this.readonlyFailure = true;
+    this.reportError(`${reportedName}: readonly variable`);
     return true;
   }
 
