@@ -138,29 +138,7 @@ class MutableRectangle<T extends num> with _RectangleBase<T> implements Rectangl
 T _clampToZero<T extends num>(T value) => (value == double.negativeInfinity ? 0.0 : -value * 0) as T;
 `;
 
-/** dart:io, of which the interpreter has only the standard output and error streams and `exit`. */
-export const IO_SOURCE = String.raw`
-abstract interface class IOSink implements StringSink {
-  external void write(Object? object);
-  external void writeln([Object? object = ""]);
-  external void writeAll(Iterable<dynamic> objects, [String separator = ""]);
-  external void writeCharCode(int charCode);
-}
-
-class Stdout implements IOSink {
-  final bool _isError;
-  Stdout._(this._isError);
-  external void write(Object? object);
-  external void writeln([Object? object = ""]);
-  external void writeAll(Iterable<dynamic> objects, [String separator = ""]);
-  external void writeCharCode(int charCode);
-}
-
-final Stdout stdout = Stdout._(false);
-final Stdout stderr = Stdout._(true);
-
-external Never exit(int code);
-`;
+export { IO_SOURCE } from './io';
 
 /** dart:collection, as the interpreter declares it, with the VM's hash maps transcribed so that their order matches. */
 export { COLLECTION_SOURCE } from './collection';

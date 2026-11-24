@@ -95,18 +95,12 @@ const UNAVAILABLE_NAMES: Record<string, string> = {
   runZonedGuarded: 'runZonedGuarded（非同期処理）',
   ZoneSpecification: 'ZoneSpecification（非同期処理）',
   Isolate: 'Isolate',
-  stdin: 'stdin（標準入力）',
-  exitCode: 'exitCode（プロセスの終了状態）',
-  File: 'File（ファイルの読み書き）',
-  Directory: 'Directory（ファイルの読み書き）',
-  FileSystemEntity: 'FileSystemEntity（ファイルの読み書き）',
   Platform: 'Platform（実行環境の情報）',
   Process: 'Process（外部のプロセス）',
   HttpClient: 'HttpClient（ネットワーク）',
   HttpServer: 'HttpServer（ネットワーク）',
   Socket: 'Socket（ネットワーク）',
   Uri: 'Uri',
-  sleep: 'sleep（実行を止める）',
   Expando: 'Expando',
   WeakReference: 'WeakReference',
   Finalizer: 'Finalizer',
@@ -117,18 +111,14 @@ const UNAVAILABLE_NAMES: Record<string, string> = {
 };
 
 const UNAVAILABLE_SINK_MEMBERS = new Set([
-  'add',
-  'addError',
-  'addStream',
-  'close',
-  'done',
-  'encoding',
-  'flush',
   'hasTerminal',
-  'nonBlocking',
   'terminalColumns',
   'terminalLines',
   'supportsAnsiEscapes',
+  'nonBlocking',
+  'lineMode',
+  'echoMode',
+  'echoNewlineMode',
 ]);
 const UNAVAILABLE_STATIC_MEMBERS = new Set(['dart:math.Random.secure', 'dart:core.StackTrace.current']);
 const SPECIAL_TYPES = new Map<string, DartType>([
@@ -180,7 +170,7 @@ export abstract class CompilerBase {
   protected checkUnavailableIoMember(receiver: DartType, name: string, span: Span): void {
     const type = resolveBound(receiver);
     if (type.kind !== 'interface' || type.cls.library !== 'dart:io') return;
-    if ((type.cls.name === 'Stdout' || type.cls.name === 'IOSink') && UNAVAILABLE_SINK_MEMBERS.has(name))
+    if (['Stdout', 'Stdin', 'IOSink'].includes(type.cls.name) && UNAVAILABLE_SINK_MEMBERS.has(name))
       this.unsupported(span, type.cls.name + '.' + name);
   }
 

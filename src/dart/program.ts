@@ -19,6 +19,7 @@ import './library/nativeRegExp';
 import './library/nativeOthers';
 import './library/nativeConvert';
 import './library/nativeBigInt';
+import './library/nativeIo';
 import { NATIVES } from './library/nativeSupport';
 import { parseDart } from './parse';
 import { DartThrow, EMPTY_TYPE_ENV, Frame, type FunctionInfo, type LibraryLinks, Runtime } from './runtime';
@@ -46,8 +47,8 @@ const LIBRARY_SOURCES: LibrarySource[] = [
   { uri: 'dart:math', source: MATH_SOURCE, imports: [] },
   { uri: 'dart:async', source: ASYNC_SOURCE, imports: ['dart:collection'] },
   { uri: 'dart:collection', source: COLLECTION_SOURCE, imports: ['dart:math'] },
-  { uri: 'dart:convert', source: CONVERT_SOURCE, imports: ['dart:collection'] },
-  { uri: 'dart:io', source: IO_SOURCE, imports: [] },
+  { uri: 'dart:convert', source: CONVERT_SOURCE, imports: ['dart:async', 'dart:collection'] },
+  { uri: 'dart:io', source: IO_SOURCE, imports: ['dart:async', 'dart:convert'] },
 ];
 
 /** The libraries a program may import, and why the others are unavailable. */

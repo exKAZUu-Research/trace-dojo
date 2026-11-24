@@ -798,6 +798,7 @@ export abstract class ControlCompiler extends StatementCompiler {
         const iterator = runtime.getProperty(values, 'iterator', undefined);
         frame.temporaries.push(iterator);
         try {
+          // oxlint-disable-next-line require-yield -- An Iterator's moveNext answers at once; a stream's is awaited.
           return yield* iterate(frame, iterator, loop, function* () {
             return runtime.invoke(iterator, 'moveNext', NO_ARGUMENTS, [], undefined);
           });

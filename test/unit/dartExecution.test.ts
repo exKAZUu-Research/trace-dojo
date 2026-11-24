@@ -3003,7 +3003,7 @@ void main() {
 }
 `;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'Stdout\na1\n' });
-  for (const statement of ['stdout.flush()', 'stdout.close()', 'print(stdout.done)', 'exitCode = 2']) {
+  for (const statement of ['print(stdout.hasTerminal)', 'print(stdout.terminalColumns)', 'print(stdin.echoMode)']) {
     const result = executeProgram('dart', `import 'dart:io'; void main() { ${statement}; }`);
     expect(result.kind).toBe('compileError');
     if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toMatch(/この採点環境では使えません。$/);
@@ -3313,9 +3313,9 @@ test.each([
 });
 
 test.each([
-  { name: 'standard input', program: "import 'dart:io';\n\nvoid main() {\n  print(stdin.readLineSync());\n}\n" },
+  { name: 'isolates', program: "import 'dart:isolate';\n\nvoid main() {\n  print(Isolate.current);\n}\n" },
   { name: 'zones', program: "import 'dart:async';\n\nvoid main() {\n  runZoned(() => print('zoned'));\n}\n" },
-  { name: 'files', program: "import 'dart:io';\n\nvoid main() {\n  print(File('a.txt').readAsStringSync());\n}\n" },
+  { name: 'platform details', program: "import 'dart:io';\n\nvoid main() {\n  print(Platform.operatingSystem);\n}\n" },
   {
     name: 'secure random constructors',
     program: "import 'dart:math'; void main() { print('before'); try { Random.secure(); } catch (_) {} }",
@@ -9992,4 +9992,39 @@ test.each([
   'void g() async { await for (var x in [1]) {} }',
 ])('misused async syntax `%s` is a compile error', (declaration) => {
   expect(executeProgram('dart', `${declaration}\nvoid main() {}`)).toMatchObject({ kind: 'compileError' });
+});
+
+// Dart SDK 3.13.7 (`dart run`) on macOS prints the expected output, whose errno for a non-empty directory is macOS's.
+test('Dart reads standard input and the files of its run with the SDK messages', () => {
+  const program = `import 'dart:convert';
+import 'dart:io';
+void main() async {
+  print([stdin.readLineSync(), stdin.readByteSync(), stdin.readLineSync(), stdin.readLineSync()]);
+  final file = File('notes/a.txt');
+  Directory('notes').createSync();
+  file.writeAsStringSync('one\\ntwo\\n');
+  await file.writeAsString('three\\n', mode: FileMode.append);
+  print([file.readAsLinesSync(), file.lengthSync(), await File('input.txt').readAsString()]);
+  await for (final line in file.openRead().transform(utf8.decoder).transform(const LineSplitter())) print(line);
+  print(Directory('notes').listSync().map((entity) => entity.path).toList());
+  for (final action in [() => File('none.txt').readAsStringSync(), () => Directory('notes').deleteSync()]) {
+    try {
+      action();
+    } on FileSystemException catch (error) {
+      print(error);
+    }
+  }
+  File('notes/a.txt').renameSync('b.txt');
+  Directory('notes').deleteSync();
+}`;
+  expect(executeProgram('dart', program, { stdin: 'first\nXsecond\n', files: { 'input.txt': 'given' } })).toMatchObject(
+    {
+      kind: 'executed',
+      stdout:
+        '[first, 88, second, null]\n[[one, two, three], 14, given]\none\ntwo\nthree\n[notes/a.txt]\n' +
+        "PathNotFoundException: Cannot open file, path = 'none.txt' (OS Error: No such file or directory, errno = 2)\n" +
+        "FileSystemException: Deletion failed, path = 'notes' (OS Error: Directory not empty, errno = 66)\n",
+      finalFiles: { 'b.txt': 'one\ntwo\nthree\n', 'input.txt': 'given' },
+    }
+  );
 });

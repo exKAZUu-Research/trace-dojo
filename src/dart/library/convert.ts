@@ -8,9 +8,11 @@ abstract mixin class Codec<S, T> {
   S decode(T encoded) => decoder.convert(encoded);
 }
 
-abstract mixin class Converter<S, T> {
+abstract mixin class Converter<S, T> implements StreamTransformer<S, T> {
   const Converter();
   T convert(S input);
+  Stream<T> bind(Stream<S> stream) => stream.map(convert);
+  StreamTransformer<RS, RT> cast<RS, RT>() => StreamTransformer.castFrom<S, T, RS, RT>(this);
 }
 
 abstract class Encoding extends Codec<String, List<int>> {
@@ -97,6 +99,36 @@ final class Utf8Decoder extends Converter<List<int>, String> {
   final bool _allowMalformed;
   const Utf8Decoder({bool allowMalformed = false}) : _allowMalformed = allowMalformed;
   String convert(List<int> codeUnits, [int start = 0, int? end]) => _utf8Decode(codeUnits, _allowMalformed, start, end);
+  Stream<String> bind(Stream<List<int>> stream) =>
+      Stream<String>.eventTransformed(stream, (EventSink<String> sink) => _Utf8ChunkSink(sink, _allowMalformed));
+}
+
+/** Decodes the chunks of a byte stream, holding a character's bytes that a chunk splits until the next chunk. */
+class _Utf8ChunkSink implements EventSink<List<int>> {
+  final EventSink<String> _sink;
+  final bool _allowMalformed;
+  List<int> _pending = <int>[];
+  _Utf8ChunkSink(this._sink, this._allowMalformed);
+  void add(List<int> chunk) {
+    var bytes = [..._pending, ...chunk];
+    var end = bytes.length;
+    var start = end - 1;
+    while (start >= 0 && start > end - 4 && (bytes[start] & 0xC0) == 0x80) start--;
+    if (start >= 0) {
+      var lead = bytes[start];
+      var length = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+      if (start + length > end) end = start;
+    }
+    _pending = bytes.sublist(end);
+    if (end > 0) _sink.add(_utf8Decode(bytes, _allowMalformed, 0, end));
+  }
+  void addError(Object error, [StackTrace? stackTrace]) {
+    _sink.addError(error, stackTrace);
+  }
+  void close() {
+    if (_pending.isNotEmpty) _sink.add(_utf8Decode(_pending, _allowMalformed));
+    _sink.close();
+  }
 }
 
 external _Uint8List _utf8Encode(String input, [int start = 0, int? end]);
@@ -134,11 +166,38 @@ external String _base64Encode(List<int> bytes, bool urlSafe);
 external _Uint8List _base64Decode(String source, int start, int? end);
 external String _base64Normalize(String source, int start, int? end);
 
-final class LineSplitter {
+final class LineSplitter extends StreamTransformerBase<String, String> {
   const LineSplitter();
   static Iterable<String> split(String lines, [int start = 0, int? end]) =>
       _LineSplitIterable(lines, start, RangeError.checkValidRange(start, end, lines.length));
   List<String> convert(String data) => split(data).toList();
+  Stream<String> bind(Stream<String> stream) =>
+      Stream<String>.eventTransformed(stream, (EventSink<String> sink) => _LineSplitterSink(sink));
+}
+
+/** Splits the chunks of a string stream into lines, holding a line that a chunk ends in the middle of. */
+class _LineSplitterSink implements EventSink<String> {
+  final EventSink<String> _sink;
+  String _carry = "";
+  /** Whether the last chunk ended with a carriage return, whose CRLF the next chunk may end. */
+  bool _skipLineFeed = false;
+  _LineSplitterSink(this._sink);
+  void add(String chunk) {
+    var text = _carry + chunk;
+    if (_skipLineFeed && text.isNotEmpty && text.codeUnitAt(0) == 10) text = text.substring(1);
+    var end = text.length;
+    while (end > 0 && text.codeUnitAt(end - 1) != 10 && text.codeUnitAt(end - 1) != 13) end--;
+    for (var line in LineSplitter.split(text, 0, end)) _sink.add(line);
+    _carry = text.substring(end);
+    _skipLineFeed = end > 0 && end == text.length && text.codeUnitAt(end - 1) == 13;
+  }
+  void addError(Object error, [StackTrace? stackTrace]) {
+    _sink.addError(error, stackTrace);
+  }
+  void close() {
+    for (var line in LineSplitter.split(_carry)) _sink.add(line);
+    _sink.close();
+  }
 }
 
 class _LineSplitIterable extends Iterable<String> {
