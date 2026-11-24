@@ -274,12 +274,39 @@ export class Converter {
       text: node.text,
     };
     if (nameNode.type === 'subscript') assignment.subscript = this.subscriptWord(nameNode);
-    if (valueNode?.type === 'array') {
-      assignment.array = valueNode.namedChildren.flatMap((child) =>
-        child && child.type !== 'comment' ? [this.word(child)] : []
-      );
-    } else if (valueNode) assignment.value = this.word(valueNode);
+    if (valueNode?.type === 'array') assignment.array = this.arrayElements(valueNode);
+    else if (valueNode) assignment.value = this.word(valueNode);
     return assignment;
+  }
+
+  /**
+   * Reconstructs compound-assignment elements, joining words the grammar split at spaces inside `[subscript]=value`.
+   */
+  // code-gauge-allow functionCognitiveComplexity -- Scans bracket depth across split element words while keeping non-keyed words separate.
+  private arrayElements(arrayNode: Node): Word[] {
+    const nodes = arrayNode.namedChildren.filter((child): child is Node => Boolean(child) && child.type !== 'comment');
+    const words = nodes.map((node) => this.word(node));
+    const elements: Word[] = [];
+    for (let i = 0; i < words.length; i++) {
+      const end = keyedSpanEnd(words, i);
+      if (end === undefined || end === i) {
+        elements.push(words[i]);
+        continue;
+      }
+      const parts: WordPart[] = [...words[i].parts];
+      for (let j = i + 1; j <= end; j++) {
+        const gap = this.source.slice(nodes[j - 1].endIndex, nodes[j].startIndex).replaceAll('\\\n', '');
+        if (gap) parts.push({ kind: 'literal', text: gap });
+        parts.push(...words[j].parts);
+      }
+      elements.push({
+        parts: mergeLiterals(parts),
+        row: words[i].row,
+        text: this.source.slice(nodes[i].startIndex, nodes[end].endIndex),
+      });
+      i = end;
+    }
+    return elements;
   }
 
   /** The index of a subscript node, from its first `[` to its last `]`, including any nested brackets. */
@@ -690,6 +717,29 @@ function mergeLiterals(parts: WordPart[]): WordPart[] {
     else merged.push(part.kind === 'literal' ? { ...part } : part);
   }
   return merged;
+}
+
+/** The last word index of a `[subscript]=value` element starting at `start`, or `undefined` if not keyed. */
+// code-gauge-allow functionCognitiveComplexity -- Tracks nested unescaped brackets across split words until the closing `]=` or `]+=`.
+function keyedSpanEnd(words: Word[], start: number): number | undefined {
+  const [first] = words[start].parts;
+  if (first?.kind !== 'literal' || !first.text.startsWith('[')) return undefined;
+  let depth = 0;
+  for (let w = start; w < words.length; w++) {
+    for (const part of words[w].parts) {
+      if (part.kind !== 'literal') continue;
+      for (let i = 0; i < part.text.length; i++) {
+        const c = part.text[i];
+        if (c === '\\') i++;
+        else if (c === '[') depth++;
+        else if (c === ']' && --depth === 0) {
+          const after = part.text.slice(i + 1);
+          return after.startsWith('=') || after.startsWith('+=') ? w : undefined;
+        }
+      }
+    }
+  }
+  return undefined;
 }
 
 const SIMPLE_ESCAPES: Record<string, number> = {
