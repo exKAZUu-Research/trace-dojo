@@ -23,6 +23,18 @@ int main() {
   std::cout << x << std::endl;
   return 0;
 }`,
+  csharp: `using System;
+using System.Text.RegularExpressions;
+
+class Program
+{
+    static void Main()
+    {
+        int x = int.Parse(Regex.Match("x=6", @"x=(\\d+)").Groups[1].Value);
+        x = x * 7;
+        Console.WriteLine(Regex.Replace("<" + x + ">", "[<>]", ""));
+    }
+}`,
   dart: `void main() {
   var x = int.parse(RegExp(r'x=(\\d+)').firstMatch('x=6')!.group(1)!);
   x = x * 7;

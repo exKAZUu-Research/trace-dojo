@@ -2,6 +2,7 @@ import { type Interpreter, type ProgramExecution, type ProgramTrace, traceWith }
 import { interpreter as bash } from './languages/bash';
 import { interpreter as c } from './languages/c';
 import { interpreter as cpp } from './languages/cpp';
+import { interpreter as csharp } from './languages/csharp';
 import { interpreter as dart } from './languages/dart';
 import { interpreter as go } from './languages/go';
 import { interpreter as haskell } from './languages/haskell';
@@ -35,6 +36,7 @@ const interpreters = {
   zig,
   dart,
   haskell,
+  csharp,
   bash,
 } satisfies Record<string, Interpreter>;
 
