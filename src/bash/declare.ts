@@ -647,7 +647,7 @@ function applyDeclaredAttributes(
 ): boolean {
   const assigns = assignMode !== 'none' || isCompound(operand);
   if (preUnsetStore?.deferUnsetN && !isSubscripted && (options.set.has('a') || options.set.has('A'))) {
-    if (!applyReferentArrayKind(shell, builtin, preUnsetStore, options, assigns)) return false;
+    if (!applyReferentArrayKind(shell, builtin, preUnsetStore, options)) return false;
     return applyAttributes(
       shell,
       builtin,
@@ -659,12 +659,20 @@ function applyDeclaredAttributes(
       isCompound(operand)
     );
   }
+  const redirectsGlobalScalarStore =
+    options.set.has('g') &&
+    assignMode !== 'none' &&
+    !isCompound(operand) &&
+    !isSubscripted &&
+    destination.referencedSubscript === undefined &&
+    !options.set.has('A') &&
+    !destination.variable.attributes.has('A');
   return applyAttributes(
     shell,
     builtin,
     destination.variable,
     options,
-    assigns,
+    assigns && !redirectsGlobalScalarStore,
     isSubscripted || destination.referencedSubscript !== undefined,
     Boolean(preUnsetStore?.deferUnsetN),
     isCompound(operand)
@@ -675,8 +683,7 @@ function applyReferentArrayKind(
   shell: Shell,
   builtin: string,
   preUnsetStore: PreUnsetNamerefStore,
-  options: Options,
-  assigns: boolean
+  options: Options
 ): boolean {
   const referent = preUnsetStore.variable;
   const arrayOpts: Options = {
@@ -690,7 +697,7 @@ function applyReferentArrayKind(
     shell.reportError(`${builtin}: ${referent.name}: ${kindErr}`);
     return false;
   }
-  applyArrayKindAttributes(shell, referent, arrayOpts.set.has('A'), arrayOpts.set.has('a'), assigns);
+  applyArrayKindAttributes(shell, referent, arrayOpts.set.has('A'), arrayOpts.set.has('a'), false);
   if (options.set.has('g') && isIndexedCell(referent) && preUnsetStore.preResolved === undefined) {
     preUnsetStore.preResolved = resolveNameInScopes(shell.state.scopes, preUnsetStore.operandName);
   }
