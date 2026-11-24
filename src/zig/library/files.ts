@@ -39,6 +39,10 @@ pub const Limit = enum(usize) {
     pub fn limited(n: usize) Limit {
         return @enumFromInt(n);
     }
+
+    pub fn slice(l: Limit, s: []u8) []u8 {
+        return s[0..@min(s.len, @intFromEnum(l))];
+    }
 };
 
 pub const Reader = struct {
@@ -51,6 +55,24 @@ pub const Reader = struct {
     pub const ShortError = error{ReadFailed};
     pub const DelimiterError = error{ ReadFailed, EndOfStream, StreamTooLong };
     pub const LimitedAllocError = std.mem.Allocator.Error || ShortError || error{StreamTooLong};
+    pub const StreamError = error{ ReadFailed, WriteFailed, EndOfStream };
+    pub const StreamRemainingError = error{ ReadFailed, WriteFailed };
+    pub const StreamDelimiterLimitError = error{ ReadFailed, WriteFailed, StreamTooLong };
+    pub const DiscardDelimiterLimitError = error{ ReadFailed, StreamTooLong };
+    pub const ReadAllocError = Error || std.mem.Allocator.Error;
+    pub const TakeEnumError = Error || error{InvalidEnumTag};
+
+    pub const limited = @compileError("std.Io.Reader.limited は、この採点環境では使えません。");
+    pub const hashed = @compileError("std.Io.Reader.hashed は、この採点環境では使えません。");
+    pub const readVec = @compileError("std.Io.Reader.readVec は、この採点環境では使えません。");
+    pub const readVecAll = @compileError("std.Io.Reader.readVecAll は、この採点環境では使えません。");
+    pub const takeStruct = @compileError("std.Io.Reader.takeStruct は、この採点環境では使えません。");
+    pub const peekStruct = @compileError("std.Io.Reader.peekStruct は、この採点環境では使えません。");
+    pub const takeStructPointer = @compileError("std.Io.Reader.takeStructPointer は、この採点環境では使えません。");
+    pub const peekStructPointer = @compileError("std.Io.Reader.peekStructPointer は、この採点環境では使えません。");
+    pub const takeLeb128 = @compileError("std.Io.Reader.takeLeb128 は、この採点環境では使えません。");
+    pub const allocRemainingAlignedSentinel = @compileError("std.Io.Reader.allocRemainingAlignedSentinel は、この採点環境では使えません。");
+    pub const appendRemainingAligned = @compileError("std.Io.Reader.appendRemainingAligned は、この採点環境では使えません。");
 
     pub fn fixed(bytes: []const u8) Reader {
         return .{ .buffer = @constCast(bytes), .seek = 0, .end = bytes.len, .descriptor = null };
@@ -261,6 +283,172 @@ pub const Reader = struct {
             r.seek = r.end;
             try r.fillMore();
         }
+    }
+
+    pub fn stream(r: *Reader, w: *Io.Writer, limit: Limit) StreamError!usize {
+        if (r.seek == r.end) try r.fillMore();
+        const buffer = limit.slice(r.buffer[r.seek..r.end]);
+        try w.writeAll(buffer);
+        r.seek += buffer.len;
+        return buffer.len;
+    }
+
+    pub fn streamExact(r: *Reader, w: *Io.Writer, n: usize) StreamError!void {
+        var remaining = n;
+        while (remaining != 0) remaining -= try r.stream(w, .limited(remaining));
+    }
+
+    pub fn streamExact64(r: *Reader, w: *Io.Writer, n: u64) StreamError!void {
+        try r.streamExact(w, @intCast(n));
+    }
+
+    pub fn streamRemaining(r: *Reader, w: *Io.Writer) StreamRemainingError!usize {
+        var offset: usize = 0;
+        while (true) {
+            offset += r.stream(w, .unlimited) catch |err| switch (err) {
+                error.EndOfStream => return offset,
+                else => |e| return e,
+            };
+        }
+    }
+
+    pub fn streamDelimiter(r: *Reader, w: *Io.Writer, delimiter: u8) StreamError!usize {
+        const n = r.streamDelimiterLimit(w, delimiter, .unlimited) catch |err| switch (err) {
+            error.StreamTooLong => unreachable,
+            else => |e| return e,
+        };
+        if (r.seek == r.end) return error.EndOfStream;
+        return n;
+    }
+
+    pub fn streamDelimiterEnding(r: *Reader, w: *Io.Writer, delimiter: u8) StreamRemainingError!usize {
+        return r.streamDelimiterLimit(w, delimiter, .unlimited) catch |err| switch (err) {
+            error.StreamTooLong => unreachable,
+            else => |e| return e,
+        };
+    }
+
+    pub fn streamDelimiterLimit(r: *Reader, w: *Io.Writer, delimiter: u8, limit: Limit) StreamDelimiterLimitError!usize {
+        var remaining = @intFromEnum(limit);
+        while (remaining != 0) {
+            const available = Limit.limited(remaining).slice(r.peekGreedy(1) catch |err| switch (err) {
+                error.ReadFailed => |e| return e,
+                error.EndOfStream => return @intFromEnum(limit) - remaining,
+            });
+            if (std.mem.findScalar(u8, available, delimiter)) |delimiter_index| {
+                try w.writeAll(available[0..delimiter_index]);
+                r.toss(delimiter_index);
+                remaining -= delimiter_index;
+                return @intFromEnum(limit) - remaining;
+            }
+            try w.writeAll(available);
+            r.toss(available.len);
+            remaining -= available.len;
+        }
+        return error.StreamTooLong;
+    }
+
+    pub fn discardDelimiterExclusive(r: *Reader, delimiter: u8) ShortError!usize {
+        return r.discardDelimiterLimit(delimiter, .unlimited) catch |err| switch (err) {
+            error.StreamTooLong => unreachable,
+            else => |e| return e,
+        };
+    }
+
+    pub fn discardDelimiterLimit(r: *Reader, delimiter: u8, limit: Limit) DiscardDelimiterLimitError!usize {
+        var remaining = @intFromEnum(limit);
+        while (remaining != 0) {
+            const available = Limit.limited(remaining).slice(r.peekGreedy(1) catch |err| switch (err) {
+                error.ReadFailed => |e| return e,
+                error.EndOfStream => return @intFromEnum(limit) - remaining,
+            });
+            if (std.mem.findScalar(u8, available, delimiter)) |delimiter_index| {
+                r.toss(delimiter_index);
+                remaining -= delimiter_index;
+                return @intFromEnum(limit) - remaining;
+            }
+            r.toss(available.len);
+            remaining -= available.len;
+        }
+        return error.StreamTooLong;
+    }
+
+    pub fn discard(r: *Reader, limit: Limit) Error!usize {
+        if (r.seek == r.end) try r.fillMore();
+        const n = @min(r.end - r.seek, @intFromEnum(limit));
+        r.seek += n;
+        return n;
+    }
+
+    pub fn discardAll64(r: *Reader, n: u64) Error!void {
+        try r.discardAll(@intCast(n));
+    }
+
+    pub fn peekSentinel(r: *Reader, comptime sentinel: u8) DelimiterError![:sentinel]u8 {
+        const result = try r.peekDelimiterInclusive(sentinel);
+        return result[0 .. result.len - 1 :sentinel];
+    }
+
+    pub fn takeSentinel(r: *Reader, comptime sentinel: u8) DelimiterError![:sentinel]u8 {
+        const result = try r.peekSentinel(sentinel);
+        r.toss(result.len + 1);
+        return result;
+    }
+
+    pub fn readAllocAll(r: *Reader, allocator: std.mem.Allocator, len: usize) ReadAllocError![]u8 {
+        const dest = try allocator.alloc(u8, len);
+        errdefer allocator.free(dest);
+        try r.readSliceAll(dest);
+        return dest;
+    }
+
+    pub fn readAllocShort(r: *Reader, allocator: std.mem.Allocator, len: usize) ReadAllocError![]u8 {
+        const dest = try allocator.alloc(u8, len);
+        errdefer allocator.free(dest);
+        const n = try r.readSliceShort(dest);
+        if (n == dest.len) return dest;
+        return try allocator.realloc(dest, n);
+    }
+
+    pub fn appendRemaining(r: *Reader, gpa: std.mem.Allocator, list: *std.ArrayList(u8), limit: Limit) LimitedAllocError!void {
+        const data = try r.allocRemaining(gpa, if (limit == .unlimited) limit else .limited(@intFromEnum(limit) -| list.items.len));
+        defer gpa.free(data);
+        try list.appendSlice(gpa, data);
+    }
+
+    pub fn appendExact(r: *Reader, gpa: std.mem.Allocator, list: *std.ArrayList(u8), n: usize) (std.mem.Allocator.Error || Error)!void {
+        const data = try r.take(n);
+        try list.appendSlice(gpa, data);
+    }
+
+    pub inline fn takeInt(r: *Reader, comptime T: type, endian: std.builtin.Endian) Error!T {
+        const n = @divExact(@typeInfo(T).int.bits, 8);
+        return readInt(T, try r.take(n), endian);
+    }
+
+    pub inline fn peekInt(r: *Reader, comptime T: type, endian: std.builtin.Endian) Error!T {
+        const n = @divExact(@typeInfo(T).int.bits, 8);
+        return readInt(T, try r.peek(n), endian);
+    }
+
+    pub fn takeVarInt(r: *Reader, comptime Int: type, endian: std.builtin.Endian, n: usize) Error!Int {
+        return readInt(Int, try r.take(n), endian);
+    }
+
+    pub fn takeEnum(r: *Reader, comptime Enum: type, endian: std.builtin.Endian) TakeEnumError!Enum {
+        const Tag = @typeInfo(Enum).@"enum".tag_type;
+        const int = try r.takeInt(Tag, endian);
+        return std.enums.fromInt(Enum, int) orelse return error.InvalidEnumTag;
+    }
+
+    fn readInt(comptime T: type, bytes: []const u8, endian: std.builtin.Endian) T {
+        const U = @Int(.unsigned, @typeInfo(T).int.bits);
+        var result: U = 0;
+        for (0..bytes.len) |i| {
+            const byte = if (endian == .little) bytes[bytes.len - 1 - i] else bytes[i];
+            result = (result << 8) | byte;
+        }
+        return @bitCast(result);
     }
 
     pub fn allocRemaining(r: *Reader, gpa: std.mem.Allocator, limit: Limit) LimitedAllocError![]u8 {

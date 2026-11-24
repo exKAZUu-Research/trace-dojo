@@ -16,6 +16,11 @@ pub const SourceLocation = struct {
     column: u32,
 };
 
+pub const Endian = enum {
+    big,
+    little,
+};
+
 pub const Signedness = enum(u1) {
     signed,
     unsigned,

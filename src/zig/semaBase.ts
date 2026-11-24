@@ -68,6 +68,7 @@ import {
   USIZE,
   VOID,
 } from './types';
+import { decodeUtf8 } from './utf8';
 import { aggregateFacts, fieldFacts, staticResultOf, type ValueFacts, valueFactsOf } from './valueFacts';
 import {
   arrayPointerView,
@@ -503,6 +504,12 @@ export abstract class SemaBase implements SemaApi {
         return known(type, value, span);
       }
       default: {
+        // A library declaration that is only `@compileError("...")` reports its message where the program uses it.
+        const value = decl.syntax.value;
+        if (decl.namespace.internal && value?.kind === 'builtinCall' && value.name === '@compileError') {
+          const [message] = value.args;
+          if (message?.kind === 'string') this.error(span, decodeUtf8(message.bytes));
+        }
         this.resolveVariable(decl);
         const { alignment } = decl;
         if (decl.kind === 'const') {
