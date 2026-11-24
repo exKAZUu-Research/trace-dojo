@@ -203,7 +203,9 @@ export class Expander {
   arithmeticText(source: ArithmeticSource): string {
     let text = '';
     for (const piece of source.pieces) {
-      text += typeof piece === 'string' ? piece : this.joinPieces(this.expandPart(piece, true));
+      if (typeof piece === 'string') text += piece;
+      else if (piece.kind === 'ansiC') text += `'${piece.text.replaceAll("'", String.raw`'\''`)}'`;
+      else text += this.joinPieces(this.expandPart(piece, true));
     }
     return text;
   }

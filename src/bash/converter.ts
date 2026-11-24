@@ -29,7 +29,6 @@ const EXPANSION_TYPES = new Set([
   'command_substitution',
   'arithmetic_expansion',
   'string',
-  'raw_string',
   'ansi_c_string',
   'translated_string',
 ]);
