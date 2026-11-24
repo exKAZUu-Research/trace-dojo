@@ -58,7 +58,9 @@ export class FieldSplitter {
 
   private onFieldBreak(): void {
     if (!this.hasNonWhitePrimaryIfs && this.ifs !== '') {
-      this.separate(this.ifs[0]);
+      if (this.started) this.end();
+      this.sawEmptyElement = false;
+      this.afterWhite = true;
       return;
     }
     if (this.started) this.end();

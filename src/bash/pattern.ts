@@ -61,11 +61,6 @@ export function quotePattern(text: string): string {
   return text.replaceAll(/[*?[\]\\!^\-+@():=.]/g, (c) => `\\${c}`);
 }
 
-/** Strips pattern-quoting backslashes from `pattern`. */
-export function unquotePattern(pattern: string): string {
-  return pattern.replaceAll(/\\([\s\S])/g, '$1');
-}
-
 /** Compiles a shell pattern into a sequence of wildcard, literal, and bracket atoms. */
 export function compileGlob(pattern: string): CompiledGlob {
   const chars = charactersOf(pattern);

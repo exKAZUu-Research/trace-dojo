@@ -89,6 +89,8 @@ function braceExpandDeclarationAssignment(shell: Shell, arg: Assignment): Assign
   return expanded;
 }
 
+const POSITIVE_IGNORED_MODE_FLAGS = new Set(['g', 'I', 'p']);
+
 function recordOptionWord(word: string, options: Options): boolean {
   if (word === '--' || !/^[-+]./.test(word)) return true;
   for (const ch of word.slice(1)) applyOptionSign(options, word[0] as '-' | '+', ch);
@@ -97,6 +99,7 @@ function recordOptionWord(word: string, options: Options): boolean {
 
 function applyOptionSign(options: Options, sign: '-' | '+', ch: string): void {
   if (sign === '+') {
+    if (POSITIVE_IGNORED_MODE_FLAGS.has(ch)) return;
     options.unset.add(ch);
     options.set.delete(ch);
   } else if (!options.unset.has(ch)) {
@@ -198,8 +201,8 @@ function ensureCompoundTargetVariable(
       ? scopes[0].get(targetName)
       : shell.findVariable(targetName, false);
   if (!variable) {
-    const inherited = localScope && set.has('I') ? findEnclosingVariable(scopes, localScope, targetName) : undefined;
-    variable = createDeclaredVariable(targetName, inherited);
+    const origin = localScope ? resolveLocalOrigin(shell, localScope, targetName, set.has('I')) : undefined;
+    variable = createDeclaredVariable(targetName, origin);
     (localScope ?? scopes[0]).set(targetName, variable);
   }
   return variable;
@@ -213,9 +216,7 @@ function resolveCompoundExisting(
 ): Variable | undefined {
   const { scopes } = shell.state;
   if (localScope) {
-    return (
-      localScope.get(targetName) ?? (set.has('I') ? findEnclosingVariable(scopes, localScope, targetName) : undefined)
-    );
+    return localScope.get(targetName) ?? resolveLocalOrigin(shell, localScope, targetName, set.has('I'))?.source;
   }
   return set.has('g') || set.has('n') ? scopes[0].get(targetName) : shell.findVariable(targetName, false);
 }
@@ -645,17 +646,21 @@ function declaredDestination(
   }
   const origin =
     targetScope && !variable ? resolveLocalOrigin(shell, targetScope, targetName, set.has('I')) : undefined;
-  if (checkReadonlyConflict(shell, builtin, targetName, variable ?? origin?.source, options, assigns)) {
+  const candidate = variable ?? createDeclaredVariable(targetName, origin);
+  if (checkReadonlyConflict(shell, builtin, targetName, candidate, options, assigns)) {
     return undefined;
   }
-  if (!variable) {
-    variable = createDeclaredVariable(targetName, origin?.source, origin?.keepAllAttributes ?? false);
-    (targetScope ?? scopes[0]).set(targetName, variable);
-  }
+  if (!variable) (targetScope ?? scopes[0]).set(targetName, candidate);
   return {
-    variable,
+    variable: candidate,
     ...(referencedSubscript === undefined ? {} : { referencedSubscript }),
   };
+}
+
+interface LocalOrigin {
+  source: Variable;
+  keepAllAttributes: boolean;
+  fromTempEnv: boolean;
 }
 
 function resolveLocalOrigin(
@@ -663,31 +668,33 @@ function resolveLocalOrigin(
   targetScope: Map<string, Variable>,
   name: string,
   inheritEnclosing: boolean
-): { source: Variable; keepAllAttributes: boolean } | undefined {
+): LocalOrigin | undefined {
   const tempBinding = findCallPrefixBinding(shell, targetScope, name);
-  if (tempBinding) return { source: tempBinding, keepAllAttributes: true };
+  if (tempBinding) return { source: tempBinding, keepAllAttributes: true, fromTempEnv: true };
   if (!inheritEnclosing) return undefined;
   const inherited = findEnclosingVariable(shell.state.scopes, targetScope, name);
-  return inherited ? { source: inherited, keepAllAttributes: false } : undefined;
+  return inherited
+    ? { source: inherited, keepAllAttributes: false, fromTempEnv: Boolean(inherited.fromTempEnv) }
+    : undefined;
 }
 
 function findCallPrefixBinding(shell: Shell, targetScope: Map<string, Variable>, name: string): Variable | undefined {
-  const { scopes, functionScopes } = shell.state;
-  const fnScopes = new Set(functionScopes);
+  const { scopes } = shell.state;
   for (let i = scopes.indexOf(targetScope) - 1; i >= 1; i--) {
     const found = scopes[i].get(name);
-    if (!found) continue;
-    return fnScopes.has(i) ? undefined : found;
+    if (found) return found.fromTempEnv ? found : undefined;
   }
   return undefined;
 }
 
-function createDeclaredVariable(name: string, inherited: Variable | undefined, keepAllAttributes = false): Variable {
-  if (!inherited) return { name, value: undefined, attributes: new Set() };
+function createDeclaredVariable(name: string, origin: LocalOrigin | undefined): Variable {
+  if (!origin) return { name, value: undefined, attributes: new Set() };
+  const { source, keepAllAttributes, fromTempEnv } = origin;
   return {
     name,
-    value: cloneValue(inherited.value),
-    attributes: new Set(keepAllAttributes ? inherited.attributes : [...inherited.attributes].filter((a) => a !== 'n')),
+    value: cloneValue(source.value),
+    attributes: new Set(keepAllAttributes ? source.attributes : [...source.attributes].filter((a) => a !== 'n')),
+    ...(fromTempEnv ? { fromTempEnv: true } : {}),
   };
 }
 

@@ -176,18 +176,9 @@ class TestReader {
   private parseGrouped(): boolean {
     this.index++;
     if (this.atEnd) this.fail('argument expected');
-    if (this.peek(1) === ')') {
-      const value = this.take() !== '';
-      this.index++;
-      return value;
-    }
-    if (this.peek(2) === ')' && (this.peek() === '!' || UNARY_FLAGS.has(this.peek() as string))) {
-      const value = this.evaluateTwo();
-      this.index++;
-      return value;
-    }
-    if (this.peek(3) === ')' && BINARY_FLAGS.has(this.peek(1) as string)) {
-      const value = this.applyBinary();
+    const shortLength = this.findShortGroupLength();
+    if (shortLength !== undefined) {
+      const value = this.evaluateSpan(shortLength);
       this.index++;
       return value;
     }
@@ -196,6 +187,30 @@ class TestReader {
     if (this.peek() !== ')') this.fail(`\`)' expected, found ${this.peek()}`);
     this.index++;
     return inner;
+  }
+
+  private findShortGroupLength(): number | undefined {
+    const first = this.peek() as string;
+    const second = this.peek(1);
+    if (second === undefined) return undefined;
+    let depth = first === '(' && second !== ')' && !isThreeTokenGroupOperator(second) ? 2 : 1;
+    for (let offset = 1; offset <= 4 && this.index + offset < this.tokens.length; offset++) {
+      const token = this.tokens[this.index + offset];
+      if (token === '(') {
+        depth++;
+        continue;
+      }
+      if (token !== ')') continue;
+      if (depth === 1 && this.isOperandCloseParen(offset, first, second)) continue;
+      if (--depth === 0) return offset;
+    }
+    return undefined;
+  }
+
+  private isOperandCloseParen(offset: number, first: string, second: string): boolean {
+    if (offset === 1 && (first === '!' || UNARY_FLAGS.has(first)) && this.peek(2) === ')') return true;
+    if (offset === 2 && isThreeTokenGroupOperator(second) && this.peek(3) === ')') return true;
+    return false;
   }
 
   private applyUnary(): boolean {
@@ -226,6 +241,10 @@ class TestReader {
 }
 
 const UTF8_ENCODER = new TextEncoder();
+
+function isThreeTokenGroupOperator(op: string): boolean {
+  return BINARY_FLAGS.has(op) || op === '-a' || op === '-o';
+}
 
 function compareUtf8Bytes(a: string, b: string): number {
   const bytesA = UTF8_ENCODER.encode(a);

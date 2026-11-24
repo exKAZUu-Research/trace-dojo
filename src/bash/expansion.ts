@@ -289,7 +289,11 @@ export class Expander {
     const resolved = shell.resolveNameOrUndefined(name);
     if (resolved === undefined) return { kind: 'scalar', value: undefined };
     const split = shell.splitSubscript(resolved);
-    if (expansion?.braced === false && split && (split.subscript === '@' || split.subscript === '*')) {
+    if (
+      (expansion?.braced === false || expansion?.prefix === '#') &&
+      split &&
+      (split.subscript === '@' || split.subscript === '*')
+    ) {
       const arr = shell.resolveNameOrUndefined(split.name);
       return { kind: 'list', values: arr === undefined ? [] : shell.arrayValues(arr), star: split.subscript === '*' };
     }

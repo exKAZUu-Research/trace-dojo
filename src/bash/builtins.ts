@@ -201,6 +201,7 @@ function unsetName(shell: Shell, name: string, mode: UnsetMode): boolean {
     shell.state.functions.delete(name);
     return true;
   }
+  if (mode === 'n') return unsetNameref(shell, name, split);
   if (split && isIdentifier(split.name)) return unsetElement(shell, split.name, split.subscript);
   if (!isIdentifier(name)) {
     if (mode === 'v') {
@@ -215,10 +216,16 @@ function unsetName(shell: Shell, name: string, mode: UnsetMode): boolean {
   if (!shell.findOwnVariable(name) && mode === 'any' && shell.state.functions.has(name)) {
     return shell.state.functions.delete(name);
   }
-  if (mode === 'n') {
-    return shell.findOwnVariable(name)?.attributes.has('n') ? shell.unsetVariable(name, false) : true;
-  }
   return shell.unsetVariable(name, true);
+}
+
+function unsetNameref(shell: Shell, name: string, split: { name: string; subscript: string } | undefined): boolean {
+  if (split && isIdentifier(split.name) && split.subscript !== '') return true;
+  if (!isIdentifier(name)) {
+    shell.reportError(`unset: \`${name}': not a valid identifier`);
+    return false;
+  }
+  return shell.findOwnVariable(name)?.attributes.has('n') ? shell.unsetVariable(name, false) : true;
 }
 
 /** `unset 'name[subscript]'`, which clears an indexed array for `@` or `*` and expands an associative key. */

@@ -20,6 +20,8 @@ export interface Variable {
   shared?: boolean;
   /** Whether an empty scalar value represents a `null` object binding from a `for` loop over turtles/structures. */
   nullReference?: boolean;
+  /** Whether the cell originated from a command-prefix temporary environment binding. */
+  fromTempEnv?: boolean;
 }
 
 /** A lexical/dynamic variable scope (global scope at index 0, followed by function and temporary scopes). */
@@ -267,6 +269,7 @@ export function removeScopedVariable(
     if (i > 0 && currentFunctionScope === i) {
       variable.value = undefined;
       variable.shared = false;
+      variable.fromTempEnv = false;
       variable.attributes.clear();
     } else scopes[i].delete(target);
     return i > 0 ? 'local' : 'global';
@@ -531,16 +534,21 @@ export function translateNegativeIndex(
   dynamicLength?: number,
   allowScalarWrite = false
 ): bigint | undefined {
-  const length =
-    variable?.value?.kind === 'indexed'
-      ? maxElementIndex(variable.value.elements) + 1n
-      : dynamicLength !== undefined
-        ? BigInt(dynamicLength)
-        : allowScalarWrite && variable?.value?.kind === 'scalar'
-          ? 1n
-          : 0n;
+  let length = 0n;
+  if (variable?.value?.kind === 'indexed') length = maxElementIndex(variable.value.elements) + 1n;
+  else if (dynamicLength !== undefined) length = BigInt(dynamicLength);
+  else if (allowScalarWrite && isDeclaredScalarVariable(variable)) length = 1n;
   const resolved = length + index;
   return resolved < 0n ? undefined : resolved;
+}
+
+function isDeclaredScalarVariable(variable: Variable | undefined): boolean {
+  return (
+    variable !== undefined &&
+    !variable.attributes.has('a') &&
+    !variable.attributes.has('A') &&
+    variable.value?.kind !== 'associative'
+  );
 }
 
 /** Lists all element values of a non-empty `VariableValue`. */

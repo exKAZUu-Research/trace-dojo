@@ -6,7 +6,7 @@ import {
   ArithmeticStoreError,
   type ArithmeticTarget,
   evaluateArithmetic,
-  skipSubscript,
+  splitSubscriptText,
   type WriteTargetResult,
 } from './arithmetic';
 import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word } from './ast';
@@ -647,6 +647,7 @@ export class Shell implements ArithmeticHost {
         name: assignment.name,
         value: { kind: 'scalar', value: combined },
         attributes: new Set(['x']),
+        fromTempEnv: true,
       });
     }
     return true;
@@ -1002,7 +1003,8 @@ export class Shell implements ArithmeticHost {
     if (arr === undefined) return undefined;
     if (split.subscript === '@' || split.subscript === '*') {
       const values = this.arrayValues(arr);
-      return values.length === 0 ? undefined : values.join(split.subscript === '*' ? this.expander.ifsJoiner() : ' ');
+      const sep = split.subscript === '*' ? this.expander.ifsJoiner() : this.expander.ifsJoiner() || ' ';
+      return values.length === 0 ? undefined : values.join(sep);
     }
     const sub = this.expandDynamicSubscript(split.subscript);
     if (this.isAssociative(arr)) {
@@ -1292,7 +1294,8 @@ export class Shell implements ArithmeticHost {
       this.reportError(`${reportedName}[]: bad array subscript`);
       return false;
     }
-    const index = evaluated ? BigInt(subscript) : this.arrayIndexFor(variable, subscript, undefined, true);
+    const declared = this.state.scopes.some((scope) => scope.get(variable.name) === variable) ? variable : undefined;
+    const index = evaluated ? BigInt(subscript) : this.arrayIndexFor(declared, subscript, undefined, true);
     if (index === undefined) {
       this.reportError(`${reportedName}[${subscript}]: bad array subscript`);
       return false;
@@ -1483,10 +1486,6 @@ export class Shell implements ArithmeticHost {
 
   /** Evaluates a subscript of a name like `a[i+1]`, as `printf -v` and `unset` read one. */
   splitSubscript(text: string): { name: string; subscript: string } | undefined {
-    const open = text.indexOf('[');
-    if (open === -1) return undefined;
-    const close = skipSubscript(text, open);
-    if (close !== text.length - 1) return undefined;
-    return { name: text.slice(0, open), subscript: text.slice(open + 1, close) };
+    return splitSubscriptText(text);
   }
 }

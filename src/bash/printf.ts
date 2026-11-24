@@ -266,24 +266,16 @@ class Printf {
   private formatWideChar(spec: Specification): void {
     const arg = this.takeArgument();
     if (arg === undefined || arg === '') {
-      this.push(padPrintfBytes([0], spec));
+      this.push(padPrintfBytes([0], spec, false));
       return;
     }
     const [ch] = charactersOf(arg);
-    this.push(padWideCharacters([ch], spec, true));
+    this.push(padWideCharacters([ch], spec));
   }
 
   private formatWideString(spec: Specification): void {
-    const raw = this.takeArgument() ?? '';
-    if (spec.flags.includes('#')) {
-      const { out, stop } = expandB(raw, this.host);
-      const chars = charactersOf(decodeBytes(out));
-      this.push(padWideCharacters(spec.precision === undefined ? chars : chars.slice(0, spec.precision), spec, false));
-      if (stop) throw new StopOutput();
-      return;
-    }
-    const chars = charactersOf(raw);
-    this.push(padWideCharacters(spec.precision === undefined ? chars : chars.slice(0, spec.precision), spec, true));
+    const chars = charactersOf(this.takeArgument() ?? '');
+    this.push(padWideCharacters(spec.precision === undefined ? chars : chars.slice(0, spec.precision), spec));
   }
 
   /** `%q` and `%Q`, the latter applying the precision to the argument before quoting it. */
@@ -312,9 +304,8 @@ function checkFieldSize(width: number | undefined, precision: number | undefined
   }
 }
 
-function padWideCharacters(chars: string[], spec: Specification, allowZeroPad: boolean): number[] {
-  const padCount = Math.max(0, (spec.width ?? 0) - chars.length);
-  const pad = (allowZeroPad && spec.flags.includes('0') && !spec.flags.includes('-') ? '0' : ' ').repeat(padCount);
+function padWideCharacters(chars: string[], spec: Specification): number[] {
+  const pad = ' '.repeat(Math.max(0, (spec.width ?? 0) - chars.length));
   const body = chars.join('');
   return encodeText(spec.flags.includes('-') ? body + pad : pad + body);
 }
