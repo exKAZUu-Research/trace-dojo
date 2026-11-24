@@ -63,6 +63,7 @@ import type {
   Module,
   Name,
   Operator,
+  OverlapMode,
   Pat,
   QName,
   Rhs,
@@ -158,6 +159,7 @@ export interface RInstanceDecl {
   type: RType;
   context: RConstraint[];
   bindings: RBinding[];
+  overlap?: OverlapMode;
   span: Span;
 }
 
@@ -987,7 +989,7 @@ class Renamer {
       if (method.unsupported) throw unsupportedError(name.span, method.unsupported);
       bindings.push(this.renameFunBinding(binding, { kind: 'global', entity: method }, new LocalScope()));
     }
-    this.instances.push({ cls, type, context, bindings, span: decl.span });
+    this.instances.push({ cls, type, context, bindings, overlap: decl.overlap, span: decl.span });
   }
 
   private renameFamilies(decls: Decl[]): Pick<RModule, 'typeFamilies' | 'typeInstances'> {

@@ -40,19 +40,34 @@ export class ClassEnv {
    */
   findInstance(pred: Pred): { instance: InstanceInfo; args: Type[] } | 'none' | 'pending' | 'overlap' {
     let pending = false;
-    let matched: { instance: InstanceInfo; args: Type[] } | undefined;
+    const matches: { instance: InstanceInfo; args: Type[] }[] = [];
     const head = splitApp(pred.type).head;
     const instances = head.tag === 'tcon' ? this.instancesForHead(pred.cls, head.entity) : this.instancesOf(pred.cls);
     for (const instance of instances) {
       const bindings: (Type | undefined)[] = [];
       if (matchType(instance.head, pred.type, bindings)) {
-        if (matched) return typeVarsOf(pred.type).size > 0 ? 'pending' : 'overlap';
-        matched = { instance, args: instance.kinds.map((_, index) => bindings[index] as Type) };
+        matches.push({ instance, args: instance.kinds.map((_, index) => bindings[index] as Type) });
         continue;
       }
-      if (couldMatch(instance.head, pred.type)) pending = true;
+      // An instance that could match once the type is known decides nothing yet, unless it is incoherent.
+      if (instance.overlap !== 'INCOHERENT' && couldMatch(instance.head, pred.type)) pending = true;
     }
-    return pending ? 'pending' : (matched ?? 'none');
+    // As GHC does, an instance gives way to a more specific one when either pragma allows it.
+    const remaining = matches.filter(
+      (candidate) =>
+        !matches.some(
+          (other) =>
+            other !== candidate &&
+            moreSpecific(other.instance, candidate.instance) &&
+            (overlappable(candidate.instance) || overlapping(other.instance))
+        )
+    );
+    const coherent = remaining.filter((candidate) => candidate.instance.overlap !== 'INCOHERENT');
+    const chosen = coherent.length > 0 ? coherent : remaining.slice(0, 1);
+    if (chosen.length > 1) return typeVarsOf(pred.type).size > 0 ? 'pending' : 'overlap';
+    // Only incoherent instances match: GHC takes one without waiting for the instances that might match later.
+    if (coherent.length === 0 && chosen.length === 1) return chosen[0];
+    return pending ? 'pending' : (chosen[0] ?? 'none');
   }
 
   private instancesForHead(cls: ClassEntity, head: TypeEntity): InstanceInfo[] {
@@ -71,6 +86,19 @@ export class ClassEnv {
     }
     return candidates;
   }
+}
+
+/** Whether an instance's head is an instance of another's, but not the other way round. */
+function moreSpecific(a: InstanceInfo, b: InstanceInfo): boolean {
+  return matchType(b.head, a.head, []) && !matchType(a.head, b.head, []);
+}
+
+function overlappable(instance: InstanceInfo): boolean {
+  return instance.overlap === 'OVERLAPPABLE' || instance.overlap === 'OVERLAPS' || instance.overlap === 'INCOHERENT';
+}
+
+function overlapping(instance: InstanceInfo): boolean {
+  return instance.overlap === 'OVERLAPPING' || instance.overlap === 'OVERLAPS' || instance.overlap === 'INCOHERENT';
 }
 
 /** Whether a constraint's type has a type constructor at its head, so that only an instance can solve it. */

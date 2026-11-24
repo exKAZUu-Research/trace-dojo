@@ -933,7 +933,6 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       ['Any', 'all'],
       ['Sum', 'all'],
       ['Product', 'all'],
-      ['NonEmpty', 'all'],
     ],
     values: [
       'getMin',

@@ -1,6 +1,7 @@
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import { convertModule } from './convert';
+import { preprocess } from './cpp';
 import { validateDialect } from './dialect';
 import { Extensions, readExtensions } from './extensions';
 import type { Module } from './syntax';
@@ -41,7 +42,8 @@ export function parseHaskell(source: string, defaultName = 'Main', library = fal
     ? new Extensions(['TypeFamilies', 'DataKinds', 'RoleAnnotations'])
     : readExtensions(source);
   const extended = LEXICAL_EXTENSIONS.some((name) => extensions.has(name));
-  return parseSource(extended ? extendedParser : parser, source, MISSING_TOKEN_NAMES, (root) => {
+  const text = !library && extensions.has('CPP') ? preprocess(source) : source;
+  return parseSource(extended ? extendedParser : parser, text, MISSING_TOKEN_NAMES, (root) => {
     if (!library) validateDialect(root, extensions);
     return convertModule(root, extensions, defaultName);
   });

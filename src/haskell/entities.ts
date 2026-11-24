@@ -201,6 +201,8 @@ export interface InstanceInfo {
   /** The evidence for each superclass of the class at the instance's type, in terms of the context's dictionaries. */
   supers: Evidence[];
   contextParams: DictParam[];
+  /** How the instance may overlap others, as `{-# OVERLAPPING #-}` and the like say. */
+  overlap?: 'OVERLAPPING' | 'OVERLAPPABLE' | 'OVERLAPS' | 'INCOHERENT';
   module: string;
   span?: Span;
 }

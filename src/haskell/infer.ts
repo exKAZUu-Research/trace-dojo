@@ -351,7 +351,13 @@ export class Checker {
       }
       if (pred.cls.fundeps?.length) this.improveByFundeps(pred, hole.span, givens);
       const unsolvable = pred.cls.packed && typeVarsOf(pred.type).size > 0 && this.env.findInstance(pred) === 'none';
-      if (hasConstructorHead(pred.type) && !unsolvable) {
+      // An instance for any type, `instance C a`, solves a constraint on a rigid type too.
+      const rigidHead = splitApp(pred.type).head;
+      const anyType =
+        rigidHead.tag === 'tvar' &&
+        rigidHead.skolem === true &&
+        this.env.instancesOf(pred.cls).some((instance) => splitApp(instance.head).head.tag === 'tgen');
+      if ((hasConstructorHead(pred.type) || anyType) && !unsolvable) {
         const found = this.instanceFor(hole);
         if (found !== 'pending') {
           const { instance, args } = found;

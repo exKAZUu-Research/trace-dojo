@@ -200,7 +200,6 @@ export function readExtensions(source: string): Extensions {
  * mean without syntax of their own to reject, so enabling them is rejected.
  */
 const UNSUPPORTED_EXTENSIONS: Record<string, string> = {
-  CPP: 'C プリプロセッサ（CPP）',
   RebindableSyntax: '構文の読み替え（RebindableSyntax）',
   ParallelArrays: '並列配列（ParallelArrays）',
   Arrows: 'アロー記法（Arrows）',

@@ -24,6 +24,7 @@ import type {
   Multiplicity,
   Name,
   Operator,
+  OverlapMode,
   Pat,
   QName,
   Rhs,
@@ -44,8 +45,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   unboxed_unit: 'ボックス化されないタプル',
   prefix_unboxed_sum: 'ボックス化されない和型',
   prefix_unboxed_tuple: 'ボックス化されないタプル',
-  special: '特別な構成子の宣言',
-  pragma: 'プラグマ（{-# ... #-}）',
   cpp: 'C プリプロセッサの指令',
   calling_convention: '外部の関数の宣言（foreign）',
   entity: '外部の関数の宣言（foreign）',
@@ -207,7 +206,10 @@ function checkPragma(pragma: Node): void {
   const keyword = match[1].toUpperCase();
   if (keyword === 'LANGUAGE' || keyword.startsWith('OPTIONS') || keyword === 'INCLUDE') return;
   if (['OVERLAPPING', 'OVERLAPPABLE', 'OVERLAPS', 'INCOHERENT'].includes(keyword)) {
-    throw unsupportedError(spanOf(pragma), `重なるインスタンス（${keyword}）`);
+    if (pragma.parent?.type !== 'instance') {
+      throw syntaxError(spanOf(pragma), `${keyword} プラグマは、instance の直後に書いてください。`);
+    }
+    return;
   }
   if (!ADVISORY_PRAGMAS.has(keyword)) return;
   if (BINDING_PRAGMAS.has(keyword)) {
@@ -222,8 +224,9 @@ function checkPragma(pragma: Node): void {
 function bindsNearby(pragma: Node, name: string): boolean {
   let scope = pragma.parent;
   if (scope?.type === 'imports' || scope?.type === 'header') scope = scope.parent;
-  if (scope?.type === 'haskell') scope = field(scope, 'declarations') ?? scope;
-  else if (scope?.type === 'where_clause' || scope?.type === 'let' || scope?.type === 'let_in') {
+  if (scope?.type === 'haskell' || scope?.type === 'instance' || scope?.type === 'class') {
+    scope = field(scope, 'declarations') ?? scope;
+  } else if (scope?.type === 'where_clause' || scope?.type === 'let' || scope?.type === 'let_in') {
     scope = field(scope, 'binds') ?? scope;
   }
   if (!scope) return false;
@@ -394,6 +397,8 @@ function convertOperator(node: Node): Operator {
 // Declarations
 
 function convertTopDecl(node: Node): Decl[] {
+  // Pragmas among declarations only guide the compiler, which checkPragmas has checked.
+  if (node.type === 'pragma') return [];
   rejectUnsupported(node);
   switch (node.type) {
     case 'data_type': {
@@ -456,6 +461,7 @@ function convertTopDecl(node: Node): Decl[] {
 
 /** Converts a declaration that may appear in a `let`, a `where`, a class, an instance, or at the top level. */
 function convertDecl(node: Node): Decl[] {
+  if (node.type === 'pragma') return [];
   rejectUnsupported(node);
   switch (node.type) {
     case 'signature': {
@@ -1161,6 +1167,13 @@ function convertGadtConstructor(node: Node): ConDecl[] {
 function convertConstructorBody(node: Node): ConDecl {
   const inner = required(node, 'constructor');
   rejectUnsupported(inner);
+  if (inner.type === 'special') {
+    // Only GHC's own modules declare `()`, `[]`, and tuples; a program cannot bind those names again.
+    throw syntaxError(
+      spanOf(inner),
+      `既にある名前 ${inner.text.replaceAll(/[^(),[\]#]/g, '')} は、構成子として宣言できません。`
+    );
+  }
   switch (inner.type) {
     case 'prefix': {
       return convertPrefixConstructor(inner);
@@ -1360,12 +1373,19 @@ function convertInstance(node: Node): Decl {
         return convertDecl(child);
       })
     : [];
+  const overlap = namedChildren(node)
+    .filter((child) => child.type === 'pragma')
+    .map((child) => /^\{-#\s*([A-Za-z]+)/.exec(child.text)?.[1].toUpperCase())
+    .find((keyword): keyword is OverlapMode =>
+      ['OVERLAPPING', 'OVERLAPPABLE', 'OVERLAPS', 'INCOHERENT'].includes(keyword ?? '')
+    );
   return {
     kind: 'instance',
     context: contextNode ? convertContext(contextNode) : [],
     cls: qualifiedName(nameNode).name,
     types: types.map(convertType),
     decls,
+    ...(overlap ? { overlap } : {}),
     // GHC reports an instance at its head, from the context to the type.
     span: {
       ...spanOf(contextNode?.firstChild ?? nameNode),

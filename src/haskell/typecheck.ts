@@ -195,11 +195,9 @@ function declareInstance(
   const head = checker.convertType(decl.type, vars, varKinds, checker.classKind(decl.cls, decl.span));
   const rep = via && checker.convertType(via, vars, varKinds, checker.classKind(decl.cls, decl.span));
   const context = checker.convertConstraints(decl.context, vars, varKinds);
-  if (splitApp(head).head.tag !== 'tcon') {
-    throw unsupportedError(decl.span, '型変数だけを型に書いたインスタンス');
-  }
   checker.checkKinds();
   const info = makeInstance(decl.cls, kinds.map(defaultKind), head, context, moduleName, decl.span);
+  if (decl.overlap) info.overlap = decl.overlap;
   if (!undecidable) validateInstanceTermination(info, decl.span);
   registerInstance(checker, info, decl.span);
   return { declared: { info, typeNames: names, bindings: decl.bindings, span: decl.span, rep }, vars, varKinds };
