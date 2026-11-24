@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss -- The nativesLinq module keeps one stage of the C# interpreter together.
 import { CsDecimal } from '../decimal';
+import type { Evaluator } from '../evaluator';
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { arithmetic, decimalArithmetic, PendingException } from '../numeric';
 import { environmentOf, runtimeTypeName } from '../objects';
@@ -224,6 +225,12 @@ function collectionContains(call: NativeCall, items: Value): ((value: Value) => 
       undefined,
       environmentOf(evaluator, implementation, items)
     ) as boolean;
+}
+
+/** An element of a sequence as `object` sees it: a value-type value in a box of its type, other values as they are. */
+function boxedElement(evaluator: Evaluator, item: Value, elementType: Type | undefined): Value {
+  if (item instanceof CsStruct) return evaluator.box(item, item.type);
+  return elementType ? evaluator.box(item, elementType) : item;
 }
 
 function isEmptyArray(value: Value): boolean {
@@ -847,10 +854,8 @@ const linq: Record<string, NativeMethod> = {
       : `System.Linq.Enumerable+<CastIterator>d__36\`1[${runtimeTypeName(target)}]`;
     return query(call, target, name, [items as Value], function* () {
       for (const item of all) {
-        const boxed =
-          elementType && typeof item !== 'object' && typeof item !== 'string' ? new CsBox(elementType, item) : item;
         yield evaluator.convertValue(
-          boxed,
+          boxedElement(evaluator, item, elementType),
           target.kind === 'named' && target.symbol.isValueType ? 'unboxing' : 'referenceCheck',
           libraryType(call, 'System.Object'),
           target
@@ -866,10 +871,14 @@ const linq: Record<string, NativeMethod> = {
     const isValueType = target.kind === 'named' && target.symbol.isValueType && !nullableUnderlying(target);
     if (isValueType && isEnumerableOf(call, items as Value, target)) return items as Value;
     const isValueTypeOrNullable = target.kind === 'named' && target.symbol.isValueType;
+    // The elements of a collection of a value type come unboxed, which OfType tests and yields in their boxes.
+    const elementType = elementTypeOf(items as Value);
     return query(call, target, iteratorName('OfTypeIterator', [target]), [items as Value], function* () {
-      for (const item of all)
-        if (item !== undefined && evaluator.isInstanceOf(item, target))
-          yield item instanceof CsBox && isValueTypeOrNullable ? copyValue(item.value) : item;
+      for (const item of all) {
+        const boxed = boxedElement(evaluator, item, elementType);
+        if (boxed !== undefined && evaluator.isInstanceOf(boxed, target))
+          yield boxed instanceof CsBox && isValueTypeOrNullable ? copyValue(boxed.value) : boxed;
+      }
     });
   },
   [`${ENUMERABLE}.Chunk`]: (call, _receiver, [items, size]) => {
