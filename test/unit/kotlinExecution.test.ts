@@ -6317,6 +6317,28 @@ fun main() {
   });
 });
 
+test('keeps what writers write until they flush or close, and loses what an unclosed writer holds', () => {
+  const source = `import java.io.File
+fun main() {
+    val printed = File("printed.txt")
+    val writer = printed.printWriter()
+    writer.println("x")
+    println(printed.readText().length)
+    writer.close()
+    writer.println("after close")
+    val buffered = File("buffered.txt").bufferedWriter()
+    buffered.write("hello")
+    buffered.close()
+    try { buffered.write("!") } catch (e: java.io.IOException) { println(e.message) }
+    File("lost.txt").bufferedWriter().write("never flushed")
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '0\nStream closed\n',
+    finalFiles: { 'printed.txt': 'x\n', 'buffered.txt': 'hello', 'lost.txt': '' },
+  });
+});
+
 test.each([
   ['a local function', 'fun main() {\n  fun local(x: Int) = x + 100; println(local(1))\n}', false],
   ['an anonymous function', 'fun main() {\n  val f = fun(x: Int) = x + 1; println(f(1))\n}', false],

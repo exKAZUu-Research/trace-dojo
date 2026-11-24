@@ -2,6 +2,7 @@ import { type FileHandle, FileSystemError, type TextReader } from '../../interpr
 import { stringHash, stringOf } from '../format';
 import { type Frame, ProgramExit } from '../runtime';
 import { KObject, NULL, type Value } from '../values';
+import { BufferedFileWriter } from './fileWriters';
 import { defineNative, defineNativeProperty, libraryClass, newItems, throwError } from './registry';
 
 // The host's clocks, as the Java interpreter's System gives them.
@@ -206,7 +207,7 @@ function openWriter(frame: Frame, file: Value, className: string): KObject {
     return rethrown(frame, path, error);
   }
   const value = new KObject(libraryClass(className), 0);
-  value.native = { handle };
+  value.native = { writer: new BufferedFileWriter(handle) };
   return value;
 }
 
@@ -219,8 +220,20 @@ function readerOf(value: Value): TextReader {
   return (value as KObject).native?.reader as TextReader;
 }
 
-function handleOf(value: Value): FileHandle {
-  return (value as KObject).native?.handle as FileHandle;
+function writerOf(value: Value): BufferedFileWriter {
+  return (value as KObject).native?.writer as BufferedFileWriter;
+}
+
+/** The writer of a `BufferedWriter`, which throws once it is closed, as Java's does. */
+function openWriterOf(frame: Frame, value: Value): BufferedFileWriter {
+  const writer = writerOf(value);
+  return writer.isClosed ? throwError(frame, 'java.io.IOException', 'Stream closed') : writer;
+}
+
+/** Runs a `PrintWriter`'s operation, which does nothing once it is closed: it records errors instead of throwing. */
+function printing(frame: Frame, value: Value, run: (writer: BufferedFileWriter) => void): void {
+  const writer = writerOf(value);
+  if (!writer.isClosed) run(writer);
 }
 
 defineNative('java.io.BufferedReader.readLine()', (_frame, receiver) => readerOf(receiver).readLine() ?? NULL);
@@ -230,22 +243,33 @@ defineNative('java.io.BufferedReader.read()', (_frame, receiver) => {
 });
 defineNative('java.io.BufferedReader.ready()', (_frame, receiver) => !readerOf(receiver).isAtEnd);
 defineNative('java.io.BufferedReader.close()', () => {});
-defineNative('java.io.BufferedWriter.write(String)', (_frame, receiver, [text]) => {
-  handleOf(receiver).write(text as string);
+defineNative('java.io.BufferedWriter.write(String)', (frame, receiver, [text]) => {
+  openWriterOf(frame, receiver).write(frame, text as string);
 });
-defineNative('java.io.BufferedWriter.newLine()', (_frame, receiver) => {
-  handleOf(receiver).write('\n');
+defineNative('java.io.BufferedWriter.newLine()', (frame, receiver) => {
+  openWriterOf(frame, receiver).write(frame, '\n');
 });
-defineNative('java.io.BufferedWriter.flush()', () => {});
-defineNative('java.io.BufferedWriter.close()', () => {});
+defineNative('java.io.BufferedWriter.flush()', (frame, receiver) => {
+  openWriterOf(frame, receiver).flush(frame);
+});
+defineNative('java.io.BufferedWriter.close()', (frame, receiver) => {
+  writerOf(receiver).close(frame);
+});
 defineNative('java.io.PrintWriter.print(Any?)', (frame, receiver, [value]) => {
-  handleOf(receiver).write(stringOf(frame, value));
+  printing(frame, receiver, (writer) => writer.write(frame, stringOf(frame, value)));
 });
 defineNative('java.io.PrintWriter.println(Any?)', (frame, receiver, [value]) => {
-  handleOf(receiver).write(`${stringOf(frame, value)}\n`);
+  printing(frame, receiver, (writer) => {
+    writer.write(frame, stringOf(frame, value));
+    writer.write(frame, '\n');
+  });
 });
-defineNative('java.io.PrintWriter.println()', (_frame, receiver) => {
-  handleOf(receiver).write('\n');
+defineNative('java.io.PrintWriter.println()', (frame, receiver) => {
+  printing(frame, receiver, (writer) => writer.write(frame, '\n'));
 });
-defineNative('java.io.PrintWriter.flush()', () => {});
-defineNative('java.io.PrintWriter.close()', () => {});
+defineNative('java.io.PrintWriter.flush()', (frame, receiver) => {
+  printing(frame, receiver, (writer) => writer.flush(frame));
+});
+defineNative('java.io.PrintWriter.close()', (frame, receiver) => {
+  writerOf(receiver).close(frame);
+});
