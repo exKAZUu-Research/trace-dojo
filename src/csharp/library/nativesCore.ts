@@ -1447,7 +1447,7 @@ for (const arity of [2, 3]) {
     return `(${values.map((value, index) => textOf(call, value, type.args[index])).join(', ')})`;
   };
   tupleNatives[`${name}.Equals`] = (call, receiver, [other]) => {
-    if (!(other instanceof CsObject) || other.type.symbol !== (receiver as CsObject).type.symbol) return false;
+    if (!(other instanceof CsObject) || !sameType(other.type, (receiver as CsObject).type)) return false;
     const a = (receiver as CsObject).native as Value[];
     const b = other.native as Value[];
     return a.every((value, index) => valuesEqual(evaluatorOf(call), value, b[index], call.frame));
