@@ -1520,14 +1520,18 @@ defineNatives({
     ((receiver as CsObject).native as LibraryEnumerator).next(),
   'System.Linq.Internal.Enumerator`1.get_Current': (call, receiver) =>
     ((receiver as CsObject).native as LibraryEnumerator).currentValue(call),
-  'System.Linq.Internal.Enumerator`1.Reset': () =>
-    fail('System.NotSupportedException', 'Specified method is not supported.'),
+  'System.Linq.Internal.Enumerator`1.Reset': (_call, receiver) => {
+    ((receiver as CsObject).native as LibraryEnumerator).reset();
+    return;
+  },
   'System.Linq.Internal.Enumerator`1.Dispose': () => {},
   'System.Linq.Internal.Grouping`2.get_Key': (_call, receiver) => ((receiver as CsObject).native as GroupingState).key,
   'System.Linq.Internal.Grouping`2.GetEnumerator': (call, receiver) => {
     const state = (receiver as CsObject).native as GroupingState;
     const enumerator = new CsObject(libraryType(call, 'System.Linq.Internal.Enumerator', [state.elementType]), []);
-    enumerator.native = new LibraryEnumerator(state.elements[Symbol.iterator](), [receiver]);
+    // A grouping's elements are a list, whose enumerator .NET can reset, unlike a query's or a lookup's.
+    const enumerate = (): Iterator<Value> => state.elements[Symbol.iterator]();
+    enumerator.native = new LibraryEnumerator(enumerate(), [receiver], enumerate);
     return enumerator;
   },
   'System.Linq.Internal.Lookup`2.get_Count': (_call, receiver) =>

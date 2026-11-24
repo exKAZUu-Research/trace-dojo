@@ -1601,7 +1601,8 @@ defineNatives({
   },
   [`${READ_ONLY}.GetEnumerator`]: (call, receiver) => {
     const enumerator = new CsObject(libraryType(call, 'System.Linq.Internal.Enumerator', [typeArgument(call)]), []);
-    enumerator.native = new LibraryEnumerator(listOf(receiver).enumerate(), [receiver]);
+    const enumerate = (): Iterator<Value> => listOf(receiver).enumerate();
+    enumerator.native = new LibraryEnumerator(enumerate(), [receiver], enumerate);
     return enumerator;
   },
 });

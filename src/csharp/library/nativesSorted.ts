@@ -29,9 +29,9 @@ function setNative(receiver: Value, state: unknown): Value {
   return undefined;
 }
 
-function enumeratorOf(call: NativeCall, elementType: Type, source: Iterable<Value>, holds: Value[]): CsObject {
+function enumeratorOf(call: NativeCall, elementType: Type, enumerate: () => Iterator<Value>, holds: Value[]): CsObject {
   const enumerator = new CsObject(libraryType(call, 'System.Linq.Internal.Enumerator', [elementType]), []);
-  enumerator.native = new LibraryEnumerator(source[Symbol.iterator](), holds);
+  enumerator.native = new LibraryEnumerator(enumerate(), holds, enumerate);
   return enumerator;
 }
 
@@ -248,7 +248,7 @@ function sortedDictionaryNatives(prefix: string): Record<string, NativeMethod> {
       return enumeratorOf(
         call,
         libraryType(call, 'System.Collections.Generic.KeyValuePair', [state.keyType, state.valueType as Type]),
-        state.enumerate(),
+        () => state.enumerate(),
         [receiver]
       );
     },
@@ -330,7 +330,7 @@ defineNatives({
     return;
   },
   [`${SORTED_SET}.GetEnumerator`]: (call, receiver) =>
-    enumeratorOf(call, sortedOf(receiver).keyType, sortedOf(receiver).enumerate(), [receiver]),
+    enumeratorOf(call, sortedOf(receiver).keyType, () => sortedOf(receiver).enumerate(), [receiver]),
   [`${SORTED_SET}.GetViewBetween`]: (call, receiver, [lower, upper]) => {
     const state = sortedOf(receiver);
     if (state.compare(lower as Value, upper as Value) > 0)
@@ -583,7 +583,7 @@ defineNatives({
   [`${LINKED}.Find`]: (call, receiver, [value]) => findNode(call, linkedOf(receiver), value as Value, false)?.object,
   [`${LINKED}.FindLast`]: (call, receiver, [value]) => findNode(call, linkedOf(receiver), value as Value, true)?.object,
   [`${LINKED}.GetEnumerator`]: (call, receiver) =>
-    enumeratorOf(call, typeArgument(call), linkedOf(receiver).enumerate(), [receiver]),
+    enumeratorOf(call, typeArgument(call), () => linkedOf(receiver).enumerate(), [receiver]),
   [`${LINKED}.Remove(T)`]: (call, receiver, [value]) => {
     const state = linkedOf(receiver);
     const node = findNode(call, state, value as Value, false);

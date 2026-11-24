@@ -965,6 +965,7 @@ function enumeratorOf(call: NativeCall, elementName: string, collection: Value):
     libraryType(call, 'System.Linq.Internal.Enumerator', [libraryType(call, elementName)]),
     []
   );
-  enumerator.native = new LibraryEnumerator(listOf(collection)[Symbol.iterator](), [collection]);
+  const enumerate = (): Iterator<Value> => listOf(collection)[Symbol.iterator]();
+  enumerator.native = new LibraryEnumerator(enumerate(), [collection], enumerate);
   return enumerator;
 }

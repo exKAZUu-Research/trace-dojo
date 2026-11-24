@@ -31,7 +31,6 @@ import {
   refOf,
   storeArrayElement,
   storeInArray,
-  typeArgument,
 } from './support';
 
 const ARRAY = 'System.Array';
@@ -161,7 +160,7 @@ defineNatives({
       for (const value of array.values)
         yield isValueType && value !== undefined ? new CsBox(element, copyValue(value)) : value;
     };
-    enumerator.native = new LibraryEnumerator(boxed(), [receiver]);
+    enumerator.native = new LibraryEnumerator(boxed(), [receiver], boxed);
     return enumerator;
   },
   [`${ARRAY}.BinarySearch(T[], T)`]: (call, _receiver, [array, value]) =>
@@ -475,8 +474,10 @@ defineNatives({
     return;
   },
   [`${ARRAY_HELPER}.GetEnumerator`]: (call, receiver) => {
-    const enumerator = new CsObject(libraryType(call, 'System.Linq.Internal.Enumerator', [typeArgument(call)]), []);
-    enumerator.native = new LibraryEnumerator((receiver as CsArray).values[Symbol.iterator](), [receiver]);
+    // The array's own element type, since an interface call through the helper carries no type arguments.
+    const { type, values } = receiver as CsArray;
+    const enumerator = new CsObject(libraryType(call, 'System.Linq.Internal.Enumerator', [type.element]), []);
+    enumerator.native = new LibraryEnumerator(values[Symbol.iterator](), [receiver], () => values[Symbol.iterator]());
     return enumerator;
   },
 });
