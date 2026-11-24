@@ -20,19 +20,22 @@ interface Applied {
 /**
  * Solves `Coercible a b` by how values of the two types are represented: the same types, a given constraint, a
  * newtype and its field, or applications of the same type whose arguments convert as the type's roles allow. Types
- * not yet known leave the constraint for later, which `undefined` stands for.
+ * not yet known leave the constraint for later, which `undefined` stands for; `defaulting`, once nothing else can
+ * decide them, makes an unknown type the other side's when that is no newtype, as GHC's defaulting does.
  */
 export function solveCoercible(
   checker: CoercionChecker,
   pred: Pred,
   givens: readonly { pred: Pred; evidence: Evidence }[],
-  span: Span
+  span: Span,
+  defaulting = false
 ): Evidence | undefined {
   const [from, to] = splitApp(pred.type).args;
   const solver = new CoercionSolver(
     checker,
     givens.filter((given) => given.pred.cls === COERCIBLE_CLASS),
-    span
+    span,
+    defaulting
   );
   const spec = solver.solve(from, to, 0);
   return spec === 'stuck' ? undefined : { kind: 'coercion', spec, leaves: solver.leaves };
@@ -44,7 +47,8 @@ class CoercionSolver {
   constructor(
     private readonly checker: CoercionChecker,
     private readonly givens: readonly { pred: Pred; evidence: Evidence }[],
-    private readonly span: Span
+    private readonly span: Span,
+    private readonly defaulting: boolean
   ) {}
 
   solve(a: Type, b: Type, depth: number): CoercionSpec | 'stuck' {
@@ -56,12 +60,12 @@ class CoercionSolver {
     if (given) return given;
     const l = splitApp(left);
     const r = splitApp(right);
-    // An unknown type stands for the other one when that is no newtype, which no other type is represented as.
-    if ((flexible(left) && isPlainData(r)) || (flexible(right) && isPlainData(l))) {
+    if (this.defaulting && ((flexible(left) && isPlainData(r)) || (flexible(right) && isPlainData(l)))) {
       this.checker.unify(left, right, this.span, '型の表現（coerce）');
       return { k: 'refl' };
     }
-    if (flexible(l.head) || flexible(r.head)) return 'stuck';
+    if (flexible(l.head) || flexible(r.head))
+      return this.defaulting ? this.unwrapToDefault(left, right, l, r, depth) : 'stuck';
     const decomposed = this.decompose(l, r, depth);
     if (decomposed) return decomposed;
     const fromNewtype = unwrappable(l.head);
@@ -74,6 +78,15 @@ class CoercionSolver {
       this.span,
       `型 ${printer.show(left)} と型 ${printer.show(right)} は表現が同じではないので、coerce できません。`
     );
+  }
+
+  /** In defaulting, a newtype facing an unknown type gives way to its field, which the unknown type may then be. */
+  private unwrapToDefault(left: Type, right: Type, l: Applied, r: Applied, depth: number): CoercionSpec | 'stuck' {
+    const fromNewtype = flexible(r.head) ? unwrappable(l.head) : undefined;
+    if (fromNewtype) return this.nested('unwrap', fromNewtype, this.solve(field(fromNewtype, l), right, depth + 1));
+    const toNewtype = flexible(l.head) ? unwrappable(r.head) : undefined;
+    if (toNewtype) return this.nested('wrap', toNewtype, this.solve(left, field(toNewtype, r), depth + 1));
+    return 'stuck';
   }
 
   /** The conversion a given `Coercible` constraint gives, either way round. */

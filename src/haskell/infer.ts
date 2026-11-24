@@ -486,6 +486,20 @@ export class Checker {
     typeError(hole.span, `${printer.showPred(hole.pred)} のインスタンスがありません（${hole.origin}）。`);
   }
 
+  /**
+   * Solves the `Coercible` constraints whose unknown types nothing visible (the given types) can decide any more,
+   * by GHC's defaulting of an unknown side to the other, giving back the constraints left.
+   */
+  private defaultCoercible(holes: EvidenceHole[], visible: readonly Type[]): EvidenceHole[] {
+    const shown = new Set(visible.flatMap((type) => [...typeVarsOf(zonk(type))]));
+    return holes.filter((hole) => {
+      if (hole.pred.cls !== COERCIBLE_CLASS) return true;
+      if ([...typeVarsOf(zonk(hole.pred.type))].some((variable) => shown.has(variable))) return true;
+      hole.solution = solveCoercible(this, hole.pred, [], hole.span, true);
+      return hole.solution === undefined;
+    });
+  }
+
   makeDictParams(holes: EvidenceHole[]): DictParam[] {
     const distinct: Pred[] = [];
     for (const hole of holes) if (!distinct.some((pred) => predsEqual(pred, hole.pred))) distinct.push(hole.pred);
@@ -505,9 +519,15 @@ export class Checker {
 
   solveTop(): void {
     for (let round = 0; round < 100; round++) {
-      const { retained } = this.simplify(this.wanted, -1);
+      const { retained: unsolved } = this.simplify(this.wanted, -1);
       this.wanted = [];
+      const retained = this.defaultCoercible(unsolved, []);
       if (retained.length === 0) return;
+      // Defaulting a Coercible constraint decides types the other constraints then need solving at.
+      if (retained.length < unsolved.length) {
+        this.wanted = retained;
+        continue;
+      }
       for (const hole of retained) {
         if (prune(hole.pred.type).tag !== 'tvar') this.ambiguous(hole);
       }
@@ -1360,7 +1380,9 @@ export class Checker {
     const inner = this.wanted;
     this.wanted = saved;
     const { retained, deferred } = this.simplify(inner, outer);
-    const kept = this.keepGeneralizable(bindings, monoTypes, retained, deferred, outer);
+    const kept = this.defaultCoercible(this.keepGeneralizable(bindings, monoTypes, retained, deferred, outer), [
+      ...monoTypes.values(),
+    ]);
     const params = this.makeDictParams(kept);
     for (const binding of bindings) this.generalizeBinding(binding, monoTypes.get(binding) as Type, params, outer);
     this.wanted.push(...deferred);
