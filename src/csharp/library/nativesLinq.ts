@@ -5,7 +5,17 @@ import { arithmetic, decimalArithmetic, PendingException } from '../numeric';
 import { runtimeTypeName } from '../objects';
 import type { NativeState } from '../runtime';
 import { type NamedType, nullableUnderlying, specialOf, type SpecialType, type Type } from '../types';
-import { copyValue, CsArray, CsBox, CsObject, CsStruct, isString, stringText, type Value } from '../values';
+import {
+  copyValue,
+  CsArray,
+  CsBox,
+  CsObject,
+  CsStruct,
+  isString,
+  stringText,
+  structFieldSlots,
+  type Value,
+} from '../values';
 import { isEnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { comparisonOf, type Equality, equalityOf, HashState, ListState, newList } from './nativesCollections';
 import { stableSort } from './sort';
@@ -615,8 +625,9 @@ function groupsOf(
       index.set(hash, bucket);
       groups.push(group);
     }
-    call.frame.runtime.allocateSlots(1);
-    group.elements.push(elementOf(item));
+    const element = elementOf(item);
+    call.frame.runtime.allocateSlots(1 + structFieldSlots(element));
+    group.elements.push(element);
   }
   return groups;
 }
@@ -674,7 +685,7 @@ function seenSet(call: NativeCall, equality: Equality): { add(value: Value): boo
     add(value) {
       const bucket = bucketOf(value);
       if (indexIn(bucket, value) >= 0) return false;
-      call.frame.runtime.allocateSlots(1);
+      call.frame.runtime.allocateSlots(1 + structFieldSlots(value));
       bucket.push(value);
       return true;
     },
@@ -845,7 +856,7 @@ const linq: Record<string, NativeMethod> = {
         // Each element is charged as the chunk takes it, so a huge chunk size meets the slot limit while it fills.
         let chunk: Value[] = [];
         for (const item of all) {
-          call.frame.runtime.allocateSlots(1);
+          call.frame.runtime.allocateSlots(1 + structFieldSlots(item));
           chunk.push(item);
           if (chunk.length === size) {
             yield arrayOfBuffer(elementType, chunk);

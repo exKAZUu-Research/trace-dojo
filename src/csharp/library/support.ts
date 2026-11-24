@@ -17,7 +17,16 @@ import {
   type Type,
   type TypeParameterSymbol,
 } from '../types';
-import { copyValue, CsArray, CsBox, CsObject, plainString, type Value, type VariableReference } from '../values';
+import {
+  copyValue,
+  CsArray,
+  CsBox,
+  CsObject,
+  plainString,
+  structFieldSlots,
+  type Value,
+  type VariableReference,
+} from '../values';
 
 /** The evaluator that runs the call. */
 export function evaluatorOf(call: NativeCall): Evaluator {
@@ -233,11 +242,16 @@ function valueElement(evaluator: Evaluator, item: Value, sourceElement: Type | u
  */
 export function bufferedElements(call: NativeCall, items: Iterable<Value>): Value[] {
   const buffer: Value[] = [];
+  let pending = 0;
   for (const item of items) {
     buffer.push(item);
-    if (buffer.length % 64 === 0) call.frame.runtime.allocateSlots(64);
+    pending += 1 + structFieldSlots(item);
+    if (pending >= 64) {
+      call.frame.runtime.allocateSlots(pending);
+      pending = 0;
+    }
   }
-  call.frame.runtime.allocateSlots(buffer.length % 64);
+  call.frame.runtime.allocateSlots(pending);
   return buffer;
 }
 
@@ -263,9 +277,20 @@ export function newArrayOf(
   valueAt: (index: number) => Value
 ): CsArray {
   call.frame.runtime.allocateSlots(length);
-  const values: Value[] = [];
-  for (let index = 0; index < length; index++) values.push(copyValue(valueAt(index)));
-  return new CsArray({ kind: 'array', element, rank: 1 }, [length], values);
+  const sources = Array.from({ length }, (_, index) => valueAt(index));
+  chargeStructFields(call, sources);
+  return new CsArray(
+    { kind: 'array', element, rank: 1 },
+    [length],
+    sources.map((value) => copyValue(value))
+  );
+}
+
+/** Charges the fields of the struct values among elements a native keeps reachable, beyond their one slot each. */
+export function chargeStructFields(call: NativeCall, values: Iterable<Value>): void {
+  let count = 0;
+  for (const value of values) count += structFieldSlots(value);
+  if (count > 0) call.frame.runtime.allocateSlots(count);
 }
 
 /** The elements of a `params` array argument, which may be null. */

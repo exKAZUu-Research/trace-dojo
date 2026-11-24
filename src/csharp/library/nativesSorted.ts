@@ -3,7 +3,7 @@ import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import type { NativeState } from '../runtime';
 import type { Type } from '../types';
-import { CsObject, CsStruct, type Value } from '../values';
+import { CsObject, CsStruct, structFieldSlots, type Value } from '../values';
 import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { type Comparison, comparisonOf, equalityOf } from './nativesCollections';
 import {
@@ -81,7 +81,7 @@ class SortedState implements EnumerableState {
       this.version++;
       return true;
     }
-    this.allocate(1);
+    this.allocate(1 + structFieldSlots(key) + structFieldSlots(value));
     this.keys.splice(index, 0, key);
     this.values.splice(index, 0, value);
     this.version++;
@@ -472,7 +472,7 @@ function nodeOf(value: Value, name = 'node'): LinkNode {
 }
 
 function newNode(call: NativeCall, elementType: Type, value: Value): LinkNode {
-  call.frame.runtime.allocateSlots(1);
+  call.frame.runtime.allocateSlots(1 + structFieldSlots(value));
   const object = new CsObject(libraryType(call, 'System.Collections.Generic.LinkedListNode', [elementType]), []);
   const node: LinkNode = { value, previous: undefined, next: undefined, list: undefined, object };
   object.native = new LinkNodeState(node);
@@ -710,7 +710,7 @@ defineNatives({
     return;
   },
   [`${PRIORITY_QUEUE}.Enqueue`]: (call, receiver, [element, priority]) => {
-    call.frame.runtime.allocateSlots(2);
+    call.frame.runtime.allocateSlots(2 + structFieldSlots(element as Value) + structFieldSlots(priority as Value));
     heapOf(receiver).enqueue(element as Value, priority as Value);
     return;
   },

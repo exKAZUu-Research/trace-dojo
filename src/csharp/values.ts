@@ -150,6 +150,17 @@ export interface VariableReference {
 }
 
 /** Copies a struct, as reading a variable of a value type into another does. */
+/**
+ * The slots a struct value's fields hold beyond the one slot holding the value, nested structs included, which storage
+ * keeping the value reachable is charged for; 0 for other values.
+ */
+export function structFieldSlots(value: Value): number {
+  if (!(value instanceof CsStruct)) return 0;
+  let count = value.fields.length;
+  for (const field of value.fields) count += structFieldSlots(field);
+  return count;
+}
+
 export function copyValue<T extends Value | undefined>(value: T): T {
   return value instanceof CsStruct ? (value.clone() as T) : value;
 }

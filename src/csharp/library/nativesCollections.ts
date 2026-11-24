@@ -4,12 +4,22 @@ import { PendingException } from '../numeric';
 import { defaultCompare, environmentOf, hashOf, runtimeTypeName, stringOf, valuesEqual } from '../objects';
 import { CsThrow } from '../runtime';
 import { type MethodSymbol, substitute, substitutionOf, type Type } from '../types';
-import { copyValue, CsArray, CsDelegate, CsObject, CsStruct, type Value, type VariableReference } from '../values';
+import {
+  copyValue,
+  CsArray,
+  CsDelegate,
+  CsObject,
+  CsStruct,
+  structFieldSlots,
+  type Value,
+  type VariableReference,
+} from '../values';
 import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { InconsistentComparer, introSort } from './sort';
 import {
   bufferedElements,
   chargeElements,
+  chargeStructFields,
   copyToArray,
   evaluatorOf,
   fail,
@@ -203,7 +213,10 @@ export function listOf(value: Value): ListState {
 
 /** Creates a `List<T>` with elements, as LINQ's `ToList` does. */
 export function newList(call: NativeCall, elementType: Type, items: Value[], isCharged = false): CsObject {
-  if (!isCharged) call.frame.runtime.allocateSlots(items.length);
+  if (!isCharged) {
+    call.frame.runtime.allocateSlots(items.length);
+    chargeStructFields(call, items);
+  }
   const list = new CsObject(libraryType(call, 'System.Collections.Generic.List', [elementType]), []);
   const state = new ListState(
     items.map((item) => copyValue(item)),
@@ -356,7 +369,7 @@ const listNatives: Record<string, NativeMethod> = {
   },
   [`${LIST}.Add`]: (call, receiver, [value]) => {
     const list = listOf(receiver);
-    call.frame.runtime.allocateSlots(1);
+    call.frame.runtime.allocateSlots(1 + structFieldSlots(value as Value));
     list.ensureCapacity(list.items.length + 1);
     list.items.push(value as Value);
     list.version++;
@@ -529,7 +542,7 @@ const listNatives: Record<string, NativeMethod> = {
     const list = listOf(receiver);
     if ((index as number) < 0 || (index as number) > list.items.length)
       failOutOfRange(call, 'index', 'Index must be within the bounds of the List.');
-    call.frame.runtime.allocateSlots(1);
+    call.frame.runtime.allocateSlots(1 + structFieldSlots(value as Value));
     list.ensureCapacity(list.items.length + 1);
     list.items.splice(index as number, 0, value as Value);
     list.version++;
@@ -761,7 +774,7 @@ export class HashState implements EnumerableState {
       this.entries[existing].value = value;
       return true;
     }
-    this.allocate(1);
+    this.allocate(1 + structFieldSlots(key) + structFieldSlots(value));
     const hash = this.equality.hash(key);
     const entry: Entry = { hash, key, value, isFree: false };
     let index: number;
@@ -1398,7 +1411,7 @@ for (const [name, isStack] of [
       indexOfValue(call, sequenceOf(receiver).items, value as Value, sequenceOf(receiver).head) >= 0,
     [`${prefix}.${isStack ? 'Push' : 'Enqueue'}`]: (call, receiver, [value]) => {
       const state = sequenceOf(receiver);
-      call.frame.runtime.allocateSlots(1);
+      call.frame.runtime.allocateSlots(1 + structFieldSlots(value as Value));
       state.items.push(value as Value);
       state.version++;
       return;
@@ -1478,6 +1491,7 @@ export function chargedElements(call: NativeCall, source: Value): Value[] {
     if (items.length % SLOTS_PER_CHARGE === 0) call.frame.runtime.allocateSlots(SLOTS_PER_CHARGE);
   }
   call.frame.runtime.allocateSlots(items.length % SLOTS_PER_CHARGE);
+  chargeStructFields(call, items);
   return items;
 }
 
