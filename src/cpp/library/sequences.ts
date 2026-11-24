@@ -813,17 +813,19 @@ const nonEmpty = (self: SequenceValue): void => {
   if (self.length === 0) throw new CppRuntimeError('emptyContainer');
 };
 
+type ListMethod = (
+  name: string,
+  params: Type[],
+  ret: Type,
+  run: (self: SequenceValue, args: unknown[], frame: Frame) => unknown,
+  options?: { isConst?: boolean }
+) => void;
+
 function listMethods(
   library: Library,
   cls: ClassInfo,
   element: Type,
-  method: (
-    name: string,
-    params: Type[],
-    ret: Type,
-    run: (self: SequenceValue, args: unknown[], frame: Frame) => unknown,
-    options?: { isConst?: boolean }
-  ) => void,
+  method: ListMethod,
   editor: SequenceEditor
 ): void {
   const less = lessThan(element);
@@ -885,6 +887,33 @@ function listMethods(
       { owner: cls }
     );
   });
+  listTransferMethods(library, cls, element, method, editor, callable);
+  addTemplateMethod(cls, 'unique', (args) => {
+    const same = callable(args);
+    if (!same) return;
+    return native(
+      'unique',
+      callableParams(args),
+      SIZE_T,
+      (_args, { self, frame }) => unique(self as SequenceValue, frame, (a, b) => same(frame, a, b)),
+      { owner: cls }
+    );
+  });
+}
+
+/**
+ * The members of `std::list` that move nodes between lists or remove them by a predicate: `splice` and `merge`,
+ * whose elements keep their objects and iterators, and `remove_if`.
+ */
+function listTransferMethods(
+  library: Library,
+  cls: ClassInfo,
+  element: Type,
+  method: ListMethod,
+  editor: SequenceEditor,
+  callable: (args: Expr[]) => ((frame: Frame, a: Ptr, b: Ptr) => boolean) | undefined
+): void {
+  const less = lessThan(element);
   const listRef = referenceTo(classType(cls));
   const constIterator = cls.memberTypes.get('const_iterator') as Type;
   for (const otherType of [listRef, { ...listRef, isRvalue: true }]) {
@@ -937,17 +966,6 @@ function listMethods(
           truthy(test(frame, list.location(candidate)))
         );
       },
-      { owner: cls }
-    );
-  });
-  addTemplateMethod(cls, 'unique', (args) => {
-    const same = callable(args);
-    if (!same) return;
-    return native(
-      'unique',
-      callableParams(args),
-      SIZE_T,
-      (_args, { self, frame }) => unique(self as SequenceValue, frame, (a, b) => same(frame, a, b)),
       { owner: cls }
     );
   });

@@ -495,7 +495,9 @@ function stringize(tokens: Token[]): string {
   const text = tokens
     .map((token, index) => {
       const spelled =
-        token.kind === 'string' || token.kind === 'char' ? token.text.replaceAll(/[\\"]/g, String.raw`\$&`) : token.text;
+        token.kind === 'string' || token.kind === 'char'
+          ? token.text.replaceAll(/[\\"]/g, String.raw`\$&`)
+          : token.text;
       return index > 0 && token.space ? ` ${spelled}` : spelled;
     })
     .join('');

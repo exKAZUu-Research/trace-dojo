@@ -105,15 +105,8 @@ export abstract class CoroutineCompiler extends StatementCompiler {
    * coroutine's frame runs it (C++20 [dcl.fct.def.coroutine]p5).
    */
   protected coroutineFunction(fn: FunctionInfo, body: Syntax): CompiledFunction {
+    this.checkCoroutine(fn, body);
     const { row } = body;
-    if (fn.isConstructor || fn.isDestructor || (fn.name === 'main' && !fn.owner))
-      return this.error((firstCoroutineNode(body) as Syntax).row, `${fn.displayName} はコルーチンにできません。`);
-    if (fn.isVariadic) return this.error(row, '可変長引数（...）の関数はコルーチンにできません。');
-    if (this.context.returnType.kind !== 'class')
-      return this.error(row, 'コルーチンの戻り値の型には、promise_type を持つクラスを書いてください。');
-    const returnStatement = findReturnStatement(body);
-    if (returnStatement)
-      return this.error(returnStatement.row, 'コルーチンでは return ではなく co_return を使ってください。');
     const context = this.context;
     const outerScope = context.scope;
     const savedPromise = this.promiseClass;
@@ -121,61 +114,23 @@ export abstract class CoroutineCompiler extends StatementCompiler {
     this.hiddenCount = 0;
     try {
       const parameterCopies = this.parameterCopies(fn, row);
-      const traits = this.coroutineTraitsArguments(fn);
-      const setupStatements = [
-        `std::coroutine_traits<${traits}>::promise_type ${HIDDEN_PREFIX}promise;`,
-        `auto ${HIDDEN_PREFIX}handle = std::coroutine_handle<decltype(${HIDDEN_PREFIX}promise)>::from_promise(${HIDDEN_PREFIX}promise);`,
-      ].map((text) => this.compileStatement(this.hiddenStatement(text, {})));
-      const promise = this.hiddenExpression(`${HIDDEN_PREFIX}promise`, row);
-      const promiseType = unqualified(promise.type);
-      if (promiseType.kind !== 'class') return this.error(row, 'promise_type にはクラスを書いてください。');
-      this.promiseClass = promiseType.cls;
-      const promiseLocation = promise.run as Eval<Ptr>;
-      const returnObject = this.copyInitializer(
-        context.returnType,
-        this.hiddenExpression(`${HIDDEN_PREFIX}promise.get_return_object()`, row),
-        row,
-        false
-      );
-
-      const initial = this.suspendPoint(`${HIDDEN_PREFIX}promise.initial_suspend()`, row, false);
-      const bodyScope = new Scope();
-      const statements = this.inScopeWith(this.resumableMode, () => this.resumableStatements(body.children), bodyScope);
-      const fallsOff = this.hasPromiseMember('return_void')
-        ? this.compileStatement(this.hiddenStatement(`${HIDDEN_PREFIX}promise.return_void();`, {}))
-        : undefined;
-      const unhandled = this.compileStatement(
-        this.hiddenStatement(`${HIDDEN_PREFIX}promise.unhandled_exception();`, {})
-      );
-      const final = this.suspendPoint(`${HIDDEN_PREFIX}promise.final_suspend()`, row, true);
+      const { setup, promiseLocation } = this.promiseSetup(fn, row);
+      const statements = this.inScopeWith(this.resumableMode, () => this.resumableStatements(body.children));
+      const run = coroutineRun({
+        initial: this.suspendPoint(`${HIDDEN_PREFIX}promise.initial_suspend()`, row, false),
+        statements,
+        fallsOff: this.hasPromiseMember('return_void')
+          ? this.compileStatement(this.hiddenStatement(`${HIDDEN_PREFIX}promise.return_void();`, {}))
+          : undefined,
+        unhandled: this.compileStatement(this.hiddenStatement(`${HIDDEN_PREFIX}promise.unhandled_exception();`, {})),
+        final: this.suspendPoint(`${HIDDEN_PREFIX}promise.final_suspend()`, row, true),
+      });
       context.endBody();
-
       const teardown = (frame: Frame): void => {
         // The promise is destroyed before the parameter copies, which the end of its scope leaves alone.
         const destroyCopies = parameterCopies.map((copy) => copy.destroyer(frame));
         endScope(frame, outerScope);
         for (const destroyCopy of destroyCopies.toReversed()) destroyCopy();
-      };
-      const run: Resumable = function* (frame): Resumption {
-        yield* initial(frame);
-        const { tryBlocks } = frame.runtime;
-        // The body runs in a handler that catches every exception for the promise (C++20 [dcl.fct.def.coroutine]p5).
-        tryBlocks.push(() => true);
-        let isActive = true;
-        try {
-          const completion = yield* statements(frame);
-          if (completion !== RETURN) fallsOff?.(frame);
-        } catch (error) {
-          if (!(error instanceof CppException)) throw error;
-          tryBlocks.pop();
-          isActive = false;
-          runHandler(frame, unhandled, error);
-        } finally {
-          if (isActive) tryBlocks.pop();
-        }
-        yield* final(frame);
-        teardown(frame);
-        return;
       };
       return {
         slotCount: context.slotCount,
@@ -183,20 +138,59 @@ export abstract class CoroutineCompiler extends StatementCompiler {
         body: (frame) => {
           try {
             for (const copy of parameterCopies) copy.make(frame);
-            for (const setup of setupStatements) setup(frame);
-            frame.returnValue = returnObject(frame, undefined, false, 'full-expression');
+            setup(frame);
           } catch (error) {
             if (error instanceof CppException) teardown(frame);
             throw error;
           }
           // A handle's address, the promise's, designates the promise's storage.
-          new Coroutine(frame, promiseLocation(frame).store as Store, run, teardown).start();
+          new Coroutine(frame, promiseLocation(frame).store as Store, run(teardown), teardown).start();
         },
       };
     } finally {
       this.promiseClass = savedPromise;
       this.hiddenCount = savedCount;
     }
+  }
+
+  private checkCoroutine(fn: FunctionInfo, body: Syntax): void {
+    const { row } = body;
+    if (fn.isConstructor || fn.isDestructor || (fn.name === 'main' && !fn.owner))
+      this.error((firstCoroutineNode(body) as Syntax).row, `${fn.displayName} はコルーチンにできません。`);
+    if (fn.isVariadic) this.error(row, '可変長引数（...）の関数はコルーチンにできません。');
+    if (this.context.returnType.kind !== 'class')
+      this.error(row, 'コルーチンの戻り値の型には、promise_type を持つクラスを書いてください。');
+    const returnStatement = findReturnStatement(body);
+    if (returnStatement) this.error(returnStatement.row, 'コルーチンでは return ではなく co_return を使ってください。');
+  }
+
+  /**
+   * The promise of a coroutine and its handle, as hidden variables, and the setup that makes them and the object the
+   * call returns from `get_return_object`.
+   */
+  private promiseSetup(fn: FunctionInfo, row: number): { setup: (frame: Frame) => void; promiseLocation: Eval<Ptr> } {
+    const traits = this.coroutineTraitsArguments(fn);
+    const statements = [
+      `std::coroutine_traits<${traits}>::promise_type ${HIDDEN_PREFIX}promise;`,
+      `auto ${HIDDEN_PREFIX}handle = std::coroutine_handle<decltype(${HIDDEN_PREFIX}promise)>::from_promise(${HIDDEN_PREFIX}promise);`,
+    ].map((text) => this.compileStatement(this.hiddenStatement(text, {})));
+    const promise = this.hiddenExpression(`${HIDDEN_PREFIX}promise`, row);
+    const promiseType = unqualified(promise.type);
+    if (promiseType.kind !== 'class') return this.error(row, 'promise_type にはクラスを書いてください。');
+    this.promiseClass = promiseType.cls;
+    const returnObject = this.copyInitializer(
+      this.context.returnType,
+      this.hiddenExpression(`${HIDDEN_PREFIX}promise.get_return_object()`, row),
+      row,
+      false
+    );
+    return {
+      setup: (frame) => {
+        for (const statement of statements) statement(frame);
+        frame.returnValue = returnObject(frame, undefined, false, 'full-expression');
+      },
+      promiseLocation: promise.run as Eval<Ptr>,
+    };
   }
 
   /**
@@ -278,10 +272,9 @@ export abstract class CoroutineCompiler extends StatementCompiler {
   private resumableStatement(node: Syntax): Resumable {
     if (!isCoroutineCode(node)) return synchronous(this.compileStatement(node));
     if (node.row >= 0) this.userRow = node.row;
-    const mode = this.resumableMode;
     switch (node.type) {
       case 'compound_statement': {
-        return this.inScopeWith(mode, () => this.resumableStatements(node.children));
+        return this.inScopeWith(this.resumableMode, () => this.resumableStatements(node.children));
       }
       case 'expression_statement':
       case 'declaration':
@@ -293,105 +286,128 @@ export abstract class CoroutineCompiler extends StatementCompiler {
         return this.resumableIf(node);
       }
       case 'while_statement': {
-        if (isCoroutineCode(fieldOf(node, 'condition') as Syntax)) return this.awaitingWhile(node);
-        return this.inScopeWith(mode, () => {
-          const { condition, body } = this.whileParts(node, mode);
-          return function* (frame): Resumption {
-            while (condition(frame)) {
-              frame.runtime.spend();
-              const completion = yield* body(frame);
-              if (completion === BREAK) break;
-              if (completion === RETURN || completion === GOTO) return completion;
-            }
-            return;
-          };
-        });
+        return this.resumableWhile(node);
       }
       case 'do_statement': {
-        this.rejectAwaitIn(fieldOf(node, 'condition'), 'ループの条件');
-        const { body, condition } = this.doParts(node, mode);
-        return function* (frame): Resumption {
-          do {
-            frame.runtime.spend();
-            const completion = yield* body(frame);
-            if (completion === BREAK) break;
-            if (completion === RETURN || completion === GOTO) return completion;
-          } while (condition(frame));
-          return;
-        };
+        return this.resumableDo(node);
       }
       case 'for_statement': {
-        for (const field of ['initializer', 'condition', 'update'])
-          this.rejectAwaitIn(fieldOf(node, field), 'for 文の初期化・条件・更新');
-        const scope = new Scope();
-        return this.inScopeWith(
-          mode,
-          () => {
-            const { init, condition, update, body } = this.forParts(node, mode, scope);
-            return function* (frame): Resumption {
-              init(frame);
-              while (condition(frame)) {
-                frame.runtime.spend();
-                const completion = yield* body(frame);
-                if (completion === BREAK) break;
-                if (completion === RETURN || completion === GOTO) return completion;
-                update(frame);
-              }
-              return;
-            };
-          },
-          scope
-        );
+        return this.resumableFor(node);
       }
       case 'for_range_loop': {
-        for (const field of ['initializer', 'right']) this.rejectAwaitIn(fieldOf(node, field), '範囲 for 文の範囲');
-        return this.inScopeWith(mode, () => {
-          const { init, start, notDone, advance, enter, body, bodyScope } = this.rangeForParts(node, mode);
-          const iteration = resumableScopeExit(function* (frame): Resumption {
-            enter(frame);
-            return yield* body(frame);
-          }, bodyScope);
-          return function* (frame): Resumption {
-            const completion = init?.(frame);
-            if (completion !== undefined) return completion;
-            start(frame);
-            while (notDone(frame)) {
-              frame.runtime.spend();
-              const completion = yield* iteration(frame);
-              if (completion === BREAK) break;
-              if (completion === RETURN || completion === GOTO) return completion;
-              advance(frame);
-            }
-            return;
-          };
-        });
+        return this.resumableRangeFor(node);
       }
       case 'try_statement': {
-        for (const clause of node.children.filter((child) => child.type === 'catch_clause')) {
-          const awaiting = firstCoroutineNode(clause);
-          if (awaiting) return this.error(awaiting.row, 'catch の中では co_await や co_yield を使えません。');
-        }
-        const { body, matches, handle } = this.tryParts(node, mode);
-        return function* (frame): Resumption {
-          const { tryBlocks } = frame.runtime;
-          tryBlocks.push(matches);
-          let isActive = true;
-          try {
-            return yield* body(frame);
-          } catch (error) {
-            if (!(error instanceof CppException)) throw error;
-            tryBlocks.pop();
-            isActive = false;
-            return handle(frame, error);
-          } finally {
-            if (isActive) tryBlocks.pop();
-          }
-        };
+        return this.resumableTry(node);
       }
       default: {
         return this.unsupported(node.row, 'この位置の co_await・co_yield・co_return');
       }
     }
+  }
+
+  private resumableWhile(node: Syntax): Resumable {
+    if (isCoroutineCode(fieldOf(node, 'condition') as Syntax)) return this.awaitingWhile(node);
+    const mode = this.resumableMode;
+    return this.inScopeWith(mode, () => {
+      const { condition, body } = this.whileParts(node, mode);
+      return function* (frame): Resumption {
+        while (condition(frame)) {
+          frame.runtime.spend();
+          const completion = yield* body(frame);
+          if (completion === BREAK) break;
+          if (completion === RETURN || completion === GOTO) return completion;
+        }
+        return;
+      };
+    });
+  }
+
+  private resumableDo(node: Syntax): Resumable {
+    this.rejectAwaitIn(fieldOf(node, 'condition'), 'ループの条件');
+    const { body, condition } = this.doParts(node, this.resumableMode);
+    return function* (frame): Resumption {
+      do {
+        frame.runtime.spend();
+        const completion = yield* body(frame);
+        if (completion === BREAK) break;
+        if (completion === RETURN || completion === GOTO) return completion;
+      } while (condition(frame));
+      return;
+    };
+  }
+
+  private resumableFor(node: Syntax): Resumable {
+    for (const field of ['initializer', 'condition', 'update'])
+      this.rejectAwaitIn(fieldOf(node, field), 'for 文の初期化・条件・更新');
+    const mode = this.resumableMode;
+    const scope = new Scope();
+    return this.inScopeWith(
+      mode,
+      () => {
+        const { init, condition, update, body } = this.forParts(node, mode, scope);
+        return function* (frame): Resumption {
+          init(frame);
+          while (condition(frame)) {
+            frame.runtime.spend();
+            const completion = yield* body(frame);
+            if (completion === BREAK) break;
+            if (completion === RETURN || completion === GOTO) return completion;
+            update(frame);
+          }
+          return;
+        };
+      },
+      scope
+    );
+  }
+
+  private resumableRangeFor(node: Syntax): Resumable {
+    for (const field of ['initializer', 'right']) this.rejectAwaitIn(fieldOf(node, field), '範囲 for 文の範囲');
+    const mode = this.resumableMode;
+    return this.inScopeWith(mode, () => {
+      const { init, start, notDone, advance, enter, body, bodyScope } = this.rangeForParts(node, mode);
+      const iteration = resumableScopeExit(function* (frame): Resumption {
+        enter(frame);
+        return yield* body(frame);
+      }, bodyScope);
+      return function* (frame): Resumption {
+        const completion = init?.(frame);
+        if (completion !== undefined) return completion;
+        start(frame);
+        while (notDone(frame)) {
+          frame.runtime.spend();
+          const completion = yield* iteration(frame);
+          if (completion === BREAK) break;
+          if (completion === RETURN || completion === GOTO) return completion;
+          advance(frame);
+        }
+        return;
+      };
+    });
+  }
+
+  private resumableTry(node: Syntax): Resumable {
+    for (const clause of node.children.filter((child) => child.type === 'catch_clause')) {
+      const awaiting = firstCoroutineNode(clause);
+      if (awaiting) return this.error(awaiting.row, 'catch の中では co_await や co_yield を使えません。');
+    }
+    const { body, matches, handle } = this.tryParts(node, this.resumableMode);
+    return function* (frame): Resumption {
+      const { tryBlocks } = frame.runtime;
+      tryBlocks.push(matches);
+      let isActive = true;
+      try {
+        return yield* body(frame);
+      } catch (error) {
+        if (!(error instanceof CppException)) throw error;
+        tryBlocks.pop();
+        isActive = false;
+        return handle(frame, error);
+      } finally {
+        if (isActive) tryBlocks.pop();
+      }
+    };
   }
 
   /**
@@ -738,6 +754,41 @@ export abstract class CoroutineCompiler extends StatementCompiler {
     return fill(parseStatementAt(text, row));
   }
   protected abstract isLibraryInstance(cls: ClassInfo, name: string): boolean;
+}
+
+/**
+ * The run of a coroutine's body after the setup: the initial suspend point, the body in a handler that gives every
+ * exception to the promise (C++20 [dcl.fct.def.coroutine]p5), the final suspend point, and then the end of the frame.
+ */
+function coroutineRun(parts: {
+  initial: Resumable;
+  statements: Resumable;
+  fallsOff: Exec | undefined;
+  unhandled: Exec;
+  final: Resumable;
+}): (teardown: (frame: Frame) => void) => Resumable {
+  const { initial, statements, fallsOff, unhandled, final } = parts;
+  return (teardown) =>
+    function* (frame): Resumption {
+      yield* initial(frame);
+      const { tryBlocks } = frame.runtime;
+      tryBlocks.push(() => true);
+      let isActive = true;
+      try {
+        const completion = yield* statements(frame);
+        if (completion !== RETURN) fallsOff?.(frame);
+      } catch (error) {
+        if (!(error instanceof CppException)) throw error;
+        tryBlocks.pop();
+        isActive = false;
+        runHandler(frame, unhandled, error);
+      } finally {
+        if (isActive) tryBlocks.pop();
+      }
+      yield* final(frame);
+      teardown(frame);
+      return;
+    };
 }
 
 function synchronous(exec: Exec): Resumable {

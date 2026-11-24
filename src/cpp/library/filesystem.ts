@@ -8,91 +8,48 @@ import type { Library } from './registry';
 import { makeString } from './string';
 import { native, readCString } from './support';
 
+const PATH = pointerTo(CONST_CHAR);
+
+/** A native's work on the run's files, given the paths its `const char*` arguments hold and its other arguments. */
+type FileOperation = (files: VirtualFileSystem, paths: string[], args: unknown[]) => unknown;
+
 /**
  * The natives `<filesystem>` works on the run's files with, which return a negative `errno` for an error that the
  * library's C++ source reports with a `std::filesystem::filesystem_error`.
  */
 export function filesystemFunctions(library: Library): Map<string, FunctionInfo[]> {
-  const path = pointerTo(CONST_CHAR);
-  const define = (
-    name: string,
-    params: Type[],
-    ret: Type,
-    run: (files: VirtualFileSystem, args: string[], frame: Frame, raw: unknown[]) => unknown
-  ): [string, FunctionInfo[]] => [
-    name,
-    [
-      native(name, params, ret, (args, { frame }) => {
-        const paths = args.map((arg, index) => (params[index] === path ? pathOf(arg, frame) : ''));
-        try {
-          return run(frame.runtime.io.files, paths, frame, args);
-        } catch (error) {
-          if (!(error instanceof FileSystemError)) throw error;
-          const code = -(ERROR_NUMBERS[error.code] as number);
-          return ret === ULLONG || ret === LLONG ? BigInt(code) : code;
-        }
-      }),
-    ],
-  ];
   return new Map([
-    define('__builtin_fs_status', [path], INT, (files, [p]) => {
+    fileNative('__builtin_fs_status', [PATH], INT, (files, [p]) => {
       const kind = files.kindOf(p as string);
       return kind === 'file' ? 1 : kind === 'directory' ? 2 : 0;
     }),
-    define('__builtin_fs_file_size', [path], LLONG, (files, [p]) => {
+    fileNative('__builtin_fs_file_size', [PATH], LLONG, (files, [p]) => {
       if (files.kindOf(p as string) === 'directory') throw new FileSystemError('EISDIR', p as string);
       return BigInt(files.readFile(p as string).length);
     }),
-    define('__builtin_fs_create_directory', [path, BOOL], INT, (files, [p], _frame, [, recursive]) => {
-      const target = p as string;
-      if (recursive) return files.createDirectory(target, true) === undefined ? 0 : 1;
-      const kind = files.kindOf(target);
-      if (kind === 'directory') return 0;
-      if (kind === 'file') throw new FileSystemError('EEXIST', target);
-      files.createDirectory(target, false);
-      return 1;
-    }),
-    define('__builtin_fs_remove', [path], INT, (files, [p]) => {
+    fileNative('__builtin_fs_create_directory', [PATH, BOOL], INT, (files, [p], [, recursive]) =>
+      createDirectory(files, p as string, recursive !== 0)
+    ),
+    fileNative('__builtin_fs_remove', [PATH], INT, (files, [p]) => {
       if (!files.kindOf(p as string)) return 0;
       files.remove(p as string);
       return 1;
     }),
-    define('__builtin_fs_remove_all', [path], LLONG, (files, [p]) => BigInt(removeAll(files, p as string))),
-    define('__builtin_fs_rename', [path, path], INT, (files, [from, to]) => {
+    fileNative('__builtin_fs_remove_all', [PATH], LLONG, (files, [p]) => BigInt(removeAll(files, p as string))),
+    fileNative('__builtin_fs_rename', [PATH, PATH], INT, (files, [from, to]) => {
       files.rename(from as string, to as string);
       return 0;
     }),
-    define('__builtin_fs_copy_file', [path, path, INT], INT, (files, [from, to], _frame, raw) => {
-      const option = raw[2];
-      const source = from as string;
-      const target = to as string;
-      if (files.kindOf(source) !== 'file')
-        throw new FileSystemError(files.kindOf(source) ? 'EINVAL' : 'ENOENT', source);
-      const existing = files.kindOf(target);
-      if (existing === 'directory') throw new FileSystemError('EISDIR', target);
-      if (existing === 'file') {
-        // `copy_options::skip_existing` skips it, `overwrite_existing` replaces it, and otherwise it is an error.
-        if (option === 1) return 0;
-        if (option !== 2 || files.isSameFile(source, target)) throw new FileSystemError('EEXIST', target);
-      }
-      const content = files.readFile(source);
-      files.open(target, { create: 'always', truncate: true, append: false }).write(content);
-      return 1;
-    }),
-    define('__builtin_fs_resize_file', [path, ULLONG], INT, (files, [p], _frame, [, size]) => {
-      const target = p as string;
-      if (files.kindOf(target) !== 'file')
-        throw new FileSystemError(files.kindOf(target) ? 'EISDIR' : 'ENOENT', target);
-      const content = files.readFile(target);
-      const length = Number(size);
-      const resized = length <= content.length ? content.slice(0, length) : content.padEnd(length, '\0');
-      files.open(target, { create: 'never', truncate: true, append: false }).write(resized);
-      return 0;
-    }),
+    fileNative('__builtin_fs_copy_file', [PATH, PATH, INT], INT, (files, [from, to], args) =>
+      copyFile(files, from as string, to as string, args[2] as number)
+    ),
+    fileNative('__builtin_fs_resize_file', [PATH, ULLONG], INT, (files, [p], [, size]) =>
+      resizeFile(files, p as string, Number(size))
+    ),
     [
       '__builtin_fs_list',
       [
-        native('__builtin_fs_list', [path], library.stringType, ([p], { frame }) =>
+        native('__builtin_fs_list', [PATH], library.stringType, ([p], { frame }) =>
           makeString(frame, frame.runtime.io.files.list(pathOf(p, frame)).map(encode).join('/'))
         ),
       ],
@@ -106,6 +63,63 @@ export function filesystemFunctions(library: Library): Map<string, FunctionInfo[
       ],
     ],
   ]);
+}
+
+/** A native that works on the run's files, returning the negative `errno` of an error. */
+function fileNative(name: string, params: Type[], ret: Type, run: FileOperation): [string, FunctionInfo[]] {
+  const returnsBigInt = ret === LLONG || ret === ULLONG;
+  return [
+    name,
+    [
+      native(name, params, ret, (args, { frame }) => {
+        const paths = args.map((arg, index) => (params[index] === PATH ? pathOf(arg, frame) : ''));
+        try {
+          return run(frame.runtime.io.files, paths, args);
+        } catch (error) {
+          if (!(error instanceof FileSystemError)) throw error;
+          const code = -(ERROR_NUMBERS[error.code] as number);
+          return returnsBigInt ? BigInt(code) : code;
+        }
+      }),
+    ],
+  ];
+}
+
+/** Creates a directory, with its missing ancestors when `recursive`, telling whether it created one. */
+function createDirectory(files: VirtualFileSystem, path: string, recursive: boolean): number {
+  if (recursive) return files.createDirectory(path, true) === undefined ? 0 : 1;
+  const kind = files.kindOf(path);
+  if (kind === 'directory') return 0;
+  if (kind === 'file') throw new FileSystemError('EEXIST', path);
+  files.createDirectory(path, false);
+  return 1;
+}
+
+/**
+ * Copies a file, which `copy_options::skip_existing` (1) skips when the target exists and `overwrite_existing` (2)
+ * replaces, telling whether it copied the file.
+ */
+function copyFile(files: VirtualFileSystem, source: string, target: string, option: number): number {
+  const kind = files.kindOf(source);
+  if (kind !== 'file') throw new FileSystemError(kind ? 'EINVAL' : 'ENOENT', source);
+  const existing = files.kindOf(target);
+  if (existing === 'directory') throw new FileSystemError('EISDIR', target);
+  if (existing === 'file') {
+    if (option === 1) return 0;
+    if (option !== 2 || files.isSameFile(source, target)) throw new FileSystemError('EEXIST', target);
+  }
+  const content = files.readFile(source);
+  files.open(target, { create: 'always', truncate: true, append: false }).write(content);
+  return 1;
+}
+
+function resizeFile(files: VirtualFileSystem, path: string, length: number): number {
+  const kind = files.kindOf(path);
+  if (kind !== 'file') throw new FileSystemError(kind ? 'EISDIR' : 'ENOENT', path);
+  const content = files.readFile(path);
+  const resized = length <= content.length ? content.slice(0, length) : content.padEnd(length, '\0');
+  files.open(path, { create: 'never', truncate: true, append: false }).write(resized);
+  return 0;
 }
 
 /** Removes a file or a directory with what it holds, counting what it removed, the deepest first. */

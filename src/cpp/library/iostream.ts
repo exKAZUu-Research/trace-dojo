@@ -918,13 +918,38 @@ const UNLIMITED = (1n << 63n) - 1n;
  * whitespace.
  */
 function addInputMembers(cls: ClassInfo): void {
-  const istream = referenceTo(classType(cls));
+  const input = inputMethod(cls);
   const charPointer = pointerTo(CHAR);
-  const input = (
+  input('get', [], INT, (stream) => (unformattedSentry(stream) ? (takeByte(stream) ?? fail(stream)) : END_OF_INPUT));
+  input('get', [referenceTo(CHAR)], 'self', getCharacter);
+  input('get', [charPointer, LONG, CHAR], 'self', (stream, args, frame) => readInto(stream, args, frame, false), {
+    optional: 1,
+  });
+  input('getline', [charPointer, LONG, CHAR], 'self', (stream, args, frame) => readInto(stream, args, frame, true), {
+    optional: 1,
+  });
+  input('peek', [], INT, peek);
+  input('ignore', [LONG, INT], 'self', ignore, { optional: 2 });
+  input('read', [charPointer, LONG], 'self', read);
+  input('unget', [], 'self', stepBack);
+  input('putback', [CHAR], 'self', stepBack);
+  input('gcount', [], LONG, (stream) => BigInt(stream.extracted), { isConst: true });
+  input('tellg', [], LONG, (stream, _args, frame) =>
+    stream.failed || !seeks(stream, frame) ? -1n : BigInt(stream.position)
+  );
+  input('seekg', [LONG], 'self', seekg);
+}
+
+type InputOperation = (stream: StreamValue, args: unknown[], frame: Frame) => unknown;
+
+/** Adds a member of `std::istream` to a class, which returns the stream itself when it returns `'self'`. */
+function inputMethod(cls: ClassInfo) {
+  const istream = referenceTo(classType(cls));
+  return (
     name: string,
     params: Type[],
     ret: Type | 'self',
-    run: (stream: StreamValue, args: unknown[], frame: Frame) => unknown,
+    run: InputOperation,
     options: { optional?: number; isConst?: boolean } = {}
   ): void => {
     addMethod(
@@ -941,71 +966,53 @@ function addInputMembers(cls: ClassInfo): void {
       )
     );
   };
-  input('get', [], INT, (stream) => (unformattedSentry(stream) ? (takeByte(stream) ?? fail(stream)) : END_OF_INPUT));
-  input('get', [referenceTo(CHAR)], 'self', (stream, [target]) => {
-    if (!unformattedSentry(stream)) return;
+}
+
+const getCharacter: InputOperation = (stream, [target]) => {
+  if (!unformattedSentry(stream)) return;
+  const byte = takeByte(stream);
+  if (byte === undefined) stream.state |= IO_STATE.failbit;
+  else (target as Ptr).write(signedChar(byte));
+};
+
+const peek: InputOperation = (stream) => {
+  if (!unformattedSentry(stream)) return END_OF_INPUT;
+  if (stream.position < stream.buffer.length) return byteAt(stream.buffer, stream.position);
+  stream.state |= IO_STATE.eofbit;
+  return END_OF_INPUT;
+};
+
+const ignore: InputOperation = (stream, [count, delimiter], frame) => {
+  if (!unformattedSentry(stream)) return;
+  const limit = count === undefined ? 1n : BigInt(count as bigint);
+  const separator = delimiter === undefined ? END_OF_INPUT : asNumber(delimiter);
+  while (limit === UNLIMITED || BigInt(stream.extracted) < limit) {
+    if (stream.extracted % 64 === 0) frame.runtime.spend();
     const byte = takeByte(stream);
-    if (byte === undefined) stream.state |= IO_STATE.failbit;
-    else (target as Ptr).write(signedChar(byte));
-  });
-  input('get', [charPointer, LONG, CHAR], 'self', (stream, args, frame) => readInto(stream, args, frame, false), {
-    optional: 1,
-  });
-  input('getline', [charPointer, LONG, CHAR], 'self', (stream, args, frame) => readInto(stream, args, frame, true), {
-    optional: 1,
-  });
-  input('peek', [], INT, (stream) => {
-    if (!unformattedSentry(stream)) return END_OF_INPUT;
-    if (stream.position < stream.buffer.length) return byteAt(stream.buffer, stream.position);
-    stream.state |= IO_STATE.eofbit;
-    return END_OF_INPUT;
-  });
-  input(
-    'ignore',
-    [LONG, INT],
-    'self',
-    (stream, [count, delimiter], frame) => {
-      if (!unformattedSentry(stream)) return;
-      const limit = count === undefined ? 1n : BigInt(count as bigint);
-      const separator = delimiter === undefined ? END_OF_INPUT : asNumber(delimiter);
-      while (limit === UNLIMITED || BigInt(stream.extracted) < limit) {
-        if (stream.extracted % 64 === 0) frame.runtime.spend();
-        const byte = takeByte(stream);
-        if (byte === undefined || byte === separator) break;
-      }
-    },
-    { optional: 2 }
-  );
-  input('read', [charPointer, LONG], 'self', (stream, [pointer, count], frame) => {
-    if (!unformattedSentry(stream)) return;
-    for (let index = 0; index < Number(count); index++) {
-      if (index % 64 === 0) frame.runtime.spend();
-      const byte = takeByte(stream);
-      if (byte === undefined) {
-        stream.state |= IO_STATE.failbit;
-        return;
-      }
-      (pointer as Ptr).offset(index).write(signedChar(byte));
-    }
-  });
-  input('unget', [], 'self', stepBack);
-  input('putback', [CHAR], 'self', stepBack);
-  input('gcount', [], LONG, (stream) => BigInt(stream.extracted), { isConst: true });
-  input('tellg', [], LONG, (stream, _args, frame) =>
-    stream.failed || !seeks(stream, frame) ? -1n : BigInt(stream.position)
-  );
-  input('seekg', [LONG], 'self', (stream, [position], frame) => {
-    stream.state &= ~IO_STATE.eofbit;
-    if (stream.failed) return;
-    if (!seeks(stream, frame)) {
+    if (byte === undefined || byte === separator) break;
+  }
+};
+
+const read: InputOperation = (stream, [pointer, count], frame) => {
+  if (!unformattedSentry(stream)) return;
+  for (let index = 0; index < Number(count); index++) {
+    if (index % 64 === 0) frame.runtime.spend();
+    const byte = takeByte(stream);
+    if (byte === undefined) {
       stream.state |= IO_STATE.failbit;
       return;
     }
-    const target = Number(position);
-    if (target < 0 || target > stream.buffer.length) stream.state |= IO_STATE.failbit;
-    else stream.position = target;
-  });
-}
+    (pointer as Ptr).offset(index).write(signedChar(byte));
+  }
+};
+
+const seekg: InputOperation = (stream, [position], frame) => {
+  stream.state &= ~IO_STATE.eofbit;
+  if (stream.failed) return;
+  const target = Number(position);
+  if (!seeks(stream, frame) || target < 0 || target > stream.buffer.length) stream.state |= IO_STATE.failbit;
+  else stream.position = target;
+};
 
 /** Whether an unformatted input may read the stream, setting `failbit` when it may not. */
 function unformattedSentry(stream: StreamValue): boolean {

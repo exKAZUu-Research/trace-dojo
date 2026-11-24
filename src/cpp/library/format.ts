@@ -1,6 +1,6 @@
 import { formatFixed, formatGeneral, formatHex, formatScientific } from '../../c/library/floatFormat';
 import { byteArray } from '../bytes';
-import type { ExpressionCompiler } from '../expressionCompiler';
+import type { Expr } from '../expr';
 import { floatSignBit } from '../floatSign';
 import { utf8 } from '../literals';
 import type { Frame } from '../runtime';
@@ -57,47 +57,7 @@ class FormatError extends Error {}
 
 /** `std::format`, `std::vformat`, `std::make_format_args`, and `std::formatted_size` of `<format>`. */
 export function formatFunctions(library: Library): { functions: Map<string, FunctionInfo[]>; formatArgs: ClassInfo } {
-  const compiler = (): ExpressionCompiler => library.compiler;
-  const format = generic('format', (args) => {
-    const [formatString, ...values] = args;
-    if (!formatString) return;
-    const kinds = values.map((value) => argumentKind(value.type));
-    if (formatString.literalBytes === undefined) {
-      if (!isStringType(formatString.type)) return;
-      return compiler().error(
-        formatString.row,
-        'std::format の書式には文字列リテラルを書いてください（実行時に決まる書式は std::vformat に渡してください）。'
-      );
-    }
-    const unformattable = values.find((value) => argumentKind(value.type) === undefined);
-    if (unformattable)
-      return compiler().unsupported(
-        formatString.row,
-        `${typeName(unformattable.type)} 型の値の std::format（std::formatter の特殊化）`
-      );
-    let pieces: FormatPiece[];
-    try {
-      pieces = parseFormat(formatString.literalBytes, kinds as ArgumentKind[]);
-    } catch (error) {
-      if (error instanceof FormatError)
-        return compiler().error(formatString.row, `std::format の書式が正しくありません: ${error.message}`);
-      throw error;
-    }
-    const readers = values.map((value) => argumentReader(value.type));
-    return native(
-      'format',
-      [CONST_CHAR_PTR, ...values.map((value) => constRef(unqualified(nonReference(value.type))))],
-      library.stringType,
-      ([, ...locations], { frame }) => {
-        const formatted = writeFormat(
-          pieces,
-          locations.map((location, index) => (readers[index] as Reader)(location as Ptr, frame))
-        );
-        frame.runtime.spend(Math.ceil(formatted.length / 64));
-        return makeString(frame, formatted);
-      }
-    );
-  });
+  const format = generic('format', (args) => formatInstance(library, args));
   const formattedSize = generic('formatted_size', (args) => {
     const instance = format.instantiate?.(args, undefined);
     if (!instance?.native) return;
@@ -106,19 +66,72 @@ export function formatFunctions(library: Library): { functions: Map<string, Func
       'formatted_size',
       instance.params.map((param) => param.type),
       LONG,
-      (values, context) => {
-        const text = run(values, context) as StringValue;
-        return BigInt(text.bytes.length);
-      }
+      (values, context) => BigInt((run(values, context) as StringValue).bytes.length)
     );
   });
-  const formatArgs = new ClassInfo('std::format_args', 'class');
-  formatArgs.isComplete = true;
-  formatArgs.library = { kind: 'format_args', args: [], size: 16, align: 8 };
-  formatArgs.operations = {
+  const formatArgs = formatArgsClass();
+  return {
+    functions: new Map([
+      ['format', [format]],
+      ['formatted_size', [formattedSize]],
+      ['make_format_args', [makeFormatArgs(formatArgs)]],
+      ['vformat', [vformat(library, formatArgs)]],
+    ]),
+    formatArgs,
+  };
+}
+
+/** The `std::format` for a call's arguments, whose literal format string it checks as it compiles. */
+function formatInstance(library: Library, args: readonly Expr[]): FunctionInfo | undefined {
+  const compiler = library.compiler;
+  const [formatString, ...values] = args;
+  if (!formatString) return;
+  if (formatString.literalBytes === undefined) {
+    if (!isStringType(formatString.type)) return;
+    return compiler.error(
+      formatString.row,
+      'std::format の書式には文字列リテラルを書いてください（実行時に決まる書式は std::vformat に渡してください）。'
+    );
+  }
+  const unformattable = values.find((value) => argumentKind(value.type) === undefined);
+  if (unformattable)
+    return compiler.unsupported(
+      formatString.row,
+      `${typeName(unformattable.type)} 型の値の std::format（std::formatter の特殊化）`
+    );
+  let pieces: FormatPiece[];
+  try {
+    pieces = parseFormat(
+      formatString.literalBytes,
+      values.map((value) => argumentKind(value.type) as ArgumentKind)
+    );
+  } catch (error) {
+    if (error instanceof FormatError)
+      return compiler.error(formatString.row, `std::format の書式が正しくありません: ${error.message}`);
+    throw error;
+  }
+  const read = argumentsReader(values);
+  return native(
+    'format',
+    [CONST_CHAR_PTR, ...argumentParams(values)],
+    library.stringType,
+    ([, ...locations], { frame }) => {
+      const formatted = writeFormat(pieces, read(locations, frame));
+      frame.runtime.spend(Math.ceil(formatted.length / 64));
+      return makeString(frame, formatted);
+    }
+  );
+}
+
+/** `std::format_args`, which holds what `std::make_format_args` read. */
+function formatArgsClass(): ClassInfo {
+  const cls = new ClassInfo('std::format_args', 'class');
+  cls.isComplete = true;
+  cls.library = { kind: 'format_args', args: [], size: 16, align: 8 };
+  cls.operations = {
     copyIsNoexcept: true,
     copy: (_frame, source) => {
-      const copy = new CObject(formatArgs, []);
+      const copy = new CObject(cls, []);
       storedArguments.set(copy, storedArguments.get(source as CObject) ?? []);
       return copy;
     },
@@ -126,56 +139,58 @@ export function formatFunctions(library: Library): { functions: Map<string, Func
       storedArguments.set(target as CObject, storedArguments.get(source as CObject) ?? []);
     },
   };
-  const formatArgsType = classType(formatArgs);
-  const makeFormatArgs = generic('make_format_args', (args) => {
-    const kinds = args.map((value) => argumentKind(value.type));
-    if (kinds.includes(undefined)) return;
-    const readers = args.map((value) => argumentReader(value.type));
-    return native(
-      'make_format_args',
-      args.map((value) => constRef(unqualified(nonReference(value.type)))),
-      formatArgsType,
-      (locations, { frame }) => {
-        const object = new CObject(formatArgs, []);
-        storedArguments.set(
-          object,
-          locations.map((location, index) => (readers[index] as Reader)(location as Ptr, frame))
-        );
-        return object;
-      }
-    );
+  return cls;
+}
+
+function makeFormatArgs(formatArgs: ClassInfo): FunctionInfo {
+  return generic('make_format_args', (args) => {
+    if (args.some((value) => argumentKind(value.type) === undefined)) return;
+    const read = argumentsReader(args);
+    return native('make_format_args', argumentParams(args), classType(formatArgs), (locations, { frame }) => {
+      const object = new CObject(formatArgs, []);
+      storedArguments.set(object, read(locations, frame));
+      return object;
+    });
   });
-  const vformatFunction = native(
+}
+
+/** `std::vformat`, which reads its format string when it runs, throwing `std::format_error` for a wrong one. */
+function vformat(library: Library, formatArgs: ClassInfo): FunctionInfo {
+  const run = native(
     'vformat',
-    [constRef(library.stringType), constRef(formatArgsType)],
+    [constRef(library.stringType), constRef(classType(formatArgs))],
     library.stringType,
     ([text, store], { frame }) => {
       const bytes = stringBytes((text as Ptr).read(), frame);
       const values = storedArguments.get((store as Ptr).read() as CObject) ?? [];
-      let pieces: FormatPiece[];
       try {
-        pieces = parseFormat(
-          bytes,
-          values.map((value) => value.kind)
+        return makeString(
+          frame,
+          writeFormat(
+            parseFormat(
+              bytes,
+              values.map((value) => value.kind)
+            ),
+            values
+          )
         );
       } catch (error) {
         if (error instanceof FormatError) return throwLibrary(frame, library.exception('format_error'), error.message);
         throw error;
       }
-      return makeString(frame, writeFormat(pieces, values));
     }
   );
   // libc++ declares `std::vformat` as a function template, for its overloads that take a locale.
-  const vformat = generic('vformat', (args) => (args.length === 2 ? vformatFunction : undefined));
-  return {
-    functions: new Map([
-      ['format', [format]],
-      ['formatted_size', [formattedSize]],
-      ['make_format_args', [makeFormatArgs]],
-      ['vformat', [vformat]],
-    ]),
-    formatArgs,
-  };
+  return generic('vformat', (args) => (args.length === 2 ? run : undefined));
+}
+
+function argumentParams(values: readonly Expr[]): Type[] {
+  return values.map((value) => constRef(unqualified(nonReference(value.type))));
+}
+
+function argumentsReader(values: readonly Expr[]): (locations: unknown[], frame: Frame) => FormatArgument[] {
+  const readers = values.map((value) => argumentReader(value.type));
+  return (locations, frame) => locations.map((location, index) => (readers[index] as Reader)(location as Ptr, frame));
 }
 
 type Reader = (location: Ptr, frame: Frame) => FormatArgument;
@@ -258,62 +273,63 @@ function stringBytes(value: Value | Ptr, frame: Frame): string {
 // Parsing ----------------------------------------------------------------------------------------------------------
 
 /** Parses a format string, checking each field against the argument it formats. */
-// code-gauge-allow functionCognitiveComplexity -- The parser walks the string once, handling escapes and fields.
 function parseFormat(text: string, kinds: readonly ArgumentKind[]): FormatPiece[] {
   const pieces: FormatPiece[] = [];
+  const ids = new ArgumentIds(kinds);
   let literal = '';
-  let next = 0;
-  let isManual: boolean | undefined;
-  const argumentId = (written: string): number => {
-    if (written === '') {
-      if (isManual) throw new FormatError('引数の番号を書く場合と書かない場合を混ぜることはできません。');
-      isManual = false;
-      return next++;
-    }
-    if (!/^\d+$/.test(written)) throw new FormatError(`引数の番号 ${written} が正しくありません。`);
-    if (isManual === false) throw new FormatError('引数の番号を書く場合と書かない場合を混ぜることはできません。');
-    isManual = true;
-    return Number(written);
-  };
-  const checkArgument = (index: number): ArgumentKind => {
-    const kind = kinds[index];
-    if (kind === undefined) throw new FormatError(`${index} 番の引数がありません。`);
-    return kind;
-  };
   for (let index = 0; index < text.length; index++) {
-    const char = text[index];
-    if (char === '}') {
-      if (text[index + 1] !== '}') throw new FormatError('} は }} と書いてください。');
-      literal += '}';
-      index++;
-      continue;
-    }
-    if (char !== '{') {
+    const char = text[index] as string;
+    const isEscape = (char === '{' || char === '}') && text[index + 1] === char;
+    if (char === '}' && !isEscape) throw new FormatError('} は }} と書いてください。');
+    if (char !== '{' || isEscape) {
       literal += char;
-      continue;
-    }
-    if (text[index + 1] === '{') {
-      literal += '{';
-      index++;
+      if (isEscape) index++;
       continue;
     }
     const close = findFieldEnd(text, index + 1);
-    const field = text.slice(index + 1, close);
-    const colon = field.indexOf(':');
-    const id = argumentId(colon === -1 ? field : field.slice(0, colon));
-    const kind = checkArgument(id);
-    const spec = parseSpec(colon === -1 ? '' : field.slice(colon + 1), kind, (written) => {
-      const nested = argumentId(written);
-      if (checkArgument(nested) !== 'integer') throw new FormatError('幅や精度の引数は整数にしてください。');
-      return nested;
-    });
     if (literal) pieces.push(literal);
     literal = '';
-    pieces.push({ arg: id, spec });
+    pieces.push(parseField(text.slice(index + 1, close), ids));
     index = close;
   }
   if (literal) pieces.push(literal);
   return pieces;
+}
+
+/** A replacement field (`0:>8`): the argument it formats and how. */
+function parseField(field: string, ids: ArgumentIds): FormatPiece {
+  const colon = field.indexOf(':');
+  const id = ids.next(colon === -1 ? field : field.slice(0, colon));
+  const spec = parseSpec(colon === -1 ? '' : field.slice(colon + 1), ids.kindOf(id), (written) => {
+    const nested = ids.next(written);
+    if (ids.kindOf(nested) !== 'integer') throw new FormatError('幅や精度の引数は整数にしてください。');
+    return nested;
+  });
+  return { arg: id, spec };
+}
+
+/** The arguments the fields of a format string name, all by automatic numbering or all by their numbers. */
+class ArgumentIds {
+  private following = 0;
+  private isManual: boolean | undefined;
+
+  constructor(private readonly kinds: readonly ArgumentKind[]) {}
+
+  next(written: string): number {
+    const isManual = written !== '';
+    if (this.isManual === !isManual)
+      throw new FormatError('引数の番号を書く場合と書かない場合を混ぜることはできません。');
+    this.isManual = isManual;
+    if (!isManual) return this.following++;
+    if (!/^\d+$/.test(written)) throw new FormatError(`引数の番号 ${written} が正しくありません。`);
+    return Number(written);
+  }
+
+  kindOf(index: number): ArgumentKind {
+    const kind = this.kinds[index];
+    if (kind === undefined) throw new FormatError(`${index} 番の引数がありません。`);
+    return kind;
+  }
 }
 
 function findFieldEnd(text: string, start: number): number {
@@ -337,60 +353,82 @@ const TYPES: Record<ArgumentKind, string> = {
   pointer: 'p',
 };
 
-// code-gauge-allow functionCognitiveComplexity -- The specification's parts follow one another in a fixed order.
 function parseSpec(written: string, kind: ArgumentKind, nestedId: (written: string) => number): FormatSpec {
-  const characters = [...decode(written)];
-  let at = 0;
-  const spec: FormatSpec = { fill: ' ', sign: '-', alternate: false, zero: false, type: '' };
-  if (isAlign(characters[1])) {
-    if (characters[0] === '{' || characters[0] === '}') throw new FormatError('埋める文字に { や } は使えません。');
-    spec.fill = characters[0] as string;
-    spec.align = characters[1];
-    at = 2;
-  } else if (isAlign(characters[0])) {
-    spec.align = characters[0];
-    at = 1;
-  }
-  const char = (): string | undefined => characters[at];
-  if (char() === '+' || char() === '-' || char() === ' ') spec.sign = characters[at++] as FormatSpec['sign'];
-  if (char() === '#') {
-    spec.alternate = true;
-    at++;
-  }
-  if (char() === '0') {
-    spec.zero = true;
-    at++;
-  }
-  const number = (): number | { arg: number } | undefined => {
-    if (char() === '{') {
-      const close = characters.indexOf('}', at);
-      if (close === -1) throw new FormatError('{ に対応する } がありません。');
-      const id = nestedId(characters.slice(at + 1, close).join(''));
-      at = close + 1;
-      return { arg: id };
-    }
-    let digits = '';
-    while (char() !== undefined && /\d/.test(char() as string)) digits += characters[at++];
-    return digits === '' ? undefined : Number(digits);
-  };
-  spec.width = number();
-  if (char() === '.') {
-    at++;
-    spec.precision = number();
+  const reader = new SpecReader([...decode(written)], nestedId);
+  const spec: FormatSpec = { fill: ' ', sign: '-', alternate: false, zero: false, type: '', ...reader.fillAndAlign() };
+  const sign = reader.take(['+', '-', ' ']);
+  if (sign) spec.sign = sign as FormatSpec['sign'];
+  spec.alternate = reader.take(['#']) !== undefined;
+  spec.zero = reader.take(['0']) !== undefined;
+  spec.width = reader.count();
+  if (reader.take(['.'])) {
+    spec.precision = reader.count();
     if (spec.precision === undefined) throw new FormatError('. の後に精度を書いてください。');
     if (kind !== 'float' && kind !== 'string') throw new FormatError('精度は浮動小数点数と文字列にしか書けません。');
   }
-  if (char() === 'L') at++;
-  if (char() !== undefined) spec.type = characters[at++] as string;
-  if (at < characters.length) throw new FormatError(`書式 ${written} が正しくありません。`);
+  reader.take(['L']);
+  spec.type = reader.rest();
+  if (spec.type.length > 1) throw new FormatError(`書式 ${written} が正しくありません。`);
   if (spec.type && !TYPES[kind].includes(spec.type)) throw new FormatError(`型 ${spec.type} はこの引数に使えません。`);
-  const asString =
-    kind === 'string' ||
-    (kind === 'char' && (spec.type === '' || spec.type === 'c')) ||
-    (kind === 'bool' && (spec.type === '' || spec.type === 's'));
-  if (asString && (spec.sign !== '-' || spec.alternate || spec.zero))
+  if (writesText(kind, spec.type) && (spec.sign !== '-' || spec.alternate || spec.zero))
     throw new FormatError('符号・#・0 は数として書く値にしか使えません。');
   return spec;
+}
+
+/** Whether a field writes its argument as text: a string, or a character or a Boolean without an integer type. */
+function writesText(kind: ArgumentKind, type: string): boolean {
+  if (kind === 'string') return true;
+  if (kind === 'char') return type === '' || type === 'c';
+  return kind === 'bool' && (type === '' || type === 's');
+}
+
+/** Reads a format specification's parts in their order. */
+class SpecReader {
+  private at = 0;
+
+  constructor(
+    private readonly characters: readonly string[],
+    private readonly nestedId: (written: string) => number
+  ) {}
+
+  fillAndAlign(): Pick<FormatSpec, 'fill' | 'align'> | undefined {
+    const [first, second] = this.characters;
+    if (isAlign(second)) {
+      if (first === '{' || first === '}') throw new FormatError('埋める文字に { や } は使えません。');
+      this.at = 2;
+      return { fill: first as string, align: second };
+    }
+    if (!isAlign(first)) return undefined;
+    this.at = 1;
+    return { fill: ' ', align: first };
+  }
+
+  take(options: readonly string[]): string | undefined {
+    const char = this.characters[this.at];
+    if (char === undefined || !options.includes(char)) return undefined;
+    this.at++;
+    return char;
+  }
+
+  /** A width or a precision: digits, or a nested field (`{}`) that names an argument. */
+  count(): number | { arg: number } | undefined {
+    if (this.characters[this.at] === '{') {
+      const close = this.characters.indexOf('}', this.at);
+      if (close === -1) throw new FormatError('{ に対応する } がありません。');
+      const id = this.nestedId(this.characters.slice(this.at + 1, close).join(''));
+      this.at = close + 1;
+      return { arg: id };
+    }
+    let digits = '';
+    while (/^\d$/.test(this.characters[this.at] ?? '')) digits += this.characters[this.at++];
+    return digits === '' ? undefined : Number(digits);
+  }
+
+  rest(): string {
+    const rest = this.characters.slice(this.at).join('');
+    this.at = this.characters.length;
+    return rest;
+  }
 }
 
 function isAlign(char: string | undefined): char is '<' | '>' | '^' {
@@ -420,53 +458,70 @@ function formatField(spec: FormatSpec, arg: FormatArgument, args: readonly Forma
   const width = resolveCount(spec.width, args) ?? 0;
   const precision = resolveCount(spec.precision, args);
   const { kind } = arg;
-  if (
-    kind === 'string' ||
-    (kind === 'char' && (spec.type === '' || spec.type === 'c')) ||
-    (kind === 'bool' && (spec.type === '' || spec.type === 's'))
-  ) {
-    let text: string;
-    if (kind === 'string') text = arg.value as string;
-    else if (kind === 'bool') text = arg.value ? 'true' : 'false';
-    else text = String.fromCodePoint(Number(BigInt.asUintN(8, arg.value as bigint)));
-    if (precision !== undefined) text = truncateColumns(text, precision);
-    return pad(text, width, spec.align ?? '<', spec.fill);
+  if (writesText(kind, spec.type)) {
+    const text = textOf(arg);
+    return pad(precision === undefined ? text : truncateColumns(text, precision), width, spec.align ?? '<', spec.fill);
   }
   if (kind === 'pointer') return pad(pointerText(arg.value as Ptr), width, spec.align ?? '>', spec.fill);
-  let sign = '';
-  let prefix = '';
-  let digits: string;
-  if (kind === 'float') {
-    const value = arg.value as number;
-    sign = arg.isNegative ? '-' : spec.sign === '-' ? '' : spec.sign;
-    digits = floatDigits(Math.abs(value), spec, precision, arg.isFloat32 === true);
-    if (!Number.isFinite(value)) {
-      return pad(sign + digits, width, spec.align ?? '>', spec.fill);
-    }
-  } else {
-    let value = kind === 'bool' ? (arg.value ? 1n : 0n) : (arg.value as bigint);
-    if (kind === 'char' && value < 0n) value = BigInt.asUintN(8, value);
-    if (spec.type === 'c') {
-      if (value < 0n || value > 255n) throw new FormatError('文字として書ける値ではありません。');
-      return pad(String.fromCodePoint(Number(value)), width, spec.align ?? '<', spec.fill);
-    }
-    const negative = value < 0n;
-    const magnitude = negative ? -value : value;
-    sign = negative ? '-' : spec.sign === '-' ? '' : spec.sign;
-    const base = { b: 2, B: 2, o: 8, x: 16, X: 16 }[spec.type] ?? 10;
-    digits = magnitude.toString(base);
-    if (spec.type === 'X') digits = digits.toUpperCase();
-    if (spec.alternate) {
-      if (spec.type === 'b' || spec.type === 'B') prefix = `0${spec.type}`;
-      else if (spec.type === 'x' || spec.type === 'X') prefix = `0${spec.type}`;
-      else if (spec.type === 'o' && magnitude !== 0n) prefix = '0';
-    }
-  }
-  if (spec.zero && spec.align === undefined) {
+  const number = kind === 'float' ? floatParts(spec, arg, precision) : integerParts(spec, arg);
+  if (typeof number === 'string') return pad(number, width, spec.align ?? '<', spec.fill);
+  const { sign, prefix, digits, isFinite } = number;
+  // The `0` option pads after the sign and the prefix, unless an alignment is given or the number is not finite.
+  if (spec.zero && spec.align === undefined && isFinite) {
     const length = columns(sign + prefix + digits);
     return sign + prefix + '0'.repeat(Math.max(0, width - length)) + digits;
   }
   return pad(sign + prefix + digits, width, spec.align ?? '>', spec.fill);
+}
+
+/** The text of a string, a character, or a Boolean that a field writes as text. */
+function textOf(arg: FormatArgument): string {
+  if (arg.kind === 'string') return arg.value as string;
+  if (arg.kind === 'bool') return arg.value ? 'true' : 'false';
+  return String.fromCodePoint(Number(BigInt.asUintN(8, arg.value as bigint)));
+}
+
+interface NumberParts {
+  sign: string;
+  prefix: string;
+  digits: string;
+  isFinite: boolean;
+}
+
+function signOf(isNegative: boolean, spec: FormatSpec): string {
+  if (isNegative) return '-';
+  return spec.sign === '-' ? '' : spec.sign;
+}
+
+function floatParts(spec: FormatSpec, arg: FormatArgument, precision: number | undefined): NumberParts {
+  const value = arg.value as number;
+  return {
+    sign: signOf(arg.isNegative === true, spec),
+    prefix: '',
+    digits: floatDigits(Math.abs(value), spec, precision, arg.isFloat32 === true),
+    isFinite: Number.isFinite(value),
+  };
+}
+
+/** The parts of an integer, a character, or a Boolean written as a number, or the character the `c` type writes. */
+function integerParts(spec: FormatSpec, arg: FormatArgument): NumberParts | string {
+  let value = arg.kind === 'bool' ? (arg.value ? 1n : 0n) : (arg.value as bigint);
+  if (arg.kind === 'char' && value < 0n) value = BigInt.asUintN(8, value);
+  if (spec.type === 'c') {
+    if (value < 0n || value > 255n) throw new FormatError('文字として書ける値ではありません。');
+    return String.fromCodePoint(Number(value));
+  }
+  const magnitude = value < 0n ? -value : value;
+  const base = { b: 2, B: 2, o: 8, x: 16, X: 16 }[spec.type] ?? 10;
+  const digits = magnitude.toString(base);
+  let prefix = '';
+  if (spec.alternate && base !== 10) prefix = base === 8 ? (magnitude === 0n ? '' : '0') : `0${spec.type}`;
+  return {
+    sign: signOf(value < 0n, spec),
+    prefix,
+    digits: spec.type === 'X' ? digits.toUpperCase() : digits,
+    isFinite: true,
+  };
 }
 
 // code-gauge-allow functionCognitiveComplexity -- One branch per presentation type of a floating-point number.
