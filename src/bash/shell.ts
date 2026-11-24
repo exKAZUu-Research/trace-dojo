@@ -447,9 +447,18 @@ export class Shell implements ArithmeticHost {
             this.runtime.spend();
             this.currentRow = statement.row - this.lineShift;
             // A name reference as the loop variable refers to each word in turn, as Bash's `for` makes it.
-            const reference = this.findOwnVariable(statement.variable);
-            if (reference?.attributes.has('n')) reference.value = { kind: 'scalar', value };
-            else this.assignScalar(statement.variable, value);
+            const reference = this.findVariable(statement.variable, false);
+            if (reference?.attributes.has('n')) {
+              if (reference.attributes.has('r')) {
+                this.reportError(`${statement.variable}: readonly variable`);
+                last.status = 1;
+                return;
+              }
+              reference.value = { kind: 'scalar', value };
+            } else if (!this.assignScalar(statement.variable, value)) {
+              last.status = 1;
+              return;
+            }
             this.runtime.steps.stepBinding(statement.row, !bindsObjects);
             if (this.iterate(statement.body, last) === 'stop') return;
           }
