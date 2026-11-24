@@ -142,7 +142,9 @@ defineNatives({
   'System.Object.MemberwiseClone': (call, receiver) => {
     if (!(receiver instanceof CsBox)) return evaluatorOf(call).cloneObject(receiver as CsObject);
     call.frame.runtime.allocateSlots(1 + structFieldSlots(receiver.value));
-    return new CsBox(receiver.type, copyValue(receiver.value));
+    const copy = new CsBox(receiver.type, copyValue(receiver.value));
+    copy.isCharged = true;
+    return copy;
   },
   // A call through `object` passes the struct in its box, since ValueType is a class.
   // An enum reaches it in a box, which compares as Object.Equals does a boxed value.

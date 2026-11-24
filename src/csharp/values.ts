@@ -92,6 +92,8 @@ export class CsStruct {
 export class CsBox {
   /** The hash code `RuntimeHelpers.GetHashCode` gave it, which .NET gives an object when first asked. */
   hashCode?: number;
+  /** Whether storage has been charged for the struct it holds, which every later reference to it shares. */
+  isCharged = false;
 
   constructor(
     readonly type: Type,
@@ -149,13 +151,17 @@ export interface VariableReference {
   set(value: Value): void;
 }
 
-/** Copies a struct, as reading a variable of a value type into another does. */
 /**
- * The slots a struct value's fields hold beyond the one slot holding the value, nested structs included, which storage
- * keeping the value reachable is charged for; 0 for other values.
+ * The slots that storage newly keeping a value is charged for beyond the slot holding it: a struct's fields, nested
+ * structs included, since storing a struct copies them, and a box's struct the first time any storage keeps the box,
+ * since every reference shares it; 0 for other values.
  */
 export function structFieldSlots(value: Value): number {
-  if (value instanceof CsBox) return structFieldSlots(value.value);
+  if (value instanceof CsBox) {
+    if (value.isCharged) return 0;
+    value.isCharged = true;
+    return structFieldSlots(value.value);
+  }
   if (!(value instanceof CsStruct)) return 0;
   let count = value.fields.length;
   for (const field of value.fields) count += structFieldSlots(field);
@@ -167,6 +173,7 @@ export function storeGrowth(previous: Value, next: Value): number {
   return Math.max(0, structFieldSlots(next) - structFieldSlots(previous));
 }
 
+/** Copies a struct, as reading a variable of a value type into another does. */
 export function copyValue<T extends Value | undefined>(value: T): T {
   return value instanceof CsStruct ? (value.clone() as T) : value;
 }
