@@ -15,7 +15,7 @@ import {
   shortestSuffixMatch,
 } from './pattern';
 import { doubleQuote, quoteReusable } from './quoting';
-import { ExitSignal } from './runtime';
+import { DiscardSignal, ExitSignal } from './runtime';
 import type { Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
 import { ATTRIBUTE_ORDER } from './variables';
@@ -178,7 +178,7 @@ function defaultValue(
   }
   const assigned =
     subscript === undefined ? shell.assignScalar(name, text) : shell.assignElement(name, subscript, text, false);
-  if (!assigned) shell.discard(`${name}: cannot assign`);
+  if (!assigned) throw new DiscardSignal();
   return expander.valuePieces({ kind: 'scalar', value: shell.lastStored }, inDouble);
 }
 
