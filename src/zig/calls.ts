@@ -449,6 +449,9 @@ export abstract class CallCompiler extends VectorCompiler {
               : declared
             : this.compileType(syntax.returnType);
         if (!syntax.inferredErrorSet) return { returnType: payload, inferredErrors: undefined };
+        // A function that is not generic has one inferred error set, which its type and its body's analysis share.
+        if (declared && declared !== ANYTYPE && declared.kind === 'error_union' && declared.errorSet.resolved === false)
+          return { returnType: declared, inferredErrors: declared.errorSet };
         const errors: ErrorSetType = {
           kind: 'error_set',
           names: new Set(),

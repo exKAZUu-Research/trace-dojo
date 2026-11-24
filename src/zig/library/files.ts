@@ -6,6 +6,7 @@ import { addDecls, runtime, type SemaApi } from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
+  type Decl,
   type EnumType,
   errorSetOf,
   errorUnionOf,
@@ -342,6 +343,59 @@ pub const File = struct {
     };
 };
 
+pub fn Future(Result: type) type {
+    return struct {
+        result: Result,
+
+        pub fn cancel(f: *@This(), io: Io) Result {
+            _ = io;
+            return f.result;
+        }
+
+        pub fn await(f: *@This(), io: Io) Result {
+            _ = io;
+            return f.result;
+        }
+    };
+}
+
+/// Runs the function to its end when it is called, so that what runs asynchronously runs in the order it starts.
+pub fn async(io: Io, function: anytype, args: anytype) Future(@typeInfo(@TypeOf(function)).@"fn".return_type.?) {
+    _ = io;
+    return .{ .result = @call(.auto, function, args) };
+}
+
+pub fn concurrent(io: Io, function: anytype, args: anytype) error{ConcurrencyUnavailable}!Future(@typeInfo(@TypeOf(function)).@"fn".return_type.?) {
+    _ = io;
+    return .{ .result = @call(.auto, function, args) };
+}
+
+pub const Group = struct {
+    state: usize,
+
+    pub const init: Group = .{ .state = 0 };
+
+    pub fn async(g: *Group, io: Io, function: anytype, args: anytype) void {
+        _ = g;
+        _ = io;
+        _ = @as(error{Canceled}!void, @call(.auto, function, args)) catch {};
+    }
+
+    pub fn concurrent(g: *Group, io: Io, function: anytype, args: anytype) error{ConcurrencyUnavailable}!void {
+        g.async(io, function, args);
+    }
+
+    pub fn await(g: *Group, io: Io) error{Canceled}!void {
+        _ = g;
+        _ = io;
+    }
+
+    pub fn cancel(g: *Group, io: Io) void {
+        _ = g;
+        _ = io;
+    }
+};
+
 /// The errors that the virtual file system gives, which each function below may return.
 pub const FsError = error{ FileNotFound, PathAlreadyExists, IsDir, NotDir, DirNotEmpty, BadPathName };
 
@@ -535,6 +589,13 @@ export function filesNamespace(): StructType {
   for (const [name, member] of Object.entries(nativeMembers(types.file))) native(name, member);
   io = { kind: 'struct', isTuple: false, namespace, layout: 'auto', fields: [] };
   return io;
+}
+
+/** A declaration of the ported library by its name, such as the function `async`. */
+export function filesDecl(name: string): Decl {
+  const decl = filesNamespace().namespace.decls.get(name);
+  if (!decl) throw new Error(`Io.${name} is missing`);
+  return decl;
 }
 
 /** A declaration of the ported library, such as `Reader` or `File.Reader`, as a type. */

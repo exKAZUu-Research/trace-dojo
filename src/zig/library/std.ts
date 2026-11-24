@@ -24,7 +24,7 @@ import {
 } from '../types';
 import { decodeUtf8 } from '../utf8';
 import { ErrorValue, NativeHandle, Pointer, type Slice, type Value, ZArray, ZStruct } from '../values';
-import { configureFiles, fileDescriptor, filesType, openFileLength } from './files';
+import { configureFiles, fileDescriptor, filesDecl, filesType, openFileLength } from './files';
 import { ALLOCATOR, allocatorMembers, ARENA_ALLOCATOR, arenaValue, heapNamespace } from './heap';
 import { langNamespace } from './lang';
 import {
@@ -334,6 +334,8 @@ function addIoMembers(): void {
     [IO, 'Reader', 'Reader'],
     [IO, 'Dir', 'Dir'],
     [IO, 'Limit', 'Limit'],
+    [IO, 'Future', 'Future'],
+    [IO, 'Group', 'Group'],
     [FILE, 'Reader', 'File.Reader'],
     [FILE, 'OpenError', 'File.OpenError'],
     [FILE, 'Kind', 'File.Kind'],
@@ -346,6 +348,17 @@ function addIoMembers(): void {
         throw new Error(`Io.${path} needs the compiler`);
       },
       resolveWith: (sema: SemaApi, span: Span) => known(TYPE, filesType(sema, path, span), span),
+    });
+  }
+  // `io.async(...)` and `io.concurrent(...)` call functions that the library declares in Zig.
+  for (const name of ['async', 'concurrent']) {
+    IO.namespace.decls.set(name, {
+      kind: 'native',
+      name,
+      resolve: () => {
+        throw new Error(`Io.${name} needs the compiler`);
+      },
+      resolveWith: (sema: SemaApi, span: Span) => sema.resolveDecl(filesDecl(name), span),
     });
   }
   addWriterMembers();
