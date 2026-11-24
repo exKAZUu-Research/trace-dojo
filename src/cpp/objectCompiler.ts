@@ -952,12 +952,19 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return (frame: Frame, args: unknown[], receiver?: Ptr): Value | Ptr => {
       const location = fn.isStatic ? undefined : receiver;
       let callee = fn;
+      let self = location;
       if (key !== undefined && location) {
         const target = location.read();
-        if (target instanceof CObject) callee = target.cls.virtuals.get(key) ?? fn;
+        if (target instanceof CObject) {
+          // A secondary base's subobject calls the final overrider of the object it is a base of.
+          const owner = outermostOwner(target);
+          callee = owner.cls.virtuals.get(key) ?? fn;
+          if (owner !== target && callee.owner && owner.cls.isDerivedFrom(callee.owner))
+            self = owner.receiver(callee.owner);
+        }
         if (callee.isPure) throw new CppRuntimeError('custom', `純粋仮想関数 ${callee.displayName} を呼び出しました。`);
       }
-      const result = invoke(frame, callee, args, location, row, true);
+      const result = invoke(frame, callee, args, self, row, true);
       if (resultClass && callee !== fn && !sameType(callee.ret, fn.ret)) return (result as Ptr).forClass(resultClass);
       return result;
     };
@@ -1296,4 +1303,11 @@ function copyAs(
   const operations = cls.operations;
   if (!operations) throw new Error(`${cls.name} cannot be copied`);
   return operations.copy(frame, source, destination, sourceIsConst);
+}
+
+/** The complete object that an object is a secondary base subobject of, through every level, or the object itself. */
+export function outermostOwner(object: CObject): CObject {
+  let owner = object;
+  while (owner.secondaryOwner && owner.secondaryOwner.liveness === Liveness.Alive) owner = owner.secondaryOwner;
+  return owner;
 }

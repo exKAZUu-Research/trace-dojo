@@ -354,16 +354,29 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const [declarator] = declarators;
     const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
     if (!value) return this.specifiedType(node, true);
-    const args =
-      value.type === 'argument_list' || value.type === 'initializer_list'
-        ? expandPacks(this, value.children).map((arg) => this.argument(arg))
-        : [this.compileExpression(value)];
+    const nodes =
+      value.type === 'argument_list' || value.type === 'initializer_list' ? expandPacks(this, value.children) : [value];
+    const args = nodes.map((arg) => this.argument(arg));
+    this.deducingLambdas = new Map();
+    for (const [index, arg] of nodes.entries())
+      if (arg.type === 'lambda_expression') this.deducingLambdas.set(arg, args[index]);
     return this.withDeducedClass(typeNode, args, () => this.specifiedType(node, true));
   }
 
   private localDeclaration(
     node: Syntax,
     recordStep = true
+  ): { exec: Exec; recordsStep: boolean; enter?: Exec | false } {
+    try {
+      return this.localDeclarationOf(node, recordStep);
+    } finally {
+      this.deducingLambdas = undefined;
+    }
+  }
+
+  private localDeclarationOf(
+    node: Syntax,
+    recordStep: boolean
   ): { exec: Exec; recordsStep: boolean; enter?: Exec | false } {
     // A thread_local variable of a program with one thread is a static one.
     const isStatic =

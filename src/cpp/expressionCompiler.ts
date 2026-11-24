@@ -39,7 +39,7 @@ import { orderingOf, UNORDERED } from './library/compare';
 import { lessThan, moveValue } from './library/elements';
 import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral, utf8 } from './literals';
-import { constructArray, initializeAt, invoke, ObjectCompiler, zeroOf } from './objectCompiler';
+import { constructArray, initializeAt, invoke, ObjectCompiler, outermostOwner, zeroOf } from './objectCompiler';
 import { hasUserType, memberOperators, overloadedOperator, withOverloads } from './operatorOverloads';
 import { expandPacks, PACK_ELEMENT, packElements, packsIn, withPackElement } from './packs';
 import { erasePointee, recoverPointee } from './pointerCasts';
@@ -248,7 +248,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         return this.bracedCast(node);
       }
       case 'lambda_expression': {
-        return this.lambdaExpression(node);
+        return this.deducingLambdas?.get(node) ?? this.lambdaExpression(node);
       }
       case 'extension_expression': {
         return this.compileExpression(node.children[0]);
@@ -465,7 +465,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         }
         if (isQualified && !this.context.cls)
           return this.error(row, `メンバ変数 ${name} を使うには、オブジェクトが要ります。`);
-        const object = this.implicitThis(row, name, field.owner);
+        const object = this.subobject(this.implicitThis(row, name, field.owner), field.owner, row);
         this.checkAccess(field.access, field.owner, this.namingClass(node, field.owner), row, name, this.context.cls);
         return this.fieldAccess(object, field, row);
       }
@@ -590,6 +590,21 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   /** `this` as the object it points to, for a member a member function names without `this->`. */
+  /** The subobject of a class that an object of a class derived from it holds, through its secondary bases. */
+  private subobject(object: Expr, owner: ClassInfo, row: number): Expr {
+    let current = object;
+    for (;;) {
+      if (current.type.kind !== 'class') return current;
+      let found: ClassInfo['secondaryBases'][number] | undefined;
+      for (let cls: ClassInfo | undefined = current.type.cls; cls && !found; cls = cls.base) {
+        if (cls === owner) return current;
+        found = cls.secondaryBases.find((secondary) => secondary.cls.isDerivedFrom(owner));
+      }
+      if (!found) return current;
+      current = this.fieldAccess(current, found.field, row);
+    }
+  }
+
   private implicitThis(row: number, name: string, owner?: ClassInfo): Expr {
     const { captures } = this.context;
     if (captures && owner !== captures.closure) {
@@ -743,7 +758,23 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         functions: { name, candidates: [], object },
       };
     }
+    const inSecondary = this.secondaryMember(object, cls, name, row);
+    if (inSecondary) return inSecondary;
     return this.missingMember(cls, name, row);
+  }
+
+  /** A member that a secondary base of the class (or of its bases) declares, through the base's subobject. */
+  private secondaryMember(object: Expr, cls: ClassInfo, name: string, row: number): Expr | undefined {
+    const found: Expr[] = [];
+    for (let owner: ClassInfo | undefined = cls; owner; owner = owner.base) {
+      for (const secondary of owner.secondaryBases) {
+        if (!hasMemberNamed(secondary.cls, name)) continue;
+        this.checkBaseConversion(cls, secondary.cls, row);
+        found.push(this.member(this.fieldAccess(object, secondary.field, row), name, row));
+      }
+    }
+    if (found.length > 1) return this.error(row, `${name} は複数の親クラスにあるので、どれを指すのか決まりません。`);
+    return found[0];
   }
 
   private staticMemberExpr(field: StaticFieldInfo, row: number, object?: Expr): Expr {
@@ -2160,7 +2191,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         run: (frame) => {
           const location = run(frame) as Ptr;
           const object = location.read();
-          if (!(object instanceof CObject) || !object.cls.isDerivedFrom(cls))
+          if (!(object instanceof CObject) || !outermostOwner(object).cls.isDerivedFrom(cls))
             throwLibrary(frame, badCast, 'std::bad_cast');
           return location.forClass(cls);
         },
@@ -2175,7 +2206,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         const location = run(frame) as Ptr;
         if (location.isNull) return NULL_PTR;
         const object = location.read();
-        return object instanceof CObject && object.cls.isDerivedFrom(cls) ? location.forClass(cls) : NULL_PTR;
+        return object instanceof CObject && outermostOwner(object).cls.isDerivedFrom(cls)
+          ? location.forClass(cls)
+          : NULL_PTR;
       },
     };
   }
@@ -2345,17 +2378,28 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const typeNode = fieldOf(node, 'type') as Syntax;
     // `(T){...}` is a C99 compound literal, which clang++ makes a temporary as `T{...}`.
     const list = fieldOf(node, 'value') as Syntax;
+    if (typeNode.type !== 'type_descriptor' && this.namedClassTemplate(typeNode)) {
+      // `Box{1}` deduces a class template's arguments, from the lambdas it initializes the object with too.
+      const nodes = expandPacks(this, list.children);
+      const args = nodes.map((arg) => this.argument(arg));
+      const saved = this.deducingLambdas;
+      this.deducingLambdas = new Map(saved);
+      for (const [index, arg] of nodes.entries())
+        if (arg.type === 'lambda_expression') this.deducingLambdas.set(arg, args[index]);
+      try {
+        const type = this.withDeducedClass(typeNode, args, () => this.resolveTypeSpecifier(typeNode));
+        return this.listObject(type, list, node.row);
+      } finally {
+        this.deducingLambdas = saved;
+      }
+    }
     const type =
-      typeNode.type === 'type_descriptor'
-        ? this.typeDescriptor(typeNode)
-        : this.namedClassTemplate(typeNode)
-          ? this.withDeducedClass(
-              typeNode,
-              expandPacks(this, list.children).map((arg) => this.argument(arg)),
-              () => this.resolveTypeSpecifier(typeNode)
-            )
-          : this.resolveTypeSpecifier(typeNode);
-    const value = this.listValue(type, list, true, node.row);
+      typeNode.type === 'type_descriptor' ? this.typeDescriptor(typeNode) : this.resolveTypeSpecifier(typeNode);
+    return this.listObject(type, list, node.row);
+  }
+
+  private listObject(type: Type, list: Syntax, row: number): Expr {
+    const value = this.listValue(type, list, true, row);
     const object = { ...value, onlyCalls: type.kind === 'class' };
     return list.children.length === 0 ? constantFunctor(type, object) : object;
   }
@@ -3197,7 +3241,8 @@ function isConstantObject(object: Expr | undefined): boolean {
 function downcastLocation(location: Ptr, to: ClassInfo): Ptr {
   const object = location.read();
   let view: Ptr | undefined;
-  if (object instanceof CObject) view = object.cls.isDerivedFrom(to) ? location.forClass(to) : undefined;
+  if (object instanceof CObject)
+    view = outermostOwner(object).cls.isDerivedFrom(to) ? location.forClass(to) : undefined;
   else if (object instanceof Store) view = object.classView(location, to);
   if (!view) throw new CppRuntimeError('custom', `${to.name} 型ではないオブジェクトをキャストしました。`);
   return view;
@@ -3230,4 +3275,14 @@ function promoteBitField(expr: Expr): Expr {
   const promotion = expr.bitFieldPromotion;
   if (!promotion || expr.isLvalue) return expr;
   return { ...convertArithmetic(expr, promotion), bitFieldPromotion: undefined };
+}
+
+/** Whether a class or one of its bases declares a member of a name. */
+function hasMemberNamed(cls: ClassInfo, name: string): boolean {
+  for (let owner: ClassInfo | undefined = cls; owner; owner = owner.base) {
+    if (owner.ownFields.some((field) => field.name === name) || owner.methods.has(name)) return true;
+    if (owner.staticFields.has(name) || owner.constants.has(name) || owner.memberTypes.has(name)) return true;
+    if (owner.secondaryBases.some((secondary) => hasMemberNamed(secondary.cls, name))) return true;
+  }
+  return false;
 }

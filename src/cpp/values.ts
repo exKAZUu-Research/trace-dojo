@@ -236,6 +236,8 @@ export class CObject extends Store {
   private receiverStorage?: Store;
   private baseLocations?: Map<ClassInfo, Ptr>;
   private memberStorage?: Map<number, MemberStorage>;
+  /** The object whose secondary base this object is, which virtual calls and downcasts reach. */
+  secondaryOwner?: CObject;
   /** The member of a union that was written last, or undefined while no access has decided one. */
   activeMember?: number;
 
@@ -277,6 +279,16 @@ export class CObject extends Store {
   receiver(asClass = this.cls): Ptr {
     if (this.completeClass === asClass)
       return new CompleteObjectPointer(this.receiverLocation, this.fallbackReceiver());
+    // A secondary base's subobject is a member's object, which knows the object it is a base of.
+    const secondary = this.completeClass.secondaryBaseOf(asClass);
+    if (secondary) {
+      const subobject = this.values[secondary.field.index];
+      if (subobject instanceof CObject) {
+        subobject.secondaryOwner = this;
+        return subobject.receiver(asClass);
+      }
+    }
+    if (this.secondaryOwner && !this.completeClass.isDerivedFrom(asClass)) return this.secondaryOwner.receiver(asClass);
     this.baseLocations ??= new Map();
     let location = this.baseLocations.get(asClass);
     if (!location) {
@@ -584,6 +596,13 @@ export class Ptr {
   }
 
   allocationLocation(): Ptr {
+    // A secondary base's subobject belongs to the object it is a base of, which `new` allocated.
+    const object = this.isNull ? undefined : this.addressedValue();
+    if (object instanceof CObject && object.secondaryOwner) {
+      let owner = object.secondaryOwner;
+      while (owner.secondaryOwner) owner = owner.secondaryOwner;
+      if (owner.completeLocation) return owner.completeLocation;
+    }
     const store = this.store;
     return this.index === 0 && store instanceof BaseSubobjectStorage ? (store.object.completeLocation ?? this) : this;
   }

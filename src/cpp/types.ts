@@ -304,6 +304,18 @@ export class ClassInfo {
   declaresConstructor = false;
   /** Whether the class has no name, which a typedef that names it gives it (`typedef struct { ... } P;`). */
   isUnnamed = false;
+  /**
+   * The bases after the first (`class C : A, B`), each of which an object holds as a subobject in a member of its
+   * own, which conversions to the base and the base's members reach.
+   */
+  secondaryBases: { cls: ClassInfo; access: Access; field: FieldInfo }[] = [];
+
+  /** The secondary base whose subobject holds the subobject of `other`, a base of this class through it. */
+  secondaryBaseOf(other: ClassInfo): { cls: ClassInfo; access: Access; field: FieldInfo } | undefined {
+    if (this.base?.isDerivedFrom(other)) return undefined;
+    return this.secondaryBases.find((secondary) => secondary.cls.isDerivedFrom(other));
+  }
+
   /** The members of its anonymous unions and structs, which the class names as its own. */
   anonymousFields: FieldInfo[] = [];
   /** The bit-fields without names, which only take room, each before the own member at position `before`. */
@@ -338,6 +350,10 @@ export class ClassInfo {
     if (this === other) return 0;
     const primary = this.base?.distanceToBase(other);
     if (primary !== undefined) return primary + 1;
+    for (const { cls: base } of this.secondaryBases) {
+      const distance = base.distanceToBase(other);
+      if (distance !== undefined) return distance + 1;
+    }
     for (const base of this.library?.additionalPublicBases ?? []) {
       const distance = base.distanceToBase(other);
       if (distance !== undefined) return distance + 1;

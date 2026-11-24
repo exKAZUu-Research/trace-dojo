@@ -250,7 +250,8 @@ export function compileLambda(compiler: Compiler, node: Syntax): Expr {
     closure.methods.set('operator()', [call]);
     compiler.compileLambdaBody(call, node, captures);
   }
-  compiler.completeClass(closure, true);
+  // A closure type is no final class, so a class may derive from it (the `overloaded` idiom of `std::visit`).
+  compiler.completeClass(closure, false);
   const initializers = captures.captures.map((capture) => ({
     field: capture.field,
     initialize: captureInitializer(compiler, capture),

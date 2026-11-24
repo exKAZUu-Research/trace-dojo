@@ -47,6 +47,7 @@ import {
   zeroMembers,
   zeroOf,
 } from './objectCompiler';
+import { memberOperators } from './operatorOverloads';
 import { expandPacks, packElements, withPackElement } from './packs';
 import { parseLibrarySource } from './parse';
 import {
@@ -833,13 +834,14 @@ export class Compiler extends StatementCompiler {
   private baseClause(cls: ClassInfo, node: Syntax, defaultAccess: Access): void {
     const clause = node.children.find((child) => child.type === 'base_class_clause');
     if (!clause) return;
-    const bases = clause.children.filter((child) => child.type !== 'access_specifier');
-    if (bases.length > 1) return this.unsupported(clause.row, '多重継承');
     if (hasToken(clause, 'virtual')) return this.unsupported(clause.row, '仮想継承（virtual で継承すること）');
-    const baseName = bases[0];
-    const baseType = this.resolveTypeSpecifier(baseName, false, true);
+    const bases = this.writtenBases(clause, defaultAccess);
+    const [first, ...others] = bases;
+    if (!first) return;
+    for (const { type, access, node: written } of others) this.secondaryBase(cls, clause, written, type, access);
+    const baseType = first.type;
     if (baseType.kind !== 'class')
-      return this.error(clause.row, `${bases[0].text} はクラスではないので継承できません。`);
+      return this.error(clause.row, `${first.node.text} はクラスではないので継承できません。`);
     const base = baseType.cls;
     if (!base.isComplete)
       return this.error(clause.row, `クラス ${base.name} はまだ定義されていないので継承できません。`);
@@ -848,9 +850,57 @@ export class Compiler extends StatementCompiler {
       return this.unsupported(clause.row, `標準ライブラリのクラス ${base.name} の継承`);
     }
     cls.base = base;
-    const accessNode = clause.children.find((child) => child.type === 'access_specifier');
-    cls.baseAccess = (accessNode?.text as Access | undefined) ?? defaultAccess;
-    cls.fields = [...base.fields];
+    cls.baseAccess = first.access;
+    cls.fields = [...base.fields, ...cls.fields];
+    for (const [index, field] of cls.fields.entries()) if (field.owner === cls) field.index = index;
+  }
+
+  /**
+   * The bases a base clause names, in order, with the access each has; a pack expansion (`: Ts...`) names a base for
+   * each type of its pack.
+   */
+  private writtenBases(clause: Syntax, defaultAccess: Access): { node: Syntax; type: Type; access: Access }[] {
+    const bases: { node: Syntax; type: Type; access: Access }[] = [];
+    let access = defaultAccess;
+    for (const [index, child] of clause.all.entries()) {
+      if (child.type === 'access_specifier') access = child.text as Access;
+      if (child.type === ',') access = defaultAccess;
+      if (!child.isNamed || child.type === 'access_specifier') continue;
+      if (clause.all[index + 1]?.type === '...') {
+        const pack = this.findName(child.text);
+        if (pack?.kind !== 'pack')
+          return this.error(child.row, `${child.text}... の ${child.text} はパックではありません。`);
+        for (const item of pack.items) bases.push({ node: child, type: this.typeOfEntity(item, child), access });
+        continue;
+      }
+      bases.push({ node: child, type: this.resolveTypeSpecifier(child, false, true), access });
+    }
+    return bases;
+  }
+
+  /**
+   * Adds a base after the first (`class C : public A, public B`), whose subobject is a member of the class's objects,
+   * placed after the first base's.
+   */
+  private secondaryBase(cls: ClassInfo, clause: Syntax, node: Syntax, type: Type, access: Access): void {
+    if (type.kind !== 'class') return this.error(clause.row, `${node.text} はクラスではないので継承できません。`);
+    const base = type.cls;
+    if (!base.isComplete)
+      return this.error(clause.row, `クラス ${base.name} はまだ定義されていないので継承できません。`);
+    if (base.isFinal) return this.error(clause.row, `クラス ${base.name} は final なので継承できません。`);
+    if (base.library) return this.unsupported(clause.row, `標準ライブラリのクラス ${base.name} の多重継承`);
+    if (cls.secondaryBases.some((other) => other.cls === base))
+      return this.error(clause.row, `${base.name} を2回継承しています。`);
+    const field: FieldInfo = {
+      name: `\0base ${base.name}#${cls.secondaryBases.length}`,
+      type: classType(base),
+      index: cls.fields.length,
+      access: 'public',
+      owner: cls,
+      row: clause.row,
+    };
+    cls.fields.push(field);
+    cls.secondaryBases.push({ cls: base, access, field });
   }
 
   private memberDeclaration(cls: ClassInfo, node: Syntax, access: Access): void {
@@ -1050,7 +1100,11 @@ export class Compiler extends StatementCompiler {
     fn.isDestructor = isDestructor;
     if (isDestructor) fn.isNoexcept = true;
     fn.isStatic = this.hasSpecifier(node, 'static');
-    const inheritedVirtual = !isConstructor && cls.base?.virtuals.has(isDestructor ? '~' : virtualKey(fn));
+    const inheritedVirtual =
+      !isConstructor &&
+      [cls.base, ...cls.secondaryBases.map((secondary) => secondary.cls)].some((base) =>
+        base?.virtuals.has(isDestructor ? '~' : virtualKey(fn))
+      );
     fn.isVirtual = hasToken(node, 'virtual') || inheritedVirtual === true;
     fn.isInline = isDefinition || this.hasSpecifier(node, 'inline');
     if ((isConstructor || isDestructor) && fn.isStatic)
@@ -1241,6 +1295,21 @@ export class Compiler extends StatementCompiler {
     if (target?.type !== 'qualified_identifier')
       return this.error(node.row, `using ${target?.text ?? ''} は書けません。`);
     const { scope: scopeNode, name: nameNode } = splitQualified(target);
+    if (hasToken(node, '...')) {
+      // `using Ts::operator()...;` brings the member of each base a pack names.
+      const pack = this.findName(scopeNode.text);
+      if (pack?.kind !== 'pack')
+        return this.error(node.row, `${scopeNode.text}... の ${scopeNode.text} はパックではありません。`);
+      const name = this.plainName(nameNode);
+      for (const item of pack.items) {
+        const type = this.typeOfEntity(item, scopeNode);
+        if (type.kind !== 'class' || !cls.isDerivedFrom(type.cls))
+          return this.error(node.row, `${typeName(type)} は ${cls.name} の親クラスではありません。`);
+        const methods = memberOperators(type.cls, name);
+        cls.methods.set(name, [...(cls.methods.get(name) ?? []), ...methods]);
+      }
+      return;
+    }
     const scope = this.resolveScope(scopeNode);
     if (scope.kind !== 'class' || !cls.isDerivedFrom(scope.cls) || scope.cls === cls)
       return this.error(node.row, `${scopeNode.text} は ${cls.name} の親クラスではありません。`);
@@ -1517,6 +1586,8 @@ export class Compiler extends StatementCompiler {
   completeClass(cls: ClassInfo, isFinalClass: boolean): void {
     cls.isFinal = isFinalClass;
     if (cls.base) for (const [key, fn] of cls.base.virtuals) cls.virtuals.set(key, fn);
+    for (const { cls: base } of cls.secondaryBases)
+      for (const [key, fn] of base.virtuals) if (!cls.virtuals.has(key) || key === '~') cls.virtuals.set(key, fn);
     for (const overloads of cls.methods.values()) {
       for (const fn of overloads) this.completeVirtual(cls, fn, virtualKey(fn));
     }
@@ -1637,7 +1708,9 @@ export class Compiler extends StatementCompiler {
   }
 
   private completeVirtual(cls: ClassInfo, fn: FunctionInfo, key: string): void {
-    const overridden = cls.base?.virtuals.get(key);
+    const overridden =
+      cls.base?.virtuals.get(key) ??
+      cls.secondaryBases.map((secondary) => secondary.cls.virtuals.get(key)).find(Boolean);
     if (overridden) {
       this.checkOverrider(fn, overridden);
       fn.isVirtual = true;
@@ -1739,6 +1812,13 @@ export class Compiler extends StatementCompiler {
       if (cls.base && this.namesClass(nameNode, cls.base)) {
         if (baseInitializer) this.error(initializer.row, `親クラス ${name} の初期化が重複しています。`);
         baseInitializer = initializer;
+        continue;
+      }
+      const secondary = cls.secondaryBases.find((candidate) => this.namesClass(nameNode, candidate.cls));
+      if (secondary) {
+        if (initializers.has(secondary.field.name))
+          this.error(initializer.row, `親クラス ${name} の初期化が重複しています。`);
+        initializers.set(secondary.field.name, initializer);
         continue;
       }
       if (!cls.ownFields.some((field) => field.name === name)) {

@@ -55,6 +55,11 @@ export abstract class CompilerBase {
   protected userRow = 0;
   /** The class that a class template's name without arguments, at the type node, denotes after deduction. */
   private deducedClass?: { node: Syntax; type: Type };
+  /**
+   * The lambda expressions of the declaration compiled now whose closure types deduced a class template's arguments,
+   * which the declaration's initialization uses as they are, since each compilation of a lambda makes a new type.
+   */
+  protected deducingLambdas?: Map<Syntax, Expr>;
 
   constructor(protected readonly library: Library) {}
 
@@ -89,11 +94,8 @@ export abstract class CompilerBase {
     }
     // A nested class's members see its own members, then those of the classes it is nested in.
     for (let outer = this.enclosingClass; outer; outer = outer.outer) {
-      for (let cls: ClassInfo | undefined = outer; cls; cls = cls.base) {
-        const member = this.memberEntity(cls, name);
-        if (member && (!typeOnly || isTypeName(member))) return member;
-        if (name === cls.name) return { kind: 'class', cls };
-      }
+      const member = this.inheritedMember(outer, name, typeOnly);
+      if (member) return member;
     }
     const inNamespace = this.findInNamespaces(name);
     if (inNamespace && (!typeOnly || isTypeName(inNamespace))) return inNamespace;
@@ -269,6 +271,20 @@ export abstract class CompilerBase {
     if (memberType) return { kind: 'type', type: memberType };
     const constant = cls.constants.get(name);
     if (constant) return { kind: 'value', make: constant };
+  }
+
+  /** A member of a class or of its bases, the first base's before the others' (C++20 [class.member.lookup]). */
+  private inheritedMember(cls: ClassInfo, name: string, typeOnly: boolean): Entity | undefined {
+    for (let current: ClassInfo | undefined = cls; current; current = current.base) {
+      const member = this.memberEntity(current, name);
+      if (member && (!typeOnly || isTypeName(member))) return member;
+      if (name === current.name) return { kind: 'class', cls: current };
+      for (const secondary of current.secondaryBases) {
+        const inherited = this.inheritedMember(secondary.cls, name, typeOnly);
+        if (inherited) return inherited;
+      }
+    }
+    return undefined;
   }
 
   /** Looks up `scope::name` for a qualified identifier, its scope being a namespace or a class. */
