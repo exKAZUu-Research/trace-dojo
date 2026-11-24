@@ -718,6 +718,12 @@ function utf8Failure(ctx: NativeContext, bytes: Uint8Array): StructValue {
 
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
 for (const [name, native] of Object.entries(strNatives)) natives[`str::${name}`] = native;
+natives['std::ffi::c_str_literal'] = ([bytes]) => deref(bytes);
+natives['CStr::to_bytes'] = ([self]) => deref(self);
+natives['CStr::to_bytes_with_nul'] = ([self]) => [...(deref(self) as Value[]), 0n];
+natives['CStr::count_bytes'] = ([self]) => BigInt((deref(self) as Value[]).length);
+natives['CStr::is_empty'] = ([self]) => (deref(self) as Value[]).length === 0;
+natives['CStr::to_str'] = ([self], ctx) => natives['std::str::from_utf8']([self], ctx);
 natives['std::str::from_utf8'] = ([value], ctx) => {
   const bytes = Uint8Array.from(sliceItems(deref(value)) as bigint[], Number);
   try {

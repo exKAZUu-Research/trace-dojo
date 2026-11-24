@@ -1025,6 +1025,7 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   Context: 'Context',
   Waker: 'Waker',
   Condvar: 'Condvar',
+  CStr: 'CStr',
 };
 
 const BUILTIN_ENUMS: Record<string, BuiltinAdt> = {

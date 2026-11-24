@@ -1542,6 +1542,18 @@ pub mod io {
     impl Write for Stderr {}
     impl Write for StderrLock {}
 }
+pub mod ffi {
+    /** A C string: its bytes without the terminating NUL, which no byte inside is. */
+    pub struct CStr;
+    impl CStr {
+        pub fn to_bytes(&self) -> &[u8];
+        pub fn to_bytes_with_nul(&self) -> &[u8];
+        pub fn to_str(&self) -> Result<&str, super::str::Utf8Error>;
+        pub fn count_bytes(&self) -> usize;
+        pub fn is_empty(&self) -> bool;
+    }
+    pub fn c_str_literal(bytes: &'static [u8]) -> &'static CStr;
+}
 pub mod future {
     use super::pin::Pin;
     use super::task::{Context, Poll};

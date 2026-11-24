@@ -324,6 +324,11 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boo
     case 'RefMut': {
       return valuesEqual(t.args[0], pointee(x), pointee(y));
     }
+    case 'CStr': {
+      const a = x as bigint[];
+      const b = y as bigint[];
+      return a.length === b.length && a.every((byte, index) => byte === b[index]);
+    }
     case 'Duration': {
       return (x as DurationValue).nanos === (y as DurationValue).nanos;
     }

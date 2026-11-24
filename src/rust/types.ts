@@ -212,7 +212,8 @@ export type BuiltinAdt =
   | 'Context'
   | 'Waker'
   | 'Poll'
-  | 'Condvar';
+  | 'Condvar'
+  | 'CStr';
 
 /** The pointer a typed `self` is in: `Box<Self>`, `Rc<Self>`, `Arc<Self>`, or `Pin<&mut Self>`. */
 export type SelfWrapper = 'Box' | 'Rc' | 'Arc' | 'Pin';

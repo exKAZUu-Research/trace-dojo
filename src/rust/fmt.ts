@@ -385,6 +385,9 @@ export class Formatter {
       case 'Duration': {
         return padString(durationDebug(v, spec.precision), spec, write);
       }
+      case 'CStr': {
+        return padString(`"${(v as bigint[]).map((byte) => escapeAscii(Number(byte))).join('')}"`, spec, write);
+      }
       case 'Thread': {
         const id: DebugPart = (_inner, sink) => emit(`ThreadId(${String(v)})`, sink);
         const name: DebugPart = (_inner, sink) => emit(v === 1 ? 'Some("main")' : 'None', sink);
@@ -773,4 +776,12 @@ function errorDebug(builtin: string, value: Value, indent: number | undefined): 
       return builtin;
     }
   }
+}
+
+/** A byte as `u8::escape_ascii` writes it, which `CStr`'s `Debug` shows. */
+function escapeAscii(byte: number): string {
+  const escapes: Record<number, string> = { 9: String.raw`\t`, 10: String.raw`\n`, 13: String.raw`\r`, 34: String.raw`\"`, 39: String.raw`\'`, 92: String.raw`\\` };
+  if (escapes[byte]) return escapes[byte];
+  if (byte >= 0x20 && byte < 0x7f) return String.fromCodePoint(byte);
+  return `\\x${byte.toString(16).padStart(2, '0')}`;
 }

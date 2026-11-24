@@ -5,9 +5,11 @@ import { forEachDirect } from './astWalk';
 import { MacroConverter } from './convertMacros';
 import { isComment, splitAttributes, syntaxError, unavailable } from './convertSyntax';
 import {
+  cStringBytes,
   parseByteLiteral,
   parseByteStringLiteral,
   parseCharLiteral,
+  parseCStringLiteral,
   parseFloatLiteral,
   parseIntegerLiteral,
   parseRawStringLiteral,
@@ -302,7 +304,11 @@ export abstract class ExpressionConverter extends MacroConverter {
       if (bytes === undefined) syntaxError(span, `バイト文字列の書き方（${node.text}）に誤りがあります。`);
       return byteStringExpr(bytes, span);
     }
-    if (node.text.startsWith('c')) unavailable(span, 'C の文字列（c"..."）');
+    if (node.text.startsWith('c')) {
+      const bytes = parseCStringLiteral(node.text);
+      if (bytes === undefined) syntaxError(span, `C の文字列の書き方（${node.text}）に誤りがあります。`);
+      return cStringExpr(bytes, span);
+    }
     const value = parseStringLiteral(node.text);
     if (value === undefined) syntaxError(span, `文字列の書き方（${node.text}）に誤りがあります。`);
     return { kind: 'str', value, span };
@@ -311,7 +317,11 @@ export abstract class ExpressionConverter extends MacroConverter {
   private rawStringLiteral(node: Node, span: Span): Expr {
     const literal = parseRawStringLiteral(node.text);
     if (!literal) syntaxError(span, `生の文字列の書き方（${node.text}）に誤りがあります。`);
-    if (literal.prefix === 'c') unavailable(span, 'C の文字列（cr"..."）');
+    if (literal.prefix === 'c') {
+      const bytes = cStringBytes(literal.body);
+      if (bytes === undefined) syntaxError(span, `C の文字列の書き方（${node.text}）に誤りがあります。`);
+      return cStringExpr(bytes, span);
+    }
     if (literal.prefix === 'b')
       return byteStringExpr(
         Array.from(literal.body, (char) => char.codePointAt(0) ?? 0),
@@ -949,6 +959,17 @@ function isItem(node: Node): boolean {
 function byteStringExpr(bytes: number[], span: Span): Expr {
   const elems: Expr[] = bytes.map((byte) => ({ kind: 'int', value: BigInt(byte), suffix: 'u8', span }));
   return { kind: 'ref', mutable: false, operand: { kind: 'array', elems, span }, span };
+}
+
+/** `c"..."` as the `&CStr` of its bytes. */
+function cStringExpr(bytes: number[], span: Span): Expr {
+  const segments = ['std', 'ffi', 'c_str_literal'].map((name) => ({ name, args: undefined, span }));
+  return {
+    kind: 'call',
+    callee: { kind: 'path', path: { segments, span }, span },
+    args: [byteStringExpr(bytes, span)],
+    span,
+  };
 }
 
 function isBlockLike(expr: Expr): boolean {
