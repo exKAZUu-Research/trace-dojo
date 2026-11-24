@@ -585,7 +585,7 @@ export class Evaluator extends StatementExecutor {
         const current = place.get();
         const value = this.withOperand(frame, current, () => this.evaluate(expression.operation, frame));
         // `x ??= y` stores only when x is null, so a setter runs only then.
-        if (expression.operation.kind !== 'coalesce' || current === undefined) place.set(value);
+        if (expression.operation.kind !== 'coalesce' || current === undefined) place.set(copyValue(value));
         return value;
       }
       case 'increment': {

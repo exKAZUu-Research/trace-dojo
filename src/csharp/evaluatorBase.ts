@@ -1,3 +1,4 @@
+import { LIMITS } from '../interpreter/limits';
 import { BinderBase } from './binderBase';
 import type { CompiledProgram } from './compiler';
 import type { ConversionKind, Conversions } from './conversions';
@@ -371,10 +372,15 @@ export abstract class EvaluatorBase {
     const key = typeKey(type);
     const known = this.slotCounts.get(key);
     if (known !== undefined) return known;
+    // Counting a construction costs as much as its name is long, which the program pays as operations.
+    this.runtime.spend(Math.ceil(key.length / 16));
     const substitution = substitutionOf(type);
     let count = type.symbol.instanceFieldCount;
     for (const field of type.symbol.fields) {
       if (!field.isStatic && !field.isConst) count += this.defaultSlotCount(substitute(field.type, substitution));
+      // A layout past the slot limit fails to allocate whatever its size, so counting stops there, which also bounds
+      // the work of constructions that share no counts.
+      if (count > LIMITS.maxSlots) break;
     }
     this.slotCounts.set(key, count);
     return count;
