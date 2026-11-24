@@ -19,6 +19,8 @@ export interface ImportDirective extends Span {
   prefix: string | undefined;
   show: string[] | undefined;
   hide: string[];
+  /** `deferred as`, whose prefix reaches the library only once `loadLibrary` has loaded it. */
+  isDeferred: boolean;
 }
 
 export type TopLevelDeclaration =

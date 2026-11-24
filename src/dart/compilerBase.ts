@@ -397,15 +397,20 @@ export abstract class CompilerBase {
         return special;
       }
     }
-    if (prefix !== undefined && !this.library.hasPrefix(prefix)) {
-      this.error(syntax, `${prefix}.${name} という型はありません。`);
-    }
+    if (prefix !== undefined) this.checkTypePrefix(syntax, prefix, name);
     const declaration = prefix === undefined ? this.library.lookup(name) : this.library.lookupPrefixed(prefix, name);
     if (declaration?.kind === 'class') return this.instantiateClass(declaration.cls, syntax, options);
     if (declaration?.kind === 'alias') return this.instantiateAlias(declaration.alias, syntax, options);
     if (declaration) return this.error(syntax, `${name} は型ではありません。`);
     this.checkUnavailableName(syntax, name, prefix);
     return this.error(syntax, `型 ${name} が見つかりません。`);
+  }
+
+  private checkTypePrefix(syntax: Span, prefix: string, name: string): void {
+    if (!this.library.hasPrefix(prefix)) this.error(syntax, `${prefix}.${name} という型はありません。`);
+    if (this.library.deferredPrefixes.has(prefix)) {
+      this.error(syntax, `型 ${name} は接頭辞 ${prefix} で遅延読み込みするので、型には書けません。`);
+    }
   }
 
   protected checkTypeNameBinding(name: string, prefix: string | undefined, span: Span): void {

@@ -1049,6 +1049,21 @@ final class _Timer implements Timer {
   external void _unschedule();
 }
 
+abstract final class _DeferredLoading {
+  static Future<void> load(String prefix) async {
+    await Future<void>(() {
+      _markLoaded(prefix);
+    });
+  }
+  external static void _markLoaded(String prefix);
+}
+
+class _DeferredNotLoadedError extends Error {
+  final String _prefix;
+  _DeferredNotLoadedError(this._prefix);
+  String toString() => "Deferred library " + _prefix + " was not loaded.";
+}
+
 class _SuspendState {
   void Function(dynamic)? _thenCallback;
   void Function(Object, StackTrace)? _errorCallback;

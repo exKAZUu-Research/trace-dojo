@@ -253,9 +253,56 @@ export abstract class CallCompiler extends OperatorCompiler {
     return undefined;
   }
 
+  /** A call of a declaration a library prefix reaches, or undefined for one that is not a function or class. */
+  private compilePrefixedCall(
+    prefix: string,
+    callee: Extract<Expression, { kind: 'member' }>,
+    expression: Extract<Expression, { kind: 'call' }>,
+    context: DartType | undefined
+  ): Compiled | undefined {
+    const { arguments: args, typeArguments } = expression;
+    const declaration = this.library.lookupPrefixed(prefix, callee.name);
+    if (declaration?.kind === 'function')
+      return this.compileFunctionCall(declaration.fn, args, typeArguments, expression, context);
+    if (declaration?.kind === 'class') {
+      return this.compileConstructorCall(
+        declaration.cls,
+        undefined,
+        this.classTypeArguments(declaration.cls, typeArguments, callee),
+        args,
+        undefined,
+        expression,
+        context,
+        false
+      );
+    }
+    if (declaration?.kind === 'alias') {
+      const { cls, types } = this.aliasConstructor(declaration.alias, typeArguments, callee);
+      return this.compileConstructorCall(cls, undefined, types, args, undefined, expression, context, false);
+    }
+    if (!declaration) return this.undefinedName(callee, callee.name, prefix);
+    return undefined;
+  }
+
+  /** `prefix.loadLibrary()` of a `deferred as` import, which loads the library in a later event as the VM does. */
+  private compileLoadLibrary(prefix: string, expression: Extract<Expression, { kind: 'call' }>): Compiled {
+    const { arguments: args } = expression;
+    if (args.positional.length > 0 || args.named.length > 0 || expression.typeArguments) {
+      this.error(expression, 'loadLibrary には引数を渡せません。');
+    }
+    return {
+      type: interfaceType(coreTypes.future, [VOID]),
+      run: (frame) => {
+        const { runtime } = frame;
+        const load = runtime.links.classNamed('_DeferredLoading').staticMembers.get('load');
+        return load?.impl?.(runtime, undefined, { positional: [prefix], named: undefined }, [], undefined);
+      },
+      isConst: false,
+    };
+  }
+
   /** A call `a.b(...)`: a static member, a named constructor, a prefixed declaration, or a method. */
   // code-gauge-allow functionCognitiveComplexity -- Static, prefixed, extension and instance calls use distinct dispatch rules.
-  // code-gauge-allow functionNcss -- Static, prefixed, extension and instance calls use distinct dispatch rules.
   private compileMemberCall(
     expression: Extract<Expression, { kind: 'call' }>,
     callee: Extract<Expression, { kind: 'member' }>,
@@ -279,26 +326,12 @@ export abstract class CallCompiler extends OperatorCompiler {
       );
     }
     if (target?.kind === 'prefix') {
-      const declaration = this.library.lookupPrefixed(target.prefix, callee.name);
-      if (declaration?.kind === 'function')
-        return this.compileFunctionCall(declaration.fn, args, typeArguments, expression, context);
-      if (declaration?.kind === 'class') {
-        return this.compileConstructorCall(
-          declaration.cls,
-          undefined,
-          this.classTypeArguments(declaration.cls, typeArguments, callee),
-          args,
-          undefined,
-          expression,
-          context,
-          false
-        );
+      const { prefix } = target;
+      if (callee.name === 'loadLibrary' && this.library.deferredPrefixes.has(prefix)) {
+        return this.compileLoadLibrary(prefix, expression);
       }
-      if (declaration?.kind === 'alias') {
-        const { cls, types } = this.aliasConstructor(declaration.alias, typeArguments, callee);
-        return this.compileConstructorCall(cls, undefined, types, args, undefined, expression, context, false);
-      }
-      if (!declaration) return this.undefinedName(callee, callee.name, target.prefix);
+      const call = this.compilePrefixedCall(prefix, callee, expression, context);
+      if (call) return this.loadedOnly(prefix, call);
     }
     if (target?.kind === 'extension') {
       const member = target.ext.staticMembers.get(callee.name);

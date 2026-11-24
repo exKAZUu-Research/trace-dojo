@@ -77,6 +77,8 @@ export class LibraryEnv {
   readonly imports: Import[] = [];
   /** Names only the interpreter's other libraries see, such as dart:core's LinkedHashMap, which dart:collection exports. */
   readonly hiddenNames = new Set<string>();
+  /** The prefixes of `deferred as` imports. */
+  readonly deferredPrefixes = new Set<string>();
   /** Declarations of other libraries this library exports as its own. */
   readonly reexports = new Map<string, Declaration>();
 

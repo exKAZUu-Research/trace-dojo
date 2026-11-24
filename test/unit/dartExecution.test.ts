@@ -10046,3 +10046,22 @@ test('Dart DateTime computes and prints dates as the SDK does', () => {
       '[1970-01-01 00:00:00.000Z, -0005-01-01 00:00:00.000Z, 12345-01-01 00:00:00.000Z]\n',
   });
 });
+
+test('a deferred Dart import reaches its library only after loadLibrary', () => {
+  const program = `import 'dart:math' deferred as m;
+Future<void> main() async {
+  try {
+    print(m.max(1, 2));
+  } catch (error) {
+    print(error);
+  }
+  await m.loadLibrary();
+  print(m.max(1, 2));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Deferred library m was not loaded.\n2\n',
+  });
+  const typed = "import 'dart:math' deferred as m;\nm.Random? random;\nvoid main() {}";
+  expect(executeProgram('dart', typed)).toMatchObject({ kind: 'compileError' });
+});

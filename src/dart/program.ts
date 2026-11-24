@@ -202,6 +202,7 @@ function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
     if (declaration) collection.reexports.set(name, declaration);
   }
   (core.declarations.get('_Symbol') as { cls: ClassInfo }).cls.vmName = 'Symbol';
+  asyncClass('_Future').vmName = 'Future';
   (collection.declarations.get('_QueueIterator') as { cls: ClassInfo }).cls.vmName = '_ListQueueIterator';
   (collection.declarations.get('_Uint8List') as { cls: ClassInfo }).cls.vmName = 'Uint8List';
 }
@@ -246,6 +247,7 @@ export function compileProgram(syntax: Library, options: { atomicRows?: Readonly
   }
   for (const directive of syntax.imports) {
     env.addImport(libraryAt(envs, directive), directive.prefix, directive.show, directive.hide);
+    if (directive.isDeferred && directive.prefix) env.deferredPrefixes.add(directive.prefix);
   }
   // A program is the only library of its run, so what it exports reaches no other library.
   for (const directive of syntax.exports) libraryAt(envs, directive);

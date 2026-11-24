@@ -209,3 +209,8 @@ define('_Timer._unschedule', (runtime, self) => {
   runtime.events.unschedule(self as DartObject);
   return;
 });
+
+define('_DeferredLoading._markLoaded', (runtime, _self, [prefix]) => {
+  runtime.loadedPrefixes.add(prefix as string);
+  return;
+});

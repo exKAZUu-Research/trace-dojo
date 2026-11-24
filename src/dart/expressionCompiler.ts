@@ -1577,6 +1577,22 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     return resolution !== undefined && resolution.kind !== 'prefix';
   }
 
+  /** What a prefix of a `deferred as` import reaches, which fails until its library is loaded. */
+  protected loadedOnly(prefix: string, compiled: Compiled): Compiled {
+    if (!this.library.deferredPrefixes.has(prefix)) return compiled;
+    const { run } = compiled;
+    return {
+      ...compiled,
+      isConst: false,
+      constValue: undefined,
+      run: (frame) => {
+        if (!frame.runtime.loadedPrefixes.has(prefix))
+          frame.runtime.throwError('_DeferredNotLoadedError', '', [prefix]);
+        return run(frame);
+      },
+    };
+  }
+
   protected readStaticTarget(
     target: NonNullable<ReturnType<ExpressionCompiler['staticTarget']>>,
     name: string,
@@ -1585,7 +1601,7 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     if (target.kind === 'prefix') {
       const declaration = this.library.lookupPrefixed(target.prefix, name);
       if (!declaration) return this.undefinedName(span, name, target.prefix);
-      return this.readDeclaration(declaration, span);
+      return this.loadedOnly(target.prefix, this.readDeclaration(declaration, span));
     }
     if (target.kind === 'extension') {
       const member = target.ext.staticMembers.get(name);

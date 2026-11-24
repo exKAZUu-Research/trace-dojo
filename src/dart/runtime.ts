@@ -210,6 +210,8 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   readonly events: EventLoop;
+  /** The prefixes of `deferred as` imports whose libraries `loadLibrary` has loaded. */
+  readonly loadedPrefixes = new Set<string>();
   /** The entry point's frame once its `async` body suspended, which ends the entry point when it completes. */
   private suspendedEntry: Frame | undefined;
 

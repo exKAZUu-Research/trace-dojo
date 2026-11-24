@@ -158,8 +158,6 @@ export class Converter extends ExpressionConverter {
       inner
     );
     const uriNode = requireNode(fieldOf(specification, 'uri'), specification);
-    if (hasToken(specification, 'deferred'))
-      return unsupported(specification, 'deferred as（ライブラリの遅延読み込み）');
     const uri = this.selectedUri(uriNode);
     if (!uri.startsWith('dart:')) return unsupported(uriNode, `import '${uri}'（標準ライブラリ以外の読み込み）`);
     let show: string[] | undefined;
@@ -169,7 +167,14 @@ export class Converter extends ExpressionConverter {
       if (hasToken(combinator, 'show')) show = show?.filter((name) => names.includes(name)) ?? names;
       else hide.push(...names);
     }
-    return { uri, prefix: fieldOf(specification, 'alias')?.text, show, hide, ...spanOf(inner.parent ?? inner) };
+    return {
+      uri,
+      prefix: fieldOf(specification, 'alias')?.text,
+      show,
+      hide,
+      isDeferred: hasToken(specification, 'deferred'),
+      ...spanOf(inner.parent ?? inner),
+    };
   }
 
   /**
