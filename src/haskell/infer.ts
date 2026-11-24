@@ -756,6 +756,7 @@ export class Checker {
       case 'con': {
         const { type, evidence } = this.instantiate(conScheme(expr.con), expr.span, expr.con.name);
         if (evidence.length > 0) expr.evidence = evidence;
+        if (expr.con.datatypeContext) this.wantDatatypeContext(expr.con, type, expr.span);
         return type;
       }
       case 'lit': {
@@ -1087,6 +1088,7 @@ export class Checker {
   private matchConstructor(con: ConInfo, type: Type, span: Span): Type[] {
     const { type: conType, fieldTypes } = this.instantiateCon(con);
     this.unify(conType, type, span, `構成子 ${con.name} のパターン`);
+    if (con.datatypeContext) this.wantDatatypeContext(con, conType, span);
     return fieldTypes;
   }
 
@@ -1131,6 +1133,19 @@ export class Checker {
       scope.givens.push({ pred: param.pred, evidence: { kind: 'param', param } });
     }
     return con.fieldTypes.map((fieldType) => instantiateType(fieldType, all));
+  }
+
+  /**
+   * The constraints DatatypeContexts puts on a constructor, which its use needs at the types of the data type it
+   * builds or matches, whose evidence the value does not keep.
+   */
+  private wantDatatypeContext(con: ConInfo, type: Type, span: Span): void {
+    let result = prune(type);
+    while (functionParts(result)) result = prune((functionParts(result) as { result: Type }).result);
+    const { args } = splitApp(result);
+    for (const pred of con.datatypeContext ?? []) {
+      this.want({ cls: pred.cls, type: instantiateType(pred.type, args) }, span, `構成子 ${con.name} の文脈`);
+    }
   }
 
   instantiateCon(con: ConInfo): { type: Type; fieldTypes: Type[] } {

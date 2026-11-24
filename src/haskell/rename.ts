@@ -90,6 +90,8 @@ export interface RDataDecl {
   /** The kinds the parameters' annotations give, by position. */
   paramKinds?: (RType | undefined)[];
   cons: RConDecl[];
+  /** The constraints DatatypeContexts puts on the constructors, in terms of `params`. */
+  datatypeContext?: RType[];
   deriving: { type: RType; cls?: ClassEntity; strategy?: DerivingStrategy; via?: RType; span: Span }[];
   span: Span;
 }
@@ -838,6 +840,9 @@ class Renamer {
     }));
     this.dataDecls.push({
       entity,
+      ...(decl.datatypeContext
+        ? { datatypeContext: decl.datatypeContext.map((constraint) => this.renameType(constraint, paramNames)) }
+        : {}),
       params: [...decl.params.map((param) => param.name), ...extra],
       paramKinds: decl.paramKinds?.map((kind) => kind && this.renameKind(kind)),
       cons,

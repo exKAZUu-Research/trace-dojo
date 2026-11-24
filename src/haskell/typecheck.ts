@@ -766,6 +766,10 @@ function inferDerivedContext(checker: Checker, decl: RDataDecl, cls: ClassEntity
   const { kinds } = declHead(decl);
   const params = kinds.map((kind, index) => freshSkolem(kind, 1_000_000, decl.params[index] ?? `t${index}`));
   const work: Pred[] = rep ? [{ cls, type: instantiateType(rep, params) }] : [];
+  // A derived instance needs the constraints DatatypeContexts puts on the type's constructors, as GHC's has them.
+  for (const pred of decl.cons[0]?.con.datatypeContext ?? []) {
+    work.push({ cls: pred.cls, type: instantiateType(pred.type, params) });
+  }
   for (const { con } of rep ? [] : decl.cons) {
     for (const field of con.fieldTypes) {
       if (FUNCTOR_LIKE_CLASSES.has(cls.name)) {

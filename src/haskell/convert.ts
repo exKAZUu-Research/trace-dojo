@@ -718,12 +718,11 @@ function convertLocalBinds(node: Node | undefined): Decl[] {
 
 // code-gauge-allow functionCognitiveComplexity -- Each branch rejects one unsupported form of a data declaration.
 function convertData(node: Node, isInstance = false): Decl {
-  for (const name of ['context', 'forall']) {
-    const child = field(node, name);
-    if (child) {
-      if (name === 'context') throw unsupportedError(spanOf(child), 'data 宣言の文脈（DatatypeContexts）');
-      throw unsupported(child);
-    }
+  const forallNode = field(node, 'forall');
+  if (forallNode) throw unsupported(forallNode);
+  const contextNode = field(node, 'context');
+  if (contextNode && !extensions.has('DatatypeContexts')) {
+    throw syntaxError(spanOf(contextNode), 'data 宣言に文脈を書くには、DatatypeContexts の拡張が要ります。');
   }
   const kindNode = field(node, 'kind');
   const constructorsNode = field(node, 'constructors');
@@ -743,6 +742,7 @@ function convertData(node: Node, isInstance = false): Decl {
     kind: 'data',
     name: typeDeclName(node),
     params: isInstance ? [] : typeParams(node),
+    ...(contextNode ? { datatypeContext: convertContext(contextNode) } : {}),
     cons,
     deriving: convertDerivingClauses(node),
     span: spanOf(node),

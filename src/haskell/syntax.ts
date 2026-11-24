@@ -253,6 +253,8 @@ export type Decl =
       /** Whether the head binds a kind variable invisibly, `data T @k (a :: k)`, which needs a kind signature. */
       invisibleBinders?: boolean;
       cons: ConDecl[];
+      /** The constraints `data Eq a => Set a` puts on the type's constructors, as DatatypeContexts allows. */
+      datatypeContext?: Constraint[];
       deriving: DerivingClause[];
       span: Span;
       /** Whether the declaration is a `newtype`, whose one constructor patterns match without evaluating. */

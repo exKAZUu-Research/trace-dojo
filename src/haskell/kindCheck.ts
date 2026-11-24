@@ -211,6 +211,9 @@ function inferTypeDeclaration(checker: Checker, entry: Exclude<KindDeclaration, 
   const vars = new Map<string, Type>(decl.params.map((name, index) => [name, { tag: 'tgen', index }]));
   const varKinds = new Map<string, Kind>(decl.params.map((name, index) => [name, kinds[index]]));
   if (entry.kind === 'data') {
+    const datatypeContext =
+      entry.decl.datatypeContext && checker.convertConstraints(entry.decl.datatypeContext, vars, varKinds);
+    for (const conDecl of entry.decl.cons) if (datatypeContext) conDecl.con.datatypeContext = datatypeContext;
     for (const conDecl of entry.decl.cons) {
       if (conDecl.ownVars) inferConstructorVariables(checker, entry.decl, conDecl, kinds);
       else conDecl.con.fieldTypes = conDecl.fields.map((field) => checker.convertType(field, vars, varKinds, STAR));
