@@ -96,6 +96,7 @@ export function invoke(
       const value = args[index] as Value;
       callee.slots[index] = parameterLocation(param.type, value);
     }
+    if (fn.isVariadic) callee.variadicArguments = args.slice(fn.params.length);
     if (fn.isNoexcept) runtime.withoutOuterHandlers(() => compiled.body(callee));
     else compiled.body(callee);
     if (!isCallerDestroying) destroyParameters(callee, fn, args);

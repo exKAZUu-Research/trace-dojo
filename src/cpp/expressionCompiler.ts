@@ -99,6 +99,7 @@ import {
   UNINIT,
   type Value,
 } from './values';
+import { nextVariadicArgument, startVariadicArguments } from './variadic';
 
 const RELATIONAL_OPERATORS = ['<', '<=', '>', '>='];
 const COMPARISONS = new Set(['==', '!=', ...RELATIONAL_OPERATORS]);
@@ -178,6 +179,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       }
       case 'typeid_expression': {
         return this.typeidExpression(node);
+      }
+      case 'va_arg_expression': {
+        return this.vaArgExpression(node);
       }
       case 'requires_expression': {
         return constantExpr(BOOL, Number(requirementsHold(this as never, node)), node.row);
@@ -2422,6 +2426,47 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   // Calls -------------------------------------------------------------------------------------------------------------
 
+  /** `va_start(ap, last)`, `va_end(ap)`, and `va_copy(dst, src)` of `<cstdarg>`, which work on a `va_list`. */
+  private variadicMacro(name: string, argNodes: readonly Syntax[], row: number): Expr {
+    const args = argNodes.map((arg) => this.compileExpression(arg));
+    const [list, other] = args;
+    if (!list?.isLvalue) return this.error(row, `${name} の最初の引数には va_list の変数を書いてください。`);
+    if (name === 'va_start' && !this.context.fn?.isVariadic)
+      return this.error(row, 'va_start は、可変長引数（...）をとる関数の中でしか使えません。');
+    const location = list.run;
+    const source = name === 'va_copy' && other ? this.rvalue(other).run : undefined;
+    return {
+      type: { kind: 'void' },
+      isLvalue: false,
+      row,
+      run: (frame) => {
+        const target = location(frame) as Ptr;
+        if (name === 'va_start') target.write(startVariadicArguments(frame));
+        else if (source) target.write(source(frame) as Ptr);
+        return;
+      },
+    };
+  }
+
+  /** `va_arg(ap, T)`, the next argument of a variadic function, as a `T`. */
+  private vaArgExpression(node: Syntax): Expr {
+    const list = this.compileExpression(fieldOf(node, 'value') as Syntax);
+    const type = unqualified(this.typeDescriptor(fieldOf(node, 'type') as Syntax));
+    if (!list.isLvalue) return this.error(node.row, 'va_arg の最初の引数には va_list の変数を書いてください。');
+    const location = list.run;
+    return {
+      type,
+      isLvalue: false,
+      row: node.row,
+      run: (frame) => {
+        const place = location(frame) as Ptr;
+        const { value, next } = nextVariadicArgument(place.read() as Ptr, type);
+        place.write(next);
+        return value;
+      },
+    };
+  }
+
   /**
    * `typeid(T)` or `typeid(e)`: the `std::type_info` of a type, or of the dynamic type of a polymorphic object, which
    * names the type as Apple clang++ does (C++20 [expr.typeid]).
@@ -2480,6 +2525,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const argsNode = fieldOf(node, 'arguments') as Syntax;
     const argNodes = expandPacks(this, argsNode.children);
     const isUnqualified = functionNode.type === 'identifier';
+    if (isUnqualified && VARIADIC_MACROS.has(functionNode.text) && this.library.isFunctionMacro(functionNode.text))
+      return this.variadicMacro(functionNode.text, argNodes, node.row);
     if (isUnqualified && this.library.isFunctionMacro(functionNode.text))
       return this.unsupported(functionNode.row, `マクロ（${functionNode.text}）`);
     // The grammar reads the `noexcept(e)` operator as a call.
@@ -3371,3 +3418,6 @@ function typeInfoObject(frame: Frame, cls: ClassInfo, type: Type, row: number): 
   }
   return location;
 }
+
+/** The macros of `<cstdarg>` that the compiler gives the meaning of. */
+const VARIADIC_MACROS = new Set(['va_start', 'va_end', 'va_copy']);

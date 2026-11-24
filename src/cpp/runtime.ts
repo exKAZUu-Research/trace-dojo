@@ -58,6 +58,8 @@ export class Frame implements TracedFrame {
   private operandAccesses?: OperandAccesses;
   /** The slot of the local variable that a `return` returned without copying (the named return value). */
   nrvoSlot: number | undefined;
+  /** The arguments a call passed to the `...` of a C variadic function, with their types after promotion. */
+  variadicArguments?: readonly unknown[];
   /** The label of the `goto` the frame is jumping to. */
   gotoLabel = '';
 

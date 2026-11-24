@@ -18,6 +18,7 @@ import {
   VOID,
 } from '../types';
 import { Box, NULL_PTR, Ptr } from '../values';
+import { remainingArguments } from '../variadic';
 import { formatPrintf, type PrintfArgument } from './formatting';
 import { IO_STATE, OPEN_MODE, StreamValue } from './iostream';
 import type { Library } from './registry';
@@ -103,6 +104,35 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
       ([target, size, format, ...args], { frame }) =>
         printfToBuffer(frame, target as Ptr, format as Ptr, args, asNumber(size)),
       { isVariadic: true }
+    )
+  );
+  // The `v` forms take the variadic arguments a `va_list` has left.
+  add(
+    native('vprintf', [CONST_CHAR_PTR, CHAR_POINTER], INT, ([format, list], { frame }) => {
+      const text = printf(frame, format as Ptr, remainingArguments(list as Ptr));
+      frame.runtime.write('stdout', text);
+      return text.length;
+    })
+  );
+  add(
+    native('vfprintf', [streamType, CONST_CHAR_PTR, CHAR_POINTER], INT, ([stream, format, list], { frame }) => {
+      const text = printf(frame, format as Ptr, remainingArguments(list as Ptr));
+      library.writeFile(stream as Ptr, frame, text);
+      return text.length;
+    })
+  );
+  add(
+    native('vsprintf', [CHAR_POINTER, CONST_CHAR_PTR, CHAR_POINTER], INT, ([target, format, list], { frame }) =>
+      printfToBuffer(frame, target as Ptr, format as Ptr, remainingArguments(list as Ptr))
+    )
+  );
+  add(
+    native(
+      'vsnprintf',
+      [CHAR_POINTER, SIZE_T, CONST_CHAR_PTR, CHAR_POINTER],
+      INT,
+      ([target, size, format, list], { frame }) =>
+        printfToBuffer(frame, target as Ptr, format as Ptr, remainingArguments(list as Ptr), asNumber(size))
     )
   );
   add(

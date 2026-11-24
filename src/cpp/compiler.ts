@@ -1433,6 +1433,9 @@ export class Compiler extends StatementCompiler {
       isVirtual: false,
       isInline: this.hasSpecifier(node, 'inline'),
       isConst: qualifiers.has('const'),
+      isVariadic: (fieldOf(declarator, 'parameters')?.children ?? []).some(
+        (param) => param.type === 'variadic_parameter'
+      ),
       isNoexcept: this.exceptionSpecification(declarator),
       isConstexpr: this.hasSpecifier(node, 'constexpr') || this.hasSpecifier(node, 'consteval'),
       isConsteval: this.hasSpecifier(node, 'consteval'),
@@ -1518,7 +1521,8 @@ export class Compiler extends StatementCompiler {
     const params: ParamInfo[] = [];
     const declarations = list.children;
     for (const param of declarations) {
-      if (param.type === 'variadic_parameter') return this.unsupported(param.row, '可変長引数（...）');
+      // A C variadic parameter (`...`), which `isVariadic` marks on the function.
+      if (param.type === 'variadic_parameter') continue;
       if (param.type === 'variadic_parameter_declaration') {
         params.push(...this.packParameters(param));
         continue;

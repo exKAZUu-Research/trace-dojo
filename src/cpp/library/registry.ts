@@ -515,6 +515,8 @@ export class Library {
       ['uint32_t', UINT],
       ['uint64_t', ULLONG],
       ['nullptr_t', { kind: 'nullptr' }],
+      // arm64 macOS defines `va_list` as `char *`.
+      ['va_list', { kind: 'pointer', to: CHAR }],
     ] as const) {
       const entity = { kind: 'type', type } as const;
       this.addStd(name, entity);
