@@ -1,6 +1,7 @@
 import { ANY } from './sources/any';
 import { BIT } from './sources/bit';
 import { BITSET } from './sources/bitset';
+import { COMPLEX } from './sources/complex';
 import { COROUTINE } from './sources/coroutine';
 import { DISTRIBUTIONS } from './sources/distributions';
 import { EXCEPTION_PTR } from './sources/exceptionPtr';
@@ -53,11 +54,15 @@ export const LIBRARY_SOURCES: readonly LibrarySource[] = [
   BIT,
   REVERSE_ITERATOR,
   SPAN,
+  COMPLEX,
 ];
 
-const SOURCE_BY_NAME = new Map(LIBRARY_SOURCES.flatMap((source) => source.names.map((name) => [name, source])));
+const SOURCES_BY_NAME = new Map<string, LibrarySource[]>();
+for (const source of LIBRARY_SOURCES) {
+  for (const name of source.names) SOURCES_BY_NAME.set(name, [...(SOURCES_BY_NAME.get(name) ?? []), source]);
+}
 
-/** The part of the library's C++ source that declares `std::name`, if any. */
-export function librarySourceDeclaring(name: string): LibrarySource | undefined {
-  return SOURCE_BY_NAME.get(name);
+/** The parts of the library's C++ source that declare `std::name`, such as the overloads of a function. */
+export function librarySourcesDeclaring(name: string): readonly LibrarySource[] {
+  return SOURCES_BY_NAME.get(name) ?? [];
 }

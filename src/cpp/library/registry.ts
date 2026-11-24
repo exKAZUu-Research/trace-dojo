@@ -48,6 +48,7 @@ import {
   FLAGS,
   ManipulatorValue,
   OPEN_MODE,
+  skipWhitespace,
   Streams,
   type StreamValue,
   StreamValue as StreamValueClass,
@@ -113,7 +114,6 @@ const UNSUPPORTED_STD_NAMES: Record<string, string> = {
   type_index: '実行時の型の情報（std::type_index）',
   move: 'ムーブ（std::move）',
   forward: '完全転送（std::forward）',
-  complex: '複素数（std::complex）',
   valarray: 'std::valarray',
   format: '書式（std::format）',
   ranges: 'レンジ（std::ranges）',
@@ -554,14 +554,16 @@ export class Library {
     this.addStd('streamsize', { kind: 'type', type: LONG });
     for (const [name, apply] of Object.entries(MANIPULATORS)) {
       const isOutputOnly = OUTPUT_MANIPULATORS.has(name);
-      const streamType = referenceTo(classType(isOutputOnly ? streams.ostream : streams.iosBase));
+      const streamClass = isOutputOnly ? streams.ostream : name === 'ws' ? streams.istream : streams.iosBase;
+      const streamType = referenceTo(classType(streamClass));
       const fn = native(name, [streamType], streamType, ([location], { frame }) => {
         const stream = location as Ptr;
         apply(stream.read() as StreamValue, frame);
         return stream;
       });
       fn.streamManipulator = isOutputOnly ? 'output' : 'both';
-      if (isOutputOnly) this.nativeStdTemplates.add(fn);
+      // libc++ declares these manipulators as function templates of the character type.
+      if (isOutputOnly || name === 'ws') this.nativeStdTemplates.add(fn);
       this.addStd(name, { kind: 'functions', functions: [fn] });
     }
     const manipulatorFunctions = new Map<string, FunctionInfo[]>();
@@ -623,6 +625,7 @@ const MANIPULATORS: Record<string, (stream: StreamValue, frame: Frame) => void> 
   uppercase: (stream) => (stream.flags |= FLAGS.uppercase),
   nouppercase: (stream) => (stream.flags &= ~FLAGS.uppercase),
   skipws: (stream) => (stream.flags |= FLAGS.skipws),
+  ws: skipWhitespace,
   noskipws: (stream) => (stream.flags &= ~FLAGS.skipws),
 };
 

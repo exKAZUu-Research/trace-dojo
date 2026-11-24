@@ -63,8 +63,10 @@ import {
   CHAR,
   type ClassInfo,
   classType,
+  DOUBLE,
   type FieldInfo,
   fieldSubobjectOffset,
+  FLOAT,
   type FunctionInfo,
   type GlobalInfo,
   INT,
@@ -77,6 +79,7 @@ import {
   isScopedEnum,
   isSigned,
   isWide,
+  LDOUBLE,
   LONG,
   nonReference,
   NULLPTR,
@@ -471,7 +474,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     if (['h', 'min', 's', 'ms', 'us', 'ns', 'y', 'd'].includes(suffix))
       return this.unsupported(row, '<chrono> の時間のリテラル');
-    if (['i', 'if', 'il'].includes(suffix)) return this.unsupported(row, '<complex> の虚数のリテラル');
+    if (['i', 'if', 'il'].includes(suffix)) return this.imaginaryLiteral(suffix, literal, row);
     const view = suffix === 'sv' && literal.type !== 'number_literal' ? this.findStdName('string_view') : undefined;
     if (view?.kind === 'class') {
       const value = this.compileExpression(literal);
@@ -3059,6 +3062,18 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     };
   }
 
+  /** `2.5i`, a `std::complex` whose imaginary part is the number (C++20 [complex.literals]). */
+  private imaginaryLiteral(suffix: string, literal: Syntax, row: number): Expr {
+    const entity = this.findStdName('complex');
+    const template = entity?.kind === 'template' ? entity.template.program : undefined;
+    if (template?.kind !== 'class')
+      return this.error(row, '虚数のリテラルを使うには #include <complex> を書いてください。');
+    const part = suffix === 'if' ? FLOAT : suffix === 'il' ? LDOUBLE : DOUBLE;
+    const type = this.instantiateClassTemplate(template, [part], row) as Extract<Type, { kind: 'class' }>;
+    const value = this.convert(this.compileExpression(literal), part, row);
+    return this.constructObject(type.cls, [constantExpr(part, 0, row), value], row, false);
+  }
+
   /** A node that stands for an expression already compiled, in code the interpreter writes. */
   protected compiledSyntax(expr: Expr): Syntax {
     const text = `\0compiled ${this.compiledExpressions.size}`;
@@ -3372,6 +3387,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   abstract copyInitializer(type: Type, expr: Expr, row: number, isList: boolean): Initializer;
   /** `std::hash<T>` for a type, which the program may specialize. */
   abstract stdHash(type: Type): Type;
+  abstract instantiateClassTemplate(info: ClassTemplateInfo, written: Type[], row: number): Type;
 
   /** The value default-initialization gives an object of a type. */
   abstract defaultInitializer(type: Type, row: number): Initializer;

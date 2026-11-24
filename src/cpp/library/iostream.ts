@@ -13,6 +13,7 @@ import {
   CHAR,
   ClassInfo,
   classType,
+  INT,
   isCharType,
   isConstType,
   LONG,
@@ -118,6 +119,8 @@ export class StreamValue extends Store {
   /** Where writing continues in the buffer, overwriting what is there, as `basic_stringbuf`'s put area does. */
   writePosition = 0;
   state: number = IO_STATE.goodbit;
+  /** The number of characters the last unformatted input extracted (`gcount()`). */
+  extracted = 0;
   tied = NULL_PTR;
   private readonly bases = new Map<StreamBaseKind, Ptr>();
 
@@ -407,6 +410,7 @@ export class Streams {
       },
       assign: () => {},
     };
+    if (kind === 'istream') addInputMembers(cls);
     if (kind === 'ostream' || kind === 'istream') cls.isDefaultConstructorDeleted = true;
     else {
       const defaultMode = (isInput ? OPEN_MODE.in : 0) | (isOutput ? OPEN_MODE.out : 0);
@@ -904,6 +908,176 @@ function bindStreamMethods(cls: ClassInfo) {
   };
 }
 
+/** The end of the input that unformatted input functions return as an `int` (`EOF`). */
+const END_OF_INPUT = -1;
+/** `std::numeric_limits<std::streamsize>::max()`, the count `ignore` takes for no limit. */
+const UNLIMITED = (1n << 63n) - 1n;
+
+/**
+ * The unformatted input functions of `std::istream` (C++20 [istream.unformatted]), whose `sentry` does not skip
+ * whitespace.
+ */
+function addInputMembers(cls: ClassInfo): void {
+  const istream = referenceTo(classType(cls));
+  const charPointer = pointerTo(CHAR);
+  const input = (
+    name: string,
+    params: Type[],
+    ret: Type | 'self',
+    run: (stream: StreamValue, args: unknown[], frame: Frame) => unknown,
+    options: { optional?: number; isConst?: boolean } = {}
+  ): void => {
+    addMethod(
+      cls,
+      native(
+        name,
+        params,
+        ret === 'self' ? istream : ret,
+        (args, { self: object, selfLocation, frame }) => {
+          const result = run(self(object), args, frame);
+          return ret === 'self' ? selfLocation?.forClass(cls) : result;
+        },
+        options
+      )
+    );
+  };
+  input('get', [], INT, (stream) => (unformattedSentry(stream) ? (takeByte(stream) ?? fail(stream)) : END_OF_INPUT));
+  input('get', [referenceTo(CHAR)], 'self', (stream, [target]) => {
+    if (!unformattedSentry(stream)) return;
+    const byte = takeByte(stream);
+    if (byte === undefined) stream.state |= IO_STATE.failbit;
+    else (target as Ptr).write(signedChar(byte));
+  });
+  input('get', [charPointer, LONG, CHAR], 'self', (stream, args, frame) => readInto(stream, args, frame, false), {
+    optional: 1,
+  });
+  input('getline', [charPointer, LONG, CHAR], 'self', (stream, args, frame) => readInto(stream, args, frame, true), {
+    optional: 1,
+  });
+  input('peek', [], INT, (stream) => {
+    if (!unformattedSentry(stream)) return END_OF_INPUT;
+    if (stream.position < stream.buffer.length) return byteAt(stream.buffer, stream.position);
+    stream.state |= IO_STATE.eofbit;
+    return END_OF_INPUT;
+  });
+  input(
+    'ignore',
+    [LONG, INT],
+    'self',
+    (stream, [count, delimiter], frame) => {
+      if (!unformattedSentry(stream)) return;
+      const limit = count === undefined ? 1n : BigInt(count as bigint);
+      const separator = delimiter === undefined ? END_OF_INPUT : asNumber(delimiter);
+      while (limit === UNLIMITED || BigInt(stream.extracted) < limit) {
+        if (stream.extracted % 64 === 0) frame.runtime.spend();
+        const byte = takeByte(stream);
+        if (byte === undefined || byte === separator) break;
+      }
+    },
+    { optional: 2 }
+  );
+  input('read', [charPointer, LONG], 'self', (stream, [pointer, count], frame) => {
+    if (!unformattedSentry(stream)) return;
+    for (let index = 0; index < Number(count); index++) {
+      if (index % 64 === 0) frame.runtime.spend();
+      const byte = takeByte(stream);
+      if (byte === undefined) {
+        stream.state |= IO_STATE.failbit;
+        return;
+      }
+      (pointer as Ptr).offset(index).write(signedChar(byte));
+    }
+  });
+  input('unget', [], 'self', stepBack);
+  input('putback', [CHAR], 'self', stepBack);
+  input('gcount', [], LONG, (stream) => BigInt(stream.extracted), { isConst: true });
+  input('tellg', [], LONG, (stream, _args, frame) =>
+    stream.failed || !seeks(stream, frame) ? -1n : BigInt(stream.position)
+  );
+  input('seekg', [LONG], 'self', (stream, [position], frame) => {
+    stream.state &= ~IO_STATE.eofbit;
+    if (stream.failed) return;
+    if (!seeks(stream, frame)) {
+      stream.state |= IO_STATE.failbit;
+      return;
+    }
+    const target = Number(position);
+    if (target < 0 || target > stream.buffer.length) stream.state |= IO_STATE.failbit;
+    else stream.position = target;
+  });
+}
+
+/** Whether an unformatted input may read the stream, setting `failbit` when it may not. */
+function unformattedSentry(stream: StreamValue): boolean {
+  stream.extracted = 0;
+  if (stream.isGood && stream.mode & OPEN_MODE.in) return true;
+  stream.state |= IO_STATE.failbit;
+  return false;
+}
+
+function takeByte(stream: StreamValue): number | undefined {
+  if (stream.position >= stream.buffer.length) {
+    stream.state |= IO_STATE.eofbit;
+    return undefined;
+  }
+  stream.extracted++;
+  return byteAt(stream.buffer, stream.position++);
+}
+
+/** Reads characters into an array until the delimiter, which `getline` extracts and `get` leaves. */
+function readInto(stream: StreamValue, args: unknown[], frame: Frame, extractsDelimiter: boolean): void {
+  const [pointer, count, delimiter] = args;
+  const target = pointer as Ptr;
+  const limit = Number(count);
+  const separator = delimiter === undefined ? 10 : asNumber(delimiter) & 0xff;
+  let written = 0;
+  let isFull = false;
+  if (unformattedSentry(stream)) {
+    for (;;) {
+      if (written % 64 === 0) frame.runtime.spend();
+      if (stream.position >= stream.buffer.length) {
+        stream.state |= IO_STATE.eofbit;
+        break;
+      }
+      const byte = byteAt(stream.buffer, stream.position);
+      if (byte === separator) {
+        if (extractsDelimiter) {
+          stream.position++;
+          stream.extracted++;
+        }
+        break;
+      }
+      if (written >= limit - 1) {
+        isFull = true;
+        break;
+      }
+      target.offset(written).write(signedChar(byte));
+      written++;
+      stream.position++;
+      stream.extracted++;
+    }
+  }
+  if (limit > 0) target.offset(written).write(0);
+  if (stream.extracted === 0 || (extractsDelimiter && isFull)) stream.state |= IO_STATE.failbit;
+}
+
+function stepBack(stream: StreamValue): void {
+  stream.state &= ~IO_STATE.eofbit;
+  if (!unformattedSentry(stream)) return;
+  if (stream.position > 0) stream.position--;
+  else stream.state |= IO_STATE.badbit;
+}
+
+/** Whether a stream can seek, which libc++'s standard input cannot, wherever it comes from. */
+function seeks(stream: StreamValue, frame: Frame): boolean {
+  return stream !== frame.runtime.standardInput();
+}
+
+function fail(stream: StreamValue): number {
+  stream.state |= IO_STATE.failbit;
+  return END_OF_INPUT;
+}
+
 const readLine: NativeFunction = ([stream, text, delimiter], { frame }) => {
   const place = stream as Ptr;
   const source = place.read() as StreamValue;
@@ -1052,6 +1226,20 @@ function paddingPoint(text: string): number {
 
 function chargeInput(frame: Frame, offset: number): void {
   if (offset % 64 === 0) frame.runtime.spend();
+}
+
+/** `std::ws`, which skips whitespace, reaching the end of the text without failing (C++20 [istream.manip]). */
+export function skipWhitespace(stream: StreamValue, frame: Frame): void {
+  if (!stream.isGood || !(stream.mode & OPEN_MODE.in)) {
+    stream.state |= IO_STATE.failbit;
+    return;
+  }
+  const start = stream.position;
+  while (stream.position < stream.buffer.length && isSpaceByte(byteAt(stream.buffer, stream.position))) {
+    chargeInput(frame, stream.position - start);
+    stream.position++;
+  }
+  if (stream.position >= stream.buffer.length) stream.state |= IO_STATE.eofbit;
 }
 
 /** The input `sentry`: fails unless the stream is good, then skips whitespace, failing at the end of the text. */

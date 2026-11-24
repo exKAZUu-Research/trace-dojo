@@ -1,5 +1,5 @@
 import { fma } from '../../c/library/binaryFloat';
-import { BINARY, UNARY } from '../../c/library/mathFunctions';
+import { BINARY, MATH_FUNCTIONS, UNARY } from '../../c/library/mathFunctions';
 import { convertNumeric, type NumericValue } from '../arithmetic';
 import { overflowError } from '../errors';
 import { copyFloatSign, type FloatingValue, FloatNaN, floatSignBit, fusedNaN, NEGATIVE_NAN } from '../floatSign';
@@ -56,6 +56,30 @@ export function mathFunctions(): Map<string, FunctionInfo[]> {
     native('abs', [LLONG], LLONG, ([x]) => integerAbs(x, LLONG)),
     ...FLOAT_TYPES.map((type) => native('abs', [type], type, ([x]) => copyFloatSign(x, 0))),
   ]);
+  for (const name of ['ldexp', 'scalbn', 'scalbln']) {
+    const exponent = name === 'scalbln' ? LONG : INT;
+    functions.set(
+      name,
+      FLOAT_TYPES.map((type) =>
+        native(name, [type, exponent], type, ([x, e], { frame }) =>
+          (type === FLOAT ? MATH_FUNCTIONS.ldexpf : MATH_FUNCTIONS.ldexp)(
+            frame.runtime as never,
+            [x as number, Number(e)],
+            [],
+            0
+          )
+        )
+      )
+    );
+  }
+  functions.set(
+    'ilogb',
+    FLOAT_TYPES.map((type) =>
+      native('ilogb', [type], INT, ([x], { frame }) =>
+        MATH_FUNCTIONS.ilogb(frame.runtime as never, [x as number], [], 0)
+      )
+    )
+  );
   for (const name of ['labs', 'llabs'])
     functions.set(name, [
       native(name, [name === 'labs' ? LONG : LLONG], name === 'labs' ? LONG : LLONG, ([x]) =>

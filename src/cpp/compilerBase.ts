@@ -188,10 +188,14 @@ export abstract class CompilerBase {
   }
 
   protected findStdName(name: string): Entity | undefined {
-    const std = this.library.std(name);
-    if ((!std || std.kind === 'unsupported') && this.library.declaresStd(name)) {
+    let std = this.library.std(name);
+    const isNative = std !== undefined && std.kind !== 'unsupported';
+    if ((!isNative || std?.kind === 'functions') && this.library.declaresStd(name)) {
       const written = this.librarySourceEntity(name);
-      if (written) return written;
+      // The library's C++ source adds overloads to the natives' (`std::abs` of a `std::complex`).
+      if (written?.kind === 'functions' && std?.kind === 'functions')
+        std = { kind: 'functions', functions: [...std.functions, ...written.functions] };
+      else if (written && !isNative) return written;
     }
     const local = this.rootScope.names.get(name);
     if (std?.kind === 'functions' && local?.kind === 'functions') {

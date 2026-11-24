@@ -31,7 +31,7 @@ import { thisLocation } from './expressionCompiler';
 import { compileLambda } from './lambdas';
 import { type OrderingName, orderingNumber, ORDERINGS } from './library/compare';
 import { provideProgramOperators, type ValueComparison } from './library/elements';
-import { type LibrarySource, librarySourceDeclaring } from './library/librarySources';
+import { type LibrarySource, librarySourcesDeclaring } from './library/librarySources';
 import type { Library, LibraryTemplate } from './library/registry';
 import {
   bindRetainedTemporary,
@@ -203,9 +203,9 @@ export class Compiler extends CoroutineCompiler {
   }
 
   protected override librarySourceEntity(name: string): Entity | undefined {
-    const source = librarySourceDeclaring(name);
-    if (!source) return undefined;
-    this.compileLibrarySource(source);
+    const sources = librarySourcesDeclaring(name);
+    if (sources.length === 0) return undefined;
+    for (const source of sources) this.compileLibrarySource(source);
     return this.libraryNamespace.member(name);
   }
 
