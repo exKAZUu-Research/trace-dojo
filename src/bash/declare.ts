@@ -1568,6 +1568,8 @@ function isReadonlyGlobal(shell: Shell, name: string): boolean {
   return variable?.attributes.has('r') === true && shell.state.scopes[0].get(name) === variable;
 }
 
+const VALUE_CONVERSION_ATTRIBUTES: Attribute[] = ['i', 'l', 'u', 'c'];
+
 /** Sets and removes a declaration's attributes, converting the value as Bash does, or reports why it cannot. */
 // code-gauge-allow functionCognitiveComplexity -- Bash's attribute rules for declare: conversions, exclusive case attributes, and array kinds.
 // code-gauge-allow functionParameterCount -- Carries shell, builtin, target variable, flags, assignment/subscript flags, and deferred +n mode.
@@ -1591,6 +1593,9 @@ function applyAttributes(
     (impliesIndexed && !set.has('A') && !variable.attributes.has('A') && variable.value?.kind !== 'associative');
   if ((set.has('A') || becomesIndexed) && variable.attributes.delete('n') && !set.has('a') && !set.has('A')) {
     variable.value = { kind: 'indexed', elements: new Map() };
+  }
+  if (set.has('n')) {
+    for (const attribute of VALUE_CONVERSION_ATTRIBUTES) variable.attributes.delete(attribute);
   }
   for (const attribute of ['i', 'l', 'u', 'c', 'n', 'x', 't'] as Attribute[]) {
     if (set.has(attribute)) variable.attributes.add(attribute);
