@@ -16,13 +16,15 @@ import {
   wrap,
 } from './operators';
 import type { Frame, Runtime } from './runtime';
-import { Flow } from './scope';
+import { type ConditionFlow, Flow } from './scope';
 import {
   coreTypes,
   type DartType,
   DYNAMIC,
+  factorType,
   interfaceType,
   isNeverType,
+  isNonNullable,
   isPotentiallyNullable,
   isSubtype,
   makeNullable,
@@ -326,6 +328,42 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     };
   }
 
+  protected compileIs(expression: Extract<Expression, { kind: 'is' }>): { compiled: Compiled; flow: ConditionFlow } {
+    const value = this.compileExpression(expression.value);
+    if (value.type.kind === 'void') this.error(expression.value, 'void の値は、式の中では使えません。');
+    const type = this.resolveType(expression.type);
+    const resolve = this.runtimeType(type);
+    const { run } = value;
+    const { variable } = value;
+    let tested = variable ? this.flow.rememberTypeTest(variable, type) : this.flow;
+    let promoted = tested;
+    if (variable && this.isPromotable(variable)) {
+      const current = this.promotedType(variable);
+      const narrowed = promotionTarget(current, type);
+      if (narrowed) promoted = tested.promote(variable, narrowed);
+      // A failed test removes the tested type from a union, as `FutureOr<T>` without `Future<T>` is `T`.
+      const remaining = factorType(current, type);
+      if (!sameType(remaining, current) && isSubtype(remaining, current) && !isNeverType(remaining)) {
+        tested = tested.promote(variable, remaining);
+      }
+    }
+    // A test the static type already decides leaves its other branch unreachable.
+    if (isSubtype(value.type, type)) tested = tested.unreachable;
+    else if (isNeverType(type) || (type.kind === 'null' && isNonNullable(value.type))) promoted = promoted.unreachable;
+    const { negated } = expression;
+    return {
+      compiled: {
+        type: interfaceType(coreTypes.bool),
+        run: (frame) => {
+          const result = this.valueIsAt(frame, run(frame), resolve(frame));
+          return result !== negated;
+        },
+        isConst: value.isConst && !this.usesLexicalTypeVariables(type),
+      },
+      flow: negated ? { whenTrue: tested, whenFalse: promoted } : { whenTrue: promoted, whenFalse: tested },
+    };
+  }
+
   protected compileAs(expression: Extract<Expression, { kind: 'as' }>): Compiled {
     const value = this.compileExpression(expression.value);
     const type = this.resolveType(expression.type);
@@ -381,9 +419,12 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       run: (frame) => (frame.locals[slot] as Cell).v,
       isConst: false,
     };
-    const sections = expression.sections.map(
-      (section) => this.compileNullChain(() => this.compileCascadeSection(receiver, section)).result
-    );
+    const sections = expression.sections.map((section, index) => {
+      const run = this.compileNullChain(() => this.compileCascadeSection(receiver, section)).result;
+      // A section that ran before a later one awaited must not run again when the statement continues.
+      const remember = this.rememberBeforeAwait(section, section, expression.sections.slice(index + 1));
+      return remember ? (frame: Frame) => remember(frame, () => run(frame)) : run;
+    });
     const targetRun = target.run;
     return {
       type: target.type,

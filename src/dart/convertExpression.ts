@@ -406,7 +406,8 @@ export abstract class ExpressionConverter {
         return this.convertDotShorthand(node);
       }
       case 'await_expression': {
-        return unsupported(node, 'await（非同期処理）');
+        const operand = childrenOf(node).filter((child) => child.type !== 'await' && child.type !== 'comment');
+        return { kind: 'await', value: this.soleExpression(node, operand), ...spanOf(node) };
       }
       default: {
         return syntaxError(node, '書き方に誤りがあります。');
@@ -726,6 +727,7 @@ export abstract class ExpressionConverter {
         const loop = this.convertForParts(node);
         const body = this.elementField(node, 'body');
         if (loop.kind === 'forIn') {
+          if (loop.isAwait) return unsupported(node, 'コレクションの中の await for');
           return { kind: 'forInElement', binding: loop.binding, iterable: loop.iterable, body, ...span };
         }
         return { kind: 'forElement', init: loop.init, condition: loop.condition, updates: loop.updates, body, ...span };
@@ -1361,8 +1363,8 @@ export abstract class ExpressionConverter {
         condition: Expression | undefined;
         updates: Expression[];
       }
-    | { kind: 'forIn'; binding: ForInBinding; iterable: Expression } {
-    if (hasToken(node, 'await')) return unsupported(node, 'await for（非同期処理）');
+    | { kind: 'forIn'; binding: ForInBinding; iterable: Expression; isAwait: boolean } {
+    const isAwait = hasToken(node, 'await');
     const children = childrenOf(node);
     const inIndex = children.findIndex((child) => child.type === 'in');
     if (inIndex !== -1) {
@@ -1372,6 +1374,7 @@ export abstract class ExpressionConverter {
         kind: 'forIn',
         binding: this.convertForInBinding(node, bindingNodes),
         iterable: this.fieldExpression(node, 'value'),
+        isAwait,
       };
     }
     const initNodes = fieldsOf(node, 'init');

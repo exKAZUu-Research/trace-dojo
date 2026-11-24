@@ -15,17 +15,9 @@ import type {
   TypeSyntax,
 } from './ast';
 import { chainHead, isDotShorthand } from './astWalk';
+import { AwaitCompiler } from './awaitCompiler';
 import type { ClassInfo, FieldMember, Member } from './classes';
-import {
-  at,
-  type Compiled,
-  CompilerBase,
-  type Eval,
-  extensionMember,
-  type ResolvedMember,
-  typeName,
-  valueIs,
-} from './compilerBase';
+import { at, type Compiled, type Eval, extensionMember, type ResolvedMember, typeName, valueIs } from './compilerBase';
 import {
   elementTypeOfContext,
   isDoubleContext,
@@ -142,7 +134,7 @@ const COMPOUND_OPERATORS: Record<string, string> = {
   '>>>=': '>>>',
 };
 
-export abstract class ExpressionCompiler extends CompilerBase {
+export abstract class ExpressionCompiler extends AwaitCompiler {
   // Implemented by the subclasses that compile calls, closures, patterns, and declarations.
   abstract compileCall(expression: Extract<Expression, { kind: 'call' }>, context: DartType | undefined): Compiled;
   abstract compileNew(expression: Extract<Expression, { kind: 'new' }>, context: DartType | undefined): Compiled;
@@ -468,42 +460,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  private compileIs(expression: Extract<Expression, { kind: 'is' }>): { compiled: Compiled; flow: ConditionFlow } {
-    const value = this.compileExpression(expression.value);
-    if (value.type.kind === 'void') this.error(expression.value, 'void の値は、式の中では使えません。');
-    const type = this.resolveType(expression.type);
-    const resolve = this.runtimeType(type);
-    const { run } = value;
-    const { variable } = value;
-    let tested = variable ? this.flow.rememberTypeTest(variable, type) : this.flow;
-    let promoted = tested;
-    if (variable && this.isPromotable(variable)) {
-      const current = this.promotedType(variable);
-      const narrowed = promotionTarget(current, type);
-      if (narrowed) promoted = tested.promote(variable, narrowed);
-    }
-    // A test the static type already decides leaves its other branch unreachable.
-    if (isSubtype(value.type, type)) tested = tested.unreachable;
-    else if (isNeverType(type) || (type.kind === 'null' && isNonNullable(value.type))) promoted = promoted.unreachable;
-    const { negated } = expression;
-    return {
-      compiled: {
-        type: interfaceType(coreTypes.bool),
-        run: (frame) => {
-          const result = this.valueIsAt(frame, run(frame), resolve(frame));
-          return result !== negated;
-        },
-        isConst: value.isConst && !this.usesLexicalTypeVariables(type),
-      },
-      flow: negated ? { whenTrue: tested, whenFalse: promoted } : { whenTrue: promoted, whenFalse: tested },
-    };
-  }
-
   protected valueIsAt(frame: Frame, value: Value, type: DartType): boolean {
     return valueIs(frame.runtime, value, type);
   }
 
+  /**
+   * Compiles part of an expression, which remembers its value when an `await` after it in the statement may suspend
+   * the statement.
+   */
   protected compileChainPart(expression: Expression, context: DartType | undefined): Compiled {
+    return this.rememberedBeforeAwait(expression, () => this.compileChainPartNow(expression, context));
+  }
+
+  private compileChainPartNow(expression: Expression, context: DartType | undefined): Compiled {
     const explicitlyConst = 'isConst' in expression && expression.isConst;
     const params =
       this.inConstContext || explicitlyConst
@@ -571,7 +540,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return this.compileConstructorTearoff(expression.type, expression.name, expression);
       }
       case 'await': {
-        return this.unsupported(expression, 'await（非同期処理）');
+        return this.compileAwait(expression, context);
       }
       default: {
         return this.compilePrimary(expression, context);
@@ -1707,6 +1676,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
     context: DartType | undefined
   ): Compiled;
   protected abstract compileAs(expression: Extract<Expression, { kind: 'as' }>): Compiled;
+  protected abstract compileIs(expression: Extract<Expression, { kind: 'is' }>): {
+    compiled: Compiled;
+    flow: ConditionFlow;
+  };
   protected abstract compileThrow(expression: Extract<Expression, { kind: 'throw' }>): Compiled;
   protected abstract compileConditional(
     expression: Extract<Expression, { kind: 'conditional' }>,

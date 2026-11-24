@@ -50,7 +50,7 @@ import { markCovariantParameters, MemberCompiler } from './memberCompiler';
 import { isPrimitive } from './primitives';
 import { checkRepresentationCycles } from './representationCycles';
 import { Frame, type FunctionInfo, type Runtime, type TypeEnv } from './runtime';
-import { type FunctionContext, primaryParameterInInitializer } from './scope';
+import { bodyKind, type FunctionContext, primaryParameterInInitializer } from './scope';
 import { type GenExec, inheritsCovariance } from './statementCompiler';
 import {
   asInstanceOf,
@@ -1689,7 +1689,7 @@ export class Compiler extends MemberCompiler {
         typeParams,
         kind: {
           returnType: fn.type.returnType,
-          isGenerator: body.modifier === 'sync*',
+          ...bodyKind(body.modifier),
           thisClass: undefined,
           thisType: undefined,
           hasThis: false,

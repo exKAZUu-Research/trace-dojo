@@ -50,11 +50,17 @@ export function runProgram(
   let uncaughtException: string | undefined;
   try {
     runMain(runtime, program);
+    // The isolate keeps running the microtasks and timers that `main` left until none remain.
+    runtime.events.run();
   } catch (error) {
     uncaughtException = describeUncaught(runtime, error);
   }
   if (runtime.onMainExit) {
     runtime.onMainExit = undefined;
+    finalTurtles = runtime.world.turtleTraces();
+  } else if (runtime.events.hasRun) {
+    // Callbacks that ran after `main` returned may have moved turtles.
+    runtime.collectGarbage();
     finalTurtles = runtime.world.turtleTraces();
   }
   return { finalBoard: runtime.world.boardText(), finalTurtles, uncaughtException, ...runtime.io.output() };

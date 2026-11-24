@@ -3314,7 +3314,7 @@ test.each([
 
 test.each([
   { name: 'standard input', program: "import 'dart:io';\n\nvoid main() {\n  print(stdin.readLineSync());\n}\n" },
-  { name: 'async functions', program: 'Future<void> main() async {\n  await Future.delayed(Duration.zero);\n}\n' },
+  { name: 'zones', program: "import 'dart:async';\n\nvoid main() {\n  runZoned(() => print('zoned'));\n}\n" },
   { name: 'files', program: "import 'dart:io';\n\nvoid main() {\n  print(File('a.txt').readAsStringSync());\n}\n" },
   {
     name: 'secure random constructors',
@@ -5288,7 +5288,7 @@ test('unsupported SDK exports respect import prefixes and visibility', () => {
     ["import 'dart:convert';", "print(ascii.encode('A'));"],
     ["import 'dart:convert' as codec show htmlEscape;", "print(codec.htmlEscape.convert('<'));"],
     ["import 'dart:collection' as collections;", 'collections.LinkedList<collections.LinkedListEntry>();'],
-    ['', 'Sink? value; print(value);'],
+    ['', 'Expando? value; print(value);'],
     ["import 'dart:io' as io;", 'print(io.HttpDate);'],
   ]) {
     const result = executeProgram('dart', `${declaration} void main() { ${body} }`);
@@ -9915,4 +9915,81 @@ void main() {
   for (const directive of ["part of 'main.dart';", "export 'tools.dart';", "int f() native 'f';"]) {
     expect(executeProgram('dart', `${directive}\nvoid main() {}`)).toMatchObject({ kind: 'compileError' });
   }
+});
+
+// Dart SDK 3.13.7 (`dart run`) prints the expected output: the order of microtasks, timers, and resumed awaits, the
+// update a concurrent `+=` loses, and the cleanup of an `async*` body whose listener cancelled.
+test('Dart async functions, timers, and streams run in the order of the VM event loop', () => {
+  const program = `import 'dart:async';
+int total = 0;
+Future<int> later(int x) async {
+  await null;
+  return x;
+}
+Future<void> add(int x) async {
+  total += await later(x);
+}
+Stream<int> count(int n) async* {
+  try {
+    for (var i = 1; i <= n; i++) yield i;
+  } finally {
+    print('count closed');
+  }
+}
+void main() async {
+  scheduleMicrotask(() => print('microtask'));
+  Timer(Duration(milliseconds: 5), () => print('timer 5'));
+  Timer.run(() => print('timer 0'));
+  print('main \${[1, await later(2), 3]}');
+  await Future.wait([add(1), add(2)]);
+  print('total $total');
+  var controller = StreamController<String>.broadcast();
+  controller.stream.listen((event) => print('heard $event'));
+  controller.add('a');
+  await for (var i in count(5)) {
+    if (i == 2) break;
+    print('loop $i');
+  }
+  print(await count(3).map((i) => i * 10).toList());
+  try {
+    await Future<int>.error(StateError('no')).timeout(Duration(seconds: 1));
+  } on StateError catch (e) {
+    print(e);
+  }
+  await Future.delayed(Duration(milliseconds: 10));
+  print('end');
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'microtask\nmain [1, 2, 3]\ntotal 2\nheard a\nloop 1\ncount closed\ncount closed\n[10, 20, 30]\n' +
+      'Bad state: no\ntimer 0\ntimer 5\nend\n',
+  });
+});
+
+test('an unhandled asynchronous error ends a Dart run before later events', () => {
+  const program = `import 'dart:async';
+void main() {
+  Future.error(StateError('x'));
+  Timer(Duration(seconds: 1), () => print('later'));
+  scheduleMicrotask(() => print('microtask'));
+  print('end');
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'end\n',
+    uncaughtException: 'Unhandled exception:\nBad state: x',
+  });
+});
+
+test.each([
+  'int f() async => 1;',
+  'void g() { await null; }',
+  "Future<int> f() async => 'x';",
+  'Future<int> f() async {}',
+  "Stream<int> f() async* { yield 'a'; }",
+  'Stream<int> f() async* { return 1; }',
+  'void g() async { await for (var x in [1]) {} }',
+])('misused async syntax `%s` is a compile error', (declaration) => {
+  expect(executeProgram('dart', `${declaration}\nvoid main() {}`)).toMatchObject({ kind: 'compileError' });
 });

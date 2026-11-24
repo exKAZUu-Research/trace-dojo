@@ -14,6 +14,7 @@ import {
   sourceMemberName,
 } from './classes';
 import { eraseFunctionType } from './eraseExtensionTypes';
+import { EventLoop } from './eventLoop';
 import { RecordShapes } from './recordShapes';
 import {
   asInstanceOf,
@@ -76,6 +77,8 @@ export class Frame implements TracedFrame {
   readonly locals: (Cell | undefined)[];
   /** Values a statement holds while it evaluates the rest of an expression, which garbage collection keeps. */
   readonly temporaries: Value[] = [];
+  /** Whether the frame's `async` body is waiting at an `await` or `yield`, so that leaving the frame does not end it. */
+  isSuspended = false;
 
   // code-gauge-allow functionParameterCount -- The parameters are the parts a caller already holds; grouping them would only rename them.
   constructor(
@@ -124,7 +127,15 @@ export interface LibraryLinks {
   syncStarIterable(
     frame: Frame,
     elementType: DartType,
-    body: (frame: Frame) => Generator<Value, unknown, undefined>
+    body: (frame: Frame) => Generator<unknown, unknown, Value>
+  ): Value;
+  /** Starts an `async` function's body, which runs until its first `await`, and returns its future. */
+  startAsync(frame: Frame, valueType: DartType, body: (frame: Frame) => Generator<unknown, unknown, Value>): Value;
+  /** The stream an `async*` function returns, whose body starts when the stream is listened to. */
+  startAsyncStar(
+    frame: Frame,
+    elementType: DartType,
+    body: (frame: Frame) => Generator<unknown, unknown, Value>
   ): Value;
   listIterator(runtime: Runtime, list: DartList): DartObject;
   /** Whether a value is of a type that holds no type parameters. */
@@ -195,7 +206,12 @@ export class Runtime implements TracedRuntime<Frame> {
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
+    this.events = new EventLoop(this);
   }
+
+  readonly events: EventLoop;
+  /** The entry point's frame once its `async` body suspended, which ends the entry point when it completes. */
+  private suspendedEntry: Frame | undefined;
 
   spend(cost = 1): void {
     this.budget.spend(cost);
@@ -228,11 +244,16 @@ export class Runtime implements TracedRuntime<Frame> {
   private overflowing = false;
 
   exit(frame: Frame): void {
-    if (this.frames.length === 1 && this.onMainExit) {
-      // The entry point's frame still holds its variables, which the end of a trace shows.
-      const callback = this.onMainExit;
-      this.onMainExit = undefined;
-      callback();
+    if (this.onMainExit) {
+      const isEntry = this.frames.length === 1 ? this.suspendedEntry === undefined : frame === this.suspendedEntry;
+      if (isEntry && frame.isSuspended) {
+        this.suspendedEntry = frame;
+      } else if (isEntry || frame === this.suspendedEntry) {
+        // The entry point's frame still holds its variables, which the end of a trace shows.
+        const callback = this.onMainExit;
+        this.onMainExit = undefined;
+        callback();
+      }
     }
     const top = this.frames.pop();
     if (top !== frame) throw new Error('The frames got out of order');

@@ -1,4 +1,4 @@
-import type { Span } from './ast';
+import type { BodyModifier, Span } from './ast';
 import type { ClassInfo } from './classes';
 import type { Eval } from './compilerBase';
 import type { FunctionInfo, TypeEnv } from './runtime';
@@ -122,7 +122,10 @@ export class FunctionContext {
     readonly kind: {
       /** The declared or contextual return type, or undefined for a closure whose return type is inferred. */
       returnType: DartType | undefined;
+      /** Whether the body yields: `sync*` and `async*`. */
       isGenerator: boolean;
+      /** Whether the body awaits: `async` and `async*`. */
+      isAsync: boolean;
       /** The class whose members `this` reaches, for methods, constructors, and closures inside them. */
       thisClass: ClassInfo | undefined;
       thisType: InterfaceType | undefined;
@@ -472,4 +475,12 @@ function affectedPath(variable: LocalVar, matches: (part: LocalVar) => boolean):
     if (matches(current)) return true;
   }
   return false;
+}
+
+/** Whether a body with this modifier yields (`sync*`, `async*`) and awaits (`async`, `async*`). */
+export function bodyKind(modifier: BodyModifier | undefined): { isGenerator: boolean; isAsync: boolean } {
+  return {
+    isGenerator: modifier === 'sync*' || modifier === 'async*',
+    isAsync: modifier === 'async' || modifier === 'async*',
+  };
 }

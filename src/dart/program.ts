@@ -7,7 +7,9 @@ import { valueIs } from './compilerBase';
 import { initialGlobals, instantiateObject } from './declarationRuntime';
 import { type GlobalVariable, LibraryEnv, type TopLevelFunction } from './environment';
 import { stringOf } from './format';
+import { ASYNC_SOURCE } from './library/async';
 import { CORE_SOURCE } from './library/core';
+import { startAsync, startAsyncStar } from './library/nativeAsync';
 import { addAllToMap, listIterator, newMap, newSet, quickCopySet, syncStarIterable } from './library/nativeCollections';
 import { COLLECTION_SOURCE, CONVERT_SOURCE, IO_SOURCE, MATH_SOURCE } from './library/others';
 import './library/nativeCore';
@@ -42,6 +44,7 @@ interface LibrarySource {
 const LIBRARY_SOURCES: LibrarySource[] = [
   { uri: 'dart:core', source: CORE_SOURCE, imports: ['dart:math'] },
   { uri: 'dart:math', source: MATH_SOURCE, imports: [] },
+  { uri: 'dart:async', source: ASYNC_SOURCE, imports: ['dart:collection'] },
   { uri: 'dart:collection', source: COLLECTION_SOURCE, imports: ['dart:math'] },
   { uri: 'dart:convert', source: CONVERT_SOURCE, imports: ['dart:collection'] },
   { uri: 'dart:io', source: IO_SOURCE, imports: [] },
@@ -49,7 +52,6 @@ const LIBRARY_SOURCES: LibrarySource[] = [
 
 /** The libraries a program may import, and why the others are unavailable. */
 const UNAVAILABLE_LIBRARIES: Record<string, string> = {
-  'dart:async': 'dart:async（非同期処理）',
   'dart:isolate': 'dart:isolate（Isolate）',
   'dart:mirrors': 'dart:mirrors（リフレクション）',
   'dart:ffi': 'dart:ffi（外部の関数の呼び出し）',
@@ -116,6 +118,25 @@ export function libraries(): Libraries {
 function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
   const core = envs.get('dart:core') as LibraryEnv;
   assignCoreTypes(core);
+  const asyncLibrary = envs.get('dart:async') as LibraryEnv;
+  const asyncClass = (name: string): ClassInfo => (asyncLibrary.declarations.get(name) as { cls: ClassInfo }).cls;
+  Object.assign(coreTypes, {
+    future: asyncClass('Future'),
+    futureOr: asyncClass('FutureOr'),
+    stream: asyncClass('Stream'),
+  });
+  // dart:core exports these declarations of dart:async.
+  for (const name of [
+    'Future',
+    'Stream',
+    'FutureExtensions',
+    'FutureIterable',
+    ...Array.from({ length: 8 }, (_, index) => `FutureRecord${index + 2}`),
+    'ParallelWaitError',
+  ]) {
+    const declaration = asyncLibrary.declarations.get(name);
+    if (declaration) core.reexports.set(name, declaration);
+  }
   for (const name of [
     'MappedIterable',
     'MappedListIterable',
@@ -363,6 +384,8 @@ export const LINKS: LibraryLinks = {
   },
   constantIdentityKey,
   syncStarIterable,
+  startAsync,
+  startAsyncStar,
   listIterator,
   isValueOf: (runtime, value, type) => valueIs(runtime, value, type),
 };

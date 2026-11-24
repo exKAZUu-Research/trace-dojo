@@ -15,7 +15,7 @@ import type { ExtensionInfo, TopLevelFunction, TypeAlias } from './environment';
 import { SHORTED } from './expressionCompiler';
 import { OperatorCompiler } from './operatorCompiler';
 import type { Frame, Runtime, TypeEnv } from './runtime';
-import type { FunctionContext } from './scope';
+import { bodyKind, type FunctionContext } from './scope';
 import {
   closeInferenceHoles,
   INFERENCE_HOLE,
@@ -988,7 +988,7 @@ export abstract class CallCompiler extends OperatorCompiler {
         typeParams,
         kind: {
           returnType: undefined,
-          isGenerator: expression.body.modifier === 'sync*',
+          ...bodyKind(expression.body.modifier),
           thisClass: this.fn.kind.thisClass,
           thisType: this.fn.kind.thisType,
           hasThis: this.fn.kind.hasThis,

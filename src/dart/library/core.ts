@@ -392,6 +392,45 @@ final class RuneIterator implements Iterator<int> {
   }
 }
 
+class Stopwatch {
+  static final int _frequency = _initTicker();
+  int _start = 0;
+  int? _stop = 0;
+  Stopwatch() {
+    _frequency;
+  }
+  int get frequency => _frequency;
+  void start() {
+    int? stop = _stop;
+    if (stop != null) {
+      _start += _now() - stop;
+      _stop = null;
+    }
+  }
+  void stop() {
+    _stop ??= _now();
+  }
+  void reset() {
+    _start = _stop ?? _now();
+  }
+  int get elapsedTicks {
+    return (_stop ?? _now()) - _start;
+  }
+  Duration get elapsed {
+    return Duration(microseconds: elapsedMicroseconds);
+  }
+  int get elapsedMicroseconds => elapsedTicks ~/ 1000;
+  int get elapsedMilliseconds => elapsedTicks ~/ 1000000;
+  bool get isRunning => _stop == null;
+  static int _initTicker() => 1000000000;
+  external static int _now();
+}
+
+abstract interface class Sink<T> {
+  void add(T data);
+  void close();
+}
+
 abstract interface class StringSink {
   void write(Object? object);
   void writeAll(Iterable<dynamic> objects, [String separator = ""]);

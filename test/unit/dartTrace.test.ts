@@ -496,3 +496,50 @@ test('learner callbacks retain a single call row for native and SDK operations',
     expect(calls).toEqual([[3], [3]]);
   }
 });
+
+test('Dart async functions record their steps where they resume, without the call that awaited them', () => {
+  const program = `Future<int> walk(Turtle t, int n) async {
+  for (var i = 0; i < n; i++) {
+    t.forward();
+    await Future.delayed(Duration(milliseconds: 10));
+  }
+  return n;
+}
+
+Future<void> main() async {
+  var a = Turtle(1, 1);
+  var b = Turtle(4, 1);
+  var fa = walk(a, 2);
+  var fb = walk(b, 2);
+  var total = await fa + await fb;
+  a.turnRight();
+  print(total);
+}`;
+  const trace = traceProgram('dart', program, program);
+  expect(trace.traceItems.map(({ line, callLines }) => [line, callLines])).toEqual([
+    [0, []],
+    [10, []],
+    [11, []],
+    [2, [12]],
+    [3, [12]],
+    [12, []],
+    [2, [13]],
+    [3, [13]],
+    [13, []],
+    [4, [12]],
+    [2, [12]],
+    [3, [12]],
+    [4, [13]],
+    [2, [13]],
+    [3, [13]],
+    [4, [12]],
+    [2, [12]],
+    [4, [13]],
+    [2, [13]],
+    [14, []],
+    [15, []],
+    [16, []],
+  ]);
+  expect(trace.finalVars).toEqual({ total: 4 });
+  expect(trace.stdout).toBe('4\n');
+});

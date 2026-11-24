@@ -7,7 +7,7 @@ import type { GlobalVariable } from './environment';
 import { checkExhaustive } from './exhaustiveness';
 import { ExpressionCompiler, SHORTED } from './expressionCompiler';
 import type { HashStore } from './hashStore';
-import { forEachValue, implicitCast } from './library/nativeSupport';
+import { forEachValue, implicitCast, iterableValues } from './library/nativeSupport';
 import { wrap } from './operators';
 import { PatternCache } from './patternCompiler';
 import type { Frame } from './runtime';
@@ -33,7 +33,7 @@ import {
   sameType,
   upperBound,
 } from './types';
-import { type Callable, Cell, type DartObject, NO_ARGUMENTS, UNINITIALIZED, type Value } from './values';
+import { type Callable, Cell, DartList, type DartObject, NO_ARGUMENTS, UNINITIALIZED, type Value } from './values';
 
 /** How to read and write the target of an assignment once its receiver and index are evaluated. */
 interface AssignableTarget {
@@ -105,7 +105,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
 
   // code-gauge-allow functionNcss -- Simple, compound, and null-aware assignments.
   private assignTo(target: AssignableTarget, operator: string, valueSyntax: Expression, span: Span): Compiled {
-    const { read, write, variable, writeType } = target;
+    const { write, variable, writeType } = target;
     if (operator === '=') {
       const written = this.compileExpression(valueSyntax, writeType);
       if (written.type.kind === 'void') this.error(valueSyntax, 'void の値は代入できません。');
@@ -132,6 +132,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const { readType } = target;
     if (!readType) return this.error(span, '複合代入には、値を読み取れる代入先が必要です。');
     const current: Compiled = { type: readType, run: (frame) => frame.temporaries.at(-1), isConst: false };
+    const readCurrent = this.readBeforeValue(target, valueSyntax);
     if (operator === '??=') {
       const before = this.flow;
       const written = this.compileExpression(valueSyntax, writeType);
@@ -147,7 +148,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       return {
         type: upperBound(nonNullable(readType), assignedType(written, value)),
         run: withPrepared(target, (frame, prepared) => {
-          const existing = read(frame, prepared);
+          const existing = readCurrent(frame, prepared);
           if (existing !== undefined) return existing;
           const result = run(frame);
           write(frame, prepared, result);
@@ -170,7 +171,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     return {
       type: assignedType(combined, coerced),
       run: withPrepared(target, (frame, prepared) => {
-        frame.temporaries.push(read(frame, prepared));
+        frame.temporaries.push(readCurrent(frame, prepared));
         let result: Value;
         try {
           result = run(frame);
@@ -182,6 +183,17 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       }),
       isConst: false,
     };
+  }
+
+  /** Reads a compound assignment's target, once when its value awaits and the statement then runs again. */
+  private readBeforeValue(
+    target: AssignableTarget,
+    valueSyntax: Expression
+  ): (frame: Frame, prepared: unknown) => Value {
+    const { read } = target;
+    const remember = this.rememberBeforeAwait(target, valueSyntax);
+    if (!remember) return read;
+    return (frame, prepared) => remember(frame, () => read(frame, prepared));
   }
 
   protected compileIncrement(operand: Expression, operator: '+' | '-', isPrefix: boolean, span: Span): Compiled {
@@ -780,8 +792,30 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const run =
       kind === 'map'
         ? this.compileMapSpread(element, compiled, elementContext, valueContext, types)
-        : this.compileIterableSpread(element, compiled, elementContext, types);
+        : this.compileIterableSpread(element, this.listedBeforeAwait(element, compiled), elementContext, types);
     return { run, isConst: compiled.isConst };
+  }
+
+  /**
+   * A spread iterable that a later `await` follows, listed once, so that evaluating the statement again after the
+   * `await` does not iterate a lazy iterable, whose iteration may run code, a second time.
+   */
+  private listedBeforeAwait(element: Extract<CollectionElement, { kind: 'spread' }>, compiled: Compiled): Compiled {
+    const remember = this.precedesAwait(element)
+      ? this.rememberBeforeAwait(element, element, [{ kind: 'await' }])
+      : undefined;
+    if (!remember) return compiled;
+    const { run } = compiled;
+    return {
+      ...compiled,
+      run: (frame) =>
+        remember(frame, () => {
+          const value = run(frame);
+          if (value === undefined || value instanceof DartList) return value;
+          const { runtime } = frame;
+          return runtime.links.newList(runtime, DYNAMIC, iterableValues(runtime, value), true);
+        }),
+    };
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Validate both map type arguments before configuring the spread.
@@ -917,6 +951,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     valueContext: DartType | undefined,
     types: ElementTypes[]
   ): (frame: Frame, add: AddElement) => void {
+    if (this.awaitsWithin(element)) this.unsupported(element, 'コレクションの for の中の await');
     const { result, slots } = this.withScope(() =>
       element.kind === 'forInElement'
         ? this.compileForInElement(element, kind, elementContext, valueContext, types)

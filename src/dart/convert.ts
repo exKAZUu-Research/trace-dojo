@@ -978,7 +978,6 @@ export class Converter extends ExpressionConverter {
     if (tokens.has('async')) modifier = tokens.has('*') ? 'async*' : 'async';
     else if (tokens.has('async*')) modifier = 'async*';
     else if (tokens.has('sync*') || tokens.has('sync')) modifier = 'sync*';
-    if (modifier === 'async' || modifier === 'async*') return unsupported(node, `${modifier}（非同期処理）`);
     const block = namedOf(node).find((child) => child.type === 'block');
     if (block) return { kind: 'block', block: this.convertBlock(block), modifier, ...span };
     const children = childrenOf(node);
@@ -1063,7 +1062,6 @@ export class Converter extends ExpressionConverter {
     return parameters;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- One check per parameter modifier and form Dart distinguishes.
   private convertFormalParameter(
     node: Node,
     isRequired: boolean,
@@ -1181,7 +1179,14 @@ export class Converter extends ExpressionConverter {
         const parts = this.convertForParts(node);
         const body = this.convertStatement(requireNode(fieldOf(node, 'body'), node));
         if (parts.kind === 'forIn') {
-          return { kind: 'forIn', binding: parts.binding, iterable: parts.iterable, body, isAwait: false, ...span };
+          return {
+            kind: 'forIn',
+            binding: parts.binding,
+            iterable: parts.iterable,
+            body,
+            isAwait: parts.isAwait,
+            ...span,
+          };
         }
         return { kind: 'for', init: parts.init, condition: parts.condition, updates: parts.updates, body, ...span };
       }

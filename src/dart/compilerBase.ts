@@ -90,15 +90,10 @@ export function at(span: Span): Span {
 /** Names of the SDK the interpreter does not provide, with what they are, for the message that they are unavailable. */
 const UNAVAILABLE_NAMES: Record<string, string> = {
   DateTime: 'DateTime（日付と時刻）',
-  Stopwatch: 'Stopwatch（時間の計測）',
-  Future: 'Future（非同期処理）',
-  FutureOr: 'FutureOr（非同期処理）',
-  Stream: 'Stream（非同期処理）',
-  StreamController: 'StreamController（非同期処理）',
-  Timer: 'Timer（非同期処理）',
-  Completer: 'Completer（非同期処理）',
   Zone: 'Zone（非同期処理）',
-  scheduleMicrotask: 'scheduleMicrotask（非同期処理）',
+  runZoned: 'runZoned（非同期処理）',
+  runZonedGuarded: 'runZonedGuarded（非同期処理）',
+  ZoneSpecification: 'ZoneSpecification（非同期処理）',
   Isolate: 'Isolate',
   stdin: 'stdin（標準入力）',
   exitCode: 'exitCode（プロセスの終了状態）',

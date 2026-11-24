@@ -296,7 +296,6 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     }
   }
 
-  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private compileFactory(
     cls: ClassInfo,
     constructor: ConstructorInfo,
@@ -319,6 +318,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       kind: {
         returnType: cls.thisType,
         isGenerator: false,
+        isAsync: false,
         thisClass: cls,
         thisType: cls.thisType,
         hasThis: false,
@@ -431,6 +431,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       kind: {
         returnType: VOID,
         isGenerator: false,
+        isAsync: false,
         thisClass: cls,
         thisType: cls.thisType,
         hasThis: true,

@@ -15,6 +15,7 @@ import { EMPTY_ENV } from './constructorCompiler';
 import type { ExtensionInfo } from './environment';
 import { MetadataCompiler } from './metadataCompiler';
 import { Frame, type Runtime, type TypeEnv } from './runtime';
+import { bodyKind } from './scope';
 import {
   asInstanceOf,
   type DartType,
@@ -199,7 +200,7 @@ export abstract class MemberCompiler extends MetadataCompiler {
               typeParams,
               kind: {
                 returnType,
-                isGenerator: body?.modifier === 'sync*',
+                ...bodyKind(body?.modifier),
                 thisClass: declaredClass,
                 thisType: declaredClass?.thisType,
                 hasThis: !declaration.isStatic,
