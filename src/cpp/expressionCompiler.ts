@@ -37,8 +37,9 @@ import {
 import { type FloatingValue, fusedNaN, negateFloat } from './floatSign';
 import { orderingOf, UNORDERED } from './library/compare';
 import { lessThan, moveValue } from './library/elements';
-import { throwLibrary } from './library/support';
+import { cStringStore, throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral, utf8 } from './literals';
+import { typeInfoName } from './mangling';
 import { constructArray, initializeAt, invoke, ObjectCompiler, outermostOwner, zeroOf } from './objectCompiler';
 import { hasUserType, memberOperators, overloadedOperator, withOverloads } from './operatorOverloads';
 import { expandPacks, PACK_ELEMENT, packElements, packsIn, withPackElement } from './packs';
@@ -95,6 +96,7 @@ import {
   NULL_PTR,
   Ptr,
   Store,
+  UNINIT,
   type Value,
 } from './values';
 
@@ -173,6 +175,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       }
       case 'template_function': {
         return this.templateFunction(node);
+      }
+      case 'typeid_expression': {
+        return this.typeidExpression(node);
       }
       case 'requires_expression': {
         return constantExpr(BOOL, Number(requirementsHold(this as never, node)), node.row);
@@ -2406,6 +2411,41 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   // Calls -------------------------------------------------------------------------------------------------------------
 
+  /**
+   * `typeid(T)` or `typeid(e)`: the `std::type_info` of a type, or of the dynamic type of a polymorphic object, which
+   * names the type as Apple clang++ does (C++20 [expr.typeid]).
+   */
+  private typeidExpression(node: Syntax): Expr {
+    const { row } = node;
+    const typeInfo = this.findStdName('type_info');
+    if (typeInfo?.kind !== 'class') return this.error(row, 'typeid を使うには #include <typeinfo> を書いてください。');
+    const { cls } = typeInfo;
+    const result = { type: withConst(classType(cls)), isLvalue: true, row };
+    const typeNode = fieldOf(node, 'type');
+    if (typeNode) {
+      const type = this.typeDescriptor(typeNode);
+      return { ...result, run: (frame) => typeInfoObject(frame, cls, type, row) };
+    }
+    const valueNode = fieldOf(node, 'value') as Syntax;
+    // `typeid(Base)` names a type with a name the grammar reads as an expression.
+    const named = this.expressionAsType(valueNode);
+    if (named) return { ...result, run: (frame) => typeInfoObject(frame, cls, named, row) };
+    const probe = this.unevaluated(() => this.compileExpression(valueNode));
+    const operandType = probe.type;
+    if (!(probe.isLvalue && operandType.kind === 'class' && operandType.cls.isPolymorphic))
+      return { ...result, run: (frame) => typeInfoObject(frame, cls, operandType, row) };
+    // A polymorphic glvalue's typeid names the dynamic type of the object, which runs the operand.
+    const operand = this.compileExpression(valueNode).run;
+    return {
+      ...result,
+      run: (frame) => {
+        const object = (operand(frame) as Ptr).read();
+        const dynamic = object instanceof CObject ? classType(outermostOwner(object).cls) : operandType;
+        return typeInfoObject(frame, cls, dynamic, row);
+      },
+    };
+  }
+
   /** A type-trait builtin (`__is_class(T)`), a constant that tells whether its types have a property. */
   private typeTrait(name: string, argNodes: readonly Syntax[], row: number): Expr {
     const typeOf = (node: Syntax): Type =>
@@ -3285,4 +3325,38 @@ function hasMemberNamed(cls: ClassInfo, name: string): boolean {
     if (owner.secondaryBases.some((secondary) => hasMemberNamed(secondary.cls, name))) return true;
   }
   return false;
+}
+
+const typeInfoObjects = new WeakMap<object, Map<string, Ptr>>();
+
+/**
+ * The `std::type_info` object that names a type, one for each name in a run of a program, which names the type when a
+ * program first asks, since a type the interpreter cannot name stops only the program that asks.
+ */
+function typeInfoObject(frame: Frame, cls: ClassInfo, type: Type, row: number): Ptr {
+  let name: string;
+  try {
+    name = typeInfoName(type, row);
+  } catch (error) {
+    if (error instanceof CompileError) throw new CppRuntimeError('custom', error.diagnostics[0]?.message);
+    throw error;
+  }
+  let objects = typeInfoObjects.get(frame.runtime);
+  if (!objects) {
+    objects = new Map();
+    typeInfoObjects.set(frame.runtime, objects);
+  }
+  let location = objects.get(name);
+  if (!location) {
+    const object = new CObject(
+      cls,
+      cls.fields.map(() => UNINIT)
+    );
+    object.values[0] = new Ptr(cStringStore(name), 0);
+    const box = new Box(object);
+    location = box.location(0);
+    object.completeLocation = location;
+    objects.set(name, location);
+  }
+  return location;
 }

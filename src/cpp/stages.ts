@@ -8,7 +8,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   va_arg_expression: '可変長引数（va_arg）',
   bit_int_specifier: '_BitInt',
   linkage_specification: '外部の関数の宣言（extern "C"）',
-  typeid_expression: '実行時の型の情報（typeid）',
   co_await_expression: 'コルーチン（co_await・co_yield・co_return）',
   co_return_statement: 'コルーチン（co_await・co_yield・co_return）',
   co_yield_statement: 'コルーチン（co_await・co_yield・co_return）',
