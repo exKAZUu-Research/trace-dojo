@@ -217,6 +217,7 @@ function validateCompoundDeclarationTarget(
   }
   const kindErr = existing && incompatibleArrayKindError(existing, set);
   if (kindErr) shell.discard(`${targetName}: ${kindErr}`);
+  if (set.has('n')) return false;
   return !(existing && conversionError(existing, set, unset));
 }
 
@@ -421,7 +422,16 @@ function declareOne(
     return false;
   }
   const priorKind = shell.findVariable(name, !options.set.has('n') && !options.unset.has('n'))?.value?.kind;
-  const destination = declaredDestination(shell, builtin, name, options, isLocal, isSubscripted, assignMode);
+  const destination = declaredDestination(
+    shell,
+    builtin,
+    name,
+    options,
+    isLocal,
+    isSubscripted,
+    assignMode,
+    isCompound(operand)
+  );
   if (!destination) return false;
   if (
     !isSubscripted &&
@@ -445,7 +455,8 @@ function declareOne(
       options,
       assignMode !== 'none' || isCompound(operand),
       isSubscripted || destination.referencedSubscript !== undefined,
-      Boolean(preUnsetStore?.deferUnsetN)
+      Boolean(preUnsetStore?.deferUnsetN),
+      isCompound(operand)
     )
   ) {
     return false;
@@ -629,7 +640,8 @@ function resolvePendingNamerefTarget(
   if (isSubscripted || set.has('a') || set.has('A') || unset.has('n')) return undefined;
   const { scopes, functionScopes } = shell.state;
   const localScope = isLocal ? scopes[functionScopes.at(-1) as number] : undefined;
-  const existing = localScope ? localScope.get(name) : set.has('g') ? scopes[0].get(name) : shell.findOwnVariable(name);
+  const existing = findDeclarationExisting(shell, name, set.has('g'), localScope);
+  if (existing && isArrayCell(existing)) return undefined;
   if (!set.has('n') && !(existing?.attributes.has('n') && existing.value === undefined)) return undefined;
   const pending = extractPendingNamerefValue(shell, operand, parsed);
   if (!pending) return undefined;
@@ -638,6 +650,16 @@ function resolvePendingNamerefTarget(
   const baseSource = existing ?? origin?.source;
   const base = baseSource?.value?.kind === 'scalar' ? baseSource.value.value : '';
   return base + pending.value;
+}
+
+function findDeclarationExisting(
+  shell: Shell,
+  name: string,
+  globalOnly: boolean,
+  localScope: Map<string, Variable> | undefined
+): Variable | undefined {
+  if (localScope) return localScope.get(name);
+  return globalOnly ? shell.state.scopes[0].get(name) : shell.findOwnVariable(name);
 }
 
 function extractPendingNamerefValue(
@@ -854,7 +876,7 @@ function resolveAssignMode(
 }
 
 /** Resolves the target variable and any nameref element subscript for a declaration operand. */
-// code-gauge-allow functionParameterCount -- Needs shell, builtin, operand name, flags, scope mode, subscript presence, and assignment mode.
+// code-gauge-allow functionParameterCount -- Needs shell, builtin, operand name, flags, scope mode, subscript presence, assignment mode, and compound flag.
 function declaredDestination(
   shell: Shell,
   builtin: string,
@@ -862,7 +884,8 @@ function declaredDestination(
   options: Options,
   isLocal: boolean,
   isSubscripted: boolean,
-  assignMode: AssignMode
+  assignMode: AssignMode,
+  assignsCompound = false
 ): DeclarationDestination | undefined {
   const { set, unset } = options;
   const { scopes } = shell.state;
@@ -882,6 +905,13 @@ function declaredDestination(
     return undefined;
   }
   const candidate = variable ?? createNewDeclaredVariable(shell, targetName, set, isSubscripted, targetScope);
+  if (!variable) {
+    const newVarErr = conversionError(candidate, set, unset, isSubscripted || assignsCompound);
+    if (newVarErr) {
+      shell.reportError(`${builtin}: ${targetName}: ${newVarErr}`);
+      return undefined;
+    }
+  }
   if (!variable && targetScope) targetScope.set(targetName, candidate);
   if (checkReadonlyConflict(shell, builtin, targetName, candidate, options, assignMode !== 'none')) {
     return undefined;
@@ -1118,9 +1148,10 @@ function applyAttributes(
   { set, unset }: Options,
   assigns: boolean,
   impliesIndexed: boolean,
-  deferUnsetN = false
+  deferUnsetN = false,
+  assignsCompound = false
 ): boolean {
-  const error = conversionError(variable, set, unset);
+  const error = conversionError(variable, set, unset, impliesIndexed || assignsCompound);
   if (error) {
     shell.reportError(`${builtin}: ${variable.name}: ${error}`);
     return false;
@@ -1180,9 +1211,17 @@ function incompatibleArrayKindError(variable: Variable, set: Set<string>): strin
   return undefined;
 }
 
-function conversionError(variable: Variable, set: Set<string>, unset: Set<string>): string | undefined {
+function conversionError(
+  variable: Variable,
+  set: Set<string>,
+  unset: Set<string>,
+  impliesArray = false
+): string | undefined {
   const kindErr = incompatibleArrayKindError(variable, set);
   if (kindErr) return kindErr;
+  if (set.has('n') && (isArrayCell(variable) || set.has('a') || set.has('A') || impliesArray)) {
+    return 'reference variable cannot be an array';
+  }
   if (unset.has('a') && variable.value?.kind === 'indexed') return 'cannot destroy array variables in this way';
   if (unset.has('A') && variable.value?.kind === 'associative') return 'cannot destroy array variables in this way';
   return undefined;
