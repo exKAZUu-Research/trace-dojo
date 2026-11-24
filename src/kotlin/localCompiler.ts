@@ -13,6 +13,7 @@ import {
   Scope,
   typeMismatchMessage,
 } from './compilerBase';
+import type { ClassEntry } from './declarationCompiler';
 import { returnRepr, runtimeClassOf } from './dispatch';
 import { lambdaValue } from './lambdaValue';
 import { type ClassReference, classReference } from './natives/reflection';
@@ -723,16 +724,72 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     }
   }
 
-  protected compileLocalClass(_scope: Scope, _context: FunctionContext, decl: ClassDecl): Exec {
-    return this.unavailable(decl.row, '関数の中でのクラスの宣言');
+  protected compileLocalClass(scope: Scope, context: FunctionContext, decl: ClassDecl): Exec {
+    if (decl.classKind === 'object') this.error(decl.row, '関数の中には、名前のある object を宣言できません。');
+    if (decl.classKind === 'enum') this.error(decl.row, '関数の中には、enum class を宣言できません。');
+    const misplaced = [...decl.modifiers.keywords].find((keyword) => LOCAL_CLASS_FORBIDDEN_MODIFIERS.has(keyword));
+    if (misplaced) this.error(decl.row, `ローカルクラスには ${misplaced} 修飾子を付けられません。`);
+    if (scope.classes.has(decl.name)) this.error(decl.row, `クラス ${decl.name} が2回宣言されています。`);
+    return this.compileClassHere(scope, context, decl, false).store;
   }
 
+  /** `object : Base(), I { ... }`, which declares an anonymous class and creates its one instance. */
   protected compileObjectExpression(
-    _scope: Scope,
-    _context: FunctionContext,
+    scope: Scope,
+    context: FunctionContext,
     expression: Extract<Expression, { kind: 'object' }>
   ): Compiled {
-    return this.unavailable(expression.row, 'オブジェクト式');
+    const { entry, store } = this.compileClassHere(scope, context, expression.decl, true);
+    const ctor = entry.constructorSymbol as FunctionSymbol;
+    const { row } = expression;
+    return {
+      type: entry.symbol.type,
+      repr: 'ref',
+      eval: (frame) => {
+        store(frame);
+        return (ctor.invoke as NonNullable<FunctionSymbol['invoke']>)(frame, undefined, [], row);
+      },
+      isCreation: true,
+    };
+  }
+
+  /**
+   * Declares and compiles a class where a function body or an object expression declares it. Running `store` captures
+   * what the class's members read, in a slot of the frame running the declaration, from which instances take it.
+   */
+  private compileClassHere(
+    scope: Scope,
+    context: FunctionContext,
+    decl: ClassDecl,
+    isAnonymous: boolean
+  ): { entry: ClassEntry; store: Exec } {
+    const captureContext = new FunctionContext(context, false, decl.name, context.info.isLibrary, undefined);
+    const envVariable = this.newVariable(
+      scope,
+      context,
+      `\0localClass:${decl.name}:${decl.row}`,
+      this.anyNullableType,
+      false,
+      decl.row,
+      false
+    );
+    const local = { context: captureContext, declaringInfo: context.info, envSlot: envVariable.slot };
+    const entries = this.declareClassInScope(decl, scope, isAnonymous, (declared) => {
+      for (const each of declared) {
+        if (each !== declared[0] && !each.symbol.isInner)
+          this.error(each.decl.row, 'ローカルクラスの中には、inner でないクラスを宣言できません。');
+        this.localClasses.set(each.symbol, local);
+      }
+    });
+    this.compileClassesInScope(entries);
+    const build = this.captureBuilder(context, captureContext);
+    const { slot } = envVariable;
+    return {
+      entry: entries[0],
+      store: (frame) => {
+        frame.locals[slot] = build(frame) as unknown as Value;
+      },
+    };
   }
 
   /** Rejects the modifiers that a declaration in a function body cannot have. */
@@ -741,6 +798,21 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     if (misplaced) this.error(row, `${what}には ${misplaced} 修飾子を付けられません。`);
   }
 }
+
+/** The modifiers kotlinc rejects on a class declared in a function body. */
+const LOCAL_CLASS_FORBIDDEN_MODIFIERS = new Set([
+  'private',
+  'protected',
+  'internal',
+  'public',
+  'inner',
+  'companion',
+  'annotation',
+  'value',
+  'const',
+  'lateinit',
+  'override',
+]);
 
 /** The modifiers kotlinc rejects on a function or class declared in a function body. */
 const LOCAL_FORBIDDEN_MODIFIERS = new Set([

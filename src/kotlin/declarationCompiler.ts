@@ -187,7 +187,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     decl: ClassDecl,
     file: FileContext,
     outer: ClassEntry | undefined,
-    kindOverride?: ClassSymbolKind
+    kindOverride?: ClassSymbolKind,
+    parentScope?: Scope
   ): ClassEntry {
     const kind: ClassSymbolKind = kindOverride ?? (decl.classKind === 'enum' ? 'enum' : decl.classKind);
     const prefix = outer ? `${outer.symbol.qualifiedName}$` : file.packageName ? `${file.packageName}.` : '';
@@ -213,7 +214,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.isLibrary = file.isLibrary;
     symbol.enumEntries = decl.enumEntries.map((entry, ordinal) => ({ name: entry.name, ordinal }));
     this.checkClassHeader(decl, symbol);
-    const scope = new Scope(outer?.scope, undefined);
+    const scope = new Scope(parentScope ?? outer?.scope, undefined);
     scope.staticClass = symbol;
     const entry: ClassEntry = {
       decl,
@@ -275,6 +276,37 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.visibility = visibilityOf(decl.modifiers);
     if (!file.isLibrary) this.typeAliasSymbols.push(symbol);
     return symbol;
+  }
+
+  /**
+   * Declares a class of a function body or of an object expression, whose scope is the body's, with the classes
+   * nested in it, and resolves their headers, as the phases do for the file's classes.
+   */
+  protected declareClassInScope(
+    decl: ClassDecl,
+    scope: Scope,
+    isAnonymous: boolean,
+    beforeHeaders: (entries: ClassEntry[]) => void
+  ): ClassEntry[] {
+    const first = this.classEntries.length;
+    const entry = this.declareClass(decl, this.file, undefined, undefined, scope);
+    entry.symbol.isLocal = true;
+    entry.symbol.isAnonymous = isAnonymous;
+    entry.symbol.qualifiedName = decl.name;
+    if (!isAnonymous) scope.classes.set(decl.name, entry.symbol);
+    const entries = this.classEntries.slice(first);
+    beforeHeaders(entries);
+    this.checkTypeBoundsAfter(() => {
+      for (const each of entries) {
+        this.declareTypeParameters(each.scope, each.decl.typeParameters, (params) => {
+          each.symbol.typeParameters = params;
+        });
+      }
+      for (const each of entries) this.declareSupertypes(each);
+    });
+    for (const each of entries) this.declareMembers(each);
+    this.linkClasses(entries);
+    return entries;
   }
 
   private checkClassHeader(decl: ClassDecl, symbol: ClassSymbol): void {

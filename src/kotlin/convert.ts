@@ -356,6 +356,47 @@ export class Converter extends ExpressionConverter {
     };
   }
 
+  protected convertObjectLiteral(node: Node): ClassDecl {
+    const bodyNode = firstOfType(node, 'class_body');
+    return {
+      kind: 'class',
+      row: rowOf(node),
+      isLocal: true,
+      headerEndRow: bodyNode?.startPosition.row ?? node.endPosition.row,
+      endRow: node.endPosition.row,
+      classKind: 'class',
+      name: '<anonymous>',
+      isFunInterface: false,
+      modifiers: { keywords: NO_MODIFIERS, annotations: [] },
+      typeParameters: [],
+      primaryConstructor: undefined,
+      supers: this.convertSupers(firstOfType(node, 'delegation_specifiers')),
+      ...this.withLocal(false, () => this.convertClassBody(bodyNode)),
+    };
+  }
+
+  protected convertAnonymousFunction(node: Node): FunctionDecl {
+    const parts = named(node);
+    const parametersNode = required(firstOfType(node, 'function_value_parameters'));
+    const bodyNode = firstOfType(node, 'function_body');
+    const typeNodes = parts.filter((part) => isTypeNode(part));
+    const receiverNode = typeNodes.find((part) => part.startIndex < parametersNode.startIndex);
+    const returnNode = typeNodes.find((part) => part.startIndex > parametersNode.startIndex);
+    return {
+      kind: 'function',
+      row: rowOf(node),
+      isLocal: true,
+      headerEndRow: rowOf(bodyNode ?? node),
+      name: '',
+      modifiers: { keywords: NO_MODIFIERS, annotations: [] },
+      typeParameters: [],
+      receiver: receiverNode ? this.convertType(receiverNode) : undefined,
+      params: this.convertParameters(parametersNode),
+      returnType: returnNode ? this.convertType(returnNode) : undefined,
+      body: bodyNode ? this.withLocal(true, () => this.convertFunctionBody(bodyNode)) : undefined,
+    };
+  }
+
   private convertPrimaryConstructor(node: Node): NonNullable<ClassDecl['primaryConstructor']> {
     const modifiersNode = firstOfType(node, 'modifiers');
     if (modifiersNode && !hasToken(node, 'constructor'))

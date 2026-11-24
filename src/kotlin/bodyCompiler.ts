@@ -27,6 +27,34 @@ import { uninitializedCheck } from './uninitialized';
 import { KObject, UNIT, type Value } from './values';
 
 /** Compiles the bodies of functions, the accessors and initializers of properties, and the initializers of classes and objects. */
+/**
+ * The frame of what a class declared in a function body captured for an instance, made when the instance is first
+ * initialized from what the declaration stored in the frame that ran it, which a caller's frames lead to.
+ */
+function localFrameOf(
+  caller: Frame,
+  instance: KObject,
+  cls: ClassSymbol,
+  local: { context: FunctionContext; declaringInfo: FunctionInfo; envSlot: number }
+): Frame {
+  const existing = instance.localFrames?.get(cls) as Frame | undefined;
+  if (existing) return existing;
+  let declaring: Frame | undefined = caller;
+  while (declaring && declaring.info !== local.declaringInfo) declaring = declaring.enclosing;
+  if (!declaring) throw new Error(`The class ${cls.name} was used outside the code that declares it`);
+  const frame = new Frame(
+    caller.runtime,
+    local.context.info,
+    declaring.locals[local.envSlot] as unknown as unknown[],
+    instance,
+    undefined
+  );
+  frame.enclosing = declaring;
+  instance.localFrames ??= new Map();
+  instance.localFrames.set(cls, frame);
+  return frame;
+}
+
 /** Runs a `tailrec` function's body again in its frame with the arguments of each tail call it makes of itself. */
 function restartingOnTailCalls(run: Eval): Eval {
   return (frame) => {
@@ -49,26 +77,93 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   protected compileBodies(): void {
     for (const entry of this.propertyEntries) this.ensurePropertyCompiled(entry);
     // The defaults need the types of the fields, which inferred properties have only now.
-    const done = new Set<ClassSymbol>();
-    const setDefaults = (cls: ClassSymbol): void => {
-      const entry = this.entryOfClass.get(cls);
-      if (!entry || done.has(cls)) return;
-      done.add(cls);
-      if (cls.superclass) setDefaults(cls.superclass.cls);
-      this.layOutFields(entry);
-      const defaults: Value[] = [...(cls.superclass?.cls.fieldDefaults ?? [])];
-      defaults.length = cls.fieldCount;
-      for (const property of cls.ownFields) defaults[property.slot as number] = this.defaultValueOf(property.type);
-      cls.fieldDefaults = defaults;
-    };
-    for (const entry of this.classEntries) setDefaults(entry.symbol);
+    for (const entry of this.classEntries) this.setFieldDefaults(entry.symbol);
     for (const entry of this.functionEntries) this.ensureFunctionCompiled(entry);
     this.validateOverrideTypes();
     this.validateJvmSignatures();
     for (const entry of this.classEntries) {
+      if (this.classesCompiledInScope.has(entry)) continue;
       this.file = entry.file;
       this.compileClassInitializer(entry);
     }
+  }
+
+  private readonly laidOutClasses = new Set<ClassSymbol>();
+
+  /** Lays out a class's fields after its superclass's, with the JVM's default value of each field's type. */
+  private setFieldDefaults(cls: ClassSymbol): void {
+    const entry = this.entryOfClass.get(cls);
+    if (!entry || this.laidOutClasses.has(cls)) return;
+    this.laidOutClasses.add(cls);
+    if (cls.superclass) this.setFieldDefaults(cls.superclass.cls);
+    this.layOutFields(entry);
+    const defaults: Value[] = [...(cls.superclass?.cls.fieldDefaults ?? [])];
+    defaults.length = cls.fieldCount;
+    for (const property of cls.ownFields) defaults[property.slot as number] = this.defaultValueOf(property.type);
+    cls.fieldDefaults = defaults;
+  }
+
+  /** The classes compiled where a function body or an object expression declares them, which the phases skip. */
+  private readonly classesCompiledInScope = new Set<ClassEntry>();
+
+  /** What a class declared in a function body captures, which its members read when they run. */
+  protected readonly localClasses = new Map<
+    ClassSymbol,
+    { context: FunctionContext; declaringInfo: FunctionInfo; envSlot: number }
+  >();
+
+  /**
+   * Compiles the classes a function body or an object expression declares, there, with the bodies of their members,
+   * whose contexts capture what they read through their class's capture context.
+   */
+  protected compileClassesInScope(entries: ClassEntry[]): void {
+    const savedFlow = this.flow;
+    const savedFile = this.file;
+    const savedBase = this.localFlowBase;
+    this.localFlowBase = savedFlow.copy();
+    try {
+      for (const entry of entries) this.classesCompiledInScope.add(entry);
+      for (const entry of this.propertyEntries)
+        if (entry.cls && entries.includes(entry.cls)) this.ensurePropertyCompiled(entry);
+      for (const entry of entries) this.setFieldDefaults(entry.symbol);
+      for (const entry of this.functionEntries)
+        if (entry.cls && entries.includes(entry.cls)) this.ensureFunctionCompiled(entry);
+      this.validateOverrideTypes();
+      for (const entry of entries) {
+        this.file = entry.file;
+        this.compileClassInitializer(entry);
+      }
+    } finally {
+      this.flow = savedFlow;
+      this.file = savedFile;
+      this.localFlowBase = savedBase;
+    }
+  }
+
+  /** The flow around a local class's declaration, whose assigned variables its members may read. */
+  private localFlowBase: Flow | undefined;
+
+  /** The capture context of a class declared in a function body, the parent of its members' contexts. */
+  protected captureParentOf(cls: ClassSymbol | undefined): FunctionContext | undefined {
+    return cls ? this.localClasses.get(cls)?.context : undefined;
+  }
+
+  /**
+   * What a member of a class declared in a function body runs with: what its context captured, built from the frame
+   * of what the class captured, which an instance gets when it is created, and that frame, which leads to the frame
+   * that declared the class.
+   */
+  protected localCapture(
+    cls: ClassSymbol | undefined,
+    context: FunctionContext
+  ): ((caller: Frame, receiver: Value) => { captured: unknown[]; enclosing: Frame | undefined }) | undefined {
+    const local = cls && this.localClasses.get(cls);
+    if (!local) return undefined;
+    const build = this.captureBuilder(local.context, context);
+    return (caller, receiver) => {
+      const frame = localFrameOf(caller, receiver as KObject, cls, local);
+      return { captured: build(frame), enclosing: frame };
+    };
   }
 
   protected ensureReturnType(func: FunctionSymbol, row: number): KType {
@@ -94,6 +189,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   /** Starts the flow of code compiled on its own, where only the constructor parameters initializers see are assigned. */
   protected startFlow(): void {
     this.flow = new Flow();
+    for (const variable of this.localFlowBase?.assigned ?? []) this.flow.assigned.add(variable);
     for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
   }
 
@@ -127,7 +223,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     entry.state = 'compiling';
     this.withSavedState(entry, () => {
       const { decl, symbol } = entry;
-      const context = new FunctionContext(undefined, false, symbol.name, entry.file.isLibrary, undefined);
+      const context = new FunctionContext(
+        this.captureParentOf(entry.cls?.symbol),
+        false,
+        symbol.name,
+        entry.file.isLibrary,
+        undefined
+      );
       Object.defineProperty(context, 'returnTarget', { value: context });
       context.label = symbol.name;
       if (symbol.isTailrec && decl.body)
@@ -192,6 +294,17 @@ export abstract class BodyCompiler extends DeclarationCompiler {
 
   /** The type a `vararg` parameter has inside its function: an array of its elements. */
   protected abstract varargType(elementType: KType): KType;
+
+  /**
+   * The type a declaration infers from an object expression: its anonymous type only when the declaration is private,
+   * and otherwise the one supertype it names, or `Any`.
+   */
+  protected approximatedDeclarationType(type: KType, visibility: string): KType {
+    if (visibility === 'private' || type.kind !== 'class' || !type.cls.isAnonymous) return type;
+    const supertypes = type.cls.supertypes.filter((supertype) => supertype.cls !== this.core.any);
+    const approximated = supertypes.length === 1 ? supertypes[0] : this.core.any.type;
+    return type.nullable ? { ...approximated, nullable: true } : approximated;
+  }
 
   private inferredResultType(compiled: Compiled): KType {
     const type = resolved(compiled.type);
@@ -259,8 +372,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       : body;
     const none: unknown[] = [];
     const runs = symbol.isTailrec ? restartingOnTailCalls(run) : run;
-    symbol.invoke = (caller, receiver, args, callRow) =>
-      caller.runtime.call(info, caller, none, receiver, args, callRow, runs);
+    const local = this.localCapture(symbol.owner, context);
+    symbol.invoke = local
+      ? (caller, receiver, args, callRow) => {
+          const { captured, enclosing } = local(caller, receiver);
+          return caller.runtime.call(info, caller, captured, receiver, args, callRow, runs, enclosing);
+        }
+      : (caller, receiver, args, callRow) => caller.runtime.call(info, caller, none, receiver, args, callRow, runs);
   }
 
   private compileExpressionBody(
@@ -276,7 +394,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       context.returnRepr = returnRepr(symbol);
     }
     const compiled = this.compileExpression(scope, context, expression, symbol.returnType);
-    symbol.returnType ??= this.inferredResultType(compiled);
+    symbol.returnType ??= this.approximatedDeclarationType(this.inferredResultType(compiled), symbol.visibility);
     // The returns of an inferred body must fit the type its value gives, as a declared one checks them as they compile.
     const returnType = symbol.returnType;
     const misfit = context.returnedTypes.find((type) => !isSubtype(type, returnType));
@@ -303,7 +421,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         const compiled = this.inPropertyInitializer(entry, context, () =>
           this.compileExpression(scope, context, decl.initializer as Expression)
         );
-        const type = resolved(compiled.type);
+        const type = this.approximatedDeclarationType(resolved(compiled.type), symbol.visibility);
         symbol.type = compiled.integerLiteral ? this.primitiveType(this.primitiveOf(type) ?? 'Int') : type;
       }
       if (decl.delegate) this.compileMemberDelegate(entry);
@@ -348,7 +466,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     let context = this.initializerContexts.get(key);
     if (!context) {
       const name = entry.cls ? entry.cls.symbol.name : '<init>';
-      context = new FunctionContext(undefined, false, name, entry.file.isLibrary, undefined);
+      context = new FunctionContext(
+        this.captureParentOf(entry.cls?.symbol),
+        false,
+        name,
+        entry.file.isLibrary,
+        undefined
+      );
       context.forbidsReturn = true;
       context.info.showsThis = entry.cls !== undefined && !entry.cls.symbol.isObject && !entry.file.isLibrary;
       this.initializerContexts.set(key, context);
@@ -451,7 +575,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     isProbe = false
   ): { context: FunctionContext; scope: Scope } {
     const context = new FunctionContext(
-      undefined,
+      this.captureParentOf(entry.cls?.symbol),
       false,
       `${kind}-${entry.symbol.name}`,
       entry.file.isLibrary,
@@ -507,7 +631,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     }
     const { info } = context;
     const none: unknown[] = [];
-    symbol.get = (frame, receiver) => frame.runtime.call(info, frame, none, receiver, [], undefined, run);
+    const local = this.localCapture(entry.cls?.symbol, context);
+    symbol.get = local
+      ? (frame, receiver) => {
+          const { captured, enclosing } = local(frame, receiver);
+          return frame.runtime.call(info, frame, captured, receiver, [], undefined, run, enclosing);
+        }
+      : (frame, receiver) => frame.runtime.call(info, frame, none, receiver, [], undefined, run);
   }
 
   private compileSetter(entry: PropertyEntry): void {
@@ -528,11 +658,22 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const evaluate = compiled.eval;
     const { info } = context;
     const none: unknown[] = [];
+    const local = this.localCapture(entry.cls?.symbol, context);
     symbol.set = (frame, receiver, newValue) => {
-      frame.runtime.call(info, frame, none, receiver, [newValue], undefined, (inner) => {
-        evaluate(inner);
-        return UNIT;
-      });
+      const { captured, enclosing } = local?.(frame, receiver) ?? { captured: none, enclosing: undefined };
+      frame.runtime.call(
+        info,
+        frame,
+        captured,
+        receiver,
+        [newValue],
+        undefined,
+        (inner) => {
+          evaluate(inner);
+          return UNIT;
+        },
+        enclosing
+      );
     };
   }
 
@@ -635,7 +776,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const initializedFlow = this.flow.copy();
     if (!delegatesToSecondaries) this.checkValsInitialized(entry);
     if (symbol.kind === 'enum') this.compileEnumArguments(entry);
-    const info = { ...context.info, isAtomic: entry.constructorSymbol?.isAtomic ?? false };
+    const { info } = context;
+    info.isAtomic = entry.constructorSymbol?.isAtomic ?? false;
     const run = (frame: Frame): Value => {
       for (const [index, evaluate] of defaults.entries()) {
         if (evaluate && frame.locals[index] === MISSING) frame.locals[index] = evaluate(frame);
@@ -645,8 +787,10 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       return UNIT;
     };
     const none: unknown[] = [];
+    const local = this.localCapture(symbol, context);
     const initialize = (caller: Frame, instance: Value, args: Value[], callRow: number | undefined): void => {
-      caller.runtime.call(info, caller, none, instance, args, callRow, run);
+      const { captured, enclosing } = local?.(caller, instance) ?? { captured: none, enclosing: undefined };
+      caller.runtime.call(info, caller, captured, instance, args, callRow, run, enclosing);
     };
     symbol.initialize = (frame, instance) => initialize(frame, instance, [], undefined);
     if (symbol.isObject) this.objectInitializers.set(symbol, initialize);
@@ -667,7 +811,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const targets = new Map<FunctionSymbol, FunctionSymbol>();
     for (const { decl, symbol: ctor } of entry.secondaryConstructors) {
       this.file = entry.file;
-      const context = new FunctionContext(undefined, false, entry.symbol.name, entry.file.isLibrary, undefined);
+      const context = new FunctionContext(
+        this.captureParentOf(entry.symbol),
+        false,
+        entry.symbol.name,
+        entry.file.isLibrary,
+        undefined
+      );
       Object.defineProperty(context, 'returnTarget', { value: context });
       context.returnType = this.core.unit.type;
       context.returnRepr = 'ref';
@@ -724,8 +874,10 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         return UNIT;
       };
       const none: unknown[] = [];
+      const local = this.localCapture(entry.symbol, context);
       this.bindConstructor(entry.symbol, ctor, (caller, instance, args, callRow) => {
-        caller.runtime.call(context.info, caller, none, instance, args, callRow, run);
+        const { captured, enclosing } = local?.(caller, instance) ?? { captured: none, enclosing: undefined };
+        caller.runtime.call(context.info, caller, captured, instance, args, callRow, run, enclosing);
       });
     }
     this.rejectDelegationCycles(entry, targets);

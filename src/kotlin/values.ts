@@ -153,6 +153,11 @@ export class KObject {
   native?: Record<string, unknown>;
   /** What a lambda captured when it was created. */
   env?: readonly unknown[];
+  /**
+   * For an instance of a class declared in a function body or by an object expression, the frame of what each such
+   * class captured when it was declared, by the class, whose members run with it.
+   */
+  localFrames?: Map<unknown, unknown>;
 
   constructor(
     public cls: ClassSymbol,

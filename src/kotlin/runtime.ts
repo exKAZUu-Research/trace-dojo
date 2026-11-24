@@ -282,6 +282,7 @@ export class Runtime implements TracedRuntime<Frame> {
 function enqueueObjectReferences(stack: unknown[], object: KObject): void {
   enqueueObjects(stack, object.fields);
   if (object.env) enqueueObjects(stack, object.env);
+  if (object.localFrames) enqueueObjects(stack, object.localFrames.values());
   if (object.items) enqueueObjects(stack, object.items);
   if (object.store) for (const entry of object.store.entries) stack.push(entry.key, entry.value);
   if (object.native) enqueueObjects(stack, Object.values(object.native));

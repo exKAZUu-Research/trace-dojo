@@ -7,7 +7,9 @@ import type {
   Argument,
   BinaryOperator,
   Block,
+  ClassDecl,
   Expression,
+  FunctionDecl,
   LambdaExpression,
   LambdaParameter,
   Modifiers,
@@ -49,6 +51,12 @@ export abstract class ExpressionConverter {
   }
 
   protected abstract convertStatement(node: Node): Statement;
+
+  /** The class an object expression declares. */
+  protected abstract convertObjectLiteral(node: Node): ClassDecl;
+
+  /** The function an anonymous function declares, which has no name. */
+  protected abstract convertAnonymousFunction(node: Node): FunctionDecl;
 
   convertStatements(nodes: Node[]): Statement[] {
     return nodes.map((node) => this.convertStatement(node));
@@ -127,6 +135,17 @@ export abstract class ExpressionConverter {
           row,
           receiver: typeNode ? { kind: 'type', type: this.convertUserType(typeNode, false) } : undefined,
           name: nameNode ? identifierName(nameNode) : 'class',
+        };
+      }
+      case 'object_literal': {
+        return { kind: 'object', row, decl: this.convertObjectLiteral(node) };
+      }
+      case 'anonymous_function': {
+        return {
+          kind: 'anonymousFunction',
+          row,
+          endRow: node.endPosition.row,
+          decl: this.convertAnonymousFunction(node),
         };
       }
       case 'collection_literal': {
@@ -784,7 +803,4 @@ function intoRightOperand(target: Expression, apply: (operand: Expression) => Ex
 }
 
 /** The expressions of syntax this environment does not run, by tree-sitter's node type, with what the error names. */
-const UNAVAILABLE_EXPRESSIONS: Record<string, string> = {
-  object_literal: 'オブジェクト式（object : 型 { ... }）',
-  anonymous_function: '無名関数（fun (...) { ... }）',
-};
+const UNAVAILABLE_EXPRESSIONS: Record<string, string> = {};
