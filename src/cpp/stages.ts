@@ -4,8 +4,6 @@ import { fieldOf, type Syntax } from './syntax';
 
 /** The syntax the interpreter leaves out, by node type, with the name learners know it by. */
 const UNSUPPORTED_NODES: Record<string, string> = {
-  raw_string_literal: '生の文字列リテラル（R"(...)"）',
-  user_defined_literal: 'ユーザ定義リテラル（"abc"s など）',
   initializer_pair: '指示付きの初期化子（{.x = 1} など）',
   field_designator: '指示付きの初期化子（{.x = 1} など）',
   subscript_designator: '指示付きの初期化子（{[1] = 2} など）',

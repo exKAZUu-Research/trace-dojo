@@ -35,7 +35,7 @@ import {
 import { type FloatingValue, fusedNaN, negateFloat } from './floatSign';
 import { moveValue } from './library/elements';
 import { throwLibrary } from './library/support';
-import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
+import { checkLiteralPrefix, literalBytes, numberLiteral, utf8 } from './literals';
 import { constructArray, initializeAt, invoke, ObjectCompiler, zeroOf } from './objectCompiler';
 import { hasUserType, memberOperators, overloadedOperator, withOverloads } from './operatorOverloads';
 import { expandPacks, PACK_ELEMENT, packElements, packsIn, withPackElement } from './packs';
@@ -54,6 +54,7 @@ import {
   type GlobalInfo,
   INT,
   isArithmetic,
+  isCharType,
   isConstType,
   isCopyConstructor,
   isInteger,
@@ -123,8 +124,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         return this.charLiteral(node);
       }
       case 'string_literal':
+      case 'raw_string_literal':
       case 'concatenated_string': {
         return this.stringLiteral(node);
+      }
+      case 'user_defined_literal': {
+        return this.userDefinedLiteral(node);
       }
       case 'true':
       case 'false': {
@@ -265,8 +270,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const parts = node.type === 'concatenated_string' ? node.children : [node];
     let bytes = '';
     for (const part of parts) {
-      if (part.type !== 'string_literal') return this.unsupported(part.row, '生の文字列リテラル（R"(...)"）');
       checkLiteralPrefix(part);
+      if (part.type === 'raw_string_literal') {
+        // A raw string literal holds its characters as written, with no escape sequences (C++20 [lex.string]).
+        bytes += utf8(part.children.find((child) => child.type === 'raw_string_content')?.text ?? '');
+        continue;
+      }
+      if (part.type !== 'string_literal') return this.error(part.row, `${part.text} は文字列リテラルではありません。`);
       bytes += literalBytes(part.children);
     }
     let box = this.literalStores.get(bytes);
@@ -288,6 +298,75 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       literalBytes: bytes,
       staticAddress: true,
     };
+  }
+
+  /**
+   * A user-defined literal (C++20 [lex.ext]): `10_km` calls `operator""_km`, and the library's `"abc"s` makes a
+   * `std::string`.
+   */
+  private userDefinedLiteral(node: Syntax): Expr {
+    const suffix = (node.children.find((child) => child.type === 'literal_suffix') as Syntax).text;
+    const literal = node.children.find((child) => child.type !== 'literal_suffix') as Syntax;
+    const { row } = node;
+    if (!suffix.startsWith('_')) return this.standardLiteral(suffix, literal, row);
+    const name = `operator""${suffix}`;
+    const entity = this.findName(name);
+    if (entity?.kind !== 'functions') return this.error(row, `リテラル演算子 ${name} は宣言されていません。`);
+    const callee = this.entityExpr(entity, { ...node, text: name }, false);
+    const args = this.literalOperatorArguments(literal, entity.functions);
+    return this.callWith(callee, args, row);
+  }
+
+  /** The arguments a literal operator gets for a literal: its value, or a string literal's pointer and length. */
+  private literalOperatorArguments(literal: Syntax, candidates: FunctionInfo[]): Expr[] {
+    const { row } = literal;
+    if (literal.type === 'number_literal') {
+      const value = this.compileExpression(literal);
+      const takesRaw = candidates.some(
+        (fn) => fn.params.length === 1 && fn.params[0].type.kind === 'pointer' && isCharType(fn.params[0].type.to)
+      );
+      const isInteger = value.type.kind === 'int';
+      const cooked = candidates.some(
+        (fn) =>
+          fn.params.length === 1 && (isInteger ? fn.params[0].type.kind === 'int' : fn.params[0].type.kind === 'float')
+      );
+      // A numeric literal goes to the operator that takes its value, or else to the one that takes its characters.
+      if (!cooked && takesRaw)
+        return [
+          this.stringLiteral({
+            ...literal,
+            type: 'string_literal',
+            children: [{ ...literal, type: 'string_content' }],
+            all: [{ ...literal, type: 'string_content' }],
+          }),
+        ];
+      return [
+        convertArithmetic(
+          this.rvalue(value),
+          isInteger ? { kind: 'int', name: 'ullong' } : { kind: 'float', name: 'ldouble' }
+        ),
+      ];
+    }
+    const value = this.compileExpression(literal);
+    if (literal.type === 'char_literal') return [value];
+    const length = (value.type as Extract<Type, { kind: 'array' }>).length ?? 1;
+    return [this.rvalue(value), constantExpr(SIZE_T, BigInt(length - 1), row)];
+  }
+
+  /** The library's literal suffixes: `"abc"s` makes a `std::string`; the others need what the interpreter leaves out. */
+  private standardLiteral(suffix: string, literal: Syntax, row: number): Expr {
+    if (suffix === 's' && literal.type !== 'number_literal') {
+      const value = this.compileExpression(literal);
+      const length = (value.type as Extract<Type, { kind: 'array' }>).length ?? 1;
+      const { stringClass } = this.library;
+      const pointer = this.rvalue(value);
+      return this.constructObject(stringClass, [pointer, constantExpr(SIZE_T, BigInt(length - 1), row)], row, false);
+    }
+    if (['h', 'min', 's', 'ms', 'us', 'ns', 'y', 'd'].includes(suffix))
+      return this.unsupported(row, '<chrono> の時間のリテラル');
+    if (['i', 'if', 'il'].includes(suffix)) return this.unsupported(row, '<complex> の虚数のリテラル');
+    if (suffix === 'sv') return this.unsupported(row, 'std::string_view のリテラル（"..."sv）');
+    return this.error(row, `リテラルの接尾辞 ${suffix} はありません。`);
   }
 
   // Names -----------------------------------------------------------------------------------------------------------

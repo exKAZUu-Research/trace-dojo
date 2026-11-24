@@ -380,6 +380,10 @@ export class Compiler extends StatementCompiler {
       return;
     }
     if (isNamespace) {
+      // The library's literal suffixes need no directive here: the interpreter knows `"..."s` wherever it appears.
+      if (/^std::(?:literals(?:::string_literals)?|string_literals)$/.test(target.text.replaceAll(/\s+/g, ''))) return;
+      if (/^std::(?:literals::)?(?:chrono_literals|chrono)$/.test(target.text.replaceAll(/\s+/g, '')))
+        return this.unsupported(node.row, '<chrono>');
       const scope = this.resolveScope(target);
       if (scope.kind !== 'namespace') return this.error(node.row, `${target.text} は名前空間ではありません。`);
       const directives = this.context.fn ? this.context.scope : this.globalScope;
