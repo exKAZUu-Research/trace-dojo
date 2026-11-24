@@ -13,6 +13,7 @@ import {
   lookupType,
   lookupValue,
   type Module,
+  resolveTraitPath,
   resolveTypePath,
   type TypeBinding,
   unavailableStdItem,
@@ -24,13 +25,16 @@ import { boundsOf, lookupAssociated } from './methods';
 import {
   adt,
   type AdtDef,
+  allSupertraits,
   CHAR,
   type FnDef,
   freshVar,
   intType,
   shallow,
   substitute,
+  substituteTraitRef,
   type TraitDef,
+  type TraitRef,
   type Type,
   type TypeParam,
   typeToString,
@@ -122,6 +126,8 @@ export function resolveValuePath(c: Checker, path: PathAst, span: Span): PathRes
   // A path whose last segment names a value in a module, a variant of an enum, or an associated item of a type.
   const names = segments.map((segment) => segment.name);
   const last = segments.at(-1)!;
+  const qualified = segments[0].qualified;
+  if (qualified && segments.length === 2) return qualifiedValueRes(c, qualified, last, span);
   const owner = resolvePrefix(c, segments.slice(0, -1), span);
   if (owner.kind === 'mod') return moduleValueRes(c, owner.module, names, last, span);
   if (owner.kind === 'trait') {
@@ -132,6 +138,32 @@ export function resolveValuePath(c: Checker, path: PathAst, span: Span): PathRes
     return { kind: 'fn', fn, typeArgs };
   }
   return associatedValueRes(c, normalize(shallow(owner.type)), last, span);
+}
+
+/** `<T as Trait>::name` or `<T>::name`: an associated function or constant of `T`, of the trait if one is named. */
+function qualifiedValueRes(
+  c: Checker,
+  qualified: NonNullable<PathAst['segments'][number]['qualified']>,
+  last: PathAst['segments'][number],
+  span: Span
+): PathRes {
+  const self = c.lowerType(qualified.self);
+  if (!qualified.trait) return associatedValueRes(c, normalize(shallow(self)), last, span);
+  const ref = resolveTraitPath(qualified.trait, c.typeScope(), self);
+  c.require(self, ref, span);
+  const constant = ref.trait.consts.get(last.name);
+  if (constant) {
+    const subst = new Map([
+      [ref.trait.self, self],
+      ...ref.trait.params.map((param, index): [TypeParam, Type] => [param, ref.args[index]]),
+    ]);
+    return { kind: 'const', def: constant, type: substitute(constant.type, subst), typeArgs: [self, ...ref.args] };
+  }
+  const fn = ref.trait.methods.get(last.name);
+  if (!fn) compileError(span, `トレイト ${ref.trait.name} に ${last.name} がありません。`);
+  const typeArgs = [self, ...ref.args, ...fn.params.slice(fn.parentParamCount).map(() => freshVar())];
+  applyWrittenFnArgs(c, fn, typeArgs, last.args, span);
+  return { kind: 'fn', fn, typeArgs };
 }
 
 function singleNameRes(c: Checker, segment: PathAst['segments'][number], span: Span): PathRes {
@@ -263,7 +295,7 @@ function associatedConst(c: Checker, t: Type, name: string, span: Span): PathRes
   }
   if (t.kind === 'char' && name === 'MAX') return { kind: 'builtinConst', type: CHAR, name: 'char::MAX' };
   const found = lookupAssociatedConst(c.solver, c.body.module, t, name, span);
-  if (!found) return undefined;
+  if (!found) return traitConst(c, t, name);
   const { def, subst } = found;
   return {
     kind: 'const',
@@ -271,6 +303,26 @@ function associatedConst(c: Checker, t: Type, name: string, span: Span): PathRes
     type: substitute(def.type, subst),
     typeArgs: def.impl!.params.map((param) => subst.get(param) ?? { kind: 'param', param }),
   };
+}
+
+/** A constant a trait declares, on a type bounded by the trait or with an impl of it that leaves the default. */
+function traitConst(c: Checker, t: Type, name: string): PathRes | undefined {
+  const bounds = boundsOf(t);
+  const refs: TraitRef[] = bounds
+    ? allSupertraits(bounds, t)
+    : c.program.impls.flatMap((impl) => {
+        if (!impl.trait?.trait.consts.has(name)) return [];
+        const subst = c.solver.matchImpl(impl, t);
+        return subst ? [substituteTraitRef(impl.trait, subst)] : [];
+      });
+  const ref = refs.find((candidate) => candidate.trait.consts.has(name));
+  if (!ref) return undefined;
+  const def = ref.trait.consts.get(name)!;
+  const subst = new Map([
+    [ref.trait.self, t],
+    ...ref.trait.params.map((param, index): [TypeParam, Type] => [param, ref.args[index]]),
+  ]);
+  return { kind: 'const', def, type: substitute(def.type, subst), typeArgs: [t, ...ref.args] };
 }
 
 function selfCtor(c: Checker, span: Span): PathRes {

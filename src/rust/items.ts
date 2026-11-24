@@ -25,6 +25,8 @@ import { TraitSolver } from './traits';
 import {
   adt,
   type AdtDef,
+  allSupertraits,
+  type AssocTypeDef,
   BOOL,
   type BuiltinAdt,
   CHAR,
@@ -43,13 +45,16 @@ import {
   NEVER,
   newOpaque,
   newTypeParam,
+  shallow,
   STR,
   type Subst,
   substitute,
+  substituteTraitRef,
   type TraitDef,
   type TraitRef,
   type Type,
   type TypeParam,
+  typeToString,
   UNIT,
   type VariantDef,
 } from './types';
@@ -173,6 +178,8 @@ export class Program {
     methods: new Map(),
     supertraits: [],
     builtin: 'Static',
+    assocTypes: new Map(),
+    consts: new Map(),
   };
   /** The shapes of iterators (`std::iter::shape`), which stand for std's iterator types, by name. */
   readonly shapes = new Map<string, AdtDef>();
@@ -240,6 +247,8 @@ export interface TypeScope {
    * a type parameter here that the bound sets as `Item`, as if written `I: Iterator<Item = J>`.
    */
   assocParams?: TypeParam[];
+  /** In a trait impl, its trait, whose associated types `Self::Name` names. */
+  implTrait?: TraitRef;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -516,6 +525,8 @@ export class ItemCollector {
       methods: new Map(),
       supertraits: [],
       module,
+      assocTypes: new Map(),
+      consts: new Map(),
     };
     if (module.isStd && module.path !== 'std::io') {
       def.builtin = item.name;
@@ -532,8 +543,30 @@ export class ItemCollector {
       if (module.isStd) fn.nativeKey = `${def.path}::${method.name}`;
       def.methods.set(method.name, fn);
     }
+    for (const assoc of item.assocTypes) {
+      if (def.assocTypes.has(assoc.name)) compileError(assoc.span, `関連型 ${assoc.name} が2回宣言されています。`);
+      def.assocTypes.set(assoc.name, {
+        name: assoc.name,
+        bounds: [],
+        projection: projectionDef(def, assoc.name, module),
+      });
+    }
+    for (const constant of item.consts) {
+      if (def.consts.has(constant.name) || def.methods.has(constant.name)) {
+        compileError(constant.span, `${constant.name} が2回宣言されています。`);
+      }
+      const constDef = this.constDef(constant, module, undefined, def);
+      def.consts.set(constant.name, constDef);
+    }
     const params = new Map(def.params.map((param) => [param.name, param]));
     const scope: TypeScope = { module, params, selfType };
+    for (const assoc of item.assocTypes) {
+      this.lowering.push(() => {
+        (def.assocTypes.get(assoc.name) as AssocTypeDef).bounds = assoc.bounds.flatMap((bound) =>
+          bound.kind === 'trait' ? [lowerBound(bound, scope, projectionOf(def, assoc.name, selfType))] : []
+        );
+      });
+    }
     for (const [index, param] of item.generics.params.entries()) {
       const defaultType = param.defaultType;
       if (defaultType) this.traitDefaults.push(() => (def.params[index].defaultType = lowerType(defaultType, scope)));
@@ -559,6 +592,7 @@ export class ItemCollector {
       selfType: UNIT,
       methods: new Map(),
       consts: new Map(),
+      assocTypes: new Map(),
       module,
       span: item.span,
     };
@@ -587,6 +621,14 @@ export class ItemCollector {
         if (binding.kind === 'trait') this.checkStdTraitImpl(item, impl, binding.def);
         const trait = resolveTraitPath(item.trait, scope, impl.selfType);
         impl.trait = trait;
+        scope.implTrait = trait;
+        for (const assoc of item.assocTypes) {
+          if (!trait.trait.assocTypes.has(assoc.name)) {
+            compileError(assoc.span, `関連型 ${assoc.name} は、トレイト ${trait.trait.name} にありません（E0437）。`);
+          }
+          if (impl.assocTypes.has(assoc.name)) compileError(assoc.span, `関連型 ${assoc.name} が2回あります。`);
+          impl.assocTypes.set(assoc.name, lowerType(assoc.type, scope));
+        }
         this.checkTraitImpl(item, impl, trait.trait);
       } else if (!module.isStd) {
         const self = impl.selfType;
@@ -618,6 +660,20 @@ export class ItemCollector {
         compileError(method.span, `メソッド ${method.name} は、トレイト ${trait.name} にありません。`);
       }
     }
+    for (const constant of item.consts) {
+      if (!trait.consts.has(constant.name)) {
+        compileError(constant.span, `定数 ${constant.name} は、トレイト ${trait.name} にありません（E0438）。`);
+      }
+    }
+    for (const name of trait.assocTypes.keys()) {
+      if (!impl.assocTypes.has(name))
+        compileError(item.span, `トレイト ${trait.name} の関連型 ${name} を書いてください（E0046）。`);
+    }
+    for (const [name, constant] of trait.consts) {
+      if (!constant.ast.value && !impl.consts.has(name)) {
+        compileError(item.span, `トレイト ${trait.name} の定数 ${name} を書いてください（E0046）。`);
+      }
+    }
     if (this.program.root.isAncestorOf(trait.module as Module) || (impl.module as Module).isStd) {
       for (const [name, method] of trait.methods) {
         if (!method.ast?.body && !impl.methods.has(name) && !(trait.module as Module).isStd) {
@@ -642,14 +698,15 @@ export class ItemCollector {
     impl.consts.set(constant.name, this.constDef(constant, module, impl));
   }
 
-  private constDef(item: ConstItem, module: Module, impl: ImplDef | undefined): ConstDef {
-    const def: ConstDef = { name: item.name, type: UNIT, ast: item, module, impl };
+  private constDef(item: ConstItem, module: Module, impl: ImplDef | undefined, trait?: TraitDef): ConstDef {
+    const def: ConstDef = { name: item.name, type: UNIT, ast: item, module, impl, trait };
     this.program.consts.push(def);
     this.lowering.push(() => {
       const scope: TypeScope = {
         module,
-        params: new Map(impl?.params.map((param) => [param.name, param])),
-        selfType: impl?.selfType,
+        params: new Map((impl?.params ?? trait?.params ?? []).map((param) => [param.name, param])),
+        selfType: trait ? { kind: 'param', param: trait.self } : impl?.selfType,
+        implTrait: impl?.trait,
       };
       def.type = lowerType(item.type, scope);
     });
@@ -688,7 +745,7 @@ export class ItemCollector {
     if (trait) params.delete('Self');
     const selfType: Type | undefined = trait ? { kind: 'param', param: trait.self } : impl?.selfType;
     const assocParams: TypeParam[] = [];
-    const scope: TypeScope = { module, params, selfType, assocParams };
+    const scope: TypeScope = { module, params, selfType, assocParams, implTrait: impl?.trait };
     for (const [index, param] of item.generics.params.entries()) {
       own[index].bounds = param.bounds.map((bound) => lowerBound(bound, scope, { kind: 'param', param: own[index] }));
     }
@@ -1437,16 +1494,20 @@ export function resolveTraitPath(path: PathAst, scope: TypeScope, self?: Type): 
   const last = path.segments.at(-1);
   const args = traitArguments(def, last?.args ?? [], scope, path.span, self);
   let item: Type | undefined;
+  const assocs = new Map<string, Type>();
   for (const assoc of last?.bindings ?? []) {
-    const isIterator = ['Iterator', 'IntoIterator', 'DoubleEndedIterator', 'ExactSizeIterator'].includes(
-      def.builtin as string
-    );
-    if (!isIterator || assoc.name !== 'Item' || item) {
-      compileError(assoc.span, `関連型の指定（${assoc.name} = ...）は、この採点環境では使えません。`);
+    const isIterator = ITERATION_TRAITS.has(def.builtin ?? '');
+    if (item || assocs.has(assoc.name)) compileError(assoc.span, `関連型 ${assoc.name} が2回指定されています。`);
+    if (isIterator && assoc.name === 'Item') {
+      item = lowerType(assoc.type, scope);
+      continue;
     }
-    item = lowerType(assoc.type, scope);
+    const owner = allSupertraits([{ trait: def, args }], self).find((ref) => ref.trait.assocTypes.has(assoc.name));
+    if (!owner) compileError(assoc.span, `トレイト ${def.name} に関連型 ${assoc.name} がありません（E0220）。`);
+    assocs.set(assoc.name, lowerType(assoc.type, scope));
   }
-  return item ? { trait: def, args, item } : { trait: def, args };
+  const ref: TraitRef = item ? { trait: def, args, item } : { trait: def, args };
+  return assocs.size > 0 ? { ...ref, assoc: assocs } : ref;
 }
 
 function traitArguments(def: TraitDef, written: TypeAst[], scope: TypeScope, span: Span, self?: Type): Type[] {
@@ -1570,8 +1631,13 @@ function describeBound(bound: BoundAst): string {
 function lowerPathType(path: PathAst, scope: TypeScope): Type {
   const names = path.segments.map((segment) => segment.name);
   const last = path.segments.at(-1)!;
+  const qualified = path.segments[0].qualified;
+  if (qualified) return lowerQualifiedPath(path, qualified, scope);
   const owner = names.length === 2 ? scope.params.get(names[0]) : undefined;
   if (owner) return lowerAssocItemPath(path, names, owner, scope);
+  if (names.length === 2 && names[0] === 'Self' && scope.selfType) {
+    return assocTypeOf(scope.selfType, names[1], undefined, scope, path.span);
+  }
   if (last.bindings)
     compileError(last.bindings[0].span, '関連型の指定（Item = ...）は、トレイトの境界にだけ書けます。');
   if (names.length === 1) {
@@ -1608,11 +1674,103 @@ function lowerPathType(path: PathAst, scope: TypeScope): Type {
 
 function lowerAssocItemPath(path: PathAst, names: string[], owner: TypeParam, scope: TypeScope): Type {
   const last = path.segments.at(-1)!;
-  if (last.name !== 'Item' || last.args)
-    compileError(path.span, `${names.join('::')} は、この採点環境では使えません。`);
-  const item = assocItem(owner, scope);
-  if (!item) compileError(path.span, `${owner.name} に関連型 Item がありません（Iterator の境界を書いてください）。`);
-  return item;
+  if (last.args) compileError(path.span, `${names.join('::')} には型引数を書けません。`);
+  return assocTypeOf({ kind: 'param', param: owner }, last.name, undefined, scope, path.span);
+}
+
+/** `<T as Trait>::Name` or `<T>::Name`. */
+function lowerQualifiedPath(
+  path: PathAst,
+  qualified: NonNullable<PathAst['segments'][number]['qualified']>,
+  scope: TypeScope
+): Type {
+  if (path.segments.length !== 2) compileError(path.span, '<T as Trait>:: の後には、関連型の名前を1つ書いてください。');
+  const self = lowerType(qualified.self, scope);
+  const trait = qualified.trait && resolveTraitPath(qualified.trait, scope, self);
+  return assocTypeOf(self, path.segments[1].name, trait, scope, path.span);
+}
+
+const ITERATION_TRAITS = new Set(['Iterator', 'IntoIterator', 'DoubleEndedIterator', 'ExactSizeIterator']);
+
+/**
+ * The associated type `name` of a type, of the trait given or else of the bounds or the impl it has: what a bound sets
+ * (`T: Add<Output = T>`), a type parameter added for it in a signature, or the projection `<T as Trait>::Name`, which
+ * resolves once the type is known.
+ */
+// code-gauge-allow functionCognitiveComplexity -- Follows rustc's resolution of associated types case by case.
+function assocTypeOf(self: Type, name: string, trait: TraitRef | undefined, scope: TypeScope, span: Span): Type {
+  const t = shallow(self);
+  let bound = trait;
+  if (!bound) {
+    const bounds =
+      t.kind === 'param' && t.param.isSelf && scope.implTrait
+        ? [scope.implTrait]
+        : t.kind === 'param'
+          ? t.param.bounds
+          : scope.implTrait && sameSelf(self, scope.selfType)
+            ? [scope.implTrait]
+            : [];
+    const candidates = allSupertraits(bounds, self).filter(
+      (candidate) =>
+        candidate.trait.assocTypes.has(name) || (name === 'Item' && ITERATION_TRAITS.has(candidate.trait.builtin ?? ''))
+    );
+    const traits = new Set(candidates.map((candidate) => candidate.trait));
+    if (traits.size > 1)
+      compileError(span, `関連型 ${name} が、複数のトレイトにあります（<T as Trait>::${name} と書いてください）。`);
+    bound = candidates[0];
+    if (!bound) compileError(span, `${typeToString(self)} に関連型 ${name} がありません。`);
+  }
+  if (name === 'Item' && ITERATION_TRAITS.has(bound.trait.builtin ?? '') && t.kind === 'param' && !t.param.isSelf) {
+    const item = assocItem(t.param, scope);
+    if (item) return item;
+  }
+  if (bound.item && name === 'Item') return bound.item;
+  const set = bound.assoc?.get(name);
+  if (set) return set;
+  const assoc = bound.trait.assocTypes.get(name);
+  if (!assoc) {
+    if (name === 'Item' && ITERATION_TRAITS.has(bound.trait.builtin ?? '')) return intoIterItem(self) ?? freshVar();
+    return compileError(span, `トレイト ${bound.trait.name} に関連型 ${name} がありません。`);
+  }
+  // In a signature, the associated type of a parameter's bound becomes a parameter of its own that callers infer.
+  if (t.kind === 'param' && !t.param.isSelf && scope.assocParams && t.param.bounds.includes(bound)) {
+    const param = newTypeParam(`${t.param.name}::${name}`);
+    scope.assocParams.push(param);
+    (bound as { assoc?: Map<string, Type> }).assoc = new Map([
+      ...(bound.assoc ?? []),
+      [name, { kind: 'param', param }],
+    ]);
+    const projected: Type = { kind: 'param', param };
+    param.bounds = assoc.bounds.map((ref) => substituteTraitRef(ref, new Map([[bound.trait.self, self]])));
+    return projected;
+  }
+  return projectionOf(bound.trait, name, self, bound.args);
+}
+
+function sameSelf(a: Type, b: Type | undefined): boolean {
+  return b !== undefined && shallow(a) === shallow(b);
+}
+
+/** The pseudo-type that stands for an associated type of a trait on a type. */
+export function projectionDef(trait: TraitDef, name: string, module: Module): AdtDef {
+  return {
+    name: `${trait.name}::${name}`,
+    path: `${trait.path}::${name}`,
+    kind: 'struct',
+    params: [],
+    variants: [],
+    derives: new Set(),
+    span: trait.span ?? { row: 0, col: 1 },
+    builtin: 'Projection',
+    projection: { trait, name },
+    module,
+  };
+}
+
+export function projectionOf(trait: TraitDef, name: string, self: Type, args?: Type[]): Type {
+  const assoc = trait.assocTypes.get(name);
+  if (!assoc) throw new Error(`Unknown associated type ${trait.name}::${name}`);
+  return adt(assoc.projection, [self, ...(args ?? trait.params.map((param): Type => ({ kind: 'param', param })))]);
 }
 
 function lowerLocalTypeName(path: PathAst, scope: TypeScope): Type | undefined {

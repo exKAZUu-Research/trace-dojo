@@ -154,6 +154,8 @@ interface PseudoTypes {
   intoShape: (type: Type) => Type | undefined;
   /** The error of `TryFrom<source>` for `target`. */
   tryFromError: (source: Type, target: Type) => Type | undefined;
+  /** The type an associated type (`<T as Trait>::Name`) stands for, once it is known. */
+  projection: (type: Type & { kind: 'adt' }) => Type | undefined;
 }
 
 /** The types of the standard library's pseudo-types, once their arguments are known. */
@@ -170,6 +172,10 @@ export function setPseudoTypes(types: PseudoTypes): void {
 // code-gauge-allow functionCognitiveComplexity -- Each pseudo-type has its own normalization rules.
 export function normalize(type: Type): Type {
   if (type.kind !== 'adt' || !isPseudo(type.def)) return type;
+  if (type.def.builtin === 'Projection') {
+    const projected = pseudoTypes?.projection(type);
+    return projected ? normalize(shallow(projected)) : type;
+  }
   const arg = normalize(shallow(type.args[0]));
   if (type.def.builtin === 'Indexed') return indexed(type, arg);
   if (arg.kind === 'var') return type;
@@ -235,6 +241,7 @@ export function isPseudo(def: AdtDef): boolean {
     'IntoItem',
     'IntoShape',
     'TryFromError',
+    'Projection',
   ].includes(def.builtin as string);
 }
 

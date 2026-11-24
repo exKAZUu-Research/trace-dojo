@@ -343,13 +343,14 @@ export class Checker {
       }
       const subst = implSubst(impl, traitRef, decl, fn);
       this.checkImplMethodGenerics(fn, decl, subst, span);
-      const expected = decl.paramTypes.map((type) => substitute(type, subst));
+      const expected = decl.paramTypes.map((type) => deepNormalize(substitute(type, subst)));
       for (const [index, param] of expected.entries()) {
-        const written = fn.paramTypes[index];
+        const written = deepNormalize(fn.paramTypes[index]);
         if (!sameType(param, written)) this.implSignatureMismatch(fn, trait, param, written, span);
       }
-      const result = substitute(decl.ret, subst);
-      if (!this.compatibleImplResult(result, fn.ret)) this.implSignatureMismatch(fn, trait, result, fn.ret, span);
+      const result = deepNormalize(substitute(decl.ret, subst));
+      const written = deepNormalize(fn.ret);
+      if (!this.compatibleImplResult(result, written)) this.implSignatureMismatch(fn, trait, result, written, span);
     }
   }
 
@@ -489,9 +490,9 @@ export class Checker {
         module,
         retType: def.type,
         isAtomic: true,
-        typeParams: new Map(impl?.params.map((param) => [param.name, param])),
-        selfType: impl?.selfType,
-        currentTrait: impl?.trait?.trait,
+        typeParams: new Map((impl?.params ?? def.trait?.params ?? []).map((param) => [param.name, param])),
+        selfType: def.trait ? { kind: 'param', param: def.trait.self } : impl?.selfType,
+        currentTrait: def.trait ?? impl?.trait?.trait,
       });
       this.fnContexts.set(def, this.body.fn);
       this.coverageChecks.set(def, this.body.coverage);
@@ -908,7 +909,7 @@ export class Checker {
   // -------------------------------------------------------------------------------------------------------------------
   // Types
 
-  private typeScope(): TypeScope {
+  typeScope(): TypeScope {
     return {
       module: this.body.module,
       params: this.body.typeParams,

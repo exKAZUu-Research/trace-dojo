@@ -5,15 +5,16 @@ import type { Item } from './ast';
 import { Checker } from './checker';
 import { evaluateConstants } from './constantEvaluation';
 import { Converter } from './convert';
-import { setPseudoTypes, Unifier } from './infer';
+import { normalize, setPseudoTypes, Unifier } from './infer';
 import { ItemCollector, Program, resolveImports } from './items';
 import { intoIterItem, intoIterShape, iterationBound } from './iterTypes';
+import { boundsOf } from './methods';
 import { turtleImplSource } from './natives/core';
 import { parseRust, parseWith } from './parse';
 import { STD_SOURCE } from './stdSource';
 import { arrayTryFrom, intoConversion } from './traitConversions';
 import { TraitSolver } from './traits';
-import { hasVars, shallow, type Type } from './types';
+import { allSupertraits, hasVars, resolve, shallow, substitute, type TraitDef, type Type } from './types';
 
 let stdItems: Item[] | undefined;
 
@@ -75,8 +76,106 @@ function declareStd(program: Program, collector: ItemCollector): void {
     intoItem: (type) => (isAbstract(type) ? iterationBound(type)?.item : intoIterItem(type)),
     intoShape: (type) => (isAbstract(type) ? undefined : intoIterShape(program, type)),
     tryFromError: (source, target) => tryFromErrorType(conversionSolver, source, target),
+    projection: (type) => projectionType(conversionSolver, type),
   });
 }
+
+/**
+ * The type `<Self as Trait>::Name` stands for: what a bound of `Self` sets, an iterator's item, or the type the impl
+ * of the trait for `Self` gives, once `Self` is known.
+ */
+// code-gauge-allow functionCognitiveComplexity -- Each kind of `Self` finds its associated types differently.
+function projectionType(solver: TraitSolver, type: Type & { kind: 'adt' }): Type | undefined {
+  const projection = type.def.projection;
+  if (!projection) return undefined;
+  const { trait, name } = projection;
+  const self = normalize(shallow(type.args[0]));
+  const traitArgs = type.args.slice(1);
+  if (self.kind === 'var') return undefined;
+  const bounds = boundsOf(self);
+  if (bounds) {
+    for (const bound of allSupertraits(bounds, self)) {
+      if (bound.trait !== trait) continue;
+      const set = bound.assoc?.get(name) ?? (name === 'Item' ? bound.item : undefined);
+      if (set) return set;
+    }
+    return undefined;
+  }
+  if (name === 'Item' && (trait.builtin === 'Iterator' || trait.builtin === 'IntoIterator')) {
+    const item = intoIterItem(self);
+    if (item) return item;
+  }
+  const builtin = builtinAssocType(solver.program, trait, name, self, traitArgs);
+  if (builtin) return builtin;
+  if (hasVars(self)) return undefined;
+  const { unifier } = solver;
+  const snapshot = unifier.snapshot();
+  try {
+    for (const impl of solver.program.impls) {
+      if (impl.trait?.trait !== trait) continue;
+      const assoc = impl.assocTypes.get(name);
+      if (!assoc) continue;
+      const subst = solver.matchImpl(impl, self, traitArgs);
+      if (subst) return resolve(substitute(assoc, subst));
+    }
+    return undefined;
+  } finally {
+    unifier.rollback(snapshot);
+  }
+}
+
+/** The associated types of the standard library's traits for the types whose impls the interpreter knows. */
+function builtinAssocType(program: Program, trait: TraitDef, name: string, self: Type, args: Type[]): Type | undefined {
+  const builtin = trait.builtin;
+  if (!builtin) return undefined;
+  if (name === 'Output' && OPERATOR_OUTPUTS.has(builtin)) {
+    if (self.kind === 'int' || self.kind === 'float' || self.kind === 'bool') return self;
+    if (self.kind === 'ref') {
+      const target = normalize(shallow(self.target));
+      if (target.kind === 'int' || target.kind === 'float' || target.kind === 'bool') return target;
+    }
+    if (builtin === 'Add' && self.kind === 'adt' && self.def.builtin === 'String') return self;
+    return undefined;
+  }
+  if (name === 'Target' && (builtin === 'Deref' || builtin === 'DerefMut')) {
+    if (self.kind === 'ref') return self.target;
+    if (self.kind === 'adt') {
+      if (self.def.builtin === 'Box') return self.args[0];
+      if (self.def.builtin === 'String') return { kind: 'str' };
+      if (self.def.builtin === 'Vec') return { kind: 'slice', elem: self.args[0] };
+    }
+    return undefined;
+  }
+  if (name === 'Output' && (builtin === 'Index' || builtin === 'IndexMut')) {
+    const index = args[0] && normalize(shallow(args[0]));
+    const elem =
+      self.kind === 'array' || self.kind === 'slice'
+        ? self.elem
+        : self.kind === 'adt' && (self.def.builtin === 'Vec' || self.def.builtin === 'VecDeque')
+          ? self.args[0]
+          : undefined;
+    if (elem && index?.kind === 'int') return elem;
+    if (self.kind === 'adt' && (self.def.builtin === 'HashMap' || self.def.builtin === 'BTreeMap')) return self.args[1];
+    return undefined;
+  }
+  void program;
+  return undefined;
+}
+
+const OPERATOR_OUTPUTS = new Set([
+  'Add',
+  'Sub',
+  'Mul',
+  'Div',
+  'Rem',
+  'Neg',
+  'Not',
+  'BitAnd',
+  'BitOr',
+  'BitXor',
+  'Shl',
+  'Shr',
+]);
 
 function setupPrelude(program: Program): void {
   const prelude = program.std.types.get('prelude');

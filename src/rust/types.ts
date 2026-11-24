@@ -156,7 +156,9 @@ export type BuiltinAdt =
   | 'FromUtf8Error'
   | 'Entry'
   | 'OccupiedEntry'
-  | 'Infallible';
+  | 'Infallible'
+  /** `<Self as Trait>::Name`, an associated type, whose arguments are `Self` and then the trait's arguments. */
+  | 'Projection';
 
 export interface AdtDef {
   name: string;
@@ -177,6 +179,17 @@ export interface AdtDef {
   module?: unknown;
   /** For an enum with `#[derive(Default)]`, the index of its `#[default]` variant. */
   defaultVariant?: number;
+  /** For a `Projection`, the trait and the name of the associated type. */
+  projection?: { trait: TraitDef; name: string };
+}
+
+/** An associated type a trait declares (`type Item: Display;`). */
+export interface AssocTypeDef {
+  name: string;
+  /** The bounds every impl's type for it must meet, with `Self` the implementing type. */
+  bounds: TraitRef[];
+  /** The `Projection` that stands for it on a type. */
+  projection: AdtDef;
 }
 
 export interface TraitDef {
@@ -191,6 +204,8 @@ export interface TraitDef {
   /** A trait of the standard library whose implementations the interpreter knows. */
   builtin?: string;
   module?: unknown;
+  assocTypes: Map<string, AssocTypeDef>;
+  consts: Map<string, ConstDef>;
 }
 
 export interface TraitRef {
@@ -200,6 +215,8 @@ export interface TraitRef {
   fnSig?: { params: Type[]; ret: Type };
   /** The `Item` an `Iterator` or `IntoIterator` bound sets (`Iterator<Item = i32>`). */
   item?: Type;
+  /** The other associated types a bound sets (`Add<Output = T>`). */
+  assoc?: ReadonlyMap<string, Type>;
 }
 
 export interface ImplDef {
@@ -208,6 +225,8 @@ export interface ImplDef {
   selfType: Type;
   methods: Map<string, FnDef>;
   consts: Map<string, ConstDef>;
+  /** The associated types of a trait impl (`type Item = u32;`), lowered once the impl's types are. */
+  assocTypes: Map<string, Type>;
   module: unknown;
   span: { row: number; col: number };
 }
@@ -218,6 +237,8 @@ export interface ConstDef {
   ast: ConstItem;
   module: Module;
   impl: ImplDef | undefined;
+  /** For a constant a trait declares, the trait, whose `Self` the constant's uses give as their first type argument. */
+  trait?: TraitDef;
 }
 
 export interface FnDef {
@@ -390,6 +411,7 @@ function mapTraitRef(ref: TraitRef, f: (type: Type) => Type): TraitRef {
     args: ref.args.map(f),
     fnSig: ref.fnSig && { params: ref.fnSig.params.map(f), ret: f(ref.fnSig.ret) },
     item: ref.item && f(ref.item),
+    ...(ref.assoc && { assoc: new Map([...ref.assoc].map(([name, type]) => [name, f(type)])) }),
   };
 }
 
@@ -557,6 +579,11 @@ function sameTraitRef(a: TraitRef, b: TraitRef): boolean {
   if (a.fnSig && b.fnSig) {
     if (!sameTypeList(a.fnSig.params, b.fnSig.params) || !sameType(a.fnSig.ret, b.fnSig.ret)) return false;
   } else if (a.fnSig || b.fnSig) return false;
+  if ((a.assoc?.size ?? 0) !== (b.assoc?.size ?? 0)) return false;
+  for (const [name, type] of a.assoc ?? []) {
+    const other = b.assoc?.get(name);
+    if (!other || !sameType(type, other)) return false;
+  }
   return a.item && b.item ? sameType(a.item, b.item) : a.item === b.item;
 }
 
@@ -673,6 +700,12 @@ export function typeToString(type: Type): string {
       return `&${t.mutable ? 'mut ' : ''}${typeToString(t.target)}`;
     }
     case 'adt': {
+      if (t.def.projection) {
+        const [self, ...args] = t.args;
+        const trait =
+          args.length === 0 ? t.def.projection.trait.name : traitRefToString({ trait: t.def.projection.trait, args });
+        return `<${typeToString(self)} as ${trait}>::${t.def.projection.name}`;
+      }
       if (t.def.builtin === 'Iter') {
         // An iterator is the std type its shape stands for.
         const shape = shallow(t.args[1]);
@@ -708,8 +741,13 @@ export function traitRefToString(ref: TraitRef): string {
     const ret = isUnit(ref.fnSig.ret) ? '' : ` -> ${typeToString(ref.fnSig.ret)}`;
     return `${ref.trait.name}(${ref.fnSig.params.map(typeToString).join(', ')})${ret}`;
   }
-  if (ref.args.length === 0) return ref.trait.name;
-  return `${ref.trait.name}<${ref.args.map(typeToString).join(', ')}>`;
+  const args = [
+    ...ref.args.map(typeToString),
+    ...(ref.item ? [`Item = ${typeToString(ref.item)}`] : []),
+    ...[...(ref.assoc ?? [])].map(([name, type]) => `${name} = ${typeToString(type)}`),
+  ];
+  if (args.length === 0) return ref.trait.name;
+  return `${ref.trait.name}<${args.join(', ')}>`;
 }
 
 export function isUnit(type: Type): boolean {

@@ -42,6 +42,11 @@ export function evaluateConstants(checker: Checker, budget: ExecutionBudget): vo
   }
 }
 
+/** Whether a constant's value depends on type arguments, which only its uses give. */
+function isGeneric(def: ConstDef): boolean {
+  return Boolean(def.impl?.params.length || def.trait);
+}
+
 class ConstantEvaluation {
   readonly interpreter: Interpreter;
   private readonly checked = new Map<ConstDef | FnDef, Set<string>>();
@@ -59,8 +64,8 @@ class ConstantEvaluation {
 
   run(constants: ConstDef[]): void {
     for (const def of this.checker.coverageChecks.keys()) this.checkCoverage(def);
-    for (const def of constants) if (!def.impl?.params.length) this.validate(def, []);
-    if (!constants.some((def) => def.impl?.params.length)) return;
+    for (const def of constants) if (!isGeneric(def)) this.validate(def, []);
+    if (!constants.some(isGeneric)) return;
     const { paths, unevaluatedRepeatOperands } = this.checker.annotations;
     for (const [node, res] of paths) {
       if (res.kind === 'const' && !unevaluatedRepeatOperands.has(node)) {

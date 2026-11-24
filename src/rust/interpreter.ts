@@ -313,6 +313,10 @@ export class Interpreter implements CallSupport {
   // Constants and conversions
 
   constValue(def: ConstDef, frame: Frame, types: Type[]): Value {
+    if (def.trait) {
+      const implemented = this.traitConstImpl(def, types);
+      if (implemented) return this.constValue(implemented.def, frame, implemented.typeArgs);
+    }
     this.beforeConstant?.(def);
     const key = JSON.stringify(types.map(typeKey));
     let instances = this.constValues.get(def);
@@ -376,6 +380,22 @@ export class Interpreter implements CallSupport {
     return { fn: dispatched.fn, typeArgs: [...dispatched.implArgs, ...typeArgs.slice(fn.parentParamCount)] };
   }
 
+  /** The constant an impl gives for a trait's constant on the concrete `Self` that `types` starts with. */
+  private traitConstImpl(def: ConstDef, types: Type[]): { def: ConstDef; typeArgs: Type[] } | undefined {
+    const self = this.revealType(types[0]);
+    const traitArgs = types.slice(1).map((type) => this.revealType(type));
+    for (const impl of this.program.impls) {
+      if (impl.trait?.trait !== def.trait) continue;
+      const subst = new Map<TypeParam, Type>();
+      const params = new Set(impl.params);
+      if (!matchConcrete(impl.selfType, self, params, subst)) continue;
+      if (!traitArgs.every((arg, index) => matchConcrete(impl.trait!.args[index], arg, params, subst))) continue;
+      const constant = impl.consts.get(def.name);
+      return constant && { def: constant, typeArgs: impl.params.map((param) => subst.get(param) as Type) };
+    }
+    return undefined;
+  }
+
   private evaluateConst(def: ConstDef, frame: Frame, types: Type[]): Value {
     const native = NATIVES[`const:${def.name}`];
     let value: Value;
@@ -397,7 +417,7 @@ export class Interpreter implements CallSupport {
         compiled = this.compiler.compileConst(def.ast.value, context);
         this.constFns.set(def, compiled);
       }
-      const params = def.impl?.params ?? [];
+      const params = def.impl?.params ?? (def.trait ? [def.trait.self, ...def.trait.params] : []);
       const typeArgs = new Map(params.map((param, index) => [param, types[index]]));
       value = this.invoke(compiled, typeArgs, [], undefined, []);
     }

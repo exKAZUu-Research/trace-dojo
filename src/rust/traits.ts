@@ -2,6 +2,7 @@ import { isPseudo, normalize, type Unifier } from './infer';
 import type { Module, Program } from './items';
 import { builtinImplements } from './traitBuiltins';
 import {
+  adt,
   allSupertraits,
   type ClosureType,
   F32,
@@ -19,6 +20,7 @@ import {
   type TraitDef,
   type TraitRef,
   type Type,
+  type TypeParam,
   USIZE,
 } from './types';
 
@@ -42,6 +44,8 @@ export class TraitSolver {
   // code-gauge-allow functionNcss -- Routes Rust trait obligations by receiver type.
   implements(type: Type, ref: TraitRef): Answer {
     const t = normalize(shallow(type));
+    if (ref.assoc && t.kind !== 'param' && t.kind !== 'opaque' && t.kind !== 'dyn')
+      return this.implementsWithAssoc(t, ref);
     const { trait } = ref;
     if (t.kind === 'never') return 'yes';
     if (t.kind === 'var') return this.varImplements(t, ref);
@@ -70,6 +74,25 @@ export class TraitSolver {
     return 'no';
   }
 
+  /** Whether a type implements a trait whose associated types the bound sets, which must then be those types. */
+  private implementsWithAssoc(t: Type, ref: TraitRef): Answer {
+    const { assoc, ...rest } = ref;
+    const answer = this.implements(t, rest);
+    if (answer === 'no' || !assoc) return answer;
+    let result: Answer = answer;
+    for (const [name, expected] of assoc) {
+      const declared = ref.trait.assocTypes.get(name)?.projection;
+      if (!declared) continue;
+      const actual = normalize(adt(declared, [t, ...ref.args]));
+      if (actual.kind === 'adt' && actual.def === declared) {
+        result = 'unknown';
+        continue;
+      }
+      if (!this.unifier.unify(actual, expected)) return 'no';
+    }
+    return result;
+  }
+
   private builtinOnly(t: Type, ref: TraitRef): Answer {
     return ref.trait.builtin ? builtinImplements(this, t, ref) : 'no';
   }
@@ -85,6 +108,7 @@ export class TraitSolver {
   }
 
   private pseudoImplements(type: Type & { kind: 'adt' }, ref: TraitRef): Answer {
+    if (type.def.projection) return this.projectionImplements(type, ref);
     if (type.def.builtin === 'TryFromError') {
       if (ref.trait.builtin === 'Sized') return 'yes';
       return hasVars(type) ? 'unknown' : 'no';
@@ -94,6 +118,24 @@ export class TraitSolver {
     const iterator = type.args[0];
     if (this.implements(iterator, { trait: this.program.traitDef('Iterator'), args: [] }) !== 'yes') return 'unknown';
     return this.implements(iterator, ref);
+  }
+
+  /**
+   * An associated type of a type parameter that no bound sets has the bounds its trait declares for it (and is
+   * `Sized`); of a type not known yet, nothing is known.
+   */
+  private projectionImplements(type: Type & { kind: 'adt' }, ref: TraitRef): Answer {
+    const { trait, name } = type.def.projection!;
+    const self = normalize(shallow(type.args[0]));
+    if (self.kind === 'var' || hasVars(self)) return 'unknown';
+    if (ref.trait.builtin === 'Sized') return 'yes';
+    const subst: Subst = new Map([
+      [trait.self, self],
+      ...trait.params.map((param, index): [TypeParam, Type] => [param, type.args[index + 1]]),
+    ]);
+    const bounds = (trait.assocTypes.get(name)?.bounds ?? []).map((bound) => substituteTraitRef(bound, subst));
+    const answer = this.boundAnswer(bounds, ref, type);
+    return answer === 'no' ? this.builtinOnly(type, ref) : answer;
   }
 
   private varImplements(t: Type & { kind: 'var' }, ref: TraitRef): Answer {
@@ -215,7 +257,11 @@ export class TraitSolver {
     return (
       bound.trait === ref.trait &&
       bound.args.every((arg, i) => ref.args[i] === undefined || this.unifier.unify(arg, ref.args[i])) &&
-      this.itemsMatch(bound, ref)
+      this.itemsMatch(bound, ref) &&
+      [...(ref.assoc ?? [])].every(([name, type]) => {
+        const set = bound.assoc?.get(name);
+        return set !== undefined && this.unifier.unify(set, type);
+      })
     );
   }
 

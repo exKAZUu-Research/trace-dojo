@@ -4,6 +4,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import type {
   Attributes,
   BoundAst,
+  ConstItem,
   Crate,
   EnumItem,
   FieldAst,
@@ -71,15 +72,7 @@ export class Converter extends ExpressionConverter {
         return this.implItem(node);
       }
       case 'const_item': {
-        const value = this.isStd ? node.childForFieldName('value') : this.field(node, 'value');
-        return {
-          kind: 'const',
-          name: this.identifier(this.field(node, 'name')),
-          span,
-          vis: this.visibility(node),
-          type: this.type(this.field(node, 'type')),
-          value: value ? this.expr(value) : undefined,
-        };
+        return this.constItem(node, this.isStd);
       }
       case 'static_item': {
         if (node.namedChildren.some((child) => child.type === 'mutable_specifier')) {
@@ -149,6 +142,19 @@ export class Converter extends ExpressionConverter {
         return this.unsupportedItem(node);
       }
     }
+  }
+
+  /** A constant; `allowMissingValue` for one of a trait, whose impls give its value. */
+  private constItem(node: Node, allowMissingValue: boolean): ConstItem {
+    const value = allowMissingValue ? node.childForFieldName('value') : this.field(node, 'value');
+    return {
+      kind: 'const',
+      name: this.identifier(this.field(node, 'name')),
+      span: this.span(node),
+      vis: this.visibility(node),
+      type: this.type(this.field(node, 'type')),
+      value: value ? this.expr(value) : undefined,
+    };
   }
 
   private unsupportedItem(node: Node): never {
@@ -471,6 +477,8 @@ export class Converter extends ExpressionConverter {
     const span = this.span(node);
     if (node.text.startsWith('unsafe')) unavailable(span, 'unsafe trait');
     const methods: FnItem[] = [];
+    const assocTypes: TraitItem['assocTypes'] = [];
+    const consts: TraitItem['consts'] = [];
     for (const syntax of this.field(node, 'body').namedChildren) {
       if (isComment(syntax)) continue;
       const { attributes, target: child } = splitAttributes(syntax);
@@ -478,8 +486,19 @@ export class Converter extends ExpressionConverter {
       if (!attrs || !child) continue;
       if (child.type === 'function_item') methods.push(this.fnItem(child, false, attrs));
       else if (child.type === 'function_signature_item') methods.push(this.fnItem(child, true, attrs));
-      else if (child.type === 'associated_type') unavailable(this.span(child), '関連型（type Item;）');
-      else if (child.type === 'const_item') unavailable(this.span(child), 'トレイトの関連定数');
+      else if (child.type === 'associated_type') {
+        if (child.childForFieldName('type_parameters')) {
+          unavailable(this.span(child), '型引数を持つ関連型（type Item<T>;）');
+        }
+        const typeBounds = child.childForFieldName('bounds');
+        assocTypes.push({
+          name: this.identifier(this.field(child, 'name')),
+          bounds: typeBounds ? this.bounds(typeBounds) : [],
+          span: this.span(child),
+        });
+      } else if (child.type === 'type_item') {
+        syntaxError(this.span(child), '関連型の既定の型は、不安定な機能なので使えません（E0658）。');
+      } else if (child.type === 'const_item') consts.push(this.constItem(child, true));
       else if (child.type === 'macro_invocation') unavailable(this.span(child), 'トレイトの中のマクロ');
       else this.unsupportedAssociatedItem(child);
     }
@@ -492,6 +511,8 @@ export class Converter extends ExpressionConverter {
       generics: this.generics(node),
       supertraits: bounds ? this.bounds(bounds) : [],
       methods,
+      assocTypes,
+      consts,
     };
   }
 
@@ -504,6 +525,7 @@ export class Converter extends ExpressionConverter {
     const trait = node.childForFieldName('trait');
     const methods: FnItem[] = [];
     const consts: ImplItem['consts'] = [];
+    const assocTypes: ImplItem['assocTypes'] = [];
     for (const syntax of node.childForFieldName('body')?.namedChildren ?? []) {
       if (isComment(syntax)) continue;
       const { attributes, target: child } = splitAttributes(syntax);
@@ -512,8 +534,16 @@ export class Converter extends ExpressionConverter {
       if (child.type === 'function_item') methods.push(this.fnItem(child, false, attrs));
       else if (child.type === 'function_signature_item' && this.isStd) methods.push(this.fnItem(child, true, attrs));
       else if (child.type === 'const_item') consts.push(this.item(child) as ImplItem['consts'][number]);
-      else if (child.type === 'type_item') unavailable(this.span(child), '関連型（type Item = ...;）');
-      else if (child.type === 'function_signature_item') syntaxError(this.span(child), '関数の本体が足りません。');
+      else if (child.type === 'type_item') {
+        if (child.childForFieldName('type_parameters')) {
+          unavailable(this.span(child), '型引数を持つ関連型（type Item<T> = ...;）');
+        }
+        assocTypes.push({
+          name: this.identifier(this.field(child, 'name')),
+          type: this.type(this.field(child, 'type')),
+          span: this.span(child),
+        });
+      } else if (child.type === 'function_signature_item') syntaxError(this.span(child), '関数の本体が足りません。');
       else if (child.type === 'macro_invocation') unavailable(this.span(child), 'impl の中のマクロ');
       else this.unsupportedAssociatedItem(child);
     }
@@ -525,6 +555,7 @@ export class Converter extends ExpressionConverter {
       selfType: this.type(this.field(node, 'type')),
       methods,
       consts,
+      assocTypes,
     };
   }
 
@@ -674,7 +705,7 @@ export class Converter extends ExpressionConverter {
       }
       case 'bracketed_type':
       case 'qualified_type': {
-        return unavailable(span, `<T as Trait> の形の型`);
+        return syntaxError(span, '<T as Trait> の後には、::Item のように関連型の名前を書いてください。');
       }
       default: {
         return unavailable(span, `型の書き方（${node.text}）`);
@@ -742,6 +773,7 @@ export class Converter extends ExpressionConverter {
       const name = this.field(node, 'name');
       return { segments: [...prefix, { name: this.identifier(name), args: undefined, span: this.span(name) }], span };
     }
+    if (node.type === 'bracketed_type') return this.qualifiedPath(node);
     if (
       node.type === 'type_identifier' ||
       node.type === 'primitive_type' ||
@@ -754,6 +786,20 @@ export class Converter extends ExpressionConverter {
     }
     if (node.type === 'function_type') unavailable(span, '関数ポインタの型（fn(i32) -> i32）');
     return unavailable(span, `型の書き方（${node.text}）`);
+  }
+
+  /** `<T as Trait>` or `<T>` at the start of a path, as a segment that the rest of the path is relative to. */
+  private qualifiedPath(node: Node): PathAst {
+    const span = this.span(node);
+    const inner = node.namedChildren.find((child) => !isComment(child));
+    if (!inner) return syntaxError(span, '書き方に誤りがあります。');
+    if (inner.type === 'qualified_type') {
+      const self = this.type(this.field(inner, 'type'));
+      const trait = this.typePath(this.field(inner, 'alias'));
+      return { segments: [{ name: '<qualified>', args: undefined, span, qualified: { self, trait } }], span };
+    }
+    const self = this.type(inner);
+    return { segments: [{ name: '<qualified>', args: undefined, span, qualified: { self, trait: undefined } }], span };
   }
 
   /** The type arguments, without the lifetimes and the associated types (`Item = i32`) that the caller takes. */
@@ -804,7 +850,7 @@ export class Converter extends ExpressionConverter {
         return { segments: [...base.segments.slice(0, -1), { ...last, args }], span };
       }
       case 'bracketed_type': {
-        return unavailable(span, '<T as Trait>:: の形のパス');
+        return this.qualifiedPath(node);
       }
       default: {
         return unavailable(span, `パスの書き方（${node.text}）`);

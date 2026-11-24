@@ -147,6 +147,10 @@ export interface TraitItem {
   generics: Generics;
   supertraits: BoundAst[];
   methods: FnItem[];
+  /** The associated types the trait declares (`type Item: Display;`). */
+  assocTypes: { name: string; bounds: BoundAst[]; span: Span }[];
+  /** The associated constants the trait declares, with their default values if any. */
+  consts: ConstItem[];
 }
 
 export interface ImplItem {
@@ -157,6 +161,8 @@ export interface ImplItem {
   selfType: TypeAst;
   methods: FnItem[];
   consts: ConstItem[];
+  /** The associated types a trait impl sets (`type Item = u32;`). */
+  assocTypes: { name: string; type: TypeAst; span: Span }[];
 }
 
 export interface ConstItem {
@@ -209,6 +215,8 @@ export interface PathAst {
 
 export interface PathSegment {
   name: string;
+  /** For the first segment of `<T as Trait>::name` or `<T>::name`: the type and the trait it is qualified by. */
+  qualified?: { self: TypeAst; trait: PathAst | undefined };
   args: TypeAst[] | undefined;
   /** The lifetime arguments (`Parser<'a>`). */
   lifetimes?: string[];
