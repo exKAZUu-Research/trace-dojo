@@ -40,7 +40,7 @@ import {
   isIdentifier,
   isValidFunctionName,
   PERMANENT_DYNAMIC_VARIABLES,
-  promoteTemporaryInScopes,
+  resolvePrefixPromotion,
   type Scope,
   sortedElements,
   type Variable,
@@ -120,6 +120,7 @@ export class Shell implements ArithmeticHost {
   private readonly activeOutputs: { text: string }[] = [];
   /** Prefix-assignment scopes active for the running command, distinct from persistent local/global scopes. */
   private readonly tempScopes = new WeakSet<Scope>();
+  private currentDeclarationTemp: Scope | undefined;
   private readonlyFailure = false;
 
   constructor(readonly runtime: Runtime) {
@@ -561,11 +562,20 @@ export class Shell implements ArithmeticHost {
   }
 
   /** Runs a command with the assignments written before it visible both to later assignments and to the command. */
-  private withTemporaryScope(assignments: Assignment[], run: () => number): number {
-    if (assignments.length === 0) return run();
+  private withTemporaryScope(assignments: Assignment[], run: () => number, forDeclaration = false): number {
+    const prevDeclTemp = this.currentDeclarationTemp;
+    if (assignments.length === 0) {
+      this.currentDeclarationTemp = undefined;
+      try {
+        return run();
+      } finally {
+        this.currentDeclarationTemp = prevDeclTemp;
+      }
+    }
     const scope: Scope = new Map();
     this.tempScopes.add(scope);
     this.state.scopes.push(scope);
+    this.currentDeclarationTemp = forDeclaration ? scope : undefined;
     try {
       for (const assignment of assignments) {
         if (assignment.subscript || assignment.array) {
@@ -574,7 +584,7 @@ export class Shell implements ArithmeticHost {
           continue;
         }
         const value = assignment.value ? this.expander.expandAssignmentValue(assignment.value) : '';
-        const existing = this.findVariable(assignment.name);
+        const existing = this.findOwnVariable(assignment.name);
         if (existing?.attributes.has('r')) {
           // Bash reports the assignment and runs the command without it.
           this.reportError(`${assignment.name}: readonly variable`);
@@ -589,6 +599,7 @@ export class Shell implements ArithmeticHost {
       }
       return run();
     } finally {
+      this.currentDeclarationTemp = prevDeclTemp;
       this.removeScope(scope);
     }
   }
@@ -616,13 +627,16 @@ export class Shell implements ArithmeticHost {
         );
       } else args.push(...this.expander.expandWords([arg]));
     }
-    return this.withTemporaryScope(statement.assignments, () =>
-      this.withRedirects(statement.redirects, () => {
-        const status = runDeclaration(this, statement.name, args);
-        const last = args.at(-1);
-        this.state.lastArgument = last === undefined ? statement.name : typeof last === 'string' ? last : last.text;
-        return status;
-      })
+    return this.withTemporaryScope(
+      statement.assignments,
+      () =>
+        this.withRedirects(statement.redirects, () => {
+          const status = runDeclaration(this, statement.name, args);
+          const last = args.at(-1);
+          this.state.lastArgument = last === undefined ? statement.name : typeof last === 'string' ? last : last.text;
+          return status;
+        }),
+      true
     );
   }
 
@@ -887,8 +901,23 @@ export class Shell implements ArithmeticHost {
    * When `name` is bound in an active command-prefix temporary scope, promotes that binding into the enclosing
    * persistent variable scope (as `export` and `readonly` require) and returns it.
    */
-  promoteTemporaryVariable(name: string): Variable | undefined {
-    return promoteTemporaryInScopes(this.state.scopes, this.tempScopes, name);
+  promoteDirectPrefix(
+    name: string,
+    assigns: boolean,
+    unsetExport: boolean
+  ): { variable: Variable; promoted: boolean } | undefined {
+    const resolved = resolvePrefixPromotion(
+      this.state.scopes,
+      this.tempScopes,
+      this.currentDeclarationTemp,
+      name,
+      assigns,
+      unsetExport
+    );
+    if (resolved?.promoted && !assigns) {
+      this.assignScalarTo(resolved.variable, resolved.prefixValue, false);
+    }
+    return resolved && { variable: resolved.variable, promoted: resolved.promoted };
   }
 
   /** The name a name reference finally names, or the name itself. */

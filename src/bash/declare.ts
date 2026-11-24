@@ -116,6 +116,7 @@ function parseWordOperand(word: string): { name: string; subscript?: string; app
 interface DeclarationDestination {
   variable: Variable;
   referencedSubscript?: string;
+  promoted?: boolean;
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Bash's declaration of one operand: its name, a dynamic variable, its attributes, and its value.
@@ -151,22 +152,23 @@ function declareOne(
   ) {
     return false;
   }
-  const { variable, referencedSubscript } = destination;
+  const { variable, referencedSubscript, promoted } = destination;
   let ok = true;
   if (parsed?.value !== undefined) {
+    const append = promoted ? false : parsed.append;
     if (variable.attributes.has('n') && parsed.subscript === undefined) {
       ok = assignReferenceTarget(shell, builtin, variable, parsed.value);
     } else if (parsed.subscript !== undefined) {
       ok = shell.assignElementTo(variable, parsed.subscript, parsed.value, parsed.append);
     } else if (referencedSubscript !== undefined) {
-      ok = shell.assignElementTo(variable, referencedSubscript, parsed.value, parsed.append);
+      ok = shell.assignElementTo(variable, referencedSubscript, parsed.value, append);
     } else {
-      ok = shell.assignScalarTo(variable, parsed.value, parsed.append);
+      ok = shell.assignScalarTo(variable, parsed.value, append);
     }
   } else if (typeof operand !== 'string') {
     ok = variable.attributes.has('n')
       ? assignReference(shell, builtin, variable, operand)
-      : assignLocally(shell, variable, operand, referencedSubscript);
+      : assignLocally(shell, variable, operand, referencedSubscript, promoted);
   }
   if (options.set.has('r')) variable.attributes.add('r');
   return ok;
@@ -199,14 +201,17 @@ function declaredDestination(
 ): DeclarationDestination | undefined {
   const { scopes } = shell.state;
   const scope = isLocal ? scopes[shell.state.functionScopes.at(-1) as number] : undefined;
-  const resolved = resolveDeclaredTarget(shell, name, scope, set, unset, isSubscripted);
-  const { targetName, referencedSubscript } = resolved;
-  const targetScope = scope && targetName === name ? scope : undefined;
-  let variable =
-    !targetScope && (builtin === 'export' || builtin === 'readonly')
-      ? shell.promoteTemporaryVariable(targetName)
+  const directPrefix =
+    !scope && !isSubscripted && (builtin === 'export' || builtin === 'readonly')
+      ? shell.promoteDirectPrefix(name, assigns, unset.has('x'))
       : undefined;
-  variable ??= targetScope
+  if (directPrefix) {
+    if (checkReadonlyConflict(shell, builtin, name, directPrefix.variable, set, assigns)) return undefined;
+    return { variable: directPrefix.variable, promoted: directPrefix.promoted };
+  }
+  const { targetName, referencedSubscript } = resolveDeclaredTarget(shell, name, set, unset, isSubscripted);
+  const targetScope = scope && referencedSubscript === undefined ? scope : undefined;
+  let variable = targetScope
     ? targetScope.get(targetName)
     : set.has('n') || (set.has('g') && !isSubscripted && targetName === name)
       ? scopes[0].get(targetName)
@@ -216,11 +221,7 @@ function declaredDestination(
     shell.reportError(`${builtin}: ${targetName}: readonly variable`);
     return undefined;
   }
-  const changes = assigns || [...set].some((a) => a !== 'r' && a !== 'x' && a !== 'p' && a !== 'g');
-  if (variable?.attributes.has('r') && changes) {
-    shell.reportError(`${builtin}: ${targetName}: readonly variable`);
-    return undefined;
-  }
+  if (checkReadonlyConflict(shell, builtin, targetName, variable, set, assigns)) return undefined;
   if (!variable) {
     variable = { name: targetName, value: undefined, attributes: new Set() };
     (targetScope ?? scopes[0]).set(targetName, variable);
@@ -228,20 +229,29 @@ function declaredDestination(
   return { variable, ...(referencedSubscript === undefined ? {} : { referencedSubscript }) };
 }
 
+function checkReadonlyConflict(
+  shell: Shell,
+  builtin: string,
+  targetName: string,
+  variable: Variable | undefined,
+  set: Set<string>,
+  assigns: boolean
+): boolean {
+  const changes = assigns || [...set].some((a) => a !== 'r' && a !== 'x' && a !== 'p' && a !== 'g');
+  if (!variable?.attributes.has('r') || !changes) return false;
+  shell.reportError(`${builtin}: ${targetName}: readonly variable`);
+  return true;
+}
+
 function resolveDeclaredTarget(
   shell: Shell,
   name: string,
-  scope: Map<string, Variable> | undefined,
   set: Set<string>,
   unset: Set<string>,
   isSubscripted: boolean
 ): { targetName: string; referencedSubscript?: string } {
   if (set.has('n') || unset.has('n')) return { targetName: name };
-  let current = scope
-    ? scope.get(name)
-    : set.has('g') && !isSubscripted
-      ? shell.state.scopes[0].get(name)
-      : shell.findOwnVariable(name);
+  let current = set.has('g') && !isSubscripted ? shell.state.scopes[0].get(name) : shell.findOwnVariable(name);
   let target = name;
   for (let depth = 0; depth < 8; depth++) {
     if (!current?.attributes.has('n') || current.value?.kind !== 'scalar' || current.value.value === '') break;
@@ -348,8 +358,10 @@ function assignLocally(
   shell: Shell,
   variable: Variable,
   assignment: Assignment,
-  referencedSubscript?: string
+  referencedSubscript?: string,
+  promoted = false
 ): boolean {
+  const append = promoted ? false : assignment.append;
   if (assignment.value === undefined && !assignment.array) {
     if (variable.attributes.has('a') && !variable.value) variable.value = { kind: 'indexed', elements: new Map() };
     if (variable.attributes.has('A') && !variable.value)
@@ -357,8 +369,8 @@ function assignLocally(
     // `declare x` and `local x` declare a variable with no value; `x=` gives it the empty one.
     if (assignment.text.includes('=')) {
       return referencedSubscript === undefined
-        ? shell.assignScalarTo(variable, '', assignment.append)
-        : shell.assignElementTo(variable, referencedSubscript, '', assignment.append);
+        ? shell.assignScalarTo(variable, '', append)
+        : shell.assignElementTo(variable, referencedSubscript, '', append);
     }
     return true;
   }
@@ -383,9 +395,9 @@ function assignLocally(
     return shell.assignElementTo(variable, subscript, value, assignment.append);
   }
   if (referencedSubscript !== undefined) {
-    return shell.assignElementTo(variable, referencedSubscript, value, assignment.append);
+    return shell.assignElementTo(variable, referencedSubscript, value, append);
   }
-  return shell.assignScalarTo(variable, value, assignment.append);
+  return shell.assignScalarTo(variable, value, append);
 }
 
 /** `declare -p names`: each variable as a declaration that recreates it. */

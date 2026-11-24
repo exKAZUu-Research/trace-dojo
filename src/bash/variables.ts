@@ -190,36 +190,39 @@ export function isValidFunctionName(name: string): boolean {
   return name !== '' && !name.includes('$') && !/^[0-9]+$/.test(name);
 }
 
-/** Promotes a command-prefix temporary variable binding into the nearest persistent scope when present. */
-export function promoteTemporaryInScopes(
+export interface PrefixPromotion {
+  variable: Variable;
+  promoted: boolean;
+  prefixValue: string;
+}
+
+/** Resolves how `export` or `readonly` handles a direct prefix assignment on the same declaration command. */
+export function resolvePrefixPromotion(
   scopes: Scope[],
   tempScopes: WeakSet<Scope>,
-  name: string
-): Variable | undefined {
-  let tempIndex = -1;
-  for (let i = scopes.length - 1; i >= 0; i--) {
-    const scope = scopes[i];
-    if (!scope.has(name)) continue;
-    if (tempScopes.has(scope)) tempIndex = i;
-    break;
-  }
-  if (tempIndex === -1) return undefined;
-  const tempVar = scopes[tempIndex].get(name) as Variable;
-  scopes[tempIndex].delete(name);
+  commandTemp: Scope | undefined,
+  name: string,
+  assigns: boolean,
+  unsetExport: boolean
+): PrefixPromotion | undefined {
+  const tempVar = commandTemp?.get(name);
+  if (!commandTemp || !tempVar) return undefined;
+  const prefixValue = tempVar.value?.kind === 'scalar' ? tempVar.value.value : '';
+  if (unsetExport && !assigns) return { variable: tempVar, promoted: false, prefixValue };
   let target: Variable | undefined;
-  for (let i = tempIndex - 1; i >= 0; i--) {
+  for (let i = scopes.length - 1; i >= 0; i--) {
     if (tempScopes.has(scopes[i])) continue;
     target = scopes[i].get(name);
     if (target) break;
   }
+  if (target?.attributes.has('n')) return { variable: tempVar, promoted: false, prefixValue };
+  commandTemp.delete(name);
   if (!target) {
     target = { name, value: undefined, attributes: new Set() };
     scopes[0].set(name, target);
   }
-  target.value = tempVar.value;
-  target.shared = false;
-  for (const attr of tempVar.attributes) target.attributes.add(attr);
-  return target;
+  if (!unsetExport) target.attributes.add('x');
+  return { variable: target, promoted: true, prefixValue };
 }
 
 /** Elements of call-stack dynamic arrays (`FUNCNAME`, `BASH_LINENO`, `BASH_SOURCE`). */

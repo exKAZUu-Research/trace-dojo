@@ -110,7 +110,6 @@ export class Converter {
     return result;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- One case per statement node of the grammar, each delegating to its own converter.
   // code-gauge-allow functionNcss -- One case per statement node of the grammar, each delegating to its own converter.
   private statement(node: Node): Statement {
     const row = node.startPosition.row;
