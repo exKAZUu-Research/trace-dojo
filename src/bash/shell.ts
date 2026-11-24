@@ -158,6 +158,8 @@ export class Shell implements ArithmeticHost {
   private conditionDepth = 0;
   /** Nesting depth on the left side of `&&` or `||`, where pure tests record no step unless shown state changed. */
   private listConditionDepth = 0;
+  /** The converted string written by the most recent scalar or element store. */
+  lastStored = '';
   /** Outputs of running and pending command substitutions and loop word lists, whose turtle handles stay live. */
   private readonly inFlight: { values: string[] }[] = [];
   private readonly activeOutputs: { text: string }[] = [];
@@ -965,6 +967,7 @@ export class Shell implements ArithmeticHost {
     if (!this.isDynamic(name)) return false;
     if (name === 'RANDOM') this.seedRandom(value);
     if (name === 'BASH_SUBSHELL') this.state.subshellLevel = /^\s*[-+]?\d+\s*$/.test(value) ? Number(value) : 0;
+    this.lastStored = value;
     return true;
   }
 
@@ -1139,6 +1142,7 @@ export class Shell implements ArithmeticHost {
     if (converted === undefined) return false;
     this.checkLength(converted);
     variable.value = { kind: 'scalar', value: converted };
+    this.lastStored = converted;
     return true;
   }
 
@@ -1206,6 +1210,7 @@ export class Shell implements ArithmeticHost {
       if (converted === undefined) return false;
       this.checkLength(converted);
       table.set(subscript, converted);
+      this.lastStored = converted;
       return true;
     }
     if (subscript === '') {
@@ -1224,6 +1229,7 @@ export class Shell implements ArithmeticHost {
     this.checkLength(converted);
     if (!elements.has(index)) this.chargeSlot();
     elements.set(index, converted);
+    this.lastStored = converted;
     return true;
   }
 

@@ -138,8 +138,7 @@ function defaultValue(
   const assigned =
     subscript === undefined ? shell.assignScalar(name, text) : shell.assignElement(name, subscript, text, false);
   if (!assigned) shell.discard(`${name}: cannot assign`);
-  const stored = subscript === undefined ? shell.scalarValue(name) : shell.elementValue(name, subscript);
-  return expander.valuePieces({ kind: 'scalar', value: stored }, inDouble);
+  return expander.valuePieces({ kind: 'scalar', value: shell.lastStored }, inDouble);
 }
 
 /** Applies a string operation to a scalar or to each element of a list, keeping the list's fields. */
