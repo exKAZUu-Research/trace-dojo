@@ -35,7 +35,8 @@ interface Library {
   derivingSupport: (name: string) => ValueEntity;
   weakValues: Map<string, ValueEntity>;
   weakTypes: Map<string, TypeEntity>;
-  negate: () => ValueEntity;
+  /** A value of the library's base module, which code the compiler generates refers to. */
+  value: (name: string) => ValueEntity;
 }
 
 let library: Library | undefined;
@@ -61,7 +62,7 @@ function compileLibrary(): Library {
     derivingSupport: (name) => compiler.baseValue(name),
     weakValues: compiler.turtleValues(),
     weakTypes: new Map([['Turtle', TURTLE_TYPE]]),
-    negate: () => compiler.baseValue('negate'),
+    value: (name) => compiler.baseValue(name),
   };
 }
 
@@ -429,11 +430,11 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>,
     const parsed = parseHaskell(source);
     const renamed = renameModule(parsed, {
       modules: lib.modules,
-      implicitPrelude: true,
+      implicitPrelude: parsed.extensions.has('ImplicitPrelude'),
       unsupportedModule: (name) => (Object.hasOwn(UNSUPPORTED_MODULES, name) ? UNSUPPORTED_MODULES[name] : undefined),
       weakValues: lib.weakValues,
       weakTypes: lib.weakTypes,
-      negate: lib.negate,
+      support: lib.value,
     });
     const checked = typecheckModule(renamed, {
       env: new ClassEnv(lib.env),

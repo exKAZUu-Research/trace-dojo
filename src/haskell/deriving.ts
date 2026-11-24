@@ -1,9 +1,26 @@
+import { FUNCTION_TYPE, tupleCon } from './builtinTypes';
 import type { ClassEntity, ConInfo, ValueEntity } from './entities';
+import { compileError } from './errors';
 import type { LocalVar, RBinding, RClause, RExpr, RPat } from './rast';
 import { newLocal, type RDataDecl } from './rename';
 import type { Span } from './syntax';
+import { splitApp, type Type } from './types';
+import { chargeTypeWork } from './typeWorkBudget';
 
-export const DERIVABLE_CLASSES = ['Eq', 'Ord', 'Show', 'Read', 'Enum', 'Bounded'] as const;
+export const DERIVABLE_CLASSES = [
+  'Eq',
+  'Ord',
+  'Show',
+  'Read',
+  'Enum',
+  'Bounded',
+  'Functor',
+  'Foldable',
+  'Traversable',
+] as const;
+
+/** The classes of type constructors, which GHC derives from how each field's type uses the last type parameter. */
+export const FUNCTOR_LIKE_CLASSES: ReadonlySet<string> = new Set(['Functor', 'Foldable', 'Traversable']);
 
 /** The precedence of function application, which derived `Show` and `Read` compare against. */
 const APP_PREC = 10;
@@ -43,8 +60,337 @@ export function deriveInstance(decl: RDataDecl, cls: ClassEntity, support: Suppo
     case 'Bounded': {
       return deriveBounded(builder, cons);
     }
+    case 'Functor':
+    case 'Foldable':
+    case 'Traversable': {
+      return deriveFunctorLike(new FieldShapes(builder, decl.entity.arity - 1), cls.name, cons);
+    }
     default: {
       return [];
+    }
+  }
+}
+
+/**
+ * The functions that map, fold, or traverse a field by its type's use of the last type parameter, as GHC's
+ * `DeriveFunctor`, `DeriveFoldable`, and `DeriveTraversable` build them; each returns `undefined` for a field that
+ * does not use the parameter.
+ */
+class FieldShapes {
+  constructor(
+    readonly builder: Builder,
+    private readonly last: number
+  ) {}
+
+  mentions(type: Type): boolean {
+    chargeTypeWork();
+    if (type.tag === 'tgen') return type.index === this.last;
+    return type.tag === 'tap' && (this.mentions(type.fn) || this.mentions(type.arg));
+  }
+
+  /** The parts of a field type: a function's argument and result, a tuple's elements, or a constructor's arguments. */
+  shape(
+    type: Type,
+    className: string
+  ): { kind: 'param' } | { kind: 'function' | 'tuple'; args: Type[] } | { kind: 'app'; arg: Type } {
+    if (type.tag === 'tgen') return { kind: 'param' };
+    const { head, args } = splitApp(type);
+    if (head.tag === 'tcon' && head.entity === FUNCTION_TYPE && args.length === 2) {
+      if (className !== 'Functor' || this.mentions(args[0])) this.fail(className, '関数の型の中');
+      return { kind: 'function', args };
+    }
+    if (head.tag === 'tcon' && head.entity.special === 'tuple' && args.length === head.entity.arity) {
+      return { kind: 'tuple', args };
+    }
+    if (this.mentions(head) || args.slice(0, -1).some((arg) => this.mentions(arg))) {
+      this.fail(className, '最後の引数以外');
+    }
+    return { kind: 'app', arg: args.at(-1) as Type };
+  }
+
+  private fail(className: string, where: string): never {
+    throw compileError(
+      this.builder.span,
+      `型の最後の型変数を${where}で使っているので、${className} を deriving できません。`
+    );
+  }
+
+  fmap(type: Type, f: RExpr): RExpr | undefined {
+    if (!this.mentions(type)) return undefined;
+    const b = this.builder;
+    const shape = this.shape(type, 'Functor');
+    switch (shape.kind) {
+      case 'param': {
+        return f;
+      }
+      case 'function': {
+        const g = b.newVar('g');
+        return b.lambda(g, b.call('.', this.fmap(shape.args[1], f) as RExpr, b.local(g)));
+      }
+      case 'tuple': {
+        return this.tupleFunction(shape.args, (vars) => ({
+          k: 'tuple',
+          elems: shape.args.map((arg, index) => {
+            const fn = this.fmap(arg, f);
+            return fn ? b.app(fn, b.local(vars[index])) : b.local(vars[index]);
+          }),
+          span: b.span,
+        }));
+      }
+      case 'app': {
+        return b.call('fmap', this.fmap(shape.arg, f) as RExpr);
+      }
+    }
+  }
+
+  /** A function of a field and an accumulator, which `foldr` folds the field's elements into from the right. */
+  foldr(type: Type, f: RExpr): RExpr | undefined {
+    if (!this.mentions(type)) return undefined;
+    const b = this.builder;
+    const shape = this.shape(type, 'Foldable');
+    switch (shape.kind) {
+      case 'param': {
+        return f;
+      }
+      case 'function': {
+        throw new Error('A function field reached foldr');
+      }
+      case 'tuple': {
+        const acc = b.newVar('z');
+        const fn = this.tupleFunction(shape.args, (vars) => {
+          let result = b.local(acc);
+          for (const [index, arg] of shape.args.entries().toArray().toReversed()) {
+            const inner = this.foldr(arg, f);
+            if (inner) result = b.app(inner, b.local(vars[index]), result);
+          }
+          return result;
+        });
+        const x = b.newVar('x');
+        return lambdaOf(b, [b.pvar(x), b.pvar(acc)], b.app(fn, b.local(x)));
+      }
+      case 'app': {
+        const x = b.newVar('x');
+        const acc = b.newVar('z');
+        return lambdaOf(
+          b,
+          [b.pvar(x), b.pvar(acc)],
+          b.call('foldr', this.foldr(shape.arg, f) as RExpr, b.local(acc), b.local(x))
+        );
+      }
+    }
+  }
+
+  foldMap(type: Type, f: RExpr): RExpr | undefined {
+    if (!this.mentions(type)) return undefined;
+    const b = this.builder;
+    const shape = this.shape(type, 'Foldable');
+    switch (shape.kind) {
+      case 'param': {
+        return f;
+      }
+      case 'function': {
+        throw new Error('A function field reached foldMap');
+      }
+      case 'tuple': {
+        return this.tupleFunction(shape.args, (vars) =>
+          mappendAll(
+            b,
+            shape.args.flatMap((arg, index) => {
+              const inner = this.foldMap(arg, f);
+              return inner ? [b.app(inner, b.local(vars[index]))] : [];
+            })
+          )
+        );
+      }
+      case 'app': {
+        return b.call('foldMap', this.foldMap(shape.arg, f) as RExpr);
+      }
+    }
+  }
+
+  traverse(type: Type, f: RExpr): RExpr | undefined {
+    if (!this.mentions(type)) return undefined;
+    const b = this.builder;
+    const shape = this.shape(type, 'Traversable');
+    switch (shape.kind) {
+      case 'param': {
+        return f;
+      }
+      case 'function': {
+        throw new Error('A function field reached traverse');
+      }
+      case 'tuple': {
+        return this.tupleFunction(shape.args, (vars) =>
+          rebuild(
+            b,
+            vars.map((variable, index) => ({ value: variable, effect: this.traverse(shape.args[index], f) })),
+            (values) => ({ k: 'tuple', elems: values, span: b.span })
+          )
+        );
+      }
+      case 'app': {
+        return b.call('traverse', this.traverse(shape.arg, f) as RExpr);
+      }
+    }
+  }
+
+  private tupleFunction(args: Type[], body: (vars: LocalVar[]) => RExpr): RExpr {
+    const b = this.builder;
+    const vars = args.map((_, index) => b.newVar(`y${index + 1}`));
+    return lambdaOf(
+      b,
+      [
+        b.pcon(
+          tupleCon(args.length),
+          vars.map((variable) => b.pvar(variable))
+        ),
+      ],
+      body(vars)
+    );
+  }
+}
+
+function lambdaOf(builder: Builder, pats: RPat[], body: RExpr): RExpr {
+  return { k: 'lambda', pats, body, span: builder.span };
+}
+
+function mappendAll(builder: Builder, parts: RExpr[]): RExpr {
+  if (parts.length === 0) return builder.global('mempty');
+  return builder.foldRight(parts, (part, rest) => builder.call('mappend', part, rest));
+}
+
+/**
+ * Rebuilds a value from parts some of which run an effect: `fmap (\b1 b2 -> build) e1 <*> e2`, or `pure build` when no
+ * part does.
+ */
+function rebuild(
+  builder: Builder,
+  parts: { value: LocalVar; effect: RExpr | undefined }[],
+  build: (values: RExpr[]) => RExpr
+): RExpr {
+  const effectful = parts.filter((part) => part.effect);
+  const results = new Map(effectful.map((part, index) => [part, builder.newVar(`b${index + 1}`)]));
+  const built = build(parts.map((part) => builder.local(results.get(part) ?? part.value)));
+  if (effectful.length === 0) return builder.call('pure', built);
+  const fn = lambdaOf(
+    builder,
+    [...results.values()].map((variable) => builder.pvar(variable)),
+    built
+  );
+  let result = builder.call('fmap', fn, builder.app(effectful[0].effect as RExpr, builder.local(effectful[0].value)));
+  for (const part of effectful.slice(1)) {
+    result = builder.call('<*>', result, builder.app(part.effect as RExpr, builder.local(part.value)));
+  }
+  return result;
+}
+
+function deriveFunctorLike(shapes: FieldShapes, className: string, cons: ConInfo[]): RBinding[] {
+  const b = shapes.builder;
+  const f = b.newVar('f');
+  const emptyCase = (local: LocalVar): RExpr => ({ k: 'case', scrutinee: b.local(local), alts: [], span: b.span });
+  switch (className) {
+    case 'Functor': {
+      if (cons.length === 0) {
+        const z = b.newVar('z');
+        return [b.method('fmap', [b.clause([b.wild(), b.pvar(z)], emptyCase(z))])];
+      }
+      return [
+        b.method(
+          'fmap',
+          cons.map((con) => {
+            const xs = fieldVars(b, con, 'a');
+            const args = xs.map((x, index) => {
+              const fn = shapes.fmap(con.fieldTypes[index], b.local(f));
+              return fn ? b.app(fn, b.local(x)) : b.local(x);
+            });
+            return b.clause(
+              [
+                b.pvar(f),
+                b.pcon(
+                  con,
+                  xs.map((x) => b.pvar(x))
+                ),
+              ],
+              b.app(b.con(con), ...args)
+            );
+          })
+        ),
+      ];
+    }
+    case 'Foldable': {
+      const z = b.newVar('z');
+      if (cons.length === 0) {
+        return [
+          b.method('foldr', [b.clause([b.wild(), b.pvar(z), b.wild()], b.local(z))]),
+          b.method('foldMap', [b.clause([b.wild(), b.wild()], b.global('mempty'))]),
+        ];
+      }
+      const foldr = cons.map((con) => {
+        const xs = fieldVars(b, con, 'a');
+        let result = b.local(z);
+        for (const [index, x] of xs.entries().toArray().toReversed()) {
+          const fn = shapes.foldr(con.fieldTypes[index], b.local(f));
+          if (fn) result = b.app(fn, b.local(x), result);
+        }
+        return b.clause(
+          [
+            b.pvar(f),
+            b.pvar(z),
+            b.pcon(
+              con,
+              xs.map((x) => b.pvar(x))
+            ),
+          ],
+          result
+        );
+      });
+      const foldMap = cons.map((con) => {
+        const xs = fieldVars(b, con, 'a');
+        const parts = xs.flatMap((x, index) => {
+          const fn = shapes.foldMap(con.fieldTypes[index], b.local(f));
+          return fn ? [b.app(fn, b.local(x))] : [];
+        });
+        return b.clause(
+          [
+            b.pvar(f),
+            b.pcon(
+              con,
+              xs.map((x) => b.pvar(x))
+            ),
+          ],
+          mappendAll(b, parts)
+        );
+      });
+      return [b.method('foldr', foldr), b.method('foldMap', foldMap)];
+    }
+    default: {
+      if (cons.length === 0) {
+        const z = b.newVar('z');
+        return [b.method('traverse', [b.clause([b.wild(), b.pvar(z)], b.call('pure', emptyCase(z)))])];
+      }
+      return [
+        b.method(
+          'traverse',
+          cons.map((con) => {
+            const xs = fieldVars(b, con, 'a');
+            const body = rebuild(
+              b,
+              xs.map((x, index) => ({ value: x, effect: shapes.traverse(con.fieldTypes[index], b.local(f)) })),
+              (values) => b.app(b.con(con), ...values)
+            );
+            return b.clause(
+              [
+                b.pvar(f),
+                b.pcon(
+                  con,
+                  xs.map((x) => b.pvar(x))
+                ),
+              ],
+              body
+            );
+          })
+        ),
+      ];
     }
   }
 }

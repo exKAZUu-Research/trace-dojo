@@ -2,15 +2,15 @@ import { assert } from 'es-toolkit';
 
 import { FUNCTION_TYPE } from './builtinTypes';
 import type { ClassEnv } from './classEnv';
-import { deriveInstance } from './deriving';
+import { deriveInstance, FUNCTOR_LIKE_CLASSES } from './deriving';
 import { type ClassEntity, type Evidence, type InstanceInfo, nextId, type ValueEntity } from './entities';
 import { compileError, unsupportedError } from './errors';
 import { type Builtins, Checker, newDictParam, typeParamKinds, typeVarNames } from './infer';
 import { inferKinds } from './kindCheck';
 import { TypePrinter } from './prettyType';
-import { directClassConstraint, type RBinding } from './rast';
+import { directClassConstraint, type RBinding, type RType } from './rast';
 import type { RClassDecl, RDataDecl, RInstanceDecl, RModule } from './rename';
-import type { Span } from './syntax';
+import type { DerivingStrategy, Span } from './syntax';
 import {
   defaultKind,
   freshKindVar,
@@ -21,6 +21,7 @@ import {
   matchType,
   type Pred,
   prune,
+  pruneKind,
   quantifyType,
   type Scheme,
   splitApp,
@@ -60,8 +61,13 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
   inferKinds(checker, module);
   for (const decl of module.dataDecls) defineConstructors(decl);
   for (const decl of module.classes) defineClassMethods(decl);
-  const instanceDecls = module.instances.map((decl) => declareInstance(checker, decl, module.name));
-  const derived = deriveInstances(checker, module, options);
+  const instanceDecls = module.instances.map((decl) =>
+    declareInstance(checker, decl, module.name, module.extensions.has('UndecidableInstances'))
+  );
+  const derived = [
+    ...deriveInstances(checker, module, options),
+    ...deriveStandaloneInstances(checker, module, options),
+  ];
   const instances: CheckedInstance[] = [];
   for (const declared of [...instanceDecls, ...derived]) {
     checkInstanceSupers(checker, declared.info, declared.span);
@@ -136,7 +142,12 @@ interface DeclaredInstance {
   span: Span;
 }
 
-function declareInstance(checker: Checker, decl: RInstanceDecl, moduleName: string): DeclaredInstance {
+function declareInstance(
+  checker: Checker,
+  decl: RInstanceDecl,
+  moduleName: string,
+  undecidable: boolean
+): DeclaredInstance {
   const names = typeVarNames([decl.type]);
   const kinds: Kind[] = names.map(() => freshKindVar());
   const vars = new Map<string, Type>(names.map((name, index) => [name, { tag: 'tgen', index }]));
@@ -148,7 +159,7 @@ function declareInstance(checker: Checker, decl: RInstanceDecl, moduleName: stri
   }
   checker.checkKinds();
   const info = makeInstance(decl.cls, kinds.map(defaultKind), head, context, moduleName, decl.span);
-  validateInstanceTermination(info, decl.span);
+  if (!undecidable) validateInstanceTermination(info, decl.span);
   registerInstance(checker, info, decl.span);
   return { info, typeNames: names, bindings: decl.bindings, span: decl.span };
 }
@@ -297,28 +308,25 @@ function checkClauses(checker: Checker, binding: Extract<RBinding, { k: 'fun' }>
 
 // code-gauge-allow functionCognitiveComplexity -- Each branch checks one condition GHC places on a derivable class.
 function deriveInstances(checker: Checker, module: RModule, options: TypecheckOptions): DeclaredInstance[] {
-  const pending: { decl: RDataDecl; cls: ClassEntity; info: InstanceInfo; span: Span }[] = [];
+  const pending: { decl: RDataDecl; cls: ClassEntity; info: InstanceInfo; span: Span; anyclass: boolean }[] = [];
   for (const decl of module.dataDecls) {
-    for (const { cls, span } of decl.deriving) {
+    for (const { cls, span, strategy } of decl.deriving) {
       assert(cls, 'The derived class is unresolved');
-      if (!options.builtins.derivableClasses.has(cls)) {
-        if (['Functor', 'Foldable', 'Traversable', 'Generic', 'Data', 'Lift'].includes(cls.name)) {
-          throw unsupportedError(span, `${cls.name} の deriving`);
-        }
-        throw compileError(span, `クラス ${cls.name} は deriving できません。`);
-      }
-      checkDerivable(decl, cls, span);
+      const anyclass = derivingStrategy(module, options, decl, cls, strategy, span) === 'anyclass';
+      const functorLike = !anyclass && FUNCTOR_LIKE_CLASSES.has(cls.name);
       const kinds = typeParamKinds(decl.entity);
-      const head = tap(tcon(decl.entity), ...kinds.map((_, index): Type => ({ tag: 'tgen', index })));
-      const info = makeInstance(cls, kinds, head, [], module.name, span);
+      const headKinds = functorLike ? kinds.slice(0, -1) : kinds;
+      const head = tap(tcon(decl.entity), ...headKinds.map((_, index): Type => ({ tag: 'tgen', index })));
+      const info = makeInstance(cls, headKinds, head, [], module.name, span);
       registerInstance(checker, info, span);
-      pending.push({ decl, cls, info, span });
+      pending.push({ decl, cls, info, span, anyclass });
     }
   }
   // Infer the contexts together, since derived instances of mutually recursive types depend on each other.
   for (let round = 0; round < 50; round++) {
     let changed = false;
     for (const item of pending) {
+      if (item.anyclass) continue;
       const context = inferDerivedContext(checker, item.decl, item.cls, item.span);
       if (!sameContext(context, item.info.context)) {
         item.info.context = context;
@@ -330,9 +338,64 @@ function deriveInstances(checker: Checker, module: RModule, options: TypecheckOp
   return pending.map((item) => ({
     info: item.info,
     typeNames: item.decl.params,
-    bindings: deriveInstance(item.decl, item.cls, options.derivingSupport),
+    bindings: item.anyclass ? [] : deriveInstance(item.decl, item.cls, options.derivingSupport),
     span: item.span,
   }));
+}
+
+/** Instances that `deriving instance` declares, with the contexts they state. */
+function deriveStandaloneInstances(checker: Checker, module: RModule, options: TypecheckOptions): DeclaredInstance[] {
+  return module.standaloneDerivings.map((standalone) => {
+    const { head } = splitRType(standalone.type);
+    const decl = head.k === 'con' ? module.dataDecls.find((candidate) => candidate.entity === head.entity) : undefined;
+    if (!decl) throw unsupportedError(standalone.span, 'このプログラムで定義していない型の deriving');
+    const strategy = derivingStrategy(module, options, decl, standalone.cls, standalone.strategy, standalone.span);
+    const declared = declareInstance(
+      checker,
+      { cls: standalone.cls, type: standalone.type, context: standalone.context, bindings: [], span: standalone.span },
+      module.name,
+      module.extensions.has('UndecidableInstances')
+    );
+    declared.bindings = strategy === 'anyclass' ? [] : deriveInstance(decl, standalone.cls, options.derivingSupport);
+    return declared;
+  });
+}
+
+/** How a class is derived for a data type, rejecting a class that cannot be derived as asked. */
+function derivingStrategy(
+  module: RModule,
+  options: TypecheckOptions,
+  decl: RDataDecl,
+  cls: ClassEntity,
+  strategy: DerivingStrategy | undefined,
+  span: Span
+): 'stock' | 'anyclass' {
+  if (strategy === 'anyclass') return 'anyclass';
+  const stock = options.builtins.derivableClasses.has(cls);
+  if (!stock) {
+    if (strategy === undefined && module.extensions.has('DeriveAnyClass')) return 'anyclass';
+    if (['Generic', 'Data', 'Lift', 'Typeable'].includes(cls.name))
+      throw unsupportedError(span, `${cls.name} の deriving`);
+    throw compileError(span, `クラス ${cls.name} は deriving できません。`);
+  }
+  const extension = { Functor: 'DeriveFunctor', Foldable: 'DeriveFoldable', Traversable: 'DeriveTraversable' }[
+    cls.name
+  ];
+  if (extension && !module.extensions.has(extension)) {
+    throw compileError(span, `${cls.name} を deriving するには、${extension} の拡張が要ります。`);
+  }
+  checkDerivable(decl, cls, span);
+  return 'stock';
+}
+
+function splitRType(type: RType): { head: RType; args: RType[] } {
+  const args: RType[] = [];
+  let head = type;
+  while (head.k === 'app') {
+    args.unshift(head.arg);
+    head = head.fn;
+  }
+  return { head, args };
 }
 
 export function makeInstance(
@@ -379,6 +442,15 @@ function registerInstance(checker: Checker, info: InstanceInfo, span: Span): voi
 
 function checkDerivable(decl: RDataDecl, cls: ClassEntity, span: Span): void {
   const cons = decl.entity.cons;
+  if (FUNCTOR_LIKE_CLASSES.has(cls.name)) {
+    const kinds = typeParamKinds(decl.entity);
+    if (kinds.length === 0 || pruneKind(kinds.at(-1) as Kind).tag !== 'star') {
+      throw compileError(
+        span,
+        `${decl.entity.name} は型引数をとる型ではないので、${cls.name} を deriving できません。`
+      );
+    }
+  }
   if (cls.name === 'Enum' && (cons.length === 0 || cons.some((con) => con.arity > 0))) {
     throw compileError(
       span,
@@ -395,7 +467,13 @@ function inferDerivedContext(checker: Checker, decl: RDataDecl, cls: ClassEntity
   const params = kinds.map((kind, index) => freshSkolem(kind, 1_000_000, decl.params[index] ?? `t${index}`));
   const work: Pred[] = [];
   for (const con of decl.entity.cons) {
-    for (const field of con.fieldTypes) work.push({ cls, type: instantiateType(field, params) });
+    for (const field of con.fieldTypes) {
+      if (FUNCTOR_LIKE_CLASSES.has(cls.name)) {
+        for (const type of functorLikeConstraints(field, kinds.length - 1)) {
+          work.push({ cls, type: instantiateType(type, params) });
+        }
+      } else work.push({ cls, type: instantiateType(field, params) });
+    }
   }
   const context: Pred[] = [];
   const printer = new TypePrinter();
@@ -424,6 +502,30 @@ function inferDerivedContext(checker: Checker, decl: RDataDecl, cls: ClassEntity
     }
   }
   return context.toSorted((a, b) => printer.showPred(a).localeCompare(printer.showPred(b)));
+}
+
+/**
+ * The type constructors a functor-like instance of a field needs the class at: `F t1 .. tk-1` for each application
+ * `F t1 .. tk` whose last argument uses the type's last parameter.
+ */
+function functorLikeConstraints(type: Type, last: number): Type[] {
+  const mentions = (node: Type): boolean =>
+    node.tag === 'tgen' ? node.index === last : node.tag === 'tap' && (mentions(node.fn) || mentions(node.arg));
+  const result: Type[] = [];
+  const pending = [type];
+  while (pending.length > 0) {
+    chargeTypeWork();
+    const node = pending.pop() as Type;
+    if (!mentions(node) || node.tag !== 'tap') continue;
+    const { head, args } = splitApp(node);
+    if (head.tag === 'tcon' && (head.entity === FUNCTION_TYPE || head.entity.special === 'tuple')) {
+      pending.push(...args);
+      continue;
+    }
+    result.push(node.fn);
+    pending.push(node.arg);
+  }
+  return result;
 }
 
 function inferableDerivedType(type: Type): boolean {

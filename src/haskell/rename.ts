@@ -11,6 +11,7 @@ import {
 } from './entities';
 import { compileError, unsupportedError } from './errors';
 import { ExportTableBuilder } from './exportTable';
+import type { Extensions } from './extensions';
 import { DEFAULT_FIXITY, resolveExprChain, resolvePatChain, sectionOperand } from './fixity';
 import { LocalScope } from './localScope';
 import { emptyExports, type ExportTable, type TypeLike } from './modules';
@@ -32,11 +33,12 @@ import type {
   RType,
   VarRef,
 } from './rast';
-import { rpatChildren } from './rast';
+import { rpatChildren, rpatLocals } from './rast';
 import { RecursionBudget } from './recursionBudget';
 import type {
   Alt,
   Decl,
+  DerivingStrategy,
   Expr,
   FieldBind,
   Import,
@@ -60,7 +62,16 @@ export interface RDataDecl {
   entity: TypeEntity;
   params: string[];
   cons: { con: ConInfo; fields: RType[] }[];
-  deriving: { type: RType; cls?: ClassEntity; span: Span }[];
+  deriving: { type: RType; cls?: ClassEntity; strategy?: DerivingStrategy; span: Span }[];
+  span: Span;
+}
+
+/** `deriving instance ctx => C (T a)`, which derives an instance with the context it states. */
+export interface RStandaloneDeriving {
+  cls: ClassEntity;
+  type: RType;
+  context: RConstraint[];
+  strategy?: DerivingStrategy;
   span: Span;
 }
 
@@ -94,9 +105,11 @@ export interface RModule {
   synonyms: RSynonymDecl[];
   classes: RClassDecl[];
   instances: RInstanceDecl[];
+  standaloneDerivings: RStandaloneDeriving[];
   values: RBindGroup;
   exports: ExportTable;
   hasExportList: boolean;
+  extensions: Extensions;
 }
 
 export interface RenameOptions {
@@ -114,7 +127,8 @@ export interface RenameOptions {
 
   ownShadowsImports?: boolean;
 
-  negate?: () => ValueEntity;
+  /** A library value that code the renamer generates refers to, such as `negate` for `-x`. */
+  support?: (name: string) => ValueEntity;
 }
 
 class Candidates<T> {
@@ -198,6 +212,7 @@ class Renamer {
   private readonly synonyms: RSynonymDecl[] = [];
   private readonly classes: RClassDecl[] = [];
   private readonly instances: RInstanceDecl[] = [];
+  private readonly standaloneDerivings: RStandaloneDeriving[] = [];
 
   constructor(
     private readonly module: Module,
@@ -219,7 +234,10 @@ class Renamer {
       else if (decl.kind === 'typeSyn') this.renameSynonym(decl);
       else if (decl.kind === 'class') this.renameClass(decl);
     }
-    for (const decl of decls) if (decl.kind === 'instance') this.renameInstance(decl);
+    for (const decl of decls) {
+      if (decl.kind === 'instance') this.renameInstance(decl);
+      else if (decl.kind === 'standaloneDeriving') this.renameStandaloneDeriving(decl);
+    }
     const values = this.renameTopBindings(decls, topBindings);
     return {
       name: this.module.name,
@@ -227,9 +245,11 @@ class Renamer {
       synonyms: this.synonyms,
       classes: this.classes,
       instances: this.instances,
+      standaloneDerivings: this.standaloneDerivings,
       values,
       exports: this.buildExports(),
       hasExportList: this.module.exports !== undefined,
+      extensions: this.module.extensions,
     };
   }
 
@@ -486,6 +506,7 @@ class Renamer {
         fieldTypes: [],
         strictFields: conDecl.strictFields,
         span: conDecl.span,
+        ...(decl.newtype ? { isNewtype: true } : {}),
       };
       entity.con = con;
       type.cons.push(con);
@@ -583,7 +604,11 @@ class Renamer {
       const fields = conDecl.fields.map((field) => this.renameType(field, params));
       return { con, fields };
     });
-    const deriving = decl.deriving.map((name) => ({ type: this.renameTypeName(name), span: name.span }));
+    const deriving = decl.deriving.map((clause) => ({
+      type: this.renameTypeName(clause.cls),
+      strategy: clause.strategy,
+      span: clause.span,
+    }));
     this.dataDecls.push({ entity, params: decl.params.map((param) => param.name), cons, deriving, span: decl.span });
   }
 
@@ -674,6 +699,15 @@ class Renamer {
       bindings.push(this.renameFunBinding(binding, { kind: 'global', entity: method }, new LocalScope()));
     }
     this.instances.push({ cls, type, context, bindings, span: decl.span });
+  }
+
+  private renameStandaloneDeriving(decl: Extract<Decl, { kind: 'standaloneDeriving' }>): void {
+    const cls = this.lookupClass(decl.cls);
+    const vars = new Set<string>();
+    collectTypeVars(decl.type, vars);
+    const type = this.renameType(decl.type, vars);
+    const context = decl.context.map((constraint) => this.renameType(constraint, vars));
+    this.standaloneDerivings.push({ cls, type, context, strategy: decl.strategy, span: decl.span });
   }
 
   private renameTopBindings(decls: Decl[], raw: RawBinding[]): RBindGroup {
@@ -901,6 +935,7 @@ class Renamer {
         };
       }
       case 'comprehension': {
+        if (expr.parallel) return this.renameParallelComprehension(expr, scope);
         const { stmts, scope: inner } = this.renameStmts(expr.quals, scope, false);
         return { k: 'comp', expr: this.renameExpr(expr.expr, inner), quals: stmts, span };
       }
@@ -947,7 +982,7 @@ class Renamer {
   private renameOperatorApplication(expr: Extract<Expr, { kind: 'binop' | 'neg' }>, scope: LocalScope): RExpr {
     const { span } = expr;
     if (expr.kind === 'neg') {
-      const negate = this.options.negate?.() ?? this.lookupValue({ name: 'negate', span }, true);
+      const negate = this.options.support?.('negate') ?? this.lookupValue({ name: 'negate', span }, true);
       const fn: RExpr = { k: 'var', ref: { kind: 'global', entity: negate }, name: 'negate', span };
       return { k: 'app', fn, arg: this.renameExpr(expr.expr, scope), span };
     }
@@ -961,6 +996,91 @@ class Renamer {
       span: { ...span, endRow: op.span.endRow, endCol: op.span.endCol },
     };
     return { k: 'app', fn: inner, arg: right, span };
+  }
+
+  /**
+   * Renames `[e | qs1 | qs2 | ...]` as `[e | (vs1, (vs2, ...)) <- zip [vs1 | qs1] (zip [vs2 | qs2] ...)]`, where each
+   * `vs` is the tuple of the variables its branch binds.
+   */
+  private renameParallelComprehension(expr: Extract<Expr, { kind: 'comprehension' }>, scope: LocalScope): RExpr {
+    const { span } = expr;
+    const branches = [expr.quals, ...(expr.parallel ?? [])].map((quals) => {
+      const renamed = this.renameStmts(quals, scope, false);
+      const locals = renamed.stmts.flatMap((stmt) =>
+        stmt.k === 'bind'
+          ? rpatLocals(stmt.pat)
+          : stmt.k === 'let'
+            ? stmt.binds.bindings.flatMap((binding) =>
+                binding.k === 'fun' ? [(binding.binder as { kind: 'local'; local: LocalVar }).local] : binding.binders
+              )
+            : []
+      );
+      const seen = new Map<string, LocalVar>();
+      for (const local of locals) seen.set(local.name, local);
+      return { stmts: renamed.stmts, locals: [...seen.values()] };
+    });
+    const names = new Set<string>();
+    for (const branch of branches) {
+      for (const local of branch.locals) {
+        if (names.has(local.name))
+          throw compileError(local.span, `並列の内包表記の中で ${local.name} が重複しています。`);
+        names.add(local.name);
+      }
+    }
+    const tupleOf = (items: RExpr[]): RExpr =>
+      items.length === 1
+        ? items[0]
+        : items.length === 0
+          ? { k: 'con', con: UNIT_CON, span }
+          : { k: 'tuple', elems: items, span };
+    const zip = (fn: RExpr, left: RExpr, right: RExpr): RExpr => ({
+      k: 'app',
+      fn: { k: 'app', fn, arg: left, span },
+      arg: right,
+      span,
+    });
+    const zipFn: RExpr = {
+      k: 'var',
+      ref: { kind: 'global', entity: this.supportValue('zip', span) },
+      name: 'zip',
+      span,
+    };
+    const outer = new LocalScope(scope);
+    const patterns: RPat[] = [];
+    const lists: RExpr[] = [];
+    for (const branch of branches) {
+      const fresh = branch.locals.map((local) => newLocal(local.name, local.span));
+      for (const local of fresh) outer.define(local.name, local);
+      const vars = branch.locals.map((local): RExpr => ({
+        k: 'var',
+        ref: { kind: 'local', local },
+        name: local.name,
+        span,
+      }));
+      lists.push({ k: 'comp', expr: tupleOf(vars), quals: branch.stmts, span });
+      const pats = fresh.map((local): RPat => ({ k: 'var', local, span }));
+      patterns.push(
+        pats.length === 1
+          ? pats[0]
+          : { k: 'con', con: pats.length === 0 ? UNIT_CON : tupleCon(pats.length), args: pats, span }
+      );
+    }
+    let source = lists.at(-1) as RExpr;
+    let pattern = patterns.at(-1) as RPat;
+    for (let index = lists.length - 2; index >= 0; index--) {
+      source = zip(zipFn, lists[index], source);
+      pattern = { k: 'con', con: tupleCon(2), args: [patterns[index], pattern], span };
+    }
+    return {
+      k: 'comp',
+      expr: this.renameExpr(expr.expr, outer),
+      quals: [{ k: 'bind', pat: pattern, expr: source, span }],
+      span,
+    };
+  }
+
+  private supportValue(name: string, span: Span): ValueEntity {
+    return this.options.support?.(name) ?? this.lookupValue({ name, span }, true);
   }
 
   /** The fields `..` fills in a construction: each one not given whose name a variable in scope has. */

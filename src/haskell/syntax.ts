@@ -1,3 +1,5 @@
+import type { Extensions } from './extensions';
+
 /** A source range: 0-based rows and columns, the end column exclusive. */
 export interface Span {
   row: number;
@@ -52,7 +54,14 @@ export type Expr =
   | { kind: 'tuple'; elems: Expr[]; span: Span }
   | { kind: 'list'; elems: Expr[]; span: Span }
   | { kind: 'arith'; from: Expr; next?: Expr; to?: Expr; span: Span }
-  | { kind: 'comprehension'; expr: Expr; quals: Stmt[]; span: Span }
+  | {
+      kind: 'comprehension';
+      expr: Expr;
+      quals: Stmt[];
+      span: Span;
+      /** The qualifiers of the other branches of a parallel comprehension, `[e | qs1 | qs2]`, after the first. */
+      parallel?: Stmt[][];
+    }
   | { kind: 'leftSection'; left: Expr; op: Operator; span: Span }
   | { kind: 'rightSection'; op: Operator; right: Expr; span: Span }
   | { kind: 'typed'; expr: Expr; sig: SigType; span: Span }
@@ -150,10 +159,36 @@ export type Decl =
   | { kind: 'fixity'; assoc: 'infix' | 'infixl' | 'infixr'; prec: number; ops: Name[]; span: Span }
   | { kind: 'funClause'; name: Name; args: Pat[]; rhs: Rhs; span: Span }
   | { kind: 'patBind'; pat: Pat; rhs: Rhs; span: Span }
-  | { kind: 'data'; name: Name; params: Name[]; cons: ConDecl[]; deriving: QName[]; span: Span }
+  | {
+      kind: 'data';
+      name: Name;
+      params: Name[];
+      cons: ConDecl[];
+      deriving: DerivingClause[];
+      span: Span;
+      /** Whether the declaration is a `newtype`, whose one constructor patterns match without evaluating. */
+      newtype?: boolean;
+    }
   | { kind: 'typeSyn'; name: Name; params: Name[]; type: TypeExpr; span: Span }
   | { kind: 'class'; context: Constraint[]; name: Name; param: Name; decls: Decl[]; span: Span }
-  | { kind: 'instance'; context: Constraint[]; cls: QName; type: TypeExpr; decls: Decl[]; span: Span };
+  | { kind: 'instance'; context: Constraint[]; cls: QName; type: TypeExpr; decls: Decl[]; span: Span }
+  | {
+      kind: 'standaloneDeriving';
+      context: Constraint[];
+      cls: QName;
+      type: TypeExpr;
+      strategy?: DerivingStrategy;
+      span: Span;
+    };
+
+export type DerivingStrategy = 'stock' | 'anyclass' | 'newtype' | 'via';
+
+/** A class a `deriving` clause names, with the strategy it gives. */
+export interface DerivingClause {
+  cls: QName;
+  strategy?: DerivingStrategy;
+  span: Span;
+}
 
 export interface ImportItem {
   kind: 'value' | 'type';
@@ -173,6 +208,7 @@ export interface Import {
 
 export interface Module {
   name: string;
+  extensions: Extensions;
   exports?: ImportItem[];
   imports: Import[];
   decls: Decl[];

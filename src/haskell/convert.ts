@@ -12,6 +12,8 @@ import type {
   ConDecl,
   Constraint,
   Decl,
+  DerivingClause,
+  DerivingStrategy,
   Expr,
   FieldBind,
   Guard,
@@ -43,8 +45,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   default_export: 'default の export',
   default_signature: 'クラスの default のシグネチャ',
   default_types: 'default 宣言',
-  deriving_instance: '独立した deriving 宣言（deriving instance）',
-  deriving_strategy: 'deriving の戦略（stock・newtype・anyclass）',
   do_module: '修飾つきの do（QualifiedDo）',
   equation: '型族',
   equations: '型族',
@@ -71,8 +71,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   module_export: 'モジュールの再 export（module M）',
   namespace: '名前空間の指定（type・data）',
   namespaced_child: '名前空間の指定（type・data）',
-  newtype: 'newtype',
-  newtype_constructor: 'newtype',
   pattern_synonym: 'パターンシノニム',
   promoted: '昇格した構成子（DataKinds）',
   rec: 'rec ブロック（RecursiveDo）',
@@ -199,6 +197,7 @@ export function convertModule(root: Node, moduleExtensions: Extensions, defaultN
   }
   return {
     name: header ? moduleName(required(header, 'module')) : defaultName,
+    extensions,
     exports: header ? convertExports(header) : undefined,
     imports,
     decls,
@@ -405,6 +404,12 @@ function convertTopDecl(node: Node): Decl[] {
     case 'data_type': {
       return [convertData(node)];
     }
+    case 'newtype': {
+      return [convertNewtype(node)];
+    }
+    case 'deriving_instance': {
+      return [convertStandaloneDeriving(node)];
+    }
     case 'type_synonym': {
       return [convertTypeSynonym(node)];
     }
@@ -604,24 +609,120 @@ function convertData(node: Node): Decl {
   const constructorsNode = field(node, 'constructors');
   if (constructorsNode?.type === 'gadt_constructors') throw unsupported(constructorsNode);
   const cons = constructorsNode ? fields(constructorsNode, 'constructor').map(convertConstructor) : [];
-  const derivingNodes = fields(node, 'deriving');
-  const deriving: QName[] = [];
-  for (const derivingNode of derivingNodes) {
-    for (const name of ['strategy', 'via']) {
-      const child = field(derivingNode, name);
-      if (child) throw unsupported(child);
-    }
-    const classes = required(derivingNode, 'classes');
-    deriving.push(...derivingClasses(classes));
-  }
   return {
     kind: 'data',
     name: typeDeclName(node),
     params: typeParams(node),
     cons,
-    deriving,
+    deriving: convertDerivingClauses(node),
     span: spanOf(node),
   };
+}
+
+function convertDerivingClauses(node: Node): DerivingClause[] {
+  const deriving: DerivingClause[] = [];
+  for (const derivingNode of fields(node, 'deriving')) {
+    const strategy = derivingStrategy(derivingNode);
+    const classes = required(derivingNode, 'classes');
+    for (const cls of derivingClasses(classes)) deriving.push({ cls, strategy, span: cls.span });
+  }
+  return deriving;
+}
+
+/** The strategy a `deriving` clause or standalone declaration names, if any. */
+function derivingStrategy(node: Node): DerivingStrategy | undefined {
+  const via = field(node, 'via');
+  if (via) {
+    if (!extensions.has('DerivingVia'))
+      throw syntaxError(spanOf(via), 'deriving via を使うには、DerivingVia の拡張が要ります。');
+    throw unsupported(via);
+  }
+  const strategyNode = field(node, 'strategy');
+  if (!strategyNode) return undefined;
+  if (!extensions.has('DerivingStrategies')) {
+    throw syntaxError(spanOf(strategyNode), 'deriving の戦略を書くには、DerivingStrategies の拡張が要ります。');
+  }
+  const strategy = strategyNode.text.trim() as DerivingStrategy;
+  if (strategy === 'anyclass' && !extensions.has('DeriveAnyClass')) {
+    throw syntaxError(spanOf(strategyNode), 'deriving anyclass を使うには、DeriveAnyClass の拡張が要ります。');
+  }
+  if (strategy === 'newtype')
+    throw unsupportedError(spanOf(strategyNode), 'newtype の deriving（GeneralizedNewtypeDeriving）');
+  return strategy;
+}
+
+function convertStandaloneDeriving(node: Node): Decl {
+  if (!extensions.has('StandaloneDeriving')) {
+    throw syntaxError(spanOf(node), '独立した deriving 宣言を使うには、StandaloneDeriving の拡張が要ります。');
+  }
+  for (const name of ['forall', 'head']) {
+    const child = field(node, name);
+    if (child) throw unsupported(child);
+  }
+  const strategy = derivingStrategy(node);
+  const contextNode = field(node, 'context');
+  const nameNode = required(node, 'name');
+  const types = fields(node, 'patterns').flatMap((patternsNode) => namedChildren(patternsNode));
+  if (types.length !== 1) {
+    throw unsupportedError(spanOf(node), types.length === 0 ? '型を書かないインスタンス' : '多引数の型クラス');
+  }
+  return {
+    kind: 'standaloneDeriving',
+    context: contextNode ? convertContext(contextNode) : [],
+    cls: qualifiedName(nameNode).name,
+    type: convertType(types[0]),
+    strategy,
+    span: spanOf(node),
+  };
+}
+
+function convertNewtype(node: Node): Decl {
+  for (const name of ['context', 'forall', 'kind', 'head']) {
+    const child = field(node, name);
+    if (child) {
+      if (name === 'context') throw unsupportedError(spanOf(child), 'newtype 宣言の文脈（DatatypeContexts）');
+      if (name === 'head') throw unsupportedError(spanOf(child), '演算子の型の宣言（TypeOperators）');
+      throw unsupported(child);
+    }
+  }
+  const constructor = required(node, 'constructor');
+  const fieldNode = required(constructor, 'field');
+  let con: ConDecl;
+  if (fieldNode.type === 'record') {
+    const fieldDecl = required(fieldNode, 'field');
+    con = {
+      name: plainName(required(constructor, 'name')),
+      fields: [convertNewtypeField(required(fieldDecl, 'type'))],
+      fieldNames: [plainName(required(fieldDecl, 'name'))],
+      isInfix: false,
+      span: spanOf(constructor),
+    };
+  } else {
+    const typeNode = field(fieldNode, 'type') ?? namedChildren(fieldNode)[0];
+    if (!typeNode) throw syntaxError(spanOf(fieldNode), '書き方に誤りがあります。');
+    con = {
+      name: plainName(required(constructor, 'name')),
+      fields: [convertNewtypeField(typeNode)],
+      isInfix: false,
+      span: spanOf(constructor),
+    };
+  }
+  return {
+    kind: 'data',
+    name: typeDeclName(node),
+    params: typeParams(node),
+    cons: [con],
+    deriving: convertDerivingClauses(node),
+    span: spanOf(node),
+    newtype: true,
+  };
+}
+
+function convertNewtypeField(node: Node): TypeExpr {
+  if (node.type === 'strict_field' || node.type === 'lazy_field') {
+    throw syntaxError(spanOf(node), 'newtype の構成子のフィールドには、! や ~ を付けられません。');
+  }
+  return convertFieldType(node);
 }
 
 function derivingClasses(node: Node): QName[] {
@@ -1112,13 +1213,18 @@ function convertCollection(node: Node, span: Span): Expr {
       };
     }
     case 'list_comprehension': {
-      const qualifiersNodes = fields(node, 'qualifiers');
-      if (qualifiersNodes.length !== 1) throw unsupportedError(span, '並列の内包表記（ParallelListComp）');
+      const branches = fields(node, 'qualifiers').map((qualifiers) =>
+        fields(qualifiers, 'qualifier').map(convertStatement)
+      );
+      if (branches.length > 1 && !extensions.has('ParallelListComp')) {
+        throw syntaxError(span, '並列の内包表記を使うには、ParallelListComp の拡張が要ります。');
+      }
       return {
         kind: 'comprehension',
         expr: convertExpr(required(node, 'expression')),
-        quals: fields(qualifiersNodes[0], 'qualifier').map(convertStatement),
+        quals: branches[0] ?? [],
         span,
+        ...(branches.length > 1 ? { parallel: branches.slice(1) } : {}),
       };
     }
     default: {
