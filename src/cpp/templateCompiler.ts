@@ -75,6 +75,64 @@ export function declareTemplate(compiler: Compiler, node: Syntax, owner?: ClassI
   }
 }
 
+/**
+ * Declares an abbreviated function template (`void f(auto x)`), whose `auto` parameters are invented template
+ * parameters (C++20 [dcl.fct]p18), when a function declaration has any; tells whether it did.
+ */
+export function declareAbbreviatedTemplate(
+  compiler: Compiler,
+  node: Syntax,
+  owner?: ClassInfo,
+  access: Access = 'public'
+): boolean {
+  const written = fieldOf(node, 'declarator');
+  const declarator = written && functionDeclarator(written);
+  const list = declarator && fieldOf(declarator, 'parameters');
+  if (!list || !list.children.some(hasPlaceholder)) return false;
+  const { node: rewritten, parameters } = inventParameters(node, list);
+  declareFunctionTemplate(compiler, parameters, [], rewritten, owner, access, undefined);
+  return true;
+}
+
+function hasPlaceholder(parameter: Syntax): boolean {
+  const type = fieldOf(parameter, 'type');
+  return type?.type === 'placeholder_type_specifier' && !type.children.some((child) => child.type === 'decltype');
+}
+
+/**
+ * A declaration whose parameter list names an invented template parameter for each `auto` parameter type, with the
+ * invented parameters: `auto... xs` invents a pack.
+ */
+export function inventParameters(
+  node: Syntax,
+  list: Syntax,
+  parameters: TemplateParameter[] = []
+): { node: Syntax; parameters: TemplateParameter[] } {
+  const invented = [...parameters];
+  const replace = (current: Syntax): Syntax => {
+    if (current === list) {
+      const all = current.all.map((parameter) => {
+        if (!parameter.isNamed || !hasPlaceholder(parameter)) return parameter;
+        const name = `\0auto${invented.length}`;
+        invented.push({ name, kind: 'type', isPack: parameter.type === 'variadic_parameter_declaration' });
+        const type = fieldOf(parameter, 'type') as Syntax;
+        const named: Syntax = { ...type, type: 'type_identifier', text: name, all: [], children: [] };
+        const parts = parameter.all.map((child) => (child === type ? named : child));
+        return { ...parameter, all: parts, children: parts.filter((child) => child.isNamed) };
+      });
+      return { ...current, all, children: all.filter((child) => child.isNamed) };
+    }
+    if (!containsNode(current, list)) return current;
+    const all = current.all.map(replace);
+    return { ...current, all, children: all.filter((child) => child.isNamed) };
+  };
+  return { node: replace(node), parameters: invented };
+}
+
+function containsNode(node: Syntax, target: Syntax): boolean {
+  return node === target || node.children.some((child) => containsNode(child, target));
+}
+
 function isFunctionDeclaration(node: Syntax): boolean {
   if (node.type === 'function_definition') return true;
   const declarator = fieldOf(node, 'declarator');
@@ -142,7 +200,7 @@ function declareClassTemplate(
   compiler.declareHere(name, compiler.templateEntity(info), node.row);
 }
 
-function declareFunctionTemplate(
+export function declareFunctionTemplate(
   compiler: Compiler,
   parameters: TemplateParameter[],
   outer: TemplateParameter[][],

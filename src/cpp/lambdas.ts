@@ -2,6 +2,7 @@ import type { Compiler } from './compiler';
 import { AUTO } from './compilerBase';
 import type { Expr, Initializer } from './expr';
 import { initializeAt, newObject } from './objectCompiler';
+import { templateParameters } from './programTemplates';
 import type { Eval, Frame } from './runtime';
 import type { CaptureLookup, Entity, FunctionContext } from './scopes';
 import { fieldOf, type Syntax } from './syntax';
@@ -109,6 +110,16 @@ class LambdaCaptures implements CaptureLookup {
 
   private readonly implicitCaptures = new Map<string, Capture>();
 
+  /** Captures every variable of the enclosing scopes that a body names, and the enclosing object if there is one. */
+  captureNamed(body: Syntax): void {
+    const visit = (node: Syntax): void => {
+      if (node.type === 'identifier') this.lookup(node.text);
+      for (const child of node.children) visit(child);
+    };
+    visit(body);
+    if (this.enclosingClass && !this.enclosing.isStaticContext && !this.thisCapture) this.thisObject(body.row);
+  }
+
   /** The enclosing object, which the body's implicit member accesses and `this` use. */
   thisObject(row: number): Expr | undefined {
     if (!this.thisCapture) {
@@ -157,7 +168,6 @@ function capturableType(entity: Entity): Type | undefined {
  * closure object the expression creates (C++20 [expr.prim.lambda]).
  */
 export function compileLambda(compiler: Compiler, node: Syntax): Expr {
-  if (fieldOf(node, 'template_parameters')) return compiler.unsupported(node.row, 'テンプレート引数のあるラムダ式');
   const { row } = node;
   const closure = new ClassInfo('(lambda)', 'class');
   closure.row = row;
@@ -173,31 +183,49 @@ export function compileLambda(compiler: Compiler, node: Syntax): Expr {
   const declarator = fieldOf(node, 'declarator');
   const isMutable = declarator?.children.some((child) => child.type === 'lambda_specifier' && child.text === 'mutable');
   const trailing = declarator?.children.find((child) => child.type === 'trailing_return_type');
-  const ret = trailing ? compiler.typeDescriptor(trailing.children[0]) : AUTO;
   const parameters = declarator ? fieldOf(declarator, 'parameters') : undefined;
-  const call: FunctionInfo = {
-    name: 'operator()',
-    displayName: '(lambda)::operator()',
-    params: parameters ? compiler.parameters(parameters) : [],
-    ret,
-    owner: closure,
-    isStatic: false,
-    isVirtual: false,
-    isInline: false,
-    isConst: !isMutable,
-    isNoexcept: declarator?.children.some((child) => child.type === 'noexcept') === true,
-    isPure: false,
-    isConstructor: false,
-    isDestructor: false,
-    isOverride: false,
-    isFinal: false,
-    access: 'public',
-    row,
-    isAtomic: false,
-    isDefined: true,
-  };
-  closure.methods.set('operator()', [call]);
-  compiler.compileLambdaBody(call, node, captures);
+  const templateList = fieldOf(node, 'template_parameters');
+  const isGeneric =
+    templateList !== undefined ||
+    (parameters?.children.some((parameter) => fieldOf(parameter, 'type')?.type === 'placeholder_type_specifier') ??
+      false);
+  if (isGeneric) {
+    // A generic lambda's call operator is a template, whose instances compile after the closure object's captures
+    // are known: a default capture captures every variable of the enclosing scopes the body names.
+    if (defaultCapture) captures.captureNamed(node.children.find((child) => child.field === 'body') as Syntax);
+    const parameterList = templateList ? templateParameters(templateList) : [];
+    compiler.declareGenericLambda(
+      closure,
+      genericCallOperator(node, isMutable === true, trailing),
+      parameterList,
+      captures
+    );
+  } else {
+    const ret = trailing ? compiler.typeDescriptor(trailing.children[0]) : AUTO;
+    const call: FunctionInfo = {
+      name: 'operator()',
+      displayName: '(lambda)::operator()',
+      params: parameters ? compiler.parameters(parameters) : [],
+      ret,
+      owner: closure,
+      isStatic: false,
+      isVirtual: false,
+      isInline: false,
+      isConst: !isMutable,
+      isNoexcept: declarator?.children.some((child) => child.type === 'noexcept') === true,
+      isPure: false,
+      isConstructor: false,
+      isDestructor: false,
+      isOverride: false,
+      isFinal: false,
+      access: 'public',
+      row,
+      isAtomic: false,
+      isDefined: true,
+    };
+    closure.methods.set('operator()', [call]);
+    compiler.compileLambdaBody(call, node, captures);
+  }
   compiler.completeClass(closure, true);
   const initializers = captures.captures.map((capture) => ({
     field: capture.field,
@@ -222,6 +250,36 @@ export function compileLambda(compiler: Compiler, node: Syntax): Expr {
       return object;
     },
   };
+}
+
+/**
+ * A function definition for a generic lambda's call operator: `auto operator()(params) const -> ret { body }`, as a
+ * member function template's pattern.
+ */
+function genericCallOperator(node: Syntax, isMutable: boolean, trailing: Syntax | undefined): Syntax {
+  const token = (type: string, field?: string, isNamed = false): Syntax => ({
+    ...node,
+    type,
+    text: type,
+    field,
+    isNamed,
+    all: [],
+    children: [],
+  });
+  const declarator = fieldOf(node, 'declarator');
+  const parameters = (declarator && fieldOf(declarator, 'parameters')) ?? token('parameter_list', 'parameters', true);
+  const name: Syntax = { ...token('field_identifier', 'declarator', true), text: 'operator()' };
+  const qualifiers = isMutable ? [] : [{ ...token('type_qualifier', undefined, true), text: 'const' }];
+  const parts = [name, { ...parameters, field: 'parameters' }, ...qualifiers, ...(trailing ? [trailing] : [])];
+  const functionDeclarator: Syntax = {
+    ...token('function_declarator', 'declarator', true),
+    all: parts,
+    children: parts.filter((part) => part.isNamed),
+  };
+  const autoType: Syntax = { ...token('placeholder_type_specifier', 'type', true), text: 'auto' };
+  const body = node.children.find((child) => child.field === 'body') as Syntax;
+  const all = [autoType, functionDeclarator, body];
+  return { ...node, type: 'function_definition', all, children: all };
 }
 
 function readCaptureList(compiler: Compiler, captures: LambdaCaptures, list: Syntax): void {

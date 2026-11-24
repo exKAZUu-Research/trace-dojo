@@ -58,7 +58,14 @@ import {
 } from './statementCompiler';
 import { isObjectCreation } from './stepRules';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
-import { declareTemplate, functionDeclarator, type FunctionTemplateInfo } from './templateCompiler';
+import {
+  declareAbbreviatedTemplate,
+  declareFunctionTemplate,
+  declareTemplate,
+  functionDeclarator,
+  type FunctionTemplateInfo,
+  inventParameters,
+} from './templateCompiler';
 import {
   type Access,
   allowsMemberAssignment,
@@ -134,7 +141,7 @@ export class Compiler extends StatementCompiler {
   private readonly delegatedConstructors = new WeakMap<FunctionInfo, FunctionInfo>();
   private pendingObjectUses: (() => void)[] | undefined = [];
   private readonly programComparisons = new Map<string, ValueComparison<boolean> | undefined>();
-  private readonly lambdaCaptures = new WeakMap<FunctionInfo, CaptureLookup>();
+  private readonly lambdaCaptures = new WeakMap<ClassInfo, CaptureLookup>();
   /** Whether member function bodies wait for their first use, as a class template instance's do. */
   private defersBodies = false;
   private defaultDependencies?: {
@@ -271,10 +278,12 @@ export class Compiler extends StatementCompiler {
         return;
       }
       case 'function_definition': {
+        if (declareAbbreviatedTemplate(this, node)) return;
         this.functionDefinition(node);
         return;
       }
       case 'declaration': {
+        if (declareAbbreviatedTemplate(this, node)) return;
         this.globalDeclaration(node);
         return;
       }
@@ -497,14 +506,17 @@ export class Compiler extends StatementCompiler {
             break;
           }
           case 'field_declaration': {
+            if (declareAbbreviatedTemplate(this, member, cls, access)) break;
             this.memberDeclaration(cls, member, access);
             break;
           }
           case 'declaration': {
+            if (declareAbbreviatedTemplate(this, member, cls, access)) break;
             this.memberDeclaration(cls, member, access);
             break;
           }
           case 'function_definition': {
+            if (declareAbbreviatedTemplate(this, member, cls, access)) break;
             const fn = this.memberFunction(cls, member, access, true);
             definitions.push({ fn, node: member });
             break;
@@ -2254,8 +2266,22 @@ export class Compiler extends StatementCompiler {
 
   /** Compiles a lambda's body as its closure type's function call operator, which sees the lambda's captures. */
   compileLambdaBody(fn: FunctionInfo, node: Syntax, captures: CaptureLookup): void {
-    this.lambdaCaptures.set(fn, captures);
+    this.lambdaCaptures.set(captures.closure, captures);
     this.compileFunctionBody(fn, node);
+  }
+
+  /** Declares a generic lambda's function call operator, a member template whose instances see its captures. */
+  declareGenericLambda(
+    closure: ClassInfo,
+    node: Syntax,
+    parameters: TemplateParameter[],
+    captures: CaptureLookup
+  ): void {
+    this.lambdaCaptures.set(closure, captures);
+    const declarator = functionDeclarator(fieldOf(node, 'declarator') as Syntax);
+    const list = declarator && fieldOf(declarator, 'parameters');
+    const { node: rewritten, parameters: all } = list ? inventParameters(node, list, parameters) : { node, parameters };
+    declareFunctionTemplate(this, all, [], rewritten, closure, 'public', undefined);
   }
 
   /** The enclosing object a lambda's body uses: what the captured `this` points to, or the captured copy. */
@@ -2290,7 +2316,7 @@ export class Compiler extends StatementCompiler {
   private compileFunctionBodyIn(fn: FunctionInfo, node: Syntax): void {
     const cls = fn.owner;
     const context = new FunctionContext(fn, cls, fn.isConstructor || fn.isDestructor ? VOID : fn.ret);
-    context.captures = this.lambdaCaptures.get(fn);
+    context.captures = fn.owner?.isLambda ? this.lambdaCaptures.get(fn.owner) : undefined;
     // A member function of a local class sees the names of the blocks around the class.
     for (let outer = cls; outer; outer = outer.outer) {
       if (outer.localScopes) {
