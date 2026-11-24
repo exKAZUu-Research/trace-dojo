@@ -7,9 +7,9 @@ import {
   cultureHashKey,
   cultureIndexOf,
   cultureLastIndexOf,
+  cultureMatches,
   cultureStartsWith,
   equalsCulture,
-  isIgnorable,
 } from '../culture';
 import { MeteredText } from '../meteredText';
 import { defineNatives, defineNativesKeepingStrings, type NativeCall, type NativeMethod } from '../natives';
@@ -246,21 +246,13 @@ function replacedText(call: NativeCall, text: string, from: string, to: string, 
   return text.replaceAll(new RegExp(from.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`), 'gi'), replace);
 }
 
-/**
- * Replaces each match that the culture comparison finds from the left, taking a match as long as the value, which
- * kana and case variants are.
- */
+/** Replaces each match that the culture comparison finds from the left, each by its own span. */
 function culturallyReplacedText(call: NativeCall, text: string, from: string, to: string, comparison: number): string {
-  const culture = cultureOf(call, comparison);
-  // A value without culture weights matches with no width anywhere, which .NET's Replace leaves the text as it is for.
-  if (isIgnorable(from, culture)) return text;
   let result = '';
   let position = 0;
-  while (position < text.length) {
-    const found = cultureIndexOf(text, from, position, text.length, culture);
-    if (found === -1) break;
-    result += text.slice(position, found) + to;
-    position = found + from.length;
+  for (const [start, end] of cultureMatches(text, from, cultureOf(call, comparison))) {
+    result += text.slice(position, start) + to;
+    position = end;
     call.frame.runtime.allocateString(result.length, 0);
   }
   return result + text.slice(position);

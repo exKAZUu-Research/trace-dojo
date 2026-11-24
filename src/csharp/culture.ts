@@ -405,6 +405,31 @@ export function cultureIndexOf(
   return -1;
 }
 
+/**
+ * The spans, from the left and not overlapping, where substrings equal the value under a culture, as `Replace` finds
+ * them in one pass over the text; none for a value without weights.
+ */
+export function cultureMatches(text: string, value: string, options: CultureComparison = {}): [number, number][] {
+  const matches: [number, number][] = [];
+  if (!options.ignoreCase && PLAIN.test(text) && PLAIN.test(value)) {
+    for (let found = text.indexOf(value); found !== -1; found = text.indexOf(value, found + value.length))
+      matches.push([found, found + value.length]);
+    return matches;
+  }
+  if (isIgnorable(value, options)) return matches;
+  const boundaries = searchBoundaries(text);
+  const meter = meterOf(options);
+  let index = 0;
+  while (index < text.length) {
+    const end = boundaries[index] ? matchEndAt(text, value, index, boundaries, options, meter) : -1;
+    if (end > index) {
+      matches.push([index, end]);
+      index = end;
+    } else index++;
+  }
+  return matches;
+}
+
 /** The last index from `start` where a substring ending by `end` equals the value, as `LastIndexOf` searches. */
 export function cultureLastIndexOf(
   text: string,
@@ -605,9 +630,21 @@ function matchesAt(
   options: CultureComparison,
   meter: (length: number) => void
 ): boolean {
+  return matchEndAt(source, value, index, boundaries, options, meter) !== -1;
+}
+
+/** Where a substring starting at the index that equals the value under a culture ends, or -1 when none does. */
+function matchEndAt(
+  source: string,
+  value: string,
+  index: number,
+  boundaries: boolean[],
+  options: CultureComparison,
+  meter: (length: number) => void
+): number {
   const { compare, comparable } = comparisonOf(options, true);
   if (index < source.length && isIgnorable(String.fromCodePoint(source.codePointAt(index) as number), options))
-    return false;
+    return -1;
   // The grapheme cluster before the index, which ends where the substring starts.
   let previous = Math.max(0, index - 1);
   while (previous > 0 && !boundaries[previous]) previous--;
@@ -618,17 +655,17 @@ function matchesAt(
     if (!boundaries[stop]) continue;
     meter(stop - index + target.length);
     const segment = comparable(context + source.slice(index, stop));
-    if (compare(segment, target) === 0) return true;
-    if (!isPrimaryPrefix(segment, target, options.isInvariant)) return false;
+    if (compare(segment, target) === 0) return stop;
+    if (!isPrimaryPrefix(segment, target, options.isInvariant)) return -1;
   }
-  return false;
+  return -1;
 }
 
 const MAX_ELEMENTS_PER_CHARACTER = 18;
 const MAX_CHARACTERS_PER_ELEMENT = 4;
 
 /** Whether a text has no weights under a comparison, as control and format characters have none. */
-export function isIgnorable(text: string, options: CultureComparison): boolean {
+function isIgnorable(text: string, options: CultureComparison): boolean {
   const { compare, comparable } = comparisonOf(options);
   return compare(comparable(text), '') === 0;
 }
