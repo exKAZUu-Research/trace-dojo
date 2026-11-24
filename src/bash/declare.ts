@@ -1296,8 +1296,7 @@ function printDeclarations(shell: Shell, builtin: string, names: DeclarationArgu
   for (const operand of names) {
     const name = typeof operand === 'string' ? operand : operand.name;
     const variable = declarationToShow(shell, builtin, name);
-    if (!variable || variable.isSystem) {
-      if (variable?.isSystem) throw new UnsupportedFeatureError(`シェルの変数の表示（${builtin} -p ${name}）`);
+    if (!variable) {
       shell.reportError(`${builtin}: ${name}: not found`);
       status = 1;
       continue;
