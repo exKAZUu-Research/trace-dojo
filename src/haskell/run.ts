@@ -2,12 +2,21 @@ import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
-import { type CompiledProgram, compileProgram } from './compile';
+import { type CompiledProgram, compileProgram, setSpliceRunner } from './compile';
 import type { GlobalDef } from './core';
 import { ioSupport } from './ioPrimitives';
 import { forceString } from './primitives';
 import { Runtime, type TraceFrame } from './runtime';
 import { HaskellException, type Slot, type Value } from './values';
+
+// A splice runs as a program of its own while the program that has it compiles, giving the code its output spells.
+setSpliceRunner((program) => {
+  const run = runProgram(new Runtime(), compileProgram(program));
+  if (run.uncaughtException !== undefined) {
+    throw new CompileError([{ row: 0, message: run.uncaughtException }]);
+  }
+  return run.stdout;
+});
 
 export function executeHaskellProgram(source: string, input?: ProgramInput): ProgramExecution {
   let compiled: CompiledProgram;

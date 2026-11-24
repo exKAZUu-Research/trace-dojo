@@ -661,9 +661,12 @@ function derivingStrategy(
     if (strategy === undefined && isNewtype && module.extensions.has('GeneralizedNewtypeDeriving')) return 'newtype';
     throw compileError(span, `クラス ${cls.name} は deriving できません。`);
   }
-  const extension = { Functor: 'DeriveFunctor', Foldable: 'DeriveFoldable', Traversable: 'DeriveTraversable' }[
-    cls.name
-  ];
+  const extension = {
+    Functor: 'DeriveFunctor',
+    Foldable: 'DeriveFoldable',
+    Traversable: 'DeriveTraversable',
+    Lift: 'DeriveLift',
+  }[cls.name];
   if (extension && !module.extensions.has(extension)) {
     throw compileError(span, `${cls.name} を deriving するには、${extension} の拡張が要ります。`);
   }

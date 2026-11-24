@@ -338,6 +338,17 @@ define('castException', 3, [0, 1], ([from, to, value], runtime) => {
 define('literalOf', 2, [0], ([value], runtime) => runtime.machine.force(value));
 define('applyField', 2, [0], ([selector, record], runtime) => new TailCall(runtime.machine.force(selector), [record]));
 
+// Template Haskell's unique numbers, which newName gives names, counting up through a run.
+
+const uniques = new WeakMap<Runtime, number>();
+define('thNewUnique', 1, [], (_, runtime) =>
+  ioAction('thNewUnique', [], () => {
+    const next = uniques.get(runtime) ?? 0;
+    uniques.set(runtime, next + 1);
+    return BigInt(next);
+  })
+);
+
 // Mutable references and the ST monad
 
 define('newIORef', 1, [], ([value]) => ioAction('newIORef', [value], () => new RefValue(value)));

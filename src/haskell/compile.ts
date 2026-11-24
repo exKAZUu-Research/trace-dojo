@@ -25,7 +25,13 @@ import { DERIVABLE_CLASSES } from './deriving';
 import { type ClassEntity, nextId, type TypeEntity, type ValueEntity } from './entities';
 import { type Builtins, setLiteralClasses } from './infer';
 import { ioSupport, setIOConstructors } from './ioPrimitives';
-import { LIBRARY_SOURCES, PUBLIC_MODULES, UNSUPPORTED_MODULES, UNSUPPORTED_VALUES } from './library';
+import {
+  LIBRARY_SOURCES,
+  PUBLIC_MODULES,
+  TEMPLATE_HASKELL_UNSUPPORTED,
+  UNSUPPORTED_MODULES,
+  UNSUPPORTED_VALUES,
+} from './library';
 import {
   KNOWN_LIBRARY_CLASS_METHODS,
   KNOWN_LIBRARY_FIELDS,
@@ -35,9 +41,10 @@ import {
   KNOWN_LIBRARY_VALUES,
 } from './library/knownValues';
 import { emptyExports, type ExportTable, type TypeLike } from './modules';
-import { misplacedHaskellAtomicMessage, parseHaskell } from './parse';
+import { findProgramSplices, misplacedHaskellAtomicMessage, parseHaskell } from './parse';
 import { setPrimitiveTypes } from './primitives';
 import { renameModule, type RModule } from './rename';
+import { expandSplices } from './thSplice';
 import { typecheckModule } from './typecheck';
 import { STAR, tcon } from './types';
 import { withCompilationBudget } from './typeWorkBudget';
@@ -86,12 +93,15 @@ function compileLibrary(): Library {
     ioSupport[key] = globalOf(entity, entity.name, entity);
   }
   for (const [name, what] of Object.entries(UNSUPPORTED_VALUES)) compiler.baseValue(name).unsupported = what;
+  for (const name of TEMPLATE_HASKELL_UNSUPPORTED) {
+    compiler.supportValue(name).unsupported = `コンパイル中のプログラムを調べる Template Haskell の関数（${name}）`;
+  }
   return {
     modules: compiler.publicModules(),
     env: compiler.env,
     builtins: compiler.builtins,
     support: compiler.support,
-    derivingSupport: (name) => compiler.baseValue(name),
+    derivingSupport: (name) => compiler.supportValue(name),
     weakValues: compiler.turtleValues(),
     weakTypes: new Map([['Turtle', TURTLE_TYPE]]),
     value: (name) => compiler.supportValue(name),
@@ -152,7 +162,12 @@ class LibraryCompiler {
   }
 
   baseClass(name: string): ClassEntity {
-    const entry = this.base?.exports.types.get(name);
+    let entry = this.base?.exports.types.get(name);
+    // A class of a later library module, as Template Haskell's Lift, once that module is compiled.
+    for (const exports of this.internal.values()) {
+      if (entry?.entity.kind === 'class') break;
+      entry = exports.types.get(name);
+    }
     if (entry?.entity.kind !== 'class') throw new Error(`The library has no class ${name}`);
     return entry.entity.entity;
   }
@@ -467,8 +482,11 @@ function makeBuiltins(type: (name: string) => TypeEntity, cls: (name: string) =>
       return numericClasses;
     },
     get derivableClasses() {
-      derivableClasses ??= new Set(DERIVABLE_CLASSES.map(cls));
-      return derivableClasses;
+      if (derivableClasses) return derivableClasses;
+      // Lift is Template Haskell's, whose module compiles after the base module uses this set.
+      const found = new Set(DERIVABLE_CLASSES.flatMap((name) => tryClass(cls, name)));
+      if (found.size === DERIVABLE_CLASSES.length) derivableClasses = found;
+      return found;
     },
   };
 }
@@ -481,6 +499,13 @@ function tryClass(cls: (name: string) => ClassEntity, name: string): ClassEntity
   }
 }
 
+let spliceRunner: ((program: string) => string) | undefined;
+
+/** Sets how a splice's program runs, giving its output, which running programs provides. */
+export function setSpliceRunner(runner: (program: string) => string): void {
+  spliceRunner = runner;
+}
+
 export interface CompiledProgram {
   main: GlobalDef;
 }
@@ -488,6 +513,11 @@ export interface CompiledProgram {
 /** Compiles a program, throwing a `CompileError` for the errors GHC reports before running and for unsupported code. */
 export function compileProgram(source: string, atomicRows?: ReadonlySet<number>, traceTypes = false): CompiledProgram {
   const lib = (library ??= compileLibrary());
+  const splices = findProgramSplices(source);
+  if (splices && splices.sites.length > 0) {
+    assert(spliceRunner, 'No runner of Template Haskell splices is set');
+    source = expandSplices(source, splices.header, splices.sites, spliceRunner);
+  }
   return withCompilationBudget(() => {
     const parsed = parseHaskell(source);
     const renamed = renameModule(parsed, {

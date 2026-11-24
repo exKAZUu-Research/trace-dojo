@@ -17,6 +17,7 @@ export const DERIVABLE_CLASSES = [
   'Functor',
   'Foldable',
   'Traversable',
+  'Lift',
 ] as const;
 
 /** The classes of type constructors, which GHC derives from how each field's type uses the last type parameter. */
@@ -64,6 +65,14 @@ export function deriveInstance(decl: RDataDecl, cls: ClassEntity, support: Suppo
     case 'Foldable':
     case 'Traversable': {
       return deriveFunctorLike(new FieldShapes(builder, decl.entity.arity - 1), cls.name, cons);
+    }
+    case 'Lift': {
+      return [
+        builder.method(
+          'lift',
+          cons.map((con) => deriveLiftClause(builder, con))
+        ),
+      ];
     }
     default: {
       return [];
@@ -723,6 +732,22 @@ function deriveEnum(builder: Builder, decl: RDataDecl): RBinding[] {
       ),
     ]),
   ];
+}
+
+/** `lift (C a b) = appE (appE (conE 'C) (lift a)) (lift b)`, the tree of a value of the type, as DeriveLift gives. */
+function deriveLiftClause(builder: Builder, con: ConInfo): RClause {
+  const vars = Array.from({ length: con.arity }, (_, index) => builder.newVar(`a${index + 1}`));
+  let expr = builder.call('quoteGlobalCon', builder.str(con.entity.module), builder.str(con.name));
+  for (const variable of vars) expr = builder.call('appE', expr, builder.call('lift', builder.local(variable)));
+  return builder.clause(
+    [
+      builder.pcon(
+        con,
+        vars.map((variable) => builder.pvar(variable))
+      ),
+    ],
+    expr
+  );
 }
 
 function deriveBounded(builder: Builder, cons: ConInfo[]): RBinding[] {

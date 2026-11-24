@@ -409,31 +409,31 @@ uncons :: NonEmpty a -> (a, Maybe (NonEmpty a))
 uncons (a :| as) = (a, nonEmpty as)
 
 reverse :: NonEmpty a -> NonEmpty a
-reverse = lift B.reverse
+reverse = liftNE B.reverse
 
 sort :: Ord a => NonEmpty a -> NonEmpty a
-sort = lift B.sort
+sort = liftNE B.sort
 
 sortBy :: (a -> a -> Ordering) -> NonEmpty a -> NonEmpty a
-sortBy f = lift (B.sortBy f)
+sortBy f = liftNE (B.sortBy f)
 
 sortOn :: Ord b => (a -> b) -> NonEmpty a -> NonEmpty a
-sortOn f = lift (B.sortOn f)
+sortOn f = liftNE (B.sortOn f)
 
 sortWith :: Ord o => (a -> o) -> NonEmpty a -> NonEmpty a
-sortWith f = lift (B.sortBy (\x y -> compare (f x) (f y)))
+sortWith f = liftNE (B.sortBy (\x y -> compare (f x) (f y)))
 
 nub :: Eq a => NonEmpty a -> NonEmpty a
-nub = lift B.nub
+nub = liftNE B.nub
 
 nubBy :: (a -> a -> Bool) -> NonEmpty a -> NonEmpty a
-nubBy f = lift (B.nubBy f)
+nubBy f = liftNE (B.nubBy f)
 
 intersperse :: a -> NonEmpty a -> NonEmpty a
-intersperse x = lift (B.intersperse x)
+intersperse x = liftNE (B.intersperse x)
 
-lift :: ([a] -> [b]) -> NonEmpty a -> NonEmpty b
-lift f = fromList . f . toList
+liftNE :: ([a] -> [b]) -> NonEmpty a -> NonEmpty b
+liftNE f = fromList . f . toList
 
 zip :: NonEmpty a -> NonEmpty b -> NonEmpty (a, b)
 zip (a :| as) (b :| bs) = (a, b) :| B.zip as bs
@@ -486,7 +486,7 @@ repeat :: a -> NonEmpty a
 repeat a = a :| B.repeat a
 
 cycle :: NonEmpty a -> NonEmpty a
-cycle = lift B.cycle
+cycle = liftNE B.cycle
 
 scanl :: Foldable f => (b -> a -> b) -> b -> f a -> NonEmpty b
 scanl f z = fromList . B.scanl f z . B.toList

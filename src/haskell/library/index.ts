@@ -8,6 +8,7 @@ import { BASE_MONOID, NON_EMPTY_SOURCE, SEMIGROUP_SOURCE } from './monoid';
 import { OVERLOADED_SOURCE, OVERLOADED_SUPPORT } from './overloaded';
 import { PRINTF_SOURCE } from './printf';
 import { SYSTEM_IO } from './systemIo';
+import { TEMPLATE_HASKELL_SOURCE } from './templateHaskell';
 import { BASE_TUPLES } from './tuples';
 
 /** The library's own modules in dependency order, which public modules re-export. */
@@ -18,6 +19,7 @@ export const LIBRARY_SOURCES: { name: string; source: string }[] = [
   },
   { name: 'Data.Semigroup.Internal', source: SEMIGROUP_SOURCE },
   { name: 'Data.List.NonEmpty.Internal', source: NON_EMPTY_SOURCE },
+  { name: 'Language.Haskell.TH.Internal', source: TEMPLATE_HASKELL_SOURCE },
   { name: 'Data.Set.Internal', source: SET_SOURCE },
   { name: 'Data.Map.Internal', source: MAP_SOURCE },
   { name: 'Data.Map.Strict.Internal', source: STRICT_MAP_SOURCE },
@@ -454,6 +456,23 @@ const SET_VALUES = [
 ];
 
 /** The modules a program may import, by name. */
+/** The names `Language.Haskell.TH` and its modules export: those its source declares, but its own helpers. */
+const TEMPLATE_HASKELL_MODULE: PublicModule = (() => {
+  const internal =
+    /^(render|quote[A-Z]|run[A-Z]\w*Splice|runSplice|typedQuote|thNewUnique|newNameIO|splice|ppr[A-Z]|isSymOcc|parensIf|showRational|indent|packageOf)/;
+  const values = [...TEMPLATE_HASKELL_SOURCE.matchAll(/^([a-z_][\w']*|\([^)]+\)) ::/gm)]
+    .map((match) => match[1])
+    .filter((name) => !internal.test(name));
+  const types = [...TEMPLATE_HASKELL_SOURCE.matchAll(/^(?:data|newtype|type|class) (?:[^=]*=> )?([A-Z]\w*)/gm)]
+    .map((match) => match[1])
+    .filter((name) => name !== 'Splice');
+  return {
+    from: 'Language.Haskell.TH.Internal',
+    types: [...new Set(types)].map((name): [string, 'all'] => [name, 'all']),
+    values: [...new Set(values)],
+  };
+})();
+
 export const PUBLIC_MODULES: Record<string, PublicModule> = {
   Prelude: PRELUDE,
   'Data.List': { from: 'Base', types: [], values: DATA_LIST_VALUES },
@@ -1019,6 +1038,20 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
   'Data.Functor.Identity': { from: 'Base', types: [['Identity', 'all']], values: ['runIdentity'] },
   'Data.Functor.Const': { from: 'Base', types: [['Const', 'all']], values: ['getConst'] },
   'Data.Functor.Compose': { from: 'Base', types: [['Compose', 'all']], values: ['getCompose'] },
+  'Language.Haskell.TH': TEMPLATE_HASKELL_MODULE,
+  'Language.Haskell.TH.Syntax': TEMPLATE_HASKELL_MODULE,
+  'Language.Haskell.TH.Lib': TEMPLATE_HASKELL_MODULE,
+  'Language.Haskell.TH.Ppr': TEMPLATE_HASKELL_MODULE,
+  'Language.Haskell.TH.Quote': {
+    from: 'Language.Haskell.TH.Internal',
+    types: [['QuasiQuoter', 'all']],
+    values: ['quoteExp', 'quotePat', 'quoteType', 'quoteDec'],
+  },
+  'Language.Haskell.TH.Runner': {
+    from: 'Language.Haskell.TH.Internal',
+    types: [],
+    values: ['runSplice', 'runDecSplice', 'runTypedSplice', 'quoteExp', 'mkNameG_v', 'mkNameG_d', 'mkNameG_tc'],
+  },
   'Data.Coerce': {
     from: 'Base',
     types: [['Coercible', 'none']],
@@ -1090,6 +1123,25 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
 /** The values a program cannot use, with what to name in the message that rejects them. */
 export const UNSUPPORTED_VALUES: Record<string, string> = {};
 
+/**
+ * Template Haskell's functions that look at the program being compiled (its declarations, instances, and source),
+ * which a splice cannot here, since it runs as a program of its own.
+ */
+export const TEMPLATE_HASKELL_UNSUPPORTED = [
+  'reify',
+  'reifyInstances',
+  'reifyFixity',
+  'reifyType',
+  'reifyRoles',
+  'isInstance',
+  'lookupTypeName',
+  'lookupValueName',
+  'location',
+  'addTopDecls',
+  'isExtEnabled',
+  'extsEnabled',
+];
+
 /** Modules this environment knows but does not provide, with what to name in the message that rejects them. */
 export const UNSUPPORTED_MODULES: Record<string, string> = {
   'Control.Concurrent': '並行処理（Control.Concurrent）',
@@ -1119,7 +1171,6 @@ export const UNSUPPORTED_MODULES: Record<string, string> = {
   'Control.Monad.State': 'mtl のモナド変換子（Control.Monad.State）',
   'Control.Monad.Reader': 'mtl のモナド変換子（Control.Monad.Reader）',
   'Control.Monad.Writer': 'mtl のモナド変換子（Control.Monad.Writer）',
-  'Language.Haskell.TH': 'Template Haskell（Language.Haskell.TH）',
   Foreign: '外部の関数（Foreign）',
   'Foreign.C': '外部の関数（Foreign.C）',
 };

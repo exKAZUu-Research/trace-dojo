@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss -- The syntax-tree conversion covers every node kind of the grammar in one pass.
 import type { Node, Tree } from '@willbooster/web-tree-sitter';
 
 import type { CompileError } from '../interpreter/diagnostics';
@@ -37,6 +36,8 @@ import type {
   TypeExpr,
   TyVarBinder,
 } from './syntax';
+// code-gauge-allow-file fileNcss -- The syntax-tree conversion covers every node kind of the grammar in one pass.
+import { QuoteBuilder } from './thQuote';
 
 /** What each node type stands for, in the message that rejects it. */
 const UNSUPPORTED_NODES: Record<string, string> = {
@@ -51,19 +52,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   safety: '外部の関数の宣言（foreign）',
   foreign_import: '外部の関数の宣言（foreign import）',
   foreign_export: '外部の関数の宣言（foreign export）',
-  quasiquote: 'Template Haskell の準クォート',
-  quasiquote_body: 'Template Haskell の準クォート',
-  quoter: 'Template Haskell の準クォート',
-  quote: 'Template Haskell のクォート',
-  quoted_decls: 'Template Haskell のクォート',
-  quoted_expression: 'Template Haskell のクォート',
-  quoted_pattern: 'Template Haskell のクォート',
-  quoted_type: 'Template Haskell のクォート',
-  typed_quote: 'Template Haskell のクォート',
-  th_quoted_name: 'Template Haskell の名前のクォート',
-  splice: 'Template Haskell のスプライス',
-  top_splice: 'Template Haskell のスプライス',
-  import_level: 'Template Haskell の段階を指定した import',
 };
 
 const columnsByTree = new WeakMap<Tree, Uint32Array>();
@@ -137,7 +125,12 @@ export function convertModule(root: Node, moduleExtensions: Extensions, defaultN
   const header = namedChildren(root).find((child) => child.type === 'header');
   const importsNode = field(root, 'imports');
   const declarationsNode = field(root, 'declarations');
-  const imports = importsNode ? fields(importsNode, 'import').map(convertImport) : [];
+  // An import for splices only (`import splice M`) gives the program that runs a splice its names, not this module.
+  const imports = importsNode
+    ? fields(importsNode, 'import')
+        .filter((node) => field(node, 'level')?.text.trim() !== 'splice')
+        .map(convertImport)
+    : [];
   const decls: Decl[] = [];
   if (declarationsNode) {
     for (const child of namedChildren(declarationsNode)) {
@@ -277,7 +270,9 @@ const CONTAINERS_MODULES = /^Data\.(Map|Set|IntMap|IntSet|Sequence|Tree|Graph|Co
 
 function convertImport(node: Node): Import {
   const level = field(node, 'level');
-  if (level) throw unsupported(level);
+  if (level && !extensions.has('ExplicitLevelImports')) {
+    throw syntaxError(spanOf(level), 'import に段階を書くには、ExplicitLevelImports の拡張が要ります。');
+  }
   const packageNode = field(node, 'package');
   if (packageNode) {
     if (!extensions.has('PackageImports')) {
@@ -1632,6 +1627,26 @@ export function convertExpr(node: Node): Expr {
     case 'parenthesized_name': {
       return convertNameExpression(node, span);
     }
+    case 'quote':
+    case 'typed_quote': {
+      return convertQuote(node, span);
+    }
+    case 'th_quoted_name': {
+      requireTemplateHaskell(span, 'TemplateHaskellQuotes');
+      const typeNode = field(node, 'type');
+      const nameNode = typeNode ?? required(node, 'name');
+      const { name, isConstructor } = qualifiedName(nameNode);
+      return { kind: 'thName', name, namespace: typeNode ? 'type' : isConstructor ? 'con' : 'var', span };
+    }
+    case 'splice': {
+      const inner = namedChildren(node)[0];
+      if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
+      return {
+        kind: 'thSplice',
+        expr: convertExpr(inner.type === 'parens' ? required(inner, 'expression') : inner),
+        span,
+      };
+    }
     case 'literal': {
       const literal: Expr = { kind: 'lit', lit: convertLiteral(namedChildren(node)[0] ?? node), span };
       if (literal.lit.kind !== 'string' || !extensions.has('OverloadedStrings')) return literal;
@@ -1944,6 +1959,44 @@ function convertMultiWayIf(node: Node, span: Span): Expr {
     span,
     what: 'multi-way if',
   };
+}
+
+function requireTemplateHaskell(span: Span, quotes?: string): void {
+  if (!extensions.has('TemplateHaskell') && !(quotes && extensions.has(quotes))) {
+    throw syntaxError(span, 'Template Haskell を使うには、TemplateHaskell の拡張が要ります。');
+  }
+}
+
+/** Converts a quote, `[| e |]`, `[p| p |]`, `[t| t |]`, `[d| ds |]`, or `[|| e ||]`, into code building its tree. */
+function convertQuote(node: Node, span: Span): Expr {
+  requireTemplateHaskell(span, 'TemplateHaskellQuotes');
+  const builder = new QuoteBuilder(span);
+  const inner = namedChildren(node).find((child) => child.type.startsWith('quoted_'));
+  if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
+  switch (inner.type) {
+    case 'quoted_pattern': {
+      return builder.pattern(convertPattern(namedChildren(inner)[0]));
+    }
+    case 'quoted_type': {
+      return builder.type(convertType(namedChildren(inner)[0]));
+    }
+    case 'quoted_decls': {
+      return builder.declarations(fields(inner, 'declaration').flatMap(convertTopDecl));
+    }
+    default: {
+      const expr = convertExpr(namedChildren(inner)[0]);
+      const built = builder.expression(expr);
+      if (node.type !== 'typed_quote') return built;
+      // The typed quote's function only gives the type of its expression, which it never runs.
+      const typer: Expr = { kind: 'lambda', pats: [{ kind: 'pwild', span }], body: expr, span };
+      return {
+        kind: 'app',
+        fn: { kind: 'app', fn: { kind: 'support', name: 'typedQuote', span }, arg: typer, span },
+        arg: built,
+        span,
+      };
+    }
+  }
 }
 
 function requireRecordDot(span: Span): void {

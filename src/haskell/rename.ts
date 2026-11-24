@@ -29,6 +29,7 @@ import { compileError, unsupportedError } from './errors';
 import { ExportTableBuilder } from './exportTable';
 import type { Extensions } from './extensions';
 import { DEFAULT_FIXITY, resolveExprChain, resolvePatChain, resolveTypeChain, sectionOperand } from './fixity';
+import { TH_NAME_MODULES } from './library/thNames';
 import { LocalScope } from './localScope';
 import { emptyExports, type ExportTable, type TypeLike } from './modules';
 import type {
@@ -1323,6 +1324,14 @@ class Renamer {
       case 'hole': {
         return { k: 'hole', name: expr.name, span };
       }
+      case 'thVar':
+      case 'thName':
+      case 'thChain': {
+        return this.renameExpr(this.templateHaskellCode(expr, scope), scope);
+      }
+      case 'thSplice': {
+        throw compileError(span, 'Template Haskell のスプライスを、ここには書けません。');
+      }
       case 'projection': {
         return { k: 'projection', expr: this.renameExpr(expr.expr, scope), field: expr.field, span };
       }
@@ -2059,6 +2068,100 @@ class Renamer {
         };
       }
     }
+  }
+
+  /** The code a quote builds for what needs the program's scope: names, and operator chains by their fixities. */
+  private templateHaskellCode(expr: Extract<Expr, { kind: 'thVar' | 'thName' | 'thChain' }>, scope: LocalScope): Expr {
+    const { span } = expr;
+    const str = (text: string): Expr => ({ kind: 'lit', lit: { kind: 'string', value: [...text] }, span });
+    const call = (name: string, ...args: Expr[]): Expr => {
+      let result: Expr = { kind: 'support', name, span };
+      for (const arg of args) result = { kind: 'app', fn: result, arg, span };
+      return result;
+    };
+    switch (expr.kind) {
+      case 'thVar': {
+        if (expr.constructor) {
+          const con = this.lookupCon(expr.name);
+          return call('quoteGlobalCon', str(this.thModule('con', con)), str(con.name));
+        }
+        if (expr.implicit) {
+          const entity = this.supportValue(expr.name.name, span);
+          return call('quoteGlobalVar', str(this.thModule('v', entity)), str(entity.name));
+        }
+        // A name nothing binds stays unbound in the tree, for the code it is spliced into to bind, as GHC does.
+        if (!(!expr.name.qualifier && scope.lookup(expr.name.name)) && this.valuesNamed(expr.name).length === 0) {
+          return call('unboundVarE', call('mkName', str(expr.name.name)));
+        }
+        const ref = this.resolveVar(expr.name, scope);
+        // A variable of the program outside the quote is lifted: the tree of its value.
+        if (ref.kind === 'local') return call('lift', { kind: 'var', name: expr.name, span });
+        return call('quoteGlobalVar', str(this.thModule('v', ref.entity)), str(ref.entity.name));
+      }
+      case 'thName': {
+        if (expr.namespace === 'type') {
+          // The types of special syntax have names of their own in GHC.
+          const special = expr.name.qualifier ? undefined : specialTypeName(expr.name.name);
+          if (special) return call('mkNameG_tc', str('ghc-internal'), str(special[0]), str(special[1]));
+          const like = this.lookupType(expr.name);
+          const module = this.thModule('t', like.entity);
+          return call('mkNameG_tc', str(thPackage(module)), str(module), str(like.entity.name));
+        }
+        if (expr.namespace === 'con') {
+          const con = this.lookupCon(expr.name);
+          const module = this.thModule('con', con);
+          return call('mkNameG_d', str(thPackage(module)), str(module), str(con.name));
+        }
+        if (!expr.name.qualifier && scope.lookup(expr.name.name)) return call('mkNameS', str(expr.name.name));
+        const entity = this.lookupValue(expr.name, false);
+        if (entity.con) {
+          const module = this.thModule('con', entity.con);
+          return call('mkNameG_d', str(thPackage(module)), str(module), str(entity.name));
+        }
+        const module = this.thModule('v', entity);
+        return call('mkNameG_v', str(thPackage(module)), str(module), str(entity.name));
+      }
+      case 'thChain': {
+        const resolved = resolveExprChain(expr.items, span, (op) => this.fixityOf(op, scope));
+        const operatorOf = (op: Operator): Expr => {
+          const found =
+            expr.operators.get(op) ??
+            [...expr.operators].find(([key]) => key.name === op.name && key.span.col === op.span.col)?.[1];
+          if (!found) throw compileError(op.span, '書き方に誤りがあります。');
+          return found;
+        };
+        const build = (node: Expr): Expr => {
+          if (node.kind === 'binop') {
+            const [left, right] = [build(node.left), build(node.right)];
+            if (expr.pattern) return call('infixP', left, operatorOf(node.op), right);
+            return call('infixE', call('Just', left), operatorOf(node.op), call('Just', right));
+          }
+          if (node.kind === 'neg') return call('appE', expr.negate, build(node.expr));
+          return node;
+        };
+        return build(resolved);
+      }
+    }
+  }
+
+  /** The module GHC defines a name in, which Template Haskell shows it with. */
+  private thModule(kind: 'v' | 't' | 'con', of: ValueEntity | ConInfo | TypeEntity | ClassEntity): string {
+    if ('tag' in of && 'arity' in of && 'fieldTypes' in of) {
+      const con = of as ConInfo;
+      if (con.type.special === 'tuple' || con.type.special === 'unit') return 'GHC.Internal.Tuple';
+      if (con.type.special === 'list') return 'GHC.Internal.Types';
+      return this.thModule('t', con.type);
+    }
+    const entity = of as { module: string; name: string; method?: { cls: ClassEntity } };
+    if (entity.module === this.module.name) return entity.module;
+    // A class's method is where its class is.
+    if (entity.method) return this.thModule('t', entity.method.cls);
+    const found = thNameModules().get(`${kind === 'con' ? 't' : kind} ${entity.module} ${entity.name}`);
+    if (found) return found;
+    if (entity.module === 'GHC.Types') {
+      return entity.name === 'Integer' ? 'GHC.Internal.Bignum.Integer' : 'GHC.Internal.Types';
+    }
+    return 'GHC.Internal.Base';
   }
 
   private resolveVar(name: QName, scope: LocalScope): VarRef {
@@ -2914,4 +3017,27 @@ function importChildren(item: ImportItem, available: ValueEntity[], hiding: bool
     else if (!hiding) throw compileError(child.span, `${item.name.name} の中に ${child.name} はありません。`);
   }
   return children;
+}
+
+let nameModules: Map<string, string> | undefined;
+
+/** The modules of the library's names in GHC, by the kind of name, the module here, and the name. */
+function thNameModules(): Map<string, string> {
+  nameModules ??= new Map(
+    Object.entries(TH_NAME_MODULES).flatMap(([module, keys]) => keys.map((key): [string, string] => [key, module]))
+  );
+  return nameModules;
+}
+
+function thPackage(module: string): string {
+  return module.startsWith('GHC.') ? 'ghc-internal' : 'main';
+}
+
+/** GHC's names of the types of special syntax: lists, unit, tuples, and functions. */
+function specialTypeName(name: string): [string, string] | undefined {
+  if (name === '[]') return ['GHC.Internal.Types', 'List'];
+  if (name === '()') return ['GHC.Internal.Tuple', 'Unit'];
+  if (name === '->') return ['GHC.Internal.Types', '->'];
+  const tuple = /^\((,+)\)$/.exec(name);
+  return tuple ? ['GHC.Internal.Tuple', `Tuple${tuple[1].length + 1}`] : undefined;
 }
