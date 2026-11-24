@@ -81,6 +81,12 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
   const badAlloc = define('bad_alloc', exception, false);
   define('bad_array_new_length', badAlloc, false, 'bad_array_new_length');
   define('bad_exception', exception, false);
+  const badCast = define('bad_cast', exception, false);
+  define('bad_typeid', exception, false);
+  define('bad_function_call', exception, false);
+  define('bad_optional_access', exception, false, 'bad_optional_access');
+  define('bad_variant_access', exception, false, 'bad_variant_access');
+  define('bad_any_cast', badCast, false, 'bad any cast');
   for (const name of ['invalid_argument', 'domain_error', 'length_error', 'out_of_range']) define(name, logic, true);
   for (const name of ['range_error', 'overflow_error', 'underflow_error']) define(name, runtime, true);
   return classes;

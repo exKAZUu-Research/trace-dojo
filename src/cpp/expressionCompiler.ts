@@ -495,6 +495,50 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return { ...expr, functions: { ...(expr.functions as FunctionCandidates), templateArgs } };
   }
 
+  /**
+   * `p->~A()`, which runs the object's destructor and those of its members and bases without freeing its storage
+   * (C++20 [class.dtor]p15).
+   */
+  private destructorCall(object: Expr, name: Syntax, row: number): Expr {
+    const type = object.type;
+    const written = name.children[0]?.text ?? '';
+    const cls = type.kind === 'class' ? type.cls : undefined;
+    if (cls && written !== cls.name && written !== cls.name.replace(/^std::/, '').replace(/<.*$/, ''))
+      return this.error(row, `デストラクタの名前 ~${written} が ${typeName(type)} と合いません。`);
+    const destroy = this.destroyerOf(type, row);
+    const call: FunctionInfo = {
+      name: `~${written}`,
+      displayName: `~${written}`,
+      params: [],
+      ret: { kind: 'void' },
+      owner: cls,
+      isStatic: false,
+      isVirtual: false,
+      isConst: false,
+      isPure: false,
+      isConstructor: false,
+      isDestructor: true,
+      isNoexcept: true,
+      isOverride: false,
+      isFinal: false,
+      access: 'public',
+      row,
+      isAtomic: false,
+      isDefined: true,
+      native: (_args, { frame, selfLocation }) => {
+        destroy?.(frame, selfLocation?.read() as Value);
+        return;
+      },
+    };
+    return {
+      type: { kind: 'void' },
+      isLvalue: false,
+      row,
+      run: () => {},
+      functions: { name: call.name, candidates: [call], object, isQualified: true },
+    };
+  }
+
   /** `this` as the object it points to, for a member a member function names without `this->`. */
   private implicitThis(row: number, name: string, owner?: ClassInfo): Expr {
     const { captures } = this.context;
@@ -544,7 +588,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const argument = this.compileExpression(fieldOf(node, 'argument') as Syntax);
     const object = isArrow ? this.arrow(argument, node.row) : argument;
     const fieldNode = fieldOf(node, 'field') as Syntax;
-    if (fieldNode.type === 'destructor_name') return this.unsupported(node.row, 'デストラクタの明示的な呼び出し');
+    if (fieldNode.type === 'destructor_name') return this.destructorCall(object, fieldNode, node.row);
     if (fieldNode.type === 'qualified_identifier') return this.qualifiedMember(object, fieldNode);
     // `obj.f<int>` and `obj.template f<int>` name a member function template with template arguments.
     const method = fieldNode.type === 'dependent_name' ? fieldNode.children[0] : fieldNode;
@@ -1793,6 +1837,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   ): Expr {
     const { type: from } = expr;
     const { to } = type;
+    // `static_cast<T&&>(x)` makes an xvalue of an lvalue, as `std::move` does.
+    if (
+      type.isRvalue &&
+      expr.isLvalue &&
+      sameType(unqualified(from), unqualified(to), false) &&
+      (!isConstType(from) || isConstType(to))
+    )
+      return { ...expr, type: to, isXvalue: true };
     if (
       expr.isLvalue &&
       !expr.isXvalue &&
@@ -1804,7 +1856,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return this.castClassLocation(expr, to, from.cls, to.cls, row, kind);
     }
     const converted = this.convert(expr, type, row);
-    return { ...converted, type: to, isLvalue: true, isXvalue: false };
+    return { ...converted, type: to, isLvalue: true, isXvalue: type.isRvalue === true };
   }
 
   private castPointer(
@@ -1868,9 +1920,103 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   private namedCast(node: Syntax): Expr {
     const keyword = node.all.find((child) => !child.isNamed && child.type.endsWith('_cast'))?.type;
-    if (keyword !== 'static_cast') return this.unsupported(node.row, keyword ?? 'キャスト');
     const type = this.typeDescriptor(fieldOf(node, 'type') as Syntax);
-    return this.explicitConversion(this.compileExpression(fieldOf(node, 'value') as Syntax), type, node.row, 'static');
+    const value = this.compileExpression(fieldOf(node, 'value') as Syntax);
+    const { row } = node;
+    switch (keyword) {
+      case 'static_cast': {
+        return this.explicitConversion(value, type, row, 'static');
+      }
+      case 'const_cast': {
+        return this.constCast(value, type, row);
+      }
+      case 'dynamic_cast': {
+        return this.dynamicCast(value, type, row);
+      }
+      case 'reinterpret_cast': {
+        // The cases whose results do not depend on how the machine lays out values in memory.
+        const target = nonReference(type);
+        const source = this.rvalue(value).type;
+        if (
+          target.kind === 'pointer' &&
+          source.kind === 'pointer' &&
+          sameType(unqualified(target.to), unqualified(source.to), false)
+        )
+          return this.explicitConversion(value, type, row, 'C');
+        return this.unsupported(row, 'reinterpret_cast（値のメモリ上の表し方は、CPU や OS によって違います）');
+      }
+      default: {
+        return this.unsupported(row, keyword ?? 'キャスト');
+      }
+    }
+  }
+
+  /** `const_cast<T>(e)`, which adds or removes `const` from a pointer's or a reference's target. */
+  private constCast(value: Expr, type: Type, row: number): Expr {
+    const strip = (t: Type): Type => (t.kind === 'pointer' ? pointerTo(strip(t.to)) : unqualified(t));
+    if (type.kind === 'reference') {
+      if (!value.isLvalue || !sameType(strip(value.type), strip(type.to), false))
+        return this.error(row, `${typeName(value.type)} は const_cast で ${typeName(type)} に変換できません。`);
+      return { ...value, type: type.to, isXvalue: type.isRvalue === true ? true : undefined };
+    }
+    const pointer = this.rvalue(value);
+    if (
+      type.kind !== 'pointer' ||
+      pointer.type.kind !== 'pointer' ||
+      !sameType(strip(pointer.type), strip(type), false)
+    )
+      return this.error(row, `${typeName(value.type)} は const_cast で ${typeName(type)} に変換できません。`);
+    return { ...pointer, type };
+  }
+
+  /**
+   * `dynamic_cast<T>(e)`, which checks the dynamic type of a polymorphic object: a pointer cast gives a null pointer
+   * when the object is no `T`, and a reference cast throws `std::bad_cast`.
+   */
+  private dynamicCast(value: Expr, type: Type, row: number): Expr {
+    const isReference = type.kind === 'reference';
+    const target = isReference ? type.to : type.kind === 'pointer' ? type.to : undefined;
+    const source = isReference ? value.type : this.rvalue(value).type;
+    const from = isReference ? source : source.kind === 'pointer' ? source.to : undefined;
+    if (target?.kind !== 'class' || from?.kind !== 'class')
+      return this.error(row, 'dynamic_cast には、クラスへのポインタか参照を書いてください。');
+    if (isConstType(from) && !isConstType(target))
+      return this.error(row, `dynamic_cast では const を外せません（${typeName(source)}）。`);
+    if (from.cls.isDerivedFrom(target.cls))
+      return isReference
+        ? this.castReference(value, type as Extract<Type, { kind: 'reference' }>, row, 'static')
+        : this.convert(value, type, row);
+    if (!from.cls.isPolymorphic)
+      return this.error(row, `${typeName(from)} は仮想関数を持たないので、dynamic_cast できません。`);
+    const cls = target.cls;
+    const badCast = this.library.exception('bad_cast');
+    if (isReference) {
+      const run = value.run;
+      return {
+        type: target,
+        isLvalue: true,
+        row,
+        run: (frame) => {
+          const location = run(frame) as Ptr;
+          const object = location.read();
+          if (!(object instanceof CObject) || !object.cls.isDerivedFrom(cls))
+            throwLibrary(frame, badCast, 'std::bad_cast');
+          return location.forClass(cls);
+        },
+      };
+    }
+    const run = this.rvalue(value).run;
+    return {
+      type,
+      isLvalue: false,
+      row,
+      run: (frame) => {
+        const location = run(frame) as Ptr;
+        if (location.isNull) return NULL_PTR;
+        const object = location.read();
+        return object instanceof CObject && object.cls.isDerivedFrom(cls) ? location.forClass(cls) : NULL_PTR;
+      },
+    };
   }
 
   /**
@@ -2006,6 +2152,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const isUnqualified = functionNode.type === 'identifier';
     if (isUnqualified && this.library.isFunctionMacro(functionNode.text))
       return this.unsupported(functionNode.row, `マクロ（${functionNode.text}）`);
+    // The grammar reads the `noexcept(e)` operator as a call.
+    if (functionNode.type === 'identifier' && functionNode.text === 'noexcept' && argNodes.length === 1)
+      return this.noexceptOperator(argNodes[0], node.row);
     const cast = this.utilityCast(functionNode, argNodes, node.row);
     if (cast) return cast;
     const typeTarget = this.callTypeTarget(functionNode);
@@ -2032,6 +2181,24 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const callee = this.compileExpression(functionNode);
     const args = argNodes.map((arg) => this.argument(arg));
     return this.callWith(callee, args, node.row, isUnqualified);
+  }
+
+  /**
+   * `noexcept(e)`, which tells whether an unevaluated expression may throw: whether it calls a function that may, or
+   * makes an object with `new` or `throw` (C++20 [expr.unary.noexcept]).
+   */
+  private noexceptOperator(operand: Syntax, row: number): Expr {
+    const previous = { probe: this.noexceptProbe, unevaluated: this.isUnevaluated };
+    const probe = { mayThrow: false };
+    this.noexceptProbe = probe;
+    this.isUnevaluated = true;
+    try {
+      this.compileExpression(operand);
+    } finally {
+      this.noexceptProbe = previous.probe;
+      this.isUnevaluated = previous.unevaluated;
+    }
+    return constantExpr(BOOL, probe.mayThrow ? 0 : 1, row);
   }
 
   /**
@@ -2361,6 +2528,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   // new and delete ---------------------------------------------------------------------------------------------------
 
   private newExpression(node: Syntax): Expr {
+    if (this.noexceptProbe) this.noexceptProbe.mayThrow = true;
     if (fieldOf(node, 'placement')) return this.unsupported(node.row, '配置 new（new (場所) 型）');
     let baseType = this.specifiedType(node, true);
     let declarator = fieldOf(node, 'declarator');

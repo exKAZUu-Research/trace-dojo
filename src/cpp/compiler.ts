@@ -942,7 +942,8 @@ export class Compiler extends StatementCompiler {
       isVirtual: false,
       isInline: this.hasSpecifier(node, 'inline'),
       isConst: qualifiers.has('const'),
-      isNoexcept: declarator.children.some((child) => child.type === 'noexcept'),
+      isNoexcept: this.exceptionSpecification(declarator),
+      refQualifier: declarator.children.find((child) => child.type === 'ref_qualifier')?.text as '&' | '&&' | undefined,
       isPure: false,
       isConstructor: false,
       isDestructor: false,
@@ -965,6 +966,26 @@ export class Compiler extends StatementCompiler {
 
   protected parameterTypes(list: Syntax): Type[] {
     return this.parameters(list).map((param) => param.type);
+  }
+
+  /**
+   * Whether a function declarator's exception specification says it throws nothing: `noexcept`, `noexcept(true)`,
+   * or `throw()` (C++20 [except.spec]).
+   */
+  private exceptionSpecification(declarator: Syntax): boolean {
+    const throwSpecifier = declarator.children.find((child) => child.type === 'throw_specifier');
+    if (throwSpecifier) {
+      if (throwSpecifier.children.length > 0)
+        this.error(throwSpecifier.row, 'C++17 からは throw(型) の例外の指定は使えません。noexcept を使ってください。');
+      return true;
+    }
+    const specifier = declarator.children.find((child) => child.type === 'noexcept');
+    if (!specifier) return false;
+    const condition = specifier.children[0];
+    if (!condition) return true;
+    const value = this.rvalue(this.compileExpression(condition));
+    if (value.constant === undefined) this.error(condition.row, 'noexcept(...) の条件は定数式でなければなりません。');
+    return Number(value.constant) !== 0;
   }
 
   /** Whether a declaration says `explicit`, or `explicit(true)` with a constant condition. */
@@ -3686,7 +3707,7 @@ export class Compiler extends StatementCompiler {
 class TemporaryConstructorReferenceError extends CompileError {}
 
 function sameDeclaredSignature(a: FunctionInfo, b: FunctionInfo): boolean {
-  return !a.instantiate && !b.instantiate && sameParameters(a, b);
+  return !a.instantiate && !b.instantiate && a.refQualifier === b.refQualifier && sameParameters(a, b);
 }
 
 function registerStaticTemporary(frame: Frame, box: Box): void {

@@ -6,8 +6,6 @@ import { fieldOf, type Syntax } from './syntax';
 const UNSUPPORTED_NODES: Record<string, string> = {
   union_specifier: '共用体（union）',
   bitfield_clause: 'ビットフィールド',
-  ref_qualifier: '参照修飾子（& や &&）の付いたメンバ関数',
-  throw_specifier: '例外の指定（throw(...)）',
   variadic_parameter: '可変長引数（...）',
   alignas_qualifier: 'alignas',
   alignof_expression: 'alignof',
@@ -92,10 +90,6 @@ export function rejectUnsupportedSyntax(root: Syntax): void {
       case 'storage_class_specifier':
       case 'type_qualifier': {
         checkSpecifier(node);
-        break;
-      }
-      case 'noexcept': {
-        if (node.all.some((child) => child.type === '(')) unsupported(node.row, 'noexcept(式)');
         break;
       }
       default: {

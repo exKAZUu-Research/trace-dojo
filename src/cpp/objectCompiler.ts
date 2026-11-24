@@ -783,11 +783,19 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   /** The conversion of the object of a member function call to the implicit object parameter. */
   private objectConversion(fn: FunctionInfo, object: Expr): ConversionSequence | undefined {
     if (isConstType(object.type) && !fn.isConst) return undefined;
+    // A ref-qualified member function takes an object of its value category (C++20 [over.match.funcs]p4).
+    const isRvalue = !object.isLvalue || object.isXvalue === true;
+    if (fn.refQualifier === '&' && isRvalue && !fn.isConst) return undefined;
+    if (fn.refQualifier === '&&' && !isRvalue) return undefined;
     return {
       rank: Rank.Exact,
       isBoolean: false,
       baseDistance: 0,
-      reference: { toConst: fn.isConst },
+      reference: {
+        toConst: fn.isConst,
+        isRvalue: fn.refQualifier === '&&',
+        fromRvalue: fn.refQualifier ? isRvalue : undefined,
+      },
       apply: (e) => e,
     };
   }
@@ -850,8 +858,12 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
    * A call of a resolved function. A member function needs the object, as an lvalue or a prvalue; `isQualified`
    * calls the function itself rather than the final overrider of a virtual one.
    */
+  /** The calls of the `noexcept(e)` operand compiled now, which tells whether one of them may throw. */
+  noexceptProbe: { mayThrow: boolean } | undefined;
+
   callExpr(resolved: Resolved, args: Expr[], object: Expr | undefined, row: number, isQualified = false): Expr {
     const { fn } = resolved;
+    if (this.noexceptProbe && !fn.isNoexcept && !fn.isDestructor) this.noexceptProbe.mayThrow = true;
     const converted = this.convertArguments(resolved, args);
     const argRuns = this.callArguments(fn, converted, row);
     const evaluateObject = object && (fn.isStatic ? this.materialize(object).run : this.objectOf(object));
