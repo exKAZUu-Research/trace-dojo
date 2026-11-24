@@ -276,7 +276,7 @@ function propagatePrefixedAttributes(
     if (!applyAttributes(shell, builtin, target, options, assigns, false)) return false;
     if (tempVar.value?.kind === 'scalar' && !shell.assignScalarTo(target, tempVar.value.value, false)) return false;
   }
-  if (options.set.has('r')) target.attributes.add('r');
+  for (const attr of tempVar.attributes) target.attributes.add(attr);
   return true;
 }
 
