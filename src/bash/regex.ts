@@ -5,6 +5,7 @@
  */
 
 import { charactersOf, POSIX_CHARACTER_CLASSES } from './characters';
+import { matchesEquivalenceClass, resolveCollatingElement } from './collation';
 
 type RegexNode =
   | { kind: 'char'; c: string }
@@ -186,10 +187,33 @@ class RegexParser {
     if (close === -1) throw new RegexSyntaxError('brackets ([ ]) not balanced');
     const name = rest.slice(0, close);
     this.position += 2 + charactersOf(name).length + 2;
-    if (type !== ':') return (ch) => ch === name;
-    const test = Object.hasOwn(CLASSES, name) ? CLASSES[name] : undefined;
-    if (!test) throw new RegexSyntaxError('invalid character class');
-    return test;
+    if (type === ':') {
+      const test = Object.hasOwn(CLASSES, name) ? CLASSES[name] : undefined;
+      if (!test) throw new RegexSyntaxError('invalid character class');
+      return test;
+    }
+    const element = resolveCollatingElement(name);
+    if (element === undefined) throw new RegexSyntaxError('invalid collating element');
+    if (type === '.' && this.chars[this.position] === '-' && (this.chars[this.position + 1] ?? ']') !== ']') {
+      this.position++;
+      const end = this.readRangeEndChar();
+      return makeCodeRangeTest(element, end);
+    }
+    return type === '=' ? (ch) => matchesEquivalenceClass(element, ch) : (ch) => ch === element;
+  }
+
+  private readRangeEndChar(): string {
+    if (this.chars[this.position] === '[' && this.chars[this.position + 1] === '.') {
+      const rest = this.chars.slice(this.position + 2).join('');
+      const close = rest.indexOf('.]');
+      if (close === -1) throw new RegexSyntaxError('brackets ([ ]) not balanced');
+      const name = rest.slice(0, close);
+      this.position += 2 + charactersOf(name).length + 2;
+      const element = resolveCollatingElement(name);
+      if (element === undefined) throw new RegexSyntaxError('invalid collating element');
+      return element;
+    }
+    return this.chars[this.position++];
   }
 }
 

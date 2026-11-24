@@ -5,6 +5,7 @@
  */
 
 import { charactersOf, POSIX_CHARACTER_CLASSES } from './characters';
+import { matchesEquivalenceClass, resolveCollatingElement } from './collation';
 
 type BracketSpec =
   | { kind: 'char'; c: string }
@@ -26,23 +27,6 @@ const CHARACTER_CLASSES: Record<string, (c: string) => boolean> = {
   ...POSIX_CHARACTER_CLASSES,
   ascii: (c) => (c.codePointAt(0) as number) < 128,
   word: (c) => /^[\p{L}\p{N}_]$/u.test(c),
-};
-
-const COLLATING_SYMBOLS: Record<string, string> = {
-  NUL: '\0',
-  tab: '\t',
-  newline: '\n',
-  'vertical-tab': '\v',
-  'form-feed': '\f',
-  'carriage-return': '\r',
-  space: ' ',
-  hyphen: '-',
-  period: '.',
-  slash: '/',
-  backslash: '\\',
-  underscore: '_',
-  'left-square-bracket': '[',
-  'right-square-bracket': ']',
 };
 
 /** Whether the entire `text` matches `pattern`. */
@@ -370,13 +354,17 @@ function tryReadSubbracketSpec(chars: readonly string[], pos: number): { spec: B
   if (chars[pos] !== '[' || (kind !== ':' && kind !== '=')) return undefined;
   const end = findSubbracketClose(chars, pos + 2, kind);
   if (end === undefined) return undefined;
-  const rawName = chars.slice(pos + 2, end).join('');
+  const name = chars
+    .slice(pos + 2, end)
+    .join('')
+    .replaceAll(/\\(.)/g, '$1');
   if (kind === ':') {
-    const className = rawName.replaceAll(/\\(.)/g, '$1');
-    const test = Object.hasOwn(CHARACTER_CLASSES, className) ? CHARACTER_CLASSES[className] : undefined;
+    const test = Object.hasOwn(CHARACTER_CLASSES, name) ? CHARACTER_CLASSES[name] : undefined;
     return { spec: { kind: 'class', test }, next: end + 2 };
   }
-  return { spec: { kind: 'char', c: resolveCollatingSymbol(rawName) }, next: end + 2 };
+  const target = resolveCollatingElement(name);
+  const test = target === undefined ? undefined : (ch: string): boolean => matchesEquivalenceClass(target, ch);
+  return { spec: { kind: 'class', test }, next: end + 2 };
 }
 
 function readBracketAtom(chars: readonly string[], pos: number): { c: string; next: number } | undefined {
@@ -384,7 +372,11 @@ function readBracketAtom(chars: readonly string[], pos: number): { c: string; ne
   if (chars[pos] === '[' && chars[pos + 1] === '.') {
     const end = findSubbracketClose(chars, pos + 2, '.');
     if (end !== undefined) {
-      return { c: resolveCollatingSymbol(chars.slice(pos + 2, end).join('')), next: end + 2 };
+      const name = chars
+        .slice(pos + 2, end)
+        .join('')
+        .replaceAll(/\\(.)/g, '$1');
+      return { c: resolveCollatingElement(name) ?? name, next: end + 2 };
     }
   }
   if (chars[pos] === '\\') {
@@ -395,13 +387,8 @@ function readBracketAtom(chars: readonly string[], pos: number): { c: string; ne
 
 function findSubbracketClose(chars: readonly string[], from: number, delimiter: string): number | undefined {
   for (let i = from; i + 1 < chars.length; i++) {
-    if (delimiter !== '.' && chars[i] === ']') return undefined;
+    if (i > from && delimiter !== '.' && chars[i] === ']') return undefined;
     if (chars[i] === delimiter && chars[i + 1] === ']') return i;
   }
   return undefined;
-}
-
-function resolveCollatingSymbol(name: string): string {
-  if (charactersOf(name).length === 1) return name;
-  return Object.hasOwn(COLLATING_SYMBOLS, name) ? COLLATING_SYMBOLS[name] : name;
 }
