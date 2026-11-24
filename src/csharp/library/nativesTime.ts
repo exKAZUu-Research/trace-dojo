@@ -648,9 +648,17 @@ function addMonths(call: NativeCall, receiver: Value, months: number): Value {
  * string it cannot read, though .NET reads some such strings, such as `5/6/2024`, a time alone, and English month names.
  */
 function parseDate(text: string): bigint | undefined {
-  // ja-JP also reads the long date, as `2024年3月5日 10時20分`.
+  // ja-JP also reads the long date, as `2024年3月5日 10時20分`, with the weekday that the D and F formats write, which
+  // must be the date's.
+  let weekday: number | undefined;
   const normalized = text
-    .replace(/^(\s*\d{4})年(\d{1,2})月(\d{1,2})日/, '$1/$2/$3')
+    .replace(
+      /^(\s*\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*([日月火水木金土])曜日)?/,
+      (_match, year: string, month: string, day: string, name?: string) => {
+        if (name !== undefined) weekday = '日月火水木金土'.indexOf(name);
+        return `${year}/${month}/${day}`;
+      }
+    )
     .replace(
       /(\d{1,2})時(\d{1,2})分(?:(\d{1,2})秒)?(\s*)$/,
       (_match, hour: string, minute: string, second: string | undefined, rest: string) =>
@@ -675,6 +683,7 @@ function parseDate(text: string): bigint | undefined {
     );
     // A fraction of a second has up to seven digits, one per tick (100 ns).
     const ticks = whole + BigInt(fraction.padEnd(7, '0') || '0');
+    if (weekday !== undefined && partsOf(ticks).dayOfWeek !== weekday) return undefined;
     return zoneTicks === undefined ? ticks : ticks - zoneTicks + LOCAL_OFFSET_TICKS;
   } catch {
     return undefined;
