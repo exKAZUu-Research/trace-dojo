@@ -522,8 +522,7 @@ function isValidParameterName(name: string): boolean {
 function hasUnquotedTildePrefix(parts: WordPart[], partIndex: number, from: number, afterColon: boolean): boolean {
   for (let p = partIndex; p < parts.length; p++) {
     const part = parts[p];
-    if (part.kind === 'single' || part.kind === 'double' || part.kind === 'ansiC') return false;
-    if (part.kind !== 'literal') continue;
+    if (part.kind !== 'literal') return false;
     for (let i = p === partIndex ? from : 0; i < part.text.length; i++) {
       const c = part.text[i];
       if (c === '\\') return false;

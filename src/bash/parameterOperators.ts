@@ -95,7 +95,10 @@ function joined(value: ParameterValue): string {
  * words, whose quotes and backslashes quote, as Bash 5.3 does.
  */
 function expandArgument(expander: Expander, parts: WordPart[], inDouble: boolean, isPattern: boolean): Piece[] {
-  if (isPattern) return expander.expandParts(parts, false);
+  if (isPattern) {
+    expander.checkTilde(parts, false);
+    return expander.expandParts(parts, false);
+  }
   if (!inDouble) {
     expander.checkTilde(parts, false);
     return expander
