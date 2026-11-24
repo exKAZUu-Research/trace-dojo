@@ -187,6 +187,7 @@ function pushStackFrame(frame: Frame, scannedEnvs: Set<Env>, push: Push): void {
 function pushReferences(runtime: Runtime, value: object, push: Push): void {
   if (value instanceof ConValue) {
     for (const field of value.fields) push(field);
+    for (const dict of value.dicts ?? []) push(dict);
   } else if (value instanceof Thunk) {
     for (const root of runtime.previewRoots(value) ?? []) push(root);
     if (value.state === 'done') push(value.value);

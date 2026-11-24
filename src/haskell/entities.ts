@@ -37,8 +37,17 @@ export interface ConInfo {
   arity: number;
   fieldNames?: string[];
   isInfix: boolean;
-  /** The field types with the data type's parameters as `TGen` indices. */
+  /**
+   * The field types with the data type's parameters as `TGen` indices, followed by the constructor's existential
+   * variables.
+   */
   fieldTypes: Type[];
+  /** The kinds of the existential variables, which follow the data type's parameters. */
+  exKinds?: Kind[];
+  /** The constraints whose dictionaries a value of the constructor holds, after its fields. */
+  context?: Pred[];
+  /** What a GADT constructor fixes the data type's parameters to, by position, as `IntLit :: Int -> Expr Int` does. */
+  equalities?: [number, Type][];
   /** The positions of the fields that constructing a value evaluates first, in order. */
   strictFields?: number[];
   isNewtype?: boolean;

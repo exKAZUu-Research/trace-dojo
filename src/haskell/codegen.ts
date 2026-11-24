@@ -52,6 +52,10 @@ import { chargeTypeWork } from './typeWorkBudget';
 import { type Dict, Env, HaskellException, type Slot, Thunk } from './values';
 import type { VisibleBinding, VisibleScope } from './visibleScope';
 
+function local(index: number): Core {
+  return { k: 'local', depth: 0, index };
+}
+
 /** The file name GHC's messages show for the program, which runs as `Main.hs`. */
 export const PROGRAM_FILE = 'Main.hs';
 
@@ -251,29 +255,36 @@ export class Codegen {
    * Generates a constructor's function, for uses that do not apply it to all its fields, and for every use of a
    * constructor with strict fields, which evaluates them from left to right before building the value as GHC does.
    */
+  /** A constructor's function, which takes the dictionaries of its constraints first, then its fields. */
   static constructorGlobal(con: ConInfo): GlobalDef {
     const def = globalOf(con, con.name);
     if (def.code) return def;
-    if (con.arity === 0) {
+    const dicts = con.context?.length ?? 0;
+    if (con.arity + dicts === 0) {
       def.code = { k: 'con', con, args: [] };
       return def;
     }
     let body: Core = {
       k: 'con',
       con,
-      args: Array.from({ length: con.arity }, (_, index) => ({ k: 'local', depth: 0, index }) as Core),
+      args: [
+        ...Array.from({ length: con.arity }, (_, index) => local(dicts + index)),
+        ...Array.from({ length: dicts }, (_, index) => local(index)),
+      ],
     };
     const seq: Core = { k: 'prim', prim: primitiveNamed('seq') };
     for (const position of [...(con.strictFields ?? [])].toReversed())
-      body = { k: 'app', fn: seq, args: [{ k: 'local', depth: 0, index: position }, body] };
-    def.code = { k: 'lam', arity: con.arity, size: con.arity, body };
+      body = { k: 'app', fn: seq, args: [local(dicts + position), body] };
+    def.code = { k: 'lam', arity: con.arity + dicts, size: con.arity + dicts, body };
     return def;
   }
 
-  /** A constructor applied to all its fields. */
-  private construct(con: ConInfo, args: Core[]): Core {
-    if (con.strictFields) return { k: 'app', fn: { k: 'global', global: Codegen.constructorGlobal(con) }, args };
-    return { k: 'con', con, args };
+  /** A constructor applied to all its fields, after the dictionaries of its constraints. */
+  private construct(con: ConInfo, args: Core[], dicts: Core[] = []): Core {
+    if (con.strictFields) {
+      return { k: 'app', fn: { k: 'global', global: Codegen.constructorGlobal(con) }, args: [...dicts, ...args] };
+    }
+    return { k: 'con', con, args: [...args, ...dicts] };
   }
 
   /** Generates a record field's selector, which fails for constructors without the field. */
@@ -557,7 +568,12 @@ export class Codegen {
         continue;
       }
       const fieldSlots = Array.from({ length: pat.args.length }, () => -1);
-      target[index] = { k: 'con', con: pat.con, slot, fieldSlots, fields };
+      const dictSlots = pat.dictParams?.map((param) => {
+        const dictSlot = this.frame.alloc();
+        this.frame.slots.set(param, dictSlot);
+        return dictSlot;
+      });
+      target[index] = { k: 'con', con: pat.con, slot, fieldSlots, fields, dictSlots };
       const children = [];
       for (const position of pat.order ?? pat.args.keys()) {
         const arg = pat.args[position];
@@ -670,7 +686,7 @@ export class Codegen {
               k: 'case',
               scrut: { k: 'local', depth: 0, index: plan.slot },
               bindIndex: plan.slot,
-              alts: new Map([[plan.con.tag, { slots: plan.fieldSlots, body: code }]]),
+              alts: new Map([[plan.con.tag, { slots: plan.fieldSlots, body: code, dictSlots: plan.dictSlots }]]),
               default: plan.con.type.cons.length > 1 ? fail : undefined,
             };
     }
@@ -797,7 +813,9 @@ export class Codegen {
         return this.compileVar(expr);
       }
       case 'con': {
-        return { k: 'global', global: Codegen.constructorGlobal(expr.con) };
+        const global: Core = { k: 'global', global: Codegen.constructorGlobal(expr.con) };
+        if (!expr.evidence?.length) return global;
+        return { k: 'app', fn: global, args: expr.evidence.map((item) => this.compileEvidence(item)) };
       }
       case 'lit': {
         return this.literalCore(expr.lit, expr.evidence);
@@ -881,7 +899,11 @@ export class Codegen {
         });
         for (const field of expr.fields)
           args[field.field.positions.get(expr.con) as number] = this.compileExpr(field.value);
-        return this.construct(expr.con, args);
+        return this.construct(
+          expr.con,
+          args,
+          (expr.evidence ?? []).map((item) => this.compileEvidence(item))
+        );
       }
       case 'recordUpdate': {
         return this.compileRecordUpdate(expr);
@@ -947,7 +969,8 @@ export class Codegen {
     if (head.k === 'con' && args.length >= head.con.arity && head.con.arity > 0) {
       const con = this.construct(
         head.con,
-        args.slice(0, head.con.arity).map((arg) => this.compileExpr(arg))
+        args.slice(0, head.con.arity).map((arg) => this.compileExpr(arg)),
+        (head.evidence ?? []).map((item) => this.compileEvidence(item))
       );
       const rest = args.slice(head.con.arity);
       return rest.length === 0 ? con : { k: 'app', fn: con, args: rest.map((arg) => this.compileExpr(arg)) };
@@ -1526,7 +1549,7 @@ type Plan =
   | { k: 'or'; alts: Plan[] }
   | { k: 'lit'; pat: Extract<RPat, { k: 'lit' }>; slot: number }
   | { k: 'newtype'; slot: number; fieldSlot: number; fields: Plan[] }
-  | { k: 'con'; con: ConInfo; slot: number; fieldSlots: number[]; fields: Plan[] };
+  | { k: 'con'; con: ConInfo; slot: number; fieldSlots: number[]; fields: Plan[]; dictSlots?: number[] };
 
 function binderKey(binding: Extract<RBinding, { k: 'fun' }>): LocalVar | ValueEntity {
   return binding.binder.kind === 'local' ? binding.binder.local : binding.binder.entity;

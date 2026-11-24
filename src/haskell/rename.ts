@@ -29,6 +29,7 @@ import type {
   Binder,
   LocalVar,
   RAlt,
+  RBinder,
   RBindGroup,
   RBinding,
   RClause,
@@ -73,9 +74,22 @@ export interface RDataDecl {
   params: string[];
   /** The kinds the parameters' annotations give, by position. */
   paramKinds?: (RType | undefined)[];
-  cons: { con: ConInfo; fields: RType[] }[];
+  cons: RConDecl[];
   deriving: { type: RType; cls?: ClassEntity; strategy?: DerivingStrategy; span: Span }[];
   span: Span;
+}
+
+export interface RConDecl {
+  con: ConInfo;
+  fields: RType[];
+  /**
+   * The type variables the constructor quantifies itself, in order: an existential constructor's `forall`, or every
+   * variable of a GADT constructor's signature.
+   */
+  ownVars?: RBinder[];
+  context?: RConstraint[];
+  /** For a constructor in GADT syntax, the type it constructs. */
+  result?: RType;
 }
 
 /** `deriving instance ctx => C (T a)`, which derives an instance with the context it states. */
@@ -233,6 +247,7 @@ class Renamer {
   private readonly classes: RClassDecl[] = [];
   private readonly instances: RInstanceDecl[] = [];
   private readonly standaloneDerivings: RStandaloneDeriving[] = [];
+  private readonly dataKindSigs: RModule['kindSigs'] = [];
 
   constructor(
     private readonly module: Module,
@@ -267,7 +282,7 @@ class Renamer {
       instances: this.instances,
       standaloneDerivings: this.standaloneDerivings,
       defaultDecls: this.renameDefaultDecls(decls),
-      kindSigs: this.renameKindSigs(decls),
+      kindSigs: [...this.renameKindSigs(decls), ...this.dataKindSigs],
       values,
       exports: this.buildExports(),
       hasExportList: this.module.exports !== undefined,
@@ -480,7 +495,7 @@ class Renamer {
           module: this.module.name,
           sort: decl.kind === 'data' ? 'data' : 'synonym',
           kind: STAR,
-          arity: decl.params.length,
+          arity: decl.params.length + (decl.kind === 'data' && decl.kindSig ? kindArity(decl.kindSig) : 0),
           cons: [],
           fields: new Map(),
           span: decl.span,
@@ -668,10 +683,30 @@ class Renamer {
     const like = this.ownTypes.get(decl.name.name) as { kind: 'type'; entity: TypeEntity };
     const entity = like.entity;
     const params = checkTypeParams(decl.params);
-    const cons = decl.cons.map((conDecl, index) => {
+    const extra = Array.from({ length: entity.arity - decl.params.length }, (_, index) => ` p${index}`);
+    const cons = decl.cons.map((conDecl, index): RConDecl => {
       const con = entity.cons[index];
-      const fields = conDecl.fields.map((field) => this.renameType(field, params));
-      return { con, fields };
+      if (!conDecl.exVars && !conDecl.result) {
+        return { con, fields: conDecl.fields.map((field) => this.renameType(field, params)) };
+      }
+      const own = new Set<string>(conDecl.exVars?.map((binder) => binder.name.name));
+      if (conDecl.result && !conDecl.exVars) {
+        for (const type of [...conDecl.fields, conDecl.result, ...(conDecl.context ?? [])]) collectTypeVars(type, own);
+      }
+      const vars = new Set([...(conDecl.result ? [] : params), ...own]);
+      const ownVars = conDecl.exVars
+        ? conDecl.exVars.map((binder) => ({
+            name: binder.name.name,
+            kind: binder.kind && this.renameKind(binder.kind),
+          }))
+        : [...own].map((name) => ({ name }));
+      return {
+        con,
+        fields: conDecl.fields.map((field) => this.renameType(field, vars)),
+        ownVars,
+        context: (conDecl.context ?? []).map((constraint) => this.renameType(constraint, vars)),
+        result: conDecl.result && this.renameType(conDecl.result, vars),
+      };
     });
     const deriving = decl.deriving.map((clause) => ({
       type: this.renameTypeName(clause.cls),
@@ -680,12 +715,13 @@ class Renamer {
     }));
     this.dataDecls.push({
       entity,
-      params: decl.params.map((param) => param.name),
+      params: [...decl.params.map((param) => param.name), ...extra],
       paramKinds: decl.paramKinds?.map((kind) => kind && this.renameKind(kind)),
       cons,
       deriving,
       span: decl.span,
     });
+    if (decl.kindSig) this.dataKindSigs.push({ entity, kind: this.renameKind(decl.kindSig), span: decl.span });
   }
 
   private renameSynonym(decl: Extract<Decl, { kind: 'typeSyn' }>): void {
@@ -1665,6 +1701,11 @@ class Renamer {
     if (found.kind !== 'class') throw compileError(name.span, `${describeName(name)} は型で、クラスではありません。`);
     return found.entity;
   }
+}
+
+/** The number of arguments a kind takes, as `data T :: Type -> Type where` gives `T`. */
+function kindArity(kind: TypeExpr): number {
+  return kind.kind === 'tfun' ? 1 + kindArity(kind.to) : 0;
 }
 
 function classParamIndex(decl: Extract<Decl, { kind: 'class' }>, name: Name): number {

@@ -49,8 +49,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   field_path: '入れ子のレコードの更新（OverloadedRecordUpdate）',
   forall: 'forall',
   forall_required: 'forall',
-  gadt_constructor: 'GADT の構文',
-  gadt_constructors: 'GADT の構文',
   group: 'TransformListComp の内包表記',
   transform: 'TransformListComp の内包表記',
   implicit_parameter: '暗黙のパラメータ（?x）',
@@ -648,7 +646,7 @@ function convertLocalBinds(node: Node | undefined): Decl[] {
 
 // code-gauge-allow functionCognitiveComplexity -- Each branch rejects one unsupported form of a data declaration.
 function convertData(node: Node): Decl {
-  for (const name of ['context', 'forall', 'kind', 'head']) {
+  for (const name of ['context', 'forall', 'head']) {
     const child = field(node, name);
     if (child) {
       if (name === 'context') throw unsupportedError(spanOf(child), 'data 宣言の文脈（DatatypeContexts）');
@@ -656,10 +654,20 @@ function convertData(node: Node): Decl {
       throw unsupported(child);
     }
   }
+  const kindNode = field(node, 'kind');
   const constructorsNode = field(node, 'constructors');
-  if (constructorsNode?.type === 'gadt_constructors') throw unsupported(constructorsNode);
-  const cons = constructorsNode ? fields(constructorsNode, 'constructor').map(convertConstructor) : [];
+  let cons: ConDecl[] = [];
+  if (constructorsNode?.type === 'gadt_constructors') {
+    if (!extensions.has('GADTSyntax')) {
+      throw syntaxError(spanOf(constructorsNode), 'GADT の構文を使うには、GADTSyntax の拡張が要ります。');
+    }
+    cons = fields(constructorsNode, 'constructor').flatMap(convertGadtConstructor);
+  } else if (constructorsNode) cons = fields(constructorsNode, 'constructor').map(convertConstructor);
+  if (cons.length === 0 && !constructorsNode && !extensions.has('EmptyDataDecls')) {
+    throw syntaxError(spanOf(node), '構成子のない data 宣言には、EmptyDataDecls の拡張が要ります。');
+  }
   return {
+    ...(kindNode ? { kindSig: convertKind(kindNode) } : {}),
     kind: 'data',
     name: typeDeclName(node),
     params: typeParams(node),
@@ -857,11 +865,70 @@ function convertKind(node: Node): TypeExpr {
   return convertType(node);
 }
 
+/** A constructor with its existential variables and constraints, `forall a. Show a => MkT a`. */
 function convertConstructor(node: Node): ConDecl {
-  for (const name of ['context', 'forall']) {
-    const child = field(node, name);
-    if (child) throw unsupportedError(spanOf(child), '存在型の構成子（ExistentialQuantification）');
+  const forallNode = field(node, 'forall');
+  const contextNode = field(node, 'context');
+  const converted = convertConstructorBody(node);
+  if (!forallNode && !contextNode) return converted;
+  if (!extensions.has('ExistentialQuantification') && !extensions.has('GADTs')) {
+    throw syntaxError(spanOf(node), '存在型の構成子には、ExistentialQuantification の拡張が要ります。');
   }
+  return {
+    ...converted,
+    exVars: forallNode ? namedChildren(required(forallNode, 'variables')).map(convertBinder) : [],
+    context: contextNode ? convertContext(contextNode) : [],
+  };
+}
+
+/** Converts `C1, C2 :: forall a. ctx => t1 -> t2 -> T a`, a constructor declared by its signature. */
+function convertGadtConstructor(node: Node): ConDecl[] {
+  const forallNode = field(node, 'forall');
+  const contextNode = field(node, 'context');
+  const typeNode = required(node, 'type');
+  const exVars = forallNode ? namedChildren(required(forallNode, 'variables')).map(convertBinder) : undefined;
+  const context = contextNode ? convertContext(contextNode) : [];
+  let fieldTypes: TypeExpr[] = [];
+  let fieldNames: Name[] | undefined;
+  const strictFields: number[] = [];
+  let result: TypeExpr;
+  if (typeNode.type === 'record') {
+    fieldNames = [];
+    for (const fieldNode of fields(required(typeNode, 'fields'), 'field')) {
+      const fieldType = required(fieldNode, 'type');
+      for (const nameNode of fields(fieldNode, 'name')) {
+        if (isStrictField(fieldType)) strictFields.push(fieldTypes.length);
+        fieldNames.push(plainName(nameNode));
+        fieldTypes.push(convertFieldType(fieldType));
+      }
+    }
+    result = convertType(required(typeNode, 'type'));
+  } else {
+    let current = typeNode.type === 'prefix' ? required(typeNode, 'type') : typeNode;
+    while (current.type === 'function') {
+      const parameter = required(current, 'parameter');
+      if (isStrictField(parameter)) strictFields.push(fieldTypes.length);
+      fieldTypes.push(convertFieldType(parameter));
+      current = required(current, 'result');
+    }
+    if (current.type === 'context' || current.type === 'forall')
+      throw unsupportedError(spanOf(current), '入れ子の forall');
+    result = convertType(current);
+  }
+  return fields(node, 'name').map((nameNode) => ({
+    name: plainName(nameNode),
+    fields: fieldTypes,
+    ...(fieldNames ? { fieldNames } : {}),
+    ...(strictFields.length > 0 ? { strictFields } : {}),
+    isInfix: false,
+    span: spanOf(node),
+    exVars,
+    context,
+    result,
+  }));
+}
+
+function convertConstructorBody(node: Node): ConDecl {
   const inner = required(node, 'constructor');
   rejectUnsupported(inner);
   switch (inner.type) {

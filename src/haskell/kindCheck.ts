@@ -5,7 +5,7 @@ import type { Checker } from './infer';
 import { checkSchemeAmbiguity, typeVarNames } from './infer';
 import { rememberKind } from './kindTemplates';
 import type { RType } from './rast';
-import type { RClassDecl, RDataDecl, RModule, RSynonymDecl } from './rename';
+import type { RClassDecl, RConDecl, RDataDecl, RModule, RSynonymDecl } from './rename';
 import {
   CONSTRAINT,
   defaultKind,
@@ -138,8 +138,10 @@ function inferTypeDeclaration(checker: Checker, entry: Exclude<KindDeclaration, 
   const vars = new Map<string, Type>(decl.params.map((name, index) => [name, { tag: 'tgen', index }]));
   const varKinds = new Map<string, Kind>(decl.params.map((name, index) => [name, kinds[index]]));
   if (entry.kind === 'data') {
-    for (const { con, fields } of entry.decl.cons)
-      con.fieldTypes = fields.map((field) => checker.convertType(field, vars, varKinds, STAR));
+    for (const conDecl of entry.decl.cons) {
+      if (conDecl.ownVars) inferConstructorVariables(checker, entry.decl, conDecl, kinds);
+      else conDecl.con.fieldTypes = conDecl.fields.map((field) => checker.convertType(field, vars, varKinds, STAR));
+    }
   } else {
     let resultKind = entry.decl.entity.kind;
     for (let index = 0; index < decl.params.length; index++) resultKind = (resultKind as { tag: 'arrow'; to: Kind }).to;
@@ -150,6 +152,64 @@ function inferTypeDeclaration(checker: Checker, entry: Exclude<KindDeclaration, 
 /** The kinds of a class's parameters, in order. */
 export function classParamKinds(cls: ClassEntity): Kind[] {
   return cls.packed ? parameterKinds(cls.packed.kind) : [cls.tyvarKind];
+}
+
+/**
+ * Types a constructor with variables of its own: an existential one keeps the data type's parameters and adds its
+ * `forall` variables; a GADT one maps each variable its result type has at a parameter's position to that parameter,
+ * fixes the other parameters to the types at their positions, and keeps the rest of its variables as existential.
+ */
+function inferConstructorVariables(checker: Checker, decl: RDataDecl, conDecl: RConDecl, paramKinds: Kind[]): void {
+  const { con } = conDecl;
+  const ownVars = conDecl.ownVars ?? [];
+  const universal = new Map<string, number>();
+  const resultArgs: RType[] = [];
+  if (conDecl.result) {
+    let head = conDecl.result;
+    while (head.k === 'app') {
+      resultArgs.unshift(head.arg);
+      head = head.fn;
+    }
+    if (head.k !== 'con' || head.entity !== decl.entity || resultArgs.length !== decl.params.length) {
+      throw compileError(
+        con.span ?? decl.span,
+        `構成子 ${con.name} の型は、${decl.entity.name} の型で終わらなければなりません。`
+      );
+    }
+    for (const [index, arg] of resultArgs.entries()) {
+      if (arg.k === 'var' && !universal.has(arg.name)) universal.set(arg.name, index);
+    }
+  } else for (const [index, name] of decl.params.entries()) universal.set(name, index);
+  const existential = ownVars.filter((binder) => !universal.has(binder.name));
+  const vars = new Map<string, Type>();
+  const varKinds = new Map<string, Kind>();
+  for (const [name, index] of universal) {
+    vars.set(name, { tag: 'tgen', index });
+    varKinds.set(name, paramKinds[index]);
+  }
+  const kindVars = new Map<string, Kind>();
+  con.exKinds = existential.map((binder, position) => {
+    const kind = binder.kind ? checker.kindOf(binder.kind, kindVars) : freshKindVar();
+    vars.set(binder.name, { tag: 'tgen', index: decl.params.length + position });
+    varKinds.set(binder.name, kind);
+    return kind;
+  });
+  for (const binder of ownVars) {
+    if (
+      binder.kind &&
+      universal.has(binder.name) &&
+      !unifyKinds(varKinds.get(binder.name) as Kind, checker.kindOf(binder.kind, kindVars))
+    ) {
+      throw compileError(con.span ?? decl.span, `構成子 ${con.name} の型変数 ${binder.name} の種類が合いません。`);
+    }
+  }
+  con.fieldTypes = conDecl.fields.map((field) => checker.convertType(field, vars, varKinds, STAR));
+  con.context = checker.convertConstraints(conDecl.context ?? [], vars, varKinds);
+  con.equalities = resultArgs.flatMap((arg, index): [number, Type][] =>
+    arg.k === 'var' && universal.get(arg.name) === index
+      ? []
+      : [[index, checker.convertType(arg, vars, varKinds, paramKinds[index])]]
+  );
 }
 
 function inferClass(checker: Checker, decl: RClassDecl): void {

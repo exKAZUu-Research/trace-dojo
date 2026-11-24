@@ -65,8 +65,11 @@ export interface CaseCore {
   scrut: Core;
   /** The slot that receives the evaluated scrutinee, if any. */
   bindIndex?: number;
-  /** The alternatives by constructor tag, each with the slots its fields go to (-1 for unused fields). */
-  alts: Map<number, { slots: number[]; body: Core }>;
+  /**
+   * The alternatives by constructor tag, each with the slots its fields go to (-1 for unused fields), and those its
+   * dictionaries go to for a constructor with constraints.
+   */
+  alts: Map<number, { slots: number[]; body: Core; dictSlots?: number[] }>;
   default?: Core;
 }
 

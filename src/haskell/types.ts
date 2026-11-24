@@ -173,12 +173,15 @@ export function tap(fn: Type, ...args: Type[]): Type {
 export function prune(type: Type): Type {
   if (type.tag !== 'tvar' || !type.ref) return type;
   const path: TVar[] = [];
+  let rigid = false;
   while (type.tag === 'tvar' && type.ref) {
     chargeTypeWork();
+    // A rigid variable stands for a type only while a GADT match assumes it, so paths through it stay as they are.
+    if (type.skolem) rigid = true;
     path.push(type);
     type = type.ref;
   }
-  for (const variable of path) variable.ref = type;
+  if (!rigid) for (const variable of path) variable.ref = type;
   return type;
 }
 

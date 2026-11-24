@@ -180,10 +180,11 @@ export class Machine {
       case 'con': {
         if (code.args.length === 0) return nullary(code.con);
         this.runtime.allocate(code.args.length);
-        return new ConValue(
-          code.con,
-          code.args.map((arg) => this.makeLetSlot(arg, env))
-        );
+        const slots = code.args.map((arg) => this.makeLetSlot(arg, env));
+        if (code.con.context?.length) {
+          return new ConValue(code.con, slots.slice(0, code.con.arity), slots.slice(code.con.arity));
+        }
+        return new ConValue(code.con, slots);
       }
       case 'iodo': {
         return new IODo(code, env as Env);
@@ -648,7 +649,8 @@ export class Machine {
     }
     const alt = core.alts.get(scrutinee.con.tag);
     if (alt) {
-      const { slots } = alt;
+      const { slots, dictSlots } = alt;
+      if (dictSlots) for (const [index, slot] of dictSlots.entries()) env.slots[slot] = scrutinee.dicts![index];
       for (let index = 0; index < slots.length; index++) {
         if (slots[index] >= 0)
           env.slots[slots[index]] = typedSlot(

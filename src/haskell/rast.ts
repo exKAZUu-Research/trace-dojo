@@ -25,7 +25,13 @@ export type RExpr = (
       /** The dictionaries the variable's instantiated scheme takes, in order. */
       evidence?: Evidence[];
     }
-  | { k: 'con'; con: ConInfo; span: Span }
+  | {
+      k: 'con';
+      con: ConInfo;
+      span: Span;
+      /** The dictionaries of the constructor's constraints, which the value it builds holds. */
+      evidence?: Evidence[];
+    }
   | { k: 'lit'; lit: Literal; span: Span; evidence?: Evidence }
   | { k: 'app'; fn: RExpr; arg: RExpr; span: Span }
   | { k: 'lambda'; pats: RPat[]; body: RExpr; span: Span }
@@ -45,7 +51,7 @@ export type RExpr = (
   | { k: 'comp'; expr: RExpr; quals: RStmt[]; span: Span }
   | { k: 'rsection'; op: RExpr; right: RExpr; span: Span }
   | { k: 'typed'; expr: RExpr; sig: RSigType; span: Span; dictParams?: DictParam[]; evidence?: Evidence[] }
-  | { k: 'recordCon'; con: ConInfo; fields: RFieldBind[]; span: Span }
+  | { k: 'recordCon'; con: ConInfo; fields: RFieldBind[]; span: Span; evidence?: Evidence[] }
   | { k: 'recordUpdate'; expr: RExpr; fields: RFieldBind[]; span: Span; cons?: ConInfo[] }
   | { k: 'hole'; name: string; span: Span }
   | { k: 'tyapp'; expr: RExpr; typeArg: RType | undefined; span: Span }
@@ -70,7 +76,15 @@ export type RPat = (
       negate?: Evidence;
       type?: Type;
     }
-  | { k: 'con'; con: ConInfo; args: RPat[]; order?: number[]; span: Span }
+  | {
+      k: 'con';
+      con: ConInfo;
+      args: RPat[];
+      order?: number[];
+      span: Span;
+      /** The dictionaries a matched value of a constructor with constraints holds, which the match binds. */
+      dictParams?: DictParam[];
+    }
   | { k: 'as'; local: LocalVar; pat: RPat; span: Span }
   /** `!p`, which evaluates the value before matching it. */
   | { k: 'bang'; pat: RPat; span: Span }

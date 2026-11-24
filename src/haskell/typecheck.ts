@@ -368,6 +368,13 @@ function deriveInstances(checker: Checker, module: RModule, options: TypecheckOp
   for (const decl of module.dataDecls) {
     for (const { cls, span, strategy } of decl.deriving) {
       assert(cls, 'The derived class is unresolved');
+      const special = decl.entity.cons.find((con) => con.exKinds);
+      if (special) {
+        throw compileError(
+          span,
+          `構成子 ${special.name} に存在型の型変数・文脈・特定の結果の型があるので、${cls.name} を deriving できません。`
+        );
+      }
       const anyclass = derivingStrategy(module, options, decl, cls, strategy, span) === 'anyclass';
       const functorLike = !anyclass && FUNCTOR_LIKE_CLASSES.has(cls.name);
       const kinds = typeParamKinds(decl.entity);

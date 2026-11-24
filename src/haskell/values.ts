@@ -52,7 +52,9 @@ export class Env {
 export class ConValue {
   constructor(
     readonly con: ConInfo,
-    readonly fields: Slot[]
+    readonly fields: Slot[],
+    /** The dictionaries of a constructor's constraints, which matching the value gives. */
+    readonly dicts?: Slot[]
   ) {}
 }
 

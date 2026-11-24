@@ -168,6 +168,15 @@ export interface ConDecl {
   fieldNames?: Name[];
   isInfix: boolean;
   span: Span;
+  /**
+   * The type variables the constructor quantifies itself: the existential ones of `forall a. C a`, or every variable
+   * of a GADT constructor's signature.
+   */
+  exVars?: TyVarBinder[];
+  /** The constraints the constructor holds the evidence of, `Show a =>`. */
+  context?: Constraint[];
+  /** For a constructor in GADT syntax, the type it constructs, `T Int`. */
+  result?: TypeExpr;
 }
 
 export type Decl =
@@ -188,6 +197,8 @@ export type Decl =
       params: Name[];
       /** The kinds the parameters' annotations give, by position. */
       paramKinds?: (TypeExpr | undefined)[];
+      /** The kind `data T :: k where` gives the type. */
+      kindSig?: TypeExpr;
       cons: ConDecl[];
       deriving: DerivingClause[];
       span: Span;

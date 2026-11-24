@@ -95,8 +95,19 @@ export function typeError(span: Span, message: string): never {
   throw compileError(span, message);
 }
 
+/** The state of a construct whose patterns may give existential types, constraints, and GADT equalities. */
+interface PatternScope {
+  outer: number;
+  /** The wanted constraints outside the scope, set once a pattern gives something the scope solves under. */
+  savedWanted?: EvidenceHole[];
+  givens: { pred: Pred; evidence: Evidence }[];
+  /** The rigid types GADT equalities stand for in the scope. */
+  assumed: TVar[];
+}
+
 export class Checker {
   private readonly recursion = new RecursionBudget();
+  private readonly patternScopes: PatternScope[] = [];
   level = 0;
   wanted: EvidenceHole[] = [];
 
@@ -412,7 +423,9 @@ export class Checker {
         return this.typeOfRef(expr.ref, expr.span, expr.name, expr);
       }
       case 'con': {
-        return this.instantiate(conScheme(expr.con), expr.span, expr.con.name).type;
+        const { type, evidence } = this.instantiate(conScheme(expr.con), expr.span, expr.con.name);
+        if (evidence.length > 0) expr.evidence = evidence;
+        return type;
       }
       case 'lit': {
         return this.inferLiteral(expr);
@@ -472,6 +485,19 @@ export class Checker {
         return instantiated.type;
       }
       case 'recordCon': {
+        if (expr.con.exKinds) {
+          const { type, evidence } = this.instantiate(conScheme(expr.con), expr.span, expr.con.name);
+          if (evidence.length > 0) expr.evidence = evidence;
+          const fieldTypes: Type[] = [];
+          let rest = prune(type);
+          for (let index = 0; index < expr.con.arity; index++) {
+            const { args } = splitApp(rest);
+            fieldTypes.push(args[0]);
+            rest = prune(args[1]);
+          }
+          this.checkFields(expr.fields, expr.con, fieldTypes);
+          return rest;
+        }
         const { type, fieldTypes } = this.instantiateCon(expr.con);
         this.checkFields(expr.fields, expr.con, fieldTypes);
         return type;
@@ -520,7 +546,7 @@ export class Checker {
     const evidence = scheme.preds.map((pred) =>
       this.want({ cls: pred.cls, type: instantiateType(pred.type, args) }, head.span, `${name} の使用`)
     );
-    if (head.k === 'var') head.evidence = evidence;
+    if (head.k === 'var' || (head.k === 'con' && evidence.length > 0)) head.evidence = evidence;
     const type = instantiateType(scheme.type, args);
     head.type = type;
     return type;
@@ -572,11 +598,62 @@ export class Checker {
    */
   inPatternScope<T>(run: () => T): T {
     const saved = this.scopedTypes;
+    const scope: PatternScope = { outer: this.level, givens: [], assumed: [] };
+    this.patternScopes.push(scope);
+    let completed = false;
     try {
-      return run();
+      const result = run();
+      completed = true;
+      return result;
     } finally {
+      this.patternScopes.pop();
       this.scopedTypes = saved;
+      if (scope.savedWanted) {
+        if (completed) this.leaveImplication(scope);
+        else {
+          for (const variable of scope.assumed) variable.ref = undefined;
+          this.level = scope.outer;
+          this.wanted = scope.savedWanted;
+        }
+      }
     }
+  }
+
+  /**
+   * Starts solving the constraints of the current pattern scope apart, under what its patterns give: existential
+   * types, constraints, and GADT equalities.
+   */
+  private enterImplication(span: Span): PatternScope {
+    const scope = this.patternScopes.at(-1);
+    if (!scope) typeError(span, 'この場所では、存在型や GADT の構成子のパターンは使えません。');
+    if (!scope.savedWanted) {
+      scope.savedWanted = this.wanted;
+      this.wanted = [];
+      this.level++;
+    }
+    return scope;
+  }
+
+  private leaveImplication(scope: PatternScope): void {
+    this.level = scope.outer;
+    const inner = this.wanted;
+    this.wanted = scope.savedWanted as EvidenceHole[];
+    const { retained, deferred } = this.simplify(inner, scope.outer, scope.givens);
+    for (const hole of retained) {
+      const evidence = entailByGivens(scope.givens, hole.pred);
+      if (evidence) {
+        hole.solution = evidence;
+        continue;
+      }
+      const vars = [...typeVarsOf(hole.pred.type)];
+      if (vars.some((variable) => variable.skolem && variable.level > scope.outer)) {
+        typeError(hole.span, `${new TypePrinter().showPred(hole.pred)} を導けません（${hole.origin}）。`);
+      }
+      for (const variable of vars) if (variable.level > scope.outer) variable.level = scope.outer;
+      deferred.push(hole);
+    }
+    for (const variable of scope.assumed) variable.ref = undefined;
+    this.wanted.push(...deferred);
   }
 
   private inferApp(expr: Extract<RExpr, { k: 'app' }>): Type {
@@ -636,6 +713,41 @@ export class Checker {
       const position = fieldBind.field.positions.get(con) as number;
       this.checkExpr(fieldBind.value, fieldTypes[position], `フィールド ${fieldBind.field.name}`);
     }
+  }
+
+  private matchConstructor(con: ConInfo, type: Type, span: Span): Type[] {
+    const { type: conType, fieldTypes } = this.instantiateCon(con);
+    this.unify(conType, type, span, `構成子 ${con.name} のパターン`);
+    return fieldTypes;
+  }
+
+  /**
+   * Types a match of a constructor with variables of its own. Its existential variables are new rigid types the match
+   * scope must not let escape; its constraints are given there, with the dictionaries the value holds; and a GADT
+   * constructor's equalities hold there, which a rigid type of the scrutinee then stands for.
+   */
+  private matchConstructorVariables(pat: Extract<RPat, { k: 'con' }>, type: Type): Type[] {
+    const { con, span } = pat;
+    const scope = this.enterImplication(span);
+    const args = typeParamKinds(con.type).map((kind) => this.freshVar(kind));
+    this.unify(tap(tcon(con.type), ...args), type, span, `構成子 ${con.name} のパターン`);
+    const existentials = (con.exKinds ?? []).map((kind) => freshSkolem(kind, this.level, 'a'));
+    const all = [...args, ...existentials];
+    for (const [index, fixed] of con.equalities ?? []) {
+      const target = prune(args[index]);
+      const assumed = instantiateType(fixed, all);
+      if (target.tag === 'tvar' && target.skolem) {
+        target.ref = assumed;
+        scope.assumed.push(target);
+      } else if (target.tag === 'tvar') {
+        typeError(span, `GADT の構成子 ${con.name} で照合する値の型が決まりません。型シグネチャを付けてください。`);
+      } else this.unify(target, assumed, span, `構成子 ${con.name} のパターン`);
+    }
+    pat.dictParams = (con.context ?? []).map((pred) =>
+      newDictParam({ cls: pred.cls, type: instantiateType(pred.type, all) })
+    );
+    for (const param of pat.dictParams) scope.givens.push({ pred: param.pred, evidence: { kind: 'param', param } });
+    return con.fieldTypes.map((fieldType) => instantiateType(fieldType, all));
   }
 
   instantiateCon(con: ConInfo): { type: Type; fieldTypes: Type[] } {
@@ -793,8 +905,9 @@ export class Checker {
           break;
         }
         case 'con': {
-          const { type: conType, fieldTypes } = this.instantiateCon(pat.con);
-          this.unify(conType, type, pat.span, `構成子 ${pat.con.name} のパターン`);
+          const fieldTypes = pat.con.exKinds
+            ? this.matchConstructorVariables(pat as Extract<RPat, { k: 'con' }>, type)
+            : this.matchConstructor(pat.con, type, pat.span);
           for (let index = pat.args.length - 1; index >= 0; index--) {
             pending.push({ pat: pat.args[index], type: fieldTypes[index] });
           }
@@ -1139,10 +1252,14 @@ function setBinderScheme(binder: Binder, scheme: Scheme): void {
 }
 
 export function conScheme(con: ConInfo): Scheme {
-  const kinds = typeParamKinds(con.type);
-  let type: Type = tap(tcon(con.type), ...kinds.map((_, index): Type => ({ tag: 'tgen', index })));
+  const params = typeParamKinds(con.type);
+  const kinds = [...params, ...(con.exKinds ?? [])];
+  const resultArgs = params.map(
+    (_, index): Type => con.equalities?.find(([position]) => position === index)?.[1] ?? { tag: 'tgen', index }
+  );
+  let type: Type = tap(tcon(con.type), ...resultArgs);
   for (const field of con.fieldTypes.toReversed()) type = fnType(field, type);
-  return { kinds, preds: [], type, specified: kinds.map((_, index) => index) };
+  return { kinds, preds: con.context ?? [], type, specified: kinds.map((_, index) => index) };
 }
 
 export function typeParamKinds(type: TypeEntity): Kind[] {
