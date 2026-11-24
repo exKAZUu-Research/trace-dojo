@@ -620,17 +620,36 @@ export class Shell implements ArithmeticHost {
   }
 
   private executeDeclaration(statement: Extract<Statement, { kind: 'declaration' }>): number {
-    return this.withRedirects(statement.redirects, () => {
-      const args: DeclarationArgument[] = [];
-      for (const arg of statement.args) {
-        if ('append' in arg) args.push(arg);
-        else args.push(...this.expander.expandWords([arg]));
-      }
-      const status = runDeclaration(this, statement.name, args);
-      const last = args.at(-1);
-      this.state.lastArgument = last === undefined ? statement.name : typeof last === 'string' ? last : last.text;
-      return status;
-    });
+    const args: DeclarationArgument[] = [];
+    for (const arg of statement.args) {
+      if ('append' in arg) {
+        args.push(
+          arg.value
+            ? {
+                ...arg,
+                value: {
+                  parts: [
+                    {
+                      kind: 'single',
+                      text: this.expander.withSpacedStar(() => this.expander.expandAssignmentValue(arg.value as Word)),
+                    },
+                  ],
+                  row: arg.value.row,
+                  text: arg.value.text,
+                },
+              }
+            : arg
+        );
+      } else args.push(...this.expander.expandWords([arg]));
+    }
+    return this.withRedirects(statement.redirects, () =>
+      this.withTemporaryScope(statement.assignments, () => {
+        const status = runDeclaration(this, statement.name, args);
+        const last = args.at(-1);
+        this.state.lastArgument = last === undefined ? statement.name : typeof last === 'string' ? last : last.text;
+        return status;
+      })
+    );
   }
 
   // ---------------------------------------------------------------- functions
