@@ -187,7 +187,7 @@ function sortedDictionaryNatives(prefix: string): Record<string, NativeMethod> {
     // The views share the dictionary's arrays, so a saved Keys or Values shows later changes, as .NET's views do.
     [`${prefix}.get_Keys`]: (call, receiver) => {
       const state = sortedOf(receiver);
-      const view = liveView(call, state.keys, state.keyType);
+      const view = liveView(call, state, state.keys, state.keyType);
       // Its keys are found by the dictionary's comparer, as ContainsKey and IndexOfKey find them.
       (view.native as ListState).indexOfKey = (key) => {
         const { index, isFound } = state.position(key);
@@ -197,7 +197,7 @@ function sortedDictionaryNatives(prefix: string): Record<string, NativeMethod> {
     },
     [`${prefix}.get_Values`]: (call, receiver) => {
       const state = sortedOf(receiver);
-      return liveView(call, state.values, state.valueType as Type);
+      return liveView(call, state, state.values, state.valueType as Type);
     },
     [`${prefix}.Add`]: (call, receiver, [key, value]) => {
       if (key === undefined) failNull('key');
@@ -774,8 +774,16 @@ defineNatives({
 });
 
 /** A read-only collection over a sorted dictionary's own keys or values, which changes as the dictionary does. */
-function liveView(call: NativeCall, items: Value[], elementType: Type): CsObject {
+function liveView(call: NativeCall, owner: SortedState, items: Value[], elementType: Type): CsObject {
   const view = new CsObject(libraryType(call, 'System.Collections.ObjectModel.ReadOnlyCollection', [elementType]), []);
-  view.native = new ListState(items, elementType);
+  const state = new ListState(items, elementType);
+  // The view's enumerators see the dictionary's changes, so changing it during foreach fails as .NET's does.
+  Object.defineProperty(state, 'version', { get: () => owner.version, set: () => {} });
+  state.modified = () =>
+    new PendingException(
+      'System.InvalidOperationException',
+      'Collection was modified after the enumerator was instantiated.'
+    );
+  view.native = state;
   return view;
 }

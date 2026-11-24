@@ -168,6 +168,8 @@ export class ListState implements EnumerableState {
   version = 0;
   /** For a view of a sorted dictionary's keys, where a key is by the dictionary's comparer, which its search uses. */
   indexOfKey?: (key: Value) => number;
+  /** The exception an enumeration throws when the list changes under it, which a view gives its owner's. */
+  modified: () => PendingException = collectionModified;
   /** The capacity of .NET's backing array, which `Capacity` shows: it starts at 4 and doubles as items are added. */
   capacity = 0;
 
@@ -185,10 +187,10 @@ export class ListState implements EnumerableState {
   *enumerate(): Generator<Value> {
     const version = this.version;
     for (let index = 0; index < this.items.length; index++) {
-      if (this.version !== version) throw collectionModified();
+      if (this.version !== version) throw this.modified();
       yield this.items[index];
     }
-    if (this.version !== version) throw collectionModified();
+    if (this.version !== version) throw this.modified();
   }
 
   references(): Value[] {
