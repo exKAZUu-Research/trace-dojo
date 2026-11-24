@@ -94,17 +94,27 @@ export class ExpressionConverter {
         return { kind: 'qualifiedType', left, name, typeArgs, ...position };
       }
       case 'array_type': {
-        const element = this.convertType(requiredField(node, 'type'));
-        const rank = requiredField(node, 'rank');
-        if (namedChildren(rank).length > 0) {
-          throw new CompileError([
-            {
-              row: rank.startPosition.row,
-              message: "CS0270: 配列のサイズは変数宣言の中で指定できません ('new' を使用して初期化してください)",
-            },
-          ]);
+        // The grammar nests `int[][,]` with its last rank outermost, while C# reads the first one written as the
+        // outermost array, as array creation does: a jagged array of 2D arrays.
+        const ranks: Node[] = [];
+        let base: Node = node;
+        while (base.type === 'array_type') {
+          ranks.unshift(requiredField(base, 'rank'));
+          base = requiredField(base, 'type');
         }
-        return { kind: 'arrayType', element, rank: rankOf(rank), ...position };
+        let type = this.convertType(base);
+        for (const rank of ranks.toReversed()) {
+          if (namedChildren(rank).length > 0) {
+            throw new CompileError([
+              {
+                row: rank.startPosition.row,
+                message: "CS0270: 配列のサイズは変数宣言の中で指定できません ('new' を使用して初期化してください)",
+              },
+            ]);
+          }
+          type = { kind: 'arrayType', element: type, rank: rankOf(rank), ...position };
+        }
+        return type;
       }
       case 'nullable_type': {
         return { kind: 'nullableType', inner: this.convertType(requiredField(node, 'type')), ...position };
