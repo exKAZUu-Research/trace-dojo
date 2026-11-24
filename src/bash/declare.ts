@@ -170,7 +170,7 @@ function commitCompoundDeclaration(
     return undefined;
   }
   const variable = ensureCompoundTargetVariable(shell, targetName, set, localScope);
-  const preUnsetStore = resolvePreUnsetNamerefStore(shell, variable, options, localScope !== undefined, true);
+  const preUnsetStore = resolveCompoundPreUnsetStore(shell, variable, options, localScope !== undefined);
   return executeCompoundCommit(shell, builtin, arg, variable, preUnsetStore, options, rawItems);
 }
 
@@ -750,6 +750,38 @@ function operandSubscriptText(operand: DeclarationArgument, parsed: { subscript?
 interface PreUnsetNamerefStore extends DeclarationDestination {
   finalLink: Variable;
   deferUnsetN: boolean;
+}
+
+function resolveCompoundPreUnsetStore(
+  shell: Shell,
+  finalLink: Variable,
+  { unset }: Options,
+  isLocal: boolean
+): PreUnsetNamerefStore | undefined {
+  if (isLocal || !unset.has('n') || !finalLink.attributes.has('n')) return undefined;
+  const firstHop = finalLink.value?.kind === 'scalar' ? finalLink.value.value : '';
+  if (firstHop === '') return undefined;
+  const { targetName, referencedSubscript } = resolveVisibleReferentTarget(shell, firstHop);
+  return {
+    variable: ensureStoreVariable(shell, targetName),
+    finalLink,
+    deferUnsetN: referencedSubscript === undefined,
+    ...(referencedSubscript === undefined ? {} : { referencedSubscript }),
+  };
+}
+
+function resolveVisibleReferentTarget(
+  shell: Shell,
+  firstHop: string
+): { targetName: string; referencedSubscript?: string } {
+  const direct = firstHop.includes('[') ? shell.findOwnVariable(firstHop) : undefined;
+  if (direct) return { targetName: firstHop };
+  const split = shell.splitSubscript(firstHop);
+  if (split) {
+    const resolvedArr = resolveDeclaredTarget(shell, split.name, new Set(), new Set(), false, false).targetName;
+    return { targetName: resolvedArr, referencedSubscript: split.subscript };
+  }
+  return resolveDeclaredTarget(shell, firstHop, new Set(), new Set(), false, false);
 }
 
 function resolvePreUnsetNamerefStore(
