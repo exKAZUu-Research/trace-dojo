@@ -1,6 +1,7 @@
 import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
 import { skipSubscript } from './arithmetic';
+import { findForHeaderSemicolons } from './syntaxCheck';
 import { arithmeticEnd, skipBalanced, skipBlanks, skipWordPiece, SourceText } from './syntaxWords';
 import { isIdentifier } from './variables';
 
@@ -83,28 +84,12 @@ function collectErrorNodes(root: Node): Node[] {
   return errors;
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Preserves newlines and top-level semicolons outside quotes and parentheses in C-style for headers.
 function blankArithmeticSlice(slice: string, keepsSemicolons: boolean): string {
   if (!keepsSemicolons) return slice.replaceAll(/[^\n]/g, ' ');
+  const semis = new Set(findForHeaderSemicolons(slice));
   let out = '';
-  let depth = 0;
-  let quote: string | undefined;
   for (let i = 0; i < slice.length; i++) {
-    const c = slice[i];
-    if (c === '\\' && quote !== "'") {
-      out += i + 1 < slice.length && slice[i + 1] === '\n' ? ' \n' : '  ';
-      i++;
-      continue;
-    }
-    if (quote) {
-      if (c === quote) quote = undefined;
-      out += c === '\n' ? '\n' : ' ';
-      continue;
-    }
-    if (c === "'" || c === '"') quote = c;
-    else if (c === '(') depth++;
-    else if (c === ')' && depth > 0) depth--;
-    out += c === '\n' || (c === ';' && depth === 0) ? c : ' ';
+    out += slice[i] === '\n' || semis.has(i) ? slice[i] : ' ';
   }
   return out;
 }

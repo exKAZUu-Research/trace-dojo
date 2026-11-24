@@ -17,6 +17,7 @@ import type {
   WordPart,
 } from './ast';
 import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
+import { findForHeaderSemicolons } from './syntaxCheck';
 import { isReservedCommand, unexpectedTokenMessage } from './syntaxErrors';
 import { unsupportedMessage } from './unsupported';
 import { isIdentifier } from './variables';
@@ -796,22 +797,12 @@ function nextClauseWord(ifNode: Node, after: Node): Node | undefined {
   return words.find((word) => word.startIndex >= after.endIndex);
 }
 
-/** Splits the text of `for ((init; condition; update))` at its two semicolons outside parentheses. */
+/** Splits the text of `for ((init; condition; update))` at its two semicolons outside quotes, expansions, and `(...)`. */
 function splitForHeader(raw: string): [string, string, string] {
-  const parts: string[] = [];
-  let depth = 0;
-  let start = 0;
-  for (let i = 0; i < raw.length; i++) {
-    if (raw[i] === '(') depth++;
-    else if (raw[i] === ')') depth--;
-    else if (raw[i] === ';' && depth === 0 && parts.length < 2) {
-      parts.push(raw.slice(start, i));
-      start = i + 1;
-    }
-  }
-  parts.push(raw.slice(start));
-  while (parts.length < 3) parts.push('');
-  return parts as [string, string, string];
+  const [first, second] = findForHeaderSemicolons(raw);
+  if (first === undefined) return [raw, '', ''];
+  if (second === undefined) return [raw.slice(0, first), raw.slice(first + 1), ''];
+  return [raw.slice(0, first), raw.slice(first + 1, second), raw.slice(second + 1)];
 }
 
 /** Whether a subscript node holds `a[1][2]`, two subscripts in a row, rather than one with nested brackets. */

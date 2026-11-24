@@ -8,7 +8,7 @@ import { maskInvalidArithmetic } from './arithmeticMasking';
 import type { Program, Statement, WordPart } from './ast';
 import { hideInvalidBackquotes } from './backquotes';
 import { Converter, decodeAnsiC } from './converter';
-import { checkBashSyntax } from './syntaxCheck';
+import { checkBashSyntax, createValidatorSourceText } from './syntaxCheck';
 import { syntaxErrorMessage, syntaxErrorsOf } from './syntaxErrors';
 import { skipBalanced, skipWordPiece, SourceText } from './syntaxWords';
 import { UnsupportedFeatureError } from './unsupported';
@@ -83,28 +83,33 @@ function isEmptySubscript(node: Node): boolean {
  * The pieces of arithmetic text the grammar could not read, whose expansions Bash still performs before it evaluates
  * the text: the text is read as a double-quoted string, as Bash treats it.
  */
+// code-gauge-allow functionCognitiveComplexity -- Scans raw arithmetic text across quotes, line continuations, escapes, and shell expansions.
 function rawArithmeticPieces(raw: string): (string | WordPart)[] {
-  if (!/[$`]/.test(raw)) return [raw];
-  const wrapped = `"${raw.replaceAll('"', String.raw`\"`)}"`;
-  const tree = parser.parse(wrapped);
-  if (!tree) throw new Error('The parser returned no tree');
-  try {
-    const string = tree.rootNode.descendantsOfType('string')[0];
-    if (tree.rootNode.hasError || !string) return [raw];
-    const [part] = new Converter(
-      wrapped,
-      new Set(),
-      new Map(),
-      () => [raw],
-      reparseBackquoted,
-      new Map(),
-      new Set()
-    ).word(string).parts;
-    if (part?.kind !== 'double') return [raw];
-    return part.parts.map((inner) => (inner.kind === 'literal' ? inner.text.replaceAll(String.raw`\"`, '"') : inner));
-  } finally {
-    tree.delete();
+  if (!/[$`"\\]/.test(raw)) return [raw];
+  const text = createValidatorSourceText(raw);
+  const pieces: (string | WordPart)[] = [];
+  let plain = '';
+  for (let i = 0; i < raw.length;) {
+    const c = raw[i];
+    const next = raw[i + 1];
+    if (c === '\\' && next !== undefined && '$`\\\n'.includes(next)) {
+      if (next !== '\n') plain += next;
+      i += 2;
+      continue;
+    }
+    if (c === '"' || c === '`' || (c === '$' && next !== undefined && /['"{([A-Za-z_0-9@#?*!$-]/.test(next))) {
+      if (plain) pieces.push(plain);
+      plain = '';
+      const step = readSubscriptPiece(raw, i, text);
+      pieces.push(...step.parts);
+      i = step.next;
+      continue;
+    }
+    plain += c;
+    i++;
   }
+  if (plain) pieces.push(plain);
+  return pieces;
 }
 
 /** The statements of a backquoted body read again, padded so that its rows stay those of the program. */

@@ -23,13 +23,27 @@ export function checkBashSyntax(source: string): {
   backquotes: { start: number; end: number }[];
   literalSingleQuotes: number[];
 } {
-  const text = new SourceText(source);
-  text.parseSubstitution = (start) => new ShellGrammarValidator(text, start, true).validateSubstitution();
+  const text = createValidatorSourceText(source);
   return {
     error: detectSyntaxError(text),
     backquotes: text.backquotes,
     literalSingleQuotes: text.literalSingleQuotes,
   };
+}
+
+export function createValidatorSourceText(source: string): SourceText {
+  const text = new SourceText(source);
+  text.parseSubstitution = (start) => new ShellGrammarValidator(text, start, true).validateSubstitution();
+  return text;
+}
+
+export function findForHeaderSemicolons(source: string, start = 0, end = source.length): number[] {
+  const text = createValidatorSourceText(source);
+  try {
+    return forHeaderSemicolons(text, start, end);
+  } catch {
+    return [];
+  }
 }
 
 function detectSyntaxError(text: SourceText): BashSyntaxError | 'unknown' | undefined {
@@ -516,7 +530,7 @@ class ShellGrammarValidator {
   private parseCStyleForHeader(forKeyword: ShellToken, openParens: ShellToken): void {
     const closeEnd = arithmeticEnd(this.text, openParens.start);
     if (closeEnd === undefined) this.failUnexpected({ ...openParens, value: '(' });
-    const sections = countHeaderSections(this.text, openParens.start + 2, closeEnd - 2);
+    const sections = forHeaderSemicolons(this.text, openParens.start + 2, closeEnd - 2).length + 1;
     if (sections < 3) this.text.fail(forKeyword.row, 'syntax error: arithmetic expression required');
     if (sections > 3) this.text.fail(forKeyword.row, "syntax error: `;' unexpected");
     this.seekTo(closeEnd);
@@ -771,16 +785,16 @@ class ShellGrammarValidator {
   }
 }
 
-/** Counts semicolon-delimited sections in `for ((init; condition; update))` outside quotes and nested parentheses. */
-function countHeaderSections(text: SourceText, start: number, end: number): number {
-  let sections = 1;
+/** Offsets of top-level `;` separators in `for ((init; condition; update))` outside quotes, expansions, and `(...)`. */
+function forHeaderSemicolons(text: SourceText, start: number, end: number): number[] {
+  const offsets: number[] = [];
   let parenDepth = 0;
   for (let i = start; i < end;) {
     const ch = text.source[i];
-    if (ch === ';' && parenDepth === 0) sections++;
+    if (ch === ';' && parenDepth === 0) offsets.push(i);
     else if (ch === '(') parenDepth++;
     else if (ch === ')') parenDepth--;
     i = ch === '(' || ch === ')' || ch === ';' ? i + 1 : skipWordPiece(text, i);
   }
-  return sections;
+  return offsets;
 }
