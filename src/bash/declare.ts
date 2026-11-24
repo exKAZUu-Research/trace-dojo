@@ -494,6 +494,14 @@ interface DeclarationDestination {
   referencedSubscript?: string;
 }
 
+interface PreUnsetNamerefStore extends DeclarationDestination {
+  finalLink: Variable;
+  deferUnsetN: boolean;
+  extraUnsetLink?: Variable;
+  failedBase?: boolean;
+  invalidBaseTarget?: string;
+}
+
 function declareOperand(
   shell: Shell,
   builtin: string,
@@ -654,7 +662,7 @@ function storeSelectedDeclaration(
   builtin: string,
   name: string,
   destination: DeclarationDestination,
-  preUnsetStore: DeclarationDestination | undefined,
+  preUnsetStore: PreUnsetNamerefStore | undefined,
   options: Options,
   operand: DeclarationArgument,
   parsed: { subscript?: string; append: boolean; value?: string } | undefined,
@@ -731,6 +739,7 @@ function finishDeclarationEffects(
   onMaterialize: (() => void) | undefined
 ): void {
   if (ok && preUnsetStore?.deferUnsetN) preUnsetStore.finalLink.attributes.delete('n');
+  if (ok && preUnsetStore?.extraUnsetLink) preUnsetStore.extraUnsetLink.attributes.delete('n');
   if (setsReadonly) variable.attributes.add('r');
   notifyIfArrayMaterialized(ok, variable, priorKind, onMaterialize);
 }
@@ -759,17 +768,23 @@ function selectDeclarationStore(
   builtin: string,
   name: string,
   destination: DeclarationDestination,
-  preUnsetStore: DeclarationDestination | undefined,
+  preUnsetStore: PreUnsetNamerefStore | undefined,
   { set, unset }: Options,
   isSubscripted: boolean,
   assignsNonCompound: boolean
 ): SelectedDeclarationStore {
+  if (preUnsetStore?.failedBase) {
+    if (preUnsetStore.invalidBaseTarget !== undefined) {
+      shell.reportError(`${builtin}: \`${preUnsetStore.invalidBaseTarget}': not a valid identifier`);
+    }
+    return { kind: 'failed' };
+  }
   const base = preUnsetStore ?? destination;
   const { variable, referencedSubscript } = base;
   const implicitIndexedZero =
     assignsNonCompound && !isSubscripted && referencedSubscript === undefined && isIndexedCell(variable);
   if (set.has('g') && implicitIndexedZero) {
-    return resolveImplicitIndexedStore(shell, builtin, variable.name);
+    return resolveImplicitIndexedStore(shell, builtin, preUnsetStore ? variable.name : name);
   }
   if (preUnsetStore) {
     return { kind: 'store', storeVariable: variable, effectiveSubscript: referencedSubscript };
@@ -832,11 +847,6 @@ function operandSubscriptText(operand: DeclarationArgument, parsed: { subscript?
     : (operand.subscript?.text ?? '');
 }
 
-interface PreUnsetNamerefStore extends DeclarationDestination {
-  finalLink: Variable;
-  deferUnsetN: boolean;
-}
-
 function rejectUnsetArrayThroughNameref(
   shell: Shell,
   builtin: string,
@@ -890,17 +900,58 @@ function resolvePreUnsetNamerefStore(
     globalOnly
   );
   if (targetName === finalLink.name && referencedSubscript === undefined) return undefined;
+  if (referencedSubscript !== undefined) {
+    return resolvePreUnsetElementStore(shell, finalLink, targetName, referencedSubscript, globalOnly);
+  }
+  return {
+    variable: ensurePreUnsetScalarStore(shell, targetName, globalOnly),
+    finalLink,
+    deferUnsetN: true,
+  };
+}
+
+function resolvePreUnsetElementStore(
+  shell: Shell,
+  finalLink: Variable,
+  baseName: string,
+  referencedSubscript: string,
+  globalOnly: boolean
+): PreUnsetNamerefStore {
+  const baseStart = globalOnly ? shell.state.scopes[0].get(baseName) : shell.findOwnVariable(baseName);
+  const extraUnsetLink = baseStart?.attributes.has('n')
+    ? findFinalNamerefLink(shell, baseStart, globalOnly)
+    : undefined;
+  const resolvedBase = shell.resolveNameOrUndefined(baseName);
+  if (resolvedBase === undefined) {
+    return { variable: finalLink, finalLink, deferUnsetN: false, failedBase: true, referencedSubscript };
+  }
+  const direct = resolvedBase.includes('[') ? shell.findOwnVariable(resolvedBase) : undefined;
+  if (!direct && !isIdentifier(resolvedBase)) {
+    return {
+      variable: finalLink,
+      finalLink,
+      deferUnsetN: false,
+      failedBase: true,
+      invalidBaseTarget: `${resolvedBase}[${referencedSubscript}]`,
+      referencedSubscript,
+    };
+  }
+  return {
+    variable: direct ?? ensureStoreVariable(shell, resolvedBase),
+    finalLink,
+    deferUnsetN: false,
+    referencedSubscript,
+    ...(extraUnsetLink ? { extraUnsetLink } : {}),
+  };
+}
+
+function ensurePreUnsetScalarStore(shell: Shell, targetName: string, globalOnly: boolean): Variable {
   let storeVariable = globalOnly ? shell.state.scopes[0].get(targetName) : shell.findVariable(targetName, false);
   if (!storeVariable) {
     storeVariable = { name: targetName, value: undefined, attributes: new Set() };
     shell.state.scopes[0].set(targetName, storeVariable);
   }
-  return {
-    variable: storeVariable,
-    finalLink,
-    deferUnsetN: referencedSubscript === undefined,
-    ...(referencedSubscript === undefined ? {} : { referencedSubscript }),
-  };
+  return storeVariable;
 }
 
 // code-gauge-allow functionParameterCount -- Inspects operand, parsed string form, options, scope mode, and subscript presence.
