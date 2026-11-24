@@ -3,6 +3,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
+import { stripAttributes } from './attributes';
 import { rejectUnsupportedSyntax } from './stages';
 import { copySyntax, type Syntax } from './syntax';
 
@@ -26,7 +27,7 @@ export function parseCpp(source: string): Syntax {
     (root) => {
       const syntax = copySyntax(root);
       rejectUnsupportedSyntax(syntax);
-      return syntax;
+      return stripAttributes(syntax);
     },
     { locateErrors: (root, errors) => locateErrors(root, errors, source) }
   );
