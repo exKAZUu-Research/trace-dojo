@@ -156,10 +156,11 @@ export class Compiler extends StatementBinder {
   /** Checks the type arguments of the generic types the program names against their parameters' constraints. */
   /** Reports each instance field of a struct whose type holds that struct by value (CS0523), as Roslyn does. */
   private checkStructLayouts(declared: DeclaredType[]): void {
+    const budget = { remaining: MAX_LAYOUT_WORK };
     for (const { symbol } of declared) {
       if (symbol.kind !== 'struct') continue;
       for (const field of symbol.fields) {
-        if (field.isStatic || field.isConst || !holdsByValue(field.type, symbol, [])) continue;
+        if (field.isStatic || field.isConst || !holdsByValue(field.type, symbol, [], budget)) continue;
         this.error(
           field.row,
           'CS0523',
@@ -931,6 +932,7 @@ function holdsByValue(
   type: Type,
   target: TypeSymbol,
   path: { key: string; symbol: TypeSymbol }[],
+  budget: { remaining: number },
   finished = new Map<string, boolean>()
 ): boolean {
   if (type.kind !== 'named' || type.symbol.kind !== 'struct') return false;
@@ -938,20 +940,24 @@ function holdsByValue(
   const key = typeKey(type);
   const known = finished.get(key);
   if (known !== undefined) return known;
-  // Constructions that wrap type arguments differently on every path share no results, so the check stops after a
-  // bounded number of them, taking the layout as free of cycles; one it misses ends at run time as a stack overflow.
-  if (finished.size >= MAX_LAYOUT_CONSTRUCTIONS) return false;
+  // Constructions that wrap type arguments differently on every path share no results, so the whole compilation's
+  // check stops after bounded work, which grows with the constructions' sizes, taking the remaining layouts as free of
+  // cycles; one it misses ends at run time as a stack overflow.
+  budget.remaining -= key.length;
+  if (budget.remaining < 0) return false;
   if (path.some((entry) => entry.key === key)) return false;
   if (path.filter((entry) => entry.symbol === type.symbol).length >= MAX_GENERIC_NESTING) return true;
   const substitution = substitutionOf(type);
   const inner = [...path, { key, symbol: type.symbol }];
   const holds = type.symbol.fields.some(
     (field) =>
-      !field.isStatic && !field.isConst && holdsByValue(substitute(field.type, substitution), target, inner, finished)
+      !field.isStatic &&
+      !field.isConst &&
+      holdsByValue(substitute(field.type, substitution), target, inner, budget, finished)
   );
   finished.set(key, holds);
   return holds;
 }
 
 const MAX_GENERIC_NESTING = 16;
-const MAX_LAYOUT_CONSTRUCTIONS = 4096;
+const MAX_LAYOUT_WORK = 1_000_000;
