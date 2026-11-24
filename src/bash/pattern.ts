@@ -5,7 +5,7 @@
  */
 
 import { charactersOf, POSIX_CHARACTER_CLASSES } from './characters';
-import { matchesEquivalenceClass, resolveCollatingElement } from './collation';
+import { matchesGlobEquivalenceClass, resolveCollatingElement } from './collation';
 
 type BracketSpec =
   | { kind: 'char'; c: string }
@@ -363,7 +363,7 @@ function tryReadSubbracketSpec(chars: readonly string[], pos: number): { spec: B
     return { spec: { kind: 'class', test }, next: end + 2 };
   }
   const target = resolveCollatingElement(name);
-  const test = target === undefined ? undefined : (ch: string): boolean => matchesEquivalenceClass(target, ch);
+  const test = target === undefined ? undefined : (ch: string): boolean => matchesGlobEquivalenceClass(target, ch);
   return { spec: { kind: 'class', test }, next: end + 2 };
 }
 

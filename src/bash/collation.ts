@@ -30,15 +30,33 @@ export function compareCollated(a: string, b: string): number {
   return COLLATOR.compare(a.replaceAll(UNWEIGHTED, ''), b.replaceAll(UNWEIGHTED, ''));
 }
 
-/** Resolves a `[.name.]` or `[=name=]` collating element name to its single character, or `undefined` when unknown. */
+/** Resolves a `[.name.]` or `[=name=]` collating element name in glob bracket expressions. */
 export function resolveCollatingElement(name: string): string | undefined {
   if (charactersOf(name).length === 1) return name;
   return Object.hasOwn(COLLATING_SYMBOLS, name) ? COLLATING_SYMBOLS[name] : undefined;
 }
 
-/** Whether `candidate` belongs to `target`'s primary collation equivalence class (`[=target=]`) in `en_US.UTF-8`. */
-export function matchesEquivalenceClass(target: string, candidate: string): boolean {
+/** Resolves a `[.name.]` or `[=name=]` collating element in macOS `regcomp`, which rejects unweighted characters. */
+export function resolveRegexCollatingElement(name: string): string | undefined {
+  const element = resolveCollatingElement(name);
+  return element !== undefined && (element === '\0' || !UNWEIGHTED_CHAR.test(element)) ? element : undefined;
+}
+
+/** Whether `candidate` matches glob `[=target=]` in macOS `en_US.UTF-8`, where unweighted characters compare equal. */
+export function matchesGlobEquivalenceClass(target: string, candidate: string): boolean {
   if (candidate === target) return true;
-  if (UNWEIGHTED_CHAR.test(target) || UNWEIGHTED_CHAR.test(candidate)) return false;
+  if (target === '\0' || candidate === '\0' || charactersOf(candidate).length !== 1) return false;
+  const targetUnweighted = UNWEIGHTED_CHAR.test(target);
+  const candidateUnweighted = UNWEIGHTED_CHAR.test(candidate);
+  if (targetUnweighted || candidateUnweighted) return targetUnweighted && candidateUnweighted;
+  return BASE_COLLATOR.compare(candidate, target) === 0;
+}
+
+/** Whether `candidate` matches ERE `[=target=]` in macOS `en_US.UTF-8`, where unweighted characters have no weight. */
+export function matchesRegexEquivalenceClass(target: string, candidate: string): boolean {
+  if (candidate === target) return true;
+  if (target === '\0' || candidate === '\0' || UNWEIGHTED_CHAR.test(target) || UNWEIGHTED_CHAR.test(candidate)) {
+    return false;
+  }
   return charactersOf(candidate).length === 1 && BASE_COLLATOR.compare(candidate, target) === 0;
 }
