@@ -1,4 +1,5 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
+import { assignSubscriptedBuiltinTarget } from './builtins';
 import { ObservationAbortError } from './runtime';
 import type { Shell } from './shell';
 import { isIdentifier } from './variables';
@@ -49,7 +50,7 @@ function turtleNew(shell: Shell, args: string[], name: string): number {
   if ('error' in created) fail(shell, name, created.error);
   const handle = shell.runtime.addTurtle(created);
   const stored = target
-    ? shell.assignElement(target.name, target.subscript, handle, false)
+    ? assignSubscriptedBuiltinTarget(shell, name, target.name, target.subscript, handle)
     : shell.assignScalar(variable, handle);
   return stored ? 0 : 1;
 }

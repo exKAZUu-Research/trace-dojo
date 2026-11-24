@@ -22,6 +22,7 @@ import {
   DiscardSignal,
   ExitSignal,
   type Frame,
+  ObservationAbortError,
   ReturnSignal,
   type Runtime,
   SCRIPT_NAME,
@@ -34,20 +35,22 @@ import {
   buildDynamicDeclaration,
   callStackArray,
   cloneScope,
-  cloneValue,
   type CompoundElement,
+  compoundPrepareForVariable,
   DYNAMIC_VARIABLES,
   ensureWritable,
   ENVIRONMENT_VARIABLES,
   findEnclosingVariable,
   isIdentifier,
   isValidFunctionName,
+  maxElementIndex,
   PERMANENT_DYNAMIC_VARIABLES,
   readAssociativePair,
   removeScopedVariable,
   SCALAR_DYNAMIC_VARIABLES,
   type Scope,
   sortedElements,
+  unpackIndexedElement,
   type Variable,
   type VariableValue,
 } from './variables';
@@ -628,7 +631,7 @@ export class Shell implements ArithmeticHost {
   }
 
   private executeDeclaration(statement: Extract<Statement, { kind: 'declaration' }>): number {
-    const args = expandDeclarationArguments(this, statement.args);
+    const args = expandDeclarationArguments(this, statement.name, statement.args);
     return this.withTemporaryScope(
       statement.assignments,
       () =>
@@ -710,6 +713,7 @@ export class Shell implements ArithmeticHost {
   /** Runs statements in a copy of the shell, capturing what they write to standard output. */
   // code-gauge-allow functionNcss -- Copies and restores every part of the shell state a command substitution changes.
   captureSubshell(body: Statement[]): { output: string; status: number } {
+    if (this.runtime.observing) throw new ObservationAbortError();
     const buffer = { text: '' };
     const capture: OutputTarget = {
       write: (text) => {
@@ -790,7 +794,7 @@ export class Shell implements ArithmeticHost {
     }
   }
 
-  private evaluateFatalReadonly(text: string): bigint {
+  evaluateFatalReadonly(text: string): bigint {
     try {
       return evaluateArithmetic(text, this, undefined, () => this.runtime.spend());
     } catch (error) {
@@ -1050,7 +1054,7 @@ export class Shell implements ArithmeticHost {
    */
   arrayIndex(name: string, subscript: string): bigint | undefined {
     const dynamicLen =
-      this.isDynamic(name) && !SCALAR_DYNAMIC_VARIABLES.has(name) ? (this.dynamicArray(name)?.length ?? 0) : undefined;
+      this.isDynamic(name) && !SCALAR_DYNAMIC_VARIABLES.has(name) ? this.dynamicArray(name)?.length : undefined;
     return this.arrayIndexFor(this.findVariable(name), subscript, dynamicLen);
   }
 
@@ -1058,7 +1062,11 @@ export class Shell implements ArithmeticHost {
     const index = this.evaluateFatalReadonly(subscript);
     if (index >= 0n) return index;
     const length =
-      variable?.value?.kind === 'indexed' ? this.maxIndex(variable.value.elements) + 1n : BigInt(dynamicLength ?? 1);
+      variable?.value?.kind === 'indexed'
+        ? maxElementIndex(variable.value.elements) + 1n
+        : variable?.attributes.has('a')
+          ? 0n
+          : BigInt(dynamicLength ?? 1);
     const resolved = length + index;
     return resolved < 0n ? undefined : resolved;
   }
@@ -1068,12 +1076,6 @@ export class Shell implements ArithmeticHost {
     const index = this.arrayIndex(name, subscript);
     if (index === undefined) this.reportError(`${name}: bad array subscript`);
     return index;
-  }
-
-  maxIndex(elements: Map<bigint, string>): bigint {
-    let max = -1n;
-    for (const key of elements.keys()) if (key > max) max = key;
-    return max;
   }
 
   /** The values of `${name[@]}`: the elements of an array, the value of a scalar, or none when unset. */
@@ -1147,9 +1149,15 @@ export class Shell implements ArithmeticHost {
   }
 
   /** Applies the integer and case attributes to a value about to be stored, or `undefined` after an error. */
-  private convertForAttributes(variable: Variable, value: string, base: string, append: boolean): string | undefined {
+  private convertForAttributes(
+    variable: Variable,
+    value: string,
+    base: string,
+    append: boolean,
+    preconvertedInteger = false
+  ): string | undefined {
     let result: string;
-    if (variable.attributes.has('i')) {
+    if (variable.attributes.has('i') && !preconvertedInteger) {
       const number = this.evaluateFatalReadonly(value);
       result = append ? String(this.evaluateFatalReadonly(base || '0') + number) : String(number);
       result = String(BigInt.asIntN(64, BigInt(result)));
@@ -1301,17 +1309,18 @@ export class Shell implements ArithmeticHost {
       variable.value = { kind: 'indexed', elements: existing };
       variable.attributes.add('a');
     }
-    let next = append ? this.maxIndex(existing) + 1n : 0n;
+    let next = append ? maxElementIndex(existing) + 1n : 0n;
     for (const rawElement of elements) {
-      const element = typeof rawElement !== 'string' && 'plain' in rawElement ? rawElement.plain : rawElement;
-      const index = typeof element === 'string' ? next : this.arrayIndexFor(variable, element.key);
+      const item = unpackIndexedElement(rawElement);
+      const index = item.invalidIndex
+        ? undefined
+        : (item.evaluatedIndex ?? (item.key === undefined ? next : this.arrayIndexFor(variable, item.key)));
       if (index === undefined) {
-        this.reportError(`${reportedName}[${(element as { key: string }).key}]: bad array subscript`);
+        this.reportError(`${reportedName}[${item.key ?? ''}]: bad array subscript`);
         return false;
       }
-      const keyed = typeof element === 'string' ? { value: element, append: false } : element;
-      const base = keyed.append ? (existing.get(index) ?? '') : '';
-      const converted = this.convertForAttributes(variable, keyed.value, base, keyed.append);
+      const base = item.append ? (existing.get(index) ?? '') : '';
+      const converted = this.convertForAttributes(variable, item.value, base, item.append, item.preconvertedInteger);
       if (converted === undefined) return false;
       this.checkLength(converted);
       if (!existing.has(index)) this.chargeSlot();
@@ -1332,7 +1341,7 @@ export class Shell implements ArithmeticHost {
         continue;
       }
       const base = entry.append ? (table.get(entry.key) ?? '') : '';
-      const converted = this.convertForAttributes(variable, entry.value, base, entry.append);
+      const converted = this.convertForAttributes(variable, entry.value, base, entry.append, entry.preconvertedInteger);
       if (converted === undefined) return false;
       this.checkLength(converted);
       if (!table.has(entry.key)) this.chargeSlot();
@@ -1353,7 +1362,15 @@ export class Shell implements ArithmeticHost {
         return false;
       }
       const resolved = this.resolveName(assignment.name);
-      const { elements, error } = this.expander.expandCompound(assignment.array, this.isAssociative(resolved), false);
+      const isAssoc = this.isAssociative(resolved);
+      const targetVar = this.findVariable(resolved);
+      const prepare = compoundPrepareForVariable(
+        targetVar,
+        assignment.append,
+        isAssoc,
+        Boolean(targetVar?.attributes.has('i'))
+      );
+      const { elements, error } = this.expander.expandCompound(assignment.array, isAssoc, false, prepare);
       const ok = this.assignCompound(resolved, elements, assignment.append);
       if (error) this.discard(error);
       return ok;
@@ -1416,11 +1433,6 @@ export class Shell implements ArithmeticHost {
     }
     for (const { text } of this.activeOutputs) yield text;
     for (const { values } of this.inFlight) yield* values;
-  }
-
-  /** Copies a value for `local` to inherit, as `declare -I` does; plain `local` starts unset. */
-  copyValue(value: VariableValue | undefined): VariableValue | undefined {
-    return cloneValue(value);
   }
 
   /** Evaluates a subscript of a name like `a[i+1]`, as `printf -v` and `unset` read one. */

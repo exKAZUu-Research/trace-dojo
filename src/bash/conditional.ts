@@ -141,7 +141,11 @@ function isSet(shell: Shell, operand: string): boolean {
     const resolved = shell.resolveName(split.name);
     if (shell.isAssociative(resolved)) {
       const key = shell.expander.expandSubscriptText(split.subscript);
-      return key !== '' && shell.elementValue(resolved, key) !== undefined;
+      if (key === '') {
+        shell.reportError(`${resolved}: bad array subscript`);
+        return false;
+      }
+      return shell.elementValue(resolved, key) !== undefined;
     }
     if (split.subscript === '@' || split.subscript === '*') return shell.arrayValues(resolved).length > 0;
     const index = shell.arrayIndex(resolved, split.subscript);

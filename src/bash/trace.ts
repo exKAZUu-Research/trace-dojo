@@ -111,7 +111,7 @@ function observeElement(shell: Shell, name: string, subscript: string, maxScope:
   const savedLastStored = shell.lastStored;
   const savedRow = shell.currentRow;
   const savedSlots = shell.slotCount;
-  const savedObserving = runtime.observing;
+  const savedObservation = runtime.beginObservation();
   const savedRecorder = runtime.steps.recorder;
   const savedFrameCount = runtime.frames.length;
   const silentAbort: OutputTarget = {
@@ -119,7 +119,6 @@ function observeElement(shell: Shell, name: string, subscript: string, maxScope:
       throw new PureReadAbort();
     },
   };
-  runtime.observing = true;
   runtime.steps.recorder = undefined;
   shell.state = {
     ...savedState,
@@ -149,7 +148,7 @@ function observeElement(shell: Shell, name: string, subscript: string, maxScope:
     shell.lastStored = savedLastStored;
     shell.currentRow = savedRow;
     shell.restoreSlots(savedSlots);
-    runtime.observing = savedObserving;
+    runtime.endObservation(savedObservation);
     runtime.steps.recorder = savedRecorder;
     runtime.frames.length = savedFrameCount;
   }

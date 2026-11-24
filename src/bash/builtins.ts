@@ -126,19 +126,25 @@ function printf(shell: Shell, args: string[]): number {
   else {
     const split = shell.splitSubscript(target);
     const stored = split
-      ? assignPrintfElement(shell, split.name, split.subscript, text)
+      ? assignSubscriptedBuiltinTarget(shell, 'printf', split.name, split.subscript, text)
       : shell.assignScalar(target, text);
     if (!stored) return 1;
   }
   return ok ? 0 : 1;
 }
 
-function assignPrintfElement(shell: Shell, name: string, subscript: string, value: string): boolean {
+export function assignSubscriptedBuiltinTarget(
+  shell: Shell,
+  builtin: string,
+  name: string,
+  subscript: string,
+  value: string
+): boolean {
   const resolved = shell.resolveName(name);
   if (!shell.isAssociative(resolved)) return shell.assignElement(name, subscript, value, false);
   const key = shell.expander.expandSubscriptText(subscript);
   if (key === '') {
-    shell.reportError(`printf: ${name}[${subscript}]: bad array subscript`);
+    shell.reportError(`${builtin}: ${name}[${subscript}]: bad array subscript`);
     return false;
   }
   return shell.assignElement(resolved, key, value, false, true);
@@ -218,20 +224,27 @@ export function unsetElement(shell: Shell, name: string, subscript: string): boo
   if (variable?.value?.kind === 'associative' || variable?.attributes.has('A')) {
     return unsetAssociativeElement(shell, variable, subscript);
   }
-  if (!variable?.value) return true;
-  ensureWritable(variable);
-  if (subscript === '@' || subscript === '*') {
-    if (variable.value.kind === 'indexed') variable.value.elements.clear();
-    else shell.unsetVariable(resolved);
-    return true;
-  }
+  if (!variable?.value && !variable?.attributes.has('a')) return true;
+  if (subscript === '@' || subscript === '*') return clearIndexedOrScalar(shell, variable, resolved);
   const index = shell.arrayIndex(resolved, subscript);
   if (index === undefined) {
     shell.reportError(`unset: [${subscript}]: bad array subscript`);
     return false;
   }
+  if (!variable.value) return true;
+  ensureWritable(variable);
   if (variable.value.kind === 'indexed') variable.value.elements.delete(index);
   else if (index === 0n) shell.unsetVariable(resolved);
+  return true;
+}
+
+function clearIndexedOrScalar(shell: Shell, variable: Variable, resolved: string): boolean {
+  if (variable.value?.kind === 'indexed') {
+    ensureWritable(variable);
+    variable.value.elements.clear();
+  } else if (variable.value) {
+    shell.unsetVariable(resolved);
+  }
   return true;
 }
 

@@ -1,4 +1,5 @@
 import type { Assignment, Word } from './ast';
+import type { CompoundPrepareOptions } from './expansion';
 import { ansicQuote, ansicShouldQuote, containsShellMetas, doubleQuote } from './quoting';
 import type { CompoundElement, Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
@@ -6,6 +7,8 @@ import {
   AssociativeTable,
   type Attribute,
   ATTRIBUTE_ORDER,
+  cloneValue,
+  compoundPrepareForVariable,
   CONVERTED_BUCKETS,
   findEnclosingVariable,
   isIdentifier,
@@ -39,16 +42,47 @@ interface Options {
 }
 
 /** Expands declaration command arguments left-to-right before prefix bindings and `runDeclaration` execute. */
-export function expandDeclarationArguments(shell: Shell, rawArgs: (Word | Assignment)[]): DeclarationArgument[] {
+export function expandDeclarationArguments(
+  shell: Shell,
+  builtin: string,
+  rawArgs: (Word | Assignment)[]
+): DeclarationArgument[] {
   const args: DeclarationArgument[] = [];
+  const options: Options = { set: new Set(), unset: new Set() };
+  let optionsDone = false;
   for (const arg of rawArgs) {
-    if ('append' in arg) args.push(expandDeclarationAssignment(shell, arg));
-    else args.push(...shell.expander.expandWords([arg]));
+    if ('append' in arg) {
+      optionsDone = true;
+      args.push(expandDeclarationAssignment(shell, builtin, arg, options));
+      continue;
+    }
+    const words = shell.expander.expandWords([arg]);
+    for (const word of words) {
+      if (!optionsDone) optionsDone = recordOptionWord(word, options);
+      args.push(word);
+    }
   }
   return args;
 }
 
-function expandDeclarationAssignment(shell: Shell, arg: Assignment): DeclarationArgument {
+function recordOptionWord(word: string, options: Options): boolean {
+  if (word === '--') return true;
+  if (!/^[-+]./.test(word)) return true;
+  const adding = word.startsWith('-') ? options.set : options.unset;
+  const removing = word.startsWith('-') ? options.unset : options.set;
+  for (const ch of word.slice(1)) {
+    adding.add(ch);
+    removing.delete(ch);
+  }
+  return false;
+}
+
+function expandDeclarationAssignment(
+  shell: Shell,
+  builtin: string,
+  arg: Assignment,
+  options: Options
+): DeclarationArgument {
   const subscript = arg.subscript && literalWord(arg.subscript, shell.expander.expandAssociativeKey(arg.subscript));
   const value =
     arg.value &&
@@ -56,13 +90,49 @@ function expandDeclarationAssignment(shell: Shell, arg: Assignment): Declaration
       arg.value,
       shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(arg.value as Word))
     );
-  const expandedElements = arg.array && shell.expander.expandCompoundItems(arg.array);
+  const expandedElements =
+    arg.array &&
+    shell.expander.expandCompoundItems(arg.array, buildCompoundPrepareOptions(shell, builtin, arg, options));
   return {
     ...arg,
     ...(subscript ? { subscript } : {}),
     ...(value ? { value } : {}),
     ...(expandedElements ? { expandedElements } : {}),
   };
+}
+
+function buildCompoundPrepareOptions(
+  shell: Shell,
+  builtin: string,
+  arg: Assignment,
+  { set, unset }: Options
+): CompoundPrepareOptions {
+  const isLocal =
+    shell.isInFunction && !set.has('g') && (builtin === 'local' || builtin === 'declare' || builtin === 'typeset');
+  const { scopes, functionScopes } = shell.state;
+  const localScope = isLocal ? scopes[functionScopes.at(-1) as number] : undefined;
+  const { targetName } = resolveDeclaredTarget(shell, arg.name, set, unset, false, set.has('g'), localScope);
+  const existing = resolveCompoundExisting(shell, targetName, set, localScope);
+  const isAssociative =
+    set.has('A') ||
+    (!set.has('a') && (existing?.value?.kind === 'associative' || Boolean(existing?.attributes.has('A'))));
+  const isInteger = set.has('i') || (Boolean(existing?.attributes.has('i')) && !unset.has('i'));
+  return compoundPrepareForVariable(existing, arg.append, isAssociative, isInteger);
+}
+
+function resolveCompoundExisting(
+  shell: Shell,
+  targetName: string,
+  set: Set<string>,
+  localScope: Map<string, Variable> | undefined
+): Variable | undefined {
+  const { scopes } = shell.state;
+  if (localScope) {
+    return (
+      localScope.get(targetName) ?? (set.has('I') ? findEnclosingVariable(scopes, localScope, targetName) : undefined)
+    );
+  }
+  return set.has('g') || set.has('n') ? scopes[0].get(targetName) : shell.findVariable(targetName, false);
 }
 
 function literalWord(origin: Word, text: string): Word {
@@ -354,7 +424,15 @@ function declaredDestination(
 ): DeclarationDestination | undefined {
   const { scopes } = shell.state;
   const scope = isLocal ? scopes[shell.state.functionScopes.at(-1) as number] : undefined;
-  const { targetName, referencedSubscript } = resolveDeclaredTarget(shell, name, set, unset, isSubscripted);
+  const { targetName, referencedSubscript } = resolveDeclaredTarget(
+    shell,
+    name,
+    set,
+    unset,
+    isSubscripted,
+    set.has('g'),
+    scope
+  );
   const targetScope = scope && referencedSubscript === undefined ? scope : undefined;
   let variable = targetScope
     ? targetScope.get(targetName)
@@ -370,7 +448,7 @@ function declaredDestination(
     targetScope && !variable && set.has('I') ? findEnclosingVariable(scopes, targetScope, targetName) : undefined;
   if (checkReadonlyConflict(shell, builtin, targetName, variable ?? inherited, set, assigns)) return undefined;
   if (!variable) {
-    variable = createDeclaredVariable(shell, targetName, inherited);
+    variable = createDeclaredVariable(targetName, inherited);
     (targetScope ?? scopes[0]).set(targetName, variable);
   }
   return {
@@ -379,12 +457,12 @@ function declaredDestination(
   };
 }
 
-function createDeclaredVariable(shell: Shell, name: string, inherited: Variable | undefined): Variable {
-  if (!inherited || inherited.attributes.has('n')) return { name, value: undefined, attributes: new Set() };
+function createDeclaredVariable(name: string, inherited: Variable | undefined): Variable {
+  if (!inherited) return { name, value: undefined, attributes: new Set() };
   return {
     name,
-    value: shell.copyValue(inherited.value),
-    attributes: new Set(inherited.attributes),
+    value: cloneValue(inherited.value),
+    attributes: new Set([...inherited.attributes].filter((attr) => attr !== 'n')),
   };
 }
 
@@ -413,21 +491,25 @@ function checkReadonlyConflict(
   set: Set<string>,
   assigns: boolean
 ): boolean {
-  const changes = assigns || [...set].some((a) => a !== 'r' && a !== 'x' && a !== 'p' && a !== 'g');
+  const changes = assigns || [...set].some((a) => a !== 'r' && a !== 'x' && a !== 'p' && a !== 'g' && a !== 'I');
   if (!variable?.attributes.has('r') || !changes) return false;
   shell.reportError(`${builtin}: ${targetName}: readonly variable`);
   return true;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Resolves -n/+n, -g, -I local inheritance, and chained nameref element targets.
+// code-gauge-allow functionParameterCount -- Needs shell, operand name, set/unset flags, subscript flag, global-only flag, and optional local scope.
 function resolveDeclaredTarget(
   shell: Shell,
   name: string,
   set: Set<string>,
   unset: Set<string>,
   isSubscripted: boolean,
-  globalOnly = set.has('g')
+  globalOnly = set.has('g'),
+  localScope?: Map<string, Variable>
 ): { targetName: string; referencedSubscript?: string } {
   if (set.has('n') || unset.has('n') || (globalOnly && isSubscripted)) return { targetName: name };
+  if (localScope && set.has('I') && !localScope.has(name)) return { targetName: name };
   let current = globalOnly ? shell.state.scopes[0].get(name) : shell.findOwnVariable(name);
   let target = name;
   for (let depth = 0; depth < 8; depth++) {

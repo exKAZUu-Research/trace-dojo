@@ -25,8 +25,15 @@ export type Scope = Map<string, Variable>;
 
 /** An element of a compound assignment: a plain word, or `[key]=value`. */
 export type CompoundElement =
-  | { key: string; value: string; append: boolean; rawText?: string }
-  | { plain: string; rawText: string }
+  | {
+      key: string;
+      value: string;
+      append: boolean;
+      rawText?: string;
+      evaluatedIndex?: bigint | 'invalid';
+      preconvertedInteger?: boolean;
+    }
+  | { plain: string; rawText: string; evaluatedIndex?: bigint; preconvertedInteger?: boolean }
   | string;
 
 /** Reads one `[key]=value` item or alternating `key value` pair from an associative compound assignment. */
@@ -34,7 +41,14 @@ export function readAssociativePair(
   elements: CompoundElement[],
   index: number,
   element: CompoundElement
-): { key: string; rawKey: string; value: string; append: boolean; consumedNext: boolean } {
+): {
+  key: string;
+  rawKey: string;
+  value: string;
+  append: boolean;
+  consumedNext: boolean;
+  preconvertedInteger: boolean;
+} {
   if (typeof element !== 'string' && !('plain' in element)) {
     return {
       key: element.key,
@@ -42,13 +56,77 @@ export function readAssociativePair(
       value: element.value,
       append: element.append,
       consumedNext: false,
+      preconvertedInteger: Boolean(element.preconvertedInteger),
     };
   }
   const key = typeof element === 'string' ? element : element.plain;
   const rawKey = typeof element === 'string' ? element : element.rawText;
   const next = elements[index + 1];
   const value = next === undefined ? '' : typeof next === 'string' ? next : 'plain' in next ? next.plain : '';
-  return { key, rawKey, value, append: false, consumedNext: true };
+  const preconvertedInteger =
+    next !== undefined && typeof next !== 'string' && 'plain' in next && Boolean(next.preconvertedInteger);
+  return { key, rawKey, value, append: false, consumedNext: true, preconvertedInteger };
+}
+
+/** Normalizes one indexed compound element for `assignCompoundTo`. */
+export function unpackIndexedElement(rawElement: CompoundElement): {
+  key: string | undefined;
+  value: string;
+  append: boolean;
+  evaluatedIndex: bigint | undefined;
+  invalidIndex: boolean;
+  preconvertedInteger: boolean;
+} {
+  if (typeof rawElement === 'string') {
+    return {
+      key: undefined,
+      value: rawElement,
+      append: false,
+      evaluatedIndex: undefined,
+      invalidIndex: false,
+      preconvertedInteger: false,
+    };
+  }
+  if ('plain' in rawElement) {
+    return {
+      key: undefined,
+      value: rawElement.plain,
+      append: false,
+      evaluatedIndex: rawElement.evaluatedIndex,
+      invalidIndex: false,
+      preconvertedInteger: Boolean(rawElement.preconvertedInteger),
+    };
+  }
+  return {
+    key: rawElement.key,
+    value: rawElement.value,
+    append: rawElement.append,
+    evaluatedIndex: rawElement.evaluatedIndex === 'invalid' ? undefined : rawElement.evaluatedIndex,
+    invalidIndex: rawElement.evaluatedIndex === 'invalid',
+    preconvertedInteger: Boolean(rawElement.preconvertedInteger),
+  };
+}
+
+/** Builds compound initializer preparation context from an existing target variable and optional flag overrides. */
+export function compoundPrepareForVariable(
+  existing: Variable | undefined,
+  append: boolean,
+  isAssociative: boolean,
+  isInteger: boolean
+): {
+  isAssociative: boolean;
+  isInteger: boolean;
+  baseIndexed: ReadonlyMap<bigint, string> | undefined;
+  baseAssociative: AssociativeTable | undefined;
+} {
+  const baseIndexed =
+    append && existing?.value?.kind === 'indexed'
+      ? existing.value.elements
+      : append && existing?.value?.kind === 'scalar'
+        ? new Map([[0n, existing.value.value]])
+        : undefined;
+  const baseAssociative = append && existing?.value?.kind === 'associative' ? existing.value.table : undefined;
+  return { isAssociative, isInteger, baseIndexed, baseAssociative };
 }
 
 interface BucketEntry {
@@ -178,6 +256,13 @@ function fnv1SignedUtf8(text: string): number {
 /** Indexed-array elements ordered by ascending numeric index. */
 export function sortedElements(elements: Map<bigint, string>): [bigint, string][] {
   return [...elements].toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/** Greatest key in an indexed-array map, or `-1n` when empty. */
+export function maxElementIndex(elements: ReadonlyMap<bigint, string>): bigint {
+  let max = -1n;
+  for (const key of elements.keys()) if (key > max) max = key;
+  return max;
 }
 
 export function cloneValue(value: VariableValue | undefined): VariableValue | undefined {

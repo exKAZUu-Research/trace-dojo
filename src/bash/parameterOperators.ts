@@ -94,7 +94,7 @@ export function applyOperator(
 
 function joined(expander: Expander, value: ParameterValue, inDouble: boolean): string {
   if (value.kind === 'scalar') return value.value ?? '';
-  return expander.joinPieces(expander.valuePieces(value, inDouble));
+  return value.values.join(value.star && inDouble ? expander.ifsJoiner() : ' ');
 }
 
 /**
@@ -276,7 +276,7 @@ function substring(
   if (expansion.argument.length === 0) shell.discard(`${expansion.text}: bad substitution`);
   const { offset: offsetParts, length: lengthParts } = splitSubstring(expansion.argument);
   if (value.kind === 'scalar' && value.value === undefined) return [];
-  if (value.kind === 'list' && value.values.length === 0) {
+  if (value.kind === 'list' && name !== '@' && name !== '*' && value.values.length === 0) {
     return expander.valuePieces({ ...value, values: [] }, inDouble);
   }
   const evaluate = (parts: (string | WordPart)[]): bigint =>
@@ -293,10 +293,10 @@ function substring(
     );
     return sliced === undefined ? [] : expander.valuePieces({ kind: 'scalar', value: sliced }, inDouble);
   }
-  const length = lengthParts === undefined ? undefined : evaluate(lengthParts);
-  if (length !== undefined && length < 0n) negativeLength();
   const values = sliceList(shell, name, value, offset);
   if (values === undefined) return expander.valuePieces({ ...value, values: [] }, inDouble);
+  const length = lengthParts === undefined ? undefined : evaluate(lengthParts);
+  if (length !== undefined && length < 0n) negativeLength();
   return expander.valuePieces(
     { ...value, values: length === undefined ? values : values.slice(0, Number(length)) },
     inDouble
@@ -332,17 +332,15 @@ function sliceList(
   start: bigint
 ): string[] | undefined {
   if (name === '@' || name === '*') {
-    const offset = start < 0n ? start + BigInt(value.values.length + 1) : start;
-    return offset < 0n ? undefined : ['main.sh', ...value.values].slice(Number(offset));
+    const total = BigInt(value.values.length + 1);
+    const offset = start < 0n ? start + total : start;
+    return offset < 0n || offset > total ? undefined : ['main.sh', ...value.values].slice(Number(offset));
   }
   if (shell.isAssociative(shell.resolveName(name))) return sliceAssociative(value.values, start);
   const keyed = arrayEntries(shell, name, value);
-  let offset = start;
-  if (offset < 0n) {
-    const last = keyed.length > 0 ? (keyed.at(-1) as [bigint, string])[0] : -1n;
-    offset = last + 1n + offset;
-    if (offset < 0n) return undefined;
-  }
+  const last = keyed.length > 0 ? (keyed.at(-1) as [bigint, string])[0] : -1n;
+  const offset = start < 0n ? last + 1n + start : start;
+  if (offset < 0n || offset > last) return undefined;
   return keyed.filter(([key]) => key >= offset).map(([, element]) => element);
 }
 

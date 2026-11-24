@@ -67,6 +67,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly io: ProgramIO;
   readonly frames: Frame[] = [];
   observing = false;
+  private observationOps = 0;
   private readonly turtles = new Map<string, TurtleState>();
   private nextTurtle = 1;
   /** Gives the strings that the program can still reach, for the turtles' garbage collection. */
@@ -77,7 +78,24 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   spend(cost = 1): void {
+    if (this.observing) {
+      this.observationOps += Math.max(cost, 0);
+      if (this.observationOps > 4096) throw new ObservationAbortError();
+      return;
+    }
     this.budget.spend(cost);
+  }
+
+  beginObservation(): { savedObserving: boolean; savedOps: number } {
+    const saved = { savedObserving: this.observing, savedOps: this.observationOps };
+    this.observing = true;
+    this.observationOps = 0;
+    return saved;
+  }
+
+  endObservation(saved: { savedObserving: boolean; savedOps: number }): void {
+    this.observing = saved.savedObserving;
+    this.observationOps = saved.savedOps;
   }
 
   addTurtle(turtle: TurtleState): string {

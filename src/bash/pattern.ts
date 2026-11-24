@@ -56,9 +56,9 @@ export function hasPatternCharacters(pattern: string): boolean {
   return compileGlob(pattern).atoms.some((atom) => atom.kind !== 'char');
 }
 
-/** Escapes shell glob metacharacters so `text` matches literally. */
+/** Escapes shell glob and bracket-expression operators so `text` matches literally. */
 export function quotePattern(text: string): string {
-  return text.replaceAll(/[*?[\]\\]/g, (c) => `\\${c}`);
+  return text.replaceAll(/[*?[\]\\!^\-+@():=.]/g, (c) => `\\${c}`);
 }
 
 /** Strips pattern-quoting backslashes from `pattern`. */

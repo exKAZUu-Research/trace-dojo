@@ -11,10 +11,26 @@ import { singleQuote } from './quoting';
 import { ExitSignal, SCRIPT_NAME } from './runtime';
 import type { CompoundElement, Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
-import { isIdentifier } from './variables';
+import { type AssociativeTable, isIdentifier } from './variables';
 
 /** Marks a quoted part that expands to nothing, which still makes a field (`""`), unlike `"$@"` with no elements. */
 const QUOTED_EMPTY: Fragment = { text: '', quoted: true, split: false };
+
+/** Target array/integer context for evaluating compound initializer subscripts and values in source order. */
+export interface CompoundPrepareOptions {
+  isAssociative: boolean;
+  isInteger: boolean;
+  baseIndexed?: ReadonlyMap<bigint, string> | undefined;
+  baseAssociative?: AssociativeTable | undefined;
+}
+
+interface CompoundPrepareState {
+  currentMax: bigint;
+  nextIndex: bigint;
+  stagedIndexed: Map<bigint, string>;
+  stagedAssoc: AssociativeTable | undefined;
+  pendingAssocKey: string | undefined;
+}
 
 /** A parameter's value before its operator: one string, or the elements of `$@`, `$*`, or `${a[@]}`. */
 export type ParameterValue =
@@ -101,9 +117,11 @@ export class Expander {
   }
 
   /**
-   * Expands the elements of `name=(...)` left-to-right, preserving raw source text for associative empty-key errors.
+   * Expands the elements of `name=(...)` left-to-right, evaluating indexed subscripts and integer conversions in
+   * source order when `prepare` supplies the target variable's array/integer context.
    */
-  expandCompoundItems(words: Word[]): CompoundElement[] {
+  expandCompoundItems(words: Word[], prepare?: CompoundPrepareOptions): CompoundElement[] {
+    const state = createCompoundPrepareState(prepare);
     const elements: CompoundElement[] = [];
     for (const word of words) {
       const keyed = splitKeyedElement(word);
@@ -111,14 +129,83 @@ export class Expander {
         const key = this.joinPieces(this.expandParts(keyed.key, false));
         this.checkTilde(keyed.value, true);
         const value = this.joinPieces(this.expandParts(keyed.value, false));
-        elements.push({ key, value, append: keyed.append, rawText: word.text });
+        elements.push(
+          this.prepareKeyedCompoundItem({ key, value, append: keyed.append, rawText: word.text }, prepare, state)
+        );
         continue;
       }
       for (const field of this.expandWords([word])) {
-        elements.push({ plain: field, rawText: word.text });
+        elements.push(this.preparePlainCompoundItem(field, word.text, prepare, state));
       }
     }
     return elements;
+  }
+
+  private prepareKeyedCompoundItem(
+    item: { key: string; value: string; append: boolean; rawText: string },
+    prepare: CompoundPrepareOptions | undefined,
+    state: CompoundPrepareState
+  ): CompoundElement {
+    const { key, value, append, rawText } = item;
+    state.pendingAssocKey = undefined;
+    if (!prepare) return { key, value, append, rawText };
+    if (prepare.isAssociative) {
+      if (key === '' || !prepare.isInteger) return { key, value, append, rawText };
+      const base = append ? (state.stagedAssoc?.get(key) ?? '') : '';
+      const converted = this.evaluateCompoundInteger(value, base, append);
+      state.stagedAssoc?.set(key, converted);
+      return { key, value: converted, append: false, rawText, preconvertedInteger: true };
+    }
+    if (key === '') return { key, value, append, rawText, evaluatedIndex: 'invalid' };
+    const rawIdx = this.shell.evaluateFatalReadonly(key);
+    const idx = rawIdx >= 0n ? rawIdx : state.currentMax + 1n + rawIdx;
+    if (idx < 0n) return { key, value, append, rawText, evaluatedIndex: 'invalid' };
+    if (idx > state.currentMax) state.currentMax = idx;
+    state.nextIndex = idx + 1n;
+    if (!prepare.isInteger) {
+      state.stagedIndexed.set(idx, (append ? (state.stagedIndexed.get(idx) ?? '') : '') + value);
+      return { key, value, append, rawText, evaluatedIndex: idx };
+    }
+    const base = append ? (state.stagedIndexed.get(idx) ?? '') : '';
+    const converted = this.evaluateCompoundInteger(value, base, append);
+    state.stagedIndexed.set(idx, converted);
+    return { key, value: converted, append: false, rawText, evaluatedIndex: idx, preconvertedInteger: true };
+  }
+
+  private preparePlainCompoundItem(
+    field: string,
+    rawText: string,
+    prepare: CompoundPrepareOptions | undefined,
+    state: CompoundPrepareState
+  ): CompoundElement {
+    if (!prepare) return { plain: field, rawText };
+    if (prepare.isAssociative) {
+      if (state.pendingAssocKey === undefined) {
+        state.pendingAssocKey = field;
+        return { plain: field, rawText };
+      }
+      const key = state.pendingAssocKey;
+      state.pendingAssocKey = undefined;
+      if (!prepare.isInteger || key === '') return { plain: field, rawText };
+      const converted = this.evaluateCompoundInteger(field, '', false);
+      state.stagedAssoc?.set(key, converted);
+      return { plain: converted, rawText, preconvertedInteger: true };
+    }
+    const idx = state.nextIndex++;
+    if (idx > state.currentMax) state.currentMax = idx;
+    if (!prepare.isInteger) {
+      state.stagedIndexed.set(idx, field);
+      return { plain: field, rawText, evaluatedIndex: idx };
+    }
+    const converted = this.evaluateCompoundInteger(field, '', false);
+    state.stagedIndexed.set(idx, converted);
+    return { plain: converted, rawText, evaluatedIndex: idx, preconvertedInteger: true };
+  }
+
+  private evaluateCompoundInteger(value: string, base: string, append: boolean): string {
+    const number = this.shell.evaluateFatalReadonly(value);
+    const sum = append ? this.shell.evaluateFatalReadonly(base || '0') + number : number;
+    return String(BigInt.asIntN(64, sum));
   }
 
   /**
@@ -128,9 +215,10 @@ export class Expander {
   expandCompound(
     words: Word[],
     isAssociative: boolean,
-    declared: boolean
+    declared: boolean,
+    prepare?: CompoundPrepareOptions
   ): { elements: CompoundElement[]; error?: string } {
-    return this.validateCompoundItems(this.expandCompoundItems(words), isAssociative, declared);
+    return this.validateCompoundItems(this.expandCompoundItems(words, prepare), isAssociative, declared);
   }
 
   validateCompoundItems(
@@ -584,6 +672,20 @@ function literalFragments(text: string): Fragment[] {
 /** Removes the backslashes that quote `$`, `` ` ``, `"`, `\`, and newlines inside double quotes. */
 export function unescapeDoubleQuoted(text: string): string {
   return text.replaceAll(/\\([$`"\\\n])/g, (_, c: string) => (c === '\n' ? '' : c));
+}
+
+function createCompoundPrepareState(prepare: CompoundPrepareOptions | undefined): CompoundPrepareState {
+  let currentMax = -1n;
+  if (prepare?.baseIndexed) {
+    for (const key of prepare.baseIndexed.keys()) if (key > currentMax) currentMax = key;
+  }
+  return {
+    currentMax,
+    nextIndex: currentMax + 1n,
+    stagedIndexed: new Map(prepare?.baseIndexed),
+    stagedAssoc: prepare?.baseAssociative?.clone(),
+    pendingAssocKey: undefined,
+  };
 }
 
 /** Splits an array element written `[key]=value` or `[key]+=value` into its parts. */

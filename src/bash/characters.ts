@@ -35,7 +35,7 @@ export const POSIX_CHARACTER_CLASSES: Record<string, (c: string) => boolean> = {
   digit: (c) => /^[0-9]$/.test(c),
   graph: (c) => /^[^\p{C}\p{Z}]$/u.test(c),
   lower: (c) => /^\p{Ll}$/u.test(c),
-  print: (c) => /^[^\p{C}]$/u.test(c) && c !== '\u2028' && c !== '\u2029',
+  print: (c) => /^[^\p{C}]$/u.test(c),
   punct: (c) => /^(?:[!-/:-@[-`{-~]|\p{P})$/u.test(c),
   space: (c) => /^[ \t\n\v\f\r]$/.test(c),
   upper: (c) => /^\p{Lu}$/u.test(c),
