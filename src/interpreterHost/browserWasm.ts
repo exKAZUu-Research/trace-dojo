@@ -7,6 +7,8 @@ const wasmUrls: Record<string, () => URL> = {
     new URL('../../node_modules/@willbooster/web-tree-sitter/web-tree-sitter.wasm', import.meta.url),
   '@willbooster/tree-sitter-c/tree-sitter-c.wasm': () =>
     new URL('../../node_modules/@willbooster/tree-sitter-c/tree-sitter-c.wasm', import.meta.url),
+  '@willbooster/tree-sitter-c-sharp/tree-sitter-c_sharp.wasm': () =>
+    new URL('../../node_modules/@willbooster/tree-sitter-c-sharp/tree-sitter-c_sharp.wasm', import.meta.url),
   '@willbooster/tree-sitter-cpp/tree-sitter-cpp.wasm': () =>
     new URL('../../node_modules/@willbooster/tree-sitter-cpp/tree-sitter-cpp.wasm', import.meta.url),
   '@willbooster/tree-sitter-dart/tree-sitter-dart.wasm': () =>
