@@ -12,13 +12,15 @@ export type ArithmeticTarget =
   | { kind: 'indexedElement'; name: string; index: bigint }
   | { kind: 'invalidElement'; raw: string; emptyWrite?: boolean };
 
+export type WriteTargetResult = 'ok' | 'readonly' | 'invalid';
+
 export interface ArithmeticHost {
   /** Resolves a variable or `name[subscript]` once into a reusable target. */
   resolveTarget(name: string, rawSubscript: string | undefined, willRead: boolean): ArithmeticTarget;
   /** Reads the current string value of `target`, or `undefined` when unset. */
   readTarget(target: ArithmeticTarget): string | undefined;
-  /** Stores `value` into `target`, returning `false` when the assignment fails (such as readonly or bad subscript). */
-  writeTarget(target: ArithmeticTarget, value: string): boolean;
+  /** Stores `value` into `target`, reporting why a failed store was rejected. */
+  writeTarget(target: ArithmeticTarget, value: string): WriteTargetResult;
   /** Reports a diagnostic without formatting it as an arithmetic syntax error. */
   reportError(message: string): void;
 }
@@ -33,7 +35,7 @@ export class ArithmeticError extends Error {
 
 /** Aborts remaining arithmetic evaluation after a host variable store fails and already reported its own error. */
 export class ArithmeticStoreError extends Error {
-  constructor() {
+  constructor(readonly isReadonly = false) {
     super('Arithmetic store failed');
     this.name = 'ArithmeticStoreError';
   }
@@ -92,6 +94,7 @@ interface EvalOutcome {
   value: bigint;
   assignable: boolean;
   target?: ArithmeticTarget;
+  deferred?: { name: string; subscript: string | undefined };
 }
 
 interface ScannerSnapshot {
@@ -235,6 +238,7 @@ class FrameParser {
     return result;
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Evaluates RHS first, resolves deferred plain-= lvalues, and guards compound zero-divisors.
   private parseAssignment(): EvalOutcome {
     const left = this.parseTernary();
     if (this.current.kind !== 'op') return left;
@@ -251,7 +255,13 @@ class FrameParser {
       }
       value = applyCompound(op, left.value, value);
     }
-    if (this.suppress === 0 && left.target) this.store(left.target, value);
+    if (this.suppress === 0) {
+      const target =
+        left.deferred === undefined
+          ? left.target
+          : this.session.host.resolveTarget(left.deferred.name, left.deferred.subscript, false);
+      if (target) this.store(target, value);
+    }
     return { value, assignable: false };
   }
 
@@ -477,9 +487,8 @@ class FrameParser {
     const { name, subscript } = this.current as Extract<LexToken, { kind: 'identifier' }>;
     const peeked = this.peekAfterIdentifier();
     if (peeked.kind === 'op' && peeked.op === '=') {
-      const target = this.suppress > 0 ? undefined : this.session.host.resolveTarget(name, subscript, false);
       this.advance();
-      return { value: 0n, assignable: true, target };
+      return { value: 0n, assignable: true, deferred: { name, subscript } };
     }
     const target = this.suppress > 0 ? undefined : this.session.host.resolveTarget(name, subscript, true);
     const current = this.readValue(target);
@@ -522,11 +531,10 @@ class FrameParser {
     if (target.kind === 'invalidElement' && target.emptyWrite) {
       const prefix = this.session.commandName === undefined ? '' : `${this.session.commandName}: `;
       this.session.host.reportError(`${prefix}\`${target.raw}': not a valid identifier`);
-      throw new ArithmeticStoreError();
+      throw new ArithmeticStoreError(false);
     }
-    if (!this.session.host.writeTarget(target, value.toString())) {
-      throw new ArithmeticStoreError();
-    }
+    const status = this.session.host.writeTarget(target, value.toString());
+    if (status !== 'ok') throw new ArithmeticStoreError(status === 'readonly');
   }
 
   private isOp(op: OperatorText): boolean {

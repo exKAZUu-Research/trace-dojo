@@ -187,14 +187,7 @@ export class Converter {
         return { ...base, kind: 'not', body: this.statement(body) };
       }
       case 'redirected_statement': {
-        const body = node.childForFieldName('body') as Node;
-        if (body.type === 'function_definition') this.unsupported(node, '関数の定義に付けたリダイレクト');
-        return {
-          ...base,
-          kind: 'redirected',
-          body: this.statement(body),
-          redirects: this.fieldNodes(node, 'redirect').map((redirect) => this.redirect(redirect)),
-        };
+        return this.redirectedStatement(node, base);
       }
       case 'pipeline': {
         return this.unsupported(node, 'パイプ（|）');
@@ -212,6 +205,18 @@ export class Converter {
         return this.fail(node, unexpectedTokenMessage(node.text.split(/\s/)[0] || node.type));
       }
     }
+  }
+
+  private redirectedStatement(node: Node, base: { row: number; lineRow: number }): Statement {
+    const bodyNode = node.childForFieldName('body');
+    if (bodyNode?.type === 'function_definition') this.unsupported(node, '関数の定義に付けたリダイレクト');
+    const redirects = this.fieldNodes(node, 'redirect').map((redirect) => this.redirect(redirect));
+    if (!bodyNode) return { ...base, kind: 'command', assignments: [], words: [], redirects };
+    const converted = this.statement(bodyNode);
+    if (converted.kind === 'command' || converted.kind === 'declaration') {
+      return { ...converted, redirects: [...converted.redirects, ...redirects] };
+    }
+    return { ...base, kind: 'redirected', body: converted, redirects };
   }
 
   private body(node: Node): Statement[] {

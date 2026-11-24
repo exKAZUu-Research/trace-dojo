@@ -3,12 +3,12 @@ import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
-import { ArithmeticError, ArithmeticStoreError, type ArithmeticTarget, evaluateArithmetic } from './arithmetic';
 import { parseBash } from './parse';
 import { runProgram } from './run';
-import { type Frame, Runtime } from './runtime';
-import { Shell } from './shell';
-import { type Scope, sortedElements, type Variable, type VariableValue } from './variables';
+import { DiscardSignal, ExitSignal, type Frame, Runtime } from './runtime';
+import { type OutputTarget, Shell } from './shell';
+import { UnsupportedFeatureError } from './unsupported';
+import { cloneScope, type Scope, sortedElements, type Variable, type VariableValue } from './variables';
 
 class PureReadAbort extends Error {}
 
@@ -72,7 +72,7 @@ function scopeRank(scopes: Scope[], variable: Variable): number {
 
 /**
  * The value a variable shows in `frame`, resolving name references (including `arr[sub]` targets) within `frame`'s
- * visible scopes without executing side effects.
+ * visible scopes without mutating live shell state.
  */
 function shownValueOf(shell: Shell, frame: Frame, variable: Variable): VariableValue | undefined {
   if (!variable.attributes.has('n') || variable.value?.kind !== 'scalar') return variable.value;
@@ -83,7 +83,7 @@ function shownValueOf(shell: Shell, frame: Frame, variable: Variable): VariableV
     const ref = current.value.value;
     if (ref === '') return current.value;
     const split = shell.splitSubscript(ref);
-    if (split) return shownElementOf(shell, split.name, split.subscript, maxScope);
+    if (split) return observeElement(shell, split.name, split.subscript, maxScope);
     const next = findOwnVariableIn(shell, ref, maxScope);
     if (!next || next === current) return undefined;
     current = next;
@@ -91,8 +91,10 @@ function shownValueOf(shell: Shell, frame: Frame, variable: Variable): VariableV
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Chases chained namerefs and resolves associative, scalar, or pure-indexed elements.
-function shownElementOf(shell: Shell, name: string, subscript: string, maxScope: number): VariableValue | undefined {
+/** Evaluates `name[subscript]` against a discarded copy-on-write snapshot of `frame`'s visible scopes. */
+// code-gauge-allow functionCognitiveComplexity -- Resolves chained namerefs, whole-array `@`/`*` subscripts, and isolated CoW element reads.
+// code-gauge-allow functionNcss -- Resolves chained namerefs and evaluates element subscripts against a discarded CoW ShellState.
+function observeElement(shell: Shell, name: string, subscript: string, maxScope: number): VariableValue | undefined {
   let target: Variable | undefined = findOwnVariableIn(shell, name, maxScope);
   for (let depth = 0; depth < 8 && target?.attributes.has('n') && target.value?.kind === 'scalar'; depth++) {
     const ref = target.value.value;
@@ -101,114 +103,44 @@ function shownElementOf(shell: Shell, name: string, subscript: string, maxScope:
     if (!next || next === target) return undefined;
     target = next;
   }
-  const value = target?.value;
-  if (!value) return undefined;
-  if (subscript === '@' || subscript === '*') return value;
-  if (value.kind === 'associative') {
-    const element = value.table.get(subscript);
-    return element === undefined ? undefined : { kind: 'scalar', value: element };
-  }
-  const index = pureSubscriptIndex(shell, value, subscript, maxScope);
-  if (index === undefined) return undefined;
-  if (value.kind === 'scalar') return index === 0n ? value : undefined;
-  const element = value.elements.get(index);
-  return element === undefined ? undefined : { kind: 'scalar', value: element };
-}
-
-function pureSubscriptIndex(
-  shell: Shell,
-  value: VariableValue,
-  subscript: string,
-  maxScope: number
-): bigint | undefined {
-  const overlay = new Map<string, string>();
-  const evalPure = (expr: string): bigint | undefined => {
-    try {
-      return evaluateArithmetic(
-        expr,
-        {
-          resolveTarget: (name, rawSubscript) => pureResolveTarget(shell, name, rawSubscript, maxScope, evalPure),
-          readTarget: (target) => pureReadTarget(shell, target, maxScope, overlay),
-          writeTarget: (target, written) => {
-            if (target.kind === 'invalidElement') return false;
-            overlay.set(pureTargetKey(target), written);
-            return true;
-          },
-          reportError: () => {
-            throw new PureReadAbort();
-          },
-        },
-        undefined,
-        () => shell.runtime.spend()
-      );
-    } catch (error) {
-      if (error instanceof ArithmeticError || error instanceof ArithmeticStoreError || error instanceof PureReadAbort) {
-        return undefined;
-      }
-      throw error;
-    }
+  if (!target?.value) return undefined;
+  if (subscript === '@' || subscript === '*') return target.value;
+  const savedState = shell.state;
+  const savedLastStored = shell.lastStored;
+  const savedRow = shell.currentRow;
+  const savedSlots = shell.slotCount;
+  const silentAbort: OutputTarget = {
+    write: () => {
+      throw new PureReadAbort();
+    },
   };
-  const raw = evalPure(subscript);
-  if (raw === undefined) return undefined;
-  if (raw >= 0n) return raw;
-  const length = value.kind === 'indexed' ? shell.maxIndex(value.elements) + 1n : 1n;
-  const resolved = length + raw;
-  return resolved < 0n ? undefined : resolved;
-}
-
-function pureResolveTarget(
-  shell: Shell,
-  name: string,
-  rawSubscript: string | undefined,
-  maxScope: number,
-  evalPure: (expr: string) => bigint | undefined
-): ArithmeticTarget {
-  if (rawSubscript === undefined) return { kind: 'scalar', name };
-  if (rawSubscript === '') return { kind: 'invalidElement', raw: `${name}[]` };
-  const variable = findOwnVariableIn(shell, name, maxScope);
-  if (variable?.value?.kind === 'associative' || variable?.attributes.has('A')) {
-    return { kind: 'associativeElement', name, key: rawSubscript };
+  shell.state = {
+    ...savedState,
+    scopes: savedState.scopes.slice(0, maxScope + 1).map((scope) => cloneScope(scope)),
+    functionScopes: savedState.functionScopes.filter((idx) => idx <= maxScope),
+    unsetDynamic: new Set(savedState.unsetDynamic),
+    fd1: silentAbort,
+    fd2: silentAbort,
+  };
+  try {
+    const element = shell.elementValue(target.name, subscript);
+    return element === undefined ? undefined : { kind: 'scalar', value: element };
+  } catch (error) {
+    if (
+      error instanceof PureReadAbort ||
+      error instanceof DiscardSignal ||
+      error instanceof ExitSignal ||
+      error instanceof UnsupportedFeatureError
+    ) {
+      return undefined;
+    }
+    throw error;
+  } finally {
+    shell.state = savedState;
+    shell.lastStored = savedLastStored;
+    shell.currentRow = savedRow;
+    shell.restoreSlots(savedSlots);
   }
-  const raw = evalPure(rawSubscript);
-  if (raw === undefined) return { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` };
-  const length = variable?.value?.kind === 'indexed' ? shell.maxIndex(variable.value.elements) + 1n : 1n;
-  const resolved = raw < 0n ? length + raw : raw;
-  return resolved < 0n
-    ? { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` }
-    : { kind: 'indexedElement', name, index: resolved };
-}
-
-function pureTargetKey(target: Exclude<ArithmeticTarget, { kind: 'invalidElement' }>): string {
-  if (target.kind === 'scalar') return target.name;
-  if (target.kind === 'associativeElement') return `${target.name}[${target.key}]`;
-  return `${target.name}[${target.index}]`;
-}
-
-function pureReadTarget(
-  shell: Shell,
-  target: ArithmeticTarget,
-  maxScope: number,
-  overlay: ReadonlyMap<string, string>
-): string | undefined {
-  if (target.kind === 'invalidElement') return undefined;
-  const shadowed = overlay.get(pureTargetKey(target));
-  if (shadowed !== undefined) return shadowed;
-  if (target.kind === 'associativeElement') {
-    const element = shownElementOf(shell, target.name, target.key, maxScope);
-    return element?.kind === 'scalar' ? element.value : undefined;
-  }
-  if (target.kind === 'indexedElement') {
-    const element = shownElementOf(shell, target.name, String(target.index), maxScope);
-    return element?.kind === 'scalar' ? element.value : undefined;
-  }
-  const variable = findOwnVariableIn(shell, target.name, maxScope);
-  const val = variable
-    ? shownValueOf(shell, { callRow: undefined, isAtomic: false, scopeIndex: maxScope }, variable)
-    : undefined;
-  if (!val) return undefined;
-  if (val.kind === 'scalar') return val.value;
-  if (val.kind === 'indexed') return val.elements.get(0n);
-  return val.table.get('0');
 }
 
 function findOwnVariableIn(shell: Shell, name: string, maxScope: number): Variable | undefined {

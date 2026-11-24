@@ -7,6 +7,7 @@ import {
   type ArithmeticTarget,
   evaluateArithmetic,
   skipSubscript,
+  type WriteTargetResult,
 } from './arithmetic';
 import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word } from './ast';
 import { BUILTINS } from './builtins';
@@ -27,13 +28,19 @@ import {
 } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import {
+  advanceRandomState,
   AssociativeTable,
   type Attribute,
+  callStackArray,
   cloneScope,
   cloneValue,
+  DYNAMIC_VARIABLES,
   ensureWritable,
   ENVIRONMENT_VARIABLES,
   isIdentifier,
+  isValidFunctionName,
+  PERMANENT_DYNAMIC_VARIABLES,
+  promoteTemporaryInScopes,
   type Scope,
   sortedElements,
   type Variable,
@@ -80,11 +87,6 @@ export interface ShellState {
   fd2: OutputTarget;
 }
 
-/** The variables Bash computes whenever a program reads them. */
-const DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'FUNCNAME', 'BASH_LINENO', 'BASH_SOURCE', 'BASH_SUBSHELL']);
-/** The dynamic variables Bash refuses to unset. */
-const PERMANENT_DYNAMIC_VARIABLES = new Set(['BASH_LINENO', 'BASH_SOURCE']);
-
 export const BASH_VERSION = '5.3.0(1)-release';
 
 /** Runs a parsed program as Bash 5.3 does. */
@@ -118,6 +120,7 @@ export class Shell implements ArithmeticHost {
   private readonly activeOutputs: { text: string }[] = [];
   /** Prefix-assignment scopes active for the running command, distinct from persistent local/global scopes. */
   private readonly tempScopes = new WeakSet<Scope>();
+  private readonlyFailure = false;
 
   constructor(readonly runtime: Runtime) {
     const global: Scope = new Map();
@@ -770,6 +773,19 @@ export class Shell implements ArithmeticHost {
     }
   }
 
+  private evaluateFatalReadonly(text: string): bigint {
+    try {
+      return evaluateArithmetic(text, this, undefined, () => this.runtime.spend());
+    } catch (error) {
+      if (error instanceof ArithmeticError) this.discard(error.message);
+      if (error instanceof ArithmeticStoreError) {
+        if (error.isReadonly) throw new ExitSignal(1);
+        throw new DiscardSignal();
+      }
+      throw error;
+    }
+  }
+
   /** The status of `((...))`: 0 when the value is not zero; an error reports and gives 1. */
   arithmeticStatus(source: ArithmeticSource, commandName: string): number {
     const value = this.tryEvaluate(this.expander.arithmeticText(source), commandName);
@@ -824,14 +840,16 @@ export class Shell implements ArithmeticHost {
     return undefined;
   }
 
-  writeTarget(target: ArithmeticTarget, value: string): boolean {
-    if (target.kind === 'scalar') return this.assignScalar(target.name, value);
-    if (target.kind === 'associativeElement') return this.assignElement(target.name, target.key, value, false, true);
-    if (target.kind === 'indexedElement') {
-      return this.assignElement(target.name, String(target.index), value, false, true);
-    }
-    this.reportError(`${target.raw}: bad array subscript`);
-    return false;
+  writeTarget(target: ArithmeticTarget, value: string): WriteTargetResult {
+    this.readonlyFailure = false;
+    let ok = false;
+    if (target.kind === 'scalar') ok = this.assignScalar(target.name, value);
+    else if (target.kind === 'associativeElement') ok = this.assignElement(target.name, target.key, value, false, true);
+    else if (target.kind === 'indexedElement') {
+      ok = this.assignElement(target.name, String(target.index), value, false, true);
+    } else this.reportError(`${target.raw}: bad array subscript`);
+    if (ok) return 'ok';
+    return this.readonlyFailure ? 'readonly' : 'invalid';
   }
 
   /** Whether a name holds an associative array, including one declared with `-A` that has no elements yet. */
@@ -870,31 +888,7 @@ export class Shell implements ArithmeticHost {
    * persistent variable scope (as `export` and `readonly` require) and returns it.
    */
   promoteTemporaryVariable(name: string): Variable | undefined {
-    const { scopes } = this.state;
-    let tempIndex = -1;
-    for (let i = scopes.length - 1; i >= 0; i--) {
-      const scope = scopes[i];
-      if (!scope.has(name)) continue;
-      if (this.tempScopes.has(scope)) tempIndex = i;
-      break;
-    }
-    if (tempIndex === -1) return undefined;
-    const tempVar = scopes[tempIndex].get(name) as Variable;
-    scopes[tempIndex].delete(name);
-    let target: Variable | undefined;
-    for (let i = tempIndex - 1; i >= 0; i--) {
-      if (this.tempScopes.has(scopes[i])) continue;
-      target = scopes[i].get(name);
-      if (target) break;
-    }
-    if (!target) {
-      target = { name, value: undefined, attributes: new Set() };
-      scopes[0].set(name, target);
-    }
-    target.value = tempVar.value;
-    target.shared = false;
-    for (const attr of tempVar.attributes) target.attributes.add(attr);
-    return target;
+    return promoteTemporaryInScopes(this.state.scopes, this.tempScopes, name);
   }
 
   /** The name a name reference finally names, or the name itself. */
@@ -950,23 +944,7 @@ export class Shell implements ArithmeticHost {
 
   /** The elements of `FUNCNAME`, `BASH_LINENO`, and `BASH_SOURCE`, which describe the calls in progress. */
   dynamicArray(name: string): string[] | undefined {
-    if (!this.isDynamic(name)) return undefined;
-    const calls = this.state.calls.toReversed();
-    switch (name) {
-      case 'FUNCNAME': {
-        // Outside every function, `FUNCNAME` is declared without elements, while the others describe the script.
-        return calls.length === 0 ? undefined : [...calls.map((call) => call.name), 'main'];
-      }
-      case 'BASH_LINENO': {
-        return [...calls.map((call) => String(call.line)), '0'];
-      }
-      case 'BASH_SOURCE': {
-        return [...calls.map(() => SCRIPT_NAME), SCRIPT_NAME];
-      }
-      default: {
-        return undefined;
-      }
-    }
+    return this.isDynamic(name) ? callStackArray(name, this.state.calls, SCRIPT_NAME) : undefined;
   }
 
   /**
@@ -1005,18 +983,10 @@ export class Shell implements ArithmeticHost {
 
   /** Bash's `RANDOM`: Park and Miller's generator, folded to 15 bits, never repeating the last value. */
   private nextRandom(): number {
-    let value: number;
-    do {
-      let seed = this.state.randomSeed === 0 ? 123_459_876 : this.state.randomSeed;
-      const high = Math.trunc(seed / 127_773);
-      const low = seed % 127_773;
-      seed = 16_807 * low - 2836 * high;
-      if (seed < 0) seed += 0x7f_ff_ff_ff;
-      this.state.randomSeed = seed;
-      value = ((seed >>> 16) ^ (seed & 0xff_ff)) & 0x7f_ff;
-    } while (value === this.state.lastRandom);
-    this.state.lastRandom = value;
-    return value;
+    const next = advanceRandomState(this.state.randomSeed, this.state.lastRandom);
+    this.state.randomSeed = next.seed;
+    this.state.lastRandom = next.value;
+    return next.value;
   }
 
   /** Seeds `RANDOM`, whose value Bash evaluates as arithmetic because the variable has the integer attribute. */
@@ -1071,7 +1041,7 @@ export class Shell implements ArithmeticHost {
   }
 
   private arrayIndexFor(variable: Variable | undefined, subscript: string): bigint | undefined {
-    const index = this.evaluateText(subscript, undefined);
+    const index = this.evaluateFatalReadonly(subscript);
     if (index >= 0n) return index;
     const length = variable?.value?.kind === 'indexed' ? this.maxIndex(variable.value.elements) + 1n : 1n;
     const resolved = length + index;
@@ -1137,6 +1107,7 @@ export class Shell implements ArithmeticHost {
 
   assignScalarTo(variable: Variable, value: string, append = false): boolean {
     if (variable.attributes.has('r')) {
+      this.readonlyFailure = true;
       this.reportError(`${variable.name}: readonly variable`);
       return false;
     }
@@ -1162,8 +1133,8 @@ export class Shell implements ArithmeticHost {
   private convertForAttributes(variable: Variable, value: string, base: string, append: boolean): string | undefined {
     let result: string;
     if (variable.attributes.has('i')) {
-      const number = this.evaluateText(value, undefined);
-      result = append ? String(this.evaluateText(base || '0', undefined) + number) : String(number);
+      const number = this.evaluateFatalReadonly(value);
+      result = append ? String(this.evaluateFatalReadonly(base || '0') + number) : String(number);
       result = String(BigInt.asIntN(64, BigInt(result)));
     } else result = base + value;
     if (variable.attributes.has('u')) result = upperCase(result);
@@ -1185,6 +1156,7 @@ export class Shell implements ArithmeticHost {
     if (this.isDynamic(name)) return this.assignDynamic(name, value);
     let variable = this.findVariable(name);
     if (variable?.attributes.has('r')) {
+      this.readonlyFailure = true;
       this.reportError(`${name}: readonly variable`);
       return false;
     }
@@ -1206,6 +1178,7 @@ export class Shell implements ArithmeticHost {
     reportedName = variable.name
   ): boolean {
     if (variable.attributes.has('r')) {
+      this.readonlyFailure = true;
       this.reportError(`${reportedName}: readonly variable`);
       return false;
     }
@@ -1243,6 +1216,14 @@ export class Shell implements ArithmeticHost {
     elements.set(index, converted);
     this.lastStored = converted;
     return true;
+  }
+
+  get slotCount(): number {
+    return this.slots;
+  }
+
+  restoreSlots(count: number): void {
+    this.slots = count;
   }
 
   private chargeSlot(): void {
@@ -1448,9 +1429,4 @@ export type CompoundElement = { key: string; value: string; append: boolean } | 
 /** Whether a declaration declares name references (`local -n this=$1`), which hold no value of their own. */
 function declaresReferences(statement: Extract<Statement, { kind: 'declaration' }>): boolean {
   return statement.args.some((arg) => !('append' in arg) && /^-[A-Za-z]*n[A-Za-z]*$/.test(arg.text));
-}
-
-/** Whether a function's name is non-empty, contains no `$`, and is not purely digits. */
-function isValidFunctionName(name: string): boolean {
-  return name !== '' && !name.includes('$') && !/^[0-9]+$/.test(name);
 }

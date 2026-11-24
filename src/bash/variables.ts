@@ -185,6 +185,84 @@ export function isIdentifier(text: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(text);
 }
 
+/** Whether a function's name is non-empty, contains no `$`, and is not purely digits. */
+export function isValidFunctionName(name: string): boolean {
+  return name !== '' && !name.includes('$') && !/^[0-9]+$/.test(name);
+}
+
+/** Promotes a command-prefix temporary variable binding into the nearest persistent scope when present. */
+export function promoteTemporaryInScopes(
+  scopes: Scope[],
+  tempScopes: WeakSet<Scope>,
+  name: string
+): Variable | undefined {
+  let tempIndex = -1;
+  for (let i = scopes.length - 1; i >= 0; i--) {
+    const scope = scopes[i];
+    if (!scope.has(name)) continue;
+    if (tempScopes.has(scope)) tempIndex = i;
+    break;
+  }
+  if (tempIndex === -1) return undefined;
+  const tempVar = scopes[tempIndex].get(name) as Variable;
+  scopes[tempIndex].delete(name);
+  let target: Variable | undefined;
+  for (let i = tempIndex - 1; i >= 0; i--) {
+    if (tempScopes.has(scopes[i])) continue;
+    target = scopes[i].get(name);
+    if (target) break;
+  }
+  if (!target) {
+    target = { name, value: undefined, attributes: new Set() };
+    scopes[0].set(name, target);
+  }
+  target.value = tempVar.value;
+  target.shared = false;
+  for (const attr of tempVar.attributes) target.attributes.add(attr);
+  return target;
+}
+
+/** Elements of call-stack dynamic arrays (`FUNCNAME`, `BASH_LINENO`, `BASH_SOURCE`). */
+export function callStackArray(
+  name: string,
+  calls: readonly { name: string; line: number }[],
+  scriptName: string
+): string[] | undefined {
+  const reversed = calls.toReversed();
+  if (name === 'FUNCNAME') return reversed.length === 0 ? undefined : [...reversed.map((c) => c.name), 'main'];
+  if (name === 'BASH_LINENO') return [...reversed.map((c) => String(c.line)), '0'];
+  if (name === 'BASH_SOURCE') return [...reversed.map(() => scriptName), scriptName];
+  return undefined;
+}
+
+/** Advances Bash's Park-Miller `RANDOM` generator until it produces a 15-bit value distinct from `lastRandom`. */
+export function advanceRandomState(randomSeed: number, lastRandom: number): { seed: number; value: number } {
+  let seed = randomSeed;
+  let value: number;
+  do {
+    seed = seed === 0 ? 123_459_876 : seed;
+    const high = Math.trunc(seed / 127_773);
+    const low = seed % 127_773;
+    seed = 16_807 * low - 2836 * high;
+    if (seed < 0) seed += 0x7f_ff_ff_ff;
+    value = ((seed >>> 16) ^ (seed & 0xff_ff)) & 0x7f_ff;
+  } while (value === lastRandom);
+  return { seed, value };
+}
+
+/** Dynamic variables computed on read unless unset or shadowed. */
+export const DYNAMIC_VARIABLES = new Set([
+  'RANDOM',
+  'LINENO',
+  'FUNCNAME',
+  'BASH_LINENO',
+  'BASH_SOURCE',
+  'BASH_SUBSHELL',
+]);
+
+/** Dynamic variables that `unset` refuses to remove. */
+export const PERMANENT_DYNAMIC_VARIABLES = new Set(['BASH_LINENO', 'BASH_SOURCE']);
+
 /** Host environment variables absent in the browser grading sandbox. */
 export const ENVIRONMENT_VARIABLES = new Set([
   'HOME',
