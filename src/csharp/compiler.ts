@@ -124,6 +124,7 @@ export class Compiler extends StatementBinder {
     let declared: DeclaredType[] = [];
     this.runGuarded(() => {
       declared = this.declareUnit(unit, this.userRoot, false);
+      this.checkStructLayouts(declared);
       const program = unit.statements.length > 0 ? this.declareTopLevel(unit) : undefined;
       // Roslyn binds no method bodies once the declarations have errors, so their errors would not appear.
       if (this.diagnostics.length > 0) return;
@@ -152,6 +153,21 @@ export class Compiler extends StatementBinder {
   }
 
   /** Checks the type arguments of the generic types the program names against their parameters' constraints. */
+  /** Reports each instance field of a struct whose type holds that struct by value (CS0523), as Roslyn does. */
+  private checkStructLayouts(declared: DeclaredType[]): void {
+    for (const { symbol } of declared) {
+      if (symbol.kind !== 'struct') continue;
+      for (const field of symbol.fields) {
+        if (field.isStatic || field.isConst || !holdsByValue(field.type, symbol, new Set())) continue;
+        this.error(
+          field.row,
+          'CS0523',
+          `型 '${displayType(field.type)}' の構造体メンバー '${displayTypeSymbol(symbol)}.${field.property?.name ?? field.name}' により、構造体レイアウトで循環参照が発生します`
+        );
+      }
+    }
+  }
+
   private checkTypeArguments(): void {
     for (const { symbol, args, row } of this.constraintChecks) {
       const parameters = symbol.allTypeParameters;
@@ -902,4 +918,17 @@ function calleesFirst(locals: MethodSymbol[], callees: Map<MethodSymbol, MethodS
   };
   for (const local of pending) visit(local);
   return order;
+}
+
+/** Whether a value of the type holds a struct by value, through its instance fields and theirs. */
+function holdsByValue(type: Type, target: TypeSymbol, seen: Set<TypeSymbol>): boolean {
+  if (type.kind !== 'named' || type.symbol.kind !== 'struct') return false;
+  if (type.symbol === target) return true;
+  // A generic struct is expanded once per definition, which also stops layouts that grow without end.
+  if (seen.has(type.symbol)) return false;
+  seen.add(type.symbol);
+  const substitution = substitutionOf(type);
+  return type.symbol.fields.some(
+    (field) => !field.isStatic && !field.isConst && holdsByValue(substitute(field.type, substitution), target, seen)
+  );
 }
