@@ -946,6 +946,8 @@ export class Evaluator extends StatementExecutor {
     if (target.receiver) {
       receiver = this.evaluate(target.receiver, frame);
       if (receiver === undefined && property.owner.special !== 'nullable') throw NULL_REFERENCE();
+      // An accessor of a struct runs on a copy of a value that is not a variable, as a method does.
+      if (receiver instanceof CsStruct && !isVariable(target.receiver, true)) receiver = receiver.clone();
     } else if (!property.isStatic) {
       receiver = frame.thisValue;
     }
