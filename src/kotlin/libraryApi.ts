@@ -3,15 +3,8 @@ import { javaTypeAliases, libraryAnnotationNames, libraryDeclarationNames, libra
 import type { ClassSymbol, TypeParameterSymbol } from './symbols';
 import { type KType, resolved, typeToString } from './types';
 
-const memberLabels = new Map([
-  ['toSortedMap', '並べ替えた Map（toSortedMap）'],
-  ['toSortedSet', '並べ替えた Set（toSortedSet）'],
-]);
-
 export function unavailableLibraryMember(type: KType, name: string): string | undefined {
-  if (hasLibraryMember(type, name, new Set())) {
-    return memberLabels.get(name) ?? `${typeToString(type)} の ${name}`;
-  }
+  if (hasLibraryMember(type, name, new Set())) return `${typeToString(type)} の ${name}`;
 }
 
 export function isKnownLibraryPackage(path: string): boolean {

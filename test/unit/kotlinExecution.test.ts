@@ -6175,11 +6175,6 @@ test.each([
     'kotlin.system.measureTimeMillisは、この採点環境では使えません。',
   ],
   [
-    'an omitted collection factory',
-    'fun main() { println(sortedMapOf(1 to 2)) }',
-    'kotlin.collections.sortedMapOfは、この採点環境では使えません。',
-  ],
-  [
     'a Java method mapped to a mutable Kotlin collection',
     'fun main() { mutableMapOf("a" to 1).putIfAbsent("b", 2) }',
     'MutableMap<String, Int> の putIfAbsentは、この採点環境では使えません。',

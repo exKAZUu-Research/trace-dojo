@@ -20,6 +20,7 @@ import {
   TURTLE_SOURCE,
 } from './runtimeTypes';
 import { SEQUENCES_SOURCE } from './sequences';
+import { SORTED_COLLECTION_FUNCTIONS_SOURCE, SORTED_COLLECTIONS_SOURCE } from './sortedCollections';
 import { STANDARD_SOURCE } from './standard';
 import { TEXT_SOURCE, UTIL_SOURCE } from './text';
 import { TEXT_COLLECTIONS_SOURCE } from './textCollections';
@@ -40,6 +41,8 @@ export const PRELUDE_SOURCES = [
   COLLECTION_FUNCTIONS_SOURCE,
   COLLECTION_VIEWS_SOURCE,
   SEQUENCES_SOURCE,
+  SORTED_COLLECTIONS_SOURCE,
+  SORTED_COLLECTION_FUNCTIONS_SOURCE,
   arraysSource(),
   COMPARISONS_SOURCE,
   RANDOM_SOURCE,
