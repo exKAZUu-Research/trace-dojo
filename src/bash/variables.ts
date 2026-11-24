@@ -371,11 +371,10 @@ export function dynamicArrayLength(elements: ReadonlyMap<bigint, string> | undef
 
 /** Unsets one element (or `'all'` for `@`/`*`) of `FUNCNAME` or `PIPESTATUS`. */
 export function unsetDynamicArrayElement(
-  state: { calls: readonly CallFrameEntry[]; funcname: Map<bigint, string>; pipeStatus: Map<bigint, string> },
+  state: { funcname: Map<bigint, string>; pipeStatus: Map<bigint, string> },
   name: string,
   index: bigint | 'all'
 ): void {
-  if (name === 'FUNCNAME' && state.calls.length === 0) return;
   const target = name === 'PIPESTATUS' ? state.pipeStatus : name === 'FUNCNAME' ? state.funcname : undefined;
   if (!target) return;
   if (index === 'all') target.clear();
