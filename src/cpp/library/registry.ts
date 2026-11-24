@@ -128,8 +128,6 @@ const UNSUPPORTED_C_NAMES: Record<string, string> = {
   raise: 'シグナル（std::raise）',
   setjmp: '大域的な脱出（setjmp）',
   longjmp: '大域的な脱出（longjmp）',
-  vscanf: '標準入力（vscanf）',
-  vfscanf: '標準入力・ファイル（vfscanf）',
   freopen: 'ファイルの読み書き（freopen）',
   fread: 'ファイルの読み書き（fread）',
   fwrite: 'ファイルの読み書き（fwrite）',

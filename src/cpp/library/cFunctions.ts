@@ -406,6 +406,31 @@ function addInputFunctions(library: Library, add: (fn: FunctionInfo) => void, st
       { isVariadic: true }
     )
   );
+  // The `v` forms take the pointers a `va_list` has left.
+  add(
+    native('vscanf', [CONST_CHAR_PTR, CHAR_POINTER], INT, ([format, list], { frame }) =>
+      scanFrom(frame.runtime.standardInput(), frame, format as Ptr, remainingArguments(list as Ptr))
+    )
+  );
+  add(
+    native('vfscanf', [streamType, CONST_CHAR_PTR, CHAR_POINTER], INT, ([file, format, list], { frame }) =>
+      scanFrom(library.inputStream(file as Ptr, frame), frame, format as Ptr, remainingArguments(list as Ptr))
+    )
+  );
+  add(
+    native(
+      'vsscanf',
+      [CONST_CHAR_PTR, CONST_CHAR_PTR, CHAR_POINTER],
+      INT,
+      ([text, format, list], { frame }) =>
+        scanFormat(
+          frame,
+          readCString(text as Ptr, frame.runtime),
+          readCString(format as Ptr, frame.runtime),
+          remainingArguments(list as Ptr)
+        ).count
+    )
+  );
   add(native('getchar', [], INT, (_args, { frame }) => readByte(frame.runtime.standardInput())));
   addFileFunctions(library, add, streamType);
   for (const name of ['getc', 'fgetc'])
