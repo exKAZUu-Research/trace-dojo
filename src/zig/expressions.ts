@@ -77,6 +77,7 @@ import {
   indexableChild,
   type IntType,
   intType,
+  isVectorType,
   maxInt,
   minInt,
   NULL_TYPE,
@@ -153,6 +154,8 @@ export abstract class ExpressionCompiler extends SemaBase {
   protected abstract compileTry(expression: ExpressionOf<'try'>, resultType: Type | undefined): TExpr;
   protected abstract compileCatch(expression: ExpressionOf<'catch'>, resultType: Type | undefined): TExpr;
   protected abstract localSlot(): number;
+  /** An operator on vectors, which applies it to each element. */
+  protected abstract vectorOperation(expression: ExpressionOf<'binary' | 'unary'>, operands: TExpr[]): TExpr;
 
   compile(expression: Expression, resultType?: Type): TExpr {
     this.compilationBudget.spend();
@@ -1239,6 +1242,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   private unary(expression: ExpressionOf<'unary'>, resultType: Type | undefined): TExpr {
     if (expression.operator === '&') return this.addressOperand(expression, resultType);
     const operand = this.compile(expression.operand, expression.operator === '!' ? BOOL : resultType);
+    if (isVectorType(operand.type)) return this.vectorOperation(expression, [operand]);
     const type = operand.type;
     switch (expression.operator) {
       case '!': {
@@ -1447,6 +1451,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const { operator } = expression;
     let left = this.compile(expression.left);
     let right = this.compile(expression.right, left.type.kind === 'null' ? undefined : unionTag(left.type));
+    if (isVectorType(left.type) || isVectorType(right.type)) return this.vectorOperation(expression, [left, right]);
     if (left.type.kind === 'enum_literal' && right.type.kind !== 'enum_literal')
       left = this.compile(expression.left, unionTag(right.type));
     // A tagged union compares with an enum value by its active tag.
@@ -1568,7 +1573,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     let left = this.compile(expression.left);
     if (left.type.kind === 'pointer' && (left.type.size === 'many' || left.type.size === 'c'))
       return this.pointerArithmetic(left, expression);
-    let right = this.compile(expression.right);
+    let right = this.compile(expression.right, isVectorType(left.type) ? left.type : undefined);
+    if (isVectorType(left.type) || isVectorType(right.type)) return this.vectorOperation(expression, [left, right]);
     const bitwise = operator === '&' || operator === '|' || operator === '^';
     if (bitwise && (left.type.kind === 'bool' || right.type.kind === 'bool')) {
       this.error(expression, `bool の値には ${operator} ではなく and・or を使います。`);
@@ -1748,6 +1754,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   // code-gauge-allow functionCognitiveComplexity -- Keeps unbounded and fixed-width shift contracts together.
   private shift(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const left = this.compile(expression.left, resultType);
+    if (isVectorType(left.type)) return this.vectorOperation(expression, [left, this.compile(expression.right)]);
     const type = left.type;
     if (type.kind !== 'int' && type.kind !== 'comptime_int') {
       return this.error(expression, `シフトは整数の型にだけ使えます（${typeName(type)} 型です）。`);

@@ -191,6 +191,13 @@ function computeLayout(type: Type, query: LayoutQuery): Layout {
       return type.size === 'slice' ? { size: 16, align: 8 } : { size: 8, align: 8 };
     }
     case 'array': {
+      if (type.isVector) {
+        // A vector packs its elements' bits and takes the next power of two bytes, aligned as LLVM's vectors are.
+        const bytes = Math.ceil((query.bits(type.child) * Number(type.length)) / 8);
+        let size = 1;
+        while (size < bytes) size *= 2;
+        return { size: bytes === 0 ? 0 : size, align: Math.min(Math.max(size, 1), 16) };
+      }
       const child = query.layout(type.child);
       return {
         size: child.size * Number(type.length + (type.sentinel === undefined ? 0n : 1n)),

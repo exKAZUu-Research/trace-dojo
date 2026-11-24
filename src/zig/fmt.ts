@@ -279,6 +279,10 @@ export function checkFormat(spec: string, type: Type, info: TypeInfo, hasOptions
   };
   const kind = type.kind;
   if (kind === 'enum') info.enumFields(type);
+  if (type.kind === 'array' && type.isVector && spec !== 'any' && spec !== '') {
+    checkFormat(spec, type.child, info, hasOptions, depth);
+    return;
+  }
   const special = SPECIAL_SPECIFIERS.get(spec);
   if (special) {
     if (!special.accepts(type)) invalid();
@@ -409,7 +413,9 @@ export function checkFormat(spec: string, type: Type, info: TypeInfo, hasOptions
       return;
     }
     case 'array': {
-      if (!isAny) throw new FormatError('cannot format array without a specifier (i.e. {s} or {any})');
+      // A vector formats its elements with the specifier, as `{ 1, 2 }`.
+      if (!isAny && !type.isVector)
+        throw new FormatError('cannot format array without a specifier (i.e. {s} or {any})');
       if (depth > 0) checkFormat(spec, type.child, info, hasOptions, depth - 1);
       return;
     }
