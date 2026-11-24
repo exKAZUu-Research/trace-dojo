@@ -3065,7 +3065,7 @@ export class Compiler extends StatementCompiler {
     if (!this.isUnevaluated) this.checkLibraryStorage(type.cls, row);
     const isAggregate = this.isAggregate(type.cls);
     const single =
-      elements.length === 1 && elements[0].type !== 'initializer_list'
+      elements.length === 1 && elements[0].type !== 'initializer_list' && elements[0].type !== 'initializer_pair'
         ? this.compileExpression(elements[0])
         : undefined;
     const copy = single?.type.kind === 'class' && single.type.cls.isDerivedFrom(type.cls) ? single : undefined;
@@ -3336,13 +3336,111 @@ export class Compiler extends StatementCompiler {
   }
 
   private takeArrayElements(element: Type, limit: number, clauses: Clauses, row: number): (() => Initializer)[] {
+    if (isDesignated(clauses)) return this.designatedElements(element, limit, clauses, row);
     const taken: (() => Initializer)[] = [];
     while (taken.length < limit && clauses.next < clauses.nodes.length)
       taken.push(this.takeClauses(element, clauses, row));
     return taken;
   }
 
+  /**
+   * The elements of an array that a designated initializer list (`{[1] = 5, [3 ... 4] = 7}`, a C99 and GNU extension
+   * clang++ accepts) initializes, by index, with the next clause after each designated one.
+   */
+  private designatedElements(element: Type, limit: number, clauses: Clauses, row: number): (() => Initializer)[] {
+    const slots: (() => Initializer)[] = [];
+    let position = 0;
+    for (const node of clauses.nodes.slice(clauses.next)) {
+      let [first, last] = [position, position];
+      let value = node;
+      const designators = node.type === 'initializer_pair' ? fieldsOf(node, 'designator') : [];
+      if (designators.length > 0) {
+        const designator = designators[0];
+        if (designator.type === 'field_designator') return this.error(node.row, '配列の初期値に .名前 は書けません。');
+        const bound = (field: string): number => {
+          const expr = this.rvalue(this.compileExpression(fieldOf(designator, field) ?? designator.children[0]));
+          if (expr.constant === undefined || !isInteger(expr.type))
+            return this.error(node.row, '配列の添字の指定には整数の定数式を書いてください。');
+          return Number(expr.constant);
+        };
+        first = designator.type === 'subscript_range_designator' ? bound('start') : bound('');
+        last = designator.type === 'subscript_range_designator' ? bound('end') : first;
+        value = this.nestedDesignation(node, designators.slice(1));
+      }
+      if (first < 0 || last >= limit || first > last)
+        return this.error(node.row, `配列の添字の指定 ${node.text.split('=')[0].trim()} が範囲を超えています。`);
+      for (let index = first; index <= last; index++) {
+        slots[index] = this.takeClauses(element, { nodes: [value], next: 0, compiled: clauses.compiled }, row);
+      }
+      position = last + 1;
+    }
+    clauses.next = clauses.nodes.length;
+    const zero = (): Initializer => this.initializeList(element, [], row);
+    return Array.from({ length: slots.length }, (_, index) => slots[index] ?? zero);
+  }
+
+  /** The value a designator list's later designators initialize (`.p.x = 3` makes `.p = {.x = 3}`). */
+  private nestedDesignation(node: Syntax, rest: Syntax[]): Syntax {
+    const value = fieldOf(node, 'value') as Syntax;
+    if (rest.length === 0) return value;
+    const pair: Syntax = { ...node, all: [...rest, value], children: [...rest, value] };
+    return { ...node, type: 'initializer_list', all: [pair], children: [pair] };
+  }
+
+  /**
+   * The members a designated initializer list (`{.x = 1, .y = 2}`) initializes, by name, with the next member after
+   * each designated one; the ones it leaves out take their default member initializers.
+   */
+  private designatedMembers(cls: ClassInfo, clauses: Clauses, row: number): () => Initializer {
+    if (cls.base) return this.error(row, '親クラスのある集成体には、指示付きの初期化子を書けません。');
+    const fields = cls.ownFields;
+    const grouped: Syntax[][] = fields.map(() => []);
+    const direct = new Map<number, Syntax>();
+    let position = 0;
+    for (const node of clauses.nodes.slice(clauses.next)) {
+      const designators = node.type === 'initializer_pair' ? fieldsOf(node, 'designator') : [];
+      let index = position;
+      if (designators.length > 0) {
+        const designator = designators[0];
+        if (designator.type !== 'field_designator')
+          return this.error(node.row, 'クラスの初期値に [添字] は書けません。');
+        const name = designator.children[0].text;
+        index = fields.findIndex((field) => field.name === name);
+        if (index < 0) return this.error(node.row, `${cls.name} に ${name} というメンバはありません。`);
+      }
+      if (index >= fields.length) return this.error(node.row, `${cls.name} を初期化する {...} の値が多すぎます。`);
+      if (designators.length > 1) {
+        const nested: Syntax = {
+          ...node,
+          all: [...designators.slice(1), fieldOf(node, 'value') as Syntax],
+          children: [...designators.slice(1), fieldOf(node, 'value') as Syntax],
+        };
+        grouped[index].push(nested);
+        direct.delete(index);
+      } else {
+        direct.set(index, designators.length > 0 ? (fieldOf(node, 'value') as Syntax) : node);
+        grouped[index] = [];
+      }
+      position = index + 1;
+    }
+    clauses.next = clauses.nodes.length;
+    const taken = fields.map((field, index) => {
+      const value = direct.get(index);
+      const nested = grouped[index];
+      if (!value && nested.length === 0) return;
+      const node = value ?? { ...nested[0], type: 'initializer_list', all: nested, children: nested };
+      return this.takeClauses(field.type, { nodes: [node], next: 0, compiled: clauses.compiled }, row);
+    });
+    return () =>
+      this.initializeAggregate(
+        cls,
+        taken.map((take) => take?.()),
+        row
+      );
+  }
+
   private takeMemberClauses(cls: ClassInfo, clauses: Clauses, row: number): () => Initializer {
+    if (isDesignated(clauses)) return this.designatedMembers(cls, clauses, row);
     const taken = this.aggregateElementTypes(cls).map((type) =>
       clauses.next < clauses.nodes.length ? this.takeClauses(type, clauses, row) : undefined
     );
@@ -3604,6 +3702,11 @@ function arrayStorage(value: Value): ArrayStore | undefined {
 }
 
 /** The initializer-clauses of a braced list, which the elements of an aggregate take in order. */
+/** Whether a braced list's clauses designate what they initialize (`{.x = 1}`, `{[2] = 3}`). */
+function isDesignated(clauses: Clauses): boolean {
+  return clauses.next === 0 && clauses.nodes.some((node) => node.type === 'initializer_pair');
+}
+
 interface Clauses {
   readonly nodes: readonly Syntax[];
   next: number;

@@ -4,10 +4,6 @@ import { fieldOf, type Syntax } from './syntax';
 
 /** The syntax the interpreter leaves out, by node type, with the name learners know it by. */
 const UNSUPPORTED_NODES: Record<string, string> = {
-  initializer_pair: '指示付きの初期化子（{.x = 1} など）',
-  field_designator: '指示付きの初期化子（{.x = 1} など）',
-  subscript_designator: '指示付きの初期化子（{[1] = 2} など）',
-  subscript_range_designator: '指示付きの初期化子（{[1] = 2} など）',
   union_specifier: '共用体（union）',
   bitfield_clause: 'ビットフィールド',
   ref_qualifier: '参照修飾子（& や &&）の付いたメンバ関数',
