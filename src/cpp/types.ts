@@ -31,8 +31,13 @@ export type Type =
   /** An array, whose length is undefined while it is incomplete (`int a[]` before its initializer). */
   | ({ kind: 'array'; of: Type; length?: number; variableLength?: Eval<unknown> } & Qualified)
   | ({ kind: 'class'; cls: ClassInfo } & Qualified)
-  /** The type of a function's name, which only a call or a library algorithm's argument may use. */
-  | { kind: 'function'; ret: Type; params: Type[] };
+  /** A pointer to a member of a class (`int P::*`, `int (P::*)() const`), whose member has type `to`. */
+  | ({ kind: 'memberPointer'; cls: ClassInfo; to: Type } & Qualified)
+  /**
+   * The type of a function's name, which only a call or a library algorithm's argument may use; a member function's
+   * type, which a pointer to a member has, says whether the function is const.
+   */
+  | { kind: 'function'; ret: Type; params: Type[]; isConstMember?: boolean };
 
 export type IntType = Extract<Type, { kind: 'int' }>;
 export type FloatType = Extract<Type, { kind: 'float' }>;
@@ -531,8 +536,13 @@ export function sameType(a: Type, b: Type, withQualifiers = true): boolean {
     case 'class': {
       return a.cls === (b as typeof a).cls;
     }
+    case 'memberPointer': {
+      const other = b as typeof a;
+      return a.cls === other.cls && sameType(a.to, other.to);
+    }
     case 'function': {
       const other = b as typeof a;
+      if ((a.isConstMember === true) !== (other.isConstMember === true)) return false;
       return (
         sameType(a.ret, other.ret) &&
         a.params.length === other.params.length &&
@@ -586,7 +596,12 @@ export function typeName(type: Type, inner = ''): string {
       return typeName(type.of, `${inner}[${type.length ?? ''}]`);
     }
     case 'function': {
-      return typeName(type.ret, `${inner}(${type.params.map((param) => typeName(param)).join(', ')})`);
+      const qualifier = type.isConstMember ? ' const' : '';
+      return typeName(type.ret, `${inner}(${type.params.map((param) => typeName(param)).join(', ')})${qualifier}`);
+    }
+    case 'memberPointer': {
+      const pointer = `${classDisplayName(type.cls)}::*${constText ? ' const' : ''}${inner}`;
+      return typeName(type.to, type.to.kind === 'function' ? `(${pointer})` : ` ${pointer}`);
     }
   }
 }
@@ -643,6 +658,10 @@ export function sizeOf(type: Type): number {
     }
     case 'class': {
       return classLayout(type.cls).size;
+    }
+    case 'memberPointer': {
+      // The Itanium C++ ABI's pointer to a member function holds the function and an adjustment of `this`.
+      return type.to.kind === 'function' ? 16 : 8;
     }
     default: {
       return 1;

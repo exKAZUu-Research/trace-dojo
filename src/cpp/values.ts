@@ -7,6 +7,7 @@ import {
   baseSubobjectOffset,
   type ClassInfo,
   classType,
+  type FieldInfo,
   fieldSubobjectOffset,
   type FunctionInfo,
   isArithmetic,
@@ -24,7 +25,17 @@ export class PartialScalar {
   ) {}
 }
 
-export type Value = number | bigint | FloatNaN | Ptr | Store | FunctionRef | PartialScalar | typeof UNINIT | undefined;
+export type Value =
+  | number
+  | bigint
+  | FloatNaN
+  | Ptr
+  | Store
+  | FunctionRef
+  | MemberPointer
+  | PartialScalar
+  | typeof UNINIT
+  | undefined;
 
 export function isIndeterminate(value: Value): boolean {
   return value === UNINIT || value instanceof PartialScalar;
@@ -736,3 +747,21 @@ function fitBitField(value: Value, type: Type, width: number): Value {
   const fitted = signed ? BigInt.asIntN(width, BigInt(value)) : BigInt.asUintN(width, BigInt(value));
   return typeof value === 'bigint' ? fitted : Number(fitted);
 }
+
+/** A pointer to a member of a class: a data member, a member function, or neither when it is null. */
+export class MemberPointer {
+  constructor(
+    readonly field?: FieldInfo,
+    readonly fn?: FunctionInfo
+  ) {}
+
+  get isNull(): boolean {
+    return !this.field && !this.fn;
+  }
+
+  equals(other: MemberPointer): boolean {
+    return this.field === other.field && this.fn === other.fn;
+  }
+}
+
+export const NULL_MEMBER = new MemberPointer();

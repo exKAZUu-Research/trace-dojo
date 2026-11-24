@@ -884,6 +884,16 @@ export abstract class CompilerBase {
    * `int *a[3]` declares an array of three pointers.
    */
   applyDeclarator(base: Type, declarator: Syntax): Declared {
+    // `int P::*p` declares a pointer to a member of `P`.
+    const memberPointer = declarator.type === 'qualified_identifier' ? fieldOf(declarator, 'name') : undefined;
+    if (memberPointer?.type === 'pointer_declarator' || memberPointer?.type === 'abstract_pointer_declarator') {
+      const scope = this.resolveScope(fieldOf(declarator, 'scope') as Syntax);
+      if (scope.kind !== 'class')
+        return this.error(declarator.row, `${declarator.text} の :: の前にはクラスを書いてください。`);
+      if (base.kind === 'reference') return this.error(declarator.row, '参照のメンバへのポインタは作れません。');
+      const isConst = memberPointer.children.some((child) => child.type === 'type_qualifier' && child.text === 'const');
+      return this.applyInner(withConst({ kind: 'memberPointer', cls: scope.cls, to: base }, isConst), memberPointer);
+    }
     switch (declarator.type) {
       case 'identifier':
       case 'field_identifier':
@@ -959,7 +969,7 @@ export abstract class CompilerBase {
         }
         const inner = fieldOf(declarator, 'declarator');
         // `int (*fp)(int)` declares a pointer to a function type rather than a function.
-        if (inner?.type === 'parenthesized_declarator')
+        if (inner?.type === 'parenthesized_declarator' || inner?.type === 'abstract_parenthesized_declarator')
           return this.applyDeclarator(this.functionType(base, declarator), inner);
         const declared = inner
           ? this.applyDeclarator(base, inner)
@@ -988,7 +998,15 @@ export abstract class CompilerBase {
     if (ret.kind === 'array') this.error(declarator.row, '関数は配列を返せません。');
     if (ret.kind === 'function') this.error(declarator.row, '関数は関数を返せません。');
     const parameters = fieldOf(declarator, 'parameters');
-    return { kind: 'function', ret, params: parameters ? this.parameterTypes(parameters) : [] };
+    const isConstMember = declarator.children.some(
+      (child) => child.type === 'type_qualifier' && child.text === 'const'
+    );
+    return {
+      kind: 'function',
+      ret,
+      params: parameters ? this.parameterTypes(parameters) : [],
+      ...(isConstMember ? { isConstMember } : {}),
+    };
   }
 
   /** The type of an unevaluated expression, without a reference. */

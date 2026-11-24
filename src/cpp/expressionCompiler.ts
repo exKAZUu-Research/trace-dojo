@@ -93,6 +93,7 @@ import {
   FunctionRef,
   holdValues,
   Liveness,
+  MemberPointer,
   NULL_PTR,
   Ptr,
   Store,
@@ -897,6 +898,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   // Operators ---------------------------------------------------------------------------------------------------------
 
   private binaryExpression(node: Syntax): Expr {
+    const memberOperator = tokenOf(node, ['.*', '->*']) as '.*' | '->*' | undefined;
+    if (memberOperator) {
+      const left = this.compileExpression(fieldOf(node, 'left') as Syntax);
+      const right = this.compileExpression(fieldOf(node, 'right') as Syntax);
+      return this.memberAccessThroughPointer(memberOperator, left, right, node.row);
+    }
     const operator =
       tokenOf(node, [
         ...ARITHMETIC_OPERATORS,
@@ -1029,6 +1036,23 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const libraryResult = this.libraryOperator(operator, [left, right], row);
     if (libraryResult) return libraryResult;
     if (operator === '&&' || operator === '||') return this.logical(operator, left, right, row);
+    const member = [left, right].find((operand) => operand.type.kind === 'memberPointer')?.type;
+    if (member && (operator === '==' || operator === '!=')) {
+      // Pointers to members compare equal when they designate the same member, or are both null.
+      const a = this.convert(left, unqualified(member), row).run;
+      const b = this.convert(right, unqualified(member), row).run;
+      return {
+        type: BOOL,
+        isLvalue: false,
+        row,
+        run: (frame) =>
+          holdAll(
+            frame,
+            [a, b],
+            ([x, y]) => Number((x as MemberPointer).equals(y as MemberPointer) === (operator === '==')) as Value
+          ),
+      };
+    }
     for (const operand of [left, right]) {
       if (operand.type.kind === 'class') {
         return this.error(
@@ -1457,9 +1481,91 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   private pointerExpression(node: Syntax): Expr {
     const operator = tokenOf(node, ['*', '&']);
-    const operand = this.compileExpression(fieldOf(node, 'argument') as Syntax);
+    const argument = fieldOf(node, 'argument') as Syntax;
+    const member =
+      operator === '&' && argument.type === 'qualified_identifier' ? this.memberPointer(argument) : undefined;
+    if (member) return member;
+    const operand = this.compileExpression(argument);
     if (operator === '&') return this.addressOf(operand, node.row);
     return this.dereferenceOperator(operand, node.row);
+  }
+
+  /** `&C::m` of a non-static member: a pointer to the member, or undefined for another qualified name. */
+  private memberPointer(node: Syntax): Expr | undefined {
+    const scopeNode = fieldOf(node, 'scope');
+    const scope = scopeNode && this.resolveScope(scopeNode);
+    if (scope?.kind !== 'class') return undefined;
+    const entity = this.lookupQualified(node);
+    const { row } = node;
+    if (entity.kind === 'field') {
+      const { field } = entity;
+      const value = new MemberPointer(field);
+      return {
+        type: { kind: 'memberPointer', cls: field.owner, to: field.type },
+        isLvalue: false,
+        row,
+        run: () => value,
+      };
+    }
+    if (entity.kind !== 'functions') return undefined;
+    const members = entity.functions.filter((fn) => fn.owner && !fn.isStatic && !fn.isConstructor);
+    if (members.length === 0) return undefined;
+    const [fn, ...others] = members;
+    if (others.length > 0)
+      return this.error(row, `${node.text} はオーバーロードされているので、どれを指すのか決まりません。`);
+    this.checkDefined(fn, row);
+    const value = new MemberPointer(undefined, fn);
+    const type: Type = {
+      kind: 'memberPointer',
+      cls: fn.owner as ClassInfo,
+      to: {
+        ...(functionTypeOf(fn) as Extract<Type, { kind: 'function' }>),
+        ...(fn.isConst ? { isConstMember: true } : {}),
+      },
+    };
+    return { type, isLvalue: false, row, run: () => value };
+  }
+
+  /**
+   * `object.*member` and `pointer->*member`: the member of an object that a pointer to a member designates, an lvalue
+   * for a data member, or a member function to call (C++20 [expr.mptr.oper]).
+   */
+  private memberAccessThroughPointer(operator: '.*' | '->*', left: Expr, right: Expr, row: number): Expr {
+    const memberType = right.type;
+    if (memberType.kind !== 'memberPointer')
+      return this.error(row, `${operator} の右には、メンバへのポインタを書いてください（${typeName(memberType)}）。`);
+    const object = operator === '->*' ? this.arrow(left, row) : left;
+    if (object.type.kind !== 'class' || !object.type.cls.isDerivedFrom(memberType.cls))
+      return this.error(row, `${typeName(object.type)} には、${typeName(memberType)} の指すメンバがありません。`);
+    const base = this.convert(
+      this.materialize(object),
+      referenceTo(classType(memberType.cls, isConstType(object.type))),
+      row
+    );
+    const location = base.run;
+    const member = this.rvalue(right).run;
+    if (memberType.to.kind === 'function') {
+      return {
+        type: { kind: 'void' },
+        isLvalue: false,
+        row,
+        run: () => {},
+        boundMember: { object: base, member: this.rvalue(right) },
+      };
+    }
+    const type = isConstType(object.type) ? withConst(memberType.to) : memberType.to;
+    return {
+      type,
+      isLvalue: true,
+      row,
+      run: (frame) =>
+        holdAll(frame, [location, member], ([place, pointer]) => {
+          const field = (pointer as MemberPointer).field;
+          if (!field) throw new CppRuntimeError('nullAccess');
+          const target = (place as Ptr).forClass(memberType.cls);
+          return new Ptr(target.read() as CObject, field.index, { location: target, cls: memberType.cls });
+        }),
+    };
   }
 
   dereferenceOperator(operand: Expr, row: number): Expr {
@@ -1504,7 +1610,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   addressOf(operand: Expr, row: number): Expr {
     if (operand.functions) {
       if (operand.functions.object || operand.functions.candidates.some((fn) => fn.owner && !fn.isStatic))
-        return this.unsupported(row, 'メンバ関数へのポインタ');
+        return this.error(row, 'メンバ関数へのポインタは、&クラス名::関数名 と書いて作ってください。');
       return operand;
     }
     if (!operand.isLvalue || operand.isXvalue)
@@ -2666,6 +2772,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const result = object.type.cls.library.memberCall(this, object, candidates.name, args, row);
       if (result) return result;
     }
+    if (callee.boundMember) return this.callThroughMemberPointer(callee.boundMember, args, row);
     if (!candidates) {
       const pointee = callee.type.kind === 'pointer' ? callee.type.to : callee.type;
       if (pointee.kind === 'function') return this.callThroughPointer(callee, pointee, args, row);
@@ -2703,6 +2810,55 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   /** Calls the function a pointer to a function points to, with the arguments its type takes. */
+  /** `(object.*member)(args)`, which calls the member function the pointer designates, its final overrider. */
+  private callThroughMemberPointer(bound: NonNullable<Expr['boundMember']>, args: Expr[], row: number): Expr {
+    const memberType = bound.member.type as Extract<Type, { kind: 'memberPointer' }>;
+    const type = memberType.to as Extract<Type, { kind: 'function' }>;
+    if (isConstType(bound.object.type) && !type.isConstMember)
+      return this.error(row, `const のオブジェクトで、const でないメンバ関数（${typeName(memberType)}）は呼べません。`);
+    const signature: FunctionInfo = { ...this.pointerSignature(type, typeName(memberType), row), isStatic: false };
+    const resolved = this.resolve(`メンバへのポインタ（${typeName(memberType)}）`, [signature], args, undefined, row);
+    const argRuns = this.callArguments(signature, this.convertArguments(resolved, args), row);
+    const object = bound.object.run;
+    const member = bound.member.run;
+    const isReference = type.ret.kind === 'reference';
+    const result = nonReference(type.ret);
+    return {
+      type: result,
+      isLvalue: isReference,
+      row,
+      onlyCalls: true,
+      isTemporaryObject: !isReference && result.kind === 'class',
+      run: (frame) =>
+        holdAll(frame, [object, member, ...argRuns], ([receiver, pointer, ...values]) => {
+          const fn = (pointer as MemberPointer).fn;
+          if (!fn) throw new CppRuntimeError('nullAccess');
+          return this.prepareInvocation(fn, row)(frame, values, receiver as Ptr);
+        }),
+    };
+  }
+
+  private pointerSignature(type: Extract<Type, { kind: 'function' }>, displayName: string, row: number): FunctionInfo {
+    return {
+      name: '(関数ポインタ)',
+      displayName,
+      params: type.params.map((param) => ({ name: undefined, type: param, row })),
+      ret: type.ret,
+      isStatic: true,
+      isVirtual: false,
+      isConst: false,
+      isPure: false,
+      isConstructor: false,
+      isDestructor: false,
+      isOverride: false,
+      isFinal: false,
+      access: 'public',
+      row,
+      isAtomic: false,
+      isDefined: true,
+    };
+  }
+
   private callThroughPointer(callee: Expr, type: Extract<Type, { kind: 'function' }>, args: Expr[], row: number): Expr {
     const signature: FunctionInfo = {
       name: '(関数ポインタ)',
@@ -3165,7 +3321,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const [fn, ...others] = init.functions.candidates;
       if (others.length > 0)
         return this.error(row, `${init.functions.name} はオーバーロードされているので、auto の型が決まりません。`);
-      if (fn.owner && !fn.isStatic) return this.unsupported(row, 'メンバ関数へのポインタ');
+      if (fn.owner && !fn.isStatic)
+        return this.error(row, 'メンバ関数へのポインタは、&クラス名::関数名 と書いて作ってください。');
       return this.deduceAutoPattern(declared, pointerTo(functionTypeOf(fn)), row);
     }
     if (init.type.kind === 'void')

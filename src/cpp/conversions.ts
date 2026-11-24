@@ -14,8 +14,8 @@ import {
   type Type,
   unqualified,
 } from './types';
-import type { Ptr } from './values';
-import { FunctionRef, NULL_PTR } from './values';
+import type { MemberPointer, Ptr } from './values';
+import { FunctionRef, NULL_MEMBER, NULL_PTR } from './values';
 
 /** The ranks of implicit conversion sequences, better first. */
 export const enum Rank {
@@ -347,7 +347,7 @@ function standardConversion(host: ConversionHost, expr: Expr, to: Type): Convers
   if (from.kind === 'class' || to.kind === 'void' || from.kind === 'void') return undefined;
   if (isArithmetic(to)) {
     if (isArithmetic(from)) return arithmeticConversion(host, from, to);
-    if (to.name === 'bool' && (from.kind === 'pointer' || from.kind === 'array')) {
+    if (to.name === 'bool' && (from.kind === 'pointer' || from.kind === 'array' || from.kind === 'memberPointer')) {
       return sequence(Rank.Conversion, (e) => ({ ...host.rvalue(e), type: to, run: notNull(host.rvalue(e).run) }), {
         isBoolean: true,
       });
@@ -356,6 +356,25 @@ function standardConversion(host: ConversionHost, expr: Expr, to: Type): Convers
   }
   if (to.kind === 'nullptr') return from.kind === 'nullptr' ? sequence(Rank.Exact, (e) => host.rvalue(e)) : undefined;
   if (to.kind === 'pointer') return pointerConversion(host, expr, to);
+  if (to.kind === 'memberPointer') return memberPointerConversion(host, expr, to);
+  return undefined;
+}
+
+/**
+ * The conversions to a pointer to a member: the same type, the null pointer constant, and a pointer to a member of a
+ * base to one of the derived class (C++20 [conv.mem]).
+ */
+function memberPointerConversion(
+  host: ConversionHost,
+  expr: Expr,
+  to: Extract<Type, { kind: 'memberPointer' }>
+): ConversionSequence | undefined {
+  const from = expr.type;
+  if (expr.isNullConstant || from.kind === 'nullptr')
+    return sequence(Rank.Conversion, (e) => ({ ...host.rvalue(e), type: to, run: () => NULL_MEMBER }));
+  if (from.kind !== 'memberPointer' || !sameType(from.to, to.to)) return undefined;
+  if (from.cls === to.cls) return sequence(Rank.Exact, (e) => ({ ...host.rvalue(e), type: to }));
+  if (to.cls.isDerivedFrom(from.cls)) return sequence(Rank.Conversion, (e) => ({ ...host.rvalue(e), type: to }));
   return undefined;
 }
 
@@ -504,7 +523,7 @@ export function classLocation(expr: Expr, cls: ClassInfo): Expr {
 }
 
 function notNull(run: Expr['run']): Expr['run'] {
-  return (frame) => ((run(frame) as Ptr).isNull ? 0 : 1);
+  return (frame) => ((run(frame) as Ptr | MemberPointer).isNull ? 0 : 1);
 }
 
 /** How many classes up from `from` the class `to` is, or 0 when `to` is no proper base of `from`. */
