@@ -1,17 +1,46 @@
 import type { LocalVar, PathRes } from './annotations';
-import type { Pattern } from './ast';
+import type { Expr, Pattern, Span } from './ast';
 import { patternBindings } from './astWalk';
 import type { Checker } from './checker';
 import { resolveStructPath, resolveValuePath } from './checkerPaths';
-import { checkFieldVisible } from './checkerPlaces';
+import { checkFieldVisible, isPlaceExpr, requireMutablePlace } from './checkerPlaces';
 import type { Known } from './constLint';
 import { normalize } from './infer';
 import { compileError, lookupValue } from './items';
-import { adt, freshVar, ref, resolve, shallow, substitute, type Type, typeToString } from './types';
+import { adt, freshVar, integerConst, ref, resolve, shallow, substitute, type Type, typeToString } from './types';
 
 export function checkPattern(c: Checker, pattern: Pattern, type: Type, mode: LocalVar['mode']): void {
   checkPatternPart(c, pattern, type, mode);
   distinctBindings(c, pattern);
+}
+
+/** Requires the value a pattern matches to be mutable where a `ref mut` binding borrows it mutably. */
+export function requireRefMutSource(c: Checker, pattern: Pattern, source: Expr): void {
+  if (bindsRefMutDirectly(pattern) && isPlaceExpr(c, source)) requireMutablePlace(c, source, 'ref mut で借りる');
+}
+
+function bindsRefMutDirectly(pattern: Pattern): boolean {
+  const t = pattern.ty && normalize(shallow(pattern.ty));
+  if (t?.kind === 'ref' && pattern.kind !== 'binding') return false;
+  switch (pattern.kind) {
+    case 'binding': {
+      return pattern.byRef === 'refMut' || (pattern.sub !== undefined && bindsRefMutDirectly(pattern.sub));
+    }
+    case 'tuple':
+    case 'tupleStruct':
+    case 'slice': {
+      return pattern.elems.some(bindsRefMutDirectly);
+    }
+    case 'struct': {
+      return pattern.fields.some((field) => bindsRefMutDirectly(field.pattern));
+    }
+    case 'or': {
+      return pattern.alternatives.some(bindsRefMutDirectly);
+    }
+    default: {
+      return false;
+    }
+  }
 }
 
 /** Checks the patterns of one parameter list, which must not bind a name twice between them either (E0415). */
@@ -43,6 +72,7 @@ function distinctBindings(c: Checker, pattern: Pattern): Set<string> {
     }
     case 'tuple':
     case 'tupleStruct':
+    case 'slice':
     case 'struct': {
       const children = pattern.kind === 'struct' ? pattern.fields.map((field) => field.pattern) : pattern.elems;
       const names = new Set<string>();
@@ -101,7 +131,106 @@ function checkPatternPart(c: Checker, pattern: Pattern, type: Type, mode: LocalV
       orPattern(c, pattern, type, mode);
       return;
     }
+    case 'range': {
+      rangePattern(c, pattern, type, t);
+      return;
+    }
+    case 'slice': {
+      slicePattern(c, pattern, type, t, mode);
+      return;
+    }
+    case 'rest': {
+      compileError(pattern.span, '.. は、タプル・タプル構造体・スライスのパターンの中にだけ書けます。');
+    }
   }
+}
+
+/** Replaces the `..` among the element patterns with as many `_` as the elements it stands for. */
+function expandRest(elems: Pattern[], count: number, span: Span): Pattern[] {
+  const rest = elems.findIndex((elem) => elem.kind === 'rest');
+  if (rest === -1) return elems;
+  if (elems.findLastIndex((elem) => elem.kind === 'rest') !== rest) {
+    compileError(span, '.. は、パターンの中に1回だけ書けます。');
+  }
+  const fill = Math.max(0, count - (elems.length - 1));
+  const wilds = Array.from({ length: fill }, (): Pattern => ({ kind: 'wild', span: elems[rest].span }));
+  return [...elems.slice(0, rest), ...wilds, ...elems.slice(rest + 1)];
+}
+
+function rangePattern(c: Checker, pattern: Extract<Pattern, { kind: 'range' }>, type: Type, outer: Type): void {
+  const { t } = derefForMatch(outer, 'move');
+  for (const end of [pattern.start, pattern.end]) {
+    if (!end) continue;
+    checkPatternPart(c, end, t, 'move');
+    const endType = normalize(shallow(t));
+    if (endType.kind !== 'int' && endType.kind !== 'char' && endType.kind !== 'float' && endType.kind !== 'var') {
+      compileError(
+        pattern.span,
+        `範囲のパターンは、整数・小数・文字にだけ使えます（${typeToString(resolve(type))} には使えません）。`
+      );
+    }
+  }
+  if (!pattern.inclusive && !pattern.end && pattern.start === undefined) {
+    compileError(pattern.span, '範囲のパターンの書き方に誤りがあります。');
+  }
+}
+
+function slicePattern(
+  c: Checker,
+  pattern: Extract<Pattern, { kind: 'slice' }>,
+  type: Type,
+  outer: Type,
+  mode: LocalVar['mode']
+): void {
+  let { t, bindingMode } = derefForMatch(outer, mode);
+  const restIndex = pattern.elems.findIndex(isRestElement);
+  if (pattern.elems.findLastIndex(isRestElement) !== restIndex) {
+    compileError(pattern.span, '.. は、スライスのパターンの中に1回だけ書けます。');
+  }
+  pattern.restIndex = restIndex === -1 ? undefined : restIndex;
+  const fixed = pattern.elems.length - (restIndex === -1 ? 0 : 1);
+  if (t.kind === 'var') {
+    if (restIndex !== -1) compileError(pattern.span, 'スライスのパターンが合う値の型が決まりません。');
+    c.unifier.unify(t, { kind: 'array', elem: freshVar(), len: fixed });
+    t = normalize(shallow(t));
+  }
+  if (t.kind !== 'array' && t.kind !== 'slice') {
+    compileError(
+      pattern.span,
+      `パターンの型が合いません（${typeToString(resolve(type))} にスライスのパターンは合いません）。`
+    );
+  }
+  if (t.kind === 'array' && (restIndex === -1 ? fixed !== t.len : fixed > t.len)) {
+    compileError(
+      pattern.span,
+      `パターンの要素の数が合いません（配列の要素は ${t.len} 個ですが、パターンは ${fixed} 個${restIndex === -1 ? '' : '以上'}です）。`
+    );
+  }
+  const elemType = (inner: Type): Type => (bindingMode === 'move' ? inner : ref(inner, bindingMode === 'refMut'));
+  const subMode = bindingMode === 'move' ? mode : 'move';
+  for (const [index, elem] of pattern.elems.entries()) {
+    if (index !== restIndex) {
+      checkPatternPart(c, elem, elemType(t.elem), subMode, bindingMode !== 'move');
+      continue;
+    }
+    if (elem.kind === 'rest') {
+      elem.ty = t;
+      continue;
+    }
+    // `rest @ ..` binds the elements `..` stands for: an array of them, or a slice.
+    const restType: Type = t.kind === 'array' ? { kind: 'array', elem: t.elem, len: t.len - fixed } : t;
+    if (t.kind === 'slice' && bindingMode === 'move') {
+      compileError(
+        elem.span,
+        `${(elem as { name: string }).name} @ .. は、スライスの参照に合わせたときにだけ書けます。`
+      );
+    }
+    checkPatternPart(c, elem, elemType(restType), subMode, bindingMode !== 'move');
+  }
+}
+
+function isRestElement(pattern: Pattern): boolean {
+  return pattern.kind === 'rest' || (pattern.kind === 'binding' && pattern.sub?.kind === 'rest');
 }
 
 /** The type under the references a pattern that is not a reference pattern looks through, and the binding mode. */
@@ -131,14 +260,16 @@ function bindingPattern(
     return;
   }
   if (!inherited) checkVariantBinding(pattern, matched, mode);
-  // Edition 2024 does not let `mut` bind by value where the pattern borrows what it matches without saying so.
-  if (inherited && pattern.mutable) {
+  // Edition 2024 does not let `mut` or `ref` modify a binding where the pattern borrows what it matches without saying so.
+  if (inherited && (pattern.mutable || pattern.byRef)) {
+    const written = pattern.byRef === 'refMut' ? 'ref mut' : pattern.byRef ? 'ref' : 'mut';
     compileError(
       pattern.span,
-      `参照を分解するパターンの中では、mut ${pattern.name} と書けません（パターンに & を書くか、値を分解してください）。`
+      `参照を分解するパターンの中では、${written} ${pattern.name} と書けません（パターンに & を書くか、値を分解してください）。`
     );
   }
-  const localType = mode === 'move' ? type : ref(t, mode === 'refMut');
+  const byRef = pattern.byRef && ref(type, pattern.byRef === 'refMut');
+  const localType = byRef ?? (mode === 'move' ? type : ref(t, mode === 'refMut'));
   const existing = c.orBindings?.get(pattern.name);
   if (existing) {
     if (existing.mode !== mode || existing.mutable !== pattern.mutable) {
@@ -147,7 +278,7 @@ function bindingPattern(
     c.unifyOrError(pattern.span, existing.type, localType);
     c.annotations.bindings.set(pattern, existing);
     (c.body.scopes.at(-1) as Map<string, LocalVar>).set(pattern.name, existing);
-    if (pattern.sub) checkPatternPart(c, pattern.sub, type, mode);
+    if (pattern.sub && pattern.sub.kind !== 'rest') checkPatternPart(c, pattern.sub, type, mode);
     return;
   }
   const local = c.declareLocal(pattern.name, localType, pattern.mutable, pattern.span, mode);
@@ -155,7 +286,7 @@ function bindingPattern(
     compileError(pattern.span, '参照に合わせたパターンの名前には、mut を付けられません。');
   }
   c.annotations.bindings.set(pattern, local);
-  if (pattern.sub) checkPatternPart(c, pattern.sub, type, mode);
+  if (pattern.sub && pattern.sub.kind !== 'rest') checkPatternPart(c, pattern.sub, type, mode);
 }
 
 function checkVariantBinding(pattern: Extract<Pattern, { kind: 'binding' }>, type: Type, mode: LocalVar['mode']): void {
@@ -201,6 +332,10 @@ function tuplePattern(
   mode: LocalVar['mode']
 ): void {
   let { t, bindingMode } = derefForMatch(outer, mode);
+  if (pattern.elems.some((elem) => elem.kind === 'rest')) {
+    if (t.kind !== 'tuple') compileError(pattern.span, '.. を含むタプルのパターンが合う値の型が決まりません。');
+    pattern.elems = expandRest(pattern.elems, t.elems.length, pattern.span);
+  }
   if (t.kind === 'var') {
     const elems = pattern.elems.map(() => freshVar());
     c.unifier.unify(t, { kind: 'tuple', elems });
@@ -307,7 +442,7 @@ function strLiteralPattern(pattern: Pattern, type: Type, inherited: boolean): vo
 
 /** A single name in a pattern that names a unit variant, a unit struct, or a constant, rather than a new binding. */
 function patternBindingRes(c: Checker, pattern: Extract<Pattern, { kind: 'binding' }>): PathRes | undefined {
-  if (pattern.sub || pattern.mutable) return undefined;
+  if (pattern.sub || pattern.mutable || pattern.byRef) return undefined;
   const binding = lookupValue(c.body.module, pattern.name, pattern.span);
   if (!binding) return undefined;
   if (binding.kind === 'ctor') {
@@ -409,6 +544,11 @@ function adtPattern(
       checkConstPattern(c, pattern, res, t);
       return;
     }
+    if (res.kind === 'builtinConst' && res.type.kind !== 'float') {
+      c.unifyOrError(pattern.span, t, res.type);
+      c.annotations.constPatterns.set(pattern, res.type.kind === 'char' ? '\u{10FFFF}' : integerConst(res.name));
+      return;
+    }
     if (res.kind !== 'ctor' || res.def.variants[res.variant].shape !== 'unit') {
       compileError(pattern.span, `${pattern.path.segments.map((s) => s.name).join('::')} はパターンに書けません。`);
     }
@@ -438,6 +578,7 @@ function adtPattern(
   if (pattern.kind === 'tupleStruct') {
     if (variant.shape !== 'tuple')
       compileError(pattern.span, `${variant.name} は ${variant.name}(..) の形では書けません。`);
+    pattern.elems = expandRest(pattern.elems, variant.fields.length, pattern.span);
     if (pattern.elems.length !== variant.fields.length) {
       compileError(
         pattern.span,
@@ -461,7 +602,7 @@ function adtPattern(
     checkPatternPart(c, field.pattern, fieldType(index), subMode, bindingMode !== 'move');
   }
   const missing = variant.fields.filter((f) => !seen.has(f.name));
-  if (missing.length > 0) {
+  if (missing.length > 0 && !pattern.rest) {
     compileError(pattern.span, `パターンにフィールド ${missing.map((f) => f.name).join(', ')} が足りません。`);
   }
 }

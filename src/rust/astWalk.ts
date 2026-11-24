@@ -144,7 +144,10 @@ function forEachDirectInControlFlow(expr: Expr, visit: (expr: Expr) => void, pat
     case 'match': {
       if (expr.arms.length === 1) visitPatternSource(expr.arms[0].pattern, expr.scrutinee, visit, patternSource);
       else visit(expr.scrutinee);
-      for (const arm of expr.arms) visit(arm.body);
+      for (const arm of expr.arms) {
+        if (arm.guard) visit(arm.guard);
+        visit(arm.body);
+      }
       return;
     }
     case 'loop': {
@@ -253,8 +256,12 @@ export function patternBindingParts(pattern: Pattern, annotations: Annotations):
     switch (p.kind) {
       case 'binding': {
         const local = annotations.bindings.get(p);
-        if (local) parts.push({ local, path, throughRef });
+        if (local) parts.push({ local, path, throughRef: throughRef || p.byRef !== undefined });
         if (p.sub) visit(p.sub, path, throughRef);
+        return;
+      }
+      case 'slice': {
+        for (const [index, elem] of p.elems.entries()) visit(elem, `${path}.${index}`, under);
         return;
       }
       case 'tuple':

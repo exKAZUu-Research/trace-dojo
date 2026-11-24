@@ -3,15 +3,23 @@ import type { Annotations } from './annotations';
 import type { Pattern } from './ast';
 import type { Known } from './constLint';
 import { normalize } from './infer';
-import { shallow, type Type } from './types';
+import { intMax, intMin, shallow, type Type } from './types';
 
 /**
  * A pattern reduced to what decides matching: a constructor with subpatterns, or anything (a wildcard or binding).
  * Literals of types with infinitely many values are constructors that never cover their type.
  */
-type Pat = { kind: 'any' } | { kind: 'ctor'; ctor: string; args: Pat[] } | { kind: 'or'; alts: Pat[] };
+type Pat =
+  | { kind: 'any' }
+  | { kind: 'ctor'; ctor: string; args: Pat[] }
+  | { kind: 'or'; alts: Pat[] }
+  /** The integers or `char` code points from `lo` to `hi`, both included. */
+  | { kind: 'range'; lo: bigint; hi: bigint }
+  /** A slice pattern: its leading and trailing elements, with a `..` between them when `variable`. */
+  | { kind: 'slice'; prefix: Pat[]; suffix: Pat[]; variable: boolean };
 
 const ANY: Pat = { kind: 'any' };
+const EMPTY_RANGE: Pat = { kind: 'ctor', ctor: 'empty', args: [] };
 
 /** Lowers a checked pattern, using the paths the checker resolved to tell variants from bindings. */
 // code-gauge-allow functionCognitiveComplexity -- One case per kind of pattern or type.
@@ -30,8 +38,19 @@ export function lowerPattern(pattern: Pattern, annotations: Annotations): Pat {
     case 'lit': {
       const { expr } = pattern;
       if (expr.kind === 'bool') return { kind: 'ctor', ctor: String(expr.value), args: [] };
-      const value = 'value' in expr ? String(expr.value) : '';
+      if (expr.kind === 'int') return { kind: 'range', lo: expr.value, hi: expr.value };
+      if (expr.kind === 'char') return pointRange(expr.value);
+      const value = expr.kind === 'float' || expr.kind === 'str' ? String(expr.value) : '';
       return { kind: 'ctor', ctor: `lit:${value}`, args: [] };
+    }
+    case 'range': {
+      return lowerRange(pattern, annotations);
+    }
+    case 'slice': {
+      return lowerSlice(pattern, annotations);
+    }
+    case 'rest': {
+      return ANY;
     }
     case 'tuple': {
       return { kind: 'ctor', ctor: 'tuple', args: pattern.elems.map((elem) => lowerPattern(elem, annotations)) };
@@ -67,7 +86,67 @@ export function lowerPattern(pattern: Pattern, annotations: Annotations): Pat {
   }
 }
 
+function pointRange(char: string): Pat {
+  const code = BigInt(char.codePointAt(0) ?? 0);
+  return { kind: 'range', lo: code, hi: code };
+}
+
+/** A range pattern over integers or `char`s, or the constructor of a float range, which never covers its type. */
+function lowerRange(pattern: Extract<Pattern, { kind: 'range' }>, annotations: Annotations): Pat {
+  const type = normalize(shallow(pattern.ty ?? { kind: 'tuple', elems: [] }));
+  const domain = rangeDomain(type);
+  if (!domain) return { kind: 'ctor', ctor: `range:${pattern.span.row}:${pattern.span.col}`, args: [] };
+  const lo = pattern.start ? endValue(pattern.start, annotations) : domain[0][0];
+  let hi = pattern.end ? endValue(pattern.end, annotations) : (domain.at(-1) as [bigint, bigint])[1];
+  if (lo === undefined || hi === undefined) return { kind: 'ctor', ctor: 'const', args: [] };
+  if (pattern.end && !pattern.inclusive) hi -= 1n;
+  return lo > hi ? EMPTY_RANGE : { kind: 'range', lo, hi };
+}
+
+/** The integer or code point an end of a range pattern stands for. */
+export function endValue(end: Pattern, annotations: Annotations): bigint | undefined {
+  if (end.kind === 'lit') {
+    if (end.expr.kind === 'int') return end.expr.value;
+    if (end.expr.kind === 'char') return BigInt(end.expr.value.codePointAt(0) ?? 0);
+    return undefined;
+  }
+  const value = annotations.constPatterns.get(end);
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'string' && /^.$/su.test(value)) return BigInt(value.codePointAt(0) ?? 0);
+  return undefined;
+}
+
+function lowerSlice(pattern: Extract<Pattern, { kind: 'slice' }>, annotations: Annotations): Pat {
+  const elems = pattern.elems.map((elem) => lowerPattern(elem, annotations));
+  const rest = pattern.restIndex;
+  let t = normalize(shallow(pattern.ty ?? { kind: 'tuple', elems: [] }));
+  while (t.kind === 'ref') t = normalize(shallow(t.target));
+  if (rest === undefined) return { kind: 'slice', prefix: elems, suffix: [], variable: false };
+  const prefix = elems.slice(0, rest);
+  const suffix = elems.slice(rest + 1);
+  if (t.kind === 'array') {
+    const fill = Array.from({ length: Math.max(0, t.len - prefix.length - suffix.length) }, () => ANY);
+    return { kind: 'slice', prefix: [...prefix, ...fill, ...suffix], suffix: [], variable: false };
+  }
+  return { kind: 'slice', prefix, suffix, variable: true };
+}
+
+/** The values of an integer type or of `char`, as disjoint ranges in order, or undefined for other types. */
+function rangeDomain(type: Type): [bigint, bigint][] | undefined {
+  let t = normalize(shallow(type));
+  while (t.kind === 'ref') t = normalize(shallow(t.target));
+  if (t.kind === 'int') return [[intMin(t.name), intMax(t.name)]];
+  if (t.kind === 'char') {
+    return [
+      [0n, 0xd7_ffn],
+      [0xe0_00n, 0x10_ff_ffn],
+    ];
+  }
+  return undefined;
+}
+
 function lowerConstantValue(value: Known | undefined): Pat {
+  if (typeof value === 'bigint') return { kind: 'range', lo: value, hi: value };
   if (typeof value === 'object' && value.ctor) {
     return { kind: 'ctor', ctor: value.ctor, args: [...value.fields.values()].map(lowerConstantValue) };
   }
@@ -149,6 +228,14 @@ function useful(rows: Pat[][], vector: Pat[], types: Type[], budget: ExecutionBu
     }
     return undefined;
   }
+  const domain = rangeDomain(type);
+  if (domain && (head.kind === 'range' || head.kind === 'any')) {
+    return usefulInRanges(expanded, head, domain, rest, restTypes, budget, depth);
+  }
+  const sliceElem = sliceElementType(type);
+  if (sliceElem && (head.kind === 'slice' || head.kind === 'any')) {
+    return usefulInSlices(expanded, head, sliceElem, arrayLength(type), rest, restTypes, budget, depth);
+  }
   const ctors = constructorsOf(type);
   if (head.kind === 'ctor') {
     const arity = head.args.length;
@@ -187,6 +274,124 @@ function usefulUnderSome(
   return undefined;
 }
 
+/**
+ * Usefulness over the values of an integer type or `char`: the ends of the rows' ranges split the values into segments
+ * that each row covers whole or not at all, and each segment the head covers is a constructor of its own.
+ */
+// code-gauge-allow functionCognitiveComplexity -- Splits the domain at every range end, then tries each segment.
+function usefulInRanges(
+  rows: Pat[][],
+  head: Pat,
+  domain: [bigint, bigint][],
+  rest: Pat[],
+  restTypes: Type[],
+  budget: ExecutionBudget,
+  depth: number
+): Pat[] | undefined {
+  const cuts = new Set<bigint>();
+  for (const row of rows) {
+    const first = row[0];
+    if (first?.kind === 'range') {
+      cuts.add(first.lo);
+      cuts.add(first.hi + 1n);
+    }
+  }
+  const sortedCuts = [...cuts].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  for (const [domainLo, domainHi] of domain) {
+    let lo = head.kind === 'range' ? (head.lo > domainLo ? head.lo : domainLo) : domainLo;
+    const hi = head.kind === 'range' ? (head.hi < domainHi ? head.hi : domainHi) : domainHi;
+    while (lo <= hi) {
+      budget.spend();
+      const next = sortedCuts.find((cut) => cut > lo && cut <= hi);
+      const segmentHi = next === undefined ? hi : next - 1n;
+      const covered = rows.filter((row) => {
+        const first = row[0];
+        return first?.kind === 'any' || (first?.kind === 'range' && first.lo <= lo && segmentHi <= first.hi);
+      });
+      const witness = useful(
+        covered.map((row) => row.slice(1)),
+        rest,
+        restTypes,
+        budget,
+        depth + 1
+      );
+      if (witness)
+        return [head.kind === 'any' && cuts.size === 0 ? ANY : { kind: 'range', lo, hi: segmentHi }, ...witness];
+      lo = segmentHi + 1n;
+    }
+  }
+  return undefined;
+}
+
+function arrayLength(type: Type): number | undefined {
+  let t = normalize(shallow(type));
+  while (t.kind === 'ref') t = normalize(shallow(t.target));
+  return t.kind === 'array' ? t.len : undefined;
+}
+
+function sliceElementType(type: Type): Type | undefined {
+  let t = normalize(shallow(type));
+  while (t.kind === 'ref') t = normalize(shallow(t.target));
+  return t.kind === 'slice' || t.kind === 'array' ? t.elem : undefined;
+}
+
+/**
+ * Usefulness over slices: each length up to the longest fixed pattern, and every longer length together, is a
+ * constructor whose arguments are the elements; a pattern with `..` matches each length it fits in.
+ */
+// code-gauge-allow functionCognitiveComplexity -- Enumerates the lengths that tell the slice patterns apart.
+function usefulInSlices(
+  rows: Pat[][],
+  head: Pat,
+  elem: Type,
+  fixedLength: number | undefined,
+  rest: Pat[],
+  restTypes: Type[],
+  budget: ExecutionBudget,
+  depth: number
+): Pat[] | undefined {
+  let longest = 0;
+  for (const pattern of [head, ...rows.map((row) => row[0])]) {
+    if (pattern?.kind !== 'slice') continue;
+    const length = pattern.prefix.length + pattern.suffix.length;
+    longest = Math.max(longest, pattern.variable ? length : length + 1);
+  }
+  const lengths: { length: number; orLonger: boolean }[] = [];
+  if (fixedLength !== undefined) {
+    lengths.push({ length: fixedLength, orLonger: false });
+  } else if (head.kind === 'slice' && !head.variable) {
+    lengths.push({ length: head.prefix.length, orLonger: false });
+  } else {
+    const first = head.kind === 'slice' ? head.prefix.length + head.suffix.length : 0;
+    for (let length = first; length < longest; length++) lengths.push({ length, orLonger: false });
+    lengths.push({ length: Math.max(longest, first), orLonger: true });
+  }
+  for (const { length, orLonger } of lengths) {
+    const fits = (pattern: Extract<Pat, { kind: 'slice' }>): boolean =>
+      pattern.variable
+        ? pattern.prefix.length + pattern.suffix.length <= length
+        : !orLonger && pattern.prefix.length === length;
+    const elements = (pattern: Pat): Pat[] => {
+      if (pattern.kind !== 'slice') return Array.from({ length }, () => ANY);
+      const fill = Array.from({ length: length - pattern.prefix.length - pattern.suffix.length }, () => ANY);
+      return [...pattern.prefix, ...fill, ...pattern.suffix];
+    };
+    const specialized = rows.flatMap((row) => {
+      const first = row[0];
+      if (first?.kind === 'any' || (first?.kind === 'slice' && fits(first)))
+        return [[...elements(first), ...row.slice(1)]];
+      return [];
+    });
+    const elemTypes = Array.from({ length }, () => elem);
+    const witness = useful(specialized, [...elements(head), ...rest], [...elemTypes, ...restTypes], budget, depth + 1);
+    if (witness) {
+      const args = witness.slice(0, length);
+      return [{ kind: 'slice', prefix: args, suffix: [], variable: orLonger }, ...witness.slice(length)];
+    }
+  }
+  return undefined;
+}
+
 function specialize(rows: Pat[][], ctor: string, arity: number): Pat[][] {
   const result: Pat[][] = [];
   for (const row of rows) {
@@ -215,9 +420,15 @@ export function isIrrefutable(pattern: Pat, type: Type, budget: ExecutionBudget)
 }
 
 function describe(pattern: Pat, type: Type): string {
-  if (pattern.kind !== 'ctor') return '_';
   let t = normalize(shallow(type));
   while (t.kind === 'ref') t = normalize(shallow(t.target));
+  if (pattern.kind === 'range') return describeRange(pattern, t);
+  if (pattern.kind === 'slice') {
+    const elem = sliceElementType(t) ?? t;
+    const parts = pattern.prefix.map((part) => describe(part, elem));
+    return `[${[...parts, ...(pattern.variable ? ['..'] : [])].join(', ')}]`;
+  }
+  if (pattern.kind !== 'ctor') return '_';
   if (pattern.ctor === 'true' || pattern.ctor === 'false') return pattern.ctor;
   const ctors = constructorsOf(t);
   const types = ctors?.find((c) => c.ctor === pattern.ctor)?.types ?? [];
@@ -235,4 +446,15 @@ function describe(pattern: Pat, type: Type): string {
     return name;
   }
   return '_';
+}
+
+function describeRange(pattern: Extract<Pat, { kind: 'range' }>, type: Type): string {
+  const show = (value: bigint): string => {
+    if (type.kind === 'char') return `'${String.fromCodePoint(Number(value))}'`;
+    if (type.kind === 'int' && value === intMin(type.name)) return `${type.name}::MIN`;
+    if (type.kind === 'int' && value === intMax(type.name)) return `${type.name}::MAX`;
+    return `${value}_${type.kind === 'int' ? type.name : ''}`;
+  };
+  if (pattern.lo === pattern.hi) return show(pattern.lo);
+  return `${show(pattern.lo)}..=${show(pattern.hi)}`;
 }

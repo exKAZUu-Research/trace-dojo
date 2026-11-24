@@ -5,7 +5,7 @@ import { checkClosure } from './checkerClosures';
 import { checkMacro } from './checkerMacros';
 import { checkAssign, checkBinary, checkCast, checkCompoundAssign, checkUnary, refExpr } from './checkerOperators';
 import { pathExpr, structExpr } from './checkerPaths';
-import { checkPattern } from './checkerPatterns';
+import { checkPattern, requireRefMutSource } from './checkerPatterns';
 import { checkField, checkIndex } from './checkerPlaces';
 import { constInteger } from './constExpressions';
 import { lowerPattern, missingPattern } from './exhaustiveness';
@@ -344,6 +344,7 @@ function checkCondition(c: Checker, cond: Condition): void {
   }
   const type = c.expr(cond.value, undefined);
   checkPattern(c, cond.pattern, type, 'move');
+  requireRefMutSource(c, cond.pattern, cond.value);
 }
 
 function ifExpr(c: Checker, expr: Extract<Expr, { kind: 'if' }>, expected: Type | undefined): Type {
@@ -406,6 +407,8 @@ function matchExpr(c: Checker, expr: Extract<Expr, { kind: 'match' }>, expected:
   for (const arm of expr.arms) {
     c.withScope(() => {
       checkPattern(c, arm.pattern, scrutinee, 'move');
+      requireRefMutSource(c, arm.pattern, expr.scrutinee);
+      if (arm.guard) c.coerceExpr(arm.guard, BOOL);
       const type = c.expr(arm.body, expected);
       if (shallow(type).kind === 'never') return;
       completes = true;
@@ -436,7 +439,8 @@ function coerceArm(c: Checker, body: Expr, type: Type, result: Type): void {
 }
 
 function checkExhaustive(c: Checker, expr: Extract<Expr, { kind: 'match' }>, scrutinee: Type): void {
-  const patterns = expr.arms.map((arm) => lowerPattern(arm.pattern, c.annotations));
+  // An arm with a guard may not run for a value its pattern matches, so it covers nothing.
+  const patterns = expr.arms.filter((arm) => !arm.guard).map((arm) => lowerPattern(arm.pattern, c.annotations));
   const missing = missingPattern(patterns, resolve(scrutinee, true), c.budget);
   if (missing) {
     compileError(

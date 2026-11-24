@@ -2889,7 +2889,6 @@ SkipWhile { iter: Cycle { orig: Iter([1, 2]), iter: Iter([]) }, flag: true }
 });
 
 test.each([
-  ['range patterns (stage C)', '    match 3 { 1..=5 => {}, _ => {} }'],
   ['attributes on tuple elements (stage C)', '    let tuple = (#[cfg(any())] 1, 2);'],
   ['an unavailable string method', '    let escaped = "abc".escape_debug();'],
   [
@@ -7073,13 +7072,13 @@ test('casts a char to char, and gives a Vec made through a boxed slice no spare 
 });
 
 test.each([
-  ['an unsupported pattern', 'matches!(v, Some(ref x))', 3, 'ref パターン'],
+  ['an unstable pattern', 'matches!(v, Some(box x))', 3, 'box パターン'],
   ['a syntax error', 'matches!(v, Some(x y))', 3, '書き方に誤り'],
   [
     'a later row of the pattern',
-    'matches!(\n        v,\n        Some(1)\n            | Some(2..=5)\n    )',
+    'matches!(\n        v,\n        Some(1)\n            | Some(box 2)\n    )',
     6,
-    '範囲のパターン',
+    'box パターン',
   ],
 ])('reports %s in a matches! pattern on its row', (_name, call, row, message) => {
   const program = rustMain(`    let v: Option<i32> = Some(3);\n\n    let c = ${call};`);

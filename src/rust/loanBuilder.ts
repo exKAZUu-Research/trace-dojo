@@ -595,8 +595,21 @@ export class LoanBuilder {
   private bindPart(binding: Binding, p: Pattern, place: Place, byRef: BindingMode): void {
     switch (p.kind) {
       case 'binding': {
-        this.bindVariable(binding, p, place, byRef);
+        const explicit = p.byRef === 'refMut' ? 'mut' : p.byRef && 'shared';
+        this.bindVariable(binding, p, place, explicit ?? byRef);
         if (p.sub) this.bindPart(binding, p.sub, place, byRef);
+        return;
+      }
+      case 'slice': {
+        const [sub, mode] = matchDeref(p, place, byRef);
+        for (const elem of p.elems) this.bindPart(binding, elem, project(sub, '[]'), mode);
+        return;
+      }
+      case 'range': {
+        binding.accesses.push({ place: matchDeref(p, place, byRef)[0], kind: 'read', span: p.span });
+        return;
+      }
+      case 'rest': {
         return;
       }
       case 'tuple':
@@ -1006,17 +1019,26 @@ export class LoanBuilder {
   private match(expr: Extract<Expr, { kind: 'match' }>): Value {
     const source = this.source(expr.scrutinee);
     this.point({ uses: [source.root], accesses: [{ place: source, kind: 'read', span: expr.scrutinee.span }] });
-    const start = this.current;
+    let start = this.current;
     const result = this.temp(expr.ty);
     const ends: (number | undefined)[] = [];
     for (const arm of expr.arms) {
       this.current = start;
+      let failed: number | undefined;
       this.patternScope(arm.pattern, arm.body, () => {
         this.bind(arm.pattern, source);
+        if (arm.guard) {
+          this.value(arm.guard);
+          failed = this.current;
+        }
         const value = this.value(arm.body);
         if (this.current !== undefined) this.store(value, result);
       });
       ends.push(this.current);
+      if (arm.guard) {
+        this.join([start, failed]);
+        start = this.current;
+      }
     }
     this.join(expr.arms.length === 0 ? [] : ends);
     return result;

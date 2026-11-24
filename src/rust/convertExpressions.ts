@@ -1,18 +1,20 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { BinaryOp, Block, Condition, Expr, Item, MatchArm, Pattern, Span, Stmt, TypeAst } from './ast';
+import { forEachDirect } from './astWalk';
 import { MacroConverter } from './convertMacros';
 import { isComment, syntaxError, unavailable, withoutDocAttributes } from './convertSyntax';
 import {
   parseByteLiteral,
+  parseByteStringLiteral,
   parseCharLiteral,
   parseFloatLiteral,
   parseIntegerLiteral,
+  parseRawStringLiteral,
   parseStringLiteral,
 } from './literals';
 
 const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
-  raw_string_literal: '生の文字列（r"..."）',
   await_expression: '.await',
   async_block: 'async ブロック',
   unsafe_block: 'unsafe ブロック',
@@ -37,7 +39,7 @@ export abstract class ExpressionConverter extends MacroConverter {
     const children = node.namedChildren.filter((child) => !isComment(child)).map(withoutDocAttributes);
     for (const [index, child] of children.entries()) {
       const isLast = index === children.length - 1;
-      if (child.type === 'label') unavailable(this.span(child), "ラベル付きのブロック（'a: { ... }）");
+      if (child.type === 'label') continue;
       if (child.type === 'let_declaration') {
         stmts.push(this.letStmt(child));
       } else if (child.type === 'expression_statement') {
@@ -114,6 +116,9 @@ export abstract class ExpressionConverter extends MacroConverter {
       case 'string_literal': {
         return this.stringLiteral(node, span);
       }
+      case 'raw_string_literal': {
+        return this.rawStringLiteral(node, span);
+      }
       case 'identifier':
       case 'self':
       case 'scoped_identifier':
@@ -137,7 +142,8 @@ export abstract class ExpressionConverter extends MacroConverter {
         return this.structExpr(node);
       }
       case 'block': {
-        return this.block(node);
+        const label = this.label(node);
+        return label === undefined ? this.block(node) : this.labeledBlock(node, label, span);
       }
       case 'if_expression':
       case 'else_clause': {
@@ -156,6 +162,39 @@ export abstract class ExpressionConverter extends MacroConverter {
         return this.operatorExpr(node, span);
       }
     }
+  }
+
+  /**
+   * `'a: { ... }`, which runs as `'a: loop { break 'a { ... } }`: only a `break 'a` leaves it early, and rustc rejects
+   * the unlabeled `break` and `continue` that the loop would catch.
+   */
+  private labeledBlock(node: Node, label: string, span: Span): Expr {
+    const block = this.block(node);
+    const check = (expr: Expr): void => {
+      if (expr.kind === 'closure' || expr.kind === 'loop' || expr.kind === 'while' || expr.kind === 'for') {
+        if (expr.kind === 'for') check(expr.iterable);
+        if (expr.kind === 'while' && expr.cond.kind === 'expr') check(expr.cond.expr);
+        return;
+      }
+      if ((expr.kind === 'break' || expr.kind === 'continue') && expr.label === undefined) {
+        syntaxError(expr.span, `ラベル付きのブロックの中の ${expr.kind} には、ラベルを書いてください（E0695）。`);
+      }
+      if (expr.kind === 'continue' && expr.label === label) {
+        syntaxError(expr.span, `continue '${label} は、ブロックのラベルには使えません（E0696）。`);
+      }
+      forEachDirect(expr, check);
+    };
+    check(block);
+    const exit: Expr = { kind: 'break', label, value: block, span };
+    const body: Block = {
+      kind: 'block',
+      stmts: [{ kind: 'expr', expr: exit, semi: true, span }],
+      tail: undefined,
+      span,
+      endRow: block.endRow,
+      items: [],
+    };
+    return { kind: 'loop', label, body, span };
   }
 
   private integerLiteral(node: Node, span: Span): Expr {
@@ -179,11 +218,27 @@ export abstract class ExpressionConverter extends MacroConverter {
   }
 
   private stringLiteral(node: Node, span: Span): Expr {
-    if (node.text.startsWith('b')) unavailable(span, 'バイト文字列（b"..."）');
+    if (node.text.startsWith('b')) {
+      const bytes = parseByteStringLiteral(node.text);
+      if (bytes === undefined) syntaxError(span, `バイト文字列の書き方（${node.text}）に誤りがあります。`);
+      return byteStringExpr(bytes, span);
+    }
     if (node.text.startsWith('c')) unavailable(span, 'C の文字列（c"..."）');
     const value = parseStringLiteral(node.text);
     if (value === undefined) syntaxError(span, `文字列の書き方（${node.text}）に誤りがあります。`);
     return { kind: 'str', value, span };
+  }
+
+  private rawStringLiteral(node: Node, span: Span): Expr {
+    const literal = parseRawStringLiteral(node.text);
+    if (!literal) syntaxError(span, `生の文字列の書き方（${node.text}）に誤りがあります。`);
+    if (literal.prefix === 'c') unavailable(span, 'C の文字列（cr"..."）');
+    if (literal.prefix === 'b')
+      return byteStringExpr(
+        Array.from(literal.body, (char) => char.codePointAt(0) ?? 0),
+        span
+      );
+    return { kind: 'str', value: literal.body, span };
   }
 
   private pathExpr(node: Node, span: Span): Expr {
@@ -499,10 +554,14 @@ export abstract class ExpressionConverter extends MacroConverter {
         continue;
       }
       const matchPattern = this.field(arm, 'pattern');
-      if (matchPattern.childForFieldName('condition')) unavailable(this.span(matchPattern), 'match の腕のガード（if）');
-      const inner = matchPattern.namedChildren.find((child) => !isComment(child));
+      const condition = matchPattern.childForFieldName('condition');
+      if (condition && (condition.type === 'let_condition' || condition.type === 'let_chain')) {
+        syntaxError(this.span(condition), 'match の腕のガードの if let は、不安定な機能なので使えません（E0658）。');
+      }
+      const inner = matchPattern.namedChildren.find((child) => !isComment(child) && child.id !== condition?.id);
       const pattern: Pattern = inner ? this.pattern(inner) : { kind: 'wild', span: this.span(matchPattern) };
-      arms.push({ pattern, body: this.expr(this.field(arm, 'value')), span: this.span(arm) });
+      const guard = condition ? this.expr(condition) : undefined;
+      arms.push({ pattern, guard, body: this.expr(this.field(arm, 'value')), span: this.span(arm) });
     }
     return { kind: 'match', scrutinee: this.expr(this.field(node, 'value')), arms, endRow: node.endPosition.row, span };
   }
@@ -573,6 +632,12 @@ const ITEM_TYPES = new Set([
 
 function isItem(node: Node): boolean {
   return ITEM_TYPES.has(node.type);
+}
+
+/** A byte string literal, which is a reference to an array of its bytes (`&[u8; N]`), as `&[b'a', ...]` would be. */
+function byteStringExpr(bytes: number[], span: Span): Expr {
+  const elems: Expr[] = bytes.map((byte) => ({ kind: 'int', value: BigInt(byte), suffix: 'u8', span }));
+  return { kind: 'ref', mutable: false, operand: { kind: 'array', elems, span }, span };
 }
 
 function isBlockLike(expr: Expr): boolean {

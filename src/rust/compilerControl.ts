@@ -1,6 +1,6 @@
 import type { Condition, Expr, Pattern } from './ast';
 import type { Compiler, Eval } from './compiler';
-import { compilePatternInput, takesWhole } from './compilerPatterns';
+import { compileGuardedMatcher, compilePatternInput, takesWhole } from './compilerPatterns';
 import { normalize } from './infer';
 import { ControlSignal, type Frame } from './runtime';
 import { runtimeType } from './runtimeTypes';
@@ -33,18 +33,25 @@ export function compileIf(c: Compiler, expr: ExprOf<'if'>, asStatement: boolean)
 export function compileMatch(c: Compiler, expr: ExprOf<'match'>, asStatement: boolean): Eval {
   const scrutinee = compilePatternInput(c, expr.scrutinee);
   const arms = expr.arms.map((arm) => {
-    const matcher = c.compileMatcher(arm.pattern);
+    const matcher = compileGuardedMatcher(c, arm.pattern);
+    const guard = arm.guard && c.value(arm.guard);
     const body = asStatement ? c.statement(arm.body) : c.value(arm.body);
     const slots = c.patternSlots(arm.pattern);
     const takeAll = takesWhole(c, expr.scrutinee, arm.pattern);
-    return { matcher, body, slots, takeAll };
+    return { matcher, guard, body, slots, takeAll };
   });
   return (frame) => {
     frame.runtime.spend();
     const { value, place } = scrutinee(frame);
     return frame.runtime.withRoots([place], () => {
-      for (const { matcher, body, slots, takeAll } of arms) {
-        if (!matcher(frame, value, () => place)) continue;
+      for (const { matcher, guard, body, slots, takeAll } of arms) {
+        const moveOut = matcher(frame, value, () => place);
+        if (!moveOut) continue;
+        if (guard && guard(frame) !== true) {
+          frame.endScope(slots);
+          continue;
+        }
+        moveOut();
         takeAll?.(frame);
         try {
           return body(frame);

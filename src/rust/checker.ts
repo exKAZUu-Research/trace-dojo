@@ -10,7 +10,7 @@ import { BorrowChecker } from './borrowck';
 import { settleClosures } from './checkerClosures';
 import { exprInner } from './checkerExpr';
 import { settleBinaries } from './checkerOperators';
-import { checkParamPatterns, checkPattern } from './checkerPatterns';
+import { checkParamPatterns, checkPattern, requireRefMutSource } from './checkerPatterns';
 import { checkConstOperations, ConstLint } from './constLint';
 import { neverCompletes } from './divergence';
 import { requireSizedSource } from './dynSource';
@@ -1245,6 +1245,7 @@ export class Checker {
       }
     }
     checkPattern(this, stmt.pattern, type, 'move');
+    if (stmt.init) requireRefMutSource(this, stmt.pattern, stmt.init);
     if (stmt.init && this.annotations.paths.get(stmt.init)?.kind === 'fn') {
       this.annotations.functionInitializers.set(stmt.init, this.annotations.bindings.get(stmt.pattern));
     }

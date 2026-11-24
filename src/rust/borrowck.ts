@@ -292,9 +292,17 @@ export class BorrowChecker {
   private match(expr: Extract<Expr, { kind: 'match' }>, state: State): State {
     const afterScrutinee = this.patternSource(expr.scrutinee, state);
     let result: State = BOTTOM;
+    // A false guard passes the value on to the later arms, which see what the guard did but no move by the pattern.
+    let next = afterScrutinee;
     for (const arm of expr.arms) {
-      const armState = this.bindPattern(arm.pattern, expr.scrutinee, afterScrutinee);
+      const bound = this.bindPattern(arm.pattern, expr.scrutinee, next);
+      const armState = arm.guard ? this.expr(arm.guard, bound, 'move') : bound;
       result = join(result, this.expr(arm.body, armState, 'move'));
+      if (arm.guard) {
+        const passed = new Map(armState);
+        for (const [local, varState] of next) if (bound.get(local) !== varState) passed.set(local, varState);
+        next = join(next, passed);
+      }
     }
     return expr.arms.length === 0 ? afterScrutinee : result;
   }

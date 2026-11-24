@@ -322,6 +322,8 @@ export type Condition = { kind: 'expr'; expr: Expr } | { kind: 'let'; pattern: P
 
 export interface MatchArm {
   pattern: Pattern;
+  /** The arm's `if` guard, which runs after the pattern matches and lets later arms try when it is false. */
+  guard: Expr | undefined;
   body: Expr;
   span: Span;
 }
@@ -375,11 +377,30 @@ interface PatternBase {
 export type Pattern = PatternBase &
   (
     | { kind: 'wild' }
-    | { kind: 'binding'; name: string; mutable: boolean; sub: Pattern | undefined }
+    | {
+        kind: 'binding';
+        name: string;
+        mutable: boolean;
+        /** `ref x` and `ref mut x`, which borrow what they bind. */
+        byRef?: 'ref' | 'refMut';
+        sub: Pattern | undefined;
+      }
     | { kind: 'lit'; expr: Expr }
     | { kind: 'tuple'; elems: Pattern[] }
     | { kind: 'tupleStruct'; path: PathAst; elems: Pattern[] }
-    | { kind: 'struct'; path: PathAst; fields: { name: string; pattern: Pattern; span: Span }[] }
+    | {
+        kind: 'struct';
+        path: PathAst;
+        fields: { name: string; pattern: Pattern; span: Span }[];
+        /** Whether the pattern ends with `..`, which leaves the other fields out. */
+        rest: boolean;
+      }
+    /** `..` among the elements of a tuple, tuple struct, or slice pattern, which the checker expands for tuples. */
+    | { kind: 'rest' }
+    /** `a..=b`, `a..b`, `a..`, or `..=b`, whose ends are literal or constant patterns. */
+    | { kind: 'range'; start: Pattern | undefined; end: Pattern | undefined; inclusive: boolean }
+    /** `[a, b, rest @ .., z]`; `restIndex` is the position of its `..`, which the checker finds. */
+    | { kind: 'slice'; elems: Pattern[]; restIndex?: number }
     | { kind: 'path'; path: PathAst }
     | { kind: 'ref'; mutable: boolean; pattern: Pattern }
     | { kind: 'or'; alternatives: Pattern[] }

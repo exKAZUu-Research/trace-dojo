@@ -1,18 +1,32 @@
 import type { LocalVar, PathRes } from './annotations';
 import type { Expr, Pattern } from './ast';
 import type { Compiler } from './compiler';
-import { derefAll, isPlaceExpr, isRefType } from './compilerCommon';
+import { derefAll, isPlaceExpr, isRefType, stripRefs } from './compilerCommon';
 import { normalize } from './infer';
 import { projectedBindings } from './loanCaptures';
-import { copyValue, needsCopy, valuesEqual } from './ops';
+import { compareValues, copyValue, needsCopy, valuesEqual } from './ops';
 import { type Frame, MOVED } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { resolve, shallow, type Type } from './types';
-import { CellPlace, ElementPlace, type EnumValue, isPlace, type Place, type StructValue, type Value } from './values';
+import {
+  CellPlace,
+  ElementPlace,
+  type EnumValue,
+  isPlace,
+  type Place,
+  sliceBase,
+  sliceLength,
+  SliceView,
+  type StructValue,
+  type Value,
+} from './values';
 
 export type Matcher = (frame: Frame, value: Value, place: (() => Place) | undefined) => boolean;
 
-type PatternProbe = (frame: Frame, value: Value, place: (() => Place) | undefined, bindings: (() => void)[]) => boolean;
+/** A step of binding a pattern's variables; `movesOut` marks one that leaves a moved part in the matched value. */
+type Binding = (() => void) & { movesOut?: boolean };
+
+type PatternProbe = (frame: Frame, value: Value, place: (() => Place) | undefined, bindings: Binding[]) => boolean;
 
 type PatternOf<K extends Pattern['kind']> = Extract<Pattern, { kind: K }>;
 
@@ -40,12 +54,30 @@ export function compilePatternInput(c: Compiler, expr: Expr): (frame: Frame) => 
  * bindings that bind by mutable reference.
  */
 export function compileMatcher(c: Compiler, pattern: Pattern): Matcher {
+  const matcher = compileGuardedMatcher(c, pattern);
+  return (frame, value, place) => {
+    const moveOut = matcher(frame, value, place);
+    moveOut?.();
+    return moveOut !== undefined;
+  };
+}
+
+/**
+ * Matches a value against a pattern as {@link compileMatcher} does, but leaves the parts that bindings move out of the
+ * value in place until the returned function runs, as a match arm's guard sees them before the arm takes them.
+ */
+export function compileGuardedMatcher(
+  c: Compiler,
+  pattern: Pattern
+): (frame: Frame, value: Value, place: (() => Place) | undefined) => (() => void) | undefined {
   const probe = compileProbe(c, pattern);
   return (frame, value, place) => {
-    const bindings: (() => void)[] = [];
-    if (!probe(frame, value, place, bindings)) return false;
-    for (const bind of bindings) bind();
-    return true;
+    const bindings: Binding[] = [];
+    if (!probe(frame, value, place, bindings)) return;
+    for (const bind of bindings) if (!bind.movesOut) bind();
+    return () => {
+      for (const bind of bindings) if (bind.movesOut) bind();
+    };
   };
 }
 
@@ -80,7 +112,71 @@ function compileProbe(c: Compiler, pattern: Pattern): PatternProbe {
     case 'or': {
       return orMatcher(c, pattern);
     }
+    case 'range': {
+      return rangeMatcher(c, pattern, type);
+    }
+    case 'slice': {
+      return sliceMatcher(c, pattern);
+    }
+    case 'rest': {
+      return () => true;
+    }
   }
+}
+
+function rangeMatcher(c: Compiler, pattern: PatternOf<'range'>, type: Type): PatternProbe {
+  const endValue = (end: Pattern | undefined): ((frame: Frame) => Value) | undefined => {
+    if (!end) return undefined;
+    if (end.kind === 'lit') return c.value(end.expr);
+    const res = c.annotations.paths.get(end);
+    if (res?.kind === 'builtinConst') {
+      const value = c.support.builtinConst(res.name);
+      return () => value;
+    }
+    return res?.kind === 'const' ? compileConstant(c, res) : undefined;
+  };
+  const start = endValue(pattern.start);
+  const end = endValue(pattern.end);
+  const valueType = stripRefs(type);
+  const inclusive = pattern.inclusive;
+  return (frame, value) => {
+    const target = derefAll(value);
+    if (start && !((compareValues(valueType, start(frame), target, true) ?? 1) <= 0)) return false;
+    if (!end) return true;
+    const order = compareValues(valueType, target, end(frame), true);
+    return order !== undefined && (inclusive ? order <= 0 : order < 0);
+  };
+}
+
+function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
+  const rest = pattern.restIndex;
+  const elems = pattern.elems.map((elem, index) => (index === rest ? undefined : compileProbe(c, elem)));
+  const fixed = pattern.elems.length - (rest === undefined ? 0 : 1);
+  const restBinding = rest === undefined ? undefined : pattern.elems[rest];
+  const restLocal = restBinding && c.annotations.bindings.get(restBinding);
+  const restByRef = restLocal !== undefined && isRefType(restLocal.type);
+  return (frame, value, place, bindings) => {
+    const target = derefAll(value);
+    const { base, start } = sliceBase(target);
+    const length = sliceLength(target);
+    if (rest === undefined ? length !== fixed : length < fixed) return false;
+    const after = length - fixed;
+    for (const [index, elem] of elems.entries()) {
+      if (!elem) continue;
+      const position = start + (rest !== undefined && index > rest ? index - 1 + after : index);
+      const elemPlace = place || isPlace(value) ? () => new ElementPlace(base, position) : undefined;
+      if (!elem(frame, base[position], elemPlace, bindings)) return false;
+    }
+    if (restLocal) {
+      const from = start + (rest as number);
+      bindings.push(() => {
+        frame.locals[restLocal.slot] = restByRef
+          ? new SliceView(base, from, from + after, target instanceof SliceView ? target.owner : undefined)
+          : base.slice(from, from + after);
+      });
+    }
+    return true;
+  };
 }
 
 function orMatcher(c: Compiler, pattern: PatternOf<'or'>): PatternProbe {
@@ -111,9 +207,8 @@ function bindingMatcher(c: Compiler, pattern: PatternOf<'binding'>, type: Type):
     if (sub && !sub(frame, value, place, bindings)) return false;
     bindings.push(() => {
       frame.locals[local.slot] = boundValue(value, place, local.mode, bindsPlace, copies);
-      if (!movesOut || !place) return;
-      place().set(MOVED);
     });
+    if (movesOut && place) bindings.push(Object.assign(() => place().set(MOVED), { movesOut: true }));
     return true;
   };
 }
@@ -186,6 +281,10 @@ function constMatcher(c: Compiler, res: PathRes, type: Type): (frame: Frame, val
   if (res.kind === 'const') {
     const read = compileConstant(c, res);
     return (frame, value) => valuesEqual(type, derefAll(value), read(frame));
+  }
+  if (res.kind === 'builtinConst') {
+    const constant = c.support.builtinConst(res.name);
+    return (_frame, value) => valuesEqual(type, derefAll(value), constant);
   }
   return () => true;
 }

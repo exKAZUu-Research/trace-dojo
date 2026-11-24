@@ -549,6 +549,11 @@ export class ConstLint {
       if (matches === undefined) break;
       if (!matches) continue;
       this.bind(arm.pattern, scrutinee);
+      if (arm.guard) {
+        const guard = this.expr(arm.guard);
+        if (typeof guard !== 'boolean') break;
+        if (!guard) continue;
+      }
       return this.expr(arm.body);
     }
     this.known.clear();
@@ -565,8 +570,9 @@ export class ConstLint {
       const matches = this.matchesPattern(arm.pattern, scrutinee);
       if (matches === false) continue;
       this.bind(arm.pattern, matches === true ? scrutinee : undefined);
+      if (arm.guard) this.expr(arm.guard);
       allDiverge = this.branch(() => this.expr(arm.body)) && allDiverge;
-      if (matches === true) break;
+      if (matches === true && !arm.guard) break;
     }
     this.diverged = allDiverge && arms.length > 0;
   }
@@ -906,6 +912,12 @@ function patternMatches(
     case 'ref': {
       return patternMatches(pattern.pattern, value, annotations, constant);
     }
+    case 'rest': {
+      return true;
+    }
+    case 'range': {
+      return rangeMatches(pattern, value, annotations, constant);
+    }
     case 'or': {
       const results = pattern.alternatives.map((alternative) =>
         patternMatches(alternative, value, annotations, constant)
@@ -917,6 +929,29 @@ function patternMatches(
       return undefined;
     }
   }
+}
+
+function rangeMatches(
+  pattern: Extract<Pattern, { kind: 'range' }>,
+  value: Known | undefined,
+  annotations: Annotations,
+  constant: ((def: ConstDef) => Known | undefined) | undefined
+): boolean | undefined {
+  if (typeof value !== 'bigint') return undefined;
+  const end = (bound: Pattern | undefined): bigint | 'open' | undefined => {
+    if (!bound) return 'open';
+    if (bound.kind === 'lit') return bound.expr.kind === 'int' ? bound.expr.value : undefined;
+    const res = annotations.paths.get(bound);
+    const known =
+      res?.kind === 'const' ? constant?.(res.def) : res?.kind === 'builtinConst' ? integerConst(res.name) : undefined;
+    return typeof known === 'bigint' ? known : undefined;
+  };
+  const start = end(pattern.start);
+  const stop = end(pattern.end);
+  if (start === undefined || stop === undefined) return undefined;
+  if (start !== 'open' && value < start) return false;
+  if (stop === 'open') return true;
+  return pattern.inclusive ? value <= stop : value < stop;
 }
 
 function allKnownMatches(results: (boolean | undefined)[]): boolean | undefined {
