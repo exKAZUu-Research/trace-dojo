@@ -154,6 +154,9 @@ export class Shell implements ArithmeticHost {
   private ranFunction = false;
   /** Whether the shell is reading a statement's condition, whose commands record no steps. */
   private conditionDepth = 0;
+  /** Outputs of running and pending command substitutions and loop word lists, whose turtle handles stay live. */
+  private readonly inFlight: { values: string[] }[] = [];
+  private readonly activeOutputs: { text: string }[] = [];
 
   constructor(readonly runtime: Runtime) {
     const global: Scope = new Map();
@@ -222,6 +225,17 @@ export class Shell implements ArithmeticHost {
     let status = 0;
     for (const statement of statements) status = this.execute(statement);
     return status;
+  }
+
+  /** Runs a function while keeping any command-substitution outputs it produces rooted for turtle GC. */
+  private withRoots<T>(run: (roots: string[]) => T): T {
+    const frame = { values: [] as string[] };
+    this.inFlight.push(frame);
+    try {
+      return run(frame.values);
+    } finally {
+      this.inFlight.pop();
+    }
   }
 
   /** Runs statements whose exit status decides a branch, recording no steps for their commands. */
@@ -336,18 +350,18 @@ export class Shell implements ArithmeticHost {
         }
       }
     };
-    if (!recordsStep) return this.withStatus(run);
+    if (!recordsStep) return this.withRoots(() => this.withStatus(run));
     if (statement.kind === 'declaration' && declaresReferences(statement)) {
       // A name reference stores no value learners answer, as Java's `this` binds none, so it records a step only
       // when it changes what the trace shows.
-      const status = this.withStatus(run);
+      const status = this.withRoots(() => this.withStatus(run));
       this.runtime.steps.stepBinding(statement.row, false);
       return status;
     }
     return this.runtime.steps.runStatement(
       statement.row,
       () => this.ranFunction,
-      () => this.withStatus(run)
+      () => this.withRoots(() => this.withStatus(run))
     );
   }
 
@@ -413,29 +427,32 @@ export class Shell implements ArithmeticHost {
       this.reportError(`\`${statement.variable}': not a valid identifier`);
       return 1;
     }
-    const values = statement.values
-      ? this.leavingLine(() => this.expander.expandWords(statement.values as Word[]))
-      : [...(this.state.positional.at(-1) as string[])];
-    // A list holding turtles is a list of objects, as Java's `Turtle[]` is, and an empty string stands for null; a
-    // binding of either records a step only when it changes what the trace shows.
-    const bindsObjects = values.some(
-      (value) => this.runtime.turtleOf(value) !== undefined || this.namesStructure(value)
-    );
-    // The words' expansion leaves Bash's line counter at the `for`, but the loop restores it however it ends.
-    return this.restoringLine(() =>
-      this.loop((last) => {
-        for (const value of values) {
-          this.runtime.spend();
-          this.currentRow = statement.row - this.lineShift;
-          // A name reference as the loop variable refers to each word in turn, as Bash's `for` makes it.
-          const reference = this.findOwnVariable(statement.variable);
-          if (reference?.attributes.has('n')) reference.value = { kind: 'scalar', value };
-          else this.assignScalar(statement.variable, value);
-          this.runtime.steps.stepBinding(statement.row, !bindsObjects && value !== '');
-          if (this.iterate(statement.body, last) === 'stop') return;
-        }
-      })
-    );
+    return this.withRoots((roots) => {
+      const values = statement.values
+        ? this.leavingLine(() => this.expander.expandWords(statement.values as Word[]))
+        : [...(this.state.positional.at(-1) as string[])];
+      roots.push(...values);
+      // A list holding turtles is a list of objects, as Java's `Turtle[]` is, and an empty string stands for null; a
+      // binding of either records a step only when it changes what the trace shows.
+      const bindsObjects = values.some(
+        (value) => this.runtime.turtleOf(value) !== undefined || this.namesStructure(value)
+      );
+      // The words' expansion leaves Bash's line counter at the `for`, but the loop restores it however it ends.
+      return this.restoringLine(() =>
+        this.loop((last) => {
+          for (const value of values) {
+            this.runtime.spend();
+            this.currentRow = statement.row - this.lineShift;
+            // A name reference as the loop variable refers to each word in turn, as Bash's `for` makes it.
+            const reference = this.findOwnVariable(statement.variable);
+            if (reference?.attributes.has('n')) reference.value = { kind: 'scalar', value };
+            else this.assignScalar(statement.variable, value);
+            this.runtime.steps.stepBinding(statement.row, !bindsObjects);
+            if (this.iterate(statement.body, last) === 'stop') return;
+          }
+        })
+      );
+    });
   }
 
   private executeArithmeticFor(statement: Extract<Statement, { kind: 'arithmeticFor' }>): number {
@@ -678,11 +695,11 @@ export class Shell implements ArithmeticHost {
   /** Runs statements in a copy of the shell, capturing what they write to standard output. */
   // code-gauge-allow functionNcss -- Copies and restores every part of the shell state a command substitution changes.
   captureSubshell(body: Statement[]): { output: string; status: number } {
-    let output = '';
+    const buffer = { text: '' };
     const capture: OutputTarget = {
       write: (text) => {
-        output += text;
-        if (output.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+        buffer.text += text;
+        if (buffer.text.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
       },
     };
     const parent = this.state;
@@ -698,6 +715,7 @@ export class Shell implements ArithmeticHost {
       fd1: capture,
     };
     this.suspended.push(parent);
+    this.activeOutputs.push(buffer);
     this.state = child;
     const savedLoop = this.loopDepth;
     const savedCondition = this.conditionDepth;
@@ -713,14 +731,16 @@ export class Shell implements ArithmeticHost {
       else if (error instanceof BreakSignal || error instanceof ContinueSignal) status = 0;
       else throw error;
     } finally {
+      this.activeOutputs.pop();
       this.state = this.suspended.pop() as ShellState;
       this.loopDepth = savedLoop;
       this.conditionDepth = savedCondition;
       this.currentRow = savedRow;
       this.ranFunction = savedRanFunction;
     }
+    this.inFlight.at(-1)?.values.push(buffer.text);
     // Bash keeps the random generator's state across command substitutions only when they reseed it.
-    return { output, status };
+    return { output: buffer.text, status };
   }
 
   // ---------------------------------------------------------------- errors
@@ -1325,6 +1345,18 @@ export class Shell implements ArithmeticHost {
         }
       }
       for (const args of state.positional) yield* args;
+    }
+    yield* this.inFlightHandles();
+  }
+
+  private *inFlightHandles(): Iterable<string> {
+    for (const { text } of this.activeOutputs) {
+      for (const [handle] of text.matchAll(/Turtle@\d+/g)) yield handle;
+    }
+    for (const { values } of this.inFlight) {
+      for (const text of values) {
+        for (const [handle] of text.matchAll(/Turtle@\d+/g)) yield handle;
+      }
     }
   }
 
