@@ -92,7 +92,7 @@ function compileLibrary(): Library {
     derivingSupport: (name) => compiler.baseValue(name),
     weakValues: compiler.turtleValues(),
     weakTypes: new Map([['Turtle', TURTLE_TYPE]]),
-    value: (name) => compiler.baseValue(name),
+    value: (name) => compiler.supportValue(name),
   };
 }
 
@@ -125,6 +125,17 @@ class LibraryCompiler {
     enumClass: () => this.baseClass('Enum'),
     ratioCon: () => this.baseType('Ratio').cons[0],
   };
+
+  /** A value code the compiler generates refers to: one of the base module, or of a later library module. */
+  supportValue(name: string): ValueEntity {
+    const entity = this.base?.exports.values.get(name);
+    if (entity) return entity;
+    for (const exports of this.internal.values()) {
+      const found = exports.values.get(name);
+      if (found) return found;
+    }
+    throw new Error(`The library has no ${name}`);
+  }
 
   baseValue(name: string): ValueEntity {
     const entity = this.base?.exports.values.get(name);

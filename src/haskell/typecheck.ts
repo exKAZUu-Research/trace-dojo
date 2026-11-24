@@ -1,6 +1,6 @@
 import { assert } from 'es-toolkit';
 
-import { FUNCTION_TYPE } from './builtinTypes';
+import { EQUALITY_CLASS, FUNCTION_TYPE } from './builtinTypes';
 import { type ClassEnv, superPred } from './classEnv';
 import { deriveInstance, FUNCTOR_LIKE_CLASSES } from './deriving';
 import { type ClassEntity, type Evidence, type InstanceInfo, nextId, type ValueEntity } from './entities';
@@ -178,6 +178,7 @@ function validateInstanceTermination(info: InstanceInfo, span: Span): void {
   const headVars = new Map<number, number>();
   const headSize = instanceTypeSize(info.head, headVars);
   for (const pred of info.context) {
+    if (pred.cls === EQUALITY_CLASS) continue;
     const vars = new Map<number, number>();
     const size = instanceTypeSize(pred.type, vars);
     if (size >= headSize || [...vars].some(([index, count]) => count > (headVars.get(index) ?? 0))) {

@@ -48,7 +48,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   implicit_variable: '暗黙のパラメータ（?x）',
   invisible: '型変数の明示的な束縛（@a）',
   kind_application: '種類の適用（@k）',
-  label: 'ラベル（#name）',
   linear_function: '線形型（%1 ->）',
   modifier: '多重度の注釈（%1）',
   pattern_synonym: 'パターンシノニム',
@@ -1458,7 +1457,19 @@ export function convertExpr(node: Node): Expr {
       return convertNameExpression(node, span);
     }
     case 'literal': {
-      return { kind: 'lit', lit: convertLiteral(namedChildren(node)[0] ?? node), span };
+      const literal: Expr = { kind: 'lit', lit: convertLiteral(namedChildren(node)[0] ?? node), span };
+      if (literal.lit.kind !== 'string' || !extensions.has('OverloadedStrings')) return literal;
+      return { kind: 'app', fn: { kind: 'support', name: 'overloadedFromString', span }, arg: literal, span };
+    }
+    case 'label': {
+      if (!extensions.has('OverloadedLabels'))
+        throw syntaxError(span, 'ラベルを使うには、OverloadedLabels の拡張が要ります。');
+      return {
+        kind: 'tyapp',
+        expr: { kind: 'support', name: 'overloadedFromLabel', span },
+        type: { kind: 'tlit', value: node.text.slice(1), span },
+        span,
+      };
     }
     case 'apply': {
       const fn = required(node, 'function');
@@ -1593,18 +1604,24 @@ function convertCollection(node: Node, span: Span): Expr {
       return convertTupleExpr(node, span);
     }
     case 'list': {
-      return { kind: 'list', elems: fields(node, 'element').map(convertExpr), span };
+      const list: Expr = { kind: 'list', elems: fields(node, 'element').map(convertExpr), span };
+      if (!extensions.has('OverloadedLists')) return list;
+      const count: Expr = { kind: 'lit', lit: { kind: 'int', value: BigInt(list.elems.length) }, span };
+      const fromListN: Expr = { kind: 'support', name: 'overloadedFromListN', span };
+      return { kind: 'app', fn: { kind: 'app', fn: fromListN, arg: count, span }, arg: list, span };
     }
     case 'arithmetic_sequence': {
       const step = field(node, 'step');
       const to = field(node, 'to');
-      return {
+      const sequence: Expr = {
         kind: 'arith',
         from: convertExpr(required(node, 'from')),
         next: step ? convertExpr(step) : undefined,
         to: to ? convertExpr(to) : undefined,
         span,
       };
+      if (!extensions.has('OverloadedLists')) return sequence;
+      return { kind: 'app', fn: { kind: 'support', name: 'overloadedFromList', span }, arg: sequence, span };
     }
     case 'list_comprehension': {
       const branches = fields(node, 'qualifiers').map((qualifiers) =>
@@ -2109,7 +2126,24 @@ export function convertPattern(node: Node): Pat {
       return { kind: 'pwild', span };
     }
     case 'literal': {
-      return { kind: 'plit', lit: convertLiteral(namedChildren(node)[0] ?? node), negative: false, span };
+      const lit = convertLiteral(namedChildren(node)[0] ?? node);
+      if (lit.kind === 'string' && extensions.has('OverloadedStrings')) {
+        // GHC matches an overloaded string by (==) with the literal's value at the pattern's type.
+        const matches: Expr = {
+          kind: 'app',
+          fn: { kind: 'support', name: 'overloadedStringEq', span },
+          arg: { kind: 'lit', lit, span },
+          span,
+        };
+        return {
+          kind: 'pview',
+          expr: matches,
+          exprText: '==',
+          pat: { kind: 'pcon', con: { name: 'True', span }, args: [], span },
+          span,
+        };
+      }
+      return { kind: 'plit', lit, negative: false, span };
     }
     case 'negation': {
       const number = required(node, 'number');
@@ -2148,7 +2182,15 @@ export function convertPattern(node: Node): Pat {
       return { kind: 'pcon', con: { name: node.text.replaceAll(/\s+/g, ''), span }, args: [], span };
     }
     case 'list': {
-      return { kind: 'plist', elems: fields(node, 'element').map(convertPattern), span };
+      const list: Pat = { kind: 'plist', elems: fields(node, 'element').map(convertPattern), span };
+      if (!extensions.has('OverloadedLists')) return list;
+      return {
+        kind: 'pview',
+        expr: { kind: 'support', name: 'overloadedToList', span },
+        exprText: 'toList',
+        pat: list,
+        span,
+      };
     }
     case 'as': {
       return {

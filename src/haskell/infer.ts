@@ -248,7 +248,11 @@ export class Checker {
         typeError(hole.span, '型クラスの制約の計算が上限を超えました。');
       }
       if (hole.solution) continue;
-      const pred = { cls: hole.pred.cls, type: zonk(hole.pred.type) };
+      const zonked = zonk(hole.pred.type);
+      const pred = {
+        cls: hole.pred.cls,
+        type: hole.pred.cls === EQUALITY_CLASS ? zonked : this.reduceFamilies(zonked),
+      };
       hole.pred = pred;
       if (pred.cls === literalClasses?.nat || pred.cls === literalClasses?.symbol) {
         const literal = prune(this.reduceFamilies(pred.type));
@@ -1371,7 +1375,9 @@ export class Checker {
     const params = scheme.preds.map((pred) =>
       newDictParam({ cls: pred.cls, type: instantiateType(pred.type, skolems) })
     );
-    const assumed = params.flatMap((param) => this.assumeEquality(param.pred));
+    const assumed = [...extraGivens.map((given) => given.pred), ...params.map((param) => param.pred)].flatMap((pred) =>
+      this.assumeEquality(pred)
+    );
     const givens = [
       ...extraGivens,
       ...params.map((param) => ({ pred: param.pred, evidence: { kind: 'param', param } as Evidence })),

@@ -4,6 +4,7 @@ import { BASE_MISC } from './baseMisc';
 import { BASE_TEXT } from './baseText';
 import { MAP_SOURCE, SET_SOURCE, STRICT_MAP_SOURCE, STRICT_MAP_VALUES } from './containers';
 import { BASE_EXTRA } from './extra';
+import { OVERLOADED_SOURCE, OVERLOADED_SUPPORT } from './overloaded';
 import { PRINTF_SOURCE } from './printf';
 import { SYSTEM_IO } from './systemIo';
 import { BASE_TUPLES } from './tuples';
@@ -18,6 +19,7 @@ export const LIBRARY_SOURCES: { name: string; source: string }[] = [
   { name: 'Data.Map.Internal', source: MAP_SOURCE },
   { name: 'Data.Map.Strict.Internal', source: STRICT_MAP_SOURCE },
   { name: 'Text.Printf.Internal', source: PRINTF_SOURCE },
+  { name: 'GHC.Overloaded.Internal', source: OVERLOADED_SOURCE + OVERLOADED_SUPPORT },
 ];
 
 /** A public module: the library module it re-exports from, and its values and types (with their children). */
@@ -885,6 +887,34 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
     from: 'Base',
     types: [['HasField', 'none']],
     values: ['getField'],
+  },
+  'Data.String': {
+    from: 'GHC.Overloaded.Internal',
+    types: [['IsString', 'all']],
+    values: [],
+    overrides: { from: 'Base', values: ['lines', 'words', 'unlines', 'unwords'] },
+  },
+  'GHC.IsList': {
+    from: 'GHC.Overloaded.Internal',
+    types: [
+      ['IsList', 'all'],
+      ['Item', 'none'],
+    ],
+    values: [],
+  },
+  'GHC.Exts': {
+    from: 'GHC.Overloaded.Internal',
+    types: [
+      ['IsList', 'all'],
+      ['Item', 'none'],
+      ['IsString', 'all'],
+    ],
+    values: [],
+  },
+  'GHC.OverloadedLabels': {
+    from: 'GHC.Overloaded.Internal',
+    types: [['IsLabel', 'all']],
+    values: [],
   },
   'Control.Monad.Fix': {
     from: 'Base',

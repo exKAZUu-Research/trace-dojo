@@ -37,7 +37,7 @@ export const misplacedHaskellAtomicMessage =
 
 /** Parses a module, throwing a `CompileError` for syntax errors and for syntax this environment does not support. */
 export function parseHaskell(source: string, defaultName = 'Main', library = false): Module {
-  const extensions = library ? new Extensions() : readExtensions(source);
+  const extensions = library ? new Extensions(['TypeFamilies', 'DataKinds']) : readExtensions(source);
   const extended = LEXICAL_EXTENSIONS.some((name) => extensions.has(name));
   return parseSource(extended ? extendedParser : parser, source, MISSING_TOKEN_NAMES, (root) => {
     if (!library) validateDialect(root, extensions);
