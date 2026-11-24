@@ -10,6 +10,7 @@ import { PARAMETER_PROPERTY_ASSIGNMENT, unsteppedStatements } from './jsView';
 export class TypeScriptProgramConverter extends ProgramConverter {
   // The reference runs a file without `import` or `export` as a CommonJS script, which is not strict mode code.
   protected override readonly isStrictByDefault = false;
+  protected override readonly hasAutoAccessors = true;
   /** The errors of the statements that failed to convert, which tsc reports all of, unlike Node's first one. */
   private readonly statementErrors: SourceDiagnostic[] = [];
 
@@ -158,6 +159,13 @@ export class TypeScriptProgramConverter extends ProgramConverter {
         .length ?? 0;
     if (count > 0) cls.afterSuper = (cls.ctor.body as Statement[]).splice(0, count);
     return cls;
+  }
+
+  /** The decorators of a class or a class member, which run as TypeScript's standard decorators do. */
+  protected override decoratorsOf(node: Node): Expression[] | undefined {
+    const decorators = node.namedChildren.filter((child) => child.type === 'decorator');
+    if (decorators.length === 0) return undefined;
+    return decorators.map((decorator) => this.expression(decorator.namedChildren[0] as Node));
   }
 
   protected override stepRowOf(node: Node): number | undefined {

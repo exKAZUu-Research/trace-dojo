@@ -14,6 +14,14 @@ import type {
   VariableDeclaration,
 } from './ast';
 import { createAsyncGeneratorObject } from './asyncGenerators';
+import {
+  decorateClass,
+  decorateMembers,
+  type EvaluatedDecorators,
+  evaluateDecorators,
+  type MemberDefinition,
+  runInitializers,
+} from './decorators';
 import { nameFunction, patternNames } from './evaluatorBase';
 import { defineAccessor } from './expressionEvaluator';
 import { createGeneratorObject, type Steps } from './generators';
@@ -45,6 +53,7 @@ import {
   type JsObject,
   JsThrow,
   type Key,
+  type Property,
   Scope,
   toBoolean,
   UNINITIALIZED,
@@ -583,7 +592,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       }
     }
     const prototype = runtime.newObject(prototypeParent);
-    const behavior: ClassBehavior = {
+    const behavior: Extract<ClassBehavior, { kind: 'class' }> = {
       kind: 'class',
       node: cls,
       ctor: cls.ctor,
@@ -609,10 +618,56 @@ export class Evaluator extends SuspendableStatementEvaluator {
       enumerable: false,
       configurable: true,
     });
-    const staticInitializers = this.inScope(classScope, () => this.defineMembers(cls, fn, prototype, behavior));
-    if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
+    return this.defineDecoratedMembers(cls, fn, prototype, behavior, inferredName, binding);
+  }
+
+  /** Defines the members of a class, applies its decorators, and initializes it, returning the class decorators gave. */
+  private defineDecoratedMembers(
+    cls: ClassNode,
+    fn: JsFunction,
+    prototype: JsObject,
+    behavior: Extract<ClassBehavior, { kind: 'class' }>,
+    inferredName: Key | undefined,
+    binding: Binding | undefined
+  ): JsFunction {
+    const classScope = behavior.scope;
+    const decorators = evaluateDecorators(cls.decorators, cls.members, (expression) =>
+      this.inScope(classScope, () => this.evaluate(expression))
+    );
+    const definitions: MemberDefinition[] = [];
+    const staticInitializers = this.inScope(classScope, () =>
+      this.defineMembers(cls, fn, prototype, behavior, definitions)
+    );
+    const decorated = decorators
+      ? this.applyDecorators(fn, behavior, definitions, decorators, staticInitializers, inferredName)
+      : { cls: fn, initializers: [] };
+    if (cls.name) classScope.bindings.set(cls.name, { value: decorated.cls, isMutable: false });
     this.initializeStaticMembers(classScope, fn, staticInitializers, binding);
-    return fn;
+    runInitializers(this.runtime, decorated.initializers, decorated.cls);
+    return decorated.cls;
+  }
+
+  /**
+   * Applies TypeScript's standard decorators: those of the members, whose added initializers run on the class before
+   * its static fields and on each instance before its fields, and then the class's own.
+   */
+  private applyDecorators(
+    fn: JsFunction,
+    behavior: Extract<ClassBehavior, { kind: 'class' }>,
+    definitions: MemberDefinition[],
+    decorators: EvaluatedDecorators,
+    staticInitializers: (() => void)[],
+    inferredName: Key | undefined
+  ): { cls: JsFunction; initializers: Value[] } {
+    const { runtime } = this;
+    // oxlint-disable-next-line unicorn/no-null -- The metadata object of a class without a decorated base has no prototype.
+    const metadata = runtime.newObject(null);
+    const added = decorateMembers(runtime, definitions, decorators, metadata);
+    if (added.instanceMembers.length > 0) behavior.initializers = added.instanceMembers;
+    if (added.staticMembers.length > 0)
+      staticInitializers.unshift(() => runInitializers(runtime, added.staticMembers, fn));
+    const name = behavior.node.name || (typeof inferredName === 'string' ? inferredName : '');
+    return decorateClass(runtime, fn, name, decorators.classDecorators, metadata);
   }
 
   private initializeStaticMembers(
@@ -665,7 +720,13 @@ export class Evaluator extends SuspendableStatementEvaluator {
    * its static fields and static blocks in source order.
    */
   // code-gauge-allow functionCognitiveComplexity -- Keeps method definitions and deferred field/static-block initialization in class source order.
-  private defineMembers(cls: ClassNode, fn: JsFunction, prototype: JsObject, behavior: ClassBehavior): (() => void)[] {
+  private defineMembers(
+    cls: ClassNode,
+    fn: JsFunction,
+    prototype: JsObject,
+    behavior: Extract<ClassBehavior, { kind: 'class' }>,
+    definitions: MemberDefinition[]
+  ): (() => void)[] {
     const { runtime } = this;
     const staticInitializers: (() => void)[] = [];
     const classScope = runtime.frame.scope;
@@ -677,26 +738,73 @@ export class Evaluator extends SuspendableStatementEvaluator {
       const target = member.isStatic ? fn : prototype;
       const isPrivate = member.key.kind === 'private';
       const key = this.propertyKey(member.key);
+      const name = member.key.kind === 'private' ? member.key.name : key;
       if (member.kind === 'field') {
-        const { value } = member;
-        const initialize = value
-          ? this.fieldInitializer(value, classScope, target, member.key.kind === 'private' ? member.key.name : key)
-          : undefined;
-        const field: ClassField = {
-          key,
-          isPrivate,
-          initialize,
-          stepRow: member.stepRow,
-          onlyCalls: value !== undefined && isObjectCreation(value),
-        };
-        if (member.isStatic) {
-          staticInitializers.push(() => this.initializeField(fn, field, member.isTraceConstant));
-        } else behavior.fields.push(field);
+        const { field, property } = member.isAutoAccessor
+          ? this.autoAccessor(member, key, target, classScope)
+          : { field: this.classField(member, key, name, target, classScope), property: undefined };
+        if (member.isStatic) staticInitializers.push(() => this.initializeField(fn, field, member.isTraceConstant));
+        else behavior.fields.push(field);
+        definitions.push({ member, key, name, isPrivate, field, property });
         continue;
       }
-      this.defineMethod(member, key, target, classScope, behavior.fields);
+      const property = this.defineMethod(member, key, target, classScope, behavior.fields);
+      definitions.push({ member, key, name, isPrivate, property });
     }
     return staticInitializers;
+  }
+
+  private classField(
+    member: Extract<ClassMember, { kind: 'field' }>,
+    key: Key,
+    name: Key,
+    target: JsObject,
+    classScope: Scope
+  ): ClassField {
+    const { value } = member;
+    return {
+      key,
+      isPrivate: member.key.kind === 'private',
+      initialize: value ? this.fieldInitializer(value, classScope, target, name) : undefined,
+      stepRow: member.stepRow,
+      onlyCalls: value !== undefined && isObjectCreation(value),
+    };
+  }
+
+  /**
+   * `accessor x = value`: a field of a private name of its own that holds the value, and a getter and a setter of `x`
+   * that read and write it.
+   */
+  private autoAccessor(
+    member: Extract<ClassMember, { kind: 'field' }>,
+    key: Key,
+    target: JsObject,
+    classScope: Scope
+  ): { field: ClassField; property: Property } {
+    const { runtime } = this;
+    const storage = `${String(key)}\0accessor\0${nextPrivateId++}\0field`;
+    const { value } = member;
+    const field: ClassField = {
+      key: storage,
+      isPrivate: true,
+      initialize: value ? this.fieldInitializer(value, classScope, target, key) : undefined,
+      stepRow: member.stepRow,
+      onlyCalls: value !== undefined && isObjectCreation(value),
+    };
+    const property: Property = {
+      get: runtime.newNativeFunction(`get ${String(key)}`, 0, ({ runtime: caller, thisValue }) =>
+        caller.getPrivate(thisValue, storage)
+      ),
+      set: runtime.newNativeFunction(`set ${String(key)}`, 1, ({ runtime: caller, thisValue, args }) => {
+        caller.setPrivate(thisValue, storage, args[0]);
+        return;
+      }),
+      enumerable: false,
+      configurable: true,
+    };
+    if (member.key.kind === 'private') mergePrivate(runtime, target, privateIdentity(key), property);
+    else target.properties.set(key, property);
+    return { field, property };
   }
 
   private fieldInitializer(
@@ -730,14 +838,13 @@ export class Evaluator extends SuspendableStatementEvaluator {
     target: JsObject,
     classScope: Scope,
     instanceFields: ClassField[]
-  ): void {
+  ): Property | undefined {
     const { runtime } = this;
     const method = this.createFunction(member.fn, classScope, target);
     if (member.key.kind === 'computed') nameFunction(runtime, method, key);
     if (member.key.kind === 'private') {
       const property = privateMethodProperty(member.kind, method);
-      if (member.isStatic) mergePrivate(runtime, target, privateIdentity(key), property);
-      else
+      if (!member.isStatic) {
         instanceFields.unshift({
           key,
           isPrivate: true,
@@ -746,16 +853,20 @@ export class Evaluator extends SuspendableStatementEvaluator {
           onlyCalls: false,
           property,
         });
-    } else if (member.kind === 'method') {
+        return property;
+      }
+      mergePrivate(runtime, target, privateIdentity(key), property);
+      return target.privateMembers?.get(privateIdentity(key));
+    }
+    if (member.kind === 'method')
       runtime.defineProperty(target, key, {
         value: method,
         writable: true,
         enumerable: false,
         configurable: true,
       });
-    } else {
-      defineAccessor(runtime, target, key, member.kind, method, false);
-    }
+    else defineAccessor(runtime, target, key, member.kind, method, false);
+    return target.properties.get(key);
   }
 
   private methodScope(scope: Scope, thisValue: JsObject, homeObject: JsObject): Scope {
@@ -775,7 +886,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       return;
     }
     this.runtime.steps.runStatement(field.stepRow, field.onlyCalls, () => {
-      const value = field.initialize ? field.initialize(target) : undefined;
+      const value = initialValue(runtime, target, field);
       const hiddenTraceConstant = value !== undefined && value !== null ? traceConstant : undefined;
       if (field.isPrivate)
         runtime.definePrivate(target, privateIdentity(field.key), {
@@ -815,6 +926,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     runtime.pushFrame(scope, callRow, behavior.ctor?.isAtomic ?? false, fn);
     try {
       if (thisValue !== UNINITIALIZED) {
+        runInitializers(runtime, behavior.initializers ?? [], thisValue);
         for (const field of behavior.fields) this.initializeField(thisValue, field);
       }
       let result: Value;
@@ -877,6 +989,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     frame.thisValue = constructed;
     const { behavior } = constructing;
     if (behavior.kind === 'class') {
+      runInitializers(runtime, behavior.initializers ?? [], constructed);
       for (const field of behavior.fields) this.initializeField(constructed, field);
       if (!skipsAfterSuper) this.initializeAfterSuper(behavior.node.afterSuper, frame);
     }
@@ -892,6 +1005,13 @@ export class Evaluator extends SuspendableStatementEvaluator {
 }
 
 /** The key of a private member, which is the string identity of its private name rather than a property key. */
+/** A field's initial value: its initializer's, passed through the functions its decorators added. */
+function initialValue(runtime: Evaluator['runtime'], target: JsObject, field: ClassField): Value {
+  let value = field.initialize ? field.initialize(target) : undefined;
+  for (const transform of field.transforms ?? []) value = runtime.call(transform, target, [value]);
+  return value;
+}
+
 function privateIdentity(key: Key): string {
   if (typeof key !== 'string') throw new TypeError('A private name has a string identity');
   return key;

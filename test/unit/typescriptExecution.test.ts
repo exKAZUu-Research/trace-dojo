@@ -306,7 +306,6 @@ console.log(s.area() as Id, s, Object.keys(s), (s.name() satisfies string).lengt
 
 test.each([
   ['an import', 'import fs from "fs";', 'import や export は、この採点環境では使えません。'],
-  ['a decorator', 'function d(t: unknown) {}\n@d class A {}', 'デコレータは、この採点環境では使えません。'],
   ['a Date', 'new Date();', 'Date（日付と時刻）は、この採点環境では使えません。'],
   ['Math.random', 'Math.random();', 'Math.random は、この採点環境では使えません。'],
   [

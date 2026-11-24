@@ -6,7 +6,6 @@ import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics'
 const unsupportedNodes: Record<string, string> = {
   import_statement: 'import や export',
   import: 'import や export',
-  decorator: 'デコレータ',
 };
 
 /** The message for a feature this interpreter does not run, with a space after a name ending in ASCII. */

@@ -477,8 +477,18 @@ export class ProgramConverter extends ExpressionConverter {
     }
   }
 
+  /** The decorators of a class or a class member, which JavaScript as Node.js runs it does not have. */
+  protected decoratorsOf(node: Node, isClass: boolean): Expression[] | undefined {
+    return isClass && namedChildren(node).some((child) => child.type === 'decorator')
+      ? unsupported(node, 'デコレータ')
+      : undefined;
+  }
+
+  /** Whether `accessor x` declares an auto-accessor, which TypeScript has and JavaScript as Node.js runs it does not. */
+  protected readonly hasAutoAccessors: boolean = false;
+
   private strictClassNode(node: Node, name: string): ClassNode {
-    if (namedChildren(node).some((child) => child.type === 'decorator')) unsupported(node, 'デコレータ');
+    const decorators = this.decoratorsOf(node, true);
     const heritage = namedChildren(node).find((child) => child.type === 'class_heritage');
     const superClass = heritage ? this.expression(namedChildren(heritage)[0]) : undefined;
     const members: ClassMember[] = [];
@@ -502,7 +512,7 @@ export class ProgramConverter extends ExpressionConverter {
       this.derivedConstructor = outerDerived;
       this.privateNames.pop();
     }
-    return { name, superClass, ctor, members, source: this.sourceOf(node), row: rowOf(node) };
+    return { name, superClass, ctor, members, source: this.sourceOf(node), row: rowOf(node), decorators };
   }
 
   private classMember(member: Node): ClassMember {
@@ -511,7 +521,13 @@ export class ProgramConverter extends ExpressionConverter {
       const key = this.propertyName(field(member, 'name'));
       checkMemberName(member, key, isStatic, false);
       const kind = accessorOf(member) ?? 'method';
-      return { kind, isStatic, key, fn: this.functionNode(member, kind, keyName(key)) };
+      return {
+        kind,
+        isStatic,
+        key,
+        fn: this.functionNode(member, kind, keyName(key)),
+        decorators: this.decoratorsOf(member, false),
+      };
     }
     if (member.type === 'field_definition') {
       const key = this.propertyName(field(member, 'name'));
@@ -527,6 +543,8 @@ export class ProgramConverter extends ExpressionConverter {
         key,
         value,
         row: rowOf(member),
+        decorators: this.decoratorsOf(member, false),
+        isAutoAccessor: this.hasAutoAccessors && hasChild(member, 'accessor') ? true : undefined,
       };
       const recordsStep = value !== undefined && !constant;
       return recordsStep ? this.steppable(member, fieldMember) : fieldMember;

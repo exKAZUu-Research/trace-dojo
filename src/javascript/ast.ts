@@ -142,10 +142,18 @@ export interface ClassNode extends Span {
   afterSuper?: Statement[];
   members: ClassMember[];
   source: string;
+  /** The class's decorators, in source order, as TypeScript's standard decorators apply them. */
+  decorators?: Expression[];
 }
 
 export type ClassMember =
-  | { kind: 'method' | 'getter' | 'setter'; isStatic: boolean; key: PropertyName; fn: FunctionNode }
+  | {
+      kind: 'method' | 'getter' | 'setter';
+      isStatic: boolean;
+      key: PropertyName;
+      fn: FunctionNode;
+      decorators?: Expression[];
+    }
   | {
       kind: 'field';
       isStatic: boolean;
@@ -154,6 +162,9 @@ export type ClassMember =
       value?: Expression;
       stepRow?: number;
       row: number;
+      decorators?: Expression[];
+      /** Whether it is `accessor x`, a getter and a setter of a value the instance keeps privately. */
+      isAutoAccessor?: true;
     }
   | { kind: 'staticBlock'; body: Statement[]; scope: ScopeDeclarations; row: number };
 

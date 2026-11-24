@@ -516,10 +516,6 @@ function classBody(node: TreeNode, binder: Binder): ViewNode {
   const parameterProperties: ViewNode[] = [];
   for (const [index, child] of node.children.entries()) {
     if (!child || erasedClassMembers.has(child.type) || isTypeOnlyField(child)) continue;
-    if (isAutoAccessor(child)) {
-      for (const member of autoAccessorMembers(child, binder)) parts.push({ node: member, fieldName: undefined });
-      continue;
-    }
     const viewed = isConstructorDefinition(child)
       ? constructorWithProperties(child, parameterProperties, binder)
       : view(child, binder);
@@ -528,74 +524,6 @@ function classBody(node: TreeNode, binder: Binder): ViewNode {
   // Fields go after the opening brace, before the members the body declares.
   parts.splice(1, 0, ...parameterProperties.map((field) => ({ node: field, fieldName: undefined })));
   return assemble(node, 'class_body', parts);
-}
-
-function isAutoAccessor(node: TreeNode): boolean {
-  return node.type === 'field_definition' && node.children.some((child) => child?.type === 'accessor');
-}
-
-/**
- * `accessor x = 1` as the class members it stands for: a private field that holds the value, and a getter and a setter
- * of `x` that read and write it.
- */
-function autoAccessorMembers(node: TreeNode, binder: Binder): ViewNode[] {
-  const name = node.childForFieldName('name') as TreeNode;
-  const isStatic = node.children.some((child) => child?.type === 'static');
-  const storage = `#${name.text.replace(/^#/, '')}_accessor_storage`;
-  const staticToken = isStatic ? [{ node: token(node, 'static'), fieldName: undefined }] : [];
-  const stored = (): ViewNode =>
-    assemble(node, 'member_expression', [
-      { node: leaf(node, 'this', 'this'), fieldName: 'object' },
-      { node: token(node, '.'), fieldName: undefined },
-      { node: leaf(node, 'private_property_identifier', storage), fieldName: 'property' },
-    ]);
-  const value = node.childForFieldName('value');
-  const field = assemble(node, 'field_definition', [
-    ...staticToken,
-    { node: leaf(node, 'private_property_identifier', storage), fieldName: 'name' },
-    ...(value
-      ? [
-          { node: token(node, '='), fieldName: undefined },
-          { node: view(value, binder), fieldName: 'value' },
-        ]
-      : []),
-  ]);
-  const method = (kind: 'get' | 'set', parameter: ViewNode[], statement: ViewNode): ViewNode =>
-    assemble(node, 'method_definition', [
-      ...staticToken,
-      { node: token(node, kind), fieldName: undefined },
-      { node: view(name, binder), fieldName: 'name' },
-      {
-        node: assemble(node, 'formal_parameters', [
-          { node: token(node, '('), fieldName: undefined },
-          ...parameter.map((each) => ({ node: each, fieldName: undefined })),
-          { node: token(node, ')'), fieldName: undefined },
-        ]),
-        fieldName: 'parameters',
-      },
-      {
-        node: assemble(node, 'statement_block', [
-          { node: token(node, '{'), fieldName: undefined },
-          { node: unstepped(statement), fieldName: undefined },
-          { node: token(node, '}'), fieldName: undefined },
-        ]),
-        fieldName: 'body',
-      },
-    ]);
-  const getter = method(
-    'get',
-    [],
-    assemble(node, 'return_statement', [
-      { node: token(node, 'return'), fieldName: undefined },
-      { node: stored(), fieldName: undefined },
-    ])
-  );
-  const setter = method(
-    'set',
-    [leaf(node, 'identifier', 'value')],
-    expressionStatement(node, assignment(node, stored(), leaf(node, 'identifier', 'value')))
-  );
-  return [field, getter, setter];
 }
 
 /** Whether a field only declares a type: an abstract field, or one marked `declare`. */

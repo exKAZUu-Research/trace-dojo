@@ -165,6 +165,8 @@ export type FunctionBehavior =
       /** Instance fields, initialized when the constructor starts (or `super()` returns). */
       fields: ClassField[];
       traceBinding?: Binding;
+      /** The functions decorators of the instance members added, run on each instance before its fields. */
+      initializers?: Value[];
     };
 
 export interface ClassField {
@@ -176,6 +178,8 @@ export interface ClassField {
   onlyCalls: boolean;
   /** A private method or accessor, which every instance gets before its fields. */
   property?: Property;
+  /** The functions decorators added that the initial value passes through, in the order they were added. */
+  transforms?: Value[];
 }
 
 export class JsFunction extends JsObject {

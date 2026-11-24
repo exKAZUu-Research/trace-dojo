@@ -2,6 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { checkDuplicateMembers, checkOverloadOptionality, memberName } from './declarations';
+import { checkDecorators } from './decoratorChecks';
 import { FlowState, propertyReferenceKey, type State } from './flow';
 import { checkIndexConformance } from './indexConformance';
 import { isBaseTypeVariable, isMixinConstructor } from './mixinConstructors';
@@ -54,13 +55,14 @@ export class ClassDeclarationChecker {
     this.checkAbstractMembers(node, info);
     this.checkBaseCompatibility(node, info);
     this.checkStaticCompatibility(node, info);
-    this.checkModifiers(node, members);
+    this.checkModifiers(node, members, info);
   }
 
-  /** The `override` modifiers of the members, and the `in` and `out` annotations of the type parameters. */
-  private checkModifiers(node: TreeNode, members: TreeNode[]): void {
+  /** The `override` modifiers and decorators of the members, and the `in` and `out` annotations of the type parameters. */
+  private checkModifiers(node: TreeNode, members: TreeNode[], info: ClassInfo): void {
     this.checkOverrideModifiers(node, members);
     checkVarianceAnnotations(this.c, node);
+    checkDecorators(this.c, node, info);
   }
 
   /** A member marked `override`, including a parameter property, must override a member of the base class. */
