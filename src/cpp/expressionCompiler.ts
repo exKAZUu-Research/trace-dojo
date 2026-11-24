@@ -5,7 +5,7 @@ import { commonType, promote } from '../c/types';
 import { CompileError } from '../interpreter/diagnostics';
 import { arithmeticOperation, convertNumeric, type NumericValue } from './arithmetic';
 import { byteAt } from './bytes';
-import { hasAuto, isAuto } from './compilerBase';
+import { asTemplate, hasAuto, isAuto } from './compilerBase';
 import {
   classLocation,
   conversionFunctions,
@@ -149,6 +149,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       }
       case 'template_function': {
         return this.templateFunction(node);
+      }
+      case 'dependent_name': {
+        return this.compileExpression({ ...node.children[0], field: node.field });
       }
       case 'this': {
         return this.thisExpr(node.row);
@@ -365,6 +368,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       case 'namespace': {
         return this.error(row, `${node.text} は名前空間の名前なので、値としては使えません。`);
       }
+      case 'pack': {
+        return this.error(row, `パラメータパック ${name} は、... で展開して使ってください。`);
+      }
       case 'ambiguous': {
         return this.error(row, `${name} が、自分で宣言したものと std::${name} のどちらを指すのか決まりません。`);
       }
@@ -445,6 +451,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const fieldNode = fieldOf(node, 'field') as Syntax;
     if (fieldNode.type === 'destructor_name') return this.unsupported(node.row, 'デストラクタの明示的な呼び出し');
     if (fieldNode.type === 'qualified_identifier') return this.qualifiedMember(object, fieldNode);
+    // `obj.f<int>` and `obj.template f<int>` name a member function template with template arguments.
+    const method = fieldNode.type === 'dependent_name' ? fieldNode.children[0] : fieldNode;
+    if (method?.type === 'template_method') {
+      const member = this.member(object, (fieldOf(method, 'name') as Syntax).text, node.row);
+      if (!member.functions) return this.error(node.row, `${method.text} はメンバ関数テンプレートではありません。`);
+      const templateArgs = this.templateArguments(fieldOf(method, 'arguments') as Syntax);
+      return { ...member, functions: { ...member.functions, templateArgs } };
+    }
     return this.member(object, fieldNode.text, node.row);
   }
 
@@ -1878,7 +1892,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     if (node.type === 'template_function') {
       const name = fieldOf(node, 'name') as Syntax;
-      const entity = name.type === 'qualified_identifier' ? this.lookupQualified(name) : this.findName(name.text);
+      const found = name.type === 'qualified_identifier' ? this.lookupQualified(name) : this.findName(name.text);
+      const entity = found && asTemplate(found);
       if (entity?.kind === 'template') {
         return this.instantiateTemplate(entity.template, fieldOf(node, 'arguments') as Syntax, node.row);
       }

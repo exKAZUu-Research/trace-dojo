@@ -1,5 +1,6 @@
 import { CppRuntimeError, ProgramExit } from '../errors';
 import type { ExpressionCompiler } from '../expressionCompiler';
+import type { ClassTemplateInfo } from '../programTemplates';
 import type { Frame } from '../runtime';
 import type { Entity } from '../scopes';
 import {
@@ -50,8 +51,14 @@ import { headerOf, isCtypeFunction, isVisible } from './visibility';
 
 /** A class template of the library, such as `std::vector`, which template arguments instantiate. */
 export type LibraryTemplate =
-  | { name: string; takesArrayBound?: false; instantiate: (args: Type[], row: number) => Type }
-  | { name: string; takesArrayBound: true; instantiate: (element: Type, bound: number) => Type };
+  | {
+      name: string;
+      takesArrayBound?: false;
+      instantiate: (args: Type[], row: number) => Type;
+      /** The class template or alias template the program declares, when the template is the program's. */
+      program?: ClassTemplateInfo;
+    }
+  | { name: string; takesArrayBound: true; instantiate: (element: Type, bound: number) => Type; program?: undefined };
 
 /** The names the library declares that the interpreter leaves out, with the feature they belong to. */
 const UNSUPPORTED_STD_NAMES: Record<string, string> = {

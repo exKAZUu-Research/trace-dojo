@@ -37,6 +37,8 @@ export abstract class CompilerBase {
   readonly rootScope = new Scope();
   /** The namespace whose declarations are compiled now, or undefined for the global namespace. */
   namespace: NamespaceInfo | undefined;
+  /** The bindings of the parameters of the template instances whose declarations are compiled now. */
+  templateScopes: Scope[] = [];
 
   /** The scope of the namespace whose declarations are compiled now. */
   get globalScope(): Scope {
@@ -76,6 +78,10 @@ export abstract class CompilerBase {
     if (local) return local;
     const captured = this.context.captures?.lookup(name);
     if (captured && (!typeOnly || isTypeName(captured))) return captured;
+    for (let index = this.templateScopes.length - 1; index >= 0; index--) {
+      const bound = this.templateScopes[index].names.get(name);
+      if (bound && (!typeOnly || isTypeName(bound))) return bound;
+    }
     // A nested class's members see its own members, then those of the classes it is nested in.
     for (let outer = this.enclosingClass; outer; outer = outer.outer) {
       for (let cls: ClassInfo | undefined = outer; cls; cls = cls.base) {
@@ -217,7 +223,9 @@ export abstract class CompilerBase {
   /** Looks up `scope::name` for a qualified identifier, its scope being a namespace or a class. */
   lookupQualified(node: Syntax, typeOnly = false): Entity {
     const scopeNode = fieldOf(node, 'scope');
-    const nameNode = fieldOf(node, 'name') as Syntax;
+    const written = fieldOf(node, 'name') as Syntax;
+    // `T::template f<int>` marks a dependent name, which an instance resolves as any other.
+    const nameNode = written.type === 'dependent_name' ? { ...written.children[0], field: 'name' } : written;
     if (!scopeNode) return this.lookupInGlobal(nameNode, typeOnly);
     const scope = this.resolveScope(scopeNode);
     if (scope.kind === 'namespace' && scope.ns) return this.lookupInProgramNamespace(scope.ns, nameNode, node.row);
@@ -575,6 +583,9 @@ export abstract class CompilerBase {
       case 'enum_specifier': {
         return enumSpecifierType(this, node);
       }
+      case 'dependent_type': {
+        return this.resolveTypeSpecifier(node.children[0], allowAuto, true);
+      }
       case 'type_descriptor': {
         return this.typeDescriptor(node);
       }
@@ -610,14 +621,20 @@ export abstract class CompilerBase {
     }
   }
 
-  private templateType(node: Syntax, entity: Entity): Type {
+  private templateType(node: Syntax, written: Entity): Type {
+    const entity = asTemplate(written);
     if (entity.kind !== 'template') return this.error(node.row, `${node.text} はテンプレートではありません。`);
     return this.instantiateTemplate(entity.template, fieldOf(node, 'arguments') as Syntax, node.row);
   }
 
   protected instantiateTemplate(template: LibraryTemplate, list: Syntax, row: number): Type {
-    if (!template.takesArrayBound)
-      return this.library.trackDefinition(template.name, template.instantiate(this.templateArguments(list), row));
+    if (!template.takesArrayBound && template.program) return template.instantiate(this.templateArguments(list), row);
+    if (!template.takesArrayBound) {
+      const args = this.templateArguments(list);
+      if (args.some((arg) => arg.kind === 'int' && arg.templateValue !== undefined))
+        return this.error(row, `std::${template.name} のテンプレート引数には型を書いてください。`);
+      return this.library.trackDefinition(template.name, template.instantiate(args, row));
+    }
     const args = list.children;
     if (args.length !== 2) return this.error(row, `std::${template.name} のテンプレート引数は 2 個です。`);
     const [element, bound] = args;
@@ -629,13 +646,32 @@ export abstract class CompilerBase {
     );
   }
 
-  protected templateArguments(list: Syntax): Type[] {
+  /** The arguments of a template argument list: types, or the values of constant expressions. */
+  templateArguments(list: Syntax): Type[] {
     return list.children.map((argument) => this.templateTypeArgument(argument));
   }
 
   private templateTypeArgument(argument: Syntax): Type {
-    if (argument.type === 'type_descriptor') return this.typeDescriptor(argument);
-    return this.expressionAsType(argument) ?? this.error(argument.row, 'テンプレート引数には型を書いてください。');
+    if (argument.type === 'type_descriptor') {
+      // `Box<N>` gives a name the grammar reads as a type, which may name a value.
+      const named = fieldOf(argument, 'type');
+      if (!fieldOf(argument, 'declarator') && named?.type === 'type_identifier') {
+        const entity = this.findName(named.text);
+        if (entity?.kind === 'value' || entity?.kind === 'local' || entity?.kind === 'global')
+          return this.valueArgument(named);
+      }
+      return this.typeDescriptor(argument);
+    }
+    return this.expressionAsType(argument) ?? this.valueArgument(argument);
+  }
+
+  /** A non-type template argument: the value of a constant expression, with its type. */
+  private valueArgument(node: Syntax): Type {
+    const expr = this.rvalue(this.compileExpression(node));
+    if (expr.type.kind !== 'int' || expr.constant === undefined)
+      return this.error(node.row, `テンプレート引数 ${node.text} には、型か整数の定数式を書いてください。`);
+    const { enumeration: _, ...type } = expr.type;
+    return { ...unqualifiedInt(type), templateValue: expr.constant };
   }
 
   /** The type an expression-shaped template argument names, or undefined when it names no type. */
@@ -849,11 +885,21 @@ export function operatorName(node: Syntax): string {
   return /^[a-z_]/i.test(symbol) ? `operator ${symbol}` : `operator${symbol}`;
 }
 
+function unqualifiedInt<T extends { isConst?: boolean }>(type: T): T {
+  const { isConst: _, ...rest } = type;
+  return rest as T;
+}
+
 /** The type that `auto` stands for until an initializer decides it. */
 export const AUTO: Extract<Type, { kind: 'class' }> = classType(new ClassInfo('auto', 'class'));
 
 export function isAuto(type: Type): boolean {
   return type.kind === 'class' && type.cls === AUTO.cls;
+}
+
+/** A template a name denotes, which the name of a class template's instance in its own scope also denotes. */
+export function asTemplate(entity: Entity): Entity {
+  return entity.kind === 'class' && entity.cls.templateEntity ? entity.cls.templateEntity : entity;
 }
 
 function isTypeName(entity: Entity): boolean {

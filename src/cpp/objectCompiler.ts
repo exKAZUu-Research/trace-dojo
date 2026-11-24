@@ -717,7 +717,9 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     for (const [index, arg] of args.entries()) callablePositions.set(arg, index);
     for (const candidate of candidates) {
       const instantiated = candidate.instantiate?.(args, templateArgs);
-      const fn = candidate.instantiate ? instantiated && { ...instantiated, isTemplate: true } : candidate;
+      const fn = candidate.instantiate
+        ? instantiated && (instantiated.isTemplate ? instantiated : { ...instantiated, isTemplate: true })
+        : candidate;
       if (!fn || (templateArgs && !candidate.instantiate)) continue;
       if (isFunctionPointer && args.length < fn.params.length) continue;
       const conversions = this.argumentConversions(fn, args);
@@ -809,7 +811,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (aBetter !== bBetter) return aBetter ? 1 : -1;
     if (aBetter && bBetter) return 0;
     if (a.fn.isTemplate !== b.fn.isTemplate) return a.fn.isTemplate ? -1 : 1;
-    return 0;
+    // Between two function templates, the more specialized one wins (C++20 [temp.func.order]).
+    return Math.sign((a.fn.templateSpecificity ?? 0) - (b.fn.templateSpecificity ?? 0));
   }
 
   /**

@@ -89,7 +89,7 @@ function bestCandidate(candidates: Candidate[]): Candidate | undefined {
     if (aBetter !== bBetter) return aBetter ? 1 : -1;
     if (aBetter) return 0;
     if (a.match.fn.isTemplate !== b.match.fn.isTemplate) return a.match.fn.isTemplate ? -1 : 1;
-    return 0;
+    return Math.sign((a.match.fn.templateSpecificity ?? 0) - (b.match.fn.templateSpecificity ?? 0));
   };
   let best: Candidate | undefined;
   for (const candidate of candidates) if (!best || compare(candidate, best) > 0) best = candidate;

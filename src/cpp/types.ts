@@ -2,7 +2,7 @@ import { type FloatName, INT_PROPERTIES, type IntName } from '../c/types';
 import type { ConstantLocation, Expr, LibraryConstant } from './expr';
 import type { ClassOperations, LibraryClass } from './library/libraryClass';
 import type { CompiledFunction, Eval, Frame } from './runtime';
-import type { NamespaceInfo, Scope } from './scopes';
+import type { Entity, NamespaceInfo, Scope } from './scopes';
 import type { Syntax } from './syntax';
 import type { Ptr } from './values';
 
@@ -16,7 +16,13 @@ interface Qualified {
 export type Type =
   | ({ kind: 'void' } & Qualified)
   /** An integer type, or an enumeration whose values have the type `name` underlies. */
-  | ({ kind: 'int'; name: IntName; enumeration?: EnumInfo } & Qualified)
+  | ({
+      kind: 'int';
+      name: IntName;
+      enumeration?: EnumInfo;
+      /** The value of a non-type template argument this type carries (`Array<int, 3>`). */
+      templateValue?: number | bigint;
+    } & Qualified)
   | ({ kind: 'float'; name: FloatName } & Qualified)
   | ({ kind: 'nullptr' } & Qualified)
   | ({ kind: 'pointer'; to: Type } & Qualified)
@@ -186,6 +192,14 @@ export interface FunctionInfo {
   instantiate?: (args: Expr[], templateArgs: Type[] | undefined) => FunctionInfo | undefined;
   /** Whether the function is an instance of a template, which overload resolution likes less than a function. */
   isTemplate?: boolean;
+  /** The function template a template's pattern declares, whose `instantiate` makes its instances. */
+  templatePattern?: { node: Syntax | undefined };
+  /** How specialized a function template's parameter types are, which partial ordering prefers more of. */
+  templateSpecificity?: number;
+  /** Compiles a template instance's body the first time the program uses it. */
+  lazyCompile?: () => void;
+  /** The bindings of the template parameters the function's declaration and body see. */
+  templateScopes?: Scope[];
   /** The namespace a non-member function is a member of. */
   namespace?: NamespaceInfo;
   /** Whether the function is a conversion function (`operator int() const`). */
@@ -246,6 +260,13 @@ export class ClassInfo {
   /** The constructor a class without user-declared ones has, when it has anything to initialize. */
   row = -1;
 
+  /** The class template this class is an instance of, with its arguments. */
+  templateOrigin?: object;
+  templateArgs?: readonly Type[];
+  /** The bindings of the template parameters the class's members see. */
+  templateScopes?: Scope[];
+  /** The template the class's name denotes with template arguments in its own scope (`Box<T>` in `Box`). */
+  templateEntity?: Entity;
   /** The namespace the class is a member of. */
   namespace?: NamespaceInfo;
   /** Whether the class is a lambda's closure type. */
@@ -545,8 +566,13 @@ function baseName(type: Type): string {
 
 /** A class's name with the classes it is nested in, such as `Outer::Inner`. */
 export function classDisplayName(cls: ClassInfo): string {
-  if (cls.outer) return `${classDisplayName(cls.outer)}::${cls.name}`;
-  return cls.namespace ? `${cls.namespace.qualifiedName}::${cls.name}` : cls.name;
+  const args = cls.templateArgs ? `<${cls.templateArgs.map(templateArgumentName).join(', ')}>` : '';
+  if (cls.outer) return `${classDisplayName(cls.outer)}::${cls.name}${args}`;
+  return cls.namespace ? `${cls.namespace.qualifiedName}::${cls.name}${args}` : `${cls.name}${args}`;
+}
+
+function templateArgumentName(type: Type): string {
+  return type.kind === 'int' && type.templateValue !== undefined ? String(type.templateValue) : typeName(type);
 }
 
 /** The size in bytes, as `sizeof` gives on arm64 macOS with libc++. */

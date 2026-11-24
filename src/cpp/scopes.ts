@@ -34,7 +34,10 @@ export type Entity =
   | { kind: 'template'; template: LibraryTemplate }
   /** A library object or constant, such as `std::cout` or `INT_MAX`. */
   | { kind: 'value'; make: (row: number) => Expr }
+  /** A namespace the program defines, or `std` when `ns` is undefined. */
   | { kind: 'namespace'; name: string; ns?: NamespaceInfo }
+  /** A template parameter pack, or a function parameter pack, whose elements an expansion (`xs...`) uses. */
+  | { kind: 'pack'; items: Entity[] }
   /** A library name the interpreter leaves out, such as `std::thread`. */
   | { kind: 'unsupported'; feature: string };
 

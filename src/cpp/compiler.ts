@@ -36,8 +36,18 @@ import {
   zeroOf,
 } from './objectCompiler';
 import { overloadedOperator } from './operatorOverloads';
+import {
+  argumentsKey,
+  argumentsText,
+  type ClassTemplateInfo,
+  Deduction,
+  type ProgramTemplate,
+  TemplateBindings,
+  type TemplateParameter,
+  templateValue,
+} from './programTemplates';
 import { type CompiledFunction, type Eval, type Exec, type Frame, holdAll, RETURN, type Runtime } from './runtime';
-import { type CaptureLookup, type Entity, FunctionContext, NamespaceInfo } from './scopes';
+import { type CaptureLookup, type Entity, FunctionContext, NamespaceInfo, type Scope } from './scopes';
 import {
   type AutoDeduction,
   deducedType,
@@ -47,6 +57,7 @@ import {
 } from './statementCompiler';
 import { isObjectCreation } from './stepRules';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
+import { declareTemplate, functionDeclarator, type FunctionTemplateInfo } from './templateCompiler';
 import {
   type Access,
   allowsMemberAssignment,
@@ -63,6 +74,7 @@ import {
   isCopyConstructor,
   isInteger,
   isReferenceRelated,
+  isWide,
   nonReference,
   type ParamInfo,
   sameParameters,
@@ -122,6 +134,8 @@ export class Compiler extends StatementCompiler {
   private pendingObjectUses: (() => void)[] | undefined = [];
   private readonly programComparisons = new Map<string, ValueComparison<boolean> | undefined>();
   private readonly lambdaCaptures = new WeakMap<FunctionInfo, CaptureLookup>();
+  /** Whether member function bodies wait for their first use, as a class template instance's do. */
+  private defersBodies = false;
   private defaultDependencies?: {
     functions: Map<FunctionInfo, number>;
     staticMembers: Map<GlobalInfo, number>;
@@ -271,6 +285,14 @@ export class Compiler extends StatementCompiler {
       }
       case 'namespace_definition': {
         this.namespaceDefinition(node);
+        return;
+      }
+      case 'template_declaration': {
+        declareTemplate(this, node);
+        return;
+      }
+      case 'template_instantiation': {
+        this.explicitInstantiation(node);
         return;
       }
       case 'namespace_alias_definition': {
@@ -496,6 +518,10 @@ export class Compiler extends StatementCompiler {
           }
           case 'friend_declaration': {
             this.friendDeclaration(cls, member, definitions);
+            break;
+          }
+          case 'template_declaration': {
+            declareTemplate(this, member, cls, access);
             break;
           }
           case 'type_definition':
@@ -842,7 +868,7 @@ export class Compiler extends StatementCompiler {
 
   /** Adds a function to an overload set, rejecting a second declaration with the same parameters. */
   private addOverload(overloads: FunctionInfo[], fn: FunctionInfo, row: number): void {
-    const same = overloads.find((other) => sameDeclaredSignature(other, fn));
+    const same = overloads.find((other) => !other.templatePattern && sameDeclaredSignature(other, fn));
     if (same) this.error(row, `${fn.displayName} は、同じ引数の型ですでに宣言されています。`);
     overloads.push(fn);
   }
@@ -883,6 +909,7 @@ export class Compiler extends StatementCompiler {
       ret,
       owner,
       namespace: owner ? undefined : this.namespace,
+      templateScopes: this.templateScopes.length > 0 ? [...this.templateScopes] : undefined,
       isExplicit: this.isExplicitSpecified(node),
       isConversion: declarator.type === 'abstract_function_declarator' && name.startsWith('operator '),
       isStatic: false,
@@ -1616,7 +1643,7 @@ export class Compiler extends StatementCompiler {
     if (existing && existing.kind !== 'functions')
       return this.error(node.row, `${name} はすでに別のものとして宣言されています。`);
     const overloads = existing?.kind === 'functions' ? existing.functions : [];
-    let same = overloads.find((other) => sameDeclaredSignature(other, fn));
+    let same = overloads.find((other) => !other.templatePattern && sameDeclaredSignature(other, fn));
     if (same?.native) {
       if (!this.library.sameCFunction(fn, same))
         this.error(node.row, `関数 ${name} は、同じ型の引数を取る using 宣言と重複しています。`);
@@ -1759,6 +1786,20 @@ export class Compiler extends StatementCompiler {
 
   /** Compiles a function's body, binding its parameters to the first slots of its frame. */
   private compileFunction(fn: FunctionInfo, node: Syntax): void {
+    // A class template's member functions compile when the program uses them (C++20 [temp.inst]).
+    if (this.defersBodies && !fn.isConstructor && !fn.isDestructor && !fn.isVirtual && fn.name !== 'operator=') {
+      const memberClass = this.memberClass;
+      fn.lazyCompile = () => {
+        const saved = this.memberClass;
+        this.memberClass = memberClass;
+        try {
+          this.compileFunctionBody(fn, node);
+        } finally {
+          this.memberClass = saved;
+        }
+      };
+      return;
+    }
     if (fn.isInline && fn.name !== 'main') {
       this.inlineDependencies.set(
         fn,
@@ -1767,6 +1808,416 @@ export class Compiler extends StatementCompiler {
       return;
     }
     this.compileFunctionBody(fn, node);
+  }
+
+  // Templates -------------------------------------------------------------------------------------------------------
+
+  /** The entity a class template or an alias template's name denotes. */
+  templateEntity(info: ClassTemplateInfo): Entity {
+    return {
+      kind: 'template',
+      template: {
+        name: info.name,
+        program: info,
+        instantiate: (args, row) => this.instantiateClassTemplate(info, args, row),
+      },
+    };
+  }
+
+  /** The class template a name (`Box`, `geo::Box`) denotes, which the program must have declared. */
+  classTemplateNamed(name: Syntax): ClassTemplateInfo {
+    const entity =
+      name.type === 'qualified_identifier'
+        ? this.lookupQualified(name, true)
+        : this.lookupName(name.text, name.row, true);
+    if (entity.kind !== 'template' || !entity.template.program || entity.template.program.kind !== 'class')
+      return this.error(name.row, `${name.text} はクラステンプレートではありません。`);
+    return entity.template.program;
+  }
+
+  /** The template a template type's name denotes, for deduction against an argument's class. */
+  templateOfName(name: Syntax): object | string | undefined {
+    const entity =
+      name.type === 'qualified_identifier' ? this.lookupQualified(name, true) : this.findName(name.text, true);
+    if (entity?.kind !== 'template') return undefined;
+    return entity.template.program ?? entity.template.name;
+  }
+
+  /** The template arguments of a class that is an instance of a template, or undefined when it is not one. */
+  instanceArguments(cls: ClassInfo, template: object | string | undefined): readonly Type[] | undefined {
+    if (template === undefined) return undefined;
+    if (typeof template === 'string') return cls.library?.kind === template ? cls.library.args : undefined;
+    return cls.templateOrigin === template ? cls.templateArgs : undefined;
+  }
+
+  /** Runs `run` where a template instance's declarations are compiled: its namespace, its class, and its bindings. */
+  private inTemplate<T>(template: ProgramTemplate, bindings: TemplateBindings | undefined, run: () => T): T {
+    const saved = {
+      context: this.context,
+      memberClass: this.memberClass,
+      namespace: this.namespace,
+      templateScopes: this.templateScopes,
+    };
+    this.context = new FunctionContext(undefined, undefined, VOID);
+    this.memberClass = template.owner;
+    this.namespace = template.namespace;
+    this.templateScopes = bindings ? [...template.enclosing, bindings.scope] : [...template.enclosing];
+    try {
+      return run();
+    } finally {
+      this.context = saved.context;
+      this.memberClass = saved.memberClass;
+      this.namespace = saved.namespace;
+      this.templateScopes = saved.templateScopes;
+    }
+  }
+
+  /** Declares a function template's pattern among the functions of its name. */
+  declareFunctionTemplate(pattern: FunctionInfo): void {
+    const owner = pattern.owner;
+    if (owner) {
+      if (pattern.isConstructor) owner.constructors.push(pattern);
+      else owner.methods.set(pattern.name, [...(owner.methods.get(pattern.name) ?? []), pattern]);
+      return;
+    }
+    const existing = this.globalScope.names.get(pattern.name);
+    if (existing && existing.kind !== 'functions')
+      return this.error(pattern.row, `${pattern.name} はすでに別のものとして宣言されています。`);
+    if (existing) existing.functions.push(pattern);
+    else this.globalScope.names.set(pattern.name, { kind: 'functions', functions: [pattern] });
+  }
+
+  private functionTemplates(name: string, owner: ClassInfo | undefined): FunctionInfo[] {
+    const functions = owner
+      ? name === owner.name
+        ? owner.constructors
+        : (owner.methods.get(name) ?? [])
+      : (() => {
+          const entity = this.globalScope.names.get(name);
+          return entity?.kind === 'functions' ? entity.functions : [];
+        })();
+    return functions.filter((fn) => fn.templatePattern);
+  }
+
+  /**
+   * The function template of a name that a declaration with these template parameters and this function
+   * declaration redeclares: the same number of template parameters and the same parameter types as written.
+   */
+  functionTemplateIfAny(
+    name: string,
+    owner: ClassInfo | undefined,
+    count: number,
+    declaration?: Syntax
+  ): FunctionTemplateInfo | undefined {
+    const patterns = this.functionTemplates(name, owner).map((fn) => fn.templatePattern as FunctionTemplateInfo);
+    const signature = declaration && parameterSignature(declaration);
+    return patterns.find(
+      (pattern) =>
+        pattern.parameters.length === count &&
+        (signature === undefined || (pattern.node && parameterSignature(pattern.node) === signature))
+    );
+  }
+
+  functionTemplateNamed(name: string, owner: ClassInfo | undefined, row: number): FunctionTemplateInfo {
+    const [pattern] = this.functionTemplates(name, owner);
+    if (!pattern) return this.error(row, `${name} は関数テンプレートではありません。`);
+    return pattern.templatePattern as FunctionTemplateInfo;
+  }
+
+  /** Declares a function template's instance for its bindings, compiling its body when the program uses it. */
+  declareTemplateFunction(info: FunctionTemplateInfo, bindings: TemplateBindings, node: Syntax): FunctionInfo {
+    return this.inTemplate(info, bindings, () => {
+      const written = fieldOf(node, 'declarator') as Syntax;
+      const declared = this.applyDeclarator(fieldOf(node, 'type') ? this.specifiedType(node, true) : VOID, written);
+      const fn = this.functionInfo(info.name, declared.type, declared.function as Syntax, node, info.owner);
+      fn.isStatic = this.hasSpecifier(node, 'static');
+      fn.isConstructor = info.owner !== undefined && info.name === info.owner.name;
+      fn.access = info.access;
+      fn.isTemplate = true;
+      fn.isInline = true;
+      fn.templateSpecificity = parameterSpecificity(node);
+      this.checkTrailingDefaults(fn.params);
+      this.bindDefaultArguments(fn);
+      if (node.type === 'function_definition') {
+        fn.isDefined = true;
+        fn.definition = node;
+        fn.lazyCompile = () => this.compileFunctionBody(fn, node);
+      }
+      return fn;
+    });
+  }
+
+  /** The parameter types an explicit specialization of a function template declares. */
+  declaredParameterTypes(node: Syntax): Type[] | undefined {
+    const declarator = functionDeclarator(fieldOf(node, 'declarator') as Syntax);
+    const parameters = declarator && fieldOf(declarator, 'parameters');
+    return parameters ? this.parameterTypes(parameters) : undefined;
+  }
+
+  templateArgumentsOf(list: Syntax): Type[] {
+    return this.templateArguments(list);
+  }
+
+  /** A value template argument converted to its parameter's type, which may name the parameters before it. */
+  valueTemplateArgument(
+    info: ProgramTemplate,
+    bindings: TemplateBindings,
+    parameter: TemplateParameter,
+    value: number | bigint
+  ): Type {
+    const type = this.inTemplate(info, bindings, () =>
+      this.typeDescriptor({
+        ...(parameter.valueDeclaration as Syntax),
+        all: (parameter.valueDeclaration as Syntax).all.filter(
+          (child) => child.field !== 'declarator' && child.field !== 'default_value'
+        ),
+      })
+    );
+    if (type.kind !== 'int' || type.enumeration)
+      return this.unsupported(info.node?.row ?? 0, `${typeName(type)} 型のテンプレート引数`);
+    const { isConst: _, ...plain } = type;
+    return {
+      ...plain,
+      templateValue: type.name === 'bool' ? Number(Number(value) !== 0) : convertTemplateValue(value, type),
+    };
+  }
+
+  /** A parameter's default template argument, which may name the parameters before it. */
+  defaultTemplateArgument(info: ProgramTemplate, bindings: TemplateBindings, parameter: TemplateParameter): Type {
+    const node = parameter.defaultValue as Syntax;
+    return this.inTemplate(info, bindings, () => {
+      if (parameter.kind === 'type')
+        return this.typeDescriptor(
+          node.type === 'type_descriptor'
+            ? node
+            : {
+                ...node,
+                type: 'type_descriptor',
+                all: [{ ...node, field: 'type' }],
+                children: [{ ...node, field: 'type' }],
+              }
+        );
+      const [argument] = this.templateArguments({ ...node, all: [node], children: [node] });
+      return this.valueTemplateArgument(info, bindings, parameter, templateValue(argument) ?? 0);
+    });
+  }
+
+  /** The instance of a class template or an alias template for template arguments. */
+  instantiateClassTemplate(info: ClassTemplateInfo, written: Type[], row: number): Type {
+    const bindings = new TemplateBindings();
+    for (const [index, parameter] of info.parameters.entries()) {
+      if (parameter.isPack) {
+        bindings.bind(parameter, written.slice(index));
+        break;
+      }
+      let argument: Type | undefined = written[index];
+      if (!argument && parameter.defaultValue) argument = this.defaultTemplateArgument(info, bindings, parameter);
+      if (!argument) return this.error(row, `${info.name} のテンプレート引数が足りません。`);
+      const value = templateValue(argument);
+      if ((parameter.kind === 'value') !== (value !== undefined))
+        return this.error(
+          row,
+          `${info.name} の ${index + 1} 番目のテンプレート引数には、${parameter.kind === 'value' ? '値' : '型'}を書いてください。`
+        );
+      if (parameter.kind === 'value')
+        argument = this.valueTemplateArgument(info, bindings, parameter, value as number | bigint);
+      bindings.bind(parameter, argument);
+    }
+    if (!info.parameters.some((parameter) => parameter.isPack) && written.length > info.parameters.length)
+      return this.error(row, `${info.name} のテンプレート引数が多すぎます。`);
+    const key = argumentsKey(bindings.args);
+    const cached = info.instances.get(key);
+    if (cached) return cached;
+    if (info.kind === 'alias') {
+      const node = info.node as Syntax;
+      const type = this.inTemplate(info, bindings, () => this.typeDescriptor(fieldOf(node, 'type') as Syntax));
+      info.instances.set(key, type);
+      return type;
+    }
+    return this.defineClassInstance(info, bindings, key, row);
+  }
+
+  private defineClassInstance(info: ClassTemplateInfo, bindings: TemplateBindings, key: string, row: number): Type {
+    const chosen = this.chooseSpecialization(info, bindings.args, row);
+    const node = chosen?.node ?? info.node;
+    const cls = new ClassInfo(info.name, node?.type === 'struct_specifier' ? 'struct' : 'class');
+    cls.row = node?.row ?? row;
+    cls.templateOrigin = info;
+    cls.templateArgs = bindings.args;
+    cls.templateEntity = this.templateEntity(info);
+    cls.namespace = info.namespace;
+    cls.outer = info.owner;
+    const type = classType(cls);
+    info.instances.set(key, type);
+    const instanceBindings = chosen?.bindings ?? bindings;
+    const body = node && fieldOf(node, 'body');
+    if (!node || !body) return type;
+    const template: ProgramTemplate = { ...info, enclosing: chosen?.enclosing ?? info.enclosing };
+    this.inTemplate(template, instanceBindings, () => {
+      cls.templateScopes = [...this.templateScopes];
+      const savedDefers = this.defersBodies;
+      this.defersBodies = true;
+      try {
+        this.defineClass(cls, node, body);
+        for (const member of info.outOfClassMembers) this.defineTemplateMember(cls, member);
+      } finally {
+        this.defersBodies = savedDefers;
+      }
+    });
+    return type;
+  }
+
+  /** The specialization of a class template whose arguments match best, with its parameters' bindings. */
+  private chooseSpecialization(
+    info: ClassTemplateInfo,
+    args: readonly Type[],
+    row: number
+  ): { node: Syntax; bindings: TemplateBindings; enclosing: Scope[] } | undefined {
+    const key = argumentsKey(args);
+    let best: { node: Syntax; bindings: TemplateBindings; enclosing: Scope[]; score: number } | undefined;
+    for (const spec of info.specializations) {
+      const list = fieldOf(fieldOf(spec.node, 'name') as Syntax, 'arguments') as Syntax;
+      if (spec.parameters.length === 0) {
+        const specArgs = this.inTemplate({ ...info, enclosing: spec.enclosing }, undefined, () =>
+          this.templateArguments(list)
+        );
+        if (argumentsKey(specArgs) === key)
+          return { node: spec.node, bindings: new TemplateBindings(), enclosing: spec.enclosing };
+        continue;
+      }
+      const deduction = new Deduction(this, spec.parameters);
+      const matches = list.children.every((argument, index) => {
+        const actual = args[index];
+        if (!actual) return false;
+        const value = templateValue(actual);
+        if (argument.type === 'type_descriptor') {
+          const named = fieldOf(argument, 'type') as Syntax;
+          const parameter = spec.parameters.find((candidate) => candidate.name === named.text);
+          if (parameter?.kind === 'value' && !fieldOf(argument, 'declarator'))
+            return value !== undefined && deduction.bindValue(named.text, value);
+          return (
+            value === undefined && deduction.match(deduction.pattern(argument, fieldOf(argument, 'declarator')), actual)
+          );
+        }
+        return value !== undefined && argument.type === 'identifier' && deduction.bindValue(argument.text, value);
+      });
+      if (!matches || list.children.length !== args.length) continue;
+      const bindings = new TemplateBindings();
+      let complete = true;
+      for (const parameter of spec.parameters) {
+        const name = parameter.name ?? '';
+        if (parameter.isPack) bindings.bind(parameter, deduction.packs.get(name) ?? []);
+        else if (parameter.kind === 'value' && deduction.values.has(name))
+          bindings.bind(
+            parameter,
+            this.valueTemplateArgument(
+              { ...info, enclosing: spec.enclosing },
+              bindings,
+              parameter,
+              deduction.values.get(name) as number | bigint
+            )
+          );
+        else if (deduction.types.has(name)) bindings.bind(parameter, deduction.types.get(name) as Type);
+        else complete = false;
+      }
+      if (!complete) continue;
+      const score = specificity(list);
+      if (best && best.score === score)
+        return this.error(
+          row,
+          `${info.name}${argumentsText(args)} に合う部分特殊化が複数あり、どれを使うのか決まりません。`
+        );
+      if (!best || score > best.score) best = { node: spec.node, bindings, enclosing: spec.enclosing, score };
+    }
+    return best;
+  }
+
+  /** Defines a class template's member that the program defines outside the class, for one instance. */
+  defineTemplateMember(
+    cls: ClassInfo,
+    member: { parameters: TemplateParameter[]; memberParameters: TemplateParameter[]; node: Syntax; qualified: Syntax }
+  ): void {
+    const scope = fieldOf(member.qualified, 'scope') as Syntax;
+    const list = fieldOf(scope, 'arguments') as Syntax;
+    const classParameters = member.parameters.slice(0, member.parameters.length - member.memberParameters.length);
+    const deduction = new Deduction(this, classParameters);
+    const args = cls.templateArgs ?? [];
+    for (const [index, argument] of list.children.entries()) {
+      const actual = args[index];
+      const value = actual && templateValue(actual);
+      const named = argument.type === 'type_descriptor' ? fieldOf(argument, 'type') : argument;
+      if (value !== undefined && named) deduction.bindValue(named.text, value);
+      else if (actual && argument.type === 'type_descriptor')
+        deduction.match(deduction.pattern(argument, fieldOf(argument, 'declarator')), actual);
+    }
+    const bindings = new TemplateBindings();
+    for (const parameter of classParameters) {
+      const name = parameter.name ?? '';
+      const value = deduction.values.get(name);
+      bindings.bind(
+        parameter,
+        value === undefined
+          ? (deduction.types.get(name) as Type)
+          : this.valueTemplateArgument(
+              {
+                name: cls.name,
+                parameters: classParameters,
+                node: member.node,
+                namespace: cls.namespace,
+                owner: undefined,
+                enclosing: [],
+              },
+              bindings,
+              parameter,
+              value
+            )
+      );
+    }
+    const template: ProgramTemplate = {
+      name: cls.name,
+      parameters: classParameters,
+      node: member.node,
+      namespace: cls.namespace,
+      owner: undefined,
+      enclosing: (cls.templateOrigin as ClassTemplateInfo).enclosing,
+    };
+    if (member.memberParameters.length > 0) {
+      // A member template's definition, which its pattern in the instance uses.
+      const name = this.plainName(fieldOf(member.qualified, 'name') as Syntax);
+      const pattern = this.functionTemplateIfAny(name, cls, member.memberParameters.length);
+      if (pattern) pattern.node = member.node;
+      return;
+    }
+    this.inTemplate(template, bindings, () => {
+      const savedDefers = this.defersBodies;
+      this.defersBodies = true;
+      try {
+        this.outOfClassDefinition(member.node, member.qualified);
+      } finally {
+        this.defersBodies = savedDefers;
+      }
+    });
+  }
+
+  /** `template class Box<int>;`, which instantiates a class template's members. */
+  private explicitInstantiation(node: Syntax): void {
+    const typeNode = fieldOf(node, 'type');
+    if (!typeNode) return this.unsupported(node.row, '関数テンプレートの明示的な実体化');
+    const nameNode = fieldOf(typeNode, 'name') ?? typeNode;
+    const type = this.resolveTypeSpecifier(nameNode, false, true);
+    if (type.kind !== 'class') return this.error(node.row, `${typeNode.text} はクラスではありません。`);
+    for (const methods of type.cls.methods.values()) {
+      for (const fn of methods) if (!fn.templatePattern && fn.isDefined) this.checkDefined(fn, node.row);
+    }
+  }
+
+  /** Whether a template's arguments satisfy its `requires` clause. */
+  satisfies(_info: ProgramTemplate, _bindings: TemplateBindings, constraint: Syntax): boolean {
+    return this.unsupported(constraint.row, 'requires');
+  }
+
+  declareConcept(_parameters: TemplateParameter[], node: Syntax): void {
+    this.unsupported(node.row, 'コンセプト（concept）');
   }
 
   lambdaExpression(node: Syntax): Expr {
@@ -1792,13 +2243,19 @@ export class Compiler extends StatementCompiler {
   }
 
   private compileFunctionBody(fn: FunctionInfo, node: Syntax): void {
-    // A function's body sees the names of the namespace it is a member of.
+    // A function's body sees the names of the namespace it is a member of and of its template's parameters.
     const savedNamespace = this.namespace;
+    const savedTemplates = this.templateScopes;
+    const savedDefers = this.defersBodies;
     this.namespace = fn.namespace ?? namespaceOf(fn.owner);
+    this.templateScopes = fn.templateScopes ?? fn.owner?.templateScopes ?? [];
+    this.defersBodies = false;
     try {
       this.compileFunctionBodyIn(fn, node);
     } finally {
       this.namespace = savedNamespace;
+      this.templateScopes = savedTemplates;
+      this.defersBodies = savedDefers;
     }
   }
 
@@ -2835,6 +3292,11 @@ export class Compiler extends StatementCompiler {
 
   checkDefined(fn: FunctionInfo, row: number): void {
     if (fn.isDeleted) this.error(row, `削除された関数 ${fn.displayName} は使えません（= delete）。`);
+    const compile = fn.lazyCompile;
+    if (compile) {
+      fn.lazyCompile = undefined;
+      compile();
+    }
     if (this.isUnevaluated) return;
     if (fn.native) {
       if (fn.isConstructor && fn.owner) this.checkLibraryStorage(fn.owner, row);
@@ -3099,6 +3561,51 @@ function intMaxOf(type: Extract<Type, { kind: 'int' }>): bigint {
 function argumentClass(type: Type): ClassInfo | undefined {
   const target = type.kind === 'pointer' || type.kind === 'reference' ? type.to : type;
   return target.kind === 'class' && !target.cls.library ? target.cls : undefined;
+}
+
+/** A function declaration's parameter types as written, without the parameters' names, to match redeclarations. */
+function parameterSignature(node: Syntax): string {
+  const declarator = functionDeclarator(fieldOf(node, 'declarator') as Syntax);
+  const parameters = declarator ? fieldOf(declarator, 'parameters') : undefined;
+  return (parameters?.children ?? [])
+    .map((parameter) => {
+      const type = fieldOf(parameter, 'type')?.text ?? '';
+      const written = fieldOf(parameter, 'declarator');
+      const shape = written ? written.text.replaceAll(/[\p{L}_][\p{L}\p{N}_]*/gu, '') : '';
+      const isConst = parameter.children.some((child) => child.type === 'type_qualifier') ? 'const ' : '';
+      return `${isConst}${type}${shape}`.replaceAll(/\s+/g, '');
+    })
+    .join(',');
+}
+
+/** How much a function template's parameter types constrain their arguments: pointers, arrays, and instances. */
+function parameterSpecificity(node: Syntax): number {
+  const declarator = functionDeclarator(fieldOf(node, 'declarator') as Syntax);
+  const count = (syntax: Syntax): number =>
+    ([
+      'pointer_declarator',
+      'abstract_pointer_declarator',
+      'array_declarator',
+      'abstract_array_declarator',
+      'template_type',
+    ].includes(syntax.type)
+      ? 1
+      : 0) + syntax.children.reduce((sum, child) => sum + count(child), 0);
+  return (declarator ? (fieldOf(declarator, 'parameters')?.children ?? []) : []).reduce(
+    (sum, parameter) => sum + count(parameter),
+    0
+  );
+}
+
+/** How much a partial specialization's argument list constrains its arguments, for choosing the most specialized. */
+function specificity(node: Syntax): number {
+  if (node.type === 'type_identifier' || node.type === 'identifier') return 0;
+  return 1 + node.children.reduce((sum, child) => sum + specificity(child), 0);
+}
+
+/** A non-type template argument's value in its parameter's type. */
+function convertTemplateValue(value: number | bigint, type: Extract<Type, { kind: 'int' }>): number | bigint {
+  return isWide(type) ? BigInt(value) : Number(value);
 }
 
 /** The namespace a class is a member of, through the classes it is nested in. */
