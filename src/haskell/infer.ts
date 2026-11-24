@@ -11,24 +11,15 @@ import {
   HAS_FIELD_TYPES,
   IMPLICIT_CLASS,
   IMPLICIT_TYPES,
-  IO_TYPE,
   LIST_TYPE,
   symbolType,
   tupleCon,
   UNIT_TYPE,
 } from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, impliedBySuperclasses, predsEqual } from './classEnv';
+import { solveCoercible } from './coercible';
 import { dependencyOrder } from './dependencies';
-import type {
-  ClassEntity,
-  CoercionSpec,
-  ConInfo,
-  DictParam,
-  Evidence,
-  EvidenceHole,
-  TypeEntity,
-  ValueEntity,
-} from './entities';
+import type { ClassEntity, ConInfo, DictParam, Evidence, EvidenceHole, TypeEntity, ValueEntity } from './entities';
 import { compileError } from './errors';
 import { freshKinds } from './kindTemplates';
 import { checkLinearUses } from './linearity';
@@ -50,7 +41,6 @@ import {
   type VarRef,
 } from './rast';
 import { RecursionBudget } from './recursionBudget';
-import { rolesOf } from './roles';
 import type { Span } from './syntax';
 import { constraintPreds, TypeConversion } from './typeConversion';
 import { walkGraph } from './typeGraph';
@@ -274,74 +264,14 @@ export class Checker {
         type: hole.pred.cls === EQUALITY_CLASS ? zonked : this.reduceFamilies(zonked),
       };
       hole.pred = pred;
-      if (pred.cls === literalClasses?.nat || pred.cls === literalClasses?.symbol) {
-        const literal = prune(this.reduceFamilies(pred.type));
-        if (literal.tag === 'tcon' && literal.entity.literal !== undefined) {
-          hole.solution = { kind: 'literal', value: literal.entity.literal };
-          continue;
-        }
-        if (literal.tag === 'tcon' || literal.tag === 'tap') this.noInstance(hole);
-      }
-      if (pred.cls === IMPLICIT_CLASS) {
-        const [name, type] = splitApp(pred.type).args;
-        const given = givens.find(
-          (candidate) =>
-            candidate.pred.cls === IMPLICIT_CLASS && typesEqual(splitApp(candidate.pred.type).args[0], name)
-        );
-        if (given) {
-          this.unify(type, splitApp(given.pred.type).args[1], hole.span, `暗黙のパラメータ（${hole.origin}）`);
-          hole.solution = given.evidence;
-          continue;
-        }
-      }
-      if (pred.cls === CONSTRAINT_TYPE_CLASS) {
-        const preds = constraintPreds(pred.type);
-        if (preds.length !== 1) {
-          typeError(hole.span, '制約のタプルを型変数の制約に当てはめることは、この採点環境では使えません。');
-        }
-        if (preds[0].cls !== CONSTRAINT_TYPE_CLASS) {
-          hole.pred = preds[0];
-          index--;
-          continue;
-        }
-      }
-      if (pred.cls === COERCIBLE_CLASS) {
-        const solution = this.solveCoercible(pred, givens, hole.span);
-        if (solution) {
-          hole.solution = solution;
-          continue;
-        }
+      const outcome = this.solveBuiltin(hole, givens);
+      if (outcome === 'solved') continue;
+      if (outcome === 'retained') {
         retained.push(hole);
         continue;
       }
-      if (pred.cls === HAS_FIELD_CLASS) {
-        const solution = this.solveHasField(pred, hole.span);
-        if (solution) {
-          hole.solution = solution;
-          continue;
-        }
-      }
-      if (pred.cls === EQUALITY_CLASS) {
-        const [left, right] = splitApp(pred.type).args.map((side) => this.reduceFamilies(side));
-        const flexible = [left, right].find((side) => {
-          const pruned = prune(side);
-          return pruned.tag === 'tvar' && !pruned.skolem;
-        });
-        if (flexible) {
-          const other = prune(flexible === left ? right : left);
-          if (prune(flexible) !== other) {
-            const failure = this.bindVar(prune(flexible) as TVar, other);
-            if (failure) this.unify(left, right, hole.span, `型の等しさの制約（${hole.origin}）`);
-          }
-          hole.solution = { kind: 'equality' };
-          continue;
-        }
-        if (!typesEqual(left, right) && (isFamilyApplication(left) || isFamilyApplication(right))) {
-          retained.push(hole);
-          continue;
-        }
-        this.unify(left, right, hole.span, `型の等しさの制約（${hole.origin}）`);
-        hole.solution = { kind: 'equality' };
+      if (outcome === 'again') {
+        index--;
         continue;
       }
       const given = entailByGivens(givens, pred);
@@ -350,35 +280,133 @@ export class Checker {
         continue;
       }
       if (pred.cls.fundeps?.length) this.improveByFundeps(pred, hole.span, givens);
-      const unsolvable = pred.cls.packed && typeVarsOf(pred.type).size > 0 && this.env.findInstance(pred) === 'none';
-      // An instance for any type, `instance C a`, solves a constraint on a rigid type too.
-      const rigidHead = splitApp(pred.type).head;
-      const anyType =
-        rigidHead.tag === 'tvar' &&
-        rigidHead.skolem === true &&
-        this.env.instancesOf(pred.cls).some((instance) => splitApp(instance.head).head.tag === 'tgen');
-      if ((hasConstructorHead(pred.type) || anyType) && !unsolvable) {
-        const found = this.instanceFor(hole);
-        if (found !== 'pending') {
-          const { instance, args } = found;
-          for (const [index, type] of instance.equalities) this.unify(args[index], type, hole.span);
-          const sub = instance.context.map((contextPred) => ({
-            id: nextHoleId++,
-            pred: { cls: contextPred.cls, type: instantiateType(contextPred.type, args) },
-            span: hole.span,
-            origin: hole.origin,
-          }));
-          hole.solution = { kind: 'instance', instance, args: sub.map((subHole) => ({ kind: 'hole', hole: subHole })) };
-          for (const child of sub) depths.set(child, depth + 1);
-          work.push(...sub);
-          continue;
-        }
+      const sub = this.solveByInstance(hole);
+      if (sub) {
+        for (const child of sub) depths.set(child, depth + 1);
+        work.push(...sub);
+        continue;
       }
       const vars = [...typeVarsOf(pred.type)];
       if (vars.length > 0 && vars.every((variable) => variable.level <= outerLevel)) deferred.push(hole);
       else retained.push(hole);
     }
     return { retained, deferred };
+  }
+
+  /**
+   * Solves a constraint of a class the checker knows itself: type-level literals, implicit parameters, constraints
+   * written as types, `Coercible`, `HasField`, and equalities. `retained` leaves the constraint for later, `again`
+   * looks at it once more as the class it turned out to be, and `undefined` leaves it to givens and instances.
+   */
+  private solveBuiltin(
+    hole: EvidenceHole,
+    givens: readonly { pred: Pred; evidence: Evidence }[]
+  ): 'solved' | 'retained' | 'again' | undefined {
+    const { pred } = hole;
+    if (pred.cls === literalClasses?.nat || pred.cls === literalClasses?.symbol) {
+      const literal = prune(this.reduceFamilies(pred.type));
+      if (literal.tag === 'tcon' && literal.entity.literal !== undefined) {
+        hole.solution = { kind: 'literal', value: literal.entity.literal };
+        return 'solved';
+      }
+      if (literal.tag === 'tcon' || literal.tag === 'tap') this.noInstance(hole);
+      return undefined;
+    }
+    switch (pred.cls) {
+      case IMPLICIT_CLASS: {
+        return this.solveImplicit(hole, givens);
+      }
+      case CONSTRAINT_TYPE_CLASS: {
+        const preds = constraintPreds(pred.type);
+        if (preds.length !== 1) {
+          typeError(hole.span, '制約のタプルを型変数の制約に当てはめることは、この採点環境では使えません。');
+        }
+        if (preds[0].cls === CONSTRAINT_TYPE_CLASS) return undefined;
+        hole.pred = preds[0];
+        return 'again';
+      }
+      case COERCIBLE_CLASS: {
+        hole.solution = solveCoercible(this, pred, givens, hole.span);
+        return hole.solution ? 'solved' : 'retained';
+      }
+      case HAS_FIELD_CLASS: {
+        hole.solution = this.solveHasField(pred, hole.span);
+        return hole.solution ? 'solved' : undefined;
+      }
+      case EQUALITY_CLASS: {
+        return this.solveEquality(hole);
+      }
+      default: {
+        return undefined;
+      }
+    }
+  }
+
+  private solveImplicit(
+    hole: EvidenceHole,
+    givens: readonly { pred: Pred; evidence: Evidence }[]
+  ): 'solved' | undefined {
+    const [name, type] = splitApp(hole.pred.type).args;
+    const given = givens.find(
+      (candidate) => candidate.pred.cls === IMPLICIT_CLASS && typesEqual(splitApp(candidate.pred.type).args[0], name)
+    );
+    if (!given) return undefined;
+    this.unify(type, splitApp(given.pred.type).args[1], hole.span, `暗黙のパラメータ（${hole.origin}）`);
+    hole.solution = given.evidence;
+    return 'solved';
+  }
+
+  /**
+   * Solves `a ~ b` by binding an unknown side to the other, or by unifying the sides; an application of a type
+   * family that cannot reduce yet leaves the equality for later.
+   */
+  private solveEquality(hole: EvidenceHole): 'solved' | 'retained' {
+    const [left, right] = splitApp(hole.pred.type).args.map((side) => this.reduceFamilies(side));
+    const flexibleSide = [left, right].find((side) => {
+      const pruned = prune(side);
+      return pruned.tag === 'tvar' && !pruned.skolem;
+    });
+    if (flexibleSide) {
+      const other = prune(flexibleSide === left ? right : left);
+      if (prune(flexibleSide) !== other) {
+        const failure = this.bindVar(prune(flexibleSide) as TVar, other);
+        if (failure) this.unify(left, right, hole.span, `型の等しさの制約（${hole.origin}）`);
+      }
+      hole.solution = { kind: 'equality' };
+      return 'solved';
+    }
+    if (!typesEqual(left, right) && (isFamilyApplication(left) || isFamilyApplication(right))) return 'retained';
+    this.unify(left, right, hole.span, `型の等しさの制約（${hole.origin}）`);
+    hole.solution = { kind: 'equality' };
+    return 'solved';
+  }
+
+  /**
+   * Solves a constraint by the instance that matches it, giving the constraints of the instance's context to solve
+   * next, or `undefined` when no instance decides it yet.
+   */
+  private solveByInstance(hole: EvidenceHole): EvidenceHole[] | undefined {
+    const { pred } = hole;
+    const unsolvable = pred.cls.packed && typeVarsOf(pred.type).size > 0 && this.env.findInstance(pred) === 'none';
+    // An instance for any type, `instance C a`, solves a constraint on a rigid type too.
+    const rigidHead = splitApp(pred.type).head;
+    const anyType =
+      rigidHead.tag === 'tvar' &&
+      rigidHead.skolem === true &&
+      this.env.instancesOf(pred.cls).some((instance) => splitApp(instance.head).head.tag === 'tgen');
+    if ((!hasConstructorHead(pred.type) && !anyType) || unsolvable) return undefined;
+    const found = this.instanceFor(hole);
+    if (found === 'pending') return undefined;
+    const { instance, args } = found;
+    for (const [index, type] of instance.equalities) this.unify(args[index], type, hole.span);
+    const sub = instance.context.map((contextPred): EvidenceHole => ({
+      id: nextHoleId++,
+      pred: { cls: contextPred.cls, type: instantiateType(contextPred.type, args) },
+      span: hole.span,
+      origin: hole.origin,
+    }));
+    hole.solution = { kind: 'instance', instance, args: sub.map((subHole) => ({ kind: 'hole', hole: subHole })) };
+    return sub;
   }
 
   /**
@@ -418,94 +446,6 @@ export class Checker {
     }
     this.unify(field, instantiateType(info.fieldType, args), span, `フィールド ${info.name} の型`);
     return { kind: 'field', field: info };
-  }
-
-  /**
-   * Solves `Coercible a b` by how values of the two types are represented: the same types, a given constraint, a
-   * newtype and its field, or applications of the same type whose arguments convert as the type's roles allow.
-   * Types not yet known leave the constraint for later.
-   */
-  private solveCoercible(
-    pred: Pred,
-    givens: readonly { pred: Pred; evidence: Evidence }[],
-    span: Span
-  ): Evidence | undefined {
-    const [from, to] = splitApp(pred.type).args;
-    const leaves: Evidence[] = [];
-    const coercibleGivens = givens.filter((given) => given.pred.cls === COERCIBLE_CLASS);
-    const fail = (a: Type, b: Type): never => {
-      const printer = new TypePrinter();
-      typeError(span, `型 ${printer.show(a)} と型 ${printer.show(b)} は表現が同じではないので、coerce できません。`);
-    };
-    const solve = (a: Type, b: Type, depth: number): CoercionSpec | 'stuck' => {
-      if (depth > 200) typeError(span, '型の表現の計算が上限を超えました。');
-      const left = prune(this.reduceFamilies(a));
-      const right = prune(this.reduceFamilies(b));
-      if (typesEqual(left, right)) return { k: 'refl' };
-      for (const given of coercibleGivens) {
-        const [givenFrom, givenTo] = splitApp(zonk(given.pred.type)).args;
-        const forward = typesEqual(givenFrom, left) && typesEqual(givenTo, right);
-        if (forward || (typesEqual(givenFrom, right) && typesEqual(givenTo, left))) {
-          let index = leaves.indexOf(given.evidence);
-          if (index < 0) index = leaves.push(given.evidence) - 1;
-          return { k: 'leaf', index, flipped: !forward };
-        }
-      }
-      const l = splitApp(left);
-      const r = splitApp(right);
-      // An unknown type stands for the other one when that is no newtype, which no other type is represented as.
-      for (const [variable, other] of [
-        [left, r],
-        [right, l],
-      ] as const) {
-        if (flexible(variable) && other.head.tag === 'tcon' && !unwrappable(other.head)) {
-          this.unify(left, right, span, '型の表現（coerce）');
-          return { k: 'refl' };
-        }
-      }
-      if (flexible(l.head) || flexible(r.head)) return 'stuck';
-      const sameHead =
-        l.args.length === r.args.length &&
-        (l.head.tag === 'tcon' && r.head.tag === 'tcon' ? l.head.entity === r.head.entity : typesEqual(l.head, r.head));
-      const roles = l.head.tag === 'tcon' ? rolesOf(l.head.entity) : l.args.map(() => 'nominal' as const);
-      const nominalEqual =
-        sameHead &&
-        l.args.every((arg, index) => (roles[index] ?? 'nominal') !== 'nominal' || typesEqual(arg, r.args[index]));
-      if (sameHead && (!unwrappable(l.head) || nominalEqual)) {
-        const params: CoercionSpec[] = [];
-        for (const [index, arg] of l.args.entries()) {
-          const role = roles[index] ?? 'nominal';
-          if (role === 'nominal') {
-            this.unify(arg, r.args[index], span, '型の表現（coerce）');
-            params.push({ k: 'refl' });
-          } else if (role === 'phantom') params.push({ k: 'refl' });
-          else {
-            const inner = solve(arg, r.args[index], depth + 1);
-            if (inner === 'stuck') return 'stuck';
-            params.push(inner);
-          }
-        }
-        if (params.every((param) => param.k === 'refl')) return { k: 'refl' };
-        if (l.head.tag === 'tcon' && l.head.entity === FUNCTION_TYPE)
-          return { k: 'fun', arg: params[0], res: params[1] };
-        if (l.head.tag === 'tcon' && l.head.entity === IO_TYPE) return { k: 'io', res: params[0] };
-        return { k: 'data', params };
-      }
-      const fromNewtype = unwrappable(l.head);
-      if (fromNewtype) {
-        const inner = solve(instantiateType(fromNewtype.fieldTypes[0], l.args), right, depth + 1);
-        return inner === 'stuck' ? 'stuck' : { k: 'unwrap', con: fromNewtype, inner };
-      }
-      const toNewtype = unwrappable(r.head);
-      if (toNewtype) {
-        const inner = solve(left, instantiateType(toNewtype.fieldTypes[0], r.args), depth + 1);
-        return inner === 'stuck' ? 'stuck' : { k: 'wrap', con: toNewtype, inner };
-      }
-      if ([...typeVarsOf(left), ...typeVarsOf(right)].some((variable) => !variable.skolem)) return 'stuck';
-      return fail(left, right);
-    };
-    const spec = solve(from, to, 0);
-    return spec === 'stuck' ? undefined : { kind: 'coercion', spec, leaves };
   }
 
   /** Reduces the type family applications of a type by their equations, as far as its known parts allow. */
@@ -1689,17 +1629,6 @@ export class Checker {
 }
 
 /** Givens with their constraints written as types made the classes' constraints, once their heads are classes. */
-function flexible(head: Type): boolean {
-  return head.tag === 'tvar' && !head.skolem;
-}
-
-/** The constructor of a newtype at the head of a type, whose field `Coercible` may take the value as. */
-function unwrappable(head: Type): ConInfo | undefined {
-  if (head.tag !== 'tcon') return undefined;
-  const con = head.entity.cons.length === 1 ? head.entity.cons[0] : undefined;
-  return con?.isNewtype && !con.instanceArgs ? con : undefined;
-}
-
 function normalizeGivens(givens: readonly { pred: Pred; evidence: Evidence }[]): { pred: Pred; evidence: Evidence }[] {
   return givens.map((given) => {
     if (given.pred.cls !== CONSTRAINT_TYPE_CLASS) return given;
@@ -1829,27 +1758,7 @@ export function typeVarNames(types: readonly RType[]): string[] {
 }
 
 export function checkSchemeAmbiguity(scheme: Scheme, span: Span, defaultable?: (index: number) => boolean): void {
-  const visible = genericIndices(scheme.type);
-  // Functional dependencies determine variables from visible ones, which then are visible too.
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const pred of scheme.preds) {
-      const args = pred.cls.packed ? splitApp(pred.type).args : [pred.type];
-      for (const fundep of pred.cls.fundeps ?? []) {
-        if (!fundep.from.every((index) => [...genericIndices(args[index])].every((generic) => visible.has(generic)))) {
-          continue;
-        }
-        for (const index of fundep.to) {
-          for (const generic of genericIndices(args[index])) {
-            if (!visible.has(generic)) {
-              visible.add(generic);
-              changed = true;
-            }
-          }
-        }
-      }
-    }
-  }
+  const visible = visibleThroughFundeps(scheme, genericIndices(scheme.type));
   const ambiguous = new Set<number>();
   for (const pred of scheme.preds) {
     for (const index of genericIndices(pred.type)) {
@@ -1859,6 +1768,26 @@ export function checkSchemeAmbiguity(scheme: Scheme, span: Span, defaultable?: (
   for (const index of ambiguous) {
     if (!defaultable?.(index)) throw compileError(span, '型の制約に、結果の型から決まらない型変数があります。');
   }
+}
+
+/** The variables a scheme's type shows, with those its constraints' functional dependencies determine from them. */
+function visibleThroughFundeps(scheme: Scheme, visible: Set<number>): Set<number> {
+  const determines = (pred: Pred, fundep: { from: number[]; to: number[] }): boolean => {
+    const args = pred.cls.packed ? splitApp(pred.type).args : [pred.type];
+    if (!fundep.from.every((index) => [...genericIndices(args[index])].every((generic) => visible.has(generic)))) {
+      return false;
+    }
+    const before = visible.size;
+    for (const index of fundep.to) for (const generic of genericIndices(args[index])) visible.add(generic);
+    return visible.size > before;
+  };
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const pred of scheme.preds) {
+      for (const fundep of pred.cls.fundeps ?? []) if (determines(pred, fundep)) changed = true;
+    }
+  }
+  return visible;
 }
 
 function genericIndices(type: Type): Set<number> {

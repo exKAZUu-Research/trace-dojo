@@ -123,7 +123,6 @@ export class QuoteBuilder {
 
   // Expressions
 
-  // code-gauge-allow functionCognitiveComplexity -- One case per kind of expression a quote may hold.
   private expr(expr: Expr): Expr {
     switch (expr.kind) {
       case 'var': {
@@ -192,6 +191,15 @@ export class QuoteBuilder {
           return { kind: 'thVar', name: { name: '[]', span: expr.span }, constructor: true, span: expr.span };
         return this.call('listE', this.list(expr.elems.map((elem) => this.expr(elem))));
       }
+      default: {
+        return this.otherExpr(expr);
+      }
+    }
+  }
+
+  /** Sequences, comprehensions, signatures, records, type applications, and splices in a quote. */
+  private otherExpr(expr: Expr): Expr {
+    switch (expr.kind) {
       case 'arith': {
         const from = this.expr(expr.from);
         if (expr.next && expr.to) return this.call('fromThenToE', from, this.expr(expr.next), this.expr(expr.to));
@@ -421,7 +429,6 @@ export class QuoteBuilder {
     return names;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- One case per kind of pattern a quote may hold.
   private pat(pat: Pat): Expr {
     switch (pat.kind) {
       case 'pvar': {

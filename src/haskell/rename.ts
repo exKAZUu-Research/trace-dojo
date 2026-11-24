@@ -756,36 +756,36 @@ class Renamer {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Fixity validation shares duplicate checks while keeping class method ownership explicit.
   private applyTopFixities(decls: Decl[]): void {
     const seen = new Set<string>();
-    const apply = (
-      fixityDecl: Extract<Decl, { kind: 'fixity' }>,
-      lookup: (name: string) => ValueEntity | undefined
-    ): void => {
-      for (const op of fixityDecl.ops) {
-        if (seen.has(op.name)) throw compileError(op.span, `${op.name} の結合性が重複して宣言されています。`);
-        seen.add(op.name);
-        const entity = lookup(op.name);
-        const type = fixityDecl === undefined ? undefined : this.ownTypes.get(op.name);
-        if (!entity && !type) throw compileError(op.span, `結合性を宣言した ${op.name} の定義がありません。`);
-        const fixity = { assoc: fixityDecl.assoc, prec: fixityDecl.prec };
-        if (entity) entity.fixity = fixity;
-        if (type) type.entity.fixity = fixity;
-      }
-    };
     for (const decl of decls) {
-      if (decl.kind === 'fixity') apply(decl, (name) => this.ownValues.get(name));
-      if (decl.kind === 'class') {
-        for (const member of decl.decls) {
-          if (member.kind === 'fixity') {
-            apply(member, (name) => {
-              const entity = this.ownValues.get(name);
-              return entity?.method?.cls.name === decl.name.name ? entity : undefined;
-            });
-          }
-        }
+      if (decl.kind === 'fixity') this.applyFixity(decl, seen, (name) => this.ownValues.get(name));
+      if (decl.kind !== 'class') continue;
+      for (const member of decl.decls) {
+        if (member.kind !== 'fixity') continue;
+        this.applyFixity(member, seen, (name) => {
+          const entity = this.ownValues.get(name);
+          return entity?.method?.cls.name === decl.name.name ? entity : undefined;
+        });
       }
+    }
+  }
+
+  /** Gives the operators a fixity declaration names their fixity: a value's, a type's, or both. */
+  private applyFixity(
+    fixityDecl: Extract<Decl, { kind: 'fixity' }>,
+    seen: Set<string>,
+    lookup: (name: string) => ValueEntity | undefined
+  ): void {
+    for (const op of fixityDecl.ops) {
+      if (seen.has(op.name)) throw compileError(op.span, `${op.name} の結合性が重複して宣言されています。`);
+      seen.add(op.name);
+      const entity = lookup(op.name);
+      const type = this.ownTypes.get(op.name);
+      if (!entity && !type) throw compileError(op.span, `結合性を宣言した ${op.name} の定義がありません。`);
+      const fixity = { assoc: fixityDecl.assoc, prec: fixityDecl.prec };
+      if (entity) entity.fixity = fixity;
+      if (type) type.entity.fixity = fixity;
     }
   }
 
@@ -911,15 +911,8 @@ class Renamer {
       if (member.kind !== 'sig') continue;
       const sig = this.renameSigType(member.sig);
       if (member.isDefault) {
-        for (const name of member.names) {
-          const method = entity.methods.find((candidate) => candidate.name === name.name);
-          if (!method)
-            throw compileError(name.span, `${name.name} は、クラス ${entity.name} のメソッドではありません。`);
-          if (defaultSigs.some((item) => item.entity === method)) {
-            throw compileError(name.span, `${name.name} の default のシグネチャが重複しています。`);
-          }
-          defaultSigs.push({ entity: method, sig });
-        }
+        for (const name of member.names)
+          defaultSigs.push({ entity: this.defaultSignatureMethod(entity, name, defaultSigs), sig });
         continue;
       }
       if (params.length > 0 && !params.some((param) => rtypeMentions(sig.type, param))) {
@@ -975,19 +968,7 @@ class Renamer {
       decl.span
     );
     const context = decl.context.map((constraint) => this.renameType(constraint, vars));
-    const sigs = new Map<string, Extract<Decl, { kind: 'sig' }>>();
-    for (const member of decl.decls) {
-      if (member.kind === 'sig') {
-        if (!this.module.extensions.has('InstanceSigs')) {
-          throw compileError(member.span, 'インスタンスの中に型シグネチャを書くには、InstanceSigs の拡張が要ります。');
-        }
-        for (const name of member.names) {
-          if (sigs.has(name.name)) throw compileError(name.span, `${name.name} の型シグネチャが重複しています。`);
-          sigs.set(name.name, member);
-        }
-      }
-      if (member.kind === 'fixity') throw compileError(member.span, 'インスタンスの中には、結合性を宣言できません。');
-    }
+    const sigs = this.instanceSignatures(decl.decls);
     const raw = groupBindings(decl.decls).map((binding) => {
       const sig = binding.kind === 'fun' ? sigs.get(binding.names[0].name) : undefined;
       sigs.delete(binding.names[0].name);
@@ -997,23 +978,55 @@ class Renamer {
     const bindings: RBinding[] = [];
     for (const binding of raw) {
       if (binding.kind !== 'fun') throw compileError(binding.span, 'インスタンスの中では、パターンで束縛できません。');
-      const name = binding.names[0];
-      const candidates = [...cls.methods, ...(cls.exportedMethods ?? [])].filter(
-        (candidate) => candidate.name === name.name
-      );
-      if (candidates.length === 0)
-        throw compileError(name.span, `${name.name} は、クラス ${cls.name} のメソッドではありません。`);
-      const method = candidates.find(
-        (candidate) =>
-          this.scope.values.get(candidate.name).includes(candidate) ||
-          [...this.scope.qualifiedValues.values()].some((values) => values.get(candidate.name).includes(candidate))
-      );
-      if (!method)
-        throw compileError(name.span, `${name.name} は、クラス ${cls.name} の見えるメソッドではありません。`);
-      if (method.unsupported) throw unsupportedError(name.span, method.unsupported);
+      const method = this.instanceMethod(cls, binding.names[0]);
       bindings.push(this.renameFunBinding(binding, { kind: 'global', entity: method }, new LocalScope()));
     }
     this.instances.push({ cls, type, context, bindings, overlap: decl.overlap, span: decl.span });
+  }
+
+  /** The method a class's `default` signature types, which may have only one. */
+  private defaultSignatureMethod(entity: ClassEntity, name: Name, defaultSigs: RClassDecl['defaultSigs']): ValueEntity {
+    const method = entity.methods.find((candidate) => candidate.name === name.name);
+    if (!method) throw compileError(name.span, `${name.name} は、クラス ${entity.name} のメソッドではありません。`);
+    if (defaultSigs.some((item) => item.entity === method)) {
+      throw compileError(name.span, `${name.name} の default のシグネチャが重複しています。`);
+    }
+    return method;
+  }
+
+  /** The signatures an instance gives its methods, as InstanceSigs allows, by the methods' names. */
+  private instanceSignatures(decls: Decl[]): Map<string, Extract<Decl, { kind: 'sig' }>> {
+    const sigs = new Map<string, Extract<Decl, { kind: 'sig' }>>();
+    for (const member of decls) {
+      if (member.kind === 'fixity') throw compileError(member.span, 'インスタンスの中には、結合性を宣言できません。');
+      if (member.kind !== 'sig') continue;
+      if (!this.module.extensions.has('InstanceSigs')) {
+        throw compileError(member.span, 'インスタンスの中に型シグネチャを書くには、InstanceSigs の拡張が要ります。');
+      }
+      for (const name of member.names) {
+        if (sigs.has(name.name)) throw compileError(name.span, `${name.name} の型シグネチャが重複しています。`);
+        sigs.set(name.name, member);
+      }
+    }
+    return sigs;
+  }
+
+  /** The method of a class an instance's binding defines, which must be one the module sees. */
+  private instanceMethod(cls: ClassEntity, name: Name): ValueEntity {
+    const candidates = [...cls.methods, ...(cls.exportedMethods ?? [])].filter(
+      (candidate) => candidate.name === name.name
+    );
+    if (candidates.length === 0) {
+      throw compileError(name.span, `${name.name} は、クラス ${cls.name} のメソッドではありません。`);
+    }
+    const method = candidates.find(
+      (candidate) =>
+        this.scope.values.get(candidate.name).includes(candidate) ||
+        [...this.scope.qualifiedValues.values()].some((values) => values.get(candidate.name).includes(candidate))
+    );
+    if (!method) throw compileError(name.span, `${name.name} は、クラス ${cls.name} の見えるメソッドではありません。`);
+    if (method.unsupported) throw unsupportedError(name.span, method.unsupported);
+    return method;
   }
 
   private renameFamilies(decls: Decl[]): Pick<RModule, 'typeFamilies' | 'typeInstances'> {
@@ -2119,76 +2132,80 @@ class Renamer {
 
   /** The code a quote builds for what needs the program's scope: names, and operator chains by their fixities. */
   private templateHaskellCode(expr: Extract<Expr, { kind: 'thVar' | 'thName' | 'thChain' }>, scope: LocalScope): Expr {
+    if (expr.kind === 'thVar') return this.thVarCode(expr, scope);
+    if (expr.kind === 'thName') return this.thNameCode(expr, scope);
+    return this.thChainCode(expr, scope);
+  }
+
+  /** A variable or constructor of a quote: a global one's tree, a local one's lifted value, or an unbound name. */
+  private thVarCode(expr: Extract<Expr, { kind: 'thVar' }>, scope: LocalScope): Expr {
     const { span } = expr;
-    const str = (text: string): Expr => ({ kind: 'lit', lit: { kind: 'string', value: [...text] }, span });
-    const call = (name: string, ...args: Expr[]): Expr => {
-      let result: Expr = { kind: 'support', name, span };
-      for (const arg of args) result = { kind: 'app', fn: result, arg, span };
-      return result;
-    };
-    switch (expr.kind) {
-      case 'thVar': {
-        if (expr.constructor) {
-          const con = this.lookupCon(expr.name);
-          return call('quoteGlobalCon', str(this.thModule('con', con)), str(con.name));
-        }
-        if (expr.implicit) {
-          const entity = this.supportValue(expr.name.name, span);
-          return call('quoteGlobalVar', str(this.thModule('v', entity)), str(entity.name));
-        }
-        // A name nothing binds stays unbound in the tree, for the code it is spliced into to bind, as GHC does.
-        if (!(!expr.name.qualifier && scope.lookup(expr.name.name)) && this.valuesNamed(expr.name).length === 0) {
-          return call('unboundVarE', call('mkName', str(expr.name.name)));
-        }
-        const ref = this.resolveVar(expr.name, scope);
-        // A variable of the program outside the quote is lifted: the tree of its value.
-        if (ref.kind === 'local') return call('lift', { kind: 'var', name: expr.name, span });
-        return call('quoteGlobalVar', str(this.thModule('v', ref.entity)), str(ref.entity.name));
-      }
-      case 'thName': {
-        if (expr.namespace === 'type') {
-          // The types of special syntax have names of their own in GHC.
-          const special = expr.name.qualifier ? undefined : specialTypeName(expr.name.name);
-          if (special) return call('mkNameG_tc', str('ghc-internal'), str(special[0]), str(special[1]));
-          const like = this.lookupType(expr.name);
-          const module = this.thModule('t', like.entity);
-          return call('mkNameG_tc', str(thPackage(module)), str(module), str(like.entity.name));
-        }
-        if (expr.namespace === 'con') {
-          const con = this.lookupCon(expr.name);
-          const module = this.thModule('con', con);
-          return call('mkNameG_d', str(thPackage(module)), str(module), str(con.name));
-        }
-        if (!expr.name.qualifier && scope.lookup(expr.name.name)) return call('mkNameS', str(expr.name.name));
-        const entity = this.lookupValue(expr.name, false);
-        if (entity.con) {
-          const module = this.thModule('con', entity.con);
-          return call('mkNameG_d', str(thPackage(module)), str(module), str(entity.name));
-        }
-        const module = this.thModule('v', entity);
-        return call('mkNameG_v', str(thPackage(module)), str(module), str(entity.name));
-      }
-      case 'thChain': {
-        const resolved = resolveExprChain(expr.items, span, (op) => this.fixityOf(op, scope));
-        const operatorOf = (op: Operator): Expr => {
-          const found =
-            expr.operators.get(op) ??
-            [...expr.operators].find(([key]) => key.name === op.name && key.span.col === op.span.col)?.[1];
-          if (!found) throw compileError(op.span, '書き方に誤りがあります。');
-          return found;
-        };
-        const build = (node: Expr): Expr => {
-          if (node.kind === 'binop') {
-            const [left, right] = [build(node.left), build(node.right)];
-            if (expr.pattern) return call('infixP', left, operatorOf(node.op), right);
-            return call('infixE', call('Just', left), operatorOf(node.op), call('Just', right));
-          }
-          if (node.kind === 'neg') return call('appE', expr.negate, build(node.expr));
-          return node;
-        };
-        return build(resolved);
-      }
+    if (expr.constructor) {
+      const con = this.lookupCon(expr.name);
+      return thCall(span, 'quoteGlobalCon', thString(span, this.thModule('con', con)), thString(span, con.name));
     }
+    if (expr.implicit) {
+      const entity = this.supportValue(expr.name.name, span);
+      return thCall(span, 'quoteGlobalVar', thString(span, this.thModule('v', entity)), thString(span, entity.name));
+    }
+    // A name nothing binds stays unbound in the tree, for the code it is spliced into to bind, as GHC does.
+    if (!(!expr.name.qualifier && scope.lookup(expr.name.name)) && this.valuesNamed(expr.name).length === 0) {
+      return thCall(span, 'unboundVarE', thCall(span, 'mkName', thString(span, expr.name.name)));
+    }
+    const ref = this.resolveVar(expr.name, scope);
+    // A variable of the program outside the quote is lifted: the tree of its value.
+    if (ref.kind === 'local') return thCall(span, 'lift', { kind: 'var', name: expr.name, span });
+    return thCall(
+      span,
+      'quoteGlobalVar',
+      thString(span, this.thModule('v', ref.entity)),
+      thString(span, ref.entity.name)
+    );
+  }
+
+  /** A quoted name, `'f` or `''T`, as GHC's `Name` of what it names. */
+  private thNameCode(expr: Extract<Expr, { kind: 'thName' }>, scope: LocalScope): Expr {
+    const { span } = expr;
+    const global = (make: string, module: string, name: string): Expr =>
+      thCall(span, make, thString(span, thPackage(module)), thString(span, module), thString(span, name));
+    if (expr.namespace === 'type') {
+      // The types of special syntax have names of their own in GHC.
+      const special = expr.name.qualifier ? undefined : specialTypeName(expr.name.name);
+      if (special) return global('mkNameG_tc', special[0], special[1]);
+      const like = this.lookupType(expr.name);
+      return global('mkNameG_tc', this.thModule('t', like.entity), like.entity.name);
+    }
+    if (expr.namespace === 'con') {
+      const con = this.lookupCon(expr.name);
+      return global('mkNameG_d', this.thModule('con', con), con.name);
+    }
+    if (!expr.name.qualifier && scope.lookup(expr.name.name)) {
+      return thCall(span, 'mkNameS', thString(span, expr.name.name));
+    }
+    const entity = this.lookupValue(expr.name, false);
+    if (entity.con) return global('mkNameG_d', this.thModule('con', entity.con), entity.name);
+    return global('mkNameG_v', this.thModule('v', entity), entity.name);
+  }
+
+  /** An operator chain of a quote, whose fixities decide how its `InfixE` or `InfixP` trees nest. */
+  private thChainCode(expr: Extract<Expr, { kind: 'thChain' }>, scope: LocalScope): Expr {
+    const { span } = expr;
+    const resolved = resolveExprChain(expr.items, span, (op) => this.fixityOf(op, scope));
+    const operatorOf = (op: Operator): Expr => {
+      const found =
+        expr.operators.get(op) ??
+        [...expr.operators].find(([key]) => key.name === op.name && key.span.col === op.span.col)?.[1];
+      if (!found) throw compileError(op.span, '書き方に誤りがあります。');
+      return found;
+    };
+    const build = (node: Expr): Expr => {
+      if (node.kind === 'neg') return thCall(span, 'appE', expr.negate, build(node.expr));
+      if (node.kind !== 'binop') return node;
+      const [left, right] = [build(node.left), build(node.right)];
+      if (expr.pattern) return thCall(span, 'infixP', left, operatorOf(node.op), right);
+      return thCall(span, 'infixE', thCall(span, 'Just', left), operatorOf(node.op), thCall(span, 'Just', right));
+    };
+    return build(resolved);
   }
 
   /** The module GHC defines a name in, which Template Haskell shows it with. */
@@ -2851,8 +2868,6 @@ interface RawBinding {
   entities: ValueEntity[];
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Grouping clauses into bindings checks each of GHC's conditions on adjacent clauses.
-// code-gauge-allow functionNcss -- Grouping clauses into bindings checks each of GHC's conditions on adjacent clauses.
 /**
  * A method binding with an instance signature, `m :: sig; m ... = e`, as `m = let m' :: sig; m' ... = e in m'`, which
  * checks that the signature is at least as general as the method's type. The local's name is one programs cannot
@@ -3108,4 +3123,15 @@ function unboxedConstructor(name: string): ConInfo | undefined {
   const sum = /^\(#(\|*)_(\|*)#\)$/.exec(name);
   if (sum) return unboxedSumType(sum[1].length + sum[2].length + 1).cons[sum[1].length];
   return undefined;
+}
+
+function thString(span: Span, text: string): Expr {
+  return { kind: 'lit', lit: { kind: 'string', value: [...text] }, span };
+}
+
+/** A call of a library value the compiler chooses, which code a quote builds refers to. */
+function thCall(span: Span, name: string, ...args: Expr[]): Expr {
+  let result: Expr = { kind: 'support', name, span };
+  for (const arg of args) result = { kind: 'app', fn: result, arg, span };
+  return result;
 }

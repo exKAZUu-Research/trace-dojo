@@ -716,7 +716,6 @@ function convertLocalBinds(node: Node | undefined): Decl[] {
   return namedChildren(node).flatMap((child) => convertDecl(child));
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Each branch rejects one unsupported form of a data declaration.
 function convertData(node: Node, isInstance = false): Decl {
   const forallNode = field(node, 'forall');
   if (forallNode) throw unsupported(forallNode);
@@ -900,6 +899,44 @@ function convertPatternSynonymHead(node: Node): { name: Name; params: Name[]; fi
 }
 
 /** Converts the declarations of type families and data families, and their instances. */
+/** Converts `type family F a`, with its result kind and injectivity, or a closed family with its equations. */
+function convertTypeFamily(node: Node, span: Span): Decl {
+  const equationsNode = field(node, 'closed_family');
+  const resultNode = namedChildren(node).find((child) => child.type === 'type_family_result');
+  const params = typeParams(node);
+  const kindNode = field(node, 'kind');
+  let resultKind = kindNode ? convertKind(kindNode) : undefined;
+  const result = resultNode ? required(resultNode, 'result') : undefined;
+  if (result && (result.type === 'parens' || result.type === 'annotated')) resultKind = convertBinder(result).kind;
+  if (equationsNode?.type === 'abstract_family') {
+    throw syntaxError(spanOf(equationsNode), '中身を書かない閉じた型族は、hs-boot ファイルにだけ書けます。');
+  }
+  return {
+    kind: 'typeFamily',
+    name: typeDeclName(node),
+    params,
+    paramKinds: typeParamKinds(node),
+    resultKind,
+    equations: equationsNode ? fields(equationsNode, 'equation').map(convertEquation) : undefined,
+    injective: familyInjectivity(node, params),
+    span,
+  };
+}
+
+/** The positions of the arguments an injectivity annotation, `= r | r -> a`, says a family's result determines. */
+function familyInjectivity(node: Node, params: Name[]): number[] | undefined {
+  const injectivityNode = namedChildren(node).find((child) => child.type === 'type_family_injectivity');
+  if (!injectivityNode) return undefined;
+  if (!extensions.has('TypeFamilyDependencies')) {
+    throw syntaxError(spanOf(injectivityNode), '単射の注釈には、TypeFamilyDependencies の拡張が要ります。');
+  }
+  return fields(injectivityNode, 'determined').map((determined) => {
+    const index = params.findIndex((param) => param.name === determined.text);
+    if (index === -1) throw syntaxError(spanOf(determined), `${determined.text} は、型族の引数ではありません。`);
+    return index;
+  });
+}
+
 function convertFamilyDecl(node: Node): Decl {
   if (!extensions.has('TypeFamilies')) {
     throw syntaxError(spanOf(node), '型族やデータ族を使うには、TypeFamilies の拡張が要ります。');
@@ -907,43 +944,7 @@ function convertFamilyDecl(node: Node): Decl {
   const span = spanOf(node);
   switch (node.type) {
     case 'type_family': {
-      const equationsNode = field(node, 'closed_family');
-      const resultNode = namedChildren(node).find((child) => child.type === 'type_family_result');
-      const injectivityNode = namedChildren(node).find((child) => child.type === 'type_family_injectivity');
-      const params = typeParams(node);
-      const kindNode = field(node, 'kind');
-      let resultKind = kindNode ? convertKind(kindNode) : undefined;
-      if (resultNode) {
-        const result = required(resultNode, 'result');
-        if (result.type === 'parens' || result.type === 'annotated') {
-          const binder = convertBinder(result);
-          resultKind = binder.kind;
-        }
-      }
-      let injective: number[] | undefined;
-      if (injectivityNode) {
-        if (!extensions.has('TypeFamilyDependencies')) {
-          throw syntaxError(spanOf(injectivityNode), '単射の注釈には、TypeFamilyDependencies の拡張が要ります。');
-        }
-        injective = fields(injectivityNode, 'determined').map((determined) => {
-          const index = params.findIndex((param) => param.name === determined.text);
-          if (index === -1) throw syntaxError(spanOf(determined), `${determined.text} は、型族の引数ではありません。`);
-          return index;
-        });
-      }
-      if (equationsNode?.type === 'abstract_family') {
-        throw syntaxError(spanOf(equationsNode), '中身を書かない閉じた型族は、hs-boot ファイルにだけ書けます。');
-      }
-      return {
-        kind: 'typeFamily',
-        name: typeDeclName(node),
-        params,
-        paramKinds: typeParamKinds(node),
-        resultKind,
-        equations: equationsNode ? fields(equationsNode, 'equation').map(convertEquation) : undefined,
-        injective,
-        span,
-      };
+      return convertTypeFamily(node, span);
     }
     case 'type_instance': {
       return { kind: 'typeInstance', ...convertEquation(node) };

@@ -79,7 +79,6 @@ class Preprocessor {
     return output.join('\n');
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- One case per directive, as cpp handles them.
   private directive(name: string, rest: string, stack: Conditional[], active: boolean): void {
     switch (name) {
       case 'if':
@@ -253,46 +252,45 @@ class Preprocessor {
       const name = match[0];
       index += name.length;
       if (condition) this.checkPlatform(name);
-      if (name === '__LINE__') {
-        result += String(this.row);
-        continue;
-      }
-      const version = /^MIN_VERSION_(\w+)$/.exec(name);
-      const macro = active.has(name) ? undefined : this.macros.get(name);
-      if (!macro && !version) {
-        result += condition && !name.startsWith("'") ? '0' : name;
-        continue;
-      }
-      if (!macro?.params && !version) {
-        result += this.expand((macro as Macro).body, new Set([...active, name]), condition);
-        continue;
-      }
-      const call = /^\s*\(/.exec(text.slice(index));
-      if (!call) {
-        result += name;
-        continue;
-      }
-      const { args, end } = splitArguments(text, index + call[0].length - 1, (message) =>
-        this.error(this.row, message)
-      );
-      index = end;
-      if (version) {
-        // In code, GHC's macro is a comparison, which Haskell reads as a Bool.
-        const satisfied = this.minVersion(version[1], args);
-        result += condition ? String(satisfied) : satisfied === 1 ? 'True' : 'False';
-        continue;
-      }
-      const params = (macro as Macro).params ?? [];
-      if (params.length !== args.length) {
-        throw this.error(this.row, `マクロ ${name} には、引数を ${params.length} 個書いてください。`);
-      }
-      const body = (macro as Macro).body.replaceAll(/[A-Za-z_]\w*/g, (word) => {
-        const position = params.indexOf(word);
-        return position === -1 ? word : args[position].trim();
-      });
-      result += this.expand(body, new Set([...active, name]), condition);
+      const expanded = this.expandName(name, text, index, active, condition);
+      result += expanded.text;
+      index = expanded.end;
     }
     return result;
+  }
+
+  /** What a name in code expands to, with where the code after it, past a macro call's arguments, starts. */
+  private expandName(
+    name: string,
+    text: string,
+    index: number,
+    active: ReadonlySet<string>,
+    condition: boolean
+  ): { text: string; end: number } {
+    if (name === '__LINE__') return { text: String(this.row), end: index };
+    const version = /^MIN_VERSION_(\w+)$/.exec(name);
+    const macro = active.has(name) ? undefined : this.macros.get(name);
+    if (!macro && !version) return { text: condition ? '0' : name, end: index };
+    if (macro && !macro.params) {
+      return { text: this.expand(macro.body, new Set([...active, name]), condition), end: index };
+    }
+    const call = /^\s*\(/.exec(text.slice(index));
+    if (!call) return { text: name, end: index };
+    const { args, end } = splitArguments(text, index + call[0].length - 1, (message) => this.error(this.row, message));
+    if (version) {
+      // In code, GHC's macro is a comparison, which Haskell reads as a Bool.
+      const satisfied = this.minVersion(version[1], args);
+      return { text: condition ? String(satisfied) : satisfied === 1 ? 'True' : 'False', end };
+    }
+    const params = (macro as Macro).params ?? [];
+    if (params.length !== args.length) {
+      throw this.error(this.row, `マクロ ${name} には、引数を ${params.length} 個書いてください。`);
+    }
+    const body = (macro as Macro).body.replaceAll(/[A-Za-z_]\w*/g, (word) => {
+      const position = params.indexOf(word);
+      return position === -1 ? word : args[position].trim();
+    });
+    return { text: this.expand(body, new Set([...active, name]), condition), end };
   }
 
   private minVersion(packageName: string, args: string[]): number {

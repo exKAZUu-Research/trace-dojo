@@ -316,37 +316,7 @@ class LibraryCompiler {
           });
         }
       }
-      // The names GHC's module has that this one leaves out, which the program learns are unavailable.
-      for (const value of UNIMPLEMENTED_LIBRARY_VALUES[name] ?? []) {
-        if (exports.values.has(value)) continue;
-        exports.values.set(value, {
-          id: nextId(),
-          name: value,
-          module: name,
-          sort: 'var',
-          unsupported: `ライブラリ関数（${name}.${value}）`,
-        });
-      }
-      for (const type of UNIMPLEMENTED_LIBRARY_TYPES[name] ?? []) {
-        if (exports.types.has(type)) continue;
-        exports.types.set(type, {
-          entity: {
-            kind: 'type',
-            entity: {
-              id: nextId(),
-              name: type,
-              module: name,
-              sort: 'prim',
-              kind: STAR,
-              arity: 0,
-              cons: [],
-              fields: new Map(),
-              unsupported: `ライブラリの型（${name}.${type}）`,
-            },
-          },
-          children: [],
-        });
-      }
+      addUnimplementedNames(exports, name);
       attachKnownTypeChildren(exports);
       assertPublicExports(name, exports);
       modules.set(name, exports);
@@ -590,4 +560,33 @@ function assertPublicExports(name: string, exports: ExportTable): void {
   for (const value of exports.values.keys())
     assert(!values || values.includes(value), `${name} does not export ${value}`);
   for (const type of exports.types.keys()) assert(!types || types.includes(type), `${name} does not export ${type}`);
+}
+
+/** The names GHC's module has that this one leaves out, which a program that uses them learns are unavailable. */
+function addUnimplementedNames(exports: ExportTable, name: string): void {
+  for (const value of UNIMPLEMENTED_LIBRARY_VALUES[name] ?? []) {
+    if (exports.values.has(value)) continue;
+    exports.values.set(value, {
+      id: nextId(),
+      name: value,
+      module: name,
+      sort: 'var',
+      unsupported: `ライブラリ関数（${name}.${value}）`,
+    });
+  }
+  for (const type of UNIMPLEMENTED_LIBRARY_TYPES[name] ?? []) {
+    if (exports.types.has(type)) continue;
+    const entity: TypeEntity = {
+      id: nextId(),
+      name: type,
+      module: name,
+      sort: 'prim',
+      kind: STAR,
+      arity: 0,
+      cons: [],
+      fields: new Map(),
+      unsupported: `ライブラリの型（${name}.${type}）`,
+    };
+    exports.types.set(type, { entity: { kind: 'type', entity }, children: [] });
+  }
 }

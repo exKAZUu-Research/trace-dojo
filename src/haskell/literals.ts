@@ -159,7 +159,8 @@ function escapeBareQuotes(body: string): string {
     if (char === '\\') {
       result += body.slice(index, index + 2);
       index++;
-    } else result += char === '"' ? String.raw`\"` : char === '\n' ? String.raw`\n` : char === '\t' ? String.raw`\t` : char;
+    } else
+      result += char === '"' ? String.raw`\"` : char === '\n' ? String.raw`\n` : char === '\t' ? String.raw`\t` : char;
   }
   return result;
 }
