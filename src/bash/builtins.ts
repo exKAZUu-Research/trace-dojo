@@ -141,8 +141,12 @@ export function assignSubscriptedBuiltinTarget(
   subscript: string,
   value: string
 ): boolean {
-  const resolved = shell.resolveName(name);
-  if (!shell.isAssociative(resolved)) return shell.assignElement(name, subscript, value, false);
+  const resolved = shell.resolveNameOrUndefined(name);
+  if (resolved === undefined) return false;
+  if (!shell.isAssociative(resolved)) {
+    const expanded = shell.expandDynamicSubscript(subscript);
+    return shell.assignElement(resolved, expanded === '' && subscript !== '' ? '0' : expanded, value, false);
+  }
   const key = shell.expander.expandSubscriptText(subscript);
   if (key === '') {
     shell.reportError(`${builtin}: ${name}[${subscript}]: bad array subscript`);
@@ -216,7 +220,8 @@ function unsetName(shell: Shell, name: string, mode: UnsetMode): boolean {
 
 /** `unset 'name[subscript]'`, which clears an indexed array for `@` or `*` and expands an associative key. */
 export function unsetElement(shell: Shell, name: string, subscript: string, viaReference = false): boolean {
-  const resolved = shell.resolveName(name);
+  const resolved = shell.resolveNameOrUndefined(name);
+  if (resolved === undefined) return false;
   const variable = shell.findVariable(resolved);
   if (variable?.attributes.has('r')) {
     shell.reportError(`unset: ${resolved}: cannot unset: readonly variable`);
@@ -227,7 +232,8 @@ export function unsetElement(shell: Shell, name: string, subscript: string, viaR
   }
   if (!variable) return true;
   if (subscript === '@' || subscript === '*') return clearIndexedOrScalar(shell, variable, resolved, viaReference);
-  const index = shell.arrayIndex(resolved, subscript);
+  const expanded = shell.expandDynamicSubscript(subscript);
+  const index = shell.arrayIndex(resolved, expanded === '' && subscript !== '' ? '0' : expanded);
   if (index === undefined) {
     shell.reportError(`unset: [${subscript}]: bad array subscript`);
     return false;

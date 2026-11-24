@@ -480,3 +480,118 @@ export function* collectReachableStrings(
   for (const { text } of activeOutputs) yield text;
   for (const { values } of inFlight) yield* values;
 }
+
+/** Whether following `start`'s nameref chain across `scopes` reaches an already-seen nameref cell. */
+export function hasNamerefCycleInScopes(scopes: readonly Scope[], start: Variable): boolean {
+  const seen = new Set<Variable>();
+  for (let cur: Variable | undefined = start; cur?.attributes.has('n') && cur.value?.kind === 'scalar';) {
+    if (seen.has(cur)) return true;
+    seen.add(cur);
+    const target: string = cur.value.value;
+    cur = target === '' || target.includes('[') ? undefined : findOwnVariableInScopes(scopes, target);
+  }
+  return false;
+}
+
+/** Follows namerefs across `scopes` to the referenced variable cell, returning `undefined` on cycles. */
+export function findVariableInScopes(
+  scopes: readonly Scope[],
+  name: string,
+  followReferences: boolean
+): Variable | undefined {
+  if (!followReferences) return findOwnVariableInScopes(scopes, name);
+  const seen = new Set<Variable>();
+  for (let target = name; ;) {
+    const variable = findOwnVariableInScopes(scopes, target);
+    if (!variable?.attributes.has('n') || variable.value?.kind !== 'scalar') return variable;
+    if (seen.has(variable)) return undefined;
+    seen.add(variable);
+    if (variable.value.value === '') return variable;
+    const open = variable.value.value.indexOf('[');
+    target = open === -1 ? variable.value.value : variable.value.value.slice(0, open);
+  }
+}
+
+/** Resolves `name` through namerefs across `scopes`, reporting `{ cyclicName }` when a reference cycle is encountered. */
+export function resolveNameInScopes(
+  scopes: readonly Scope[],
+  name: string
+): { resolved: string } | { cyclicName: string } {
+  const seen = new Set<Variable>();
+  for (let target = name; !target.includes('[');) {
+    const variable = findOwnVariableInScopes(scopes, target);
+    if (!variable?.attributes.has('n') || variable.value?.kind !== 'scalar' || variable.value.value === '') {
+      return { resolved: target };
+    }
+    if (seen.has(variable)) return { cyclicName: variable.name };
+    seen.add(variable);
+    target = variable.value.value;
+    if (target.includes('[')) return { resolved: target };
+  }
+  return { resolved: name };
+}
+
+/** Looks up `name` in `scopes` from innermost to outermost without following namerefs. */
+export function findOwnVariableInScopes(scopes: readonly Scope[], name: string): Variable | undefined {
+  for (let i = scopes.length - 1; i >= 0; i--) {
+    const variable = scopes[i].get(name);
+    if (variable) return variable;
+  }
+  return undefined;
+}
+
+/** Reads scalar/element-0 value of a `VariableValue`. */
+export function variableScalarZero(value: VariableValue | undefined): string | undefined {
+  if (!value) return undefined;
+  if (value.kind === 'scalar') return value.value;
+  return value.kind === 'indexed' ? value.elements.get(0n) : value.table.get('0');
+}
+
+/** Reads `value` at numeric `index`. */
+export function variableElementAt(value: VariableValue, index: bigint): string | undefined {
+  if (value.kind === 'scalar') return index === 0n ? value.value : undefined;
+  if (value.kind === 'associative') return value.table.get(String(index));
+  return value.elements.get(index);
+}
+
+/** Translates a negative array index relative to `variable`'s max index + 1 (or `dynamicLength`). */
+export function translateNegativeIndex(
+  variable: Variable | undefined,
+  index: bigint,
+  dynamicLength?: number
+): bigint | undefined {
+  const length =
+    variable?.value?.kind === 'indexed'
+      ? maxElementIndex(variable.value.elements) + 1n
+      : variable?.attributes.has('a')
+        ? 0n
+        : BigInt(dynamicLength ?? 1);
+  const resolved = length + index;
+  return resolved < 0n ? undefined : resolved;
+}
+
+/** Lists all element values of a non-empty `VariableValue`. */
+export function variableElementValues(value: VariableValue): string[] {
+  if (value.kind === 'scalar') return [value.value];
+  if (value.kind === 'indexed') return sortedElements(value.elements).map(([, element]) => element);
+  return value.table.entries().map(([, element]) => element);
+}
+
+/** Lists all element keys of a non-empty `VariableValue`. */
+export function variableElementKeys(value: VariableValue): string[] {
+  if (value.kind === 'scalar') return ['0'];
+  if (value.kind === 'indexed') return sortedElements(value.elements).map(([key]) => String(key));
+  return value.table.entries().map(([key]) => key);
+}
+
+/** Materializes `variable` as a writable indexed array, converting a scalar into element `0`. */
+export function ensureIndexedElements(variable: Variable): Map<bigint, string> {
+  ensureWritable(variable);
+  if (variable.value?.kind === 'indexed') return variable.value.elements;
+  const elements = new Map<bigint, string>();
+  if (variable.value?.kind === 'scalar') elements.set(0n, variable.value.value);
+  variable.value = { kind: 'indexed', elements };
+  variable.shared = false;
+  variable.attributes.add('a');
+  return elements;
+}

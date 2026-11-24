@@ -274,7 +274,6 @@ export class Expander {
     return this.expandSubscriptString(subscript);
   }
 
-  // code-gauge-allow functionNcss -- One case per special parameter and subscript form.
   parameterValue(name: string, subscript: string | undefined, expansion?: ParameterExpansion): ParameterValue {
     const { shell } = this;
     if (subscript !== undefined) {
@@ -285,6 +284,20 @@ export class Expander {
       if (subscript === '' && expansion) return this.emptySubscriptValue(expansion, resolved);
       return { kind: 'scalar', value: shell.elementValue(resolved, subscript) };
     }
+    const special = this.specialParameterValue(name);
+    if (special) return special;
+    const resolved = shell.resolveNameOrUndefined(name);
+    if (resolved === undefined) return { kind: 'scalar', value: undefined };
+    const split = shell.splitSubscript(resolved);
+    if (split && (split.subscript === '@' || split.subscript === '*')) {
+      const arr = shell.resolveNameOrUndefined(split.name);
+      return { kind: 'list', values: arr === undefined ? [] : shell.arrayValues(arr), star: split.subscript === '*' };
+    }
+    return { kind: 'scalar', value: shell.scalarValue(name) };
+  }
+
+  private specialParameterValue(name: string): ParameterValue | undefined {
+    const { shell } = this;
     const positional = shell.state.positional.at(-1) as string[];
     switch (name) {
       case '@':
@@ -315,7 +328,7 @@ export class Expander {
       }
     }
     if (/^[0-9]+$/.test(name)) return { kind: 'scalar', value: positional[Number(name) - 1] };
-    return { kind: 'scalar', value: shell.scalarValue(name) };
+    return undefined;
   }
 
   /** `${a[$k]}` whose subscript expands to nothing: element 0 of an indexed array, and an error for an associative one. */
@@ -347,19 +360,20 @@ export class Expander {
     const variable = subscript === undefined ? shell.findOwnVariable(name) : undefined;
     if (variable?.attributes.has('n')) {
       const target = variable.value?.kind === 'scalar' ? variable.value.value : '';
-      return this.finishIndirect(expansion, { kind: 'scalar', value: target }, target, inDouble);
+      return this.finishIndirect(expansion, { kind: 'scalar', value: target }, target, undefined, inDouble);
     }
     const direct = this.parameterValue(name, subscript, expansion);
     const reference = direct.kind === 'scalar' ? direct.value : direct.values.join(' ');
     if (reference === undefined || reference === '') {
       if (expansion.operator === undefined) this.checkIndirectReference(name, subscript);
-      return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, '', inDouble);
+      return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, '', undefined, inDouble);
     }
     const target = this.indirectTarget(reference);
     return this.finishIndirect(
       expansion,
       this.parameterValue(target.name, target.subscript, expansion),
-      reference,
+      target.name,
+      target.subscript,
       inDouble
     );
   }
@@ -368,11 +382,11 @@ export class Expander {
     expansion: ParameterExpansion,
     value: ParameterValue,
     targetName: string,
+    targetSubscript: string | undefined,
     inDouble: boolean
   ): Piece[] {
     if (expansion.operator === undefined) return this.valuePieces(value, inDouble);
-    const target = targetName ? this.indirectTarget(targetName) : { name: '', subscript: undefined };
-    return applyOperator(this, this.shell, expansion, value, target.name, target.subscript, inDouble);
+    return applyOperator(this, this.shell, expansion, value, targetName, targetSubscript, inDouble);
   }
 
   /** Bash rejects `${!x}` for an unset variable, but not for an unset element of an array that exists. */
@@ -383,7 +397,16 @@ export class Expander {
 
   private indirectTarget(reference: string): { name: string; subscript: string | undefined } {
     const split = this.shell.splitSubscript(reference);
-    if (split && isIdentifier(split.name)) return { name: split.name, subscript: split.subscript };
+    if (split && isIdentifier(split.name) && split.subscript !== '') {
+      const resolved = this.shell.resolveName(split.name);
+      const raw = split.subscript;
+      if (raw === '@' || raw === '*') return { name: split.name, subscript: raw };
+      const expanded = this.shell.expandDynamicSubscript(raw);
+      if (this.shell.isAssociative(resolved)) return { name: split.name, subscript: expanded };
+      const normalized = expanded === '' ? '0' : expanded;
+      const index = this.shell.arrayIndex(resolved, normalized);
+      return { name: split.name, subscript: index === undefined ? normalized : String(index) };
+    }
     if (!isValidParameterName(reference)) this.shell.discard(`${reference}: invalid variable name`);
     return { name: reference, subscript: undefined };
   }

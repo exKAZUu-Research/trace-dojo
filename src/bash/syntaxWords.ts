@@ -192,6 +192,7 @@ function skipDoubleQuotedBraceBody(text: SourceText, open: number, start: number
     } else if (c === '\\') i = Math.min(i + 2, source.length);
     else if (c === '"') i = skipDoubleQuoted(text, i);
     else if (c === '`') i = skipBackquoted(text, i);
+    else if (c === '$' && source[i + 1] === '{') i = skipBraces(text, i + 1, true);
     else if (c === '$') i = skipWordPiece(text, i);
     else i++;
   }

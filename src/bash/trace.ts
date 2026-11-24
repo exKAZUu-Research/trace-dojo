@@ -38,8 +38,8 @@ export function traceBashProgram(program: string, trace: TraceOptions, input?: P
 function variablesOf(shell: Shell, frame: Frame): TraceVariables {
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   for (const variable of visibleVariables(shell, frame)) {
-    const value = shownValueOf(shell, frame, variable);
-    addVariable(shell, variables, variable.name, value, variable.nullReference === true);
+    const { value, nullReference } = shownValueOf(shell, frame, variable);
+    addVariable(shell, variables, variable.name, value, nullReference);
     // A function receives a structure through a name reference (`local -n this=$1`), as a Java method receives
     // `this`, so its fields show among the values learners answer, as Java shows `this.x`.
     if (variable.attributes.has('n') && value?.kind === 'associative') {
@@ -75,21 +75,30 @@ function scopeRank(scopes: Scope[], variable: Variable): number {
  * The value a variable shows in `frame`, resolving name references (including `arr[sub]` targets) within `frame`'s
  * visible scopes without mutating live shell state.
  */
-function shownValueOf(shell: Shell, frame: Frame, variable: Variable): VariableValue | undefined {
-  if (!variable.attributes.has('n') || variable.value?.kind !== 'scalar') return variable.value;
-  const maxScope = frame.scopeIndex;
-  let current: Variable | undefined = variable;
-  for (let depth = 0; depth < 8; depth++) {
-    if (!current?.attributes.has('n') || current.value?.kind !== 'scalar') return current?.value;
-    const ref = current.value.value;
-    if (ref === '') return current.value;
-    const split = shell.splitSubscript(ref);
-    if (split) return observeElement(shell, split.name, split.subscript, maxScope);
-    const next = findOwnVariableIn(shell, ref, maxScope);
-    if (!next || next === current) return undefined;
-    current = next;
+function shownValueOf(
+  shell: Shell,
+  frame: Frame,
+  variable: Variable
+): { value: VariableValue | undefined; nullReference: boolean } {
+  if (!variable.attributes.has('n') || variable.value?.kind !== 'scalar') {
+    return { value: variable.value, nullReference: variable.nullReference === true };
   }
-  return undefined;
+  const maxScope = frame.scopeIndex;
+  const visited = new Set<Variable>();
+  let current: Variable | undefined = variable;
+  for (let depth = 0; depth < 16 && current; depth++) {
+    if (!current.attributes.has('n') || current.value?.kind !== 'scalar') {
+      return { value: current.value, nullReference: current.nullReference === true };
+    }
+    if (visited.has(current)) return { value: undefined, nullReference: false };
+    visited.add(current);
+    const ref = current.value.value;
+    if (ref === '') return { value: current.value, nullReference: false };
+    const split = shell.splitSubscript(ref);
+    if (split) return { value: observeElement(shell, split.name, split.subscript, maxScope), nullReference: false };
+    current = findOwnVariableIn(shell, ref, maxScope);
+  }
+  return { value: undefined, nullReference: false };
 }
 
 /** Evaluates `name[subscript]` against a discarded copy-on-write snapshot of `frame`'s visible scopes. */
@@ -97,12 +106,13 @@ function shownValueOf(shell: Shell, frame: Frame, variable: Variable): VariableV
 // code-gauge-allow functionNcss -- Resolves chained namerefs and evaluates element subscripts against a discarded CoW ShellState.
 function observeElement(shell: Shell, name: string, subscript: string, maxScope: number): VariableValue | undefined {
   let target: Variable | undefined = findOwnVariableIn(shell, name, maxScope);
-  for (let depth = 0; depth < 8 && target?.attributes.has('n') && target.value?.kind === 'scalar'; depth++) {
+  const visited = new Set<Variable>();
+  for (let depth = 0; depth < 16 && target?.attributes.has('n') && target.value?.kind === 'scalar'; depth++) {
+    if (visited.has(target)) return undefined;
+    visited.add(target);
     const ref = target.value.value;
     if (ref === '' || ref.includes('[')) return undefined;
-    const next = findOwnVariableIn(shell, ref, maxScope);
-    if (!next || next === target) return undefined;
-    target = next;
+    target = findOwnVariableIn(shell, ref, maxScope);
   }
   if (!target?.value) return undefined;
   if (subscript === '@' || subscript === '*') return target.value;
@@ -130,7 +140,9 @@ function observeElement(shell: Shell, name: string, subscript: string, maxScope:
     fd2: silentAbort,
   };
   try {
-    const element = shell.elementValue(target.name, subscript);
+    const expanded = shell.expandDynamicSubscript(subscript);
+    const normalized = expanded === '' && subscript !== '' && target.value.kind !== 'associative' ? '0' : expanded;
+    const element = shell.elementValue(target.name, normalized);
     return element === undefined ? undefined : { kind: 'scalar', value: element };
   } catch (error) {
     if (

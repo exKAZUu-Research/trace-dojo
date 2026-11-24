@@ -31,10 +31,10 @@ function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
   const { error, backquotes, literalSingleQuotes } = checkBashSyntax(source);
   if (error && error !== 'unknown')
     throw new CompileError([{ row: error.row, message: syntaxErrorMessage(error.text) }]);
-  const quoteSet = new Set(literalSingleQuotes);
-  const quoteNormalized = maskLiteralSingleQuotes(source, quoteSet);
-  const hidden = hideInvalidBackquotes(quoteNormalized, backquotes);
-  const { source: parsedSource, masked } = maskInvalidArithmetic(parser, hidden.source);
+  const hidden = hideInvalidBackquotes(source, backquotes);
+  const quoteSet = new Set([...literalSingleQuotes, ...hidden.literalSingleQuotes]);
+  const quoteNormalized = maskLiteralSingleQuotes(hidden.source, quoteSet);
+  const { source: parsedSource, masked } = maskInvalidArithmetic(parser, quoteNormalized);
   return parseSource(
     parser,
     parsedSource,
@@ -47,7 +47,8 @@ function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
         rawArithmeticPieces,
         reparseBackquoted,
         hidden.errors,
-        quoteSet
+        quoteSet,
+        source
       );
       const program = converter.convertProgram(root);
       for (const row of atomicRows) {

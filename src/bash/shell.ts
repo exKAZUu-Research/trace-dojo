@@ -38,20 +38,29 @@ import {
   type CompoundElement,
   createInitialGlobalScope,
   DYNAMIC_VARIABLES,
+  ensureIndexedElements,
   ensureWritable,
   ENVIRONMENT_VARIABLES,
   findEnclosingVariable,
+  findOwnVariableInScopes,
+  findVariableInScopes,
+  hasNamerefCycleInScopes,
   isIdentifier,
   isValidFunctionName,
   maxElementIndex,
   PERMANENT_DYNAMIC_VARIABLES,
   readAssociativePair,
   removeScopedVariable,
+  resolveNameInScopes,
   SCALAR_DYNAMIC_VARIABLES,
   type Scope,
-  sortedElements,
+  translateNegativeIndex,
   unpackIndexedElement,
   type Variable,
+  variableElementAt,
+  variableElementKeys,
+  variableElementValues,
+  variableScalarZero,
   type VariableValue,
 } from './variables';
 
@@ -120,8 +129,6 @@ export class Shell implements ArithmeticHost {
   private readonly suspended: ShellState[] = [];
   /** The loops running in the current function call or at the top level. */
   private loopDepth = 0;
-  /** Whether the last command that ran was a call of a function the program defines. */
-  private ranFunction = false;
   /** Whether the shell is reading a statement's condition, whose commands record no steps. */
   private conditionDepth = 0;
   /** Nesting depth on the left side of `&&` or `||`, where pure tests record no step unless shown state changed. */
@@ -134,8 +141,6 @@ export class Shell implements ArithmeticHost {
   /** Prefix-assignment scope owned by the currently executing declaration command, if any. */
   private activeDeclarationPrefix: Scope | undefined;
   private readonlyFailure = false;
-  private declarationAssigned = false;
-  private executedTestCommand = false;
 
   constructor(readonly runtime: Runtime) {
     this.state = {
@@ -290,38 +295,48 @@ export class Shell implements ArithmeticHost {
 
   /** Runs a command that records a step after it completes, unless it is part of a condition. */
   private executeSimple(statement: Statement): number {
-    const run = (): number => {
-      this.ranFunction = false;
-      this.declarationAssigned = false;
-      this.executedTestCommand = false;
-      switch (statement.kind) {
-        case 'command': {
-          return this.executeCommand(statement);
-        }
-        case 'declaration': {
-          return this.executeDeclaration(statement);
-        }
-        case 'arithmetic': {
-          return this.arithmeticStatus(statement.expression, '((');
-        }
-        case 'test': {
-          return this.executeTest(statement);
-        }
-        default: {
-          throw new Error(`Not a simple command: ${statement.kind}`);
-        }
-      }
-    };
-    if (this.conditionDepth > 0) return this.withRoots(() => this.withStatus(run));
+    if (this.conditionDepth > 0)
+      return this.withRoots(() => this.withStatus(() => this.runSimpleBody(statement).status));
     const mark = this.runtime.steps.statementMark();
-    const status = this.withRoots(() => this.withStatus(run));
-    const isConditionOrMeta =
-      (statement.kind === 'declaration' && !this.declarationAssigned) ||
-      (this.listConditionDepth > 0 &&
-        (statement.kind === 'test' || statement.kind === 'arithmetic' || this.executedTestCommand));
-    if (isConditionOrMeta) this.runtime.steps.stepBinding(statement.row, false);
-    else this.runtime.steps.completeStatement(statement.row, () => this.ranFunction, mark);
+    let outcome = { status: 0, conditionalStep: false, ranFunction: false };
+    const status = this.withRoots(() =>
+      this.withStatus(() => {
+        outcome = this.runSimpleBody(statement);
+        return outcome.status;
+      })
+    );
+    if (outcome.conditionalStep) this.runtime.steps.stepBinding(statement.row, false);
+    else this.runtime.steps.completeStatement(statement.row, outcome.ranFunction, mark);
     return status;
+  }
+
+  private runSimpleBody(statement: Statement): { status: number; conditionalStep: boolean; ranFunction: boolean } {
+    switch (statement.kind) {
+      case 'command': {
+        return this.executeCommand(statement);
+      }
+      case 'declaration': {
+        const { status, assignsAnswer } = this.executeDeclaration(statement);
+        return { status, conditionalStep: !assignsAnswer, ranFunction: false };
+      }
+      case 'arithmetic': {
+        return {
+          status: this.arithmeticStatus(statement.expression, '(('),
+          conditionalStep: this.listConditionDepth > 0,
+          ranFunction: false,
+        };
+      }
+      case 'test': {
+        return {
+          status: this.executeTest(statement),
+          conditionalStep: this.listConditionDepth > 0,
+          ranFunction: false,
+        };
+      }
+      default: {
+        throw new Error(`Not a simple command: ${statement.kind}`);
+      }
+    }
   }
 
   /** Runs a command and sets `$?`, before a step records its state. */
@@ -429,7 +444,18 @@ export class Shell implements ArithmeticHost {
         this.reportError(`${name}: readonly variable`);
         return false;
       }
+      if (!this.isValidNamerefTarget(value)) {
+        this.reportError(`\`${value}': not a valid identifier`);
+        return false;
+      }
+      if (!this.isInFunction && value === reference.name) {
+        this.reportError(`${name}: nameref variable self reference not allowed`);
+        return false;
+      }
       reference.value = { kind: 'scalar', value };
+      if (this.hasNamerefCycle(reference)) {
+        this.reportError(`warning: ${reference.name}: circular name reference`);
+      }
       return true;
     }
     if (!this.assignScalar(name, value)) return false;
@@ -529,34 +555,44 @@ export class Shell implements ArithmeticHost {
 
   // ---------------------------------------------------------------- simple commands
 
-  private executeCommand(statement: Extract<Statement, { kind: 'command' }>): number {
+  private executeCommand(statement: Extract<Statement, { kind: 'command' }>): {
+    status: number;
+    conditionalStep: boolean;
+    ranFunction: boolean;
+  } {
     const argv = this.expander.expandWords(statement.words);
-    if (argv.length === 0) return this.executeAssignmentOnlyCommand(statement);
+    if (argv.length === 0) {
+      return { status: this.executeAssignmentOnlyCommand(statement), conditionalStep: false, ranFunction: false };
+    }
     const [name] = argv;
     const fn = this.state.functions.get(name);
     const builtin = !fn && Object.hasOwn(BUILTINS, name) ? BUILTINS[name] : undefined;
-    return this.withTemporaryScope(statement.assignments, () =>
-      this.withRedirects(statement.redirects, () => {
-        if (fn) {
-          const status = this.callFunction(fn, argv.slice(1), statement.row);
-          this.ranFunction = true;
-          this.state.lastArgument = argv.at(-1) as string;
-          return status;
-        }
-        if (builtin) {
-          const status = builtin(this, argv.slice(1), name);
-          this.executedTestCommand = statement.assignments.length === 0 && (name === 'test' || name === '[');
-          this.state.lastArgument = argv.at(-1) as string;
-          return status;
-        }
-        if (EXTERNAL_COMMANDS.has(name) || name.includes('/')) {
-          throw new UnsupportedFeatureError(`外部コマンド（${name}）`);
-        }
-        this.reportError(`${name}: command not found`);
-        this.state.lastArgument = argv.at(-1) as string;
-        return 127;
-      })
+    const isTestCommand = !fn && statement.assignments.length === 0 && (name === 'test' || name === '[');
+    const status = this.withTemporaryScope(statement.assignments, () =>
+      this.withRedirects(statement.redirects, () => this.dispatchCommand(argv, fn, builtin, statement.row))
     );
+    return {
+      status,
+      conditionalStep: this.listConditionDepth > 0 && isTestCommand,
+      ranFunction: Boolean(fn),
+    };
+  }
+
+  private dispatchCommand(
+    argv: string[],
+    fn: ReturnType<ShellState['functions']['get']>,
+    builtin: (typeof BUILTINS)[string] | undefined,
+    row: number
+  ): number {
+    const [name, ...args] = argv;
+    let status = 127;
+    if (fn) status = this.callFunction(fn, args, row);
+    else if (builtin) status = builtin(this, args, name);
+    else if (EXTERNAL_COMMANDS.has(name) || name.includes('/')) {
+      throw new UnsupportedFeatureError(`外部コマンド（${name}）`);
+    } else this.reportError(`${name}: command not found`);
+    this.state.lastArgument = argv.at(-1) as string;
+    return status;
   }
 
   private executeAssignmentOnlyCommand(statement: Extract<Statement, { kind: 'command' }>): number {
@@ -621,20 +657,24 @@ export class Shell implements ArithmeticHost {
     if (index !== -1) this.state.scopes.splice(index, 1);
   }
 
-  private executeDeclaration(statement: Extract<Statement, { kind: 'declaration' }>): number {
+  private executeDeclaration(statement: Extract<Statement, { kind: 'declaration' }>): {
+    status: number;
+    assignsAnswer: boolean;
+  } {
     const args = expandDeclarationArguments(this, statement.name, statement.args);
-    return this.withTemporaryScope(
+    const assignsAnswer = declarationAssignsAnswer(statement.name, args);
+    const status = this.withTemporaryScope(
       statement.assignments,
       () =>
         this.withRedirects(statement.redirects, () => {
-          const status = runDeclaration(this, statement.name, args);
-          this.declarationAssigned = declarationAssignsAnswer(statement.name, args);
+          const declStatus = runDeclaration(this, statement.name, args);
           const last = args.at(-1);
           this.state.lastArgument = last === undefined ? statement.name : typeof last === 'string' ? last : last.text;
-          return status;
+          return declStatus;
         }),
       true
     );
+    return { status, assignsAnswer };
   }
 
   // ---------------------------------------------------------------- functions
@@ -736,7 +776,6 @@ export class Shell implements ArithmeticHost {
     const savedRow = this.currentRow;
     const savedLineShift = this.lineShift;
     const savedReadShift = this.readShift;
-    const savedRanFunction = this.ranFunction;
     this.loopDepth = 0;
     if (startRow !== undefined) {
       this.lineShift = startRow - this.currentRow;
@@ -759,7 +798,6 @@ export class Shell implements ArithmeticHost {
       this.currentRow = savedRow;
       this.lineShift = savedLineShift;
       this.readShift = savedReadShift;
-      this.ranFunction = savedRanFunction;
     }
     this.inFlight.at(-1)?.values.push(buffer.text);
     // Bash keeps the random generator's state across command substitutions only when they reseed it.
@@ -885,27 +923,31 @@ export class Shell implements ArithmeticHost {
 
   // ---------------------------------------------------------------- variables
 
+  /** Whether `target` has the syntax of a valid `declare -n` / `for` nameref destination (`id` or `id[nonempty]`). */
+  isValidNamerefTarget(target: string): boolean {
+    const split = this.splitSubscript(target);
+    return isIdentifier(target) || Boolean(split && isIdentifier(split.name) && split.subscript !== '');
+  }
+
+  /** Whether following `start`'s nameref chain reaches an already-seen nameref cell. */
+  hasNamerefCycle(start: Variable): boolean {
+    return hasNamerefCycleInScopes(this.state.scopes, start);
+  }
+
+  /** Expands a runtime string subscript (`$k`, `${i}`, `$(...)`) once, preserving `@` and `*` verbatim. */
+  expandDynamicSubscript(rawSubscript: string): string {
+    return rawSubscript === '@' || rawSubscript === '*'
+      ? rawSubscript
+      : this.expander.expandSubscriptText(rawSubscript);
+  }
+
   /** The variable a name refers to, from the innermost scope, following name references. */
   findVariable(name: string, followReferences = true): Variable | undefined {
-    let target = name;
-    for (let depth = 0; depth < 8; depth++) {
-      const variable = this.findOwnVariable(target);
-      if (!followReferences || !variable?.attributes.has('n') || variable.value?.kind !== 'scalar') return variable;
-      target = variable.value.value;
-      if (target === '') return variable;
-      const open = target.indexOf('[');
-      if (open !== -1) return this.findOwnVariable(target.slice(0, open));
-    }
-    return undefined;
+    return findVariableInScopes(this.state.scopes, name, followReferences);
   }
 
   findOwnVariable(name: string): Variable | undefined {
-    const { scopes } = this.state;
-    for (let i = scopes.length - 1; i >= 0; i--) {
-      const variable = scopes[i].get(name);
-      if (variable) return variable;
-    }
-    return undefined;
+    return findOwnVariableInScopes(this.state.scopes, name);
   }
 
   declarationPrefixVariable(name: string): Variable | undefined {
@@ -918,17 +960,17 @@ export class Shell implements ArithmeticHost {
       : this.findOwnVariable(name);
   }
 
+  /** Resolves `name` through name references, returning `undefined` (and optionally warning) on a reference cycle. */
+  resolveNameOrUndefined(name: string, warnCycle = true): string | undefined {
+    const outcome = resolveNameInScopes(this.state.scopes, name);
+    if ('resolved' in outcome) return outcome.resolved;
+    if (warnCycle) this.reportError(`warning: ${outcome.cyclicName}: circular name reference`);
+    return undefined;
+  }
+
   /** The name a name reference finally names, or the name itself. */
   resolveName(name: string): string {
-    let target = name;
-    for (let depth = 0; depth < 8; depth++) {
-      const variable = this.findOwnVariable(target);
-      if (!variable?.attributes.has('n') || variable.value?.kind !== 'scalar' || variable.value.value === '') {
-        return target;
-      }
-      target = variable.value.value;
-    }
-    return target;
+    return this.resolveNameOrUndefined(name, false) ?? name;
   }
 
   private isUnreadHostEnv(name: string): boolean {
@@ -937,9 +979,10 @@ export class Shell implements ArithmeticHost {
 
   /** The value of `$name`: a scalar, or element 0 of an array, or `undefined` when unset. */
   scalarValue(name: string): string | undefined {
-    const resolved = this.resolveName(name);
-    const open = resolved.indexOf('[');
-    if (open !== -1) return this.elementValue(resolved.slice(0, open), resolved.slice(open + 1, -1));
+    const resolved = this.resolveNameOrUndefined(name);
+    if (resolved === undefined) return undefined;
+    const split = this.splitSubscript(resolved);
+    if (split) return this.readReferencedElement(split);
     const dynamic = this.dynamicValue(resolved);
     if (dynamic !== undefined) return dynamic;
     const variable = this.findVariable(resolved, false);
@@ -947,11 +990,20 @@ export class Shell implements ArithmeticHost {
       if (this.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
       return undefined;
     }
-    const { value } = variable;
-    if (!value) return undefined;
-    if (value.kind === 'scalar') return value.value;
-    if (value.kind === 'indexed') return value.elements.get(0n);
-    return value.table.get('0');
+    return variableScalarZero(variable.value);
+  }
+
+  private readReferencedElement(split: { name: string; subscript: string }): string | undefined {
+    const arr = this.resolveNameOrUndefined(split.name);
+    if (arr === undefined) return undefined;
+    if (split.subscript === '@' || split.subscript === '*') return this.arrayValues(arr).join(' ');
+    const sub = this.expandDynamicSubscript(split.subscript);
+    if (this.isAssociative(arr)) {
+      if (sub !== '') return this.elementValue(arr, sub);
+      this.reportError(`${arr}: bad array subscript`);
+      return undefined;
+    }
+    return this.elementValue(arr, sub === '' && split.subscript !== '' ? '0' : sub);
   }
 
   /** The value of a dynamic variable Bash computes when it is read, unless the program unset or shadowed it. */
@@ -1037,23 +1089,19 @@ export class Shell implements ArithmeticHost {
     if (variable.value.kind === 'associative') return variable.value.table.get(subscript);
     const index = this.readIndex(name, subscript);
     if (index === undefined) return undefined;
-    if (variable.value.kind === 'scalar') return index === 0n ? variable.value.value : undefined;
-    return this.elementAtIndex(name, index);
+    return variableElementAt(variable.value, index);
   }
 
   elementAtIndex(name: string, index: bigint): string | undefined {
     const variable = this.findVariable(name);
-    const value = variable?.value;
-    if (!value) {
+    if (!variable?.value) {
       const dynamic = this.dynamicArray(name);
       if (dynamic) return dynamic[Number(index)];
       if (this.isScalarDynamic(name)) return index === 0n ? this.dynamicValue(name) : undefined;
       if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
       return undefined;
     }
-    if (value.kind === 'scalar') return index === 0n ? value.value : undefined;
-    if (value.kind === 'associative') return value.table.get(String(index));
-    return value.elements.get(index);
+    return variableElementAt(variable.value, index);
   }
 
   /**
@@ -1068,15 +1116,7 @@ export class Shell implements ArithmeticHost {
 
   private arrayIndexFor(variable: Variable | undefined, subscript: string, dynamicLength?: number): bigint | undefined {
     const index = this.evaluateFatalReadonly(subscript);
-    if (index >= 0n) return index;
-    const length =
-      variable?.value?.kind === 'indexed'
-        ? maxElementIndex(variable.value.elements) + 1n
-        : variable?.attributes.has('a')
-          ? 0n
-          : BigInt(dynamicLength ?? 1);
-    const resolved = length + index;
-    return resolved < 0n ? undefined : resolved;
+    return index >= 0n ? index : translateNegativeIndex(variable, index, dynamicLength);
   }
 
   /** An index to read an element at, reporting one before the first element, which reads as unset. */
@@ -1096,10 +1136,7 @@ export class Shell implements ArithmeticHost {
       if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
       return [];
     }
-    const { value } = variable;
-    if (value.kind === 'scalar') return [value.value];
-    if (value.kind === 'indexed') return sortedElements(value.elements).map(([, element]) => element);
-    return value.table.entries().map(([, element]) => element);
+    return variableElementValues(variable.value);
   }
 
   /** The keys of `${!name[@]}`. */
@@ -1112,17 +1149,15 @@ export class Shell implements ArithmeticHost {
       if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
       return [];
     }
-    const { value } = variable;
-    if (value.kind === 'scalar') return ['0'];
-    if (value.kind === 'indexed') return sortedElements(value.elements).map(([key]) => String(key));
-    return value.table.entries().map(([key]) => key);
+    return variableElementKeys(variable.value);
   }
 
   /** Assigns a scalar value, creating a global variable when no scope holds one, as Bash does. */
   assignScalar(name: string, value: string, append = false): boolean {
-    const resolved = this.resolveName(name);
-    const open = resolved.indexOf('[');
-    if (open !== -1) return this.assignElement(resolved.slice(0, open), resolved.slice(open + 1, -1), value, append);
+    const resolved = this.resolveNameOrUndefined(name);
+    if (resolved === undefined) return false;
+    const split = this.splitSubscript(resolved);
+    if (split) return this.assignReferencedElement(split, value, append);
     if (this.assignDynamic(resolved, value)) return true;
     let variable = this.findVariable(resolved, false);
     if (!variable) {
@@ -1130,6 +1165,22 @@ export class Shell implements ArithmeticHost {
       this.state.scopes[0].set(resolved, variable);
     }
     return this.assignScalarTo(variable, value, append);
+  }
+
+  private assignReferencedElement(split: { name: string; subscript: string }, value: string, append: boolean): boolean {
+    const arr = this.resolveNameOrUndefined(split.name);
+    if (arr === undefined) return false;
+    if (split.subscript === '@' || split.subscript === '*') {
+      this.reportError(`${arr}[${split.subscript}]: cannot assign in this way`);
+      return false;
+    }
+    const sub = this.expandDynamicSubscript(split.subscript);
+    if (this.isAssociative(arr)) {
+      if (sub !== '') return this.assignElement(arr, sub, value, append, true);
+      this.reportError(`${split.name}[${split.subscript}]: bad array subscript`);
+      return false;
+    }
+    return this.assignElement(arr, sub === '' && split.subscript !== '' ? '0' : sub, value, append);
   }
 
   assignScalarTo(variable: Variable, value: string, append = false): boolean {
@@ -1188,17 +1239,8 @@ export class Shell implements ArithmeticHost {
    */
   assignElement(name: string, subscript: string, value: string, append: boolean, evaluated = false): boolean {
     if (this.isDynamic(name)) return this.assignDynamic(name, value);
-    let variable = this.findVariable(name);
-    if (variable?.attributes.has('r')) {
-      this.readonlyFailure = true;
-      this.reportError(`${name}: readonly variable`);
-      return false;
-    }
-    if (!variable) {
-      variable = { name, value: undefined, attributes: new Set() };
-      this.state.scopes[0].set(name, variable);
-    }
-    return this.assignElementTo(variable, subscript, value, append, evaluated, name);
+    const variable = this.writableContainerVariable(name, true);
+    return variable ? this.assignElementTo(variable, subscript, value, append, evaluated, name) : false;
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
@@ -1269,29 +1311,28 @@ export class Shell implements ArithmeticHost {
 
   /** The elements of a variable as an indexed array, converting a scalar into element 0 as Bash does. */
   indexedElements(variable: Variable): Map<bigint, string> {
-    ensureWritable(variable);
-    if (variable.value?.kind === 'indexed') return variable.value.elements;
-    const elements = new Map<bigint, string>();
-    if (variable.value?.kind === 'scalar') elements.set(0n, variable.value.value);
-    variable.value = { kind: 'indexed', elements };
-    variable.shared = false;
-    variable.attributes.add('a');
-    return elements;
+    return ensureIndexedElements(variable);
   }
 
   /** Assigns the words of `name=(...)` or `name+=(...)`, already expanded into keyed and plain elements. */
   assignCompound(name: string, elements: CompoundElement[], append: boolean): boolean {
     if (this.isDynamic(name)) return true;
+    const variable = this.writableContainerVariable(name, false);
+    return variable ? this.assignCompoundTo(variable, elements, append, name) : false;
+  }
+
+  private writableContainerVariable(name: string, markReadonlyFailure: boolean): Variable | undefined {
     let variable = this.findVariable(name);
     if (variable?.attributes.has('r')) {
+      if (markReadonlyFailure) this.readonlyFailure = true;
       this.reportError(`${name}: readonly variable`);
-      return false;
+      return undefined;
     }
     if (!variable) {
       variable = { name, value: undefined, attributes: new Set() };
       this.state.scopes[0].set(name, variable);
     }
-    return this.assignCompoundTo(variable, elements, append, name);
+    return variable;
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Bash's compound assignments for associative and indexed arrays, keyed and plain elements.

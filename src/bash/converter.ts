@@ -37,7 +37,7 @@ export class Converter {
   /** The rows of the `# atomic` annotations that a function's header holds. */
   readonly claimedAtomicRows = new Set<number>();
 
-  // code-gauge-allow functionParameterCount -- Carries source, annotations, masked arithmetic, backquote hooks, and literal-quote offsets.
+  // code-gauge-allow functionParameterCount -- Carries parsed/original sources, annotations, masked arithmetic, backquote hooks, and literal-quote offsets.
   constructor(
     private readonly source: string,
     private readonly atomicRows: ReadonlySet<number>,
@@ -47,7 +47,8 @@ export class Converter {
     private readonly reparse: (text: string, row: number) => Statement[],
     /** The syntax errors of backquoted bodies, which Bash reports when it runs them, by the index of their `` ` ``. */
     private readonly backquoteErrors: ReadonlyMap<number, BackquoteSyntaxError>,
-    private readonly literalQuotes: ReadonlySet<number> = new Set()
+    private readonly literalQuotes: ReadonlySet<number> = new Set(),
+    private readonly originalSource: string = source
   ) {}
 
   convertProgram(root: Node): Program {
@@ -608,7 +609,10 @@ export class Converter {
       this.unsupported(node, '現在のシェルで実行するコマンド置換（${ ...; }）');
     }
     const row = node.startPosition.row;
-    const text = this.restoreQuotes(node.text, node.startIndex);
+    const text =
+      opening?.type === '`'
+        ? this.originalSource.slice(node.startIndex, node.endIndex)
+        : this.restoreQuotes(node.text, node.startIndex);
     const syntaxError = opening?.type === '`' ? this.backquoteErrors.get(node.startIndex) : undefined;
     if (syntaxError) return { kind: 'commandSubstitution', body: [], text, row, syntaxError };
     // Bash removes the backslashes before `$`, `` ` ``, and `\` in a backquoted body before reading it as commands.

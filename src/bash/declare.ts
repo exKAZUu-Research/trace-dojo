@@ -141,8 +141,9 @@ function commitCompoundDeclaration(
   ) {
     shell.discard(`${targetName}: readonly variable`);
   }
-  const convErr = existing && conversionError(existing, set, unset);
-  if (convErr) shell.discard(`${targetName}: ${convErr}`);
+  const kindErr = existing && incompatibleArrayKindError(existing, set);
+  if (kindErr) shell.discard(`${targetName}: ${kindErr}`);
+  if (existing && conversionError(existing, set, unset)) return false;
   const variable = ensureCompoundTargetVariable(shell, targetName, set, localScope);
   applyAttributes(shell, builtin, variable, options, true, false);
   const { elements, error } = shell.expander.validateCompoundItems(rawItems, variable.attributes.has('A'), true);
@@ -329,6 +330,13 @@ function declareOne(
       ? shell.declarationPrefixVariable(name)
       : undefined;
   if (tempVar) return declarePrefixed(shell, builtin, name, tempVar, operand, parsed, options);
+  const explicitRefTarget = resolvePendingNamerefTarget(shell, name, operand, parsed, options, isLocal, isSubscripted);
+  if (
+    explicitRefTarget !== undefined &&
+    !validatePendingNamerefTarget(shell, builtin, name, explicitRefTarget, isLocal)
+  ) {
+    return false;
+  }
   const destination = declaredDestination(shell, builtin, name, options, isLocal, isSubscripted, assigns);
   if (
     !destination ||
@@ -348,9 +356,67 @@ function declareOne(
     options.set.has('g') && (isSubscripted || destination.referencedSubscript !== undefined)
       ? resolveElementStoreVariable(shell, name, variable.name, options.set, options.unset, isSubscripted)
       : variable;
-  const ok = assignDeclaredOperand(shell, builtin, variable, storeVariable, operand, parsed, referencedSubscript);
+  const ok =
+    explicitRefTarget !== undefined
+      ? commitNamerefTarget(shell, builtin, variable, explicitRefTarget, isLocal && !options.set.has('g'))
+      : assignDeclaredOperand(shell, builtin, variable, storeVariable, operand, parsed, referencedSubscript);
   if (options.set.has('r')) variable.attributes.add('r');
   return ok;
+}
+
+// code-gauge-allow functionParameterCount -- Inspects operand, parsed string form, options, scope mode, and subscript presence.
+function resolvePendingNamerefTarget(
+  shell: Shell,
+  name: string,
+  operand: DeclarationArgument,
+  parsed: { subscript?: string; append: boolean; value?: string } | undefined,
+  { set, unset }: Options,
+  isLocal: boolean,
+  isSubscripted: boolean
+): string | undefined {
+  if (isSubscripted || set.has('a') || set.has('A') || unset.has('n')) return undefined;
+  const { scopes, functionScopes } = shell.state;
+  const localScope = isLocal ? scopes[functionScopes.at(-1) as number] : undefined;
+  const existing = localScope ? localScope.get(name) : set.has('g') ? scopes[0].get(name) : shell.findOwnVariable(name);
+  if (!set.has('n') && !existing?.attributes.has('n')) return undefined;
+  if (typeof operand === 'string') return parsed?.value;
+  if (operand.array) return undefined;
+  if (operand.value !== undefined) {
+    return shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(operand.value as Word));
+  }
+  return operand.text.includes('=') ? '' : undefined;
+}
+
+function validatePendingNamerefTarget(
+  shell: Shell,
+  builtin: string,
+  name: string,
+  target: string,
+  isLocal: boolean
+): boolean {
+  if (!shell.isValidNamerefTarget(target)) {
+    shell.reportError(`${builtin}: \`${target}': invalid variable name for name reference`);
+    return false;
+  }
+  if (!isLocal && target === name) {
+    shell.reportError(`${builtin}: ${name}: nameref variable self reference not allowed`);
+    return false;
+  }
+  return true;
+}
+
+function commitNamerefTarget(
+  shell: Shell,
+  builtin: string,
+  variable: Variable,
+  target: string,
+  isLocal: boolean
+): boolean {
+  variable.value = { kind: 'scalar', value: target };
+  if ((isLocal && target === variable.name) || shell.hasNamerefCycle(variable)) {
+    shell.reportError(`${builtin}: warning: ${variable.name}: circular name reference`);
+  }
+  return true;
 }
 
 // code-gauge-allow functionParameterCount -- Needs shell, builtin, declared/store variables, raw/parsed operand, and nameref subscript.
@@ -368,10 +434,12 @@ function assignDeclaredOperand(
       return assignReferenceTarget(shell, builtin, variable, parsed.value);
     }
     if (parsed.subscript !== undefined) {
-      return shell.assignElementTo(storeVariable, parsed.subscript, parsed.value, parsed.append);
+      const sub = expandDeclaredSubscript(shell, storeVariable, parsed.subscript);
+      return shell.assignElementTo(storeVariable, sub, parsed.value, parsed.append);
     }
     if (referencedSubscript !== undefined) {
-      return shell.assignElementTo(storeVariable, referencedSubscript, parsed.value, parsed.append);
+      const sub = expandDeclaredSubscript(shell, storeVariable, referencedSubscript);
+      return shell.assignElementTo(storeVariable, sub, parsed.value, parsed.append);
     }
     return shell.assignScalarTo(storeVariable, parsed.value, parsed.append);
   }
@@ -379,6 +447,12 @@ function assignDeclaredOperand(
   return variable.attributes.has('n')
     ? assignReference(shell, builtin, variable, operand)
     : assignLocally(shell, storeVariable, operand, referencedSubscript);
+}
+
+function expandDeclaredSubscript(shell: Shell, variable: Variable, rawSubscript: string): string {
+  const expanded = shell.expandDynamicSubscript(rawSubscript);
+  const isAssoc = variable.value?.kind === 'associative' || variable.attributes.has('A');
+  return expanded === '' && rawSubscript !== '' && !isAssoc ? '0' : expanded;
 }
 
 /**
@@ -570,6 +644,8 @@ function resolveElementStoreVariable(
   return storeVariable;
 }
 
+const PROTECTED_READONLY_UNSET = new Set(['r', 'i', 'a', 'A', 'l', 'u', 'c']);
+
 function checkReadonlyConflict(
   shell: Shell,
   builtin: string,
@@ -580,7 +656,9 @@ function checkReadonlyConflict(
 ): boolean {
   if (!variable?.attributes.has('r')) return false;
   const adds = [...set].some((a) => a !== 'r' && a !== 'x' && a !== 'p' && a !== 'g' && a !== 'I');
-  const removes = [...unset].some((a) => a !== 'x');
+  const removes = [...unset].some(
+    (a) => PROTECTED_READONLY_UNSET.has(a) || (a === 'n' && variable.attributes.has('n'))
+  );
   if (!assigns && !adds && !removes) return false;
   shell.reportError(`${builtin}: ${targetName}: readonly variable`);
   return true;
@@ -678,14 +756,21 @@ const CASE_ATTRIBUTES: [Attribute, Attribute[]][] = [
   ['c', ['u', 'l']],
 ];
 
-function conversionError(variable: Variable, set: Set<string>, unset: Set<string>): string | undefined {
+function incompatibleArrayKindError(variable: Variable, set: Set<string>): string | undefined {
   if (set.has('A') && (variable.value?.kind === 'indexed' || variable.attributes.has('a'))) {
     return 'cannot convert indexed to associative array';
   }
   if (set.has('a') && (variable.value?.kind === 'associative' || variable.attributes.has('A'))) {
     return 'cannot convert associative to indexed array';
   }
+  return undefined;
+}
+
+function conversionError(variable: Variable, set: Set<string>, unset: Set<string>): string | undefined {
+  const kindErr = incompatibleArrayKindError(variable, set);
+  if (kindErr) return kindErr;
   if (unset.has('a') && variable.value?.kind === 'indexed') return 'cannot destroy array variables in this way';
+  if (unset.has('A') && variable.value?.kind === 'associative') return 'cannot destroy array variables in this way';
   return undefined;
 }
 
@@ -697,12 +782,15 @@ function assignReference(shell: Shell, builtin: string, variable: Variable, assi
 }
 
 function assignReferenceTarget(shell: Shell, builtin: string, variable: Variable, target: string): boolean {
-  if (target !== '' && !isIdentifier(target) && !shell.splitSubscript(target)) {
+  if (!shell.isValidNamerefTarget(target)) {
     shell.reportError(`${builtin}: \`${target}': invalid variable name for name reference`);
     variable.attributes.delete('n');
     return false;
   }
   variable.value = { kind: 'scalar', value: target };
+  if (shell.hasNamerefCycle(variable)) {
+    shell.reportError(`${builtin}: warning: ${variable.name}: circular name reference`);
+  }
   return true;
 }
 
@@ -733,7 +821,7 @@ function assignLocally(
     if (assignment.text.includes('=')) {
       return referencedSubscript === undefined
         ? shell.assignScalarTo(variable, '', append)
-        : shell.assignElementTo(variable, referencedSubscript, '', append);
+        : shell.assignElementTo(variable, expandDeclaredSubscript(shell, variable, referencedSubscript), '', append);
     }
     return true;
   }
@@ -751,7 +839,12 @@ function assignLocally(
     return shell.assignElementTo(variable, subscript, value, assignment.append);
   }
   if (referencedSubscript !== undefined) {
-    return shell.assignElementTo(variable, referencedSubscript, value, append);
+    return shell.assignElementTo(
+      variable,
+      expandDeclaredSubscript(shell, variable, referencedSubscript),
+      value,
+      append
+    );
   }
   return shell.assignScalarTo(variable, value, append);
 }
