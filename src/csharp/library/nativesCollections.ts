@@ -318,14 +318,20 @@ function lastIndexOfRange(call: NativeCall, items: Value[], value: Value, start:
 }
 
 export function sortItems(call: NativeCall, items: Value[], start: number, length: number, comparer: Value): void {
+  sortChecked(call, comparer, () =>
+    introSort(items, start, length, guardedComparison(call, comparisonOf(call, comparer)))
+  );
+}
+
+/** Runs a sort, reporting a comparer whose inconsistent results overran a partition as .NET's ArgumentException. */
+export function sortChecked(call: NativeCall, comparer: Value, sort: () => void): void {
   try {
-    introSort(items, start, length, guardedComparison(call, comparisonOf(call, comparer)));
+    sort();
   } catch (error) {
     if (!(error instanceof InconsistentComparer)) throw error;
+    // .NET names the comparer the sort was given, which is null for the default one.
     const comparerName =
-      comparer === undefined
-        ? `System.Collections.Generic.GenericComparer\`1[${runtimeTypeName(typeArgument(call))}]`
-        : runtimeTypeName(call.frame.runtime.runtimeTypeOf(comparer) as Type);
+      comparer === undefined ? '' : runtimeTypeName(call.frame.runtime.runtimeTypeOf(comparer) as Type);
     fail(
       'System.ArgumentException',
       `Unable to sort because the IComparer.Compare() method returns inconsistent results. Either a value does not compare equal to itself, or one value repeatedly compared to another value yields different results. IComparer: '${comparerName}'.`
