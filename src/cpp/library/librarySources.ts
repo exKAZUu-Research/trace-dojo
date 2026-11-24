@@ -1,5 +1,7 @@
+import { BITSET } from './sources/bitset';
 import { FUNCTION } from './sources/functional';
 import { MEMORY } from './sources/memory';
+import { NUMBERS } from './sources/numbers';
 import { OPTIONAL } from './sources/optional';
 import { INTEGER_SEQUENCE, TUPLE } from './sources/tuple';
 import { TYPE_TRAITS } from './sources/typeTraits';
@@ -22,6 +24,8 @@ export const LIBRARY_SOURCES: readonly LibrarySource[] = [
   MEMORY,
   INTEGER_SEQUENCE,
   TUPLE,
+  NUMBERS,
+  BITSET,
 ];
 
 const SOURCE_BY_NAME = new Map(LIBRARY_SOURCES.flatMap((source) => source.names.map((name) => [name, source])));

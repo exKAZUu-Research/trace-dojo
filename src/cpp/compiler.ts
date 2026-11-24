@@ -167,6 +167,8 @@ export class Compiler extends StatementCompiler {
   private readonly externGlobals = new Set<GlobalInfo>();
   /** Whether member function bodies wait for their first use, as a class template instance's do. */
   private defersBodies = false;
+  /** The bodies of nested classes' member functions, which compile when the outermost class is complete. */
+  private nestedBodies: (() => void)[] | undefined;
   /** The namespace `std` of the library's C++ source. */
   private readonly libraryNamespace = new NamespaceInfo('std', undefined);
   private readonly compiledSources = new Set<LibrarySource>();
@@ -636,6 +638,11 @@ export class Compiler extends StatementCompiler {
     const savedClass = this.memberClass;
     this.memberClass = cls;
     const definitions: { fn: FunctionInfo; node: Syntax }[] = [];
+    // The member functions of a nested class may use every member of the classes it is in (C++20 [class.mem]),
+    // so their bodies compile once the outermost class is complete.
+    const isNested = cls.outer !== undefined && this.nestedBodies !== undefined;
+    const savedNested = this.nestedBodies;
+    if (!isNested) this.nestedBodies = [];
     try {
       let access: Access = defaultAccess;
       for (const member of body.children) {
@@ -707,18 +714,55 @@ export class Compiler extends StatementCompiler {
           }
         }
       }
-      // The bodies that wait for their first use are set up first, so that the others may call them.
-      const ordered = this.defersBodies
-        ? definitions.toSorted((a, b) => Number(!this.defersBody(a.fn)) - Number(!this.defersBody(b.fn)))
-        : definitions;
-      for (const { fn, node: definition } of ordered) {
-        if (!fn.isDefaulted && !fn.isDeleted) this.compileFunction(fn, definition);
-      }
-      for (const fn of [...cls.constructors, ...(cls.destructor ? [cls.destructor] : [])]) {
-        if (fn.isDefined && !fn.compiled && fn.definition) this.compileFunction(fn, fn.definition);
+      const defers = this.defersBodies;
+      const compileBodies = (): void => {
+        // The bodies that wait for their first use are set up first, so that the others may call them.
+        const ordered = defers
+          ? definitions.toSorted((a, b) => Number(!this.defersBody(a.fn)) - Number(!this.defersBody(b.fn)))
+          : definitions;
+        for (const { fn, node: definition } of ordered) {
+          if (!fn.isDefaulted && !fn.isDeleted) this.compileFunction(fn, definition);
+        }
+        for (const fn of [...cls.constructors, ...(cls.destructor ? [cls.destructor] : [])]) {
+          if (fn.isDefined && !fn.compiled && fn.definition) this.compileFunction(fn, fn.definition);
+        }
+      };
+      if (isNested) {
+        const context = this.context;
+        const templateScopes = this.templateScopes;
+        const namespace = this.namespace;
+        this.nestedBodies?.push(() =>
+          this.withClassState(
+            { memberClass: cls, defersBodies: defers, context, templateScopes, namespace },
+            compileBodies
+          )
+        );
+      } else {
+        compileBodies();
+        for (let index = 0; index < (this.nestedBodies?.length ?? 0); index++) this.nestedBodies?.[index]();
       }
     } finally {
       this.memberClass = savedClass;
+      if (!isNested) this.nestedBodies = savedNested;
+    }
+  }
+
+  private withClassState(
+    state: Pick<Compiler, 'memberClass' | 'context' | 'templateScopes' | 'namespace'> & { defersBodies: boolean },
+    run: () => void
+  ): void {
+    const saved = {
+      memberClass: this.memberClass,
+      defersBodies: this.defersBodies,
+      context: this.context,
+      templateScopes: this.templateScopes,
+      namespace: this.namespace,
+    };
+    Object.assign(this, state);
+    try {
+      run();
+    } finally {
+      Object.assign(this, saved);
     }
   }
 

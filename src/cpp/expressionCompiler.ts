@@ -158,7 +158,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         const concept = this.conceptId(node);
         if (concept) return concept;
         const entity = this.lookupQualified(node);
-        const name = fieldOf(node, 'name') as Syntax;
+        let name = fieldOf(node, 'name') as Syntax;
+        while (name.type === 'qualified_identifier') name = fieldOf(name, 'name') as Syntax;
         const variable = entity.kind === 'template' ? entity.template.program : undefined;
         if (variable?.kind === 'variable' && (name.type === 'template_function' || name.type === 'template_type')) {
           const written = this.templateArguments(fieldOf(name, 'arguments') as Syntax);

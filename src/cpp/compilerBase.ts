@@ -213,7 +213,8 @@ export abstract class CompilerBase {
   protected namedClassTemplate(node: Syntax): LibraryTemplate | undefined {
     if (node.type !== 'type_identifier' && node.type !== 'identifier' && node.type !== 'qualified_identifier')
       return undefined;
-    if (node.type === 'qualified_identifier' && fieldOf(node, 'name')?.type !== 'type_identifier') return undefined;
+    const inner = node.type === 'qualified_identifier' ? fieldOf(node, 'name')?.type : undefined;
+    if (inner !== undefined && inner !== 'type_identifier' && inner !== 'identifier') return undefined;
     let entity: Entity | undefined;
     try {
       entity = node.type === 'qualified_identifier' ? this.lookupQualified(node, true) : this.findName(node.text, true);
@@ -342,6 +343,9 @@ export abstract class CompilerBase {
       const scope = fieldOf(nameNode, 'scope') as Syntax;
       const scopeName = scope.type === 'template_type' ? (fieldOf(scope, 'name') as Syntax) : scope;
       const entity = this.lookupInNamespace(scopeName, row);
+      // `std::numbers::pi` names a member of a namespace of the library's C++ source.
+      if (entity.kind === 'namespace' && entity.ns)
+        return this.lookupInProgramNamespace(entity.ns, fieldOf(nameNode, 'name') as Syntax, row);
       let type: Type | undefined;
       if (entity.kind === 'class') type = classType(entity.cls);
       else if (entity.kind === 'type') type = entity.type;

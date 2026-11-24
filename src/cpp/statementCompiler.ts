@@ -20,7 +20,7 @@ import { ExpressionCompiler } from './expressionCompiler';
 import { SequenceValue } from './library/containerValues';
 import { bindRetainedTemporary, initializeAt, withTemporaries, zeroOf } from './objectCompiler';
 import { expandPacks } from './packs';
-import { parseInitializerArguments } from './parse';
+import { parseAsDeclaration, parseInitializerArguments } from './parse';
 import { erasePointee } from './pointerCasts';
 import {
   BREAK,
@@ -35,7 +35,7 @@ import {
 } from './runtime';
 import { type ConstantReference, type Entity, Scope } from './scopes';
 import { isObjectCreation, onlyCalls } from './stepRules';
-import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
+import { fieldOf, fieldsOf, hasToken, type Syntax, tokenOf } from './syntax';
 import {
   type GlobalInfo,
   hasVacuousInitialization,
@@ -248,6 +248,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return this.localDeclaration(node).exec;
       }
       case 'expression_statement': {
+        const declaration = this.misreadDeclaration(node);
+        if (declaration) return this.localDeclaration(declaration).exec;
         return this.expressionStatement(node);
       }
       case 'if_statement': {
@@ -324,6 +326,21 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   protected abstract localFunctionDeclaration(declaration: Syntax, declared: Declared): LocalDeclaration;
 
   // Declarations -----------------------------------------------------------------------------------------------------
+
+  /**
+   * The declaration an expression statement is when its comparisons start with a class template's name
+   * (`std::bitset<8> b;`), which the grammar reads as `std::bitset < 8 > b`.
+   */
+  private misreadDeclaration(node: Syntax): Syntax | undefined {
+    let first: Syntax | undefined = node.children[0];
+    while (first?.type === 'comma_expression' || first?.type === 'binary_expression') {
+      if (first.type === 'binary_expression' && tokenOf(first, ['<']) === '<') break;
+      first = fieldOf(first, 'left');
+    }
+    const name = first?.type === 'binary_expression' ? fieldOf(first, 'left') : undefined;
+    if (!name || !this.namedClassTemplate(name)) return undefined;
+    return parseAsDeclaration(node);
+  }
 
   /**
    * The type a variable declaration's specifiers give, where a class template's name without arguments takes the

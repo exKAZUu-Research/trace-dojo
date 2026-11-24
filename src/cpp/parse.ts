@@ -63,6 +63,28 @@ export function parseLibrarySource(source: string): Syntax {
   );
 }
 
+/**
+ * Parses a statement as a declaration, which the grammar reads as comparisons when a class template's arguments are
+ * all values (`std::bitset<8> b;`): `const` before it leaves the grammar a declaration only, and the copy drops it.
+ */
+export function parseAsDeclaration(statement: Syntax): Syntax | undefined {
+  const prefix = 'void declaration_probe() { const ';
+  const tree = parser.parse(`${prefix}${statement.text} }`);
+  if (!tree) return undefined;
+  try {
+    const { rootNode } = tree;
+    if (rootNode.hasError) return undefined;
+    const declaration = rootNode.namedChild(0)?.childForFieldName('body')?.namedChild(0);
+    if (declaration?.type !== 'declaration' || declaration.endIndex !== prefix.length + statement.text.length)
+      return undefined;
+    const syntax = copySyntax(declaration, undefined, { row: statement.row, index: statement.start - prefix.length });
+    const all = syntax.all.slice(1);
+    return { ...syntax, all, children: all.filter((child) => child.isNamed) };
+  } finally {
+    tree.delete();
+  }
+}
+
 export function parseInitializerArguments(parameters: Syntax): Syntax | undefined {
   const prefix = 'void initializer_probe() { initializer_probe';
   const tree = parser.parse(`${prefix}${parameters.text}; }`);
