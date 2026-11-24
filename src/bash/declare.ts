@@ -7,6 +7,7 @@ import { DiscardSignal } from './runtime';
 import type { CompoundElement, Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
 import {
+  applyCaseAttributes,
   AssociativeTable,
   type Attribute,
   ATTRIBUTE_ORDER,
@@ -1065,12 +1066,27 @@ function commitNamerefTarget(
   target: string,
   isLocal: boolean
 ): boolean {
-  variable.value = { kind: 'scalar', value: target };
+  const converted = convertNamerefTarget(shell, variable, target);
+  if (!shell.isValidNamerefTarget(converted)) {
+    variable.attributes.delete('n');
+    return true;
+  }
+  if (!isLocal && converted === variable.name) {
+    shell.reportError(`${builtin}: ${variable.name}: nameref variable self reference not allowed`);
+    variable.attributes.delete('n');
+    return false;
+  }
+  variable.value = { kind: 'scalar', value: converted };
   variable.userAssigned = true;
-  if ((isLocal && target === variable.name) || shell.hasNamerefCycle(variable)) {
+  if ((isLocal && converted === variable.name) || shell.hasNamerefCycle(variable)) {
     shell.reportError(`${builtin}: warning: ${variable.name}: circular name reference`);
   }
   return true;
+}
+
+function convertNamerefTarget(shell: Shell, variable: Variable, target: string): string {
+  const raw = variable.attributes.has('i') ? String(BigInt.asIntN(64, shell.evaluateFatalReadonly(target))) : target;
+  return applyCaseAttributes(variable, raw);
 }
 
 // code-gauge-allow functionParameterCount -- Needs shell, builtin, declared/store variables, raw/parsed operand, nameref subscript, and +n flag.
