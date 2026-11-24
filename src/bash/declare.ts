@@ -371,7 +371,7 @@ function declareOne(
   const explicitRefTarget = resolvePendingNamerefTarget(shell, name, operand, parsed, options, isLocal, isSubscripted);
   if (
     explicitRefTarget !== undefined &&
-    !validatePendingNamerefTarget(shell, builtin, name, explicitRefTarget, isLocal)
+    !validatePendingNamerefTarget(shell, builtin, name, explicitRefTarget, shell.isInFunction)
   ) {
     return false;
   }
@@ -396,7 +396,7 @@ function declareOne(
       : variable;
   const ok =
     explicitRefTarget !== undefined
-      ? commitNamerefTarget(shell, builtin, variable, explicitRefTarget, isLocal && !options.set.has('g'))
+      ? commitNamerefTarget(shell, builtin, variable, explicitRefTarget, shell.isInFunction)
       : assignDeclaredOperand(shell, builtin, variable, storeVariable, operand, parsed, referencedSubscript);
   if (options.set.has('r')) variable.attributes.add('r');
   return ok;
@@ -416,7 +416,7 @@ function resolvePendingNamerefTarget(
   const { scopes, functionScopes } = shell.state;
   const localScope = isLocal ? scopes[functionScopes.at(-1) as number] : undefined;
   const existing = localScope ? localScope.get(name) : set.has('g') ? scopes[0].get(name) : shell.findOwnVariable(name);
-  if (!set.has('n') && !existing?.attributes.has('n')) return undefined;
+  if (!set.has('n') && !(existing?.attributes.has('n') && existing.value === undefined)) return undefined;
   if (typeof operand === 'string') return parsed?.value;
   if (operand.array) return undefined;
   if (operand.value !== undefined) {
@@ -430,13 +430,13 @@ function validatePendingNamerefTarget(
   builtin: string,
   name: string,
   target: string,
-  isLocal: boolean
+  inFunction: boolean
 ): boolean {
   if (!shell.isValidNamerefTarget(target)) {
     shell.reportError(`${builtin}: \`${target}': invalid variable name for name reference`);
     return false;
   }
-  if (!isLocal && target === name) {
+  if (!inFunction && target === name) {
     shell.reportError(`${builtin}: ${name}: nameref variable self reference not allowed`);
     return false;
   }

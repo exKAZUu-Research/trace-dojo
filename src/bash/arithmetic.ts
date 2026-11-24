@@ -739,7 +739,6 @@ class FrameParser {
       if (literal[1] === 'x' || literal[1] === 'X') {
         radix = 16n;
         idx = 2;
-        if (idx >= literal.length) this.fail('invalid hex constant');
       } else {
         radix = 8n;
         idx = 1;

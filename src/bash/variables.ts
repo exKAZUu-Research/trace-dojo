@@ -259,7 +259,7 @@ export function removeScopedVariable(
   scopes: Scope[],
   currentFunctionScope: number | undefined,
   target: string
-): 'ok' | 'readonly' {
+): 'readonly' | 'local' | 'global' {
   for (let i = scopes.length - 1; i >= 0; i--) {
     const variable = scopes[i].get(target);
     if (!variable) continue;
@@ -269,9 +269,9 @@ export function removeScopedVariable(
       variable.shared = false;
       variable.attributes.clear();
     } else scopes[i].delete(target);
-    return 'ok';
+    return i > 0 ? 'local' : 'global';
   }
-  return 'ok';
+  return 'global';
 }
 
 /** Elements of call-stack and foreground-pipeline dynamic arrays (`FUNCNAME`, `BASH_LINENO`, `BASH_SOURCE`, `PIPESTATUS`). */

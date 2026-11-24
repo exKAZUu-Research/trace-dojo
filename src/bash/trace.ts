@@ -95,7 +95,7 @@ function shownValueOf(
     const ref = current.value.value;
     if (ref === '') return { value: current.value, nullReference: false };
     const split = shell.splitSubscript(ref);
-    if (split) return { value: observeElement(shell, split.name, split.subscript, maxScope), nullReference: false };
+    if (split) return observeElement(shell, split.name, split.subscript, maxScope);
     current = findOwnVariableIn(shell, ref, maxScope);
   }
   return { value: undefined, nullReference: false };
@@ -104,18 +104,24 @@ function shownValueOf(
 /** Evaluates `name[subscript]` against a discarded copy-on-write snapshot of `frame`'s visible scopes. */
 // code-gauge-allow functionCognitiveComplexity -- Resolves chained namerefs, whole-array `@`/`*` subscripts, and isolated CoW element reads.
 // code-gauge-allow functionNcss -- Resolves chained namerefs and evaluates element subscripts against a discarded CoW ShellState.
-function observeElement(shell: Shell, name: string, subscript: string, maxScope: number): VariableValue | undefined {
+function observeElement(
+  shell: Shell,
+  name: string,
+  subscript: string,
+  maxScope: number
+): { value: VariableValue | undefined; nullReference: boolean } {
   let target: Variable | undefined = findOwnVariableIn(shell, name, maxScope);
   const visited = new Set<Variable>();
   for (let depth = 0; depth < 16 && target?.attributes.has('n') && target.value?.kind === 'scalar'; depth++) {
-    if (visited.has(target)) return undefined;
+    if (visited.has(target)) return { value: undefined, nullReference: false };
     visited.add(target);
     const ref = target.value.value;
-    if (ref === '' || ref.includes('[')) return undefined;
+    if (ref === '' || ref.includes('[')) return { value: undefined, nullReference: false };
     target = findOwnVariableIn(shell, ref, maxScope);
   }
-  if (!target?.value) return undefined;
-  if (subscript === '@' || subscript === '*') return target.value;
+  if (!target?.value) return { value: undefined, nullReference: false };
+  const targetIsNullScalar = target.value.kind === 'scalar' && target.nullReference === true;
+  if (subscript === '@' || subscript === '*') return { value: target.value, nullReference: targetIsNullScalar };
   const { runtime } = shell;
   const savedState = shell.state;
   const savedLastStored = shell.lastStored;
@@ -143,7 +149,9 @@ function observeElement(shell: Shell, name: string, subscript: string, maxScope:
     const expanded = shell.expandDynamicSubscript(subscript);
     const normalized = expanded === '' && subscript !== '' && target.value.kind !== 'associative' ? '0' : expanded;
     const element = shell.elementValue(target.name, normalized);
-    return element === undefined ? undefined : { kind: 'scalar', value: element };
+    return element === undefined
+      ? { value: undefined, nullReference: false }
+      : { value: { kind: 'scalar', value: element }, nullReference: targetIsNullScalar };
   } catch (error) {
     if (
       error instanceof PureReadAbort ||
@@ -153,7 +161,7 @@ function observeElement(shell: Shell, name: string, subscript: string, maxScope:
       error instanceof ExitSignal ||
       error instanceof UnsupportedFeatureError
     ) {
-      return undefined;
+      return { value: undefined, nullReference: false };
     }
     throw error;
   } finally {

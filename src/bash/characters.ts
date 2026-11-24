@@ -28,10 +28,10 @@ export function charactersOf(text: string): string[] {
 
 /** Shared POSIX bracket character-class predicates under macOS `en_US.UTF-8` (`isw*`). */
 export const POSIX_CHARACTER_CLASSES: Record<string, (c: string) => boolean> = {
-  alnum: (c) => /^[\p{L}\p{N}]$/u.test(c),
+  alnum: (c) => /^[\p{L}\p{Nd}]$/u.test(c),
   alpha: (c) => /^\p{L}$/u.test(c),
   blank: (c) => c === ' ' || c === '\t',
-  cntrl: (c) => /^\p{Cc}$/u.test(c),
+  cntrl: (c) => c !== '\uFEFF' && /^[\p{Cc}\p{Cf}]$/u.test(c),
   digit: (c) => /^[0-9]$/.test(c),
   graph: (c) => /^[^\p{C}\p{Z}]$/u.test(c),
   lower: (c) => /^\p{Ll}$/u.test(c),

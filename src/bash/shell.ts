@@ -1000,7 +1000,10 @@ export class Shell implements ArithmeticHost {
   private readReferencedElement(split: { name: string; subscript: string }): string | undefined {
     const arr = this.resolveNameOrUndefined(split.name);
     if (arr === undefined) return undefined;
-    if (split.subscript === '@' || split.subscript === '*') return this.arrayValues(arr).join(' ');
+    if (split.subscript === '@' || split.subscript === '*') {
+      const values = this.arrayValues(arr);
+      return values.length === 0 ? undefined : values.join(split.subscript === '*' ? this.expander.ifsJoiner() : ' ');
+    }
     const sub = this.expandDynamicSubscript(split.subscript);
     if (this.isAssociative(arr)) {
       if (sub !== '') return this.elementValue(arr, sub);
@@ -1469,11 +1472,12 @@ export class Shell implements ArithmeticHost {
       this.state.unsetDynamic.add(target);
       return true;
     }
-    if (removeScopedVariable(this.state.scopes, this.state.functionScopes.at(-1), target) === 'readonly') {
+    const removed = removeScopedVariable(this.state.scopes, this.state.functionScopes.at(-1), target);
+    if (removed === 'readonly') {
       this.reportError(`unset: ${target}: cannot unset: readonly variable`);
       return false;
     }
-    if (ENVIRONMENT_VARIABLES.has(target)) this.state.unsetEnv.add(target);
+    if (removed === 'global' && ENVIRONMENT_VARIABLES.has(target)) this.state.unsetEnv.add(target);
     return true;
   }
 

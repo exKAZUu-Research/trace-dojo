@@ -38,6 +38,7 @@ export function compileRegex(source: string): CompiledRegex {
 class RegexParser {
   position = 0;
   groups = 0;
+  private groupDepth = 0;
 
   constructor(readonly chars: string[]) {}
 
@@ -54,7 +55,7 @@ class RegexParser {
     const items: RegexNode[] = [];
     for (;;) {
       const c = this.chars[this.position];
-      if (c === undefined || c === '|' || c === ')') break;
+      if (c === undefined || c === '|' || (c === ')' && this.groupDepth > 0)) break;
       items.push(this.parseRepeat());
     }
     if (items.length === 0) throw new RegexSyntaxError('empty (sub)expression');
@@ -65,7 +66,9 @@ class RegexParser {
     const atom = this.parseAtom();
     const first = this.readQuantifier();
     if (!first) return atom;
-    if (this.readQuantifier()) throw new RegexSyntaxError('repetition-operator operand invalid');
+    if (atom.kind === 'start' || atom.kind === 'end' || this.readQuantifier()) {
+      throw new RegexSyntaxError('repetition-operator operand invalid');
+    }
     return { kind: 'repeat', body: atom, ...first };
   }
 
@@ -100,8 +103,13 @@ class RegexParser {
     switch (c) {
       case '(': {
         const index = ++this.groups;
-        if (this.chars[this.position] === ')') throw new RegexSyntaxError('empty (sub)expression');
+        if (this.chars[this.position] === ')') {
+          this.position++;
+          return { kind: 'group', index, body: { kind: 'concat', items: [] } };
+        }
+        this.groupDepth++;
         const body = this.parseAlternation();
+        this.groupDepth--;
         if (this.chars[this.position] !== ')') throw new RegexSyntaxError('parentheses not balanced');
         this.position++;
         return { kind: 'group', index, body };
@@ -110,6 +118,12 @@ class RegexParser {
       case '+':
       case '?': {
         throw new RegexSyntaxError('repetition-operator operand invalid');
+      }
+      case '{': {
+        this.position--;
+        if (this.interval()) throw new RegexSyntaxError('repetition-operator operand invalid');
+        this.position++;
+        return { kind: 'char', c: '{' };
       }
       case '.': {
         return { kind: 'any' };
