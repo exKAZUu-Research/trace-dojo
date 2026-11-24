@@ -70,13 +70,26 @@ export class CsObject {
 }
 
 /** An instance of a struct, which assignments and calls copy. */
+/**
+ * Receives the field count of every struct made while a program runs, which the run charges as work: struct values
+ * that locals and closures keep are charged by no storage, so this bounds how many fields a run can make at all.
+ */
+let structMeter: ((fieldCount: number) => void) | undefined;
+
+/** Sets the meter for the structs made from now on, or removes it when the run ends. */
+export function meterStructs(meter: ((fieldCount: number) => void) | undefined): void {
+  structMeter = meter;
+}
+
 export class CsStruct {
   native?: unknown;
 
   constructor(
     readonly type: NamedType,
     readonly fields: Value[]
-  ) {}
+  ) {
+    structMeter?.(fields.length);
+  }
 
   clone(): CsStruct {
     const copy = new CsStruct(

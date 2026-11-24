@@ -140,6 +140,18 @@ export class Runtime {
     this.budget.spend(cost);
   }
 
+  /** The struct fields made since the last operation they were charged. */
+  private unchargedStructFields = 0;
+
+  /** Charges the fields of the structs a run makes as one operation per STRUCT_FIELDS_PER_OPERATION. */
+  meterStructFields(fieldCount: number): void {
+    this.unchargedStructFields += fieldCount;
+    if (this.unchargedStructFields < STRUCT_FIELDS_PER_OPERATION) return;
+    const operations = Math.floor(this.unchargedStructFields / STRUCT_FIELDS_PER_OPERATION);
+    this.unchargedStructFields -= operations * STRUCT_FIELDS_PER_OPERATION;
+    this.spend(operations);
+  }
+
   /** Checks a string's length and charges for building it, or for the `written` characters an edit writes. */
   allocateString(length: number, written = length): void {
     if (length > LIMITS.maxStringLength)
@@ -548,3 +560,6 @@ function nativeReferencesOf(value: CsObject | CsStruct): Iterable<unknown> {
   const native = value.native as NativeState | undefined;
   return native && typeof native.references === 'function' ? native.references() : [];
 }
+
+/** The struct fields made per operation charged, so a run makes at most this many times its operations of them. */
+const STRUCT_FIELDS_PER_OPERATION = 16;

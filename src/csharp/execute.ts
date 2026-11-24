@@ -8,7 +8,7 @@ import { runtimeTypeName } from './objects';
 import { parseCSharp } from './parse';
 import { type CsThrow, Frame, ProgramExit, Runtime } from './runtime';
 import { arrayType, namedType, type TypeSymbol } from './types';
-import { CsArray, type Value } from './values';
+import { CsArray, meterStructs, type Value } from './values';
 
 export function executeCSharpProgram(source: string, input?: ProgramInput): ProgramExecution {
   let compiled: CompiledProgram;
@@ -48,7 +48,13 @@ export function runProgram(evaluator: Evaluator, onMainExit?: (frame: Frame) => 
     }
     finalTurtles = runtime.world.turtleTraces();
   };
-  const uncaughtException = runEntry(evaluator);
+  meterStructs((fieldCount) => runtime.meterStructFields(fieldCount));
+  let uncaughtException: string | undefined;
+  try {
+    uncaughtException = runEntry(evaluator);
+  } finally {
+    meterStructs(undefined);
+  }
   return { finalBoard: runtime.world.boardText(), finalTurtles, uncaughtException, ...runtime.io.output() };
 }
 
