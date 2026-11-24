@@ -10,6 +10,8 @@ import { shallow, type Type, type TypeParam } from './types';
 import { utf8Reader } from './utf8';
 import {
   AccessorPlace,
+  BorrowGuard,
+  CellBox,
   CellPlace,
   DynValue,
   ElementPlace,
@@ -21,10 +23,12 @@ import {
   MapValue,
   type Place,
   SetValue,
+  SharedBox,
   SliceView,
   StructValue,
   TurtleValue,
   type Value,
+  WeakRef,
 } from './values';
 
 /** Marks a variable whose scope has not begun, has ended, or whose value moved out. */
@@ -240,6 +244,20 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** Drops the values of variables whose scope ends, for programs with `Drop` impls. */
   dropper: Dropper | undefined;
+  /** The guards of `RefCell` borrows made so far, whose temporaries go at the end of their statement. */
+  readonly liveGuards: BorrowGuard[] = [];
+
+  /**
+   * Ends the borrows of the guards made since `mark` that no variable of the frame holds (and that `kept` is not),
+   * as Rust drops temporaries at the end of a statement or a condition.
+   */
+  releaseGuards(frame: Frame, mark: number, kept?: Value): void {
+    if (this.liveGuards.length <= mark) return;
+    for (const guard of this.liveGuards.splice(mark)) {
+      if (guard === kept || frame.locals.some((value) => holds(value, guard))) continue;
+      guard.release();
+    }
+  }
 
   pushFrame(frame: Frame): void {
     if (this.frames.length >= LIMITS.maxCallDepth) throw new StackOverflow();
@@ -277,6 +295,13 @@ export class Runtime implements TracedRuntime<Frame> {
     }
     this.world.retain((turtle) => turtles.has(turtle));
   }
+}
+
+/** Whether a value is a guard, or holds it directly in an `Option`, a tuple, or a struct. */
+function holds(value: unknown, guard: BorrowGuard): boolean {
+  if (value === guard) return true;
+  if (value instanceof StructValue || value instanceof EnumValue) return value.fields.includes(guard);
+  return Array.isArray(value) && value.includes(guard);
 }
 
 export class StackOverflow {}
@@ -325,8 +350,12 @@ function pushChildren(item: object, stack: unknown[]): void {
     pushAll(stack, item);
   } else if (item instanceof StructValue || item instanceof EnumValue) {
     pushAll(stack, item.fields);
-  } else if (item instanceof CellPlace) {
+  } else if (item instanceof CellPlace || item instanceof SharedBox || item instanceof CellBox) {
     stack.push(item.value);
+  } else if (item instanceof WeakRef) {
+    if (item.box && item.box.strong > 0) stack.push(item.box);
+  } else if (item instanceof BorrowGuard) {
+    stack.push(item.cell);
   } else if (item instanceof AccessorPlace) {
     stack.push(item.target);
   } else if (item instanceof ElementPlace) {

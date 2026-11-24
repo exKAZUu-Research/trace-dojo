@@ -31,6 +31,10 @@ export type Value =
   | TurtleValue
   | FormatterValue
   | EntryValue
+  | SharedBox
+  | WeakRef
+  | CellBox
+  | BorrowGuard
   | undefined;
 
 export const UNIT_VALUE: Value[] = Object.freeze([]) as unknown as Value[];
@@ -312,4 +316,54 @@ export class EntryValue {
     readonly lookup: CollectionKey<[Value, Value]>,
     readonly key: Value
   ) {}
+}
+
+/** The allocation that `Rc` (and `Arc`) values share: the value, and how many strong and weak pointers there are. */
+export class SharedBox {
+  strong = 1;
+  weak = 0;
+  constructor(public value: Value) {}
+}
+
+/** A `Weak` pointer, to an allocation that may have gone (or none, from `Weak::new`). */
+export class WeakRef {
+  constructor(readonly box: SharedBox | undefined) {}
+}
+
+/**
+ * A value with interior mutability (`Cell`, `RefCell`, and the locks of threads), which the program changes through
+ * shared references; `RefCell` counts its borrows to panic as std does on a conflicting one.
+ */
+export class CellBox {
+  /** The shared borrows in use, or -1 while a mutable one is. */
+  borrows = 0;
+  constructor(public value: Value) {}
+}
+
+/** A `Ref` or `RefMut` (or a lock's guard): access to a `CellBox`'s value until the guard goes. */
+export class BorrowGuard {
+  released = false;
+  constructor(
+    readonly cell: CellBox,
+    readonly mutable: boolean
+  ) {}
+
+  /** Ends the borrow, once. */
+  release(): void {
+    if (this.released) return;
+    this.released = true;
+    if (this.mutable) this.cell.borrows = 0;
+    else this.cell.borrows--;
+  }
+
+  /** The place of the value, which a `RefMut` writes through. */
+  place(): Place {
+    const { cell } = this;
+    return new AccessorPlace(
+      () => cell.value,
+      (value) => {
+        cell.value = value;
+      }
+    );
+  }
 }

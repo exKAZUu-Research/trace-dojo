@@ -60,6 +60,11 @@ export function derefOnce(program: Program, type: Type): { type: Type; kind: Der
     case 'Vec': {
       return { type: { kind: 'slice', elem: t.args[0] }, kind: 'own' };
     }
+    case 'Rc':
+    case 'Ref':
+    case 'RefMut': {
+      return { type: t.args[0], kind: 'user' };
+    }
     default: {
       return t.def.builtin ? undefined : userDeref(program, t);
     }

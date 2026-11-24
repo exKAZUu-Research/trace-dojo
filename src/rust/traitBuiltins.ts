@@ -51,6 +51,12 @@ const CLONE_CONTAINERS = new Set([
 ]);
 
 const DEBUG_TYPES = new Set([
+  'Cell',
+  'Rc',
+  'Weak',
+  'RefCell',
+  'Ref',
+  'RefMut',
   'String',
   'Vec',
   'HashMap',
@@ -85,6 +91,7 @@ const DEBUG_TYPES = new Set([
 ]);
 
 const DEFAULT_TYPES = new Set([
+  'Weak',
   'String',
   'Vec',
   'HashMap',
@@ -186,6 +193,18 @@ const RULES: Record<string, Rule> = {
       [`${name}Assign`, (goal) => numericOperator(goal, name, true)],
     ])
   ),
+  Deref: ({ t }) =>
+    t.kind === 'adt' && ['Rc', 'Ref', 'RefMut', 'Box', 'String', 'Vec'].includes(t.def.builtin ?? '')
+      ? 'yes'
+      : t.kind === 'ref'
+        ? 'yes'
+        : 'no',
+  DerefMut: ({ t }) =>
+    t.kind === 'adt' && ['RefMut', 'Box', 'String', 'Vec'].includes(t.def.builtin ?? '')
+      ? 'yes'
+      : t.kind === 'ref' && t.mutable
+        ? 'yes'
+        : 'no',
   Neg: ({ t }) => {
     const n = operatorNumber(t);
     return n && (n.kind === 'float' || (n.kind === 'int' && n.name.startsWith('i'))) ? 'yes' : 'no';
@@ -273,6 +292,10 @@ function autoTrait({ solver, t, name, all }: Goal): Answer {
   if (t.kind === 'tuple') return all(t.elems);
   if (t.kind === 'array' || t.kind === 'slice') return all([t.elem]);
   if (t.kind === 'closure') return all(t.closure.captures?.map(({ type }) => type) ?? []);
+  // `Rc` shares its count between threads unsynchronized, and `Cell`, `RefCell`, and their guards may not be shared.
+  if (t.kind === 'adt' && ['Rc', 'Weak'].includes(t.def.builtin ?? '')) return 'no';
+  if (t.kind === 'adt' && name === 'Sync' && ['Cell', 'RefCell', 'Ref', 'RefMut'].includes(t.def.builtin ?? ''))
+    return 'no';
   if (t.kind === 'adt') return all(t.args);
   return 'yes';
 }
@@ -336,6 +359,11 @@ function cloneAdt(goal: Goal, t: AdtType): Answer {
   const d = derived(goal);
   if (d) return d;
   if (t.def.builtin === 'Iter') return all([t.args[1]]);
+  if (t.def.builtin === 'Rc' || t.def.builtin === 'Weak') return 'yes';
+  if (t.def.builtin === 'RefCell') return all(t.args);
+  if (t.def.builtin === 'Cell') {
+    return goal.solver.implements(t.args[0], { trait: goal.solver.program.traitDef('Copy'), args: [] });
+  }
   if (isIteratorShape(t.def)) return NON_CLONE_ITERATORS.has(t.def.name) ? 'no' : all(t.args);
   if (CLONE_CONTAINERS.has(t.def.builtin as string)) return all(t.args);
   if (
@@ -381,7 +409,7 @@ function display({ solver, t, all }: Goal): Answer {
     ERROR_TYPES.has(t.def.builtin as string)
   )
     return 'yes';
-  if (t.def.builtin === 'Box') return all(t.args);
+  if (['Box', 'Rc', 'Ref', 'RefMut'].includes(t.def.builtin ?? '')) return all(t.args);
   return 'no';
 }
 
@@ -490,7 +518,11 @@ function comparisonAdt(goal: Goal, t: AdtType): Answer {
     return values === 'no' ? 'no' : keys;
   }
   if (builtin === 'BTreeMap' || builtin === 'BTreeSet') return all(t.args);
-  if (['Vec', 'VecDeque', 'Box', 'Option', 'Result', 'Reverse'].includes(builtin)) return all(t.args);
+  if (['Vec', 'VecDeque', 'Box', 'Option', 'Result', 'Reverse', 'Rc', 'RefCell', 'Ref', 'RefMut'].includes(builtin)) {
+    return name === 'Hash' && builtin === 'RefCell' ? 'no' : all(t.args);
+  }
+  if (builtin === 'Cell')
+    return name === 'PartialEq' || name === 'Eq' || name === 'PartialOrd' || name === 'Ord' ? all(t.args) : 'no';
   if (RANGE_TYPES.has(builtin)) return equality || name === 'Hash' ? all(t.args) : 'no';
   return 'no';
 }
@@ -515,6 +547,7 @@ function defaultValue(goal: Goal): Answer {
     const content = normalize(shallow(t.args[0]));
     return content.kind === 'str' || content.kind === 'slice' ? 'yes' : all([content]);
   }
+  if (['Rc', 'RefCell', 'Cell'].includes(builtin)) return all(t.args);
   return 'no';
 }
 

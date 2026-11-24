@@ -164,7 +164,13 @@ export type BuiltinAdt =
   | 'OccupiedEntry'
   | 'Infallible'
   /** `<Self as Trait>::Name`, an associated type, whose arguments are `Self` and then the trait's arguments. */
-  | 'Projection';
+  | 'Projection'
+  | 'Rc'
+  | 'Weak'
+  | 'RefCell'
+  | 'Ref'
+  | 'RefMut'
+  | 'Cell';
 
 export interface AdtDef {
   name: string;

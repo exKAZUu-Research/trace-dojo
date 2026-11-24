@@ -247,9 +247,10 @@ export class Interpreter implements CallSupport {
     onEnd?: (frame: Frame, result: Value | undefined) => void
   ): Value {
     const { runtime } = this;
-    if (this.dropper.active) runtime.dropper ??= this.dropper;
+    runtime.dropper ??= this.dropper;
     const frame = new Frame(runtime, compiled.info, callRow, typeArgs, captures);
     runtime.pushFrame(frame);
+    const guards = runtime.liveGuards.length;
     let result: Value | undefined;
     let exiting = false;
     try {
@@ -268,6 +269,7 @@ export class Interpreter implements CallSupport {
             compiled.info.locals.map((local) => local.slot).toSorted((a, b) => a - b)
           );
         }
+        runtime.releaseGuards(frame, guards, result);
         onEnd?.(frame, result);
       } finally {
         runtime.popFrame();

@@ -6,6 +6,8 @@ import { normalize } from './infer';
 import { RustPanic } from './runtime';
 import { type AdtDef, intMax, intMin, type IntName, shallow, type Type } from './types';
 import {
+  BorrowGuard,
+  CellBox,
   DONE,
   EnumValue,
   FnValue,
@@ -15,10 +17,12 @@ import {
   NaNValue,
   RangeValue,
   SetValue,
+  SharedBox,
   sliceItems,
   StructValue,
   textOf,
   type Value,
+  WeakRef,
 } from './values';
 
 /** Hooks into the program's own impls, which the type-directed operations call for user types, and into its run. */
@@ -311,6 +315,13 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boo
     case 'VecDeque': {
       return compareSequence(t.args[0], x, y, rhs);
     }
+    case 'Rc':
+    case 'RefCell':
+    case 'Cell':
+    case 'Ref':
+    case 'RefMut': {
+      return valuesEqual(t.args[0], pointee(x), pointee(y));
+    }
     case 'Box':
     case 'Reverse': {
       if (def.builtin === 'Reverse')
@@ -491,6 +502,13 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: bool
     }
     case 'Box': {
       return compareValues(t.args[0], x, y, partial);
+    }
+    case 'Rc':
+    case 'RefCell':
+    case 'Cell':
+    case 'Ref':
+    case 'RefMut': {
+      return compareValues(t.args[0], pointee(x), pointee(y), partial);
     }
     case 'Reverse': {
       return compareValues(t.args[0], (y as StructValue).fields[0], (x as StructValue).fields[0], partial);
@@ -696,6 +714,21 @@ function clonePart(type: Type, value: Value): Value {
         case 'Box': {
           return clonePart(t.args[0], value);
         }
+        case 'Rc': {
+          const box = derefAll(value) as SharedBox;
+          box.strong++;
+          return box;
+        }
+        case 'Weak': {
+          const { box } = derefAll(value) as WeakRef;
+          if (box) box.weak++;
+          return new WeakRef(box);
+        }
+        case 'RefCell':
+        case 'Cell': {
+          const cell = derefAll(value) as CellBox;
+          return new CellBox(clonePart(t.args[0], cell.value));
+        }
         case 'HashMap':
         case 'BTreeMap':
         case 'HashSet':
@@ -810,4 +843,18 @@ function cloneCollection(args: Type[], source: MapValue | SetValue): MapValue | 
   copy.entries.copyFrom(source.entries, (item) => clonePart(args[0], item));
   hooks?.copyScalarStorage(source, copy);
   return copy;
+}
+
+/** What an `Rc`, a cell, or a `RefCell`'s guard holds. */
+function pointee(value: Value): Value {
+  const target = derefAll(value);
+  if (target instanceof SharedBox || target instanceof CellBox) return target.value;
+  if (target instanceof BorrowGuard) return target.cell.value;
+  return target;
+}
+
+function derefAll(value: Value): Value {
+  let current = value;
+  while (isPlace(current)) current = current.get();
+  return current;
 }

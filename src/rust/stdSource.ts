@@ -892,6 +892,61 @@ pub mod result {
         pub fn transpose(self) -> Option<Result<T, E>>;
     }
 }
+pub mod rc {
+    pub struct Rc<T>;
+    impl<T> Rc<T> {
+        pub fn new(value: T) -> Rc<T>;
+        pub fn strong_count(this: &Rc<T>) -> usize;
+        pub fn weak_count(this: &Rc<T>) -> usize;
+        pub fn downgrade(this: &Rc<T>) -> Weak<T>;
+        pub fn ptr_eq(this: &Rc<T>, other: &Rc<T>) -> bool;
+        pub fn try_unwrap(this: Rc<T>) -> Result<T, Rc<T>>;
+        pub fn into_inner(this: Rc<T>) -> Option<T>;
+        pub fn get_mut(this: &mut Rc<T>) -> Option<&mut T>;
+        pub fn make_mut(this: &mut Rc<T>) -> &mut T where T: Clone;
+        pub fn unwrap_or_clone(this: Rc<T>) -> T where T: Clone;
+        pub fn as_ref(&self) -> &T;
+    }
+    pub struct Weak<T>;
+    impl<T> Weak<T> {
+        pub fn new() -> Weak<T>;
+        pub fn upgrade(&self) -> Option<Rc<T>>;
+        pub fn strong_count(&self) -> usize;
+        pub fn weak_count(&self) -> usize;
+        pub fn ptr_eq(&self, other: &Weak<T>) -> bool;
+    }
+}
+pub mod cell {
+    pub struct RefCell<T>;
+    impl<T> RefCell<T> {
+        pub fn new(value: T) -> RefCell<T>;
+        pub fn borrow(&self) -> Ref<T>;
+        pub fn borrow_mut(&self) -> RefMut<T>;
+        pub fn replace(&self, t: T) -> T;
+        pub fn replace_with<F: FnOnce(&mut T) -> T>(&self, f: F) -> T;
+        pub fn take(&self) -> T where T: Default;
+        pub fn into_inner(self) -> T;
+        pub fn get_mut(&mut self) -> &mut T;
+        pub fn swap(&self, other: &RefCell<T>);
+    }
+    pub struct Ref<T>;
+    impl<T> Ref<T> {
+        pub fn clone(orig: &Ref<T>) -> Ref<T>;
+    }
+    pub struct RefMut<T>;
+    pub struct Cell<T>;
+    impl<T> Cell<T> {
+        pub fn new(value: T) -> Cell<T>;
+        pub fn get(&self) -> T where T: Copy;
+        pub fn set(&self, val: T);
+        pub fn replace(&self, val: T) -> T;
+        pub fn take(&self) -> T where T: Default;
+        pub fn into_inner(self) -> T;
+        pub fn get_mut(&mut self) -> &mut T;
+        pub fn swap(&self, other: &Cell<T>);
+        pub fn update<F: FnOnce(T) -> T>(&self, f: F) where T: Copy;
+    }
+}
 pub mod boxed {
     pub struct Box<T>;
     impl<T> Box<T> {

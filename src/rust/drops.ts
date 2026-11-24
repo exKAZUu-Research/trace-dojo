@@ -3,8 +3,20 @@ import type { Program } from './items';
 import { type Frame, MOVED, UNASSIGNED } from './runtime';
 import { concreteType, typeKey } from './runtimeTypes';
 import { type FnDef, type ImplDef, sameType, shallow, substitute, type Type, type TypeParam } from './types';
-import type { MapValue, SetValue} from './values';
-import { CellPlace, DynValue, EnumValue, isPlace, StructValue, type Value } from './values';
+import {
+  type BorrowGuard,
+  type CellBox,
+  CellPlace,
+  DynValue,
+  EnumValue,
+  isPlace,
+  type MapValue,
+  type SetValue,
+  type SharedBox,
+  StructValue,
+  type Value,
+  type WeakRef,
+} from './values';
 
 type Call = (fn: FnDef, typeArgs: Type[], args: Value[]) => Value;
 
@@ -25,9 +37,16 @@ export class Dropper {
     this.dropFn = program.builtinTraits.get('Drop')?.methods.get('drop');
   }
 
+  private counted = false;
+
   /** Whether any value of the program can need dropping. */
   get active(): boolean {
-    return this.impls.length > 0;
+    return this.counted || this.impls.length > 0;
+  }
+
+  /** Starts dropping values, once the program makes a value whose drop counts (an `Rc`, a `RefCell`'s guard). */
+  activate(): void {
+    this.counted = true;
   }
 
   /** Whether a value of a concrete type holds something whose drop does something. */
@@ -43,6 +62,7 @@ export class Dropper {
     switch (t.kind) {
       case 'adt': {
         result =
+          COUNTED.has(t.def.builtin ?? '') ||
           this.implFor(t) !== undefined ||
           t.args.some((arg) => this.needsDrop(arg, inner)) ||
           t.def.variants.some((variant) =>
@@ -97,7 +117,30 @@ export class Dropper {
 
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of owning type.
   private dropAdt(value: Value, t: Type & { kind: 'adt' }): void {
+    const target = isPlace(value) ? value.get() : value;
     switch (t.def.builtin) {
+      case 'Rc': {
+        const box = target as SharedBox;
+        if (box.strong === 0) return;
+        box.strong--;
+        if (box.strong === 0) this.drop(box.value, t.args[0]);
+        return;
+      }
+      case 'Weak': {
+        const { box } = target as WeakRef;
+        if (box && box.weak > 0) box.weak--;
+        return;
+      }
+      case 'Ref':
+      case 'RefMut': {
+        (target as BorrowGuard).release();
+        return;
+      }
+      case 'RefCell':
+      case 'Cell': {
+        this.drop((target as CellBox).value, t.args[0]);
+        return;
+      }
       case 'Box': {
         this.drop(value, t.args[0]);
         return;
@@ -125,7 +168,6 @@ export class Dropper {
         break;
       }
     }
-    const target = isPlace(value) ? value.get() : value;
     if (!(target instanceof StructValue) && !(target instanceof EnumValue)) return;
     const variant = t.def.variants[target instanceof EnumValue ? target.variant : 0];
     const subst = argsOf(t);
@@ -156,6 +198,9 @@ export class Dropper {
     });
   }
 }
+
+/** The types whose drop counts (an `Rc`'s strong count) or ends a borrow (a `RefCell`'s guard). */
+const COUNTED = new Set(['Rc', 'Weak', 'Ref', 'RefMut']);
 
 function argsOf(t: Type & { kind: 'adt' }): Map<TypeParam, Type> {
   return new Map(t.def.params.map((param, index) => [param, t.args[index]]));

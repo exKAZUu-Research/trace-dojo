@@ -11,6 +11,8 @@ import { FmtFailure } from './runtime';
 import { ERROR_TYPES } from './traits';
 import { type AdtDef, type IntName, shallow, type Type } from './types';
 import {
+  type BorrowGuard,
+  type CellBox,
   type DynValue,
   type EntryValue,
   EnumValue,
@@ -19,6 +21,7 @@ import {
   type MapValue,
   type RangeValue,
   type SetValue,
+  type SharedBox,
   sliceItems,
   StructValue,
   textOf,
@@ -160,6 +163,13 @@ export class Formatter {
           }
           case 'Box': {
             return this.display(v, t.args[0], spec, write);
+          }
+          case 'Rc': {
+            return this.display((v as SharedBox).value, t.args[0], spec, write);
+          }
+          case 'Ref':
+          case 'RefMut': {
+            return this.display((v as BorrowGuard).cell.value, t.args[0], spec, write);
           }
           case 'CaseIter':
           case 'EscapeDefault':
@@ -332,6 +342,26 @@ export class Formatter {
       }
       case 'Turtle': {
         return 'Turtle';
+      }
+      case 'Rc': {
+        return this.debug((v as SharedBox).value, t.args[0], spec, indent, write);
+      }
+      case 'Ref':
+      case 'RefMut': {
+        return this.debug((v as BorrowGuard).cell.value, t.args[0], spec, indent, write);
+      }
+      case 'Weak': {
+        return emit('(Weak)', write);
+      }
+      case 'RefCell':
+      case 'Cell': {
+        const cell = v as CellBox;
+        // A `RefCell` borrowed mutably shows no value, as reading it would conflict.
+        const value: DebugPart =
+          def.builtin === 'RefCell' && cell.borrows < 0
+            ? (_inner, sink) => emit('<borrowed>', sink)
+            : (inner, sink) => this.debug(cell.value, t.args[0], spec, inner, sink);
+        return structText(def.builtin, [['value', value]], indent, false, write);
       }
       case 'Iter': {
         return this.iteratorText(v as IterValue, t, spec, indent, write);

@@ -140,7 +140,11 @@ function compileCondition(c: Compiler, cond: Condition): ConditionalEval {
   if (cond.kind === 'expr') {
     const value = c.value(cond.expr);
     return (frame, onMatch) => {
-      if (!value(frame)) return false;
+      const mark = frame.runtime.liveGuards.length;
+      const result = value(frame);
+      // A condition's temporaries (a `RefCell`'s guard) go before its branch runs.
+      frame.runtime.releaseGuards(frame, mark);
+      if (!result) return false;
       onMatch();
       return true;
     };

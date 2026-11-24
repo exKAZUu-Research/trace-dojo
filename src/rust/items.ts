@@ -961,6 +961,12 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   IntoShape: 'IntoShape',
   ParseBoolError: 'ParseBoolError',
   ParseCharError: 'ParseCharError',
+  Rc: 'Rc',
+  Weak: 'Weak',
+  RefCell: 'RefCell',
+  Ref: 'Ref',
+  RefMut: 'RefMut',
+  Cell: 'Cell',
 };
 
 const BUILTIN_ENUMS: Record<string, BuiltinAdt> = {
@@ -1459,8 +1465,6 @@ function checkUnavailableStd(segments: string[], span: Span): void {
     sync: 'スレッドの同期（std::sync）',
     env: '環境変数とコマンドラインの引数（std::env）',
     time: '時刻（std::time）',
-    rc: 'Rc（std::rc）',
-    cell: 'Cell・RefCell（std::cell）',
     future: 'async/await（std::future）',
     task: 'async/await（std::task）',
     any: 'std::any',

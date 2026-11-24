@@ -256,8 +256,10 @@ export class Compiler {
         const dropped = this.droppedType(stmt.expr.ty);
         return (frame) => {
           frame.runtime.spend();
+          const mark = frame.runtime.liveGuards.length;
           const result = value(frame);
           if (dropped) frame.runtime.dropper?.drop(result, dropped(frame));
+          frame.runtime.releaseGuards(frame, mark);
           return UNIT_VALUE;
         };
       }
@@ -305,9 +307,11 @@ export class Compiler {
     const dropped = stmt.pattern.kind === 'wild' ? this.droppedType(stmt.init.ty) : undefined;
     const run: Eval = (frame) => {
       frame.runtime.spend();
+      const mark = frame.runtime.liveGuards.length;
       const value = init(frame);
       bind(frame, value);
       if (dropped) frame.runtime.dropper?.drop(value, dropped(frame));
+      frame.runtime.releaseGuards(frame, mark);
       return UNIT_VALUE;
     };
     return this.withStep(stmt.span, run, isObjectCreation(stmt.init, this.annotations));

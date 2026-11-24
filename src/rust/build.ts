@@ -145,7 +145,7 @@ function builtinAssocType(program: Program, trait: TraitDef, name: string, self:
   if (name === 'Target' && (builtin === 'Deref' || builtin === 'DerefMut')) {
     if (self.kind === 'ref') return self.target;
     if (self.kind === 'adt') {
-      if (self.def.builtin === 'Box') return self.args[0];
+      if (['Box', 'Rc', 'Ref', 'RefMut'].includes(self.def.builtin ?? '')) return self.args[0];
       if (self.def.builtin === 'String') return { kind: 'str' };
       if (self.def.builtin === 'Vec') return { kind: 'slice', elem: self.args[0] };
     }
