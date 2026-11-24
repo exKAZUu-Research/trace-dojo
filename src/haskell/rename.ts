@@ -915,7 +915,8 @@ class Renamer {
           defaultSigs.push({ entity: this.defaultSignatureMethod(entity, name, defaultSigs), sig });
         continue;
       }
-      if (params.length > 0 && !params.some((param) => rtypeMentions(sig.type, param))) {
+      const ambiguousAllowed = this.module.extensions.has('AllowAmbiguousTypes');
+      if (!ambiguousAllowed && params.length > 0 && !params.some((param) => rtypeMentions(sig.type, param))) {
         throw compileError(
           member.span,
           `クラスのメソッド ${member.names[0].name} の型に、クラスの型変数 ${params.join('・')} がありません。`
