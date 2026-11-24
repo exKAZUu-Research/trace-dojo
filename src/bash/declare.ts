@@ -118,8 +118,9 @@ function expandDeclarationAssignment(
   shell: Shell,
   builtin: string,
   arg: Assignment,
-  options: Options
+  rawOptions: Options
 ): DeclarationArgument {
+  const options = normalizeArrayNamerefPrecedence(rawOptions);
   const subscript = arg.subscript && literalWord(arg.subscript, shell.expander.expandAssociativeKey(arg.subscript));
   const value =
     arg.value &&
@@ -268,10 +269,17 @@ function literalWord(origin: Word, text: string): Word {
   return { parts: [{ kind: 'single', text }], row: origin.row, text: origin.text };
 }
 
+function normalizeArrayNamerefPrecedence(options: Options): Options {
+  if (!options.set.has('n') || (!options.set.has('a') && !options.set.has('A'))) return options;
+  const set = new Set(options.set);
+  set.delete('n');
+  return { ...options, set };
+}
+
 /** Whether an executed declaration explicitly assigns a non-nameref value (`declare x=1`, `declare "x=3"`). */
 export function declarationAssignsAnswer(builtin: string, args: readonly DeclarationArgument[]): boolean {
+  const options: Options = { set: new Set(), unset: new Set(), attemptedSet: new Set() };
   let optionsDone = false;
-  let setsNameref = false;
   let hasAssignment = false;
   for (const arg of args) {
     if (typeof arg !== 'string') {
@@ -279,20 +287,12 @@ export function declarationAssignsAnswer(builtin: string, args: readonly Declara
       hasAssignment = true;
       continue;
     }
-    if (!optionsDone && (arg === '--' || /^[-+]./.test(arg))) {
-      optionsDone = arg === '--';
-      setsNameref = updateNamerefOption(builtin, arg, setsNameref);
-      continue;
-    }
+    if (!optionsDone && !recordOptionWord(arg, options)) continue;
     optionsDone = true;
     hasAssignment ||= arg.includes('=');
   }
+  const setsNameref = builtin !== 'export' && options.set.has('n') && !options.set.has('a') && !options.set.has('A');
   return hasAssignment && !setsNameref;
-}
-
-function updateNamerefOption(builtin: string, flagWord: string, current: boolean): boolean {
-  if (flagWord === '--' || !flagWord.includes('n')) return current;
-  return flagWord.startsWith('-') ? builtin !== 'export' || current : false;
 }
 
 /** `declare`, `typeset`, `local`, `readonly`, and `export`. */
@@ -353,6 +353,7 @@ function parseOptions(
     shell.reportError(`${name}: -a: invalid option`);
     return undefined;
   }
+  if (options.set.has('a') || options.set.has('A')) options.set.delete('n');
   if (name === 'readonly') options.set.add('r');
   if (name === 'export') {
     // `export -n` removes the export attribute instead of setting a name reference.
@@ -1219,7 +1220,7 @@ function conversionError(
 ): string | undefined {
   const kindErr = incompatibleArrayKindError(variable, set);
   if (kindErr) return kindErr;
-  if (set.has('n') && (isArrayCell(variable) || set.has('a') || set.has('A') || impliesArray)) {
+  if (set.has('n') && (isArrayCell(variable) || impliesArray)) {
     return 'reference variable cannot be an array';
   }
   if (unset.has('a') && variable.value?.kind === 'indexed') return 'cannot destroy array variables in this way';
