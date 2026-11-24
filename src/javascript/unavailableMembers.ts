@@ -7,8 +7,14 @@ import { JsObject, type Key, type NativeCall, type Value } from './values';
 /** Names an unavailable library member on a receiver, or gives undefined for any other. */
 export type UnavailableMemberCheck = (value: Value, key: Key | undefined) => string | undefined;
 
+/**
+ * The well-known symbols whose protocols a TypeScript program may not replace, which leaves those that the syntax of
+ * iteration and `using` relies on.
+ */
 export const unavailableWellKnownSymbols = new Set([
-  ...Object.keys(WELL_KNOWN_SYMBOLS),
+  ...Object.keys(WELL_KNOWN_SYMBOLS).filter(
+    (name) => !['iterator', 'asyncIterator', 'dispose', 'asyncDispose'].includes(name)
+  ),
   'isConcatSpreadable',
   'match',
   'matchAll',

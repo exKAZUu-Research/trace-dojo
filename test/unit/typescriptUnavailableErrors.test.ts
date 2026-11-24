@@ -15,13 +15,11 @@ test.each([
 });
 
 test.each([
-  ['asyncIterator', 'console.log(Symbol.asyncIterator);'],
-  ['iterator', 'const iterator = [1][Symbol.iterator](); console.log(iterator.next());'],
-  ['iterator', 'const iterator = new Map<string, number>()[Symbol.iterator](); console.log(iterator.next());'],
-  ['dispose', 'console.log(Symbol.dispose);'],
-  ['asyncDispose', 'console.log(Symbol["asyncDispose"]);'],
-  ['dispose', 'const constructor: any = Symbol; console.log(constructor[["dis", "pose"].join("")]);'],
-  ['asyncDispose', 'console.log(Object.getOwnPropertyDescriptor(Symbol, "asyncDispose")?.value);'],
+  ['toPrimitive', 'console.log(Symbol.toPrimitive);'],
+  ['species', 'const species = Array[Symbol.species]; console.log(species);'],
+  ['hasInstance', 'console.log(Symbol["hasInstance"]);'],
+  ['toStringTag', 'const constructor: any = Symbol; console.log(constructor[["toString", "Tag"].join("")]);'],
+  ['species', 'console.log(Object.getOwnPropertyDescriptor(Symbol, "species")?.value);'],
 ])('reports an unavailable Symbol.%s without cascading errors', (name, source) => {
   expect(executeProgram('typescript', source)).toMatchObject({
     kind: 'compileError',

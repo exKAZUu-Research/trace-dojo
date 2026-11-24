@@ -14,6 +14,7 @@ import { isContextSensitiveFunction, parameterNodes } from './signatures';
 import { argumentParameters, isThisParameter, named, skipParentheses, stringValue, withoutAssertions } from './syntax';
 import type { TypeArgumentMismatch } from './typeNodes';
 import {
+  anonymousObject,
   anyType,
   errorType,
   functionType,
@@ -64,7 +65,7 @@ interface CallableShape {
   blocked: boolean;
 }
 
-const functionExpressionTypes = new Set(['arrow_function', 'function_expression']);
+const functionExpressionTypes = new Set(['arrow_function', 'function_expression', 'generator_function']);
 
 /** Resolves calls and `new` expressions: overloads, type argument inference, and argument checks. */
 export class Calls {
@@ -79,6 +80,40 @@ export class Calls {
     this.arity = new CallArity(c);
     this.typeArguments = new CallTypeArguments(c);
     this.unionSignatures = new UnionSignatures(c);
+  }
+
+  /**
+   * `f<T>` without a call: the signatures of `f` that take that many type arguments, instantiated with them, as
+   * TypeScript's `getInstantiatedTypePart` makes them.
+   */
+  instantiationExpression(node: TreeNode): Type {
+    const expression = node.childForFieldName('function') ?? named(node)[0];
+    const type = this.c.expressions.check(expression);
+    const typeArguments = this.typeArguments.written(node) ?? [];
+    if (isAnyLike(type) || type === errorType) return type;
+    const structure = this.c.structureOf(type);
+    const applicable = (signatures: Signature[]): Signature[] =>
+      signatures
+        .filter(
+          ({ typeParameters }) =>
+            typeParameters.length >= typeArguments.length &&
+            typeParameters.filter((parameter) => !parameter.default).length <= typeArguments.length
+        )
+        .map((signature) => {
+          const mismatch = this.typeArguments.firstMismatch(signature, typeArguments);
+          if (mismatch) this.typeArguments.reportMismatch(node, mismatch);
+          return this.typeArguments.instantiate(signature, typeArguments);
+        });
+    const callSignatures = applicable(structure.callSignatures);
+    const constructSignatures = applicable(structure.constructSignatures);
+    if (callSignatures.length === 0 && constructSignatures.length === 0) {
+      this.c.error(
+        named(node).at(-1) ?? node,
+        `型 '${this.c.print(type)}' には、この型引数の並びを使えるシグネチャがありません。`
+      );
+      return errorType;
+    }
+    return anonymousObject(() => ({ ...structure, callSignatures, constructSignatures }));
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Follows TypeScript's checks of a call's callee in order, each with its own error.
@@ -1096,8 +1131,7 @@ export class Calls {
 
   private isGenericCallback(arg: TreeNode): boolean {
     const expression = skipParentheses(arg);
-    if (expression.type === 'arrow_function' || expression.type === 'function_expression')
-      return expression.childForFieldName('type_parameters') !== null;
+    if (functionExpressionTypes.has(expression.type)) return expression.childForFieldName('type_parameters') !== null;
     if (!['identifier', 'member_expression', 'subscript_expression'].includes(expression.type)) return false;
     const type = this.c.silently(() => this.c.expressions.check(expression));
     return this.c.signaturesOf(type, 'call').some((signature) => signature.typeParameters.length > 0);

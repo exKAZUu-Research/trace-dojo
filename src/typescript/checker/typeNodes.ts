@@ -115,6 +115,15 @@ export class TypeNodes {
     ['this_type', (node) => this.c.classes.thisTypeAt(node)],
     ['type_predicate', () => booleanType],
     ['type_annotation', (node) => this.annotationType(node) ?? anyType],
+    ['non_nullable_type', (node) => this.jsDocNullabilityType(node, '!')],
+    ['flow_maybe_type', (node) => this.jsDocNullabilityType(node, '?')],
+    [
+      'existential_type',
+      (node) => {
+        this.c.error(node, 'JSDoc の型は、ドキュメントコメントの中でしか使えません。');
+        return anyType;
+      },
+    ],
   ]);
 
   readonly interfaceBases: InterfaceBases;
@@ -157,6 +166,23 @@ export class TypeNodes {
       if (defers) this.deferredDepth--;
       this.resolutionDepth--;
     }
+  }
+
+  /**
+   * JSDoc's `!T`, `T!`, `?T`, and `T?`, which tsc reads as the type they mean and rejects, suggesting how TypeScript
+   * spells it.
+   */
+  private jsDocNullabilityType(node: TreeNode, mark: '!' | '?'): Type {
+    const inner = named(node)[0];
+    const isPrefix = node.firstChild?.type === mark;
+    const operand = inner ? this.typeFromNode(inner) : anyType;
+    const type =
+      mark === '!' ? operand : unionOf(isPrefix ? [operand, nullType, undefinedType] : [operand, undefinedType]);
+    this.c.error(
+      node,
+      `'${mark}' が型の${isPrefix ? '先頭' : '末尾'}にある書き方は、TypeScript では使えません。'${this.c.print(type)}' と書くつもりでしたか？`
+    );
+    return type;
   }
 
   private intersectionType(node: TreeNode): Type {

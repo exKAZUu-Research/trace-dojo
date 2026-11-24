@@ -465,7 +465,10 @@ export class LiteralChecker {
     if (
       !members.some((member) => {
         const value = member.childForFieldName('value');
-        return member.type === 'method_definition' || (value && skipParentheses(value).type === 'function_expression');
+        return (
+          member.type === 'method_definition' ||
+          (value && ['function_expression', 'generator_function'].includes(skipParentheses(value).type))
+        );
       })
     )
       return;
@@ -487,7 +490,7 @@ export class LiteralChecker {
     const value = member.childForFieldName('value');
     const key = keyNode ? this.memberKey(keyNode) : literalType(member.text);
     const receiverOwner = isMethod ? member : value && skipParentheses(value);
-    if (receiverOwner && (isMethod || receiverOwner.type === 'function_expression'))
+    if (receiverOwner && (isMethod || ['function_expression', 'generator_function'].includes(receiverOwner.type)))
       this.c.classes.registerObjectThis(receiverOwner, literal.receiver);
     if (!isMethod) {
       this.declareObjectValue(literal, member, key, value);

@@ -153,6 +153,8 @@ function typeScriptSyntaxErrors(root: Node, source: string, parseErrors: SourceD
   const errors = withUnterminatedStrings(root, source, parseErrors);
   const visit = (node: Node): void => {
     const message =
+      (node.type === 'jsdoc_unknown_type' ? '型が必要です。' : undefined) ??
+      htmlCommentError(node) ??
       numericEscapeError(node, source) ??
       characterEscapeError(node) ??
       methodModifierError(node) ??
@@ -394,6 +396,12 @@ function superTypeArgumentError(node: Node): SourceDiagnostic | undefined {
   return argumentsNode
     ? { row: argumentsNode.startPosition.row, message: 'super の呼び出しに型引数は指定できません。' }
     : undefined;
+}
+
+/** tsc reads `<!--` as the start of a type assertion and `-->` as an operator, since HTML-like comments are not TypeScript. */
+function htmlCommentError(node: Node): string | undefined {
+  if (node.type !== 'html_comment') return undefined;
+  return node.text.startsWith('<!--') ? '型が必要です。' : '式が必要です。';
 }
 
 /** An unparenthesized unary, `await`, or type assertion expression as the base of `**`, which tsc's parser rejects. */

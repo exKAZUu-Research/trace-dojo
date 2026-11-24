@@ -13,7 +13,17 @@ import { FlowState, isUnit, type State } from './flow';
 import type { FunctionContext } from './functions';
 import { baseIndexMismatch, checkDuplicateIndexSignatures, checkIndexConformance } from './indexConformance';
 import type { Scope, Sym } from './scopes';
-import { hasToken, isDirectEmptyArray, named, skipParentheses, stringValue, templateFragmentText } from './syntax';
+import {
+  hasToken,
+  isDirectEmptyArray,
+  jumpLabel,
+  labeledBody,
+  loopStatementTypes,
+  named,
+  skipParentheses,
+  stringValue,
+  templateFragmentText,
+} from './syntax';
 import {
   anyType,
   errorType,
@@ -35,6 +45,8 @@ import { checkWrittenType } from './writtenTypes';
 
 interface JumpTarget {
   isLoop: boolean;
+  /** The labels naming the statement, which `break` and `continue` with a label jump to. */
+  labels: string[];
   breaks: State[];
   continues: State[];
 }
@@ -50,6 +62,8 @@ export class StatementChecker {
   /** Where each loop checked silently exits, by the loop and its entry state. */
   private readonly silentLoopExits = new Map<string, State[]>();
   private readonly jumpTargets: JumpTarget[] = [];
+  /** The labels of the loop about to be checked, which its jump target takes. */
+  private pendingLabels: string[] = [];
   /** The types of the objects `for...in` loops iterate, by loop. */
   private readonly forInObjectTypes = new Map<number, Type>();
   /** How each kind of statement is checked; the others need no checks. */
@@ -67,10 +81,13 @@ export class StatementChecker {
     ['try_statement', (node) => this.tryStatement(node)],
     ['return_statement', (node) => this.returnStatement(node)],
     ['throw_statement', (node) => this.throwStatement(node)],
-    ['break_statement', () => this.breakStatement()],
-    ['continue_statement', () => this.continueStatement()],
+    ['break_statement', (node) => this.breakStatement(node)],
+    ['continue_statement', (node) => this.continueStatement(node)],
+    ['labeled_statement', (node) => this.labeledStatement(node)],
+    ['with_statement', (node) => this.withStatement(node)],
     ['function_signature', (node) => this.c.functions.checkOverloadImplementation(node)],
     ['function_declaration', (node) => this.c.functions.functionDeclaration(node)],
+    ['generator_function_declaration', (node) => this.c.functions.functionDeclaration(node)],
     ['class_declaration', (node) => this.c.classDeclarations.checkClass(node)],
     ['abstract_class_declaration', (node) => this.c.classDeclarations.checkClass(node)],
     ['interface_declaration', (node) => this.interfaceDeclaration(node)],
@@ -133,16 +150,51 @@ export class StatementChecker {
     this.c.flow.current = undefined;
   }
 
-  private breakStatement(): void {
-    const target = this.jumpTargets.at(-1);
+  private breakStatement(node: TreeNode): void {
+    const label = jumpLabel(node);
+    const target =
+      label === undefined
+        ? this.jumpTargets.findLast((candidate) => candidate.isLoop || candidate.labels.length === 0)
+        : this.jumpTargets.findLast((candidate) => candidate.labels.includes(label));
     target?.breaks.push(this.c.flow.current?.clone());
     this.c.flow.current = undefined;
   }
 
-  private continueStatement(): void {
-    const target = this.jumpTargets.findLast((candidate) => candidate.isLoop);
+  private continueStatement(node: TreeNode): void {
+    const label = jumpLabel(node);
+    const target = this.jumpTargets.findLast(
+      (candidate) => candidate.isLoop && (label === undefined || candidate.labels.includes(label))
+    );
     target?.continues.push(this.c.flow.current?.clone());
     this.c.flow.current = undefined;
+  }
+
+  /** tsc rejects `with` in strict mode code, and leaves its body unchecked, as every name there has type `any`. */
+  private withStatement(node: TreeNode): void {
+    this.c.error(node, "'with' 文は Strict モードでは使えません。");
+    this.c.error(
+      node,
+      "'with' 文はサポートされていません。'with' ブロック内のすべてのシンボルの型は 'any' になります。"
+    );
+  }
+
+  /** A labeled loop takes its labels; any other labeled statement is a target that only `break` jumps out of. */
+  private labeledStatement(node: TreeNode): void {
+    const { labels, body } = labeledBody(node);
+    if (!body) return;
+    if (loopStatementTypes.has(body.type)) {
+      this.pendingLabels = labels;
+      this.checkSubstatement(body);
+      return;
+    }
+    const target: JumpTarget = { isLoop: false, labels, breaks: [], continues: [] };
+    this.jumpTargets.push(target);
+    try {
+      this.checkSubstatement(body);
+    } finally {
+      this.jumpTargets.pop();
+    }
+    this.c.flow.current = this.c.flow.merge([this.c.flow.current, ...target.breaks]);
   }
 
   private typeAliasDeclaration(node: TreeNode): void {
@@ -427,6 +479,8 @@ export class StatementChecker {
    * @param iterate Runs one iteration from the current state and returns the state where the loop exits from it.
    */
   private loop(node: TreeNode, iterate: (target: JumpTarget) => State): void {
+    const labels = this.pendingLabels;
+    this.pendingLabels = [];
     const entry = this.c.flow.current;
     let stateKey = this.stateKey(entry);
     // An enclosing loop's silent passes check this loop once each; the same entry state leaves it the same way.
@@ -439,7 +493,7 @@ export class StatementChecker {
     let state = entry?.clone();
     let settled: State[] | undefined;
     for (let pass = 1; ; pass++) {
-      const { exits, backEdge } = this.c.silently(() => this.loopPass(state, iterate));
+      const { exits, backEdge } = this.c.silently(() => this.loopPass(state, iterate, labels));
       const next = this.c.flow.merge([entry, backEdge]);
       const nextKey = this.stateKey(next);
       if (nextKey === stateKey) {
@@ -454,14 +508,18 @@ export class StatementChecker {
       stateKey = nextKey;
     }
     // Checking silently already, the pass that settled the loop is the one that would report errors.
-    const exits = settled && this.c.silent > 0 ? settled : this.loopPass(state, iterate).exits;
+    const exits = settled && this.c.silent > 0 ? settled : this.loopPass(state, iterate, labels).exits;
     if (key !== undefined) this.silentLoopExits.set(key, exits);
     this.c.flow.current = this.c.flow.merge(exits);
   }
 
   /** Runs a loop's iteration once from `state`, and returns where it exits and the state its back edge brings. */
-  private loopPass(state: State, iterate: (target: JumpTarget) => State): { exits: State[]; backEdge: State } {
-    const target: JumpTarget = { isLoop: true, breaks: [], continues: [] };
+  private loopPass(
+    state: State,
+    iterate: (target: JumpTarget) => State,
+    labels: string[]
+  ): { exits: State[]; backEdge: State } {
+    const target: JumpTarget = { isLoop: true, labels, breaks: [], continues: [] };
     this.c.flow.current = state?.clone();
     this.jumpTargets.push(target);
     try {
@@ -677,7 +735,7 @@ export class StatementChecker {
     const body = node.childForFieldName('body') as TreeNode;
     const cases = named(body).filter((child) => child.type === 'switch_case' || child.type === 'switch_default');
     const { caseEntries, noMatch, exhaustive } = this.switchCaseEntries(discriminant, cases);
-    const target: JumpTarget = { isLoop: false, breaks: [], continues: [] };
+    const target: JumpTarget = { isLoop: false, labels: [], breaks: [], continues: [] };
     this.jumpTargets.push(target);
     let fallthrough: State;
     try {

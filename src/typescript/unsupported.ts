@@ -4,15 +4,6 @@ import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics'
 
 /** Syntax this interpreter does not run yet, by node type, named as learners know it. */
 const unsupportedNodes: Record<string, string> = {
-  hash_bang_line: '#! の行',
-  html_comment: 'HTML 形式のコメント',
-  labeled_statement: 'ラベル付きの文',
-  debugger_statement: 'debugger 文',
-  with_statement: 'with 文',
-  generator_function_declaration: 'ジェネレータ関数',
-  generator_function: 'ジェネレータ関数',
-  yield_expression: 'yield',
-  override_modifier: 'override 修飾子',
   enum_declaration: 'enum',
   ambient_declaration: 'declare による宣言',
   internal_module: 'namespace',
@@ -23,17 +14,9 @@ const unsupportedNodes: Record<string, string> = {
   import: 'import や export',
   using_declaration: 'using 宣言',
   decorator: 'デコレータ',
-  sequence_expression: 'カンマ演算子',
   await_expression: 'await',
-  meta_property: 'new.target や import.meta',
-  satisfies_expression: 'satisfies 演算子',
-  instantiation_expression: '型引数だけを指定した関数の参照',
   asserts: 'asserts による型の表明',
   asserts_annotation: 'asserts による型の表明',
-  non_nullable_type: 'JSDoc の型の書き方',
-  existential_type: 'JSDoc の型の書き方',
-  flow_maybe_type: 'JSDoc の型の書き方',
-  jsdoc_unknown_type: 'JSDoc の型の書き方',
 };
 
 const functionTypes = new Set(['function_declaration', 'function_expression', 'arrow_function', 'method_definition']);
@@ -69,8 +52,8 @@ function unsupportedForm(node: TreeNode): string | undefined {
   if (node.type === 'type_parameter' && ['in', 'out'].some((token) => tokens.has(token)))
     return '型パラメーターの in / out による分散指定';
   if (node.type === 'predefined_type' && tokens.has('unique symbol')) return 'unique symbol';
+  if (node.type === 'meta_property' && node.text.replaceAll(/\s/g, '') === 'import.meta') return 'import.meta';
   if (functionTypes.has(node.type) && tokens.has('async')) return 'async 関数';
-  if (node.type === 'method_definition' && tokens.has('*')) return 'ジェネレータ関数';
   if (node.type === 'for_in_statement' && tokens.has('await')) return 'for await';
   if (node.type === 'field_definition' && tokens.has('accessor')) return 'accessor フィールド';
   return undefined;

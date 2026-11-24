@@ -7,6 +7,8 @@ import { assignmentKind, named, patternIdentifiers } from './syntax';
 export const functionLikeTypes = new Set([
   'function_declaration',
   'function_expression',
+  'generator_function_declaration',
+  'generator_function',
   'arrow_function',
   'method_definition',
   'function_signature',
@@ -55,6 +57,7 @@ export class Binder {
     ['lexical_declaration', (node, scope) => this.bindVariableDeclaration(node, scope)],
     ['variable_declaration', (node, scope) => this.bindVariableDeclaration(node, scope)],
     ['function_declaration', (node, scope) => this.bindFunctionDeclaration(node, scope)],
+    ['generator_function_declaration', (node, scope) => this.bindFunctionDeclaration(node, scope)],
     ['function_signature', (node, scope) => this.bindFunctionDeclaration(node, scope)],
     ['class_declaration', (node, scope) => this.bindClassDeclaration(node, scope)],
     ['abstract_class_declaration', (node, scope) => this.bindClassDeclaration(node, scope)],
@@ -248,7 +251,7 @@ export class Binder {
     const signatureScope = new SignatureScope(functionScope);
     this.declareTypeParameters(node, functionScope);
     // A named function expression sees its own name.
-    if (node.type === 'function_expression') {
+    if (node.type === 'function_expression' || node.type === 'generator_function') {
       const name = node.childForFieldName('name');
       if (name) functionScope.declareValue(name.text, 'function', node, name);
     }

@@ -52,7 +52,8 @@ function checkValueDuplicates(c: Checker, symbol: Sym): void {
   }
   if (entries.every((entry) => entry.kind === 'function')) {
     const implementations = symbol.valueDeclarations.filter(
-      (declaration) => declaration.type === 'function_declaration'
+      (declaration) =>
+        declaration.type === 'function_declaration' || declaration.type === 'generator_function_declaration'
     );
     if (implementations.length > 1) {
       for (const implementation of implementations) {

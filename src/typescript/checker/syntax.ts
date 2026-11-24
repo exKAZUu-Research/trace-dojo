@@ -294,7 +294,14 @@ export function numberValue(text: string): number | bigint {
 
 /** Whether a node is a function whose `this` is its own, rather than an arrow function's enclosing one. */
 export function isFunctionWithOwnThis(node: TreeNode): boolean {
-  return ['function_declaration', 'function_expression', 'method_definition', 'class_static_block'].includes(node.type);
+  return [
+    'function_declaration',
+    'function_expression',
+    'generator_function_declaration',
+    'generator_function',
+    'method_definition',
+    'class_static_block',
+  ].includes(node.type);
 }
 
 /** Whether a node is a link of an optional chain: `a?.b`, or a link continuing one without parentheses, as `a?.b.c`. */
@@ -337,3 +344,21 @@ export function isImmediatelyInvoked(node: TreeNode): boolean {
   const parent = expression.parent;
   return parent?.type === 'call_expression' && parent.childForFieldName('function')?.id === expression.id;
 }
+
+/** The labels a chain of labeled statements gives, and the statement they label. */
+export function labeledBody(node: TreeNode): { labels: string[]; body: TreeNode | undefined } {
+  const labels: string[] = [];
+  let body: TreeNode | null = node;
+  while (body?.type === 'labeled_statement') {
+    labels.push(body.childForFieldName('label')?.text ?? '');
+    body = body.childForFieldName('body');
+  }
+  return { labels, body: body ?? undefined };
+}
+
+/** The label a `break` or `continue` jumps to, if it names one. */
+export function jumpLabel(jump: TreeNode): string | undefined {
+  return named(jump).find((child) => child.type === 'statement_identifier')?.text;
+}
+
+export const loopStatementTypes = new Set(['while_statement', 'do_statement', 'for_statement', 'for_in_statement']);

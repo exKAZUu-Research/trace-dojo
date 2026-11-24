@@ -344,7 +344,7 @@ export class MemberChecker {
     if (!declaration || !this.c.isLibrary(declaration)) return undefined;
     const owner = declaration.parent?.parent?.childForFieldName('name')?.text;
     const { name } = property;
-    // The well-known symbols replace the protocols of the language, which this interpreter does not support yet.
+    // The well-known symbols other than those of iteration and `using` replace protocols this interpreter keeps fixed.
     if (owner === 'SymbolConstructor' && unavailableWellKnownSymbols.has(name) && !this.isTypeOnlyUse(propertyNode))
       return wellKnownSymbolFeature(name);
     // A stack trace names the files and lines of the host, which differ from the program's.

@@ -18,6 +18,7 @@ import {
 } from './syntax';
 import {
   anyType,
+  errorType,
   functionType,
   isAnyLike,
   isIntrinsic,
@@ -51,6 +52,32 @@ export interface FunctionContext {
   inlined?: boolean;
   initializer?: boolean;
   enclosingFlow: State;
+  generator?: GeneratorContext;
+}
+
+/** What a generator's annotation or contextual type says it yields, returns, and receives, and what it yields. */
+interface GeneratorContext {
+  /** The return type annotation, which the generator's type is. */
+  annotation?: Type;
+  /** Whether the annotation is no iterator type, which TypeScript then checks the generator's own type against. */
+  invalidAnnotation: boolean;
+  yieldType?: Type;
+  nextType?: Type;
+  yieldTypes: Type[];
+}
+
+export interface IterationTypes {
+  yieldType: Type;
+  returnType: Type;
+  nextType: Type;
+}
+
+/** The library types a generator's return type may be, whose type arguments are what it yields, returns, and receives. */
+const generatorReturnTypes = ['Generator', 'Iterator', 'Iterable', 'IterableIterator', 'IteratorObject'];
+
+/** Whether a function is a generator: `function*`, or a method written `*m()`. */
+export function isGeneratorFunction(node: TreeNode): boolean {
+  return node.type.startsWith('generator_function') || (node.type === 'method_definition' && hasToken(node, '*'));
 }
 
 /** Checks function expressions and bodies, inferring the types they return. */
@@ -349,7 +376,11 @@ export class FunctionChecker {
   }
 
   private checkBodyReturns(context: FunctionContext): void {
-    const { node, declaredReturn } = context;
+    const { node, declaredReturn, generator } = context;
+    if (generator?.invalidAnnotation && generator.annotation) {
+      const own = this.c.globalType('Generator', [anyType, anyType, unknownType]);
+      this.c.expressions.reportNotAssignable(node.childForFieldName('return_type') ?? node, own, generator.annotation);
+    }
     if (declaredReturn) this.checkMissingReturn(node, context, declaredReturn);
     if (hasToken(node, 'get') && context.endReachable && !context.returnStates.some((state) => state && !state.dead))
       this.c.error(node.childForFieldName('name') ?? node, 'get アクセサーは値を返さなければいけません。');
@@ -425,7 +456,23 @@ export class FunctionChecker {
   }
 
   private newContext(node: TreeNode, contextualReturn?: Type, declaredReturn?: Type): FunctionContext {
+    let generator: GeneratorContext | undefined;
+    if (isGeneratorFunction(node)) {
+      const declared = declaredReturn && this.iterationTypesOf(declaredReturn);
+      const contextualTypes = !declaredReturn && contextualReturn ? this.iterationTypesOf(contextualReturn) : undefined;
+      const given = declaredReturn ? (declared ?? anyIterationTypes) : contextualTypes;
+      generator = {
+        annotation: declaredReturn,
+        invalidAnnotation: declaredReturn !== undefined && !declared,
+        yieldType: given?.yieldType,
+        nextType: given?.nextType,
+        yieldTypes: [],
+      };
+      declaredReturn = declaredReturn && given?.returnType;
+      contextualReturn = contextualTypes?.returnType;
+    }
     return {
+      generator,
       node,
       returnTypes: [],
       endReachable: true,
@@ -449,12 +496,33 @@ export class FunctionChecker {
   }
 
   private returnTypeOf(context: FunctionContext): Type {
+    const { generator } = context;
+    if (generator?.annotation) return generator.annotation;
+    if (generator) {
+      const yielded = generator.yieldTypes.length === 0 ? neverType : unionOf(generator.yieldTypes, true);
+      return this.c.globalType('Generator', [
+        this.c.widen(this.widenObjectLiteral(yielded)),
+        this.inferredReturnOf(context),
+        generator.nextType ?? unknownType,
+      ]);
+    }
     if (context.declaredReturn) return context.declaredReturn;
+    return this.inferredReturnOf(context);
+  }
+
+  /** The type a function's `return` statements give, without an annotation. */
+  private inferredReturnOf(context: FunctionContext): Type {
     const types = this.c.literals.normalizeObjectLiterals(
       context.returnTypes.flatMap((type) => (type.kind === 'union' ? type.types : [type]))
     );
     // A function expression or an object literal method that never returns returns `never`; a declaration `void`.
-    if (types.length === 0 && !context.hasReturnWithoutValue && !context.endReachable && mayReturnNever(context.node))
+    if (
+      types.length === 0 &&
+      !context.hasReturnWithoutValue &&
+      !context.endReachable &&
+      !context.generator &&
+      mayReturnNever(context.node)
+    )
       return neverType;
     if (types.length === 0 || !context.hasReturnWithValue) return voidType;
     if (context.endReachable || context.hasReturnWithoutValue) types.push(undefinedType);
@@ -464,6 +532,41 @@ export class FunctionChecker {
     );
     // TypeScript widens only a returned unit type, and keeps fresh the literals of a union it returns.
     return type.kind === 'literal' ? returnedLiteralType(this.c, type, context.contextualReturn) : type;
+  }
+
+  /** What a generator's return type says it yields, returns, and receives, or undefined when it is no iterator. */
+  iterationTypesOf(type: Type): IterationTypes | undefined {
+    if (isAnyLike(type)) return anyIterationTypes;
+    const name = generatorReturnTypes.find((candidate) => this.c.isLibraryType(type, candidate));
+    if (!name || type.kind !== 'object') return undefined;
+    const [yieldType = unknownType, returnType = anyType, nextType = anyType] = type.typeArguments ?? [];
+    return { yieldType, returnType, nextType };
+  }
+
+  /**
+   * `yield value` or `yield* iterable` in a generator, whose value is what the generator receives from `next()`, or the
+   * return value of the iterable it delegates to.
+   */
+  yieldExpression(node: TreeNode, contextual: Type | undefined): Type {
+    const generator = this.contexts.at(-1)?.generator;
+    const operand = named(node).find((child) => child.type !== 'comment');
+    const delegated = hasToken(node, '*');
+    const operandType = operand
+      ? this.c.expressions.check(operand, delegated ? undefined : generator?.yieldType)
+      : undefinedType;
+    if (!generator) return anyType;
+    const yielded = delegated ? this.c.patterns.iteratedType(operand, operandType) : operandType;
+    generator.yieldTypes.push(yielded);
+    if (generator.yieldType && yielded !== errorType)
+      this.c.expressions.checkAssignable(operand ?? node, yielded, generator.yieldType, operand);
+    if (delegated) return this.iterationTypesOf(operandType)?.returnType ?? anyType;
+    if (generator.nextType) return generator.nextType;
+    if (!isResultUnused(node) && (!contextual || isAnyLike(contextual)))
+      this.c.error(
+        node,
+        "'yield' 式の結果が暗黙に any になります。この式を含むジェネレーターに戻り値の型の注釈がないためです。"
+      );
+    return anyType;
   }
 
   private widenObjectLiteral(type: Type): Type {
@@ -661,6 +764,33 @@ export class FunctionChecker {
   }
 }
 
+const anyIterationTypes: IterationTypes = { yieldType: anyType, returnType: anyType, nextType: anyType };
+
+/** Whether nothing uses the value of an expression, as TypeScript's `expressionResultIsUnused` decides. */
+function isResultUnused(node: TreeNode): boolean {
+  let current = node;
+  while (current.parent?.type === 'parenthesized_expression') current = current.parent;
+  const parent = current.parent;
+  if (!parent) return true;
+  switch (parent.type) {
+    case 'expression_statement': {
+      return true;
+    }
+    case 'sequence_expression': {
+      return named(parent).at(-1)?.id !== current.id || isResultUnused(parent);
+    }
+    case 'unary_expression': {
+      return parent.childForFieldName('operator')?.text === 'void';
+    }
+    case 'for_statement': {
+      return parent.childForFieldName('condition')?.id !== current.id;
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
 function isBooleanLike(type: Type): boolean {
   return (type.kind === 'union' ? type.types : [type]).every(
     (member) => member.kind === 'literal' && typeof member.value === 'boolean'
@@ -692,6 +822,7 @@ function mayBeUndefined(type: Type): boolean {
 }
 
 function mayReturnNever(node: TreeNode): boolean {
-  if (node.type === 'arrow_function' || node.type === 'function_expression') return true;
+  if (node.type === 'arrow_function' || node.type === 'function_expression' || node.type === 'generator_function')
+    return true;
   return node.type === 'method_definition' && node.parent?.type === 'object';
 }

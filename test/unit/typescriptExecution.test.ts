@@ -309,16 +309,8 @@ test.each([
   ['a namespace', 'namespace N {}', 'namespace は、この採点環境では使えません。'],
   ['a declare statement', 'declare const x: number;', 'declare による宣言は、この採点環境では使えません。'],
   ['an import', 'import fs from "fs";', 'import や export は、この採点環境では使えません。'],
-  ['a generator', 'function* g() {}', 'ジェネレータ関数は、この採点環境では使えません。'],
   ['an async function', 'async function f() {}', 'async 関数は、この採点環境では使えません。'],
   ['a decorator', 'function d(t: unknown) {}\n@d class A {}', 'デコレータは、この採点環境では使えません。'],
-  ['a label', 'a: for (;;) break a;', 'ラベル付きの文は、この採点環境では使えません。'],
-  [
-    'the override modifier',
-    'class A { m() {} }\nclass B extends A { override m() {} }',
-    'override 修飾子は、この採点環境では使えません。',
-  ],
-  ['satisfies', 'const a = 1 satisfies number;', 'satisfies 演算子は、この採点環境では使えません。'],
   [
     'a String.raw replaced by a value that is not a function',
     'String.raw = 1 as any;\nString.raw`x${(() => { throw new Error("bad"); })()}`;',
@@ -385,13 +377,13 @@ test.each([
   ],
   [
     'a well-known symbol',
-    'Symbol.iterator;',
-    'Symbol.iterator などの well-known シンボルは、この採点環境では使えません。',
+    'Symbol.toPrimitive;',
+    'Symbol.toPrimitive などの well-known シンボルは、この採点環境では使えません。',
   ],
   [
     'a well-known symbol through any',
-    'const constructor: any = Symbol;\nconsole.log(constructor.iterator);',
-    'Symbol.iterator などの well-known シンボルは、この採点環境では使えません。',
+    'const constructor: any = Symbol;\nconsole.log(constructor.hasInstance);',
+    'Symbol.hasInstance などの well-known シンボルは、この採点環境では使えません。',
   ],
   [
     'a reflected well-known symbol',
@@ -403,16 +395,16 @@ test.each([
 });
 
 test('reflecting keys cannot hand a well-known symbol to a TypeScript program', () => {
-  const expose = 'const keys = Object.getOwnPropertySymbols(Array.prototype);';
-  const message = '1: Symbol.iterator などの well-known シンボルは、この採点環境では使えません。';
+  const expose = 'const keys = Object.getOwnPropertySymbols(Promise.prototype);';
+  const message = '1: Symbol.toStringTag などの well-known シンボルは、この採点環境では使えません。';
   expect(diagnosticsOf(`${expose}\nconsole.log(keys[0]);`)).toEqual([message]);
   expect(
     diagnosticsOf(`${expose}
-const iterable: any = {};
-iterable[keys[0]] = () => [3].values();
-console.log([...iterable]);`)
+const tagged: any = {};
+tagged[keys[0]] = "Tagged";
+console.log(String(tagged));`)
   ).toEqual([message]);
-  expect(executeProgram('javascript', `${expose}\nconsole.log(keys[0] === Symbol.iterator);`)).toMatchObject({
+  expect(executeProgram('javascript', `${expose}\nconsole.log(keys[0] === Symbol.toStringTag);`)).toMatchObject({
     kind: 'executed',
     stdout: 'true\n',
   });
@@ -560,9 +552,9 @@ test('console.table stops before expanding repeated cells or table padding past 
   }
 });
 
-test('computed class and object members reject well-known symbols before execution', () => {
-  const source = `class A { [Symbol.iterator]() { return [1, 2].values(); } }
-const object = { [Symbol.iterator]() { return [1].values(); } };
+test('computed class and object members reject well-known symbols other than iteration ones before execution', () => {
+  const source = `class A { [Symbol.toPrimitive]() { return 1; } }
+const object = { [Symbol.hasInstance]() { return true; } };
 class B { get [Symbol.toStringTag]() { return 'B'; } }
 const tagged = { get [Symbol.toStringTag]() { return 'tagged'; } };`;
   const execution = executeProgram('typescript', source);

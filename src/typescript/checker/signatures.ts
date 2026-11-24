@@ -758,6 +758,7 @@ function usesInferredSignatureForBindings(node: TreeNode): boolean {
   return (
     (node.type === 'arrow_function' ||
       node.type === 'function_expression' ||
+      node.type === 'generator_function' ||
       (node.type === 'method_definition' && node.parent?.type === 'object')) &&
     isContextSensitiveFunction(node)
   );

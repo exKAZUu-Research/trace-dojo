@@ -107,6 +107,9 @@ function view(node: TreeNode, binder: Binder): ViewNode {
     case 'field_definition': {
       return generic(node, 'field_definition', binder);
     }
+    case 'instantiation_expression': {
+      return view((node.childForFieldName('function') ?? node.namedChildren[0]) as TreeNode, binder);
+    }
     case 'parenthesized_expression': {
       // tsx's esbuild drops parentheses around a name, which V8 then prints without them in errors.
       const inner = unwrappedName(node);

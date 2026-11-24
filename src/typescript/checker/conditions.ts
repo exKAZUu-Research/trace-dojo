@@ -42,7 +42,15 @@ export interface Condition {
 const parenthesizedConditionStatements = new Set(['if_statement', 'while_statement', 'do_statement']);
 
 /** The kinds of expressions that are objects, which are always truthy. */
-const alwaysTruthyTypes = new Set(['array', 'arrow_function', 'class', 'function_expression', 'object', 'regex']);
+const alwaysTruthyTypes = new Set([
+  'array',
+  'arrow_function',
+  'class',
+  'function_expression',
+  'generator_function',
+  'object',
+  'regex',
+]);
 
 /** Checks conditions, computing the flow states where they are true and false. */
 export class ConditionChecker {
@@ -184,7 +192,8 @@ export class ConditionChecker {
 
   /** Whether every variable an expression refers to is a constant, or a parameter or variable never reassigned. */
   private narrowsOnlyConstantReferences(expression: TreeNode): boolean {
-    if (['arrow_function', 'function_expression', 'class'].includes(expression.type)) return false;
+    if (['arrow_function', 'function_expression', 'generator_function', 'class'].includes(expression.type))
+      return false;
     if (expression.type === 'identifier') {
       const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
       return !symbol?.valueKind || symbol.valueKind === 'const' || !symbol.isReassigned;

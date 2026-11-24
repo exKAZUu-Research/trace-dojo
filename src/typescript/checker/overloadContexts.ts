@@ -25,7 +25,7 @@ interface Preview {
   eager: boolean;
 }
 
-const functionKinds = new Set(['arrow_function', 'function_expression', 'method_definition']);
+const functionKinds = new Set(['arrow_function', 'function_expression', 'generator_function', 'method_definition']);
 
 export class OverloadContexts {
   private readonly locked: Contexts[] = [];

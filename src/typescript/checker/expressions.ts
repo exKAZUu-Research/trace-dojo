@@ -18,6 +18,7 @@ import {
   assignmentKind,
   hasToken,
   isDirectEmptyArray,
+  isFunctionWithOwnThis,
   isImmediatelyInvoked,
   named,
   numberValue,
@@ -60,6 +61,18 @@ interface ExcessPropertyOptions {
 
 const reportExcessProperties: ExcessPropertyOptions = { report: true };
 
+/** The nodes that end the search for the function `new.target` belongs to: those with their own `this`. */
+const newTargetBoundaries = new Set([
+  'function_declaration',
+  'function_expression',
+  'generator_function',
+  'generator_function_declaration',
+  'method_definition',
+  'class_static_block',
+  'field_definition',
+  'program',
+]);
+
 export type CheckExpression = (node: TreeNode, contextual?: Type) => Type;
 
 /** Checks expressions, computing their types and narrowing the references their conditions test. */
@@ -96,6 +109,7 @@ export class ExpressionChecker {
     ['array', (node, contextual) => this.c.literals.arrayLiteral(node, contextual)],
     ['object', (node, contextual) => this.c.literals.objectLiteral(node, contextual)],
     ['function_expression', (node, contextual) => this.c.functions.functionExpression(node, contextual)],
+    ['generator_function', (node, contextual) => this.c.functions.functionExpression(node, contextual)],
     ['arrow_function', (node, contextual) => this.c.functions.functionExpression(node, contextual)],
     ['class', (node) => this.c.classes.classExpression(node)],
     ['member_expression', (node) => this.c.members.checkAccess(node).type],
@@ -120,7 +134,11 @@ export class ExpressionChecker {
     ],
     ['as_expression', (node, contextual) => this.checkWrapped(node, contextual)],
     ['type_assertion', (node, contextual) => this.checkWrapped(node, contextual)],
-    ['satisfies_expression', (node, contextual) => this.checkWrapped(node, contextual)],
+    ['satisfies_expression', (node) => this.satisfiesExpression(node)],
+    ['meta_property', (node) => this.newTarget(node)],
+    ['sequence_expression', (node, contextual) => this.sequenceExpression(node, contextual)],
+    ['yield_expression', (node, contextual) => this.c.functions.yieldExpression(node, contextual)],
+    ['instantiation_expression', (node) => this.calls.instantiationExpression(node)],
     ['non_null_expression', (node, contextual) => this.checkWrapped(node, contextual)],
     ['spread_element', (node) => this.check(named(node)[0])],
   ]);
@@ -187,6 +205,71 @@ export class ExpressionChecker {
       const asserted = nonNullableType(this.c, continued ?? type);
       return continued ? members.chainResult(node, asserted, asserted) : asserted;
     });
+  }
+
+  /**
+   * `a, b, c`, which TypeScript parses as `(a, b), c`: each comma whose left side has no side effects is an error, at
+   * the start of that side, unless it is the `(0, o.f)()` idiom of an indirect call.
+   */
+  private sequenceExpression(node: TreeNode, contextual: Type | undefined): Type {
+    const elements = named(node).filter((child) => child.type !== 'comment');
+    let leftIsFree = true;
+    for (const [index, element] of elements.entries()) {
+      if (index === elements.length - 1) return this.check(element, contextual);
+      this.check(element);
+      leftIsFree &&= isSideEffectFree(element);
+      if (leftIsFree && !(elements.length === 2 && isIndirectCall(node, element, elements[1])))
+        this.c.error(elements[0], 'コンマ演算子の左側は使われず、副作用もありません。');
+    }
+    return anyType;
+  }
+
+  /**
+   * `new.target`: the class in a constructor, or the function in a function declaration or expression, as TypeScript's
+   * `getNewTargetContainer` finds through arrow functions; elsewhere it is an error.
+   */
+  private newTarget(node: TreeNode): Type {
+    let container = node.parent;
+    while (container && !newTargetBoundaries.has(container.type)) container = container.parent;
+    if (container?.type === 'method_definition' && container.childForFieldName('name')?.text === 'constructor') {
+      const classNode = container.parent?.parent;
+      if (classNode) return this.c.classes.valueTypeOf(this.c.classes.classInfoOfNode(classNode));
+    }
+    if (container && isFunctionWithOwnThis(container) && container.type !== 'method_definition') {
+      const name = container.childForFieldName('name');
+      return name && container.type.endsWith('function_declaration')
+        ? this.checkReferenceSilently(name)
+        : this.c.globalType('Function');
+    }
+    this.c.error(
+      node,
+      "メタプロパティ 'new.target' は、関数宣言・関数式・コンストラクターの本体の中でしか使えません。"
+    );
+    return errorType;
+  }
+
+  /**
+   * `expression satisfies T`: the expression is checked against `T` as its contextual type and must be assignable to
+   * it, yet keeps its own type.
+   */
+  private satisfiesExpression(node: TreeNode): Type {
+    const [operand, typeNode] = named(node);
+    const target = this.c.typeNodes.typeFromNode(typeNode);
+    const type = this.check(operand, target);
+    if (target === errorType) return type;
+    if (this.c.relations.isAssignable(type, target)) this.checkExcessProperties(operand, type, target);
+    else if (!this.elaboration.report(operand, type, target)) {
+      const message = this.elaboration.typeRelationMessage(type, target);
+      const [source, expected] = [this.c.print(type), this.c.print(target)];
+      const head = `型 '${source}' を型 '${expected}' に代入することはできません。`;
+      this.c.error(
+        operand,
+        message.startsWith(head)
+          ? `型 '${source}' は、期待される型 '${expected}' を満たしません。${message.slice(head.length)}`
+          : message
+      );
+    }
+    return type;
   }
 
   observeTypes<T>(types: Map<number, Type | undefined>, run: () => T): T {
@@ -427,7 +510,7 @@ export class ExpressionChecker {
   /** Whether `arguments` names the arguments of an enclosing function, which an arrow function shares. */
   private hasArguments(node: TreeNode): boolean {
     for (let current = node.parent; current; current = current.parent) {
-      if (['function_declaration', 'function_expression', 'method_definition'].includes(current.type)) return true;
+      if (isFunctionWithOwnThis(current) && current.type !== 'class_static_block') return true;
       if (current.type === 'class_body' || current.type === 'field_definition') return false;
     }
     return false;
@@ -732,9 +815,12 @@ export class ExpressionChecker {
 
   private functionSymbolType(symbol: Sym): Type {
     const expression = symbol.valueDeclaration;
-    if (expression?.type === 'function_expression') return this.c.silently(() => this.check(expression));
+    if (expression?.type === 'function_expression' || expression?.type === 'generator_function')
+      return this.c.silently(() => this.check(expression));
     const signatures = symbol.valueDeclarations.filter((node) => node.type === 'function_signature');
-    const implementation = symbol.valueDeclarations.find((node) => node.type === 'function_declaration');
+    const implementation = symbol.valueDeclarations.find(
+      (node) => node.type === 'function_declaration' || node.type === 'generator_function_declaration'
+    );
     const ownSignatures = signatures.filter((signature) => !this.c.isLibrary(signature));
     const librarySignatures = signatures.filter((signature) => this.c.isLibrary(signature));
     const declared =
@@ -1008,6 +1094,73 @@ export class ExpressionChecker {
     this.checkExcessProperties(node, type, target);
     return true;
   }
+}
+
+const sideEffectFreeTypes = new Set([
+  'identifier',
+  'undefined',
+  'string',
+  'regex',
+  'template_string',
+  'number',
+  'true',
+  'false',
+  'null',
+  'function_expression',
+  'arrow_function',
+  'class',
+  'array',
+  'object',
+  'non_null_expression',
+]);
+
+/** Whether evaluating an expression has no effect, as TypeScript's `isSideEffectFree` decides for the comma operator. */
+function isSideEffectFree(node: TreeNode): boolean {
+  const expression = skipParentheses(node);
+  if (sideEffectFreeTypes.has(expression.type)) return true;
+  switch (expression.type) {
+    case 'call_expression': {
+      return expression.childForFieldName('arguments')?.type === 'template_string';
+    }
+    case 'ternary_expression': {
+      return ['consequence', 'alternative'].every((field) =>
+        isSideEffectFree(expression.childForFieldName(field) as TreeNode)
+      );
+    }
+    case 'binary_expression': {
+      return ['left', 'right'].every((field) => isSideEffectFree(expression.childForFieldName(field) as TreeNode));
+    }
+    case 'sequence_expression': {
+      return named(expression).every((child) => isSideEffectFree(child));
+    }
+    case 'unary_expression': {
+      const operator = expression.childForFieldName('operator')?.text ?? '';
+      return (
+        operator === 'typeof' ||
+        (['!', '+', '-', '~'].includes(operator) &&
+          isSideEffectFree(expression.childForFieldName('argument') as TreeNode))
+      );
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/** `(0, o.f)()` or `(0, eval)()`, which calls a function without passing its object as `this`. */
+function isIndirectCall(sequence: TreeNode, left: TreeNode, right: TreeNode): boolean {
+  const parenthesized = sequence.parent;
+  const call = parenthesized?.parent;
+  return (
+    parenthesized?.type === 'parenthesized_expression' &&
+    left.type === 'number' &&
+    left.text === '0' &&
+    call?.type === 'call_expression' &&
+    call.childForFieldName('function')?.id === parenthesized.id &&
+    (right.type === 'member_expression' ||
+      right.type === 'subscript_expression' ||
+      (right.type === 'identifier' && right.text === 'eval'))
+  );
 }
 
 /** Node.js names that need its type definitions, which the reference `tsc` does not have. */

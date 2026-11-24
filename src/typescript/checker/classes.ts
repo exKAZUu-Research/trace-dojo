@@ -774,6 +774,8 @@ export class ClassChecker {
       switch (current.type) {
         case 'function_declaration':
         case 'function_expression':
+        case 'generator_function_declaration':
+        case 'generator_function':
         case 'method_definition':
         case 'class_static_block': {
           return current;
@@ -832,7 +834,10 @@ export class ClassChecker {
       this.checkConstructorReceiver(node, owner, classNode, 'this');
       return isStatic ? info.staticType : this.selfType(info);
     }
-    if (objectMethod || owner.type === 'function_declaration' || owner.type === 'function_expression') {
+    if (
+      objectMethod ||
+      ['function_declaration', 'function_expression'].includes(owner.type.replace(/^generator_function/, 'function'))
+    ) {
       this.c.error(node, "'this' の型が暗黙に any になります。型の注釈がないためです。");
       return anyType;
     }
@@ -931,9 +936,14 @@ export class ClassChecker {
 
   private blocksThisType(container: TreeNode, node: TreeNode): boolean {
     if (
-      ['function_declaration', 'function_expression', 'function_signature', 'class_static_block'].includes(
-        container.type
-      )
+      [
+        'function_declaration',
+        'function_expression',
+        'generator_function_declaration',
+        'generator_function',
+        'function_signature',
+        'class_static_block',
+      ].includes(container.type)
     )
       return true;
     if (

@@ -20,6 +20,7 @@ const sideEffectTypes = new Set([
   'augmented_assignment_expression',
   'class',
   'function_expression',
+  'generator_function',
   'update_expression',
 ]);
 
