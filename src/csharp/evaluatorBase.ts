@@ -355,10 +355,10 @@ export abstract class EvaluatorBase {
       return underlying === 'long' || underlying === 'ulong' ? 0n : 0;
     }
     if (type.symbol.kind !== 'struct') return undefined;
-    // No struct is larger than MAX_STRUCT_SLOTS, far beyond any a learner writes, so no single value is too large to
-    // make; the fields of the struct values that locals and closures keep, which no storage charge counts, are bounded
-    // by the work every struct's fields cost (Runtime.meterStructFields), and storage that keeps structs charges
-    // their layouts besides.
+    // A default is not made of a struct type larger than MAX_STRUCT_SLOTS, far beyond any a learner writes, so one
+    // default cannot build a layout without bound; every struct made otherwise (copies, tuples) costs its fields as
+    // work (Runtime.meterStructFields), which bounds the struct values that locals and closures keep, and storage that
+    // keeps structs charges their layouts besides.
     if (this.defaultSlotCount(type) > MAX_STRUCT_SLOTS)
       throw new PendingException(
         'System.OutOfMemoryException',
