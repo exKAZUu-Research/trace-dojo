@@ -1692,6 +1692,14 @@ pub mod sync {
         pub fn is_poisoned(&self) -> bool;
     }
     pub struct MutexGuard<T>;
+    pub struct Condvar { inner: () }
+    impl Condvar {
+        pub fn new() -> Condvar;
+        pub fn wait<T>(&self, guard: MutexGuard<T>) -> LockResult<MutexGuard<T>>;
+        pub fn wait_while<T, F: FnMut(&mut T) -> bool>(&self, guard: MutexGuard<T>, condition: F) -> LockResult<MutexGuard<T>>;
+        pub fn notify_one(&self);
+        pub fn notify_all(&self);
+    }
     pub struct RwLock<T>;
     impl<T> RwLock<T> {
         pub fn new(value: T) -> RwLock<T>;

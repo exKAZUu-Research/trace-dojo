@@ -210,7 +210,8 @@ export type BuiltinAdt =
   | 'AsyncFuture'
   | 'Context'
   | 'Waker'
-  | 'Poll';
+  | 'Poll'
+  | 'Condvar';
 
 /** The pointer a typed `self` is in: `Box<Self>`, `Rc<Self>`, `Arc<Self>`, or `Pin<&mut Self>`. */
 export type SelfWrapper = 'Box' | 'Rc' | 'Arc' | 'Pin';

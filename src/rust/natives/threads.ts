@@ -62,11 +62,11 @@ export class Scheduler {
     return true;
   }
 
-  /** Runs every thread waiting, as a thread that sleeps or yields lets them. */
-  runAll(ctx: NativeContext): void {
-    while (this.runNext(ctx)) {
-      // Each thread runs to its end; one may spawn more.
-    }
+  /** Runs every thread waiting, as a thread that sleeps or yields lets them, telling whether one ran. */
+  runAll(ctx: NativeContext): boolean {
+    let ran = false;
+    while (this.runNext(ctx)) ran = true;
+    return ran;
   }
 
   private panicText(error: RustPanic, id: number): string {
@@ -108,6 +108,23 @@ function lock(ctx: NativeContext, target: CellBox, mutable: boolean): Value {
   const guard = new BorrowGuard(target, mutable);
   ctx.runtime.liveGuards.push(guard);
   return ok(ctx, guard);
+}
+
+/**
+ * `Condvar::wait` and `wait_while`: the lock is let go while the threads waiting run to their ends, as one of them
+ * would notify, and then taken again; with no thread to run, the wait would never end.
+ */
+function waitOnCondvar(ctx: NativeContext, held: Value, waiting: (place: Value) => boolean, once: boolean): Value {
+  const guard = deref(held) as BorrowGuard;
+  if (!once && !waiting(guard.place())) return ok(ctx, guard);
+  guard.release();
+  for (;;) {
+    if (!scheduler(ctx).runAll(ctx))
+      panic(ctx, 'デッドロックしました（通知するスレッドがないまま、Condvar を待っています）。');
+    const relocked = (lock(ctx, guard.cell, true) as EnumValue).fields[0] as BorrowGuard;
+    if (once || !waiting(relocked.place())) return ok(ctx, relocked);
+    relocked.release();
+  }
 }
 
 /** `Receiver::recv`: a message, which the threads waiting run to send, or none once none can. */
@@ -223,6 +240,12 @@ define({
     return ok(ctx, { isPlace: true, get: () => target.value, set: (value: Value) => (target.value = value) });
   },
   'Mutex<_>::is_poisoned': () => false,
+  'Condvar::new': (_args, ctx) => new StructValue(ctx.interp.program.adtDef('Condvar'), [UNIT_VALUE]),
+  'Condvar::wait': ([, guard], ctx) => waitOnCondvar(ctx, guard, () => false, true),
+  'Condvar::wait_while': ([, guard, condition], ctx) =>
+    waitOnCondvar(ctx, guard, (place) => call(ctx, condition, [place]) === true, false),
+  'Condvar::notify_one': () => UNIT_VALUE,
+  'Condvar::notify_all': () => UNIT_VALUE,
   'RwLock<_>::new': ([value], ctx) => {
     ctx.interp.dropper.activate();
     return new CellBox(value);

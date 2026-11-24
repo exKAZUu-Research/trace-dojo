@@ -1024,6 +1024,7 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   AsyncFuture: 'AsyncFuture',
   Context: 'Context',
   Waker: 'Waker',
+  Condvar: 'Condvar',
 };
 
 const BUILTIN_ENUMS: Record<string, BuiltinAdt> = {
