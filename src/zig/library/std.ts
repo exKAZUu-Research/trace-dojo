@@ -43,6 +43,7 @@ import {
   unavailableMember,
 } from './native';
 import { compilePrint, printInto } from './print';
+import { testingNamespace } from './testing';
 import {
   bufferedBytes,
   bufferedSlice,
@@ -80,6 +81,7 @@ export function importStd(): StructType {
     Random: typeMember(() => lazyNamespace('Random')),
     lang: typeMember(() => langNamespace()),
     builtin: typeMember(() => langNamespace()),
+    testing: typeMember(() => testingNamespace()),
     ArrayList: lazyMember('ArrayList'),
     ArrayListUnmanaged: lazyMember('ArrayList'),
     AutoHashMap: lazyMember('AutoHashMap'),
@@ -102,7 +104,6 @@ export function importStd(): StructType {
       c: 'C との連携（std.c）',
       Build: 'std.Build',
       time: '時刻（std.time）',
-      testing: 'テスト（std.testing）',
       json: 'JSON（std.json）',
       crypto: '暗号（std.crypto）',
       compress: '圧縮（std.compress）',

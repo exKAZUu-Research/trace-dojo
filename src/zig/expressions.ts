@@ -1399,6 +1399,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     };
   }
 
+  // code-gauge-allow functionNcss -- Keeps the known, constant, and runtime forms of one `orelse` together.
   private orelse(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const left = this.compile(expression.left, resultType ? optionalOf(resultType) : undefined);
     if (left.type.kind !== 'optional') {
@@ -1406,6 +1407,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     this.checkMemoryHeader(left, expression);
     const child = left.type.child;
+    // Zig does not analyze the right side of an `orelse` whose left side it knows holds a value.
+    if (left.known && left.value !== NULL) return known(child, optionalPayload(left.value), expression);
     const right = this.compile(expression.right, child);
     const type =
       right.type.kind === 'noreturn' ? child : this.peerType([known(child, undefined, expression), right], expression);
@@ -1891,7 +1894,11 @@ export abstract class ExpressionCompiler extends SemaBase {
         [...x, ...y].map((value) => copyForStorage(value)),
         sentinel
       );
-      return viaPointer ? new Pointer(new Constant(array), 0) : array;
+      if (!viaPointer) return array;
+      // `"a" ++ b` of strings is constant data, as Zig computes it at compile time.
+      const storage = new Constant(array);
+      markConstantStorage(storage, arrayType);
+      return new Pointer(storage, 0);
     };
     const readable =
       (!a.viaPointer || isConstantData(staticResultOf(left)?.value)) &&

@@ -10098,3 +10098,41 @@ pub fn main() void {
     uncaughtException: 'panic: integer overflow',
   });
 });
+
+test('std.testing checks values outside tests and reports a failure as Zig does', () => {
+  const program = `const std = @import("std");
+const P = struct { x: i32, y: ?u8 };
+fn div(a: i32, b: i32) !i32 {
+    if (b == 0) return error.DivisionByZero;
+    return @divTrunc(a, b);
+}
+pub fn main() !void {
+    try std.testing.expectEqual(P{ .x = 1, .y = 2 }, P{ .x = 1, .y = 2 });
+    try std.testing.expectError(error.DivisionByZero, div(1, 0));
+    std.debug.print("{any}\\n", .{std.testing.expectError(error.Overflow, div(7, 0))});
+    try std.testing.expectEqualSlices(i32, &.{ 1, 2, 3 }, &.{ 1, 5 });
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    stderr: [
+      'expected error.Overflow, found error.DivisionByZero',
+      'error.TestUnexpectedError',
+      'slices differ. first difference occurs at index 1 (0x1)',
+      '',
+      '============ expected this output: =============  len: 3 (0x3)',
+      '',
+      '[0]: 1',
+      '[1]: 2',
+      '[2]: 3',
+      '',
+      '============= instead found this: ==============  len: 2 (0x2)',
+      '',
+      '[0]: 1',
+      '[1]: 5',
+      '',
+      '================================================',
+      '',
+      '',
+    ].join('\n'),
+    uncaughtException: 'error: TestExpectedEqual',
+  });
+});

@@ -175,8 +175,8 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
 
   private builtinInComptime(expression: ExpressionOf<'builtinCall'>): TExpr {
     this.builtinArity(expression, 0);
-    if (this.comptimeDepth > 0) return known(BOOL, true, expression);
-    return runtime(BOOL, (frame) => frame.runtime.branchCount !== undefined, expression);
+    // Zig knows the answer as it analyzes the call, which lets `if (@inComptime())` drop the other branch.
+    return known(BOOL, this.comptimeDepth > 0, expression);
   }
 
   private builtinSizeOf(expression: ExpressionOf<'builtinCall'>): TExpr {
