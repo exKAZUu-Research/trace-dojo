@@ -748,6 +748,8 @@ function boxFromIterator(solver: TraitSolver, inner: Type, item: Type, element: 
 /** A derive bounds every type parameter by the trait, as `#[derive]` does. */
 function derived({ t, name, all }: Goal): Answer | undefined {
   if (t.kind !== 'adt') return undefined;
+  // A derived `Default` of an enum gives a variant without fields, which needs nothing of the type's parameters.
+  if (name === 'Default' && t.def.kind === 'enum' && t.def.derives.has(name)) return 'yes';
   return t.def.derives.has(name) ? all(t.args) : undefined;
 }
 

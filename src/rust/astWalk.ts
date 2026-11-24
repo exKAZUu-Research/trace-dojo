@@ -32,11 +32,14 @@ export function forEachResult(expr: Expr, visit: (expr: Expr) => void): void {
 
 // code-gauge-allow functionCognitiveComplexity -- The traversal keeps the active labels and evaluation order together.
 function forEachLoopResult(loop: Extract<Expr, { kind: 'loop' }>, visit: (expr: Expr) => void): void {
-  const labels = [loop.label];
+  const labels = [{ label: loop.label, isBlock: loop.isBlock === true }];
   const walk = (expr: Expr): void => {
     if (expr.kind === 'closure') return;
     if (expr.kind === 'break' && expr.value) {
-      const target = expr.label === undefined ? labels.length - 1 : labels.lastIndexOf(expr.label);
+      const target =
+        expr.label === undefined
+          ? labels.findLastIndex((entry) => !entry.isBlock)
+          : labels.findLastIndex((entry) => entry.label === expr.label);
       if (target === 0) forEachResult(expr.value, visit);
     }
     if (expr.kind !== 'for' && expr.kind !== 'while' && expr.kind !== 'loop') {
@@ -45,7 +48,7 @@ function forEachLoopResult(loop: Extract<Expr, { kind: 'loop' }>, visit: (expr: 
     }
     if (expr.kind === 'for') walk(expr.iterable);
     if (expr.kind === 'while') walk(expr.cond.kind === 'expr' ? expr.cond.expr : expr.cond.value);
-    labels.push(expr.label);
+    labels.push({ label: expr.label, isBlock: expr.kind === 'loop' && expr.isBlock === true });
     walkBlock(expr.body, walk);
     labels.pop();
   };

@@ -248,7 +248,7 @@ export class Compiler {
         return this.compileLet(stmt);
       }
       case 'expr': {
-        const value = this.statement(stmt.expr, stmt.span);
+        const value = stmt.hidden ? this.value(stmt.expr, true) : this.statement(stmt.expr, stmt.span);
         return (frame) => {
           frame.runtime.spend();
           value(frame);
@@ -282,6 +282,14 @@ export class Compiler {
         return UNIT_VALUE;
       };
       return this.withStep(stmt.span, run, isObjectCreation(stmt.init, this.annotations));
+    }
+    if (stmt.hidden) {
+      const bind = this.compileBinder(stmt.pattern);
+      const init = this.value(stmt.init);
+      return (frame) => {
+        bind(frame, init(frame));
+        return UNIT_VALUE;
+      };
     }
     const bind = this.compileBinder(stmt.pattern);
     const local =
@@ -862,7 +870,9 @@ function readArrayRepeat(c: Compiler, expr: ExprOf<'arrayRepeat'>): Eval {
   if (c.annotations.unevaluatedRepeatOperands.has(expr.value)) return () => [];
   const value = c.value(expr.value);
   const count = c.value(expr.count);
-  const constant = c.annotations.paths.get(expr.value)?.kind === 'const';
+  const constant =
+    c.annotations.paths.get(expr.value)?.kind === 'const' ||
+    (expr.value.kind === 'block' && expr.value.isConst === true);
   return (frame) => {
     const length = Number(count(frame) as bigint);
     frame.runtime.allocate(length);

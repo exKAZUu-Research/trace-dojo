@@ -175,6 +175,8 @@ export interface AdtDef {
   lifetimeParams?: string[];
   /** The module the type is declared in, whose items may read its private fields. */
   module?: unknown;
+  /** For an enum with `#[derive(Default)]`, the index of its `#[default]` variant. */
+  defaultVariant?: number;
 }
 
 export interface TraitDef {

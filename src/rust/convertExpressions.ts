@@ -3,7 +3,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import type { BinaryOp, Block, Condition, Expr, Item, MatchArm, Pattern, Span, Stmt, TypeAst } from './ast';
 import { forEachDirect } from './astWalk';
 import { MacroConverter } from './convertMacros';
-import { isComment, syntaxError, unavailable, withoutDocAttributes } from './convertSyntax';
+import { isComment, splitAttributes, syntaxError, unavailable } from './convertSyntax';
 import {
   parseByteLiteral,
   parseByteStringLiteral,
@@ -18,11 +18,6 @@ const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
   await_expression: '.await',
   async_block: 'async ブロック',
   unsafe_block: 'unsafe ブロック',
-  const_block: 'const ブロック',
-  gen_block: 'gen ブロック',
-  try_block: 'try ブロック',
-  yield_expression: 'yield',
-  become_expression: 'become',
   attribute_item: '式に付けた属性',
   attributed_expression: '式に付けた属性',
 };
@@ -36,7 +31,7 @@ export abstract class ExpressionConverter extends MacroConverter {
     const stmts: Stmt[] = [];
     const items: Item[] = [];
     let tail: Expr | undefined;
-    const children = node.namedChildren.filter((child) => !isComment(child)).map(withoutDocAttributes);
+    const children = this.blockChildren(node);
     for (const [index, child] of children.entries()) {
       const isLast = index === children.length - 1;
       if (child.type === 'label') continue;
@@ -45,7 +40,9 @@ export abstract class ExpressionConverter extends MacroConverter {
       } else if (child.type === 'expression_statement') {
         const inner = child.namedChildren.find((c) => !isComment(c)) as Node;
         const semi = child.text.trimEnd().endsWith(';') && !inner.text.endsWith(';');
-        const expression = withoutDocAttributes(inner);
+        const { attributes, target } = splitAttributes(inner);
+        if (!this.attributes.read(attributes) || !target) continue;
+        const expression = target;
         const expr = this.expr(expression);
         const terminated = semi || child.lastChild?.type === ';';
         if (isLast && !terminated && (expr.kind === 'macro' || isBlockLike(expr))) tail = expr;
@@ -62,6 +59,46 @@ export abstract class ExpressionConverter extends MacroConverter {
       }
     }
     return { kind: 'block', stmts, tail, span, endRow: node.endPosition.row, items };
+  }
+
+  /**
+   * The elements of a list of expressions (a tuple, an array, arguments), without those that `#[cfg]` removes; an
+   * attribute may precede an element or wrap it.
+   */
+  private listElements(children: Node[]): Node[] {
+    return this.withAttributes(children).flatMap(({ node }) => {
+      const { attributes, target } = splitAttributes(node);
+      return this.attributes.read(attributes) && target ? [target] : [];
+    });
+  }
+
+  /**
+   * The statements and items of a block, without the comments, the inner attributes, and what `#[cfg]` removes, and
+   * with the other attributes read.
+   */
+  private blockChildren(node: Node): Node[] {
+    const children: Node[] = [];
+    for (const child of node.namedChildren) {
+      if (isComment(child)) continue;
+      if (child.type === 'inner_attribute_item') {
+        this.attributes.readInner(child);
+        continue;
+      }
+      if (child.type === 'attribute_item')
+        syntaxError(this.span(child), '属性の後には、それを付ける文を書いてください。');
+      if (child.type !== 'attributed_declaration' && child.type !== 'attributed_expression') {
+        children.push(child);
+        continue;
+      }
+      const { attributes, target } = splitAttributes(child);
+      const attrs = this.attributes.read(attributes);
+      if (!attrs || !target) continue;
+      // An item keeps its attributes, which the item's conversion reads.
+      children.push(
+        isItem(target) && target.type !== 'attributed_declaration' && attributes.length > 0 ? child : target
+      );
+    }
+    return children;
   }
 
   /**
@@ -141,6 +178,9 @@ export abstract class ExpressionConverter extends MacroConverter {
       case 'struct_expression': {
         return this.structExpr(node);
       }
+      case 'const_block': {
+        return { ...this.block(this.field(node, 'body')), isConst: true, span };
+      }
       case 'block': {
         const label = this.label(node);
         return label === undefined ? this.block(node) : this.labeledBlock(node, label, span);
@@ -156,7 +196,11 @@ export abstract class ExpressionConverter extends MacroConverter {
         return this.closure(node);
       }
       case 'macro_invocation': {
-        return { kind: 'macro', macro: this.macro(node), span };
+        return this.literalMacro(node) ?? { kind: 'macro', macro: this.macro(node), span };
+      }
+      case 'attributed_expression': {
+        // Attributes may stand on a statement and on the elements of a list, but on no other expression.
+        return syntaxError(span, '式に付けた属性は、不安定な機能なので使えません（E0658）。');
       }
       default: {
         return this.operatorExpr(node, span);
@@ -194,7 +238,7 @@ export abstract class ExpressionConverter extends MacroConverter {
       endRow: block.endRow,
       items: [],
     };
-    return { kind: 'loop', label, body, span };
+    return { kind: 'loop', label, body, span, isBlock: true };
   }
 
   private integerLiteral(node: Node, span: Span): Expr {
@@ -268,12 +312,10 @@ export abstract class ExpressionConverter extends MacroConverter {
         };
       }
       case 'assignment_expression': {
-        return {
-          kind: 'assign',
-          target: this.assignee(this.field(node, 'left')),
-          value: this.expr(this.field(node, 'right')),
-          span,
-        };
+        const left = this.field(node, 'left');
+        const value = this.expr(this.field(node, 'right'));
+        if (this.isDestructuring(left)) return this.destructuringAssignment(left, value, span);
+        return { kind: 'assign', target: this.assignee(left), value, span };
       }
       case 'compound_assignment_expr': {
         const operator = this.field(node, 'operator').text;
@@ -334,7 +376,7 @@ export abstract class ExpressionConverter extends MacroConverter {
         return this.rangeExpr(node, span);
       }
       case 'tuple_expression': {
-        const elems = node.namedChildren.filter((child) => !isComment(child));
+        const elems = this.listElements(node.namedChildren);
         return { kind: 'tuple', elems: elems.map((child) => this.expr(child)), span };
       }
       case 'unit_expression': {
@@ -342,7 +384,7 @@ export abstract class ExpressionConverter extends MacroConverter {
       }
       case 'array_expression': {
         const length = node.childForFieldName('length');
-        const elems = node.namedChildren.filter((child) => !isComment(child) && child.id !== length?.id);
+        const elems = this.listElements(node.namedChildren.filter((child) => child.id !== length?.id));
         if (length) return { kind: 'arrayRepeat', value: this.expr(elems[0]), count: this.expr(length), span };
         return { kind: 'array', elems: elems.map((child) => this.expr(child)), span };
       }
@@ -388,13 +430,31 @@ export abstract class ExpressionConverter extends MacroConverter {
         return { kind: 'loop', label: this.label(node), body: this.block(this.field(node, 'body')), span };
       }
       case 'while_expression': {
-        return {
-          kind: 'while',
-          label: this.label(node),
-          cond: this.condition(this.field(node, 'condition')),
-          body: this.block(this.field(node, 'body')),
+        const condition = this.field(node, 'condition');
+        const body = this.block(this.field(node, 'body'));
+        const label = this.label(node);
+        if (condition.type !== 'let_chain')
+          return { kind: 'while', label, cond: this.condition(condition), body, span };
+        // `while` on a chain of conditions runs as `loop { if <chain> { ... } else { break } }`.
+        const exit: Expr = { kind: 'break', label, value: undefined, span };
+        const otherwise: Block = {
+          kind: 'block',
+          stmts: [{ kind: 'expr', expr: exit, semi: true, span }],
+          tail: undefined,
           span,
+          endRow: body.endRow,
+          items: [],
         };
+        const step = this.conditional(condition, body, otherwise, span);
+        const loopBody: Block = {
+          kind: 'block',
+          stmts: [{ kind: 'expr', expr: step, semi: true, span }],
+          tail: undefined,
+          span,
+          endRow: body.endRow,
+          items: [],
+        };
+        return { kind: 'loop', label, body: loopBody, span };
       }
       case 'for_expression': {
         return {
@@ -423,7 +483,7 @@ export abstract class ExpressionConverter extends MacroConverter {
     }
   }
 
-  /** The left side of an assignment, where `_` discards the value and tuples assign each element. */
+  /** The left side of an assignment, where `_` discards the value. */
   private assignee(node: Node): Expr {
     if (node.type === 'identifier' && node.text === '_') {
       return {
@@ -432,21 +492,112 @@ export abstract class ExpressionConverter extends MacroConverter {
         span: this.span(node),
       };
     }
-    if (node.type === 'tuple_expression' || node.type === 'struct_expression' || node.type === 'call_expression') {
-      unavailable(this.span(node), '分割代入（(a, b) = ...）');
-    }
     return this.expr(node);
+  }
+
+  /** Whether the left side of an assignment destructures the value (`(a, b) = ...`), rather than naming one place. */
+  private isDestructuring(node: Node): boolean {
+    if (node.type === 'parenthesized_expression') return this.isDestructuring(this.onlyChild(node));
+    if (node.type === 'call_expression') return this.field(node, 'function').type !== 'field_expression';
+    return ['tuple_expression', 'array_expression', 'struct_expression', 'unit_expression'].includes(node.type);
+  }
+
+  /**
+   * A destructuring assignment, which runs as rustc runs it: `(a, b) = value;` as
+   * `{ let (lhs0, lhs1) = value; a = lhs0; b = lhs1; }`.
+   */
+  private destructuringAssignment(left: Node, value: Expr, span: Span): Expr {
+    const stores: Stmt[] = [];
+    const pattern = this.assigneePattern(left, stores);
+    const binding: Stmt = { kind: 'let', pattern, type: undefined, init: value, else: undefined, span, hidden: true };
+    return { kind: 'block', stmts: [binding, ...stores], tail: undefined, span, endRow: span.row, items: [] };
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of assignee expression.
+  private assigneePattern(node: Node, stores: Stmt[]): Pattern {
+    const span = this.span(node);
+    switch (node.type) {
+      case 'parenthesized_expression': {
+        return this.assigneePattern(this.onlyChild(node), stores);
+      }
+      case 'unit_expression': {
+        return { kind: 'tuple', elems: [], span };
+      }
+      case 'tuple_expression':
+      case 'array_expression': {
+        const elems = node.namedChildren
+          .filter((child) => !isComment(child))
+          .map((child) => this.assigneePattern(child, stores));
+        if (node.type === 'tuple_expression' && elems.length === 1 && !node.children.some((c) => c.type === ',')) {
+          return elems[0];
+        }
+        return node.type === 'tuple_expression' ? { kind: 'tuple', elems, span } : { kind: 'slice', elems, span };
+      }
+      case 'range_expression': {
+        if (node.namedChildren.some((child) => !isComment(child))) break;
+        return { kind: 'rest', span };
+      }
+      case 'call_expression': {
+        const callee = this.field(node, 'function');
+        if (callee.type === 'field_expression') break;
+        const elems = this.field(node, 'arguments')
+          .namedChildren.filter((child) => !isComment(child))
+          .map((child) => this.assigneePattern(child, stores));
+        return { kind: 'tupleStruct', path: this.exprPath(callee), elems, span };
+      }
+      case 'struct_expression': {
+        return this.structAssigneePattern(node, stores, span);
+      }
+      case 'identifier': {
+        if (node.text === '_') return { kind: 'wild', span };
+        break;
+      }
+      default: {
+        break;
+      }
+    }
+    const name = `lhs#${stores.length}`;
+    const target = this.expr(node);
+    const read: Expr = { kind: 'path', path: { segments: [{ name, args: undefined, span }], span }, span };
+    stores.push({ kind: 'expr', expr: { kind: 'assign', target, value: read, span }, semi: true, span, hidden: true });
+    return { kind: 'binding', name, mutable: false, sub: undefined, span };
+  }
+
+  private structAssigneePattern(node: Node, stores: Stmt[], span: Span): Pattern {
+    const nameNode = this.field(node, 'name');
+    const path =
+      nameNode.type === 'generic_type_with_turbofish' || nameNode.type === 'generic_type'
+        ? this.typePath(nameNode)
+        : this.exprPath(nameNode);
+    const fields: { name: string; pattern: Pattern; span: Span }[] = [];
+    let rest = false;
+    for (const child of this.field(node, 'body').namedChildren) {
+      if (isComment(child)) continue;
+      const childSpan = this.span(child);
+      if (child.type === 'shorthand_field_initializer') {
+        const name = this.onlyChild(child);
+        fields.push({ name: this.identifier(name), pattern: this.assigneePattern(name, stores), span: childSpan });
+      } else if (child.type === 'field_initializer') {
+        const field = this.identifier(this.field(child, 'field'));
+        fields.push({
+          name: field,
+          pattern: this.assigneePattern(this.field(child, 'value'), stores),
+          span: childSpan,
+        });
+      } else if (child.type === 'remaining_field_pattern' || child.type === 'base_field_initializer') {
+        if (child.type === 'base_field_initializer') {
+          syntaxError(childSpan, '分割代入の左辺では、.. の後に値を書けません。');
+        }
+        rest = true;
+      }
+    }
+    return { kind: 'struct', path, fields, rest, span };
   }
 
   private call(node: Node): Expr {
     const span = this.span(node);
     const fn = this.field(node, 'function');
-    const args = this.field(node, 'arguments')
-      .namedChildren.filter((child) => !isComment(child))
-      .map((child) => {
-        if (child.type === 'attribute_item') unavailable(this.span(child), '引数に付けた属性');
-        return this.expr(child);
-      });
+    const args = this.listElements(this.field(node, 'arguments').namedChildren).map((child) => this.expr(child));
     if (
       fn.type === 'field_expression' ||
       (fn.type === 'generic_function' && this.field(fn, 'function').type === 'field_expression')
@@ -476,9 +627,10 @@ export abstract class ExpressionConverter extends MacroConverter {
         : this.exprPath(nameNode);
     const fields: { name: string; value: Expr; span: Span }[] = [];
     let base: Expr | undefined;
-    for (const child of this.field(node, 'body').namedChildren) {
-      if (isComment(child)) continue;
+    for (const { node: child } of this.withAttributes(this.field(node, 'body').namedChildren)) {
       const childSpan = this.span(child);
+      const attributes = child.namedChildren.filter((part) => part.type === 'attribute_item');
+      if (attributes.length > 0 && !this.attributes.read(attributes)) continue;
       if (child.type === 'shorthand_field_initializer') {
         const name = this.onlyChild(child);
         fields.push({
@@ -491,8 +643,6 @@ export abstract class ExpressionConverter extends MacroConverter {
         fields.push({ name: this.identifier(field), value: this.expr(this.field(child, 'value')), span: childSpan });
       } else if (child.type === 'base_field_initializer') {
         base = this.expr(this.onlyChild(child));
-      } else if (child.type === 'attribute_item') {
-        unavailable(childSpan, 'フィールドに付けた属性');
       }
     }
     return { kind: 'struct', path, fields, base, span };
@@ -513,21 +663,47 @@ export abstract class ExpressionConverter extends MacroConverter {
         elseExpr = consequence;
         continue;
       }
-      elseExpr = {
-        kind: 'if',
-        cond: this.condition(condition),
-        consequent: consequence,
-        else: elseExpr,
-        span: this.span(alternative),
-      };
+      elseExpr = this.conditional(condition, consequence, elseExpr, this.span(alternative));
     }
-    return {
-      kind: 'if',
-      cond: this.condition(this.field(node, 'condition')),
-      consequent: this.block(this.field(node, 'consequence')),
-      else: elseExpr,
+    return this.conditional(this.field(node, 'condition'), this.block(this.field(node, 'consequence')), elseExpr, span);
+  }
+
+  /**
+   * An `if` on a condition, where a chain of conditions (`if let Some(x) = a && x > 3 && let ...`) runs as
+   * `'chain: { if let Some(x) = a { if x > 3 { if let ... { break 'chain { ... } } } } else-branch }`: the first
+   * condition that fails goes on to the else branch, and the bindings of each `let` reach the conditions after it.
+   */
+  private conditional(condition: Node, consequent: Block, elseExpr: Expr | undefined, span: Span): Expr {
+    if (condition.type !== 'let_chain') {
+      return { kind: 'if', cond: this.condition(condition), consequent, else: elseExpr, span };
+    }
+    const label = `chain#${span.row}:${span.col}`;
+    const parts = condition.namedChildren.filter((child) => !isComment(child)).map((child) => this.condition(child));
+    let inner: Expr = { kind: 'break', label, value: consequent, span: consequent.span };
+    for (const part of parts.toReversed()) {
+      const body: Block = {
+        kind: 'block',
+        stmts: [{ kind: 'expr', expr: inner, semi: true, span }],
+        tail: undefined,
+        span,
+        endRow: consequent.endRow,
+        items: [],
+      };
+      inner = { kind: 'if', cond: part, consequent: body, else: undefined, span };
+    }
+    const fallback: Expr = elseExpr ?? { kind: 'tuple', elems: [], span };
+    const stmts: Block['stmts'] = [{ kind: 'expr', expr: inner, semi: true, span }];
+    const blockBody: Block = { kind: 'block', stmts, tail: fallback, span, endRow: consequent.endRow, items: [] };
+    const exit: Expr = { kind: 'break', label, value: blockBody, span };
+    const loopBody: Block = {
+      kind: 'block',
+      stmts: [{ kind: 'expr', expr: exit, semi: true, span }],
+      tail: undefined,
       span,
+      endRow: consequent.endRow,
+      items: [],
     };
+    return { kind: 'loop', label, body: loopBody, span, isBlock: true };
   }
 
   private condition(node: Node): Condition {
@@ -539,7 +715,7 @@ export abstract class ExpressionConverter extends MacroConverter {
         span: this.span(node),
       };
     }
-    if (node.type === 'let_chain') unavailable(this.span(node), 'let の連鎖（if let ... && ...）');
+    if (node.type === 'let_chain') syntaxError(this.span(node), 'let の連鎖は、if と while の条件にだけ書けます。');
     return { kind: 'expr', expr: this.expr(node) };
   }
 
@@ -547,12 +723,10 @@ export abstract class ExpressionConverter extends MacroConverter {
     const span = this.span(node);
     const arms: MatchArm[] = [];
     const body = this.field(node, 'body');
-    for (const arm of body.namedChildren) {
-      if (isComment(arm)) continue;
-      if (arm.type !== 'match_arm') {
-        if (arm.type === 'attribute_item') unavailable(this.span(arm), '腕に付けた属性');
-        continue;
-      }
+    for (const { node: arm } of this.withAttributes(body.namedChildren)) {
+      if (arm.type !== 'match_arm') continue;
+      const attributes = arm.namedChildren.filter((part) => part.type === 'attribute_item');
+      if (attributes.length > 0 && !this.attributes.read(attributes)) continue;
       const matchPattern = this.field(arm, 'pattern');
       const condition = matchPattern.childForFieldName('condition');
       if (condition && (condition.type === 'let_condition' || condition.type === 'let_chain')) {
@@ -569,7 +743,9 @@ export abstract class ExpressionConverter extends MacroConverter {
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
   private closure(node: Node): Expr {
     const span = this.span(node);
-    if (/^\s*(static|async)\b/.test(node.text)) unavailable(span, `${node.text.split(/\s/)[0]} クロージャ`);
+    if (/^\s*static\b/.test(node.text))
+      syntaxError(span, 'static クロージャは、不安定な機能なので使えません（E0658）。');
+    if (/^\s*async\b/.test(node.text)) unavailable(span, 'async クロージャ');
     const isMove = node.children.some((child) => child.type === 'move');
     const params: { pattern: Pattern; type: TypeAst | undefined; span: Span }[] = [];
     // `_` is an anonymous token among the parameters.
@@ -601,7 +777,18 @@ export abstract class ExpressionConverter extends MacroConverter {
   }
 }
 
+/** Expressions of unstable features, which stable rustc rejects (E0658). */
+const UNSTABLE_EXPRESSIONS: Record<string, string> = {
+  gen_block: 'gen ブロック',
+  try_block: 'try ブロック',
+  yield_expression: 'yield',
+  become_expression: 'become',
+};
+
 function unsupportedExpr(node: Node, span: Span): never {
+  if (Object.hasOwn(UNSTABLE_EXPRESSIONS, node.type)) {
+    syntaxError(span, `${UNSTABLE_EXPRESSIONS[node.type]}は、不安定な機能なので使えません（E0658）。`);
+  }
   if (Object.hasOwn(UNSUPPORTED_EXPRESSIONS, node.type)) unavailable(span, UNSUPPORTED_EXPRESSIONS[node.type]);
   if (node.type === 'let_condition' || node.type === 'let_chain') {
     syntaxError(span, 'let は if や while の条件にだけ書けます。');

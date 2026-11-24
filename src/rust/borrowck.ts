@@ -50,7 +50,7 @@ const BOTTOM: State = new Map();
  * places, and assignments to immutable variables here, and the conflicts of borrows with a {@link LoanBuilder}.
  */
 export class BorrowChecker {
-  private loopStack: { label: string | undefined; breaks: State[]; continues: State[] }[] = [];
+  private loopStack: { label: string | undefined; isBlock: boolean; breaks: State[]; continues: State[] }[] = [];
   /** The captures that the closure being checked moves out, which it owns. */
   private ownedCaptures: readonly LocalVar[] = [];
 
@@ -309,7 +309,9 @@ export class BorrowChecker {
 
   private loopExpr(expr: Extract<Expr, { kind: 'loop' | 'while' | 'for' }>, state: State): State {
     if (expr.kind === 'for') return this.forLoop(expr, state);
-    if (expr.kind === 'loop') return this.loop(expr.label, state, (s) => this.block(expr.body, s), false);
+    if (expr.kind === 'loop') {
+      return this.loop(expr.label, state, (s) => this.block(expr.body, s), false, expr.isBlock);
+    }
     const body = (s: State): State => {
       const { matched, otherwise } = this.condition(expr.cond, s);
       this.loopStack.at(-1)?.breaks.push(otherwise);
@@ -477,9 +479,15 @@ export class BorrowChecker {
     return moves ? 'move' : 'read';
   }
 
-  private loop(label: string | undefined, state: State, body: (state: State) => State, exits: boolean): State {
+  private loop(
+    label: string | undefined,
+    state: State,
+    body: (state: State) => State,
+    exits: boolean,
+    isBlock = false
+  ): State {
     // The body runs again after itself: check it once from the entry, then from the join with its end.
-    this.loopStack.push({ label, breaks: [], continues: [] });
+    this.loopStack.push({ label, isBlock, breaks: [], continues: [] });
     let head = state;
     for (let pass = 0; pass < 2; pass++) {
       const frame = this.loopStack.at(-1)!;
@@ -510,7 +518,7 @@ export class BorrowChecker {
   private findLoop(label: string | undefined): { breaks: State[]; continues: State[] } | undefined {
     for (let index = this.loopStack.length - 1; index >= 0; index--) {
       const loop = this.loopStack[index];
-      if (label === undefined || loop.label === label) return loop;
+      if (label === undefined ? !loop.isBlock : loop.label === label) return loop;
     }
     return undefined;
   }

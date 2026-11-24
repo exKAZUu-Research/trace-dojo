@@ -206,6 +206,7 @@ function builtinDefaultValue(ctx: NativeContext, type: Type): Value {
           break;
         }
       }
+      if (t.def.kind === 'enum') return new EnumValue(t.def, t.def.defaultVariant ?? 0, []);
       const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
       const defFields = t.def.variants[0].fields;
       ctx.runtime.allocate(defFields.length);

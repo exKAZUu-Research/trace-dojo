@@ -320,6 +320,7 @@ export class ItemCollector {
         }
         case 'typeAlias': {
           let resolved: Type | undefined;
+          let resolving = false;
           const params = declareTypeParams(item.generics);
           const scope: TypeScope = {
             module,
@@ -333,7 +334,17 @@ export class ItemCollector {
               kind: 'alias',
               params,
               lifetimes: item.generics.lifetimes,
-              resolve: () => (resolved ??= lowerType(item.type, scope)),
+              resolve: () => {
+                if (resolved) return resolved;
+                if (resolving) compileError(item.span, `型の別名 ${item.name} が、自分自身を使っています（E0391）。`);
+                resolving = true;
+                try {
+                  resolved = lowerType(item.type, scope);
+                } finally {
+                  resolving = false;
+                }
+                return resolved;
+              },
             },
             item.vis,
             item.span
@@ -419,11 +430,21 @@ export class ItemCollector {
     this.program.adts.push(def);
     this.declareType(module, item.name, { kind: 'adt', def }, item.vis, item.span);
     const deriveDefault = item.attrs.derives.find((derive) => derive.name === 'Default');
+    const defaults = item.variants.filter((variant) => variant.isDefault);
     if (deriveDefault) {
-      compileError(
-        deriveDefault.span,
-        '列挙型の #[derive(Default)] には #[default] の属性が要るので、この採点環境では使えません。'
-      );
+      if (defaults.length === 0) {
+        compileError(
+          deriveDefault.span,
+          '列挙型の #[derive(Default)] には、選択肢の1つに #[default] を付けてください。'
+        );
+      }
+      if (defaults.length > 1) compileError(defaults[1].span, '#[default] は、選択肢の1つにだけ付けてください。');
+      if (defaults[0].shape !== 'unit') {
+        compileError(defaults[0].span, '#[default] は、フィールドのない選択肢にだけ付けられます。');
+      }
+      def.defaultVariant = item.variants.indexOf(defaults[0]);
+    } else if (defaults.length > 0) {
+      compileError(defaults[0].span, '#[default] は、#[derive(Default)] を付けた列挙型の中にだけ書けます。');
     }
     const names = new Set<string>();
     for (const variant of item.variants) {
@@ -1270,9 +1291,32 @@ function checkVisible<T>(entry: Entry<T> | undefined, from: Module, name: string
 export function visibilityScope(vis: Visibility, owner: Module, span: Span): Module | undefined {
   if (vis === 'pub') return undefined;
   if (vis === 'private') return owner;
+  if (typeof vis === 'object') return restrictedScope(vis.in, owner, span);
   const parent = owner.namedModule.parent;
   if (!parent) compileError(span, 'pub(super) には親モジュールが必要です。');
   return parent;
+}
+
+/** The module that `pub(in path)` names, which must be the item's module or one around it (E0742). */
+function restrictedScope(path: string[], owner: Module, span: Span): Module {
+  const ancestors: Module[] = [];
+  for (let module: Module | undefined = owner.namedModule; module; module = module.parent) ancestors.unshift(module);
+  let current: Module | undefined;
+  for (const [index, name] of path.entries()) {
+    if (index === 0 && name === 'crate') current = ancestors[0];
+    else if (index === 0 && name === 'self') current = owner.namedModule;
+    else if (name === 'super') current = (current ?? owner.namedModule).parent;
+    else
+      current =
+        current && ancestors[ancestors.indexOf(current) + 1]?.name === name
+          ? ancestors[ancestors.indexOf(current) + 1]
+          : undefined;
+    if (!current) break;
+  }
+  if (!current || !ancestors.includes(current)) {
+    compileError(span, `pub(in ${path.join('::')}) には、この項目を囲むモジュールを書いてください。`);
+  }
+  return current;
 }
 
 export function visibleFrom(scope: Module | undefined, from: Module): boolean {

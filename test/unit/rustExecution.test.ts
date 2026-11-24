@@ -1856,10 +1856,10 @@ fn main() {
     stdout: '7\nPoint { row: 7 }\n',
     uncaughtException: undefined,
   });
-  const attribute = program.replace('/// Use the position as the marker.', '#[inline]');
+  const attribute = program.replace('/// Use the position as the marker.', '#[frobnicate]');
   expect(executeProgram('rust', attribute)).toMatchObject({
     kind: 'compileError',
-    diagnostics: [expect.objectContaining({ message: expect.stringContaining('#[inline]') })],
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('#[frobnicate]') })],
   });
 });
 
@@ -2889,7 +2889,6 @@ SkipWhile { iter: Cycle { orig: Iter([1, 2]), iter: Iter([]) }, flag: true }
 });
 
 test.each([
-  ['attributes on tuple elements (stage C)', '    let tuple = (#[cfg(any())] 1, 2);'],
   ['an unavailable string method', '    let escaped = "abc".escape_debug();'],
   [
     'an unavailable slice method reached through Vec',

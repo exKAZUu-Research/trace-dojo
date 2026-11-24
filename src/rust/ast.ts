@@ -11,7 +11,8 @@ export interface Crate {
   items: Item[];
 }
 
-export type Visibility = 'private' | 'pub' | 'super';
+/** Where an item is visible; `in` lists the path of `pub(in path)`, a module around the item. */
+export type Visibility = 'private' | 'pub' | 'super' | { in: string[] };
 
 export type Item =
   | FnItem
@@ -36,6 +37,10 @@ export interface TypeAliasItem {
 
 export interface Attributes {
   derives: { name: string; span: Span }[];
+  /** `#[default]` on the unit variant that `#[derive(Default)]` gives an enum. */
+  isDefault?: boolean;
+  /** `#[track_caller]`, which reports a panic at the caller's location. */
+  trackCaller?: boolean;
 }
 
 export interface Generics {
@@ -80,6 +85,7 @@ export interface FnItem {
   endRow: number;
   /** The row of the opening brace, through which a `// atomic` annotation marks the function. */
   headerEndRow: number;
+  trackCaller?: boolean;
 }
 
 export interface SelfParam {
@@ -130,6 +136,7 @@ export interface VariantAst {
   shape: 'named' | 'tuple' | 'unit';
   fields: FieldAst[];
   discriminant: Expr | undefined;
+  isDefault?: boolean;
 }
 
 export interface TraitItem {
@@ -160,6 +167,8 @@ export interface ConstItem {
   type: TypeAst;
   /** Undefined for a constant of the standard library whose value is native. */
   value: Expr | undefined;
+  /** A `static`, which is one value that every use refers to, rather than a value each use copies. */
+  isStatic?: boolean;
 }
 
 export interface ModItem {
@@ -221,6 +230,8 @@ export interface Block {
   /** Items declared inside the block, which are visible throughout it. */
   items: Item[];
   ty?: Type;
+  /** A `const { ... }` block, whose value is a constant. */
+  isConst?: boolean;
 }
 
 export type Stmt =
@@ -231,8 +242,10 @@ export type Stmt =
       init: Expr | undefined;
       else: Block | undefined;
       span: Span;
+      /** A statement the conversion adds, which records no step of the trace. */
+      hidden?: boolean;
     }
-  | { kind: 'expr'; expr: Expr; semi: boolean; span: Span }
+  | { kind: 'expr'; expr: Expr; semi: boolean; span: Span; hidden?: boolean }
   | { kind: 'empty'; span: Span };
 
 interface ExprBase {
@@ -301,7 +314,8 @@ export type Expr = ExprBase &
     | Block
     | { kind: 'if'; cond: Condition; consequent: Block; else: Expr | undefined }
     | { kind: 'match'; scrutinee: Expr; arms: MatchArm[]; endRow: number }
-    | { kind: 'loop'; label: string | undefined; body: Block }
+    /** `isBlock`: a labeled block (`'a: { ... }`) that runs as a loop its end breaks out of, which no unlabeled `break` or `continue` targets. */
+    | { kind: 'loop'; label: string | undefined; body: Block; isBlock?: boolean }
     | { kind: 'while'; label: string | undefined; cond: Condition; body: Block }
     | { kind: 'for'; label: string | undefined; pattern: Pattern; iterable: Expr; body: Block }
     | { kind: 'break'; label: string | undefined; value: Expr | undefined }

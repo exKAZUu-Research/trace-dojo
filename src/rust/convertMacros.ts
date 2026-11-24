@@ -22,6 +22,117 @@ export abstract class MacroConverter extends PatternConverter {
     return this.macroCall(name, tree, span);
   }
 
+  /** A macro of the standard library that expands to a literal, as that literal; undefined for the other macros. */
+  // code-gauge-allow functionCognitiveComplexity -- One case per macro.
+  // code-gauge-allow functionNcss -- One case per macro.
+  protected literalMacro(node: Node): Expr | undefined {
+    const span = this.span(node);
+    const name = this.field(node, 'macro')
+      .text.replace(/^(?:r#)?(?:::)?(?:std|core|alloc)::/, '')
+      .replace(/^r#/, '');
+    const tree = node.namedChildren.find((child) => child.type === 'token_tree');
+    switch (name) {
+      case 'cfg': {
+        if (!tree) syntaxError(span, 'cfg! には条件を書いてください。');
+        return { kind: 'bool', value: this.attributes.cfgMacro(tree, span), span };
+      }
+      case 'line': {
+        return { kind: 'int', value: BigInt(span.row + 1), suffix: 'u32', span };
+      }
+      case 'column': {
+        return { kind: 'int', value: BigInt(span.col), suffix: 'u32', span };
+      }
+      case 'file': {
+        return { kind: 'str', value: 'src/main.rs', span };
+      }
+      case 'module_path': {
+        return { kind: 'str', value: ['main', ...this.modulePath].join('::'), span };
+      }
+      case 'stringify': {
+        const inner = tree ? tree.children.slice(1, -1).filter((child) => !isComment(child)) : [];
+        return { kind: 'str', value: tokenText(inner), span };
+      }
+      case 'concat': {
+        return { kind: 'str', value: this.concatMacro(tree), span };
+      }
+      case 'compile_error': {
+        const [message] = tree ? this.macroArgs(tree) : [];
+        const text = message?.type === 'string_literal' ? parseStringLiteral(message.text) : undefined;
+        return syntaxError(span, text ?? 'compile_error! には、文字列を書いてください。');
+      }
+      case 'include':
+      case 'include_str':
+      case 'include_bytes': {
+        return unavailable(span, `別のファイルを読み込むマクロ ${name}!`);
+      }
+      case 'env':
+      case 'option_env': {
+        return unavailable(span, `コンパイルするときの環境変数を読むマクロ ${name}!`);
+      }
+      case 'asm':
+      case 'global_asm':
+      case 'naked_asm': {
+        return unavailable(span, `CPU によって結果が変わるインラインアセンブリ（${name}!）`);
+      }
+      case 'concat_idents':
+      case 'log_syntax':
+      case 'trace_macros':
+      case 'format_args_nl':
+      case 'concat_bytes': {
+        return syntaxError(span, `${name}! は、不安定な機能なので使えません（E0658）。`);
+      }
+      case 'try': {
+        return syntaxError(span, 'try は予約語なので、try! は使えません（? 演算子を使ってください）。');
+      }
+      default: {
+        return undefined;
+      }
+    }
+  }
+
+  /** The text `concat!` makes of its literal arguments. */
+  private concatMacro(tree: Node | undefined): string {
+    let text = '';
+    for (const arg of tree ? this.macroArgs(tree) : []) {
+      const expr = this.expr(arg);
+      switch (expr.kind) {
+        case 'str':
+        case 'char': {
+          text += expr.value;
+          break;
+        }
+        case 'bool': {
+          text += String(expr.value);
+          break;
+        }
+        case 'int': {
+          text += expr.value.toString();
+          break;
+        }
+        case 'float': {
+          text += arg.text.replaceAll('_', '').replace(/f(?:32|64)$/, '');
+          break;
+        }
+        case 'unary': {
+          if (expr.op === '-' && (expr.operand.kind === 'int' || expr.operand.kind === 'float')) {
+            text += `-${arg.text
+              .slice(1)
+              .trim()
+              .replaceAll('_', '')
+              .replace(/(?:[iu]\d+|[iu]size|f32|f64)$/, '')}`;
+            break;
+          }
+          syntaxError(this.span(arg), 'concat! には、リテラルだけを書いてください。');
+          break;
+        }
+        default: {
+          syntaxError(this.span(arg), 'concat! には、リテラルだけを書いてください。');
+        }
+      }
+    }
+    return text;
+  }
+
   // code-gauge-allow functionNcss -- One case per macro.
   private macroCall(name: string, tree: Node, span: Span): MacroCall {
     switch (name) {
@@ -127,7 +238,7 @@ export abstract class MacroConverter extends PatternConverter {
   }
 
   /** The comma-separated arguments of a macro, reparsed as expressions at their places in the source. */
-  private macroArgs(tree: Node): Node[] {
+  protected macroArgs(tree: Node): Node[] {
     const open = tree.text[0];
     if (open !== '(' && open !== '[' && open !== '{') syntaxError(this.span(tree), '書き方に誤りがあります。');
     const inner = tree.text.slice(1, -1);
@@ -273,5 +384,23 @@ function macroExpressionText(node: Node): string {
     end = child.endIndex;
   };
   visit(node);
+  return text;
+}
+
+/** The text `stringify!` gives tokens: as written, with one space where spaces or newlines separate them. */
+function tokenText(tokens: Node[]): string {
+  let text = '';
+  let end: number | undefined;
+  const visit = (token: Node): void => {
+    if (isComment(token)) return;
+    if (token.childCount > 0 && !token.type.endsWith('_literal')) {
+      for (const child of token.children) visit(child);
+      return;
+    }
+    if (end !== undefined && token.startIndex > end) text += ' ';
+    text += token.text;
+    end = token.endIndex;
+  };
+  for (const token of tokens) visit(token);
   return text;
 }

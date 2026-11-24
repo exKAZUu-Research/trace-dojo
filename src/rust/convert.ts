@@ -24,11 +24,9 @@ import type {
   Visibility,
 } from './ast';
 import { ExpressionConverter } from './convertExpressions';
-import { isComment, syntaxError, unavailable, withoutDocAttributes } from './convertSyntax';
+import { isComment, splitAttributes, syntaxError, unavailable } from './convertSyntax';
 
 export { type Reparse, syntaxError, unavailable } from './convertSyntax';
-
-const DERIVABLE = new Set(['Debug', 'Clone', 'Copy', 'PartialEq', 'Eq', 'PartialOrd', 'Ord', 'Hash', 'Default']);
 
 /** Converts tree-sitter's concrete syntax tree to the AST, rejecting syntax this interpreter does not support. */
 export class Converter extends ExpressionConverter {
@@ -39,6 +37,10 @@ export class Converter extends ExpressionConverter {
       if (child.type === 'expression_statement' || child.type === 'let_declaration') {
         syntaxError(this.span(child), '文は、関数の中に書いてください。');
       }
+      // rustc skips a `#!` line at the start of the file, as Unix runs scripts with it.
+      if (child.type === 'shebang') continue;
+      if (child.type === 'frontmatter')
+        syntaxError(this.span(child), 'フロントマター（---）は、不安定な機能なので使えません（E0658）。');
       const item = this.item(child);
       if (item) items.push(item);
     }
@@ -54,7 +56,7 @@ export class Converter extends ExpressionConverter {
     const span = this.span(node);
     switch (node.type) {
       case 'function_item': {
-        return this.fnItem(node);
+        return this.fnItem(node, false, attrs);
       }
       case 'struct_item': {
         return this.structItem(node, attrs ?? { derives: [] });
@@ -79,8 +81,21 @@ export class Converter extends ExpressionConverter {
           value: value ? this.expr(value) : undefined,
         };
       }
+      case 'static_item': {
+        if (node.namedChildren.some((child) => child.type === 'mutable_specifier')) {
+          return unavailable(span, 'static mut');
+        }
+        return {
+          kind: 'const',
+          name: this.identifier(this.field(node, 'name')),
+          span,
+          vis: this.visibility(node),
+          type: this.type(this.field(node, 'type')),
+          value: this.expr(this.field(node, 'value')),
+          isStatic: true,
+        };
+      }
       case 'type_item': {
-        if (!this.isStd) return this.unsupportedItem(node);
         return {
           kind: 'typeAlias',
           name: this.identifier(this.field(node, 'name')),
@@ -94,14 +109,17 @@ export class Converter extends ExpressionConverter {
         const body = node.childForFieldName('body');
         if (!body) unavailable(span, '別のファイルのモジュール（mod 名前;）');
         const items: Item[] = [];
+        const name = this.identifier(this.field(node, 'name'));
+        this.modulePath.push(name);
         for (const child of body.namedChildren) {
           if (isComment(child)) continue;
           const item = this.item(child);
           if (item) items.push(item);
         }
+        this.modulePath.pop();
         return {
           kind: 'mod',
-          name: this.identifier(this.field(node, 'name')),
+          name,
           span,
           vis: this.visibility(node),
           items,
@@ -114,7 +132,11 @@ export class Converter extends ExpressionConverter {
         return this.attributed(node);
       }
       case 'attribute_item': {
-        return unavailable(span, `属性（${node.text}）`);
+        return syntaxError(span, '属性の後には、それを付ける項目を書いてください。');
+      }
+      case 'inner_attribute_item': {
+        this.attributes.readInner(node);
+        return undefined;
       }
       case 'empty_statement': {
         return undefined;
@@ -131,52 +153,33 @@ export class Converter extends ExpressionConverter {
 
   private unsupportedItem(node: Node): never {
     const span = this.span(node);
+    const unstable: Record<string, string> = {
+      decl_macro: 'macro によるマクロの定義',
+    };
+    if (Object.hasOwn(unstable, node.type))
+      syntaxError(span, `${unstable[node.type]}は、不安定な機能なので使えません（E0658）。`);
     const names: Record<string, string> = {
-      static_item: 'static 変数',
-      type_item: '型の別名（type）',
       union_item: '共用体（union）',
       macro_definition: 'マクロの定義（macro_rules!）',
-      decl_macro: 'マクロの定義（macro）',
       extern_crate_declaration: '外部のクレート（extern crate）',
       foreign_mod_item: '外部の関数の宣言（extern ブロック）',
       inner_attribute_item: `属性（${node.text.split('\n')[0]}）`,
       function_signature_item: '本体のない関数',
-      trait_alias: 'トレイトの別名',
-      shebang: '#! で始まる行',
-      frontmatter: 'フロントマター（---）',
       macro_invocation: '関数の外のマクロの呼び出し',
     };
     return unavailable(span, names[node.type] ?? `この書き方（${node.type}）`);
   }
 
   private attributed(node: Node): Item | undefined {
-    const attrs: Attributes = { derives: [] };
-    let declaration: Node | undefined;
-    for (const child of node.namedChildren) {
-      if (isComment(child)) continue;
-      if (child.type === 'attribute_item') this.attribute(child, attrs);
-      else declaration = child;
-    }
-    if (!declaration) return undefined;
+    const { attributes, target } = splitAttributes(node);
+    const attrs = this.attributes.read(attributes);
+    if (!attrs || !target) return undefined;
+    const declaration = target;
     if (attrs.derives.length > 0 && declaration.type !== 'struct_item' && declaration.type !== 'enum_item') {
       syntaxError(this.span(node), '#[derive] は、構造体と列挙型にだけ付けられます。');
     }
+    if (attrs.isDefault) syntaxError(this.span(node), '#[default] は、列挙型の選択肢にだけ付けられます。');
     return this.item(declaration, attrs);
-  }
-
-  private attribute(node: Node, attrs: Attributes): void {
-    const attribute = node.namedChildren.find((child) => child.type === 'attribute');
-    const name = attribute?.namedChildren[0];
-    if (!attribute || name?.type !== 'identifier' || name.text !== 'derive') {
-      unavailable(this.span(node), `属性（${node.text}）`);
-    }
-    const args = attribute.childForFieldName('arguments');
-    if (!args) unavailable(this.span(node), `属性（${node.text}）`);
-    for (const token of args.namedChildren) {
-      if (token.type !== 'identifier') unavailable(this.span(token), `#[derive] の中の ${token.text}`);
-      if (!DERIVABLE.has(token.text)) unavailable(this.span(token), `#[derive(${token.text})]`);
-      attrs.derives.push({ name: token.text, span: this.span(token) });
-    }
   }
 
   private visibility(node: Node): Visibility {
@@ -187,19 +190,23 @@ export class Converter extends ExpressionConverter {
 
   private visibilityModifier(modifier: Node): Visibility {
     if (modifier.text === 'pub') return 'pub';
-    const scope = modifier.namedChildren.find((child) => !isComment(child))?.text;
+    const scopeNode = modifier.namedChildren.find((child) => !isComment(child));
+    const scope = scopeNode?.text;
     if (scope === 'self') return 'private';
     if (scope === 'super') return 'super';
     if (scope === 'crate') return 'pub';
-    return unavailable(this.span(modifier), `公開の範囲の指定（${modifier.text}）`);
+    if (scopeNode && /^pub\s*\(\s*in\b/.test(modifier.text)) {
+      return { in: scopeNode.text.split('::').map((part) => part.trim()) };
+    }
+    return syntaxError(this.span(modifier), `公開の範囲の指定（${modifier.text}）の書き方に誤りがあります。`);
   }
 
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
   // code-gauge-allow functionNcss -- One case per kind of syntax node.
-  private fnItem(node: Node, allowMissingBody = false): FnItem {
+  private fnItem(node: Node, allowMissingBody = false, attrs?: Attributes): FnItem {
     const span = this.span(node);
     const modifiers = node.namedChildren.find((child) => child.type === 'function_modifiers');
-    const isConst = this.isStd && modifiers?.text.trim() === 'const';
+    const isConst = modifiers?.text.trim() === 'const';
     if (modifiers && !isConst) {
       const text = modifiers.text;
       if (text.includes('async')) unavailable(span, 'async fn');
@@ -210,15 +217,12 @@ export class Converter extends ExpressionConverter {
     const parametersNode = this.field(node, 'parameters');
     let selfParam: SelfParam | undefined;
     const params: Param[] = [];
-    for (const child of parametersNode.namedChildren) {
-      if (isComment(child)) continue;
+    for (const { node: child } of this.withAttributes(parametersNode.namedChildren)) {
       if (child.type === 'self_parameter') {
         if (selfParam || params.length > 0) syntaxError(this.span(child), 'self は、最初の引数に一度だけ書けます。');
         selfParam = this.selfParam(child);
       } else if (child.type === 'parameter') {
         params.push(this.param(child));
-      } else if (child.type === 'attribute_item') {
-        unavailable(this.span(child), `属性（${child.text}）`);
       } else if (child.type === 'variadic_parameter') {
         unavailable(this.span(child), '可変個の引数（...）');
       } else {
@@ -238,11 +242,17 @@ export class Converter extends ExpressionConverter {
       generics: this.generics(node),
       selfParam,
       params,
-      ret: ret ? this.type(ret) : undefined,
+      ret: ret ? this.returnType(ret) : undefined,
       body,
       endRow: node.endPosition.row,
       headerEndRow: bodyNode ? bodyNode.startPosition.row : node.endPosition.row,
+      trackCaller: attrs?.trackCaller,
     };
+  }
+
+  /** A function's return type, which may be `!`, the one place stable Rust lets it be written. */
+  private returnType(node: Node): TypeAst {
+    return node.type === 'never_type' ? { kind: 'never', span: this.span(node) } : this.type(node);
   }
 
   private selfParam(node: Node): SelfParam {
@@ -352,7 +362,7 @@ export class Converter extends ExpressionConverter {
         return unavailable(span, `境界の修飾（${node.text}）`);
       }
       case 'removed_trait_bound': {
-        return unavailable(span, `境界の修飾（${node.text}）`);
+        return syntaxError(span, `境界 ${node.text} は、不安定な機能なので使えません（E0658）。`);
       }
       case 'higher_ranked_trait_bound': {
         return unavailable(span, "for<'a> の境界");
@@ -395,9 +405,7 @@ export class Converter extends ExpressionConverter {
 
   private namedFields(body: Node): FieldAst[] {
     const fields: FieldAst[] = [];
-    for (const child of body.namedChildren) {
-      if (isComment(child)) continue;
-      if (child.type === 'attribute_item') unavailable(this.span(child), `属性（${child.text}）`);
+    for (const { node: child } of this.withAttributes(body.namedChildren)) {
       if (child.type !== 'field_declaration') continue;
       fields.push({
         name: this.identifier(this.field(child, 'name')),
@@ -412,14 +420,20 @@ export class Converter extends ExpressionConverter {
   private orderedFields(body: Node): FieldAst[] {
     const fields: FieldAst[] = [];
     let vis: Visibility = 'private';
+    let pending: Node[] = [];
     for (const child of body.namedChildren) {
       if (isComment(child)) continue;
+      if (child.type === 'attribute_item') {
+        pending.push(child);
+        continue;
+      }
       if (child.type === 'visibility_modifier') {
         vis = this.visibilityModifier(child);
         continue;
       }
-      if (child.type === 'attribute_item') unavailable(this.span(child), `属性（${child.text}）`);
-      fields.push({ name: String(fields.length), type: this.type(child), vis, span: this.span(child) });
+      const kept = this.attributes.read(pending);
+      pending = [];
+      if (kept) fields.push({ name: String(fields.length), type: this.type(child), vis, span: this.span(child) });
       vis = 'private';
     }
     return fields;
@@ -429,9 +443,7 @@ export class Converter extends ExpressionConverter {
   private enumItem(node: Node, attrs: Attributes): EnumItem {
     const span = this.span(node);
     const variants: VariantAst[] = [];
-    for (const child of this.field(node, 'body').namedChildren) {
-      if (isComment(child)) continue;
-      if (child.type === 'attribute_item') unavailable(this.span(child), `属性（${child.text}）`);
+    for (const { node: child, attrs: variantAttrs } of this.withAttributes(this.field(node, 'body').namedChildren)) {
       if (child.type !== 'enum_variant') continue;
       const body = child.childForFieldName('body');
       const value = child.childForFieldName('value');
@@ -441,6 +453,7 @@ export class Converter extends ExpressionConverter {
         shape: body?.type === 'field_declaration_list' ? 'named' : body ? 'tuple' : 'unit',
         fields: body?.type === 'field_declaration_list' ? this.namedFields(body) : body ? this.orderedFields(body) : [],
         discriminant: value ? this.expr(value) : undefined,
+        isDefault: variantAttrs.isDefault,
       });
     }
     return {
@@ -460,9 +473,11 @@ export class Converter extends ExpressionConverter {
     const methods: FnItem[] = [];
     for (const syntax of this.field(node, 'body').namedChildren) {
       if (isComment(syntax)) continue;
-      const child = withoutDocAttributes(syntax);
-      if (child.type === 'function_item') methods.push(this.fnItem(child));
-      else if (child.type === 'function_signature_item') methods.push(this.fnItem(child, true));
+      const { attributes, target: child } = splitAttributes(syntax);
+      const attrs = this.attributes.read(attributes);
+      if (!attrs || !child) continue;
+      if (child.type === 'function_item') methods.push(this.fnItem(child, false, attrs));
+      else if (child.type === 'function_signature_item') methods.push(this.fnItem(child, true, attrs));
       else if (child.type === 'associated_type') unavailable(this.span(child), '関連型（type Item;）');
       else if (child.type === 'const_item') unavailable(this.span(child), 'トレイトの関連定数');
       else if (child.type === 'macro_invocation') unavailable(this.span(child), 'トレイトの中のマクロ');
@@ -484,15 +499,18 @@ export class Converter extends ExpressionConverter {
   private implItem(node: Node): ImplItem {
     const span = this.span(node);
     if (node.text.startsWith('unsafe')) unavailable(span, 'unsafe impl');
-    if (/^impl\b[^{]*!/.test(node.text)) unavailable(span, '否定の実装（impl !Trait）');
+    if (/^impl\b[^{]*!/.test(node.text))
+      syntaxError(span, '否定の実装（impl !Trait）は、不安定な機能なので使えません（E0658）。');
     const trait = node.childForFieldName('trait');
     const methods: FnItem[] = [];
     const consts: ImplItem['consts'] = [];
     for (const syntax of node.childForFieldName('body')?.namedChildren ?? []) {
       if (isComment(syntax)) continue;
-      const child = withoutDocAttributes(syntax);
-      if (child.type === 'function_item') methods.push(this.fnItem(child));
-      else if (child.type === 'function_signature_item' && this.isStd) methods.push(this.fnItem(child, true));
+      const { attributes, target: child } = splitAttributes(syntax);
+      const attrs = this.attributes.read(attributes);
+      if (!attrs || !child) continue;
+      if (child.type === 'function_item') methods.push(this.fnItem(child, false, attrs));
+      else if (child.type === 'function_signature_item' && this.isStd) methods.push(this.fnItem(child, true, attrs));
       else if (child.type === 'const_item') consts.push(this.item(child) as ImplItem['consts'][number]);
       else if (child.type === 'type_item') unavailable(this.span(child), '関連型（type Item = ...;）');
       else if (child.type === 'function_signature_item') syntaxError(this.span(child), '関数の本体が足りません。');
@@ -646,7 +664,7 @@ export class Converter extends ExpressionConverter {
       }
       case 'never_type': {
         if (this.isStd) return { kind: 'never', span };
-        return unavailable(span, '型 !');
+        return syntaxError(span, '型 ! は、関数の戻り値の型にだけ書けます（ほかの場所では不安定な機能です。E0658）。');
       }
       case 'pointer_type': {
         return unavailable(span, '生ポインタ（*const T・*mut T）');

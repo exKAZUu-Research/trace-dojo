@@ -1,4 +1,5 @@
 import type { Block, Condition, Expr, Span } from './ast';
+import { forEachDirect } from './astWalk';
 import type { Checker, LoopContext } from './checker';
 import { checkCall, checkMethodCall } from './checkerCalls';
 import { checkClosure } from './checkerClosures';
@@ -8,6 +9,7 @@ import { pathExpr, structExpr } from './checkerPaths';
 import { checkPattern, requireRefMutSource } from './checkerPatterns';
 import { checkField, checkIndex } from './checkerPlaces';
 import { constInteger } from './constExpressions';
+import { checkConstOperations } from './constLint';
 import { lowerPattern, missingPattern } from './exhaustiveness';
 import { isPseudo, normalize } from './infer';
 import { compileError } from './items';
@@ -133,6 +135,22 @@ function literalExpr(
   }
 }
 
+/** `const { ... }`, which may use no variable from outside it (E0435) and only what constants may do. */
+function constBlock(c: Checker, block: Block, expected: Type | undefined): Type {
+  const outer = new Set(c.body.fn.locals);
+  const type = c.checkBlock(block, expected);
+  const visit = (expr: Expr): void => {
+    const res = expr.kind === 'path' ? c.annotations.paths.get(expr) : undefined;
+    if ((res?.kind === 'local' && outer.has(res.local)) || res?.kind === 'capture') {
+      compileError(expr.span, `const ブロックの中では、外の変数 ${res.local.name} を使えません（E0435）。`);
+    }
+    forEachDirect(expr, visit);
+  };
+  visit(block);
+  checkConstOperations(block, c.annotations);
+  return type;
+}
+
 function controlFlowExpr(
   c: Checker,
   expr: Extract<
@@ -143,7 +161,7 @@ function controlFlowExpr(
 ): Type {
   switch (expr.kind) {
     case 'block': {
-      return c.checkBlock(expr, expected);
+      return expr.isConst ? constBlock(c, expr, expected) : c.checkBlock(expr, expected);
     }
     case 'if': {
       return ifExpr(c, expr, expected);
@@ -229,7 +247,10 @@ function arrayRepeatExpr(c: Checker, expr: Extract<Expr, { kind: 'arrayRepeat' }
   c.deferredChecks.push(() => {
     if (len !== 1 && len !== 0 && !c.solver.isCopy(resolve(elem, true))) {
       const value = expr.value;
-      if (value.kind !== 'path' || c.annotations.paths.get(value)?.kind !== 'const') {
+      const constant =
+        (value.kind === 'block' && value.isConst) ||
+        (value.kind === 'path' && c.annotations.paths.get(value)?.kind === 'const');
+      if (!constant) {
         compileError(
           expr.span,
           `[値; 個数] の値は Copy の型にしてください（${typeToString(resolve(elem))} は Copy ではありません）。`
@@ -242,7 +263,7 @@ function arrayRepeatExpr(c: Checker, expr: Extract<Expr, { kind: 'arrayRepeat' }
 
 function loopExpr(c: Checker, expr: Extract<Expr, { kind: 'loop' }>): Type {
   const breakType = freshVar();
-  inLoop(c, expr.label, breakType, () => blockUnit(c, expr.body));
+  inLoop(c, expr.label, breakType, () => blockUnit(c, expr.body), expr.isBlock);
   return loopBroke(c, expr) ? breakType : NEVER;
 }
 
@@ -306,8 +327,14 @@ function blockUnit(c: Checker, block: Block): void {
   }
 }
 
-function inLoop<T>(c: Checker, label: string | undefined, breakType: Type | undefined, run: () => T): T {
-  const loop: LoopContext = { label, breakType, context: c.body.fn };
+function inLoop<T>(
+  c: Checker,
+  label: string | undefined,
+  breakType: Type | undefined,
+  run: () => T,
+  isBlock = false
+): T {
+  const loop: LoopContext = { label, breakType, context: c.body.fn, isBlock };
   c.body.loops.push(loop);
   try {
     return run();
@@ -326,7 +353,7 @@ function findLoop(c: Checker, label: string | undefined, span: Span, keyword: st
   for (let index = c.body.loops.length - 1; index >= 0; index--) {
     const loop = c.body.loops[index];
     if (loop.context !== c.body.fn) break;
-    if (label === undefined || loop.label === label) {
+    if (label === undefined ? !loop.isBlock : loop.label === label) {
       if (label !== undefined)
         (loop as LoopContext & { broke?: boolean }).broke =
           keyword === 'break' ? true : (loop as { broke?: boolean }).broke;

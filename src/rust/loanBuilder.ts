@@ -77,6 +77,7 @@ interface Binding {
 
 interface LoopFrame {
   label: string | undefined;
+  isBlock: boolean;
   head: number;
   breaks: number[];
   result: Value;
@@ -806,7 +807,7 @@ export class LoanBuilder {
   private loopExpr(expr: Extract<Expr, { kind: 'loop' | 'while' | 'for' }>): Value {
     switch (expr.kind) {
       case 'loop': {
-        return this.loop(expr.label, expr.ty, () => this.block(expr.body));
+        return this.loop(expr.label, expr.ty, () => this.block(expr.body), expr.isBlock);
       }
       case 'while': {
         const pattern = expr.cond.kind === 'let' ? expr.cond.pattern : undefined;
@@ -1045,11 +1046,18 @@ export class LoanBuilder {
   }
 
   /** A loop whose body `body` builds, which goes round again from its end. */
-  private loop(label: string | undefined, type: Type | undefined, body: () => void): Value {
+  private loop(label: string | undefined, type: Type | undefined, body: () => void, isBlock = false): Value {
     const head = this.graph.newPoint();
     if (this.current !== undefined) this.graph.points[this.current].succ.push(head);
     this.current = head;
-    const frame: LoopFrame = { label, head, breaks: [], result: this.temp(type), scopeDepth: this.scopes.length };
+    const frame: LoopFrame = {
+      label,
+      isBlock,
+      head,
+      breaks: [],
+      result: this.temp(type),
+      scopeDepth: this.scopes.length,
+    };
     this.loops.push(frame);
     body();
     if (this.current !== undefined) this.graph.points[this.current].succ.push(head);
@@ -1080,7 +1088,7 @@ export class LoanBuilder {
   private findLoop(label: string | undefined): LoopFrame | undefined {
     for (let index = this.loops.length - 1; index >= 0; index--) {
       const loop = this.loops[index];
-      if (label === undefined || loop.label === label) return loop;
+      if (label === undefined ? !loop.isBlock : loop.label === label) return loop;
     }
     return undefined;
   }

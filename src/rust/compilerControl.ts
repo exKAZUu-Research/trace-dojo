@@ -67,10 +67,11 @@ export function compileMatch(c: Compiler, expr: ExprOf<'match'>, asStatement: bo
 export function compileLoop(c: Compiler, expr: ExprOf<'loop'>): Eval {
   const body = c.compileBlock(expr.body, true);
   const label = expr.label;
+  const isBlock = expr.isBlock === true;
   return (frame) => {
     for (;;) {
       frame.runtime.spend();
-      const signal = runBody(body, frame, label);
+      const signal = runBody(body, frame, label, isBlock);
       if (signal) return signal.value ?? UNIT_VALUE;
     }
   };
@@ -163,12 +164,12 @@ function stepBinding(frame: Frame, row: number | undefined, answered: boolean): 
 }
 
 /** Runs a loop's body once, returning the `break` that ends the loop, if any; a `continue` goes on. */
-function runBody(body: Eval, frame: Frame, label: string | undefined): ControlSignal | undefined {
+function runBody(body: Eval, frame: Frame, label: string | undefined, isBlock = false): ControlSignal | undefined {
   try {
     body(frame);
   } catch (error) {
     if (!(error instanceof ControlSignal) || error.kind === 'return') throw error;
-    if (error.label !== undefined && error.label !== label) throw error;
+    if (error.label === undefined ? isBlock : error.label !== label) throw error;
     if (error.kind === 'break') return error;
   }
   return undefined;

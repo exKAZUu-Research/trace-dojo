@@ -72,6 +72,8 @@ export interface Obligation {
 
 export interface LoopContext {
   label: string | undefined;
+  /** A labeled block, which only a labeled `break` leaves. */
+  isBlock?: boolean;
   /** The type `break` values give a `loop`, or undefined for `while` and `for`, whose breaks carry no value. */
   breakType: Type | undefined;
   context: FnContext;
@@ -627,6 +629,8 @@ export class Checker {
     }
     this.finishBody(item.span);
     this.requireKnownTypes();
+    // A `const fn` may run while the program compiles, so its body may do only what constants may.
+    if (item.isConst) checkConstOperations(body, this.annotations);
     this.checkBorrows(() =>
       new BorrowChecker(this.annotations, this.solver, this.budget).checkFn(item, this.body.fn, this.body.retType)
     );
