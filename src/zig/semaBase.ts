@@ -1157,6 +1157,12 @@ export abstract class SemaBase implements SemaApi {
         return new Pointer(view, view.offset);
       });
     }
+    // `[:s]T` to `[*:s]T` or `[*c]T`, which point to the slice's first element; Zig refuses a slice without sentinel.
+    if (from.size === 'slice' && from.sentinel !== undefined) {
+      const sentinelHolds = to.size === 'c' || (to.size === 'many' && sameSentinel(from.sentinel, to.sentinel));
+      if (!sentinelHolds || !pointerChildCoercible(from.child, to.child, to.isConst)) return undefined;
+      return this.derived(expression, to, (value) => new Pointer((value as Slice).target, (value as Slice).start));
+    }
     const cPointer =
       (to.size === 'c' && (from.size === 'one' || from.size === 'many')) ||
       (from.size === 'c' && (to.size === 'one' || to.size === 'many'));
