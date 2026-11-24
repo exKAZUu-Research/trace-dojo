@@ -56,7 +56,7 @@ export function traceCSharpProgram(program: string, trace: TraceOptions, input?:
   };
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.method?.isAtomic === true,
-    variablesOf: (frame) => guardedSnapshot(() => snapshotter.variablesOf(frame, true)),
+    variablesOf: (frame) => guardedSnapshot(runtime, () => snapshotter.variablesOf(frame, true)),
     recordItem: (item) => {
       charge(item.board.length + NODE_COST * (item.callLines.length + item.turtles.length * 4 + 1));
       charge(traceCost(item.vars) + traceCost(item.referenceVars));
@@ -67,7 +67,7 @@ export function traceCSharpProgram(program: string, trace: TraceOptions, input?:
   let finalVars: TraceItemVariable = {};
   // A model program may end with an uncaught exception to show how one stops the program.
   const run = runProgram(evaluator, (frame) => {
-    finalVars = guardedSnapshot(() => snapshotter.variablesOf(frame, false)).vars;
+    finalVars = guardedSnapshot(runtime, () => snapshotter.variablesOf(frame, false)).vars;
   });
   charge(traceCost(finalVars));
   return { traceItems: recorder.traceItems, finalVars, ...run };
@@ -76,17 +76,22 @@ export function traceCSharpProgram(program: string, trace: TraceOptions, input?:
 /**
  * Builds one snapshot under its own budget: an array shared by many rows expands into far more nodes than the run
  * allocates, so the snapshot must stop before it is built in full, ahead of the charge for what the trace stores.
+ * The program's code that a snapshot runs, such as a dictionary key's ToString, records no steps, since each would
+ * take a snapshot that runs it again.
  */
-function guardedSnapshot<T>(build: () => T): T {
+function guardedSnapshot<T>(runtime: Runtime, build: () => T): T {
   // One snapshot gets the budget the C++ and Rust recorders give a whole trace, far more than a model program shows.
   let remaining = LIMITS.maxTraceSize;
   chargeSnapshot = (cost) => {
     remaining -= cost;
     if (remaining < 0) throw new ExecutionLimitError('trace');
   };
+  const recorder = runtime.steps.recorder;
+  runtime.steps.recorder = undefined;
   try {
     return build();
   } finally {
+    runtime.steps.recorder = recorder;
     chargeSnapshot = undefined;
   }
 }
