@@ -7,6 +7,7 @@ import { interpreter as go } from './languages/go';
 import { interpreter as haskell } from './languages/haskell';
 import { interpreter as java } from './languages/java';
 import { interpreter as javascript } from './languages/javascript';
+import { interpreter as kotlin } from './languages/kotlin';
 import { interpreter as php } from './languages/php';
 import { interpreter as python } from './languages/python';
 import { interpreter as ruby } from './languages/ruby';
@@ -26,6 +27,7 @@ const interpreters = {
   python,
   ruby,
   c,
+  kotlin,
   typescript,
   cpp,
   php,

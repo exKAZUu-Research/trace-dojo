@@ -24,6 +24,8 @@ const wasmUrls: Record<string, () => URL> = {
       '../../node_modules/@willbooster/tree-sitter-javascript/tree-sitter-javascript_script.wasm',
       import.meta.url
     ),
+  '@willbooster/tree-sitter-kotlin/tree-sitter-kotlin.wasm': () =>
+    new URL('../../node_modules/@willbooster/tree-sitter-kotlin/tree-sitter-kotlin.wasm', import.meta.url),
   '@willbooster/tree-sitter-php/tree-sitter-php.wasm': () =>
     new URL('../../node_modules/@willbooster/tree-sitter-php/tree-sitter-php.wasm', import.meta.url),
   '@willbooster/tree-sitter-python/tree-sitter-python.wasm': () =>
