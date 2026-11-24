@@ -20,6 +20,7 @@ import './libRuntimeInfo';
 import './libSerialize';
 import './libWeakReference';
 import './libSpl';
+import './libSplFile';
 import './libGenerator';
 import './libUnsupported';
 import './libRegex';

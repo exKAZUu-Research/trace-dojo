@@ -6410,3 +6410,26 @@ bool(true)
     finalFiles: { 'out.txt': '日本\n語!1' },
   });
 });
+
+test('iterates files with SplFileObject as its flags make PHP read lines', () => {
+  const program = String.raw`<?php
+    $f = new SplFileObject('data.csv');
+    foreach ($f as $k => $line) echo $k, json_encode($line), ' ';
+    $f->setFlags(SplFileObject::READ_CSV | SplFileObject::SKIP_EMPTY | SplFileObject::READ_AHEAD | SplFileObject::DROP_NEW_LINE);
+    foreach ($f as $k => $row) echo $k, json_encode($row), ' ';
+    $f->setFlags(SplFileObject::SKIP_EMPTY);
+    foreach ($f as $k => $line) echo $k, json_encode($line), ' ';
+    $f->seek(3);
+    echo $f->key(), json_encode($f->current()), "\n";
+    $out = new SplTempFileObject();
+    $out->fputcsv(['a b', 'c'], ',', '"', '');
+    $out->rewind();
+    foreach ($out as $k => $line) echo $k, json_encode($line);
+    try { new SplFileObject('none.txt'); } catch (RuntimeException $e) { echo "\n", $e->getMessage(); }`;
+  expect(executeProgram('php', program, { files: { 'data.csv': 'id,name\n1,Al\n\n2,"B b"\n' } })).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`0"id,name\n" 1"1,Al\n" 2"\n" 3"2,\"B b\"\n" 4"" 0["id","name"] 1["1","Al"] 3["2","B b"] 0"id,name\n" 1"1,Al\n" 2"\n" 3"2,\"B b\"\n" 4false 3"2,\"B b\"\n"
+0"\"a b\",c\n"
+SplFileObject::__construct(none.txt): Failed to open stream: No such file or directory`,
+  });
+});

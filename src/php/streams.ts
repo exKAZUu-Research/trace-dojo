@@ -42,6 +42,11 @@ export class Stream {
   position = 0;
   /** The entries an `opendir` handle reads, and how many it has read. */
   directory?: { names: string[]; index: number };
+  /**
+   * Whether a line read that reaches the end of the data reaches the end of the stream, as for `php://temp`, whose
+   * inner memory stream PHP reads past its end when it fills the buffer that line reads use.
+   */
+  eofAtEnd = false;
 
   constructor(
     readonly mode: StreamMode,
@@ -66,7 +71,9 @@ export class Stream {
 
   /** Reads a line with its `\n`, or `limit` bytes of it, or `undefined` at the end. */
   readLine(limit = Infinity): string | undefined {
-    return this.readUntil('\n', limit, true);
+    const line = this.readUntil('\n', limit, true);
+    if (this.eofAtEnd && this.offset >= this.length) this.eof = true;
+    return line;
   }
 
   /**
@@ -217,8 +224,10 @@ export function directoryStream(names: string[]): Stream {
   return stream;
 }
 
-export function memoryStream(): Stream {
-  return new Stream({ read: true, write: true, append: false }, new MemoryStore());
+export function memoryStream(eofAtEnd = false): Stream {
+  const stream = new Stream({ read: true, write: true, append: false }, new MemoryStore());
+  stream.eofAtEnd = eofAtEnd;
+  return stream;
 }
 
 export function fileStream(handle: FileHandle, mode: StreamMode): Stream {

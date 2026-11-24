@@ -408,7 +408,7 @@ defineFunction('basename(string $path, string $suffix = ""): string', ({ args })
   basenameOf(s(args[0]), args[1] === undefined ? '' : s(args[1]))
 );
 
-function basenameOf(fullPath: string, suffix = ''): string {
+export function basenameOf(fullPath: string, suffix = ''): string {
   let path = fullPath.replace(/\/+$/, '');
   path = path.slice(path.lastIndexOf('/') + 1);
   if (suffix !== '' && path.endsWith(suffix) && path !== suffix) path = path.slice(0, -suffix.length);
@@ -444,7 +444,7 @@ defineFunction('pathinfo(string $path, int $flags = PATHINFO_ALL): array|string'
   return parts.size > 0 ? (parts.iterValues().next().value as Value) : '';
 });
 
-function dirnameOf(path: string, levels = 1n): string {
+export function dirnameOf(path: string, levels = 1n): string {
   if (path === '') return '';
   let end = path.length;
   for (let level = 0n; level < levels; level++) {

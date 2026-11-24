@@ -59,17 +59,7 @@ for (const [what, names] of UNSUPPORTED_FUNCTIONS) {
 
 /** The builtin classes this grader rejects when a program creates or uses them. */
 const UNSUPPORTED_CLASSES: [string, string[]][] = [
-  [
-    'ファイルの読み書き',
-    [
-      'SplFileObject',
-      'SplFileInfo',
-      'SplTempFileObject',
-      'DirectoryIterator',
-      'FilesystemIterator',
-      'RecursiveDirectoryIterator',
-    ],
-  ],
+  ['ファイルの読み書き', ['DirectoryIterator', 'FilesystemIterator', 'RecursiveDirectoryIterator']],
   [
     'リフレクション',
     [

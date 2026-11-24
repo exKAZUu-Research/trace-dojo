@@ -62,14 +62,19 @@ const OPEN_MODES = {
 
 /** Opens a file or a `php://` stream as `fopen` does, warning and returning `undefined` when it cannot. */
 export function openPath(functionName: string, path: string, modeText: string): Stream | undefined {
+  const opened = openPathOrFailure(path, modeText);
+  if (typeof opened !== 'string') return opened;
+  warn(`${functionName}(${path}): Failed to open stream: ${opened}`);
+  return undefined;
+}
+
+/** Opens a file or a `php://` stream, or returns why it cannot, as PHP words it after "Failed to open stream: ". */
+export function openPathOrFailure(path: string, modeText: string): Stream | string {
   if (path === '') throwError('ValueError', 'Path cannot be empty');
   const special = phpStream(path);
   if (special) return special;
   const kind = modeText[0] as keyof typeof OPEN_MODES | undefined;
-  if (kind === undefined || !Object.hasOwn(OPEN_MODES, kind)) {
-    warn(`${functionName}(${path}): Failed to open stream: \`${modeText}' is not a valid mode for fopen`);
-    return undefined;
-  }
+  if (kind === undefined || !Object.hasOwn(OPEN_MODES, kind)) return `\`${modeText}' is not a valid mode for fopen`;
   const plus = modeText.includes('+');
   const mode: StreamMode = { read: kind === 'r' || plus, write: kind !== 'r' || plus, append: kind === 'a' };
   const files = rt().io.files;
@@ -81,8 +86,7 @@ export function openPath(functionName: string, path: string, modeText: string): 
   const failure = fileSystemFailure(() => {
     stream = fileStream(files.open(host, { ...OPEN_MODES[kind], append: false }), mode);
   });
-  if (failure) warn(`${functionName}(${path}): Failed to open stream: ${failure}`);
-  return stream;
+  return failure ?? (stream as Stream);
 }
 
 function phpStream(path: string): Stream | undefined {
@@ -94,7 +98,7 @@ function phpStream(path: string): Stream | undefined {
     return standardOutputStream(name);
   }
   if (name === 'stderr' && path.length === match[0].length) return standardOutputStream('stderr');
-  if (name === 'memory' || name === 'temp') return memoryStream();
+  if (name === 'memory' || name === 'temp') return memoryStream(name === 'temp');
   throw new UnsupportedFeatureError(`ストリーム ${path}`);
 }
 
@@ -225,12 +229,21 @@ defineFunction(
     openStream(args[0], 'fputcsv');
     const { separator, enclosure, escape } = csvOptions('fputcsv', args, 2);
     const eol = args[5] === undefined ? '\n' : s(args[5]);
-    const fields = [...(args[1] as PhpArray).iterValues()].map((field) =>
-      csvField(toStr(field), separator, enclosure, escape)
-    );
-    return writeToStream(args[0], fields.join(separator) + eol, 'fputcsv');
+    return writeToStream(args[0], csvLine(args[1] as PhpArray, separator, enclosure, escape, eol), 'fputcsv');
   }
 );
+
+/** The line php_fputcsv writes for a record. */
+export function csvLine(
+  fields: PhpArray,
+  separator: string,
+  enclosure: string,
+  escape: string | undefined,
+  eol: string
+): string {
+  const texts = [...fields.iterValues()].map((field) => csvField(toStr(field), separator, enclosure, escape));
+  return texts.join(separator) + eol;
+}
 
 /** A field as php_fputcsv writes it, enclosed when it holds a character that CSV readers would split at. */
 function csvField(field: string, separator: string, enclosure: string, escape: string | undefined): string {
