@@ -2,7 +2,7 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt reads as they are.
 import { lower, untilNul } from './bytes';
 import { classConstant } from './classConstants';
-import { coerceProperty, createDynamicProp, createObject, declForKey, findClass } from './classes';
+import { coerceProperty, createDynamicProp, createObject, declForKey, findClass, findDeclaredClass } from './classes';
 import { formatFloatRepr, getType, normalizeKeyString } from './conversions';
 import { throwError, warn } from './errors';
 import { defineClass, defineFunction } from './native';
@@ -356,7 +356,7 @@ class Unserializer {
     if (name[0] === '\0' || name[0] === '\\') this.fail(nameEnd + 2);
     let cls: PhpClass | undefined;
     if (this.allowed === undefined || this.allowed.has(lower(name))) {
-      cls = findClass(name);
+      cls = findDeclaredClass(name, true);
       if (cls && cls.isAnonymous) cls = undefined;
       if (!cls && !VALID_CLASS_NAME.test(name)) this.fail(nameEnd + 2);
     } else if (!VALID_CLASS_NAME.test(name)) this.fail(nameEnd + 2);

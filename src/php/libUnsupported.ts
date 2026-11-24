@@ -51,10 +51,7 @@ const UNSUPPORTED_FUNCTIONS: [string, string[]][] = [
       'get_defined_constants',
       'get_declared_classes',
       'debug_zval_dump',
-      'register_shutdown_function',
       'register_tick_function',
-      'spl_autoload_register',
-      'class_alias',
     ],
   ],
 ];

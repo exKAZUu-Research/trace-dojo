@@ -150,6 +150,11 @@ export function lastError(): ReportedError | undefined {
   return lastErrors.get(rt());
 }
 
+/** Records the fatal error that ended the program, which shutdown functions read with `error_get_last`. */
+export function recordFatalError(message: string, row: number): void {
+  lastErrors.set(rt(), { level: E_ERROR, message, row });
+}
+
 export function clearLastError(): void {
   lastErrors.delete(rt());
 }

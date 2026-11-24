@@ -1271,6 +1271,8 @@ function persistentNativeRoots(runtime: Runtime): unknown[] {
     ...runtime.replacedExceptionHandlers,
     ...runtime.errorHandlers.map(({ handler }) => handler),
     ...runtime.outputBuffers.map(({ handler }) => handler),
+    ...runtime.autoloaders,
+    ...runtime.shutdownFunctions.flatMap(({ callback, args }) => [callback, ...args]),
   ];
 }
 

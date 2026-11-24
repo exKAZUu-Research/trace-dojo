@@ -534,6 +534,12 @@ export class Runtime {
     else if (this.displayErrors === 'stderr') this.echoError(text.slice(1));
   }
 
+  /** The autoloaders `spl_autoload_register` registered, in the order PHP calls them. */
+  readonly autoloaders: Value[] = [];
+
+  /** The functions `register_shutdown_function` registered, which run after the program ends. */
+  readonly shutdownFunctions: { callback: Value; args: Value[] }[] = [];
+
   /** The output buffers `ob_start` opened, innermost last. */
   readonly outputBuffers: OutputBuffer[] = [];
   /** The output buffer whose handler is running. */

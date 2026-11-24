@@ -2,13 +2,14 @@
 import { compareSync, encodeBase64, hashSync } from 'bcryptjs';
 
 import { ExecutionLimitError } from '../interpreter/limits';
-import { dec, enc } from './bytes';
+import { dec, enc, lower } from './bytes';
+import { autoloadClass, findDeclaredClass } from './classes';
 import { throwError, warn } from './errors';
 import { defineAlias, defineConstant, defineFunction } from './native';
-import { toStr } from './operators';
-import { rt, type Runtime } from './runtime';
+import { looseEquals, toStr } from './operators';
+import { rt, type Runtime, SCRIPT_PATH } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
-import { PhpArray } from './values';
+import { PhpArray, type Value } from './values';
 
 // Settings -----------------------------------------------------------------------------------------------------------
 
@@ -187,6 +188,70 @@ defineFunction('ini_restore(string $option): void', ({ args }) => {
 
 defineFunction('set_time_limit(int $seconds): bool', ({ args }) => {
   rt().iniSettings.set('max_execution_time', String(args[0] as bigint));
+  return true;
+});
+
+defineFunction('register_shutdown_function(callable $callback, mixed ...$args): void', ({ args }) => {
+  rt().shutdownFunctions.push({ callback: args[0], args: args.slice(1) });
+  return null;
+});
+
+// Autoloading and aliases -------------------------------------------------------------------------------------------
+
+defineFunction(
+  'spl_autoload_register(?callable $callback = null, bool $throw = true, bool $prepend = false): bool',
+  ({ args }) => {
+    const callback = args[0] ?? null;
+    if (callback === null) throw new UnsupportedFeatureError('ファイルを読み込む既定のオートローダー（spl_autoload）');
+    const loaders = rt().autoloaders;
+    if (loaders.some((loader) => sameCallable(loader, callback))) return true;
+    if (args[2] === true) loaders.unshift(callback);
+    else loaders.push(callback);
+    return true;
+  }
+);
+
+defineFunction('spl_autoload_unregister(callable $callback): bool', ({ args }) => {
+  const runtime = rt();
+  const index = runtime.autoloaders.findIndex((loader) => sameCallable(loader, args[0]));
+  if (index === -1) return false;
+  const [removed] = runtime.autoloaders.splice(index, 1);
+  runtime.releaseCallResult(removed);
+  return true;
+});
+
+defineFunction('spl_autoload_functions(): array', () => PhpArray.list(rt().autoloaders));
+
+defineFunction('spl_autoload_call(string $class): void', ({ args }) => {
+  autoloadClass(args[0] as string);
+  return null;
+});
+
+/** Whether two callables name the same function, as PHP compares autoloaders. */
+function sameCallable(left: Value, right: Value): boolean {
+  if (left instanceof PhpArray && right instanceof PhpArray)
+    return looseEquals(left, right) && left.get(0n) === right.get(0n);
+  if (typeof left === 'string' && typeof right === 'string')
+    return lower(left.replace(/^\\/, '')) === lower(right.replace(/^\\/, ''));
+  return left === right;
+}
+
+defineFunction('class_alias(string $class, string $alias, bool $autoload = true): bool', ({ args }) => {
+  const runtime = rt();
+  const [name, alias] = args as [string, string];
+  const cls = findDeclaredClass(name, args[2] !== false);
+  if (!cls) {
+    warn(`Class "${name}" not found`);
+    return false;
+  }
+  const key = lower(alias.replace(/^\\/, ''));
+  const existing = runtime.classes.get(key);
+  if (existing) {
+    const previously = existing.decl ? ` (previously declared in ${SCRIPT_PATH}:${existing.declaredRow + 1})` : '';
+    warn(`Cannot redeclare class ${alias}${previously}`);
+    return false;
+  }
+  runtime.classes.set(key, cls);
   return true;
 });
 

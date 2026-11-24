@@ -3,7 +3,7 @@ import { arrayObjectProperty } from './arrayObjectProperties';
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst, TraitRule } from './ast';
 import { canBindClass, declaresStringConversion } from './astAnalysis';
 import builtinNames from './builtinNames.json';
-import { consumeInvokedResult, discardInvokedResult } from './callables';
+import { callValue, consumeInvokedResult, discardInvokedResult } from './callables';
 import {
   addConst,
   applyTraitConstants,
@@ -74,18 +74,43 @@ export function requireClass(name: string): PhpClass {
 export function findMemberClass(name: string): PhpClass | undefined {
   const unsupported = unsupportedClasses.get(lower(name.replace(/^\\/, '')));
   if (unsupported) throw new UnsupportedFeatureError(unsupported);
-  return findDeclaredClass(name);
+  return findDeclaredClass(name, true);
 }
 
 /**
  * Finds a class, rejecting a builtin class PHP declares but this environment lacks; a stub of an unsupported class is
- * found, as it is declared.
+ * found, as it is declared. With `autoload`, the autoloaders `spl_autoload_register` registered may declare it.
  */
-export function findDeclaredClass(name: string): PhpClass | undefined {
+export function findDeclaredClass(name: string, autoload = false): PhpClass | undefined {
   const cls = findClass(name);
   if (!cls && builtinNames.classes.some((builtin) => lower(builtin) === lower(name.replace(/^\\/, ''))))
     throw new UnsupportedFeatureError(`PHP の組み込みクラス（${name}）`);
-  return cls;
+  return cls ?? (autoload ? autoloadClass(name) : undefined);
+}
+
+/** The classes being autoloaded, which PHP does not autoload again while their autoloaders run. */
+const autoloading = new Set<string>();
+
+/** Calls the registered autoloaders in order until one declares the class. */
+export function autoloadClass(name: string): PhpClass | undefined {
+  const runtime = rt();
+  const plain = name.startsWith('\\') ? name.slice(1) : name;
+  const key = lower(plain);
+  if (runtime.autoloaders.length === 0 || autoloading.has(key)) return undefined;
+  autoloading.add(key);
+  try {
+    for (const loader of [...runtime.autoloaders]) {
+      consumeInvokedResult(
+        () => callValue(loader, [{ v: plain }], runtime.row),
+        () => {}
+      );
+      const cls = findClass(plain);
+      if (cls) return cls;
+    }
+    return undefined;
+  } finally {
+    autoloading.delete(key);
+  }
 }
 
 /** Whether a class declaration can be bound before the program runs, as PHP's early binding does. */
@@ -137,7 +162,7 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
   cls.isReadonly = decl.isReadonly;
   cls.declaredRow = row;
   if (decl.parent) {
-    const parent = findClass(decl.parent);
+    const parent = findClass(decl.parent) ?? autoloadClass(decl.parent);
     if (!parent) throwError('Error', `Class "${decl.parent}" not found`);
     if (parent.kind === 'interface')
       throw new FatalError(`Class ${decl.name} cannot extend interface ${parent.name}`, row);

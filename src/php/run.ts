@@ -5,9 +5,17 @@ import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import { bootstrap } from './bootstrap';
 import { dec } from './bytes';
-import { callValue } from './callables';
+import { callValue, consumeInvokedResult } from './callables';
 import { asInternal, type CallRecord, HostStackExhaustion, invoke, resetCallStack } from './calls';
-import { E_DEPRECATED, E_ERROR, E_WARNING, emitError, throwableLocation } from './errors';
+import {
+  E_DEPRECATED,
+  E_ERROR,
+  E_WARNING,
+  emitError,
+  readThrowableSlot,
+  recordFatalError,
+  throwableLocation,
+} from './errors';
 import { throwableText, traceText } from './exceptions';
 import { releaseDropped, releaseGlobalObject } from './garbage';
 import { holderCounts } from './holderCounts';
@@ -55,6 +63,7 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
       onEnd?.(runtime.globalFrame);
       runtime.world.recordFinalTurtles();
       // A rejection of an unsupported feature ends the run outside PHP, so PHP's shutdown does not run after it.
+      if (!rejectedRuns.has(runtime)) uncaughtException = callShutdownFunctions(runtime) ?? uncaughtException;
       if (rejectedRuns.has(runtime)) {
         for (const buffer of runtime.outputBuffers.splice(0)) runtime.echo(buffer.data);
       } else {
@@ -174,6 +183,7 @@ function printUncaught(runtime: Runtime, object: PhpObject): ReportOutcome {
     try {
       const text = throwableText(object);
       const message = `Fatal error: Uncaught ${text}\n  thrown in ${throwableLocation(object)}`;
+      recordFatalError(`Uncaught ${text}\n  thrown`, Number(readThrowableSlot(object, 'line') ?? 1n) - 1);
       if ((runtime.errorReporting & E_ERROR) !== 0n) runtime.displayError(`\n${message}\n`);
       return { kind: 'failure', failure: dec(message) };
     } catch (error) {
@@ -182,6 +192,35 @@ function printUncaught(runtime: Runtime, object: PhpObject): ReportOutcome {
       object = error.object;
     }
   }
+}
+
+/**
+ * Calls the functions `register_shutdown_function` registered, including those they register, until one exits or ends
+ * with an error.
+ */
+function callShutdownFunctions(runtime: Runtime): string | undefined {
+  const functions = runtime.shutdownFunctions;
+  for (let index = 0; index < functions.length; index++) {
+    const { callback, args } = functions[index];
+    try {
+      asInternal(() =>
+        consumeInvokedResult(
+          () =>
+            callValue(
+              callback,
+              args.map((v) => ({ v })),
+              undefined
+            ),
+          () => {}
+        )
+      );
+    } catch (error) {
+      restoreStack(runtime);
+      const outcome = report(runtime, error);
+      if (outcome.kind !== 'handled') return outcome.failure;
+    }
+  }
+  return undefined;
 }
 
 /** Releases file-scope statics, symbol-table objects, then the remaining object handles. */

@@ -492,37 +492,39 @@ function memberQueryClass(target: Value, operation: 'method_exists' | 'property_
 }
 
 defineFunction('class_exists(string $class, bool $autoload = true): bool', ({ args }) => {
-  const cls = findDeclaredClass(args[0] as string);
+  const cls = findDeclaredClass(args[0] as string, args[1] !== false);
   return cls?.kind === 'class' || cls?.kind === 'enum';
 });
 defineFunction(
   'interface_exists(string $interface, bool $autoload = true): bool',
-  ({ args }) => findDeclaredClass(args[0] as string)?.kind === 'interface'
+  ({ args }) => findDeclaredClass(args[0] as string, args[1] !== false)?.kind === 'interface'
 );
 defineFunction(
   'trait_exists(string $trait, bool $autoload = true): bool',
-  ({ args }) => findDeclaredClass(args[0] as string)?.kind === 'trait'
+  ({ args }) => findDeclaredClass(args[0] as string, args[1] !== false)?.kind === 'trait'
 );
 defineFunction(
   'enum_exists(string $enum, bool $autoload = true): bool',
-  ({ args }) => findDeclaredClass(args[0] as string)?.kind === 'enum'
+  ({ args }) => findDeclaredClass(args[0] as string, args[1] !== false)?.kind === 'enum'
 );
 defineFunction('is_a(mixed $object_or_class, string $class, bool $allow_string = false): bool', ({ args }) => {
   const [value, className, allowString] = args;
+  const cls =
+    value instanceof PhpObject
+      ? value.cls
+      : typeof value === 'string' && allowString === true
+        ? findMemberClass(value)
+        : undefined;
   const target = findDeclaredClass(className as string);
-  if (!target) return false;
-  if (value instanceof PhpObject) return value.cls.isSubclassOf(target);
-  if (typeof value === 'string' && allowString === true) return findMemberClass(value)?.isSubclassOf(target) ?? false;
-  return false;
+  return target !== undefined && cls !== undefined && cls.isSubclassOf(target);
 });
 defineFunction('is_subclass_of(mixed $object_or_class, string $class, bool $allow_string = true): bool', ({ args }) => {
   const [value, className, allowString = true] = args;
-  const target = findDeclaredClass(className as string);
-  if (!target) return false;
   let cls;
   if (value instanceof PhpObject) cls = value.cls;
   else if (typeof value === 'string' && allowString === true) cls = findMemberClass(value);
-  return cls !== undefined && cls !== target && cls.isSubclassOf(target);
+  const target = findDeclaredClass(className as string);
+  return target !== undefined && cls !== undefined && cls !== target && cls.isSubclassOf(target);
 });
 for (const [name, related] of [
   ['class_implements', (cls: PhpClass) => cls.interfaces],
