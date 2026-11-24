@@ -1,3 +1,4 @@
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { compileError, unsupportedError } from './errors';
 
 /**
@@ -44,6 +45,8 @@ class Preprocessor {
   ]);
 
   private row = 0;
+  /** The characters macro expansion has produced, which the length of a program's text bounds. */
+  private produced = 0;
   private inBlockComment = 0;
 
   run(source: string): string {
@@ -253,6 +256,8 @@ class Preprocessor {
       index += name.length;
       if (condition) this.checkPlatform(name);
       const expanded = this.expandName(name, text, index, active, condition);
+      this.produced += expanded.text.length;
+      if (this.produced > LIMITS.maxStringLength) throw new ExecutionLimitError('operations');
       result += expanded.text;
       index = expanded.end;
     }
