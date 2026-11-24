@@ -14,6 +14,8 @@ import { Box, childValues, CObject, endLifetime, Liveness, Ptr, Store, type Valu
 export const BREAK = 1;
 export const CONTINUE = 2;
 export const RETURN = 3;
+/** A `goto`, whose label `Frame.gotoLabel` names. */
+export const GOTO = 4;
 export type Completion = number | undefined;
 
 export type Exec = (frame: Frame) => Completion;
@@ -55,6 +57,8 @@ export class Frame implements TracedFrame {
   private operandAccesses?: OperandAccesses;
   /** The slot of the local variable that a `return` returned without copying (the named return value). */
   nrvoSlot: number | undefined;
+  /** The label of the `goto` the frame is jumping to. */
+  gotoLabel = '';
 
   /**
    * @param self The location of the object a member function runs for, which `this` points to.

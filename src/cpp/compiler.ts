@@ -221,6 +221,12 @@ export class Compiler extends StatementCompiler {
         this.globalDeclaration(node);
         return;
       }
+      case 'type_definition':
+      case 'alias_declaration':
+      case 'static_assert_declaration': {
+        this.declarationOnly(node);
+        return;
+      }
       case 'expression_statement': {
         if (node.children.length === 0) return;
         this.error(node.row, '関数の外には、文を書けません（変数・関数・クラスの宣言だけを書けます）。');
@@ -284,7 +290,18 @@ export class Compiler extends StatementCompiler {
     const nameNode = fieldOf(node, 'name');
     if (nameNode) this.checkHeaderMacro(nameNode.text, nameNode.row);
     const body = fieldOf(node, 'body');
-    if (!nameNode) return this.unsupported(node.row, '名前のないクラス');
+    if (!nameNode) {
+      if (!body) return this.error(node.row, 'クラスの名前を書いてください。');
+      if (this.context.fn) return this.unsupported(node.row, '関数の中のクラスの定義');
+      const unnamed = new ClassInfo(
+        `(unnamed ${node.type === 'struct_specifier' ? 'struct' : 'class'})`,
+        node.type === 'struct_specifier' ? 'struct' : 'class'
+      );
+      unnamed.isUnnamed = true;
+      unnamed.row = node.row;
+      this.defineClass(unnamed, node, body);
+      return classType(unnamed);
+    }
     if (nameNode.type !== 'type_identifier') return this.unsupported(node.row, `クラス ${nameNode.text} の定義`);
     const name = nameNode.text;
     let cls: ClassInfo;
@@ -339,6 +356,12 @@ export class Compiler extends StatementCompiler {
           }
           case 'enum_specifier': {
             this.resolveTypeSpecifier(member);
+            break;
+          }
+          case 'type_definition':
+          case 'alias_declaration':
+          case 'static_assert_declaration': {
+            this.declarationOnly(member);
             break;
           }
           case 'class_specifier':
@@ -1452,6 +1475,10 @@ export class Compiler extends StatementCompiler {
       }
       const statements = this.compileStatements(body.children);
       context.endBody();
+      for (const { label, row, isReachable } of context.gotos) {
+        if (!context.labels.has(label)) this.error(row, `ラベル ${label} はありません。`);
+        if (!isReachable) this.unsupported(row, 'ループや if・switch の中のラベルへ、その外から goto で移ること');
+      }
       const undo = fn.isConstructor && cls ? this.constructorBodyFailure(cls, initializerList) : undefined;
       fn.compiled = this.functionBody(fn, context, memberInit, statements, undo);
     } finally {

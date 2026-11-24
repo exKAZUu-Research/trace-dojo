@@ -19,7 +19,17 @@ import { SequenceValue } from './library/containerValues';
 import { bindRetainedTemporary, initializeAt, withTemporaries, zeroOf } from './objectCompiler';
 import { parseInitializerArguments } from './parse';
 import { erasePointee } from './pointerCasts';
-import { BREAK, type Completion, CONTINUE, type Eval, type Exec, type Frame, type LocalInfo, RETURN } from './runtime';
+import {
+  BREAK,
+  type Completion,
+  CONTINUE,
+  type Eval,
+  type Exec,
+  type Frame,
+  GOTO,
+  type LocalInfo,
+  RETURN,
+} from './runtime';
 import { type ConstantReference, type Entity, Scope } from './scopes';
 import { isObjectCreation, onlyCalls } from './stepRules';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
@@ -127,19 +137,59 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   compileBlock(node: Syntax): Exec {
-    return this.inScope(() => this.compileStatements(node.children));
+    const scope = new Scope();
+    let statements: LabeledExec | undefined;
+    const exec = this.inScope(() => {
+      statements = this.compileStatements(node.children);
+      return statements;
+    }, scope);
+    const enter = statements?.enter;
+    if (!enter) return exec;
+    // A `goto` may enter the block at one of its labels, which starts the block's scope there.
+    return Object.assign(exec, { enter: this.withScopeExit((frame) => enter(frame, frame.gotoLabel), scope) });
   }
 
-  compileStatements(nodes: readonly Syntax[]): Exec {
-    const compiled = nodes.map((node) => this.compileStatement(node));
-    if (compiled.length === 1) return compiled[0];
-    return (frame) => {
-      for (const exec of compiled) {
-        const completion = exec(frame);
+  compileStatements(nodes: readonly Syntax[]): LabeledExec {
+    const labels = new Map<string, number>();
+    for (const [index, node] of nodes.entries()) {
+      for (const label of labelsIn(node)) labels.set(label, index);
+    }
+    const { enclosingLabels } = this.context;
+    enclosingLabels.push(labels);
+    let compiled: LabeledExec[];
+    try {
+      compiled = nodes.map((node) => this.compileStatement(node));
+    } finally {
+      enclosingLabels.pop();
+    }
+    if (labels.size === 0) {
+      if (compiled.length === 1) return compiled[0];
+      return (frame) => {
+        for (const exec of compiled) {
+          const completion = exec(frame);
+          if (completion !== undefined) return completion;
+        }
+        return;
+      };
+    }
+    const run = (frame: Frame, label: string | undefined): Completion => {
+      let index = label === undefined ? 0 : (labels.get(label) as number);
+      let entering = label;
+      while (index < compiled.length) {
+        const exec = compiled[index];
+        const completion = entering !== undefined && exec.enter ? exec.enter(frame, entering) : exec(frame);
+        entering = undefined;
+        if (completion === GOTO && labels.has(frame.gotoLabel)) {
+          index = labels.get(frame.gotoLabel) as number;
+          entering = frame.gotoLabel;
+          continue;
+        }
         if (completion !== undefined) return completion;
+        index++;
       }
       return;
     };
+    return Object.assign((frame: Frame) => run(frame, undefined), { enter: run });
   }
 
   compileStatement(node: Syntax): Exec {
@@ -158,6 +208,35 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     switch (node.type) {
       case 'compound_statement': {
         return this.compileBlock(node);
+      }
+      case 'labeled_statement': {
+        const label = (fieldOf(node, 'label') as Syntax).text;
+        const previous = this.context.labels.get(label);
+        if (previous !== undefined) this.error(node.row, `ラベル ${label} はすでに ${previous + 1} 行目にあります。`);
+        this.context.labels.set(label, node.row);
+        const statement = node.children.find((child) => child.field !== 'label');
+        if (!statement) return () => {};
+        const exec: LabeledExec = this.compileStatement(statement);
+        // The label names the statement; entering at a label inside it enters the statement there.
+        const enter = exec.enter;
+        return Object.assign((frame: Frame) => exec(frame), {
+          enter: (frame: Frame, target: string) => (target === label || !enter ? exec(frame) : enter(frame, target)),
+        });
+      }
+      case 'type_definition':
+      case 'alias_declaration':
+      case 'static_assert_declaration': {
+        this.declarationOnly(node);
+        return () => {};
+      }
+      case 'goto_statement': {
+        const label = (fieldOf(node, 'label') as Syntax).text;
+        const isReachable = this.context.enclosingLabels.some((labels) => labels.has(label));
+        this.context.gotos.push({ label, row: node.row, isReachable });
+        return this.withStep(node.row, (frame) => {
+          frame.gotoLabel = label;
+          return GOTO;
+        });
       }
       case 'declaration': {
         return this.localDeclaration(node).exec;
@@ -788,24 +867,68 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return this.withStep(node.row, exec, onlyCalls(expressionNode));
   }
 
+  /**
+   * The condition of an `if`, a loop, or a `switch`: an expression, or the declaration of a variable whose value is
+   * the condition (`if (int n = f())`), which declares the variable in the current scope.
+   */
   private conditionOf(clause: Syntax): Eval<boolean> {
     const value = clause.type === 'condition_clause' ? fieldOf(clause, 'value') : clause;
     if (!value) return this.error(clause.row, '条件を書いてください。');
-    if (value.type === 'declaration')
-      return this.unsupported(value.row, '条件の中の変数の宣言（if (int x = f()) など）');
-    const condition = this.condition(this.compileExpression(value), value.row);
-    return this.fullExpression(condition);
+    const { declare, expr } = this.conditionValue(value);
+    const condition = this.fullExpression(this.condition(expr, value.row));
+    if (!declare) return condition;
+    return (frame) => {
+      declare(frame);
+      return condition(frame);
+    };
+  }
+
+  /** The value a condition tests, after the declaration of its variable when it declares one. */
+  private conditionValue(value: Syntax): { declare?: Exec; expr: Expr } {
+    if (value.type !== 'declaration') return { expr: this.compileExpression(value) };
+    const declarator = fieldOf(value, 'declarator') as Syntax;
+    const initializer = fieldOf(value, 'value');
+    if (!initializer) return this.error(value.row, '条件の中で宣言する変数には、初期値を書いてください。');
+    const init: Syntax = {
+      ...value,
+      type: 'init_declarator',
+      field: 'declarator',
+      all: value.all.filter((child) => child.field === 'declarator' || child.field === 'value' || child.type === '='),
+      children: [declarator, initializer],
+    };
+    const declaration: Syntax = {
+      ...value,
+      all: [...value.all.filter(isSpecifier), init],
+      children: [...value.children.filter(isSpecifier), init],
+    };
+    const { exec } = this.localDeclaration(declaration, false);
+    const name = this.applyDeclarator(VOID, declarator).name as string;
+    return { declare: exec, expr: this.entityExpr(this.lookupName(name, value.row), declarator, false) };
+  }
+
+  /** Compiles the init-statement of an `if`, a `switch`, or a range `for`, which runs before the rest. */
+  private initStatement(clause: Syntax | undefined): Exec | undefined {
+    const node = clause?.type === 'init_statement' ? clause.children[0] : clause;
+    if (!node) return undefined;
+    return this.compileStatement(node);
   }
 
   private ifStatement(node: Syntax): Exec {
     if (node.all.some((child) => child.type === 'constexpr')) return this.unsupported(node.row, 'if constexpr');
     if (node.all.some((child) => child.type === 'consteval')) return this.unsupported(node.row, 'if consteval');
-    const condition = this.conditionOf(fieldOf(node, 'condition') as Syntax);
-    const consequence = this.inScope(() => this.compileStatement(fieldOf(node, 'consequence') as Syntax));
-    const elseClause = fieldOf(node, 'alternative');
-    const alternativeNode = elseClause?.children[0];
-    const alternative = alternativeNode ? this.inScope(() => this.compileStatement(alternativeNode)) : undefined;
-    return (frame) => (condition(frame) ? consequence(frame) : alternative?.(frame));
+    return this.inScope(() => {
+      const clause = fieldOf(node, 'condition') as Syntax;
+      const init = this.initStatement(fieldOf(clause, 'initializer'));
+      const condition = this.conditionOf(clause);
+      const consequence = this.inScope(() => this.compileStatement(fieldOf(node, 'consequence') as Syntax));
+      const elseClause = fieldOf(node, 'alternative');
+      const alternativeNode = elseClause?.children[0];
+      const alternative = alternativeNode ? this.inScope(() => this.compileStatement(alternativeNode)) : undefined;
+      return (frame) => {
+        init?.(frame);
+        return condition(frame) ? consequence(frame) : alternative?.(frame);
+      };
+    });
   }
 
   private loopBody(node: Syntax, header?: Scope): Exec {
@@ -822,6 +945,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   private whileStatement(node: Syntax): Exec {
+    return this.inScope(() => this.whileLoop(node));
+  }
+
+  private whileLoop(node: Syntax): Exec {
     const condition = this.conditionOf(fieldOf(node, 'condition') as Syntax);
     const body = this.loopBody(fieldOf(node, 'body') as Syntax);
     return (frame) => {
@@ -829,7 +956,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         frame.runtime.spend();
         const completion = body(frame);
         if (completion === BREAK) break;
-        if (completion === RETURN) return completion;
+        if (completion === RETURN || completion === GOTO) return completion;
       }
       return;
     };
@@ -843,7 +970,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         frame.runtime.spend();
         const completion = body(frame);
         if (completion === BREAK) break;
-        if (completion === RETURN) return completion;
+        if (completion === RETURN || completion === GOTO) return completion;
       } while (condition(frame));
       return;
     };
@@ -886,7 +1013,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
           frame.runtime.spend();
           const completion = body(frame);
           if (completion === BREAK) break;
-          if (completion === RETURN) return completion;
+          if (completion === RETURN || completion === GOTO) return completion;
           update(frame);
           if (stepUpdate) frame.runtime.steps.step(row);
         }
@@ -911,6 +1038,13 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   private rangeForLoop(node: Syntax): Exec {
+    const init = this.initStatement(fieldOf(node, 'initializer'));
+    const loop = this.rangeForIterations(node);
+    if (!init) return loop;
+    return (frame) => init(frame) ?? loop(frame);
+  }
+
+  private rangeForIterations(node: Syntax): Exec {
     const rangeNode = fieldOf(node, 'right') as Syntax;
     const { row } = node;
     const range =
@@ -986,7 +1120,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         frame.runtime.spend();
         const completion = iteration(frame);
         if (completion === BREAK) break;
-        if (completion === RETURN) return completion;
+        if (completion === RETURN || completion === GOTO) return completion;
         advance(frame);
       }
       return;
@@ -1085,15 +1219,28 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   private switchStatement(node: Syntax): Exec {
+    return this.inScope(() => this.switchWithScope(node));
+  }
+
+  private switchWithScope(node: Syntax): Exec {
     const conditionClause = fieldOf(node, 'condition') as Syntax;
+    const init = this.initStatement(fieldOf(conditionClause, 'initializer'));
     const valueNode = fieldOf(conditionClause, 'value');
-    if (!valueNode || valueNode.type === 'declaration')
-      return this.unsupported(node.row, '条件の中の変数の宣言（switch (int x = f()) など）');
-    const subject = this.rvalue(this.compileExpression(valueNode));
+    if (!valueNode) return this.error(node.row, 'switch 文の () に値を書いてください。');
+    const { declare, expr: subjectExpr } = this.conditionValue(valueNode);
+    const subject = this.rvalue(subjectExpr);
     if (!isInteger(subject.type))
       return this.error(node.row, `switch 文の () には整数を書いてください（${typeName(subject.type)}）。`);
     const promoted = promote(subject.type);
-    const value = this.fullExpression(convertArithmetic(subject, promoted).run);
+    const evaluate = this.fullExpression(convertArithmetic(subject, promoted).run);
+    const value: Eval<unknown> =
+      init || declare
+        ? (frame) => {
+            init?.(frame);
+            declare?.(frame);
+            return evaluate(frame);
+          }
+        : evaluate;
     const body = fieldOf(node, 'body') as Syntax;
     const scoped = isScopedEnum(subject.type) ? subject.type : undefined;
     return this.inScope(() => {
@@ -1484,6 +1631,24 @@ function endException(frame: Frame, exception: CppException): void {
 }
 
 /** Destroys automatic objects in reverse order and clears the local bindings. */
+/** Whether a child of a condition's declaration is one of its specifiers rather than its declarator or value. */
+function isSpecifier(child: Syntax): boolean {
+  return child.field !== 'declarator' && child.field !== 'value' && child.type !== '=';
+}
+
+/** A statement that a `goto` may enter at one of the labels it contains. */
+export type LabeledExec = Exec & { enter?: (frame: Frame, label: string) => Completion };
+
+/** The labels a `goto` reaches by entering a statement: its own and those of the blocks it consists of. */
+function labelsIn(node: Syntax): string[] {
+  if (node.type === 'labeled_statement') {
+    const label = (fieldOf(node, 'label') as Syntax).text;
+    return [label, ...node.children.filter((child) => child.field !== 'label').flatMap(labelsIn)];
+  }
+  if (node.type === 'compound_statement') return node.children.flatMap(labelsIn);
+  return [];
+}
+
 export function endScope(frame: Frame, { slots, statics, destructibles }: Scope): void {
   for (let index = slots.length - 1; index >= 0; index--) {
     const slot = slots[index];

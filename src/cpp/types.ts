@@ -235,8 +235,11 @@ export class ClassInfo {
   /** The constructor a class without user-declared ones has, when it has anything to initialize. */
   row = -1;
 
+  /** Whether the class has no name, which a typedef that names it gives it (`typedef struct { ... } P;`). */
+  isUnnamed = false;
+
   constructor(
-    readonly name: string,
+    public name: string,
     readonly key: 'class' | 'struct'
   ) {}
 

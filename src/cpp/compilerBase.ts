@@ -4,15 +4,17 @@ import type { Expr } from './expr';
 import { isSdkMemberDeclared } from './library/libcGlobals';
 import type { Library, LibraryTemplate } from './library/registry';
 import { type Entity, FunctionContext, Scope } from './scopes';
-import { fieldOf, hasToken, type Syntax } from './syntax';
+import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
   ClassInfo,
   classType,
   type EnumInfo,
   type GlobalInfo,
   type IntName,
+  isArithmetic,
   pointerTo,
   referenceTo,
+  sameType,
   type Type,
   typeName,
   VOID,
@@ -327,6 +329,53 @@ export abstract class CompilerBase {
     } finally {
       this.context.scopes.pop();
     }
+  }
+
+  /** Compiles a declaration that only declares names or checks constants: `typedef`, `using`, or `static_assert`. */
+  declarationOnly(node: Syntax): void {
+    switch (node.type) {
+      case 'type_definition': {
+        const base = this.specifiedType(node);
+        for (const declarator of fieldsOf(node, 'declarator')) {
+          const { name, type } = this.applyDeclarator(base, declarator);
+          if (name === undefined) this.error(declarator.row, 'typedef する名前を書いてください。');
+          this.declareTypeName(name, type, declarator.row);
+        }
+        return;
+      }
+      case 'alias_declaration': {
+        const name = (fieldOf(node, 'name') as Syntax).text;
+        this.declareTypeName(name, this.typeDescriptor(fieldOf(node, 'type') as Syntax), node.row);
+        return;
+      }
+      case 'static_assert_declaration': {
+        this.staticAssert(node);
+        return;
+      }
+      default: {
+        this.error(node.row, `${node.text.split('\n')[0]} は宣言として書けません。`);
+      }
+    }
+  }
+
+  private declareTypeName(name: string, type: Type, row: number): void {
+    const existing = this.findDeclaredHere(name);
+    // A typedef may declare a name again for the same type (C++20 [dcl.typedef]).
+    if (existing?.kind === 'type' && sameType(existing.type, type)) return;
+    if (type.kind === 'class' && type.cls.isUnnamed) type.cls.name = name;
+    this.declareHere(name, { kind: 'type', type }, row);
+  }
+
+  private staticAssert(node: Syntax): void {
+    const conditionNode = fieldOf(node, 'condition') as Syntax;
+    const condition = this.rvalue(this.compileExpression(conditionNode));
+    const value = condition.constant;
+    if (value === undefined || !isArithmetic(condition.type))
+      this.error(node.row, `static_assert の条件（${conditionNode.text}）は定数式でなければなりません。`);
+    if (Number(value) !== 0) return;
+    const message = fieldOf(node, 'message');
+    const detail = message ? `: ${message.text}` : '';
+    this.error(node.row, `static_assert の条件 ${conditionNode.text} が成り立ちません${detail}`);
   }
 
   // Types ----------------------------------------------------------------------------------------------------------

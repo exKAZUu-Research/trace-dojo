@@ -68,6 +68,15 @@ export class FunctionContext {
   switchDepth = 0;
   /** The locals that a `return` returns without copying, which the result shares (NRVO). */
   readonly namedReturns = new Set<LocalInfo>();
+  /** The labels of the function's statements, by name, with their rows. */
+  readonly labels = new Map<string, number>();
+  /**
+   * The labels the function's `goto` statements jump to, with their rows and whether the jump only enters blocks,
+   * which the interpreter can do, rather than a loop or a branch of an `if`.
+   */
+  readonly gotos: { label: string; row: number; isReachable: boolean }[] = [];
+  /** The labels each statement list around the statement compiled now may jump to, the innermost last. */
+  readonly enclosingLabels: ReadonlyMap<string, number>[] = [];
 
   constructor(
     readonly fn: FunctionInfo | undefined,
