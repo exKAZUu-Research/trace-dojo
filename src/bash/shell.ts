@@ -28,22 +28,22 @@ import {
 } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import {
-  type ActiveDeclarationPrefix,
   advanceRandomState,
   AssociativeTable,
   type Attribute,
+  buildDynamicDeclaration,
   callStackArray,
   cloneScope,
   cloneValue,
   DYNAMIC_VARIABLES,
   ensureWritable,
   ENVIRONMENT_VARIABLES,
+  findEnclosingVariable,
   isIdentifier,
   isValidFunctionName,
   PERMANENT_DYNAMIC_VARIABLES,
-  propagatedPrefixTargets,
+  SCALAR_DYNAMIC_VARIABLES,
   type Scope,
-  selectDirectPrefix,
   sortedElements,
   type Variable,
   type VariableValue,
@@ -78,6 +78,7 @@ export interface ShellState {
   positional: string[][];
   calls: CallInfo[];
   lastStatus: number;
+  pipeStatus: string[];
   /** `$_`, which starts as the path of Bash itself, so `undefined` until a command sets it. */
   lastArgument: string | undefined;
   randomSeed: number;
@@ -121,7 +122,7 @@ export class Shell implements ArithmeticHost {
   private readonly inFlight: { values: string[] }[] = [];
   private readonly activeOutputs: { text: string }[] = [];
   /** Prefix-assignment scope owned by the currently executing declaration command, if any. */
-  private activeDeclarationPrefix: ActiveDeclarationPrefix | undefined;
+  private activeDeclarationPrefix: Scope | undefined;
   private readonlyFailure = false;
 
   constructor(readonly runtime: Runtime) {
@@ -151,6 +152,7 @@ export class Shell implements ArithmeticHost {
       positional: [[]],
       calls: [],
       lastStatus: 0,
+      pipeStatus: [],
       lastArgument: undefined,
       randomSeed: 0,
       lastRandom: 0,
@@ -334,6 +336,8 @@ export class Shell implements ArithmeticHost {
   private withStatus(run: () => number): number {
     const status = run();
     this.state.lastStatus = status;
+    this.state.unsetDynamic.delete('PIPESTATUS');
+    this.state.pipeStatus = [String(status)];
     return status;
   }
 
@@ -569,16 +573,14 @@ export class Shell implements ArithmeticHost {
       }
     }
     const scope: Scope = new Map();
-    const active = forDeclaration ? { scope, propagated: new Set<string>() } : undefined;
     this.state.scopes.push(scope);
-    this.activeDeclarationPrefix = active;
+    this.activeDeclarationPrefix = forDeclaration ? scope : undefined;
     try {
       if (!this.populateTemporaryScope(scope, assignments)) return 1;
       return run();
     } finally {
       this.activeDeclarationPrefix = prevPrefix;
       this.removeScope(scope);
-      if (active) this.commitPropagatedPrefixes(active);
     }
   }
 
@@ -608,17 +610,6 @@ export class Shell implements ArithmeticHost {
   private removeScope(scope: Scope): void {
     const index = this.state.scopes.lastIndexOf(scope);
     if (index !== -1) this.state.scopes.splice(index, 1);
-  }
-
-  private commitPropagatedPrefixes(active: ActiveDeclarationPrefix): void {
-    for (const { target, tempVar } of propagatedPrefixTargets(this.state.scopes, active)) {
-      if (tempVar.value?.kind === 'scalar') this.assignScalarTo(target, tempVar.value.value, false);
-      else if (tempVar.value) {
-        target.value = tempVar.value;
-        target.shared = false;
-      }
-      for (const attr of tempVar.attributes) target.attributes.add(attr);
-    }
   }
 
   private executeDeclaration(statement: Extract<Statement, { kind: 'declaration' }>): number {
@@ -740,6 +731,7 @@ export class Shell implements ArithmeticHost {
       functions: new Map(parent.functions),
       positional: parent.positional.map((args) => [...args]),
       calls: [...parent.calls],
+      pipeStatus: [...parent.pipeStatus],
       unsetDynamic: new Set(parent.unsetDynamic),
       subshellLevel: parent.subshellLevel + 1,
       fd1: capture,
@@ -914,8 +906,14 @@ export class Shell implements ArithmeticHost {
     return undefined;
   }
 
-  selectCommandPrefix(name: string, assigns: boolean, unsetExport: boolean): Variable | undefined {
-    return selectDirectPrefix(this.activeDeclarationPrefix, name, assigns, unsetExport);
+  declarationPrefixVariable(name: string): Variable | undefined {
+    return this.activeDeclarationPrefix?.get(name);
+  }
+
+  findEnclosingForPrefix(name: string): Variable | undefined {
+    return this.activeDeclarationPrefix
+      ? findEnclosingVariable(this.state.scopes, this.activeDeclarationPrefix, name)
+      : this.findOwnVariable(name);
   }
 
   /** The name a name reference finally names, or the name itself. */
@@ -953,25 +951,17 @@ export class Shell implements ArithmeticHost {
   /** The value of a dynamic variable Bash computes when it is read, unless the program unset or shadowed it. */
   private dynamicValue(name: string): string | undefined {
     if (!this.isDynamic(name)) return undefined;
-    switch (name) {
-      case 'RANDOM': {
-        return String(this.nextRandom());
-      }
-      case 'LINENO': {
-        return String(this.currentRow + 1);
-      }
-      case 'BASH_SUBSHELL': {
-        return String(this.state.subshellLevel);
-      }
-      default: {
-        return this.dynamicArray(name)?.[0];
-      }
-    }
+    if (name === 'RANDOM') return String(this.nextRandom());
+    if (name === 'LINENO') return String(this.currentRow + 1);
+    if (name === 'BASH_SUBSHELL') return String(this.state.subshellLevel);
+    return this.dynamicArray(name)?.[0];
   }
 
-  /** The elements of `FUNCNAME`, `BASH_LINENO`, and `BASH_SOURCE`, which describe the calls in progress. */
+  /** The elements of `FUNCNAME`, `BASH_LINENO`, `BASH_SOURCE`, and `PIPESTATUS`. */
   dynamicArray(name: string): string[] | undefined {
-    return this.isDynamic(name) ? callStackArray(name, this.state.calls, SCRIPT_NAME) : undefined;
+    return this.isDynamic(name)
+      ? callStackArray(name, this.state.calls, SCRIPT_NAME, this.state.pipeStatus)
+      : undefined;
   }
 
   /**
@@ -989,23 +979,19 @@ export class Shell implements ArithmeticHost {
   /** A dynamic variable as `declare -p` shows it, whose value is computed as reading it computes it. */
   dynamicDeclaration(name: string): Variable | undefined {
     if (!this.isDynamic(name)) return undefined;
-    if (name === 'RANDOM' || name === 'LINENO' || name === 'BASH_SUBSHELL') {
-      const attributes = new Set<Attribute>(name === 'RANDOM' ? ['i'] : []);
-      return { name, attributes, value: { kind: 'scalar', value: this.dynamicValue(name) as string } };
-    }
-    const elements = this.dynamicArray(name);
-    return {
+    return buildDynamicDeclaration(
       name,
-      attributes: new Set(['a']),
-      value: elements && {
-        kind: 'indexed',
-        elements: new Map(elements.map((element, index) => [BigInt(index), element])),
-      },
-    };
+      SCALAR_DYNAMIC_VARIABLES.has(name) ? this.dynamicValue(name) : undefined,
+      this.dynamicArray(name)
+    );
   }
 
   isDynamic(name: string): boolean {
     return DYNAMIC_VARIABLES.has(name) && !this.state.unsetDynamic.has(name) && !this.findOwnVariable(name);
+  }
+
+  private isScalarDynamic(name: string): boolean {
+    return this.isDynamic(name) && SCALAR_DYNAMIC_VARIABLES.has(name);
   }
 
   /** Bash's `RANDOM`: Park and Miller's generator, folded to 15 bits, never repeating the last value. */
@@ -1034,6 +1020,10 @@ export class Shell implements ArithmeticHost {
         const index = this.readIndex(name, subscript);
         return index === undefined ? undefined : dynamic[Number(index)];
       }
+      if (this.isScalarDynamic(name)) {
+        const index = this.readIndex(name, subscript);
+        return index === 0n ? this.dynamicValue(name) : undefined;
+      }
       if (!variable && ENVIRONMENT_VARIABLES.has(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
       if (variable === undefined || !variable.attributes.has('A')) this.readIndex(name, subscript);
       return undefined;
@@ -1051,6 +1041,7 @@ export class Shell implements ArithmeticHost {
     if (!value) {
       const dynamic = this.dynamicArray(name);
       if (dynamic) return dynamic[Number(index)];
+      if (this.isScalarDynamic(name)) return index === 0n ? this.dynamicValue(name) : undefined;
       if (!variable && ENVIRONMENT_VARIABLES.has(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
       return undefined;
     }
@@ -1094,6 +1085,7 @@ export class Shell implements ArithmeticHost {
     if (!variable?.value) {
       const dynamic = this.dynamicArray(name);
       if (dynamic) return dynamic;
+      if (this.isScalarDynamic(name)) return [this.dynamicValue(name) as string];
       if (!variable && ENVIRONMENT_VARIABLES.has(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
       return [];
     }
@@ -1109,6 +1101,7 @@ export class Shell implements ArithmeticHost {
     if (!variable?.value) {
       const dynamic = this.dynamicArray(name);
       if (dynamic) return dynamic.map((_, index) => String(index));
+      if (this.isScalarDynamic(name)) return ['0'];
       if (!variable && ENVIRONMENT_VARIABLES.has(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
       return [];
     }

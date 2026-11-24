@@ -157,11 +157,18 @@ f() {
 a=global
 f
 declare -p g a
+u=(g0 g1); v=(b0 b1); declare -n nr=u
+h() { local -n nr=v; declare -gu nr[1]=new; }
+h
+declare -p u v nr
 export p=old
 p=temp export -n p=new p
 echo "$p|$(declare -p p)"
-p=temp export p+=only p+=last
-declare -p p
+p=temp export -n p+=more
+p2=temp export p2=a p2+=last
+declare -i cnt=0; idx=0; cnt=1 export cnt=idx++ idx=7
+false
+echo "$p|$p2|$cnt:$idx|\${PIPESTATUS[0]}|\${BASH_SUBSHELL[0]}"
 `;
   expect(executeProgram('bash', program)).toMatchObject({
     kind: 'executed',
@@ -169,8 +176,11 @@ declare -p p
       'local|local|declare -a a=([0]="2+3")',
       'declare -- g="updated"',
       'declare -ai a=([0]="global")',
+      'declare -a u=([0]="g0" [1]="g1")',
+      'declare -a v=([0]="b0" [1]="new")',
+      'declare -au nr=()',
       'new|declare -x p="new"',
-      'declare -x p="last"',
+      'newmore|last|1:7|1|0',
       '',
     ].join('\n'),
     stderr: '',

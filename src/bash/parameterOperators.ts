@@ -469,7 +469,7 @@ function transform(
       return mapValues(expander, value, inDouble, lowerCase);
     }
     case 'a': {
-      const variable = shell.findVariable(name);
+      const variable = shell.findVariable(name) ?? shell.dynamicDeclaration(shell.resolveName(name));
       const flags = variable ? ATTRIBUTE_ORDER.filter((attribute) => variable.attributes.has(attribute)).join('') : '';
       if (value.kind === 'list')
         return expander.valuePieces({ ...value, values: value.values.map(() => flags) }, inDouble);
@@ -502,7 +502,7 @@ function transform(
 
 /** `${x@A}`: formats a scalar or local assignment statement, or `declare -p` output for `${a[@]@A}`. */
 function assignmentText(shell: Shell, name: string, value: ParameterValue): string {
-  const variable = shell.findVariable(name);
+  const variable = shell.findVariable(name) ?? shell.dynamicDeclaration(shell.resolveName(name));
   if (!variable) return '';
   if (value.kind === 'list') return variable.value ? declarationText(variable) : '';
   const flags = ATTRIBUTE_ORDER.filter((attribute) => variable.attributes.has(attribute)).join('');

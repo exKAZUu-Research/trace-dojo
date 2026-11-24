@@ -115,13 +115,10 @@ function parseWordOperand(word: string): { name: string; subscript?: string; app
 
 interface DeclarationDestination {
   variable: Variable;
-  storeVariable: Variable;
   referencedSubscript?: string;
-  promoted?: boolean;
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Bash's declaration of one operand: its name, a dynamic variable, its attributes, and its value.
-// code-gauge-allow functionNcss -- Validates, resolves destination, applies attributes, and assigns scalar/element/reference values.
 function declareOne(
   shell: Shell,
   builtin: string,
@@ -139,6 +136,11 @@ function declareOne(
   const isSubscripted =
     parsed?.subscript !== undefined || (typeof operand !== 'string' && operand.subscript !== undefined);
   const assigns = hasValue(operand, parsed);
+  const tempVar =
+    !isLocal && !isSubscripted && (builtin === 'export' || builtin === 'readonly')
+      ? shell.declarationPrefixVariable(name)
+      : undefined;
+  if (tempVar) return declarePrefixed(shell, builtin, name, tempVar, operand, parsed, options);
   const destination = declaredDestination(shell, builtin, name, options, isLocal, isSubscripted, assigns);
   if (
     !destination ||
@@ -153,25 +155,146 @@ function declareOne(
   ) {
     return false;
   }
-  const { variable, storeVariable, referencedSubscript, promoted } = destination;
-  let ok = true;
-  if (parsed?.value !== undefined) {
-    const append = promoted ? false : parsed.append;
-    if (variable.attributes.has('n') && parsed.subscript === undefined) {
-      ok = assignReferenceTarget(shell, builtin, variable, parsed.value);
-    } else if (parsed.subscript !== undefined) {
-      ok = shell.assignElementTo(storeVariable, parsed.subscript, parsed.value, parsed.append);
-    } else if (referencedSubscript !== undefined) {
-      ok = shell.assignElementTo(storeVariable, referencedSubscript, parsed.value, append);
-    } else {
-      ok = shell.assignScalarTo(storeVariable, parsed.value, append);
-    }
-  } else if (typeof operand !== 'string') {
-    ok = variable.attributes.has('n')
-      ? assignReference(shell, builtin, variable, operand)
-      : assignLocally(shell, storeVariable, operand, referencedSubscript, promoted);
-  }
+  const { variable, referencedSubscript } = destination;
+  const storeVariable =
+    options.set.has('g') && (isSubscripted || destination.referencedSubscript !== undefined)
+      ? resolveElementStoreVariable(shell, name, variable.name, options.set, options.unset, isSubscripted)
+      : variable;
+  const ok = assignDeclaredOperand(shell, builtin, variable, storeVariable, operand, parsed, referencedSubscript);
   if (options.set.has('r')) variable.attributes.add('r');
+  return ok;
+}
+
+// code-gauge-allow functionParameterCount -- Needs shell, builtin, declared/store variables, raw/parsed operand, and nameref subscript.
+function assignDeclaredOperand(
+  shell: Shell,
+  builtin: string,
+  variable: Variable,
+  storeVariable: Variable,
+  operand: DeclarationArgument,
+  parsed: { subscript?: string; append: boolean; value?: string } | undefined,
+  referencedSubscript?: string
+): boolean {
+  if (parsed?.value !== undefined) {
+    if (variable.attributes.has('n') && parsed.subscript === undefined) {
+      return assignReferenceTarget(shell, builtin, variable, parsed.value);
+    }
+    if (parsed.subscript !== undefined) {
+      return shell.assignElementTo(storeVariable, parsed.subscript, parsed.value, parsed.append);
+    }
+    if (referencedSubscript !== undefined) {
+      return shell.assignElementTo(storeVariable, referencedSubscript, parsed.value, parsed.append);
+    }
+    return shell.assignScalarTo(storeVariable, parsed.value, parsed.append);
+  }
+  if (typeof operand === 'string') return true;
+  return variable.attributes.has('n')
+    ? assignReference(shell, builtin, variable, operand)
+    : assignLocally(shell, storeVariable, operand, referencedSubscript);
+}
+
+/**
+ * Executes an `export` or `readonly` operand naming a prefix binding (`x=temp export ...`) immediately against both
+ * the temporary prefix binding and the nearest enclosing variable cell, matching Bash 5.3's per-operand semantics.
+ */
+// code-gauge-allow functionParameterCount -- Needs shell, builtin, operand name, prefix cell, raw/parsed operand, and options.
+function declarePrefixed(
+  shell: Shell,
+  builtin: string,
+  name: string,
+  tempVar: Variable,
+  operand: DeclarationArgument,
+  parsed: { append: boolean; value?: string } | undefined,
+  options: Options
+): boolean {
+  const assigns = hasValue(operand, parsed);
+  let enclosing = shell.findEnclosingForPrefix(name);
+  if (
+    checkReadonlyConflict(shell, builtin, name, tempVar.attributes.has('r') ? tempVar : enclosing, options.set, assigns)
+  ) {
+    return false;
+  }
+  if (enclosing?.attributes.has('n')) {
+    return applyPrefixedTempOnly(shell, builtin, tempVar, operand, parsed, options, assigns);
+  }
+  const ensureEnclosing = (): Variable => {
+    if (!enclosing) {
+      enclosing = { name, value: undefined, attributes: new Set() };
+      shell.state.scopes[0].set(name, enclosing);
+    }
+    return enclosing;
+  };
+  if (!assignPrefixedOperand(shell, builtin, tempVar, ensureEnclosing, operand, parsed, options)) return false;
+  return propagatePrefixedAttributes(shell, builtin, tempVar, ensureEnclosing, operand, options, assigns);
+}
+
+// code-gauge-allow functionParameterCount -- Carries shell, builtin, temporary cell, lazy enclosing cell, raw/parsed operand, and options.
+function assignPrefixedOperand(
+  shell: Shell,
+  builtin: string,
+  tempVar: Variable,
+  ensureEnclosing: () => Variable,
+  operand: DeclarationArgument,
+  parsed: { append: boolean; value?: string } | undefined,
+  options: Options
+): boolean {
+  if (parsed?.value !== undefined) {
+    if (!shell.assignScalarTo(ensureEnclosing(), parsed.value, parsed.append)) return false;
+    tempVar.value = { kind: 'scalar', value: parsed.value };
+    return true;
+  }
+  if (typeof operand === 'string') return true;
+  if (operand.array) {
+    const target = ensureEnclosing();
+    return applyAttributes(shell, builtin, target, options, true, false) && assignLocally(shell, target, operand);
+  }
+  if (operand.value === undefined && !operand.text.includes('=')) return true;
+  const rhs = operand.value
+    ? shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(operand.value as Word))
+    : '';
+  if (!shell.assignScalarTo(ensureEnclosing(), rhs, operand.append)) return false;
+  tempVar.value = { kind: 'scalar', value: rhs };
+  return true;
+}
+
+// code-gauge-allow functionParameterCount -- Carries shell, builtin, temporary cell, lazy enclosing cell, operand, options, and assigns flag.
+function propagatePrefixedAttributes(
+  shell: Shell,
+  builtin: string,
+  tempVar: Variable,
+  ensureEnclosing: () => Variable,
+  operand: DeclarationArgument,
+  options: Options,
+  assigns: boolean
+): boolean {
+  if (options.set.has('x')) tempVar.attributes.add('x');
+  if (options.unset.has('x')) tempVar.attributes.delete('x');
+  if (options.set.has('r')) tempVar.attributes.add('r');
+  if (options.unset.has('x')) return true;
+  const target = ensureEnclosing();
+  if (!isCompound(operand)) {
+    if (!applyAttributes(shell, builtin, target, options, assigns, false)) return false;
+    if (tempVar.value?.kind === 'scalar' && !shell.assignScalarTo(target, tempVar.value.value, false)) return false;
+  }
+  if (options.set.has('r')) target.attributes.add('r');
+  return true;
+}
+
+// code-gauge-allow functionParameterCount -- Updates only the temporary prefix cell when an enclosing nameref must stay intact.
+function applyPrefixedTempOnly(
+  shell: Shell,
+  builtin: string,
+  tempVar: Variable,
+  operand: DeclarationArgument,
+  parsed: { append: boolean; value?: string } | undefined,
+  options: Options,
+  assigns: boolean
+): boolean {
+  if (!applyAttributes(shell, builtin, tempVar, options, assigns || isCompound(operand), false)) return false;
+  let ok = true;
+  if (parsed?.value !== undefined) ok = shell.assignScalarTo(tempVar, parsed.value, parsed.append);
+  else if (typeof operand !== 'string') ok = assignLocally(shell, tempVar, operand);
+  if (options.set.has('r')) tempVar.attributes.add('r');
   return ok;
 }
 
@@ -189,7 +312,6 @@ function declareDynamic(
 }
 
 /** Resolves the target variable and any nameref element subscript for a declaration operand. */
-// code-gauge-allow functionCognitiveComplexity -- Handles local vs global (-g), nameref chains (including element targets), prefix propagation, and readonly checks.
 // code-gauge-allow functionParameterCount -- Needs shell, builtin, operand name, flags, scope mode, subscript presence, and whether a value is assigned.
 function declaredDestination(
   shell: Shell,
@@ -202,14 +324,6 @@ function declaredDestination(
 ): DeclarationDestination | undefined {
   const { scopes } = shell.state;
   const scope = isLocal ? scopes[shell.state.functionScopes.at(-1) as number] : undefined;
-  const directPrefix =
-    !scope && !isSubscripted && (builtin === 'export' || builtin === 'readonly')
-      ? shell.selectCommandPrefix(name, assigns, unset.has('x'))
-      : undefined;
-  if (directPrefix) {
-    if (checkReadonlyConflict(shell, builtin, name, directPrefix, set, assigns)) return undefined;
-    return { variable: directPrefix, storeVariable: directPrefix, promoted: true };
-  }
   const { targetName, referencedSubscript } = resolveDeclaredTarget(shell, name, set, unset, isSubscripted);
   const targetScope = scope && referencedSubscript === undefined ? scope : undefined;
   let variable = targetScope
@@ -227,13 +341,8 @@ function declaredDestination(
     variable = { name: targetName, value: undefined, attributes: new Set() };
     (targetScope ?? scopes[0]).set(targetName, variable);
   }
-  const storeVariable =
-    set.has('g') && (isSubscripted || referencedSubscript !== undefined)
-      ? resolveElementStoreVariable(shell, name, targetName, set, unset, isSubscripted)
-      : variable;
   return {
     variable,
-    storeVariable,
     ...(referencedSubscript === undefined ? {} : { referencedSubscript }),
   };
 }
@@ -277,7 +386,7 @@ function resolveDeclaredTarget(
   isSubscripted: boolean,
   globalOnly = set.has('g')
 ): { targetName: string; referencedSubscript?: string } {
-  if (set.has('n') || unset.has('n')) return { targetName: name };
+  if (set.has('n') || unset.has('n') || (globalOnly && isSubscripted)) return { targetName: name };
   let current = globalOnly ? shell.state.scopes[0].get(name) : shell.findOwnVariable(name);
   let target = name;
   for (let depth = 0; depth < 8; depth++) {
@@ -312,6 +421,10 @@ function applyAttributes(
     shell.reportError(`${builtin}: ${variable.name}: ${error}`);
     return false;
   }
+  const becomesIndexed =
+    set.has('a') ||
+    (impliesIndexed && !set.has('A') && !variable.attributes.has('A') && variable.value?.kind !== 'associative');
+  if ((set.has('A') || becomesIndexed) && variable.attributes.delete('n')) variable.value = undefined;
   for (const attribute of ['i', 'l', 'u', 'c', 'n', 'x', 't'] as Attribute[]) {
     if (set.has(attribute)) variable.attributes.add(attribute);
     if (unset.has(attribute)) variable.attributes.delete(attribute);
@@ -320,7 +433,18 @@ function applyAttributes(
   for (const [attribute, others] of CASE_ATTRIBUTES) {
     if (set.has(attribute)) for (const other of others) variable.attributes.delete(other);
   }
-  if (set.has('A')) {
+  applyArrayKindAttributes(shell, variable, set.has('A'), becomesIndexed, assigns);
+  return true;
+}
+
+function applyArrayKindAttributes(
+  shell: Shell,
+  variable: Variable,
+  becomesAssociative: boolean,
+  becomesIndexed: boolean,
+  assigns: boolean
+): void {
+  if (becomesAssociative) {
     variable.attributes.add('A');
     if (variable.value?.kind === 'scalar') {
       const table = new AssociativeTable(CONVERTED_BUCKETS);
@@ -329,15 +453,11 @@ function applyAttributes(
     }
     if (!variable.value && assigns) variable.value = { kind: 'associative', table: new AssociativeTable() };
   }
-  if (
-    set.has('a') ||
-    (impliesIndexed && !set.has('A') && !variable.attributes.has('A') && variable.value?.kind !== 'associative')
-  ) {
+  if (becomesIndexed) {
     variable.attributes.add('a');
     if (variable.value?.kind === 'scalar') shell.indexedElements(variable);
     if (!variable.value && assigns) variable.value = { kind: 'indexed', elements: new Map() };
   }
-  return true;
 }
 
 const CASE_ATTRIBUTES: [Attribute, Attribute[]][] = [
@@ -390,10 +510,9 @@ function assignLocally(
   shell: Shell,
   variable: Variable,
   assignment: Assignment,
-  referencedSubscript?: string,
-  promoted = false
+  referencedSubscript?: string
 ): boolean {
-  const append = promoted ? false : assignment.append;
+  const { append } = assignment;
   if (assignment.value === undefined && !assignment.array) {
     if (variable.attributes.has('a') && !variable.value) variable.value = { kind: 'indexed', elements: new Map() };
     if (variable.attributes.has('A') && !variable.value)

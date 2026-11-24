@@ -190,54 +190,24 @@ export function isValidFunctionName(name: string): boolean {
   return name !== '' && !name.includes('$') && !/^[0-9]+$/.test(name);
 }
 
-export interface ActiveDeclarationPrefix {
-  scope: Scope;
-  propagated: Set<string>;
-}
-
-/** Marks a direct declaration-command prefix binding for end-of-command propagation when appropriate. */
-export function selectDirectPrefix(
-  active: ActiveDeclarationPrefix | undefined,
-  name: string,
-  assigns: boolean,
-  unsetExport: boolean
-): Variable | undefined {
-  const tempVar = active?.scope.get(name);
-  if (!active || !tempVar) return undefined;
-  if (!unsetExport || assigns) active.propagated.add(name);
-  return tempVar;
-}
-
-/** Resolves destination variables in enclosing scopes for propagated prefix bindings after removing `active.scope`. */
-export function propagatedPrefixTargets(
-  scopes: Scope[],
-  active: ActiveDeclarationPrefix
-): { target: Variable; tempVar: Variable }[] {
-  const pairs: { target: Variable; tempVar: Variable }[] = [];
-  for (const name of active.propagated) {
-    const tempVar = active.scope.get(name);
-    if (!tempVar) continue;
-    let target: Variable | undefined;
-    for (let i = scopes.length - 1; i >= 0; i--) {
-      target = scopes[i].get(name);
-      if (target) break;
-    }
-    if (target?.attributes.has('n') || target?.attributes.has('r')) continue;
-    if (!target) {
-      target = { name, value: undefined, attributes: new Set() };
-      scopes[0].set(name, target);
-    }
-    pairs.push({ target, tempVar });
+/** Looks up `name` in `scopes` from innermost to outermost, skipping `excludedScope`. */
+export function findEnclosingVariable(scopes: Scope[], excludedScope: Scope, name: string): Variable | undefined {
+  for (let i = scopes.length - 1; i >= 0; i--) {
+    if (scopes[i] === excludedScope) continue;
+    const found = scopes[i].get(name);
+    if (found) return found;
   }
-  return pairs;
+  return undefined;
 }
 
-/** Elements of call-stack dynamic arrays (`FUNCNAME`, `BASH_LINENO`, `BASH_SOURCE`). */
+/** Elements of call-stack and foreground-pipeline dynamic arrays (`FUNCNAME`, `BASH_LINENO`, `BASH_SOURCE`, `PIPESTATUS`). */
 export function callStackArray(
   name: string,
   calls: readonly { name: string; line: number }[],
-  scriptName: string
+  scriptName: string,
+  pipeStatus: readonly string[] = []
 ): string[] | undefined {
+  if (name === 'PIPESTATUS') return [...pipeStatus];
   const reversed = calls.toReversed();
   if (name === 'FUNCNAME') return reversed.length === 0 ? undefined : [...reversed.map((c) => c.name), 'main'];
   if (name === 'BASH_LINENO') return [...reversed.map((c) => String(c.line)), '0'];
@@ -268,7 +238,34 @@ export const DYNAMIC_VARIABLES = new Set([
   'BASH_LINENO',
   'BASH_SOURCE',
   'BASH_SUBSHELL',
+  'PIPESTATUS',
 ]);
+
+export const SCALAR_DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'BASH_SUBSHELL']);
+
+/** Formats a dynamic variable cell for `declare -p` and `${v@a}` / `${v@A}`. */
+export function buildDynamicDeclaration(
+  name: string,
+  scalarValue: string | undefined,
+  elements: string[] | undefined
+): Variable | undefined {
+  if (SCALAR_DYNAMIC_VARIABLES.has(name)) {
+    return {
+      name,
+      attributes: new Set<Attribute>(name === 'RANDOM' ? ['i'] : []),
+      value: { kind: 'scalar', value: scalarValue as string },
+    };
+  }
+  if (!elements || (name === 'PIPESTATUS' && elements.length === 0)) return undefined;
+  return {
+    name,
+    attributes: new Set(['a']),
+    value: {
+      kind: 'indexed',
+      elements: new Map(elements.map((element, index) => [BigInt(index), element])),
+    },
+  };
+}
 
 /** Dynamic variables that `unset` refuses to remove. */
 export const PERMANENT_DYNAMIC_VARIABLES = new Set(['BASH_LINENO', 'BASH_SOURCE']);
@@ -300,6 +297,7 @@ export const ENVIRONMENT_VARIABLES = new Set([
   'BASH',
   'SHLVL',
   'SECONDS',
+  'BASH_MONOSECONDS',
   'EPOCHSECONDS',
   'EPOCHREALTIME',
   'SRANDOM',
