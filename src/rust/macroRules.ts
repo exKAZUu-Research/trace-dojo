@@ -31,6 +31,12 @@ export function tokensOf(tree: Node): Token[] {
   const visit = (node: Node): void => {
     if (node.type === 'line_comment' || node.type === 'block_comment') return;
     if (node.childCount === 0 || LEAF_TYPES.has(node.type) || node.type.endsWith('_literal')) {
+      // In a token tree, tree-sitter splits a lifetime (`'a`) into a quote and a name.
+      const previous = leaves.at(-1);
+      if (previous?.type === "'" && /^\w+$/.test(node.text)) {
+        leaves[leaves.length - 1] = { kind: 'leaf', text: `'${node.text}`, type: 'lifetime' };
+        return;
+      }
       leaves.push({ kind: 'leaf', text: node.text, type: node.type });
       return;
     }

@@ -46,7 +46,6 @@ import {
   NEVER,
   newTypeParam,
   type OpaqueType,
-  ref,
   resolve,
   resolveTraitRef,
   sameType,
@@ -616,7 +615,10 @@ export class Checker {
     if (item.selfParam && selfType) {
       const mode = item.selfParam.mode;
       const value = wrapSelf(this.program, item.selfParam.wrapper, selfType);
-      const type = mode === 'value' ? value : ref(selfType, mode === 'mutRef');
+      const type: Type =
+        mode === 'value'
+          ? value
+          : { kind: 'ref', mutable: mode === 'mutRef', target: selfType, lifetime: item.selfParam.lifetime };
       const local = this.declareLocal('self', type, item.selfParam.mutable, item.selfParam.span);
       local.isSelf = true;
     }
@@ -642,7 +644,12 @@ export class Checker {
     // A `const fn` may run while the program compiles, so its body may do only what constants may.
     if (item.isConst) checkConstOperations(body, this.annotations);
     this.checkBorrows(() =>
-      new BorrowChecker(this.annotations, this.solver, this.budget).checkFn(item, this.body.fn, this.body.retType)
+      new BorrowChecker(this.annotations, this.solver, this.budget).checkFn(
+        item,
+        this.body.fn,
+        this.body.retType,
+        def.impl?.lifetimeBounds
+      )
     );
     new ConstLint(this.annotations).check(body);
   }

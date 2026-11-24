@@ -118,18 +118,29 @@ export function compileFor(c: Compiler, expr: ExprOf<'for'>): Eval {
     const iterator = c.support.toIter(source, fromType(frame)) as IterValue;
     return frame.runtime.withRoots([iterator], () =>
       frame.runtime.withActiveBorrows([iterator], () => {
-        for (;;) {
-          frame.runtime.spend();
-          const next = iterator.next();
-          if (next === DONE) return UNIT_VALUE;
-          frame.temporaries.push(bind(frame, next));
-          try {
-            stepBinding(frame, row, answered);
-            if (runBody(body, frame, label)) return UNIT_VALUE;
-          } finally {
-            frame.temporaries.pop();
-            frame.endScope(patternSlots);
+        try {
+          for (;;) {
+            frame.runtime.spend();
+            const next = iterator.next();
+            if (next === DONE) return UNIT_VALUE;
+            frame.temporaries.push(bind(frame, next));
+            let broke = false;
+            try {
+              stepBinding(frame, row, answered);
+              broke = !!runBody(body, frame, label);
+            } finally {
+              frame.temporaries.pop();
+              frame.endScope(patternSlots);
+            }
+            if (broke) {
+              frame.runtime.dropper?.dropRest(iterator);
+              return UNIT_VALUE;
+            }
           }
+        } catch (error) {
+          // A `return` or a `break` of an outer loop leaves the loop, which drops its iterator.
+          if (error instanceof ControlSignal) frame.runtime.dropper?.dropRest(iterator);
+          throw error;
         }
       })
     );

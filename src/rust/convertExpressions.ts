@@ -833,8 +833,8 @@ export abstract class ExpressionConverter extends MacroConverter {
 const UNSTABLE_EXPRESSIONS: Record<string, string> = {
   gen_block: 'gen ブロック',
   try_block: 'try ブロック',
-  yield_expression: 'yield',
-  become_expression: 'become',
+  yield_expression: 'yield 式',
+  become_expression: 'become 式',
 };
 
 function asyncBlock(body: Block, isMove: boolean, span: Span): Expr {

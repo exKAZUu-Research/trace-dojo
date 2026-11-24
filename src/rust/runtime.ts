@@ -247,8 +247,11 @@ export class Runtime implements TracedRuntime<Frame> {
   dropper: Dropper | undefined;
   /** The threads the program spawned, once it spawns one. */
   scheduler: Scheduler | undefined;
-  /** The guards of `RefCell` borrows made so far, whose temporaries go at the end of their statement. */
-  readonly liveGuards: BorrowGuard[] = [];
+  /**
+   * The temporaries that go at the end of their statement: the guards of `RefCell` borrows, and values a method
+   * borrows as its receiver (`v.into_iter().next()`), which need dropping.
+   */
+  readonly liveGuards: { release(): void }[] = [];
 
   /**
    * Ends the borrows of the guards made since `mark` that no variable of the frame holds (and that `kept` is not),
@@ -256,7 +259,8 @@ export class Runtime implements TracedRuntime<Frame> {
    */
   releaseGuards(frame: Frame, mark: number, kept?: Value): void {
     if (this.liveGuards.length <= mark) return;
-    for (const guard of this.liveGuards.splice(mark)) {
+    // Rust drops a statement's temporaries in the reverse order of their making.
+    for (const guard of this.liveGuards.splice(mark).toReversed()) {
       if (guard === kept || frame.locals.some((value) => holds(value, guard))) continue;
       guard.release();
     }
@@ -301,10 +305,10 @@ export class Runtime implements TracedRuntime<Frame> {
 }
 
 /** Whether a value is a guard, or holds it directly in an `Option`, a tuple, or a struct. */
-function holds(value: unknown, guard: BorrowGuard): boolean {
+function holds(value: unknown, guard: { release(): void }): boolean {
   if (value === guard) return true;
-  if (value instanceof StructValue || value instanceof EnumValue) return value.fields.includes(guard);
-  return Array.isArray(value) && value.includes(guard);
+  if (value instanceof StructValue || value instanceof EnumValue) return value.fields.includes(guard as Value);
+  return Array.isArray(value) && value.includes(guard as Value);
 }
 
 export class StackOverflow {}

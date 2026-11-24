@@ -2,7 +2,7 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
-import type { Block, Condition, Expr, FnItem, FormatArgs, Pattern, Span, Stmt } from './ast';
+import type { Block, Condition, Expr, FnItem, FormatArgs, Generics, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindingParts, patternBindings } from './astWalk';
 import {
   checkConstDrop,
@@ -69,7 +69,7 @@ export class BorrowChecker {
     );
   }
 
-  checkFn(item: FnItem, context: FnContext, ret: Type): void {
+  checkFn(item: FnItem, context: FnContext, ret: Type, implBounds: Generics['lifetimeBounds'] = []): void {
     if (!item.body) return;
     const moveError = this.checkMoves(item, item.body, context);
     const loanErrors: LoanError[] = [];
@@ -78,6 +78,14 @@ export class BorrowChecker {
       body: item.body,
       ret,
       end: { row: item.endRow, col: 0 },
+      signature: {
+        params: item.params.map((param) => ({
+          name: param.pattern.kind === 'binding' ? param.pattern.name : '_',
+          span: param.span,
+        })),
+        bounds: [...(item.generics.lifetimeBounds ?? []), ...implBounds],
+        span: item.span,
+      },
     };
     LoanBuilder.checkFn(this.annotations, this.solver, context, fn, { errors: loanErrors, budget: this.budget });
     // rustc reports the errors in the order of their positions.

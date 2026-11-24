@@ -617,6 +617,7 @@ export class ItemCollector {
       methods: new Map(),
       consts: new Map(),
       assocTypes: new Map(),
+      lifetimeBounds: item.generics.lifetimeBounds,
       module,
       span: item.span,
     };

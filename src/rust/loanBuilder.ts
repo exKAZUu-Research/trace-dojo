@@ -4,6 +4,7 @@ import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations'
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { patternBindings } from './astWalk';
 import { normalize } from './infer';
+import { checkLifetimeRelations } from './lifetimeRelations';
 import {
   type Access,
   type AccessKind,
@@ -39,7 +40,7 @@ import { markExtendedTemporaries, promotable } from './temporaryScopes';
 import { arrayTryFrom } from './traitConversions';
 import type { TraitSolver } from './traits';
 import { relateReturnedError } from './tryErrors';
-import { type ClosureType, type FnDef, resolve, shallow, substitute, type Type } from './types';
+import { type ClosureType, type FnDef, resolve, shallow, substitute, type Type, UNIT } from './types';
 
 /** The temporary that holds a value with borrows, or undefined for a value without any. */
 type Value = Var | undefined;
@@ -56,6 +57,13 @@ interface ClosureSummary {
 }
 
 /** What the builders of a function and of the closures in it share. */
+/** What the lifetime check of a function's signature reads besides the types: its parameters' names and its bounds. */
+interface SignatureNames {
+  params: { name: string; span: Span }[];
+  bounds: { name: string; outlives: string[] }[];
+  span: Span;
+}
+
 interface LoanCheck {
   budget: ExecutionBudget;
   errors: LoanError[];
@@ -124,19 +132,25 @@ export class LoanBuilder {
     annotations: Annotations,
     solver: TraitSolver,
     context: FnContext,
-    fn: { params: Pattern[]; body: Block; ret: Type; end: Span },
+    fn: { params: Pattern[]; body: Block; ret: Type; end: Span; signature: SignatureNames },
     check: LoanCheck
   ): void {
     const builder = new LoanBuilder(annotations, solver, context, { ...check, summaries: new Map() });
     const params = fn.params.map((pattern) => ({ pattern, type: pattern.ty }));
-    builder.build(params, fn.body, fn.ret, fn.end);
+    builder.build(params, fn.body, fn.ret, fn.end, fn.signature);
   }
 
   /**
    * Builds and checks a body whose parameters (and `self`) hold their arguments at the entry, returning the variables
    * that hold the parameters.
    */
-  private build(params: { pattern: Pattern; type: Type | undefined }[], body: Expr, ret: Type, end: Span): Var[] {
+  private build(
+    params: { pattern: Pattern; type: Type | undefined }[],
+    body: Expr,
+    ret: Type,
+    end: Span,
+    signature?: SignatureNames
+  ): Var[] {
     this.current = this.graph.newPoint();
     this.returnVar = this.newVar('{return}', ret);
     this.returnType = ret;
@@ -165,6 +179,27 @@ export class LoanBuilder {
     this.endLocals(parameterLocals, end);
     this.checkStaticInputs([...defs, ...paramVars], body.span);
     this.graph.check(this.shared.errors);
+    if (signature) {
+      const inputs = [
+        ...receiver.map((local, index) => ({ v: defs[index], type: local.type, name: 'self', span: signature.span })),
+        ...params.map(({ type }, index) => ({
+          v: paramVars[index],
+          type: type ?? UNIT,
+          name: signature.params[index].name,
+          span: signature.params[index].span,
+        })),
+      ];
+      const error = checkLifetimeRelations({
+        inputs: inputs.map(({ v, type, name, span }) => ({ layout: this.layouts[v], type, name, span })),
+        ret: { layout: this.layouts[this.returnVar], type: ret },
+        refSelf: receiver.some((local) => shallow(local.type).kind === 'ref'),
+        bounds: signature.bounds,
+        outlives: this.graph.outlives,
+        staticRegion: this.staticRegion,
+        span: bodyResultSpan(body),
+      });
+      if (error) this.shared.errors.push(error);
+    }
     return paramVars;
   }
 
@@ -1459,4 +1494,10 @@ function refTarget(type: Type | undefined): Type | undefined {
 function isReference(type: Type | undefined): boolean {
   const t = type && normalize(shallow(type));
   return t?.kind === 'ref' || (t?.kind === 'adt' && t.def.builtin !== 'Box');
+}
+
+/** Where a body gives its value: its last expression or statement. */
+function bodyResultSpan(body: Expr): Span {
+  if (body.kind !== 'block') return body.span;
+  return body.tail?.span ?? body.stmts.at(-1)?.span ?? body.span;
 }

@@ -9030,6 +9030,46 @@ fn main() {
   });
 });
 
+test.each([
+  ['a parameter without the lifetime the return type names', "fn f<'a>(x: &'a str, y: &str) -> &'a str { y }", 'E0621'],
+  ['a lifetime with no bound to the returned one', "fn f<'a, 'b>(x: &'a str, y: &'b str) -> &'a str { y }", "'b: 'a"],
+  [
+    'a method returning another parameter than self',
+    "struct S<'a> { t: &'a str }\nimpl<'a> S<'a> { fn f(&self, o: &str) -> &str { o } }",
+    'ライフタイムが足りません',
+  ],
+  ['a declared bound', "fn f<'a, 'b: 'a>(x: &'a str, y: &'b str) -> &'a str { y }", undefined],
+  [
+    'a field whose lifetime the type of self implies',
+    "struct S<'a> { t: &'a str }\nimpl<'a> S<'a> { fn f(&self, o: &str) -> &str { self.t } }",
+    undefined,
+  ],
+])('checks the lifetimes a function body relates against its signature: %s', (_name, items, error) => {
+  const execution = executeProgram('rust', rustMain('', items));
+  if (error === undefined) expect(execution.kind).toBe('executed');
+  else {
+    expect(execution).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining(error) })],
+    });
+  }
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('an iterator that owns its elements drops those it has not yielded when it goes', () => {
+  const program = rustMain(
+    `    let first = vec![D(1), D(2), D(3)].into_iter().next();
+    println!("after");
+    for d in vec![D(6), D(7)] { if d.0 == 6 { break; } }
+    println!("end {}", first.is_some());`,
+    'struct D(i32);\nimpl Drop for D { fn drop(&mut self) { println!("drop {}", self.0); } }'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'drop 2\ndrop 3\nafter\ndrop 6\ndrop 7\nend true\ndrop 1\n',
+  });
+});
+
 test('an empty match covers the uninhabited Infallible', () => {
   const program = rustMain(
     '    println!("{:?}", widen(5));',

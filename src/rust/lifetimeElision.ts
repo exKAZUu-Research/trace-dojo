@@ -14,7 +14,9 @@ export function checkElidedReturnLifetime(fn: FnDef, ast: FnItem): void {
   if (inputs === 1) return;
   compileError(
     ast.ret?.span ?? ast.span,
-    '戻り値の型の参照には、ライフタイムを書いてください（引数の参照が1つではないので、どの引数から借りた値を返すのか決まりません）。'
+    inputs === 0
+      ? '戻り値の型の参照には、ライフタイムを書いてください（引数に参照がないので、借りる元がありません）（E0106）。'
+      : '戻り値の型の参照には、ライフタイムを書いてください（引数の参照が1つではないので、どの引数から借りた値を返すのか決まりません）（E0106）。'
   );
 }
 
@@ -67,7 +69,7 @@ export function checkFieldLifetimes(type: Type, span: Span, declared: string[]):
 }
 
 function checkFieldLifetime(lifetime: string | undefined, span: Span, declared: string[]): void {
-  if (!lifetime || lifetime === "'_") compileError(span, 'フィールドの型には、ライフタイムを書いてください。');
+  if (!lifetime || lifetime === "'_") compileError(span, 'フィールドの型には、ライフタイムを書いてください（E0106）。');
   if (lifetime !== "'static" && !declared.includes(lifetime)) {
     compileError(span, `ライフタイム ${lifetime} が宣言されていません。`);
   }

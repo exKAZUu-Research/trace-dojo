@@ -1,7 +1,7 @@
 import type { MethodRes, ReceiverAdjust } from './annotations';
 import type { Expr } from './ast';
 import type { Compiler, Eval } from './compiler';
-import { construct, derefAll, evaluateValues, stripRefs } from './compilerCommon';
+import { construct, derefAll, evaluateValues, isPlaceExpr, stripRefs } from './compilerCommon';
 import { placeThrough, valueThrough } from './compilerPlaces';
 import { normalize } from './infer';
 import { derefOnce } from './methods';
@@ -9,7 +9,7 @@ import { copyValue, needsCopy } from './ops';
 import { MOVED } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { shallow, type Type } from './types';
-import { CellPlace, DynValue } from './values';
+import { CellPlace, DynValue, type Place } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
 
@@ -79,7 +79,7 @@ function compileReceiver(c: Compiler, expr: ExprOf<'methodCall'>, method: Method
   if (adjust.autoref === 'mut') {
     const place = placeThrough(c, expr.receiver, adjust.derefs);
     if (iterFrom) return (frame) => new CellPlace(c.support.toIter(place(frame).get(), iterFrom(frame)));
-    return place;
+    return dropsTemporary(c, expr.receiver, adjust, place);
   }
   const byValue = adjust.autoref === 'none' && method.fn.selfMode === 'value' && adjust.derefs.length === 0;
   // rustc reborrows a `&mut` receiver rather than moving it out of its variable.
@@ -90,6 +90,21 @@ function compileReceiver(c: Compiler, expr: ExprOf<'methodCall'>, method: Method
     return derefedSelf(c, expr.receiver, adjust.derefs, read);
   }
   return read;
+}
+
+/** A receiver borrowed from a temporary value (`v.into_iter().next()`), which goes at the end of the statement. */
+function dropsTemporary(c: Compiler, receiver: Expr, adjust: ReceiverAdjust, place: Eval): Eval {
+  if (adjust.derefs.length > 0 || isPlaceExpr(receiver, c.annotations)) return place;
+  const type = runtimeType(receiver.ty!);
+  return (frame) => {
+    const borrowed = place(frame) as Place;
+    const { dropper } = frame.runtime;
+    const temporaryType = type(frame);
+    if (dropper?.needsDrop(temporaryType)) {
+      frame.runtime.liveGuards.push({ release: () => dropper.drop(borrowed.get(), temporaryType) });
+    }
+    return borrowed;
+  };
 }
 
 /** A receiver taken by value after derefs: a `Copy` value is copied, and through owners only (a `Box`), one that is not `Copy` moves out of the place that owns it. */

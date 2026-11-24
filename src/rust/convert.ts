@@ -179,6 +179,7 @@ export class Converter extends ExpressionConverter {
     const span = this.span(node);
     const unstable: Record<string, string> = {
       decl_macro: 'macro によるマクロの定義',
+      trait_alias: 'トレイトの別名',
     };
     if (Object.hasOwn(unstable, node.type))
       syntaxError(span, `${unstable[node.type]}は、不安定な機能なので使えません（E0658）。`);
@@ -553,9 +554,11 @@ export class Converter extends ExpressionConverter {
       const { attributes, target: child } = splitAttributes(syntax);
       const attrs = this.attributes.read(attributes);
       if (!attrs || !child) continue;
-      if (child.type === 'function_item') methods.push(this.fnItem(child, false, attrs));
-      else if (child.type === 'function_signature_item') methods.push(this.fnItem(child, true, attrs));
-      else if (child.type === 'associated_type') {
+      if (child.type === 'function_item' || child.type === 'function_signature_item') {
+        const method = this.fnItem(child, child.type === 'function_signature_item', attrs);
+        if (method.isConst) syntaxError(method.span, 'トレイトの関数は const にできません（E0379）。');
+        methods.push(method);
+      } else if (child.type === 'associated_type') {
         if (child.childForFieldName('type_parameters')) {
           unavailable(this.span(child), '型引数を持つ関連型（type Item<T>;）');
         }

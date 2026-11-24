@@ -284,6 +284,8 @@ export interface ImplDef {
   consts: Map<string, ConstDef>;
   /** The associated types of a trait impl (`type Item = u32;`), lowered once the impl's types are. */
   assocTypes: Map<string, Type>;
+  /** The bounds between lifetimes the impl declares (`impl<'a, 'b: 'a>`). */
+  lifetimeBounds?: { name: string; outlives: string[] }[];
   module: unknown;
   span: { row: number; col: number };
 }

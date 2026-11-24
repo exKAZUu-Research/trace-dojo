@@ -11,6 +11,7 @@ import {
   EnumValue,
   FnValue,
   isPlace,
+  type IterValue,
   type MapValue,
   type SetValue,
   type SharedBox,
@@ -121,6 +122,11 @@ export class Dropper {
     }
   }
 
+  /** Drops the elements an iterator that owns them has not yielded. */
+  dropRest(iter: IterValue): void {
+    if (iter.rest && iter.ownedItemType) for (const item of iter.rest()) this.drop(item, iter.ownedItemType);
+  }
+
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of owning type.
   private dropAdt(value: Value, t: Type & { kind: 'adt' }): void {
     const target = isPlace(value) ? value.get() : value;
@@ -155,6 +161,10 @@ export class Dropper {
       }
       case 'Box': {
         this.drop(value, t.args[0]);
+        return;
+      }
+      case 'Iter': {
+        this.dropRest(target as IterValue);
         return;
       }
       case 'Vec':
