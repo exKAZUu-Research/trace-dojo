@@ -541,7 +541,7 @@ export class Compiler extends StatementCompiler {
             break;
           }
           case 'using_declaration': {
-            this.unsupported(member.row, 'クラスの中の using 宣言（using Base::Base; など）');
+            this.memberUsing(cls, member, access, definitions);
             break;
           }
           case 'enum_specifier': {
@@ -902,10 +902,99 @@ export class Compiler extends StatementCompiler {
       this.error(row, `${fn.displayName} には = default を付けられません（特別なメンバ関数ではありません）。`);
   }
 
+  /**
+   * A using-declaration in a class (C++20 [namespace.udecl]): `using Base::Base;` inherits the base's constructors,
+   * and `using Base::f;` makes the base's member functions of that name overloads of the class's.
+   */
+  private memberUsing(
+    cls: ClassInfo,
+    node: Syntax,
+    access: Access,
+    definitions: { fn: FunctionInfo; node: Syntax }[]
+  ): void {
+    const target = node.children[0];
+    if (target?.type !== 'qualified_identifier')
+      return this.error(node.row, `using ${target?.text ?? ''} は書けません。`);
+    const { scope: scopeNode, name: nameNode } = splitQualified(target);
+    const scope = this.resolveScope(scopeNode);
+    if (scope.kind !== 'class' || !cls.isDerivedFrom(scope.cls) || scope.cls === cls)
+      return this.error(node.row, `${scopeNode.text} は ${cls.name} の親クラスではありません。`);
+    const base = scope.cls;
+    const name = this.plainName(nameNode);
+    if (name === base.name || name === base.name.replace(/^std::/, '')) {
+      for (const constructor of base.constructors) {
+        if (isCopyConstructor(constructor, base) || constructor.templatePattern) continue;
+        const inherited = this.inheritedConstructor(cls, base, constructor, access);
+        definitions.push(inherited);
+      }
+      return;
+    }
+    const entity = this.lookupQualified(target);
+    if (entity.kind === 'functions') {
+      cls.methods.set(name, [...(cls.methods.get(name) ?? []), ...entity.functions]);
+      return;
+    }
+    if (entity.kind !== 'field' && entity.kind !== 'staticField' && entity.kind !== 'type')
+      this.error(node.row, `${target.text} はメンバではありません。`);
+  }
+
+  /** A constructor of a class that a base's constructor gives it, which constructs the base with its arguments. */
+  private inheritedConstructor(
+    cls: ClassInfo,
+    base: ClassInfo,
+    constructor: FunctionInfo,
+    access: Access
+  ): { fn: FunctionInfo; node: Syntax } {
+    const row = cls.row;
+    const synthetic = (type: string, text: string, children: Syntax[] = [], field?: string): Syntax => ({
+      type,
+      text,
+      row,
+      endRow: row,
+      start: 0,
+      end: 0,
+      isNamed: true,
+      field,
+      all: children,
+      children,
+    });
+    const names = constructor.params.map((_, index) => `\0inherited${index}`);
+    const args = synthetic(
+      'argument_list',
+      '',
+      names.map((name) => synthetic('identifier', name))
+    );
+    const baseName = synthetic('type_identifier', base.name);
+    const initializer = synthetic('field_initializer', base.name, [baseName, args]);
+    const list = synthetic('field_initializer_list', '', [initializer]);
+    const body = synthetic('compound_statement', '{}', [], 'body');
+    const node = synthetic('function_definition', '', [list, body]);
+    const fn: FunctionInfo = {
+      ...constructor,
+      name: cls.name,
+      displayName: `${cls.name}::${cls.name}`,
+      owner: cls,
+      params: constructor.params.map((param, index) => ({ ...param, name: names[index] })),
+      native: undefined,
+      instantiate: undefined,
+      compiled: undefined,
+      access,
+      isConstructor: true,
+      isDefined: true,
+      definition: node,
+      isInline: true,
+    };
+    if (!cls.constructors.some((other) => sameDeclaredSignature(other, fn))) cls.constructors.push(fn);
+    return { fn, node };
+  }
+
   /** Adds a function to an overload set, rejecting a second declaration with the same parameters. */
   private addOverload(overloads: FunctionInfo[], fn: FunctionInfo, row: number): void {
     const same = overloads.find((other) => !other.templatePattern && sameDeclaredSignature(other, fn));
-    if (same) this.error(row, `${fn.displayName} は、同じ引数の型ですでに宣言されています。`);
+    // A member function hides a base's of the same signature that a using-declaration brought in.
+    if (same && fn.owner && same.owner && same.owner !== fn.owner) {
+      overloads.splice(overloads.indexOf(same), 1);
+    } else if (same) this.error(row, `${fn.displayName} は、同じ引数の型ですでに宣言されています。`);
     overloads.push(fn);
   }
 
@@ -3936,6 +4025,16 @@ function withoutEllipsis(node: Syntax): Syntax | undefined {
     return inner ? [inner] : [];
   });
   return { ...node, all, children: all.filter((child) => child.isNamed) };
+}
+
+/** A qualified name's last name and the scope before it (`std::runtime_error` of `std::runtime_error::what`). */
+function splitQualified(node: Syntax): { scope: Syntax; name: Syntax } {
+  const scope = fieldOf(node, 'scope') as Syntax;
+  const name = fieldOf(node, 'name') as Syntax;
+  if (name.type !== 'qualified_identifier') return { scope, name };
+  const inner = splitQualified(name);
+  const all = node.all.map((child) => (child === name ? { ...inner.scope, field: 'name' } : child));
+  return { scope: { ...node, all, children: all.filter((child) => child.isNamed) }, name: inner.name };
 }
 
 /** The class whose namespace argument-dependent lookup searches for an argument of a type. */
