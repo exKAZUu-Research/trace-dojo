@@ -43,6 +43,7 @@ const OPTIONS: Record<string, string> = {
 interface Options {
   set: Set<string>;
   unset: Set<string>;
+  attemptedSet: Set<string>;
 }
 
 /** Expands declaration command arguments left-to-right before prefix bindings and `runDeclaration` execute. */
@@ -52,7 +53,7 @@ export function expandDeclarationArguments(
   rawArgs: (Word | Assignment)[]
 ): DeclarationArgument[] {
   const args: DeclarationArgument[] = [];
-  const options: Options = { set: new Set(), unset: new Set() };
+  const options: Options = { set: new Set(), unset: new Set(), attemptedSet: new Set() };
   let optionsDone = false;
   for (const arg of rawArgs) {
     if ('append' in arg) {
@@ -89,7 +90,7 @@ function braceExpandDeclarationAssignment(shell: Shell, arg: Assignment): Assign
   return expanded;
 }
 
-const POSITIVE_IGNORED_MODE_FLAGS = new Set(['g', 'I', 'p']);
+const SIGN_INDEPENDENT_MODE_FLAGS = new Set(['I', 'p']);
 
 function recordOptionWord(word: string, options: Options): boolean {
   if (word === '--' || !/^[-+]./.test(word)) return true;
@@ -98,13 +99,18 @@ function recordOptionWord(word: string, options: Options): boolean {
 }
 
 function applyOptionSign(options: Options, sign: '-' | '+', ch: string): void {
+  if (SIGN_INDEPENDENT_MODE_FLAGS.has(ch)) {
+    options.set.add(ch);
+    return;
+  }
   if (sign === '+') {
-    if (POSITIVE_IGNORED_MODE_FLAGS.has(ch)) return;
+    if (ch === 'g') return;
     options.unset.add(ch);
     options.set.delete(ch);
-  } else if (!options.unset.has(ch)) {
-    options.set.add(ch);
+    return;
   }
+  options.attemptedSet.add(ch);
+  if (!options.unset.has(ch)) options.set.add(ch);
 }
 
 function expandDeclarationAssignment(
@@ -202,7 +208,7 @@ function ensureCompoundTargetVariable(
       : shell.findVariable(targetName, false);
   if (!variable) {
     const origin = localScope ? resolveLocalOrigin(shell, localScope, targetName, set.has('I')) : undefined;
-    variable = createDeclaredVariable(targetName, origin);
+    variable = createDeclaredVariable(targetName, origin, true);
     (localScope ?? scopes[0]).set(targetName, variable);
   }
   return variable;
@@ -283,7 +289,7 @@ function parseOptions(
   name: string,
   args: DeclarationArgument[]
 ): { options: Options; operands: DeclarationArgument[] } | undefined {
-  const options: Options = { set: new Set(), unset: new Set() };
+  const options: Options = { set: new Set(), unset: new Set(), attemptedSet: new Set() };
   let index = 0;
   for (; index < args.length; index++) {
     const arg = args[index];
@@ -646,7 +652,8 @@ function declaredDestination(
   }
   const origin =
     targetScope && !variable ? resolveLocalOrigin(shell, targetScope, targetName, set.has('I')) : undefined;
-  const candidate = variable ?? createDeclaredVariable(targetName, origin);
+  const creatingArray = set.has('a') || set.has('A') || isSubscripted;
+  const candidate = variable ?? createDeclaredVariable(targetName, origin, creatingArray);
   if (checkReadonlyConflict(shell, builtin, targetName, candidate, options, assigns)) {
     return undefined;
   }
@@ -659,7 +666,7 @@ function declaredDestination(
 
 interface LocalOrigin {
   source: Variable;
-  keepAllAttributes: boolean;
+  inheritAttributes: boolean;
   fromTempEnv: boolean;
 }
 
@@ -670,11 +677,11 @@ function resolveLocalOrigin(
   inheritEnclosing: boolean
 ): LocalOrigin | undefined {
   const tempBinding = findCallPrefixBinding(shell, targetScope, name);
-  if (tempBinding) return { source: tempBinding, keepAllAttributes: true, fromTempEnv: true };
+  if (tempBinding) return { source: tempBinding, inheritAttributes: inheritEnclosing, fromTempEnv: true };
   if (!inheritEnclosing) return undefined;
   const inherited = findEnclosingVariable(shell.state.scopes, targetScope, name);
   return inherited
-    ? { source: inherited, keepAllAttributes: false, fromTempEnv: Boolean(inherited.fromTempEnv) }
+    ? { source: inherited, inheritAttributes: true, fromTempEnv: Boolean(inherited.fromTempEnv) }
     : undefined;
 }
 
@@ -687,13 +694,17 @@ function findCallPrefixBinding(shell: Shell, targetScope: Map<string, Variable>,
   return undefined;
 }
 
-function createDeclaredVariable(name: string, origin: LocalOrigin | undefined): Variable {
+function createDeclaredVariable(name: string, origin: LocalOrigin | undefined, creatingArray = false): Variable {
   if (!origin) return { name, value: undefined, attributes: new Set() };
-  const { source, keepAllAttributes, fromTempEnv } = origin;
+  const { source, inheritAttributes, fromTempEnv } = origin;
+  const attributes = inheritAttributes
+    ? new Set([...source.attributes].filter((a) => a !== 'n'))
+    : new Set<Attribute>(source.attributes.has('x') ? ['x'] : []);
+  const value = !inheritAttributes && creatingArray ? undefined : cloneValue(source.value);
   return {
     name,
-    value: cloneValue(source.value),
-    attributes: new Set(keepAllAttributes ? source.attributes : [...source.attributes].filter((a) => a !== 'n')),
+    value,
+    attributes,
     ...(fromTempEnv ? { fromTempEnv: true } : {}),
   };
 }
@@ -722,11 +733,11 @@ function checkReadonlyConflict(
   builtin: string,
   targetName: string,
   variable: Variable | undefined,
-  { set, unset }: Options,
+  { set, unset, attemptedSet }: Options,
   assigns: boolean
 ): boolean {
   if (!variable?.attributes.has('r')) return false;
-  const adds = [...set].some((a) => a !== 'r' && a !== 'x' && a !== 'p' && a !== 'g' && a !== 'I');
+  const adds = [...set, ...attemptedSet].some((a) => a !== 'r' && a !== 'x' && a !== 'p' && a !== 'g' && a !== 'I');
   const removes = [...unset].some(
     (a) => PROTECTED_READONLY_UNSET.has(a) || (a === 'n' && variable.attributes.has('n'))
   );

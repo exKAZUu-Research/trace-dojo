@@ -191,26 +191,29 @@ class TestReader {
 
   private findShortGroupLength(): number | undefined {
     const first = this.peek() as string;
-    const second = this.peek(1);
-    if (second === undefined) return undefined;
-    let depth = first === '(' && second !== ')' && !isThreeTokenGroupOperator(second) ? 2 : 1;
     for (let offset = 1; offset <= 4 && this.index + offset < this.tokens.length; offset++) {
-      const token = this.tokens[this.index + offset];
-      if (token === '(') {
-        depth++;
-        continue;
-      }
-      if (token !== ')') continue;
-      if (depth === 1 && this.isOperandCloseParen(offset, first, second)) continue;
-      if (--depth === 0) return offset;
+      if (this.tokens[this.index + offset] !== ')') continue;
+      return this.resolveShortGroupClose(offset, first);
     }
     return undefined;
   }
 
-  private isOperandCloseParen(offset: number, first: string, second: string): boolean {
-    if (offset === 1 && (first === '!' || UNARY_FLAGS.has(first)) && this.peek(2) === ')') return true;
-    if (offset === 2 && isThreeTokenGroupOperator(second) && this.peek(3) === ')') return true;
-    return false;
+  private resolveShortGroupClose(offset: number, first: string): number | undefined {
+    if (offset === 1) return 1;
+    if (offset === 2) return first === '(' || (first === '!' && this.peek(1) === '(') ? undefined : 2;
+    if (offset === 3) return this.resolveThreeTokenClose(first);
+    const fourth = this.peek(3);
+    if (first === '!' && this.peek(1) !== '(' && fourth !== '(') return 4;
+    return first === '(' && fourth === ')' ? 4 : undefined;
+  }
+
+  private resolveThreeTokenClose(first: string): number | undefined {
+    const second = this.peek(1) as string;
+    const third = this.peek(2) as string;
+    if (first !== '(') return first === '!' && second === '(' ? undefined : 3;
+    if (third === ')') return 3;
+    if (isThreeTokenGroupOperator(second)) return third === '(' ? undefined : 3;
+    return this.peek(4) === ')' ? 4 : undefined;
   }
 
   private applyUnary(): boolean {

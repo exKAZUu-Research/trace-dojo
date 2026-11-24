@@ -4,6 +4,7 @@
  * Supplements tree-sitter-bash where error recovery or token boundaries differ from Bash 5.3, while collecting backquoted
  * substitutions whose bodies Bash parses only when executed.
  */
+import { skipSubscript } from './arithmetic';
 import { parseConditional } from './conditionalSyntax';
 import {
   arithmeticEnd,
@@ -15,6 +16,7 @@ import {
   SyntaxFailure,
   UnknownSyntax,
 } from './syntaxWords';
+import { isIdentifier } from './variables';
 
 export function checkBashSyntax(source: string): {
   error: BashSyntaxError | 'unknown' | undefined;
@@ -81,7 +83,26 @@ const SHELL_OPERATORS = [
 const REDIRECTION_OPERATORS = new Set(['<', '>', '>>', '<>', '>|', '&>', '&>>', '<&', '>&', '<<<', '<<', '<<-']);
 const WORD_BREAK_CHARS = new Set([' ', '\t', '\n', ';', '&', '|', '<', '>', '(', ')']);
 const DECLARATION_NAMES = new Set(['declare', 'typeset', 'local', 'export', 'readonly']);
-const COMPOUND_LHS_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=$/;
+
+function isAssignmentWord(word: string): boolean {
+  const open = word.indexOf('[');
+  const eq = word.indexOf('=');
+  if (eq <= 0) return false;
+  if (open === -1 || open > eq) {
+    return isIdentifier(word.slice(0, word[eq - 1] === '+' ? eq - 1 : eq));
+  }
+  if (!isIdentifier(word.slice(0, open))) return false;
+  const close = skipSubscript(word, open);
+  return close < word.length && (word.startsWith('=', close + 1) || word.startsWith('+=', close + 1));
+}
+
+function isCompoundAssignmentPrefix(prefix: string): boolean {
+  if (!prefix.endsWith('=')) return false;
+  const lhs = prefix.slice(0, prefix.endsWith('+=') ? -2 : -1);
+  if (isIdentifier(lhs)) return true;
+  const open = lhs.indexOf('[');
+  return open > 0 && isIdentifier(lhs.slice(0, open)) && skipSubscript(lhs, open) === lhs.length - 1;
+}
 
 class ShellTokenStream {
   private pendingHeredocSpec: { stripLeadingTabs: boolean } | undefined;
@@ -151,7 +172,14 @@ class ShellTokenStream {
         this.position = this.text.parseSubstitution(this.position + 2);
         continue;
       }
-      if (ch === '(' && allowCompoundArray && COMPOUND_LHS_PATTERN.test(source.slice(start, this.position))) {
+      if (ch === '[' && allowCompoundArray && isIdentifier(source.slice(start, this.position))) {
+        const close = skipSubscript(source, this.position);
+        if (close < source.length && (source.startsWith('=', close + 1) || source.startsWith('+=', close + 1))) {
+          this.position = skipBalanced(this.text, this.position, '[', ']');
+          continue;
+        }
+      }
+      if (ch === '(' && allowCompoundArray && isCompoundAssignmentPrefix(source.slice(start, this.position))) {
         this.position = this.scanCompoundArrayBody(this.position);
         continue;
       }
@@ -592,7 +620,7 @@ class ShellGrammarValidator {
       }
       if (token.kind !== 'word') return;
       this.advance();
-      if (commandName === undefined && !COMPOUND_LHS_PATTERN.test(token.value.replace(/=[\s\S]*$/, '='))) {
+      if (commandName === undefined && !isAssignmentWord(token.value)) {
         commandName = token.value;
       }
       if (position === 0 && this.hasOperator(this.peek(), '(')) {
@@ -622,8 +650,11 @@ class ShellGrammarValidator {
   }
 
   private peek(allowCompoundArray = false): ShellToken {
-    if (this.cached && this.cachedAllowsCompound !== allowCompoundArray && this.couldBeCompoundArray(this.cached)) {
-      this.stream.position = this.cached.start;
+    if (this.cached && !this.cachedAllowsCompound && allowCompoundArray && this.needsAssignmentRescan(this.cached)) {
+      const { start } = this.cached;
+      while ((this.text.backquotes.at(-1)?.start ?? -1) >= start) this.text.backquotes.pop();
+      while ((this.text.literalSingleQuotes.at(-1) ?? -1) >= start) this.text.literalSingleQuotes.pop();
+      this.stream.position = start;
       this.cached = undefined;
     }
     if (!this.cached) {
@@ -633,11 +664,11 @@ class ShellGrammarValidator {
     return this.cached;
   }
 
-  private couldBeCompoundArray(token: ShellToken): boolean {
+  private needsAssignmentRescan(token: ShellToken): boolean {
     if (token.kind !== 'word') return false;
-    const slice = this.text.source.slice(token.start, token.end + 1);
-    const paren = slice.indexOf('(');
-    return paren !== -1 && COMPOUND_LHS_PATTERN.test(slice.slice(0, paren));
+    if (this.text.source[token.end] === '(' && isCompoundAssignmentPrefix(token.value)) return true;
+    const open = token.value.indexOf('[');
+    return open > 0 && isIdentifier(token.value.slice(0, open));
   }
 
   private advance(): ShellToken {

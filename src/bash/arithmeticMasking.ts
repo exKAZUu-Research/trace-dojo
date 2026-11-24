@@ -1,6 +1,8 @@
 import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
+import { skipSubscript } from './arithmetic';
 import { arithmeticEnd, skipBalanced, skipBlanks, skipWordPiece, SourceText } from './syntaxWords';
+import { isIdentifier } from './variables';
 
 /**
  * The text of arithmetic expressions that the grammar cannot read, by the offset where each one's text starts. Bash
@@ -11,7 +13,6 @@ export type MaskedArithmetic = Map<number, string>;
 
 const MAX_PASSES = 50;
 const BOUNDARY_CHARS = new Set([' ', '\t', '\n', ';', '&', '|', '(', ')', '<', '>']);
-const COMPOUND_ARRAY_LHS = /(?:^|[ \t\n;&|()])(?:[A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]]*\])?\+?=$/;
 
 interface Region {
   opener: '((' | '$((' | '$[' | '[';
@@ -176,7 +177,7 @@ function scanPlain(text: SourceText, from: number, stopChar: string | undefined,
           continue;
         }
       }
-      if (c === '(' && !atBoundary && COMPOUND_ARRAY_LHS.test(source.slice(0, i))) {
+      if (c === '(' && !atBoundary && hasCompoundArrayLhsBefore(source, i)) {
         i = scanCompoundSubscripts(text, i + 1, regions);
         atBoundary = false;
         continue;
@@ -238,4 +239,20 @@ function tryFindParenArithmeticEnd(text: SourceText, openParens: number): number
 
 function isAfterFor(source: string, openPos: number): boolean {
   return /(?:^|[ \t\n;&|()])for(?:[ \t]|\\\n)+$/.test(source.slice(0, openPos));
+}
+
+function hasCompoundArrayLhsBefore(source: string, openPos: number): boolean {
+  if (source[openPos - 1] !== '=') return false;
+  const lhsEnd = source[openPos - 2] === '+' ? openPos - 2 : openPos - 1;
+  if (source[lhsEnd - 1] !== ']') {
+    let start = lhsEnd;
+    while (start > 0 && /[A-Za-z0-9_]/.test(source[start - 1])) start--;
+    return (start === 0 || BOUNDARY_CHARS.has(source[start - 1])) && isIdentifier(source.slice(start, lhsEnd));
+  }
+  const head = source.slice(0, lhsEnd);
+  for (const match of head.matchAll(/(?:^|[ \t\n;&|()])([A-Za-z_][A-Za-z0-9_]*)\[/g)) {
+    const bracketIndex = (match.index as number) + match[0].length - 1;
+    if (skipSubscript(source, bracketIndex) === lhsEnd - 1) return true;
+  }
+  return false;
 }

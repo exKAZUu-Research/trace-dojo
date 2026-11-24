@@ -32,8 +32,8 @@ export class FieldSplitter {
   private field: Fragment[] = [];
   private started = false;
   private afterWhite = false;
+  private afterListWhite = false;
   private afterDelimiter = false;
-  private sawEmptyElement = false;
   private readonly hasNonWhitePrimaryIfs: boolean;
 
   constructor(private readonly ifs: string) {
@@ -49,25 +49,29 @@ export class FieldSplitter {
       this.field.push({ ...piece, split: false });
       this.started = true;
       this.afterWhite = false;
+      this.afterListWhite = false;
       this.afterDelimiter = false;
-      this.sawEmptyElement = false;
-    } else if (piece.text === '') {
-      if (this.hasNonWhitePrimaryIfs) this.sawEmptyElement = true;
-    } else this.split(piece.text);
+    } else if (piece.text !== '') {
+      this.split(piece.text);
+    }
   }
 
   private onFieldBreak(): void {
-    if (!this.hasNonWhitePrimaryIfs && this.ifs !== '') {
-      if (this.started) this.end();
-      this.sawEmptyElement = false;
+    if (this.ifs === '') return;
+    if (this.afterListWhite) {
       this.afterWhite = true;
+      this.afterListWhite = false;
+    }
+    if (this.hasNonWhitePrimaryIfs) {
+      this.separate(this.ifs[0]);
       return;
     }
-    if (this.started) this.end();
-    else if (this.afterDelimiter || this.sawEmptyElement) this.fields.push([]);
-    this.afterWhite = false;
-    this.afterDelimiter = false;
-    this.sawEmptyElement = false;
+    if (this.started) {
+      this.end();
+      this.afterWhite = true;
+    } else if (!this.afterDelimiter) {
+      this.afterWhite = true;
+    }
   }
 
   finish(): Fragment[][] {
@@ -88,8 +92,8 @@ export class FieldSplitter {
         run += c;
         this.started = true;
         this.afterWhite = false;
+        this.afterListWhite = false;
         this.afterDelimiter = false;
-        this.sawEmptyElement = false;
         continue;
       }
       if (run) this.field.push({ text: run, quoted: false, split: false });
@@ -100,16 +104,19 @@ export class FieldSplitter {
   }
 
   private separate(c: string): void {
-    this.sawEmptyElement = false;
     if (c === ' ' || c === '\t' || c === '\n') {
-      if (!this.started) return;
-      this.end();
-      this.afterWhite = true;
+      if (this.started) {
+        this.end();
+        this.afterWhite = true;
+      } else if (!this.afterDelimiter) {
+        this.afterListWhite = true;
+      }
       return;
     }
     if (this.started) this.end();
     else if (!this.afterWhite) this.fields.push([]);
     this.afterWhite = false;
+    this.afterListWhite = false;
     this.afterDelimiter = true;
   }
 }
