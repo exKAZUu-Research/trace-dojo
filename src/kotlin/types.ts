@@ -14,6 +14,8 @@ export interface ParameterType {
   kind: 'param';
   param: TypeParameterSymbol;
   nullable: boolean;
+  /** Whether the type is `T & Any`, which no `null` is of, whatever `T` is. */
+  definitelyNonNull?: boolean;
 }
 
 export interface FunctionType {
@@ -56,6 +58,8 @@ export function classType(cls: ClassSymbol, args: KType[] = [], nullable = false
 }
 
 export function withNullability<T extends KType>(type: T, nullable: boolean): T {
+  if (type.kind === 'param' && nullable && type.definitelyNonNull)
+    return { ...type, nullable, definitelyNonNull: undefined };
   if (type.nullable === nullable) return type;
   return { ...type, nullable };
 }
@@ -66,13 +70,17 @@ export function nullable(type: KType): KType {
 
 export function nonNull(type: KType): KType {
   if (type.kind === 'variable' && type.variable.fixed) return nonNull(type.variable.fixed);
+  // A type parameter that may stand for a nullable type is `T & Any` once a value of it is known not to be null.
+  if (type.kind === 'param' && !type.definitelyNonNull && isNullable({ ...type, nullable: false }))
+    return { ...type, nullable: false, definitelyNonNull: true };
   return withNullability(type, false);
 }
 
 /** Whether a value of the type may be `null`, which a type parameter without a non-null bound may hold. */
 export function isNullable(type: KType): boolean {
   if (type.nullable) return true;
-  if (type.kind === 'param') return type.param.bounds.length === 0 || type.param.bounds.every(isNullable);
+  if (type.kind === 'param')
+    return !type.definitelyNonNull && (type.param.bounds.length === 0 || type.param.bounds.every(isNullable));
   if (type.kind === 'variable' && type.variable.fixed) return isNullable(type.variable.fixed);
   return false;
 }
@@ -101,6 +109,7 @@ export function substitute(type: KType, substitution: Substitution): KType {
     case 'param': {
       const replacement = substitution.get(type.param);
       if (!replacement) return type;
+      if (type.definitelyNonNull) return nonNull(replacement);
       return type.nullable ? nullable(replacement) : replacement;
     }
     case 'class': {
@@ -206,7 +215,7 @@ export function typeToString(type: KType): string {
       return `${type.cls.name}${args}${suffix}`;
     }
     case 'param': {
-      return `${type.param.name}${suffix}`;
+      return type.definitelyNonNull ? `${type.param.name} & Any` : `${type.param.name}${suffix}`;
     }
     case 'function': {
       const receiver = type.receiver ? `${typeToString(type.receiver)}.` : '';

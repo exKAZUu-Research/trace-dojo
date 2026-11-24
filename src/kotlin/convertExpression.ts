@@ -554,22 +554,28 @@ export abstract class ExpressionConverter {
   convertLambda(node: Node): LambdaExpression {
     const parts = named(node);
     let params: LambdaParameter[] | undefined;
+    const destructurings: Statement[] = [];
     const parametersNode = parts.find((part) => part.type === 'lambda_parameters');
     if (parametersNode) {
-      params = named(parametersNode).map((parameter): LambdaParameter => {
-        if (parameter.type === 'multi_variable_declaration') {
-          const typeNode = parameter.childForFieldName('type');
-          return {
-            row: rowOf(parameter),
-            name: undefined,
-            type: typeNode ? this.convertType(typeNode) : undefined,
-            destructured: namedOfType(parameter, 'variable_declaration').map((variable) => {
-              const declared = this.convertVariableDeclaration(variable);
-              return declared.name === undefined ? undefined : { ...declared, name: declared.name };
-            }),
-          };
-        }
-        return this.convertVariableDeclaration(parameter);
+      params = named(parametersNode).map((parameter, index): LambdaParameter => {
+        if (parameter.type !== 'multi_variable_declaration') return this.convertVariableDeclaration(parameter);
+        // `{ (k, v) -> ... }` takes a parameter that the body destructures first.
+        const typeNode = parameter.childForFieldName('type');
+        const row = rowOf(parameter);
+        const name = `\0destructured${index}`;
+        destructurings.push({
+          kind: 'destructuring',
+          row,
+          modifiers: { keywords: new Set(), annotations: [] },
+          isParameter: true,
+          isVar: false,
+          names: namedOfType(parameter, 'variable_declaration').map((variable) => {
+            const declared = this.convertVariableDeclaration(variable);
+            return declared.name === undefined ? undefined : { ...declared, name: declared.name };
+          }),
+          initializer: { kind: 'name', row, name },
+        });
+        return { row, name, type: typeNode ? this.convertType(typeNode) : undefined };
       });
     } else if (hasToken(node, '->')) {
       params = [];
@@ -580,7 +586,10 @@ export abstract class ExpressionConverter {
       endRow: node.endPosition.row,
       label: undefined,
       params,
-      statements: this.convertStatements(parts.filter((part) => part.type !== 'lambda_parameters')),
+      statements: [
+        ...destructurings,
+        ...this.convertStatements(parts.filter((part) => part.type !== 'lambda_parameters')),
+      ],
     };
   }
 

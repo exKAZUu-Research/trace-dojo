@@ -235,7 +235,17 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       if (symbol.isTailrec && decl.body)
         context.tailrec = { symbol, calls: tailCallsOf(decl.body, isNonNullClass(symbol.returnType, this.core.unit)) };
       context.info.isAtomic = symbol.isAtomic;
-      const scope = new Scope(this.withOuterReceivers(entry.scope, entry.cls?.symbol, context), context);
+      let base = this.withOuterReceivers(entry.scope, entry.cls?.symbol, context);
+      // An extension declared in a class sees the class's instance, which calls pass, around its extension receiver.
+      const dispatch =
+        entry.cls && symbol.extensionReceiver && !(entry.cls.symbol.isObject && entry.cls.file.isLibrary)
+          ? new ReceiverSymbol(this.thisTypeOf(entry.cls.symbol), context, entry.cls.symbol, entry.cls.symbol.name)
+          : undefined;
+      if (dispatch) {
+        base = new Scope(base, context);
+        base.receiver = dispatch;
+      }
+      const scope = new Scope(base, context);
       const thisType = this.addReceivers(scope, context, entry.cls, symbol.extensionReceiver, symbol.name);
       // An object's members show its properties as `Name.x`, as Java's static members do, rather than as `this.x`.
       context.info.showsThis =
@@ -249,6 +259,23 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           decl.params[index].row
         )
       );
+      for (const [index, param] of symbol.contextParameters.entries()) {
+        const declared = decl.modifiers.contextParameters?.[index];
+        const variable = this.newParameter(
+          scope,
+          context,
+          param.name === '_' ? undefined : param.name,
+          param.type,
+          declared?.row ?? decl.row
+        );
+        variable.isContextParameter = true;
+        this.flow.assigned.add(variable);
+        if (param.name === '_') scope.variables.set(`\0context${index}`, variable);
+      }
+      if (dispatch) {
+        dispatch.slot = context.allocate('\0dispatchReceiver', dispatch.type, false);
+        symbol.passesDispatchReceiver = true;
+      }
       const reified = symbol.typeParameters.filter((param) => param.isReified);
       if (reified.length > 0 && decl.body) {
         // A call passes the reified type arguments after the arguments, in the frame's next slot.
@@ -343,9 +370,6 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     if (cls) {
       thisType = this.thisTypeOf(cls.symbol);
       if (!extension) scope.receiver = new ReceiverSymbol(thisType, context, cls.symbol, cls.symbol.name);
-      // An extension declared in an object, as `Int.minutes` in `Duration.Companion`, needs no instance of it.
-      else if (!cls.symbol.isObject || !cls.file.isLibrary)
-        this.unavailable(cls.symbol.row, 'クラスの中での拡張関数・拡張プロパティの宣言');
     }
     if (extension) {
       scope.receiver = new ReceiverSymbol(extension, context, undefined, label);

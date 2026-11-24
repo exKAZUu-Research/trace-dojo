@@ -387,18 +387,16 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const evaluate = initializer.eval;
     // Releasing the initializer lets the collector remove what no component keeps, such as a skipped `_` turtle.
     const releasesHolder = initializer.repr === 'ref';
-    return this.withStep(
-      row,
-      (frame) => {
-        holderWrite(frame, evaluate(frame));
-        try {
-          for (const write of writes) write?.(frame);
-        } finally {
-          if (releasesHolder) holderWrite(frame, NULL);
-        }
-      },
-      false
-    );
+    const exec: Exec = (frame) => {
+      holderWrite(frame, evaluate(frame));
+      try {
+        for (const write of writes) write?.(frame);
+      } finally {
+        if (releasesHolder) holderWrite(frame, NULL);
+      }
+    };
+    if (statement.isParameter) return exec;
+    return this.withStep(row, exec, false);
   }
 
   // Assignments.

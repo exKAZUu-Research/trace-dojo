@@ -53,6 +53,9 @@ function checkAccessorsSeparated(property: Node, getter: Node, setter: Node): vo
 /** Converts tree-sitter's tree into the AST, rejecting syntax that this environment does not run. */
 export class Converter extends ExpressionConverter {
   convertFile(root: Node): KotlinFile {
+    // `dynamic` is a type of Kotlin/JS alone, which kotlinc rejects on the JVM.
+    const dynamic = root.descendantsOfType('dynamic')[0];
+    if (dynamic) throw syntaxError(dynamic, 'dynamic 型は Kotlin/JS でだけ使えます。');
     let packageName: string | undefined;
     const annotations: Annotation[] = [];
     const imports: Import[] = [];

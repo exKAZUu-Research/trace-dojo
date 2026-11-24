@@ -212,6 +212,8 @@ export interface DestructuringDecl {
   kind: 'destructuring';
   row: number;
   modifiers: Modifiers;
+  /** Whether the declaration destructures a lambda's parameter, which is part of the lambda's call, not a step. */
+  isParameter?: boolean;
   isVar: boolean;
   names: DestructuredName[];
   initializer: Expression;
@@ -279,11 +281,9 @@ export interface Argument {
 
 export interface LambdaParameter {
   row: number;
-  /** `undefined` for `_` and for a destructured parameter. */
+  /** `undefined` for `_`. */
   name: string | undefined;
   type: TypeRef | undefined;
-  /** The variables of a destructured parameter, as `k` and `v` of `{ (k, v) -> ... }`. */
-  destructured?: DestructuredName[];
 }
 
 export interface LambdaExpression {

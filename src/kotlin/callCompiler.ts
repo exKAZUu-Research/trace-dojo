@@ -11,16 +11,26 @@ import {
 import type { Expression, LambdaExpression } from './ast';
 import {
   type Compiled,
+  convertRepr,
   type Eval,
   FunctionContext,
   isBareCallExpression,
   nullableReceiverMessage,
+  type ReceiverSymbol,
   reprOf,
   type Scope,
   typeMismatchMessage,
 } from './compilerBase';
 import { CompilerCore } from './compilerCore';
-import { callFunction, getPropertyValue, parameterReprs, receiverRepr, returnRepr } from './dispatch';
+import {
+  callFunction,
+  getPropertyValue,
+  isVirtual,
+  parameterReprs,
+  receiverRepr,
+  returnRepr,
+  runtimeClassOf,
+} from './dispatch';
 import { mostSpecificReceivers, type ReceiverSpecificity } from './extensionResolution';
 import { literalFits } from './literals';
 import { runtimeType } from './reified';
@@ -82,6 +92,8 @@ export interface Candidate {
   substitution: Substitution;
   /** The receiver's static type, for a member or an extension. */
   receiverType: KType | undefined;
+  /** For an extension declared in a class, the implicit receiver that is the class's instance the call passes. */
+  dispatch?: ReceiverSymbol;
 }
 
 interface DeclaredCallLevel {
@@ -798,6 +810,33 @@ export abstract class CallCompiler extends CompilerCore {
     return true;
   }
 
+  /**
+   * The value a call passes a context parameter of a type: the nearest implicit receiver or context parameter around
+   * the call that is of the type.
+   */
+  private contextArgument(scope: Scope, context: FunctionContext, type: KType, row: number): Compiled {
+    for (let current: Scope | undefined = scope; current; current = current.parent) {
+      const { receiver } = current;
+      if (receiver && isSubtype(this.receiverTypeOf(receiver), type))
+        return {
+          type: receiver.type,
+          repr: reprOf(this.core, receiver.type),
+          eval: this.receiverAccess(context, receiver),
+        };
+      for (const variable of current.variables.values()) {
+        if (variable.isContextParameter && isSubtype(variable.type, type))
+          return {
+            type: variable.type,
+            repr: reprOf(this.core, variable.type),
+            eval: this.variableAccess(context, variable).read,
+          };
+      }
+    }
+    return this.error(row, `${typeToString(resolved(type))} のコンテキストがありません。with などで用意してください。`);
+  }
+
+  protected abstract receiverTypeOf(receiver: ReceiverSymbol): KType;
+
   /** The array a `vararg` parameter of the element type holds. */
   protected abstract varargArrayType(elementType: KType): KType;
 
@@ -1139,6 +1178,12 @@ export abstract class CallCompiler extends CompilerCore {
       (type) => this.varargArrayFactory(type)
     );
     const callRow = this.recordsSteps && !this.file.isLibrary ? row : undefined;
+    const contextEvals = symbol.contextParameters.map((param) => {
+      const type = substitute(param.type, substitution);
+      const argument = this.contextArgument(scope, context, type, row);
+      return convertRepr(argument.eval, argument.repr, reprOf(this.core, type));
+    });
+    const dispatchEval = candidate.dispatch && this.receiverAccess(context, candidate.dispatch);
     const reifiedTypes = symbol.typeParameters
       .filter((param) => param.isReified)
       .map((param) => substitute({ kind: 'param', param, nullable: false }, substitution));
@@ -1149,6 +1194,16 @@ export abstract class CallCompiler extends CompilerCore {
       try {
         if (candidate.kind === 'constructor' && symbol.owner) this.ensureClassInitialized(frame, symbol.owner);
         const values = evaluateArgs(frame);
+        for (const evaluate of contextEvals) values.push(evaluate(frame));
+        if (dispatchEval) {
+          const dispatch = dispatchEval(frame);
+          values.push(dispatch);
+          if (symbol.passesTypeArguments)
+            values.push(reifiedTypes.map((type) => runtimeType(resolved(type), frame)) as unknown as Value);
+          for (const value of values) temporaries.push(value);
+          const target = isVirtual(symbol) ? runtimeClassOf(dispatch).dispatch(symbol) : symbol;
+          return callFunction(target, frame, receiver, values, callRow);
+        }
         if (symbol.passesTypeArguments)
           values.push(reifiedTypes.map((type) => runtimeType(resolved(type), frame)) as unknown as Value);
         for (const value of values) temporaries.push(value);

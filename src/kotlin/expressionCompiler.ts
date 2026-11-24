@@ -1603,6 +1603,15 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
     const local = this.extensionFunctionCandidates(this.localFunctions(scope, name), receiver.type);
     if (local.length > 0) levels.push({ candidates: local, receiver });
+    for (const dispatch of this.receiversOf(scope)) {
+      const candidates = this.memberCandidates(this.receiverTypeOf(dispatch), name)
+        .filter(({ symbol, substitution }) => {
+          const declared = symbol.extensionReceiver && substitute(symbol.extensionReceiver, substitution);
+          return declared !== undefined && matchExtensionReceiver(symbol.typeParameters, declared, receiver.type);
+        })
+        .map((candidate): Candidate => ({ ...candidate, kind: 'extension', receiverType: receiver.type, dispatch }));
+      if (candidates.length > 0) levels.push({ candidates, receiver });
+    }
     const properties = this.topLevelProperties(name, true);
     for (const [index, functions] of this.topLevelFunctions(name, true).entries()) {
       const candidates = this.extensionFunctionCandidates(functions, receiver.type);

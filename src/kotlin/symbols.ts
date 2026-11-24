@@ -196,6 +196,10 @@ export class FunctionSymbol implements MemberBase {
   isOpen = false;
   isOverride = false;
   isInline = false;
+  /** The context parameters of `context(name: Type) fun f()`, which calls pass after the arguments. */
+  contextParameters: { name: string; type: KType }[] = [];
+  /** Whether calls pass the instance of the class that declares the extension, after the context arguments. */
+  passesDispatchReceiver = false;
   /** Whether calls pass the type arguments of the function's reified type parameters after its arguments. */
   passesTypeArguments = false;
   /** Whether the function is `tailrec`, whose calls of itself in tail position reuse its frame. */
@@ -281,6 +285,8 @@ export class VariableSymbol {
   awaitsValue = false;
   /** Whether the variable is a `lateinit var`, whose read before its first assignment throws. */
   isLateinit = false;
+  /** Whether the variable is a context parameter, which calls needing a context of its type receive. */
+  isContextParameter = false;
   isParameter = false;
 
   constructor(

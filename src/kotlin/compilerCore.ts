@@ -164,8 +164,10 @@ export abstract class CompilerCore {
       const param = this.findTypeParameter(scope, first.name);
       if (param) {
         if (first.args.length > 0) this.error(ref.row, `型引数 ${first.name} には型引数を書けません。`);
+        if (ref.definitelyNonNull) return { kind: 'param', param, nullable: false, definitelyNonNull: true };
         return { kind: 'param', param, nullable: ref.nullable };
       }
+      if (ref.definitelyNonNull) this.error(ref.row, '& Any の前には、型引数を書いてください。');
       if (first.name === 'Nothing' && !this.findClass(scope, 'Nothing')) {
         return ref.nullable ? nullable(NOTHING) : NOTHING;
       }
@@ -600,6 +602,8 @@ export abstract class CompilerCore {
         for (const inner of path) value = (value as KObject).fields[inner.outerSlot as number];
         return value;
       };
+    const { slot } = receiver;
+    if (receiver.context === context && slot !== undefined) return (frame) => frame.locals[slot] as Value;
     if (receiver.context === context) return (frame) => frame.thisValue;
     const index = context.captureIndex(receiver);
     return (frame) => frame.captured[index] as Value;

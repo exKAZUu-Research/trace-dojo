@@ -117,6 +117,9 @@ export class ReceiverSymbol {
      */
     readonly outerPath?: readonly ClassSymbol[]
   ) {}
+
+  /** For the dispatch receiver of an extension declared in a class, the slot of the frame that holds it. */
+  slot: number | undefined;
 }
 
 export interface LoopContext {

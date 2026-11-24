@@ -912,6 +912,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.isAtomic = !file.isLibrary && this.claimAtomicRange(decl.row, decl.headerEndRow);
     if (decl.receiver) symbol.extensionReceiver = this.resolveType(scope, decl.receiver);
     symbol.params = decl.params.map((param) => this.declareParameter(scope, param));
+    symbol.contextParameters = (decl.modifiers.contextParameters ?? []).map((param) => {
+      if (!param.type) this.error(param.row, `コンテキスト引数 ${param.name} の型を書いてください。`);
+      return { name: param.name, type: this.resolveType(scope, param.type) };
+    });
     this.rejectDuplicateNames(decl.params);
     if (decl.returnType) symbol.returnType = this.resolveType(scope, decl.returnType);
     else if (decl.body?.kind !== 'expression') symbol.returnType = this.core.unit.type;

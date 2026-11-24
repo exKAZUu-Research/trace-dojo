@@ -29,6 +29,7 @@ import {
   isNonNullClass,
   isNullable,
   type KType,
+  NOTHING,
   resolved,
   substitute,
   type Substitution,
@@ -375,12 +376,17 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     });
     if (!receiver) return this.error(row, '::class の前に、クラスか値を書いてください。');
     const qualifier = receiver.kind === 'expression' ? this.compileQualifier(scope, receiver.expression) : undefined;
-    const typeParameter =
+    const simpleName =
       receiver.kind === 'expression' &&
       receiver.expression.kind === 'name' &&
       !this.findVariable(scope, receiver.expression.name)
-        ? this.findTypeParameter(scope, receiver.expression.name)
+        ? receiver.expression.name
         : undefined;
+    if (simpleName === 'Nothing' && !this.findClass(scope, simpleName) && !this.findTypeParameter(scope, simpleName)) {
+      const value = classReference({ nothing: true });
+      return { type: typed(NOTHING, 'inv'), repr: 'ref', eval: () => value };
+    }
+    const typeParameter = simpleName === undefined ? undefined : this.findTypeParameter(scope, simpleName);
     if (receiver.kind === 'type' || qualifier?.kind === 'class' || typeParameter) {
       const type: KType = typeParameter
         ? { kind: 'param', param: typeParameter, nullable: false }
