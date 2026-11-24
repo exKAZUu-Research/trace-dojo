@@ -50,6 +50,8 @@ interface CallInfo {
   line: number;
 }
 
+class PureReadAbort extends Error {}
+
 /** The state that a subshell copies and discards: variables, functions, positional parameters, and descriptors. */
 export interface ShellState {
   scopes: Scope[];
@@ -1330,6 +1332,108 @@ export class Shell implements ArithmeticHost {
       }
     }
     return result.toSorted((a, b) => scopeRank(scopes, b) - scopeRank(scopes, a));
+  }
+
+  /**
+   * The value a variable shows in `frame`, resolving name references (including `arr[sub]` targets) within `frame`'s
+   * visible scopes without executing side effects.
+   */
+  // code-gauge-allow functionCognitiveComplexity -- Follows chained namerefs within a frame's scopes and resolves associative or indexed element targets cleanly.
+  shownValueOf(frame: Frame, variable: Variable): VariableValue | undefined {
+    if (!variable.attributes.has('n') || variable.value?.kind !== 'scalar') return variable.value;
+    const maxScope = frame.scopeIndex;
+    let current: Variable | undefined = variable;
+    for (let depth = 0; depth < 8; depth++) {
+      if (!current?.attributes.has('n') || current.value?.kind !== 'scalar') return current?.value;
+      const ref = current.value.value;
+      if (ref === '') return current.value;
+      const split = this.splitSubscript(ref);
+      if (split) return this.shownElementOf(split.name, split.subscript, maxScope);
+      const next = this.findOwnVariableIn(ref, maxScope);
+      if (!next || next === current) return undefined;
+      current = next;
+    }
+    return undefined;
+  }
+
+  private shownElementOf(name: string, subscript: string, maxScope: number): VariableValue | undefined {
+    let target: Variable | undefined = this.findOwnVariableIn(name, maxScope);
+    for (let depth = 0; depth < 8 && target?.attributes.has('n') && target.value?.kind === 'scalar'; depth++) {
+      const ref = target.value.value;
+      if (ref === '' || ref.includes('[')) return undefined;
+      const next = this.findOwnVariableIn(ref, maxScope);
+      if (!next || next === target) return undefined;
+      target = next;
+    }
+    const value = target?.value;
+    if (!value) return undefined;
+    if (subscript === '@' || subscript === '*') return value;
+    if (value.kind === 'associative') {
+      const element = value.table.get(subscript);
+      return element === undefined ? undefined : { kind: 'scalar', value: element };
+    }
+    const index = this.pureSubscriptIndex(value, subscript, maxScope);
+    if (index === undefined) return undefined;
+    if (value.kind === 'scalar') return index === 0n ? value : undefined;
+    const element = value.elements.get(index);
+    return element === undefined ? undefined : { kind: 'scalar', value: element };
+  }
+
+  private pureSubscriptIndex(value: VariableValue, subscript: string, maxScope: number): bigint | undefined {
+    let raw: bigint;
+    try {
+      raw = evaluateArithmetic(
+        subscript,
+        {
+          valueOf: (token, isElement) => this.pureValueOf(token, isElement, maxScope),
+          assign: () => {
+            throw new PureReadAbort();
+          },
+          isAssociative: (name) => this.findOwnVariableIn(name, maxScope)?.attributes.has('A') === true,
+          reportError: () => {
+            throw new PureReadAbort();
+          },
+        },
+        undefined,
+        () => this.runtime.spend()
+      );
+    } catch (error) {
+      if (error instanceof ArithmeticError || error instanceof PureReadAbort) return undefined;
+      throw error;
+    }
+    if (raw >= 0n) return raw;
+    const length = value.kind === 'indexed' ? this.maxIndex(value.elements) + 1n : 1n;
+    const resolved = length + raw;
+    return resolved < 0n ? undefined : resolved;
+  }
+
+  private pureValueOf(
+    token: string,
+    isElement: boolean,
+    maxScope: number
+  ): { value: string | undefined; index: bigint } {
+    if (isElement) {
+      const open = token.indexOf('[');
+      const element = this.shownElementOf(token.slice(0, open), token.slice(open + 1, -1), maxScope);
+      return { value: element?.kind === 'scalar' ? element.value : undefined, index: -1n };
+    }
+    const variable = this.findOwnVariableIn(token, maxScope);
+    const val = variable
+      ? this.shownValueOf({ callRow: undefined, isAtomic: false, scopeIndex: maxScope }, variable)
+      : undefined;
+    if (!val) return { value: undefined, index: -1n };
+    if (val.kind === 'scalar') return { value: val.value, index: -1n };
+    if (val.kind === 'indexed') return { value: val.elements.get(0n), index: -1n };
+    return { value: val.table.get('0'), index: -1n };
+  }
+
+  private findOwnVariableIn(name: string, maxScope: number): Variable | undefined {
+    const { scopes } = this.state;
+    for (let i = Math.min(maxScope, scopes.length - 1); i >= 0; i--) {
+      const variable = scopes[i].get(name);
+      if (variable) return variable;
+    }
+    return undefined;
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Walks every value kind of every scope of the running and suspended shells.

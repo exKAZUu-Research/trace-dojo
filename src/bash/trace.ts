@@ -7,7 +7,7 @@ import { parseBash } from './parse';
 import { runProgram } from './run';
 import { type Frame, Runtime } from './runtime';
 import { Shell } from './shell';
-import { sortedElements, type Variable, type VariableValue } from './variables';
+import { sortedElements, type VariableValue } from './variables';
 
 // code-gauge-allow duplicateLines -- Each language's trace entry point wires its runtime into the shared recorder in the same way.
 export function traceBashProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
@@ -34,7 +34,7 @@ export function traceBashProgram(program: string, trace: TraceOptions, input?: P
 function variablesOf(shell: Shell, frame: Frame): TraceVariables {
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   for (const variable of shell.visibleVariables(frame)) {
-    const value = valueShown(shell, variable);
+    const value = shell.shownValueOf(frame, variable);
     addVariable(shell, variables, variable.name, value);
     // A function receives a structure through a name reference (`local -n this=$1`), as a Java method receives
     // `this`, so its fields show among the values learners answer, as Java shows `this.x`.
@@ -45,13 +45,6 @@ function variablesOf(shell: Shell, frame: Frame): TraceVariables {
     }
   }
   return variables;
-}
-
-/** The value a variable shows: its own, or that of the variable a name reference names. */
-function valueShown(shell: Shell, variable: Variable): VariableValue | undefined {
-  if (!variable.attributes.has('n') || variable.value?.kind !== 'scalar') return variable.value;
-  const target = shell.findVariable(variable.name);
-  return target && target !== variable ? target.value : variable.value;
 }
 
 function define(record: object, name: string, value: unknown): void {
