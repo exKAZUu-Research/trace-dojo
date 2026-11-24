@@ -1,7 +1,7 @@
 import { CompileError } from '../../interpreter/diagnostics';
 import { checkElementStore } from '../arrayStore';
 import type { Evaluator } from '../evaluator';
-import type { NativeCall } from '../natives';
+import type { NativeCall, NativeMethod } from '../natives';
 import { convertNumeric, type NumericValue, PendingException } from '../numeric';
 import { stringOf } from '../objects';
 import { CsThrow, type ExceptionState } from '../runtime';
@@ -142,6 +142,17 @@ export function libraryType(call: NativeCall, fullName: string, args: Type[] = [
 /** Creates an array of a type with elements. */
 export function newArray(call: NativeCall, element: Type, values: Value[]): CsArray {
   return newArrayOf(call, element, values.length, (index) => values[index]);
+}
+
+/**
+ * The ICollection<T> and IList<T> mutators of a read-only collection, which .NET implements explicitly by throwing, with
+ * the message of a dictionary's Keys or Values view where that names it.
+ */
+export function readOnlyCollection(prefix: string, message = 'Collection is read-only.'): Record<string, NativeMethod> {
+  const unsupported: NativeMethod = () => fail('System.NotSupportedException', message);
+  return Object.fromEntries(
+    ['Add', 'Clear', 'Remove', 'Insert', 'RemoveAt', 'set_Item'].map((name) => [`${prefix}.${name}`, unsupported])
+  );
 }
 
 /** `ICollection<T>.CopyTo` of a collection's elements into an array from an index, checked as .NET's collections do. */

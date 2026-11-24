@@ -145,9 +145,18 @@ export class LibraryEnumerator implements NativeState {
   private state: 'before' | 'running' | 'after' = 'before';
 
   constructor(
-    private readonly iterator: Iterator<Value>,
-    private readonly holds: Value[] = []
+    private iterator: Iterator<Value>,
+    private readonly holds: Value[] = [],
+    private readonly restart?: () => Iterator<Value>
   ) {}
+
+  /** `IEnumerator.Reset`: a collection's enumerator starts over, which a LINQ query's cannot. */
+  reset(): void {
+    if (!this.restart) fail('System.NotSupportedException', 'Specified method is not supported.');
+    this.iterator = this.restart();
+    this.state = 'before';
+    this.current = undefined;
+  }
 
   next(): boolean {
     if (this.state === 'after') return false;

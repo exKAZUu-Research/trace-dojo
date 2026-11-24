@@ -6,7 +6,7 @@ import type { NativeState } from '../runtime';
 import type { Type } from '../types';
 import { CsObject, CsStruct, type Value } from '../values';
 import { collectionModifiedAfterStart, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
-import { type Comparison, comparisonOf, equalityOf, ListState } from './nativesCollections';
+import { type Comparison, comparisonOf, equalityOf, ListState, pairCollectionNatives } from './nativesCollections';
 import {
   bufferedElements,
   copyToArray,
@@ -165,7 +165,7 @@ function keyNotFound(call: NativeCall, key: Value): never {
 // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
 // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 function sortedDictionaryNatives(prefix: string): Record<string, NativeMethod> {
-  return {
+  const natives: Record<string, NativeMethod> = {
     [`${prefix}..ctor()`]: (call, receiver) =>
       setNative(receiver, newSorted(call, undefined, typeArgument(call, 0), typeArgument(call, 1))),
     [`${prefix}..ctor(IComparer<TKey>?)`]: (call, receiver, [comparer]) =>
@@ -279,6 +279,7 @@ function sortedDictionaryNatives(prefix: string): Record<string, NativeMethod> {
       return isFound;
     },
   };
+  return { ...natives, ...pairCollectionNatives(prefix, natives[`${prefix}.Add`], sortedOf) };
 }
 defineNatives(sortedDictionaryNatives('System.Collections.Generic.SortedDictionary`2'));
 defineNatives(sortedDictionaryNatives('System.Collections.Generic.SortedList`2'));

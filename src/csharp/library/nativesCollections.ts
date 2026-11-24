@@ -29,6 +29,7 @@ import {
   NARROW_INTEGRALS,
   newArray,
   nullReference,
+  readOnlyCollection,
   refOf,
   stepMeter,
   storeInArray,
@@ -234,12 +235,12 @@ function enumeratorStruct(
   call: NativeCall,
   typeName: string,
   typeArgs: Type[],
-  source: Iterable<Value>,
+  enumerate: () => Iterator<Value>,
   holds: Value[]
 ): CsStruct {
   const type = libraryType(call, typeName, typeArgs);
   const enumerator = new CsStruct(type, []);
-  enumerator.native = new LibraryEnumerator(source[Symbol.iterator](), holds);
+  enumerator.native = new LibraryEnumerator(enumerate(), holds, enumerate);
   return enumerator;
 }
 
@@ -256,6 +257,11 @@ const enumeratorNatives = (typeName: string): Record<string, NativeMethod> => ({
     return evaluatorOf(call).defaultOf(substitute(call.method.returnType, substitutionOf(type)));
   },
   [`${typeName}.Dispose`]: () => {},
+  [`${typeName}.Reset`]: (_call, receiver) => {
+    const enumerator = (receiver as CsStruct).native as LibraryEnumerator | undefined;
+    enumerator?.reset();
+    return;
+  },
 });
 
 const LIST = 'System.Collections.Generic.List`1';
@@ -527,7 +533,7 @@ const listNatives: Record<string, NativeMethod> = {
       call,
       'System.Collections.Generic.List`1+Enumerator',
       [typeArgument(call)],
-      listOf(receiver).enumerate(),
+      () => listOf(receiver).enumerate(),
       [receiver]
     ),
   [`${LIST}.GetRange`]: (call, receiver, [index, count]) => {
@@ -892,6 +898,48 @@ export function newHashState(call: NativeCall, comparer: Value, keyType: Type, v
 
 const DICTIONARY = 'System.Collections.Generic.Dictionary`2';
 
+const addToDictionary: NativeMethod = (call, receiver, [key, value]) => {
+  checkKey(key as Value);
+  if (!hashOfState(receiver).insert(key as Value, value as Value, false)) {
+    fail(
+      'System.ArgumentException',
+      `An item with the same key has already been added. Key: ${textOf(call, key as Value, typeArgument(call, 0))}`
+    );
+  }
+  return;
+};
+
+interface PairStore {
+  containsPair(pair: CsStruct, call: NativeCall): boolean;
+  remove(key: Value): unknown;
+  enumerate(): Iterable<Value>;
+}
+
+/**
+ * The ICollection<KeyValuePair<TKey, TValue>> members that a dictionary implements explicitly in .NET, through its own
+ * Add and its lookup: a pair is removed only when its value equals the key's.
+ */
+export function pairCollectionNatives(
+  prefix: string,
+  add: NativeMethod,
+  storeOf: (receiver: Value) => PairStore
+): Record<string, NativeMethod> {
+  const pair = 'KeyValuePair<TKey, TValue>';
+  return {
+    [`${prefix}.Add(${pair})`]: (call, receiver, [item]) => add(call, receiver, (item as CsStruct).fields),
+    [`${prefix}.Remove(${pair})`]: (call, receiver, [item]) => {
+      const store = storeOf(receiver);
+      if (!store.containsPair(item as CsStruct, call)) return false;
+      store.remove((item as CsStruct).fields[0]);
+      return true;
+    },
+    [`${prefix}.CopyTo(${pair}[], int)`]: (call, receiver, [array, index]) => {
+      copyToArray(call, [...storeOf(receiver).enumerate()], array as Value, index as number);
+      return;
+    },
+  };
+}
+
 function keyNotFound(call: NativeCall, key: Value, keyType: Type): never {
   throw new PendingException(
     'System.Collections.Generic.KeyNotFoundException',
@@ -944,16 +992,8 @@ const dictionaryNatives: Record<string, NativeMethod> = {
     viewOf(call, receiver, 'KeyCollection', typeArgument(call, 0), (entry) => entry.key),
   [`${DICTIONARY}.get_Values`]: (call, receiver) =>
     viewOf(call, receiver, 'ValueCollection', typeArgument(call, 1), (entry) => entry.value),
-  [`${DICTIONARY}.Add`]: (call, receiver, [key, value]) => {
-    checkKey(key as Value);
-    if (!hashOfState(receiver).insert(key as Value, value as Value, false)) {
-      fail(
-        'System.ArgumentException',
-        `An item with the same key has already been added. Key: ${textOf(call, key as Value, typeArgument(call, 0))}`
-      );
-    }
-    return;
-  },
+  [`${DICTIONARY}.Add`]: addToDictionary,
+  ...pairCollectionNatives(DICTIONARY, addToDictionary, hashOfState),
   [`${DICTIONARY}.Clear`]: (_call, receiver) => {
     hashOfState(receiver).clear();
     return;
@@ -972,7 +1012,7 @@ const dictionaryNatives: Record<string, NativeMethod> = {
       call,
       'System.Collections.Generic.Dictionary`2+Enumerator',
       [typeArgument(call, 0), typeArgument(call, 1)],
-      hashOfState(receiver).enumerate(),
+      () => hashOfState(receiver).enumerate(),
       [receiver]
     ),
   [`${DICTIONARY}.Remove(TKey)`]: (_call, receiver, [key]) => {
@@ -1079,6 +1119,10 @@ for (const name of ['KeyCollection', 'ValueCollection']) {
   defineNatives({
     [`${prefix}.get_Count`]: (_call, receiver) => ((receiver as CsObject).native as ViewState).dictionary.count,
     [`${prefix}.get_IsReadOnly`]: () => true,
+    ...readOnlyCollection(
+      prefix,
+      `Mutating a ${name === 'KeyCollection' ? 'key' : 'value'} collection derived from a dictionary is not allowed.`
+    ),
     [`${prefix}.Contains`]: (call, receiver, [value]) => {
       const view = (receiver as CsObject).native as ViewState;
       // The keys' membership is the dictionary's own key lookup, with its comparer.
@@ -1096,7 +1140,7 @@ for (const name of ['KeyCollection', 'ValueCollection']) {
         call,
         `${prefix}+Enumerator`,
         [typeArgument(call, 0), typeArgument(call, 1)],
-        ((receiver as CsObject).native as ViewState).enumerate(),
+        () => ((receiver as CsObject).native as ViewState).enumerate(),
         [receiver]
       ),
   });
@@ -1213,7 +1257,7 @@ defineNatives({
       'System.Collections.Generic.HashSet`1+Enumerator',
       // A call through the non-generic IEnumerable has no type arguments, which the set's own state keeps.
       [hashOfState(receiver).keyType],
-      hashOfState(receiver).enumerate(),
+      () => hashOfState(receiver).enumerate(),
       [receiver]
     ),
   [`${HASH_SET}.IntersectWith`]: (call, receiver, [other]) => {
@@ -1443,7 +1487,7 @@ for (const [name, isStack] of [
       newArray(call, typeArgument(call), [...sequenceOf(receiver).enumerate()]),
     [`${prefix}.TrimExcess`]: () => {},
     [`${prefix}.GetEnumerator`]: (call, receiver) =>
-      enumeratorStruct(call, `${prefix}+Enumerator`, [typeArgument(call)], sequenceOf(receiver).enumerate(), [
+      enumeratorStruct(call, `${prefix}+Enumerator`, [typeArgument(call)], () => sequenceOf(receiver).enumerate(), [
         receiver,
       ]),
     ...enumeratorNatives(`${prefix}+Enumerator`),
@@ -1541,6 +1585,7 @@ defineNatives({
         : new ListState(chargedElements(call, list as Value), typeArgument(call))
     );
   },
+  ...readOnlyCollection(READ_ONLY),
   [`${READ_ONLY}.get_Count`]: (_call, receiver) => listOf(receiver).items.length,
   [`${READ_ONLY}.get_IsReadOnly`]: () => true,
   [`${READ_ONLY}.get_Item`]: (call, receiver, [index]) => {

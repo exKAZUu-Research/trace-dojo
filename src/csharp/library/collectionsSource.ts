@@ -142,6 +142,7 @@ namespace System.Collections.Generic {
       public T Current { get; }
       public bool MoveNext();
       public void Dispose();
+      private void Reset();
     }
   }
   public class Dictionary<TKey, TValue> : IDictionary<TKey, TValue>, IReadOnlyDictionary<TKey, TValue> where TKey : notnull {
@@ -161,7 +162,10 @@ namespace System.Collections.Generic {
     public void Add(TKey key, TValue value);
     public void Clear();
     public bool ContainsKey(TKey key);
-    public bool Contains(KeyValuePair<TKey, TValue> item);
+    private bool Contains(KeyValuePair<TKey, TValue> item);
+    private void Add(KeyValuePair<TKey, TValue> item);
+    private bool Remove(KeyValuePair<TKey, TValue> item);
+    private void CopyTo(KeyValuePair<TKey, TValue>[] array, int index);
     public bool ContainsValue(TValue value);
     public Enumerator GetEnumerator();
     public bool Remove(TKey key);
@@ -176,6 +180,7 @@ namespace System.Collections.Generic {
       public KeyValuePair<TKey, TValue> Current { get; }
       public bool MoveNext();
       public void Dispose();
+      private void Reset();
     }
     public sealed class KeyCollection : ICollection<TKey>, IReadOnlyCollection<TKey> {
       public int Count { get; }
@@ -183,10 +188,14 @@ namespace System.Collections.Generic {
       public Enumerator GetEnumerator();
       public bool Contains(TKey item);
       public void CopyTo(TKey[] array, int index);
+      private void Add(TKey item);
+      private void Clear();
+      private bool Remove(TKey item);
       public struct Enumerator : IEnumerator<TKey> {
         public TKey Current { get; }
         public bool MoveNext();
         public void Dispose();
+        private void Reset();
       }
     }
     public sealed class ValueCollection : ICollection<TValue>, IReadOnlyCollection<TValue> {
@@ -195,10 +204,14 @@ namespace System.Collections.Generic {
       public Enumerator GetEnumerator();
       public bool Contains(TValue item);
       public void CopyTo(TValue[] array, int index);
+      private void Add(TValue item);
+      private void Clear();
+      private bool Remove(TValue item);
       public struct Enumerator : IEnumerator<TValue> {
         public TValue Current { get; }
         public bool MoveNext();
         public void Dispose();
+        private void Reset();
       }
     }
   }
@@ -214,7 +227,10 @@ namespace System.Collections.Generic {
     public void Add(TKey key, TValue value);
     public void Clear();
     public bool ContainsKey(TKey key);
-    public bool Contains(KeyValuePair<TKey, TValue> item);
+    private bool Contains(KeyValuePair<TKey, TValue> item);
+    private void Add(KeyValuePair<TKey, TValue> item);
+    private bool Remove(KeyValuePair<TKey, TValue> item);
+    public void CopyTo(KeyValuePair<TKey, TValue>[] array, int index);
     public bool ContainsValue(TValue value);
     public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator();
     public bool Remove(TKey key);
@@ -232,7 +248,10 @@ namespace System.Collections.Generic {
     public void Add(TKey key, TValue value);
     public void Clear();
     public bool ContainsKey(TKey key);
-    public bool Contains(KeyValuePair<TKey, TValue> item);
+    private bool Contains(KeyValuePair<TKey, TValue> item);
+    private void Add(KeyValuePair<TKey, TValue> item);
+    private bool Remove(KeyValuePair<TKey, TValue> item);
+    private void CopyTo(KeyValuePair<TKey, TValue>[] array, int index);
     public bool ContainsValue(TValue value);
     public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator();
     public int IndexOfKey(TKey key);
@@ -272,6 +291,7 @@ namespace System.Collections.Generic {
       public T Current { get; }
       public bool MoveNext();
       public void Dispose();
+      private void Reset();
     }
   }
   public class SortedSet<T> : ISet<T>, IReadOnlySet<T> {
@@ -320,6 +340,7 @@ namespace System.Collections.Generic {
       public T Current { get; }
       public bool MoveNext();
       public void Dispose();
+      private void Reset();
     }
   }
   public class Stack<T> : IReadOnlyCollection<T>, System.Collections.ICollection {
@@ -341,6 +362,7 @@ namespace System.Collections.Generic {
       public T Current { get; }
       public bool MoveNext();
       public void Dispose();
+      private void Reset();
     }
   }
   public class LinkedList<T> : ICollection<T>, IReadOnlyCollection<T> {
@@ -403,11 +425,16 @@ namespace System.Collections.ObjectModel {
     public ReadOnlyCollection(IList<T> list);
     public int Count { get; }
     public bool IsReadOnly { get; }
-    public T this[int index] { get; }
+    public T this[int index] { get; private set; }
     public bool Contains(T value);
     public void CopyTo(T[] array, int index);
     public int IndexOf(T value);
     public IEnumerator<T> GetEnumerator();
+    private void Add(T item);
+    private void Clear();
+    private bool Remove(T item);
+    private void Insert(int index, T item);
+    private void RemoveAt(int index);
   }
 }
 
@@ -729,15 +756,31 @@ namespace System.Text.RegularExpressions {
   public class MatchCollection : IList<Match>, IReadOnlyList<Match> {
     public int Count { get; }
     public bool IsReadOnly { get; }
-    public virtual Match this[int i] { get; }
+    public virtual Match this[int i] { get; private set; }
     public IEnumerator<Match> GetEnumerator();
+    public void CopyTo(Match[] array, int arrayIndex);
+    private bool Contains(Match item);
+    private int IndexOf(Match item);
+    private void Add(Match item);
+    private void Clear();
+    private bool Remove(Match item);
+    private void Insert(int index, Match item);
+    private void RemoveAt(int index);
   }
   public class GroupCollection : IList<Group>, IReadOnlyList<Group> {
     public int Count { get; }
     public bool IsReadOnly { get; }
-    public Group this[int groupnum] { get; }
+    public Group this[int groupnum] { get; private set; }
     public Group this[string groupname] { get; }
     public IEnumerator<Group> GetEnumerator();
+    public void CopyTo(Group[] array, int arrayIndex);
+    private bool Contains(Group item);
+    private int IndexOf(Group item);
+    private void Add(Group item);
+    private void Clear();
+    private bool Remove(Group item);
+    private void Insert(int index, Group item);
+    private void RemoveAt(int index);
   }
 }
 `;

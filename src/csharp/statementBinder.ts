@@ -217,7 +217,9 @@ export abstract class StatementBinder extends PatternBinder {
     use: string
   ): BoundLValue {
     const { property } = target;
-    const setter = this.setterOf(property);
+    const declared = this.setterOf(property);
+    // A library property's private setter stands for .NET's explicit IList<T> indexer, which leaves it read-only.
+    const setter = declared?.access === 'private' && property.owner.isLibrary ? undefined : declared;
     const display = propertyDisplay(target);
     if (!setter) {
       if (property.backingField && !property.isStatic && this.isInConstructorOf(property, context)) {

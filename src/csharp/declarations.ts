@@ -86,6 +86,7 @@ export class DeclarationBinder extends BinderBase {
       for (const type of ordered) for (const method of type.symbol.methods) this.resolveOverride(method, type.symbol);
       for (const type of ordered)
         for (const property of type.symbol.properties) this.resolvePropertyOverride(property, type.symbol);
+      for (const type of ordered) this.checkLibraryInterfaces(type.symbol);
     } else {
       for (const type of ordered) this.checkInheritance(type);
       for (const type of ordered) this.checkAccessibility(type.symbol);
@@ -1401,6 +1402,47 @@ export class DeclarationBinder extends BinderBase {
         }
       }
     }
+  }
+
+  /**
+   * A library class implements each member of its interfaces by a method of the same name and parameter types, the
+   * one the runtime dispatches an interface call to, so no call through an interface reaches an abstract member.
+   */
+  private checkLibraryInterfaces(symbol: TypeSymbol): void {
+    if ((symbol.kind !== 'class' && symbol.kind !== 'struct') || symbol.isAbstract) return;
+    for (const face of this.allInterfaces(symbol.declaredType)) {
+      const accessors = face.symbol.properties.flatMap((property) => [property.getter, property.setter]);
+      for (const member of [...face.symbol.methods, ...accessors]) {
+        if (!member || member.isStatic || !member.isAbstract) continue;
+        if (!this.libraryImplementation(symbol.declaredType, member, face))
+          this.error(
+            symbol.row,
+            'CS0535',
+            `'${displayTypeSymbol(symbol)}' does not implement '${displayTypeSymbol(face.symbol, face.args)}.${member.name}(${member.parameters.map((parameter) => displayType(parameter.type)).join(', ')})'`
+          );
+      }
+    }
+  }
+
+  private libraryImplementation(type: NamedType, member: MethodSymbol, face: NamedType): MethodSymbol | undefined {
+    const wanted = member.parameters.map((parameter) => substitute(parameter.type, substitutionOf(face)));
+    for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
+      const substitution = substitutionOf(current);
+      const accessors = current.symbol.properties.flatMap((property) => [property.getter, property.setter]);
+      const found = [...current.symbol.methods, ...accessors].find(
+        (candidate): candidate is MethodSymbol =>
+          candidate !== undefined &&
+          candidate.name === member.name &&
+          !candidate.isStatic &&
+          candidate.typeParameters.length === member.typeParameters.length &&
+          candidate.parameters.length === wanted.length &&
+          candidate.parameters.every((parameter, index) =>
+            sameType(substitute(parameter.type, substitution), wanted[index])
+          )
+      );
+      if (found) return found.isAbstract || !found.native ? undefined : found;
+    }
+    return undefined;
   }
 
   private libraryBaseOf(symbol: TypeSymbol): NamedType | undefined {

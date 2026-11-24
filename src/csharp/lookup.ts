@@ -121,6 +121,8 @@ export class LookupBinder extends DeclarationBinder {
     let inaccessible: MethodSymbol | undefined;
     for (const method of owner.symbol.methods) {
       if (method.name !== name || method.kind === 'operator' || method.property || method.isOverride) continue;
+      // The library's private members stand for .NET's explicit interface implementations, which no name finds.
+      if (method.access === 'private' && owner.symbol.isLibrary) continue;
       if (!this.isAccessible(method.access, owner.symbol, context, type)) {
         inaccessible ??= method;
         continue;

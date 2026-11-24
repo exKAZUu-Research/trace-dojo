@@ -1,12 +1,22 @@
 // code-gauge-allow-file fileNcss -- The nativesRegex module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { MeteredText } from '../meteredText';
-import { defineNatives, defineNativesKeepingStrings, type NativeCall } from '../natives';
+import { defineNatives, defineNativesKeepingStrings, type NativeCall, type NativeMethod } from '../natives';
 import type { NativeState } from '../runtime';
 import { CsObject, type CsString, freshString, plainString, stringText, type Value } from '../values';
 import { type EnumerableState, LibraryEnumerator } from './iteration';
 import { type CompiledRegExp, compileRegExp, execRegExp } from './regexEngine';
-import { evaluatorOf, fail, failNull, failOutOfRange, libraryType, newArray, unsupportedCall } from './support';
+import {
+  copyToArray,
+  evaluatorOf,
+  fail,
+  failNull,
+  failOutOfRange,
+  libraryType,
+  newArray,
+  readOnlyCollection,
+  unsupportedCall,
+} from './support';
 
 const NAMESPACE = 'System.Text.RegularExpressions';
 
@@ -776,7 +786,22 @@ defineNatives({
     listOf(receiver).find((group) => groupOf(group).name === name) ?? missingGroup(call),
   [`${NAMESPACE}.GroupCollection.GetEnumerator`]: (call, receiver) =>
     enumeratorOf(call, `${NAMESPACE}.Group`, receiver),
+  ...matchListNatives(`${NAMESPACE}.MatchCollection`),
+  ...matchListNatives(`${NAMESPACE}.GroupCollection`),
 });
+
+/** The IList members of MatchCollection and GroupCollection: lookups by reference, and the read-only mutators. */
+function matchListNatives(prefix: string): Record<string, NativeMethod> {
+  return {
+    [`${prefix}.Contains`]: (_call, receiver, [item]) => listOf(receiver).includes(item as CsObject),
+    [`${prefix}.IndexOf`]: (_call, receiver, [item]) => listOf(receiver).indexOf(item as CsObject),
+    [`${prefix}.CopyTo`]: (call, receiver, [array, index]) => {
+      copyToArray(call, listOf(receiver), array as Value, index as number);
+      return;
+    },
+    ...readOnlyCollection(prefix),
+  };
+}
 
 // These take the input string with its identity, which a result that is all of it is, as .NET returns it.
 defineNativesKeepingStrings({
