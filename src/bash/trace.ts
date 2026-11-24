@@ -140,6 +140,8 @@ function observeElement(
     ...savedState,
     scopes: savedState.scopes.slice(0, maxScope + 1).map((scope) => cloneScope(scope)),
     functionScopes: savedState.functionScopes.filter((idx) => idx <= maxScope),
+    calls: savedState.calls.map((call) => ({ ...call })),
+    pipeStatus: new Map(savedState.pipeStatus),
     unsetDynamic: new Set(savedState.unsetDynamic),
     unsetEnv: new Set(savedState.unsetEnv),
     fd1: silentAbort,

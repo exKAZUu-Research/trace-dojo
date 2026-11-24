@@ -6,7 +6,14 @@ import type { Shell } from './shell';
 import { testBuiltin } from './testBuiltin';
 import { type Builtin, TURTLE_BUILTINS } from './turtle';
 import { UnsupportedFeatureError } from './unsupported';
-import { ensureWritable, isIdentifier, SCALAR_DYNAMIC_VARIABLES, type Variable } from './variables';
+import {
+  ensureWritable,
+  isIdentifier,
+  PERMANENT_DYNAMIC_VARIABLES,
+  SCALAR_DYNAMIC_VARIABLES,
+  unsetDynamicArrayElement,
+  type Variable,
+} from './variables';
 
 /** Parses a signed 64-bit decimal integer surrounded by optional blanks, or `undefined` when invalid. */
 function legalNumber(text: string): bigint | undefined {
@@ -245,7 +252,7 @@ export function unsetElement(shell: Shell, name: string, subscript: string, viaR
   if (variable?.value?.kind === 'associative' || variable?.attributes.has('A')) {
     return unsetAssociativeElement(shell, variable, subscript);
   }
-  if (!variable) return unsetSpecialOrMissingElement(shell, resolved, subscript);
+  if (!variable) return unsetSpecialOrMissingElement(shell, resolved, subscript, viaReference);
   if (subscript === '@' || subscript === '*') return clearIndexedOrScalar(shell, variable, resolved, viaReference);
   const expanded = shell.expandDynamicSubscript(subscript);
   const index = shell.arrayIndex(resolved, expanded === '' && subscript !== '' ? '0' : expanded);
@@ -256,19 +263,40 @@ export function unsetElement(shell: Shell, name: string, subscript: string, viaR
   return deleteIndexedOrScalarElement(shell, variable, resolved, index);
 }
 
-function unsetSpecialOrMissingElement(shell: Shell, resolved: string, subscript: string): boolean {
+function unsetSpecialOrMissingElement(
+  shell: Shell,
+  resolved: string,
+  subscript: string,
+  viaReference: boolean
+): boolean {
   if (shell.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
   if (!shell.isDynamic(resolved)) return true;
-  if (!SCALAR_DYNAMIC_VARIABLES.has(resolved) || subscript === '@' || subscript === '*') {
-    return shell.unsetVariable(resolved, false);
+  if (PERMANENT_DYNAMIC_VARIABLES.has(resolved)) {
+    shell.reportError(`unset: ${resolved}: cannot unset`);
+    return false;
   }
+  if (subscript === '@' || subscript === '*') return unsetAllDynamicElements(shell, resolved, viaReference);
   const expanded = shell.expandDynamicSubscript(subscript);
   const index = shell.arrayIndex(resolved, expanded === '' && subscript !== '' ? '0' : expanded);
   if (index === undefined) {
     shell.reportError(`unset: [${subscript}]: bad array subscript`);
     return false;
   }
+  if (!SCALAR_DYNAMIC_VARIABLES.has(resolved)) {
+    unsetDynamicArrayElement(shell.state, resolved, index);
+    return true;
+  }
   if (index === 0n) return shell.unsetVariable(resolved, false);
+  shell.reportError(`unset: ${resolved}: not an array variable`);
+  return false;
+}
+
+function unsetAllDynamicElements(shell: Shell, resolved: string, viaReference: boolean): boolean {
+  if (!SCALAR_DYNAMIC_VARIABLES.has(resolved)) {
+    unsetDynamicArrayElement(shell.state, resolved, 'all');
+    return true;
+  }
+  if (viaReference) return true;
   shell.reportError(`unset: ${resolved}: not an array variable`);
   return false;
 }

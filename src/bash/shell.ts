@@ -32,13 +32,15 @@ import {
   advanceRandomState,
   AssociativeTable,
   buildDynamicDeclaration,
-  callStackArray,
+  type CallFrameEntry,
+  callStackElements,
   cloneScope,
   collectReachableStrings,
   type CompoundElement,
   createInitialGlobalScope,
   deriveSubshellSeed,
   DYNAMIC_VARIABLES,
+  dynamicArrayLength,
   ensureIndexedElements,
   ensureWritable,
   ENVIRONMENT_VARIABLES,
@@ -81,13 +83,6 @@ export interface FunctionDefinition {
   lineShift: number;
 }
 
-interface CallInfo {
-  name: string;
-  /** The 1-based line of the call, which `BASH_LINENO` reports. */
-  line: number;
-}
-
-/** The state that a subshell copies and discards: variables, functions, positional parameters, and descriptors. */
 export interface ShellState {
   scopes: Scope[];
   /** The scope index of each function call's own locals, the innermost last. */
@@ -95,9 +90,10 @@ export interface ShellState {
   functions: Map<string, FunctionDefinition>;
   /** The positional parameters of the script and of each function call, the innermost last. */
   positional: string[][];
-  calls: CallInfo[];
+  calls: CallFrameEntry[];
+  mainFuncnameUnset?: boolean;
   lastStatus: number;
-  pipeStatus: string[];
+  pipeStatus: Map<bigint, string>;
   /** `$_`, which starts as the path of Bash itself, so `undefined` until a command sets it. */
   lastArgument: string | undefined;
   randomSeed: number;
@@ -153,7 +149,7 @@ export class Shell implements ArithmeticHost {
       positional: [[]],
       calls: [],
       lastStatus: 0,
-      pipeStatus: [],
+      pipeStatus: new Map(),
       lastArgument: undefined,
       randomSeed: initialRandomSeed(),
       lastRandom: 0,
@@ -353,7 +349,7 @@ export class Shell implements ArithmeticHost {
   setCommandStatus(status: number): void {
     this.state.lastStatus = status;
     this.state.unsetDynamic.delete('PIPESTATUS');
-    this.state.pipeStatus = [String(status)];
+    this.state.pipeStatus = new Map([[0n, String(status)]]);
   }
 
   private executeIf(statement: Extract<Statement, { kind: 'if' }>): number {
@@ -704,6 +700,7 @@ export class Shell implements ArithmeticHost {
     state.positional.push(args);
     // `BASH_LINENO` gives the line Bash numbered the call with; the trace keeps the row of the call's step.
     const reportedRow = this.currentRow;
+    state.mainFuncnameUnset = state.calls.length > 0 && Boolean(state.mainFuncnameUnset);
     state.calls.push({ name: fn.name, line: reportedRow + 1 });
     const frame: Frame = { callRow, isAtomic: fn.isAtomic, scopeIndex };
     this.runtime.frames.push(frame);
@@ -774,8 +771,8 @@ export class Shell implements ArithmeticHost {
       functionScopes: [...parent.functionScopes],
       functions: new Map(parent.functions),
       positional: parent.positional.map((args) => [...args]),
-      calls: [...parent.calls],
-      pipeStatus: [...parent.pipeStatus],
+      calls: parent.calls.map((call) => ({ ...call })),
+      pipeStatus: new Map(parent.pipeStatus),
       randomSeed: deriveSubshellSeed(parent.randomSeed, ++parent.subshellDraws, parent.subshellLevel + 1),
       lastRandom: 0,
       subshellDraws: 0,
@@ -1033,13 +1030,19 @@ export class Shell implements ArithmeticHost {
     if (name === 'RANDOM') return String(this.nextRandom());
     if (name === 'LINENO') return String(this.currentRow + 1);
     if (name === 'BASH_SUBSHELL') return String(this.state.subshellLevel);
-    return this.dynamicArray(name)?.[0];
+    return this.dynamicElements(name)?.get(0n);
   }
 
-  /** The elements of `FUNCNAME`, `BASH_LINENO`, `BASH_SOURCE`, and `PIPESTATUS`. */
-  dynamicArray(name: string): string[] | undefined {
+  /** Sparse elements of `FUNCNAME`, `BASH_LINENO`, `BASH_SOURCE`, and `PIPESTATUS`. */
+  dynamicElements(name: string): Map<bigint, string> | undefined {
     return this.isDynamic(name)
-      ? callStackArray(name, this.state.calls, SCRIPT_NAME, this.state.pipeStatus)
+      ? callStackElements(
+          name,
+          this.state.calls,
+          SCRIPT_NAME,
+          this.state.pipeStatus,
+          Boolean(this.state.mainFuncnameUnset)
+        )
       : undefined;
   }
 
@@ -1061,7 +1064,7 @@ export class Shell implements ArithmeticHost {
     return buildDynamicDeclaration(
       name,
       SCALAR_DYNAMIC_VARIABLES.has(name) ? this.dynamicValue(name) : undefined,
-      this.dynamicArray(name)
+      this.dynamicElements(name)
     );
   }
 
@@ -1095,10 +1098,10 @@ export class Shell implements ArithmeticHost {
   elementValue(name: string, subscript: string): string | undefined {
     const variable = this.findVariable(name);
     if (!variable?.value) {
-      const dynamic = this.dynamicArray(name);
+      const dynamic = this.dynamicElements(name);
       if (dynamic) {
         const index = this.readIndex(name, subscript);
-        return index === undefined ? undefined : dynamic[Number(index)];
+        return index === undefined ? undefined : dynamic.get(index);
       }
       if (this.isScalarDynamic(name)) {
         const index = this.readIndex(name, subscript);
@@ -1119,7 +1122,7 @@ export class Shell implements ArithmeticHost {
     if (variable?.value) return variableElementAt(variable.value, index);
     if (this.isScalarDynamic(name)) return index === 0n ? this.dynamicValue(name) : undefined;
     if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
-    return this.dynamicArray(name)?.[Number(index)];
+    return this.dynamicElements(name)?.get(index);
   }
 
   /**
@@ -1127,8 +1130,7 @@ export class Shell implements ArithmeticHost {
    * negative one before the first element, which each caller reports in its own way.
    */
   arrayIndex(name: string, subscript: string, allowScalarWrite = false): bigint | undefined {
-    const dynamicLen =
-      this.isDynamic(name) && !SCALAR_DYNAMIC_VARIABLES.has(name) ? this.dynamicArray(name)?.length : undefined;
+    const dynamicLen = !SCALAR_DYNAMIC_VARIABLES.has(name) ? dynamicArrayLength(this.dynamicElements(name)) : undefined;
     return this.arrayIndexFor(this.findVariable(name), subscript, dynamicLen, allowScalarWrite);
   }
 
@@ -1155,7 +1157,8 @@ export class Shell implements ArithmeticHost {
     if (variable?.value) return variableElementValues(variable.value);
     if (this.isScalarDynamic(name)) return [this.dynamicValue(name) as string];
     if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
-    return this.dynamicArray(name) ?? [];
+    const dynamic = this.dynamicElements(name);
+    return dynamic ? variableElementValues({ kind: 'indexed', elements: dynamic }) : [];
   }
 
   /** The keys of `${!name[@]}`. */
@@ -1164,7 +1167,8 @@ export class Shell implements ArithmeticHost {
     if (variable?.value) return variableElementKeys(variable.value);
     if (this.isScalarDynamic(name)) return ['0'];
     if (!variable && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
-    return this.dynamicArray(name)?.map((_, index) => String(index)) ?? [];
+    const dynamic = this.dynamicElements(name);
+    return dynamic ? variableElementKeys({ kind: 'indexed', elements: dynamic }) : [];
   }
 
   /** Assigns a scalar value, creating a global variable when no scope holds one, as Bash does. */

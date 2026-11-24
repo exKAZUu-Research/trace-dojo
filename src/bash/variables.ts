@@ -306,19 +306,70 @@ export function removeScopedVariable(
   return 'global';
 }
 
-/** Elements of call-stack and foreground-pipeline dynamic arrays (`FUNCNAME`, `BASH_LINENO`, `BASH_SOURCE`, `PIPESTATUS`). */
-export function callStackArray(
+export interface CallFrameEntry {
+  name: string;
+  line: number;
+  funcnameUnset?: boolean;
+}
+
+/** Sparse indexed-array elements of `FUNCNAME`, `BASH_LINENO`, `BASH_SOURCE`, and `PIPESTATUS`. */
+export function callStackElements(
   name: string,
-  calls: readonly { name: string; line: number }[],
+  calls: readonly CallFrameEntry[],
   scriptName: string,
-  pipeStatus: readonly string[] = []
-): string[] | undefined {
-  if (name === 'PIPESTATUS') return [...pipeStatus];
+  pipeStatus: ReadonlyMap<bigint, string>,
+  mainFuncnameUnset = false
+): Map<bigint, string> | undefined {
+  if (name === 'PIPESTATUS') return new Map(pipeStatus);
   const reversed = calls.toReversed();
-  if (name === 'FUNCNAME') return reversed.length === 0 ? undefined : [...reversed.map((c) => c.name), 'main'];
-  if (name === 'BASH_LINENO') return [...reversed.map((c) => String(c.line)), '0'];
-  if (name === 'BASH_SOURCE') return [...reversed.map(() => scriptName), scriptName];
+  if (name === 'FUNCNAME') return buildFuncnameElements(reversed, mainFuncnameUnset);
+  if (name === 'BASH_LINENO') {
+    return new Map([...reversed.map((c) => String(c.line)), '0'].map((v, i) => [BigInt(i), v]));
+  }
+  if (name === 'BASH_SOURCE') {
+    return new Map([...reversed.map(() => scriptName), scriptName].map((v, i) => [BigInt(i), v]));
+  }
   return undefined;
+}
+
+function buildFuncnameElements(
+  reversed: readonly CallFrameEntry[],
+  mainFuncnameUnset: boolean
+): Map<bigint, string> | undefined {
+  if (reversed.length === 0) return undefined;
+  const elements = new Map<bigint, string>();
+  for (let i = 0; i < reversed.length; i++) {
+    if (!reversed[i].funcnameUnset) elements.set(BigInt(i), reversed[i].name);
+  }
+  if (!mainFuncnameUnset) elements.set(BigInt(reversed.length), 'main');
+  return elements;
+}
+
+/** Negative-index reference length (`maxIndex + 1`) for a non-empty dynamic array, or `undefined` when empty. */
+export function dynamicArrayLength(elements: ReadonlyMap<bigint, string> | undefined): number | undefined {
+  return elements && elements.size > 0 ? Number(maxElementIndex(elements) + 1n) : undefined;
+}
+
+/** Unsets one element (or `'all'` for `@`/`*`) of `FUNCNAME` or `PIPESTATUS`. */
+export function unsetDynamicArrayElement(
+  state: { calls: CallFrameEntry[]; pipeStatus: Map<bigint, string>; mainFuncnameUnset?: boolean },
+  name: string,
+  index: bigint | 'all'
+): void {
+  if (name === 'PIPESTATUS') {
+    if (index === 'all') state.pipeStatus.clear();
+    else state.pipeStatus.delete(index);
+    return;
+  }
+  if (name !== 'FUNCNAME' || state.calls.length === 0) return;
+  if (index === 'all') {
+    for (const call of state.calls) call.funcnameUnset = true;
+    state.mainFuncnameUnset = true;
+    return;
+  }
+  const count = BigInt(state.calls.length);
+  if (index === count) state.mainFuncnameUnset = true;
+  else if (index >= 0n && index < count) state.calls[Number(count - 1n - index)].funcnameUnset = true;
 }
 
 /** Picks a nonzero initial Park-Miller seed for a fresh shell from the host random source. */
@@ -370,7 +421,7 @@ export const SCALAR_DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'BASH_SUBSH
 export function buildDynamicDeclaration(
   name: string,
   scalarValue: string | undefined,
-  elements: string[] | undefined
+  elements: ReadonlyMap<bigint, string> | undefined
 ): Variable | undefined {
   if (SCALAR_DYNAMIC_VARIABLES.has(name)) {
     return {
@@ -379,13 +430,13 @@ export function buildDynamicDeclaration(
       value: { kind: 'scalar', value: scalarValue as string },
     };
   }
-  if (!elements || (name === 'PIPESTATUS' && elements.length === 0)) return undefined;
+  if (!elements || (name === 'PIPESTATUS' && elements.size === 0)) return undefined;
   return {
     name,
     attributes: new Set(['a']),
     value: {
       kind: 'indexed',
-      elements: new Map(elements.map((element, index) => [BigInt(index), element])),
+      elements: new Map(elements),
     },
   };
 }
