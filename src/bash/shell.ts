@@ -672,8 +672,8 @@ export class Shell implements ArithmeticHost {
   private combineTemporaryValue(name: string, value: string, append: boolean): string {
     if (!append) return value;
     const base = this.scalarValue(name) ?? '';
-    if (!this.findVariable(name)?.attributes.has('i')) return base + value;
-    return String(BigInt.asIntN(64, this.evaluateFatalReadonly(base || '0') + this.evaluateFatalReadonly(value)));
+    const variable = this.findVariable(name);
+    return variable ? (this.convertForAttributes(variable, value, base, true) ?? base + value) : base + value;
   }
 
   private removeScope(scope: Scope): void {
