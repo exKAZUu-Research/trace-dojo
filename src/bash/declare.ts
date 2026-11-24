@@ -1257,6 +1257,9 @@ function materializeOrHandleDynamic(
     !options.set.has('n') &&
     (options.set.has('a') || options.set.has('A') || isSubscripted || isCompound(operand));
   if (convertsToArray) {
+    if ((options.set.has('a') || options.set.has('A')) && !isSubscripted && !isCompound(operand)) {
+      shell.scalarValue(name);
+    }
     shell.state.scopes[0].set(name, shell.dynamicDeclaration(name) as Variable);
     return false;
   }

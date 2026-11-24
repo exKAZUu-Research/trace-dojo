@@ -1257,8 +1257,8 @@ export class Shell implements ArithmeticHost {
       this.lastStored = converted;
       return true;
     }
-    if (subscript === '') {
-      this.reportError(`${reportedName}[]: bad array subscript`);
+    if (subscript === '' || (!evaluated && (subscript === '@' || subscript === '*'))) {
+      this.reportError(`${reportedName}[${subscript}]: bad array subscript`);
       return false;
     }
     const declared =
