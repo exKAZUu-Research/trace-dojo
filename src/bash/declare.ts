@@ -500,7 +500,7 @@ function storeSelectedDeclaration(
     isSubscripted,
     assignMode !== 'none' && !isCompound(operand)
   );
-  if (!selected) return false;
+  if (selected.kind !== 'store') return selected.kind === 'skipStore';
   return assignDeclaredOperand(
     shell,
     builtin,
@@ -576,6 +576,11 @@ function rejectSubscriptedAttributeBuiltin(
   return true;
 }
 
+type SelectedDeclarationStore =
+  | { kind: 'store'; storeVariable: Variable; effectiveSubscript: string | undefined }
+  | { kind: 'skipStore' }
+  | { kind: 'failed' };
+
 // code-gauge-allow functionParameterCount -- Selects the destination or visible local element store for a declaration operand.
 function selectDeclarationStore(
   shell: Shell,
@@ -586,7 +591,7 @@ function selectDeclarationStore(
   { set, unset }: Options,
   isSubscripted: boolean,
   assignsNonCompound: boolean
-): { storeVariable: Variable; effectiveSubscript: string | undefined } | undefined {
+): SelectedDeclarationStore {
   const base = preUnsetStore ?? destination;
   const { variable, referencedSubscript } = base;
   const implicitIndexedZero =
@@ -595,30 +600,26 @@ function selectDeclarationStore(
     return resolveImplicitIndexedStore(shell, builtin, variable.name);
   }
   if (preUnsetStore) {
-    return { storeVariable: variable, effectiveSubscript: referencedSubscript };
+    return { kind: 'store', storeVariable: variable, effectiveSubscript: referencedSubscript };
   }
   const storeVariable =
     set.has('g') && (isSubscripted || referencedSubscript !== undefined)
       ? resolveElementStoreVariable(shell, name, variable.name, set, unset, isSubscripted)
       : variable;
-  return { storeVariable, effectiveSubscript: referencedSubscript };
+  return { kind: 'store', storeVariable, effectiveSubscript: referencedSubscript };
 }
 
-function resolveImplicitIndexedStore(
-  shell: Shell,
-  builtin: string,
-  baseName: string
-): { storeVariable: Variable; effectiveSubscript: string } | undefined {
+function resolveImplicitIndexedStore(shell: Shell, builtin: string, baseName: string): SelectedDeclarationStore {
   const resolved = shell.resolveNameOrUndefined(baseName);
-  if (resolved === undefined) return undefined;
+  if (resolved === undefined) return { kind: 'failed' };
   const direct = resolved.includes('[') ? shell.findOwnVariable(resolved) : undefined;
   if (!direct && !isIdentifier(resolved)) {
     shell.reportError(`${builtin}: \`${resolved}': not a valid identifier`);
-    return undefined;
+    return { kind: 'skipStore' };
   }
   const storeVariable = direct ?? ensureStoreVariable(shell, resolved);
   materializeRedirectedIndexedCell(storeVariable);
-  return { storeVariable, effectiveSubscript: '0' };
+  return { kind: 'store', storeVariable, effectiveSubscript: '0' };
 }
 
 function materializeRedirectedIndexedCell(variable: Variable): void {
