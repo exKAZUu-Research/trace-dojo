@@ -37,18 +37,12 @@ export function rejectUnsupportedSyntax(root: TreeNode): void {
 
 /** A feature that a node of a supported type spells in a form this interpreter does not run. */
 function unsupportedForm(node: TreeNode): string | undefined {
-  if (node.type === 'export_statement' && !isInNamespace(node)) return 'import や export';
-  if (node.type === 'import_statement') {
-    const source = node.childForFieldName('source') ?? node.namedChildren.at(-1)?.childForFieldName('source');
-    const module = source?.text.slice(1, -1);
-    if (module === undefined || !importableModules.has(module)) return `モジュール '${module ?? ''}' の import`;
-  }
   if (node.type === 'meta_property' && node.text.replaceAll(/\s/g, '') === 'import.meta') return 'import.meta';
-  return undefined;
-}
-
-function isInNamespace(node: TreeNode): boolean {
-  for (let current = node.parent; current; current = current.parent)
-    if (current.type === 'internal_module' || current.type === 'module') return true;
-  return false;
+  if (node.type !== 'import_statement' && node.type !== 'export_statement') return undefined;
+  const source = node.childForFieldName('source') ?? node.namedChildren.at(-1)?.childForFieldName('source');
+  // An export without `from` loads no other module.
+  if (node.type === 'export_statement' && !source) return undefined;
+  const module = source?.text.slice(1, -1) ?? '';
+  if (importableModules.has(module)) return undefined;
+  return `モジュール '${module}' の ${node.type === 'import_statement' ? 'import' : 'export'}`;
 }

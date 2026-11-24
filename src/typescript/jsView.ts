@@ -99,6 +99,7 @@ const compiledDeclarations: Record<string, (node: TreeNode, binder: Binder) => V
   module: (node, binder) => namespaceView(node, binder),
   import_alias: (node, binder) => importAliasView(node, binder),
   import_statement: (node) => importView(node),
+  export_statement: (node, binder) => exportView(node, binder),
 };
 
 function view(node: TreeNode, binder: Binder): ViewNode {
@@ -320,6 +321,17 @@ function importBindings(node: TreeNode, clause: TreeNode, source: TreeNode): [st
       return [[local.text, member]];
     });
   });
+}
+
+/**
+ * A top-level `export`, which runs as what it declares, or its default value as an expression statement; an export of
+ * names declared elsewhere runs nothing.
+ */
+function exportView(node: TreeNode, binder: Binder): ViewNode {
+  const declaration = node.childForFieldName('declaration');
+  if (declaration) return view(declaration, binder);
+  const value = node.childForFieldName('value');
+  return value ? expressionStatement(node, view(value, binder)) : leaf(node, 'empty_statement');
 }
 
 /** `import X = N.Y` as TypeScript compiles it, `var X = N.Y;`, or nothing when `N.Y` has no value. */

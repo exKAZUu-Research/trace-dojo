@@ -176,10 +176,29 @@ export class StatementChecker {
     }
   }
 
-  /** `export` in a namespace, which checks the declaration it exports. */
+  /**
+   * `export`, which checks the declaration or the default value it exports, and that each name `export { ... }`
+   * exports is declared. `export =` is CommonJS's, which tsc rejects in a module of ECMAScript syntax.
+   */
   private exportStatement(node: TreeNode): void {
     const declaration = node.childForFieldName('declaration');
     if (declaration) this.check(declaration);
+    const value = node.childForFieldName('value');
+    if (value) this.c.expressions.check(value);
+    const assigned = named(node).find((child) => child.type !== 'export_clause' && child.type !== 'comment');
+    if (!declaration && !value && assigned && !node.childForFieldName('source'))
+      this.c.error(
+        node,
+        "ECMAScript モジュールを対象にするときは、エクスポートの代入は使えません。'export default' か別のモジュール形式を使ってください。"
+      );
+    const clause = named(node).find((child) => child.type === 'export_clause');
+    if (!clause || node.childForFieldName('source')) return;
+    for (const specifier of named(clause)) {
+      const name = specifier.childForFieldName('name');
+      const scope = name && this.c.scopeOf(name);
+      if (name && !scope?.lookupValue(name.text) && !scope?.lookupType(name.text))
+        this.c.error(name, `名前 ${name.text} が見つかりません。`);
+    }
   }
 
   /** `declare global` augments the globals only from a module, which this program never is. */
