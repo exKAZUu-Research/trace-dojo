@@ -8,7 +8,7 @@ import { compileError, unsupportedError } from './errors';
 import { type Builtins, Checker, newDictParam, typeParamKinds, typeVarNames } from './infer';
 import { inferKinds } from './kindCheck';
 import { TypePrinter } from './prettyType';
-import { directClassConstraint, type RBinding, type RType } from './rast';
+import { directClassConstraint, type RBinding, type RExpr, type RType } from './rast';
 import type { RClassDecl, RDataDecl, RInstanceDecl, RModule } from './rename';
 import type { DerivingStrategy, Span } from './syntax';
 import {
@@ -59,6 +59,7 @@ export interface TypecheckOptions {
 export function typecheckModule(module: RModule, options: TypecheckOptions): TypecheckResult {
   const checker = new Checker(options.env, options.builtins);
   inferKinds(checker, module);
+  applyDefaultDecls(checker, module);
   for (const decl of module.dataDecls) defineConstructors(decl);
   for (const decl of module.classes) defineClassMethods(decl);
   const instanceDecls = module.instances.map((decl) =>
@@ -86,6 +87,19 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
   }
   checker.solveTop();
   return { instances, defaults, main };
+}
+
+function applyDefaultDecls(checker: Checker, module: RModule): void {
+  checker.extendedDefaults = module.extensions.has('ExtendedDefaultRules');
+  for (const decl of module.defaultDecls) {
+    const types = decl.types.map((type) => {
+      const converted = checker.convertType(type, new Map(), new Map(), decl.cls ? decl.cls.tyvarKind : STAR);
+      checker.checkKinds();
+      return converted;
+    });
+    if (decl.cls) checker.namedDefaults.set(decl.cls, types);
+    else checker.defaultTypes = types;
+  }
 }
 
 function defineConstructors(decl: RDataDecl): void {
@@ -214,7 +228,7 @@ function checkInstanceSupers(checker: Checker, info: InstanceInfo, span: Span): 
 function checkInstanceMethods(checker: Checker, declared: DeclaredInstance): Omit<CheckedInstance, 'sourceDefined'> {
   const { info } = declared;
   const bindings: RBinding[] = [];
-  for (const binding of declared.bindings) {
+  for (const binding of [...declared.bindings, ...genericDefaultBindings(declared)]) {
     if (binding.k !== 'fun' || binding.binder.kind !== 'global') continue;
     const method = binding.binder.entity;
     const index = method.method?.index as number;
@@ -258,6 +272,33 @@ function checkInstanceMethods(checker: Checker, declared: DeclaredInstance): Omi
   return { info, bindings };
 }
 
+/**
+ * The methods an instance leaves out whose defaults a `default` signature types, defined as those defaults, which
+ * the instance's own type then has to satisfy the signature's constraints for.
+ */
+function genericDefaultBindings(declared: DeclaredInstance): RBinding[] {
+  const { cls } = declared.info;
+  const defined = new Set(
+    declared.bindings.flatMap((binding) =>
+      binding.k === 'fun' && binding.binder.kind === 'global' ? [binding.binder.entity] : []
+    )
+  );
+  const span = declared.span;
+  return [...(cls.genericDefaults ?? [])].flatMap(([index, generic]) => {
+    const method = cls.methods[index];
+    if (defined.has(method)) return [];
+    const expr: RExpr = { k: 'var', ref: { kind: 'global', entity: generic }, name: method.name, span };
+    return [
+      {
+        k: 'fun',
+        binder: { kind: 'global', entity: method },
+        clauses: [{ pats: [], rhs: { body: { k: 'plain', expr }, where: { bindings: [] }, span }, span }],
+        span,
+      } satisfies RBinding,
+    ];
+  });
+}
+
 function shiftGens(type: Type, replacement: Type): Type {
   return mapType(type, (node) =>
     node.tag === 'tgen' ? (node.index === 0 ? replacement : { tag: 'tgen', index: node.index - 1 }) : node
@@ -270,6 +311,15 @@ function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
     if (binding.k !== 'fun' || binding.binder.kind !== 'global') continue;
     const method = binding.binder.entity;
     const index = method.method?.index as number;
+    const generic = decl.entity.genericDefaults?.get(index);
+    if (generic) {
+      const scheme = generic.scheme as Scheme;
+      const params = checker.checkAgainstScheme(scheme, (type, skolems) =>
+        checker.withScopedTypes(new Map([[decl.param, skolems[0]]]), () => checkClauses(checker, binding, type))
+      );
+      result.push({ ...binding, binder: { kind: 'global', entity: generic }, dictParams: params });
+      continue;
+    }
     const implementation: ValueEntity = {
       id: nextId(),
       name: method.name,

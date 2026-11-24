@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss -- The type checker keeps its inference rules beside the substitution state they share.
 import { LIMITS } from '../interpreter/limits';
-import { CHAR_TYPE, FUNCTION_TYPE, LIST_TYPE, tupleCon } from './builtinTypes';
+import { CHAR_TYPE, FUNCTION_TYPE, LIST_TYPE, tupleCon, UNIT_TYPE } from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, isSubclassOf, predsEqual } from './classEnv';
 import { dependencyOrder } from './dependencies';
 import type { ClassEntity, ConInfo, DictParam, Evidence, EvidenceHole, TypeEntity, ValueEntity } from './entities';
@@ -74,6 +74,9 @@ export interface Builtins {
 let nextHoleId = 0;
 let nextParamId = 0;
 
+/** The classes whose constraints alone let ExtendedDefaultRules default a type variable. */
+const INTERACTIVE_CLASSES = new Set(['Show', 'Eq', 'Ord', 'Foldable', 'Traversable']);
+
 export function newDictParam(pred: Pred): DictParam {
   return { id: nextParamId++, pred };
 }
@@ -99,6 +102,12 @@ export class Checker {
   private reductionsRemaining = LIMITS.maxOperations;
   private readonly typeConversion = new TypeConversion();
   private scopedTypes: ReadonlyMap<string, Type> = new Map();
+  /** The types an ambiguous type variable may default to, in order, which a `default` declaration replaces. */
+  defaultTypes: Type[] | undefined;
+  /** The candidates of `default C (...)` declarations, by class. */
+  readonly namedDefaults = new Map<ClassEntity, Type[]>();
+  /** Whether ExtendedDefaultRules relaxes defaulting as GHCi does. */
+  extendedDefaults = false;
   /** The typed holes found so far with their types, which the module reports once it is checked. */
   readonly holes: { hole: Extract<RExpr, { k: 'hole' }>; type: Type }[] = [];
 
@@ -250,7 +259,7 @@ export class Checker {
           holes.map((hole) => hole.pred)
         );
         if (!chosen) this.ambiguous(holes[0]);
-        this.unify(variable, tcon(chosen), holes[0].span);
+        this.unify(variable, chosen, holes[0].span);
       }
       this.wanted = retained;
     }
@@ -801,7 +810,7 @@ export class Checker {
         constraints.map((hole) => hole.pred)
       );
       if (!chosen) this.ambiguous(constraints[0]);
-      this.unify(variable, tcon(chosen), constraints[0].span);
+      this.unify(variable, chosen, constraints[0].span);
     }
   }
 
@@ -863,15 +872,28 @@ export class Checker {
     return scheme;
   }
 
-  private defaultFor(variable: TVar, preds: readonly Pred[]): TypeEntity | undefined {
-    if (pruneKind(variable.kind).tag !== 'star' && pruneKind(variable.kind).tag !== 'kvar') return undefined;
+  private defaultFor(variable: TVar, preds: readonly Pred[]): Type | undefined {
+    const kind = pruneKind(variable.kind);
     const classes = preds.map((pred) => pred.cls);
+    const fits = (candidate: Type): boolean =>
+      unifyKinds(variable.kind, kindOfType(candidate)) &&
+      classes.every((cls) => this.solvable({ cls, type: candidate }));
+    for (const cls of classes) {
+      const named = this.namedDefaults.get(cls);
+      const found = named?.find(fits);
+      if (found) return found;
+    }
+    const standard = this.defaultTypes ?? [tcon(this.builtins.integer), tcon(this.builtins.double)];
+    if (this.extendedDefaults) {
+      if (!classes.some((cls) => this.builtins.numericClasses.has(cls) || INTERACTIVE_CLASSES.has(cls.name))) {
+        return undefined;
+      }
+      return [tcon(UNIT_TYPE), tcon(LIST_TYPE), ...standard].find(fits);
+    }
+    if (kind.tag !== 'star' && kind.tag !== 'kvar') return undefined;
     if (!classes.some((cls) => this.builtins.numericClasses.has(cls))) return undefined;
     if (!classes.every((cls) => this.builtins.standardClasses.has(cls))) return undefined;
-    for (const candidate of [this.builtins.integer, this.builtins.double]) {
-      if (classes.every((cls) => this.solvable({ cls, type: tcon(candidate) }))) return candidate;
-    }
-    return undefined;
+    return standard.find(fits);
   }
 
   private solvable(pred: Pred): boolean {

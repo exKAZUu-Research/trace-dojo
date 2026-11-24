@@ -42,9 +42,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   constructor_synonyms: 'パターンシノニム',
   data_family: 'データ族（data family）',
   data_instance: 'データ族のインスタンス（data instance）',
-  default_export: 'default の export',
-  default_signature: 'クラスの default のシグネチャ',
-  default_types: 'default 宣言',
   do_module: '修飾つきの do（QualifiedDo）',
   equation: '型族',
   equations: '型族',
@@ -60,7 +57,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   transform: 'TransformListComp の内包表記',
   implicit_parameter: '暗黙のパラメータ（?x）',
   implicit_variable: '暗黙のパラメータ（?x）',
-  import_package: 'パッケージを指定した import',
   inferred: '型変数の明示的な束縛',
   invisible: '型変数の明示的な束縛（@a）',
   kind_application: '種類の適用（@k）',
@@ -68,9 +64,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   label: 'ラベル（#name）',
   linear_function: '線形型（%1 ->）',
   modifier: '多重度の注釈（%1）',
-  module_export: 'モジュールの再 export（module M）',
-  namespace: '名前空間の指定（type・data）',
-  namespaced_child: '名前空間の指定（type・data）',
   pattern_synonym: 'パターンシノニム',
   promoted: '昇格した構成子（DataKinds）',
   rec: 'rec ブロック（RecursiveDo）',
@@ -299,16 +292,46 @@ function moduleName(node: Node): string {
 function convertExports(header: Node): ImportItem[] | undefined {
   const exportsNode = field(header, 'exports');
   if (!exportsNode) return undefined;
-  for (const child of namedChildren(exportsNode)) rejectUnsupported(child);
-  return fields(exportsNode, 'export').map((node) => convertImportItem(node, true));
+  const items: ImportItem[] = [];
+  for (const child of namedChildren(exportsNode)) {
+    rejectUnsupported(child);
+    if (child.type === 'module_export') {
+      const module = required(child, 'module');
+      items.push({ kind: 'module', name: { name: moduleName(module), span: spanOf(child) } });
+    } else if (child.type === 'default_export') {
+      if (!extensions.has('NamedDefaults')) {
+        throw syntaxError(spanOf(child), 'default の export には、NamedDefaults の拡張が要ります。');
+      }
+    } else if (child.type === 'export') {
+      items.push(convertImportItem(child, true));
+    }
+  }
+  return items;
 }
 
+/** The modules of the containers package, which `import "containers"` may name. */
+const CONTAINERS_MODULES = /^Data\.(Map|Set|IntMap|IntSet|Sequence|Tree|Graph|Containers)(\.|$)/;
+
 function convertImport(node: Node): Import {
-  for (const name of ['package', 'level']) {
-    const child = field(node, name);
-    if (child) throw unsupported(child);
+  const level = field(node, 'level');
+  if (level) throw unsupported(level);
+  const packageNode = field(node, 'package');
+  if (packageNode) {
+    if (!extensions.has('PackageImports')) {
+      throw syntaxError(spanOf(packageNode), 'パッケージを指定した import には、PackageImports の拡張が要ります。');
+    }
+    const name = packageNode.text.slice(1, -1);
+    const module = moduleName(required(node, 'module'));
+    if (name !== 'base' && name !== 'containers') {
+      throw unsupportedError(spanOf(packageNode), `base・containers 以外のパッケージ（${name}）`);
+    }
+    if ((name === 'containers') !== CONTAINERS_MODULES.test(module)) {
+      throw syntaxError(spanOf(packageNode), `モジュール ${module} は、パッケージ ${name} にはありません。`);
+    }
   }
-  if (hasToken(node, 'safe')) throw unsupportedError(spanOf(node), 'safe を付けた import');
+  if (hasToken(node, 'safe') && !['Safe', 'Trustworthy', 'Unsafe'].some((name) => extensions.has(name))) {
+    throw syntaxError(spanOf(node), 'safe を付けた import には、Safe・Trustworthy・Unsafe のどれかの拡張が要ります。');
+  }
   const namesNode = field(node, 'names');
   const aliasNode = field(node, 'alias');
   return {
@@ -324,7 +347,9 @@ function convertImport(node: Node): Import {
 function convertImportItem(node: Node, exporting = false): ImportItem {
   const nameOf = (name: Node): QName => (exporting ? qualifiedName(name).name : plainName(name));
   const namespace = field(node, 'namespace');
-  if (namespace) throw unsupported(namespace);
+  if (namespace && !extensions.has('ExplicitNamespaces') && !extensions.has('TypeOperators')) {
+    throw syntaxError(spanOf(namespace), 'type・data の名前空間を書くには、ExplicitNamespaces の拡張が要ります。');
+  }
   const variable = field(node, 'variable');
   const operator = field(node, 'operator');
   const type = field(node, 'type');
@@ -336,8 +361,18 @@ function convertImportItem(node: Node, exporting = false): ImportItem {
   const childrenNode = field(node, 'children');
   let children: ImportItem['children'];
   if (childrenNode) {
-    const elements = fields(childrenNode, 'element');
-    for (const element of elements) rejectUnsupported(element);
+    const elements = fields(childrenNode, 'element').map((element) => {
+      rejectUnsupported(element);
+      if (element.type !== 'namespaced_child') return element;
+      return (
+        field(element, 'constructor') ??
+        field(element, 'variable') ??
+        field(element, 'operator') ??
+        field(element, 'type') ??
+        namedChildren(element).at(-1) ??
+        element
+      );
+    });
     children = elements.some((element) => element.type === 'all_names') ? 'all' : elements.map(nameOf);
   }
   return { kind: 'type', name: nameOf(typeNode), children };
@@ -409,6 +444,20 @@ function convertTopDecl(node: Node): Decl[] {
     }
     case 'deriving_instance': {
       return [convertStandaloneDeriving(node)];
+    }
+    case 'default_types': {
+      const cls = field(node, 'class');
+      if (cls && !extensions.has('NamedDefaults')) {
+        throw syntaxError(spanOf(cls), 'クラスを指定した default 宣言には、NamedDefaults の拡張が要ります。');
+      }
+      return [
+        {
+          kind: 'defaultTypes',
+          cls: cls ? qualifiedName(cls).name : undefined,
+          types: fields(node, 'type').map(convertType),
+          span: spanOf(node),
+        },
+      ];
     }
     case 'type_synonym': {
       return [convertTypeSynonym(node)];
@@ -887,6 +936,12 @@ function convertClass(node: Node): Decl {
   const declarationsNode = field(node, 'declarations');
   const decls = declarationsNode
     ? fields(declarationsNode, 'declaration').flatMap((child) => {
+        if (child.type === 'default_signature') {
+          if (!extensions.has('DefaultSignatures')) {
+            throw syntaxError(spanOf(child), 'default のシグネチャを使うには、DefaultSignatures の拡張が要ります。');
+          }
+          return [{ ...convertSignature(required(child, 'signature')), isDefault: true } as Decl];
+        }
         rejectUnsupported(child);
         return convertDecl(child);
       })

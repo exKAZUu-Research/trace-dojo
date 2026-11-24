@@ -155,7 +155,14 @@ export interface ConDecl {
 }
 
 export type Decl =
-  | { kind: 'sig'; names: Name[]; sig: SigType; span: Span }
+  | {
+      kind: 'sig';
+      names: Name[];
+      sig: SigType;
+      span: Span;
+      /** Whether the signature is a class's `default` signature, which types the method's default implementation. */
+      isDefault?: boolean;
+    }
   | { kind: 'fixity'; assoc: 'infix' | 'infixl' | 'infixr'; prec: number; ops: Name[]; span: Span }
   | { kind: 'funClause'; name: Name; args: Pat[]; rhs: Rhs; span: Span }
   | { kind: 'patBind'; pat: Pat; rhs: Rhs; span: Span }
@@ -172,6 +179,8 @@ export type Decl =
   | { kind: 'typeSyn'; name: Name; params: Name[]; type: TypeExpr; span: Span }
   | { kind: 'class'; context: Constraint[]; name: Name; param: Name; decls: Decl[]; span: Span }
   | { kind: 'instance'; context: Constraint[]; cls: QName; type: TypeExpr; decls: Decl[]; span: Span }
+  /** `default (T1, T2)`, or `default C (T1, T2)` for one class, which choose the types ambiguous variables get. */
+  | { kind: 'defaultTypes'; cls?: QName; types: TypeExpr[]; span: Span }
   | {
       kind: 'standaloneDeriving';
       context: Constraint[];
@@ -191,7 +200,8 @@ export interface DerivingClause {
 }
 
 export interface ImportItem {
-  kind: 'value' | 'type';
+  /** A value, a type or class, or (in an export list) `module M`, which exports what `M` brought into scope. */
+  kind: 'value' | 'type' | 'module';
   name: QName;
   /** For a type or class: `undefined` for the name alone, `'all'` for `(..)`, or the listed constructors and fields. */
   children?: 'all' | QName[];

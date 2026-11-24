@@ -87,6 +87,8 @@ export interface RClassDecl {
   param: string;
   supers: RConstraint[];
   methods: { entity: ValueEntity; sig: RSigType }[];
+  /** The `default` signatures, which type the default implementations of their methods instead. */
+  defaultSigs: { entity: ValueEntity; sig: RSigType }[];
   defaults: RBinding[];
   span: Span;
 }
@@ -106,6 +108,8 @@ export interface RModule {
   classes: RClassDecl[];
   instances: RInstanceDecl[];
   standaloneDerivings: RStandaloneDeriving[];
+  /** The module's `default` declarations: one for every class, and at most one per class with NamedDefaults. */
+  defaultDecls: { cls?: ClassEntity; types: RType[]; span: Span }[];
   values: RBindGroup;
   exports: ExportTable;
   hasExportList: boolean;
@@ -246,6 +250,7 @@ class Renamer {
       classes: this.classes,
       instances: this.instances,
       standaloneDerivings: this.standaloneDerivings,
+      defaultDecls: this.renameDefaultDecls(decls),
       values,
       exports: this.buildExports(),
       hasExportList: this.module.exports !== undefined,
@@ -373,6 +378,10 @@ class Renamer {
     }
     const builder = new ExportTableBuilder();
     for (const item of this.module.exports) {
+      if (item.kind === 'module') {
+        this.exportModule(builder, item.name);
+        continue;
+      }
       if (item.kind === 'value') {
         const entity = this.lookupValue(item.name, false);
         builder.addValue(entity, item.name.span);
@@ -382,6 +391,32 @@ class Renamer {
       builder.addType(item.name, entry, this.resolveExportChildren(item, entry));
     }
     return builder.table;
+  }
+
+  /** Exports `module M`: what is in scope both unqualified and as `M.x`, or everything the module itself defines. */
+  private exportModule(builder: ExportTableBuilder, name: QName): void {
+    if (name.name === this.module.name) {
+      for (const entity of this.ownValues.values()) builder.addValue(entity, name.span);
+      for (const [typeName, entity] of this.ownTypes) {
+        builder.addType({ name: typeName, span: name.span }, entity, this.ownTypeChildren.get(entity) ?? []);
+      }
+      return;
+    }
+    if (!this.scope.moduleAliases.has(name.name)) {
+      throw compileError(name.span, `export の module ${name.name} は、import されていません。`);
+    }
+    for (const [valueName, entities] of this.scope.qualifiedValues.get(name.name)?.map ?? []) {
+      for (const entity of entities) {
+        if (this.scope.values.get(valueName).includes(entity)) builder.addValue(entity, name.span);
+      }
+    }
+    for (const [typeName, entries] of this.scope.qualifiedTypes.get(name.name)?.map ?? []) {
+      for (const entry of entries) {
+        if (this.scope.types.get(typeName).some((other) => other.entity === entry.entity)) {
+          builder.addType({ name: typeName, span: name.span }, entry, []);
+        }
+      }
+    }
   }
 
   private resolveExportChildren(item: ImportItem, parent: TypeLike): ValueEntity[] {
@@ -450,7 +485,7 @@ class Renamer {
         this.declareOwnType(decl.name, like);
         const children: ValueEntity[] = [];
         for (const member of decl.decls) {
-          if (member.kind !== 'sig') continue;
+          if (member.kind !== 'sig' || member.isDefault) continue;
           for (const name of member.names) {
             const method: ValueEntity = {
               id: nextId(),
@@ -631,9 +666,22 @@ class Renamer {
     const param = decl.param.name;
     const supers = decl.context.map((constraint) => this.renameType(constraint, new Set([param])));
     const methods: RClassDecl['methods'] = [];
+    const defaultSigs: RClassDecl['defaultSigs'] = [];
     for (const member of decl.decls) {
       if (member.kind !== 'sig') continue;
       const sig = this.renameSigType(member.sig);
+      if (member.isDefault) {
+        for (const name of member.names) {
+          const method = entity.methods.find((candidate) => candidate.name === name.name);
+          if (!method)
+            throw compileError(name.span, `${name.name} は、クラス ${entity.name} のメソッドではありません。`);
+          if (defaultSigs.some((item) => item.entity === method)) {
+            throw compileError(name.span, `${name.name} の default のシグネチャが重複しています。`);
+          }
+          defaultSigs.push({ entity: method, sig });
+        }
+        continue;
+      }
       if (!rtypeMentions(sig.type, param)) {
         throw compileError(
           member.span,
@@ -665,7 +713,7 @@ class Renamer {
       if (member.kind === 'sig' || member.kind === 'funClause' || member.kind === 'patBind') continue;
       throw compileError(member.span, 'クラスの中には、メソッドの型と既定の実装だけを書けます。');
     }
-    this.classes.push({ entity, param, supers, methods, defaults, span: decl.span });
+    this.classes.push({ entity, param, supers, methods, defaultSigs, span: decl.span, defaults });
   }
 
   private renameInstance(decl: Extract<Decl, { kind: 'instance' }>): void {
@@ -674,11 +722,25 @@ class Renamer {
     collectTypeVars(decl.type, vars);
     const type = this.renameType(decl.type, vars);
     const context = decl.context.map((constraint) => this.renameType(constraint, vars));
+    const sigs = new Map<string, Extract<Decl, { kind: 'sig' }>>();
     for (const member of decl.decls) {
-      if (member.kind === 'sig') throw unsupportedError(member.span, 'インスタンスの中の型シグネチャ（InstanceSigs）');
+      if (member.kind === 'sig') {
+        if (!this.module.extensions.has('InstanceSigs')) {
+          throw compileError(member.span, 'インスタンスの中に型シグネチャを書くには、InstanceSigs の拡張が要ります。');
+        }
+        for (const name of member.names) {
+          if (sigs.has(name.name)) throw compileError(name.span, `${name.name} の型シグネチャが重複しています。`);
+          sigs.set(name.name, member);
+        }
+      }
       if (member.kind === 'fixity') throw compileError(member.span, 'インスタンスの中には、結合性を宣言できません。');
     }
-    const raw = groupBindings(decl.decls);
+    const raw = groupBindings(decl.decls).map((binding) => {
+      const sig = binding.kind === 'fun' ? sigs.get(binding.names[0].name) : undefined;
+      sigs.delete(binding.names[0].name);
+      return sig ? withInstanceSignature(binding, sig) : binding;
+    });
+    for (const [name, sig] of sigs) throw compileError(sig.span, `型シグネチャを書いた ${name} の定義がありません。`);
     const bindings: RBinding[] = [];
     for (const binding of raw) {
       if (binding.kind !== 'fun') throw compileError(binding.span, 'インスタンスの中では、パターンで束縛できません。');
@@ -699,6 +761,19 @@ class Renamer {
       bindings.push(this.renameFunBinding(binding, { kind: 'global', entity: method }, new LocalScope()));
     }
     this.instances.push({ cls, type, context, bindings, span: decl.span });
+  }
+
+  private renameDefaultDecls(decls: Decl[]): RModule['defaultDecls'] {
+    const result: RModule['defaultDecls'] = [];
+    for (const decl of decls) {
+      if (decl.kind !== 'defaultTypes') continue;
+      const cls = decl.cls ? this.lookupClass(decl.cls) : undefined;
+      if (result.some((other) => other.cls === cls)) {
+        throw compileError(decl.span, 'default 宣言が重複しています。');
+      }
+      result.push({ cls, types: decl.types.map((type) => this.renameType(type, new Set())), span: decl.span });
+    }
+    return result;
   }
 
   private renameStandaloneDeriving(decl: Extract<Decl, { kind: 'standaloneDeriving' }>): void {
@@ -1553,6 +1628,29 @@ interface RawBinding {
 
 // code-gauge-allow functionCognitiveComplexity -- Grouping clauses into bindings checks each of GHC's conditions on adjacent clauses.
 // code-gauge-allow functionNcss -- Grouping clauses into bindings checks each of GHC's conditions on adjacent clauses.
+/**
+ * A method binding with an instance signature, `m :: sig; m ... = e`, as `m = let m' :: sig; m' ... = e in m'`, which
+ * checks that the signature is at least as general as the method's type. The local's name is one programs cannot
+ * spell, so `m` in its body still names the method.
+ */
+function withInstanceSignature(binding: RawBinding, sig: Extract<Decl, { kind: 'sig' }>): RawBinding {
+  const name = binding.names[0];
+  const local: Name = { name: ` ${name.name}`, span: name.span };
+  const decls: Decl[] = [
+    { ...sig, names: [local] },
+    ...binding.clauses.map((clause): Decl => ({
+      kind: 'funClause',
+      name: local,
+      args: clause.args,
+      rhs: clause.rhs,
+      span: clause.span,
+    })),
+  ];
+  const span = binding.span;
+  const body: Expr = { kind: 'let', decls, body: { kind: 'var', name: local, span: name.span }, span };
+  return { ...binding, clauses: [{ args: [], rhs: { body: { kind: 'plain', expr: body }, where: [], span }, span }] };
+}
+
 function groupBindings(decls: Decl[]): RawBinding[] {
   const bindings: RawBinding[] = [];
   const seen = new Set<string>();

@@ -1,5 +1,5 @@
 import { stronglyConnected } from './dependencies';
-import type { ClassEntity, TypeEntity } from './entities';
+import { type ClassEntity, nextId, type TypeEntity, type ValueEntity } from './entities';
 import { compileError } from './errors';
 import type { Checker } from './infer';
 import { checkSchemeAmbiguity, typeVarNames } from './infer';
@@ -108,6 +108,18 @@ function inferTypeDeclaration(checker: Checker, entry: Exclude<KindDeclaration, 
 function inferClass(checker: Checker, decl: RClassDecl): void {
   checker.checkSuperclassTypes(decl.supers, decl.param, decl.entity.tyvarKind);
   for (const method of decl.methods) method.entity.scheme = methodScheme(checker, decl, method.sig);
+  for (const item of decl.defaultSigs) {
+    const index = item.entity.method?.index as number;
+    const implementation: ValueEntity = {
+      id: nextId(),
+      name: item.entity.name,
+      module: decl.entity.module,
+      sort: 'var',
+      span: item.sig.span,
+      scheme: methodScheme(checker, decl, item.sig),
+    };
+    (decl.entity.genericDefaults ??= new Map()).set(index, implementation);
+  }
 }
 
 function arrowKind(params: readonly Kind[], result: Kind): Kind {

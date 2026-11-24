@@ -91,6 +91,11 @@ export interface ClassEntity {
   exportedMethods?: ValueEntity[];
   /** The default implementation of each method, taking the class's dictionary, or undefined. */
   defaults: (ValueEntity | undefined)[];
+  /**
+   * The default implementations that a `default` signature types, by method index: functions of their own scheme,
+   * which an instance that leaves the method out defines it as.
+   */
+  genericDefaults?: Map<number, ValueEntity>;
   span?: Span;
 }
 
