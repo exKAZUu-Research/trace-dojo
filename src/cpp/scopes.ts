@@ -34,7 +34,7 @@ export type Entity =
   | { kind: 'template'; template: LibraryTemplate }
   /** A library object or constant, such as `std::cout` or `INT_MAX`. */
   | { kind: 'value'; make: (row: number) => Expr }
-  | { kind: 'namespace'; name: string }
+  | { kind: 'namespace'; name: string; ns?: NamespaceInfo }
   /** A library name the interpreter leaves out, such as `std::thread`. */
   | { kind: 'unsupported'; feature: string };
 
@@ -42,6 +42,8 @@ export class Scope {
   readonly names = new Map<string, Entity>();
   isTryBlock = false;
   usesStd = false;
+  /** The namespaces `using namespace` directives in this scope nominate, whose names unqualified lookup finds. */
+  readonly usings: NamespaceInfo[] = [];
   /** The variables declared in this block whose destruction has an effect, by slot. */
   readonly destructibles = new Map<number, (frame: Frame, value: Value) => void>();
   /** The slots of the variables declared in this block, which go out of scope with it. */
@@ -176,5 +178,35 @@ export class FunctionContext {
       if (entity?.kind === 'local' && (entity.isConstexpr || entity.staticStorage) && (!accept || accept(entity)))
         return entity;
     }
+  }
+}
+
+/** A namespace the program defines (`namespace geo { ... }`), whose declarations its scope holds. */
+export class NamespaceInfo {
+  readonly scope = new Scope();
+  /** The inline namespaces in this one, whose members are members of this one too. */
+  readonly inlineNamespaces: NamespaceInfo[] = [];
+
+  constructor(
+    readonly name: string,
+    readonly parent: NamespaceInfo | undefined
+  ) {}
+
+  /** The name with the enclosing namespaces, such as `geo::detail`, which names its members in messages. */
+  get qualifiedName(): string {
+    return this.parent ? `${this.parent.qualifiedName}::${this.name}` : this.name;
+  }
+
+  /** What `name` denotes as a member of this namespace: its own, an inline namespace's, or a nominated one's. */
+  member(name: string, seen = new Set<NamespaceInfo>()): Entity | undefined {
+    if (seen.has(this)) return undefined;
+    seen.add(this);
+    const own = this.scope.names.get(name);
+    if (own) return own;
+    for (const inner of [...this.inlineNamespaces, ...this.scope.usings]) {
+      const found = inner.member(name, seen);
+      if (found) return found;
+    }
+    return undefined;
   }
 }

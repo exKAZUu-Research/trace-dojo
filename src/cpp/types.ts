@@ -2,7 +2,7 @@ import { type FloatName, INT_PROPERTIES, type IntName } from '../c/types';
 import type { ConstantLocation, Expr, LibraryConstant } from './expr';
 import type { ClassOperations, LibraryClass } from './library/libraryClass';
 import type { CompiledFunction, Eval, Frame } from './runtime';
-import type { Scope } from './scopes';
+import type { NamespaceInfo, Scope } from './scopes';
 import type { Syntax } from './syntax';
 import type { Ptr } from './values';
 
@@ -186,6 +186,8 @@ export interface FunctionInfo {
   instantiate?: (args: Expr[], templateArgs: Type[] | undefined) => FunctionInfo | undefined;
   /** Whether the function is an instance of a template, which overload resolution likes less than a function. */
   isTemplate?: boolean;
+  /** The namespace a non-member function is a member of. */
+  namespace?: NamespaceInfo;
   /** Whether the function is a conversion function (`operator int() const`). */
   isConversion?: boolean;
   /** Whether the function is deleted (`= delete`), which overload resolution may choose but no call may use. */
@@ -244,6 +246,8 @@ export class ClassInfo {
   /** The constructor a class without user-declared ones has, when it has anything to initialize. */
   row = -1;
 
+  /** The namespace the class is a member of. */
+  namespace?: NamespaceInfo;
   /** Whether the class is a lambda's closure type. */
   isLambda = false;
   /** The class this one is nested in. */
@@ -541,7 +545,8 @@ function baseName(type: Type): string {
 
 /** A class's name with the classes it is nested in, such as `Outer::Inner`. */
 export function classDisplayName(cls: ClassInfo): string {
-  return cls.outer ? `${classDisplayName(cls.outer)}::${cls.name}` : cls.name;
+  if (cls.outer) return `${classDisplayName(cls.outer)}::${cls.name}`;
+  return cls.namespace ? `${cls.namespace.qualifiedName}::${cls.name}` : cls.name;
 }
 
 /** The size in bytes, as `sizeof` gives on arm64 macOS with libc++. */

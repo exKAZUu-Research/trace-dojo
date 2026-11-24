@@ -3,7 +3,7 @@ import { compileError, unsupported } from './errors';
 import type { Expr } from './expr';
 import { isSdkMemberDeclared } from './library/libcGlobals';
 import type { Library, LibraryTemplate } from './library/registry';
-import { type Entity, FunctionContext, Scope } from './scopes';
+import { type Entity, FunctionContext, type NamespaceInfo, Scope } from './scopes';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
   ClassInfo,
@@ -33,7 +33,15 @@ export interface Declared {
 
 /** The parts of the compiler that every other part uses: messages, scopes, names, and types. */
 export abstract class CompilerBase {
-  readonly globalScope = new Scope();
+  /** The global namespace's scope. */
+  readonly rootScope = new Scope();
+  /** The namespace whose declarations are compiled now, or undefined for the global namespace. */
+  namespace: NamespaceInfo | undefined;
+
+  /** The scope of the namespace whose declarations are compiled now. */
+  get globalScope(): Scope {
+    return this.namespace?.scope ?? this.rootScope;
+  }
   /** The names `using namespace std;` makes visible, in effect after it appears. */
   usesStd = false;
   readonly globals: GlobalInfo[] = [];
@@ -76,6 +84,8 @@ export abstract class CompilerBase {
         if (name === cls.name) return { kind: 'class', cls };
       }
     }
+    const inNamespace = this.findInNamespaces(name);
+    if (inNamespace && (!typeOnly || isTypeName(inNamespace))) return inNamespace;
     if (typeOnly) {
       const global = this.typeOnlyGlobalName(name);
       if (global) return global;
@@ -85,6 +95,37 @@ export abstract class CompilerBase {
     return this.findGlobalName(name);
   }
 
+  /**
+   * What a name denotes in the namespaces around the code compiled now, short of the global namespace, or through the
+   * `using namespace` directives of its blocks.
+   */
+  private findInNamespaces(name: string): Entity | undefined {
+    const local = this.nominated(
+      this.context.scopes.flatMap((scope) => scope.usings),
+      name
+    );
+    if (local) return local;
+    for (let ns = this.namespace; ns; ns = ns.parent) {
+      const found = ns.member(name);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  /** What a name denotes outside every class: in the blocks, the namespaces, and the global namespace. */
+  findNonMemberName(name: string): Entity | undefined {
+    return this.context.lookupLocal(name) ?? this.findInNamespaces(name) ?? this.findGlobalName(name);
+  }
+
+  /** What a name denotes in the namespaces `using namespace` directives nominate. */
+  protected nominated(namespaces: readonly NamespaceInfo[], name: string): Entity | undefined {
+    for (const ns of namespaces) {
+      const found = ns.member(name);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
   private get hasUsingStd(): boolean {
     return this.usesStd || this.context.scopes.some((scope) => scope.usesStd);
   }
@@ -92,7 +133,7 @@ export abstract class CompilerBase {
   /** Looks a name up in the global namespace, including the names `using` brought in. */
   findGlobalName(name: string): Entity | undefined {
     const found = this.ordinaryGlobalName(name);
-    const own = found === this.globalScope.names.get(name) ? found : undefined;
+    const own = found === this.rootScope.names.get(name) ? found : undefined;
     const usesStd = this.hasUsingStd;
     if (own && usesStd && this.library.conflictsWithStdName(name, own.kind === 'functions')) {
       return { kind: 'ambiguous', name };
@@ -110,7 +151,7 @@ export abstract class CompilerBase {
   }
 
   private ordinaryGlobalName(name: string): Entity | undefined {
-    const own = this.globalScope.names.get(name);
+    const own = this.rootScope.names.get(name) ?? this.nominated(this.rootScope.usings, name);
     const library = this.library.global(name);
     if (own?.kind === 'class' && this.library.hasGlobalDeclaration(name)) {
       return library ?? { kind: 'hiddenClass', cls: own.cls };
@@ -122,7 +163,7 @@ export abstract class CompilerBase {
   }
 
   private typeOnlyGlobalName(name: string): Entity | undefined {
-    const own = this.globalScope.names.get(name);
+    const own = this.rootScope.names.get(name) ?? this.nominated(this.rootScope.usings, name);
     if (own && isTypeName(own)) return own;
     const library = this.library.global(name);
     return library && isTypeName(library) ? library : undefined;
@@ -130,7 +171,7 @@ export abstract class CompilerBase {
 
   protected findStdName(name: string): Entity | undefined {
     const std = this.library.std(name);
-    const local = this.globalScope.names.get(name);
+    const local = this.rootScope.names.get(name);
     if (std?.kind === 'functions' && local?.kind === 'functions') {
       return { kind: 'functions', functions: this.library.rebindCOverloads(name, std.functions, local.functions) };
     }
@@ -179,6 +220,7 @@ export abstract class CompilerBase {
     const nameNode = fieldOf(node, 'name') as Syntax;
     if (!scopeNode) return this.lookupInGlobal(nameNode, typeOnly);
     const scope = this.resolveScope(scopeNode);
+    if (scope.kind === 'namespace' && scope.ns) return this.lookupInProgramNamespace(scope.ns, nameNode, node.row);
     if (scope.kind === 'namespace') return this.lookupInNamespace(nameNode, node.row);
     if (scope.kind === 'enum') {
       const enumerator = enumeratorEntity(scope.info, nameNode.text);
@@ -189,7 +231,44 @@ export abstract class CompilerBase {
     return this.lookupInClass(scope.cls, nameNode, node.row);
   }
 
+  /** Looks up a name, which may be qualified further, as a member of a namespace the program defines. */
+  private lookupInProgramNamespace(ns: NamespaceInfo, nameNode: Syntax, row: number): Entity {
+    if (nameNode.type === 'qualified_identifier') {
+      const scopeNode = fieldOf(nameNode, 'scope') as Syntax;
+      const inner = ns.member(this.plainName(scopeNode));
+      const rest = fieldOf(nameNode, 'name') as Syntax;
+      if (inner?.kind === 'namespace' && inner.ns) return this.lookupInProgramNamespace(inner.ns, rest, row);
+      const cls =
+        inner?.kind === 'class'
+          ? inner.cls
+          : inner?.kind === 'type' && inner.type.kind === 'class'
+            ? inner.type.cls
+            : undefined;
+      if (cls) return this.lookupInClass(cls, rest, row);
+      if (inner?.kind === 'type' && inner.type.kind === 'int' && inner.type.enumeration) {
+        const info = inner.type.enumeration;
+        return (
+          enumeratorEntity(info, rest.text) ??
+          this.error(row, `列挙 ${info.name} に ${rest.text} という列挙子はありません。`)
+        );
+      }
+      return this.error(row, `${ns.qualifiedName}::${scopeNode.text} はクラスでも名前空間でもありません。`);
+    }
+    const name = this.plainName(nameNode);
+    return ns.member(name) ?? this.error(row, `${ns.qualifiedName}::${name} は宣言されていません。`);
+  }
+
   private lookupInGlobal(nameNode: Syntax, typeOnly: boolean): Entity {
+    // `::a::x` names a member of a namespace from the global one.
+    if (nameNode.type === 'qualified_identifier') {
+      const saved = this.namespace;
+      this.namespace = undefined;
+      try {
+        return this.lookupQualified(nameNode, typeOnly);
+      } finally {
+        this.namespace = saved;
+      }
+    }
     const name = this.plainName(nameNode);
     const entity = typeOnly ? this.typeOnlyGlobalName(name) : this.ordinaryGlobalName(name);
     if (!entity) {
@@ -279,10 +358,26 @@ export abstract class CompilerBase {
   /** The namespace or class a qualified name's scope names. */
   resolveScope(
     node: Syntax
-  ): { kind: 'namespace' } | { kind: 'class'; cls: ClassInfo } | { kind: 'enum'; info: EnumInfo } {
-    if (node.type === 'namespace_identifier' && node.text === 'std') return { kind: 'namespace' };
+  ): { kind: 'namespace'; ns?: NamespaceInfo } | { kind: 'class'; cls: ClassInfo } | { kind: 'enum'; info: EnumInfo } {
+    if (
+      (node.type === 'namespace_identifier' || node.type === 'identifier') &&
+      node.text === 'std' &&
+      !this.findInNamespaces('std')
+    )
+      return { kind: 'namespace' };
+    if (node.type === 'qualified_identifier' || node.type === 'nested_namespace_specifier') {
+      const entity =
+        node.type === 'qualified_identifier' ? this.lookupQualified(node, true) : this.nestedNamespace(node);
+      if (entity.kind === 'namespace') return { kind: 'namespace', ns: entity.ns };
+      if (entity.kind === 'class') return { kind: 'class', cls: entity.cls };
+      if (entity.kind === 'type' && entity.type.kind === 'class') return { kind: 'class', cls: entity.type.cls };
+      if (entity.kind === 'type' && entity.type.kind === 'int' && entity.type.enumeration)
+        return { kind: 'enum', info: entity.type.enumeration };
+      return this.error(node.row, `${node.text} はクラスでも名前空間でもありません。`);
+    }
     if (node.type === 'namespace_identifier' || node.type === 'type_identifier' || node.type === 'identifier') {
       const entity = this.findName(node.text, true);
+      if (entity?.kind === 'namespace') return { kind: 'namespace', ns: entity.ns };
       if (entity?.kind === 'class') return { kind: 'class', cls: entity.cls };
       if (entity?.kind === 'type' && entity.type.kind === 'class') return { kind: 'class', cls: entity.type.cls };
       if (entity?.kind === 'type' && entity.type.kind === 'int' && entity.type.enumeration)
@@ -297,6 +392,23 @@ export abstract class CompilerBase {
     const type = this.resolveTypeSpecifier(node, false, true);
     if (type.kind === 'class') return { kind: 'class', cls: type.cls };
     return this.error(node.row, `${node.text} はクラスでも名前空間でもありません。`);
+  }
+
+  /** The namespace `a::b` names in a nested namespace specifier. */
+  nestedNamespace(node: Syntax): Entity {
+    let entity: Entity | undefined;
+    for (const part of node.children) {
+      const found =
+        entity?.kind === 'namespace' && entity.ns
+          ? entity.ns.member(part.text)
+          : entity
+            ? undefined
+            : this.findName(part.text, true);
+      if (found?.kind !== 'namespace' || !found.ns)
+        return this.error(part.row, `${part.text} は名前空間ではありません。`);
+      entity = found;
+    }
+    return entity ?? this.error(node.row, '名前空間の名前を書いてください。');
   }
 
   plainName(node: Syntax): string {

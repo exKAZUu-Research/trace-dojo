@@ -12,8 +12,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   subscript_range_designator: '指示付きの初期化子（{[1] = 2} など）',
   union_specifier: '共用体（union）',
   bitfield_clause: 'ビットフィールド',
-  namespace_definition: '名前空間の定義（namespace）',
-  namespace_alias_definition: '名前空間の別名（namespace 名前 = ...;）',
   ref_qualifier: '参照修飾子（& や &&）の付いたメンバ関数',
   throw_specifier: '例外の指定（throw(...)）',
   template_declaration: 'テンプレートの定義（template）',

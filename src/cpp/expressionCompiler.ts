@@ -2004,10 +2004,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   abstract lambdaExpression(node: Syntax): Expr;
 
   /** The non-member operator functions an operator expression may call, as unqualified lookup finds them. */
-  nonMemberOperators(name: string, _operands: Expr[]): FunctionInfo[] {
-    const entity = this.findGlobalName(name);
-    if (entity?.kind !== 'functions') return [];
-    return entity.functions.filter((fn) => !fn.owner && !fn.native);
+  nonMemberOperators(name: string, operands: Expr[]): FunctionInfo[] {
+    const entity = this.findNonMemberName(name);
+    const found = entity?.kind === 'functions' ? entity.functions.filter((fn) => !fn.owner && !fn.native) : [];
+    return this.withArgumentDependentLookup(name, found, operands).filter((fn) => !fn.owner && !fn.native);
   }
 
   /** Adds the library's functions an unqualified call finds through its arguments' types (C++20 [basic.lookup.argdep]). */

@@ -37,7 +37,7 @@ import {
 } from './objectCompiler';
 import { overloadedOperator } from './operatorOverloads';
 import { type CompiledFunction, type Eval, type Exec, type Frame, holdAll, RETURN, type Runtime } from './runtime';
-import { type CaptureLookup, type Entity, FunctionContext } from './scopes';
+import { type CaptureLookup, type Entity, FunctionContext, NamespaceInfo } from './scopes';
 import {
   type AutoDeduction,
   deducedType,
@@ -142,7 +142,7 @@ export class Compiler extends StatementCompiler {
     this.pendingObjectUses = undefined;
     for (const check of objectUses ?? []) check();
     this.checkLibraryGlobalDeclarations();
-    const main = this.globalScope.names.get('main');
+    const main = this.rootScope.names.get('main');
     if (main?.kind !== 'functions')
       return this.error(0, 'main 関数がありません。int main() { ... } を書いてください。');
     const mainFunction = main.functions.find((fn) => fn.isDefined);
@@ -219,7 +219,7 @@ export class Compiler extends StatementCompiler {
 
   private libcOverrides(): ReadonlyMap<string, FunctionInfo> {
     const overrides = new Map<string, FunctionInfo>();
-    for (const entity of this.globalScope.names.values()) {
+    for (const entity of this.rootScope.names.values()) {
       if (entity.kind !== 'functions') continue;
       for (const fn of entity.functions) {
         if (this.library.isLibcDefinition(fn)) overrides.set(fn.name, fn);
@@ -229,7 +229,7 @@ export class Compiler extends StatementCompiler {
   }
 
   private checkLibraryGlobalDeclarations(): void {
-    for (const [name, entity] of this.globalScope.names) {
+    for (const [name, entity] of this.rootScope.names) {
       if (entity.kind === 'global' && this.library.conflictsWithGlobal(name, entity.global.type))
         this.error(entity.global.row, `${name} はヘッダーにある名前の宣言と重複しています。`);
       if (entity.kind === 'functions') {
@@ -269,6 +269,19 @@ export class Compiler extends StatementCompiler {
         this.declarationOnly(node);
         return;
       }
+      case 'namespace_definition': {
+        this.namespaceDefinition(node);
+        return;
+      }
+      case 'namespace_alias_definition': {
+        const name = (fieldOf(node, 'name') as Syntax).text;
+        const target = node.children.find((child) => child.field !== 'name') as Syntax;
+        const scope = this.resolveScope(target);
+        if (scope.kind !== 'namespace') return this.error(node.row, `${target.text} は名前空間ではありません。`);
+        if (!scope.ns) return this.unsupported(node.row, `名前空間 ${target.text} の別名`);
+        this.declareHere(name, { kind: 'namespace', name, ns: scope.ns }, node.row);
+        return;
+      }
       case 'expression_statement': {
         if (node.children.length === 0) return;
         this.error(node.row, '関数の外には、文を書けません（変数・関数・クラスの宣言だけを書けます）。');
@@ -278,6 +291,39 @@ export class Compiler extends StatementCompiler {
         this.error(node.row, `${node.text.split('\n')[0]} は、関数の外には書けません。`);
       }
     }
+  }
+
+  /**
+   * Compiles a namespace's declarations (`namespace geo { ... }`), which reopen it when it exists; a nested name
+   * (`namespace a::b`) opens each namespace, and an unnamed namespace's members are visible in the enclosing one.
+   */
+  private namespaceDefinition(node: Syntax): void {
+    const nameNode = fieldOf(node, 'name');
+    const names =
+      nameNode?.type === 'nested_namespace_specifier' ? nameNode.children.map((part) => part.text) : [nameNode?.text];
+    const saved = this.namespace;
+    try {
+      for (const name of names) this.namespace = this.openNamespace(name, hasToken(node, 'inline'), node.row);
+      const body = fieldOf(node, 'body');
+      for (const item of body?.children ?? []) this.topLevel(item);
+    } finally {
+      this.namespace = saved;
+    }
+  }
+
+  private openNamespace(name: string | undefined, isInline: boolean, row: number): NamespaceInfo {
+    const parent = this.namespace;
+    const scope = this.globalScope;
+    const key = name ?? '\0unnamed';
+    const existing = scope.names.get(key);
+    if (existing?.kind === 'namespace' && existing.ns) return existing.ns;
+    if (existing) return this.error(row, `${name ?? ''} はすでに名前空間以外として宣言されています。`);
+    const ns = new NamespaceInfo(name ?? '(anonymous namespace)', parent);
+    scope.names.set(key, { kind: 'namespace', name: ns.name, ns });
+    if (isInline) parent?.inlineNamespaces.push(ns);
+    if (isInline && !parent) this.rootScope.usings.push(ns);
+    if (!name) scope.usings.push(ns);
+    return ns;
   }
 
   usingDeclaration(node: Syntax): void {
@@ -293,14 +339,18 @@ export class Compiler extends StatementCompiler {
       return;
     }
     if (isNamespace) {
-      if (target.text !== 'std') return this.unsupported(node.row, `名前空間 ${target.text}`);
-      if (this.context.fn) this.context.scope.usesStd = true;
+      const scope = this.resolveScope(target);
+      if (scope.kind !== 'namespace') return this.error(node.row, `${target.text} は名前空間ではありません。`);
+      const directives = this.context.fn ? this.context.scope : this.globalScope;
+      if (scope.ns) directives.usings.push(scope.ns);
+      else if (this.context.fn) this.context.scope.usesStd = true;
       else this.usesStd = true;
       return;
     }
     if (target.type !== 'qualified_identifier') return this.unsupported(node.row, `using ${target.text}`);
-    const scope = fieldOf(target, 'scope');
-    if (scope?.text !== 'std') return this.unsupported(node.row, '名前空間以外の using 宣言（using Base::f; など）');
+    const scope = fieldOf(target, 'scope') as Syntax;
+    if (scope.text !== 'std' && this.resolveScope(scope).kind === 'class')
+      return this.unsupported(node.row, 'クラスのメンバの using 宣言（using Base::f; など）');
     const entity = this.lookupQualified(target);
     const name = (fieldOf(target, 'name') as Syntax).text;
     const names = (this.context.fn ? this.context.scope : this.globalScope).names;
@@ -372,6 +422,7 @@ export class Compiler extends StatementCompiler {
 
   /** Records where a new class is declared: in a class (a nested class) or in a function (a local class). */
   private placeClass(cls: ClassInfo): void {
+    cls.namespace = this.namespace;
     if (this.memberClass && !this.context.fn) cls.outer = this.memberClass;
     else if (this.context.fn) cls.localScopes = [...this.context.scopes, ...this.context.outerScopes];
   }
@@ -537,6 +588,7 @@ export class Compiler extends StatementCompiler {
     if (node.type === 'type_identifier' && !this.findName(node.text, true)) {
       const friend = new ClassInfo(node.text, 'class');
       friend.row = node.row;
+      friend.namespace = this.namespace;
       this.globalScope.names.set(node.text, { kind: 'class', cls: friend });
       return classType(friend);
     }
@@ -813,7 +865,11 @@ export class Compiler extends StatementCompiler {
     if (this.hasSpecifier(node, 'constexpr') && !this.context.fn) this.unsupported(node.row, 'constexpr の関数');
     if (ret.kind === 'array') this.error(node.row, '関数は配列を返せません。');
     const params = this.parameters(fieldOf(declarator, 'parameters') as Syntax);
-    const displayName = owner ? `${owner.name}::${name}` : name;
+    const displayName = owner
+      ? `${owner.name}::${name}`
+      : this.namespace
+        ? `${this.namespace.qualifiedName}::${name}`
+        : name;
     if ((specifiers.length > 0 || qualifiers.has('const')) && !owner) {
       this.error(
         node.row,
@@ -826,6 +882,7 @@ export class Compiler extends StatementCompiler {
       params,
       ret,
       owner,
+      namespace: owner ? undefined : this.namespace,
       isExplicit: this.isExplicitSpecified(node),
       isConversion: declarator.type === 'abstract_function_declarator' && name.startsWith('operator '),
       isStatic: false,
@@ -1615,6 +1672,21 @@ export class Compiler extends StatementCompiler {
   private outOfClassDefinition(node: Syntax, qualified: Syntax): void {
     const scopeNode = fieldOf(qualified, 'scope') as Syntax;
     const scope = this.resolveScope(scopeNode);
+    if (scope.kind === 'namespace' && scope.ns) {
+      // `void geo::f() { ... }` defines a function its namespace declares.
+      const saved = this.namespace;
+      this.namespace = scope.ns;
+      try {
+        const declared = this.applyDeclarator(this.specifiedType(node, true), fieldOf(node, 'declarator') as Syntax);
+        const existing = scope.ns.scope.names.get(declared.name ?? '');
+        if (existing?.kind !== 'functions')
+          return this.error(node.row, `${qualified.text} は名前空間 ${scope.ns.qualifiedName} で宣言されていません。`);
+        this.compileFunction(this.declareFunction(node, declared, true), node);
+      } finally {
+        this.namespace = saved;
+      }
+      return;
+    }
     if (scope.kind !== 'class') return this.unsupported(node.row, '名前空間のメンバの定義');
     const cls = scope.cls;
     if (cls.library) return this.error(node.row, `標準ライブラリのクラス ${cls.name} のメンバは定義できません。`);
@@ -1720,6 +1792,17 @@ export class Compiler extends StatementCompiler {
   }
 
   private compileFunctionBody(fn: FunctionInfo, node: Syntax): void {
+    // A function's body sees the names of the namespace it is a member of.
+    const savedNamespace = this.namespace;
+    this.namespace = fn.namespace ?? namespaceOf(fn.owner);
+    try {
+      this.compileFunctionBodyIn(fn, node);
+    } finally {
+      this.namespace = savedNamespace;
+    }
+  }
+
+  private compileFunctionBodyIn(fn: FunctionInfo, node: Syntax): void {
     const cls = fn.owner;
     const context = new FunctionContext(fn, cls, fn.isConstructor || fn.isDestructor ? VOID : fn.ret);
     context.captures = this.lambdaCaptures.get(fn);
@@ -1922,7 +2005,7 @@ export class Compiler extends StatementCompiler {
       return this.error(declarator.row, `配列 ${name} の大きさを書いてください。`);
     if (type.kind === 'void') return this.error(declarator.row, `void 型の変数 ${name} は作れません。`);
     const isConstant = isConstType(type) && isArithmetic(type);
-    const global = this.declareStaticStorage(name, type, declarator.row, !isConstant);
+    const global = this.declareStaticStorage(this.namespacedName(name), type, declarator.row, !isConstant);
     global.isDefined = true;
     global.isConstexpr = isConstexpr;
     global.isConstexprPointer = isConstexpr && type.kind === 'pointer';
@@ -1943,7 +2026,7 @@ export class Compiler extends StatementCompiler {
   ): Type {
     const { row } = declarator;
     const binding = this.bindReference(name, declared, declarator, this.globalScope.names);
-    const global = this.declareStaticStorage(name, binding.type, row, true);
+    const global = this.declareStaticStorage(this.namespacedName(name), binding.type, row, true);
     global.isDefined = true;
     this.globalScope.names.set(name, { kind: 'global', global, isReference: true });
     this.initializeFileReference(global, binding, row, isConstexpr);
@@ -2003,6 +2086,11 @@ export class Compiler extends StatementCompiler {
       if (!(box.value instanceof Ptr)) box.value = run(frame);
       return;
     };
+  }
+
+  /** A name with the namespace whose declarations are compiled now, such as `cfg::level`, as the trace shows it. */
+  private namespacedName(name: string): string {
+    return this.namespace ? `${this.namespace.qualifiedName}::${name}` : name;
   }
 
   declareStaticStorage(name: string, type: Type, row: number, isShown: boolean): GlobalInfo {
@@ -2731,10 +2819,18 @@ export class Compiler extends StatementCompiler {
   // Names -------------------------------------------------------------------------------------------------------------
 
   protected withArgumentDependentLookup(name: string, functions: FunctionInfo[], args: Expr[]): FunctionInfo[] {
-    if (!args.some((arg) => this.library.isStdType(arg.type))) return functions;
-    const found = this.findStdName(name);
-    if (found?.kind !== 'functions') return functions;
-    return [...new Set([...functions, ...found.functions])];
+    const found = new Set(functions);
+    if (args.some((arg) => this.library.isStdType(arg.type))) {
+      const std = this.findStdName(name);
+      if (std?.kind === 'functions') for (const fn of std.functions) found.add(fn);
+    }
+    // The namespaces of the arguments' classes add their functions of that name (C++20 [basic.lookup.argdep]).
+    for (const arg of args) {
+      const ns = namespaceOf(argumentClass(arg.type));
+      const member = ns?.member(name);
+      if (member?.kind === 'functions') for (const fn of member.functions) found.add(fn);
+    }
+    return [...found];
   }
 
   checkDefined(fn: FunctionInfo, row: number): void {
@@ -2999,6 +3095,19 @@ function intMaxOf(type: Extract<Type, { kind: 'int' }>): bigint {
 }
 
 /** The function declarator of a declarator, which pointer and reference declarators may wrap (`int* f()`). */
+/** The class whose namespace argument-dependent lookup searches for an argument of a type. */
+function argumentClass(type: Type): ClassInfo | undefined {
+  const target = type.kind === 'pointer' || type.kind === 'reference' ? type.to : type;
+  return target.kind === 'class' && !target.cls.library ? target.cls : undefined;
+}
+
+/** The namespace a class is a member of, through the classes it is nested in. */
+function namespaceOf(cls: ClassInfo | undefined): NamespaceInfo | undefined {
+  let current = cls;
+  while (current?.outer) current = current.outer;
+  return current?.namespace;
+}
+
 /** The class a name denotes, as a class or as a type. */
 function classOfEntity(entity: Entity): ClassInfo | undefined {
   if (entity.kind === 'class') return entity.cls;
