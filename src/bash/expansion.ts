@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- Keeps word, brace, tilde, parameter, arithmetic, and field-splitting expansions in one cohesive Expander class.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { ArithmeticSource, BackquoteSyntaxError, ParameterExpansion, Word, WordPart } from './ast';
 import { expandBraces } from './braces';
@@ -20,7 +21,6 @@ export type ParameterValue =
   | { kind: 'scalar'; value: string | undefined }
   | { kind: 'list'; values: string[]; star: boolean; positional?: boolean };
 
-/** The characters that make a word a pathname pattern, whose expansion would read the file system. */
 const SPECIAL_PARAMETERS = new Set(['@', '*', '#', '?', '-', '$', '!', '0', '_']);
 
 /** Expands words as Bash does: braces, parameters, arithmetic, command substitutions, splitting, and quotes. */
@@ -100,7 +100,6 @@ export class Expander {
     return matchesPattern(pattern, text, () => this.spend());
   }
 
-  /** The elements of `name=(...)`: words that `[key]=value` makes keyed, and plain words split into fields. */
   /**
    * The elements of `name=(...)` up to the first empty key of an associative array, which Bash reports after it
    * assigns the elements before it. A declaration builtin gets the elements quoted again, as its error shows them.
@@ -149,6 +148,7 @@ export class Expander {
     return pieces;
   }
 
+  // code-gauge-allow functionNcss -- Dispatches each WordPart variant during word expansion.
   private expandPart(part: WordPart, inDouble: boolean): Piece[] {
     this.spend();
     switch (part.kind) {
@@ -188,7 +188,6 @@ export class Expander {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Scans unquoted tilde prefixes at the start of a word and after unquoted colons in assignments.
   checkTilde(parts: WordPart[], afterColon: boolean): void {
     let atPrefix = true;
     for (const [index, part] of parts.entries()) {
@@ -257,7 +256,7 @@ export class Expander {
     return this.expandSubscriptString(subscript);
   }
 
-  // code-gauge-allow functionNcss -- One case per special parameter, as Bash's param_expand.
+  // code-gauge-allow functionNcss -- One case per special parameter and subscript form.
   parameterValue(name: string, subscript: string | undefined, expansion?: ParameterExpansion): ParameterValue {
     const { shell } = this;
     if (subscript !== undefined) {
@@ -338,7 +337,7 @@ export class Expander {
       if (expansion.operator === undefined) this.checkIndirectReference(name, subscript);
       return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, '', inDouble);
     }
-    const target = this.indirectTarget(reference, expansion);
+    const target = this.indirectTarget(reference);
     return this.finishIndirect(
       expansion,
       this.parameterValue(target.name, target.subscript, expansion),
@@ -354,7 +353,7 @@ export class Expander {
     inDouble: boolean
   ): Piece[] {
     if (expansion.operator === undefined) return this.valuePieces(value, inDouble);
-    const target = targetName ? this.indirectTarget(targetName, expansion) : { name: '', subscript: undefined };
+    const target = targetName ? this.indirectTarget(targetName) : { name: '', subscript: undefined };
     return applyOperator(this, this.shell, expansion, value, target.name, target.subscript, inDouble);
   }
 
@@ -364,14 +363,10 @@ export class Expander {
     if (!this.shell.findVariable(name)) this.shell.discard(`${name}[${subscript}]: invalid indirect expansion`);
   }
 
-  private indirectTarget(
-    reference: string,
-    expansion: ParameterExpansion
-  ): { name: string; subscript: string | undefined } {
+  private indirectTarget(reference: string): { name: string; subscript: string | undefined } {
     const split = this.shell.splitSubscript(reference);
     if (split && isIdentifier(split.name)) return { name: split.name, subscript: split.subscript };
     if (!isValidParameterName(reference)) this.shell.discard(`${reference}: invalid variable name`);
-    void expansion;
     return { name: reference, subscript: undefined };
   }
 
@@ -519,6 +514,7 @@ function isValidParameterName(name: string): boolean {
   return isIdentifier(name) || /^[0-9]+$/.test(name) || SPECIAL_PARAMETERS.has(name);
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Scans literal word parts from a ~ to verify no backslash or expansion quotes the tilde prefix.
 function hasUnquotedTildePrefix(parts: WordPart[], partIndex: number, from: number, afterColon: boolean): boolean {
   for (let p = partIndex; p < parts.length; p++) {
     const part = parts[p];

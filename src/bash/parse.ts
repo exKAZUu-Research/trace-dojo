@@ -107,66 +107,68 @@ export function findBashTraceAnnotations(source: string): TraceAnnotation[] {
  * Parses an associative-array subscript taken from an arithmetic string (`let 'a[$k]+=1'`, `let 'a["x"]+=1'`) into
  * word parts whose quotes are stripped and whose `$` / backquote expansions run while keeping plain spaces intact.
  */
-// code-gauge-allow functionCognitiveComplexity -- Scans quotes, escapes, and `$`/backquote expansions across raw subscript text.
 export function parseSubscriptWordParts(raw: string): WordPart[] {
   const parts: WordPart[] = [];
   const text = new SourceText(raw);
   text.parseSubstitution = (start) => skipBalanced(text, start - 1, '(', ')');
   for (let i = 0; i < raw.length;) {
-    const c = raw[i];
-    if (c === "'") {
-      const close = raw.indexOf("'", i + 1);
-      if (close === -1) {
-        parts.push({ kind: 'single', text: "'" });
-        i++;
-      } else {
-        parts.push({ kind: 'single', text: raw.slice(i + 1, close) });
-        i = close + 1;
-      }
-      continue;
-    }
-    if (c === '\\') {
-      if (i + 1 < raw.length && raw[i + 1] !== '\n') parts.push({ kind: 'single', text: raw[i + 1] });
-      else if (i + 1 >= raw.length) parts.push({ kind: 'single', text: '\\' });
-      i += 2;
-      continue;
-    }
-    if (c === '$' && raw[i + 1] === "'") {
-      let close = i + 2;
-      while (close < raw.length && raw[close] !== "'") close += raw[close] === '\\' ? 2 : 1;
-      if (close < raw.length) {
-        parts.push({ kind: 'ansiC', text: decodeAnsiC(raw.slice(i + 2, close)) });
-        i = close + 1;
-        continue;
-      }
-    }
-    if (
-      c === '"' ||
-      c === '`' ||
-      (c === '$' && (raw[i + 1] === '"' || raw[i + 1] === '{' || raw[i + 1] === '(' || raw[i + 1] === '['))
-    ) {
-      let end = i + 1;
-      try {
-        end = skipWordPiece(text, i);
-      } catch {
-        end = raw.length;
-      }
-      parts.push(...parsePiece(raw.slice(i, end)));
-      i = end;
-      continue;
-    }
-    if (c === '$') {
-      const match = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@#?*!$-])/.exec(raw.slice(i));
-      if (match) {
-        parts.push({ kind: 'parameter', name: match[0].slice(1), argument: [], text: match[0], braced: false });
-        i += match[0].length;
-        continue;
-      }
-    }
-    parts.push({ kind: 'single', text: c });
-    i++;
+    const piece = readSubscriptPiece(raw, i, text);
+    parts.push(...piece.parts);
+    i = piece.next;
   }
   return parts;
+}
+
+function readSubscriptPiece(raw: string, i: number, text: SourceText): { parts: WordPart[]; next: number } {
+  const c = raw[i];
+  if (c === "'") return readSingleQuotedSubscript(raw, i);
+  if (c === '\\') return readEscapedSubscript(raw, i);
+  if (c === '$' && raw[i + 1] === "'") {
+    const ansi = tryReadAnsiCSubscript(raw, i);
+    if (ansi) return ansi;
+  }
+  if (c === '"' || c === '`' || (c === '$' && `"{([`.includes(raw[i + 1] ?? ''))) {
+    return readTreeParsedSubscript(raw, i, text);
+  }
+  if (c === '$') {
+    const match = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@#?*!$-])/.exec(raw.slice(i));
+    if (match) {
+      return {
+        parts: [{ kind: 'parameter', name: match[0].slice(1), argument: [], text: match[0], braced: false }],
+        next: i + match[0].length,
+      };
+    }
+  }
+  return { parts: [{ kind: 'single', text: c }], next: i + 1 };
+}
+
+function readSingleQuotedSubscript(raw: string, i: number): { parts: WordPart[]; next: number } {
+  const close = raw.indexOf("'", i + 1);
+  if (close === -1) return { parts: [{ kind: 'single', text: "'" }], next: i + 1 };
+  return { parts: [{ kind: 'single', text: raw.slice(i + 1, close) }], next: close + 1 };
+}
+
+function readEscapedSubscript(raw: string, i: number): { parts: WordPart[]; next: number } {
+  if (i + 1 >= raw.length) return { parts: [{ kind: 'single', text: '\\' }], next: i + 2 };
+  if (raw[i + 1] === '\n') return { parts: [], next: i + 2 };
+  return { parts: [{ kind: 'single', text: raw[i + 1] }], next: i + 2 };
+}
+
+function tryReadAnsiCSubscript(raw: string, i: number): { parts: WordPart[]; next: number } | undefined {
+  let close = i + 2;
+  while (close < raw.length && raw[close] !== "'") close += raw[close] === '\\' ? 2 : 1;
+  if (close >= raw.length) return undefined;
+  return { parts: [{ kind: 'ansiC', text: decodeAnsiC(raw.slice(i + 2, close)) }], next: close + 1 };
+}
+
+function readTreeParsedSubscript(raw: string, i: number, text: SourceText): { parts: WordPart[]; next: number } {
+  let end = i + 1;
+  try {
+    end = skipWordPiece(text, i);
+  } catch {
+    end = raw.length;
+  }
+  return { parts: parsePiece(raw.slice(i, end)), next: end };
 }
 
 function parsePiece(piece: string): WordPart[] {

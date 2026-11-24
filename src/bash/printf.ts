@@ -1,7 +1,14 @@
 import { formatFloatField } from '../interpreter/floatFormat';
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { charactersOf } from './characters';
-import { ansicQuote, ansicShouldQuote, backslashQuote, singleQuote } from './quoting';
+import {
+  ansicQuote,
+  ansicShouldQuote,
+  backslashQuote,
+  readRadixDigits,
+  SIMPLE_ESCAPE_BYTES,
+  singleQuote,
+} from './quoting';
 import { UnsupportedFeatureError } from './unsupported';
 
 const encoder = new TextEncoder();
@@ -32,15 +39,17 @@ interface EscapeResult {
   stop: boolean;
 }
 
-const SIMPLE_ESCAPES: Record<string, number> = { a: 7, b: 8, e: 27, E: 27, f: 12, n: 10, r: 13, t: 9, v: 11, '\\': 92 };
 const BACKSLASH: EscapeResult = { out: [92], length: 0, stop: false };
 
-/** The escapes of `printf`'s format and of `%b`, as Bash's `tescape`; `forB` reads `\c` and `\0nnn` as `%b` does. */
-// code-gauge-allow functionCognitiveComplexity -- One case per escape of printf's format and %b, as Bash's tescape.
+/** Decodes a backslash escape in `printf`'s format string or `%b` argument (`forB` enables `\c` and `\0nnn`). */
+// code-gauge-allow functionCognitiveComplexity -- Dispatches simple escapes, octal escapes, hex/Unicode escapes, quote escapes, and %b's \c.
 function escape(bytes: number[], start: number, forB: boolean, host: PrintfHost): EscapeResult {
   const c = String.fromCodePoint(bytes[start]);
-  if (c in SIMPLE_ESCAPES) return { out: [SIMPLE_ESCAPES[c]], length: 1, stop: false };
-  if (/[0-7]/.test(c)) return octalEscape(bytes, start, forB);
+  if (Object.hasOwn(SIMPLE_ESCAPE_BYTES, c)) return { out: [SIMPLE_ESCAPE_BYTES[c]], length: 1, stop: false };
+  if (/[0-7]/.test(c)) {
+    const { value, count } = readRadixDigits(bytes, start, bytes[start] === 48 && forB ? 4 : 3, 8);
+    return { out: [value & 0xff], length: count, stop: false };
+  }
   if (c === 'x')
     return hexEscape(bytes, start, 2, host, String.raw`missing hex digit for \x`, (value) => [value & 0xff]);
   if (c === 'u' || c === 'U') {
@@ -53,18 +62,6 @@ function escape(bytes: number[], start: number, forB: boolean, host: PrintfHost)
   return BACKSLASH;
 }
 
-/** `\nnn`, or `\0nnn` in `%b`, whose leading zero does not count among its three digits. */
-function octalEscape(bytes: number[], start: number, forB: boolean): EscapeResult {
-  let value = bytes[start] - 48;
-  let index = start + 1;
-  let remaining = 2 + (value === 0 && forB ? 1 : 0);
-  while (remaining-- > 0 && index < bytes.length && bytes[index] >= 48 && bytes[index] <= 55) {
-    value = value * 8 + bytes[index] - 48;
-    index++;
-  }
-  return { out: [value & 0xff], length: index - start, stop: false };
-}
-
 /** `\xHH`, `\uHHHH`, and `\UHHHHHHHH`, which report an error and stay text without a digit. */
 function hexEscape(
   bytes: number[],
@@ -74,20 +71,13 @@ function hexEscape(
   missing: string,
   encode: (value: number) => number[]
 ): EscapeResult {
-  let value = 0;
-  let index = start + 1;
-  while (index < bytes.length && index <= start + maxDigits && isHex(bytes[index])) {
-    value = value * 16 + hexValue(bytes[index++]);
-  }
-  if (index === start + 1) {
+  const { value, count } = readRadixDigits(bytes, start + 1, maxDigits, 16);
+  if (count === 0) {
     host.error(missing);
     return BACKSLASH;
   }
-  return { out: encode(value), length: index - start, stop: false };
+  return { out: encode(value), length: 1 + count, stop: false };
 }
-
-const isHex = (byte: number): boolean => /[0-9A-Fa-f]/.test(String.fromCodePoint(byte));
-const hexValue = (byte: number): number => Number.parseInt(String.fromCodePoint(byte), 16);
 
 /** `%b`'s expansion of an argument's escapes, telling whether a `\c` ended all output. */
 function expandB(text: string, host: PrintfHost): { out: number[]; stop: boolean } {

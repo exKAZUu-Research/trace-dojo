@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- Keeps POSIX ERE parsing, NFA compilation, and single-pass tagged matching in one self-contained module.
 /**
  * POSIX extended regular expressions as macOS's `regcomp` reads them for `[[ s =~ re ]]`: the leftmost match that is
  * longest, `.` matching any character, a backslash quoting the character after it, and no `\d`-style classes.
@@ -149,15 +150,10 @@ class RegexParser {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- POSIX bracket expressions with classes, equivalence classes, collating symbols, and ranges.
-  // code-gauge-allow functionNcss -- POSIX bracket expressions with classes, equivalence classes, collating symbols, and ranges.
   private parseSet(): RegexNode {
     const tests: ((c: string) => boolean)[] = [];
-    let negated = false;
-    if (this.chars[this.position] === '^') {
-      negated = true;
-      this.position++;
-    }
+    const negated = this.chars[this.position] === '^';
+    if (negated) this.position++;
     let first = true;
     for (;;) {
       const c = this.chars[this.position];
@@ -167,46 +163,46 @@ class RegexParser {
         break;
       }
       first = false;
-      if (
-        c === '[' &&
-        (this.chars[this.position + 1] === ':' ||
-          this.chars[this.position + 1] === '=' ||
-          this.chars[this.position + 1] === '.')
-      ) {
-        const type = this.chars[this.position + 1];
-        const rest = this.chars.slice(this.position + 2).join('');
-        const close = rest.indexOf(`${type}]`);
-        if (close === -1) throw new RegexSyntaxError('brackets ([ ]) not balanced');
-        const name = rest.slice(0, close);
-        this.position += 2 + charactersOf(name).length + 2;
-        if (type === ':') {
-          const test = Object.hasOwn(CLASSES, name) ? CLASSES[name] : undefined;
-          if (!test) throw new RegexSyntaxError('invalid character class');
-          tests.push(test);
-        } else tests.push((ch) => ch === name);
+      const subbracket = this.tryParseSubbracket(c);
+      if (subbracket) {
+        tests.push(subbracket);
         continue;
       }
       this.position++;
-      if (
-        this.chars[this.position] === '-' &&
-        this.chars[this.position + 1] !== undefined &&
-        this.chars[this.position + 1] !== ']'
-      ) {
+      if (this.chars[this.position] === '-' && (this.chars[this.position + 1] ?? ']') !== ']') {
         const end = this.chars[this.position + 1];
         this.position += 2;
-        const low = c.codePointAt(0) as number;
-        const high = end.codePointAt(0) as number;
-        if (low > high) throw new RegexSyntaxError('invalid character range');
-        tests.push((ch) => {
-          const code = ch.codePointAt(0) as number;
-          return code >= low && code <= high;
-        });
+        tests.push(makeCodeRangeTest(c, end));
         continue;
       }
       tests.push((ch) => ch === c);
     }
     return { kind: 'set', negated, test: (ch) => tests.some((test) => test(ch)) };
   }
+
+  private tryParseSubbracket(c: string): ((ch: string) => boolean) | undefined {
+    const type = this.chars[this.position + 1];
+    if (c !== '[' || (type !== ':' && type !== '=' && type !== '.')) return undefined;
+    const rest = this.chars.slice(this.position + 2).join('');
+    const close = rest.indexOf(`${type}]`);
+    if (close === -1) throw new RegexSyntaxError('brackets ([ ]) not balanced');
+    const name = rest.slice(0, close);
+    this.position += 2 + charactersOf(name).length + 2;
+    if (type !== ':') return (ch) => ch === name;
+    const test = Object.hasOwn(CLASSES, name) ? CLASSES[name] : undefined;
+    if (!test) throw new RegexSyntaxError('invalid character class');
+    return test;
+  }
+}
+
+function makeCodeRangeTest(startChar: string, endChar: string): (ch: string) => boolean {
+  const low = startChar.codePointAt(0) as number;
+  const high = endChar.codePointAt(0) as number;
+  if (low > high) throw new RegexSyntaxError('invalid character range');
+  return (ch) => {
+    const code = ch.codePointAt(0) as number;
+    return code >= low && code <= high;
+  };
 }
 
 /** A match: the start and end of the whole match and of each group, by character index, or -1 when unset. */
@@ -250,6 +246,7 @@ interface Thread {
 }
 
 /** Finds the leftmost-longest match, choosing among equally long ones the one whose earlier subpatterns are longer. */
+// code-gauge-allow functionCognitiveComplexity -- Single-pass NFA simulation spawning start threads and pruning paths dominated by an earlier match.
 export function searchRegex(regex: CompiledRegex, text: string, spend: () => void): RegexMatch | undefined {
   const nfa = (regex.nfa ??= buildNfa(regex, spend));
   const chars = charactersOf(text);
@@ -439,6 +436,7 @@ function stepChar(
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Compares overall start index and then pre-order subexpression history chunk by chunk.
+// code-gauge-allow functionNcss -- Compares overall start index and chunked (slot, start, end) subexpression triples.
 function betterThread(candidate: Thread, existing: Thread): boolean {
   if (candidate.start !== existing.start) return candidate.start < existing.start;
   const minEntries = Math.min(candidate.entryCount, existing.entryCount);
@@ -498,6 +496,7 @@ interface SlotAssignment {
   optionSlots: Map<RegexNode, number[]>;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Assigns pre-order subexpression slots across groups, repetitions, concatenations, and alternations.
 function assignSlots(root: RegexNode): SlotAssignment {
   let count = 0;
   let maxSeenGroup = 0;
@@ -528,7 +527,7 @@ function assignSlots(root: RegexNode): SlotAssignment {
   return { count, rangeOf, optionSlots };
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Compiles each regex AST node kind into Thompson NFA states with POSIX subpattern tags.
+// code-gauge-allow functionNcss -- Compiles each regex AST node kind into Thompson NFA states with POSIX subpattern tags.
 function compileNode(node: RegexNode, out: number, builder: NfaBuilder): number {
   const { add, slotMap, trackCaptures } = builder;
   switch (node.kind) {

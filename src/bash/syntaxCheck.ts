@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss -- One port of Bash's grammar, whose rules call each other as its yacc rules do.
+// code-gauge-allow-file fileNcss -- Mutual recursion across shell command, compound construct, and token-stream validation rules.
 /**
- * Bash's syntax errors, found by a port of the grammar of `parse.y` over a port of how its lexer reads words, so that
- * a program fails where Bash's does, with Bash's message and line. The tree-sitter grammar builds the statements, but
- * it accepts and rejects some programs differently and cannot tell which token Bash stops at.
+ * Clean-room pre-execution Bash syntax validator from POSIX.1-2017 XCU §2.3/§2.10 and GNU Bash Reference Manual §3.2–3.4.
+ * Supplements tree-sitter-bash where error recovery or token boundaries differ from Bash 5.3, while collecting backquoted
+ * substitutions whose bodies Bash parses only when executed.
  */
 import { parseConditional } from './conditionalSyntax';
 import {
@@ -15,47 +15,38 @@ import {
   UnknownSyntax,
 } from './syntaxWords';
 
-/**
- * Checks a program as Bash's parser reads it, giving the first syntax error Bash reports, `undefined` when Bash reads
- * it, or `'unknown'` for a program with a nesting too deep to read; and the backquoted command substitutions it
- * found, whose bodies Bash reads only when it runs them.
- */
 export function checkBashSyntax(source: string): {
   error: BashSyntaxError | 'unknown' | undefined;
   backquotes: { start: number; end: number }[];
 } {
   const text = new SourceText(source);
-  text.parseSubstitution = (start) => new CommandParser(text, start, true).parseSubstitution();
-  return { error: firstError(text), backquotes: text.backquotes };
+  text.parseSubstitution = (start) => new ShellGrammarValidator(text, start, true).validateSubstitution();
+  return { error: detectSyntaxError(text), backquotes: text.backquotes };
 }
 
-function firstError(text: SourceText): BashSyntaxError | 'unknown' | undefined {
+function detectSyntaxError(text: SourceText): BashSyntaxError | 'unknown' | undefined {
   try {
-    new CommandParser(text, 0, false).parseProgram();
+    new ShellGrammarValidator(text, 0, false).validateScript();
     return undefined;
   } catch (error) {
     if (error instanceof SyntaxFailure) return { row: error.row, text: error.text, near: error.near };
-    if (error instanceof UnknownSyntax) return 'unknown';
-    // The stack's size depends on where the program runs (a worker thread has less), so a nesting within the limit
-    // may still exhaust it; the tree's own check then rejects the program as too deep.
-    if (error instanceof RangeError) return 'unknown';
+    if (error instanceof UnknownSyntax || error instanceof RangeError) return 'unknown';
     throw error;
   }
 }
 
-type TokenKind = 'word' | 'number' | 'operator' | 'newline' | 'eof';
+type ShellTokenKind = 'word' | 'ioNumber' | 'operator' | 'newline' | 'eof';
 
-interface Token {
-  kind: TokenKind;
-  text: string;
+interface ShellToken {
+  kind: ShellTokenKind;
+  value: string;
   row: number;
   start: number;
   end: number;
-  /** Whether a word has quotes, which keep it from being a reserved word. */
   quoted: boolean;
 }
 
-const OPERATORS = [
+const SHELL_OPERATORS = [
   ';;&',
   ';;',
   ';&',
@@ -81,121 +72,116 @@ const OPERATORS = [
   '(',
   ')',
 ];
-const REDIRECTIONS = new Set(['<', '>', '>>', '<>', '>|', '&>', '&>>', '<&', '>&', '<<<', '<<', '<<-']);
-const METACHARACTERS = new Set([' ', '\t', '\n', ';', '&', '|', '<', '>', '(', ')']);
-const DECLARATION_BUILTINS = new Set(['declare', 'typeset', 'local', 'export', 'readonly']);
-const ASSIGNMENT_PREFIX = /^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=$/;
+const REDIRECTION_OPERATORS = new Set(['<', '>', '>>', '<>', '>|', '&>', '&>>', '<&', '>&', '<<<', '<<', '<<-']);
+const WORD_BREAK_CHARS = new Set([' ', '\t', '\n', ';', '&', '|', '<', '>', '(', ')']);
+const DECLARATION_NAMES = new Set(['declare', 'typeset', 'local', 'export', 'readonly']);
+const COMPOUND_LHS_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=$/;
 
-/** Bash's lexer for commands: words, operators, and newlines, skipping blanks, comments, and joined lines. */
-class CommandLexer {
-  /** Whether the word read next ends a here-document, and whether the body's leading tabs are removed (`<<-`). */
-  private delimiterNext: { stripsTabs: boolean } | undefined;
-  /** The here-documents of the current line, whose bodies follow its newline. */
-  private readonly hereDocuments: { delimiter: string; stripsTabs: boolean }[] = [];
+class ShellTokenStream {
+  private pendingHeredocSpec: { stripLeadingTabs: boolean } | undefined;
+  private readonly queuedHeredocs: { endMarker: string; stripLeadingTabs: boolean }[] = [];
 
   constructor(
     private readonly text: SourceText,
-    public index: number
+    public position: number
   ) {}
 
-  /** @param assignmentAllowed Whether `name=(` starts a compound assignment, as before a command's name. */
-  next(assignmentAllowed: boolean): Token {
+  readNext(allowCompoundArray: boolean): ShellToken {
     const { source } = this.text;
-    this.index = skipBlanks(source, this.index);
-    const start = this.index;
+    this.position = skipBlanks(source, this.position);
+    const start = this.position;
     const row = this.text.rowAt(start);
-    if (start >= source.length) return this.token('eof', '', row, start, false);
-    const c = source[start];
-    if (c === '\n') {
-      this.index++;
-      this.skipHereDocuments();
-      return this.token('newline', '\n', row, start, false);
+    if (start >= source.length) return this.makeToken('eof', '', row, start, false);
+    const ch = source[start];
+    if (ch === '\n') {
+      this.position++;
+      this.consumeQueuedHeredocs();
+      return this.makeToken('newline', '\n', row, start, false);
     }
-    if ((c === '<' || c === '>') && source[start + 1] === '(') return this.word(assignmentAllowed);
-    const operator = OPERATORS.find((candidate) => source.startsWith(candidate, start));
-    if (operator) {
-      if (operator === '<<' || operator === '<<-') this.delimiterNext = { stripsTabs: operator === '<<-' };
-      this.index += operator.length;
-      return this.token('operator', operator, row, start, false);
+    if ((ch === '<' || ch === '>') && source[start + 1] === '(') return this.scanWord(allowCompoundArray);
+    const op = SHELL_OPERATORS.find((candidate) => source.startsWith(candidate, start));
+    if (op) {
+      if (op === '<<' || op === '<<-') this.pendingHeredocSpec = { stripLeadingTabs: op === '<<-' };
+      this.position += op.length;
+      return this.makeToken('operator', op, row, start, false);
     }
-    const word = this.word(assignmentAllowed);
-    if (this.delimiterNext) {
-      // Quotes in the delimiter only keep the body from being expanded; the line that ends it has none.
-      this.hereDocuments.push({ delimiter: word.text.replaceAll(/\\(.)|["']/g, '$1'), ...this.delimiterNext });
-      this.delimiterNext = undefined;
+    const word = this.scanWord(allowCompoundArray);
+    if (this.pendingHeredocSpec) {
+      this.queuedHeredocs.push({
+        endMarker: word.value.replaceAll(/\\(.)|["']/g, '$1'),
+        stripLeadingTabs: this.pendingHeredocSpec.stripLeadingTabs,
+      });
+      this.pendingHeredocSpec = undefined;
     }
     return word;
   }
 
-  /** Skips the bodies of the line's here-documents, each up to the line that is its delimiter, or the end of the file. */
-  private skipHereDocuments(): void {
-    for (const { delimiter, stripsTabs } of this.hereDocuments.splice(0)) {
+  private consumeQueuedHeredocs(): void {
+    for (const { endMarker, stripLeadingTabs } of this.queuedHeredocs.splice(0)) {
       let line: string | undefined;
-      do line = this.readLine();
-      while (line !== undefined && (stripsTabs ? line.replace(/^\t+/, '') : line) !== delimiter);
+      do line = this.consumeRawLine();
+      while (line !== undefined && (stripLeadingTabs ? line.replace(/^\t+/, '') : line) !== endMarker);
     }
   }
 
-  /** The next line without its newline, or `undefined` at the end of the file. */
-  private readLine(): string | undefined {
+  private consumeRawLine(): string | undefined {
     const { source } = this.text;
-    if (this.index >= source.length) return undefined;
-    const lineEnd = source.indexOf('\n', this.index);
-    const end = lineEnd === -1 ? source.length : lineEnd;
-    const line = source.slice(this.index, end);
-    this.index = lineEnd === -1 ? end : end + 1;
-    return line;
+    if (this.position >= source.length) return undefined;
+    const nl = source.indexOf('\n', this.position);
+    const end = nl === -1 ? source.length : nl;
+    const content = source.slice(this.position, end);
+    this.position = nl === -1 ? end : end + 1;
+    return content;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- A port of Bash's read_token_word: process substitutions, compound assignments, joined lines, and quotes.
-  private word(assignmentAllowed: boolean): Token {
+  // code-gauge-allow functionCognitiveComplexity -- Scans shell words including process substitutions, compound array literals, line continuations, and quoting.
+  private scanWord(allowCompoundArray: boolean): ShellToken {
     const { source } = this.text;
-    const start = this.index;
+    const start = this.position;
     let quoted = false;
-    while (this.index < source.length) {
-      const c = source[this.index];
-      if ((c === '<' || c === '>') && source[this.index + 1] === '(') {
-        this.index = this.text.parseSubstitution(this.index + 2);
+    while (this.position < source.length) {
+      const ch = source[this.position];
+      if ((ch === '<' || ch === '>') && source[this.position + 1] === '(') {
+        this.position = this.text.parseSubstitution(this.position + 2);
         continue;
       }
-      if (c === '(' && assignmentAllowed && ASSIGNMENT_PREFIX.test(source.slice(start, this.index))) {
-        this.index = this.compoundAssignment(this.index);
+      if (ch === '(' && allowCompoundArray && COMPOUND_LHS_PATTERN.test(source.slice(start, this.position))) {
+        this.position = this.scanCompoundArrayBody(this.position);
         continue;
       }
-      if (METACHARACTERS.has(c)) break;
-      if (c === '\\' && source[this.index + 1] === '\n') {
-        this.index += 2;
+      if (WORD_BREAK_CHARS.has(ch)) break;
+      if (ch === '\\' && source[this.position + 1] === '\n') {
+        this.position += 2;
         continue;
       }
-      if (`'"\\\`$`.includes(c)) quoted ||= c !== '$';
-      this.index = skipWordPiece(this.text, this.index);
+      if (`'"\\\`$`.includes(ch)) quoted ||= ch !== '$';
+      this.position = skipWordPiece(this.text, this.position);
     }
-    const word = source.slice(start, this.index);
-    const kind = /^\d+$/.test(word) && (source[this.index] === '<' || source[this.index] === '>') ? 'number' : 'word';
-    return this.token(kind, word, this.text.rowAt(start), start, quoted);
+    const value = source.slice(start, this.position);
+    const nextChar = source[this.position];
+    const kind: ShellTokenKind = /^\d+$/.test(value) && (nextChar === '<' || nextChar === '>') ? 'ioNumber' : 'word';
+    return this.makeToken(kind, value, this.text.rowAt(start), start, quoted);
   }
 
-  /** `name=(...)`: words and newlines up to `)`, where any other operator is an error. */
-  private compoundAssignment(open: number): number {
-    this.index = open + 1;
+  private scanCompoundArrayBody(openIndex: number): number {
+    this.position = openIndex + 1;
     for (;;) {
-      const token = this.next(false);
-      if (token.kind === 'eof') this.text.unclosed(open, ')');
-      if (token.kind === 'operator' && token.text === ')') return this.index;
-      if (token.kind === 'operator') {
-        this.text.fail(token.row, `syntax error near unexpected token \`${token.text === '((' ? '(' : token.text}'`);
+      const inner = this.readNext(false);
+      if (inner.kind === 'eof') this.text.unclosed(openIndex, ')');
+      if (inner.kind === 'operator' && inner.value === ')') return this.position;
+      if (inner.kind === 'operator') {
+        const shown = inner.value === '((' ? '(' : inner.value;
+        this.text.fail(inner.row, `syntax error near unexpected token \`${shown}'`);
       }
     }
   }
 
-  private token(kind: TokenKind, text: string, row: number, start: number, quoted: boolean): Token {
-    return { kind, text, row, start, end: this.index, quoted };
+  private makeToken(kind: ShellTokenKind, value: string, row: number, start: number, quoted: boolean): ShellToken {
+    return { kind, value, row, start, end: this.position, quoted };
   }
 }
 
-// ---------------------------------------------------------------- commands
-
-const RESERVED_WORDS = new Set([
+const KEYWORDS = new Set([
   'if',
   'then',
   'else',
@@ -219,531 +205,495 @@ const RESERVED_WORDS = new Set([
   '[[',
 ]);
 
-/** The words that close or continue a construct, which cannot start a command. */
-const CLOSING_WORDS = new Set(['then', 'else', 'elif', 'fi', 'esac', 'do', 'done', 'in', '}']);
+const CONTINUATION_OR_CLOSING_KEYWORDS = new Set(['then', 'else', 'elif', 'fi', 'esac', 'do', 'done', 'in', '}']);
+const CASE_CLAUSE_TERMINATORS = new Set([';;', ';&', ';;&']);
 
-const CASE_TERMINATORS = new Set([';;', ';&', ';;&']);
+class ShellGrammarValidator {
+  private readonly stream: ShellTokenStream;
+  private cached: ShellToken | undefined;
+  private cachedAllowsCompound = false;
+  private readonly activeBlocks: { keyword: string; row: number }[] = [];
 
-/** A recursive-descent port of Bash's yacc grammar, which stops at the first token no rule accepts. */
-class CommandParser {
-  private readonly lexer: CommandLexer;
-  private lookahead: Token | undefined;
-  private lookaheadAssigns = false;
-  /** The constructs open at the current token, whose innermost Bash names when the file ends inside it. */
-  private readonly open: { word: string; row: number }[] = [];
-
-  /** @param inSubstitution Whether the commands are those of `$(...)`, which ends at its `)`. */
   constructor(
     private readonly text: SourceText,
     start: number,
-    private readonly inSubstitution: boolean
+    private readonly insideSubstitution: boolean
   ) {
-    this.lexer = new CommandLexer(text, start);
+    this.stream = new ShellTokenStream(text, start);
   }
 
-  parseProgram(): void {
+  validateScript(): void {
     for (;;) {
-      this.skipNewlines();
+      this.consumeNewlines();
       if (this.peek().kind === 'eof') return;
-      this.simpleList();
+      this.parseList(false);
+      const end = this.peek();
+      if (end.kind !== 'newline' && end.kind !== 'eof') this.failUnexpected(end);
     }
   }
 
-  /** The commands of `$(...)`, returning the index after its `)`. */
-  parseSubstitution(): number {
+  validateSubstitution(): number {
     for (;;) {
-      this.skipNewlines();
-      if (this.isOperator(this.peek(), ')')) return this.take().end;
-      this.commands(false);
+      this.consumeNewlines();
+      if (this.hasOperator(this.peek(), ')')) return this.advance().end;
+      this.parseList(false);
     }
   }
 
-  /** A line's commands: and-or lists joined by `;` and `&`, ended by a newline or the end of the file. */
-  private simpleList(): void {
-    this.commands(false);
-    const token = this.peek();
-    if (token.kind !== 'newline' && token.kind !== 'eof') this.unexpected(token);
+  private parseCompoundList(): void {
+    this.parseList(true);
   }
 
-  /**
-   * Commands joined by `&&`, `||`, `;`, and `&`: within one line for a line of the program, or across newlines for
-   * Bash's `compound_list`, which ends at a word that cannot start a command.
-   */
-  private commands(crossesLines: boolean): void {
-    if (crossesLines) this.skipNewlines();
-    this.pipelineCommand();
+  private parseList(multiline: boolean): void {
+    if (multiline) this.consumeNewlines();
+    this.parsePipeline();
     for (;;) {
-      const token = this.peek();
-      if (this.isOperator(token, '&&') || this.isOperator(token, '||')) {
-        this.take();
-        this.skipNewlines();
-        this.pipelineCommand();
+      const next = this.peek();
+      if (this.hasOperator(next, '&&') || this.hasOperator(next, '||')) {
+        this.advance();
+        this.consumeNewlines();
+        this.parsePipeline();
         continue;
       }
-      const separates =
-        this.isOperator(token, ';') || this.isOperator(token, '&') || (crossesLines && token.kind === 'newline');
-      if (!separates) return;
-      this.take();
-      if (crossesLines) this.skipNewlines();
-      if (!this.startsCommand(this.peek())) return;
-      this.pipelineCommand();
+      const isSeparator =
+        this.hasOperator(next, ';') || this.hasOperator(next, '&') || (multiline && next.kind === 'newline');
+      if (!isSeparator) return;
+      this.advance();
+      if (multiline) this.consumeNewlines();
+      if (!this.canBeginCommand(this.peek())) return;
+      this.parsePipeline();
     }
   }
 
-  private compoundList(): void {
-    this.commands(true);
-  }
-
-  private pipelineCommand(): void {
-    const token = this.peek();
-    if (this.isReserved(token, '!')) {
-      this.take();
-      this.text.nested(() => this.pipelineCommand());
+  private parsePipeline(): void {
+    const first = this.peek();
+    if (this.hasKeyword(first, '!')) {
+      this.advance();
+      this.text.nested(() => this.parsePipeline());
       return;
     }
-    if (this.isReserved(token, 'time')) {
-      this.take();
-      if (this.peek().kind === 'word' && this.peek().text === '-p') this.take();
-      const next = this.peek();
-      const ends =
-        next.kind === 'newline' || next.kind === 'eof' || this.isOperator(next, ';') || this.isOperator(next, '&');
-      if (!ends) this.pipelineCommand();
+    if (this.hasKeyword(first, 'time')) {
+      this.advance();
+      if (this.peek().kind === 'word' && this.peek().value === '-p') this.advance();
+      const after = this.peek();
+      const emptyTimed =
+        after.kind === 'newline' ||
+        after.kind === 'eof' ||
+        this.hasOperator(after, ';') ||
+        this.hasOperator(after, '&');
+      if (!emptyTimed) this.parsePipeline();
       return;
     }
-    this.command();
-    while (this.isOperator(this.peek(), '|') || this.isOperator(this.peek(), '|&')) {
-      this.take();
-      this.skipNewlines();
-      this.command();
+    this.parseCommand();
+    while (this.hasOperator(this.peek(), '|') || this.hasOperator(this.peek(), '|&')) {
+      this.advance();
+      this.consumeNewlines();
+      this.parseCommand();
     }
   }
 
-  private command(): void {
-    this.text.nested(() => this.commandAt());
-  }
-
-  private commandAt(): void {
-    const token = this.peek();
-    if (token.kind === 'word' && this.isReservedWord(token)) {
-      if (CLOSING_WORDS.has(token.text) || token.text === 'in') this.unexpected(token);
-      if (token.text === 'function') {
-        this.functionKeyword();
+  // code-gauge-allow functionCognitiveComplexity -- Dispatches function definitions, coprocesses, compound constructs, and simple commands.
+  private parseCommand(): void {
+    this.text.nested(() => {
+      const lead = this.peek();
+      if (lead.kind === 'word' && this.isKeywordToken(lead)) {
+        if (CONTINUATION_OR_CLOSING_KEYWORDS.has(lead.value)) this.failUnexpected(lead);
+        if (lead.value === 'function') {
+          this.parseFunctionKeywordForm();
+          return;
+        }
+        if (lead.value === 'coproc') {
+          this.advance();
+          this.parseCommand();
+          return;
+        }
+        this.parseCompoundConstruct();
+        this.parseTrailingRedirections();
         return;
       }
-      if (token.text === 'coproc') {
-        this.take();
-        this.command();
+      if (this.hasOperator(lead, '(') || this.hasOperator(lead, '((')) {
+        this.parseCompoundConstruct();
+        this.parseTrailingRedirections();
         return;
       }
-      this.shellCommand();
-      this.redirections();
-      return;
-    }
-    if (this.isOperator(token, '(') || this.isOperator(token, '((')) {
-      this.shellCommand();
-      this.redirections();
-      return;
-    }
-    if (token.kind === 'word' || token.kind === 'number' || this.isRedirection(token)) {
-      this.simpleCommand();
-      return;
-    }
-    this.unexpected(token);
+      if (lead.kind === 'word' || lead.kind === 'ioNumber' || this.isRedirectionOperator(lead)) {
+        this.parseSimpleOrFunctionDef();
+        return;
+      }
+      this.failUnexpected(lead);
+    });
   }
 
-  /** A command Bash's grammar names `shell_command`, which a function's body must be. */
-  // code-gauge-allow functionNcss -- One case per compound command of Bash's grammar.
-  private shellCommand(): void {
-    if (this.isOperator(this.peek(), '((') && this.arithmeticCommand()) return;
-    const current = this.peek();
-    if (this.isOperator(current, '(')) {
-      this.group(current, ')');
+  // code-gauge-allow functionNcss -- Dispatches each compound shell construct in the grammar.
+  private parseCompoundConstruct(): void {
+    if (this.hasOperator(this.peek(), '((') && this.tryParseArithmeticConstruct()) return;
+    const lead = this.peek();
+    if (this.hasOperator(lead, '(')) {
+      this.parseDelimitedCompound(lead, ')');
       return;
     }
-    if (current.kind !== 'word' || !this.isReservedWord(current)) this.unexpected(current);
-    switch (current.text) {
+    if (lead.kind !== 'word' || !this.isKeywordToken(lead)) this.failUnexpected(lead);
+    switch (lead.value) {
       case 'if': {
-        this.ifCommand(current);
+        this.parseIfConstruct(lead);
         return;
       }
       case 'while':
       case 'until': {
-        this.whileCommand(current);
+        this.parseLoopConstruct(lead);
         return;
       }
       case 'for':
       case 'select': {
-        this.forCommand(current);
+        this.parseForOrSelectConstruct(lead);
         return;
       }
       case 'case': {
-        this.caseCommand(current);
+        this.parseCaseConstruct(lead);
         return;
       }
       case '{': {
-        this.group(current, '}');
+        this.parseDelimitedCompound(lead, '}');
         return;
       }
       case '[[': {
-        this.conditional(current);
+        this.parseConditionalConstruct(lead);
         return;
       }
       default: {
-        this.unexpected(current);
+        this.failUnexpected(lead);
       }
     }
   }
 
-  /**
-   * `((...))`, telling whether it was one: a `((` that a single `)` closes is a subshell inside a subshell, which
-   * leaves a `(` to read.
-   */
-  private arithmeticCommand(): boolean {
-    const token = this.peek();
-    const end = arithmeticEnd(this.text, token.start);
-    if (end !== undefined) {
-      this.skipTo(end);
+  private tryParseArithmeticConstruct(): boolean {
+    const open = this.peek();
+    const closeEnd = arithmeticEnd(this.text, open.start);
+    if (closeEnd !== undefined) {
+      this.seekTo(closeEnd);
       return true;
     }
-    this.skipTo(token.start + 1);
-    this.lookahead = { ...token, text: '(', end: token.start + 1 };
+    this.seekTo(open.start + 1);
+    this.cached = { ...open, value: '(', end: open.start + 1 };
     return false;
   }
 
-  private whileCommand(token: Token): void {
-    this.opened(token, () => {
-      this.take();
-      this.compoundList();
-      this.expectReserved('do');
-      this.compoundList();
-      this.expectReserved('done');
+  private parseLoopConstruct(open: ShellToken): void {
+    this.withBlock(open, () => {
+      this.advance();
+      this.parseCompoundList();
+      this.requireKeyword('do');
+      this.parseCompoundList();
+      this.requireKeyword('done');
     });
   }
 
-  private ifCommand(token: Token): void {
-    this.opened(token, () => {
-      this.take();
-      this.compoundList();
-      this.expectReserved('then');
-      this.compoundList();
-      for (;;) {
-        const next = this.peek();
-        if (this.isReserved(next, 'elif')) {
-          this.take();
-          this.compoundList();
-          this.expectReserved('then');
-          this.compoundList();
-        } else if (this.isReserved(next, 'else')) {
-          this.take();
-          this.compoundList();
-          this.expectReserved('fi');
-          return;
-        } else {
-          this.expectReserved('fi');
-          return;
-        }
+  private parseIfConstruct(open: ShellToken): void {
+    this.withBlock(open, () => {
+      this.advance();
+      this.parseCompoundList();
+      this.requireKeyword('then');
+      this.parseCompoundList();
+      while (this.hasKeyword(this.peek(), 'elif')) {
+        this.advance();
+        this.parseCompoundList();
+        this.requireKeyword('then');
+        this.parseCompoundList();
       }
-    });
-  }
-
-  private forCommand(token: Token): void {
-    this.opened(token, () => {
-      this.take();
-      const name = this.peek();
-      if (this.isOperator(name, '((') && token.text === 'for') this.arithmeticFor(token, name);
-      else this.forHeader(name);
-      this.doGroup();
-    });
-  }
-
-  /** The variable of `for` or `select`, then `in` and its words, a `;`, or nothing. */
-  private forHeader(name: Token): void {
-    if (name.kind !== 'word') this.unexpected(name);
-    this.take();
-    this.skipNewlines();
-    const next = this.peek();
-    if (next.kind === 'word' && next.text === 'in' && !next.quoted) {
-      this.take();
-      let word = this.peek();
-      while (word.kind === 'word' || word.kind === 'number') {
-        this.take();
-        word = this.peek();
+      if (this.hasKeyword(this.peek(), 'else')) {
+        this.advance();
+        this.parseCompoundList();
       }
-      if (!this.isOperator(word, ';') && word.kind !== 'newline') this.unexpected(word);
-    } else if (!this.isOperator(next, ';')) return;
-    this.take();
-    this.skipNewlines();
+      this.requireKeyword('fi');
+    });
   }
 
-  /** `for ((init; test; step))`, whose three expressions Bash's `make_arith_for_command` requires. */
-  private arithmeticFor(forToken: Token, open: Token): void {
-    const end = arithmeticEnd(this.text, open.start);
-    if (end === undefined) this.unexpected({ ...open, text: '(' });
-    const count = countExpressions(this.text, open.start + 2, end - 2);
-    if (count < 3) this.text.fail(forToken.row, 'syntax error: arithmetic expression required');
-    if (count > 3) this.text.fail(forToken.row, "syntax error: `;' unexpected");
-    this.skipTo(end);
-    if (this.isOperator(this.peek(), ';')) this.take();
-    this.skipNewlines();
+  private parseForOrSelectConstruct(open: ShellToken): void {
+    this.withBlock(open, () => {
+      this.advance();
+      const target = this.peek();
+      if (this.hasOperator(target, '((') && open.value === 'for') this.parseCStyleForHeader(open, target);
+      else this.parseWordListForHeader(target);
+      this.parseLoopBodyGroup();
+    });
   }
 
-  private doGroup(): void {
-    const token = this.peek();
-    if (this.isReserved(token, '{')) {
-      this.group(token, '}');
+  private parseWordListForHeader(variable: ShellToken): void {
+    if (variable.kind !== 'word') this.failUnexpected(variable);
+    this.advance();
+    this.consumeNewlines();
+    const afterName = this.peek();
+    if (afterName.kind === 'word' && afterName.value === 'in' && !afterName.quoted) {
+      this.advance();
+      while (this.peek().kind === 'word' || this.peek().kind === 'ioNumber') this.advance();
+      const term = this.peek();
+      if (!this.hasOperator(term, ';') && term.kind !== 'newline') this.failUnexpected(term);
+    } else if (!this.hasOperator(afterName, ';')) {
       return;
     }
-    this.expectReserved('do');
-    this.compoundList();
-    this.expectReserved('done');
+    this.advance();
+    this.consumeNewlines();
   }
 
-  private caseCommand(token: Token): void {
-    this.opened(token, () => {
-      this.take();
-      const word = this.peek();
-      if (word.kind !== 'word' && word.kind !== 'number') this.unexpected(word);
-      this.take();
-      this.skipNewlines();
-      const inWord = this.peek();
-      if (inWord.kind !== 'word' || inWord.text !== 'in' || inWord.quoted) this.unexpected(inWord);
-      this.take();
+  private parseCStyleForHeader(forKeyword: ShellToken, openParens: ShellToken): void {
+    const closeEnd = arithmeticEnd(this.text, openParens.start);
+    if (closeEnd === undefined) this.failUnexpected({ ...openParens, value: '(' });
+    const sections = countHeaderSections(this.text, openParens.start + 2, closeEnd - 2);
+    if (sections < 3) this.text.fail(forKeyword.row, 'syntax error: arithmetic expression required');
+    if (sections > 3) this.text.fail(forKeyword.row, "syntax error: `;' unexpected");
+    this.seekTo(closeEnd);
+    if (this.hasOperator(this.peek(), ';')) this.advance();
+    this.consumeNewlines();
+  }
+
+  private parseLoopBodyGroup(): void {
+    const open = this.peek();
+    if (this.hasKeyword(open, '{')) {
+      this.parseDelimitedCompound(open, '}');
+      return;
+    }
+    this.requireKeyword('do');
+    this.parseCompoundList();
+    this.requireKeyword('done');
+  }
+
+  private parseCaseConstruct(open: ShellToken): void {
+    this.withBlock(open, () => {
+      this.advance();
+      const subject = this.peek();
+      if (subject.kind !== 'word' && subject.kind !== 'ioNumber') this.failUnexpected(subject);
+      this.advance();
+      this.consumeNewlines();
+      const inKeyword = this.peek();
+      if (inKeyword.kind !== 'word' || inKeyword.value !== 'in' || inKeyword.quoted) this.failUnexpected(inKeyword);
+      this.advance();
       for (;;) {
-        this.skipNewlines();
-        if (this.isReserved(this.peek(), 'esac')) {
-          this.take();
+        this.consumeNewlines();
+        if (this.hasKeyword(this.peek(), 'esac')) {
+          this.advance();
           return;
         }
-        this.caseClause();
+        this.parseCaseBranch();
       }
     });
   }
 
-  /** An optional `(`, patterns joined by `|`, `)`, an optional body, and `;;`, `;&`, or `;;&` unless `esac` follows. */
-  private caseClause(): void {
-    if (this.isOperator(this.peek(), '(')) this.take();
-    this.pattern();
-    while (this.isOperator(this.peek(), '|')) {
-      this.take();
-      this.pattern();
+  private parseCaseBranch(): void {
+    if (this.hasOperator(this.peek(), '(')) this.advance();
+    this.parseCasePattern();
+    while (this.hasOperator(this.peek(), '|')) {
+      this.advance();
+      this.parseCasePattern();
     }
-    if (!this.isOperator(this.peek(), ')')) this.unexpected(this.peek());
-    this.take();
-    this.skipNewlines();
-    if (!this.isCaseTerminator(this.peek()) && !this.isReserved(this.peek(), 'esac')) {
-      this.compoundList();
-      const end = this.peek();
-      if (!this.isCaseTerminator(end) && !this.isReserved(end, 'esac')) this.unexpected(end);
+    if (!this.hasOperator(this.peek(), ')')) this.failUnexpected(this.peek());
+    this.advance();
+    this.consumeNewlines();
+    if (!this.isCaseTerminator(this.peek()) && !this.hasKeyword(this.peek(), 'esac')) {
+      this.parseCompoundList();
+      const afterBody = this.peek();
+      if (!this.isCaseTerminator(afterBody) && !this.hasKeyword(afterBody, 'esac')) this.failUnexpected(afterBody);
     }
-    if (this.isCaseTerminator(this.peek())) this.take();
+    if (this.isCaseTerminator(this.peek())) this.advance();
   }
 
-  private isCaseTerminator(token: Token): boolean {
-    return token.kind === 'operator' && CASE_TERMINATORS.has(token.text);
+  private isCaseTerminator(token: ShellToken): boolean {
+    return token.kind === 'operator' && CASE_CLAUSE_TERMINATORS.has(token.value);
   }
 
-  private pattern(): void {
-    const token = this.peek();
-    if (token.kind !== 'word' && token.kind !== 'number') this.unexpected(token);
-    this.take();
+  private parseCasePattern(): void {
+    const pat = this.peek();
+    if (pat.kind !== 'word' && pat.kind !== 'ioNumber') this.failUnexpected(pat);
+    this.advance();
   }
 
-  /** `{ ...; }` or `( ... )`. */
-  private group(token: Token, closer: string): void {
-    this.opened(token, () => {
-      this.take();
-      this.compoundList();
+  private parseDelimitedCompound(open: ShellToken, closeSymbol: string): void {
+    this.withBlock(open, () => {
+      this.advance();
+      this.parseCompoundList();
       const end = this.peek();
-      const closes = closer === ')' ? this.isOperator(end, ')') : this.isReserved(end, closer);
-      if (!closes) this.unexpected(end);
-      this.take();
+      const matched = closeSymbol === ')' ? this.hasOperator(end, ')') : this.hasKeyword(end, closeSymbol);
+      if (!matched) this.failUnexpected(end);
+      this.advance();
     });
   }
 
-  private conditional(token: Token): void {
-    this.opened(token, () => {
-      const result = parseConditional(this.text, token.end);
-      if ('error' in result) throw new SyntaxFailure(result.error.row, result.error.text, result.error.near);
-      this.skipTo(result.end);
+  private parseConditionalConstruct(open: ShellToken): void {
+    this.withBlock(open, () => {
+      const outcome = parseConditional(this.text, open.end);
+      if ('error' in outcome) throw new SyntaxFailure(outcome.error.row, outcome.error.text, outcome.error.near);
+      this.seekTo(outcome.end);
     });
   }
 
-  /** `function name`, an optional `()`, and the body. */
-  private functionKeyword(): void {
-    this.take();
-    const name = this.peek();
-    if (name.kind !== 'word') this.unexpected(name);
-    this.take();
-    if (this.isOperator(this.peek(), '(')) {
-      this.take();
-      if (!this.isOperator(this.peek(), ')')) this.unexpected(this.peek());
-      this.take();
+  private parseFunctionKeywordForm(): void {
+    this.advance();
+    const fnName = this.peek();
+    if (fnName.kind !== 'word') this.failUnexpected(fnName);
+    this.advance();
+    if (this.hasOperator(this.peek(), '(')) {
+      this.advance();
+      if (!this.hasOperator(this.peek(), ')')) this.failUnexpected(this.peek());
+      this.advance();
     }
-    this.functionBody();
+    this.parseFunctionBody();
   }
 
-  private functionBody(): void {
-    this.skipNewlines();
-    const body = this.peek();
-    const isCompound =
-      this.isOperator(body, '(') ||
-      this.isOperator(body, '((') ||
-      (body.kind === 'word' && this.isReservedWord(body) && !CLOSING_WORDS.has(body.text) && body.text !== '!');
-    if (!isCompound || ['function', 'time', 'coproc'].includes(body.text)) this.unexpected(body);
-    this.shellCommand();
-    this.redirections();
+  private parseFunctionBody(): void {
+    this.consumeNewlines();
+    const bodyLead = this.peek();
+    const validCompound =
+      this.hasOperator(bodyLead, '(') ||
+      this.hasOperator(bodyLead, '((') ||
+      (bodyLead.kind === 'word' &&
+        this.isKeywordToken(bodyLead) &&
+        !CONTINUATION_OR_CLOSING_KEYWORDS.has(bodyLead.value) &&
+        bodyLead.value !== '!');
+    if (!validCompound || bodyLead.value === 'function' || bodyLead.value === 'time' || bodyLead.value === 'coproc') {
+      this.failUnexpected(bodyLead);
+    }
+    this.parseCompoundConstruct();
+    this.parseTrailingRedirections();
   }
 
-  /** Words, assignments, and redirections, or a function definition `name() body`. */
-  // code-gauge-allow functionCognitiveComplexity -- Bash's simple command: redirections, assignments, its name, and a function definition.
-  private simpleCommand(): void {
-    let name: string | undefined;
-    for (let count = 0; ; count++) {
-      const token = this.peek(name === undefined || DECLARATION_BUILTINS.has(name));
-      if (token.kind === 'number' || this.isRedirection(token)) {
-        this.redirection();
+  // code-gauge-allow functionCognitiveComplexity -- Parses simple commands (redirections, prefix assignments, arguments) and `name () body` functions.
+  private parseSimpleOrFunctionDef(): void {
+    let commandName: string | undefined;
+    for (let position = 0; ; position++) {
+      const token = this.peek(commandName === undefined || DECLARATION_NAMES.has(commandName));
+      if (token.kind === 'ioNumber' || this.isRedirectionOperator(token)) {
+        this.parseOneRedirection();
         continue;
       }
       if (token.kind !== 'word') return;
-      this.take();
-      if (name === undefined && !ASSIGNMENT_PREFIX.test(token.text.replace(/=[\s\S]*$/, '='))) name = token.text;
-      if (count === 0 && this.isOperator(this.peek(), '(')) {
-        this.take();
-        if (!this.isOperator(this.peek(), ')')) this.unexpected(this.peek());
-        this.take();
-        this.functionBody();
+      this.advance();
+      if (commandName === undefined && !COMPOUND_LHS_PATTERN.test(token.value.replace(/=[\s\S]*$/, '='))) {
+        commandName = token.value;
+      }
+      if (position === 0 && this.hasOperator(this.peek(), '(')) {
+        this.advance();
+        if (!this.hasOperator(this.peek(), ')')) this.failUnexpected(this.peek());
+        this.advance();
+        this.parseFunctionBody();
         return;
       }
     }
   }
 
-  private redirections(): void {
-    while (this.peek().kind === 'number' || this.isRedirection(this.peek())) this.redirection();
+  private parseTrailingRedirections(): void {
+    while (this.peek().kind === 'ioNumber' || this.isRedirectionOperator(this.peek())) {
+      this.parseOneRedirection();
+    }
   }
 
-  private redirection(): void {
-    if (this.peek().kind === 'number') this.take();
-    const operator = this.peek();
-    if (!this.isRedirection(operator)) this.unexpected(operator);
-    this.take();
+  private parseOneRedirection(): void {
+    if (this.peek().kind === 'ioNumber') this.advance();
+    const op = this.peek();
+    if (!this.isRedirectionOperator(op)) this.failUnexpected(op);
+    this.advance();
     const target = this.peek();
-    if (target.kind !== 'word' && target.kind !== 'number') this.unexpected(target);
-    this.take();
+    if (target.kind !== 'word' && target.kind !== 'ioNumber') this.failUnexpected(target);
+    this.advance();
   }
 
-  // ---------------------------------------------------------------- tokens
-
-  /**
-   * The next token without taking it.
-   *
-   * @param assignmentAllowed Whether `name=(` there starts a compound assignment.
-   */
-  private peek(assignmentAllowed = false): Token {
-    // Only `name=(` reads differently where a compound assignment may be, so only it is read again: reading every
-    // word again would read the command substitutions inside it again, twice for each level of nesting.
-    if (
-      this.lookahead &&
-      this.lookaheadAssigns !== assignmentAllowed &&
-      this.startsCompoundAssignment(this.lookahead)
-    ) {
-      this.lexer.index = this.lookahead.start;
-      this.lookahead = undefined;
+  private peek(allowCompoundArray = false): ShellToken {
+    if (this.cached && this.cachedAllowsCompound !== allowCompoundArray && this.couldBeCompoundArray(this.cached)) {
+      this.stream.position = this.cached.start;
+      this.cached = undefined;
     }
-    if (!this.lookahead) {
-      this.lookahead = this.lexer.next(assignmentAllowed);
-      this.lookaheadAssigns = assignmentAllowed;
+    if (!this.cached) {
+      this.cached = this.stream.readNext(allowCompoundArray);
+      this.cachedAllowsCompound = allowCompoundArray;
     }
-    return this.lookahead;
+    return this.cached;
   }
 
-  private startsCompoundAssignment(token: Token): boolean {
+  private couldBeCompoundArray(token: ShellToken): boolean {
     if (token.kind !== 'word') return false;
-    const word = this.text.source.slice(token.start, token.end + 1);
-    const open = word.indexOf('(');
-    return open !== -1 && ASSIGNMENT_PREFIX.test(word.slice(0, open));
+    const slice = this.text.source.slice(token.start, token.end + 1);
+    const paren = slice.indexOf('(');
+    return paren !== -1 && COMPOUND_LHS_PATTERN.test(slice.slice(0, paren));
   }
 
-  private take(): Token {
-    const token = this.lookahead ?? this.peek();
-    this.lookahead = undefined;
+  private advance(): ShellToken {
+    const token = this.cached ?? this.peek();
+    this.cached = undefined;
     return token;
   }
 
-  private skipTo(index: number): void {
-    this.lookahead = undefined;
-    this.lexer.index = index;
+  private seekTo(index: number): void {
+    this.cached = undefined;
+    this.stream.position = index;
   }
 
-  private skipNewlines(): void {
-    while (this.peek().kind === 'newline') this.take();
+  private consumeNewlines(): void {
+    while (this.peek().kind === 'newline') this.advance();
   }
 
-  private opened(token: Token, parse: () => void): void {
-    this.open.push({ word: token.text, row: token.row });
-    parse();
-    this.open.pop();
+  private withBlock(open: ShellToken, body: () => void): void {
+    this.activeBlocks.push({ keyword: open.value, row: open.row });
+    body();
+    this.activeBlocks.pop();
   }
 
-  private expectReserved(word: string): void {
-    const token = this.peek();
-    if (!this.isReserved(token, word)) this.unexpected(token);
-    this.take();
+  private requireKeyword(expected: string): void {
+    const next = this.peek();
+    if (!this.hasKeyword(next, expected)) this.failUnexpected(next);
+    this.advance();
   }
 
-  private startsCommand(token: Token): boolean {
-    if (token.kind === 'number' || this.isRedirection(token)) return true;
-    if (this.isOperator(token, '(') || this.isOperator(token, '((')) return true;
-    return token.kind === 'word' && !(this.isReservedWord(token) && CLOSING_WORDS.has(token.text));
+  private canBeginCommand(token: ShellToken): boolean {
+    if (token.kind === 'ioNumber' || this.isRedirectionOperator(token)) return true;
+    if (this.hasOperator(token, '(') || this.hasOperator(token, '((')) return true;
+    return token.kind === 'word' && !(this.isKeywordToken(token) && CONTINUATION_OR_CLOSING_KEYWORDS.has(token.value));
   }
 
-  private isReservedWord(token: Token): boolean {
-    return !token.quoted && RESERVED_WORDS.has(token.text);
+  private isKeywordToken(token: ShellToken): boolean {
+    return !token.quoted && KEYWORDS.has(token.value);
   }
 
-  private isReserved(token: Token, word: string): boolean {
-    return token.kind === 'word' && token.text === word && !token.quoted;
+  private hasKeyword(token: ShellToken, expected: string): boolean {
+    return token.kind === 'word' && token.value === expected && !token.quoted;
   }
 
-  private isOperator(token: Token, text: string): boolean {
-    return token.kind === 'operator' && token.text === text;
+  private hasOperator(token: ShellToken, expected: string): boolean {
+    return token.kind === 'operator' && token.value === expected;
   }
 
-  private isRedirection(token: Token): boolean {
-    return token.kind === 'operator' && REDIRECTIONS.has(token.text);
+  private isRedirectionOperator(token: ShellToken): boolean {
+    return token.kind === 'operator' && REDIRECTION_OPERATORS.has(token.value);
   }
 
-  private unexpected(token: Token): never {
-    if (token.kind === 'eof') this.endOfFile();
-    const text = token.kind === 'newline' ? 'newline' : token.text === '((' ? '(' : token.text;
-    const looking = this.inSubstitution && !this.isOperator(token, ')') ? " while looking for matching `)'" : '';
-    this.text.fail(token.row, `syntax error near unexpected token \`${text}'${looking}`);
+  private failUnexpected(token: ShellToken): never {
+    if (token.kind === 'eof') this.failAtEof();
+    const shown = token.kind === 'newline' ? 'newline' : token.value === '((' ? '(' : token.value;
+    const suffix = this.insideSubstitution && !this.hasOperator(token, ')') ? " while looking for matching `)'" : '';
+    this.text.fail(token.row, `syntax error near unexpected token \`${shown}'${suffix}`);
   }
 
-  private endOfFile(): never {
+  private failAtEof(): never {
     const row = this.text.eofRow;
-    if (this.inSubstitution) this.text.fail(row, "unexpected EOF while looking for matching `)'");
-    const innermost = this.open.at(-1);
+    if (this.insideSubstitution) this.text.fail(row, "unexpected EOF while looking for matching `)'");
+    const innermost = this.activeBlocks.at(-1);
     if (innermost) {
       this.text.fail(
         row,
-        `syntax error: unexpected end of file from \`${innermost.word}' command on line ${innermost.row + 1}`
+        `syntax error: unexpected end of file from \`${innermost.keyword}' command on line ${innermost.row + 1}`
       );
     }
     this.text.fail(row, 'syntax error: unexpected end of file');
   }
 }
 
-/** The expressions of `for ((...))`, split at the semicolons outside quotes and parentheses. */
-/** How many expressions `for ((...))` holds between `start` and `end`, split at the `;` outside quotes and parentheses. */
-function countExpressions(text: SourceText, start: number, end: number): number {
-  let count = 1;
-  let depth = 0;
+/** Counts semicolon-delimited sections in `for ((init; condition; update))` outside quotes and nested parentheses. */
+function countHeaderSections(text: SourceText, start: number, end: number): number {
+  let sections = 1;
+  let parenDepth = 0;
   for (let i = start; i < end;) {
-    const c = text.source[i];
-    if (c === ';' && depth === 0) count++;
-    if (c === '(') depth++;
-    if (c === ')') depth--;
-    i = c === '(' || c === ')' || c === ';' ? i + 1 : skipWordPiece(text, i);
+    const ch = text.source[i];
+    if (ch === ';' && parenDepth === 0) sections++;
+    else if (ch === '(') parenDepth++;
+    else if (ch === ')') parenDepth--;
+    i = ch === '(' || ch === ')' || ch === ';' ? i + 1 : skipWordPiece(text, i);
   }
-  return count;
+  return sections;
 }

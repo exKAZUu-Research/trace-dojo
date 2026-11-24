@@ -1,14 +1,13 @@
 import type { ParameterExpansion, WordPart } from './ast';
-import { charactersOf } from './characters';
+import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
 import { declarationText } from './declare';
 import type { Expander, ParameterValue } from './expansion';
 import { EMPTY_LIST, isFieldBreak, type Piece } from './fields';
 import { compileGlob, fixedGlobLength, longestPrefixMatch, matchesSlice, shortestPrefixMatch } from './pattern';
-import { quoteReusable } from './quoting';
+import { doubleQuote, quoteReusable } from './quoting';
 import { ExitSignal } from './runtime';
 import type { Shell } from './shell';
-import { lowerCase, upperCase } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
 import { ATTRIBUTE_ORDER } from './variables';
 
@@ -211,7 +210,7 @@ function splitReplacement(parts: WordPart[]): { pattern: WordPart[]; replacement
   return { pattern: parts, replacement: undefined };
 }
 
-/** The replacement text for one match: an unquoted `&` stands for the matched text, as `patsub_replacement` makes it. */
+/** Formats one replacement match: unquoted `&` expands to the matched substring, and `\&` produces literal `&`. */
 function replacementFor(replacement: Piece[], matched: string): string {
   let text = '';
   for (const piece of replacement) {
@@ -238,6 +237,7 @@ function replacementFor(replacement: Piece[], matched: string): string {
 
 /** `${x/p/r}`, `${x//p/r}`, `${x/#p/r}`, and `${x/%p/r}`, replacing the longest match at each position. */
 // code-gauge-allow functionCognitiveComplexity -- Bash's four replacement operators share the match search and the empty-match rule.
+// code-gauge-allow functionNcss -- Handles prefix, suffix, single, and global pattern replacement with Bash's empty-match advancement.
 function substitute(text: string, pattern: string, replacement: Piece[], operator: string, shell: Shell): string {
   if (pattern === '' && operator !== '/#' && operator !== '/%') return text;
   const chars = charactersOf(text);
@@ -354,7 +354,7 @@ function sliceList(
   return keyed.filter(([key]) => key >= offset).map(([, element]) => element);
 }
 
-/** Bash's `assoc_subrange`, which counts an associative array's elements from 1, so offsets 0 and 1 both start at the first. */
+/** Associative-array slicing counts elements 1-based, so offsets 0 and 1 both start at the first element. */
 function sliceAssociative(values: string[], start: bigint): string[] | undefined {
   const size = BigInt(values.length) + (start < 0n ? 1n : 0n);
   const offset = start < 0n ? start + size : start;
@@ -372,8 +372,8 @@ function arrayEntries(
   return value.values.map((element, index) => [BigInt(keys[index] ?? index), element]);
 }
 
-/** Splits `offset:length` at the first `:` outside parentheses and conditional expressions, as Bash's `skiparith`. */
-// code-gauge-allow functionCognitiveComplexity -- A port of Bash's skiparith, which counts parentheses and conditional colons across parts.
+/** Splits `offset:length` at the first `:` outside parentheses and `?:` conditional operators. */
+// code-gauge-allow functionCognitiveComplexity -- Tracks parenthesis nesting and ternary ? : pairs across literal word parts.
 function splitSubstring(parts: WordPart[]): {
   offset: (string | WordPart)[];
   length: (string | WordPart)[] | undefined;
@@ -425,6 +425,7 @@ function changeCase(text: string, pattern: string, operator: string, shell: Shel
 }
 
 /** `${x@Q}` and the other transformations. */
+// code-gauge-allow functionCognitiveComplexity -- Dispatches @Q/@E/@P/@u/@U/@L/@a/@A/@K/@k parameter transformations.
 // code-gauge-allow functionParameterCount -- The transformations need the expansion, the parameter, and how it is quoted, as the other operators do.
 // code-gauge-allow functionNcss -- One case per transformation letter of Bash's parameter expansion.
 function transform(
@@ -499,8 +500,7 @@ function transform(
   }
 }
 
-/** `${x@A}`: an assignment that recreates the value, with `declare` and the variable's attributes when it has any. */
-/** `${x@A}`, as Bash's `string_var_assignment`, or `declare -p`'s text for an array (`${a[@]@A}`). */
+/** `${x@A}`: formats a scalar or local assignment statement, or `declare -p` output for `${a[@]@A}`. */
 function assignmentText(shell: Shell, name: string, value: ParameterValue): string {
   const variable = shell.findVariable(name);
   if (!variable) return '';
@@ -540,16 +540,12 @@ function keyValuePairs(
   }
   const isAssociative = shell.isAssociative(shell.resolveName(name));
   const pairs = value.values.map(
-    (element, index) => `${isAssociative ? quoteKey(keys[index]) : keys[index]} ${quoteDouble(element)}`
+    (element, index) => `${isAssociative ? quoteKey(keys[index]) : keys[index]} ${doubleQuote(element)}`
   );
   const text = isAssociative ? pairs.map((pair) => `${pair} `).join('') : pairs.join(' ');
   return expander.valuePieces({ kind: 'scalar', value: text }, inDouble);
 }
 
 function quoteKey(key: string): string {
-  return /^[A-Za-z0-9_]+$/.test(key) ? key : quoteDouble(key);
-}
-
-function quoteDouble(text: string): string {
-  return `"${text.replaceAll(/[\\`$"]/g, String.raw`\$&`)}"`;
+  return /^[A-Za-z0-9_]+$/.test(key) ? key : doubleQuote(key);
 }

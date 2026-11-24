@@ -1,6 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
+import { isExplainedError } from '../interpreter/treeSitter';
 
 /** The words that Bash reads as reserved words in a command's position, which then end a construct. */
 export const CLOSING_RESERVED_WORDS = new Set(['then', 'else', 'elif', 'fi', 'do', 'done', 'esac', '}', 'in']);
@@ -41,7 +42,7 @@ export function unexpectedTokenMessage(token: string): string {
 
 /** Bash's syntax error for the first error a tree shows, located at its row. */
 export function syntaxErrorsOf(root: Node, source: string, isBenign: (node: Node) => boolean): SourceDiagnostic[] {
-  if (!root.hasError || isExplainedBy(root, isBenign)) return [];
+  if (!root.hasError || isExplainedError(root, isBenign)) return [];
   const missing = firstNode(root, (node) => node.isMissing);
   const error = firstNode(root, (node) => node.isError);
   const first =
@@ -49,16 +50,6 @@ export function syntaxErrorsOf(root: Node, source: string, isBenign: (node: Node
   if (!first) return [{ row: 0, message: syntaxErrorMessage('syntax error') }];
   if (first.isMissing) return [missingDiagnostic(first, source)];
   return [errorDiagnostic(first, source)];
-}
-
-function isExplainedBy(node: Node, isBenign: (node: Node) => boolean): boolean {
-  return (
-    isBenign(node) ||
-    (!node.isError &&
-      !node.isMissing &&
-      node.children.some((child) => child.hasError) &&
-      node.children.every((child) => !child.hasError || isExplainedBy(child, isBenign)))
-  );
 }
 
 function isInside(node: Node, container: Node): boolean {

@@ -1,5 +1,6 @@
 import { type DeclarationArgument, runDeclaration } from './declare';
 import { decodeBytes, encodeText, formatPrintf } from './printf';
+import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
 import { BreakSignal, ContinueSignal, ExitSignal, ReturnSignal } from './runtime';
 import type { Shell } from './shell';
 import { testBuiltin } from './testBuiltin';
@@ -7,7 +8,7 @@ import { type Builtin, TURTLE_BUILTINS } from './turtle';
 import { UnsupportedFeatureError } from './unsupported';
 import { ensureWritable, isIdentifier } from './variables';
 
-/** Reads a numeric argument as Bash's `legal_number`, or `undefined` when it is not one. */
+/** Parses a signed 64-bit decimal integer surrounded by optional blanks, or `undefined` when invalid. */
 function legalNumber(text: string): bigint | undefined {
   const match = /^[ \t\n]*([-+]?\d+)[ \t\n]*$/.exec(text);
   if (!match) return undefined;
@@ -51,7 +52,7 @@ function echo(shell: Shell, args: string[]): number {
   return 0;
 }
 
-/** The escapes of `echo -e`, as Bash's `ansicstr` reads them for `echo`. */
+/** Decodes `echo -e` backslash escapes into output bytes, stopping early on `\c`. */
 function echoEscapes(text: string): { out: number[]; stop: boolean } {
   const bytes = encodeText(text);
   const out: number[] = [];
@@ -69,37 +70,22 @@ function echoEscapes(text: string): { out: number[]; stop: boolean } {
   return { out, stop: false };
 }
 
-const ECHO_ESCAPES: Record<string, number> = { a: 7, b: 8, e: 27, E: 27, f: 12, n: 10, r: 13, t: 9, v: 11, '\\': 92 };
-
-/** One escape of `echo -e` whose letter `c` is at `index`, giving its bytes and the index of its last character. */
-// code-gauge-allow functionCognitiveComplexity -- One case per escape that echo -e reads, as Bash's ansicstr.
+/** Decodes one `echo -e` escape whose letter `c` is at `index`, returning its bytes and last consumed byte index. */
+// code-gauge-allow functionCognitiveComplexity -- Handles simple escapes, \0nnn octal, and \x/\u/\U hex escapes for echo -e.
 function echoEscape(bytes: number[], index: number, c: string): { out: number[]; last: number } {
-  if (c in ECHO_ESCAPES) return { out: [ECHO_ESCAPES[c]], last: index };
+  if (Object.hasOwn(SIMPLE_ESCAPE_BYTES, c)) return { out: [SIMPLE_ESCAPE_BYTES[c]], last: index };
   if (c === '0') {
-    const { value, last } = readDigits(bytes, index, 3, 8);
-    return { out: [value & 0xff], last };
+    const { value, count } = readRadixDigits(bytes, index + 1, 3, 8);
+    return { out: [value & 0xff], last: index + count };
   }
   if (c === 'x' || c === 'u' || c === 'U') {
-    const { value, last } = readDigits(bytes, index, c === 'x' ? 2 : c === 'u' ? 4 : 8, 16);
-    // An escape without digits stays as written.
-    if (last === index) return { out: [92, bytes[index]], last };
+    const { value, count } = readRadixDigits(bytes, index + 1, c === 'x' ? 2 : c === 'u' ? 4 : 8, 16);
+    if (count === 0) return { out: [92, bytes[index]], last: index };
+    const last = index + count;
     if (c === 'x' || value <= 0x7f) return { out: [value & 0xff], last };
     return { out: value <= 0x10_ff_ff ? encodeText(String.fromCodePoint(value)) : [], last };
   }
   return { out: [92, bytes[index]], last: index };
-}
-
-/** Reads up to `max` digits of `radix` after `index`, giving their value and the index of the last one read. */
-function readDigits(bytes: number[], index: number, max: number, radix: number): { value: number; last: number } {
-  let value = 0;
-  let last = index;
-  while (last - index < max && last + 1 < bytes.length) {
-    const digit = Number.parseInt(String.fromCodePoint(bytes[last + 1]), radix);
-    if (Number.isNaN(digit)) break;
-    value = value * radix + digit;
-    last++;
-  }
-  return { value, last };
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Bash's printf option and operand checks, each with its own usage error.

@@ -1,11 +1,42 @@
-/** Bash's ways of quoting a string so that the shell reads it back as the same word (`lib/sh/shquote.c`). */
+/** Shell word quoting and ANSI-C backslash-escape tables shared by `declare -p`, `${x@Q}`, `printf`, `echo -e`, and `$'...'`. */
 
 import { charactersOf } from './characters';
 
-/** The characters `sh_backslash_quote` escapes, as Bash's `bstab`. */
 const BACKSLASH_QUOTED = new Set('\t\n !"$&\'()*,;<>?[\\]^`{|}');
 
-/** Whether a character is printable as `iswprint` judges it, which `$'...'` quoting needs not escape. */
+/** Single-letter backslash escapes common to `echo -e`, `printf`, and `$'...'`. */
+export const SIMPLE_ESCAPE_BYTES: Record<string, number> = {
+  a: 7,
+  b: 8,
+  e: 27,
+  E: 27,
+  f: 12,
+  n: 10,
+  r: 13,
+  t: 9,
+  v: 11,
+  '\\': 92,
+};
+
+/** Reads up to `maxDigits` digits in `radix` (8 or 16) starting at `start` in a string or byte array. */
+export function readRadixDigits(
+  source: string | readonly number[],
+  start: number,
+  maxDigits: number,
+  radix: number
+): { value: number; count: number } {
+  let value = 0;
+  let count = 0;
+  while (count < maxDigits && start + count < source.length) {
+    const code = typeof source === 'string' ? (source.codePointAt(start + count) as number) : source[start + count];
+    const digit = Number.parseInt(String.fromCodePoint(code), radix);
+    if (Number.isNaN(digit)) break;
+    value = value * radix + digit;
+    count++;
+  }
+  return { value, count };
+}
+
 function isPrintable(c: string): boolean {
   const code = c.codePointAt(0) as number;
   if (code < 0x80) return code >= 0x20 && code < 0x7f;
@@ -16,7 +47,7 @@ export function ansicShouldQuote(text: string): boolean {
   return charactersOf(text).some((c) => !isPrintable(c));
 }
 
-/** `$'...'` quoting, as Bash's `ansic_quote`. */
+/** Formats `text` as a `$'...'` literal, escaping control and non-printable characters. */
 export function ansicQuote(text: string): string {
   const named: Record<string, string> = {
     '\u001B': 'E',
@@ -30,7 +61,7 @@ export function ansicQuote(text: string): string {
   };
   let result = "$'";
   for (const c of text) {
-    if (named[c]) result += `\\${named[c]}`;
+    if (Object.hasOwn(named, c)) result += `\\${named[c]}`;
     else if (c === '\\' || c === "'") result += `\\${c}`;
     else if (isPrintable(c)) result += c;
     else {
@@ -40,18 +71,18 @@ export function ansicQuote(text: string): string {
   return `${result}'`;
 }
 
-/** `'...'` quoting, which closes and reopens the quotes around each `'`, as Bash's `sh_single_quote`. */
+/** Formats `text` with single quotes, closing and escaping embedded `'` characters. */
 export function singleQuote(text: string): string {
   if (text === "'") return String.raw`\'`;
   return `'${text.replaceAll("'", String.raw`'\''`)}'`;
 }
 
-/** `"..."` quoting, as Bash's `sh_double_quote`. */
+/** Formats `text` inside double quotes, escaping `\`, `` ` ``, `$`, and `"`. */
 export function doubleQuote(text: string): string {
   return `"${text.replaceAll(/[\\`$"]/g, String.raw`\$&`)}"`;
 }
 
-/** Backslash quoting, as Bash's `sh_backslash_quote` with the flags that `printf %q` passes. */
+/** Escapes shell metacharacters with backslashes for `printf %q`. */
 export function backslashQuote(text: string, quoteTilde: boolean, quoteBlanks: boolean): string {
   let result = '';
   let previous = '';
@@ -68,14 +99,14 @@ export function backslashQuote(text: string, quoteTilde: boolean, quoteBlanks: b
   return result;
 }
 
-/** `${x@Q}`'s quoting: `''` for nothing, `$'...'` for unprintable characters, and `'...'` otherwise. */
+/** Formats `text` for `${x@Q}` so the shell reads it back as the same value. */
 export function quoteReusable(text: string): string {
   if (text === '') return "''";
   if (ansicShouldQuote(text)) return ansicQuote(text);
   return singleQuote(text);
 }
 
-/** Whether a string holds characters that the shell would read specially, as Bash's `sh_contains_shell_metas`. */
+/** Whether `text` contains characters that unquoted shell syntax treats specially. */
 export function containsShellMetas(text: string): boolean {
   const chars = charactersOf(text);
   return chars.some((c, i) => {

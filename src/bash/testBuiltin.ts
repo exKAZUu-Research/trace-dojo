@@ -1,224 +1,223 @@
+/**
+ * Clean-room implementation of the `test` and `[` builtins from POSIX.1-2017 XCU `test` (0–4 argument disambiguation)
+ * and GNU Bash Reference Manual §4.1 (`==`, `<`, `>`, `-v`, `-R`, and parenthesized/compound expressions).
+ */
+
 import { ARITHMETIC_OPERATORS, FILE_TEST_OPERATORS, unaryTest } from './conditional';
 import type { Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
 
-const UNARY_OPERATORS = new Set([...FILE_TEST_OPERATORS].filter((op) => !['-nt', '-ot', '-ef'].includes(op)));
-for (const op of ['-z', '-n', '-v', '-R', '-o', '-t']) UNARY_OPERATORS.add(op);
-
-const BINARY_OPERATORS = new Set([
-  '=',
-  '==',
-  '!=',
-  '<',
-  '>',
-  '-nt',
-  '-ot',
-  '-ef',
-  ...Object.keys(ARITHMETIC_OPERATORS),
+const UNARY_FLAGS = new Set([
+  ...[...FILE_TEST_OPERATORS].filter((op) => op.length === 2),
+  '-z',
+  '-n',
+  '-v',
+  '-R',
+  '-o',
+  '-t',
 ]);
 
-class TestSyntaxError extends Error {}
+const BINARY_FLAGS = new Set(['=', '==', '!=', '<', '>', '-nt', '-ot', '-ef', ...Object.keys(ARITHMETIC_OPERATORS)]);
 
-/** `test` and `[`, ported from Bash's `test.c`: arguments decide the form by their number, as POSIX says. */
+class TestDiagnosticError extends Error {}
+
 export function testBuiltin(shell: Shell, args: string[], name: string): number {
-  let argv = args;
+  let tokens = args;
   if (name === '[') {
-    if (argv.at(-1) !== ']') {
+    if (tokens.at(-1) !== ']') {
       shell.reportError("[: missing `]'");
       return 2;
     }
-    argv = argv.slice(0, -1);
+    tokens = tokens.slice(0, -1);
   }
+  if (tokens.length === 0) return 1;
   try {
-    return new Test(shell, argv, name).run() ? 0 : 1;
+    return evaluateTestTokens(shell, name, tokens) ? 0 : 1;
   } catch (error) {
-    if (error instanceof TestSyntaxError) return 2;
+    if (error instanceof TestDiagnosticError) return 2;
     throw error;
   }
 }
 
-class Test {
-  private pos = 0;
+function evaluateTestTokens(shell: Shell, name: string, tokens: readonly string[]): boolean {
+  const cursor = new TestReader(shell, name, tokens);
+  const result = cursor.evaluateSpan(tokens.length);
+  if (!cursor.atEnd) {
+    const rest = cursor.peek() as string;
+    if (rest.startsWith('-')) cursor.fail(`syntax error: \`${rest}' unexpected`);
+    cursor.fail('too many arguments');
+  }
+  return result;
+}
+
+class TestReader {
+  private index = 0;
 
   constructor(
     private readonly shell: Shell,
-    private readonly argv: string[],
-    private readonly name: string
+    private readonly name: string,
+    private readonly tokens: readonly string[]
   ) {}
 
-  private error(message: string): never {
+  get atEnd(): boolean {
+    return this.index >= this.tokens.length;
+  }
+
+  peek(offset = 0): string | undefined {
+    return this.tokens[this.index + offset];
+  }
+
+  fail(message: string): never {
     this.shell.reportError(`${this.name}: ${message}`);
-    throw new TestSyntaxError();
+    throw new TestDiagnosticError();
   }
 
-  run(): boolean {
-    if (this.argv.length === 0) return false;
-    const value = this.posixtest(this.argv.length);
-    if (this.pos !== this.argv.length) {
-      const next = this.argv[this.pos];
-      if (next?.startsWith('-')) this.error(`syntax error: \`${next}' unexpected`);
-      this.error('too many arguments');
-    }
-    return value;
-  }
-
-  private posixtest(count: number): boolean {
-    const { argv } = this;
-    switch (count) {
-      case 1: {
-        this.pos++;
-        return argv[0] !== '';
+  /** Evaluates `count` tokens starting at `this.index` using POSIX `test` argument-count rules. */
+  evaluateSpan(count: number): boolean {
+    if (count === 1) return this.take() !== '';
+    if (count === 2) return this.evaluateTwo();
+    if (count === 3) return this.evaluateThree();
+    if (count === 4) {
+      if (this.peek() === '!') {
+        this.index++;
+        return !this.evaluateThree();
       }
-      case 2: {
-        return this.twoArguments();
-      }
-      case 3: {
-        return this.threeArguments();
-      }
-      case 4: {
-        if (argv[this.pos] === '!') {
-          this.pos++;
-          return !this.threeArguments();
-        }
-        if (argv[this.pos] === '(' && argv[this.pos + 3] === ')') {
-          this.pos++;
-          const value = this.twoArguments();
-          this.pos++;
-          return value;
-        }
-        return this.expr();
-      }
-      default: {
-        return this.expr();
+      if (this.peek() === '(' && this.peek(3) === ')') {
+        this.index++;
+        const inner = this.evaluateTwo();
+        this.index++;
+        return inner;
       }
     }
+    return this.parseDisjunction();
   }
 
-  private twoArguments(): boolean {
-    const { argv } = this;
-    if (argv[this.pos] === '!') {
-      this.pos++;
-      return argv[this.pos++] === '';
+  private take(): string {
+    if (this.atEnd) this.fail('argument expected');
+    return this.tokens[this.index++];
+  }
+
+  private evaluateTwo(): boolean {
+    const first = this.peek() as string;
+    if (first === '!') {
+      this.index++;
+      return this.take() === '';
     }
-    const op = argv[this.pos];
-    if (op.length === 2 && op.startsWith('-') && UNARY_OPERATORS.has(op)) return this.unaryOperator();
-    return this.error(`${op}: unary operator expected`);
+    if (UNARY_FLAGS.has(first)) return this.applyUnary();
+    return this.fail(`${first}: unary operator expected`);
   }
 
-  private threeArguments(): boolean {
-    const { argv } = this;
-    const middle = argv[this.pos + 1];
-    if (BINARY_OPERATORS.has(middle)) return this.binaryOperator();
+  private evaluateThree(): boolean {
+    const first = this.peek() as string;
+    const middle = this.peek(1) as string;
+    const third = this.peek(2) as string;
+    if (BINARY_FLAGS.has(middle)) return this.applyBinary();
     if (middle === '-a' || middle === '-o') {
-      const left = argv[this.pos] !== '';
-      const right = argv[this.pos + 2] !== '';
-      this.pos += 3;
-      return middle === '-a' ? left && right : left || right;
+      this.index += 3;
+      return middle === '-a' ? first !== '' && third !== '' : first !== '' || third !== '';
     }
-    if (argv[this.pos] === '!') {
-      this.pos++;
-      return !this.twoArguments();
+    if (first === '!') {
+      this.index++;
+      return !this.evaluateTwo();
     }
-    if (argv[this.pos] === '(' && argv[this.pos + 2] === ')') {
-      const value = argv[this.pos + 1] !== '';
-      this.pos += 3;
-      return value;
+    if (first === '(' && third === ')') {
+      this.index += 3;
+      return middle !== '';
     }
-    return this.error(`${middle}: binary operator expected`);
+    return this.fail(`${middle}: binary operator expected`);
   }
 
-  private expr(): boolean {
-    if (this.pos >= this.argv.length) this.error('argument expected');
-    return this.or();
-  }
-
-  private or(): boolean {
-    const value = this.and();
-    if (this.pos < this.argv.length && this.argv[this.pos] === '-o') {
-      this.pos++;
-      const other = this.or();
-      return value || other;
+  private parseDisjunction(): boolean {
+    if (this.atEnd) this.fail('argument expected');
+    let left = this.parseConjunction();
+    while (this.peek() === '-o') {
+      this.index++;
+      const right = this.parseConjunction();
+      left = left || right;
     }
-    return value;
+    return left;
   }
 
-  private and(): boolean {
-    const value = this.term();
-    if (this.pos < this.argv.length && this.argv[this.pos] === '-a') {
-      this.pos++;
-      const other = this.and();
-      return value && other;
+  private parseConjunction(): boolean {
+    let left = this.parsePrimary();
+    while (this.peek() === '-a') {
+      this.index++;
+      const right = this.parsePrimary();
+      left = left && right;
     }
-    return value;
+    return left;
   }
 
-  private term(): boolean {
-    const { argv } = this;
-    if (this.pos >= argv.length) this.error('argument expected');
-    if (argv[this.pos] === '!') return this.negation();
-    if (argv[this.pos] === '(') return this.parenthesized();
-    if (this.pos + 3 <= argv.length && BINARY_OPERATORS.has(argv[this.pos + 1])) return this.binaryOperator();
-    if (this.pos + 2 <= argv.length && UNARY_OPERATORS.has(argv[this.pos])) return this.unaryOperator();
-    return argv[this.pos++] !== '';
-  }
-
-  /** `! term`, where each `!` inverts the term after it. */
-  private negation(): boolean {
-    let negate = false;
-    while (this.pos < this.argv.length && this.argv[this.pos] === '!') {
-      this.pos++;
-      if (this.pos >= this.argv.length) this.error('argument expected');
-      negate = !negate;
+  private parsePrimary(): boolean {
+    const current = this.peek();
+    if (current === undefined) this.fail('argument expected');
+    if (current === '!') return this.parseNegated();
+    if (current === '(') return this.parseGrouped();
+    if (this.index + 3 <= this.tokens.length && BINARY_FLAGS.has(this.peek(1) as string)) {
+      return this.applyBinary();
     }
-    const value = this.term();
-    return negate ? !value : value;
-  }
-
-  /** `( expression )`, which reads a short expression by its number of arguments, as Bash 5.3 does. */
-  private parenthesized(): boolean {
-    const { argv } = this;
-    this.pos++;
-    if (this.pos >= argv.length) this.error('argument expected');
-    let count = 1;
-    let nargs = 1;
-    for (; this.pos + nargs < argv.length; nargs++) {
-      if (argv[this.pos + nargs] === ')') count--;
-      else if (argv[this.pos + nargs] === '(') count++;
-      if (count === 0) break;
+    if (this.index + 2 <= this.tokens.length && UNARY_FLAGS.has(current)) {
+      return this.applyUnary();
     }
-    const value = this.pos + nargs < argv.length && nargs <= 4 ? this.posixtest(nargs) : this.expr();
-    if (this.pos >= argv.length) this.error("`)' expected");
-    if (argv[this.pos] !== ')') this.error(`\`)' expected, found ${argv[this.pos]}`);
-    this.pos++;
-    return value;
+    return this.take() !== '';
   }
 
-  private unaryOperator(): boolean {
-    const op = this.argv[this.pos++];
-    if (this.pos >= this.argv.length) this.error('argument expected');
-    const operand = this.argv[this.pos++];
-    return unaryTest(this.shell, op, operand, false);
+  private parseNegated(): boolean {
+    let inverted = false;
+    while (this.peek() === '!') {
+      this.index++;
+      if (this.atEnd) this.fail('argument expected');
+      inverted = !inverted;
+    }
+    const inner = this.parsePrimary();
+    return inverted ? !inner : inner;
   }
 
-  private binaryOperator(): boolean {
-    const left = this.argv[this.pos];
-    const op = this.argv[this.pos + 1];
-    const right = this.argv[this.pos + 2];
-    this.pos += 3;
+  private parseGrouped(): boolean {
+    this.index++;
+    if (this.atEnd) this.fail('argument expected');
+    const closeOffset = this.findGroupClose();
+    const inner =
+      closeOffset !== undefined && closeOffset <= 4 ? this.evaluateSpan(closeOffset) : this.parseDisjunction();
+    if (this.atEnd) this.fail("`)' expected");
+    if (this.peek() !== ')') this.fail(`\`)' expected, found ${this.peek()}`);
+    this.index++;
+    return inner;
+  }
+
+  private findGroupClose(): number | undefined {
+    let depth = 1;
+    for (let offset = 1; this.index + offset < this.tokens.length; offset++) {
+      const token = this.tokens[this.index + offset];
+      if (token === '(') depth++;
+      else if (token === ')' && --depth === 0) return offset;
+    }
+    return undefined;
+  }
+
+  private applyUnary(): boolean {
+    const op = this.take();
+    const operand = this.take();
+    return unaryTest(this.shell, op, operand);
+  }
+
+  private applyBinary(): boolean {
+    const left = this.take();
+    const op = this.take();
+    const right = this.take();
     if (op === '=' || op === '==') return left === right;
     if (op === '!=') return left !== right;
     if (op === '<') return left < right;
     if (op === '>') return left > right;
     if (FILE_TEST_OPERATORS.has(op)) throw new UnsupportedFeatureError(`ファイルを調べる演算子（${op}）`);
-    return ARITHMETIC_OPERATORS[op](this.integer(left), this.integer(right));
+    return ARITHMETIC_OPERATORS[op](this.parseInteger(left), this.parseInteger(right));
   }
 
-  /** An operand of `-eq` and the others, which must be an integer, as Bash's `legal_number` reads one. */
-  private integer(text: string): bigint {
+  private parseInteger(text: string): bigint {
     const match = /^[ \t\n]*([-+]?\d+)[ \t\n]*$/.exec(text);
-    if (!match) this.error(`${text}: integer expected`);
+    if (!match) this.fail(`${text}: integer expected`);
     const value = BigInt(match[1]);
-    if (value !== BigInt.asIntN(64, value)) this.error(`${text}: integer expected`);
+    if (value !== BigInt.asIntN(64, value)) this.fail(`${text}: integer expected`);
     return value;
   }
 }

@@ -16,6 +16,7 @@ import type {
   Word,
   WordPart,
 } from './ast';
+import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
 import { isReservedCommand, unexpectedTokenMessage } from './syntaxErrors';
 import { unsupportedMessage } from './unsupported';
 
@@ -282,7 +283,6 @@ export class Converter {
   /**
    * Reconstructs compound-assignment elements, joining words the grammar split at spaces inside `[subscript]=value`.
    */
-  // code-gauge-allow functionCognitiveComplexity -- Scans bracket depth across split element words while keeping non-keyed words separate.
   private arrayElements(arrayNode: Node): Word[] {
     const nodes = arrayNode.namedChildren.filter((child): child is Node => Boolean(child) && child.type !== 'comment');
     const words = nodes.map((node) => this.word(node));
@@ -770,17 +770,8 @@ function keyedSpanEnd(words: Word[], start: number): number | undefined {
   return undefined;
 }
 
-const SIMPLE_ESCAPES: Record<string, number> = {
-  a: 7,
-  b: 8,
-  e: 27,
-  E: 27,
-  f: 12,
-  n: 10,
-  r: 13,
-  t: 9,
-  v: 11,
-  '\\': 92,
+const ANSI_C_ESCAPES: Record<string, number> = {
+  ...SIMPLE_ESCAPE_BYTES,
   "'": 39,
   '"': 34,
   '?': 63,
@@ -807,24 +798,27 @@ export function decodeAnsiC(text: string): string {
 }
 
 /** The bytes of the escape whose letter is at `index`, and the index of its last character. */
-// code-gauge-allow functionCognitiveComplexity -- One case per escape of $'...', as Bash's ansicstr reads them.
+// code-gauge-allow functionCognitiveComplexity -- Handles simple escapes, octal, braced/fixed hex, Unicode, and \cX escapes in $'...'.
 function ansiCEscape(text: string, index: number): { bytes: number[]; last: number } {
   const next = text[index];
   const rest = text.slice(index + 1);
-  if (next in SIMPLE_ESCAPES) return { bytes: [SIMPLE_ESCAPES[next]], last: index };
+  if (Object.hasOwn(ANSI_C_ESCAPES, next)) return { bytes: [ANSI_C_ESCAPES[next]], last: index };
   if (/[0-7]/.test(next)) {
-    const digits = /^[0-7]{1,3}/.exec(text.slice(index))?.[0] ?? next;
-    return { bytes: [Number.parseInt(digits, 8) & 0xff], last: index + digits.length - 1 };
+    const { value, count } = readRadixDigits(text, index, 3, 8);
+    return { bytes: [value & 0xff], last: index + count - 1 };
   }
-  // ksh93's `\x{HHH}` reads every hex digit, and Bash keeps the low byte.
   const braced = next === 'x' ? /^\{([0-9A-Fa-f]*)\}?/.exec(rest) : undefined;
   if (braced) return { bytes: [Number.parseInt(braced[1] || '0', 16) & 0xff], last: index + braced[0].length };
-  const hex = next === 'x' || next === 'u' || next === 'U' ? hexDigits(rest, next) : undefined;
-  if (hex && next === 'x') return { bytes: [Number.parseInt(hex, 16)], last: index + hex.length };
-  if (hex) {
-    const code = Number.parseInt(hex, 16);
-    const valid = code <= 0x10_ff_ff && (code < 0xd8_00 || code > 0xdf_ff);
-    return { bytes: valid ? [...new TextEncoder().encode(String.fromCodePoint(code))] : [], last: index + hex.length };
+  if (next === 'x' || next === 'u' || next === 'U') {
+    const { value, count } = readRadixDigits(text, index + 1, next === 'x' ? 2 : next === 'u' ? 4 : 8, 16);
+    if (count > 0) {
+      if (next === 'x') return { bytes: [value & 0xff], last: index + count };
+      const valid = value <= 0x10_ff_ff && (value < 0xd8_00 || value > 0xdf_ff);
+      return {
+        bytes: valid ? [...new TextEncoder().encode(String.fromCodePoint(value))] : [],
+        last: index + count,
+      };
+    }
   }
   if (next === 'c' && index + 1 < text.length) {
     const control = text[index + 1];
@@ -834,10 +828,4 @@ function ansiCEscape(text: string, index: number): { bytes: number[]; last: numb
     };
   }
   return { bytes: [92, ...new TextEncoder().encode(next)], last: index };
-}
-
-/** The hex digits after `\x` (up to 2), `\u` (4), or `\U` (8), or `undefined` when none follows. */
-function hexDigits(rest: string, letter: string): string | undefined {
-  const max = letter === 'x' ? 2 : letter === 'u' ? 4 : 8;
-  return new RegExp(`^[0-9A-Fa-f]{1,${max}}`).exec(rest)?.[0];
 }

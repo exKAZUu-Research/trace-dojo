@@ -60,7 +60,7 @@ export function evaluateConditional(shell: Shell, expression: TestExpression): b
       return evaluateConditional(shell, expression.left) || evaluateConditional(shell, expression.right);
     }
     case 'unary': {
-      return unaryTest(shell, expression.operator, expander.expandString(expression.operand), true);
+      return unaryTest(shell, expression.operator, expander.expandString(expression.operand));
     }
     case 'binary': {
       const { operator } = expression;
@@ -95,7 +95,7 @@ function conditionalNumber(shell: Shell, text: string): bigint {
   }
 }
 
-/** Wraps `[[ ]]` so that an arithmetic error makes it false, as Bash's `arithcomp` returns. */
+/** Evaluates `[[ ]]` to an exit status: 0 when true, 1 when false or after an arithmetic error, and 2 on bad regex. */
 export function conditionalStatus(shell: Shell, expression: TestExpression): number {
   try {
     return evaluateConditional(shell, expression) ? 0 : 1;
@@ -106,8 +106,8 @@ export function conditionalStatus(shell: Shell, expression: TestExpression): num
   }
 }
 
-/** The unary tests of `test` and `[[`, which share Bash's `unary_test`. */
-export function unaryTest(shell: Shell, operator: string, operand: string, inConditional: boolean): boolean {
+/** Evaluates a unary test operator shared by `test`, `[`, and `[[ ]]`. */
+export function unaryTest(shell: Shell, operator: string, operand: string): boolean {
   switch (operator) {
     case '-z': {
       return operand === '';
@@ -129,7 +129,6 @@ export function unaryTest(shell: Shell, operator: string, operand: string, inCon
       throw new UnsupportedFeatureError('端末を調べる演算子（-t）');
     }
     default: {
-      void inConditional;
       throw new UnsupportedFeatureError(`ファイルを調べる演算子（${operator}）`);
     }
   }

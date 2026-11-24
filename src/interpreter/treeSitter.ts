@@ -153,7 +153,6 @@ function findTooDeepNode(root: Node, maxDepth: number, progress?: () => void): N
  * The syntax errors a tree shows, and with `includeHidden` also where only a node's error flag shows one: a token the
  * parser inserted to recover is invisible when its grammar rule is hidden, like Python's newline and dedent.
  */
-// code-gauge-allow functionCognitiveComplexity -- Collects visible and hidden errors in one walk, skipping those a language reports only when it runs.
 function collectSyntaxErrors(
   root: Node,
   missingTokenNames: Record<string, string>,
@@ -162,13 +161,6 @@ function collectSyntaxErrors(
   progress?: (cost?: number) => void
 ): SourceDiagnostic[] {
   const errors: SourceDiagnostic[] = [];
-  // Whether a node's errors all lie in benign descendants; a hidden token missing in the node itself is not benign.
-  const isExplained = (node: Node): boolean =>
-    isBenignError(node) ||
-    (!node.isError &&
-      !node.isMissing &&
-      node.children.some((child) => child.hasError) &&
-      node.children.every((child) => !child.hasError || isExplained(child)));
   const visit = (node: Node): void => {
     if (errors.length >= 5) return;
     if (isBenignError(node)) return;
@@ -177,7 +169,7 @@ function collectSyntaxErrors(
       errors.push(own);
       return;
     }
-    if (!node.hasError || isExplained(node)) return;
+    if (!node.hasError || isExplainedError(node, isBenignError)) return;
     const found = errors.length;
     progress?.(node.childCount);
     for (const child of node.children) visit(child);
@@ -187,6 +179,17 @@ function collectSyntaxErrors(
   };
   visit(root);
   return errors;
+}
+
+/** Whether `node`'s errors all lie in benign descendants; a hidden token missing in `node` itself is not benign. */
+export function isExplainedError(node: Node, isBenignError: (node: Node) => boolean): boolean {
+  return (
+    isBenignError(node) ||
+    (!node.isError &&
+      !node.isMissing &&
+      node.children.some((child) => child.hasError) &&
+      node.children.every((child) => !child.hasError || isExplainedError(child, isBenignError)))
+  );
 }
 
 /** The error a node is itself: a token the parser inserted, or text it could not parse. */

@@ -235,7 +235,6 @@ class FrameParser {
     return result;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Handles both plain and compound assignments with short-circuit suppression and zero-divisor checks.
   private parseAssignment(): EvalOutcome {
     const left = this.parseTernary();
     if (this.current.kind !== 'op') return left;
@@ -418,6 +417,7 @@ class FrameParser {
     return base;
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Handles logical, bitwise, sign, and pre-increment/decrement unary operators.
   private parseUnary(): EvalOutcome {
     if (this.isOp('!') || this.isOp('~') || this.isOp('+') || this.isOp('-')) {
       const op = (this.current as Extract<LexToken, { kind: 'op' }>).op;
@@ -600,7 +600,6 @@ class FrameParser {
     this.cursor = end;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Disambiguates 3-character, 2-character, increment/decrement, and single-character operators with context-sensitive diagnostics.
   private scanOperator(start: number): void {
     const three = this.source.slice(start, start + 3);
     const threeOp = COMPOUND_OPERATORS.get(three);
@@ -660,6 +659,7 @@ class FrameParser {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Parses 0x hex, leading-0 octal, decimal, and base#digits (bases 2..64) integer constants.
+  // code-gauge-allow functionNcss -- Parses 0x hex, leading-0 octal, decimal, and base#digits (bases 2..64) integer constants.
   private parseIntegerConstant(literal: string): bigint {
     let idx = 0;
     let radix = 10n;
