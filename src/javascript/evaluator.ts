@@ -17,8 +17,8 @@ import { createAsyncGeneratorObject } from './asyncGenerators';
 import {
   decorateClass,
   decorateMembers,
+  evaluateClassDecorators,
   type EvaluatedDecorators,
-  evaluateDecorators,
   type MemberDefinition,
   runInitializers,
 } from './decorators';
@@ -631,12 +631,12 @@ export class Evaluator extends SuspendableStatementEvaluator {
     binding: Binding | undefined
   ): JsFunction {
     const classScope = behavior.scope;
-    const decorators = evaluateDecorators(cls.decorators, cls.members, (expression) =>
+    const decorators = evaluateClassDecorators(cls.decorators, cls.members, (expression) =>
       this.inScope(classScope, () => this.evaluate(expression))
     );
     const definitions: MemberDefinition[] = [];
     const staticInitializers = this.inScope(classScope, () =>
-      this.defineMembers(cls, fn, prototype, behavior, definitions)
+      this.defineMembers(cls, fn, prototype, behavior, { definitions, decorators })
     );
     const decorated = decorators
       ? this.applyDecorators(fn, behavior, definitions, decorators, staticInitializers, inferredName)
@@ -725,7 +725,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     fn: JsFunction,
     prototype: JsObject,
     behavior: Extract<ClassBehavior, { kind: 'class' }>,
-    definitions: MemberDefinition[]
+    { definitions, decorators }: { definitions: MemberDefinition[]; decorators: EvaluatedDecorators | undefined }
   ): (() => void)[] {
     const { runtime } = this;
     const staticInitializers: (() => void)[] = [];
@@ -737,6 +737,12 @@ export class Evaluator extends SuspendableStatementEvaluator {
       }
       const target = member.isStatic ? fn : prototype;
       const isPrivate = member.key.kind === 'private';
+      // A member's decorators run just before its key, in the order of the class's source.
+      if (decorators && member.decorators)
+        decorators.members.set(
+          member,
+          member.decorators.map((expression) => this.evaluate(expression))
+        );
       const key = this.propertyKey(member.key);
       const name = member.key.kind === 'private' ? member.key.name : key;
       if (member.kind === 'field') {

@@ -42,22 +42,18 @@ export interface DecoratorInitializers {
   instanceMembers: Value[];
 }
 
-/** Evaluates the decorators of a class and then of its members, in source order, as their expressions are written. */
-export function evaluateDecorators(
+/**
+ * Evaluates the decorators of a class, when it or a member has any; defining the members evaluates each member's
+ * decorators then, just before its key, as the standard orders them.
+ */
+export function evaluateClassDecorators(
   classDecorators: Expression[] | undefined,
   members: ClassMember[],
   evaluate: (expression: Expression) => Value
 ): EvaluatedDecorators | undefined {
   if (!classDecorators && !members.some((member) => member.kind !== 'staticBlock' && member.decorators))
     return undefined;
-  const evaluated: EvaluatedDecorators = {
-    classDecorators: (classDecorators ?? []).map(evaluate),
-    members: new Map(),
-  };
-  for (const member of members)
-    if (member.kind !== 'staticBlock' && member.decorators)
-      evaluated.members.set(member, member.decorators.map(evaluate));
-  return evaluated;
+  return { classDecorators: (classDecorators ?? []).map(evaluate), members: new Map() };
 }
 
 /**
