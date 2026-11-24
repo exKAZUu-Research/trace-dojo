@@ -115,6 +115,10 @@ export class Expander {
         elements.push({ key, value, append: keyed.append, rawText: word.text });
         continue;
       }
+      if (isAssociative) {
+        elements.push({ plain: this.expandAssignmentValue(word), rawText: word.text });
+        continue;
+      }
       for (const field of this.expandWords([word])) {
         elements.push({ plain: field, rawText: word.text });
       }

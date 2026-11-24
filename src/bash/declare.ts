@@ -459,7 +459,7 @@ function declareOne(
   ) {
     return finishElementAliasAttributeBuiltin(shell, builtin, destination, operand, parsed, assignMode);
   }
-  const preUnsetStore = resolvePreUnsetNamerefStore(shell, name, destination.variable, options, assignMode !== 'none');
+  const preUnsetStore = resolvePreUnsetNamerefStore(shell, destination.variable, options, assignMode !== 'none');
   if (
     !applyAttributes(
       shell,
@@ -468,7 +468,7 @@ function declareOne(
       options,
       assignMode !== 'none' || isCompound(operand),
       isSubscripted || destination.referencedSubscript !== undefined,
-      preUnsetStore !== undefined
+      Boolean(preUnsetStore?.deferUnsetN)
     )
   ) {
     return false;
@@ -543,7 +543,7 @@ function finishDeclarationEffects(
   priorKind: VariableValue['kind'] | undefined,
   onMaterialize: (() => void) | undefined
 ): void {
-  if (ok && preUnsetStore) preUnsetStore.finalLink.attributes.delete('n');
+  if (ok && preUnsetStore?.deferUnsetN) preUnsetStore.finalLink.attributes.delete('n');
   if (setsReadonly) variable.attributes.add('r');
   notifyIfArrayMaterialized(ok, variable, priorKind, onMaterialize);
 }
@@ -605,27 +605,26 @@ function operandSubscriptText(operand: DeclarationArgument, parsed: { subscript?
 
 interface PreUnsetNamerefStore extends DeclarationDestination {
   finalLink: Variable;
+  deferUnsetN: boolean;
 }
 
 function resolvePreUnsetNamerefStore(
   shell: Shell,
-  name: string,
-  aliasVariable: Variable | undefined,
+  finalLink: Variable | undefined,
   { set, unset }: Options,
   assigns: boolean
 ): PreUnsetNamerefStore | undefined {
-  if (!assigns || !unset.has('n') || !aliasVariable?.attributes.has('n')) return undefined;
+  if (!assigns || !unset.has('n') || !finalLink?.attributes.has('n')) return undefined;
   const globalOnly = set.has('g');
-  const finalLink = findFinalNamerefLink(shell, aliasVariable, globalOnly);
   const { targetName, referencedSubscript } = resolveDeclaredTarget(
     shell,
-    name,
+    finalLink.name,
     new Set(),
     new Set(),
     false,
     globalOnly
   );
-  if (targetName === name && referencedSubscript === undefined) return undefined;
+  if (targetName === finalLink.name && referencedSubscript === undefined) return undefined;
   let storeVariable = globalOnly ? shell.state.scopes[0].get(targetName) : shell.findVariable(targetName, false);
   if (!storeVariable) {
     storeVariable = { name: targetName, value: undefined, attributes: new Set() };
@@ -634,22 +633,9 @@ function resolvePreUnsetNamerefStore(
   return {
     variable: storeVariable,
     finalLink,
+    deferUnsetN: referencedSubscript === undefined,
     ...(referencedSubscript === undefined ? {} : { referencedSubscript }),
   };
-}
-
-function findFinalNamerefLink(shell: Shell, start: Variable, globalOnly: boolean): Variable {
-  const seen = new Set<Variable>([start]);
-  let current = start;
-  while (current.attributes.has('n') && current.value?.kind === 'scalar' && current.value.value !== '') {
-    const target = current.value.value;
-    if (shell.splitSubscript(target)) break;
-    const next = globalOnly ? shell.state.scopes[0].get(target) : shell.findOwnVariable(target);
-    if (!next?.attributes.has('n') || seen.has(next)) break;
-    seen.add(next);
-    current = next;
-  }
-  return current;
 }
 
 // code-gauge-allow functionParameterCount -- Inspects operand, parsed string form, options, scope mode, and subscript presence.
@@ -1089,7 +1075,11 @@ function resolveDeclaredTarget(
   globalOnly = set.has('g'),
   localScope?: Map<string, Variable>
 ): { targetName: string; referencedSubscript?: string } {
-  if (set.has('n') || unset.has('n') || (globalOnly && isSubscripted)) return { targetName: name };
+  if (set.has('n') || (globalOnly && isSubscripted)) return { targetName: name };
+  if (unset.has('n')) {
+    const start = globalOnly ? shell.state.scopes[0].get(name) : shell.findOwnVariable(name);
+    return { targetName: start?.attributes.has('n') ? findFinalNamerefLink(shell, start, globalOnly).name : name };
+  }
   if (localScope && set.has('I') && !localScope.has(name)) return { targetName: name };
   let current = globalOnly ? shell.state.scopes[0].get(name) : shell.findOwnVariable(name);
   let target = name;
@@ -1103,6 +1093,20 @@ function resolveDeclaredTarget(
     current = globalOnly ? shell.state.scopes[0].get(target) : shell.findOwnVariable(target);
   }
   return { targetName: target };
+}
+
+function findFinalNamerefLink(shell: Shell, start: Variable, globalOnly: boolean): Variable {
+  const seen = new Set<Variable>([start]);
+  let current = start;
+  while (current.attributes.has('n') && current.value?.kind === 'scalar' && current.value.value !== '') {
+    const target = current.value.value;
+    if (shell.splitSubscript(target)) break;
+    const next = globalOnly ? shell.state.scopes[0].get(target) : shell.findOwnVariable(target);
+    if (!next?.attributes.has('n') || seen.has(next)) break;
+    seen.add(next);
+    current = next;
+  }
+  return current;
 }
 
 function isReadonlyGlobal(shell: Shell, name: string): boolean {

@@ -218,7 +218,9 @@ function unsetName(shell: Shell, name: string, mode: UnsetMode): boolean {
     return true;
   }
   if (mode === 'n') return unsetNameref(shell, name);
-  if (split && isIdentifier(split.name)) return unsetElement(shell, split.name, split.subscript);
+  if (split && isIdentifier(split.name) && split.subscript !== '') {
+    return unsetElement(shell, split.name, split.subscript);
+  }
   if (!isIdentifier(name)) {
     if (mode === 'v') {
       shell.reportError(`unset: \`${name}': not a valid identifier`);
@@ -281,6 +283,8 @@ function unsetSpecialOrMissingElement(
     shell.reportError(`unset: ${resolved}: cannot unset`);
     return false;
   }
+  if (subscript === '') return true;
+  if (resolved === 'RANDOM') shell.scalarValue('RANDOM');
   if (subscript === '@' || subscript === '*') return unsetAllDynamicElements(shell, resolved, viaReference);
   const expanded = shell.expandDynamicSubscript(subscript);
   const index = shell.arrayIndex(resolved, expanded === '' && subscript !== '' ? '0' : expanded);
