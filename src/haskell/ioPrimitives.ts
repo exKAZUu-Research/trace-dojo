@@ -5,7 +5,7 @@ import type { ConInfo } from './entities';
 import { cons, NIL, nullary, RunNext, TailCall, unpackString } from './machine';
 import { bool, define, forceString, unit } from './primitives';
 import type { Runtime } from './runtime';
-import { type Dict,ConValue,HaskellException,IOPrim,RefValue,type Slot,Thunk,type Value } from './values';
+import { ConValue, type Dict, HaskellException, IOPrim, RefValue, type Slot, Thunk, type Value } from './values';
 
 /** The library's values that primitives and the program's run call: exceptions' values and messages. */
 export const ioSupport: {
@@ -332,6 +332,11 @@ define('castException', 3, [0, 1], ([from, to, value], runtime) => {
   const same = (runtime.machine.force(from) as Dict).instance === (runtime.machine.force(to) as Dict).instance;
   return same ? new ConValue(maybe.just, [value]) : nullary(maybe.nothing);
 });
+
+// Type-level literals, whose evidence is their value, and fields, whose evidence is their selector
+
+define('literalOf', 2, [0], ([value], runtime) => runtime.machine.force(value));
+define('applyField', 2, [0], ([selector, record], runtime) => new TailCall(runtime.machine.force(selector), [record]));
 
 // Mutable references and the ST monad
 

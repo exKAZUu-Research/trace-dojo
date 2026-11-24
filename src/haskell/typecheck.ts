@@ -21,7 +21,6 @@ import {
   matchType,
   type Pred,
   prune,
-  pruneKind,
   quantifyType,
   type Scheme,
   splitApp,
@@ -29,6 +28,7 @@ import {
   tap,
   tcon,
   type Type,
+  unifyKinds,
   zonk,
 } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
@@ -58,6 +58,9 @@ export interface TypecheckOptions {
 
 export function typecheckModule(module: RModule, options: TypecheckOptions): TypecheckResult {
   const checker = new Checker(options.env, options.builtins);
+  // The library declares functions such as getField whose callers choose a variable by a type application.
+  checker.allowAmbiguousTypes = !options.isProgram || module.extensions.has('AllowAmbiguousTypes');
+  checker.polyKinds = module.extensions.has('PolyKinds');
   inferKinds(checker, module);
   applyDefaultDecls(checker, module);
   for (const decl of module.dataDecls) defineConstructors(decl);
@@ -520,7 +523,7 @@ function checkDerivable(decl: RDataDecl, cls: ClassEntity, span: Span): void {
   const cons = decl.cons.map(({ con }) => con);
   if (FUNCTOR_LIKE_CLASSES.has(cls.name)) {
     const kinds = typeParamKinds(decl.entity);
-    if (kinds.length === 0 || pruneKind(kinds.at(-1) as Kind).tag !== 'star') {
+    if (kinds.length === 0 || !unifyKinds(kinds.at(-1) as Kind, STAR)) {
       throw compileError(
         span,
         `${decl.entity.name} は型引数をとる型ではないので、${cls.name} を deriving できません。`

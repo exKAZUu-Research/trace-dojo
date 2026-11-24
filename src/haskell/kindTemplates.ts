@@ -19,15 +19,35 @@ export function freshKind(kind: Kind): { kind: Kind; variables: KindVar[] } {
   const result = mapGraph<Kind>(
     kind,
     pruneKind,
-    (node) => (node.tag === 'arrow' ? [node.from, node.to] : []),
+    (node) => (node.tag === 'arrow' ? [node.from, node.to] : node.tag === 'data' ? node.args : []),
     (node, mapped) => {
       if (node.tag === 'kvar') {
         const variable = freshKindVar();
         variables.push(variable);
         return variable;
       }
+      if (node.tag === 'data') return { tag: 'data', entity: node.entity, args: mapped };
       return node.tag === 'arrow' ? kindArrow(mapped[0], mapped[1]) : node;
     }
   );
   return { kind: result, variables };
+}
+
+/**
+ * Copies kinds with fresh variables for the kind variables they hold, the same variable alike, as instantiating a
+ * scheme of a kind-polymorphic type does.
+ */
+export function freshKinds(kinds: readonly Kind[]): Kind[] {
+  if (kinds.length === 0) return [];
+  let whole: Kind = kinds.at(-1) as Kind;
+  for (const kind of kinds.slice(0, -1).toReversed()) whole = kindArrow(kind, whole);
+  const result: Kind[] = [];
+  let current = freshKind(whole).kind;
+  for (let index = 0; index < kinds.length - 1; index++) {
+    const arrow = pruneKind(current) as { tag: 'arrow'; from: Kind; to: Kind };
+    result.push(arrow.from);
+    current = arrow.to;
+  }
+  result.push(current);
+  return result;
 }

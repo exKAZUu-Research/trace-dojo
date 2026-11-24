@@ -5,7 +5,10 @@ import {
   EQUALITY_CLASS,
   EQUALITY_TYPES,
   FUNCTION_TYPE,
+  HAS_FIELD_CLASS,
+  HAS_FIELD_TYPES,
   LIST_TYPE,
+  symbolType,
   tupleCon,
   UNIT_TYPE,
 } from './builtinTypes';
@@ -13,6 +16,7 @@ import { type ClassEnv, entailByGivens, hasConstructorHead, impliedBySuperclasse
 import { dependencyOrder } from './dependencies';
 import type { ClassEntity, ConInfo, DictParam, Evidence, EvidenceHole, TypeEntity, ValueEntity } from './entities';
 import { compileError } from './errors';
+import { freshKinds } from './kindTemplates';
 import { TypePrinter } from './prettyType';
 import type {
   Binder,
@@ -91,6 +95,13 @@ let nextParamId = 0;
 /** The classes whose constraints alone let ExtendedDefaultRules default a type variable. */
 const INTERACTIVE_CLASSES = new Set(['Show', 'Eq', 'Ord', 'Foldable', 'Traversable']);
 
+/** The library's classes of type-level literals, `KnownNat` and `KnownSymbol`, which their values solve. */
+let literalClasses: { nat: ClassEntity; symbol: ClassEntity } | undefined;
+
+export function setLiteralClasses(nat: ClassEntity, symbol: ClassEntity): void {
+  literalClasses = { nat, symbol };
+}
+
 export function newDictParam(pred: Pred): DictParam {
   return { id: nextParamId++, pred };
 }
@@ -131,6 +142,16 @@ export class Checker {
   defaultTypes: Type[] | undefined;
   /** The candidates of `default C (...)` declarations, by class. */
   readonly namedDefaults = new Map<ClassEntity, Type[]>();
+  set polyKinds(value: boolean) {
+    this.typeConversion.polyKinds = value;
+  }
+
+  get polyKinds(): boolean {
+    return this.typeConversion.polyKinds;
+  }
+
+  /** Whether AllowAmbiguousTypes lets a signature have variables only its constraints mention. */
+  allowAmbiguousTypes = false;
   /** Whether ExtendedDefaultRules relaxes defaulting as GHCi does. */
   extendedDefaults = false;
   /** The typed holes found so far with their types, which the module reports once it is checked. */
@@ -146,6 +167,10 @@ export class Checker {
     const family = (x: Type, y: Type): ReturnType<typeof unifyTypes> => {
       const left = this.reduceFamilies(x);
       const right = this.reduceFamilies(y);
+      const flexible = [left, right].find((side) => side.tag === 'tvar' && !side.skolem);
+      if (flexible && (isFamilyApplication(left) || isFamilyApplication(right))) {
+        return bind(flexible as TVar, flexible === left ? right : left);
+      }
       if (isFamilyApplication(left) || isFamilyApplication(right)) {
         if (!typesEqual(left, right)) {
           this.want({ cls: EQUALITY_CLASS, type: tap(tcon(EQUALITY_TYPES), left, right) }, span, context ?? '型族');
@@ -192,7 +217,7 @@ export class Checker {
   }
 
   instantiate(scheme: Scheme, span: Span, origin: string): { type: Type; evidence: Evidence[] } {
-    const args = scheme.kinds.map((kind, index) => this.freshVar(kind, scheme.names?.[index]));
+    const args = freshKinds(scheme.kinds).map((kind, index) => this.freshVar(kind, scheme.names?.[index]));
     const evidence = scheme.preds.map((pred) =>
       this.want({ cls: pred.cls, type: instantiateType(pred.type, args) }, span, origin)
     );
@@ -225,8 +250,36 @@ export class Checker {
       if (hole.solution) continue;
       const pred = { cls: hole.pred.cls, type: zonk(hole.pred.type) };
       hole.pred = pred;
+      if (pred.cls === literalClasses?.nat || pred.cls === literalClasses?.symbol) {
+        const literal = prune(this.reduceFamilies(pred.type));
+        if (literal.tag === 'tcon' && literal.entity.literal !== undefined) {
+          hole.solution = { kind: 'literal', value: literal.entity.literal };
+          continue;
+        }
+        if (literal.tag === 'tcon' || literal.tag === 'tap') this.noInstance(hole);
+      }
+      if (pred.cls === HAS_FIELD_CLASS) {
+        const solution = this.solveHasField(pred, hole.span);
+        if (solution) {
+          hole.solution = solution;
+          continue;
+        }
+      }
       if (pred.cls === EQUALITY_CLASS) {
         const [left, right] = splitApp(pred.type).args.map((side) => this.reduceFamilies(side));
+        const flexible = [left, right].find((side) => {
+          const pruned = prune(side);
+          return pruned.tag === 'tvar' && !pruned.skolem;
+        });
+        if (flexible) {
+          const other = prune(flexible === left ? right : left);
+          if (prune(flexible) !== other) {
+            const failure = this.bindVar(prune(flexible) as TVar, other);
+            if (failure) this.unify(left, right, hole.span, `型の等しさの制約（${hole.origin}）`);
+          }
+          hole.solution = { kind: 'equality' };
+          continue;
+        }
         if (!typesEqual(left, right) && (isFamilyApplication(left) || isFamilyApplication(right))) {
           retained.push(hole);
           continue;
@@ -289,6 +342,22 @@ export class Checker {
     }
   }
 
+  /**
+   * Solves `HasField "f" r a` once `r` is a known data type: with its field `f`, whose type `a` then is; a type
+   * without the field fails, and an unknown `r` leaves the constraint for later.
+   */
+  private solveHasField(pred: Pred, span: Span): Evidence | undefined {
+    const [label, record, field] = splitApp(pred.type).args.map(prune);
+    const { head, args } = splitApp(record);
+    if (head.tag !== 'tcon' || label.tag !== 'tcon') return undefined;
+    const info = head.entity.fields.get(String(label.entity.literal));
+    if (!info || head.entity.sort !== 'data') {
+      typeError(span, `型 ${head.entity.name} には、フィールド ${String(label.entity.literal)} がありません。`);
+    }
+    this.unify(field, instantiateType(info.fieldType, args), span, `フィールド ${info.name} の型`);
+    return { kind: 'field', field: info };
+  }
+
   /** Reduces the type family applications of a type by their equations, as far as its known parts allow. */
   reduceFamilies(type: Type, depth = 0): Type {
     if (depth > 200) typeError({ row: 0, col: 0, endRow: 0, endCol: 0 }, '型族の計算が上限を超えました。');
@@ -308,6 +377,7 @@ export class Checker {
    * yet; for a closed family, an earlier equation that could still match stops the search.
    */
   private reduceFamilyApplication(family: TypeEntity, args: Type[]): Type | undefined {
+    if (family.reduceBuiltin) return family.reduceBuiltin(args);
     for (const equation of family.equations ?? []) {
       const bindings: (Type | undefined)[] = [];
       if (equation.lhs.every((pattern, index) => matchType(pattern, args[index], bindings))) {
@@ -410,7 +480,7 @@ export class Checker {
           return index === -1 ? [] : [index];
         });
     const scheme = { kinds: kinds.map(defaultKind), names, preds, type, specified };
-    checkSchemeAmbiguity(scheme, sig.span);
+    if (!this.allowAmbiguousTypes) checkSchemeAmbiguity(scheme, sig.span);
     return scheme;
   }
 
@@ -493,6 +563,16 @@ export class Checker {
       }
       case 'poly': {
         return this.inferExpr(expr.expr);
+      }
+      case 'projection': {
+        const record = this.inferExpr(expr.expr);
+        const field = this.freshVar();
+        expr.evidence = this.want(
+          { cls: HAS_FIELD_CLASS, type: tap(tcon(HAS_FIELD_TYPES), tcon(symbolType(expr.field)), record, field) },
+          expr.span,
+          `フィールド ${expr.field} の取り出し`
+        );
+        return field;
       }
       case 'var': {
         return this.typeOfRef(expr.ref, expr.span, expr.name, expr);
@@ -608,12 +688,12 @@ export class Checker {
     if (!scheme || typeArgs.length > specified.length) {
       typeError(expr.span, '型の適用（@）ができるのは、型シグネチャで型変数を決めた関数と構成子だけです。');
     }
-    const args = scheme.kinds.map((kind, index) => this.freshVar(kind, scheme.names?.[index]));
+    const args = freshKinds(scheme.kinds).map((kind, index) => this.freshVar(kind, scheme.names?.[index]));
     for (const [position, typeArg] of typeArgs.entries()) {
       if (!typeArg) continue;
       const index = specified[position];
       const scoped = new Map([...this.scopedTypes].map(([name, type]) => [name, kindOfType(type)]));
-      const type = this.convertType(typeArg, this.scopedTypes, scoped, scheme.kinds[index]);
+      const type = this.convertType(typeArg, this.scopedTypes, scoped, (args[index] as TVar).kind);
       this.checkKinds();
       this.unify(args[index], type, typeArg.span, '型の適用');
     }
@@ -825,7 +905,7 @@ export class Checker {
   private matchConstructorVariables(pat: Extract<RPat, { k: 'con' }>, type: Type): Type[] {
     const { con, span } = pat;
     const scope = this.enterImplication(span);
-    const args = typeParamKinds(con.type).map((kind) => this.freshVar(kind));
+    const args = freshKinds(typeParamKinds(con.type)).map((kind) => this.freshVar(kind));
     this.unify(tap(tcon(con.type), ...args), type, span, `構成子 ${con.name} のパターン`);
     const existentials = (con.exKinds ?? []).map((kind) => freshSkolem(kind, this.level, 'a'));
     const all = [...args, ...existentials];
@@ -837,7 +917,18 @@ export class Checker {
         scope.assumed.push(target);
       } else if (target.tag === 'tvar') {
         typeError(span, `GADT の構成子 ${con.name} で照合する値の型が決まりません。型シグネチャを付けてください。`);
-      } else this.unify(target, assumed, span, `構成子 ${con.name} のパターン`);
+      } else {
+        // The match's own variables stand for what the scrutinee's known type has at their places.
+        for (const variable of existentials) variable.skolem = false;
+        try {
+          this.unify(target, assumed, span, `構成子 ${con.name} のパターン`);
+        } finally {
+          for (const variable of existentials) {
+            variable.skolem = true;
+            if (variable.ref && !scope.assumed.includes(variable)) scope.assumed.push(variable);
+          }
+        }
+      }
     }
     pat.dictParams = (con.context ?? []).map((pred) =>
       newDictParam({ cls: pred.cls, type: instantiateType(pred.type, all) })
@@ -851,13 +942,13 @@ export class Checker {
 
   instantiateCon(con: ConInfo): { type: Type; fieldTypes: Type[] } {
     if (con.instanceArgs) {
-      const vars = (con.instanceKinds ?? []).map((kind) => this.freshVar(kind));
+      const vars = freshKinds(con.instanceKinds ?? []).map((kind) => this.freshVar(kind));
       return {
         type: tap(tcon(con.type), ...con.instanceArgs.map((arg) => instantiateType(arg, vars))),
         fieldTypes: con.fieldTypes.map((fieldType) => instantiateType(fieldType, vars)),
       };
     }
-    const args = typeParamKinds(con.type).map((kind) => this.freshVar(kind));
+    const args = freshKinds(typeParamKinds(con.type)).map((kind) => this.freshVar(kind));
     return {
       type: tap(tcon(con.type), ...args),
       fieldTypes: con.fieldTypes.map((fieldType) => instantiateType(fieldType, args)),

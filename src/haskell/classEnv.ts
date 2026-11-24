@@ -107,20 +107,28 @@ export function entailByGivens(
   return undefined;
 }
 
+interface SuperclassStep {
+  index: number;
+  parent: SuperclassStep | undefined;
+}
+
 /** The superclass positions that lead from a constraint to another it implies, if it does. */
 function superclassPath(given: Pred, pred: Pred): number[] | undefined {
   const seen = new Set<ClassEntity>();
-  const work: { pred: Pred; path: number[] }[] = [{ pred: given, path: [] }];
+  const work: { pred: Pred; step: SuperclassStep | undefined }[] = [{ pred: given, step: undefined }];
   while (work.length > 0) {
     chargeTypeWork();
     const current = work.pop()!;
-    if (predsEqual(current.pred, pred)) return current.path;
+    if (predsEqual(current.pred, pred)) {
+      const path: number[] = [];
+      for (let step = current.step; step; step = step.parent) path.push(step.index);
+      return path.toReversed();
+    }
     // A class reached again only repeats what it implies, unless its superclasses apply to other types.
-    if (seen.has(current.pred.cls) && !current.pred.cls.superTypes?.length) continue;
+    if (seen.has(current.pred.cls) && !current.pred.cls.superTypes) continue;
     seen.add(current.pred.cls);
-    if (current.path.length > 100) continue;
     for (let index = current.pred.cls.supers.length - 1; index >= 0; index--) {
-      work.push({ pred: superPred(current.pred, index), path: [...current.path, index] });
+      work.push({ pred: superPred(current.pred, index), step: { index, parent: current.step } });
     }
   }
   return undefined;

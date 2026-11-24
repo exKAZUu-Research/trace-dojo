@@ -4,7 +4,10 @@ import {
   EQUALITY_CLASS,
   FUNCTION_TYPE,
   LIST_TYPE,
+  naturalType,
   NIL_CON,
+  promotedType,
+  symbolType,
   tupleCon,
   tupleType,
   TYPE_KIND,
@@ -1262,6 +1265,9 @@ class Renamer {
       case 'hole': {
         return { k: 'hole', name: expr.name, span };
       }
+      case 'projection': {
+        return { k: 'projection', expr: this.renameExpr(expr.expr, scope), field: expr.field, span };
+      }
       case 'support': {
         return { k: 'var', ref: { kind: 'global', entity: this.supportValue(expr.name, span) }, name: expr.name, span };
       }
@@ -1756,6 +1762,38 @@ class Renamer {
       case 'tkinded': {
         return { k: 'kinded', type: this.renameType(type.type, vars), kind: this.renameKind(type.kindSig), span };
       }
+      case 'tpromoted': {
+        return { k: 'con', entity: promotedType(this.lookupCon(type.name)), span };
+      }
+      case 'tpromotedList': {
+        let result: RType = { k: 'con', entity: promotedType(NIL_CON), span };
+        for (const elem of type.elems.toReversed()) {
+          result = {
+            k: 'app',
+            fn: {
+              k: 'app',
+              fn: { k: 'con', entity: promotedType(CONS_CON), span },
+              arg: this.renameType(elem, vars),
+              span,
+            },
+            arg: result,
+            span,
+          };
+        }
+        return result;
+      }
+      case 'tpromotedTuple': {
+        let result: RType = { k: 'con', entity: promotedType(tupleCon(type.elems.length)), span };
+        for (const elem of type.elems) result = { k: 'app', fn: result, arg: this.renameType(elem, vars), span };
+        return result;
+      }
+      case 'tlit': {
+        return {
+          k: 'con',
+          entity: typeof type.value === 'string' ? symbolType(type.value) : naturalType(type.value),
+          span,
+        };
+      }
       case 'tchain': {
         return this.renameType(
           resolveTypeChain(type.items, span, (op) => this.typeFixityOf(op)),
@@ -1916,6 +1954,15 @@ class Renamer {
     return entity.entity.fixity ?? DEFAULT_FIXITY;
   }
 
+  private typeExists(name: QName): boolean {
+    if (name.qualifier) return (this.scope.qualifiedTypes.get(name.qualifier)?.get(name.name).length ?? 0) > 0;
+    return (
+      this.scope.types.get(name.name).length > 0 ||
+      this.ownTypes.has(name.name) ||
+      this.options.weakTypes?.has(name.name) === true
+    );
+  }
+
   private renameTypeName(name: QName): RType {
     let builtin: TypeEntity | undefined;
     if (!name.qualifier && name.name === '~') return { k: 'class', entity: EQUALITY_CLASS, span: name.span };
@@ -1930,6 +1977,14 @@ class Renamer {
       }
     }
     if (builtin) return { k: 'con', entity: builtin, span: name.span };
+    if (
+      this.module.extensions.has('DataKinds') &&
+      !this.typeExists(name) &&
+      this.valuesNamed(name).some((entity) => entity.sort === 'con')
+    ) {
+      // DataKinds lets a constructor stand for its promoted type without a tick when no type has its name.
+      return { k: 'con', entity: promotedType(this.lookupCon(name)), span: name.span };
+    }
     const found = this.lookupType(name);
     return found.kind === 'type'
       ? { k: 'con', entity: found.entity, span: name.span }

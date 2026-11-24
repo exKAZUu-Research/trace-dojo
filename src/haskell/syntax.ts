@@ -29,6 +29,8 @@ export type SourceLiteral = Literal & { text: string };
 /** An operator between operands, written as a symbol (`+`, `:`) or a name in backticks (`` `div` ``). */
 export interface Operator extends QName {
   isConstructor: boolean;
+  /** Whether the operator is a promoted constructor in a type, `':`. */
+  promoted?: boolean;
 }
 
 export type Expr =
@@ -70,6 +72,8 @@ export type Expr =
   | { kind: 'paren'; expr: Expr; span: Span }
   /** A visible type application, `f @Int`, or `f @_`, which leaves the argument to inference. */
   | { kind: 'tyapp'; expr: Expr; type?: TypeExpr; span: Span }
+  /** `e.field`, which OverloadedRecordDot reads as `getField @"field" e`. */
+  | { kind: 'projection'; expr: Expr; field: string; span: Span }
   /** A library value that code the conversion generates refers to, whatever the program's scope has. */
   | { kind: 'support'; name: string; span: Span }
   /** A typed hole, `_` or an unbound name starting with `_`, which GHC reports with its type. */
@@ -116,6 +120,12 @@ export type TypeExpr =
   | { kind: 'tvar'; name: string; span: Span }
   /** A type with a kind annotation, `(t :: k)`. */
   | { kind: 'tkinded'; type: TypeExpr; kindSig: TypeExpr; span: Span }
+  /** A data constructor used as a type, as DataKinds promotes it: `'True`, `'[]`, `':`. */
+  | { kind: 'tpromoted'; name: QName; span: Span }
+  /** A type-level list, `'[a, b]`, or tuple, `'(a, b)`. */
+  | { kind: 'tpromotedList' | 'tpromotedTuple'; elems: TypeExpr[]; span: Span }
+  /** A type-level literal, `3` or `"name"`. */
+  | { kind: 'tlit'; value: bigint | string; span: Span }
   /** Types joined by type operators, `a :+: b`, before fixity resolution. */
   | { kind: 'tchain'; items: ChainItem<TypeExpr>[]; span: Span }
   /** A polymorphic type inside another, `forall a. C a => t`, as RankNTypes allows. */

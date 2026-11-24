@@ -858,6 +858,34 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
     types: [['STRef', 'none']],
     values: ['newSTRef', 'readSTRef', 'writeSTRef', 'modifySTRef', "modifySTRef'"],
   },
+  'Data.Proxy': {
+    from: 'Base',
+    types: [['Proxy', 'all']],
+    values: ['asProxyTypeOf'],
+  },
+  'GHC.TypeLits': {
+    from: 'Base',
+    types: [
+      ['Natural', 'none'],
+      ['Symbol', 'none'],
+      ['KnownNat', 'none'],
+      ['KnownSymbol', 'none'],
+    ],
+    values: ['natVal', 'symbolVal'],
+  },
+  'GHC.TypeNats': {
+    from: 'Base',
+    types: [
+      ['Natural', 'none'],
+      ['KnownNat', 'none'],
+    ],
+    values: ['natVal'],
+  },
+  'GHC.Records': {
+    from: 'Base',
+    types: [['HasField', 'none']],
+    values: ['getField'],
+  },
   'Control.Monad.Fix': {
     from: 'Base',
     types: [['MonadFix', 'all']],
@@ -908,7 +936,6 @@ export const UNSUPPORTED_MODULES: Record<string, string> = {
   'Data.Complex': '複素数（Data.Complex）',
   'Data.Fixed': 'Data.Fixed',
   'Data.Void': 'Data.Void',
-  'Data.Proxy': 'Data.Proxy',
   'Data.Typeable': 'リフレクション（Data.Typeable）',
   'Data.Dynamic': 'リフレクション（Data.Dynamic）',
   'Data.Data': 'リフレクション（Data.Data）',

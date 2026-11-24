@@ -20,6 +20,8 @@ export interface TypeEntity {
   closed?: boolean;
   /** Whether the type is a data family, whose instances declare its constructors. */
   dataFamily?: boolean;
+  /** For a built-in type family, such as GHC.TypeLits' `+`, how it reduces its arguments, if it can yet. */
+  reduceBuiltin?: (args: Type[]) => Type | undefined;
   unsupported?: string;
   kind: Kind;
   /** The number of type parameters a data type or synonym declares. */
@@ -32,6 +34,10 @@ export interface TypeEntity {
   span?: Span;
   /** The fixity a type operator was declared with, if any. */
   fixity?: Fixity;
+  /** For a type-level literal, the string or number it is. */
+  literal?: string | bigint;
+  /** For a data constructor used as a type, as DataKinds promotes it, the constructor. */
+  promotedFrom?: ConInfo;
   /** How the type prints when it is special syntax: lists, tuples, unit, functions, and a class's arguments. */
   special?: 'list' | 'tuple' | 'unit' | 'function' | 'classArguments';
   traceKind?: 'bool' | 'ratio' | 'maybe' | 'map' | 'set';
@@ -143,6 +149,10 @@ export type Evidence =
   | { kind: 'param'; param: DictParam }
   /** The evidence of a type equality, `a ~ b`, which holds no value at run time. */
   | { kind: 'equality' }
+  /** The evidence of `HasField "f" r a`: the selector of the field. */
+  | { kind: 'field'; field: FieldInfo }
+  /** The evidence of `KnownNat n` or `KnownSymbol s`: the literal's value. */
+  | { kind: 'literal'; value: string | bigint }
   | { kind: 'instance'; instance: InstanceInfo; args: Evidence[] }
   | { kind: 'super'; of: Evidence; index: number }
   | { kind: 'hole'; hole: EvidenceHole };

@@ -638,6 +638,39 @@ modifySTRef (STRef ref) f = ST (modifyIORef ref f)
 modifySTRef' :: STRef s a -> (a -> a) -> ST s ()
 modifySTRef' (STRef ref) f = ST (modifyIORef' ref f)
 
+-- Type-level literals and proxies
+
+data Proxy t = Proxy
+
+instance Eq (Proxy t) where
+  _ == _ = True
+
+instance Ord (Proxy t) where
+  compare _ _ = EQ
+
+instance Show (Proxy t) where
+  showsPrec _ _ = showString "Proxy"
+
+instance Bounded (Proxy t) where
+  minBound = Proxy
+  maxBound = Proxy
+
+asProxyTypeOf :: a -> proxy a -> a
+asProxyTypeOf x _ = x
+
+class KnownNat (n :: Natural)
+
+class KnownSymbol (s :: Symbol)
+
+natVal :: KnownNat n => proxy n -> Integer
+natVal = primitive "literalOf"
+
+symbolVal :: KnownSymbol s => proxy s -> String
+symbolVal = primitive "literalOf"
+
+getField :: HasField x r a => r -> a
+getField = primitive "applyField"
+
 -- Recursive monadic bindings, which mdo and rec blocks use.
 
 class Monad m => MonadFix m where

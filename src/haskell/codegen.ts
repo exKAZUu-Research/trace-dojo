@@ -812,6 +812,9 @@ export class Codegen {
       case 'tyapp': {
         return this.compileExpr(expr.expr);
       }
+      case 'projection': {
+        return { k: 'app', fn: this.compileEvidence(expr.evidence as Evidence), args: [this.compileExpr(expr.expr)] };
+      }
       case 'poly': {
         return this.compileDictionaryLambda(expr.dictParams, 0, () => this.compileExpr(expr.expr));
       }
@@ -1474,6 +1477,14 @@ export class Codegen {
           }
           case 'equality': {
             return { k: 'con', con: UNIT_CON, args: [] };
+          }
+          case 'field': {
+            return { k: 'global', global: Codegen.fieldGlobal(node.field) };
+          }
+          case 'literal': {
+            return typeof node.value === 'string'
+              ? { k: 'str', value: [...node.value] }
+              : { k: 'lit', value: node.value };
           }
           case 'hole': {
             throw new Error(`Unsolved constraint ${node.hole.pred.cls.name}`);

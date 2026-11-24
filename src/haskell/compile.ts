@@ -5,12 +5,16 @@ import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import {
   CONSTRAINT_KIND,
   DOUBLE_TYPE,
+  HAS_FIELD_CLASS,
   INT_TYPE,
   INTEGER_TYPE,
   IO_TYPE,
+  NATURAL_TYPE,
   PRIMITIVE_TYPES,
+  setComparisonConstructors,
   TURTLE_TYPE,
   TYPE_KIND,
+  TYPE_LIT_FAMILIES,
   UNIT_TYPE,
 } from './builtinTypes';
 import { ClassEnv } from './classEnv';
@@ -18,7 +22,7 @@ import { Codegen, type CodegenSupport, globalOf } from './codegen';
 import type { GlobalDef } from './core';
 import { DERIVABLE_CLASSES } from './deriving';
 import { type ClassEntity, nextId, type TypeEntity, type ValueEntity } from './entities';
-import type { Builtins } from './infer';
+import { type Builtins, setLiteralClasses } from './infer';
 import { ioSupport, setIOConstructors } from './ioPrimitives';
 import { LIBRARY_SOURCES, PUBLIC_MODULES, UNSUPPORTED_MODULES, UNSUPPORTED_VALUES } from './library';
 import {
@@ -52,10 +56,16 @@ interface Library {
 
 let library: Library | undefined;
 
+/** GHC.TypeNats' type families: those of GHC.TypeLits on naturals. */
+const TYPE_LIT_FAMILIES_NATURAL = Object.fromEntries(
+  Object.entries(TYPE_LIT_FAMILIES).filter(([name]) => !['CmpSymbol', 'AppendSymbol'].includes(name))
+);
+
 function primitiveExports(): ExportTable {
   const table = emptyExports();
   for (const type of PRIMITIVE_TYPES)
     table.types.set(type.name, { entity: { kind: 'type', entity: type }, children: [] });
+  table.types.set('HasField', { entity: { kind: 'class', entity: HAS_FIELD_CLASS }, children: [] });
   return table;
 }
 
@@ -64,6 +74,7 @@ function compileLibrary(): Library {
   for (const { name, source } of LIBRARY_SOURCES) compiler.compileModule(name, source);
   compiler.markPrintfResults();
   compiler.markTraceTypes();
+  setLiteralClasses(compiler.baseClass('KnownNat'), compiler.baseClass('KnownSymbol'));
   for (const [key, name] of [
     ['exception', 'primException'],
     ['display', 'primDisplayException'],
@@ -171,6 +182,7 @@ class LibraryCompiler {
       ])
         this.baseType(name).cons[0].isNewtype = true;
       setPrimitiveTypes(this.baseType('Bool').cons, this.baseType('Ordering').cons);
+      setComparisonConstructors(this.baseType('Ordering').cons, this.baseType('Bool').cons);
       const maybe = this.baseType('Maybe').cons;
       setIOConstructors(this.baseType('Handle').cons[3], { nothing: maybe[0], just: maybe[1] });
     }
@@ -278,6 +290,14 @@ class LibraryCompiler {
       assertPublicExports(name, exports);
       modules.set(name, exports);
     }
+    for (const name of ['GHC.TypeLits', 'GHC.TypeNats']) {
+      const table = modules.get(name) as ExportTable;
+      const families = name === 'GHC.TypeLits' ? TYPE_LIT_FAMILIES : TYPE_LIT_FAMILIES_NATURAL;
+      for (const [familyName, family] of Object.entries(families)) {
+        table.types.set(familyName, { entity: { kind: 'type', entity: family }, children: [] });
+      }
+      table.types.set('Nat', { entity: { kind: 'type', entity: NATURAL_TYPE }, children: [] });
+    }
     const kinds = emptyExports();
     for (const kind of [TYPE_KIND, CONSTRAINT_KIND])
       kinds.types.set(kind.name, { entity: { kind: 'type', entity: kind }, children: [] });
@@ -344,7 +364,9 @@ function exportType(
   const primitive = PRIMITIVE_TYPES.find((type) => type.name === typeName);
   const entry = primitive
     ? { entity: { kind: 'type', entity: primitive } as TypeLike, children: [] }
-    : source.types.get(typeName);
+    : typeName === 'HasField'
+      ? { entity: { kind: 'class', entity: HAS_FIELD_CLASS } as TypeLike, children: [] }
+      : source.types.get(typeName);
   if (!entry) throw new Error(`The library has no type ${typeName} for ${moduleName}`);
   const selected =
     children === 'all'

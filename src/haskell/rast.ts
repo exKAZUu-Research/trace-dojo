@@ -55,6 +55,8 @@ export type RExpr = (
   | { k: 'recordUpdate'; expr: RExpr; fields: RFieldBind[]; span: Span; cons?: ConInfo[] }
   | { k: 'hole'; name: string; span: Span }
   | { k: 'tyapp'; expr: RExpr; typeArg: RType | undefined; span: Span }
+  /** `e.field`, whose evidence selects the field of the record `e`. */
+  | { k: 'projection'; expr: RExpr; field: string; span: Span; evidence?: Evidence }
   /** An expression checked against a polymorphic type with constraints, which takes their dictionaries. */
   | { k: 'poly'; expr: RExpr; dictParams: DictParam[]; span: Span }
 ) & { type?: Type };

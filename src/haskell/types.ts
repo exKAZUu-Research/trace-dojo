@@ -1,9 +1,15 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { ClassEntity, TypeEntity } from './entities';
+import { instantiateKind } from './kindTemplates';
 import { mapGraph, walkGraph, walkGraphPairs } from './typeGraph';
 import { chargeTypeWork } from './typeWorkBudget';
 
-export type Kind = { tag: 'star' | 'constraint' } | { tag: 'arrow'; from: Kind; to: Kind } | KindVar;
+export type Kind =
+  | { tag: 'star' | 'constraint' }
+  | { tag: 'arrow'; from: Kind; to: Kind }
+  /** A data type used as a kind, as DataKinds promotes it: `Bool`, `Symbol`, `[k]`. */
+  | { tag: 'data'; entity: TypeEntity; args: Kind[] }
+  | KindVar;
 
 export interface KindVar {
   tag: 'kvar';
@@ -61,6 +67,7 @@ export function defaultKind(kind: Kind): Kind {
       node.ref = STAR;
       return STAR;
     }
+    if (node.tag === 'data') return { tag: 'data', entity: node.entity, args: mapped };
     return node.tag === 'arrow' ? kindArrow(mapped[0], mapped[1]) : node;
   });
 }
@@ -75,6 +82,7 @@ export function unifyKinds(a: Kind, b: Kind): boolean {
       if (occursKind(y, x)) return false;
       y.ref = x;
     } else if (x.tag !== y.tag) return false;
+    else if (x.tag === 'data' && (y as typeof x).entity !== x.entity) return false;
   }
   return true;
 }
@@ -85,7 +93,7 @@ function occursKind(variable: KindVar, kind: Kind): boolean {
 }
 
 function kindChildren(kind: Kind): Kind[] {
-  return kind.tag === 'arrow' ? [kind.from, kind.to] : [];
+  return kind.tag === 'arrow' ? [kind.from, kind.to] : kind.tag === 'data' ? kind.args : [];
 }
 
 export function showKind(kind: Kind): string {
@@ -105,6 +113,11 @@ function printKind(kind: Kind, depth: number): string {
     }
     case 'kvar': {
       return 'k';
+    }
+    case 'data': {
+      if (pruned.entity.special === 'list' && pruned.args.length === 1)
+        return `[${printKind(pruned.args[0], depth + 1)}]`;
+      return [pruned.entity.name, ...pruned.args.map((arg) => printKind(arg, depth + 1))].join(' ');
     }
     case 'arrow': {
       const from = pruneKind(pruned.from);
@@ -257,7 +270,9 @@ export function kindOfType(type: Type): Kind {
     applications++;
     node = prune(node.fn);
   }
-  let kind = node.tag === 'tvar' ? node.kind : node.tag === 'tcon' ? node.entity.kind : STAR;
+  // A type constructor of a polymorphic kind has a kind of its own at each use.
+  let kind =
+    node.tag === 'tvar' ? node.kind : node.tag === 'tcon' ? instantiateKind(node.entity, node.entity.kind).kind : STAR;
   for (let index = 0; index < applications; index++) {
     const fn = pruneKind(kind);
     kind = fn.tag === 'arrow' ? fn.to : STAR;

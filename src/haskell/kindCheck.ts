@@ -44,7 +44,7 @@ export function inferKinds(checker: Checker, module: RModule): void {
       checker,
       indices.map((index) => declarations[index])
     );
-  defaultDeclarations(declarations);
+  defaultDeclarations(declarations, checker.polyKinds);
   for (const decl of module.dataDecls) if (decl.instanceArgs) inferDataInstance(checker, decl);
   inferFamilyEquations(checker, module);
   for (const decl of module.dataDecls)
@@ -156,7 +156,7 @@ function kindDependencies(entry: KindDeclaration): Set<object> {
     work.push(...entry.decl.supers);
     for (const method of entry.decl.methods) work.push(method.sig.type, ...method.sig.context);
   }
-  for (const entity of typeEntities(work)) found.add(entity);
+  for (const entity of typeEntities(work)) found.add(('promotedFrom' in entity && entity.promotedFrom?.type) || entity);
   return found;
 }
 
@@ -178,7 +178,11 @@ function inferGroup(checker: Checker, group: KindDeclaration[]): void {
   }
 }
 
-function defaultDeclarations(group: KindDeclaration[]): void {
+/**
+ * Gives the kind variables nothing determined the kind `Type`, as Haskell 98 does; with PolyKinds, a data type or
+ * synonym keeps them, so that its kind is polymorphic.
+ */
+function defaultDeclarations(group: KindDeclaration[], polyKinds: boolean): void {
   for (const entry of group) {
     if (entry.kind === 'class') {
       entry.decl.entity.tyvarKind = defaultKind(entry.decl.entity.tyvarKind);
@@ -188,7 +192,7 @@ function defaultDeclarations(group: KindDeclaration[]): void {
         const scheme = method.entity.scheme as Scheme;
         scheme.kinds = scheme.kinds.map(defaultKind);
       }
-    } else entry.decl.entity.kind = defaultKind(entry.decl.entity.kind);
+    } else if (!polyKinds) entry.decl.entity.kind = defaultKind(entry.decl.entity.kind);
   }
 }
 
@@ -274,7 +278,9 @@ function inferConstructorVariables(checker: Checker, decl: RDataDecl, conDecl: R
 function inferClass(checker: Checker, decl: RClassDecl): void {
   const supers = checker.superclassTypes(decl.supers, decl.params, classParamKinds(decl.entity));
   decl.entity.supers = supers.map((sup) => sup.cls);
-  decl.entity.superTypes = supers.map((sup) => sup.type);
+  // A class of one parameter whose superclasses apply to that parameter needs no templates.
+  const trivial = !decl.entity.packed && supers.every((sup) => sup.type.tag === 'tgen' && sup.type.index === 0);
+  decl.entity.superTypes = trivial ? undefined : supers.map((sup) => sup.type);
   for (const method of decl.methods) method.entity.scheme = methodScheme(checker, decl, method.sig);
   for (const item of decl.defaultSigs) {
     const index = item.entity.method?.index as number;
@@ -352,7 +358,7 @@ function methodScheme(checker: Checker, decl: RClassDecl, sig: RClassDecl['metho
     ...order.flatMap((name) => (params.includes(name) ? [] : [names.indexOf(name)])),
   ].filter((index) => index >= 0);
   const scheme = { kinds, names, preds, type, specified };
-  checkSchemeAmbiguity(scheme, sig.span);
+  if (!checker.allowAmbiguousTypes) checkSchemeAmbiguity(scheme, sig.span);
   return scheme;
 }
 

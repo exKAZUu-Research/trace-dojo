@@ -167,7 +167,9 @@ export function resolveTypeChain(
         endRow: right.span.endRow,
         endCol: right.span.endCol,
       };
-      const op: TypeExpr = { kind: 'tcon', name: token.op, span: token.op.span };
+      const op: TypeExpr = token.op.promoted
+        ? { kind: 'tpromoted', name: token.op, span: token.op.span }
+        : { kind: 'tcon', name: token.op, span: token.op.span };
       current = { kind: 'tapp', fn: { kind: 'tapp', fn: op, arg: current, span: whole }, arg: right, span: whole };
     }
   };

@@ -41,7 +41,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   constructor_synonym: 'パターンシノニム',
   constructor_synonyms: 'パターンシノニム',
   explicit_type: 'type を付けた型引数（RequiredTypeArguments）',
-  field_path: '入れ子のレコードの更新（OverloadedRecordUpdate）',
   forall_required: 'forall',
   group: 'TransformListComp の内包表記',
   transform: 'TransformListComp の内包表記',
@@ -53,7 +52,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   linear_function: '線形型（%1 ->）',
   modifier: '多重度の注釈（%1）',
   pattern_synonym: 'パターンシノニム',
-  promoted: '昇格した構成子（DataKinds）',
   role_annotation: '型の役割の注釈（type role）',
   type_role: '型の役割の注釈（type role）',
   type_binder: 'パターンの型の束縛（@a）',
@@ -63,7 +61,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   prefix_unboxed_sum: 'ボックス化されない和型',
   prefix_unboxed_tuple: 'ボックス化されないタプル',
   special: '特別な構成子の宣言',
-  empty_list: "昇格したリスト（'[]）",
   pragma: 'プラグマ（{-# ... #-}）',
   cpp: 'C プリプロセッサの指令',
   via: 'deriving via',
@@ -903,6 +900,32 @@ function typeDeclName(node: Node): Name {
   return plainName(nameNode);
 }
 
+function requireDataKinds(span: Span): void {
+  if (!extensions.has('DataKinds'))
+    throw syntaxError(span, '型の中で構成子やリテラルを使うには、DataKinds の拡張が要ります。');
+}
+
+/** Converts what a tick promotes: a constructor, `'[]`, a list `'[a, b]`, or a tuple `'(a, b)`. */
+function convertPromoted(inner: Node, span: Span): TypeExpr {
+  switch (inner.type) {
+    case 'empty_list': {
+      return { kind: 'tpromoted', name: { name: '[]', span }, span };
+    }
+    case 'list': {
+      return { kind: 'tpromotedList', elems: fields(inner, 'element').map(convertType), span };
+    }
+    case 'tuple': {
+      return { kind: 'tpromotedTuple', elems: fields(inner, 'element').map(convertType), span };
+    }
+    case 'unit': {
+      return { kind: 'tpromoted', name: { name: '()', span }, span };
+    }
+    default: {
+      return { kind: 'tpromoted', name: qualifiedName(inner).name, span };
+    }
+  }
+}
+
 function requireTypeOperators(node: Node): void {
   if (!extensions.has('TypeOperators')) {
     throw syntaxError(spanOf(node), '演算子の型を使うには、TypeOperators の拡張が要ります。');
@@ -1397,7 +1420,15 @@ function convertType(node: Node): TypeExpr {
       return { kind: 'tchain', items, span };
     }
     case 'literal': {
-      throw unsupportedError(span, '型のリテラル（DataKinds）');
+      requireDataKinds(span);
+      const literal = convertLiteral(namedChildren(node)[0] ?? node);
+      if (literal.kind === 'int') return { kind: 'tlit', value: literal.value, span };
+      if (literal.kind === 'string') return { kind: 'tlit', value: literal.value.join(''), span };
+      throw unsupportedError(span, 'この形の型のリテラル');
+    }
+    case 'promoted': {
+      requireDataKinds(span);
+      return convertPromoted(namedChildren(node)[0] ?? node, span);
     }
     case 'wildcard': {
       throw unsupportedError(span, '型の中の _（PartialTypeSignatures）');
@@ -1490,6 +1521,23 @@ export function convertExpr(node: Node): Expr {
     }
     case 'multi_way_if': {
       return convertMultiWayIf(node, span);
+    }
+    case 'projection': {
+      requireRecordDot(span);
+      return {
+        kind: 'projection',
+        expr: convertExpr(required(node, 'expression')),
+        field: fieldLabel(required(node, 'field')),
+        span,
+      };
+    }
+    case 'projection_selector': {
+      requireRecordDot(span);
+      const name = generatedName('record', 0);
+      const fields = fieldsOfSelector(node);
+      let body: Expr = varOf(name, span);
+      for (const label of fields) body = { kind: 'projection', expr: body, field: label, span };
+      return lambdaOf([name], body, span);
     }
     case 'let_in': {
       return {
@@ -1672,6 +1720,21 @@ function convertMultiWayIf(node: Node, span: Span): Expr {
     span,
     what: 'multi-way if',
   };
+}
+
+function requireRecordDot(span: Span): void {
+  if (!extensions.has('OverloadedRecordDot')) {
+    throw syntaxError(span, 'レコードのドット記法を使うには、OverloadedRecordDot の拡張が要ります。');
+  }
+}
+
+function fieldLabel(node: Node): string {
+  return node.type === 'field_name' ? (namedChildren(node)[0] ?? node).text : node.text;
+}
+
+/** The fields `(.a.b)` selects, in order. */
+function fieldsOfSelector(node: Node): string[] {
+  return fields(node, 'field').map(fieldLabel);
 }
 
 function varOf(name: string, span: Span): Expr {
@@ -1891,6 +1954,10 @@ function convertRecordExpr(node: Node): Expr {
       return [];
     }
     const fieldNameNode = required(fieldNode, 'field');
+    if (fieldNameNode.type === 'field_path') {
+      // GHC's OverloadedRecordUpdate needs RebindableSyntax, with getField and setField of the program's own.
+      throw syntaxError(spanOf(fieldNameNode), 'フィールドのパスで更新するには、RebindableSyntax の拡張が要ります。');
+    }
     rejectUnsupported(fieldNameNode);
     const fieldName = qualifiedName(fieldNameNode).name;
     const value = field(fieldNode, 'expression');
@@ -1973,6 +2040,12 @@ function chainItems<T>(node: Node, convertOperand: (operand: Node) => T): ChainI
     if (child.type === 'prefix_negation' || fieldName === 'prefix_operator') {
       items.push({ kind: 'negate', span: spanOf(child) });
     } else if (fieldName === 'operator') {
+      if (child.type === 'promoted') {
+        requireDataKinds(spanOf(child));
+        const inner = namedChildren(child)[0] ?? child;
+        items.push({ kind: 'operator', op: { ...convertOperator(inner), promoted: true } });
+        continue;
+      }
       rejectUnsupported(child);
       items.push({ kind: 'operator', op: convertOperator(child) });
     } else if (fieldName === 'operand' || child.isNamed) {
