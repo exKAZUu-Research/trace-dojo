@@ -122,26 +122,36 @@ function expandArgument(expander: Expander, parts: WordPart[], inDouble: boolean
 
 function expandUnquotedOperatorWord(expander: Expander, parts: WordPart[]): Piece[] {
   expander.checkTilde(parts, false);
+  const ifs = expander.currentIfs();
+  const hasNonWhitePrimaryIfs = ifs !== '' && ifs[0] !== ' ' && ifs[0] !== '\t' && ifs[0] !== '\n';
   const pieces: Piece[] = [];
   for (const part of parts) {
     const keepsFields =
       part.kind === 'double' ||
       (part.kind === 'parameter' && part.operator !== undefined && /^:?[-+]$/.test(part.operator));
     for (const piece of expander.expandParts([part], false)) {
-      const mapped = mapUnquotedOperatorPiece(piece, keepsFields);
+      const mapped = mapUnquotedOperatorPiece(piece, keepsFields, ifs === '', hasNonWhitePrimaryIfs);
       if (mapped !== undefined) pieces.push(mapped);
     }
   }
   return pieces;
 }
 
-function mapUnquotedOperatorPiece(piece: Piece, keepsFields: boolean): Piece | undefined {
+function mapUnquotedOperatorPiece(
+  piece: Piece,
+  keepsFields: boolean,
+  emptyIfs: boolean,
+  hasNonWhitePrimaryIfs: boolean
+): Piece | undefined {
   if (piece === EMPTY_LIST) return undefined;
-  if (piece === FIELD_BREAK && !keepsFields) return { text: ' ', quoted: false, split: true };
+  if (piece === FIELD_BREAK) {
+    return !keepsFields && !emptyIfs ? { text: ' ', quoted: false, split: true } : FIELD_BREAK;
+  }
   if (isFieldBreak(piece) || piece.quoted) return piece;
-  return piece.listNull || piece.operatorNull
-    ? { ...piece, split: true, operatorNull: true }
-    : { ...piece, split: true };
+  if (piece.atListElement && hasNonWhitePrimaryIfs) {
+    return piece.text === '' ? { ...piece, split: true, operatorNull: true } : { ...piece, split: false };
+  }
+  return { ...piece, split: true };
 }
 
 // code-gauge-allow functionParameterCount -- The default and assignment operators need the expansion, the parameter, and how it is quoted.

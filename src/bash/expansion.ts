@@ -470,9 +470,15 @@ export class Expander {
     const separator = this.separatorOf(value);
     for (const [index, element] of value.values.entries()) {
       if (index > 0) pieces.push(separator);
-      if (element !== '') pieces.push({ text: element, quoted: inDouble, split: !inDouble });
-      else if (inDouble) pieces.push(QUOTED_EMPTY);
-      else pieces.push({ text: '', quoted: false, split: true, ...(!value.star ? { listNull: true } : {}) });
+      if (inDouble && element === '') pieces.push(QUOTED_EMPTY);
+      else {
+        pieces.push({
+          text: element,
+          quoted: inDouble,
+          split: !inDouble,
+          ...(!inDouble && !value.star ? { atListElement: true } : {}),
+        });
+      }
     }
     if (inDouble && value.values.length > 0) pieces.unshift(QUOTED_EMPTY);
     return pieces;
@@ -481,7 +487,7 @@ export class Expander {
   /** What separates a list's elements: one that joins as `"$*"` does where words are not split, or a plain break. */
   private separatorOf(value: Extract<ParameterValue, { kind: 'list' }>): Piece {
     if (!value.star) return FIELD_BREAK;
-    return value.positional && this.spacedStar ? FIELD_BREAK : STAR_BREAK;
+    return value.positional && this.spacedStar && this.ifsJoiner() === '' ? FIELD_BREAK : STAR_BREAK;
   }
 
   /**
@@ -539,9 +545,13 @@ export class Expander {
     return pattern;
   }
 
+  currentIfs(): string {
+    return this.shell.scalarValue('IFS') ?? ' \t\n';
+  }
+
   /** Splits pieces into fields at `IFS` characters in unquoted expansions and at the breaks between elements. */
   splitFields(pieces: Piece[]): Fragment[][] {
-    const splitter = new FieldSplitter(this.shell.scalarValue('IFS') ?? ' \t\n');
+    const splitter = new FieldSplitter(this.currentIfs());
     for (const piece of pieces) splitter.add(piece);
     return splitter.finish();
   }

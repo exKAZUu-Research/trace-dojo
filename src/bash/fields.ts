@@ -6,8 +6,8 @@ export interface Fragment {
   quoted: boolean;
   /** Whether the text came from an unquoted expansion, which field splitting splits at `IFS` characters. */
   split: boolean;
-  /** Whether an empty fragment came from a singleton `@`-list element (`$@` or `${a[@]}`). */
-  listNull?: boolean;
+  /** Whether the fragment came from an element of an unquoted `@`-list (`$@` or `${a[@]}`). */
+  atListElement?: boolean;
   /** Whether an empty `@`-list fragment was selected by an unquoted `${x:-word}` / `${x:+word}` operator. */
   operatorNull?: boolean;
 }

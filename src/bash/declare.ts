@@ -128,10 +128,7 @@ function expandDeclarationAssignment(
       shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(arg.value as Word))
     );
   if (arg.array) {
-    const rawItems = shell.expander.expandRawCompoundItems(
-      arg.array,
-      isAssociativeCompoundDeclaration(shell, builtin, arg, options)
-    );
+    const rawItems = shell.expander.expandRawCompoundItems(arg.array, options.set.has('A') && !options.set.has('a'));
     const committedCompound = commitCompoundDeclaration(shell, builtin, arg, options, rawItems);
     return {
       ...arg,
@@ -144,32 +141,6 @@ function expandDeclarationAssignment(
     ...(subscript ? { subscript } : {}),
     ...(value ? { value } : {}),
   };
-}
-
-function isAssociativeCompoundDeclaration(shell: Shell, builtin: string, arg: Assignment, options: Options): boolean {
-  const { set } = options;
-  if (!hasValidCompoundContext(shell, builtin, options) || set.has('a')) return false;
-  if (set.has('A')) return true;
-  if (!isIdentifier(arg.name)) return false;
-  const ctx = resolveCompoundTargetContext(shell, builtin, arg, options);
-  if (arg.subscript || ctx.referencedSubscript !== undefined) return false;
-  const existing = peekCompoundExisting(shell, ctx.targetName, set, ctx.localScope);
-  return Boolean(existing?.attributes.has('A') || existing?.value?.kind === 'associative');
-}
-
-function peekCompoundExisting(
-  shell: Shell,
-  targetName: string,
-  set: Set<string>,
-  localScope: Map<string, Variable> | undefined
-): Variable | undefined {
-  if (localScope) {
-    return (
-      localScope.get(targetName) ??
-      (set.has('I') ? findEnclosingVariable(shell.state.scopes, localScope, targetName) : undefined)
-    );
-  }
-  return set.has('g') || set.has('n') ? shell.state.scopes[0].get(targetName) : shell.findVariable(targetName, false);
 }
 
 function commitCompoundDeclaration(
@@ -459,7 +430,13 @@ function declareOne(
   ) {
     return finishElementAliasAttributeBuiltin(shell, builtin, destination, operand, parsed, assignMode);
   }
-  const preUnsetStore = resolvePreUnsetNamerefStore(shell, destination.variable, options, assignMode !== 'none');
+  const preUnsetStore = resolvePreUnsetNamerefStore(
+    shell,
+    destination.variable,
+    options,
+    isLocal,
+    assignMode !== 'none'
+  );
   if (
     !applyAttributes(
       shell,
@@ -612,9 +589,10 @@ function resolvePreUnsetNamerefStore(
   shell: Shell,
   finalLink: Variable | undefined,
   { set, unset }: Options,
+  isLocal: boolean,
   assigns: boolean
 ): PreUnsetNamerefStore | undefined {
-  if (!assigns || !unset.has('n') || !finalLink?.attributes.has('n')) return undefined;
+  if (isLocal || !assigns || !unset.has('n') || !finalLink?.attributes.has('n')) return undefined;
   const globalOnly = set.has('g');
   const { targetName, referencedSubscript } = resolveDeclaredTarget(
     shell,
@@ -1077,6 +1055,7 @@ function resolveDeclaredTarget(
 ): { targetName: string; referencedSubscript?: string } {
   if (set.has('n') || (globalOnly && isSubscripted)) return { targetName: name };
   if (unset.has('n')) {
+    if (localScope) return { targetName: name };
     const start = globalOnly ? shell.state.scopes[0].get(name) : shell.findOwnVariable(name);
     return { targetName: start?.attributes.has('n') ? findFinalNamerefLink(shell, start, globalOnly).name : name };
   }
