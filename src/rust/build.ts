@@ -129,11 +129,14 @@ function builtinAssocType(program: Program, trait: TraitDef, name: string, self:
   const builtin = trait.builtin;
   if (!builtin) return undefined;
   if (name === 'Output' && OPERATOR_OUTPUTS.has(builtin)) {
-    if (self.kind === 'int' || self.kind === 'float' || self.kind === 'bool') return self;
-    if (self.kind === 'ref') {
-      const target = normalize(shallow(self.target));
-      if (target.kind === 'int' || target.kind === 'float' || target.kind === 'bool') return target;
-    }
+    const primitive = (type: Type | undefined): Type | undefined => {
+      const t = type && normalize(shallow(type));
+      if (t?.kind === 'ref') return primitive(t.target);
+      return t?.kind === 'int' || t?.kind === 'float' || t?.kind === 'bool' ? t : undefined;
+    };
+    const left = primitive(self);
+    // std's impls for numbers take numbers (`i32 + &i32`); one with another type on the right is the program's.
+    if (left && (args.length === 0 || primitive(args[0]))) return left;
     if (builtin === 'Add' && self.kind === 'adt' && self.def.builtin === 'String') return self;
     return undefined;
   }

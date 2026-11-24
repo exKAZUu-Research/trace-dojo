@@ -646,10 +646,7 @@ export class ItemCollector {
   private checkStdTraitImpl(item: ImplItem, impl: ImplDef, trait: TraitDef): void {
     const traitModule = trait.module as Module;
     if (traitModule.isStd && !(impl.module as Module).isStd && !STD_TRAITS_LEARNERS_IMPLEMENT.has(trait.name)) {
-      const what = OPERATOR_TRAITS.has(trait.name)
-        ? `演算子の多重定義（impl ${trait.name}）`
-        : `標準ライブラリのトレイト ${trait.name} の実装`;
-      compileError(item.span, `${what}は、この採点環境では使えません。`);
+      compileError(item.span, `標準ライブラリのトレイト ${trait.name} の実装は、この採点環境では使えません。`);
     }
   }
 
@@ -856,6 +853,14 @@ const STD_TRAITS_LEARNERS_IMPLEMENT = new Set([
   'Default',
   'From',
   'Error',
+  ...['Add', 'Sub', 'Mul', 'Div', 'Rem', 'BitAnd', 'BitOr', 'BitXor', 'Shl', 'Shr'].flatMap((name) => [
+    name,
+    `${name}Assign`,
+  ]),
+  'Neg',
+  'Not',
+  'Index',
+  'IndexMut',
 ]);
 
 const REQUIRED_STD_METHODS: Record<string, string[]> = {
@@ -1835,22 +1840,6 @@ function lowerAdtPath(path: PathAst, def: AdtDef, args: Type[], scope: TypeScope
 }
 
 /** The standard library's operator traits, which learning programs neither implement nor use as bounds here. */
-const OPERATOR_TRAITS = new Set([
-  'Add',
-  'Sub',
-  'Mul',
-  'Div',
-  'Rem',
-  'Neg',
-  'Not',
-  'AddAssign',
-  'SubAssign',
-  'MulAssign',
-  'DivAssign',
-  'RemAssign',
-  'Index',
-  'IndexMut',
-]);
 
 /** Lowers a bound on `self`, which closure traits complete with their signature. */
 export function lowerBound(bound: BoundAst, scope: TypeScope, self: Type | undefined): TraitRef {
@@ -1868,10 +1857,6 @@ export function lowerBound(bound: BoundAst, scope: TypeScope, self: Type | undef
   }
   const ref = resolveTraitPath(bound.path, scope, self);
   const isStd = (ref.trait.module as Module | undefined)?.isStd;
-  // Generic arithmetic needs the operators' `Output`, which the interpreter does not model, like their impls.
-  if (isStd && OPERATOR_TRAITS.has(ref.trait.name)) {
-    compileError(bound.path.span, `演算子のトレイト ${ref.trait.name} を使う境界は、この採点環境では使えません。`);
-  }
   if (['Fn', 'FnMut', 'FnOnce'].includes(ref.trait.name) && isStd) {
     compileError(
       bound.span,

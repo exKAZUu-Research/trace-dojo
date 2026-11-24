@@ -180,7 +180,58 @@ const RULES: Record<string, Rule> = {
   Into: fromInto,
   TryFrom: tryFrom,
   TryInto: tryFrom,
+  ...Object.fromEntries(
+    ['Add', 'Sub', 'Mul', 'Div', 'Rem', 'BitAnd', 'BitOr', 'BitXor', 'Shl', 'Shr'].flatMap((name): [string, Rule][] => [
+      [name, (goal) => numericOperator(goal, name, false)],
+      [`${name}Assign`, (goal) => numericOperator(goal, name, true)],
+    ])
+  ),
+  Neg: ({ t }) => {
+    const n = operatorNumber(t);
+    return n && (n.kind === 'float' || (n.kind === 'int' && n.name.startsWith('i'))) ? 'yes' : 'no';
+  },
+  Not: ({ t }) => {
+    const n = operatorNumber(t);
+    return n && (n.kind === 'int' || n.kind === 'bool') ? 'yes' : 'no';
+  },
 };
+
+/** A number or `bool`, or a shared reference to one, which std's operator impls take. */
+function operatorNumber(type: Type | undefined): (Type & { kind: 'int' | 'float' | 'bool' }) | undefined {
+  const t = type && normalize(shallow(type));
+  if (t?.kind === 'ref' && !t.mutable) {
+    const target = normalize(shallow(t.target));
+    return target.kind === 'int' || target.kind === 'float' || target.kind === 'bool' ? target : undefined;
+  }
+  return t?.kind === 'int' || t?.kind === 'float' || t?.kind === 'bool' ? t : undefined;
+}
+
+/**
+ * std's impls of the arithmetic, bitwise, and shift operators (and their assignments) for numbers: both sides of one
+ * type (through `&` too), except shifts, which take any integer on the right; `String + &str` and `String += &str`.
+ */
+// code-gauge-allow functionCognitiveComplexity -- Follows std's impls of the operator traits.
+function numericOperator({ solver, t, ref }: Goal, name: string, assign: boolean): Answer {
+  if (assign && t.kind === 'ref') return 'no';
+  const rhs = ref.args[0] && normalize(shallow(ref.args[0]));
+  if (t.kind === 'adt' && t.def.builtin === 'String' && name === 'Add') {
+    if (rhs?.kind === 'var')
+      return solver.unifier.tryUnify(rhs, { kind: 'ref', mutable: false, target: { kind: 'str' } }) ? 'yes' : 'no';
+    return rhs?.kind === 'ref' && normalize(shallow(rhs.target)).kind === 'str' ? 'yes' : 'no';
+  }
+  const left = operatorNumber(t);
+  if (!left) return 'no';
+  if (left.kind === 'float' && ['BitAnd', 'BitOr', 'BitXor', 'Shl', 'Shr'].includes(name)) return 'no';
+  if (left.kind === 'bool' && !['BitAnd', 'BitOr', 'BitXor'].includes(name)) return 'no';
+  if (!rhs || rhs.kind === 'var') {
+    if (name === 'Shl' || name === 'Shr') return 'unknown';
+    return rhs ? (solver.unifier.tryUnify(rhs, left) ? 'yes' : 'no') : 'yes';
+  }
+  const right = operatorNumber(rhs);
+  if (!right) return 'no';
+  if (name === 'Shl' || name === 'Shr') return left.kind === 'int' && right.kind === 'int' ? 'yes' : 'no';
+  return solver.unifier.tryUnify(left, right) ? 'yes' : 'no';
+}
 
 /** Whether a type of the standard library (or a derive) implements one of its traits, as std's impls decide. */
 export function builtinImplements(solver: TraitSolver, t: Type, ref: TraitRef): Answer {

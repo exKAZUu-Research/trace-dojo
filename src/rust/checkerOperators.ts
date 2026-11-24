@@ -3,7 +3,7 @@ import type { Checker } from './checker';
 import { isPlaceExpr, requireMutablePlace } from './checkerPlaces';
 import { collectionKeyTraits } from './collectionBounds';
 import { normalize } from './infer';
-import { compileError } from './items';
+import { compileError, projectionOf } from './items';
 import { derefOnce } from './methods';
 import { BOOL, freshVar, intType, ref, REF_STR, resolve, shallow, type Type, typeToString, UNIT } from './types';
 
@@ -62,6 +62,54 @@ function settledOutput(c: Checker, expr: Extract<Expr, { kind: 'binary' }>, l: T
   return isArithmeticOperand(l) && !(bitwise && l.kind === 'float') && c.unifier.tryUnify(l, r) ? l : undefined;
 }
 
+const BINARY_TRAITS: Record<string, [string, string]> = {
+  '+': ['Add', 'add'],
+  '-': ['Sub', 'sub'],
+  '*': ['Mul', 'mul'],
+  '/': ['Div', 'div'],
+  '%': ['Rem', 'rem'],
+  '&': ['BitAnd', 'bitand'],
+  '|': ['BitOr', 'bitor'],
+  '^': ['BitXor', 'bitxor'],
+  '<<': ['Shl', 'shl'],
+  '>>': ['Shr', 'shr'],
+};
+
+/** Whether an operand's type is one whose operators an impl of an operator trait gives, not the language. */
+function isOverloadable(type: Type): boolean {
+  const t = normalize(shallow(type));
+  if (t.kind === 'ref') return isOverloadable(t.target);
+  if (t.kind === 'adt') return t.def.builtin !== 'String';
+  return t.kind === 'param' || t.kind === 'opaque' || t.kind === 'tuple' || t.kind === 'array' || t.kind === 'dyn';
+}
+
+/**
+ * An operator that an impl of its trait gives (`impl Add for Point`): it calls the trait's method, and its result is
+ * the impl's `Output`.
+ */
+function overloadedOperator(
+  c: Checker,
+  expr: Expr,
+  traitName: string,
+  method: string,
+  self: Type,
+  args: Type[],
+  span: Span,
+  describe: string
+): Type {
+  const trait = c.program.traitDef(traitName);
+  const ref = { trait, args };
+  if (c.solver.implements(self, ref) === 'no') {
+    compileError(
+      span,
+      `${typeToString(resolve(self))} に演算子 ${describe} は使えません（${traitName} が実装されていません）。`
+    );
+  }
+  c.require(self, ref, span);
+  c.annotations.operators.set(expr, { fn: trait.methods.get(method)!, typeArgs: [self, ...args] });
+  return trait.assocTypes.has('Output') ? projectionOf(trait, 'Output', self, args) : UNIT;
+}
+
 // code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
 export function checkUnary(c: Checker, expr: Extract<Expr, { kind: 'unary' }>, expected: Type | undefined): Type {
   if (expr.op === '*') {
@@ -74,6 +122,10 @@ export function checkUnary(c: Checker, expr: Extract<Expr, { kind: 'unary' }>, e
   if (expr.op === '-' && expr.operand.kind === 'int') c.negatedLiterals.add(expr.operand);
   const operandType = c.expr(expr.operand, expected);
   const t = numericOperand(operandType);
+  if (isOverloadable(t)) {
+    const [trait, method] = expr.op === '!' ? ['Not', 'not'] : ['Neg', 'neg'];
+    return overloadedOperator(c, expr, trait, method, operandType, [], expr.span, expr.op);
+  }
   if (expr.op === '!') {
     if (t.kind === 'bool' || t.kind === 'int' || (t.kind === 'var' && t.v.literal === 'int')) return t;
     compileError(expr.span, `${typeToString(resolve(operandType))} に ! は使えません。`);
@@ -128,8 +180,20 @@ export function checkBinary(c: Checker, expr: Extract<Expr, { kind: 'binary' }>,
       '&str どうしは + でつなげません（String::from("...") + "..." や format! を使ってください）。'
     );
   }
+  if (isOverloadable(left) && !isSetOperand(leftType, op)) {
+    const rightType = c.expr(expr.right, undefined);
+    const [trait, method] = BINARY_TRAITS[op];
+    return overloadedOperator(c, expr, trait, method, leftType, [rightType], expr.opSpan, op);
+  }
   if (op === '<<' || op === '>>') return checkShift(c, expr, leftType, left);
   return arithmeticOrBitwise(c, expr, leftType, left);
+}
+
+function isSetOperand(left: Type, op: string): boolean {
+  const l = normalize(shallow(left));
+  if (!['|', '&', '-', '^'].includes(op) || l.kind !== 'ref') return false;
+  const set = normalize(shallow(l.target));
+  return set.kind === 'adt' && (set.def.builtin === 'HashSet' || set.def.builtin === 'BTreeSet');
 }
 
 /** The two sides of a shift have types of their own, so a right one not known yet is checked once it is. */
@@ -151,6 +215,12 @@ function arithmeticOrBitwise(c: Checker, expr: Extract<Expr, { kind: 'binary' }>
   if ((op === '&' || op === '|' || op === '^') && left.kind === 'bool') {
     c.unifyOrError(expr.right.span, BOOL, right);
     return BOOL;
+  }
+  // A number with a type on the right whose impl takes it (`impl Mul<Point> for i32`).
+  if (isOverloadable(right)) {
+    const [trait, method] = BINARY_TRAITS[op];
+    const self = left.kind === 'var' ? resolve(left, true) : leftType;
+    return overloadedOperator(c, expr, trait, method, self, [rightType], expr.opSpan, op);
   }
   if (!isArithmeticOperand(left) || !isArithmeticOperand(right)) badOperands(expr, leftType, rightType);
   if (!c.unifier.tryUnify(left, right)) {
@@ -255,6 +325,19 @@ export function checkCompoundAssign(c: Checker, expr: Extract<Expr, { kind: 'com
   const t = normalize(shallow(targetType));
   if (expr.op === '+' && t.kind === 'adt' && t.def.builtin === 'String') {
     c.coerceExpr(expr.value, REF_STR);
+  } else if (isOverloadable(t)) {
+    const [trait, method] = BINARY_TRAITS[expr.op];
+    const valueType = c.expr(expr.value, undefined);
+    overloadedOperator(
+      c,
+      expr,
+      `${trait}Assign`,
+      `${method}_assign`,
+      targetType,
+      [valueType],
+      expr.span,
+      `${expr.op}=`
+    );
   } else if (expr.op === '<<' || expr.op === '>>') {
     const r = numericOperand(c.expr(expr.value, undefined));
     if (!isIntegral(t) || !isIntegral(r))

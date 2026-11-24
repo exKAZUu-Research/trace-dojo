@@ -81,7 +81,10 @@ export type Coercion =
   | { kind: 'intoIter'; from: Type };
 
 export interface IndexRes {
-  container: 'slice' | 'str' | 'map' | 'vecDeque';
+  /** `user`: a type with an impl of `Index` (and `IndexMut`) that the program writes. */
+  container: 'slice' | 'str' | 'map' | 'vecDeque' | 'user';
+  /** For a `user` container, the type that implements `Index`, and the index's type. */
+  implTypes?: [Type, Type];
   range: boolean;
   /** Whether a library type's `Index` impl indexes it (a `Vec`), whose panics report the `[`'s position. */
   overloaded: boolean;
@@ -107,6 +110,8 @@ export class Annotations {
   readonly unevaluatedRepeatOperands = new Set<Expr | Pattern>();
   readonly functionInitializers = new Map<Expr, LocalVar | undefined>();
   readonly methods = new Map<Expr, MethodRes>();
+  /** Operators on types whose impls of the operator traits (`Add`, `Neg`, `AddAssign`, ...) the program writes. */
+  readonly operators = new Map<Expr, { fn: FnDef; typeArgs: Type[] }>();
   readonly fields = new Map<Expr, FieldRes>();
   readonly coercions = new Map<Expr, Coercion>();
   readonly indexes = new Map<Expr, IndexRes>();

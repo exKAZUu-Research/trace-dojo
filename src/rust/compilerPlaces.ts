@@ -1,7 +1,8 @@
+import type { IndexRes } from './annotations';
 import type { Expr, Span } from './ast';
 import { madeString, stringCapacity } from './capacity';
 import type { Compiler, Eval, PlaceEval } from './compiler';
-import { LocalPlace } from './compilerCommon';
+import { evaluateValues, LocalPlace } from './compilerCommon';
 import { normalize } from './infer';
 import { type Frame, RustPanic } from './runtime';
 import { runtimeType } from './runtimeTypes';
@@ -121,6 +122,7 @@ function indexPlace(c: Compiler, expr: ExprOf<'index'>): PlaceEval {
   const base = placeThrough(c, expr.operand, res.derefs);
   const index = c.value(expr.index);
   const span = res.overloaded || res.range ? expr.bracketSpan : expr.span;
+  if (res.container === 'user') return userIndexCall(c, expr, res, 'IndexMut', 'index_mut', base) as PlaceEval;
   if (res.container === 'map') {
     const read = mapEntryAt(c, expr, index, span);
     return (frame) => new ElementPlace(read(frame), 1);
@@ -222,6 +224,7 @@ export function compileIndex(c: Compiler, expr: ExprOf<'index'>): Eval {
   if (!res) throw new Error('Unresolved index');
   const base = valueThrough(c, expr.operand, res.derefs);
   const index = c.value(expr.index);
+  if (res.container === 'user') return userIndexCall(c, expr, res, 'Index', 'index', base);
   // A range goes through the `Index` impls, which report their panics at the `[`, as `Vec`'s indexes do.
   const span = res.overloaded || res.range ? expr.bracketSpan : expr.span;
   if (res.container === 'map') {
@@ -240,6 +243,36 @@ export function compileIndex(c: Compiler, expr: ExprOf<'index'>): Eval {
       if (position >= length) throw new RustPanic(indexPanic(res.container, length, position), span);
       return sliceGet(container, Number(position));
     });
+  };
+}
+
+/**
+ * `x[i]` by the program's `Index` impl, `*x.index(i)`, or, where it is written to, `*x.index_mut(i)`, whose `&mut`
+ * result is the place.
+ */
+function userIndexCall(
+  c: Compiler,
+  expr: ExprOf<'index'>,
+  res: IndexRes,
+  traitName: 'Index' | 'IndexMut',
+  method: string,
+  base: Eval
+): Eval {
+  const fn = c.program.traitDef(traitName).methods.get(method)!;
+  const [self, indexType] = res.implTypes!;
+  const typeArgs = [runtimeType(self), runtimeType(indexType)];
+  const index = c.value(expr.index);
+  const callRow = expr.span.row;
+  return (frame) => {
+    const values = evaluateValues(frame, [base, index]);
+    return c.support.callFn(
+      fn,
+      typeArgs.map((arg) => arg(frame)),
+      values,
+      callRow,
+      expr.bracketSpan,
+      frame
+    );
   };
 }
 

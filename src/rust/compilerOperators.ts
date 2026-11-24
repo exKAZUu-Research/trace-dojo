@@ -20,7 +20,30 @@ const BTREE_OPS: Record<string, SetOp> = {
   '^': 'symmetric_difference',
 };
 
+/** An operator that calls the method of an operator trait's impl, with its operands as the arguments. */
+function compileOverloaded(c: Compiler, expr: Expr, operands: Eval[]): Eval | undefined {
+  const operator = c.annotations.operators.get(expr);
+  if (!operator) return undefined;
+  const { fn } = operator;
+  const typeArgs = operator.typeArgs.map((arg) => runtimeType(arg));
+  const span = expr.kind === 'binary' ? expr.opSpan : expr.span;
+  const callRow = expr.span.row;
+  return (frame) => {
+    const values = evaluateValues(frame, operands);
+    return c.support.callFn(
+      fn,
+      typeArgs.map((arg) => arg(frame)),
+      values,
+      callRow,
+      span,
+      frame
+    );
+  };
+}
+
 export function compileUnary(c: Compiler, expr: ExprOf<'unary'>): Eval {
+  const overloaded = expr.op === '*' ? undefined : compileOverloaded(c, expr, [c.value(expr.operand)]);
+  if (overloaded) return overloaded;
   const operand = expr.op === '*' ? c.read(expr.operand) : c.value(expr.operand);
   if (expr.op === '*') {
     const operandType = normalize(shallow(expr.operand.ty!));
@@ -55,6 +78,8 @@ export function compileBinary(c: Compiler, expr: ExprOf<'binary'>): Eval {
       ? (frame) => (left(frame) as boolean) && (right(frame) as boolean)
       : (frame) => (left(frame) as boolean) || (right(frame) as boolean);
   }
+  const overloaded = compileOverloaded(c, expr, [c.value(expr.left), c.value(expr.right)]);
+  if (overloaded) return overloaded;
   const left = c.read(expr.left);
   const right = c.read(expr.right);
   const leftCoerced = c.annotations.coercions.get(expr.left) ? c.value(expr.left) : left;
@@ -131,7 +156,14 @@ function intArithmetic(op: string, name: IntName, left: Eval, right: Eval, span:
 
 // code-gauge-allow functionNcss -- One case per kind of expression, statement, or pattern.
 export function compileCompoundAssign(c: Compiler, expr: ExprOf<'compoundAssign'>): Eval {
-  const place = c.place(expr.target);
+  const target = c.place(expr.target);
+  const overloaded = compileOverloaded(c, expr, [target, c.value(expr.value)]);
+  if (overloaded)
+    return (frame) => {
+      overloaded(frame);
+      return UNIT_VALUE;
+    };
+  const place = target;
   const value = c.value(expr.value);
   const type = numericType(expr.target.ty!);
   const span = expr.span;

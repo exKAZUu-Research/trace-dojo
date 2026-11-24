@@ -3,7 +3,7 @@ import type { Expr, Span } from './ast';
 import type { Checker } from './checker';
 import { collectionKeyTraits } from './collectionBounds';
 import { normalize } from './infer';
-import { compileError, visibleFrom } from './items';
+import { compileError, projectionOf, visibleFrom } from './items';
 import { autoderefSteps, lookupMethod } from './methods';
 import { RANGE_TYPES } from './traits';
 import {
@@ -70,6 +70,10 @@ function placeRoot(
     case 'index': {
       const index = c.annotations.indexes.get(place);
       if (index?.container === 'map') return { kind: 'sharedRef' };
+      if (index?.implTypes) {
+        const [self, indexType] = index.implTypes;
+        c.require(self, { trait: c.program.traitDef('IndexMut'), args: [indexType] }, place.span);
+      }
       return throughDerefs(c, place.operand, index?.derefs ?? []);
     }
     case 'unary': {
@@ -167,11 +171,31 @@ export function checkIndex(c: Checker, expr: Extract<Expr, { kind: 'index' }>): 
     if (t.kind === 'slice' || t.kind === 'array' || t.kind === 'str' || isDeque) {
       return indexSequence(c, expr, t, step, overloaded);
     }
+    const user = userIndex(c, expr, t, step);
+    if (user) return user;
   }
   return compileError(expr.span, `${typeToString(resolve(operandType))} は [ ] で要素を取り出せません。`);
 }
 
 type DerefStep = ReturnType<typeof autoderefSteps>[number];
+
+/** `x[i]` on a type with an `Index` impl of the program, or a type parameter bounded by `Index`. */
+function userIndex(c: Checker, expr: Extract<Expr, { kind: 'index' }>, t: Type, step: DerefStep): Type | undefined {
+  if (t.kind !== 'param' && !(t.kind === 'adt' && !t.def.builtin)) return undefined;
+  const trait = c.program.traitDef('Index');
+  const indexType = c.expr(expr.index, undefined);
+  const ref = { trait, args: [indexType] };
+  if (c.solver.implements(t, ref) === 'no') return undefined;
+  c.require(t, ref, expr.span);
+  c.annotations.indexes.set(expr, {
+    container: 'user',
+    range: false,
+    derefs: step.derefs,
+    overloaded: true,
+    implTypes: [t, indexType],
+  });
+  return projectionOf(trait, 'Output', t, [indexType]);
+}
 
 function indexMap(
   c: Checker,

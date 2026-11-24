@@ -2895,16 +2895,8 @@ test.each([
     '    let mut values = vec![1, 1, 2]; let _ = values.select_nth_unstable(1);',
   ],
   ['available-in-Rust deque append', 'let mut a = std::collections::VecDeque::from([1]); a.append(&mut a.clone());'],
-  ['available-in-Rust integer Add method (stage C)', 'let n = 1i32; let _ = n.add(2);', 'use std::ops::Add;'],
   ['threads (stage D)', '    std::thread::spawn(|| {});'],
   ['standard input (stage D)', '    let mut s = String::new();\n    std::io::stdin().read_line(&mut s).unwrap();'],
-  [
-    'associated output types of operator bounds (stage C)',
-    '',
-    'use std::ops::Add; fn plus<T: Add<Output = T>>(a: T, b: T) -> T { a + b }',
-  ],
-  ['generic assignment operators (stage C)', '', 'fn inc<T: std::ops::AddAssign + Copy>(mut a: T, b: T) { a += b; }'],
-  ['operator overloading (stage C)', '', 'struct P;\nimpl std::ops::Add for P { fn add(self, o: P) -> P { o } }'],
 ])('%s are unavailable', (_name, body, items = '') => {
   const execution = executeProgram('rust', rustMain(body, items));
   expect(execution.kind).toBe('compileError');
@@ -8778,11 +8770,33 @@ test('the items a reborrowed iterator yields do not keep the iterator borrowed',
   });
 });
 
-test('an operator trait used as a bound is reported as unavailable', () => {
-  const program = rustMain('    println!("{}", same(1));', 'fn same<T: std::ops::Add>(a: T) -> T { a }');
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('operators call the impls of the operator traits, also through generic bounds', () => {
+  const program = `use std::ops::{Add, AddAssign, Index, IndexMut, Mul, Neg};
+#[derive(Debug, Clone, Copy)]
+struct P { x: i32, y: i32 }
+impl Add for P { type Output = P; fn add(self, o: P) -> P { P { x: self.x + o.x, y: self.y + o.y } } }
+impl Mul<P> for i32 { type Output = P; fn mul(self, p: P) -> P { P { x: self * p.x, y: self * p.y } } }
+impl Neg for P { type Output = P; fn neg(self) -> P { P { x: -self.x, y: -self.y } } }
+impl AddAssign for P { fn add_assign(&mut self, o: P) { self.x += o.x; self.y += o.y; } }
+struct Grid { cells: Vec<i32>, w: usize }
+impl Index<(usize, usize)> for Grid { type Output = i32; fn index(&self, (r, c): (usize, usize)) -> &i32 { &self.cells[r * self.w + c] } }
+impl IndexMut<(usize, usize)> for Grid { fn index_mut(&mut self, (r, c): (usize, usize)) -> &mut i32 { &mut self.cells[r * self.w + c] } }
+fn total<T: Add<Output = T> + Copy>(items: &[T], zero: T) -> T { let mut acc = zero; for &i in items { acc = acc + i; } acc }
+fn twice<T>(x: T) -> T::Output where T: Add + Copy { x + x }
+fn main() {
+    let mut a = P { x: 1, y: 2 };
+    a += P { x: 1, y: 1 };
+    let mut g = Grid { cells: vec![0; 4], w: 2 };
+    g[(1, 0)] = 7;
+    g[(1, 0)] += 1;
+    println!("{:?} {:?} {:?} {} {:?}", a + a, 2 * a, -a, g[(1, 0)], g.cells);
+    println!("{:?} {} {:?} {}", total(&[a, a], P { x: 0, y: 0 }), total(&[1, 2], 0), twice(a), twice(2.5));
+}`;
   expect(executeProgram('rust', program)).toMatchObject({
-    kind: 'compileError',
-    diagnostics: [{ message: '演算子のトレイト Add を使う境界は、この採点環境では使えません。' }],
+    kind: 'executed',
+    stdout:
+      'P { x: 4, y: 6 } P { x: 4, y: 6 } P { x: -2, y: -3 } 8 [0, 0, 8, 0]\nP { x: 4, y: 6 } 3 P { x: 4, y: 6 } 5\n',
   });
 });
 
