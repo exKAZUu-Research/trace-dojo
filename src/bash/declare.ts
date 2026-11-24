@@ -22,7 +22,11 @@ import {
 /** An argument of a declaration builtin: an assignment the shell parsed, or a word it expanded. */
 export type DeclarationArgument =
   | string
-  | (Assignment & { expandedElements?: CompoundElement[]; committedCompound?: boolean });
+  | (Assignment & {
+      expandedElements?: CompoundElement[];
+      committedCompound?: boolean;
+      committedTarget?: { variable: Variable; priorKind: VariableValue['kind'] | undefined };
+    });
 
 const USAGES: Record<string, string> = {
   declare: 'declare [-aAfFgiIlnrtux] [name[=value] ...] or declare -p [-aAfFilnrtux] [name ...]',
@@ -132,11 +136,11 @@ function expandDeclarationAssignment(
     );
   if (arg.array) {
     const rawItems = shell.expander.expandRawCompoundItems(arg.array, options.set.has('A') && !options.set.has('a'));
-    const committedCompound = commitCompoundDeclaration(shell, builtin, arg, options, rawItems);
+    const committedTarget = commitCompoundDeclaration(shell, builtin, arg, options, rawItems);
     return {
       ...arg,
       ...(subscript ? { subscript } : {}),
-      ...(committedCompound ? { committedCompound: true } : { expandedElements: rawItems }),
+      ...(committedTarget ? { committedCompound: true, committedTarget } : { expandedElements: rawItems }),
     };
   }
   return {
@@ -152,28 +156,77 @@ function commitCompoundDeclaration(
   arg: Assignment,
   options: Options,
   rawItems: CompoundElement[]
-): boolean {
+): { variable: Variable; priorKind: VariableValue['kind'] | undefined } | undefined {
   const { set, unset } = options;
-  if (!hasValidCompoundContext(shell, builtin, options)) return false;
+  if (!hasValidCompoundContext(shell, builtin, options)) return undefined;
   const { localScope, targetName, referencedSubscript } = resolveCompoundTargetContext(shell, builtin, arg, options);
   if (arg.subscript || referencedSubscript !== undefined) {
     const sub = arg.subscript?.text ?? referencedSubscript ?? '';
     shell.discard(`${arg.name}[${sub}]: cannot assign list to array member`);
   }
-  if (localScope !== undefined && options.attemptedSet.has('n')) return false;
-  if (!validateCompoundDeclarationTarget(shell, builtin, targetName, arg.append, set, unset, localScope)) return false;
+  if (localScope !== undefined && options.attemptedSet.has('n')) return undefined;
+  if (!validateCompoundDeclarationTarget(shell, builtin, targetName, arg.append, set, unset, localScope)) {
+    return undefined;
+  }
   const variable = ensureCompoundTargetVariable(shell, targetName, set, localScope);
-  applyAttributes(shell, builtin, variable, options, true, false);
-  const { elements, error } = shell.expander.validateCompoundItems(
-    rawItems,
-    variable.attributes.has('A'),
-    true,
-    arg.name
-  );
-  const ok = shell.assignCompoundTo(variable, elements, arg.append, arg.name);
+  const preUnsetStore = resolvePreUnsetNamerefStore(shell, variable, options, localScope !== undefined, true);
+  return executeCompoundCommit(shell, builtin, arg, variable, preUnsetStore, options, rawItems);
+}
+
+// code-gauge-allow functionParameterCount -- Commits compound attributes, items, readonly flag, and deferred +n removal.
+function executeCompoundCommit(
+  shell: Shell,
+  builtin: string,
+  arg: Assignment,
+  variable: Variable,
+  preUnsetStore: PreUnsetNamerefStore | undefined,
+  options: Options,
+  rawItems: CompoundElement[]
+): { variable: Variable; priorKind: VariableValue['kind'] | undefined } | undefined {
+  if (preUnsetStore?.referencedSubscript !== undefined) {
+    preUnsetStore.finalLink.attributes.delete('n');
+    shell.discard(
+      `${preUnsetStore.variable.name}[${preUnsetStore.referencedSubscript}]: cannot assign list to array member`
+    );
+  }
+  const storeVariable = preUnsetStore?.variable ?? variable;
+  if (preUnsetStore && !validatePreUnsetCompoundStore(shell, builtin, storeVariable, options)) return undefined;
+  const priorKind = storeVariable.value?.kind;
+  const storeOptions = preUnsetStore ? withoutUnsetN(options) : options;
+  if (!applyAttributes(shell, builtin, storeVariable, storeOptions, true, false, false, true)) return undefined;
+  const isAssoc = storeVariable.attributes.has('A') || storeVariable.value?.kind === 'associative';
+  const { elements, error } = shell.expander.validateCompoundItems(rawItems, isAssoc, true, arg.name);
+  const ok = shell.assignCompoundTo(storeVariable, elements, arg.append, arg.name);
+  if (ok && preUnsetStore?.deferUnsetN) preUnsetStore.finalLink.attributes.delete('n');
+  if (options.set.has('r')) storeVariable.attributes.add('r');
   if (error) shell.discard(error);
   if (!ok) throw new DiscardSignal();
-  return true;
+  return { variable: storeVariable, priorKind };
+}
+
+function validatePreUnsetCompoundStore(
+  shell: Shell,
+  builtin: string,
+  storeVariable: Variable,
+  { set, unset }: Options
+): boolean {
+  if (storeVariable.attributes.has('r')) {
+    if (shell.isInFunction && builtin !== 'readonly' && builtin !== 'export') return false;
+    shell.discard(`${storeVariable.name}: readonly variable`);
+  }
+  const kindErr = incompatibleArrayKindError(storeVariable, set);
+  if (kindErr) shell.discard(`${storeVariable.name}: ${kindErr}`);
+  return !conversionError(storeVariable, set, withoutUnsetSet(unset));
+}
+
+function withoutUnsetN(options: Options): Options {
+  return { ...options, unset: withoutUnsetSet(options.unset) };
+}
+
+function withoutUnsetSet(unset: Set<string>): Set<string> {
+  const copy = new Set(unset);
+  copy.delete('n');
+  return copy;
 }
 
 function resolveCompoundTargetContext(
@@ -400,24 +453,22 @@ function declareOne(
   isLocal: boolean,
   onMaterialize?: () => void
 ): boolean {
+  if (typeof operand !== 'string' && operand.committedTarget) {
+    notifyIfArrayMaterialized(true, operand.committedTarget.variable, operand.committedTarget.priorKind, onMaterialize);
+    return true;
+  }
   const parsed = typeof operand === 'string' ? parseWordOperand(operand) : undefined;
   const name = typeof operand === 'string' ? (parsed as { name: string }).name : operand.name;
-  if (rejectInvalidDeclarationName(shell, builtin, name, operand)) return false;
-  if (!isLocal && shell.isDynamic(name)) return declareDynamic(shell, operand, parsed);
   const isSubscripted =
     parsed?.subscript !== undefined || (typeof operand !== 'string' && operand.subscript !== undefined);
-  if (rejectSubscriptedAttributeBuiltin(shell, builtin, name, operand, parsed, isSubscripted)) return false;
+  if (rejectOperandHeader(shell, builtin, name, operand, parsed, isSubscripted)) return false;
+  if (!isLocal && shell.isDynamic(name)) return declareDynamic(shell, operand, parsed);
   const assignMode = resolveAssignMode(operand, parsed);
   const tempVar =
     !isLocal && (builtin === 'export' || builtin === 'readonly') ? shell.declarationPrefixVariable(name) : undefined;
   if (tempVar) return declarePrefixed(shell, builtin, name, tempVar, operand, parsed, options);
-  const explicitRefTarget = resolvePendingNamerefTarget(shell, name, operand, parsed, options, isLocal, isSubscripted);
-  if (
-    explicitRefTarget !== undefined &&
-    !validatePendingNamerefTarget(shell, builtin, name, explicitRefTarget, shell.isInFunction)
-  ) {
-    return false;
-  }
+  const pendingRef = checkPendingNameref(shell, builtin, name, operand, parsed, options, isLocal, isSubscripted);
+  if (pendingRef === 'invalid') return false;
   const priorKind = shell.findVariable(name, !options.set.has('n') && !options.unset.has('n'))?.value?.kind;
   const destination = declaredDestination(
     shell,
@@ -430,11 +481,7 @@ function declareOne(
     isCompound(operand)
   );
   if (!destination) return false;
-  if (
-    !isSubscripted &&
-    destination.referencedSubscript !== undefined &&
-    (builtin === 'readonly' || builtin === 'export')
-  ) {
+  if (isElementAliasAttributeBuiltin(builtin, isSubscripted, destination)) {
     return finishElementAliasAttributeBuiltin(shell, builtin, destination, operand, parsed, assignMode);
   }
   const preUnsetStore = resolvePreUnsetNamerefStore(
@@ -459,8 +506,8 @@ function declareOne(
     return false;
   }
   const ok =
-    explicitRefTarget !== undefined
-      ? commitNamerefTarget(shell, builtin, destination.variable, explicitRefTarget, shell.isInFunction)
+    pendingRef !== undefined
+      ? commitNamerefTarget(shell, builtin, destination.variable, pendingRef, shell.isInFunction)
       : storeSelectedDeclaration(
           shell,
           builtin,
@@ -474,6 +521,46 @@ function declareOne(
         );
   finishDeclarationEffects(ok, destination.variable, preUnsetStore, options.set.has('r'), priorKind, onMaterialize);
   return ok;
+}
+
+function rejectOperandHeader(
+  shell: Shell,
+  builtin: string,
+  name: string,
+  operand: DeclarationArgument,
+  parsed: { subscript?: string } | undefined,
+  isSubscripted: boolean
+): boolean {
+  return (
+    rejectInvalidDeclarationName(shell, builtin, name, operand) ||
+    rejectSubscriptedAttributeBuiltin(shell, builtin, name, operand, parsed, isSubscripted)
+  );
+}
+
+function isElementAliasAttributeBuiltin(
+  builtin: string,
+  isSubscripted: boolean,
+  destination: DeclarationDestination
+): boolean {
+  return (
+    !isSubscripted && destination.referencedSubscript !== undefined && (builtin === 'readonly' || builtin === 'export')
+  );
+}
+
+// code-gauge-allow functionParameterCount -- Resolves and validates an explicit nameref target before variable creation.
+function checkPendingNameref(
+  shell: Shell,
+  builtin: string,
+  name: string,
+  operand: DeclarationArgument,
+  parsed: { subscript?: string; append: boolean; value?: string } | undefined,
+  options: Options,
+  isLocal: boolean,
+  isSubscripted: boolean
+): string | 'invalid' | undefined {
+  const target = resolvePendingNamerefTarget(shell, name, operand, parsed, options, isLocal, isSubscripted);
+  if (target === undefined) return undefined;
+  return validatePendingNamerefTarget(shell, builtin, name, target, shell.isInFunction) ? target : 'invalid';
 }
 
 // code-gauge-allow functionParameterCount -- Selects the effective store cell and writes the declared operand value.
