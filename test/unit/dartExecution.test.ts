@@ -10028,3 +10028,21 @@ void main() async {
     }
   );
 });
+
+test('Dart DateTime computes and prints dates as the SDK does', () => {
+  const program = `void main() {
+  final date = DateTime.utc(2024, 2, 29, 13, 5, 9, 7, 3);
+  print([date, date.weekday, date.toIso8601String(), date.add(const Duration(days: 1, hours: 12))]);
+  print([DateTime.utc(2024, 3, 1).difference(DateTime.utc(2024, 1, 1)), DateTime.utc(2024, 13, 35)]);
+  print([DateTime.parse('2023-10-05T08:30:00Z'), DateTime.tryParse('nope'), date.copyWith(year: 2000)]);
+  print([DateTime.fromMillisecondsSinceEpoch(0, isUtc: true), DateTime.utc(-5), DateTime.utc(12345)]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[2024-02-29 13:05:09.007003Z, 4, 2024-02-29T13:05:09.007003Z, 2024-03-02 01:05:09.007003Z]\n' +
+      '[1440:00:00.000000, 2025-02-04 00:00:00.000Z]\n' +
+      '[2023-10-05 08:30:00.000Z, null, 2000-02-29 13:05:09.007003Z]\n' +
+      '[1970-01-01 00:00:00.000Z, -0005-01-01 00:00:00.000Z, 12345-01-01 00:00:00.000Z]\n',
+  });
+});

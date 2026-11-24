@@ -20,6 +20,7 @@ import './library/nativeOthers';
 import './library/nativeConvert';
 import './library/nativeBigInt';
 import './library/nativeIo';
+import './library/nativeTime';
 import { NATIVES } from './library/nativeSupport';
 import { parseDart } from './parse';
 import { DartThrow, EMPTY_TYPE_ENV, Frame, type FunctionInfo, type LibraryLinks, Runtime } from './runtime';

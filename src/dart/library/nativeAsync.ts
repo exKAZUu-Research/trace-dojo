@@ -209,5 +209,3 @@ define('_Timer._unschedule', (runtime, self) => {
   runtime.events.unschedule(self as DartObject);
   return;
 });
-
-define('Stopwatch._now', (runtime) => runtime.events.elapsedNanoseconds());

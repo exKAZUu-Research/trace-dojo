@@ -89,7 +89,6 @@ export function at(span: Span): Span {
 
 /** Names of the SDK the interpreter does not provide, with what they are, for the message that they are unavailable. */
 const UNAVAILABLE_NAMES: Record<string, string> = {
-  DateTime: 'DateTime（日付と時刻）',
   Zone: 'Zone（非同期処理）',
   runZoned: 'runZoned（非同期処理）',
   runZonedGuarded: 'runZonedGuarded（非同期処理）',

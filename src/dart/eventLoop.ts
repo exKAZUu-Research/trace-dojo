@@ -77,6 +77,11 @@ export class EventLoop {
     return BigInt(Math.round((performance.now() - this.realStart + this.now) * 1_000_000));
   }
 
+  /** Microseconds since the Unix epoch, as `DateTime.now` reads them: the host's time plus the time the run skipped. */
+  currentMicroseconds(): bigint {
+    return BigInt(Math.round((performance.timeOrigin + performance.now() + this.now) * 1000));
+  }
+
   /** Advances the clock, as `sleep` does while the VM blocks the isolate. */
   advance(milliseconds: number): void {
     this.now += Math.max(milliseconds, 0);
