@@ -790,6 +790,8 @@ export class Shell implements ArithmeticHost {
     const savedLineShift = this.lineShift;
     const savedReadShift = this.readShift;
     this.loopDepth = 0;
+    this.conditionDepth = 0;
+    this.listConditionDepth = 0;
     if (startRow !== undefined) {
       this.lineShift = startRow - this.currentRow;
       this.readShift = this.lineShift;
