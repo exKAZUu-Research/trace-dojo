@@ -1102,6 +1102,7 @@ export class Shell implements ArithmeticHost {
     if (!variable?.value) {
       const dynamic = this.dynamicArray(name);
       if (dynamic) return dynamic.map((_, index) => String(index));
+      if (!variable && ENVIRONMENT_VARIABLES.has(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
       return [];
     }
     const { value } = variable;
