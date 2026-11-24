@@ -161,8 +161,7 @@ function skipBraces(text: SourceText, open: number, inDouble = false): number {
     let i = open + 1;
     if (inDouble) {
       i = skipParameterHeader(text, i);
-      const op = source[i];
-      if (op !== '#' && op !== '%' && op !== '/' && op !== '^' && op !== ',') {
+      if (usesDoubleQuotedBraceBody(source, i)) {
         return skipDoubleQuotedBraceBody(text, open, i);
       }
     }
@@ -172,6 +171,14 @@ function skipBraces(text: SourceText, open: number, inDouble = false): number {
     }
     return text.unclosed(open, '}');
   });
+}
+
+const UNQUOTED_BRACE_OPERATORS = new Set(['#', '%', '/', '^', ',', '~', '?']);
+
+function usesDoubleQuotedBraceBody(source: string, index: number): boolean {
+  const op = source[index];
+  if (op === undefined || UNQUOTED_BRACE_OPERATORS.has(op)) return false;
+  return !(op === ':' && source[index + 1] === '?');
 }
 
 function skipParameterHeader(text: SourceText, start: number): number {
