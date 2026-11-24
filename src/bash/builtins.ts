@@ -92,30 +92,10 @@ function echoEscape(bytes: number[], index: number, c: string): { out: number[];
   return { out: [92, bytes[index]], last: index };
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Bash's printf option and operand checks, each with its own usage error.
-// code-gauge-allow functionNcss -- Bash's printf option and operand checks, each with its own usage error.
 function printf(shell: Shell, args: string[]): number {
-  let list = args;
-  let target: string | undefined;
-  if (list[0] === '-v') {
-    target = list[1];
-    if (target === undefined) {
-      shell.reportError('printf: -v: option requires an argument');
-      shell.state.fd2.write('printf: usage: printf [-v var] format [arguments]\n');
-      return 2;
-    }
-    const split = shell.splitSubscript(target);
-    if (split ? !isIdentifier(split.name) || split.subscript === '' : !isIdentifier(target)) {
-      shell.reportError(`printf: \`${target}': not a valid identifier`);
-      return 2;
-    }
-    list = list.slice(2);
-  } else if (/^-./.test(list[0] ?? '') && list[0] !== '--') {
-    shell.reportError(`printf: ${list[0].slice(0, 2)}: invalid option`);
-    shell.state.fd2.write('printf: usage: printf [-v var] format [arguments]\n');
-    return 2;
-  }
-  list = operands(list);
+  const parsed = parsePrintfOptions(shell, args);
+  if (typeof parsed === 'number') return parsed;
+  const { target, rest: list } = parsed;
   if (list.length === 0) {
     shell.state.fd2.write('printf: usage: printf [-v var] format [arguments]\n');
     return 2;
@@ -136,6 +116,39 @@ function printf(shell: Shell, args: string[]): number {
     if (!stored) return 1;
   }
   return ok ? 0 : 1;
+}
+
+// code-gauge-allow functionCognitiveComplexity -- Scans repeated and attached -v options until `--` or the format operand.
+function parsePrintfOptions(shell: Shell, args: string[]): { target: string | undefined; rest: string[] } | number {
+  let target: string | undefined;
+  let index = 0;
+  while (index < args.length) {
+    const arg = args[index];
+    if (arg === '--') {
+      index++;
+      break;
+    }
+    if (!arg.startsWith('-') || arg === '-') break;
+    if (arg[1] !== 'v') {
+      shell.reportError(`printf: -${arg[1]}: invalid option`);
+      shell.state.fd2.write('printf: usage: printf [-v var] format [arguments]\n');
+      return 2;
+    }
+    const candidate = arg.length > 2 ? arg.slice(2) : args[index + 1];
+    if (candidate === undefined) {
+      shell.reportError('printf: -v: option requires an argument');
+      shell.state.fd2.write('printf: usage: printf [-v var] format [arguments]\n');
+      return 2;
+    }
+    const split = shell.splitSubscript(candidate);
+    if (split ? !isIdentifier(split.name) || split.subscript === '' : !isIdentifier(candidate)) {
+      shell.reportError(`printf: \`${candidate}': not a valid identifier`);
+      return 2;
+    }
+    target = candidate;
+    index += arg.length > 2 ? 1 : 2;
+  }
+  return { target, rest: args.slice(index) };
 }
 
 export function assignSubscriptedBuiltinTarget(
