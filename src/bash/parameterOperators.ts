@@ -10,6 +10,7 @@ import {
   longestPrefixMatch,
   longestSuffixMatch,
   matchesSlice,
+  nextLeftmostLongestMatch,
   shortestPrefixMatch,
   shortestSuffixMatch,
 } from './pattern';
@@ -293,18 +294,15 @@ function substitute(text: string, pattern: string, replacement: Piece[], operato
   }
   let result = '';
   for (let position = 0; position <= chars.length;) {
-    const end =
-      position < chars.length || chars.length === 0 ? longestPrefixMatch(glob, chars, position, spend) : undefined;
-    if (end === undefined || (end === position && position >= chars.length)) {
-      result += chars[position] ?? '';
-      position++;
-      continue;
-    }
-    result += replace(position, end);
-    if (operator === '/') return result + chars.slice(end).join('');
+    const match = nextLeftmostLongestMatch(glob, chars, position, spend);
+    if (!match) return result + chars.slice(position).join('');
+    result += chars.slice(position, match.start).join('') + replace(match.start, match.end);
+    if (operator === '/' || chars.length === 0) return result + chars.slice(match.end).join('');
     // An empty match moves on by one character, which it keeps.
-    if (end === position) result += chars[position++] ?? '';
-    else position = end;
+    if (match.end === match.start) {
+      result += chars[match.start] ?? '';
+      position = match.start + 1;
+    } else position = match.end;
   }
   return result;
 }

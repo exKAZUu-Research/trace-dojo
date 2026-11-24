@@ -140,6 +140,41 @@ export function longestSuffixMatch(
   return reversedEnd === undefined ? undefined : chars.length - reversedEnd;
 }
 
+/**
+ * Finds the leftmost-longest substring `chars[start..end]` with `start >= from` matching `glob` in one pass,
+ * or `undefined` when no match exists in `chars[from..]`.
+ */
+export function nextLeftmostLongestMatch(
+  glob: CompiledGlob,
+  chars: readonly string[],
+  from: number,
+  spend: () => void
+): { start: number; end: number } | undefined {
+  const count = glob.atoms.length;
+  if (from >= chars.length) {
+    return chars.length === 0 && from === 0 && glob.atoms.every((atom) => atom.kind === 'star')
+      ? { start: 0, end: 0 }
+      : undefined;
+  }
+  let starts = new Int32Array(count + 1).fill(-1);
+  let next = new Int32Array(count + 1).fill(-1);
+  let best: { start: number; end: number } | undefined;
+  for (let pos = from; pos < chars.length; pos++) {
+    spend();
+    if (!best && starts[0] === -1) {
+      starts[0] = pos;
+      closeStarStarts(glob.atoms, starts);
+      best = pickBetterMatch(best, starts[count], pos);
+    }
+    stepAtomStarts(glob.atoms, starts, next, chars[pos]);
+    [starts, next] = [next, starts];
+    next.fill(-1);
+    best = pickBetterMatch(best, starts[count], pos + 1);
+    if (best && !hasActiveStartAtOrBefore(starts, count, best.start)) break;
+  }
+  return best;
+}
+
 function reverseGlob(glob: CompiledGlob): CompiledGlob {
   return { atoms: glob.atoms.toReversed(), hasStar: glob.hasStar };
 }
@@ -237,6 +272,46 @@ function stepAtoms(atoms: readonly GlobAtom[], current: Uint8Array, next: Uint8A
   }
   if (anyActive) closeStars(atoms, next);
   return anyActive;
+}
+
+function pickBetterMatch(
+  best: { start: number; end: number } | undefined,
+  candidateStart: number,
+  candidateEnd: number
+): { start: number; end: number } | undefined {
+  if (candidateStart === -1) return best;
+  if (!best || candidateStart < best.start || (candidateStart === best.start && candidateEnd > best.end)) {
+    return { start: candidateStart, end: candidateEnd };
+  }
+  return best;
+}
+
+function closeStarStarts(atoms: readonly GlobAtom[], state: Int32Array): void {
+  for (let i = 0; i < atoms.length; i++) {
+    if (state[i] !== -1 && atoms[i].kind === 'star') state[i + 1] = minStart(state[i + 1], state[i]);
+  }
+}
+
+function stepAtomStarts(atoms: readonly GlobAtom[], current: Int32Array, next: Int32Array, ch: string): void {
+  for (let i = 0; i < atoms.length; i++) {
+    const origin = current[i];
+    if (origin === -1) continue;
+    const atom = atoms[i];
+    if (atom.kind === 'star') next[i] = minStart(next[i], origin);
+    else if (matchesAtom(atom, ch)) next[i + 1] = minStart(next[i + 1], origin);
+  }
+  closeStarStarts(atoms, next);
+}
+
+function minStart(existing: number, candidate: number): number {
+  return existing === -1 || candidate < existing ? candidate : existing;
+}
+
+function hasActiveStartAtOrBefore(state: Int32Array, count: number, limitStart: number): boolean {
+  for (let i = 0; i < count; i++) {
+    if (state[i] !== -1 && state[i] <= limitStart) return true;
+  }
+  return false;
 }
 
 function matchesAtom(atom: GlobAtom, ch: string): boolean {
