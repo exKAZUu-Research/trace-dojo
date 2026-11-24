@@ -166,11 +166,10 @@ export function ensureWritable(variable: Variable): void {
   variable.shared = false;
 }
 
-/** Clones a scope for a subshell, sharing container values copy-on-write until either side mutates them. */
+/** Clones a scope for a subshell, sharing container values copy-on-write until the subshell mutates them. */
 export function cloneScope(scope: Scope): Scope {
   const copy: Scope = new Map();
   for (const [name, variable] of scope) {
-    if (variable.value && variable.value.kind !== 'scalar') variable.shared = true;
     copy.set(name, {
       ...variable,
       value: variable.value?.kind === 'scalar' ? { ...variable.value } : variable.value,
