@@ -21,6 +21,7 @@ import {
   copyValue,
   CsArray,
   CsBox,
+  CsDelegate,
   CsObject,
   isString,
   plainString,
@@ -321,9 +322,10 @@ export const NARROW_INTEGRALS: ReadonlySet<string> = new Set(['sbyte', 'byte', '
 
 /**
  * The text a trace shows a dictionary's key as, which the Java trace shows a map's alike: a value its text, and an
- * object of a class by its identity, without running its ToString.
+ * object of a class, an array, or a delegate by its identity, without running its ToString.
  */
 export function dictionaryKeyText(call: NativeCall, key: Value, keyType: Type): string {
-  if (key instanceof CsObject && !isString(key)) return call.frame.runtime.displayIdentity(key);
+  if ((key instanceof CsObject && !isString(key)) || key instanceof CsArray || key instanceof CsDelegate)
+    return call.frame.runtime.displayIdentity(key);
   return textOf(call, key, keyType);
 }
