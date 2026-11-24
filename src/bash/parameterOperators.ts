@@ -655,14 +655,10 @@ function transform(
     }
     case 'A': {
       const text = assignmentText(shell, name, value);
-      // An array's declaration comes as three words, `declare`, its flags, and its assignment, even when quoted.
       if (value.kind === 'list') {
         if (text === '') return expander.valuePieces({ ...value, values: [] }, inDouble);
-        const [declare, flags, ...assignment] = text.split(' ');
-        return expander.valuePieces(
-          { kind: 'list', values: [declare, flags, assignment.join(' ')], star: false },
-          inDouble
-        );
+        const values = inDouble && !value.star ? splitQuotedDeclarationFields(text, expander.currentIfs()) : [text];
+        return expander.valuePieces({ ...value, values, transformed: true }, inDouble);
       }
       return expander.valuePieces({ kind: 'scalar', value: text }, inDouble);
     }
@@ -674,6 +670,18 @@ function transform(
       throw new Error(`Unknown transformation ${letter}`);
     }
   }
+}
+
+function splitQuotedDeclarationFields(text: string, ifs: string): string[] {
+  const eqIndex = text.indexOf('=');
+  const splitter = new FieldSplitter(ifs);
+  if (eqIndex === -1) {
+    splitter.add({ text, quoted: false, split: true });
+  } else {
+    splitter.add({ text: text.slice(0, eqIndex + 1), quoted: false, split: true });
+    splitter.add({ text: text.slice(eqIndex + 1), quoted: true, split: false });
+  }
+  return splitter.finish().map((field) => field.map((fragment) => fragment.text).join(''));
 }
 
 function resolveTransformationVariable(shell: Shell, name: string): Variable | undefined {
