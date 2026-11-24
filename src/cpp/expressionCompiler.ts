@@ -2268,6 +2268,17 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return constantExpr(SIZE_T, BigInt(entity.items.length), node.row);
     }
     const type = this.sizeofOperandType(node);
+    if (type.kind === 'array' && type.variableLength) {
+      // A variable-length array's size is its length at run time, times its element's.
+      const array = this.compileExpression(fieldOf(node, 'value') as Syntax).run;
+      const element = BigInt(sizeOf(type.of));
+      return {
+        type: SIZE_T,
+        isLvalue: false,
+        row: node.row,
+        run: (frame) => BigInt(((array(frame) as Ptr).read() as ArrayStore).length) * element,
+      };
+    }
     if (type.kind === 'function') return this.error(node.row, '関数には sizeof を使えません。');
     if (type.kind === 'void') return this.error(node.row, 'void 型には sizeof を使えません。');
     if (type.kind === 'array' && type.length === undefined)

@@ -18,7 +18,7 @@ import {
 } from './expr';
 import { ExpressionCompiler } from './expressionCompiler';
 import { SequenceValue } from './library/containerValues';
-import { bindRetainedTemporary, initializeAt, withTemporaries, zeroOf } from './objectCompiler';
+import { bindRetainedTemporary, constructArray, initializeAt, withTemporaries, zeroOf } from './objectCompiler';
 import { expandPacks } from './packs';
 import { parseAsDeclaration, parseInitializerArguments } from './parse';
 import { erasePointee } from './pointerCasts';
@@ -447,7 +447,14 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         },
       };
     }
-    const declared = this.applyDeclarator(base, declarator);
+    const savedVariable = this.allowsVariableLength;
+    this.allowsVariableLength = !this.isConstexpr(declaration) && !this.hasSpecifier(declaration, 'static');
+    let declared: Declared;
+    try {
+      declared = this.applyDeclarator(base, declarator);
+    } finally {
+      this.allowsVariableLength = savedVariable;
+    }
     const reread = declared.function ? this.asDirectInitialization(declarator, declared.function) : undefined;
     if (reread) return this.localDeclarator(base, reread, declaration);
     if (declared.function) return this.localFunctionDeclaration(declaration, declared);
@@ -459,6 +466,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let type = declared.type;
     if (type.kind === 'reference') return this.referenceDeclarator(name, type, declarator);
     if (type.kind === 'void') return this.error(declarator.row, `void 型の変数 ${name} は作れません。`);
+    if (type.kind === 'array' && type.variableLength) return this.variableLengthArray(name, type, value, declarator);
     let init: Initializer;
     let createsObject = false;
     let entity: Extract<Entity, { kind: 'local' }>;
@@ -510,6 +518,41 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       deduced,
       type,
     };
+  }
+
+  /**
+   * A variable-length array (`int a[n];`, a clang extension), whose elements are default-initialized when its
+   * declaration runs, as many as its length then is.
+   */
+  private variableLengthArray(
+    name: string,
+    type: Extract<Type, { kind: 'array' }>,
+    value: Syntax | undefined,
+    declarator: Syntax
+  ): LocalDeclaration {
+    const { row } = declarator;
+    if (value) return this.error(row, `大きさが定数でない配列 ${name} には、初期値を書けません。`);
+    const length = type.variableLength as Eval<unknown>;
+    const element = this.defaultInitializer(type.of, row);
+    const destroyElement = this.destroyerOf(type.of, row);
+    const { local } = this.declareVariable(name, type);
+    const destroy = this.destroyerOf(type, row);
+    if (destroy) this.context.scope.destructibles.set(local.slot, destroy);
+    const exec: Exec = (frame) => {
+      const count = Number(length(frame));
+      this.initializeLocal(frame, local, (target) =>
+        constructArray(
+          frame,
+          count,
+          type.of,
+          (current, slot) => element(current, slot instanceof CObject ? slot : undefined),
+          destroyElement,
+          target instanceof ArrayStore ? target : undefined
+        )
+      );
+      return;
+    };
+    return { exec: this.fullExpression(exec), hasInitializer: false, createsObject: this.isClassLike(type), type };
   }
 
   private initializeLocal(
@@ -1193,18 +1236,23 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let end: Expr;
     if (rangeType.kind === 'array') {
       begin = this.rvalue(rangeRef);
-      end = this.pointerOffset(
-        begin,
-        {
-          type: { kind: 'int', name: 'long' },
-          isLvalue: false,
-          row,
-          run: () => BigInt(rangeType.length ?? 0),
-          constant: BigInt(rangeType.length ?? 0),
-        },
-        1,
-        row
-      );
+      // A variable-length array's length is its array's at run time.
+      const array = rangeRef.run;
+      const length: Expr = rangeType.variableLength
+        ? {
+            type: { kind: 'int', name: 'long' },
+            isLvalue: false,
+            row,
+            run: (frame) => BigInt(((array(frame) as Ptr).read() as ArrayStore).length),
+          }
+        : {
+            type: { kind: 'int', name: 'long' },
+            isLvalue: false,
+            row,
+            run: () => BigInt(rangeType.length ?? 0),
+            constant: BigInt(rangeType.length ?? 0),
+          };
+      end = this.pointerOffset(begin, length, 1, row);
     } else if (rangeType.kind === 'class') {
       begin = this.callWith(this.member(rangeRef, 'begin', row), [], row);
       end = this.callWith(this.member(rangeRef, 'end', row), [], row);

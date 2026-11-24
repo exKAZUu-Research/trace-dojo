@@ -29,7 +29,7 @@ export type Type =
   /** An lvalue reference, or an rvalue reference (`T&&`) when `isRvalue`. */
   | { kind: 'reference'; to: Type; isRvalue?: boolean }
   /** An array, whose length is undefined while it is incomplete (`int a[]` before its initializer). */
-  | ({ kind: 'array'; of: Type; length?: number } & Qualified)
+  | ({ kind: 'array'; of: Type; length?: number; variableLength?: Eval<unknown> } & Qualified)
   | ({ kind: 'class'; cls: ClassInfo } & Qualified)
   /** The type of a function's name, which only a call or a library algorithm's argument may use. */
   | { kind: 'function'; ret: Type; params: Type[] };

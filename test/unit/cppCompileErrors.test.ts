@@ -1259,7 +1259,7 @@ int main() {
   });
 });
 
-test.each(['S& r = s; int a[r.N];', 'S* p = &s; int a[p->N];'])(
+test.each(['S& r = s; static int a[r.N];', 'S* p = &s; static int a[p->N];'])(
   'rejects a static constant named through a non-constant object expression in %s',
   (body) => {
     const program = `struct S { static const int N = 3; };
@@ -1318,7 +1318,7 @@ test.each([
   ['static S a[2][2];', 'a[2][1].N'],
 ])('rejects a static constant named through out-of-bounds element of %s %s', (declaration, bound) => {
   const program = `struct S { static const int N = 3; };
-int main() { ${declaration} int b[${bound}]; }`;
+int main() { ${declaration} static int b[${bound}]; }`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ row: 1, message: expect.stringContaining('可変長配列') }],

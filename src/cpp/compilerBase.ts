@@ -4,6 +4,7 @@ import type { Expr } from './expr';
 import { isSdkMemberDeclared } from './library/libcGlobals';
 import type { Library, LibraryTemplate } from './library/registry';
 import { expandPacks, PACK_ELEMENT, withPackElement } from './packs';
+import type { Eval } from './runtime';
 import { type Entity, FunctionContext, type NamespaceInfo, Scope } from './scopes';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
@@ -51,6 +52,8 @@ export abstract class CompilerBase {
   context: FunctionContext = new FunctionContext(undefined, undefined, VOID);
   /** The class whose member declarations are being compiled, whose members are in scope. */
   memberClass: ClassInfo | undefined;
+  /** Whether an array declarator may have a length that is no constant, as a local variable's may (a clang extension). */
+  protected allowsVariableLength = false;
   /** The row of the program's statement or declaration compiled last, where errors in the library's code show. */
   protected userRow = 0;
   /** The class that a class template's name without arguments, at the type node, denotes after deduction. */
@@ -925,7 +928,11 @@ export abstract class CompilerBase {
         if (base.kind === 'array' && base.length === undefined)
           return this.error(declarator.row, '多次元配列の内側の大きさを書いてください。');
         if (hasAuto(base)) return this.error(declarator.row, '配列の要素の型を auto で書くことはできません。');
+        if (base.kind === 'array' && base.variableLength)
+          return this.unsupported(declarator.row, '内側の大きさが定数でない多次元配列');
         const size = fieldOf(declarator, 'size');
+        const variableLength = size && this.allowsVariableLength ? this.variableLengthOf(size) : undefined;
+        if (variableLength) return this.applyInner({ kind: 'array', of: base, variableLength }, declarator);
         const length = size ? this.arrayLength(size) : undefined;
         return this.applyInner({ kind: 'array', of: base, length }, declarator);
       }
@@ -1021,6 +1028,9 @@ export abstract class CompilerBase {
 
   /** The length of an array, which must be a constant expression. */
   protected abstract arrayLength(size: Syntax): number;
+
+  /** The length of a variable-length array (`int a[n];`), evaluated where it is declared, or undefined for a constant. */
+  protected abstract variableLengthOf(size: Syntax): Eval<unknown> | undefined;
 
   /** Compiles an expression of the program, for the parts of the base that evaluate constants. */
   abstract compileExpression(node: Syntax): Expr;

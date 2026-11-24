@@ -13,7 +13,7 @@ import {
   satisfiesConcept,
   satisfiesTypeConstraint,
 } from './concepts';
-import { implicitConversion } from './conversions';
+import { convertArithmetic, implicitConversion } from './conversions';
 import { enumeratorEntity } from './enums';
 import { CppException, CppRuntimeError, NarrowingConversionError } from './errors';
 import {
@@ -4387,13 +4387,27 @@ export class Compiler extends StatementCompiler {
     }
   }
 
+  protected override variableLengthOf(size: Syntax): Eval<unknown> | undefined {
+    const expr = this.rvalue(this.compileExpression(size));
+    if (!isInteger(expr.type) || this.constantValueOf(expr) !== undefined) return undefined;
+    const run = convertArithmetic(expr, { kind: 'int', name: 'long' }).run;
+    return (frame) => {
+      const length = Number(run(frame));
+      if (length <= 0) throw new CppRuntimeError('custom', `可変長配列の大きさが ${length} になりました。`);
+      return length;
+    };
+  }
+
   protected arrayLength(size: Syntax): number {
     const expr = this.rvalue(this.compileExpression(size));
     if (!isInteger(expr.type))
       return this.error(size.row, `配列の大きさには整数を書いてください（${typeName(expr.type)}）。`);
     const constant = this.constantValueOf(expr);
     if (constant === undefined) {
-      return this.unsupported(size.row, '大きさが定数でない配列（可変長配列）');
+      return this.error(
+        size.row,
+        '大きさが定数でない配列（可変長配列）は、関数の中の static でない変数にしか使えません。'
+      );
     }
     const length = Number(constant);
     if (length < 0) return this.error(size.row, '配列の大きさは負にできません。');

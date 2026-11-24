@@ -11,11 +11,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   co_await_expression: 'コルーチン（co_await・co_yield・co_return）',
   co_return_statement: 'コルーチン（co_await・co_yield・co_return）',
   co_yield_statement: 'コルーチン（co_await・co_yield・co_return）',
-  module_declaration: 'モジュール（module・import・export）',
-  export_declaration: 'モジュール（module・import・export）',
-  import_declaration: 'モジュール（module・import・export）',
-  global_module_fragment_declaration: 'モジュール（module・import・export）',
-  private_module_fragment_declaration: 'モジュール（module・import・export）',
   atomic_type_specifier: '_Atomic',
   gnu_asm_expression: 'インラインアセンブリ（asm）',
   builtin_available_expression: '__builtin_available',
@@ -37,6 +32,18 @@ const LATER_STANDARD_NODES: Record<string, [string, string]> = {
   splice_specifier: ['リフレクション（[: :]）', 'C++26'],
 };
 
+/**
+ * The module syntax, which clang++ -std=c++20 rejects in a program of one `.cpp` file, since it compiles such a file
+ * as no module unit.
+ */
+const MODULE_NODES = new Set([
+  'module_declaration',
+  'export_declaration',
+  'import_declaration',
+  'global_module_fragment_declaration',
+  'private_module_fragment_declaration',
+]);
+
 const MICROSOFT_PREFIXES = ['ms_', 'seh_'];
 
 const UNSUPPORTED_SPECIFIERS: Record<string, string> = {
@@ -55,6 +62,11 @@ export function rejectUnsupportedSyntax(root: Syntax): void {
     if (feature) unsupported(node.row, feature);
     const later = LATER_STANDARD_NODES[node.type];
     if (later) compileError(node.row, `${later[0]} は ${later[1]} の書き方なので、C++20 では使えません。`);
+    if (MODULE_NODES.has(node.type))
+      compileError(
+        node.row,
+        'モジュール（module・import・export）は、1つのファイルのプログラムでは使えません（clang++ -std=c++20 は .cpp のファイルをモジュールとして読みません）。'
+      );
     if (MICROSOFT_PREFIXES.some((prefix) => node.type.startsWith(prefix))) unsupported(node.row, 'Microsoft の拡張');
     switch (node.type) {
       case 'preproc_include': {
