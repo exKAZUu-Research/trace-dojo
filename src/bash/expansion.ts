@@ -6,7 +6,7 @@ import { charactersOf } from './characters';
 import { EMPTY_LIST, FIELD_BREAK, FieldSplitter, type Fragment, isFieldBreak, type Piece, STAR_BREAK } from './fields';
 import { applyOperator } from './parameterOperators';
 import { parseSubscriptWordParts } from './parse';
-import { hasPatternCharacters, matchesPattern, quotePattern } from './pattern';
+import { hasExtendedGlob, hasPatternCharacters, matchesPattern, quotePattern } from './pattern';
 import { quoteReusable, singleQuote } from './quoting';
 import { ExitSignal, SCRIPT_NAME } from './runtime';
 import type { CompoundElement, Shell } from './shell';
@@ -636,7 +636,7 @@ export class Expander {
       .map((fragment) => (fragment.quoted ? quotePattern(fragment.text) : fragment.text))
       .join('');
     // `[[ == ]]` matches extended patterns even without `shopt -s extglob`, so they cannot pass as literal text.
-    if (/(?<!\\)[?*+@!]\(/.test(pattern)) throw new UnsupportedFeatureError('拡張パターン（@( ... ) など）');
+    if (hasExtendedGlob(pattern)) throw new UnsupportedFeatureError('拡張パターン（@( ... ) など）');
     return pattern;
   }
 

@@ -40,6 +40,50 @@ export function hasPatternCharacters(pattern: string): boolean {
   return compileGlob(pattern).atoms.some((atom) => atom.kind !== 'char');
 }
 
+/** Whether `pattern` contains an unescaped extended-glob operator (`?(...)`, `*(...)`, `+(...)`, `@(...)`, `!(...)`) outside `[...]`. */
+export function hasExtendedGlob(pattern: string): boolean {
+  const chars = charactersOf(pattern);
+  for (let i = 0; i < chars.length;) {
+    const c = chars[i];
+    if (c === '\\') {
+      i += 2;
+      continue;
+    }
+    if (c === '[') {
+      const bracket = readBracketExpression(chars, i + 1);
+      if (bracket) {
+        i = bracket.next;
+        continue;
+      }
+    } else if ('?*+@!'.includes(c) && chars[i + 1] === '(' && findExtglobClose(chars, i + 2) !== undefined) {
+      return true;
+    }
+    i++;
+  }
+  return false;
+}
+
+function findExtglobClose(chars: readonly string[], from: number): number | undefined {
+  let depth = 1;
+  for (let i = from; i < chars.length;) {
+    const c = chars[i];
+    if (c === '\\') {
+      i += 2;
+      continue;
+    }
+    if (c === '[') {
+      const bracket = readBracketExpression(chars, i + 1);
+      if (bracket) {
+        i = bracket.next;
+        continue;
+      }
+    } else if (c === '(') depth++;
+    else if (c === ')' && --depth === 0) return i;
+    i++;
+  }
+  return undefined;
+}
+
 /** Escapes shell glob and bracket-expression operators so `text` matches literally. */
 export function quotePattern(text: string): string {
   return text.replaceAll(/[*?[\]\\!^\-+@():=.]/g, (c) => `\\${c}`);
