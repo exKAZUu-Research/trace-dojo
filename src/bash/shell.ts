@@ -670,12 +670,14 @@ export class Shell implements ArithmeticHost {
     assignsAnswer: boolean;
   } {
     const args = expandDeclarationArguments(this, statement.name, statement.args);
-    const assignsAnswer = declarationAssignsAnswer(statement.name, args);
+    let assignsAnswer = declarationAssignsAnswer(statement.name, args);
     const status = this.withTemporaryScope(
       statement.assignments,
       () =>
         this.withRedirects(statement.redirects, () => {
-          const declStatus = runDeclaration(this, statement.name, args);
+          const declStatus = runDeclaration(this, statement.name, args, () => {
+            assignsAnswer = true;
+          });
           const last = args.at(-1);
           this.state.lastArgument = last === undefined ? statement.name : typeof last === 'string' ? last : last.text;
           return declStatus;

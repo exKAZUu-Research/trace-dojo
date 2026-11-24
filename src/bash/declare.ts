@@ -208,7 +208,7 @@ function ensureCompoundTargetVariable(
       : shell.findVariable(targetName, false);
   if (!variable) {
     const origin = localScope ? resolveLocalOrigin(shell, localScope, targetName, set.has('I')) : undefined;
-    variable = createDeclaredVariable(targetName, origin, true);
+    variable = createDeclaredVariable(targetName, origin, set.has('A') ? 'associative' : 'indexed');
     (localScope ?? scopes[0]).set(targetName, variable);
   }
   return variable;
@@ -222,7 +222,10 @@ function resolveCompoundExisting(
 ): Variable | undefined {
   const { scopes } = shell.state;
   if (localScope) {
-    return localScope.get(targetName) ?? resolveLocalOrigin(shell, localScope, targetName, set.has('I'))?.source;
+    const existing = localScope.get(targetName);
+    if (existing) return existing;
+    const origin = resolveLocalOrigin(shell, localScope, targetName, set.has('I'));
+    return origin ? createDeclaredVariable(targetName, origin, set.has('A') ? 'associative' : 'indexed') : undefined;
   }
   return set.has('g') || set.has('n') ? scopes[0].get(targetName) : shell.findVariable(targetName, false);
 }
@@ -259,7 +262,12 @@ function updateNamerefOption(builtin: string, flagWord: string, current: boolean
 }
 
 /** `declare`, `typeset`, `local`, `readonly`, and `export`. */
-export function runDeclaration(shell: Shell, name: string, args: DeclarationArgument[]): number {
+export function runDeclaration(
+  shell: Shell,
+  name: string,
+  args: DeclarationArgument[],
+  onMaterialize?: () => void
+): number {
   const parsed = parseOptions(shell, name, args);
   if (!parsed) return 2;
   const { options, operands } = parsed;
@@ -277,7 +285,7 @@ export function runDeclaration(shell: Shell, name: string, args: DeclarationArgu
     shell.isInFunction && !options.set.has('g') && (name === 'local' || name === 'declare' || name === 'typeset');
   let status = 0;
   for (const operand of operands) {
-    if (!declareOne(shell, name, operand, options, isLocal)) status = 1;
+    if (!declareOne(shell, name, operand, options, isLocal, onMaterialize)) status = 1;
   }
   return status;
 }
@@ -358,7 +366,8 @@ function declareOne(
   builtin: string,
   operand: DeclarationArgument,
   options: Options,
-  isLocal: boolean
+  isLocal: boolean,
+  onMaterialize?: () => void
 ): boolean {
   const parsed = typeof operand === 'string' ? parseWordOperand(operand) : undefined;
   const name = typeof operand === 'string' ? (parsed as { name: string }).name : operand.name;
@@ -382,7 +391,9 @@ function declareOne(
   ) {
     return false;
   }
+  const existingCells = new Set(shell.state.scopes.flatMap((s) => [...s.values()]));
   const destination = declaredDestination(shell, builtin, name, options, isLocal, isSubscripted, assigns);
+  const wasScalar = destination?.variable.value?.kind === 'scalar';
   if (
     !destination ||
     !applyAttributes(
@@ -406,6 +417,15 @@ function declareOne(
       ? commitNamerefTarget(shell, builtin, variable, explicitRefTarget, shell.isInFunction)
       : assignDeclaredOperand(shell, builtin, variable, storeVariable, operand, parsed, referencedSubscript);
   if (options.set.has('r')) variable.attributes.add('r');
+  if (
+    ok &&
+    !variable.attributes.has('n') &&
+    ((!existingCells.has(variable) && !options.set.has('I')) || wasScalar) &&
+    variable.value !== undefined &&
+    variable.value.kind !== 'scalar'
+  ) {
+    onMaterialize?.();
+  }
   return ok;
 }
 
@@ -639,29 +659,45 @@ function declaredDestination(
     set.has('g'),
     scope
   );
-  const targetScope = scope && referencedSubscript === undefined ? scope : undefined;
-  let variable = targetScope
-    ? targetScope.get(targetName)
-    : set.has('n') || set.has('g')
-      ? scopes[0].get(targetName)
-      : shell.findVariable(targetName, false);
+  const targetScope = referencedSubscript === undefined ? scope : undefined;
+  const variable = lookupDeclaredVariable(shell, targetName, set, targetScope);
   if (targetScope && !variable && isReadonlyGlobal(shell, targetName)) {
     // Bash refuses a local copy of a readonly global, though a caller's readonly local may be shadowed.
     shell.reportError(`${builtin}: ${targetName}: readonly variable`);
     return undefined;
   }
-  const origin =
-    targetScope && !variable ? resolveLocalOrigin(shell, targetScope, targetName, set.has('I')) : undefined;
-  const creatingArray = set.has('a') || set.has('A') || isSubscripted;
-  const candidate = variable ?? createDeclaredVariable(targetName, origin, creatingArray);
+  const candidate = variable ?? createNewDeclaredVariable(shell, targetName, set, isSubscripted, targetScope);
+  if (!variable && targetScope) targetScope.set(targetName, candidate);
   if (checkReadonlyConflict(shell, builtin, targetName, candidate, options, assigns)) {
     return undefined;
   }
-  if (!variable) (targetScope ?? scopes[0]).set(targetName, candidate);
+  if (!variable && !targetScope) scopes[0].set(targetName, candidate);
   return {
     variable: candidate,
     ...(referencedSubscript === undefined ? {} : { referencedSubscript }),
   };
+}
+
+function lookupDeclaredVariable(
+  shell: Shell,
+  targetName: string,
+  set: Set<string>,
+  targetScope: Map<string, Variable> | undefined
+): Variable | undefined {
+  if (targetScope) return targetScope.get(targetName);
+  return set.has('n') || set.has('g') ? shell.state.scopes[0].get(targetName) : shell.findVariable(targetName, false);
+}
+
+function createNewDeclaredVariable(
+  shell: Shell,
+  targetName: string,
+  set: Set<string>,
+  isSubscripted: boolean,
+  targetScope: Map<string, Variable> | undefined
+): Variable {
+  const origin = targetScope ? resolveLocalOrigin(shell, targetScope, targetName, set.has('I')) : undefined;
+  const arrayKind = set.has('A') ? 'associative' : set.has('a') || isSubscripted ? 'indexed' : undefined;
+  return createDeclaredVariable(targetName, origin, arrayKind);
 }
 
 interface LocalOrigin {
@@ -694,13 +730,26 @@ function findCallPrefixBinding(shell: Shell, targetScope: Map<string, Variable>,
   return undefined;
 }
 
-function createDeclaredVariable(name: string, origin: LocalOrigin | undefined, creatingArray = false): Variable {
+function createDeclaredVariable(
+  name: string,
+  origin: LocalOrigin | undefined,
+  arrayKind?: 'indexed' | 'associative'
+): Variable {
   if (!origin) return { name, value: undefined, attributes: new Set() };
   const { source, inheritAttributes, fromTempEnv } = origin;
   const attributes = inheritAttributes
     ? new Set([...source.attributes].filter((a) => a !== 'n'))
     : new Set<Attribute>(source.attributes.has('x') ? ['x'] : []);
-  const value = !inheritAttributes && creatingArray ? undefined : cloneValue(source.value);
+  let value: Variable['value'];
+  if (!inheritAttributes && arrayKind !== undefined) {
+    attributes.add(arrayKind === 'associative' ? 'A' : 'a');
+    value =
+      arrayKind === 'associative'
+        ? { kind: 'associative', table: new AssociativeTable() }
+        : { kind: 'indexed', elements: new Map() };
+  } else {
+    value = cloneValue(source.value);
+  }
   return {
     name,
     value,
@@ -727,6 +776,7 @@ function resolveElementStoreVariable(
 }
 
 const PROTECTED_READONLY_UNSET = new Set(['r', 'i', 'a', 'A', 'l', 'u', 'c']);
+const READONLY_SAFE_SET = new Set(['r', 'x', 't', 'p', 'g', 'I']);
 
 function checkReadonlyConflict(
   shell: Shell,
@@ -737,7 +787,7 @@ function checkReadonlyConflict(
   assigns: boolean
 ): boolean {
   if (!variable?.attributes.has('r')) return false;
-  const adds = [...set, ...attemptedSet].some((a) => a !== 'r' && a !== 'x' && a !== 'p' && a !== 'g' && a !== 'I');
+  const adds = [...set, ...attemptedSet].some((a) => !READONLY_SAFE_SET.has(a));
   const removes = [...unset].some(
     (a) => PROTECTED_READONLY_UNSET.has(a) || (a === 'n' && variable.attributes.has('n'))
   );

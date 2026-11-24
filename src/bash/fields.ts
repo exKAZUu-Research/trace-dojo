@@ -57,7 +57,10 @@ export class FieldSplitter {
   }
 
   private onFieldBreak(): void {
-    if (this.ifs === '') return;
+    if (this.ifs === '') {
+      if (this.started) this.end();
+      return;
+    }
     if (this.afterListWhite) {
       this.afterWhite = true;
       this.afterListWhite = false;

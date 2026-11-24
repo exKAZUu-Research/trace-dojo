@@ -104,6 +104,8 @@ function isCompoundAssignmentPrefix(prefix: string): boolean {
   return open > 0 && isIdentifier(lhs.slice(0, open)) && skipSubscript(lhs, open) === lhs.length - 1;
 }
 
+type WordContext = 'command' | 'declaration' | 'argument';
+
 class ShellTokenStream {
   private pendingHeredocSpec: { stripLeadingTabs: boolean } | undefined;
   private readonly queuedHeredocs: { endMarker: string; stripLeadingTabs: boolean }[] = [];
@@ -113,7 +115,7 @@ class ShellTokenStream {
     public position: number
   ) {}
 
-  readNext(allowCompoundArray: boolean): ShellToken {
+  readNext(context: WordContext): ShellToken {
     const { source } = this.text;
     this.position = skipBlanks(source, this.position);
     const start = this.position;
@@ -125,14 +127,14 @@ class ShellTokenStream {
       this.consumeQueuedHeredocs();
       return this.makeToken('newline', '\n', row, start, false);
     }
-    if ((ch === '<' || ch === '>') && source[start + 1] === '(') return this.scanWord(allowCompoundArray);
+    if ((ch === '<' || ch === '>') && source[start + 1] === '(') return this.scanWord(context);
     const op = SHELL_OPERATORS.find((candidate) => source.startsWith(candidate, start));
     if (op) {
       if (op === '<<' || op === '<<-') this.pendingHeredocSpec = { stripLeadingTabs: op === '<<-' };
       this.position += op.length;
       return this.makeToken('operator', op, row, start, false);
     }
-    const word = this.scanWord(allowCompoundArray);
+    const word = this.scanWord(context);
     if (this.pendingHeredocSpec) {
       this.queuedHeredocs.push({
         endMarker: word.value.replaceAll(/\\(.)|["']/g, '$1'),
@@ -161,8 +163,8 @@ class ShellTokenStream {
     return content;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Scans shell words including process substitutions, compound array literals, line continuations, and quoting.
-  private scanWord(allowCompoundArray: boolean): ShellToken {
+  // code-gauge-allow functionCognitiveComplexity -- Scans shell words including process substitutions, subscripted prefixes, compound array literals, line continuations, and quoting.
+  private scanWord(context: WordContext): ShellToken {
     const { source } = this.text;
     const start = this.position;
     let quoted = false;
@@ -172,14 +174,16 @@ class ShellTokenStream {
         this.position = this.text.parseSubstitution(this.position + 2);
         continue;
       }
-      if (ch === '[' && allowCompoundArray && isIdentifier(source.slice(start, this.position))) {
+      if (ch === '[' && context !== 'argument' && isIdentifier(source.slice(start, this.position))) {
         const close = skipSubscript(source, this.position);
-        if (close < source.length && (source.startsWith('=', close + 1) || source.startsWith('+=', close + 1))) {
-          this.position = skipBalanced(this.text, this.position, '[', ']');
+        const hasEquals =
+          close < source.length && (source.startsWith('=', close + 1) || source.startsWith('+=', close + 1));
+        if (close < source.length && (hasEquals || context === 'command')) {
+          this.consumeSubscriptInWord(close, !hasEquals);
           continue;
         }
       }
-      if (ch === '(' && allowCompoundArray && isCompoundAssignmentPrefix(source.slice(start, this.position))) {
+      if (ch === '(' && context !== 'argument' && isCompoundAssignmentPrefix(source.slice(start, this.position))) {
         this.position = this.scanCompoundArrayBody(this.position);
         continue;
       }
@@ -197,6 +201,25 @@ class ShellTokenStream {
     return this.makeToken(kind, value, this.text.rowAt(start), start, quoted);
   }
 
+  private consumeSubscriptInWord(close: number, maskBreaks: boolean): void {
+    if (!maskBreaks) {
+      this.position = skipBalanced(this.text, this.position, '[', ']');
+      return;
+    }
+    const { source } = this.text;
+    let i = this.position + 1;
+    while (i < close) {
+      const c = source[i];
+      if (WORD_BREAK_CHARS.has(c)) {
+        if (c !== '\n') this.text.literalSingleQuotes.push(i);
+        i++;
+      } else {
+        i = skipWordPiece(this.text, i);
+      }
+    }
+    this.position = close + 1;
+  }
+
   private scanCompoundArrayBody(openIndex: number): number {
     const { source } = this.text;
     this.position = openIndex + 1;
@@ -206,7 +229,7 @@ class ShellTokenStream {
         this.consumeBracketedCompoundElement();
         continue;
       }
-      const inner = this.readNext(false);
+      const inner = this.readNext('argument');
       if (inner.kind === 'eof') this.text.unclosed(openIndex, ')');
       if (inner.kind === 'operator' && inner.value === ')') return this.position;
       if (inner.kind === 'operator') {
@@ -223,7 +246,7 @@ class ShellTokenStream {
     else if (source.startsWith('=', closeEnd)) this.position = closeEnd + 1;
     else this.position = closeEnd;
     if (this.position < source.length && !WORD_BREAK_CHARS.has(source[this.position])) {
-      this.scanWord(false);
+      this.scanWord('argument');
     }
   }
 
@@ -262,7 +285,7 @@ const CASE_CLAUSE_TERMINATORS = new Set([';;', ';&', ';;&']);
 class ShellGrammarValidator {
   private readonly stream: ShellTokenStream;
   private cached: ShellToken | undefined;
-  private cachedAllowsCompound = false;
+  private cachedContext: WordContext = 'argument';
   private readonly activeBlocks: { keyword: string; row: number }[] = [];
 
   constructor(
@@ -613,7 +636,9 @@ class ShellGrammarValidator {
   private parseSimpleOrFunctionDef(): void {
     let commandName: string | undefined;
     for (let position = 0; ; position++) {
-      const token = this.peek(commandName === undefined || DECLARATION_NAMES.has(commandName));
+      const context: WordContext =
+        commandName === undefined ? 'command' : DECLARATION_NAMES.has(commandName) ? 'declaration' : 'argument';
+      const token = this.peek(context);
       if (token.kind === 'ioNumber' || this.isRedirectionOperator(token)) {
         this.parseOneRedirection();
         continue;
@@ -649,8 +674,13 @@ class ShellGrammarValidator {
     this.advance();
   }
 
-  private peek(allowCompoundArray = false): ShellToken {
-    if (this.cached && !this.cachedAllowsCompound && allowCompoundArray && this.needsAssignmentRescan(this.cached)) {
+  private peek(context: WordContext = 'argument'): ShellToken {
+    if (
+      this.cached &&
+      this.cachedContext === 'argument' &&
+      context !== 'argument' &&
+      this.needsAssignmentRescan(this.cached)
+    ) {
       const { start } = this.cached;
       while ((this.text.backquotes.at(-1)?.start ?? -1) >= start) this.text.backquotes.pop();
       while ((this.text.literalSingleQuotes.at(-1) ?? -1) >= start) this.text.literalSingleQuotes.pop();
@@ -658,8 +688,8 @@ class ShellGrammarValidator {
       this.cached = undefined;
     }
     if (!this.cached) {
-      this.cached = this.stream.readNext(allowCompoundArray);
-      this.cachedAllowsCompound = allowCompoundArray;
+      this.cached = this.stream.readNext(context);
+      this.cachedContext = context;
     }
     return this.cached;
   }

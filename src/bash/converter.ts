@@ -545,7 +545,8 @@ export class Converter {
     if (this.literalQuotes.size === 0 || !text.includes('\u001F')) return text;
     let out = '';
     for (let i = 0; i < text.length; i++) {
-      out += text[i] === '\u001F' && this.literalQuotes.has(startIndex + i) ? "'" : text[i];
+      out +=
+        text[i] === '\u001F' && this.literalQuotes.has(startIndex + i) ? this.originalSource[startIndex + i] : text[i];
     }
     return out;
   }
