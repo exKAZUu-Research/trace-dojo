@@ -42,12 +42,7 @@ function turtleNew(shell: Shell, args: string[], name: string): number {
   if ('error' in created) fail(shell, name, created.error);
   const handle = shell.runtime.addTurtle(created);
   const stored = target
-    ? shell.assignElement(
-        target.name,
-        shell.isAssociative(shell.resolveName(target.name)) ? target.subscript : target.subscript,
-        handle,
-        false
-      )
+    ? shell.assignElement(target.name, target.subscript, handle, false)
     : shell.assignScalar(variable, handle);
   return stored ? 0 : 1;
 }

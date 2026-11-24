@@ -1061,8 +1061,13 @@ export class Shell implements ArithmeticHost {
       variable = { name: resolved, value: undefined, attributes: new Set() };
       this.state.scopes[0].set(resolved, variable);
     }
-    if (variable.value?.kind === 'indexed' || variable.value?.kind === 'associative') {
-      return this.assignElement(resolved, variable.value.kind === 'indexed' ? '0' : '0', value, append);
+    if (
+      variable.value?.kind === 'indexed' ||
+      variable.value?.kind === 'associative' ||
+      variable.attributes.has('a') ||
+      variable.attributes.has('A')
+    ) {
+      return this.assignElement(resolved, '0', value, append);
     }
     const base = append && variable.value?.kind === 'scalar' ? variable.value.value : '';
     const converted = this.convertForAttributes(variable, value, base, append);

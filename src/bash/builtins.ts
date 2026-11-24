@@ -210,18 +210,22 @@ function unsetName(shell: Shell, name: string, mode: UnsetMode): boolean {
   return shell.unsetVariable(name, mode !== 'n');
 }
 
-/** `unset 'name[subscript]'`, which unsets the whole array for `@` or `*`. */
+/** `unset 'name[subscript]'`, which clears an indexed array for `@` or `*` and removes an associative key literally. */
 function unsetElement(shell: Shell, name: string, subscript: string): boolean {
   const resolved = shell.resolveName(name);
   const variable = shell.findVariable(resolved);
-  if (!variable?.value) return true;
-  if (variable.attributes.has('r')) {
+  if (variable?.attributes.has('r')) {
     shell.reportError(`unset: ${resolved}: cannot unset: readonly variable`);
     return false;
   }
-  if (subscript === '@' || subscript === '*') return shell.unsetVariable(resolved);
+  if (!variable?.value) return true;
   if (variable.value.kind === 'associative') {
     variable.value.table.delete(subscript);
+    return true;
+  }
+  if (subscript === '@' || subscript === '*') {
+    if (variable.value.kind === 'indexed') variable.value.elements.clear();
+    else shell.unsetVariable(resolved);
     return true;
   }
   const index = shell.arrayIndex(resolved, subscript);
