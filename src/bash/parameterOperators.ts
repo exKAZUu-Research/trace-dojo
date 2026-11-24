@@ -4,7 +4,7 @@ import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
 import { declarationText } from './declare';
 import type { Expander, ParameterValue } from './expansion';
-import { EMPTY_LIST, FIELD_BREAK, isFieldBreak, type Piece } from './fields';
+import { EMPTY_LIST, FieldSplitter, type Fragment, isFieldBreak, type Piece, STAR_BREAK } from './fields';
 import { rawLengthSource } from './parse';
 import {
   compileGlob,
@@ -122,37 +122,85 @@ function expandArgument(expander: Expander, parts: WordPart[], inDouble: boolean
   return kept.length === 0 ? [{ text: '', quoted: true, split: false }] : kept;
 }
 
+type NonEmptyPiece = Exclude<Piece, typeof EMPTY_LIST>;
+
+interface OperatorWordEntry {
+  piece: NonEmptyPiece;
+  keepsFields: boolean;
+}
+
 function expandUnquotedOperatorWord(expander: Expander, parts: WordPart[]): Piece[] {
   expander.checkTilde(parts, false);
   const ifs = expander.currentIfs();
-  const hasNonSpacePrimaryIfs = ifs !== '' && ifs[0] !== ' ';
-  const pieces: Piece[] = [];
-  for (const part of parts) {
-    const keepsFields =
-      part.kind === 'double' ||
-      (part.kind === 'parameter' && part.operator !== undefined && /^:?[-+]$/.test(part.operator));
-    for (const piece of expander.expandParts([part], false)) {
-      const mapped = mapUnquotedOperatorPiece(piece, keepsFields, hasNonSpacePrimaryIfs);
-      if (mapped !== undefined) pieces.push(mapped);
-    }
+  const entries = collectOperatorWordEntries(expander, parts, expander.ifsJoiner());
+  if (ifs !== '' && ifs[0] !== ' ' && entries.some(isUnquotedAtListEntry)) {
+    return joinOperatorWordFields(ifs, entries);
   }
-  return pieces;
+  return entries.map(({ piece }) => (isFieldBreak(piece) || piece.quoted ? piece : { ...piece, split: true }));
 }
 
-function mapUnquotedOperatorPiece(
+function collectOperatorWordEntries(expander: Expander, parts: WordPart[], starJoiner: string): OperatorWordEntry[] {
+  const entries: OperatorWordEntry[] = [];
+  for (const part of parts) {
+    const keepsFields = keepsOperatorFields(part);
+    for (const piece of expander.expandParts([part], false)) {
+      appendOperatorWordPiece(entries, piece, keepsFields, starJoiner);
+    }
+  }
+  return entries;
+}
+
+function keepsOperatorFields(part: WordPart): boolean {
+  return (
+    part.kind === 'double' ||
+    (part.kind === 'parameter' && part.operator !== undefined && /^:?[-+]$/.test(part.operator))
+  );
+}
+
+function appendOperatorWordPiece(
+  entries: OperatorWordEntry[],
   piece: Piece,
   keepsFields: boolean,
-  hasNonSpacePrimaryIfs: boolean
-): Piece | undefined {
-  if (piece === EMPTY_LIST) return undefined;
-  if (piece === FIELD_BREAK) {
-    return !keepsFields && hasNonSpacePrimaryIfs ? { text: ' ', quoted: false, split: true } : FIELD_BREAK;
+  starJoiner: string
+): void {
+  if (piece === EMPTY_LIST) return;
+  if (piece === STAR_BREAK && !keepsFields) {
+    if (starJoiner !== '') entries.push({ piece: { text: starJoiner, quoted: false, split: true }, keepsFields });
+    return;
   }
+  entries.push({ piece, keepsFields });
+}
+
+function isUnquotedAtListEntry({ piece, keepsFields }: OperatorWordEntry): boolean {
+  return !keepsFields && !isFieldBreak(piece) && piece.atListElement === true;
+}
+
+function joinOperatorWordFields(ifs: string, entries: OperatorWordEntry[]): Piece[] {
+  const splitter = new FieldSplitter(ifs);
+  for (const entry of entries) splitter.add(toOperatorSplitterPiece(entry));
+  const fields = splitter.finish();
+  if (fields.length === 0) return [];
+  if (fields.length === 1 && fields[0].length === 0) {
+    return [{ text: '', quoted: false, split: true, operatorNull: true }];
+  }
+  return joinNonEmptyOperatorFields(fields);
+}
+
+function toOperatorSplitterPiece({ piece, keepsFields }: OperatorWordEntry): Piece {
   if (isFieldBreak(piece) || piece.quoted) return piece;
-  if (piece.atListElement && hasNonSpacePrimaryIfs) {
+  if (!keepsFields && piece.atListElement) {
     return piece.text === '' ? { ...piece, split: true, operatorNull: true } : { ...piece, split: false };
   }
   return { ...piece, split: true };
+}
+
+function joinNonEmptyOperatorFields(fields: Fragment[][]): Piece[] {
+  const joined: Piece[] = [];
+  for (const [index, field] of fields.entries()) {
+    if (index > 0) joined.push({ text: ' ', quoted: false, split: true });
+    for (const fragment of field) joined.push({ ...fragment, split: false });
+  }
+  return joined;
 }
 
 // code-gauge-allow functionParameterCount -- The default and assignment operators need the expansion, the parameter, and how it is quoted.
