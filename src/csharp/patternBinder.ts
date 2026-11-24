@@ -325,9 +325,27 @@ export abstract class PatternBinder extends ExpressionBinder {
         return { members: [], owners: [], pattern: this.bindPattern(sub.pattern, ERROR_TYPE, context) };
       }
       const member = found.kind === 'field' ? found.field : found.property;
+      const memberType = substitute(member.type, substitutionOf(found.owner));
+      // A pattern reads a property as any expression does, through its get accessor.
+      if (found.kind === 'property') {
+        const receiver: BoundExpression = { kind: 'default', type: current, row: sub.row };
+        this.checkReadable(
+          {
+            kind: 'property',
+            receiver,
+            property: found.property,
+            args: [],
+            owner: found.owner,
+            type: memberType,
+            row: sub.row,
+          },
+          sub,
+          context
+        );
+      }
       members.push(member);
       owners.push(found.owner);
-      current = substitute(member.type, substitutionOf(found.owner));
+      current = memberType;
     }
     return { members, owners, pattern: this.bindPattern(sub.pattern, current, context) };
   }
