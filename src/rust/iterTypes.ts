@@ -1,6 +1,18 @@
 import { normalize } from './infer';
 import type { Module, Program } from './items';
-import { adt, allSupertraits, CHAR, ref, shallow, type TraitRef, type Type } from './types';
+import {
+  adt,
+  allSupertraits,
+  CHAR,
+  type ImplDef,
+  ref,
+  sameType,
+  shallow,
+  substitute,
+  type TraitRef,
+  type Type,
+  type TypeParam,
+} from './types';
 
 /** The shapes of the iterators that `IntoIterator` makes of a collection: by shared reference, by `&mut`, by value. */
 const COLLECTION_SHAPES: Record<string, [string, string | undefined, string]> = {
@@ -34,6 +46,7 @@ export function intoIterItem(type: Type): Type | undefined {
   if (t.kind === 'array') return t.elem;
   if (t.kind === 'ref') return borrowedIterItem(t);
   if (t.kind !== 'adt') return undefined;
+  if (!t.def.builtin) return userIteratorItem(t);
   switch (t.def.builtin) {
     case 'CaseIter': {
       return CHAR;
@@ -72,6 +85,8 @@ export function intoIterItem(type: Type): Type | undefined {
 
 function borrowedIterItem(type: Extract<Type, { kind: 'ref' }>): Type | undefined {
   const target = normalize(shallow(type.target));
+  // `impl Iterator for &mut I` of std makes a `&mut` of the program's iterator one too.
+  if (type.mutable && target.kind === 'adt' && !target.def.builtin) return userIteratorItem(target);
   if (target.kind === 'array' || target.kind === 'slice') return ref(target.elem, type.mutable);
   if (target.kind !== 'adt') return undefined;
   switch (target.def.builtin) {
@@ -109,6 +124,7 @@ export function intoIterShape(program: Program, type: Type): Type | undefined {
   if (dynamic) return program.shapeType('DynIteratorShape', [dynamic]);
   if (t.kind === 'param' || t.kind === 'opaque') return iterationBound(t) && adt(program.adtDef('IntoShape'), [t]);
   if (t.kind === 'array') return program.shapeType('ArrayIntoIterShape', [t.elem]);
+  if (isUserIterator(t)) return program.shapeType('UserIterShape', [t]);
   if (t.kind === 'ref') return borrowedIterShape(program, t.target, t.mutable);
   if (t.kind !== 'adt') return undefined;
   if (t.def.builtin === 'Iter') return t.args[1];
@@ -136,6 +152,40 @@ function borrowedIterShape(program: Program, type: Type, mutable: boolean): Type
   const name = COLLECTION_SHAPES[target.def.builtin as string]?.[mutable ? 1 : 0];
   if (!name) return;
   return program.shapeType(name, name === 'OptionIterShape' ? [ref(target.args[0], mutable)] : []);
+}
+
+/** The `Iterator` impl the program writes for a type of its own, with the impl's parameters bound for the type. */
+export function userIteratorImpl(type: Type): { impl: ImplDef; subst: Map<TypeParam, Type> } | undefined {
+  const t = normalize(shallow(type));
+  if (t.kind !== 'adt' || t.def.builtin) return undefined;
+  const program = (t.def.module as Module | undefined)?.program;
+  for (const impl of program?.impls ?? []) {
+    if (impl.trait?.trait.builtin !== 'Iterator') continue;
+    const self = normalize(shallow(impl.selfType));
+    if (self.kind !== 'adt' || self.def !== t.def) continue;
+    const subst = new Map<TypeParam, Type>();
+    const matches = self.args.every((arg, index) => {
+      const a = shallow(arg);
+      if (a.kind !== 'param') return sameType(a, t.args[index]);
+      subst.set(a.param, t.args[index]);
+      return true;
+    });
+    if (matches) return { impl, subst };
+  }
+  return undefined;
+}
+
+function userIteratorItem(type: Type): Type | undefined {
+  const found = userIteratorImpl(type);
+  const item = found?.impl.assocTypes.get('Item');
+  return found && item && substitute(item, found.subst);
+}
+
+/** Whether a type is one of the program's iterators, or a `&mut` of one. */
+export function isUserIterator(type: Type): boolean {
+  const t = normalize(shallow(type));
+  if (t.kind === 'ref') return t.mutable && userIteratorImpl(t.target) !== undefined;
+  return userIteratorImpl(t) !== undefined;
 }
 
 /** The `Iterator` or `IntoIterator` bound of a type parameter or an opaque type, by which it iterates. */

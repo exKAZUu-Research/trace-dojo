@@ -305,6 +305,8 @@ export function instantiate(declared: Type, subst: Subst, fresh: () => RVar): La
       return subst.param(t.param) ?? NONE;
     }
     case 'adt': {
+      // An associated type is a type of its own, which borrows nothing from the value of the type it belongs to.
+      if (t.def.projection) return { kind: 'opaque', region: fresh() };
       const written = t.lifetimes ?? [];
       const own = Array.from({ length: lifetimeCount(t) }, (_, index) => subst.lifetime(written[index]));
       const args = t.args.map((arg) => instantiate(arg, subst, fresh));

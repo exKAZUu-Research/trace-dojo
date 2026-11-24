@@ -6,6 +6,7 @@ import type { WriteChunk } from './debugText';
 import { Formatter, type Spec } from './fmt';
 import { normalize } from './infer';
 import { compileError, type Module, type Program } from './items';
+import { isUserIterator } from './iterTypes';
 import { type NativeContext, NATIVES } from './natives';
 import { toIterator } from './natives/iterators';
 import { cloneValue, compareValues, type OrderMethod, setUserImpls, valuesEqual } from './ops';
@@ -40,11 +41,13 @@ import { decodeUtf8, utf8Reader } from './utf8';
 import {
   AccessorPlace,
   CellPlace,
+  DONE,
   DynValue,
   EnumValue,
   FnValue,
   FormatterValue,
   isPlace,
+  IterValue,
   type Place,
   type RangeValue,
   StringValue,
@@ -306,7 +309,27 @@ export class Interpreter implements CallSupport {
   }
 
   toIter(value: Value, from: Type): Value {
-    return toIterator(value, this.revealType(from));
+    const type = this.revealType(from);
+    if (!(value instanceof IterValue) && isUserIterator(type)) return this.userIterator(value, type);
+    return toIterator(value, type);
+  }
+
+  /** The program's own iterator (or a `&mut` of one) as an iterator whose `next` calls the impl's `next`. */
+  private userIterator(value: Value, type: Type): IterValue {
+    const t = normalize(shallow(type));
+    const self = t.kind === 'ref' ? t.target : t;
+    const place = t.kind === 'ref' && isPlace(value) ? value : new CellPlace(value);
+    const next = this.program.traitDef('Iterator').methods.get('next') as FnDef;
+    const frame = this.runtime.frames.at(-1) as Frame;
+    return new IterValue(
+      () => {
+        const result = this.callFn(next, [self], [place], undefined, { row: 0, col: 1 }, frame) as EnumValue;
+        return result.variant === 1 ? result.fields[0] : DONE;
+      },
+      undefined,
+      undefined,
+      [place]
+    );
   }
 
   // -------------------------------------------------------------------------------------------------------------------

@@ -560,6 +560,11 @@ function innerIter(ctx: NativeContext, value: Value, type: Type): IterValue {
 }
 
 define({
+  // `Iterator::next` of an iterator of std, which a type parameter or an opaque type bounded by `Iterator` reaches.
+  'Iterator::next': ([self], ctx) => {
+    const item = nextOf(iterOf(ctx.interp.toIter(deref(self), ctx.typeArgs[0])));
+    return option(ctx, item === DONE ? undefined : item, item !== DONE);
+  },
   'IterImpl<_, _>::next': ([self], ctx) => {
     const item = nextOf(iterOf(self));
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
@@ -1130,7 +1135,7 @@ function tryFoldItems(ctx: NativeContext, iter: IterValue, accumulator: Value, c
 function iteratorsEqual(ctx: NativeContext, self: Value, other: Value): boolean {
   const a = iterOf(self);
   const otherType = ctx.typeArgs[2];
-  const b = iterOf(toIterator(other, otherType));
+  const b = iterOf(ctx.interp.toIter(other, otherType));
   const item = intoIterItem(otherType)!;
   for (;;) {
     ctx.runtime.spend();
@@ -1166,7 +1171,7 @@ function iteratorOrder(ctx: NativeContext, first: IterValue, second: IterValue, 
 define({
   'FromIterator::from_iter': ([source], ctx) => {
     const [target, item, from] = ctx.typeArgs;
-    const iter = toIterator(source, from) as IterValue;
+    const iter = ctx.interp.toIter(source, from) as IterValue;
     return ctx.runtime.withRoots([iter], () =>
       collectIterator(ctx, iter, target, item, intoIterShape(ctx.interp.program, from))
     );

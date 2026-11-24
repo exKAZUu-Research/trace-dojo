@@ -68,7 +68,7 @@ export class TraitSolver {
       return answer === 'no' ? this.builtinOnly(t, ref) : answer;
     }
     if (ref.fnSig) return this.closureImplements(t, ref);
-    const implementation = this.implAnswer(trait, t, ref.args);
+    const implementation = this.implAnswer(trait, t, ref.args, ref.item);
     if (implementation !== 'no') return implementation;
     if (trait.builtin) return builtinImplements(this, t, ref);
     return 'no';
@@ -300,24 +300,30 @@ export class TraitSolver {
     return 'no';
   }
 
-  private implAnswer(trait: TraitDef, type: Type, args: Type[]): Answer {
+  private implAnswer(trait: TraitDef, type: Type, args: Type[], item?: Type): Answer {
     if (this.implGoals.length >= 64 || this.implGoals.some((goal) => matchesImplGoal(goal, trait, type, args))) {
       return 'no';
     }
     this.implGoals.push({ trait, type, args });
     try {
-      return this.findImplAnswer(trait, type, args);
+      return this.findImplAnswer(trait, type, args, item);
     } finally {
       this.implGoals.pop();
     }
   }
 
-  private findImplAnswer(trait: TraitDef, type: Type, args: Type[]): Answer {
+  private findImplAnswer(trait: TraitDef, type: Type, args: Type[], item?: Type): Answer {
     let answer: Answer = 'no';
     for (const impl of this.program.impls) {
       if (impl.trait?.trait !== trait) continue;
       const snapshot = this.unifier.snapshot();
       const matched = this.matchImplAnswer(impl, type, args);
+      // The `Item` a bound names is the impl's.
+      const implItem = matched && item && impl.assocTypes.get('Item');
+      if (implItem && !this.unifier.unify(substitute(implItem, matched.subst), item)) {
+        this.unifier.rollback(snapshot);
+        continue;
+      }
       if (matched?.answer === 'yes') return 'yes';
       if (matched?.answer === 'unknown') answer = 'unknown';
       this.unifier.rollback(snapshot);

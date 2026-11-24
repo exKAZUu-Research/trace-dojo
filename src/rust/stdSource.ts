@@ -921,7 +921,7 @@ pub mod error {
 }
 pub mod iter {
     pub struct IterImpl<'a, T, S>;
-    pub trait Iterator {}
+    pub trait Iterator { type Item; fn next(&mut self) -> Option<Self::Item>; }
     pub trait IntoIterator {}
     pub trait FromIterator<A>: Sized { fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self; }
     pub trait Extend<A> {}
@@ -952,6 +952,7 @@ pub mod iter {
         pub struct CharsShape;
         pub struct BytesShape;
         pub struct DynIteratorShape<D>;
+        pub struct UserIterShape<I>;
         pub struct CharIndicesShape;
         pub struct SplitWhitespaceShape;
         pub struct LinesShape;

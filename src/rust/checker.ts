@@ -1436,5 +1436,7 @@ function checkDynCompatible(trait: TraitDef, span: Span, checked = new Set<Trait
 function mentionsParam(type: Type, param: TypeParam): boolean {
   const t = shallow(type);
   if (t.kind === 'param') return t.param === param;
+  // `Self::Item` is the associated type a `dyn Trait<Item = T>` names, which methods may use.
+  if (t.kind === 'adt' && t.def.projection) return t.args.slice(1).some((arg) => mentionsParam(arg, param));
   return childTypes(t).some((child) => mentionsParam(child, param));
 }

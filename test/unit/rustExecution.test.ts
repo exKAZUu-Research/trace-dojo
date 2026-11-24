@@ -8800,6 +8800,29 @@ fn main() {
   });
 });
 
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test("a program's own Iterator impl gets the adapters, for loops, and bounds of iterators", () => {
+  const program = `struct Counter { count: u32 }
+impl Iterator for Counter {
+    type Item = u32;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count < 5 { self.count += 1; Some(self.count) } else { None }
+    }
+}
+fn first_two<I: Iterator>(mut it: I) -> (Option<I::Item>, Option<I::Item>) { (it.next(), it.next()) }
+fn main() {
+    let sum: u32 = Counter { count: 0 }.zip(Counter { count: 0 }.skip(1)).map(|(a, b)| a * b).filter(|x| x % 3 == 0).sum();
+    let mut c = Counter { count: 0 };
+    let firsts: Vec<u32> = c.by_ref().take(2).collect();
+    for n in &mut c { print!("{n} "); }
+    println!("{sum} {:?} {:?}", firsts, first_two(Counter { count: 3 }));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '3 4 5 18 [1, 2] (Some(4), Some(5))\n',
+  });
+});
+
 test('an empty match covers the uninhabited Infallible', () => {
   const program = rustMain(
     '    println!("{:?}", widen(5));',

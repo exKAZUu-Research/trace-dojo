@@ -2,7 +2,7 @@
 import { collectionKeyAnswer } from './collectionBounds';
 import { isPseudo, normalize } from './infer';
 import { debugOperands, supportsDebug } from './iterDebug';
-import { dynIteratorTarget, intoIterItem } from './iterTypes';
+import { dynIteratorTarget, intoIterItem, isUserIterator } from './iterTypes';
 import { arrayTryFrom, conversionExists, inferNumericSource, intoConversion } from './traitConversions';
 import { doubleEndedSearcher, iteratorCapability } from './traitIterators';
 import type { Answer, TraitSolver } from './traits';
@@ -864,5 +864,6 @@ function isIterator(type: Type): boolean {
   if (dynIteratorTarget(type)) return true;
   const t = type.kind === 'ref' && type.mutable ? normalize(shallow(type.target)) : type;
   if (t.kind === 'param' || t.kind === 'opaque') return true;
+  if (isUserIterator(t)) return true;
   return t.kind === 'adt' && ITERATOR_BUILTINS.has(t.def.builtin as string);
 }

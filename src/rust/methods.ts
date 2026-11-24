@@ -1,7 +1,7 @@
 import type { ReceiverAdjust } from './annotations';
 import { normalize } from './infer';
 import type { Program } from './items';
-import { dynIteratorTarget, intoIterItem, intoIterShape, iterationBound } from './iterTypes';
+import { dynIteratorTarget, intoIterItem, intoIterShape, isUserIterator, iterationBound } from './iterTypes';
 import type { TraitSolver } from './traits';
 import {
   allSupertraits,
@@ -117,6 +117,12 @@ export function lookupMethod(
     if (bound.trait.builtin === 'Iterator' || name === 'into_iter') {
       return probeAsIter(program, solver, bounded, name, true);
     }
+  }
+  // The program's own iterator has the methods of `Iter` after its own.
+  const userIter = steps.find((step) => isUserIterator(step.type));
+  if (userIter) {
+    const found = probeAsIter(program, solver, userIter, name, true);
+    if (found) return found;
   }
   const characterIter = steps.find((step) => {
     const type = shallow(step.type);

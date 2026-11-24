@@ -149,6 +149,8 @@ export class SignatureInstance {
   ): void {
     if (isNone(actual)) return;
     const t = shallow(declared);
+    // An associated type borrows nothing from the inputs: what it holds comes with the type it stands for.
+    if (t.kind === 'adt' && t.def.projection) return;
     const edge = (a: RVar, b: RVar, fixed = false): void => {
       this.outlives(a, b);
       if (invariant || fixed) this.outlives(b, a);
