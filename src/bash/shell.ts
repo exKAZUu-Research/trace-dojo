@@ -907,9 +907,8 @@ export class Shell implements ArithmeticHost {
       return { kind: 'associativeElement', name: resolved, key };
     }
     if (rawSubscript === '@' || rawSubscript === '*') {
-      return willRead
-        ? { kind: 'indexedElement', name: resolved, index: 0n }
-        : { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` };
+      if (willRead) this.reportError(`${resolved}[${rawSubscript}]: bad array subscript`);
+      return { kind: 'invalidElement', raw: `${name}[${rawSubscript}]` };
     }
     const subscript = expandSubscript ? this.expander.expandSubscriptText(rawSubscript) : rawSubscript;
     const index = willRead ? this.readIndex(resolved, subscript) : this.arrayIndex(resolved, subscript, true);
