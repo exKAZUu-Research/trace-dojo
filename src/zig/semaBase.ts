@@ -366,7 +366,6 @@ export abstract class SemaBase implements SemaApi {
   protected abstract comptimeValue(compileCode: () => TExpr, span: Span, store?: LocalBinding): TExpr;
   /** Runs an analysis of its own, as Zig analyzes each function and declaration apart from the one that uses it. */
   protected abstract separateAnalysis<T>(run: () => T): T;
-  protected abstract explicitAlignment(expression: Expression, type: Type): number | undefined;
   protected abstract alignmentValue(expression: Expression): number;
   protected abstract addressSpace(expression: Expression): void;
   /** Whether `set` is the inferred error set (`!T`) of the function being analyzed, which takes in any error. */
@@ -557,7 +556,7 @@ export abstract class SemaBase implements SemaApi {
         decl.cell = { slots: [this.copyForCompilation(compiled.value, compiled.type, syntax)] };
         decl.type = compiled.type;
         if (syntax.addressSpace) this.addressSpace(syntax.addressSpace);
-        if (syntax.alignment) decl.alignment = this.explicitAlignment(syntax.alignment, compiled.type);
+        if (syntax.alignment) decl.alignment = this.alignmentValue(syntax.alignment);
         if (decl.kind === 'const') {
           decl.value = compiled.value;
           markConstantStorage(decl.cell, compiled.type);

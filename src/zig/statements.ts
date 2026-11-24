@@ -449,7 +449,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const type = value.type;
     if (type.kind === 'noreturn') return { exec: this.valueExec(value), noreturn: true };
     if (statement.addressSpace) this.addressSpace(statement.addressSpace);
-    const alignment = statement.alignment ? this.explicitAlignment(statement.alignment, type) : undefined;
+    const alignment = statement.alignment ? this.alignmentValue(statement.alignment) : undefined;
     const binding = this.declareLocal(statement.name, type, statement.isConst, value, statement.quotedName, alignment);
     const { slot } = binding;
     const evaluate = value.eval;

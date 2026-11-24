@@ -68,7 +68,7 @@ export interface PointerType {
   readonly sentinel?: Sentinel;
   readonly isVolatile?: boolean;
   readonly allowZero?: boolean;
-  /** The alignment that `align(n)` gives, when it differs from the child type's own. */
+  /** The alignment that `align(n)` gives, which Zig keeps in the type even when it is the child type's own. */
   readonly alignment?: number;
 }
 
@@ -410,7 +410,7 @@ export function sliceOf(child: Type, isConst: boolean, sentinel?: Value | Sentin
   return pointerOf('slice', child, { isConst, sentinel });
 }
 
-/** A pointer type; pass `alignment` only when it differs from the child type's own, as Zig drops it otherwise. */
+/** A pointer type, which keeps an alignment written as `align(n)`. */
 export function pointerOf(size: PointerType['size'], child: Type, attributes: PointerAttributes): PointerType {
   const canonical = size === 'one' ? undefined : canonicalSentinel(child, attributes.sentinel);
   const isVolatile = attributes.isVolatile === true;
@@ -598,13 +598,14 @@ export function indexableChild(type: Type): Type | undefined {
 
 // Names ---------------------------------------------------------------------------------------------------------------
 
-/** A pointer type's name, with its qualifiers in the order Zig writes them, as in `[*:0]align(4) const u8`. */
+/** A pointer type's name, with its qualifiers in the order Zig writes them, as in `*allowzero align(4) const u8`. */
 function pointerTypeName(type: PointerType): string {
   const sentinel = type.sentinel === undefined ? '' : `:${constantText(type.sentinel.value, type.child, typeName)}`;
   const prefix = { one: '*', many: `[*${sentinel}]`, slice: `[${sentinel}]`, c: '[*c]' }[type.size];
+  const allowZero = type.allowZero ? 'allowzero ' : '';
   const alignment = type.alignment === undefined ? '' : `align(${type.alignment}) `;
-  const qualifiers = `${type.allowZero ? 'allowzero ' : ''}${type.isConst ? 'const ' : ''}${type.isVolatile ? 'volatile ' : ''}`;
-  return `${prefix}${alignment}${qualifiers}${typeName(type.child)}`;
+  const qualifiers = `${type.isConst ? 'const ' : ''}${type.isVolatile ? 'volatile ' : ''}`;
+  return `${prefix}${allowZero}${alignment}${qualifiers}${typeName(type.child)}`;
 }
 
 /** The type's name as Zig's `@typeName` writes it. */

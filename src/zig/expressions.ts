@@ -29,7 +29,7 @@ import {
   parseFloatLiteral,
 } from './floats';
 import { integerOperationWork, type IntegerWork, spendIntegerOperation, spendIntegerShift } from './integerWork';
-import { alignOf, errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
+import { errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
 import { memorySpace, spendMemory } from './memoryAccounting';
 import { MemoryFault } from './memoryFault';
 import { callableNative } from './nativeAdapter';
@@ -312,16 +312,9 @@ export abstract class ExpressionCompiler extends SemaBase {
       isConst: expression.isConst,
       isVolatile: expression.isVolatile,
       allowZero: expression.allowZero,
-      alignment: expression.alignment ? this.explicitAlignment(expression.alignment, child) : undefined,
+      alignment: expression.alignment ? this.alignmentValue(expression.alignment) : undefined,
       sentinel,
     });
-  }
-
-  /** The alignment that `align(n)` gives a pointer to or a variable of `type`, or undefined when it is the type's own. */
-  protected explicitAlignment(expression: Expression, type: Type): number | undefined {
-    const value = this.alignmentValue(expression);
-    this.resolveStorage(type, expression);
-    return value === alignOf(type) ? undefined : value;
   }
 
   protected alignmentValue(expression: Expression): number {
