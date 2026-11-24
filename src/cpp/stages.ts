@@ -102,14 +102,9 @@ function checkInclude(node: Syntax): void {
   if (problem) unsupported(node.row, problem);
 }
 
+/** A directive the preprocessor leaves, which is none the language has. */
 function checkDirective(node: Syntax): void {
   const directive = fieldOf(node, 'directive')?.text ?? '';
-  if (directive === '#pragma') unsupported(node.row, '#pragma');
-  if (directive === '#undef') unsupported(node.row, 'マクロの定義（#define・#undef）');
-  if (directive === '#error' || directive === '#warning') {
-    unsupported(node.row, `${directive}`);
-  }
-  if (directive === '#line') unsupported(node.row, '#line');
   compileError(node.row, `プリプロセッサの指令 ${directive} はありません。`);
 }
 
