@@ -1,4 +1,4 @@
-import { formatFloatField } from '../../interpreter/floatFormat';
+import { formatFloatField, padPrintfBytes } from '../../interpreter/floatFormat';
 import type { Scalar, Value } from '../arith';
 import { CRuntimeError } from '../errors';
 import type { Runtime } from '../runtime';
@@ -78,7 +78,7 @@ export function formatPrintf(runtime: Runtime, format: Uint8Array, values: Value
     const field = convert(runtime, spec, args, out.length);
     if (field === undefined) continue;
     if (typeof field === 'string') pushText(pad(spec, field));
-    else for (const byte of padBytes(spec, field)) out.push(byte);
+    else for (const byte of padPrintfBytes(field, spec)) out.push(byte);
   }
   return out;
 }
@@ -257,14 +257,4 @@ function pad(spec: Spec, text: string): string {
   return spec.flags.includes('-')
     ? text.padEnd(width, ' ')
     : text.padStart(width, spec.flags.includes('0') && ['s', 'c', '%'].includes(spec.conversion) ? '0' : ' ');
-}
-
-function padBytes(spec: Spec, bytes: Uint8Array): Uint8Array {
-  const width = spec.width ?? 0;
-  const padding = Math.max(width - bytes.length, 0);
-  const result = new Uint8Array(bytes.length + padding).fill(
-    spec.flags.includes('0') && !spec.flags.includes('-') ? 0x30 : 0x20
-  );
-  result.set(bytes, spec.flags.includes('-') ? 0 : padding);
-  return result;
 }

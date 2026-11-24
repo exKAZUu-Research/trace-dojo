@@ -3,6 +3,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import { CompileError } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
+import { skipSubscript } from './arithmetic';
 import { maskInvalidArithmetic } from './arithmeticMasking';
 import type { Program, Statement, WordPart } from './ast';
 import { hideInvalidBackquotes } from './backquotes';
@@ -182,4 +183,53 @@ function parsePiece(piece: string): WordPart[] {
   } finally {
     tree.delete();
   }
+}
+
+/** Extracts the unexpanded `length` slice from `${name:offset:length}` for Bash's negative-length diagnostic. */
+export function rawLengthSource(expansionText: string, name: string): string {
+  let i = 2;
+  if (expansionText[i] === '#' || expansionText[i] === '!') i++;
+  i += name.length;
+  if (expansionText[i] === '[') i = skipSubscript(expansionText, i) + 1;
+  if (expansionText[i] === ':') i++;
+  const body = expansionText.slice(i, -1);
+  const splitIndex = findRawLengthColon(body);
+  return (splitIndex === -1 ? body : body.slice(splitIndex + 1)).trim();
+}
+
+const SUBSTRING_BRACKET_DELTA: Record<string, number | undefined> = { '{': 1, '(': 1, '}': -1, ')': -1 };
+
+function findRawLengthColon(body: string): number {
+  let depth = 0;
+  let conditional = 0;
+  for (let pos = 0; pos < body.length; pos++) {
+    const quoted = skipQuotedSubstringAtom(body, pos);
+    if (quoted !== pos) {
+      pos = quoted;
+      continue;
+    }
+    const delta = SUBSTRING_BRACKET_DELTA[body[pos]];
+    if (delta !== undefined) {
+      depth += delta;
+      continue;
+    }
+    if (depth > 0) continue;
+    if (body[pos] === '?') conditional++;
+    else if (body[pos] === ':' && conditional > 0) conditional--;
+    else if (body[pos] === ':') return pos;
+  }
+  return -1;
+}
+
+function skipQuotedSubstringAtom(body: string, pos: number): number {
+  const c = body[pos];
+  if (c === '\\') return pos + 1;
+  if (c === "'") {
+    const close = body.indexOf("'", pos + 1);
+    return close === -1 ? body.length : close;
+  }
+  if (c !== '"') return pos;
+  let end = pos + 1;
+  for (; end < body.length && body[end] !== '"'; end++) if (body[end] === '\\') end++;
+  return end;
 }

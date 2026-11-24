@@ -195,8 +195,8 @@ class TestReader {
     const right = this.take();
     if (op === '=' || op === '==') return left === right;
     if (op === '!=') return left !== right;
-    if (op === '<') return left < right;
-    if (op === '>') return left > right;
+    if (op === '<') return compareUtf8Bytes(left, right) < 0;
+    if (op === '>') return compareUtf8Bytes(left, right) > 0;
     if (FILE_TEST_OPERATORS.has(op)) throw new UnsupportedFeatureError(`ファイルを調べる演算子（${op}）`);
     return ARITHMETIC_OPERATORS[op](this.parseInteger(left), this.parseInteger(right));
   }
@@ -208,4 +208,16 @@ class TestReader {
     if (value !== BigInt.asIntN(64, value)) this.fail(`${text}: integer expression expected`);
     return value;
   }
+}
+
+const UTF8_ENCODER = new TextEncoder();
+
+function compareUtf8Bytes(a: string, b: string): number {
+  const bytesA = UTF8_ENCODER.encode(a);
+  const bytesB = UTF8_ENCODER.encode(b);
+  const length = Math.min(bytesA.length, bytesB.length);
+  for (let i = 0; i < length; i++) {
+    if (bytesA[i] !== bytesB[i]) return bytesA[i] - bytesB[i];
+  }
+  return bytesA.length - bytesB.length;
 }

@@ -4,7 +4,7 @@
  * Backslashes quote the following pattern character; unquoted `*`, `?`, and `[...]` act as wildcards.
  */
 
-import { charactersOf } from './characters';
+import { charactersOf, POSIX_CHARACTER_CLASSES } from './characters';
 
 type BracketSpec =
   | { kind: 'char'; c: string }
@@ -23,20 +23,9 @@ export interface CompiledGlob {
 }
 
 const CHARACTER_CLASSES: Record<string, (c: string) => boolean> = {
-  alnum: (c) => /^[\p{L}\p{N}]$/u.test(c),
-  alpha: (c) => /^\p{L}$/u.test(c),
+  ...POSIX_CHARACTER_CLASSES,
   ascii: (c) => (c.codePointAt(0) as number) < 128,
-  blank: (c) => c === ' ' || c === '\t',
-  cntrl: (c) => /^\p{Cc}$/u.test(c),
-  digit: (c) => /^[0-9]$/.test(c),
-  graph: (c) => /^[^\p{C}\p{Z}]$/u.test(c),
-  lower: (c) => /^\p{Ll}$/u.test(c),
-  print: (c) => /^[^\p{C}]$/u.test(c) && c !== '\u2028' && c !== '\u2029',
-  punct: (c) => /^[!-/:-@[-`{-~]$/.test(c),
-  space: (c) => /^[ \t\n\v\f\r]$/.test(c),
-  upper: (c) => /^\p{Lu}$/u.test(c),
   word: (c) => /^[\p{L}\p{N}_]$/u.test(c),
-  xdigit: (c) => /^[0-9A-Fa-f]$/.test(c),
 };
 
 const COLLATING_SYMBOLS: Record<string, string> = {

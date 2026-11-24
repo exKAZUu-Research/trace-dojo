@@ -5,8 +5,9 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { parseBash } from './parse';
 import { runProgram } from './run';
-import { DiscardSignal, ExitSignal, type Frame, Runtime } from './runtime';
+import { DiscardSignal, ExitSignal, type Frame, ObservationAbortError, Runtime } from './runtime';
 import { type OutputTarget, Shell } from './shell';
+import { TurtleError } from './turtle';
 import { UnsupportedFeatureError } from './unsupported';
 import { cloneScope, type Scope, sortedElements, type Variable, type VariableValue } from './variables';
 
@@ -105,15 +106,21 @@ function observeElement(shell: Shell, name: string, subscript: string, maxScope:
   }
   if (!target?.value) return undefined;
   if (subscript === '@' || subscript === '*') return target.value;
+  const { runtime } = shell;
   const savedState = shell.state;
   const savedLastStored = shell.lastStored;
   const savedRow = shell.currentRow;
   const savedSlots = shell.slotCount;
+  const savedObserving = runtime.observing;
+  const savedRecorder = runtime.steps.recorder;
+  const savedFrameCount = runtime.frames.length;
   const silentAbort: OutputTarget = {
     write: () => {
       throw new PureReadAbort();
     },
   };
+  runtime.observing = true;
+  runtime.steps.recorder = undefined;
   shell.state = {
     ...savedState,
     scopes: savedState.scopes.slice(0, maxScope + 1).map((scope) => cloneScope(scope)),
@@ -128,6 +135,8 @@ function observeElement(shell: Shell, name: string, subscript: string, maxScope:
   } catch (error) {
     if (
       error instanceof PureReadAbort ||
+      error instanceof ObservationAbortError ||
+      error instanceof TurtleError ||
       error instanceof DiscardSignal ||
       error instanceof ExitSignal ||
       error instanceof UnsupportedFeatureError
@@ -140,6 +149,9 @@ function observeElement(shell: Shell, name: string, subscript: string, maxScope:
     shell.lastStored = savedLastStored;
     shell.currentRow = savedRow;
     shell.restoreSlots(savedSlots);
+    runtime.observing = savedObserving;
+    runtime.steps.recorder = savedRecorder;
+    runtime.frames.length = savedFrameCount;
   }
 }
 

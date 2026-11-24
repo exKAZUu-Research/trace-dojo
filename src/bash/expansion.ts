@@ -101,6 +101,27 @@ export class Expander {
   }
 
   /**
+   * Expands the elements of `name=(...)` left-to-right, preserving raw source text for associative empty-key errors.
+   */
+  expandCompoundItems(words: Word[]): CompoundElement[] {
+    const elements: CompoundElement[] = [];
+    for (const word of words) {
+      const keyed = splitKeyedElement(word);
+      if (keyed) {
+        const key = this.joinPieces(this.expandParts(keyed.key, false));
+        this.checkTilde(keyed.value, true);
+        const value = this.joinPieces(this.expandParts(keyed.value, false));
+        elements.push({ key, value, append: keyed.append, rawText: word.text });
+        continue;
+      }
+      for (const field of this.expandWords([word])) {
+        elements.push({ plain: field, rawText: word.text });
+      }
+    }
+    return elements;
+  }
+
+  /**
    * The elements of `name=(...)` up to the first empty key of an associative array, which Bash reports after it
    * assigns the elements before it. A declaration builtin gets the elements quoted again, as its error shows them.
    */
@@ -109,23 +130,22 @@ export class Expander {
     isAssociative: boolean,
     declared: boolean
   ): { elements: CompoundElement[]; error?: string } {
+    return this.validateCompoundItems(this.expandCompoundItems(words), isAssociative, declared);
+  }
+
+  validateCompoundItems(
+    items: CompoundElement[],
+    isAssociative: boolean,
+    declared: boolean
+  ): { elements: CompoundElement[]; error?: string } {
+    if (!isAssociative) return { elements: items };
     const elements: CompoundElement[] = [];
-    for (const word of words) {
-      const keyed = splitKeyedElement(word);
-      if (keyed) {
-        const key = isAssociative
-          ? this.joinPieces(this.expandParts(keyed.key, false))
-          : this.joinPieces(this.expandParts(keyed.key, true));
-        this.checkTilde(keyed.value, true);
-        const value = this.joinPieces(this.expandParts(keyed.value, false));
-        if (isAssociative && key === '') {
-          const text = declared ? `[${singleQuote(key)}]=${singleQuote(value)}` : word.text;
-          return { elements, error: `${text}: bad array subscript` };
-        }
-        elements.push({ key, value, append: keyed.append });
-        continue;
+    for (const item of items) {
+      if (typeof item !== 'string' && !('plain' in item) && item.key === '') {
+        const text = declared ? `[${singleQuote(item.key)}]=${singleQuote(item.value)}` : (item.rawText ?? '');
+        return { elements, error: `${text}: bad array subscript` };
       }
-      elements.push(...this.expandWords([word]));
+      elements.push(item);
     }
     return { elements };
   }

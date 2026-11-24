@@ -1,4 +1,4 @@
-import { formatFloatField } from '../interpreter/floatFormat';
+import { formatFloatField, padPrintfBytes } from '../interpreter/floatFormat';
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { charactersOf } from './characters';
 import {
@@ -138,8 +138,8 @@ class Printf {
     return { output: this.out, ok: this.ok };
   }
 
-  private push(bytes: number[]): void {
-    for (const byte of bytes) this.out.push(byte);
+  private push(bytes: ArrayLike<number>): void {
+    for (let i = 0; i < bytes.length; i++) this.out.push(bytes[i]);
     if (this.out.length > LIMITS.maxStringLength) throw new ExecutionLimitError('output');
   }
 
@@ -240,13 +240,13 @@ class Printf {
       this.push(encodeText(formatFloat(value, spec)));
     } else if (conversion === 'c') {
       const arg = this.takeArgument();
-      this.push(pad(arg === undefined || arg === '' ? [0] : [encodeText(arg)[0]], spec));
+      this.push(padPrintfBytes(arg === undefined || arg === '' ? [0] : [encodeText(arg)[0]], spec));
     } else if (conversion === 's' && !spec.flags.includes('#')) {
-      this.push(pad(truncate(encodeText(this.takeArgument() ?? ''), precision), spec));
+      this.push(padPrintfBytes(truncate(encodeText(this.takeArgument() ?? ''), precision), spec));
     } else if (conversion === 's' || conversion === 'b') {
       // `%#s` is `%b`, as in Bash.
       const { out, stop } = expandB(this.takeArgument() ?? '', this.host);
-      this.push(pad(truncate(out, precision), spec));
+      this.push(padPrintfBytes(truncate(out, precision), spec, false));
       if (stop) throw new StopOutput();
     } else if (conversion === 'q' || conversion === 'Q') this.quote(spec);
     else if (conversion === 'n') throw new UnsupportedFeatureError('printf の %n');
@@ -266,7 +266,7 @@ class Printf {
     else if (spec.flags.includes('#')) quoted = singleQuote(arg);
     else quoted = backslashQuote(arg, true, true);
     const bytes = encodeText(quoted);
-    this.push(pad(spec.conversion === 'Q' ? bytes : truncate(bytes, spec.precision), spec));
+    this.push(padPrintfBytes(spec.conversion === 'Q' ? bytes : truncate(bytes, spec.precision), spec, false));
   }
 }
 
@@ -282,14 +282,6 @@ function checkFieldSize(width: number | undefined, precision: number | undefined
 
 function truncate(bytes: number[], precision: number | undefined): number[] {
   return precision === undefined || precision >= bytes.length ? bytes : bytes.slice(0, precision);
-}
-
-/** Pads a string or character conversion to its width in bytes, as C's `printf` does. */
-function pad(bytes: number[], spec: Specification): number[] {
-  const width = spec.width ?? 0;
-  if (bytes.length >= width) return bytes;
-  const padding = Array.from({ length: width - bytes.length }, () => 32);
-  return spec.flags.includes('-') ? [...bytes, ...padding] : [...padding, ...bytes];
 }
 
 /**
@@ -443,5 +435,10 @@ function formatFloat(value: number, spec: Specification): string {
   }
   const width = spec.width ?? 0;
   if (text.length >= width) return text;
-  return spec.flags.includes('-') ? text.padEnd(width, ' ') : text.padStart(width, ' ');
+  if (spec.flags.includes('-')) return text.padEnd(width, ' ');
+  if (spec.flags.includes('0') && /^[-+ ]?\d/.test(text)) {
+    const sign = /^[-+ ]/.exec(text)?.[0] ?? '';
+    return sign + text.slice(sign.length).padStart(width - sign.length, '0');
+  }
+  return text.padStart(width, ' ');
 }

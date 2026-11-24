@@ -126,11 +126,22 @@ function printf(shell: Shell, args: string[]): number {
   else {
     const split = shell.splitSubscript(target);
     const stored = split
-      ? shell.assignElement(split.name, split.subscript, text, false)
+      ? assignPrintfElement(shell, split.name, split.subscript, text)
       : shell.assignScalar(target, text);
     if (!stored) return 1;
   }
   return ok ? 0 : 1;
+}
+
+function assignPrintfElement(shell: Shell, name: string, subscript: string, value: string): boolean {
+  const resolved = shell.resolveName(name);
+  if (!shell.isAssociative(resolved)) return shell.assignElement(name, subscript, value, false);
+  const key = shell.expander.expandSubscriptText(subscript);
+  if (key === '') {
+    shell.reportError(`printf: ${name}[${subscript}]: bad array subscript`);
+    return false;
+  }
+  return shell.assignElement(resolved, key, value, false, true);
 }
 
 function letBuiltin(shell: Shell, args: string[]): number {

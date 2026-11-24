@@ -1,4 +1,5 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
+import { ObservationAbortError } from './runtime';
 import type { Shell } from './shell';
 import { isIdentifier } from './variables';
 
@@ -12,7 +13,12 @@ export class TurtleError extends Error {
 
 export type Builtin = (shell: Shell, args: string[], name: string) => number;
 
+function rejectObservation(shell: Shell): void {
+  if (shell.runtime.observing) throw new ObservationAbortError();
+}
+
 function fail(shell: Shell, name: string, message: string): never {
+  rejectObservation(shell);
   const report = `main.sh: line ${shell.currentRow + 1}: ${name}: ${message}`;
   shell.state.fd2.write(`${report}\n`);
   throw new TurtleError(report);
@@ -30,6 +36,7 @@ const NEW_USAGE =
 
 /** `turtle_new name [x y [color]]`, which stores the new turtle's handle in the variable, as `printf -v` stores. */
 function turtleNew(shell: Shell, args: string[], name: string): number {
+  rejectObservation(shell);
   if (args.length !== 1 && args.length !== 3 && args.length !== 4) fail(shell, name, NEW_USAGE);
   const [variable, xText = '0', yText = '0', color] = args;
   const target = shell.splitSubscript(variable);
@@ -55,6 +62,7 @@ for (const [names, sign] of [
 ] as const) {
   for (const name of names) {
     TURTLE_BUILTINS[name] = (shell, args) => {
+      rejectObservation(shell);
       const error = shell.runtime.world.move(turtleArgument(shell, args, name), sign);
       if (error) fail(shell, name, error);
       return 0;
@@ -67,6 +75,7 @@ for (const [names, quarters] of [
 ] as const) {
   for (const name of names) {
     TURTLE_BUILTINS[name] = (shell, args) => {
+      rejectObservation(shell);
       shell.runtime.world.turn(turtleArgument(shell, args, name), quarters);
       return 0;
     };
@@ -85,6 +94,7 @@ for (const name of TURTLE_METHOD_NAMES.isFrontPainted) {
 }
 for (const name of TURTLE_METHOD_NAMES.remove) {
   TURTLE_BUILTINS[name] = (shell, args) => {
+    rejectObservation(shell);
     shell.runtime.world.remove(turtleArgument(shell, args, name));
     return 0;
   };

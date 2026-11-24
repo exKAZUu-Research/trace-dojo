@@ -1,19 +1,20 @@
 import type { Assignment, Word } from './ast';
 import { ansicQuote, ansicShouldQuote, containsShellMetas, doubleQuote } from './quoting';
-import type { Shell } from './shell';
+import type { CompoundElement, Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
 import {
   AssociativeTable,
   type Attribute,
   ATTRIBUTE_ORDER,
   CONVERTED_BUCKETS,
+  findEnclosingVariable,
   isIdentifier,
   sortedElements,
   type Variable,
 } from './variables';
 
 /** An argument of a declaration builtin: an assignment the shell parsed, or a word it expanded. */
-export type DeclarationArgument = string | Assignment;
+export type DeclarationArgument = string | (Assignment & { expandedElements?: CompoundElement[] });
 
 const USAGES: Record<string, string> = {
   declare: 'declare [-aAfFgiIlnrtux] [name[=value] ...] or declare -p [-aAfFilnrtux] [name ...]',
@@ -41,18 +42,27 @@ interface Options {
 export function expandDeclarationArguments(shell: Shell, rawArgs: (Word | Assignment)[]): DeclarationArgument[] {
   const args: DeclarationArgument[] = [];
   for (const arg of rawArgs) {
-    if ('append' in arg) {
-      const subscript = arg.subscript && literalWord(arg.subscript, shell.expander.expandAssociativeKey(arg.subscript));
-      const value =
-        arg.value &&
-        literalWord(
-          arg.value,
-          shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(arg.value as Word))
-        );
-      args.push({ ...arg, ...(subscript ? { subscript } : {}), ...(value ? { value } : {}) });
-    } else args.push(...shell.expander.expandWords([arg]));
+    if ('append' in arg) args.push(expandDeclarationAssignment(shell, arg));
+    else args.push(...shell.expander.expandWords([arg]));
   }
   return args;
+}
+
+function expandDeclarationAssignment(shell: Shell, arg: Assignment): DeclarationArgument {
+  const subscript = arg.subscript && literalWord(arg.subscript, shell.expander.expandAssociativeKey(arg.subscript));
+  const value =
+    arg.value &&
+    literalWord(
+      arg.value,
+      shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(arg.value as Word))
+    );
+  const expandedElements = arg.array && shell.expander.expandCompoundItems(arg.array);
+  return {
+    ...arg,
+    ...(subscript ? { subscript } : {}),
+    ...(value ? { value } : {}),
+    ...(expandedElements ? { expandedElements } : {}),
+  };
 }
 
 function literalWord(origin: Word, text: string): Word {
@@ -356,14 +366,25 @@ function declaredDestination(
     shell.reportError(`${builtin}: ${targetName}: readonly variable`);
     return undefined;
   }
-  if (checkReadonlyConflict(shell, builtin, targetName, variable, set, assigns)) return undefined;
+  const inherited =
+    targetScope && !variable && set.has('I') ? findEnclosingVariable(scopes, targetScope, targetName) : undefined;
+  if (checkReadonlyConflict(shell, builtin, targetName, variable ?? inherited, set, assigns)) return undefined;
   if (!variable) {
-    variable = { name: targetName, value: undefined, attributes: new Set() };
+    variable = createDeclaredVariable(shell, targetName, inherited);
     (targetScope ?? scopes[0]).set(targetName, variable);
   }
   return {
     variable,
     ...(referencedSubscript === undefined ? {} : { referencedSubscript }),
+  };
+}
+
+function createDeclaredVariable(shell: Shell, name: string, inherited: Variable | undefined): Variable {
+  if (!inherited || inherited.attributes.has('n')) return { name, value: undefined, attributes: new Set() };
+  return {
+    name,
+    value: shell.copyValue(inherited.value),
+    attributes: new Set(inherited.attributes),
   };
 }
 
@@ -529,7 +550,7 @@ function isCompound(operand: DeclarationArgument): boolean {
 function assignLocally(
   shell: Shell,
   variable: Variable,
-  assignment: Assignment,
+  assignment: Assignment & { expandedElements?: CompoundElement[] },
   referencedSubscript?: string
 ): boolean {
   const { append } = assignment;
@@ -549,7 +570,9 @@ function assignLocally(
   const owner = scopes.findLast((scope) => scope.get(variable.name) === variable);
   if (!owner) return true;
   if (assignment.array) {
-    const { elements, error } = shell.expander.expandCompound(assignment.array, variable.attributes.has('A'), true);
+    const { elements, error } = assignment.expandedElements
+      ? shell.expander.validateCompoundItems(assignment.expandedElements, variable.attributes.has('A'), true)
+      : shell.expander.expandCompound(assignment.array, variable.attributes.has('A'), true);
     if (variable.attributes.has('A') && !variable.value)
       variable.value = { kind: 'associative', table: new AssociativeTable() };
     const ok = shell.assignCompoundTo(variable, elements, assignment.append);

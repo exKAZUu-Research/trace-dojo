@@ -35,6 +35,7 @@ import {
   callStackArray,
   cloneScope,
   cloneValue,
+  type CompoundElement,
   DYNAMIC_VARIABLES,
   ensureWritable,
   ENVIRONMENT_VARIABLES,
@@ -42,6 +43,7 @@ import {
   isIdentifier,
   isValidFunctionName,
   PERMANENT_DYNAMIC_VARIABLES,
+  readAssociativePair,
   removeScopedVariable,
   SCALAR_DYNAMIC_VARIABLES,
   type Scope,
@@ -49,6 +51,8 @@ import {
   type Variable,
   type VariableValue,
 } from './variables';
+
+export type { CompoundElement } from './variables';
 
 /** Where a file descriptor writes: the run's standard output or error, or the text a command substitution captures. */
 export interface OutputTarget {
@@ -434,21 +438,31 @@ export class Shell implements ArithmeticHost {
     });
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Runs C-style for init, condition, body, and update while keeping arithmetic errors local to the loop.
   private executeArithmeticFor(statement: Extract<Statement, { kind: 'arithmeticFor' }>): number {
-    const header = (source: ArithmeticSource | undefined): void => {
-      if (!source) return;
+    const evaluateHeader = (source: ArithmeticSource, stepAfter: boolean): bigint | undefined => {
       this.currentRow = statement.row - this.lineShift;
-      this.evaluate(source, '((');
-      this.runtime.steps.step(statement.row);
+      const value = this.tryEvaluate(this.expander.arithmeticText(source), undefined);
+      if (value !== undefined && stepAfter) this.runtime.steps.step(statement.row);
+      return value;
     };
-    header(statement.init);
+    if (statement.init && evaluateHeader(statement.init, true) === undefined) return 1;
     return this.loop((last) => {
       for (;;) {
         this.runtime.spend();
-        this.currentRow = statement.row - this.lineShift;
-        if (statement.condition && this.evaluate(statement.condition, '((') === 0n) return;
+        if (statement.condition) {
+          const cond = evaluateHeader(statement.condition, false);
+          if (cond === undefined) {
+            last.status = 1;
+            return;
+          }
+          if (cond === 0n) return;
+        }
         if (this.iterate(statement.body, last) === 'stop') return;
-        header(statement.update);
+        if (statement.update && evaluateHeader(statement.update, true) === undefined) {
+          last.status = 1;
+          return;
+        }
       }
     });
   }
@@ -1035,13 +1049,16 @@ export class Shell implements ArithmeticHost {
    * negative one before the first element, which each caller reports in its own way.
    */
   arrayIndex(name: string, subscript: string): bigint | undefined {
-    return this.arrayIndexFor(this.findVariable(name), subscript);
+    const dynamicLen =
+      this.isDynamic(name) && !SCALAR_DYNAMIC_VARIABLES.has(name) ? (this.dynamicArray(name)?.length ?? 0) : undefined;
+    return this.arrayIndexFor(this.findVariable(name), subscript, dynamicLen);
   }
 
-  private arrayIndexFor(variable: Variable | undefined, subscript: string): bigint | undefined {
+  private arrayIndexFor(variable: Variable | undefined, subscript: string, dynamicLength?: number): bigint | undefined {
     const index = this.evaluateFatalReadonly(subscript);
     if (index >= 0n) return index;
-    const length = variable?.value?.kind === 'indexed' ? this.maxIndex(variable.value.elements) + 1n : 1n;
+    const length =
+      variable?.value?.kind === 'indexed' ? this.maxIndex(variable.value.elements) + 1n : BigInt(dynamicLength ?? 1);
     const resolved = length + index;
     return resolved < 0n ? undefined : resolved;
   }
@@ -1285,7 +1302,8 @@ export class Shell implements ArithmeticHost {
       variable.attributes.add('a');
     }
     let next = append ? this.maxIndex(existing) + 1n : 0n;
-    for (const element of elements) {
+    for (const rawElement of elements) {
+      const element = typeof rawElement !== 'string' && 'plain' in rawElement ? rawElement.plain : rawElement;
       const index = typeof element === 'string' ? next : this.arrayIndexFor(variable, element.key);
       if (index === undefined) {
         this.reportError(`${reportedName}[${(element as { key: string }).key}]: bad array subscript`);
@@ -1307,10 +1325,12 @@ export class Shell implements ArithmeticHost {
   private assignAssociative(variable: Variable, table: AssociativeTable, elements: CompoundElement[]): boolean {
     for (let i = 0; i < elements.length; i++) {
       const element = elements[i];
-      const entry =
-        typeof element === 'string'
-          ? { key: element, value: typeof elements[++i] === 'string' ? (elements[i] as string) : '', append: false }
-          : element;
+      const entry = readAssociativePair(elements, i, element);
+      if (entry.consumedNext) i++;
+      if (entry.key === '') {
+        this.reportError(`${entry.rawKey}: bad array subscript`);
+        continue;
+      }
       const base = entry.append ? (table.get(entry.key) ?? '') : '';
       const converted = this.convertForAttributes(variable, entry.value, base, entry.append);
       if (converted === undefined) return false;
@@ -1412,9 +1432,6 @@ export class Shell implements ArithmeticHost {
     return { name: text.slice(0, open), subscript: text.slice(open + 1, close) };
   }
 }
-
-/** An element of a compound assignment: a plain word, or `[key]=value`. */
-export type CompoundElement = { key: string; value: string; append: boolean } | string;
 
 /** Whether a declaration declares name references (`local -n this=$1`), which hold no value of their own. */
 function declaresReferences(statement: Extract<Statement, { kind: 'declaration' }>): boolean {

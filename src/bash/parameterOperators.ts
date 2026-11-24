@@ -4,6 +4,7 @@ import { decodeAnsiC } from './converter';
 import { declarationText } from './declare';
 import type { Expander, ParameterValue } from './expansion';
 import { EMPTY_LIST, isFieldBreak, type Piece } from './fields';
+import { rawLengthSource } from './parse';
 import {
   compileGlob,
   longestPrefixMatch,
@@ -44,7 +45,7 @@ export function applyOperator(
     case '+': {
       const colon = operator.startsWith(':');
       const isUnset = value.kind === 'scalar' ? value.value === undefined : value.values.length === 0;
-      const isNull = isUnset || (colon && joined(value) === '');
+      const isNull = isUnset || (colon && joined(expander, value, inDouble) === '');
       const kind = operator.at(-1) as string;
       if (kind === '+') {
         if (isNull) return value.kind === 'list' && !value.star && inDouble ? [EMPTY_LIST] : [];
@@ -91,8 +92,9 @@ export function applyOperator(
   }
 }
 
-function joined(value: ParameterValue): string {
-  return value.kind === 'scalar' ? (value.value ?? '') : value.values.join(' ');
+function joined(expander: Expander, value: ParameterValue, inDouble: boolean): string {
+  if (value.kind === 'scalar') return value.value ?? '';
+  return expander.joinPieces(expander.valuePieces(value, inDouble));
 }
 
 /**
@@ -281,7 +283,7 @@ function substring(
     shell.evaluateText(expander.arithmeticText({ pieces: parts, row: shell.currentRow }), undefined);
   const offset = evaluate(offsetParts);
   const negativeLength = (): never =>
-    shell.discard(`${expander.arithmeticText({ pieces: lengthParts ?? [], row: 0 }).trim()}: substring expression < 0`);
+    shell.discard(`${rawLengthSource(expansion.text, expansion.name)}: substring expression < 0`);
   if (value.kind === 'scalar') {
     const sliced = sliceString(
       value.value as string,

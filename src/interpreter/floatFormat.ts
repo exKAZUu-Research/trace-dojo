@@ -232,3 +232,19 @@ function signOf(flags: string): string {
   if (flags.includes(' ')) return ' ';
   return '';
 }
+
+/** Pads a byte-valued `printf` field (`%s`, `%c`) to `spec.width`, zero-filling on `0` without `-` when allowed. */
+export function padPrintfBytes(
+  bytes: ArrayLike<number>,
+  spec: { flags: string; width?: number | undefined },
+  zeroAllowed = true
+): Uint8Array {
+  const width = spec.width ?? 0;
+  const padding = Math.max(width - bytes.length, 0);
+  const leftAlign = spec.flags.includes('-');
+  const result = new Uint8Array(bytes.length + padding).fill(
+    zeroAllowed && !leftAlign && spec.flags.includes('0') ? 0x30 : 0x20
+  );
+  result.set(bytes, leftAlign ? 0 : padding);
+  return result;
+}

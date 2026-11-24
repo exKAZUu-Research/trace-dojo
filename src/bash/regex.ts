@@ -4,7 +4,7 @@
  * longest, `.` matching any character, a backslash quoting the character after it, and no `\d`-style classes.
  */
 
-import { charactersOf } from './characters';
+import { charactersOf, POSIX_CHARACTER_CLASSES } from './characters';
 
 type RegexNode =
   | { kind: 'char'; c: string }
@@ -26,20 +26,7 @@ export interface CompiledRegex {
   nfa?: CompiledNfa;
 }
 
-const CLASSES: Record<string, (c: string) => boolean> = {
-  alnum: (c) => /^[\p{L}\p{N}]$/u.test(c),
-  alpha: (c) => /^\p{L}$/u.test(c),
-  blank: (c) => c === ' ' || c === '\t',
-  cntrl: (c) => /^\p{Cc}$/u.test(c),
-  digit: (c) => /^[0-9]$/.test(c),
-  graph: (c) => /^[^\p{C}\p{Z}]$/u.test(c),
-  lower: (c) => /^\p{Ll}$/u.test(c),
-  print: (c) => /^[^\p{C}]$/u.test(c),
-  punct: (c) => /^[!-/:-@[-`{-~]$/.test(c),
-  space: (c) => /^[ \t\n\v\f\r]$/.test(c),
-  upper: (c) => /^\p{Lu}$/u.test(c),
-  xdigit: (c) => /^[0-9A-Fa-f]$/.test(c),
-};
+const CLASSES = POSIX_CHARACTER_CLASSES;
 
 export function compileRegex(source: string): CompiledRegex {
   const parser = new RegexParser(charactersOf(source));

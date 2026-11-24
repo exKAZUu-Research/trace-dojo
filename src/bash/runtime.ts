@@ -56,6 +56,9 @@ export class DiscardSignal {
 const TURTLE_HANDLE_PREFIX = 'Turtle@';
 const TURTLE_HANDLE_PATTERN = /Turtle@\d+/g;
 
+/** Aborts a read-only trace observation before mutating external devices or writing output. */
+export class ObservationAbortError extends Error {}
+
 /** What every part of the interpreter shares while a program runs: the board, the trace, and the limits. */
 export class Runtime implements TracedRuntime<Frame> {
   readonly world = new TurtleWorld();
@@ -63,6 +66,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly budget = new ExecutionBudget();
   readonly io: ProgramIO;
   readonly frames: Frame[] = [];
+  observing = false;
   private readonly turtles = new Map<string, TurtleState>();
   private nextTurtle = 1;
   /** Gives the strings that the program can still reach, for the turtles' garbage collection. */
@@ -90,7 +94,7 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** Removes the turtles whose handles no variable holds any longer. */
   collectGarbage(): void {
-    if (!this.world.hasTurtles) return;
+    if (this.observing || !this.world.hasTurtles) return;
     const reached = new Set<TurtleState>();
     for (const text of this.reachableStrings()) {
       for (const [handle] of text.matchAll(TURTLE_HANDLE_PATTERN)) {

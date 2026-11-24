@@ -138,11 +138,14 @@ export function unaryTest(shell: Shell, operator: string, operand: string): bool
 function isSet(shell: Shell, operand: string): boolean {
   const split = shell.splitSubscript(operand);
   if (split && isIdentifier(split.name)) {
-    if (split.subscript === '@' || split.subscript === '*') return shell.arrayValues(split.name).length > 0;
-    if (shell.isAssociative(shell.resolveName(split.name)))
-      return shell.elementValue(split.name, split.subscript) !== undefined;
-    const index = shell.arrayIndex(split.name, split.subscript);
-    return index !== undefined && shell.elementValue(split.name, String(index)) !== undefined;
+    const resolved = shell.resolveName(split.name);
+    if (shell.isAssociative(resolved)) {
+      const key = shell.expander.expandSubscriptText(split.subscript);
+      return key !== '' && shell.elementValue(resolved, key) !== undefined;
+    }
+    if (split.subscript === '@' || split.subscript === '*') return shell.arrayValues(resolved).length > 0;
+    const index = shell.arrayIndex(resolved, split.subscript);
+    return index !== undefined && shell.elementValue(resolved, String(index)) !== undefined;
   }
   if (/^\s*[-+]?\d+\s*$/.test(operand)) {
     const index = Number(operand);

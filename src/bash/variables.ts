@@ -23,6 +23,34 @@ export interface Variable {
 /** A lexical/dynamic variable scope (global scope at index 0, followed by function and temporary scopes). */
 export type Scope = Map<string, Variable>;
 
+/** An element of a compound assignment: a plain word, or `[key]=value`. */
+export type CompoundElement =
+  | { key: string; value: string; append: boolean; rawText?: string }
+  | { plain: string; rawText: string }
+  | string;
+
+/** Reads one `[key]=value` item or alternating `key value` pair from an associative compound assignment. */
+export function readAssociativePair(
+  elements: CompoundElement[],
+  index: number,
+  element: CompoundElement
+): { key: string; rawKey: string; value: string; append: boolean; consumedNext: boolean } {
+  if (typeof element !== 'string' && !('plain' in element)) {
+    return {
+      key: element.key,
+      rawKey: element.rawText ?? element.key,
+      value: element.value,
+      append: element.append,
+      consumedNext: false,
+    };
+  }
+  const key = typeof element === 'string' ? element : element.plain;
+  const rawKey = typeof element === 'string' ? element : element.rawText;
+  const next = elements[index + 1];
+  const value = next === undefined ? '' : typeof next === 'string' ? next : 'plain' in next ? next.plain : '';
+  return { key, rawKey, value, append: false, consumedNext: true };
+}
+
 interface BucketEntry {
   key: string;
   value: string;
