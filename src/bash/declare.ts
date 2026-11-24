@@ -356,7 +356,7 @@ function createCompoundVariable(
   localScope: Map<string, Variable> | undefined
 ): Variable {
   if (!localScope && shell.isScalarDynamic(targetName)) {
-    return shell.dynamicDeclaration(targetName) as Variable;
+    return materializeDeclaredScalarDynamic(shell, targetName, set);
   }
   const origin = localScope ? resolveLocalOrigin(shell, localScope, targetName, set.has('I')) : undefined;
   return createDeclaredVariable(targetName, origin, set.has('A') ? 'associative' : 'indexed');
@@ -1325,10 +1325,7 @@ function materializeOrHandleDynamic(
     !options.set.has('n') &&
     (options.set.has('a') || options.set.has('A') || isSubscripted || isCompound(operand));
   if (convertsToArray) {
-    if ((options.set.has('a') || options.set.has('A')) && !isSubscripted && !isCompound(operand)) {
-      shell.scalarValue(name);
-    }
-    shell.state.scopes[0].set(name, shell.dynamicDeclaration(name) as Variable);
+    shell.state.scopes[0].set(name, materializeDeclaredScalarDynamic(shell, name, options.set, isSubscripted));
     return false;
   }
   return declareDynamic(shell, operand, parsed);
@@ -1509,9 +1506,24 @@ function createNewDeclaredVariable(
   isSubscripted: boolean,
   targetScope: Map<string, Variable> | undefined
 ): Variable {
+  if (!targetScope && shell.isScalarDynamic(targetName) && (set.has('a') || set.has('A') || isSubscripted)) {
+    return materializeDeclaredScalarDynamic(shell, targetName, set, isSubscripted);
+  }
   const origin = targetScope ? resolveLocalOrigin(shell, targetScope, targetName, set.has('I')) : undefined;
   const arrayKind = set.has('A') ? 'associative' : set.has('a') || isSubscripted ? 'indexed' : undefined;
   return createDeclaredVariable(targetName, origin, arrayKind);
+}
+
+function materializeDeclaredScalarDynamic(
+  shell: Shell,
+  name: string,
+  set: Set<string>,
+  isSubscripted = false
+): Variable {
+  if ((set.has('a') || set.has('A')) && !isSubscripted) {
+    shell.scalarValue(name);
+  }
+  return shell.dynamicDeclaration(name) as Variable;
 }
 
 interface LocalOrigin {
