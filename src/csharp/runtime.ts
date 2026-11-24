@@ -496,10 +496,6 @@ export class Runtime {
 /** The host's stack ran out, or the program recursed past the call depth limit. */
 export class StackOverflow extends Error {}
 
-export function isSameRuntimeType(a: Type, b: Type): boolean {
-  return sameType(a, b);
-}
-
 export type { FieldSymbol };
 
 /** The values that a value holds, which the garbage collector reaches through it. */

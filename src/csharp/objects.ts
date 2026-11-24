@@ -374,10 +374,6 @@ export function structHash(evaluator: Evaluator, value: CsStruct, frame: Frame):
 
 // ---- Ordering ----
 
-export function compareOrdinal(a: string, b: string): number {
-  return a === b ? 0 : a < b ? -1 : 1;
-}
-
 /** `Comparer<T>.Default.Compare`, which compares primitives by value and others through `IComparable`. */
 export function defaultCompare(evaluator: Evaluator, a: Value, b: Value, frame: Frame): number {
   if (a === undefined) return b === undefined ? 0 : -1;
