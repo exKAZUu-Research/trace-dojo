@@ -316,3 +316,6 @@ export function stateOf<T>(value: Value): T {
 export function isObject(value: Value): value is CsObject {
   return value instanceof CsObject;
 }
+
+/** The integral types whose `CompareTo` returns the difference of the values rather than its sign. */
+export const NARROW_INTEGRALS: ReadonlySet<string> = new Set(['sbyte', 'byte', 'short', 'ushort', 'char']);

@@ -3,7 +3,7 @@ import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import { defaultCompare, environmentOf, hashOf, runtimeTypeName, stringOf, valuesEqual } from '../objects';
 import { CsThrow } from '../runtime';
-import { type MethodSymbol, substitute, substitutionOf, type Type } from '../types';
+import { type MethodSymbol, specialOf, substitute, substitutionOf, type Type } from '../types';
 import {
   copyValue,
   CsArray,
@@ -29,6 +29,7 @@ import {
   failNull,
   failOutOfRange,
   libraryType,
+  NARROW_INTEGRALS,
   newArray,
   nullReference,
   refOf,
@@ -1458,8 +1459,14 @@ function equalityComparerObject(call: NativeCall, type: Type, equality?: Equalit
 }
 
 defineNatives({
-  'System.Collections.Generic.Comparer`1.get_Default': (call) =>
-    comparerObject(call, typeArgument(call), comparisonOf(call, undefined)),
+  'System.Collections.Generic.Comparer`1.get_Default': (call) => {
+    const type = typeArgument(call);
+    // The default comparer calls the type's CompareTo, which for the narrow integral types returns the difference.
+    const compare: Comparison = NARROW_INTEGRALS.has(specialOf(type) ?? '')
+      ? (a, b) => (a as number) - (b as number)
+      : comparisonOf(call, undefined);
+    return comparerObject(call, type, compare);
+  },
   'System.Collections.Generic.Comparer`1.Create': (call, _receiver, [comparison]) => {
     if (comparison === undefined) failNull('comparison');
     return comparerObject(call, typeArgument(call), comparisonOf(call, comparison as Value));

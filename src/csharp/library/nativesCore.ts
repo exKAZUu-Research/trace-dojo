@@ -73,6 +73,7 @@ import {
   failNull,
   failOutOfRange,
   libraryType,
+  NARROW_INTEGRALS,
   newArray,
   nullReference,
   parameterType,
@@ -389,6 +390,8 @@ for (const [name, special] of INTEGRAL) {
       if (!isSameType) fail('System.ArgumentException', `Object must be of type ${name}.`);
       const a = toBig(receiver);
       const b = toBig(other);
+      // The types narrower than int return the difference, as .NET's `m_value - value`; the others the sign.
+      if (NARROW_INTEGRALS.has(special)) return Number(a - b);
       return a < b ? -1 : a > b ? 1 : 0;
     },
     [`${prefix}.Parse`]: (_call: NativeCall, _receiver: Value, [text]: Value[]) => {
