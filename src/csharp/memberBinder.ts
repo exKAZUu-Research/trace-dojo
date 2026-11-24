@@ -160,6 +160,9 @@ export abstract class MemberBinder extends CallBinder {
     return this.convert(value, this.tupleType(types), node);
   }
 
+  /** Whether the member being bound is the target of `+=` or `-=`, which may name an event outside its type. */
+  protected isEventSubscriptionTarget = false;
+
   /** Binds an expression as a value. */
   bindValue(node: Expression, context: BindContext): BoundExpression {
     const value = this.toValue(this.bindExpression(node, context), node);
@@ -543,8 +546,14 @@ export abstract class MemberBinder extends CallBinder {
       const type = substitute(field.type, substitution);
       if (field.isConst) return this.constantField(field, type, position);
       if (field.isStatic) return { kind: 'staticField', field, owner: found.owner, type, row: position.row };
-      if (field.isEvent && context.fn.typeContext.type !== field.owner) {
-        return { kind: 'field', receiver: receiver as BoundExpression, field, type, row: position.row };
+      // Outside its declaring type, an event may only be subscribed to or unsubscribed from.
+      if (field.isEvent && context.fn.typeContext.type !== field.owner && !this.isEventSubscriptionTarget) {
+        const owner = displayTypeSymbol(field.owner);
+        this.error(
+          position,
+          'CS0070',
+          `イベント '${owner}.${field.name}' は、+= または -= の左側にのみ表示されます (型 '${owner}' 内で使用する場合を除きます)`
+        );
       }
       return { kind: 'field', receiver: receiver as BoundExpression, field, type, row: position.row };
     }

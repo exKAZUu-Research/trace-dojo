@@ -1348,7 +1348,15 @@ export abstract class ExpressionBinder extends LambdaBinder {
     }
     if (operator === '??=') return this.bindCoalesceAssignment(node, context);
     const binaryOperator = operator.slice(0, -1);
-    const target = this.bindLValue(node.target, context, 'compound');
+    const isSubscription = binaryOperator === '+' || binaryOperator === '-';
+    const saved = this.isEventSubscriptionTarget;
+    this.isEventSubscriptionTarget = isSubscription;
+    let target: BoundLValue;
+    try {
+      target = this.bindLValue(node.target, context, 'compound');
+    } finally {
+      this.isEventSubscriptionTarget = saved;
+    }
     if (target.kind === 'field' && target.field.isEvent && (binaryOperator === '+' || binaryOperator === '-')) {
       const value = this.bindAs(node.value, target.type, context);
       if (context.fn.typeContext.type !== target.field.owner)
