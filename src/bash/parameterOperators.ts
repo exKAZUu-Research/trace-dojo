@@ -3,7 +3,7 @@ import type { ParameterExpansion, WordPart } from './ast';
 import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
 import { declarationText } from './declare';
-import type { Expander, ParameterValue, SubscriptRef } from './expansion';
+import { appendBounded, type Expander, joinBounded, type ParameterValue, type SubscriptRef } from './expansion';
 import {
   EMPTY_LIST,
   FIELD_BREAK,
@@ -56,7 +56,7 @@ export function applyOperator(
     case '+': {
       const colon = operator.startsWith(':');
       const isUnset = value.kind === 'scalar' ? value.value === undefined : value.values.length === 0;
-      const isNull = isUnset || (colon && joined(expander, value, inDouble) === '');
+      const isNull = isUnset || (colon && isEmptyParameterValue(expander, value, inDouble));
       const kind = operator.at(-1) as string;
       if (kind === '+') {
         if (isNull) return value.kind === 'list' && !value.star && inDouble ? [EMPTY_LIST] : [];
@@ -105,9 +105,11 @@ export function applyOperator(
   }
 }
 
-function joined(expander: Expander, value: ParameterValue, inDouble: boolean): string {
-  if (value.kind === 'scalar') return value.value ?? '';
-  return value.values.join(value.star && inDouble ? expander.ifsJoiner() : ' ');
+function isEmptyParameterValue(expander: Expander, value: ParameterValue, inDouble: boolean): boolean {
+  if (value.kind === 'scalar') return (value.value ?? '') === '';
+  const sep = value.star && inDouble ? expander.ifsJoiner() : ' ';
+  if (value.values.length > 1 && sep !== '') return false;
+  return value.values.every((element) => element === '');
 }
 
 /**
@@ -303,7 +305,7 @@ function mapPatternRemoval(
 ): Piece[] {
   if (!inDouble && value.kind === 'list' && !value.positional && shell.scalarValue('IFS') === '') {
     if (value.values.length === 0) return [];
-    const text = value.values.map(map).join(' ');
+    const text = joinBounded(value.values.map(map), ' ', (cost) => shell.runtime.spend(cost));
     return text === '' ? [] : [{ text, quoted: false, split: false }];
   }
   return mapValues(expander, value, inDouble, map);
@@ -363,28 +365,37 @@ function splitReplacement(parts: WordPart[]): { pattern: WordPart[]; replacement
 }
 
 /** Formats one replacement match: unquoted `&` expands to the matched substring, and `\&` produces literal `&`. */
-function replacementFor(replacement: Piece[], matched: string): string {
+function replacementFor(replacement: Piece[], matched: string, spend: (cost?: number) => void): string {
   let text = '';
   for (const piece of replacement) {
     if (piece === EMPTY_LIST) continue;
-    if (isFieldBreak(piece)) {
-      text += ' ';
-      continue;
-    }
-    if (piece.quoted) {
-      text += piece.text;
-      continue;
-    }
-    for (let i = 0; i < piece.text.length; i++) {
-      const c = piece.text[i];
-      if (c === '\\' && i + 1 < piece.text.length && piece.text[i + 1] === '&') {
-        text += '&';
-        i++;
-      } else if (c === '&') text += matched;
-      else text += c;
-    }
+    if (isFieldBreak(piece)) text = appendBounded(text, ' ', spend);
+    else if (piece.quoted) text = appendBounded(text, piece.text, spend);
+    else text = appendUnquotedReplacement(text, piece.text, matched, spend);
   }
   return text;
+}
+
+function appendUnquotedReplacement(
+  initial: string,
+  raw: string,
+  matched: string,
+  spend: (cost?: number) => void
+): string {
+  let text = initial;
+  let literalStart = 0;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (c === '\\' && i + 1 < raw.length && raw[i + 1] === '&') {
+      text = appendBounded(appendBounded(text, raw.slice(literalStart, i), spend), '&', spend);
+      i++;
+      literalStart = i + 1;
+    } else if (c === '&') {
+      text = appendBounded(appendBounded(text, raw.slice(literalStart, i), spend), matched, spend);
+      literalStart = i + 1;
+    }
+  }
+  return appendBounded(text, raw.slice(literalStart), spend);
 }
 
 /** `${x/p/r}`, `${x//p/r}`, `${x/#p/r}`, and `${x/%p/r}`, replacing the longest match at each position. */
@@ -392,26 +403,30 @@ function replacementFor(replacement: Piece[], matched: string): string {
 function substitute(text: string, pattern: string, replacement: Piece[], operator: string, shell: Shell): string {
   if (pattern === '' && operator !== '/#' && operator !== '/%') return text;
   const chars = charactersOf(text);
-  const spend = (): void => shell.runtime.spend();
-  const glob = compileGlob(pattern, spend);
-  const replace = (start: number, end: number): string => replacementFor(replacement, chars.slice(start, end).join(''));
+  const spend = (cost?: number): void => shell.runtime.spend(cost);
+  const glob = compileGlob(pattern, () => spend());
+  const replace = (start: number, end: number): string =>
+    replacementFor(replacement, chars.slice(start, end).join(''), spend);
   if (operator === '/#') {
-    const end = longestPrefixMatch(glob, chars, 0, spend);
-    return end === undefined ? text : replace(0, end) + chars.slice(end).join('');
+    const end = longestPrefixMatch(glob, chars, 0, () => spend());
+    return end === undefined ? text : appendBounded(replace(0, end), chars.slice(end).join(''), spend);
   }
   if (operator === '/%') {
-    const start = longestSuffixMatch(glob, chars, spend);
-    return start === undefined ? text : chars.slice(0, start).join('') + replace(start, chars.length);
+    const start = longestSuffixMatch(glob, chars, () => spend());
+    return start === undefined
+      ? text
+      : appendBounded(chars.slice(0, start).join(''), replace(start, chars.length), spend);
   }
   let result = '';
   for (let position = 0; position <= chars.length;) {
-    const match = nextLeftmostLongestMatch(glob, chars, position, spend);
-    if (!match) return result + chars.slice(position).join('');
-    result += chars.slice(position, match.start).join('') + replace(match.start, match.end);
-    if (operator === '/' || chars.length === 0) return result + chars.slice(match.end).join('');
+    const match = nextLeftmostLongestMatch(glob, chars, position, () => spend());
+    if (!match) return appendBounded(result, chars.slice(position).join(''), spend);
+    result = appendBounded(result, chars.slice(position, match.start).join(''), spend);
+    result = appendBounded(result, replace(match.start, match.end), spend);
+    if (operator === '/' || chars.length === 0) return appendBounded(result, chars.slice(match.end).join(''), spend);
     // An empty match moves on by one character, which it keeps.
     if (match.end === match.start) {
-      result += chars[match.start] ?? '';
+      result = appendBounded(result, chars[match.start] ?? '', spend);
       position = match.start + 1;
     } else position = match.end;
   }
@@ -681,10 +696,17 @@ function keyValuePairs(
     );
   }
   const isAssociative = shell.isAssociative(shell.resolveName(name));
+  const spend = (cost?: number): void => shell.runtime.spend(cost);
   const pairs = value.values.map(
     (element, index) => `${isAssociative ? quoteKey(keys[index]) : keys[index]} ${doubleQuote(element)}`
   );
-  const text = isAssociative ? pairs.map((pair) => `${pair} `).join('') : pairs.join(' ');
+  const text = isAssociative
+    ? joinBounded(
+        pairs.map((pair) => `${pair} `),
+        '',
+        spend
+      )
+    : joinBounded(pairs, ' ', spend);
   return expander.valuePieces({ kind: 'scalar', value: text }, inDouble);
 }
 

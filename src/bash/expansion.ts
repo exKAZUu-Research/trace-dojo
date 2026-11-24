@@ -136,11 +136,15 @@ export class Expander {
   expandRegex(word: Word): string {
     return this.withIsolatedTail(() => {
       this.checkTilde(word.parts, false);
-      return this.flatten(this.expandParts(word.parts, false))
-        .map((fragment) =>
-          fragment.quoted ? fragment.text.replaceAll(/[\\^$.|?*+()[\]{}]/g, String.raw`\$&`) : fragment.text
-        )
-        .join('');
+      let regex = '';
+      const spend = (cost?: number): void => this.spend(cost);
+      for (const fragment of this.flatten(this.expandParts(word.parts, false))) {
+        const chunk = fragment.quoted
+          ? fragment.text.replaceAll(/[\\^$.|?*+()[\]{}]/g, String.raw`\$&`)
+          : fragment.text;
+        regex = appendBounded(regex, chunk, spend);
+      }
+      return regex;
     });
   }
 
@@ -264,10 +268,12 @@ export class Expander {
   arithmeticText(source: ArithmeticSource): string {
     return this.withIsolatedTail(() => {
       let text = '';
+      const spend = (cost?: number): void => this.spend(cost);
       for (const piece of source.pieces) {
-        if (typeof piece === 'string') text += piece;
-        else if (piece.kind === 'ansiC') text += `'${piece.text.replaceAll("'", String.raw`'\''`)}'`;
-        else text += this.joinPieces(this.expandPart(piece, true));
+        if (typeof piece === 'string') text = appendBounded(text, piece, spend);
+        else if (piece.kind === 'ansiC') {
+          text = appendBounded(text, `'${piece.text.replaceAll("'", String.raw`'\''`)}'`, spend);
+        } else text = appendBounded(text, this.joinPieces(this.expandPart(piece, true)), spend);
       }
       return text;
     });
@@ -616,7 +622,13 @@ export class Expander {
     if (value.star && inDouble) {
       return value.values.length === 0
         ? [QUOTED_EMPTY]
-        : [{ text: value.values.join(this.ifsJoiner()), quoted: true, split: false }];
+        : [
+            {
+              text: joinBounded(value.values, this.ifsJoiner(), (cost) => this.spend(cost)),
+              quoted: true,
+              split: false,
+            },
+          ];
     }
     if (inDouble && value.values.length === 0) return [EMPTY_LIST];
     const pieces: Piece[] = [];
@@ -670,10 +682,11 @@ export class Expander {
   /** Joins pieces into one string, as an expansion that is not split gives: elements of `$@` joined by spaces. */
   joinPieces(pieces: Piece[]): string {
     let text = '';
+    const spend = (cost?: number): void => this.spend(cost);
     for (const piece of pieces) {
       if (piece === EMPTY_LIST) continue;
-      text += isFieldBreak(piece) ? (piece === STAR_BREAK ? this.ifsJoiner() : ' ') : piece.text;
-      if (text.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+      const chunk = isFieldBreak(piece) ? (piece === STAR_BREAK ? this.ifsJoiner() : ' ') : piece.text;
+      text = appendBounded(text, chunk, spend);
     }
     return text;
   }
@@ -691,9 +704,12 @@ export class Expander {
 
   /** The pattern pieces make, with the quoted characters escaped. */
   patternOf(pieces: Piece[]): string {
-    const pattern = this.flatten(pieces)
-      .map((fragment) => (fragment.quoted ? quotePattern(fragment.text) : fragment.text))
-      .join('');
+    let pattern = '';
+    const spend = (cost?: number): void => this.spend(cost);
+    for (const fragment of this.flatten(pieces)) {
+      const chunk = fragment.quoted ? quotePattern(fragment.text) : fragment.text;
+      pattern = appendBounded(pattern, chunk, spend);
+    }
     // `[[ == ]]` matches extended patterns even without `shopt -s extglob`, so they cannot pass as literal text.
     if (hasExtendedGlob(pattern, () => this.spend()))
       throw new UnsupportedFeatureError('拡張パターン（@( ... ) など）');
@@ -744,6 +760,22 @@ export class Expander {
     this.shell.reportError(`${name}: ${message}`);
     throw new ExitSignal(1);
   }
+}
+
+export function appendBounded(current: string, addition: string, spend: (cost?: number) => void): string {
+  if (addition.length === 0) return current;
+  spend(Math.ceil(addition.length / 256));
+  if (current.length + addition.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+  return current + addition;
+}
+
+export function joinBounded(items: readonly string[], separator: string, spend: (cost?: number) => void): string {
+  let text = '';
+  for (const [index, item] of items.entries()) {
+    if (index > 0) text = appendBounded(text, separator, spend);
+    text = appendBounded(text, item, spend);
+  }
+  return text;
 }
 
 function compoundItemValidationError(
