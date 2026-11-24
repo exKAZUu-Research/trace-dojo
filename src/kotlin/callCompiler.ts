@@ -187,6 +187,8 @@ function settledResult(result: KType | undefined): KType | undefined {
 function suspendContextOf(context: FunctionContext): FunctionContext | undefined {
   for (let current: FunctionContext | undefined = context; current; current = current.parent) {
     if (current.isSuspend) return current;
+    // A probe compiles code only to learn its types, in the place of the code it stands for.
+    if (current.isProbeRoot) continue;
     if (!current.isLambda || !current.inlineLambda) return undefined;
   }
   return undefined;
@@ -196,9 +198,24 @@ function suspendContextOf(context: FunctionContext): FunctionContext | undefined
 export function allowsSuspendCalls(context: FunctionContext): boolean {
   for (let current: FunctionContext | undefined = context; current; current = current.parent) {
     if (current.isSuspend) return true;
+    // A probe compiles code only to learn its types, in the place of the code it stands for.
+    if (current.isProbeRoot) continue;
     if (!current.isLambda || !current.inlineLambda) return false;
   }
   return false;
+}
+
+/** A call of a function, or of a suspend function as the coroutine running the caller performs it. */
+function callOrSuspend(
+  symbol: FunctionSymbol,
+  frame: Frame,
+  receiver: Value,
+  values: Value[],
+  callRow: number | undefined
+): Value {
+  return symbol.isSuspend
+    ? suspendCall(symbol, receiver, values, callRow)
+    : callFunction(symbol, frame, receiver, values, callRow);
 }
 
 /** A call of a suspend function, which the coroutine running the caller performs, dispatching on the receiver. */
@@ -1244,9 +1261,7 @@ export abstract class CallCompiler extends CompilerCore {
     const reifiedTypes = symbol.typeParameters
       .filter((param) => param.isReified)
       .map((param) => substitute({ kind: 'param', param, nullable: false }, substitution));
-    if (symbol.isSuspend && !this.file.isLibrary && !allowsSuspendCalls(context))
-      this.error(row, `suspend 関数 ${symbol.name} は、suspend 関数かコルーチンの中でだけ呼べます。`);
-    if (symbol.isSuspend && !this.file.isLibrary) this.checkRestrictedSuspension(context, symbol, row);
+    const suspendVersion = this.checkSuspendCall(context, symbol, compiledArgs, row);
     const call = (frame: Frame, receiver: Value): Value => {
       const { temporaries } = frame;
       const mark = temporaries.length;
@@ -1262,13 +1277,14 @@ export abstract class CallCompiler extends CompilerCore {
             values.push(reifiedTypes.map((type) => runtimeType(resolved(type), frame)) as unknown as Value);
           for (const value of values) temporaries.push(value);
           const target = isVirtual(symbol) ? runtimeClassOf(dispatch).dispatch(symbol) : symbol;
-          return callFunction(target, frame, receiver, values, callRow);
+          return suspendVersion
+            ? suspendCall(suspendVersion, receiver, values, callRow)
+            : callFunction(target, frame, receiver, values, callRow);
         }
         if (symbol.passesTypeArguments)
           values.push(reifiedTypes.map((type) => runtimeType(resolved(type), frame)) as unknown as Value);
         for (const value of values) temporaries.push(value);
-        if (symbol.isSuspend) return suspendCall(symbol, receiver, values, callRow);
-        return callFunction(symbol, frame, receiver, values, callRow);
+        return callOrSuspend(suspendVersion ?? symbol, frame, receiver, values, callRow);
       } finally {
         temporaries.length = mark;
       }
@@ -1295,7 +1311,29 @@ export abstract class CallCompiler extends CompilerCore {
     };
   }
 
+  /**
+   * Checks where a suspend function is called, and gives the suspend version that a call of an inline function runs
+   * when a lambda it is given suspends.
+   */
+  private checkSuspendCall(
+    context: FunctionContext,
+    symbol: FunctionSymbol,
+    compiledArgs: (Compiled | undefined)[],
+    row: number
+  ): FunctionSymbol | undefined {
+    if (symbol.isSuspend && !this.file.isLibrary) {
+      if (!allowsSuspendCalls(context))
+        this.error(row, `suspend 関数 ${symbol.name} は、suspend 関数かコルーチンの中でだけ呼べます。`);
+      this.checkRestrictedSuspension(context, symbol, row);
+    }
+    const suspends = symbol.isInline && compiledArgs.some((compiled) => compiled?.suspending === true);
+    return suspends ? this.suspendVersionOf(symbol, row) : undefined;
+  }
+
   protected abstract ensureClassInitialized(frame: Frame, cls: ClassSymbol): void;
+
+  /** The suspend version of an inline function, which runs its body as a coroutine's steps. */
+  protected abstract suspendVersionOf(symbol: FunctionSymbol, row: number): FunctionSymbol;
 
   /** A lambda argument, compiled now that the other arguments constrain the types of its parameters. */
   private compileLambdaArgument(
@@ -1583,6 +1621,7 @@ export abstract class CallCompiler extends CompilerCore {
   protected probeContext(context: FunctionContext): FunctionContext {
     const returnTarget = context.isLambda ? context.returnTarget : context;
     const probe = new FunctionContext(context, true, '<probe>', context.info.isLibrary, returnTarget, true);
+    probe.isProbeRoot = true;
     probe.loops = context.loops.map((loop) => ({ ...loop, breaks: [], continues: [], valWrites: new Map() }));
     return probe;
   }

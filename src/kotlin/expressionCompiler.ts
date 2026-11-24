@@ -658,6 +658,11 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   protected readVariable(scope: Scope, context: FunctionContext, variable: VariableSymbol, row: number): Compiled {
+    const read = this.readVariableValue(scope, context, variable, row);
+    return variable.suspendInvocable ? { ...read, suspending: true } : read;
+  }
+
+  private readVariableValue(scope: Scope, context: FunctionContext, variable: VariableSymbol, row: number): Compiled {
     const { backingField, delegateRead, localDelegate } = variable;
     const repr = reprOf(this.core, variable.type);
     if (backingField)
@@ -1947,6 +1952,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     });
     const evals = [...(receiverEval ? [receiverEval] : []), ...contextEvals, ...argumentEvals];
     const target = functionValue.eval;
+    const suspends = type.isSuspend === true || functionValue.suspending === true;
     if (type.isSuspend && !this.file.isLibrary && !allowsSuspendCalls(context))
       this.error(row, 'suspend 関数型の値は、suspend 関数かコルーチンの中でだけ呼べます。');
     return {
@@ -1954,12 +1960,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
       repr: 'ref',
       eval: (frame) => {
         const fn = target(frame) as KObject;
-        if (type.isSuspend) {
+        if (suspends) {
           const values = evals.map((evaluate) => evaluate(frame));
           return new SuspendCall((caller) => {
             const run = fn.suspendFunction;
-            if (!run) throw new Error('A suspend function value without its function');
-            return run(caller as never, values);
+            if (run) return run(caller as never, values);
+            // An inline function's suspend version also receives lambdas that do not suspend.
+            if (!type.isSuspend) return invokedAsStep(caller, fn, values);
+            throw new Error('A suspend function value without its function');
           }) as unknown as Value;
         }
         const { temporaries } = frame;
@@ -2199,6 +2207,11 @@ export abstract class ExpressionCompiler extends CallCompiler {
     isSynthetic = false
   ): Compiled {
     if (expected?.isSuspend) return this.compileSuspendLambda(scope, context, lambda, expected);
+    // An inline function runs its lambda in place, so the lambda may suspend the coroutine that calls the function.
+    if (isInline && expected && allowsSuspendCalls(context)) {
+      const suspending = this.compileSuspendingInlineLambda(scope, context, lambda, expected);
+      if (suspending) return suspending;
+    }
     const lambdaContext = new FunctionContext(
       context,
       true,
@@ -2430,6 +2443,17 @@ export abstract class ExpressionCompiler extends CallCompiler {
     expected: FunctionType
   ): Compiled;
 
+  /**
+   * A lambda passed to an inline function that makes suspend calls, which runs as a coroutine's steps, or `undefined`
+   * when it makes none.
+   */
+  protected abstract compileSuspendingInlineLambda(
+    scope: Scope,
+    context: FunctionContext,
+    lambda: LambdaExpression,
+    expected: FunctionType
+  ): Compiled | undefined;
+
   /** `::x.isInitialized` and `this::x.isInitialized`, which tell whether a `lateinit` property has a value. */
   protected abstract compileIsInitialized(
     scope: Scope,
@@ -2526,4 +2550,10 @@ function staticHolders(cls: ClassSymbol): ClassSymbol[] {
   const holders = cls.isObject ? [cls] : [];
   if (cls.companion) holders.push(cls.companion);
   return holders;
+}
+
+/** A call of a function value that does not suspend, as a coroutine's step. */
+// oxlint-disable-next-line require-yield -- a step that never suspends is still a coroutine's step.
+function* invokedAsStep(caller: Frame, fn: KObject, values: Value[]): Generator<Value, Value, undefined> {
+  return invokeFunctionValue(caller, fn, values);
 }

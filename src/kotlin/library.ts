@@ -21,6 +21,8 @@ export interface Library {
   globalDefaults: CompiledProgram['globalDefaults'];
   initializers: CompiledProgram['initializers'];
   exceptions: ExceptionFactory;
+  /** The compiler that compiled the library, which compiles the suspend versions of its inline functions. */
+  compiler: Compiler;
 }
 
 /** The binary names of the JVM for the library's classes that Kotlin maps to Java's. */
@@ -138,6 +140,7 @@ function compileLibrary(
     globalDefaults: compiler.globals,
     initializers,
     exceptions: exceptionFactory(classes),
+    compiler,
   };
 }
 
@@ -237,6 +240,7 @@ export function compileKotlin(file: KotlinFile, options: CompileOptions = {}): C
   packages.set(packageName, own);
   const compiler = new Compiler(packages, library.core);
   compiler.setGlobalDefaults(library.globalDefaults);
+  compiler.setLibraryCompiler(library.compiler);
   const { contexts, initializers } = compiler.compileFiles(
     [{ file, isLibrary: false }],
     () => {},

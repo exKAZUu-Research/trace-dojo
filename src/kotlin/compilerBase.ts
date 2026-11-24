@@ -47,6 +47,11 @@ export interface Compiled {
   whenNonNull?: Map<string, KType>;
   /** For a condition, the smart casts that hold when it is true and when it is false. */
   narrowing?: { whenTrue: Map<string, KType>; whenFalse: Map<string, KType> };
+  /**
+   * Whether the value is a function whose calls suspend: a lambda passed to an inline function that makes suspend
+   * calls, or a function parameter of an inline function's suspend version.
+   */
+  suspending?: boolean;
 }
 
 /** The classes of the standard library that the compiler gives meaning to. */
@@ -169,6 +174,8 @@ export class FunctionContext {
   /** A discarded probe may retain open types until the enclosing argument reveals their positions. */
   allowOpenCallTypes: boolean;
   invokesExactlyOnce = false;
+  /** Whether the context is a probe's own, which stands in the place of the code it compiles only for its types. */
+  isProbeRoot = false;
   readonly inlineWrites = new Set<VariableSymbol>();
 
   constructor(

@@ -214,6 +214,13 @@ export class FunctionSymbol implements MemberBase {
   isSuspend = false;
   /** Runs a suspend function as a coroutine's step, which suspends where the generator yields. */
   invokeSuspend: SuspendInvoker | undefined;
+  /**
+   * For an inline function, the version that a coroutine calls with lambdas that suspend: a suspend function with
+   * the same body, whose calls of its function parameters suspend where the lambdas do.
+   */
+  suspendVersion: FunctionSymbol | undefined;
+  /** Whether the function is the suspend version of an inline function. */
+  isSuspendVersion = false;
   /** Whether the function is `tailrec`, whose calls of itself in tail position reuse its frame. */
   isTailrec = false;
   resolvesByLambdaResult = false;
@@ -303,6 +310,11 @@ export class VariableSymbol {
   isLateinit = false;
   /** Whether the variable is a context parameter, which calls needing a context of its type receive. */
   isContextParameter = false;
+  /**
+   * Whether the variable is a function parameter of an inline function's suspend version, whose calls suspend when
+   * the lambda passed suspends.
+   */
+  suspendInvocable = false;
   isParameter = false;
 
   constructor(

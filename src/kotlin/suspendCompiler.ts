@@ -15,8 +15,18 @@ import { returnRepr } from './dispatch';
 import { LocalCompiler } from './localCompiler';
 import { framedInstanceTest } from './reified';
 import { type Frame, KotlinThrow, LoopSignal, MISSING, ReturnSignal, SuspendCall, type Suspension } from './runtime';
+import {
+  assignedForm,
+  forAsWhile,
+  hiddenName,
+  isShortCircuit,
+  propertyStatement,
+  safeCallAsIf,
+  whenAsIf,
+} from './suspendRewrites';
 import type { ClassSymbol, FunctionSymbol } from './symbols';
-import { type FunctionType, isNonNullClass, type KType, resolved } from './types';
+import { commonSupertype } from './typeRelations';
+import { type FunctionType, hasOpenVariables, isNonNullClass, isNothing, type KType, NOTHING, resolved } from './types';
 import { KObject, UNIT, type Value } from './values';
 
 /** A step of a coroutine: what a statement or an expression does, suspending where a suspend call it makes suspends. */
@@ -39,12 +49,6 @@ function synchronous(evaluate: (frame: Frame) => Value): Gen {
   return function* (frame) {
     return evaluate(frame);
   };
-}
-
-let hiddenNames = 0;
-
-function hiddenName(what: string): string {
-  return `\0${what}${hiddenNames++}`;
 }
 
 /**
@@ -124,30 +128,43 @@ export abstract class SuspendCompiler extends LocalCompiler {
   }
 
   // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity -- an inline lambda and a suspend lambda differ only in a few of the parts a lambda has.
   protected compileSuspendLambda(
     scope: Scope,
     context: FunctionContext,
     lambda: LambdaExpression,
-    expected: FunctionType
+    expected: FunctionType,
+    inline = false
   ): Compiled {
-    const lambdaContext = new FunctionContext(context, true, 'lambda', context.info.isLibrary, undefined);
+    // An inline lambda's `return` leaves the function around it, and its `break` the loops around it.
+    const returnTarget = inline ? (context.returnTarget ?? (context.isLambda ? undefined : context)) : undefined;
+    const lambdaContext = new FunctionContext(context, true, 'lambda', context.info.isLibrary, returnTarget);
     lambdaContext.isSuspend = true;
+    lambdaContext.inlineLambda = inline;
+    if (inline) lambdaContext.loops = [...context.loops];
     lambdaContext.label = lambda.label;
-    lambdaContext.lambdaResult = { expected: undefined, returnsUnit: true, returned: [] };
     const lambdaScope = new Scope(scope, lambdaContext);
     const params = this.lambdaParameters(scope, lambda, expected.params);
     const receiverType = expected.receiver;
     if (receiverType) lambdaScope.receiver = new ReceiverSymbol(receiverType, lambdaContext, undefined, lambda.label);
-    lambdaContext.restrictedScope = this.restrictedScopeOf(receiverType);
+    lambdaContext.restrictedScope = inline ? suspendScopeOf(context) : this.restrictedScopeOf(receiverType);
     const outerFlow = this.flow;
     this.flow = outerFlow.copy();
     this.forgetAssignedIn(scope, lambda.statements);
     this.contextVariables(lambdaScope, lambdaContext, expected.contextTypes ?? [], lambda.row);
-    for (const param of params) {
+    const paramReprs = params.map((param) => {
       const variable = this.newParameter(lambdaScope, lambdaContext, param.name, param.type, param.row);
       this.flow.assigned.add(variable);
-    }
-    const returnsUnit = isNonNullClass(resolved(expected.returnType), this.core.unit);
+      return reprOf(this.core, variable.type);
+    });
+    const expectedReturn = resolved(expected.returnType);
+    const returnsUnit = isNonNullClass(expectedReturn, this.core.unit);
+    // `return@label value` ends the lambda with the value, as its last expression would.
+    lambdaContext.lambdaResult = {
+      expected: hasOpenVariables(expectedReturn) ? undefined : expectedReturn,
+      returnsUnit,
+      returned: [],
+    };
     let body: Gen;
     let resultType: KType = this.unitType;
     try {
@@ -161,7 +178,9 @@ export abstract class SuspendCompiler extends LocalCompiler {
           last.expression,
           resolved(expected.returnType)
         );
-        resultType = value.type;
+        const { returned } = lambdaContext.lambdaResult;
+        resultType =
+          returned.length === 0 ? value.type : commonSupertype([value.type, ...returned.map(({ type }) => type)]);
         const convert = this.reprConverter(value.repr, 'ref');
         body = function* (frame) {
           yield* before(frame);
@@ -180,6 +199,7 @@ export abstract class SuspendCompiler extends LocalCompiler {
     const build = this.captureBuilder(context, lambdaContext);
     const { info } = lambdaContext;
     const hasReceiver = receiverType !== undefined;
+    const unboxers = paramReprs.map((repr) => this.reprConverter('ref', repr));
     const type: FunctionType = {
       kind: 'function',
       receiver: receiverType,
@@ -197,11 +217,27 @@ export abstract class SuspendCompiler extends LocalCompiler {
         const env = build(frame);
         return suspendLambdaValue(functionClass, env, (caller, args) => {
           const receiver = hasReceiver ? args[0] : undefined;
-          const values = hasReceiver ? args.slice(1) : args;
+          // Calls pass boxed values, which parameters of primitive types hold unboxed, after the context arguments.
+          const contexts = expected.contextTypes?.length ?? 0;
+          const values = (hasReceiver ? args.slice(1) : args).map((value, index) =>
+            index < contexts ? value : unboxers[index - contexts](caller, value)
+          );
           return caller.runtime.callSuspend(info, caller, env, receiver, values, undefined, body, frame);
         });
       },
     };
+  }
+
+  protected compileSuspendingInlineLambda(
+    scope: Scope,
+    context: FunctionContext,
+    lambda: LambdaExpression,
+    expected: FunctionType
+  ): Compiled | undefined {
+    if (!this.mayYield(scope, lambda.statements)) return undefined;
+    const compiled = this.compileSuspendLambda(scope, context, lambda, { ...expected, isSuspend: true }, true);
+    // Its type is the inline function's parameter type, which calls resolve against.
+    return { ...compiled, type: { ...(compiled.type as FunctionType), isSuspend: undefined }, suspending: true };
   }
 
   /** The class of a sequence builder's scope that a suspend context's receiver is, which restricts its suspend calls. */
@@ -232,6 +268,7 @@ export abstract class SuspendCompiler extends LocalCompiler {
   }
 
   // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity -- one case per kind of statement that suspends in its own way.
   private compileSuspendStatement(scope: Scope, context: FunctionContext, statement: Statement): Gen {
     if (!this.mayYield(scope, statement)) {
       const exec = this.compileStatement(scope, context, statement);
@@ -242,11 +279,26 @@ export abstract class SuspendCompiler extends LocalCompiler {
     }
     switch (statement.kind) {
       case 'expressionStatement': {
-        return this.compileSuspendValue(scope, context, statement.expression, undefined).gen;
+        const value = this.compileSuspendValue(scope, context, statement.expression, undefined, false);
+        // A statement whose value never comes, as a call of an inline function whose lambda returns, ends the code.
+        if (isNothing(resolved(value.type))) this.flow.isDead = true;
+        return value.gen;
       }
       case 'property': {
-        if (!statement.initializer || statement.delegate || statement.getter || statement.setter)
-          return this.unsupportedSuspension(statement.row);
+        if (statement.delegate) {
+          // `val x by f()` makes its delegate first, as kotlinc does, which then gives the variable its values.
+          const held = hiddenName('delegate');
+          return this.compileSuspendStatements(
+            scope,
+            context,
+            [
+              propertyStatement(statement.row, held, statement.delegate),
+              { ...statement, delegate: { kind: 'name', row: statement.row, name: held } },
+            ],
+            true
+          );
+        }
+        if (!statement.initializer) return this.unsupportedSuspension(statement.row);
         const declared = statement.type ? this.resolveType(scope, statement.type) : undefined;
         const value = this.compileSuspendValue(scope, context, statement.initializer, declared);
         const type = declared ?? resolved(value.type);
@@ -262,7 +314,7 @@ export abstract class SuspendCompiler extends LocalCompiler {
       }
       case 'assignment': {
         const variable = statement.target.kind === 'name' ? this.findVariable(scope, statement.target.name) : undefined;
-        if (statement.operator !== '=' || !variable) return this.unsupportedSuspension(statement.row);
+        if (statement.operator !== '=' || !variable) return this.compileSuspendAssignment(scope, context, statement);
         if (!variable.isVar && this.flow.maybeAssigned.has(variable))
           this.error(statement.row, `val で宣言した ${variable.name} には、再び代入できません。`);
         const value = this.compileSuspendValue(scope, context, statement.value, variable.type);
@@ -315,7 +367,12 @@ export abstract class SuspendCompiler extends LocalCompiler {
     };
     const isDoWhile = statement.kind === 'doWhile';
     const bodyScope = new Scope(scope, context);
-    let condition = isDoWhile ? undefined : this.compileCondition(scope, context, statement.condition).compiled.eval;
+    const conditionYields = this.mayYield(scope, statement.condition);
+    const compileTest = (testScope: Scope): Gen =>
+      conditionYields
+        ? this.compileSuspendValue(testScope, context, statement.condition, this.core.boolean.type).gen
+        : synchronous(this.compileCondition(testScope, context, statement.condition).compiled.eval);
+    let condition = isDoWhile ? undefined : compileTest(scope);
     context.loops.push(loop);
     let body: Gen;
     try {
@@ -323,13 +380,14 @@ export abstract class SuspendCompiler extends LocalCompiler {
     } finally {
       context.loops.pop();
     }
-    if (isDoWhile) condition = this.compileCondition(bodyScope, context, statement.condition).compiled.eval;
+    if (isDoWhile) condition = compileTest(bodyScope);
     this.flow = Flow.merge([before, this.flow, ...loop.breaks]);
-    const test = condition as (frame: Frame) => Value;
+    const test = condition as Gen;
     const { identity } = loop;
     return function* (frame) {
-      for (let first = true; ; first = false) {
-        if ((!isDoWhile || !first) && !(test(frame) as boolean)) return UNIT;
+      // `do { } while (c)` tests only after each run of its body, `while (c) { }` only before.
+      for (;;) {
+        if (!isDoWhile && !((yield* test(frame)) as boolean)) return UNIT;
         frame.runtime.spend();
         try {
           yield* body(frame);
@@ -337,32 +395,58 @@ export abstract class SuspendCompiler extends LocalCompiler {
           if (!(error instanceof LoopSignal) || error.loop !== identity) throw error;
           if (error.isBreak) return UNIT;
         }
-        if (isDoWhile && !(test(frame) as boolean)) return UNIT;
-        first = false;
+        if (isDoWhile && !((yield* test(frame)) as boolean)) return UNIT;
       }
     };
   }
 
   // Expressions.
 
-  /** An expression's value, which a suspend call that is the expression, or the result of its branches, may give. */
+  /**
+   * An expression's value, which a suspend call that is the expression, or the result of its branches, may give. An
+   * expression whose value is not used (`asValue` false) runs its branches as statements.
+   */
+  // code-gauge-allow functionCognitiveComplexity -- one case per kind of expression that suspends in its own way.
+  // code-gauge-allow functionNcss -- one case per kind of expression that suspends in its own way.
   private compileSuspendValue(
     scope: Scope,
     context: FunctionContext,
     expression: Expression,
-    expected: KType | undefined
-  ): { gen: Gen; type: KType; repr: Compiled['repr'] } {
+    expected: KType | undefined,
+    asValue = true
+  ): SuspendValue {
     switch (expression.kind) {
       case 'parenthesized': {
-        return this.compileSuspendValue(scope, context, expression.expression, expected);
+        return this.compileSuspendValue(scope, context, expression.expression, expected, asValue);
       }
       case 'call': {
-        const looping = this.loopingCall(scope, expression);
+        const looping = asValue ? undefined : this.loopingCall(scope, expression);
         if (looping)
           return { gen: this.compileSuspendStatements(scope, context, looping), type: this.unitType, repr: 'ref' };
+        if (this.isYieldingSafeCall(scope, expression))
+          return this.compileSuspendValue(scope, context, safeCallAsIf(expression), expected, asValue);
+        return this.compileHoisted(scope, context, expression, expected);
+      }
+      case 'binary': {
+        if (isShortCircuit(expression) && this.mayYield(scope, expression.right))
+          return this.compileBranchValue(scope, context, expression, expected);
         return this.compileHoisted(scope, context, expression, expected);
       }
       case 'if': {
+        if (asValue && expression.elseBranch) return this.compileBranchValue(scope, context, expression, expected);
+        if (this.mayYield(scope, expression.condition)) {
+          // A condition that suspends gives its value first, without the smart casts a plain condition gives.
+          const held = hiddenName('condition');
+          const statements = [
+            propertyStatement(expression.row, held, expression.condition),
+            {
+              kind: 'expressionStatement' as const,
+              row: expression.row,
+              expression: { ...expression, condition: { kind: 'name' as const, row: expression.row, name: held } },
+            },
+          ];
+          return { gen: this.compileSuspendStatements(scope, context, statements), type: this.unitType, repr: 'ref' };
+        }
         const condition = this.compileCondition(scope, context, expression.condition);
         const before = this.flow;
         this.flow = this.withNarrowing(before, condition.whenTrue);
@@ -383,9 +467,11 @@ export abstract class SuspendCompiler extends LocalCompiler {
         };
       }
       case 'when': {
-        return this.compileSuspendValue(scope, context, whenAsIf(expression), expected);
+        if (asValue) return this.compileBranchValue(scope, context, expression, expected);
+        return this.compileSuspendValue(scope, context, whenAsIf(expression), expected, false);
       }
       case 'try': {
+        if (asValue) return this.compileBranchValue(scope, context, expression, expected);
         return this.compileSuspendTry(scope, context, expression);
       }
       case 'return': {
@@ -398,6 +484,114 @@ export abstract class SuspendCompiler extends LocalCompiler {
   }
 
   /**
+   * The value of an `if`, `when`, `try`, or short-circuit expression whose branches suspend: its type is the one the
+   * expression has, and its branches run as statements that end by assigning their values to a variable it reads.
+   */
+  private compileBranchValue(
+    scope: Scope,
+    context: FunctionContext,
+    expression: Expression,
+    expected: KType | undefined
+  ): SuspendValue {
+    let type: KType = this.unitType;
+    // The expression's type, and the errors kotlinc reports for it, such as a `when` that covers too little.
+    const error = this.probeApplicability(
+      context,
+      (probe) => {
+        type = this.compileExpression(scope, probe, expression, expected).type;
+      },
+      true
+    );
+    if (error) throw error;
+    const holderScope = new Scope(scope, context);
+    const name = hiddenName('value');
+    const variable = this.newVariable(holderScope, context, name, type, true, expression.row);
+    const target: Expression = { kind: 'name', row: expression.row, name };
+    const statements = assignedForm(expression, (value) => ({
+      kind: 'assignment',
+      row: value.row,
+      operator: '=',
+      target,
+      value,
+    }));
+    const run = this.compileSuspendStatements(holderScope, context, statements, true);
+    this.flow.assigned.add(variable);
+    const { read } = this.variableAccess(context, variable);
+    return {
+      *gen(frame) {
+        yield* run(frame);
+        return read(frame);
+      },
+      type,
+      repr: reprOf(this.core, type),
+    };
+  }
+
+  /**
+   * An assignment whose value or target suspends, as the statements that give its target's receiver and indices,
+   * then its value, to variables, in kotlinc's order, before the assignment itself.
+   */
+  private compileSuspendAssignment(
+    scope: Scope,
+    context: FunctionContext,
+    statement: Extract<Statement, { kind: 'assignment' }>
+  ): Gen {
+    const { row } = statement;
+    const before: Statement[] = [];
+    const held = (expression: Expression): Expression => {
+      if (expression.kind === 'this' || expression.kind === 'super') return expression;
+      const name = hiddenName('part');
+      before.push(propertyStatement(expression.row, name, expression));
+      return { kind: 'name', row: expression.row, name };
+    };
+    let { target } = statement;
+    if (target.kind === 'member') {
+      if (target.isSafe) {
+        // `a?.p = f()` runs `f()` only when `a` is not null.
+        const receiver = hiddenName('receiver');
+        const assignment: Statement = {
+          ...statement,
+          target: { ...target, receiver: { kind: 'name', row, name: receiver }, isSafe: false },
+        };
+        return this.compileSuspendStatements(scope, context, [
+          propertyStatement(row, receiver, target.receiver),
+          {
+            kind: 'expressionStatement',
+            row,
+            expression: {
+              kind: 'if',
+              row,
+              condition: {
+                kind: 'binary',
+                row,
+                operator: '!=',
+                left: { kind: 'name', row, name: receiver },
+                right: { kind: 'null', row },
+              },
+              thenBranch: { row, endRow: row, isBraced: true, statements: [assignment] },
+              elseBranch: undefined,
+            },
+          },
+        ]);
+      }
+      target = { ...target, receiver: held(target.receiver) };
+    } else if (target.kind === 'index') {
+      target = { ...target, receiver: held(target.receiver), indices: target.indices.map(held) };
+    }
+    const value = held(statement.value);
+    return this.compileSuspendStatements(scope, context, [...before, { ...statement, target, value }]);
+  }
+
+  /** Whether a call is `a?.f(x)` whose arguments suspend, which run only when `a` is not null. */
+  private isYieldingSafeCall(scope: Scope, call: Extract<Expression, { kind: 'call' }>): boolean {
+    return (
+      call.callee.kind === 'member' &&
+      call.callee.isSafe &&
+      (this.mayYield(scope, call.args) || this.mayYield(scope, call.trailingLambda))
+    );
+  }
+
+  /**
    * An expression whose parts make suspend calls, which run first, each into a variable that the expression then
    * reads, so that only the expression itself, when it is a suspend call, suspends as it ends.
    */
@@ -406,7 +600,7 @@ export abstract class SuspendCompiler extends LocalCompiler {
     context: FunctionContext,
     expression: Expression,
     expected: KType | undefined
-  ): { gen: Gen; type: KType; repr: Compiled['repr'] } {
+  ): SuspendValue {
     const before: Statement[] = [];
     const rewritten = this.hasNestedSuspension(scope, expression)
       ? this.hoistParts(scope, expression, before)
@@ -425,67 +619,95 @@ export abstract class SuspendCompiler extends LocalCompiler {
     };
   }
 
-  /** An expression with the suspend calls in its parts replaced by variables that `before` assigns, in order. */
+  /**
+   * An expression with the suspend calls in its parts replaced by variables that `before` assigns. Parts run in
+   * kotlinc's order: a part before one that suspends, which may have effects or read what the suspend call changes,
+   * runs into a variable first as well.
+   */
   // code-gauge-allow functionCognitiveComplexity -- one case per kind of expression whose parts may suspend.
-  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
+  // code-gauge-allow functionNcss -- one case per kind of expression whose parts may suspend.
   private hoistParts(scope: Scope, expression: Expression, before: Statement[]): Expression {
+    const hold = (part: Expression): Expression => {
+      const name = hiddenName('suspended');
+      before.push(propertyStatement(part.row, name, part));
+      return { kind: 'name', row: part.row, name };
+    };
     const hoist = (part: Expression): Expression => {
       if (!this.mayYield(scope, part)) return part;
+      // A branch that suspends gives its value through its own statements.
+      if (this.isBranchValue(scope, part)) return hold(part);
       const inner = this.hoistParts(scope, part, before);
-      if (part.kind !== 'call' || !this.isSuspendCallee(scope, part.callee)) return inner;
-      const name = hiddenName('suspended');
-      before.push(propertyStatement(part.row, name, inner));
-      return { kind: 'name', row: part.row, name };
+      return this.isSuspendingCall(scope, part) ? hold(inner) : inner;
+    };
+    const inOrder = (parts: Expression[]): Expression[] => {
+      const last = parts.findLastIndex((part) => this.mayYield(scope, part));
+      return parts.map((part, index) => {
+        if (index > last) return part;
+        if (index < last && !this.mayYield(scope, part) && hasEffects(part)) return hold(part);
+        return hoist(part);
+      });
     };
     switch (expression.kind) {
       case 'call': {
-        const callee =
-          expression.callee.kind === 'member'
-            ? { ...expression.callee, receiver: hoist(expression.callee.receiver) }
-            : expression.callee;
-        if (this.mayYield(scope, expression.trailingLambda)) return this.unsupportedSuspension(expression.row);
-        return {
-          ...expression,
-          callee,
-          args: expression.args.map((argument) => ({ ...argument, value: hoist(argument.value) })),
-        };
+        return withCallParts(expression, inOrder);
       }
       case 'member': {
         return { ...expression, receiver: hoist(expression.receiver) };
       }
-      case 'binary': {
-        if (['&&', '||', '?:'].includes(expression.operator) && this.mayYield(scope, expression.right))
-          return this.unsupportedSuspension(expression.row);
-        return { ...expression, left: hoist(expression.left), right: hoist(expression.right) };
-      }
+      case 'binary':
       case 'infix':
       case 'in': {
-        return { ...expression, left: hoist(expression.left), right: hoist(expression.right) };
+        // A right side that suspends runs only when the left side asks; a left side alone runs first anyway.
+        if (isShortCircuit(expression) && this.mayYield(scope, expression.right)) return hold(expression);
+        const [left, right] = inOrder([expression.left, expression.right]);
+        return { ...expression, left, right } as Expression;
       }
-      case 'prefix': {
-        return { ...expression, operand: hoist(expression.operand) };
-      }
+      case 'prefix':
       case 'postfix':
       case 'is':
       case 'as': {
         return { ...expression, operand: hoist(expression.operand) } as Expression;
       }
+      case 'throw': {
+        return { ...expression, value: hoist(expression.value) };
+      }
       case 'index': {
-        return { ...expression, receiver: hoist(expression.receiver), indices: expression.indices.map(hoist) };
+        const [receiver, ...indices] = inOrder([expression.receiver, ...expression.indices]);
+        return { ...expression, receiver: receiver as Expression, indices };
       }
       case 'string': {
-        return {
-          ...expression,
-          parts: expression.parts.map((part) => (typeof part === 'string' ? part : hoist(part))),
-        };
+        return withTemplateParts(expression, inOrder);
+      }
+      case 'collectionLiteral': {
+        return { ...expression, elements: inOrder(expression.elements) };
       }
       case 'parenthesized': {
         return { ...expression, expression: hoist(expression.expression) };
+      }
+      case 'if':
+      case 'when':
+      case 'try': {
+        return hold(expression);
       }
       default: {
         return this.unsupportedSuspension(expression.row);
       }
     }
+  }
+
+  /** Whether an expression is a call that suspends: of a suspend function, or of a suspend function value. */
+  private isSuspendingCall(scope: Scope, expression: Expression): boolean {
+    return (
+      expression.kind === 'call' &&
+      (this.isSuspendCallee(scope, expression.callee) || this.passesSuspendingFunction(scope, expression))
+    );
+  }
+
+  /** Whether an expression gives its value through branches, some of which suspend. */
+  private isBranchValue(scope: Scope, expression: Expression): boolean {
+    if (expression.kind === 'if' || expression.kind === 'when' || expression.kind === 'try') return true;
+    if (isShortCircuit(expression)) return this.mayYield(scope, expression.right);
+    return expression.kind === 'call' && this.isYieldingSafeCall(scope, expression);
   }
 
   private compileSuspendTry(
@@ -530,10 +752,20 @@ export abstract class SuspendCompiler extends LocalCompiler {
     scope: Scope,
     context: FunctionContext,
     expression: Extract<Expression, { kind: 'return' }>
-  ): { gen: Gen; type: KType; repr: 'ref' } {
+  ): SuspendValue {
+    if (expression.label !== undefined && expression.value) {
+      // `return@label f()` gives its value first, and then returns as any `return@label` does.
+      const { row } = expression;
+      const held = hiddenName('returned');
+      const gen = this.compileSuspendStatements(scope, context, [
+        propertyStatement(row, held, expression.value),
+        { kind: 'expressionStatement', row, expression: { ...expression, value: { kind: 'name', row, name: held } } },
+      ]);
+      this.flow.isDead = true;
+      return { gen, type: NOTHING, repr: 'ref' };
+    }
     const target = context.isLambda ? context.returnTarget : context;
-    if (!target || !expression.value || expression.label !== undefined)
-      return this.unsupportedSuspension(expression.row);
+    if (!target || !expression.value) return this.unsupportedSuspension(expression.row);
     const returnType = target.returnType;
     const value = this.compileSuspendValue(scope, context, expression.value, returnType);
     const to = target.returnRepr ?? reprOf(this.core, returnType ?? value.type);
@@ -544,7 +776,7 @@ export abstract class SuspendCompiler extends LocalCompiler {
       *gen(frame) {
         throw new ReturnSignal(frameOf(frame), convert(frame, yield* value.gen(frame)));
       },
-      type: this.unitType,
+      type: NOTHING,
       repr: 'ref',
     };
   }
@@ -567,18 +799,32 @@ export abstract class SuspendCompiler extends LocalCompiler {
     const { kind } = node as { kind?: string };
     if (kind === 'call') {
       const call = node as Extract<Expression, { kind: 'call' }>;
-      if (this.isSuspendCallee(scope, call.callee)) return true;
-      if (call.trailingLambda && isLoopingCall(call) && this.mayYield(scope, call.trailingLambda.statements))
-        return true;
+      if (this.isSuspendCallee(scope, call.callee) || this.passesSuspendingFunction(scope, call)) return true;
     }
     if (kind !== undefined && OPAQUE_KINDS.has(kind)) return false;
     return Object.values(node).some((child) => this.mayYield(scope, child));
+  }
+
+  /**
+   * Whether a call passes a function that suspends: a lambda that makes suspend calls, or a function parameter of an
+   * inline function's suspend version. An inline function then runs as its suspend version.
+   */
+  private passesSuspendingFunction(scope: Scope, call: Extract<Expression, { kind: 'call' }>): boolean {
+    const values = [
+      ...call.args.map((argument) => argument.value),
+      ...(call.trailingLambda ? [call.trailingLambda] : []),
+    ];
+    return values.some((value) => {
+      if (value.kind === 'lambda') return this.mayYield(scope, value.statements);
+      return value.kind === 'name' && this.findVariable(scope, value.name)?.suspendInvocable === true;
+    });
   }
 
   private isSuspendCallee(scope: Scope, callee: Expression): boolean {
     const name = callee.kind === 'name' || callee.kind === 'member' ? callee.name : undefined;
     if (name === undefined) return false;
     const variable = callee.kind === 'name' ? this.findVariable(scope, name) : undefined;
+    if (variable?.suspendInvocable) return true;
     if (variable) {
       const type = resolved(variable.type);
       return type.kind === 'function' && type.isSuspend === true;
@@ -626,6 +872,69 @@ export abstract class SuspendCompiler extends LocalCompiler {
 
 type Eval = (frame: Frame) => Value;
 
+/** A call with its receiver and arguments, which run in that order, replaced by what `inOrder` gives for them. */
+function withCallParts(
+  call: Extract<Expression, { kind: 'call' }>,
+  inOrder: (parts: Expression[]) => Expression[]
+): Expression {
+  const { callee } = call;
+  const lambda = call.trailingLambda ? [call.trailingLambda] : [];
+  const receiver = callee.kind === 'member' ? [callee.receiver] : [];
+  const parts = inOrder([...receiver, ...call.args.map((argument) => argument.value), ...lambda]);
+  const args = call.args.map((argument, index) => ({
+    ...argument,
+    value: parts[receiver.length + index] as Expression,
+  }));
+  return {
+    ...call,
+    callee: callee.kind === 'member' ? { ...callee, receiver: parts[0] as Expression } : callee,
+    args,
+  };
+}
+
+/** A string template with the expressions it shows replaced by what `inOrder` gives for them. */
+function withTemplateParts(
+  template: Extract<Expression, { kind: 'string' }>,
+  inOrder: (parts: Expression[]) => Expression[]
+): Expression {
+  const held = inOrder(template.parts.filter((part) => typeof part !== 'string'));
+  let next = 0;
+  return {
+    ...template,
+    parts: template.parts.map((part) => (typeof part === 'string' ? part : (held[next++] as Expression))),
+  };
+}
+
+/** What a step gives: the value of an expression that may suspend, with its type and representation. */
+interface SuspendValue {
+  gen: Gen;
+  type: KType;
+  repr: Compiled['repr'];
+}
+
+/**
+ * Whether running an expression may have effects or read what a later suspend call changes, so that it has to run
+ * before that call: a call, an assignment, or an increment, outside the lambdas it passes.
+ */
+function hasEffects(node: unknown): boolean {
+  if (!node || typeof node !== 'object') return false;
+  if (Array.isArray(node)) return node.some(hasEffects);
+  const { kind } = node as { kind?: string };
+  if (kind === 'call' || kind === 'postfix' || kind === 'index') return true;
+  if (kind === 'prefix' && ['++', '--'].includes((node as { operator?: string }).operator ?? '')) return true;
+  if (kind !== undefined && OPAQUE_KINDS.has(kind)) return false;
+  return Object.values(node).some(hasEffects);
+}
+
+/** The scope class that restricts the suspend calls of the coroutine an inline lambda runs in. */
+function suspendScopeOf(context: FunctionContext): ClassSymbol | undefined {
+  for (let current: FunctionContext | undefined = context; current; current = current.parent) {
+    if (current.isSuspend) return current.restrictedScope;
+    if (!current.isLambda || !current.inlineLambda) return undefined;
+  }
+  return undefined;
+}
+
 /** Fills the defaults of the arguments a call leaves out before a function's body runs. */
 function withDefaults(defaults: (Eval | undefined)[], gen: Gen): Gen {
   return function* (frame) {
@@ -645,124 +954,6 @@ function suspendOnly(name: string): NonNullable<FunctionSymbol['invoke']> {
 function isLoopingCall(call: Extract<Expression, { kind: 'call' }>): boolean {
   const name = call.callee.kind === 'name' || call.callee.kind === 'member' ? call.callee.name : undefined;
   return name !== undefined && LOOPING_CALLS.has(name) && call.args.length <= 1;
-}
-
-function propertyStatement(row: number, name: string, initializer: Expression): Statement {
-  return {
-    kind: 'property',
-    row,
-    modifiers: { keywords: new Set(), annotations: [] },
-    isVar: false,
-    name,
-    type: undefined,
-    receiver: undefined,
-    typeParameters: [],
-    initializer,
-    delegate: undefined,
-    getter: undefined,
-    setter: undefined,
-  };
-}
-
-/** `for (x in xs) body` as `val it = xs.iterator(); while (it.hasNext()) { val x = it.next(); body }`. */
-function forAsWhile(statement: Extract<Statement, { kind: 'for' }>): Statement[] {
-  const { row } = statement;
-  const iterator = hiddenName('iterator');
-  const read: Expression = { kind: 'name', row, name: iterator };
-  const call = (receiver: Expression, name: string): Expression => ({
-    kind: 'call',
-    row,
-    callee: { kind: 'member', row, receiver, name, isSafe: false },
-    typeArgs: [],
-    args: [],
-    trailingLambda: undefined,
-  });
-  const { variable } = statement;
-  const element: Statement =
-    'names' in variable
-      ? {
-          kind: 'destructuring',
-          row,
-          modifiers: { keywords: new Set(), annotations: [] },
-          isVar: false,
-          names: variable.names,
-          initializer: call(read, 'next'),
-        }
-      : ({ ...propertyStatement(row, variable.name, call(read, 'next')), type: variable.type } as Statement);
-  return [
-    propertyStatement(row, iterator, call(statement.iterable, 'iterator')),
-    {
-      kind: 'while',
-      row,
-      label: statement.label,
-      condition: call(read, 'hasNext'),
-      body: { ...statement.body, statements: [element, ...statement.body.statements] },
-    },
-  ];
-}
-
-/** `when` as the `if` chain it stands for, testing a subject held in a variable. */
-function whenAsIf(expression: Extract<Expression, { kind: 'when' }>): Expression {
-  const { row } = expression;
-  const subjectName = hiddenName('subject');
-  const subject: Expression = { kind: 'name', row, name: subjectName };
-  const test = (
-    condition: Extract<Expression, { kind: 'when' }>['entries'][number]['conditions'][number]
-  ): Expression => {
-    if (!expression.subject) return (condition as { expression: Expression }).expression;
-    switch (condition.kind) {
-      case 'is': {
-        return { kind: 'is', row: condition.row, negated: condition.negated, operand: subject, type: condition.type };
-      }
-      case 'in': {
-        return {
-          kind: 'in',
-          row: condition.row,
-          negated: condition.negated,
-          left: subject,
-          right: condition.expression,
-        };
-      }
-      default: {
-        return { kind: 'binary', row: condition.row, operator: '==', left: subject, right: condition.expression };
-      }
-    }
-  };
-  let chain: Block | undefined;
-  for (const entry of expression.entries.toReversed()) {
-    if (entry.conditions.length === 0 && !entry.guard) {
-      chain = entry.body;
-      continue;
-    }
-    const [first, ...rest] = entry.conditions.map(test);
-    let condition: Expression = first;
-    for (const right of rest) condition = { kind: 'binary', row: entry.row, operator: '||', left: condition, right };
-    if (entry.guard)
-      condition = { kind: 'binary', row: entry.row, operator: '&&', left: condition, right: entry.guard };
-    chain = {
-      row: entry.row,
-      endRow: entry.body.endRow,
-      isBraced: true,
-      statements: [
-        {
-          kind: 'expressionStatement',
-          row: entry.row,
-          expression: { kind: 'if', row: entry.row, condition, thenBranch: entry.body, elseBranch: chain },
-        },
-      ],
-    };
-  }
-  const statements: Statement[] = [
-    ...(expression.subject ? [propertyStatement(row, subjectName, expression.subject)] : []),
-    ...(chain?.statements ?? []),
-  ];
-  return {
-    kind: 'if',
-    row,
-    condition: { kind: 'boolean', row, value: true },
-    thenBranch: { row, endRow: row, isBraced: true, statements },
-    elseBranch: undefined,
-  };
 }
 
 /** A suspend lambda's value, which a coroutine calls through `suspendFunction`. */

@@ -284,6 +284,10 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         for (const [index, param] of reified.entries()) setReifiedAccess(param, { info: context.info, slot, index });
         symbol.passesTypeArguments = true;
       }
+      if (symbol.isSuspendVersion) {
+        for (const [index, variable] of variables.entries())
+          variable.suspendInvocable = resolved(symbol.params[index].type).kind === 'function';
+      }
       const defaults = this.compileParameterDefaults(decl.params, symbol.params, variables, scope, context);
       symbol.defaultsInfo = context.info;
       if (!decl.body) {
@@ -324,6 +328,34 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       this.finishFunction(symbol, context, defaults, body);
       entry.state = 'done';
     });
+  }
+
+  /** The compiler of the standard library, whose declarations a program's compiler has no entries for. */
+  private libraryCompiler: BodyCompiler | undefined;
+
+  setLibraryCompiler(compiler: BodyCompiler): void {
+    this.libraryCompiler = compiler;
+  }
+
+  protected suspendVersionOf(symbol: FunctionSymbol, row: number): FunctionSymbol {
+    if (symbol.suspendVersion) return symbol.suspendVersion;
+    const entry = this.entryOfFunction.get(symbol);
+    if (!entry && this.libraryCompiler) return this.libraryCompiler.suspendVersionOf(symbol, row);
+    if (!entry?.decl.body)
+      return this.unavailable(
+        row,
+        `suspend 関数を呼ぶラムダを、関数の中で宣言したインライン関数 ${symbol.name} に渡すこと`
+      );
+    // The version shares the declaration and the symbol's types, with its own implementation.
+    const version = Object.assign(Object.create(Object.getPrototypeOf(symbol) as object) as FunctionSymbol, symbol);
+    version.isSuspend = true;
+    version.isSuspendVersion = true;
+    version.invoke = undefined;
+    version.invokeSuspend = undefined;
+    version.suspendVersion = undefined;
+    symbol.suspendVersion = version;
+    this.ensureFunctionCompiled({ ...entry, symbol: version, state: 'pending' });
+    return version;
   }
 
   /** Compiles a suspend function's body as a coroutine's steps, which its `invokeSuspend` runs. */

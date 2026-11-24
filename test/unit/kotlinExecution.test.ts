@@ -6349,6 +6349,72 @@ test.each([
   expect(executeProgram('kotlin', source).kind === 'compileError').toBe(!compiles);
 });
 
+const SUSPEND_LOG = `var log = ""
+suspend fun f(x: Int): Int { log += "f$x "; return x }
+fun g(x: Int): Int { log += "g$x "; return x }
+`;
+
+test.each([
+  ['an operand before a suspend call', 'println(g(1) + f(2))', '3\ng1 f2 \n'],
+  [
+    'indexed and compound assignments',
+    'val a = intArrayOf(0, 0)\n    a[g(1)] = f(5)\n    a[0] += f(3)\n    println(a.toList())',
+    '[3, 5]\ng1 f5 f3 \n',
+  ],
+  ['short-circuit operators', 'println(f(1) > 0 && f(2) > 5 || f(3) == 3)', 'true\nf1 f2 f3 \n'],
+  [
+    'when with a subject variable and a value',
+    'when (val r = f(2)) { 2 -> println("two $r") else -> println("other") }\n    println(when (f(3)) { 3 -> f(30) else -> 0 })',
+    'two 2\n30\nf2 f3 f30 \n',
+  ],
+  [
+    'try as a value',
+    'val x = try { f(1) / 0 } catch (e: ArithmeticException) { f(7) } finally { g(9) }\n    println(x)',
+    '7\nf1 f7 g9 \n',
+  ],
+  [
+    'loop conditions',
+    'var i = 0\n    while (f(i) < 2) i++\n    do { i-- } while (f(i) > 0)\n    println(i)',
+    '0\nf0 f1 f2 f1 f0 \n',
+  ],
+  [
+    'inline lambdas with labeled returns',
+    'println(listOf(1, 2, 3).map { if (it == 2) return@map 0; it + f(it) })',
+    '[2, 0, 6]\nf1 f3 \n',
+  ],
+  [
+    'inline lambdas chosen by their result type',
+    'println(listOf(1, 2, 3).filter { f(it) % 2 == 1 }.sumOf { f(it * 10) })',
+    '40\nf1 f2 f3 f10 f30 \n',
+  ],
+  [
+    'safe calls and assignments',
+    'val b: StringBuilder? = null\n    println(b?.append(f(1)))\n    val c: StringBuilder? = StringBuilder()\n    println(c?.append(f(2)))',
+    'null\n2\nf2 \n',
+  ],
+])("runs suspend calls in %s in kotlinc's order", (_name, body, stdout) => {
+  const source = `${SUSPEND_LOG}suspend fun main() {
+    ${body}
+    print(log)
+    println()
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout });
+});
+
+test('suspends a sequence builder inside the inline lambdas and branches its block runs', () => {
+  const source = `fun main() {
+    val filtered = sequence { listOf(1, 2, 3).filter { yield(it); it > 1 }.forEach { yield(it * 10) } }
+    println(filtered.toList())
+    val branches = iterator { for (i in 1..3) { val v = if (i % 2 == 0) { yield(i); i * 10 } else -i; yield(v) } }
+    for (x in branches) print("$x ")
+    println()
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, 2, 3, 20, 30]\n-1 2 20 -3 \n',
+  });
+});
+
 test('runs a sequence builder only as far as its consumer asks, suspending at each yield', () => {
   const source = `suspend fun SequenceScope<Int>.countTo(n: Int) { for (i in 1..n) yield(i) }
 fun main() {
