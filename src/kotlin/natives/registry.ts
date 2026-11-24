@@ -1,5 +1,5 @@
 import type { NativeFunction, NativeProperty } from '../nativeTypes';
-import type { Frame } from '../runtime';
+import type { Frame, SuspendInvoker } from '../runtime';
 import type { ClassSymbol } from '../symbols';
 import { KObject, type Value } from '../values';
 
@@ -10,6 +10,13 @@ export const nativeProperties = new Map<string, NativeProperty>();
 export function defineNative(key: string, native: NativeFunction): void {
   if (nativeFunctions.has(key)) throw new Error(`The native ${key} is defined twice`);
   nativeFunctions.set(key, native);
+}
+
+/** The natives of the prelude's `external suspend` functions, which suspend where their generators yield. */
+export const suspendNatives = new Map<string, SuspendInvoker>();
+
+export function defineSuspendNative(key: string, native: SuspendInvoker): void {
+  suspendNatives.set(key, native);
 }
 
 export function defineNativeProperty(key: string, get: NativeProperty['get'], set?: NativeProperty['set']): void {

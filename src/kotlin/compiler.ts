@@ -17,11 +17,11 @@ import { type FileContext, TURTLE_PACKAGE } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
 import { callFunction, parameterReprs, receiverRepr } from './dispatch';
 import { jvmParameterDescriptor } from './jvmSignatures';
-import { LocalCompiler } from './localCompiler';
 import { libraryClass } from './natives/registry';
 import type { NativeFunction, NativeProperty } from './nativeTypes';
 import { hasNonNullReceiver, nonNullParameterIndexes, rejectNullArguments } from './nullArguments';
 import { Frame, type FunctionInfo, MISSING } from './runtime';
+import { SuspendCompiler } from './suspendCompiler';
 import { ClassSymbol, FunctionSymbol, type MemberSymbol, VariableSymbol } from './symbols';
 import { anyType, fixVariable, isSubtype } from './typeRelations';
 import { type ClassType, classType, type FunctionType, isNonNullClass, type KType, resolved } from './types';
@@ -120,7 +120,7 @@ const UNAVAILABLE_FUNCTIONS: Record<string, string> = {
   Regex: '正規表現（Regex）',
 };
 
-export class Compiler extends LocalCompiler {
+export class Compiler extends SuspendCompiler {
   constructor(
     packages: Map<string, PackageScope>,
     core: Core | undefined,

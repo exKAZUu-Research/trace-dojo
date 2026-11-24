@@ -6,3 +6,4 @@ import './duration';
 import './reflection';
 import './files';
 import './regex';
+import './coroutines';

@@ -35,7 +35,7 @@ import { mostSpecificReceivers, type ReceiverSpecificity } from './extensionReso
 import { literalFits } from './literals';
 import { runtimeType } from './reified';
 import { siblingResultType } from './resultInference';
-import type { Frame } from './runtime';
+import { type Frame, SuspendCall } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
 import {
   approximatedReadType,
@@ -181,6 +181,34 @@ function settledResult(result: KType | undefined): KType | undefined {
   if (actual?.kind !== 'variable' || actual.variable.fixed) return result;
   const lower = actual.variable.lower.map(resolved).filter((type) => !hasOpenVariables(type));
   return lower.length > 0 ? commonSupertype(lower) : result;
+}
+
+/** The suspend context a context's suspend calls run in: its own, or the one around the inline lambdas it is in. */
+function suspendContextOf(context: FunctionContext): FunctionContext | undefined {
+  for (let current: FunctionContext | undefined = context; current; current = current.parent) {
+    if (current.isSuspend) return current;
+    if (!current.isLambda || !current.inlineLambda) return undefined;
+  }
+  return undefined;
+}
+
+/** Whether a context may call suspend functions: a suspend function's or lambda's, or an inline lambda inside one. */
+export function allowsSuspendCalls(context: FunctionContext): boolean {
+  for (let current: FunctionContext | undefined = context; current; current = current.parent) {
+    if (current.isSuspend) return true;
+    if (!current.isLambda || !current.inlineLambda) return false;
+  }
+  return false;
+}
+
+/** A call of a suspend function, which the coroutine running the caller performs, dispatching on the receiver. */
+function suspendCall(symbol: FunctionSymbol, receiver: Value, args: Value[], callRow: number | undefined): Value {
+  return new SuspendCall((caller) => {
+    const target = isVirtual(symbol) ? runtimeClassOf(receiver).dispatch(symbol) : symbol;
+    const invoke = target.invokeSuspend;
+    if (!invoke) throw new Error(`The suspend function ${symbol.name} has no implementation`);
+    return invoke(caller, receiver, args, callRow);
+  }) as unknown as Value;
 }
 
 /** Whether an argument passes a vararg parameter's array, spread as `*array` or named. */
@@ -837,6 +865,21 @@ export abstract class CallCompiler extends CompilerCore {
 
   protected abstract receiverTypeOf(receiver: ReceiverSymbol): KType;
 
+  /** Rejects a suspend call that a sequence builder's scope does not allow, as `@RestrictsSuspension` makes kotlinc. */
+  private checkRestrictedSuspension(context: FunctionContext, symbol: FunctionSymbol, row: number): void {
+    const scopeClass = suspendContextOf(context)?.restrictedScope;
+    if (!scopeClass) return;
+    const receiver = symbol.extensionReceiver && resolved(symbol.extensionReceiver);
+    const onScope =
+      symbol.owner?.isSubclassOf(scopeClass) === true ||
+      (receiver?.kind === 'class' && receiver.cls.isSubclassOf(scopeClass));
+    if (!onScope)
+      this.error(
+        row,
+        `sequence や iterator の中では、${scopeClass.name} のメンバーか拡張の suspend 関数だけを呼べます。`
+      );
+  }
+
   /** The array a `vararg` parameter of the element type holds. */
   protected abstract varargArrayType(elementType: KType): KType;
 
@@ -1187,6 +1230,9 @@ export abstract class CallCompiler extends CompilerCore {
     const reifiedTypes = symbol.typeParameters
       .filter((param) => param.isReified)
       .map((param) => substitute({ kind: 'param', param, nullable: false }, substitution));
+    if (symbol.isSuspend && !this.file.isLibrary && !allowsSuspendCalls(context))
+      this.error(row, `suspend 関数 ${symbol.name} は、suspend 関数かコルーチンの中でだけ呼べます。`);
+    if (symbol.isSuspend && !this.file.isLibrary) this.checkRestrictedSuspension(context, symbol, row);
     const call = (frame: Frame, receiver: Value): Value => {
       const { temporaries } = frame;
       const mark = temporaries.length;
@@ -1207,6 +1253,7 @@ export abstract class CallCompiler extends CompilerCore {
         if (symbol.passesTypeArguments)
           values.push(reifiedTypes.map((type) => runtimeType(resolved(type), frame)) as unknown as Value);
         for (const value of values) temporaries.push(value);
+        if (symbol.isSuspend) return suspendCall(symbol, receiver, values, callRow);
         return callFunction(symbol, frame, receiver, values, callRow);
       } finally {
         temporaries.length = mark;

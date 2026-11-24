@@ -155,6 +155,13 @@ export class FunctionContext {
   inlineLambda = false;
   /** The name `return@label` leaves the context by: a function's name, or a lambda's label. */
   label: string | undefined;
+  /** Whether the context is a suspend function's or lambda's, which may call suspend functions. */
+  isSuspend = false;
+  /**
+   * For a suspend context whose receiver is a sequence builder's scope, the scope's class: as the scope is
+   * `@RestrictsSuspension`, the context calls only the suspend functions that are its members or extensions.
+   */
+  restrictedScope: ClassSymbol | undefined;
   /** For a `tailrec` function, the function and the calls in tail position of its body. */
   tailrec: { symbol: FunctionSymbol; calls: ReadonlySet<Expression> } | undefined;
   /** For a lambda, what its `return@label` must give and has given, which its result type joins. */

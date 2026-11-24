@@ -1,6 +1,6 @@
 import type { VISIBILITY_KEYWORDS } from './ast';
 import type { FunctionContext, ReceiverSymbol } from './compilerBase';
-import type { Frame, FunctionInfo, Invoker } from './runtime';
+import type { Frame, FunctionInfo, Invoker, SuspendInvoker } from './runtime';
 import type { ClassType, KType } from './types';
 import type { Value } from './values';
 
@@ -202,6 +202,10 @@ export class FunctionSymbol implements MemberBase {
   passesDispatchReceiver = false;
   /** Whether calls pass the type arguments of the function's reified type parameters after its arguments. */
   passesTypeArguments = false;
+  /** Whether the function is `suspend`, which only coroutines and other suspend functions call. */
+  isSuspend = false;
+  /** Runs a suspend function as a coroutine's step, which suspends where the generator yields. */
+  invokeSuspend: SuspendInvoker | undefined;
   /** Whether the function is `tailrec`, whose calls of itself in tail position reuse its frame. */
   isTailrec = false;
   resolvesByLambdaResult = false;

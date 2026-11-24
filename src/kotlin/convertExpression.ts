@@ -661,7 +661,10 @@ export abstract class ExpressionConverter {
           params,
           returnType: this.convertType(required(signature.at(-1))),
           nullable: false,
-          isSuspend: modifiersNode ? children(modifiersNode).some((child) => child.type === 'suspend') : false,
+          // The grammar reads `suspend` of `suspend R.() -> T` as a modifier of the receiver's type.
+          isSuspend: [modifiersNode, receiverNode && firstOfType(receiverNode, 'type_modifiers')].some(
+            (modifiers) => modifiers !== undefined && children(modifiers).some((child) => child.type === 'suspend')
+          ),
           contextTypes: contextNode ? named(contextNode).map((part) => this.convertType(part)) : [],
           annotations: this.typeAnnotations(modifiersNode),
         };
@@ -691,8 +694,13 @@ export abstract class ExpressionConverter {
   /** The annotations of a type's `type_modifiers`, as `@A` of `@A Int`, where `suspend` belongs to function types. */
   private typeAnnotations(node: Node | undefined): Annotation[] {
     if (!node) return [];
+    const owner = node.parent;
+    const isFunctionReceiver =
+      owner?.type === 'user_type' &&
+      owner.parent?.type === 'function_type' &&
+      owner.parent.namedChildren[0]?.id === owner.id;
     for (const child of children(node))
-      if (child.type === 'suspend' && node.parent?.type !== 'function_type')
+      if (child.type === 'suspend' && owner?.type !== 'function_type' && !isFunctionReceiver)
         throw syntaxError(child, 'suspend は関数型にだけ付けられます。');
     return namedOfType(node, 'annotation').map((annotation) => this.looseAnnotation(annotation, 'TYPE'));
   }

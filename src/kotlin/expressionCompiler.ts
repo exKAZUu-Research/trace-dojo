@@ -2,6 +2,7 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { Block, Expression, LambdaExpression } from './ast';
 import {
+  allowsSuspendCalls,
   type ArgumentSyntax,
   CallCompiler,
   type CallLevel,
@@ -45,7 +46,7 @@ import { invokeFunctionValue, lambdaValue } from './lambdaValue';
 import { isKnownLibraryPackage, unavailableLibraryMember, unavailableQualifiedLibraryMember } from './libraryApi';
 import { literalFits } from './literals';
 import { floatRangeBounds } from './rangeBounds';
-import { type Frame, KotlinThrow, LoopSignal, ReturnSignal, UNASSIGNED } from './runtime';
+import { type Frame, KotlinThrow, LoopSignal, ReturnSignal, SuspendCall, UNASSIGNED } from './runtime';
 import {
   type ClassSymbol,
   type FunctionSymbol,
@@ -1934,11 +1935,21 @@ export abstract class ExpressionCompiler extends CallCompiler {
     });
     const evals = receiverEval ? [receiverEval, ...argumentEvals] : argumentEvals;
     const target = functionValue.eval;
+    if (type.isSuspend && !this.file.isLibrary && !allowsSuspendCalls(context))
+      this.error(row, 'suspend 関数型の値は、suspend 関数かコルーチンの中でだけ呼べます。');
     return {
       type: type.returnType,
       repr: 'ref',
       eval: (frame) => {
         const fn = target(frame) as KObject;
+        if (type.isSuspend) {
+          const values = evals.map((evaluate) => evaluate(frame));
+          return new SuspendCall((caller) => {
+            const run = fn.suspendFunction;
+            if (!run) throw new Error('A suspend function value without its function');
+            return run(caller as never, values);
+          }) as unknown as Value;
+        }
         const { temporaries } = frame;
         const mark = temporaries.length;
         temporaries.push(fn);
@@ -2172,6 +2183,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     /** Whether the compiler wrote the lambda for a reference, whose frame traces leave out as a library's. */
     isSynthetic = false
   ): Compiled {
+    if (expected?.isSuspend) return this.compileSuspendLambda(scope, context, lambda, expected);
     const lambdaContext = new FunctionContext(
       context,
       true,
@@ -2261,7 +2273,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   /** The parameters of a lambda, declared or `it`, with the types that they declare or the expected type gives them. */
   // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  private lambdaParameters(
+  protected lambdaParameters(
     scope: Scope,
     lambda: LambdaExpression,
     expectedParams: KType[] | undefined
@@ -2375,6 +2387,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
       expected
     );
   }
+
+  /** A lambda of a suspend function type, whose body runs as a coroutine's steps. */
+  protected abstract compileSuspendLambda(
+    scope: Scope,
+    context: FunctionContext,
+    lambda: LambdaExpression,
+    expected: FunctionType
+  ): Compiled;
 
   /** `::x.isInitialized` and `this::x.isInitialized`, which tell whether a `lateinit` property has a value. */
   protected abstract compileIsInitialized(

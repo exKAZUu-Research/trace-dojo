@@ -157,6 +157,7 @@ export abstract class CompilerCore {
         params: ref.params.map((param) => this.resolveType(scope, param)),
         returnType: this.resolveType(scope, ref.returnType),
         nullable: ref.nullable,
+        isSuspend: ref.isSuspend || undefined,
       };
     }
     const [first, ...rest] = ref.parts;

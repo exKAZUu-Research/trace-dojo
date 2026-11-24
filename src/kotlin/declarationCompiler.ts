@@ -37,6 +37,7 @@ import {
 import { jvmSignatures, overriddenMembers } from './jvmSignatures';
 import { isKnownLibraryAnnotation, isKnownLibraryPackage } from './libraryApi';
 import { arrayContentHash } from './natives/arrays';
+import { suspendNatives } from './natives/registry';
 import { type NativeFunction, type NativeProperty, typeRefText } from './nativeTypes';
 import { nonNullParameterIndexes, rejectNullArguments } from './nullArguments';
 import { toInt32 } from './operators';
@@ -252,6 +253,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
     return entry;
   }
+
+  /** The names of the suspend functions the program and a sequence builder's scope declare, whose calls may suspend. */
+  protected readonly suspendFunctionNames = new Set(['yield', 'yieldAll']);
 
   /** The type aliases of the program, whose expansions are checked even when nothing uses them. */
   protected readonly typeAliasSymbols: TypeAliasSymbol[] = [];
@@ -898,6 +902,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     this.applyMemberModifiers(symbol, decl.modifiers, cls?.symbol);
     symbol.isInline = keywords.has('inline');
     symbol.isTailrec = keywords.has('tailrec');
+    symbol.isSuspend = keywords.has('suspend');
+    if (symbol.isSuspend) this.suspendFunctionNames.add(symbol.name);
     if (!file.isLibrary) this.checkFunctionModifiers(decl, symbol, cls?.symbol);
     symbol.resolvesByLambdaResult = decl.modifiers.annotations.some(
       ({ name }) => name === 'OverloadResolutionByLambdaReturnType'
@@ -999,6 +1005,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const receiverText = decl.receiver ? typeRefText(decl.receiver) : undefined;
     const base = this.nativeKey(owner, file, receiverText, decl.name);
     const key = `${base}(${decl.params.map(nativeParameterText).join(', ')})`;
+    const suspendNative = suspendNatives.get(key);
+    if (suspendNative) {
+      symbol.invokeSuspend = suspendNative;
+      return;
+    }
     const native = this.natives.get(key);
     if (!native) {
       this.missingNatives.push(key);

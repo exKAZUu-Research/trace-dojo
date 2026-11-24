@@ -147,6 +147,8 @@ export class KObject {
   readOnlyCollection?: boolean;
   /** What a function value runs, with the arguments its type lists (a receiver first). */
   function?: KFunction;
+  /** What a suspend function value runs, as a coroutine's step. */
+  suspendFunction?: (caller: never, args: Value[]) => Generator<Value, Value, undefined>;
   /** Set by the Turtle constructor. */
   turtle?: TurtleState;
   /** Values a native object holds, such as an iterator's position or a lazy value's initializer. */

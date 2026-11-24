@@ -53,6 +53,34 @@ internal class ConstrainedOnceSequence<T>(private val sequence: Sequence<T>) : S
 
 fun <T> Sequence(iterator: () -> Iterator<T>): Sequence<T> = IteratorSequence(iterator)
 
+/** The scope of \`sequence { ... }\` and \`iterator { ... }\`, whose \`yield\` gives the next element and suspends. */
+abstract class SequenceScope<in T> internal constructor() {
+    abstract suspend fun yield(value: T)
+    abstract suspend fun yieldAll(iterator: Iterator<T>)
+
+    suspend fun yieldAll(elements: Iterable<T>) {
+        if (elements is Collection && elements.isEmpty()) return
+        yieldAll(elements.iterator())
+    }
+
+    suspend fun yieldAll(sequence: Sequence<T>) = yieldAll(sequence.iterator())
+}
+
+/** The iterator a builder's block runs in, as a coroutine that each \`hasNext\` resumes until it yields or ends. */
+internal class SequenceBuilderIterator<T> : SequenceScope<T>(), Iterator<T> {
+    external override fun hasNext(): Boolean
+    external override fun next(): T
+    external override suspend fun yield(value: T)
+
+    override suspend fun yieldAll(iterator: Iterator<T>) {
+        while (iterator.hasNext()) yield(iterator.next())
+    }
+}
+
+external fun <T> iterator(block: suspend SequenceScope<T>.() -> Unit): Iterator<T>
+
+fun <T> sequence(block: suspend SequenceScope<T>.() -> Unit): Sequence<T> = Sequence { iterator(block) }
+
 fun <T> sequenceOf(vararg elements: T): Sequence<T> = elements.asSequence()
 
 fun <T> emptySequence(): Sequence<T> = IteratorSequence { emptyList<T>().iterator() }

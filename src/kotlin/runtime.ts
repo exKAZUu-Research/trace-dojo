@@ -40,6 +40,19 @@ export interface FunctionInfo {
 
 export type Invoker = (caller: Frame, receiver: Value, args: Value[], callRow: number | undefined) => Value;
 
+/** A coroutine's step: a generator that yields the values a sequence produces and returns the call's result. */
+export type Suspension = Generator<Value, Value, undefined>;
+
+export type SuspendInvoker = (caller: Frame, receiver: Value, args: Value[], callRow: number | undefined) => Suspension;
+
+/**
+ * A call of a suspend function or suspend function value whose arguments are evaluated, which the coroutine running
+ * the caller performs, as only it can suspend.
+ */
+export class SuspendCall {
+  constructor(readonly run: (caller: Frame) => Suspension) {}
+}
+
 const JVM_MAX_STRING_LENGTH = 2 ** 31 - 5;
 
 export class Frame implements TracedFrame {
@@ -209,6 +222,36 @@ export class Runtime implements TracedRuntime<Frame> {
 
   throwError(frame: Frame, qualifiedName: string, message?: string): never {
     throw new KotlinThrow(this.exceptions.create(frame, qualifiedName, message));
+  }
+
+  /** Runs a suspend function's body in a new frame as `call` does, suspending where the body's generator yields. */
+  // code-gauge-allow functionParameterCount -- the same parts as `call`'s.
+  *callSuspend(
+    info: FunctionInfo,
+    caller: Frame,
+    captured: readonly unknown[],
+    thisValue: Value,
+    args: readonly Value[],
+    callRow: number | undefined,
+    body: (frame: Frame) => Suspension,
+    enclosing?: Frame
+  ): Suspension {
+    this.spend();
+    const frame = new Frame(this, info, captured, thisValue, info.isLibrary ? undefined : callRow);
+    frame.enclosing = enclosing;
+    if (this.frames.length >= LIMITS.maxCallDepth) this.throwError(caller, 'java.lang.StackOverflowError');
+    for (const [index, arg] of args.entries()) frame.locals[index] = arg;
+    this.frames.push(frame);
+    try {
+      return yield* body(frame);
+    } catch (error) {
+      if (error instanceof ReturnSignal && error.frame === frame) return error.value;
+      throw error;
+    } finally {
+      this.onExit?.(frame);
+      this.frames.splice(this.frames.lastIndexOf(frame), 1);
+      if (info.isAtomic) this.steps.completeAtomicCall();
+    }
   }
 
   /** Runs a function's body in a new frame, returning what it returns. */

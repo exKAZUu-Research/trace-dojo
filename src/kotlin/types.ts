@@ -24,6 +24,8 @@ export interface FunctionType {
   params: KType[];
   returnType: KType;
   nullable: boolean;
+  /** Whether the type is `suspend () -> R`, whose values only coroutines and suspend functions call. */
+  isSuspend?: boolean;
 }
 
 /** `Nothing`, whose nullable form `Nothing?` is the type of `null`. */
@@ -219,7 +221,7 @@ export function typeToString(type: KType): string {
     }
     case 'function': {
       const receiver = type.receiver ? `${typeToString(type.receiver)}.` : '';
-      const text = `${receiver}(${type.params.map(typeToString).join(', ')}) -> ${typeToString(type.returnType)}`;
+      const text = `${type.isSuspend ? 'suspend ' : ''}${receiver}(${type.params.map(typeToString).join(', ')}) -> ${typeToString(type.returnType)}`;
       return type.nullable ? `(${text})?` : text;
     }
     case 'nothing': {

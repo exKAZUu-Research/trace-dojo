@@ -6326,3 +6326,20 @@ fun main() {
     finalFiles: { 'in.txt': 'a\nb\n', 'out.txt': 'xxx!' },
   });
 });
+
+test('runs a sequence builder only as far as its consumer asks, suspending at each yield', () => {
+  const source = `suspend fun SequenceScope<Int>.countTo(n: Int) { for (i in 1..n) yield(i) }
+fun main() {
+    val numbers = sequence {
+        println("start")
+        countTo(2)
+        var n = 10
+        while (true) yield(n++)
+    }
+    for (x in numbers.take(4)) println("got $x")
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'start\ngot 1\ngot 2\ngot 10\ngot 11\n',
+  });
+});

@@ -289,6 +289,12 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         entry.state = 'done';
         return;
       }
+      if (symbol.isSuspend) {
+        context.isSuspend = true;
+        this.compileSuspendFunction(entry, scope, context, defaults);
+        entry.state = 'done';
+        return;
+      }
       let body: Eval;
       if (decl.body.kind === 'expression') {
         body = this.compileExpressionBody(symbol, decl.body.expression, scope, context);
@@ -318,6 +324,14 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       entry.state = 'done';
     });
   }
+
+  /** Compiles a suspend function's body as a coroutine's steps, which its `invokeSuspend` runs. */
+  protected abstract compileSuspendFunction(
+    entry: FunctionEntry,
+    scope: Scope,
+    context: FunctionContext,
+    defaults: (Eval | undefined)[]
+  ): void;
 
   /** The type a `vararg` parameter has inside its function: an array of its elements. */
   protected abstract varargType(elementType: KType): KType;
