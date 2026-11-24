@@ -228,9 +228,12 @@ const STANDARD_DATE_FORMATS: Record<string, string> = {
 
 /** Formats a DateTime with a standard or custom format string, with the ja-JP culture's names. */
 export function formatDateTime(budget: TextBudget, value: CsStruct, format: string | undefined): string {
-  // "U" writes the value converted from local time to UTC with the full date and time pattern.
-  if (format === 'U')
-    return customDate(partsOf(ticksOf(value) - LOCAL_OFFSET_TICKS), STANDARD_DATE_FORMATS.F, new MeteredText(budget));
+  // "U" writes the value converted from local time to UTC, which stops at DateTime.MinValue, with the full date and
+  // time pattern.
+  if (format === 'U') {
+    const universal = ticksOf(value) - LOCAL_OFFSET_TICKS;
+    return customDate(partsOf(universal < 0n ? 0n : universal), STANDARD_DATE_FORMATS.F, new MeteredText(budget));
+  }
   const parts = partsOf(ticksOf(value));
   const pattern =
     format === undefined || format === ''
