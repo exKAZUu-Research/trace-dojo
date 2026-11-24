@@ -1,6 +1,6 @@
 import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
-import { charactersOf } from './characters';
+import { arithmeticEnd, skipWordPiece, SourceText } from './syntaxWords';
 
 /**
  * The text of arithmetic expressions that the grammar cannot read, by the offset where each one's text starts. Bash
@@ -9,27 +9,35 @@ import { charactersOf } from './characters';
  */
 export type MaskedArithmetic = Map<number, string>;
 
-const OPENERS = new Set(['$((', '((', '$[']);
 const MAX_PASSES = 50;
+const BOUNDARY_CHARS = new Set([' ', '\t', '\n', ';', '&', '|', '(', ')', '<', '>']);
+
+interface Region {
+  opener: '((' | '$((' | '$[';
+  openStart: number;
+  start: number;
+  end: number;
+  closeEnd: number;
+  keepsSemicolons: boolean;
+}
 
 /**
  * Blanks out the text of every arithmetic expression the grammar fails on, keeping its newlines (and, in `for ((`,
- * its semicolons) so that rows stay in place, until the program parses or no such expression remains.
+ * its top-level semicolons) so that rows and offsets stay in place, until the program parses or no failing region remains.
  */
 export function maskInvalidArithmetic(parser: Parser, source: string): { source: string; masked: MaskedArithmetic } {
   const masked: MaskedArithmetic = new Map();
+  const regions = collectArithmeticRegions(source);
   let text = source;
   for (let pass = 0; pass < MAX_PASSES; pass++) {
     const tree = parser.parse(text);
     if (!tree) throw new Error('The parser returned no tree');
     try {
-      if (!tree.rootNode.hasError) break;
-      const region = firstFailingRegion(tree.rootNode, text);
+      const region = firstFailingRegion(tree.rootNode, regions, masked);
       if (!region) break;
-      masked.set(region.start, source.slice(region.start, region.end));
-      const blank = charactersOf(text.slice(region.start, region.end))
-        .map((c) => (c === '\n' || (region.keepsSemicolons && c === ';') ? c : ' '))
-        .join('');
+      const original = source.slice(region.start, region.end);
+      masked.set(region.start, original);
+      const blank = blankArithmeticSlice(original, region.keepsSemicolons);
       text = text.slice(0, region.start) + blank + text.slice(region.end);
     } finally {
       tree.delete();
@@ -38,70 +46,130 @@ export function maskInvalidArithmetic(parser: Parser, source: string): { source:
   return { source: text, masked };
 }
 
-interface Region {
-  start: number;
-  end: number;
-  keepsSemicolons: boolean;
+function firstFailingRegion(root: Node, regions: readonly Region[], masked: MaskedArithmetic): Region | undefined {
+  const errors = root.hasError ? collectErrorNodes(root) : [];
+  for (const region of regions) {
+    if (masked.has(region.start) || region.end === region.start) continue;
+    const misparsedSubshell =
+      region.opener === '((' && root.descendantForIndex(region.openStart, region.openStart + 2)?.type !== '((';
+    const fails =
+      misparsedSubshell || errors.some((err) => err.startIndex <= region.closeEnd && err.endIndex >= region.openStart);
+    if (fails) return region;
+  }
+  return undefined;
 }
 
-/** The text of the first arithmetic opener whose expression holds an error of the tree. */
-// code-gauge-allow functionCognitiveComplexity -- Pairs the tree's errors with the arithmetic openers around them in one walk of the error nodes.
-function firstFailingRegion(root: Node, text: string): Region | undefined {
+function collectErrorNodes(root: Node): Node[] {
   const errors: Node[] = [];
-  const openers: Node[] = [];
   const pending: Node[] = [root];
   while (pending.length > 0) {
     const node = pending.pop() as Node;
-    if (node.isError || node.isMissing) errors.push(node);
-    if (!node.isNamed && OPENERS.has(node.type)) openers.push(node);
-    if (node.hasError || node.isError) for (const child of node.children) pending.push(child);
+    if (node.isError || node.isMissing) {
+      errors.push(node);
+      continue;
+    }
+    if (!node.hasError) continue;
+    let childHasError = false;
+    for (const child of node.children) {
+      if (child.hasError || child.isError || child.isMissing) {
+        childHasError = true;
+        pending.push(child);
+      }
+    }
+    if (!childHasError) errors.push(node);
   }
-  openers.sort((a, b) => a.startIndex - b.startIndex);
-  for (const opener of openers) {
-    const start = opener.endIndex;
-    const end = opener.type === '$[' ? matchingBracket(text, start) : matchingParentheses(text, start);
-    if (end === undefined) continue;
-    const fails = errors.some((error) => error.startIndex < end + 2 && error.endIndex > opener.startIndex);
-    if (!fails || end === start) continue;
-    const keepsSemicolons = opener.type === '((' && opener.parent?.type === 'c_style_for_statement';
-    return { start, end, keepsSemicolons };
-  }
-  return undefined;
+  return errors;
 }
 
-/** The offset of the `))` that closes arithmetic text starting at `start`, as Bash counts the parentheses. */
-// code-gauge-allow functionCognitiveComplexity -- Bash's scan for the end of arithmetic text, which quotes, escapes, and nesting all decide.
-function matchingParentheses(text: string, start: number): number | undefined {
+// code-gauge-allow functionCognitiveComplexity -- Preserves newlines and top-level semicolons outside quotes and parentheses in C-style for headers.
+function blankArithmeticSlice(slice: string, keepsSemicolons: boolean): string {
+  if (!keepsSemicolons) return slice.replaceAll(/[^\n]/g, ' ');
+  let out = '';
   let depth = 0;
-  for (let i = start; i < text.length; i++) {
-    const c = text[i];
-    if (c === '\\') {
+  let quote: string | undefined;
+  for (let i = 0; i < slice.length; i++) {
+    const c = slice[i];
+    if (c === '\\' && quote !== "'") {
+      out += i + 1 < slice.length && slice[i + 1] === '\n' ? ' \n' : '  ';
       i++;
       continue;
     }
-    if (c === "'" || c === '"') {
-      const close = text.indexOf(c, i + 1);
-      if (close === -1) return undefined;
-      i = close;
+    if (quote) {
+      if (c === quote) quote = undefined;
+      out += c === '\n' ? '\n' : ' ';
       continue;
     }
-    if (c === '(') depth++;
-    else if (c === ')') {
-      if (depth > 0) depth--;
-      else return text[i + 1] === ')' ? i : undefined;
-    }
+    if (c === "'" || c === '"') quote = c;
+    else if (c === '(') depth++;
+    else if (c === ')' && depth > 0) depth--;
+    out += c === '\n' || (c === ';' && depth === 0) ? c : ' ';
   }
-  return undefined;
+  return out;
 }
 
-function matchingBracket(text: string, start: number): number | undefined {
-  let depth = 0;
-  for (let i = start; i < text.length; i++) {
-    if (text[i] === '[') depth++;
-    else if (text[i] === ']') {
-      if (depth === 0) return i;
-      depth--;
-    }
+function collectArithmeticRegions(source: string): Region[] {
+  const text = new SourceText(source);
+  const regions: Region[] = [];
+  text.parseSubstitution = (start) => scanPlain(text, start, ')', regions);
+  text.onArithmetic = (opener, openStart, start, end, closeEnd) => {
+    regions.push({ opener, openStart, start, end, closeEnd, keepsSemicolons: false });
+  };
+  try {
+    scanPlain(text, 0, undefined, regions);
+  } catch {
+    // Unclosed quotes or excessive nesting are reported by the main syntax/tree checks.
   }
-  return undefined;
+  return regions.toSorted((a, b) => a.openStart - b.openStart);
+}
+
+// code-gauge-allow functionCognitiveComplexity -- Scans shell comments, boundaries, ((...)) constructs, and word pieces with bounded nesting.
+function scanPlain(text: SourceText, from: number, stopChar: string | undefined, regions: Region[]): number {
+  return text.nested(() => {
+    const { source } = text;
+    let atBoundary = true;
+    for (let i = from; i < source.length;) {
+      const c = source[i];
+      if (c === stopChar) return i + 1;
+      if (c === '#' && atBoundary) {
+        while (i < source.length && source[i] !== '\n') i++;
+        continue;
+      }
+      if (c === '(' && source[i + 1] === '(' && atBoundary) {
+        const closeEnd = tryFindParenArithmeticEnd(text, i);
+        if (closeEnd !== undefined) {
+          regions.push({
+            opener: '((',
+            openStart: i,
+            start: i + 2,
+            end: closeEnd - 2,
+            closeEnd,
+            keepsSemicolons: isAfterFor(source, i),
+          });
+          i = closeEnd;
+          atBoundary = true;
+          continue;
+        }
+      }
+      if (BOUNDARY_CHARS.has(c)) {
+        atBoundary = true;
+        i++;
+        continue;
+      }
+      i = skipWordPiece(text, i);
+      atBoundary = false;
+    }
+    return source.length;
+  });
+}
+
+function tryFindParenArithmeticEnd(text: SourceText, openParens: number): number | undefined {
+  try {
+    return arithmeticEnd(text, openParens);
+  } catch {
+    return undefined;
+  }
+}
+
+function isAfterFor(source: string, openPos: number): boolean {
+  return /(?:^|[ \t\n;&|()])for(?:[ \t]|\\\n)+$/.test(source.slice(0, openPos));
 }

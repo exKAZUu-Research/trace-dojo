@@ -30,7 +30,7 @@ export type CompoundElement =
       value: string;
       append: boolean;
       rawText?: string;
-      evaluatedIndex?: bigint | 'invalid';
+      evaluatedIndex?: bigint;
       preconvertedInteger?: boolean;
     }
   | { plain: string; rawText: string; evaluatedIndex?: bigint; preconvertedInteger?: boolean }
@@ -74,7 +74,6 @@ export function unpackIndexedElement(rawElement: CompoundElement): {
   value: string;
   append: boolean;
   evaluatedIndex: bigint | undefined;
-  invalidIndex: boolean;
   preconvertedInteger: boolean;
 } {
   if (typeof rawElement === 'string') {
@@ -83,7 +82,6 @@ export function unpackIndexedElement(rawElement: CompoundElement): {
       value: rawElement,
       append: false,
       evaluatedIndex: undefined,
-      invalidIndex: false,
       preconvertedInteger: false,
     };
   }
@@ -93,7 +91,6 @@ export function unpackIndexedElement(rawElement: CompoundElement): {
       value: rawElement.plain,
       append: false,
       evaluatedIndex: rawElement.evaluatedIndex,
-      invalidIndex: false,
       preconvertedInteger: Boolean(rawElement.preconvertedInteger),
     };
   }
@@ -101,8 +98,7 @@ export function unpackIndexedElement(rawElement: CompoundElement): {
     key: rawElement.key,
     value: rawElement.value,
     append: rawElement.append,
-    evaluatedIndex: rawElement.evaluatedIndex === 'invalid' ? undefined : rawElement.evaluatedIndex,
-    invalidIndex: rawElement.evaluatedIndex === 'invalid',
+    evaluatedIndex: rawElement.evaluatedIndex,
     preconvertedInteger: Boolean(rawElement.preconvertedInteger),
   };
 }
@@ -110,12 +106,14 @@ export function unpackIndexedElement(rawElement: CompoundElement): {
 /** Builds compound initializer preparation context from an existing target variable and optional flag overrides. */
 export function compoundPrepareForVariable(
   targetName: string,
+  reportedName: string,
   existing: Variable | undefined,
   append: boolean,
   isAssociative: boolean,
   isInteger: boolean
 ): {
   targetName: string;
+  reportedName: string;
   isAssociative: boolean;
   isInteger: boolean;
   baseIndexed: ReadonlyMap<bigint, string> | undefined;
@@ -128,7 +126,7 @@ export function compoundPrepareForVariable(
         ? new Map([[0n, existing.value.value]])
         : undefined;
   const baseAssociative = append && existing?.value?.kind === 'associative' ? existing.value.table : undefined;
-  return { targetName, isAssociative, isInteger, baseIndexed, baseAssociative };
+  return { targetName, reportedName, isAssociative, isInteger, baseIndexed, baseAssociative };
 }
 
 interface BucketEntry {

@@ -91,9 +91,11 @@ function expandDeclarationAssignment(
       arg.value,
       shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(arg.value as Word))
     );
-  const expandedElements =
-    arg.array &&
-    shell.expander.expandCompoundItems(arg.array, buildCompoundPrepareOptions(shell, builtin, arg, options));
+  let expandedElements: CompoundElement[] | undefined;
+  if (arg.array) {
+    const prepare = buildCompoundPrepareOptions(shell, builtin, arg, options);
+    expandedElements = shell.expander.expandCompoundItems(arg.array, prepare);
+  }
   return {
     ...arg,
     ...(subscript ? { subscript } : {}),
@@ -107,18 +109,35 @@ function buildCompoundPrepareOptions(
   builtin: string,
   arg: Assignment,
   { set, unset }: Options
-): CompoundPrepareOptions {
+): CompoundPrepareOptions | undefined {
   const isLocal =
     shell.isInFunction && !set.has('g') && (builtin === 'local' || builtin === 'declare' || builtin === 'typeset');
   const { scopes, functionScopes } = shell.state;
   const localScope = isLocal ? scopes[functionScopes.at(-1) as number] : undefined;
-  const { targetName } = resolveDeclaredTarget(shell, arg.name, set, unset, false, set.has('g'), localScope);
+  const { targetName, referencedSubscript } = resolveDeclaredTarget(
+    shell,
+    arg.name,
+    set,
+    unset,
+    Boolean(arg.subscript),
+    set.has('g'),
+    localScope
+  );
   const existing = resolveCompoundExisting(shell, targetName, set, localScope);
+  if (
+    existing?.attributes.has('r') ||
+    Boolean(localScope && !localScope.has(targetName) && isReadonlyGlobal(shell, targetName))
+  ) {
+    shell.discard(`${targetName}: readonly variable`);
+  }
+  if (arg.subscript || referencedSubscript !== undefined || (existing && conversionError(existing, set, unset))) {
+    return undefined;
+  }
   const isAssociative =
     set.has('A') ||
     (!set.has('a') && (existing?.value?.kind === 'associative' || Boolean(existing?.attributes.has('A'))));
   const isInteger = set.has('i') || (Boolean(existing?.attributes.has('i')) && !unset.has('i'));
-  return compoundPrepareForVariable(targetName, existing, arg.append, isAssociative, isInteger);
+  return compoundPrepareForVariable(targetName, arg.name, existing, arg.append, isAssociative, isInteger);
 }
 
 function resolveCompoundExisting(
@@ -655,16 +674,7 @@ function assignLocally(
   const { scopes } = shell.state;
   const owner = scopes.findLast((scope) => scope.get(variable.name) === variable);
   if (!owner) return true;
-  if (assignment.array) {
-    const { elements, error } = assignment.expandedElements
-      ? shell.expander.validateCompoundItems(assignment.expandedElements, variable.attributes.has('A'), true)
-      : shell.expander.expandCompound(assignment.array, variable.attributes.has('A'), true);
-    if (variable.attributes.has('A') && !variable.value)
-      variable.value = { kind: 'associative', table: new AssociativeTable() };
-    const ok = shell.assignCompoundTo(variable, elements, assignment.append);
-    if (error) shell.discard(error);
-    return ok;
-  }
+  if (assignment.array) return assignLocallyCompound(shell, variable, assignment, referencedSubscript);
   const value = shell.expander.withSpacedStar(() =>
     shell.expander.expandAssignmentValue(assignment.value as NonNullable<Assignment['value']>)
   );
@@ -678,6 +688,27 @@ function assignLocally(
     return shell.assignElementTo(variable, referencedSubscript, value, append);
   }
   return shell.assignScalarTo(variable, value, append);
+}
+
+function assignLocallyCompound(
+  shell: Shell,
+  variable: Variable,
+  assignment: Assignment & { expandedElements?: CompoundElement[] },
+  referencedSubscript?: string
+): boolean {
+  if (assignment.subscript || referencedSubscript !== undefined) {
+    const sub = assignment.subscript?.text ?? referencedSubscript ?? '';
+    shell.reportError(`${variable.name}[${sub}]: cannot assign list to array member`);
+    return false;
+  }
+  const { elements, error } = assignment.expandedElements
+    ? shell.expander.validateCompoundItems(assignment.expandedElements, variable.attributes.has('A'), true)
+    : shell.expander.expandCompound(assignment.array as Word[], variable.attributes.has('A'), true);
+  if (variable.attributes.has('A') && !variable.value)
+    variable.value = { kind: 'associative', table: new AssociativeTable() };
+  const ok = shell.assignCompoundTo(variable, elements, assignment.append);
+  if (error) shell.discard(error);
+  return ok;
 }
 
 /** `declare -p names`: each variable as a declaration that recreates it. */

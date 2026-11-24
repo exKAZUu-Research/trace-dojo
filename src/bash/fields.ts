@@ -32,6 +32,7 @@ export class FieldSplitter {
   private field: Fragment[] = [];
   private started = false;
   private afterWhite = false;
+  private afterDelimiter = false;
 
   constructor(private readonly ifs: string) {}
 
@@ -39,12 +40,15 @@ export class FieldSplitter {
     if (piece === EMPTY_LIST) return;
     if (isFieldBreak(piece)) {
       if (this.started) this.end();
+      else if (this.afterDelimiter) this.fields.push([]);
       this.afterWhite = false;
+      this.afterDelimiter = false;
     } else if (!piece.split || this.ifs === '') {
       if (piece.text === '' && !piece.quoted) return;
       this.field.push({ ...piece, split: false });
       this.started = true;
       this.afterWhite = false;
+      this.afterDelimiter = false;
     } else this.split(piece.text);
   }
 
@@ -66,6 +70,7 @@ export class FieldSplitter {
         run += c;
         this.started = true;
         this.afterWhite = false;
+        this.afterDelimiter = false;
         continue;
       }
       if (run) this.field.push({ text: run, quoted: false, split: false });
@@ -85,5 +90,6 @@ export class FieldSplitter {
     if (this.started) this.end();
     else if (!this.afterWhite) this.fields.push([]);
     this.afterWhite = false;
+    this.afterDelimiter = true;
   }
 }

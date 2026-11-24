@@ -1311,9 +1311,7 @@ export class Shell implements ArithmeticHost {
     let next = append ? maxElementIndex(existing) + 1n : 0n;
     for (const rawElement of elements) {
       const item = unpackIndexedElement(rawElement);
-      const index = item.invalidIndex
-        ? undefined
-        : (item.evaluatedIndex ?? (item.key === undefined ? next : this.arrayIndexFor(variable, item.key)));
+      const index = item.evaluatedIndex ?? (item.key === undefined ? next : this.arrayIndexFor(variable, item.key));
       if (index === undefined) {
         this.reportError(`${reportedName}[${item.key ?? ''}]: bad array subscript`);
         return false;
@@ -1361,6 +1359,11 @@ export class Shell implements ArithmeticHost {
         return false;
       }
       const resolved = this.resolveName(assignment.name);
+      if (this.findVariable(resolved)?.attributes.has('r')) {
+        this.readonlyFailure = true;
+        this.reportError(`${resolved}: readonly variable`);
+        return false;
+      }
       const { elements, error } = this.expander.expandCompound(assignment.array, this.isAssociative(resolved), false);
       const ok = this.assignCompound(resolved, elements, assignment.append);
       if (error) this.discard(error);

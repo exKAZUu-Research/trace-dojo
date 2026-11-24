@@ -139,6 +139,7 @@ function isSet(shell: Shell, operand: string): boolean {
   const split = shell.splitSubscript(operand);
   if (split && isIdentifier(split.name)) {
     const resolved = shell.resolveName(split.name);
+    if (split.subscript === '@' || split.subscript === '*') return shell.arrayValues(resolved).length > 0;
     if (shell.isAssociative(resolved)) {
       const key = shell.expander.expandSubscriptText(split.subscript);
       if (key === '') {
@@ -147,7 +148,6 @@ function isSet(shell: Shell, operand: string): boolean {
       }
       return shell.elementValue(resolved, key) !== undefined;
     }
-    if (split.subscript === '@' || split.subscript === '*') return shell.arrayValues(resolved).length > 0;
     const index = shell.arrayIndex(resolved, split.subscript);
     return index !== undefined && shell.elementValue(resolved, String(index)) !== undefined;
   }

@@ -26,6 +26,7 @@ const QUOTED_EMPTY: Fragment = { text: '', quoted: true, split: false };
 /** Target array/integer context for evaluating compound initializer subscripts and values after shell expansion. */
 export interface CompoundPrepareOptions {
   targetName: string;
+  reportedName: string;
   isAssociative: boolean;
   isInteger: boolean;
   baseIndexed?: ReadonlyMap<bigint, string> | undefined;
@@ -192,10 +193,10 @@ export class Expander {
       state.stagedAssoc.set(key, converted);
       return { key, value: converted, append: false, rawText, preconvertedInteger: true };
     }
-    if (key === '') return { key, value, append, rawText, evaluatedIndex: 'invalid' };
+    if (key === '') return this.shell.discard(`${prepare.reportedName}[]: bad array subscript`);
     const rawIdx = this.shell.evaluateFatalReadonly(key);
     const idx = rawIdx >= 0n ? rawIdx : maxElementIndex(state.stagedIndexed) + 1n + rawIdx;
-    if (idx < 0n) return { key, value, append, rawText, evaluatedIndex: 'invalid' };
+    if (idx < 0n) return this.shell.discard(`${prepare.reportedName}[${key}]: bad array subscript`);
     state.nextIndex = idx + 1n;
     const base = append ? (state.stagedIndexed.get(idx) ?? '') : '';
     if (!prepare.isInteger) {

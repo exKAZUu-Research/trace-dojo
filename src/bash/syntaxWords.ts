@@ -37,6 +37,8 @@ export class SourceText {
   parseSubstitution: (start: number) => number = () => {
     throw new Error('No parser for command substitutions');
   };
+  /** Optional observer notified whenever `$((...))` or `$[...]` is scanned inside a word or string. */
+  onArithmetic?: (opener: '$((' | '$[', openStart: number, start: number, end: number, closeEnd: number) => void;
 
   constructor(readonly source: string) {
     for (let i = 0; i < source.length; i++) if (source[i] === '\n') this.lineStarts.push(i + 1);
@@ -96,7 +98,11 @@ export function skipWordPiece(text: SourceText, index: number): number {
   if (next === "'") return skipAnsiC(text, index + 1);
   if (next === '"') return skipDoubleQuoted(text, index + 1);
   if (next === '{') return skipBraces(text, index + 1);
-  if (next === '[') return skipBalanced(text, index + 1, '[', ']');
+  if (next === '[') {
+    const closeEnd = skipBalanced(text, index + 1, '[', ']');
+    text.onArithmetic?.('$[', index, index + 2, closeEnd - 1, closeEnd);
+    return closeEnd;
+  }
   if (next === '(') return skipDollarParenthesis(text, index + 1);
   return index + 1;
 }
@@ -168,7 +174,14 @@ export function skipBalanced(text: SourceText, open: number, opener: string, clo
 /** `$((...))`, which Bash reads as text up to the matching parenthesis, or `$(...)`, whose commands it parses. */
 function skipDollarParenthesis(text: SourceText, open: number): number {
   return text.nested(() => {
-    if (text.source[open + 1] === '(') return skipBalanced(text, open, '(', ')');
+    if (text.source[open + 1] === '(') {
+      const closeEnd = arithmeticEnd(text, open);
+      if (closeEnd !== undefined) {
+        text.onArithmetic?.('$((', open - 1, open + 2, closeEnd - 2, closeEnd);
+        return closeEnd;
+      }
+      return skipBalanced(text, open, '(', ')');
+    }
     return text.parseSubstitution(open + 1);
   });
 }
