@@ -44,6 +44,7 @@ import { constantsOf } from './constants';
 import { containerTemplates } from './containers';
 import { exceptionPointerFunctions } from './exceptionPointers';
 import { exceptionClasses } from './exceptions';
+import { formatFunctions } from './format';
 import {
   FLAGS,
   ManipulatorValue,
@@ -115,7 +116,6 @@ const UNSUPPORTED_STD_NAMES: Record<string, string> = {
   move: 'ムーブ（std::move）',
   forward: '完全転送（std::forward）',
   valarray: 'std::valarray',
-  format: '書式（std::format）',
   ranges: 'レンジ（std::ranges）',
   views: 'レンジ（std::views）',
   forward_list: 'std::forward_list',
@@ -475,6 +475,9 @@ export class Library {
     this.addFunctions(exceptionPointerFunctions(), this.stdNames);
     this.addFunctions(hashFunctions(), this.stdNames);
     this.addFunctions(bitCastFunctions(), this.stdNames);
+    const format = formatFunctions(this);
+    this.addFunctions(format.functions, this.stdNames);
+    this.addStd('format_args', { kind: 'class', cls: format.formatArgs });
     const exit = native('exit', [INT], VOID, ([status]) => {
       throw new ProgramExit(asNumber(status));
     });
