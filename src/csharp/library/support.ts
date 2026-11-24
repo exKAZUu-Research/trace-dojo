@@ -277,13 +277,16 @@ export function newArrayOf(
   valueAt: (index: number) => Value
 ): CsArray {
   call.frame.runtime.allocateSlots(length);
-  const sources = Array.from({ length }, (_, index) => valueAt(index));
-  chargeStructFields(call, sources);
-  return new CsArray(
-    { kind: 'array', element, rank: 1 },
-    [length],
-    sources.map((value) => copyValue(value))
-  );
+  const values: Value[] = [];
+  for (let index = 0; index < length; index++) {
+    const value = valueAt(index);
+    // A struct element's fields are charged before the next element is made, so defaults that the source makes, as
+    // Array.Resize's, cannot run far past the limit.
+    const fieldSlots = structFieldSlots(value);
+    if (fieldSlots > 0) call.frame.runtime.allocateSlots(fieldSlots);
+    values.push(copyValue(value));
+  }
+  return new CsArray({ kind: 'array', element, rank: 1 }, [length], values);
 }
 
 /** Charges the fields of the struct values among elements a native keeps reachable, beyond their one slot each. */

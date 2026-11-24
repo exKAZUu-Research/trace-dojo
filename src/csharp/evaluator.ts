@@ -55,6 +55,7 @@ import {
   freshString,
   plainString,
   stringText,
+  structFieldSlots,
   UNASSIGNED,
   type Value,
   type VariableReference,
@@ -1073,21 +1074,25 @@ export class Evaluator extends StatementExecutor {
   /** Creates an instance of a class with its fields at their defaults. */
   allocate(type: NamedType): CsObject {
     const symbol = type.symbol;
-    this.runtime.allocateSlots(symbol.instanceFieldCount + 1);
-    const fields: Value[] = Array.from<Value>({ length: symbol.instanceFieldCount });
+    const fieldTypes: [number, Type][] = [];
     for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
       const substitution = substitutionOf(current);
       for (const field of current.symbol.fields) {
-        if (!field.isStatic && !field.isConst)
-          fields[field.slot] = this.defaultOf(substitute(field.type, substitution));
+        if (!field.isStatic && !field.isConst) fieldTypes.push([field.slot, substitute(field.type, substitution)]);
       }
     }
+    // A field of a struct type also holds the fields its default value allocates.
+    const structSlots = fieldTypes.reduce((sum, [, fieldType]) => sum + this.defaultSlotCount(fieldType), 0);
+    this.runtime.allocateSlots(symbol.instanceFieldCount + 1 + structSlots);
+    const fields: Value[] = Array.from<Value>({ length: symbol.instanceFieldCount });
+    for (const [slot, fieldType] of fieldTypes) fields[slot] = this.defaultOf(fieldType);
     return new CsObject(type, fields);
   }
 
   /** A shallow copy of an object, as `with` and `MemberwiseClone` make, charged as an allocation like `new`. */
   cloneObject(source: CsObject): CsObject {
-    this.runtime.allocateSlots(source.fields.length + 1);
+    const structSlots = source.fields.reduce((sum: number, field) => sum + structFieldSlots(field), 0);
+    this.runtime.allocateSlots(source.fields.length + 1 + structSlots);
     const copy = new CsObject(
       source.type,
       source.fields.map((field) => copyValue(field))
