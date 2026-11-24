@@ -46,17 +46,21 @@ function echo(shell: Shell, args: string[]): number {
   for (const [position, word] of words.entries()) {
     if (escapes) {
       const { out, stop } = echoEscapes(word);
-      bytes.push(...out);
+      appendBytes(bytes, out);
       if (stop) {
         shell.state.fd1.write(decodeBytes(bytes));
         return 0;
       }
-    } else bytes.push(...encodeText(word));
+    } else appendBytes(bytes, encodeText(word));
     if (position < words.length - 1) bytes.push(32);
   }
   if (newline) bytes.push(10);
   shell.state.fd1.write(decodeBytes(bytes));
   return 0;
+}
+
+function appendBytes(target: number[], source: readonly number[]): void {
+  for (const byte of source) target.push(byte);
 }
 
 /** Decodes `echo -e` backslash escapes into output bytes, stopping early on `\c`. */
