@@ -11,6 +11,7 @@ import { Converter, decodeAnsiC } from './converter';
 import { checkBashSyntax } from './syntaxCheck';
 import { syntaxErrorMessage, syntaxErrorsOf } from './syntaxErrors';
 import { skipBalanced, skipWordPiece, SourceText } from './syntaxWords';
+import { UnsupportedFeatureError } from './unsupported';
 
 const parser = await loadParser('@willbooster/tree-sitter-bash/tree-sitter-bash.wasm');
 
@@ -198,6 +199,13 @@ function parsePiece(piece: string): WordPart[] {
     const target = first?.type === 'command' ? (first.childForFieldName('name')?.namedChildren[0] ?? first) : first;
     if (tree.rootNode.hasError || !target) return [{ kind: 'single', text: piece }];
     return new Converter(piece, new Set(), new Map(), () => [piece], reparseBackquoted, new Map()).word(target).parts;
+  } catch (error) {
+    if (error instanceof CompileError) {
+      const message = error.diagnostics[0]?.message ?? '';
+      if (message.endsWith('は、この採点環境では使えません。')) throw new UnsupportedFeatureError(message);
+      return [{ kind: 'single', text: piece }];
+    }
+    throw error;
   } finally {
     tree.delete();
   }

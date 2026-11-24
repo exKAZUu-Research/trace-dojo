@@ -3,7 +3,7 @@ import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
 import { declarationText } from './declare';
 import type { Expander, ParameterValue } from './expansion';
-import { EMPTY_LIST, isFieldBreak, type Piece } from './fields';
+import { EMPTY_LIST, FIELD_BREAK, isFieldBreak, type Piece } from './fields';
 import { rawLengthSource } from './parse';
 import {
   compileGlob,
@@ -59,7 +59,9 @@ export function applyOperator(
     case '%':
     case '%%': {
       const pattern = expander.patternOf(expandArgument(expander, argument, inDouble, true));
-      return mapValues(expander, value, inDouble, (text) => removePattern(text, pattern, operator, shell));
+      return mapPatternRemoval(expander, shell, value, inDouble, (text) =>
+        removePattern(text, pattern, operator, shell)
+      );
     }
     case '/':
     case '//':
@@ -107,21 +109,32 @@ function expandArgument(expander: Expander, parts: WordPart[], inDouble: boolean
     expander.checkTilde(parts, false);
     return expander.expandParts(parts, false);
   }
-  if (!inDouble) {
-    expander.checkTilde(parts, false);
-    return expander
-      .expandParts(parts, false)
-      .map((piece) =>
-        piece === EMPTY_LIST || isFieldBreak(piece) || piece.quoted ? piece : { ...piece, split: true }
-      );
-  }
+  if (!inDouble) return expandUnquotedOperatorWord(expander, parts);
   const pieces: Piece[] = [];
   for (const part of parts) {
     if (part.kind === 'single') pieces.push({ text: `'${part.text}'`, quoted: true, split: false });
     else if (part.kind === 'double') pieces.push(...expander.expandParts([part], false));
     else pieces.push(...expander.expandParts([part], true));
   }
-  return pieces.length === 0 ? [{ text: '', quoted: true, split: false }] : pieces;
+  const kept = pieces.filter((piece) => piece !== EMPTY_LIST);
+  return kept.length === 0 ? [{ text: '', quoted: true, split: false }] : kept;
+}
+
+function expandUnquotedOperatorWord(expander: Expander, parts: WordPart[]): Piece[] {
+  expander.checkTilde(parts, false);
+  const pieces: Piece[] = [];
+  for (const part of parts) {
+    const keepsFields =
+      part.kind === 'double' ||
+      (part.kind === 'parameter' && part.operator !== undefined && /^:?[-+]$/.test(part.operator));
+    for (const piece of expander.expandParts([part], false)) {
+      if (piece === EMPTY_LIST) continue;
+      if (piece === FIELD_BREAK && !keepsFields) pieces.push({ text: ' ', quoted: false, split: true });
+      else if (isFieldBreak(piece) || piece.quoted) pieces.push(piece);
+      else pieces.push({ ...piece, split: true });
+    }
+  }
+  return pieces;
 }
 
 // code-gauge-allow functionParameterCount -- The default and assignment operators need the expansion, the parameter, and how it is quoted.
@@ -150,6 +163,21 @@ function defaultValue(
     subscript === undefined ? shell.assignScalar(name, text) : shell.assignElement(name, subscript, text, false);
   if (!assigned) shell.discard(`${name}: cannot assign`);
   return expander.valuePieces({ kind: 'scalar', value: shell.lastStored }, inDouble);
+}
+
+function mapPatternRemoval(
+  expander: Expander,
+  shell: Shell,
+  value: ParameterValue,
+  inDouble: boolean,
+  map: (text: string) => string
+): Piece[] {
+  if (!inDouble && value.kind === 'list' && shell.scalarValue('IFS') === '') {
+    if (value.values.length === 0) return [];
+    const text = value.values.map(map).join(' ');
+    return text === '' ? [] : [{ text, quoted: false, split: false }];
+  }
+  return mapValues(expander, value, inDouble, map);
 }
 
 /** Applies a string operation to a scalar or to each element of a list, keeping the list's fields. */

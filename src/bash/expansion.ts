@@ -136,7 +136,8 @@ export class Expander {
     isAssociative: boolean,
     declared: boolean
   ): { elements: CompoundElement[]; error?: string } {
-    if (!isAssociative) return { elements: items };
+    const keyedMode = items.length > 0 && typeof items[0] !== 'string' && !('plain' in items[0]);
+    if (!isAssociative || !keyedMode) return { elements: items };
     const elements: CompoundElement[] = [];
     for (const item of items) {
       if (typeof item !== 'string' && !('plain' in item) && item.key === '') {
@@ -423,7 +424,7 @@ export class Expander {
       for (const variable of scope.values()) {
         if (!variable.name.startsWith(prefix)) continue;
         if (variable.isSystem) throw new UnsupportedFeatureError(`シェルの変数の一覧（\${!${prefix}*}）`);
-        if (variable.value || variable.attributes.size > 0) names.add(variable.name);
+        if (variable.value !== undefined) names.add(variable.name);
       }
     }
     if ('BASH'.startsWith(prefix) || prefix.startsWith('BASH') || 'RANDOM'.startsWith(prefix) || prefix === '') {
@@ -462,7 +463,7 @@ export class Expander {
   /** What separates a list's elements: one that joins as `"$*"` does where words are not split, or a plain break. */
   private separatorOf(value: Extract<ParameterValue, { kind: 'list' }>): Piece {
     if (!value.star) return FIELD_BREAK;
-    return value.positional && this.spacedStar && this.ifsJoiner() === '' ? FIELD_BREAK : STAR_BREAK;
+    return value.positional && this.spacedStar ? FIELD_BREAK : STAR_BREAK;
   }
 
   /**

@@ -1380,7 +1380,7 @@ export class Shell implements ArithmeticHost {
       const table = append && previous ? previous : new AssociativeTable(previous?.bucketCount);
       const baseTable = append ? table : previous;
       if (append) variable.value = { kind: 'associative', table };
-      const ok = this.assignAssociative(variable, table, baseTable, elements);
+      const ok = this.assignAssociative(variable, table, baseTable, elements, reportedName);
       variable.value = { kind: 'associative', table };
       variable.attributes.add('A');
       return ok;
@@ -1414,14 +1414,14 @@ export class Shell implements ArithmeticHost {
     variable: Variable,
     table: AssociativeTable,
     baseTable: AssociativeTable | undefined,
-    elements: CompoundElement[]
+    elements: CompoundElement[],
+    reportedName: string
   ): boolean {
     for (let i = 0; i < elements.length; i++) {
-      const element = elements[i];
-      const entry = readAssociativePair(elements, i, element);
+      const entry = readAssociativePair(elements, i, elements[i], reportedName);
       if (entry.consumedNext) i++;
-      if (entry.key === '') {
-        this.reportError(`${entry.rawKey}: bad array subscript`);
+      if (entry.error !== undefined) {
+        this.reportError(entry.error);
         continue;
       }
       const base = entry.append ? (baseTable?.get(entry.key) ?? '') : '';

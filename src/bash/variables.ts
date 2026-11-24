@@ -33,32 +33,61 @@ export type CompoundElement =
   | { plain: string; rawText: string }
   | string;
 
+export function isKeyedCompoundList(elements: readonly CompoundElement[]): boolean {
+  return elements.length > 0 && typeof elements[0] !== 'string' && !('plain' in elements[0]);
+}
+
 /** Reads one `[key]=value` item or alternating `key value` pair from an associative compound assignment. */
 export function readAssociativePair(
   elements: CompoundElement[],
   index: number,
-  element: CompoundElement
+  element: CompoundElement,
+  reportedName: string,
+  keyedMode = isKeyedCompoundList(elements)
 ): {
   key: string;
-  rawKey: string;
   value: string;
   append: boolean;
   consumedNext: boolean;
+  error?: string;
 } {
-  if (typeof element !== 'string' && !('plain' in element)) {
+  if (keyedMode) {
+    if (typeof element === 'string' || 'plain' in element) {
+      const invalidPlain = typeof element === 'string' ? element : element.plain;
+      return {
+        key: '',
+        value: '',
+        append: false,
+        consumedNext: false,
+        error: `${reportedName}: ${invalidPlain}: must use subscript when assigning associative array`,
+      };
+    }
+    const rawKey = element.rawText ?? element.key;
     return {
       key: element.key,
-      rawKey: element.rawText ?? element.key,
       value: element.value,
       append: element.append,
       consumedNext: false,
+      ...(element.key === '' ? { error: `${rawKey}: bad array subscript` } : {}),
     };
   }
-  const key = typeof element === 'string' ? element : element.plain;
-  const rawKey = typeof element === 'string' ? element : element.rawText;
+  const key = compoundElementPlainText(element);
+  const rawKey = typeof element === 'string' ? element : (element.rawText ?? key);
   const next = elements[index + 1];
-  const value = next === undefined ? '' : typeof next === 'string' ? next : 'plain' in next ? next.plain : '';
-  return { key, rawKey, value, append: false, consumedNext: true };
+  const value = next === undefined ? '' : compoundElementPlainText(next);
+  return {
+    key,
+    value,
+    append: false,
+    consumedNext: true,
+    ...(key === '' ? { error: `${rawKey}: bad array subscript` } : {}),
+  };
+}
+
+function compoundElementPlainText(element: CompoundElement): string {
+  if (typeof element === 'string') return element;
+  if ('plain' in element) return element.plain;
+  return `[${element.key}]${element.append ? '+=' : '='}${element.value}`;
 }
 
 /** Normalizes one indexed compound element for `assignCompoundTo`. */
