@@ -4421,7 +4421,7 @@ function assignValue(frame: Frame, type: Type, target: Value, source: Value): Va
 }
 
 /** Whether converting an arithmetic value to another type narrows it (C++20 [dcl.init.list]). */
-function isNarrowing(
+export function isNarrowing(
   from: Extract<Type, { kind: 'int' | 'float' }>,
   to: Extract<Type, { kind: 'int' | 'float' }>,
   constant: number | bigint | undefined

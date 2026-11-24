@@ -83,7 +83,7 @@ import {
   unqualified,
   withConst,
 } from './types';
-import { TYPE_TRAITS } from './typeTraits';
+import { TYPE_QUERIES, TYPE_TRAITS } from './typeTraits';
 import {
   ArrayStore,
   Box,
@@ -2367,6 +2367,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const typeOf = (node: Syntax): Type =>
       this.expressionAsType(node) ?? this.error(row, `${name} の引数には型を書いてください（${node.text}）。`);
     const types = argNodes.map((arg) => (arg.type === PACK_ELEMENT ? withPackElement(this, arg, typeOf) : typeOf(arg)));
+    if (Object.hasOwn(TYPE_QUERIES, name))
+      return constantExpr(SIZE_T, BigInt(TYPE_QUERIES[name](this as never, types, row)), row);
     return constantExpr(BOOL, Number(TYPE_TRAITS[name](this as never, types, row)), row);
   }
 
@@ -2388,7 +2390,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     // The grammar reads the `noexcept(e)` operator as a call.
     if (functionNode.type === 'identifier' && functionNode.text === 'noexcept' && argNodes.length === 1)
       return this.noexceptOperator(argNodes[0], node.row);
-    if (isUnqualified && Object.hasOwn(TYPE_TRAITS, functionNode.text))
+    if (
+      isUnqualified &&
+      (Object.hasOwn(TYPE_TRAITS, functionNode.text) || Object.hasOwn(TYPE_QUERIES, functionNode.text))
+    )
       return this.typeTrait(functionNode.text, argNodes, node.row);
     const cast = this.utilityCast(functionNode, argNodes, node.row);
     if (cast) return cast;

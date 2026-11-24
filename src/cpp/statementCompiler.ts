@@ -1574,22 +1574,21 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       this.setReturnType(VOID);
       return;
     }
-    const deduced =
-      declared.kind === 'reference'
-        ? referenceTo(this.deduceAutoReference(declared.to, value))
-        : this.deduceAuto(declared, value, row);
-    this.setReturnType(deduced);
+    this.setReturnType(this.deducedReturnType(declared, value, row));
+  }
+
+  /** The return type an `auto` return type deduces from a value; `auto&&` deduces as a forwarding reference does. */
+  private deducedReturnType(declared: Type, value: Expr, row: number): Type {
+    if (declared.kind !== 'reference') return this.deduceAuto(declared, value, row);
+    const isRvalue = declared.isRvalue === true && (!value.isLvalue || value.isXvalue === true);
+    return referenceTo(this.deduceAutoReference(declared.to, value), isRvalue);
   }
 
   /** Rejects a `return` whose value deduces another type than the first one did. */
   private checkReturnDeduction(declared: Type, value: Expr | undefined, row: number): void {
     const first = this.context.returnType;
     let type: Type = VOID;
-    if (value && value.type.kind !== 'void')
-      type =
-        declared.kind === 'reference'
-          ? referenceTo(this.deduceAutoReference(declared.to, value))
-          : this.deduceAuto(declared, value, row);
+    if (value && value.type.kind !== 'void') type = this.deducedReturnType(declared, value, row);
     if (!sameType(type, first))
       this.error(
         row,

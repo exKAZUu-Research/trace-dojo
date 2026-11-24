@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-import type { Compiler } from './compiler';
+import { type Compiler, isNarrowing } from './compiler';
 import { implicitConversion } from './conversions';
 import type { Expr } from './expr';
 import {
@@ -70,6 +70,33 @@ export const TYPE_TRAITS: Readonly<Record<string, Trait>> = {
   __is_standard_layout: (_, [type]) => type.kind !== 'class' || (type.cls.isComplete && isStandardLayout(type.cls)),
   __is_trivially_copyable: (_, [type]) => isTriviallyCopyable(type),
   __is_trivial: (_, [type]) => isTriviallyCopyable(type) && hasVacuousInitialization(unqualified(type)),
+};
+
+/** The builtins the library's code asks the compiler for a number with, by name. */
+export const TYPE_QUERIES: Readonly<Record<string, (compiler: Compiler, types: Type[], row: number) => number>> = {
+  /**
+   * The alternative of a `std::variant` that a value of the first type initializes: the one whose imaginary function
+   * `F(T_i)` overload resolution picks, without narrowing conversions or conversions to bool (C++20 [variant.ctor]),
+   * or the number of alternatives when there is no unique one.
+   */
+  __best_alternative: (compiler, [source, ...alternatives], row) => {
+    const argument = valueOf(source, row);
+    const from = unqualified(nonReference(source));
+    let best: { index: number; rank: number } | undefined;
+    let isAmbiguous = false;
+    for (const [index, alternative] of alternatives.entries()) {
+      const to = unqualified(nonReference(alternative));
+      if (to.kind === 'int' && to.name === 'bool' && !(from.kind === 'int' && from.name === 'bool')) continue;
+      if (isArithmetic(from) && isArithmetic(to) && isNarrowing(from, to, undefined)) continue;
+      const sequence = implicitConversion(compiler, argument, alternative);
+      if (!sequence) continue;
+      if (!best || sequence.rank < best.rank) {
+        best = { index, rank: sequence.rank };
+        isAmbiguous = false;
+      } else if (sequence.rank === best.rank) isAmbiguous = true;
+    }
+    return best && !isAmbiguous ? best.index : alternatives.length;
+  },
 };
 
 /** An lvalue of a type, or an rvalue of it when the type is an rvalue reference, as `std::declval<T>()` gives. */

@@ -161,6 +161,8 @@ export class Deduction {
    * reference and `const T` only a const type, unlike a function parameter's type, which an argument's type adjusts.
    */
   private isExact = false;
+  /** The packs lists of template arguments bind (`variant<T...>`), which every such list must agree on. */
+  private readonly listPacks = new Map<string, Type[]>();
 
   /** Matches a pattern against a template argument of a partial specialization. */
   matchSpecializationArgument(pattern: Pattern, type: Type): boolean {
@@ -356,8 +358,7 @@ export class Deduction {
           if (value === undefined || !this.bindValue(argPattern.name, value)) return false;
         } else if (!this.match(argPattern, argument)) return false;
       }
-      if (packName !== undefined) this.bindPack(packName, args.slice(fixed.length));
-      return true;
+      return packName === undefined || this.bindPack(packName, args.slice(fixed.length));
     }
     return false;
   }
@@ -368,8 +369,7 @@ export class Deduction {
     const fixed = packName === undefined ? patterns : patterns.slice(0, -1);
     if (packName === undefined ? types.length !== fixed.length : types.length < fixed.length) return false;
     if (!fixed.every((pattern, index) => this.match(pattern as Pattern, types[index]))) return false;
-    if (packName !== undefined) this.bindPack(packName, types.slice(fixed.length));
-    return true;
+    return packName === undefined || this.bindPack(packName, types.slice(fixed.length));
   }
 
   /** The name of the pack a list of patterns ends with, if any. */
@@ -379,10 +379,16 @@ export class Deduction {
     return isNamed && this.parameterNamed(last.name)?.isPack ? last.name : undefined;
   }
 
-  bindPack(name: string, types: readonly Type[]): void {
-    if (this.fixed.has(name)) return;
+  /** Binds a pack to the types a list gives it, or checks them against the ones another list gave it. */
+  bindPack(name: string, types: readonly Type[]): boolean {
+    if (this.fixed.has(name)) return true;
+    const bound = this.listPacks.get(name);
+    if (bound)
+      return bound.length === types.length && bound.every((type, index) => typeKey(type) === typeKey(types[index]));
+    this.listPacks.set(name, [...types]);
     if (!this.packs.has(name)) this.packs.set(name, []);
     for (const type of types) this.bind(name, type);
+    return true;
   }
 
   bind(name: string, type: Type): boolean {
