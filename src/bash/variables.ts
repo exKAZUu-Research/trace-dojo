@@ -706,6 +706,10 @@ export function isArrayVariable(variable: Variable): boolean {
   );
 }
 
+export function isAssociativeVariable(variable: Variable | undefined): boolean {
+  return variable?.value?.kind === 'associative' || variable?.attributes.has('A') === true;
+}
+
 export function storeScalarCell(variable: Variable, value: string): void {
   variable.value = { kind: 'scalar', value };
   variable.shared = false;

@@ -51,6 +51,7 @@ import {
   hasNamerefCycleInScopes,
   initialRandomSeed,
   isArrayVariable,
+  isAssociativeVariable,
   isIdentifier,
   isValidFunctionName,
   maxElementIndex,
@@ -960,9 +961,7 @@ export class Shell implements ArithmeticHost {
 
   /** Whether a name holds an associative array, including one declared with `-A` that has no elements yet. */
   isAssociative(name: string): boolean {
-    return (
-      this.findVariable(name)?.value?.kind === 'associative' || this.findVariable(name)?.attributes.has('A') === true
-    );
+    return isAssociativeVariable(this.findVariable(name));
   }
 
   // ---------------------------------------------------------------- variables
@@ -1358,11 +1357,8 @@ export class Shell implements ArithmeticHost {
   /** Assigns the words of `name=(...)` or `name+=(...)`, already expanded into keyed and plain elements. */
   assignCompound(name: string, elements: CompoundElement[], append: boolean): boolean {
     if (this.isDynamic(name)) return true;
-    let variable = this.findVariable(name);
-    if (variable?.attributes.has('r')) {
-      this.reportError(`${name}: readonly variable`);
-      return false;
-    }
+    let variable = this.findOwnVariable(name);
+    if (variable && this.rejectReadonlyElement(variable, name)) return false;
     if (!variable) {
       if (append && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
       variable = { name, value: undefined, attributes: new Set() };
@@ -1379,17 +1375,13 @@ export class Shell implements ArithmeticHost {
     append: boolean,
     reportedName = variable.name
   ): boolean {
-    if (variable.attributes.has('r')) {
-      this.reportError(`${reportedName}: readonly variable`);
-      return false;
-    }
+    if (this.rejectReadonlyElement(variable, reportedName)) return false;
     ensureWritable(variable);
-    if (variable.value?.kind === 'associative' || variable.attributes.has('A')) {
+    if (isAssociativeVariable(variable)) {
       const previous = variable.value?.kind === 'associative' ? variable.value.table : undefined;
       const table = append && previous ? previous : new AssociativeTable(previous?.bucketCount);
-      const baseTable = append ? table : previous;
       if (append) variable.value = { kind: 'associative', table };
-      const ok = this.assignAssociative(variable, table, baseTable, elements, reportedName);
+      const ok = this.assignAssociative(variable, table, append ? table : previous, elements, reportedName);
       variable.value = { kind: 'associative', table };
       variable.attributes.add('A');
       variable.userAssigned = true;
@@ -1451,31 +1443,35 @@ export class Shell implements ArithmeticHost {
       this.reportError(`\`${assignment.text}': not a valid identifier`);
       return false;
     }
-    if (assignment.array) {
-      if (assignment.subscript) {
-        this.reportError(`${assignment.name}[${assignment.subscript.text}]: cannot assign list to array member`);
-        return false;
-      }
-      const resolved = this.resolveName(assignment.name);
-      if (this.findVariable(resolved)?.attributes.has('r')) {
-        this.readonlyFailure = true;
-        this.reportError(`${resolved}: readonly variable`);
-        return false;
-      }
-      const { elements, error } = this.expander.expandCompound(
-        assignment.array,
-        this.isAssociative(resolved),
-        false,
-        assignment.name
-      );
-      const ok = this.assignCompound(resolved, elements, assignment.append);
-      if (error) this.discard(error);
-      return ok;
-    }
+    if (assignment.array) return this.performCompoundAssignment(assignment);
     const value = assignment.value ? this.expander.expandAssignmentValue(assignment.value) : '';
     return assignment.subscript
       ? this.assignElementWord(assignment.name, assignment.subscript, value, assignment.append)
       : this.assignScalar(assignment.name, value, assignment.append);
+  }
+
+  private performCompoundAssignment(assignment: Assignment): boolean {
+    if (assignment.subscript) {
+      this.reportError(`${assignment.name}[${assignment.subscript.text}]: cannot assign list to array member`);
+      return false;
+    }
+    const resolved = this.resolveNameOrUndefined(assignment.name);
+    if (resolved === undefined) return false;
+    const existing = this.findOwnVariable(resolved);
+    if (!isIdentifier(resolved) && !existing) {
+      this.reportError(`\`${resolved}': not a valid identifier`);
+      return false;
+    }
+    if (existing && this.rejectReadonlyElement(existing, resolved)) return false;
+    const { elements, error } = this.expander.expandCompound(
+      assignment.array as Word[],
+      isAssociativeVariable(existing),
+      false,
+      assignment.name
+    );
+    const ok = this.assignCompound(resolved, elements, assignment.append);
+    if (error) this.discard(error);
+    return ok;
   }
 
   /** `name[subscript]=value`, whose error shows the subscript as written. */
