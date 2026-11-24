@@ -321,7 +321,10 @@ defineNatives({
     const state = sortedOf(receiver);
     if (state.compare(lower as Value, upper as Value) > 0)
       fail('System.ArgumentException', 'Must be less than or equal to upperValue.', 'lowerValue');
-    const view = newSorted(call, undefined, state.keyType, undefined);
+    // The view orders and looks up by the set's own comparer, as .NET's does.
+    const view = lookupWithComparer(state);
+    view.retain = (baseSlots, values) => call.frame.runtime.retainSlots(baseSlots, values);
+    view.store = (previous, next) => call.frame.runtime.chargeStore(previous, next);
     const step = stepMeter(call);
     for (const key of state.keys) {
       step();
