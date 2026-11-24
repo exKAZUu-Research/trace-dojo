@@ -176,23 +176,11 @@ class TestReader {
   private parseGrouped(): boolean {
     this.index++;
     if (this.atEnd) this.fail('argument expected');
-    const closeOffset = this.findGroupClose();
-    const inner =
-      closeOffset !== undefined && closeOffset <= 4 ? this.evaluateSpan(closeOffset) : this.parseDisjunction();
+    const inner = this.parseDisjunction();
     if (this.atEnd) this.fail("`)' expected");
     if (this.peek() !== ')') this.fail(`\`)' expected, found ${this.peek()}`);
     this.index++;
     return inner;
-  }
-
-  private findGroupClose(): number | undefined {
-    let depth = 1;
-    for (let offset = 1; this.index + offset < this.tokens.length; offset++) {
-      const token = this.tokens[this.index + offset];
-      if (token === '(') depth++;
-      else if (token === ')' && --depth === 0) return offset;
-    }
-    return undefined;
   }
 
   private applyUnary(): boolean {
