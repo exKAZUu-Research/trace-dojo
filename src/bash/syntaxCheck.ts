@@ -188,11 +188,11 @@ class ShellTokenStream {
         this.position = this.text.parseSubstitution(this.position + 2);
         continue;
       }
-      if (ch === '[' && context !== 'argument' && isIdentifier(source.slice(start, this.position))) {
+      if (ch === '[' && context === 'command' && isIdentifier(source.slice(start, this.position))) {
         const close = skipSubscript(source, this.position);
         const hasEquals =
           close < source.length && (source.startsWith('=', close + 1) || source.startsWith('+=', close + 1));
-        if (close < source.length && (hasEquals || context === 'command')) {
+        if (close < source.length) {
           this.consumeSubscriptInWord(close, !hasEquals);
           continue;
         }
