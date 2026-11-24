@@ -84,21 +84,27 @@ export abstract class PatternMatcher extends EvaluatorBase {
     const type = frame.resolve(pattern.testType);
     if (!this.isOfType(value, frame.resolve(pattern.inputType), type)) return false;
     if (pattern.local)
-      this.storeLocal(
-        frame,
-        pattern.local,
-        value instanceof CsBox && !isReferenceType(type) ? copyValue(value.value) : copyValue(value)
-      );
+      this.storeLocal(frame, pattern.local, this.designated(value, frame.resolve(pattern.inputType), type));
     return true;
   }
 
   /** Whether an input value has a type, where a primitive, which carries no type, tests as its input type's box. */
   private isOfType(value: Value, inputType: Type, type: Type): boolean {
-    const subject =
-      !(value instanceof CsBox) && this.runtime.runtimeTypeOf(value) === undefined && isValueType(inputType)
-        ? new CsBox(nullableUnderlying(inputType) ?? inputType, value)
-        : value;
+    const subject = this.asTestedValue(value, inputType);
     return (subject instanceof CsStruct && sameType(subject.type, type)) || this.isInstanceOf(subject, type);
+  }
+
+  /** A primitive input as the box of its input type that a type test sees; other values as they are. */
+  private asTestedValue(value: Value, inputType: Type): Value {
+    return !(value instanceof CsBox) && this.runtime.runtimeTypeOf(value) === undefined && isValueType(inputType)
+      ? new CsBox(nullableUnderlying(inputType) ?? inputType, value)
+      : value;
+  }
+
+  /** The value a pattern's variable of a type receives: the tested box for a reference type, else a copy unboxed. */
+  private designated(value: Value, inputType: Type, type: Type): Value {
+    if (isReferenceType(type)) return this.asTestedValue(value, inputType);
+    return copyValue(value instanceof CsBox ? value.value : value);
   }
 
   private matchesRelational(
@@ -128,7 +134,12 @@ export abstract class PatternMatcher extends EvaluatorBase {
     const target = value instanceof CsBox ? value.value : value;
     if (!this.matchesPositional(pattern, target, frame) || !this.matchesProperties(pattern, target, frame))
       return false;
-    if (pattern.local) this.storeLocal(frame, pattern.local, copyValue(target));
+    if (pattern.local)
+      this.storeLocal(
+        frame,
+        pattern.local,
+        this.designated(value, frame.resolve(pattern.inputType), pattern.local.type)
+      );
     return true;
   }
 
