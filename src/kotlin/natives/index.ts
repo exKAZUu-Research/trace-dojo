@@ -4,3 +4,4 @@ import './text';
 import './arrays';
 import './duration';
 import './reflection';
+import './files';

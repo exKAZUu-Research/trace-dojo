@@ -9,8 +9,9 @@ export function unavailableMessage(what: string): string {
 
 export function unavailableJavaFeature(path: string): string | undefined {
   const within = (prefix: string): boolean => path === prefix || path.startsWith(prefix + '.');
-  if (within('java.util.Scanner') || path === 'java.lang.System.in') return '標準入力';
-  if (within('java.io') || within('java.nio')) return 'ファイルの読み書き';
+  if (path === 'java.lang.System.in') return 'Java の System.in（readln() を使ってください）';
+  if (within('java.util.Scanner')) return 'Java の Scanner（readln() を使ってください）';
+  if (within('java.nio')) return 'java.nio のファイルの読み書き（java.io.File を使ってください）';
   if (within('java.net')) return 'ネットワーク';
   if (within('java.util.concurrent')) return 'コルーチン・スレッド';
   if (within('java.lang.reflect')) return 'リフレクション';

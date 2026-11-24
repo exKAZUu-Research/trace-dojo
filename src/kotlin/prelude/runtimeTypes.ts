@@ -4,9 +4,60 @@ import { kotlin } from './source';
 export const IO_SOURCE = kotlin`
 package kotlin.io
 
+import java.io.BufferedReader
+import java.io.BufferedWriter
+import java.io.Closeable
+import java.io.File
+import java.io.PrintWriter
+
 external fun println(message: Any?)
 external fun println()
 external fun print(message: Any?)
+
+external fun readLine(): String?
+external fun readln(): String
+external fun readlnOrNull(): String?
+
+external fun File.readText(): String
+external fun File.writeText(text: String)
+external fun File.appendText(text: String)
+external fun File.bufferedReader(): BufferedReader
+external fun File.bufferedWriter(): BufferedWriter
+external fun File.printWriter(): PrintWriter
+
+fun File.readLines(): List<String> {
+    val lines = ArrayList<String>()
+    bufferedReader().use { reader ->
+        while (true) lines.add(reader.readLine() ?: break)
+    }
+    return lines
+}
+
+inline fun File.forEachLine(action: (line: String) -> Unit) {
+    for (line in readLines()) action(line)
+}
+
+val File.extension: String
+    get() = name.substringAfterLast('.', "")
+
+val File.nameWithoutExtension: String
+    get() = name.substringBeforeLast(".")
+
+inline fun <T : Closeable?, R> T.use(block: (T) -> R): R {
+    var closed = false
+    try {
+        return block(this)
+    } catch (e: Throwable) {
+        closed = true
+        try {
+            this?.close()
+        } catch (_: Throwable) {
+        }
+        throw e
+    } finally {
+        if (!closed) this?.close()
+    }
+}
 
 // The overloads that kotlin.io declares on the JVM, so that resolving a call chooses among them as kotlinc does.
 fun println(message: Boolean) = println(message as Any?)
@@ -27,6 +78,62 @@ fun println(message: Short) = println(message as Any?)
 fun print(message: Short) = print(message as Any?)
 fun println(message: CharArray) = println(message.concatToString())
 fun print(message: CharArray) = print(message.concatToString())
+`;
+
+/** \`java.io\`: the files of a run's file system and the readers and writers of their text, as Java provides them. */
+export const JAVA_IO_SOURCE = kotlin`
+package java.io
+
+interface Closeable {
+    fun close()
+}
+
+external class File {
+    external constructor(pathname: String)
+    external constructor(parent: String?, child: String)
+    external constructor(parent: File?, child: String)
+    external val name: String
+    external val path: String
+    external val absolutePath: String
+    external val parent: String?
+    external val parentFile: File?
+    external val isFile: Boolean
+    external val isDirectory: Boolean
+    external fun exists(): Boolean
+    external fun length(): Long
+    external fun delete(): Boolean
+    external fun mkdir(): Boolean
+    external fun mkdirs(): Boolean
+    external fun createNewFile(): Boolean
+    external fun renameTo(dest: File): Boolean
+    external fun list(): Array<String>?
+    external fun listFiles(): Array<File>?
+    external override fun equals(other: Any?): Boolean
+    external override fun hashCode(): Int
+    external override fun toString(): String
+}
+
+external class BufferedReader : Closeable {
+    external fun readLine(): String?
+    external fun read(): Int
+    external fun ready(): Boolean
+    external override fun close()
+}
+
+external class BufferedWriter : Closeable {
+    external fun write(text: String)
+    external fun newLine()
+    external fun flush()
+    external override fun close()
+}
+
+external class PrintWriter : Closeable {
+    external fun print(value: Any?)
+    external fun println(value: Any?)
+    external fun println()
+    external fun flush()
+    external override fun close()
+}
 `;
 
 /** `System.out` and `System.err`, which Kotlin programs reach through Java's `java.lang`. */
@@ -305,6 +412,9 @@ export const EXCEPTIONS: [kotlinPackage: string, name: string, parent: string, j
   ['kotlin', 'OutOfMemoryError', 'Error', 'java.lang.OutOfMemoryError'],
   ['kotlin', 'InstantiationError', 'Error', 'java.lang.InstantiationError'],
   ['java.lang', 'LinkageError', 'Error', 'java.lang.LinkageError'],
+  ['java.io', 'IOException', 'Exception', 'java.io.IOException'],
+  ['java.io', 'FileNotFoundException', 'IOException', 'java.io.FileNotFoundException'],
+  ['kotlin.io', 'ReadAfterEOFException', 'RuntimeException', 'kotlin.io.ReadAfterEOFException'],
   ['java.lang', 'ExceptionInInitializerError', 'LinkageError', 'java.lang.ExceptionInInitializerError'],
   ['java.lang', 'NoClassDefFoundError', 'LinkageError', 'java.lang.NoClassDefFoundError'],
   ['java.lang', 'NegativeArraySizeException', 'RuntimeException', 'java.lang.NegativeArraySizeException'],

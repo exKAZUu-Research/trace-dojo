@@ -1787,8 +1787,7 @@ function nativeParameterText(param: ParameterDecl): string {
 
 /** What an import names that this environment cannot run, by the feature it stands for. */
 function describeUnavailableImport(path: string): string {
-  if (path.startsWith('kotlin.io.readLine')) return '標準入力';
-  if (path.startsWith('kotlin.io.path')) return 'ファイルの読み書き';
+  if (path.startsWith('kotlin.io.path')) return 'kotlin.io.path のファイルの読み書き（java.io.File を使ってください）';
   if (path.startsWith('io.ktor')) return 'ネットワーク';
   if (path.startsWith('kotlinx.coroutines') || path.startsWith('kotlin.concurrent')) return 'コルーチン・スレッド';
   if (path.startsWith('kotlin.reflect')) return 'リフレクション';

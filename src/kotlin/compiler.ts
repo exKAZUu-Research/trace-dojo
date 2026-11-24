@@ -107,9 +107,6 @@ export interface CompileOptions {
 
 /** The names of functions of the standard library that read input, files, or the network, by what they need. */
 const UNAVAILABLE_FUNCTIONS: Record<string, string> = {
-  readln: '標準入力（readln）',
-  readLine: '標準入力（readLine）',
-  readlnOrNull: '標準入力（readlnOrNull）',
   thread: 'スレッド（thread）',
   runBlocking: 'コルーチン（runBlocking）',
   launch: 'コルーチン（launch）',

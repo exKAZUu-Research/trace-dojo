@@ -6210,14 +6210,9 @@ test.each([
     'Map<Int, String> の maxWithOrNullは、この採点環境では使えません。',
   ],
   [
-    'standard input',
-    'fun main() {\n    val s = readln()\n    println(s)\n}',
-    '標準入力（readln）は、この採点環境では使えません。',
-  ],
-  [
     'standard input through a wildcard import',
     'import java.util.*\nfun main() { println(Scanner(System.`in`).nextInt()) }',
-    '標準入力は、この採点環境では使えません。',
+    'Java の Scanner（readln() を使ってください）は、この採点環境では使えません。',
   ],
   [
     'a Java class through a wildcard import',
@@ -6232,27 +6227,12 @@ test.each([
   [
     'standard input through a qualified class name',
     'fun main() { println(java.util.Scanner(System.`in`).nextInt()) }',
-    '標準入力は、この採点環境では使えません。',
-  ],
-  [
-    'a qualified file constructor',
-    'fun main() { println(java.io.File("a.txt").readText()) }',
-    'ファイルの読み書きは、この採点環境では使えません。',
-  ],
-  [
-    'a qualified file type',
-    'fun main() { val file: java.io.File? = null; println(file) }',
-    'ファイルの読み書きは、この採点環境では使えません。',
+    'Java の Scanner（readln() を使ってください）は、この採点環境では使えません。',
   ],
   [
     'standard input through System',
     'fun main() { println(System.`in`.read()) }',
-    '標準入力は、この採点環境では使えません。',
-  ],
-  [
-    'files',
-    'import java.io.File\nfun main() {\n    println(File("a.txt").readText())\n}',
-    'ファイルの読み書きは、この採点環境では使えません。',
+    'Java の System.in（readln() を使ってください）は、この採点環境では使えません。',
   ],
 ])('rejects %s as unavailable', (_name, source, message) => {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'compileError', diagnostics: [{ message }] });
@@ -6339,5 +6319,20 @@ test.each([
   expect(executeProgram('kotlin', program)).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ message }],
+  });
+});
+
+test('reads standard input and the files of a run, and leaves the files it writes', () => {
+  const source = `import java.io.File
+fun main() {
+    val count = readln().toInt()
+    File("out.txt").writeText("x".repeat(count))
+    File("out.txt").appendText("!")
+    println(File("in.txt").readLines() + readlnOrNull())
+}`;
+  expect(executeProgram('kotlin', source, { stdin: '3\n', files: { 'in.txt': 'a\nb\n' } })).toMatchObject({
+    kind: 'executed',
+    stdout: '[a, b, null]\n',
+    finalFiles: { 'in.txt': 'a\nb\n', 'out.txt': 'xxx!' },
   });
 });
