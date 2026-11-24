@@ -124,14 +124,14 @@ function expandArgument(expander: Expander, parts: WordPart[], inDouble: boolean
 function expandUnquotedOperatorWord(expander: Expander, parts: WordPart[]): Piece[] {
   expander.checkTilde(parts, false);
   const ifs = expander.currentIfs();
-  const hasNonWhitePrimaryIfs = ifs !== '' && ifs[0] !== ' ' && ifs[0] !== '\t' && ifs[0] !== '\n';
+  const hasNonSpacePrimaryIfs = ifs !== '' && ifs[0] !== ' ';
   const pieces: Piece[] = [];
   for (const part of parts) {
     const keepsFields =
       part.kind === 'double' ||
       (part.kind === 'parameter' && part.operator !== undefined && /^:?[-+]$/.test(part.operator));
     for (const piece of expander.expandParts([part], false)) {
-      const mapped = mapUnquotedOperatorPiece(piece, keepsFields, hasNonWhitePrimaryIfs);
+      const mapped = mapUnquotedOperatorPiece(piece, keepsFields, hasNonSpacePrimaryIfs);
       if (mapped !== undefined) pieces.push(mapped);
     }
   }
@@ -141,14 +141,14 @@ function expandUnquotedOperatorWord(expander: Expander, parts: WordPart[]): Piec
 function mapUnquotedOperatorPiece(
   piece: Piece,
   keepsFields: boolean,
-  hasNonWhitePrimaryIfs: boolean
+  hasNonSpacePrimaryIfs: boolean
 ): Piece | undefined {
   if (piece === EMPTY_LIST) return undefined;
   if (piece === FIELD_BREAK) {
-    return !keepsFields && hasNonWhitePrimaryIfs ? { text: ' ', quoted: false, split: true } : FIELD_BREAK;
+    return !keepsFields && hasNonSpacePrimaryIfs ? { text: ' ', quoted: false, split: true } : FIELD_BREAK;
   }
   if (isFieldBreak(piece) || piece.quoted) return piece;
-  if (piece.atListElement && hasNonWhitePrimaryIfs) {
+  if (piece.atListElement && hasNonSpacePrimaryIfs) {
     return piece.text === '' ? { ...piece, split: true, operatorNull: true } : { ...piece, split: false };
   }
   return { ...piece, split: true };

@@ -57,7 +57,7 @@ export class FieldSplitter {
       this.afterDelimiter = false;
     } else if (piece.text !== '') {
       this.split(piece.text);
-    } else if (piece.operatorNull && this.hasNonWhitePrimaryIfs) {
+    } else if (piece.operatorNull && this.ifs !== '' && this.ifs[0] !== ' ') {
       this.started = true;
       this.afterWhite = false;
       this.afterListWhite = false;
