@@ -1170,7 +1170,10 @@ export abstract class SemaBase implements SemaApi {
     const from = expression.type;
     if (from.kind === 'null') return known(to, NULL, span);
     if (from.kind !== 'optional' || from.child.kind !== 'pointer' || from.child.size === 'slice') return undefined;
-    return this.tryCoerce({ ...expression, type: from.child }, to, span) && { ...expression, type: to };
+    // Only a pointer whose value stays as it is converts: Zig refuses `?*[N]T`, whose array would need its first element.
+    const child = from.child;
+    if (child.size === 'one' && child.child.kind === 'array' && child.child !== to.child) return undefined;
+    return this.tryCoerce({ ...expression, type: child }, to, span) && { ...expression, type: to };
   }
 
   /** A function value that the compiler knows, as a runtime function pointer. */
