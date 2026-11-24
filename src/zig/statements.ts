@@ -148,10 +148,11 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   protected separateAnalysis<T>(run: () => T): T {
-    const { fn, comptimeDepth, runtimeConditionDepth, evalBranches } = this;
+    const { fn, comptimeDepth, runtimeConditionDepth, inComptimeBranchDepth, evalBranches } = this;
     this.fn = undefined;
     this.comptimeDepth = 0;
     this.runtimeConditionDepth = 0;
+    this.inComptimeBranchDepth = 0;
     this.evalBranches = { count: 0, quota: 1000 };
     try {
       return run();
@@ -159,6 +160,7 @@ export abstract class StatementCompiler extends CallCompiler {
       this.fn = fn;
       this.comptimeDepth = comptimeDepth;
       this.runtimeConditionDepth = runtimeConditionDepth;
+      this.inComptimeBranchDepth = inComptimeBranchDepth;
       this.evalBranches = evalBranches;
     }
   }
@@ -1368,10 +1370,18 @@ export abstract class StatementCompiler extends CallCompiler {
           resultType,
           asStatement
         );
-      const then = this.branch(expression.consequent, undefined, resultType, asStatement);
-      const otherwise = expression.otherwise
-        ? this.branch(expression.otherwise, undefined, resultType, asStatement)
-        : undefined;
+      const queriesComptime = asksInComptime(expression.condition);
+      if (queriesComptime) this.inComptimeBranchDepth++;
+      let then: ReturnType<typeof this.branch>;
+      let otherwise: ReturnType<typeof this.branch> | undefined;
+      try {
+        then = this.branch(expression.consequent, undefined, resultType, asStatement);
+        otherwise = expression.otherwise
+          ? this.branch(expression.otherwise, undefined, resultType, asStatement)
+          : undefined;
+      } finally {
+        if (queriesComptime) this.inComptimeBranchDepth--;
+      }
       const evaluateTest = test.eval;
       return this.combineBranches(expression, then, otherwise, resultType, asStatement, (frame) =>
         evaluateTest(frame) ? 0 : 1
@@ -3344,4 +3354,11 @@ function holdsStorage(storage: Slots, target: Slots): boolean {
         (value instanceof ZStruct || value instanceof ZArray || value instanceof ZUnion) && holdsStorage(value, target)
     )
   );
+}
+
+/** Whether a condition is `@inComptime()` or its negation. */
+function asksInComptime(condition: Expression): boolean {
+  const expression = unwrapParens(condition);
+  if (expression.kind === 'unary' && expression.operator === '!') return asksInComptime(expression.operand);
+  return expression.kind === 'builtinCall' && expression.name === '@inComptime';
 }

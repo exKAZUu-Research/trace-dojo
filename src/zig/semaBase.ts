@@ -271,6 +271,11 @@ export abstract class SemaBase implements SemaApi {
   protected comptimeStore: LocalBinding | undefined;
   /** How many branches on runtime conditions and runtime loop bodies enclose the code being compiled. */
   protected runtimeConditionDepth = 0;
+  /**
+   * How many branches on `@inComptime()` enclose the code being compiled. Zig analyzes only the branch that a call
+   * takes, so a `@compileError` there fails only when it runs.
+   */
+  protected inComptimeBranchDepth = 0;
   /** The backward branches that the analysis of the current function or declaration has evaluated. */
   protected evalBranches: BranchCount = { count: 0, quota: 1000 };
   private resolvingUnionFields = 0;

@@ -3,6 +3,7 @@ import { PANIC, panic } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
 import { BufferMemory } from './bufferMemory';
 import { BuiltinCompiler } from './builtins';
+import { isDuringComptime } from './comptimeMemory';
 import { constantText } from './constantText';
 import { alignOf, bitSizeOf, fieldOffsets, sizeOf } from './layout';
 import { langNamespace } from './library/lang';
@@ -149,8 +150,9 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     const { args } = expression;
     this.builtinArity(expression, 1);
     const message = this.comptimeText(args[0]);
-    // Code that the compiler runs reaches the call only on the path that runs it.
-    if (this.comptimeDepth > 0) return runtime(NORETURN, () => this.error(expression, message), expression);
+    // Code that the compiler runs, and a branch on `@inComptime()`, reach the call only on the path that runs it.
+    if (this.comptimeDepth > 0 || this.inComptimeBranchDepth > 0)
+      return runtime(NORETURN, () => this.error(expression, message), expression);
     return this.error(expression, message);
   }
 
@@ -179,8 +181,9 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
 
   private builtinInComptime(expression: ExpressionOf<'builtinCall'>): TExpr {
     this.builtinArity(expression, 0);
-    // Zig knows the answer as it analyzes the call, which lets `if (@inComptime())` drop the other branch.
-    return known(BOOL, this.comptimeDepth > 0, expression);
+    // Zig analyzes a function body apart for the calls that run at compile time, where `@inComptime()` is known. This
+    // compiler analyzes a body once for both, so the body asks when it runs.
+    return runtime(BOOL, () => isDuringComptime(), expression);
   }
 
   private builtinSizeOf(expression: ExpressionOf<'builtinCall'>): TExpr {

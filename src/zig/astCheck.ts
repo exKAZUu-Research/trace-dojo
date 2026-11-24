@@ -764,6 +764,8 @@ class AstChecker {
       }
       return;
     }
+    if (expression.name === '@inComptime' && this.inComptime())
+      this.error(expression, 'すでにコンパイルのときに実行される場所なので、@inComptime() は要りません。');
     for (const arg of expression.args) this.expression(arg, 'value');
   }
 
