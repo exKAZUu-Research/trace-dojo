@@ -28,7 +28,7 @@ import { doubleQuote, quoteReusable } from './quoting';
 import { DiscardSignal, ExitSignal } from './runtime';
 import type { Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
-import { ATTRIBUTE_ORDER, type Variable } from './variables';
+import { ATTRIBUTE_ORDER, isArrayVariable, type Variable } from './variables';
 
 /** Applies the operator of `${name<operator>argument}` to the parameter's value. */
 // code-gauge-allow functionCognitiveComplexity -- One case per operator family of Bash's parameter expansion, each needing the expansion's context.
@@ -654,10 +654,11 @@ function transform(
         : expander.valuePieces({ kind: 'scalar', value: flags }, inDouble);
     }
     case 'A': {
-      const text = assignmentText(shell, name, value);
+      const { text, isArray } = formatDeclarationTransform(shell, name, value);
       if (value.kind === 'list') {
         if (text === '') return expander.valuePieces({ ...value, values: [] }, inDouble);
-        const values = inDouble && !value.star ? splitQuotedDeclarationFields(text, expander.currentIfs()) : [text];
+        const values =
+          isArray && inDouble && !value.star ? splitQuotedDeclarationFields(text, expander.currentIfs()) : [text];
         return expander.valuePieces({ ...value, values, transformed: true }, inDouble);
       }
       return expander.valuePieces({ kind: 'scalar', value: text }, inDouble);
@@ -693,13 +694,24 @@ function resolveTransformationVariable(shell: Shell, name: string): Variable | u
 }
 
 /** `${x@A}`: formats a scalar or local assignment statement, or `declare -p` output for `${a[@]@A}`. */
-function assignmentText(shell: Shell, name: string, value: ParameterValue): string {
+function formatDeclarationTransform(
+  shell: Shell,
+  name: string,
+  value: ParameterValue
+): { text: string; isArray: boolean } {
   const variable = resolveTransformationVariable(shell, name);
-  if (!variable) return '';
-  if (value.kind === 'list') return variable.value ? declarationText(variable) : '';
+  if (!variable) return { text: '', isArray: false };
+  if (value.kind === 'list' && isArrayVariable(variable)) {
+    return { text: declarationText(variable), isArray: true };
+  }
+  const rawScalar = value.kind === 'list' ? value.values[0] : value.value;
+  return { text: scalarAssignmentText(shell, variable, rawScalar), isArray: false };
+}
+
+function scalarAssignmentText(shell: Shell, variable: Variable, rawScalar: string | undefined): string {
   const targetName = variable.name;
   const flags = ATTRIBUTE_ORDER.filter((attribute) => variable.attributes.has(attribute)).join('');
-  const quoted = variable.value && value.value !== undefined ? quoteReusable(value.value) : undefined;
+  const quoted = variable.value && rawScalar !== undefined ? quoteReusable(rawScalar) : undefined;
   const { scopes, functionScopes } = shell.state;
   const isCurrentLocal =
     functionScopes.length > 0 && scopes[functionScopes.at(-1) as number].get(targetName) === variable;
