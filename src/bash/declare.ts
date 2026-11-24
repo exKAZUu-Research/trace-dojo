@@ -458,7 +458,39 @@ function declareOne(
   ) {
     return false;
   }
-  const { storeVariable, effectiveSubscript } = selectDeclarationStore(
+  const ok =
+    explicitRefTarget !== undefined
+      ? commitNamerefTarget(shell, builtin, destination.variable, explicitRefTarget, shell.isInFunction)
+      : storeSelectedDeclaration(
+          shell,
+          builtin,
+          name,
+          destination,
+          preUnsetStore,
+          options,
+          operand,
+          parsed,
+          assignMode
+        );
+  finishDeclarationEffects(ok, destination.variable, preUnsetStore, options.set.has('r'), priorKind, onMaterialize);
+  return ok;
+}
+
+// code-gauge-allow functionParameterCount -- Selects the effective store cell and writes the declared operand value.
+function storeSelectedDeclaration(
+  shell: Shell,
+  builtin: string,
+  name: string,
+  destination: DeclarationDestination,
+  preUnsetStore: DeclarationDestination | undefined,
+  options: Options,
+  operand: DeclarationArgument,
+  parsed: { subscript?: string; append: boolean; value?: string } | undefined,
+  assignMode: AssignMode
+): boolean {
+  const isSubscripted =
+    parsed?.subscript !== undefined || (typeof operand !== 'string' && operand.subscript !== undefined);
+  const selected = selectDeclarationStore(
     shell,
     name,
     destination,
@@ -467,21 +499,17 @@ function declareOne(
     isSubscripted,
     assignMode !== 'none' && !isCompound(operand)
   );
-  const ok =
-    explicitRefTarget !== undefined
-      ? commitNamerefTarget(shell, builtin, destination.variable, explicitRefTarget, shell.isInFunction)
-      : assignDeclaredOperand(
-          shell,
-          builtin,
-          destination.variable,
-          storeVariable,
-          operand,
-          parsed,
-          effectiveSubscript,
-          preUnsetStore !== undefined
-        );
-  finishDeclarationEffects(ok, destination.variable, preUnsetStore, options.set.has('r'), priorKind, onMaterialize);
-  return ok;
+  if (!selected) return false;
+  return assignDeclaredOperand(
+    shell,
+    builtin,
+    destination.variable,
+    selected.storeVariable,
+    operand,
+    parsed,
+    selected.effectiveSubscript,
+    preUnsetStore !== undefined
+  );
 }
 
 function rejectInvalidDeclarationName(
@@ -556,20 +584,51 @@ function selectDeclarationStore(
   { set, unset }: Options,
   isSubscripted: boolean,
   assignsNonCompound: boolean
-): { storeVariable: Variable; effectiveSubscript: string | undefined } {
-  if (preUnsetStore) {
-    return { storeVariable: preUnsetStore.variable, effectiveSubscript: preUnsetStore.referencedSubscript };
-  }
-  const { variable, referencedSubscript } = destination;
+): { storeVariable: Variable; effectiveSubscript: string | undefined } | undefined {
+  const base = preUnsetStore ?? destination;
+  const { variable, referencedSubscript } = base;
   const implicitIndexedZero =
     assignsNonCompound && !isSubscripted && referencedSubscript === undefined && isIndexedCell(variable);
+  if (set.has('g') && implicitIndexedZero) {
+    return resolveImplicitIndexedStore(shell, variable.name);
+  }
+  if (preUnsetStore) {
+    return { storeVariable: variable, effectiveSubscript: referencedSubscript };
+  }
   const storeVariable =
-    set.has('g') && (isSubscripted || referencedSubscript !== undefined || implicitIndexedZero)
+    set.has('g') && (isSubscripted || referencedSubscript !== undefined)
       ? resolveElementStoreVariable(shell, name, variable.name, set, unset, isSubscripted)
       : variable;
-  const effectiveSubscript =
-    referencedSubscript ?? (implicitIndexedZero && storeVariable !== variable ? '0' : undefined);
-  return { storeVariable, effectiveSubscript };
+  return { storeVariable, effectiveSubscript: referencedSubscript };
+}
+
+function resolveImplicitIndexedStore(
+  shell: Shell,
+  baseName: string
+): { storeVariable: Variable; effectiveSubscript: string } | undefined {
+  const resolved = shell.resolveNameOrUndefined(baseName);
+  if (resolved === undefined) return undefined;
+  const direct = resolved.includes('[') ? shell.findOwnVariable(resolved) : undefined;
+  if (!direct) {
+    const split = shell.splitSubscript(resolved);
+    if (split) {
+      const arrName = shell.resolveNameOrUndefined(split.name);
+      if (arrName === undefined) return undefined;
+      return { storeVariable: ensureStoreVariable(shell, arrName), effectiveSubscript: split.subscript };
+    }
+  }
+  const storeVariable = direct ?? ensureStoreVariable(shell, resolved);
+  materializeRedirectedIndexedCell(storeVariable);
+  return { storeVariable, effectiveSubscript: '0' };
+}
+
+function materializeRedirectedIndexedCell(variable: Variable): void {
+  if (variable.attributes.has('r')) return;
+  if (variable.value?.kind === 'associative' || variable.attributes.has('A')) {
+    variable.attributes.delete('A');
+    variable.attributes.add('a');
+    variable.value = { kind: 'indexed', elements: new Map() };
+  }
 }
 
 function isIndexedCell(variable: Variable): boolean {
@@ -1083,6 +1142,10 @@ function resolveElementStoreVariable(
   isSubscripted: boolean
 ): Variable {
   const storeName = isSubscripted ? resolveDeclaredTarget(shell, name, set, unset, true, false).targetName : targetName;
+  return ensureStoreVariable(shell, storeName);
+}
+
+function ensureStoreVariable(shell: Shell, storeName: string): Variable {
   let storeVariable = shell.findVariable(storeName, false);
   if (!storeVariable) {
     storeVariable = { name: storeName, value: undefined, attributes: new Set() };
