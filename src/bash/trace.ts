@@ -172,7 +172,7 @@ function withObservedScopes<T>(shell: Shell, maxScope: number, run: () => T): T 
   };
   const functionScopes = savedState.functionScopes.filter((idx) => idx <= maxScope);
   const funcname = new Map(savedState.funcname);
-  for (let c = savedState.calls.length - 1; c >= functionScopes.length; c--) popFuncname(funcname, c);
+  for (let c = savedState.calls.length - 1; c >= functionScopes.length; c--) popFuncname(funcname);
   runtime.steps.recorder = undefined;
   shell.state = {
     ...savedState,

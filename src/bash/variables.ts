@@ -227,26 +227,16 @@ function fnv1SignedUtf8(text: string): number {
   return hash;
 }
 
-/** Pushes `fnName` onto `FUNCNAME` on function entry, seeding `[0]=fnName, [1]="main"` from top level. */
-export function pushFuncname(funcname: Map<bigint, string>, fnName: string, fromTopLevel: boolean): void {
-  if (fromTopLevel) {
-    funcname.clear();
-    funcname.set(0n, fnName);
-    funcname.set(1n, 'main');
-    return;
-  }
+/** Shifts `FUNCNAME` right by one index and inserts `[0]=fnName` on function entry. */
+export function pushFuncname(funcname: Map<bigint, string>, fnName: string): void {
   const shifted = sortedElements(funcname);
   funcname.clear();
   funcname.set(0n, fnName);
   for (const [index, value] of shifted) funcname.set(index + 1n, value);
 }
 
-/** Shifts `FUNCNAME` left by one element on function return, preserving sparse holes across remaining elements. */
-export function popFuncname(funcname: Map<bigint, string>, remainingCalls: number): void {
-  if (remainingCalls === 0) {
-    funcname.clear();
-    return;
-  }
+/** Shifts `FUNCNAME` left by one element on function return, preserving sparse mutations across calls. */
+export function popFuncname(funcname: Map<bigint, string>): void {
   const [, ...rest] = sortedElements(funcname);
   funcname.clear();
   for (const [index, value] of rest) funcname.set(index - 1n, value);
@@ -381,10 +371,11 @@ export function dynamicArrayLength(elements: ReadonlyMap<bigint, string> | undef
 
 /** Unsets one element (or `'all'` for `@`/`*`) of `FUNCNAME` or `PIPESTATUS`. */
 export function unsetDynamicArrayElement(
-  state: { funcname: Map<bigint, string>; pipeStatus: Map<bigint, string> },
+  state: { calls: readonly CallFrameEntry[]; funcname: Map<bigint, string>; pipeStatus: Map<bigint, string> },
   name: string,
   index: bigint | 'all'
 ): void {
+  if (name === 'FUNCNAME' && state.calls.length === 0) return;
   const target = name === 'PIPESTATUS' ? state.pipeStatus : name === 'FUNCNAME' ? state.funcname : undefined;
   if (!target) return;
   if (index === 'all') target.clear();

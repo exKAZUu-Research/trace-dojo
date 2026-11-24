@@ -150,7 +150,7 @@ export class Shell implements ArithmeticHost {
       functions: new Map(),
       positional: [[]],
       calls: [],
-      funcname: new Map(),
+      funcname: new Map([[0n, 'main']]),
       lastStatus: 0,
       pipeStatus: new Map(),
       lastArgument: undefined,
@@ -707,7 +707,7 @@ export class Shell implements ArithmeticHost {
     state.positional.push(args);
     // `BASH_LINENO` gives the line Bash numbered the call with; the trace keeps the row of the call's step.
     const reportedRow = this.currentRow;
-    pushFuncname(state.funcname, fn.name, state.calls.length === 0);
+    pushFuncname(state.funcname, fn.name);
     state.calls.push({ name: fn.name, line: reportedRow + 1 });
     const frame: Frame = { callRow, isAtomic: fn.isAtomic, scopeIndex };
     this.runtime.frames.push(frame);
@@ -733,7 +733,7 @@ export class Shell implements ArithmeticHost {
       this.runtime.frames.pop();
       // A subshell's state replaces the caller's while it runs, so the call cleans up the state it started in.
       state.calls.pop();
-      popFuncname(state.funcname, state.calls.length);
+      popFuncname(state.funcname);
       state.positional.pop();
       state.functionScopes.pop();
       state.scopes.length = scopeIndex;
