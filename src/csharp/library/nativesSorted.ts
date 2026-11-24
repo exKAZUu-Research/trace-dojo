@@ -187,7 +187,13 @@ function sortedDictionaryNatives(prefix: string): Record<string, NativeMethod> {
     // The views share the dictionary's arrays, so a saved Keys or Values shows later changes, as .NET's views do.
     [`${prefix}.get_Keys`]: (call, receiver) => {
       const state = sortedOf(receiver);
-      return liveView(call, state.keys, state.keyType);
+      const view = liveView(call, state.keys, state.keyType);
+      // Its keys are found by the dictionary's comparer, as ContainsKey and IndexOfKey find them.
+      (view.native as ListState).indexOfKey = (key) => {
+        const { index, isFound } = state.position(key);
+        return isFound ? index : -1;
+      };
+      return view;
     },
     [`${prefix}.get_Values`]: (call, receiver) => {
       const state = sortedOf(receiver);

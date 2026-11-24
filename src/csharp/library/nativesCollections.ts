@@ -166,6 +166,8 @@ function unmeteredEqualityOf(call: NativeCall, comparer: Value, elementType: Typ
 
 export class ListState implements EnumerableState {
   version = 0;
+  /** For a view of a sorted dictionary's keys, where a key is by the dictionary's comparer, which its search uses. */
+  indexOfKey?: (key: Value) => number;
   /** The capacity of .NET's backing array, which `Capacity` shows: it starts at 4 and doubles as items are added. */
   capacity = 0;
 
@@ -1514,6 +1516,11 @@ const SLOTS_PER_CHARGE = 64;
 // ---- ReadOnlyCollection ----
 
 const READ_ONLY = 'System.Collections.ObjectModel.ReadOnlyCollection`1';
+
+function readOnlyIndexOf(call: NativeCall, receiver: Value, value: Value): number {
+  const list = listOf(receiver);
+  return list.indexOfKey ? list.indexOfKey(value) : indexOfValue(call, list.items, value);
+}
 defineNatives({
   [`${READ_ONLY}..ctor`]: (call, receiver, [list]) => {
     if (list === undefined) failNull('list');
@@ -1533,9 +1540,8 @@ defineNatives({
     checkIndex(call, index as number, list.items.length);
     return list.items[index as number];
   },
-  [`${READ_ONLY}.Contains`]: (call, receiver, [value]) =>
-    indexOfValue(call, listOf(receiver).items, value as Value) >= 0,
-  [`${READ_ONLY}.IndexOf`]: (call, receiver, [value]) => indexOfValue(call, listOf(receiver).items, value as Value),
+  [`${READ_ONLY}.Contains`]: (call, receiver, [value]) => readOnlyIndexOf(call, receiver, value as Value) >= 0,
+  [`${READ_ONLY}.IndexOf`]: (call, receiver, [value]) => readOnlyIndexOf(call, receiver, value as Value),
   [`${READ_ONLY}.CopyTo`]: (call, receiver, [array, index]) => {
     copyToArray(call, listOf(receiver).items, array as Value, index as number);
     return;
