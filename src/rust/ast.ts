@@ -206,7 +206,9 @@ export type TypeAst =
   | { kind: 'never'; span: Span }
   | { kind: 'dyn'; bounds: BoundAst[]; lifetime?: string; span: Span }
   | { kind: 'impl'; bounds: BoundAst[]; span: Span }
-  | { kind: 'fnBound'; bound: BoundAst & { kind: 'fn' }; span: Span };
+  | { kind: 'fnBound'; bound: BoundAst & { kind: 'fn' }; span: Span }
+  /** A function pointer type (`fn(i32) -> i32`). */
+  | { kind: 'fnPointer'; params: TypeAst[]; ret: TypeAst | undefined; span: Span };
 
 export interface PathAst {
   segments: PathSegment[];

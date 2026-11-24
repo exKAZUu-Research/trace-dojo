@@ -1582,12 +1582,16 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
         if (scope.returnOf.trait) opaque.method = scope.returnOf;
         const type: Type = { kind: 'opaque', opaque };
         opaque.bounds = ast.bounds.map((bound) => lowerBound(bound, scope, type));
-        if (opaque.bounds.some((bound) => bound.fnSig)) {
-          compileError(ast.span, 'クロージャを返す impl Fn は、この採点環境では使えません。');
-        }
         return type;
       }
       return compileError(ast.span, 'impl Trait は、関数の引数と戻り値の型にだけ書けます。');
+    }
+    case 'fnPointer': {
+      return {
+        kind: 'fn',
+        params: ast.params.map((param) => lowerType(param, scope)),
+        ret: ast.ret ? lowerType(ast.ret, scope) : UNIT,
+      };
     }
     case 'fnBound': {
       if (scope.implParams === undefined) {
