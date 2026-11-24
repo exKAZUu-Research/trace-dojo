@@ -5,7 +5,7 @@ import type { Shell } from './shell';
 import { testBuiltin } from './testBuiltin';
 import { type Builtin, TURTLE_BUILTINS } from './turtle';
 import { UnsupportedFeatureError } from './unsupported';
-import { isIdentifier } from './variables';
+import { ensureWritable, isIdentifier } from './variables';
 
 /** Reads a numeric argument as Bash's `legal_number`, or `undefined` when it is not one. */
 function legalNumber(text: string): bigint | undefined {
@@ -219,6 +219,7 @@ function unsetElement(shell: Shell, name: string, subscript: string): boolean {
     return false;
   }
   if (!variable?.value) return true;
+  ensureWritable(variable);
   if (variable.value.kind === 'associative') {
     variable.value.table.delete(subscript);
     return true;

@@ -24,6 +24,7 @@ import {
   type Attribute,
   cloneScope,
   cloneValue,
+  ensureWritable,
   isIdentifier,
   type Scope,
   sortedElements,
@@ -1143,6 +1144,7 @@ export class Shell implements ArithmeticHost {
     if (converted === undefined) return false;
     this.checkLength(converted);
     variable.value = { kind: 'scalar', value: converted };
+    variable.shared = false;
     this.lastStored = converted;
     return true;
   }
@@ -1199,6 +1201,7 @@ export class Shell implements ArithmeticHost {
       this.reportError(`${reportedName}: readonly variable`);
       return false;
     }
+    ensureWritable(variable);
     if (variable.value?.kind === 'associative' || variable.attributes.has('A')) {
       variable.value ??= { kind: 'associative', table: new AssociativeTable() };
       const table = (variable.value as Extract<VariableValue, { kind: 'associative' }>).table;
@@ -1243,10 +1246,12 @@ export class Shell implements ArithmeticHost {
 
   /** The elements of a variable as an indexed array, converting a scalar into element 0 as Bash does. */
   indexedElements(variable: Variable): Map<bigint, string> {
+    ensureWritable(variable);
     if (variable.value?.kind === 'indexed') return variable.value.elements;
     const elements = new Map<bigint, string>();
     if (variable.value?.kind === 'scalar') elements.set(0n, variable.value.value);
     variable.value = { kind: 'indexed', elements };
+    variable.shared = false;
     variable.attributes.add('a');
     return elements;
   }
@@ -1278,6 +1283,7 @@ export class Shell implements ArithmeticHost {
       this.reportError(`${reportedName}: readonly variable`);
       return false;
     }
+    ensureWritable(variable);
     if (variable.value?.kind === 'associative' || variable.attributes.has('A')) {
       const previous = variable.value?.kind === 'associative' ? variable.value.table : undefined;
       const table = append && previous ? previous : new AssociativeTable(previous?.bucketCount);
@@ -1387,6 +1393,7 @@ export class Shell implements ArithmeticHost {
       // Unsetting a local of the running function leaves it declared there without a value, as Bash 5 does.
       if (i > 0 && this.state.functionScopes.at(-1) === i) {
         variable.value = undefined;
+        variable.shared = false;
         variable.attributes.clear();
       } else scopes[i].delete(target);
       return true;

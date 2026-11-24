@@ -1,7 +1,7 @@
-/** The attributes `declare` sets, by the letter `declare -p` shows them with. */
+/** Variable attribute flags recognized by `declare` and listed by `declare -p`. */
 export type Attribute = 'a' | 'A' | 'i' | 'n' | 'r' | 't' | 'x' | 'c' | 'l' | 'u';
 
-/** The order in which `declare -p` lists attributes, as Bash's `var_attribute_string`. */
+/** Canonical display order of variable attribute flags for `declare -p` and `${x@a}`. */
 export const ATTRIBUTE_ORDER: readonly Attribute[] = ['a', 'A', 'i', 'n', 'r', 't', 'x', 'c', 'l', 'u'];
 
 export type VariableValue =
@@ -11,41 +11,46 @@ export type VariableValue =
 
 export interface Variable {
   name: string;
-  /** The value, or `undefined` for a variable that is declared but unset, as `local x` leaves it. */
+  /** Stored value, or `undefined` when declared without an initial value (such as `local x`). */
   value: VariableValue | undefined;
   attributes: Set<Attribute>;
-  /** Whether the shell created the variable at startup, which traces leave out. */
+  /** Whether the variable is a built-in shell variable omitted from learner traces. */
   isSystem?: boolean;
+  /** Whether `value` is shared copy-on-write with a suspended parent or child subshell scope. */
+  shared?: boolean;
 }
 
-/** One level of variables: the global ones, or the locals of a function call. */
+/** A lexical/dynamic variable scope (global scope at index 0, followed by function and temporary scopes). */
 export type Scope = Map<string, Variable>;
 
-interface Entry {
+interface BucketEntry {
   key: string;
   value: string;
   hash: number;
 }
 
-/** The buckets of a new associative array (`ASSOC_HASH_BUCKETS`); converting a scalar starts with Bash's default 128. */
+/** Initial hash bucket count for associative arrays (1024) and scalar-to-associative conversions (128). */
 export const ASSOCIATIVE_BUCKETS = 1024;
 export const CONVERTED_BUCKETS = 128;
 
+const UTF8_ENCODER = new TextEncoder();
+
 /**
- * An associative array, kept in Bash's own hash table (`hashlib.c`) so that its keys come out in Bash's order: by
- * bucket, and within a bucket from the newest key, with the table growing fourfold as Bash's does.
+ * Sparse power-of-two chained hash table matching Bash 5.3 associative-array key order:
+ * buckets are visited in ascending index order, new keys prepend to their bucket, and capacity quadruples
+ * when entry count reaches twice the bucket capacity. Only non-empty buckets are allocated.
  */
 export class AssociativeTable {
-  private buckets: Entry[][];
+  private buckets = new Map<number, BucketEntry[]>();
+  private capacity: number;
   private count = 0;
 
-  constructor(buckets = ASSOCIATIVE_BUCKETS) {
-    this.buckets = Array.from({ length: buckets }, () => []);
+  constructor(capacity = ASSOCIATIVE_BUCKETS) {
+    this.capacity = capacity;
   }
 
-  /** The number of buckets, which a compound assignment keeps when it replaces the elements, as Bash does. */
   get bucketCount(): number {
-    return this.buckets.length;
+    return this.capacity;
   }
 
   get size(): number {
@@ -53,8 +58,8 @@ export class AssociativeTable {
   }
 
   get(key: string): string | undefined {
-    const hash = hashString(key);
-    return this.buckets[hash & (this.buckets.length - 1)].find((entry) => entry.hash === hash && entry.key === key)
+    const hash = fnv1SignedUtf8(key);
+    return this.buckets.get(hash & (this.capacity - 1))?.find((entry) => entry.hash === hash && entry.key === key)
       ?.value;
   }
 
@@ -63,61 +68,86 @@ export class AssociativeTable {
   }
 
   set(key: string, value: string): void {
-    const hash = hashString(key);
-    const existing = this.buckets[hash & (this.buckets.length - 1)].find(
-      (entry) => entry.hash === hash && entry.key === key
-    );
+    const hash = fnv1SignedUtf8(key);
+    const existing = this.buckets
+      .get(hash & (this.capacity - 1))
+      ?.find((entry) => entry.hash === hash && entry.key === key);
     if (existing) {
       existing.value = value;
       return;
     }
-    if (this.count >= this.buckets.length * 2) this.grow();
-    this.buckets[hash & (this.buckets.length - 1)].unshift({ key, value, hash });
+    if (this.count >= this.capacity * 2) this.rehash();
+    const bucketIndex = hash & (this.capacity - 1);
+    const bucket = this.buckets.get(bucketIndex);
+    if (bucket) bucket.unshift({ key, value, hash });
+    else this.buckets.set(bucketIndex, [{ key, value, hash }]);
     this.count++;
   }
 
   delete(key: string): void {
-    const hash = hashString(key);
-    const bucket = this.buckets[hash & (this.buckets.length - 1)];
-    const index = bucket.findIndex((entry) => entry.hash === hash && entry.key === key);
-    if (index === -1) return;
-    bucket.splice(index, 1);
+    const hash = fnv1SignedUtf8(key);
+    const bucketIndex = hash & (this.capacity - 1);
+    const bucket = this.buckets.get(bucketIndex);
+    if (!bucket) return;
+    const position = bucket.findIndex((entry) => entry.hash === hash && entry.key === key);
+    if (position === -1) return;
+    bucket.splice(position, 1);
+    if (bucket.length === 0) this.buckets.delete(bucketIndex);
     this.count--;
   }
 
-  /** The entries in Bash's order. */
+  clear(): void {
+    this.buckets.clear();
+    this.count = 0;
+  }
+
   entries(): [string, string][] {
-    return this.buckets.flatMap((bucket) => bucket.map(({ key, value }): [string, string] => [key, value]));
+    return [...this.buckets.keys()]
+      .toSorted((a, b) => a - b)
+      .flatMap((bucketIndex) =>
+        (this.buckets.get(bucketIndex) as BucketEntry[]).map(({ key, value }): [string, string] => [key, value])
+      );
   }
 
   clone(): AssociativeTable {
-    const copy = new AssociativeTable(this.buckets.length);
-    copy.buckets = this.buckets.map((bucket) => bucket.map((entry) => ({ ...entry })));
+    const copy = new AssociativeTable(this.capacity);
+    for (const [bucketIndex, bucket] of this.buckets) {
+      copy.buckets.set(
+        bucketIndex,
+        bucket.map((entry) => ({ ...entry }))
+      );
+    }
     copy.count = this.count;
     return copy;
   }
 
-  private grow(): void {
-    const size = this.buckets.length * 4;
-    const buckets: Entry[][] = Array.from({ length: size }, () => []);
-    for (const bucket of this.buckets) {
-      for (const entry of bucket) buckets[entry.hash & (size - 1)].unshift(entry);
+  private rehash(): void {
+    const nextCapacity = this.capacity * 4;
+    const nextBuckets = new Map<number, BucketEntry[]>();
+    for (const bucketIndex of [...this.buckets.keys()].toSorted((a, b) => a - b)) {
+      for (const entry of this.buckets.get(bucketIndex) as BucketEntry[]) {
+        const targetIndex = entry.hash & (nextCapacity - 1);
+        const target = nextBuckets.get(targetIndex);
+        if (target) target.unshift(entry);
+        else nextBuckets.set(targetIndex, [entry]);
+      }
     }
-    this.buckets = buckets;
+    this.capacity = nextCapacity;
+    this.buckets = nextBuckets;
   }
 }
 
-/** Bash's FNV-1 string hash over the UTF-8 bytes, which it reads as signed `char`s, as arm64 macOS does. */
-function hashString(text: string): number {
+/** Public-domain 32-bit FNV-1 hash (offset basis 2166136261, prime 16777619) over signed UTF-8 byte values. */
+function fnv1SignedUtf8(text: string): number {
   let hash = 2_166_136_261;
-  for (const byte of new TextEncoder().encode(text)) {
+  for (const byte of UTF8_ENCODER.encode(text)) {
     hash = Math.imul(hash, 16_777_619) >>> 0;
     hash = (hash ^ (byte >= 0x80 ? byte - 0x1_00 : byte)) >>> 0;
   }
   return hash;
 }
 
-/** The elements of an indexed array in index order. */
+/** Indexed-array elements ordered by ascending numeric index. */
 export function sortedElements(elements: Map<bigint, string>): [bigint, string][] {
   return [...elements].toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 }
@@ -129,16 +159,29 @@ export function cloneValue(value: VariableValue | undefined): VariableValue | un
   return { kind: 'associative', table: value.table.clone() };
 }
 
-export function cloneScope(scope: Scope): Scope {
-  return new Map(
-    [...scope].map(([name, variable]) => [
-      name,
-      { ...variable, value: cloneValue(variable.value), attributes: new Set(variable.attributes) },
-    ])
-  );
+/** Materializes a private copy of `variable.value` before mutating an indexed or associative container in place. */
+export function ensureWritable(variable: Variable): void {
+  if (!variable.shared) return;
+  variable.value = cloneValue(variable.value);
+  variable.shared = false;
 }
 
-/** Whether a text is a valid variable name, as Bash's `legal_identifier`. */
+/** Clones a scope for a subshell, sharing container values copy-on-write until either side mutates them. */
+export function cloneScope(scope: Scope): Scope {
+  const copy: Scope = new Map();
+  for (const [name, variable] of scope) {
+    if (variable.value && variable.value.kind !== 'scalar') variable.shared = true;
+    copy.set(name, {
+      ...variable,
+      value: variable.value?.kind === 'scalar' ? { ...variable.value } : variable.value,
+      attributes: new Set(variable.attributes),
+      shared: variable.value !== undefined && variable.value.kind !== 'scalar',
+    });
+  }
+  return copy;
+}
+
+/** Whether `text` is a valid POSIX/Bash shell identifier (`[A-Za-z_][A-Za-z0-9_]*`). */
 export function isIdentifier(text: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(text);
 }
