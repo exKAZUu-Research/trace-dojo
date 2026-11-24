@@ -136,12 +136,50 @@ export class Expander {
     declared: boolean,
     reportedName = ''
   ): { elements: CompoundElement[]; error?: string } {
+    if (isAssociative && !declared && words.length > 0) {
+      return splitKeyedElement(words[0])
+        ? this.expandKeyedAssociative(words, reportedName)
+        : this.expandAlternatingAssociative(words);
+    }
     return this.validateCompoundItems(
       this.expandRawCompoundItems(words, isAssociative),
       isAssociative,
       declared,
       reportedName
     );
+  }
+
+  private expandKeyedAssociative(words: Word[], reportedName: string): { elements: CompoundElement[]; error?: string } {
+    const elements: CompoundElement[] = [];
+    for (const word of words) {
+      const keyed = splitKeyedElement(word);
+      if (!keyed) {
+        const plain = this.expandAssignmentValue(word);
+        return { elements, error: compoundItemValidationError({ plain, rawText: word.text }, false, reportedName) };
+      }
+      const key = this.joinPieces(this.expandParts(keyed.key, false));
+      if (key === '') return { elements, error: `${word.text}: bad array subscript` };
+      this.checkTilde(keyed.value, true);
+      const value = this.joinPieces(this.expandParts(keyed.value, false));
+      elements.push({ key, value, append: keyed.append, rawText: word.text });
+    }
+    return { elements };
+  }
+
+  private expandAlternatingAssociative(words: Word[]): { elements: CompoundElement[] } {
+    const elements: CompoundElement[] = [];
+    for (let i = 0; i < words.length; i += 2) {
+      const key = this.expandAssignmentValue(words[i]);
+      if (key === '') {
+        this.shell.reportError(`${words[i].text}: bad array subscript`);
+        continue;
+      }
+      elements.push({ plain: key, rawText: words[i].text });
+      if (i + 1 < words.length) {
+        elements.push({ plain: this.expandAssignmentValue(words[i + 1]), rawText: words[i + 1].text });
+      }
+    }
+    return { elements };
   }
 
   validateCompoundItems(
