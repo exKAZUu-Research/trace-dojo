@@ -41,7 +41,7 @@ export class Expander {
     const fields: string[] = [];
     for (const word of words) {
       for (const parts of expandBraces(word.parts, () => this.spend())) {
-        this.checkTilde(parts);
+        this.checkTilde(parts, false);
         for (const field of this.splitFields(this.expandParts(parts, false))) {
           fields.push(this.finishField(field));
           if (fields.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
@@ -53,22 +53,30 @@ export class Expander {
 
   /** Expands a word to one string without splitting it, as for `case` and the operands of `[[`. */
   expandString(word: Word): string {
+    this.checkTilde(word.parts, false);
+    return this.joinPieces(this.expandParts(word.parts, false));
+  }
+
+  /** Expands an associative array's subscript, where Bash does not perform tilde expansion. */
+  expandAssociativeKey(word: Word): string {
     return this.joinPieces(this.expandParts(word.parts, false));
   }
 
   /** Expands an assignment's value, which Bash neither splits nor matches against file names. */
   expandAssignmentValue(word: Word): string {
-    this.checkTilde(word.parts);
+    this.checkTilde(word.parts, true);
     return this.joinPieces(this.expandParts(word.parts, false));
   }
 
   /** Expands a word into a pattern, quoting the characters that quotes protected. */
   expandPattern(word: Word): string {
+    this.checkTilde(word.parts, false);
     return this.patternOf(this.expandParts(word.parts, false));
   }
 
   /** Expands the right side of `=~` into an extended regular expression, escaping what quotes protected. */
   expandRegex(word: Word): string {
+    this.checkTilde(word.parts, false);
     return this.flatten(this.expandParts(word.parts, false))
       .map((fragment) =>
         fragment.quoted ? fragment.text.replaceAll(/[\\^$.|?*+()[\]{}]/g, String.raw`\$&`) : fragment.text
@@ -107,6 +115,7 @@ export class Expander {
         const key = isAssociative
           ? this.joinPieces(this.expandParts(keyed.key, false))
           : this.joinPieces(this.expandParts(keyed.key, true));
+        this.checkTilde(keyed.value, true);
         const value = this.joinPieces(this.expandParts(keyed.value, false));
         if (isAssociative && key === '') {
           const text = declared ? `[${singleQuote(key)}]=${singleQuote(value)}` : word.text;
@@ -177,9 +186,28 @@ export class Expander {
     }
   }
 
-  private checkTilde(parts: WordPart[]): void {
-    const [first] = parts;
-    if (first?.kind === 'literal' && first.text.startsWith('~')) throw new UnsupportedFeatureError('~ の展開');
+  // code-gauge-allow functionCognitiveComplexity -- Scans unquoted tilde prefixes at the start of a word and after unquoted colons in assignments.
+  checkTilde(parts: WordPart[], afterColon: boolean): void {
+    let atPrefix = true;
+    for (const [index, part] of parts.entries()) {
+      if (part.kind !== 'literal') {
+        atPrefix = false;
+        continue;
+      }
+      const { text } = part;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === '\\') {
+          atPrefix = false;
+          i++;
+          continue;
+        }
+        if (atPrefix && c === '~' && hasUnquotedTildePrefix(parts, index, i + 1, afterColon)) {
+          throw new UnsupportedFeatureError('~ の展開');
+        }
+        atPrefix = afterColon && c === ':';
+      }
+    }
   }
 
   // ---------------------------------------------------------------- parameters
@@ -223,7 +251,7 @@ export class Expander {
   private subscriptText(name: string, subscript: Word): string {
     const raw = subscript.text;
     if (raw === '@' || raw === '*') return raw;
-    if (this.shell.isAssociative(this.shell.resolveName(name))) return this.expandString(subscript);
+    if (this.shell.isAssociative(this.shell.resolveName(name))) return this.expandAssociativeKey(subscript);
     return this.expandSubscriptString(subscript);
   }
 
@@ -487,6 +515,20 @@ export class Expander {
 
 function isValidParameterName(name: string): boolean {
   return isIdentifier(name) || /^[0-9]+$/.test(name) || SPECIAL_PARAMETERS.has(name);
+}
+
+function hasUnquotedTildePrefix(parts: WordPart[], partIndex: number, from: number, afterColon: boolean): boolean {
+  for (let p = partIndex; p < parts.length; p++) {
+    const part = parts[p];
+    if (part.kind === 'single' || part.kind === 'double' || part.kind === 'ansiC') return false;
+    if (part.kind !== 'literal') continue;
+    for (let i = p === partIndex ? from : 0; i < part.text.length; i++) {
+      const c = part.text[i];
+      if (c === '\\') return false;
+      if (c === '/' || (afterColon && c === ':')) return true;
+    }
+  }
+  return true;
 }
 
 function lengthOf(value: ParameterValue): ParameterValue {

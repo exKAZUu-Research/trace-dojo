@@ -317,7 +317,7 @@ function assignLocally(shell: Shell, variable: Variable, assignment: Assignment)
   );
   if (assignment.subscript) {
     const subscript = variable.attributes.has('A')
-      ? shell.expander.expandString(assignment.subscript)
+      ? shell.expander.expandAssociativeKey(assignment.subscript)
       : shell.expander.expandSubscriptString(assignment.subscript);
     return shell.assignElementTo(variable, subscript, value, assignment.append);
   }

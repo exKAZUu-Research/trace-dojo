@@ -97,6 +97,7 @@ function joined(value: ParameterValue): string {
 function expandArgument(expander: Expander, parts: WordPart[], inDouble: boolean, isPattern: boolean): Piece[] {
   if (isPattern) return expander.expandParts(parts, false);
   if (!inDouble) {
+    expander.checkTilde(parts, false);
     return expander
       .expandParts(parts, false)
       .map((piece) =>

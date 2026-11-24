@@ -1346,7 +1346,7 @@ export class Shell implements ArithmeticHost {
   private assignElementWord(name: string, subscript: Word, value: string, append: boolean): boolean {
     const resolved = this.resolveName(name);
     if (this.isAssociative(resolved)) {
-      const key = this.expander.expandString(subscript);
+      const key = this.expander.expandAssociativeKey(subscript);
       if (key === '') {
         this.reportError(`${name}[${subscript.text}]: bad array subscript`);
         return false;
