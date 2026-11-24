@@ -97,7 +97,6 @@ import {
   U8,
   UNDEFINED_TYPE,
   USIZE,
-  withPointerAttributes,
   wrapInt,
 } from './types';
 import { concatenatedFacts, fieldFacts, payloadFacts, valueFactsOf } from './valueFacts';
@@ -1078,10 +1077,9 @@ export abstract class ExpressionCompiler extends SemaBase {
       if (!end) {
         if (expression.sentinel)
           this.error(expression, '終わりのない多要素のポインタのスライスには、番兵を書けません。');
-        const result = withPointerAttributes(type, { sentinel: undefined });
         return this.combine(
           [operand, start],
-          result,
+          type,
           ([pointer, offset]) => {
             const { target, index } = manyPointer(pointer);
             return new Pointer(target, index + Number(offset as bigint));
@@ -1369,7 +1367,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const sign = operator === '+' ? 1 : -1;
     return this.combine(
       [pointer, offset],
-      pointer.type.kind === 'pointer' ? withPointerAttributes(pointer.type, { sentinel: undefined }) : pointer.type,
+      pointer.type,
       ([value, count]) => {
         if (!(value instanceof Pointer)) throw new MemoryFault();
         return new Pointer(value.target, value.index + sign * Number(count as bigint));
