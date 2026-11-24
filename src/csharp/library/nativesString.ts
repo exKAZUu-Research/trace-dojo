@@ -1140,6 +1140,11 @@ class BuilderState implements NativeState {
     return [];
   }
 
+  /** The trace shows a builder as its text, as the Java trace shows a StringBuilder. */
+  displayText(): string {
+    return this.text;
+  }
+
   append(text: string): void {
     this.text += text;
     this.chunks.append(text.length);

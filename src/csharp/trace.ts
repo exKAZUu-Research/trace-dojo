@@ -14,7 +14,7 @@ import { formatFloat } from './format';
 import type { EnumerableState } from './library/iteration';
 import { enumText, exceptionMessage, isExceptionState } from './objects';
 import { parseCSharp } from './parse';
-import { type Frame, Runtime } from './runtime';
+import { type Frame, type NativeState, Runtime } from './runtime';
 import {
   type ArrayType,
   baseTypeOf,
@@ -339,6 +339,8 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
     return { kind: 'value', value: shownText(String(value)) };
   if (seen.has(value)) return undefined;
   if (value instanceof CsObject && value.turtle) return turtleNodeOf(value.turtle);
+  const text = value instanceof CsObject ? (value.native as NativeState | undefined)?.displayText?.() : undefined;
+  if (text !== undefined) return { kind: 'value', value: shownText(text) };
   // A delegate shows as the Java interpreter shows a lambda: an object without fields.
   if (value instanceof CsDelegate) return { kind: 'object', entries: {} };
   seen.add(value);

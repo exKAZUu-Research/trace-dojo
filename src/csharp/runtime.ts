@@ -43,6 +43,8 @@ export type Slot = Value | Cell | VariableReference | typeof UNASSIGNED;
 /** The state of a library object, which tells the garbage collector what it holds. */
 export interface NativeState {
   references(): Iterable<Value>;
+  /** For a state the trace shows as its text, as a StringBuilder, the text. */
+  displayText?(): string;
 }
 
 /** A C# exception in flight. */
