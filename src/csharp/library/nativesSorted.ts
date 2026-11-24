@@ -3,7 +3,7 @@ import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import type { NativeState } from '../runtime';
 import type { Type } from '../types';
-import { CsObject, CsStruct, structFieldSlots, type Value } from '../values';
+import { CsObject, CsStruct, storeGrowth, structFieldSlots, type Value } from '../values';
 import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { type Comparison, comparisonOf, equalityOf } from './nativesCollections';
 import {
@@ -77,6 +77,7 @@ class SortedState implements EnumerableState {
     const { index, isFound } = this.position(key);
     if (isFound) {
       if (!replace) return false;
+      this.allocate(storeGrowth(this.values[index], value));
       this.values[index] = value;
       this.version++;
       return true;

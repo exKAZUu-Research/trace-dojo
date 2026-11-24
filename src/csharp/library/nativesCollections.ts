@@ -10,6 +10,7 @@ import {
   CsDelegate,
   CsObject,
   CsStruct,
+  storeGrowth,
   structFieldSlots,
   type Value,
   type VariableReference,
@@ -369,6 +370,7 @@ const listNatives: Record<string, NativeMethod> = {
   [`${LIST}.set_Item`]: (call, receiver, [index, value]) => {
     const list = listOf(receiver);
     checkIndex(call, index as number, list.items.length);
+    call.frame.runtime.chargeStore(list.items[index as number], value as Value);
     list.items[index as number] = value as Value;
     list.version++;
     return;
@@ -777,6 +779,7 @@ export class HashState implements EnumerableState {
     if (existing >= 0) {
       if (!replace) return false;
       // Since .NET Core 3.0, only adding a key invalidates an enumeration; setting, removing, and clearing do not.
+      this.allocate(storeGrowth(this.entries[existing].value, value));
       this.entries[existing].value = value;
       return true;
     }

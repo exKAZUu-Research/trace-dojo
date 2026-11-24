@@ -155,10 +155,16 @@ export interface VariableReference {
  * keeping the value reachable is charged for; 0 for other values.
  */
 export function structFieldSlots(value: Value): number {
+  if (value instanceof CsBox) return structFieldSlots(value.value);
   if (!(value instanceof CsStruct)) return 0;
   let count = value.fields.length;
   for (const field of value.fields) count += structFieldSlots(field);
   return count;
+}
+
+/** The struct fields a store of a value adds over the value it replaces, which the store is charged for. */
+export function storeGrowth(previous: Value, next: Value): number {
+  return Math.max(0, structFieldSlots(next) - structFieldSlots(previous));
 }
 
 export function copyValue<T extends Value | undefined>(value: T): T {

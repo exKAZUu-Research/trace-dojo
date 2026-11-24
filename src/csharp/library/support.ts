@@ -186,7 +186,10 @@ export function storeInArray(
     });
   }
   for (const value of values) checkElementStore(evaluator, target, value);
-  for (const [offset, value] of values.entries()) target.values[index + offset] = copyValue(value);
+  for (const [offset, value] of values.entries()) {
+    call.frame.runtime.chargeStore(target.values[index + offset], value);
+    target.values[index + offset] = copyValue(value);
+  }
 }
 
 /**

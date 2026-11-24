@@ -31,6 +31,7 @@ import {
   CsStruct,
   freshString,
   isString,
+  storeGrowth,
   UNASSIGNED,
   type Value,
   type VariableReference,
@@ -194,6 +195,15 @@ export class Runtime {
       this.sharedStrings.set(key, shared);
     }
     return shared;
+  }
+
+  /**
+   * Charges a store into existing storage for the struct fields it adds, as when a struct replaces null in an `S?[]`
+   * or a box enters an `object` field, so a struct kept by any store counts against the slot limit.
+   */
+  chargeStore(previous: Value, next: Value): void {
+    const growth = storeGrowth(previous, next);
+    if (growth > 0) this.allocateSlots(growth);
   }
 
   /** Charges for array elements or object fields before they are allocated. */

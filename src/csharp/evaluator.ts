@@ -890,12 +890,24 @@ export class Evaluator extends StatementExecutor {
         const receiver = this.evaluate(target.receiver, frame);
         const fields = this.fieldsOf(receiver);
         const { slot } = target.field;
-        return { get: () => fields[slot], set: (value) => (fields[slot] = value) };
+        return {
+          get: () => fields[slot],
+          set: (value) => {
+            this.runtime.chargeStore(fields[slot], value);
+            fields[slot] = value;
+          },
+        };
       }
       case 'staticField': {
         const statics = this.runtime.staticsOf(frame.resolve(target.owner) as NamedType);
         const { slot } = target.field;
-        return { get: () => statics[slot], set: (value) => (statics[slot] = value) };
+        return {
+          get: () => statics[slot],
+          set: (value) => {
+            this.runtime.chargeStore(statics[slot], value);
+            statics[slot] = value;
+          },
+        };
       }
       case 'element': {
         return this.elementPlace(target, frame);
@@ -934,6 +946,7 @@ export class Evaluator extends StatementExecutor {
       get: () => array.values[offset],
       set: (value) => {
         checkElementStore(this, array, value);
+        this.runtime.chargeStore(array.values[offset], value);
         array.values[offset] = value;
       },
     };
