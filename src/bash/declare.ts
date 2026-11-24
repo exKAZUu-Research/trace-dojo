@@ -1361,7 +1361,6 @@ function isCompound(operand: DeclarationArgument): boolean {
 }
 
 /** Assigns a declaration's value to the variable it declared, which may be a local shadowing a global or vice versa. */
-// code-gauge-allow functionCognitiveComplexity -- Bash's assignment kinds for a declared variable: none, empty, compound, element, and scalar.
 function assignLocally(
   shell: Shell,
   variable: Variable,
@@ -1369,25 +1368,21 @@ function assignLocally(
   referencedSubscript?: string
 ): boolean {
   const { append } = assignment;
-  if (assignment.value === undefined && !assignment.array) {
+  if (!assignment.array && assignment.value === undefined && findOperandEquals(assignment.text) === -1) {
     if (variable.attributes.has('a') && !variable.value) variable.value = { kind: 'indexed', elements: new Map() };
     if (variable.attributes.has('A') && !variable.value)
       variable.value = { kind: 'associative', table: new AssociativeTable() };
-    // `declare x` and `local x` declare a variable with no value; `x=` gives it the empty one.
-    if (findOperandEquals(assignment.text) !== -1) {
-      return referencedSubscript === undefined
-        ? shell.assignScalarTo(variable, '', append)
-        : shell.assignElementTo(variable, expandDeclaredSubscript(shell, variable, referencedSubscript), '', append);
-    }
     return true;
   }
   const { scopes } = shell.state;
   const owner = scopes.findLast((scope) => scope.get(variable.name) === variable);
   if (!owner) return true;
   if (assignment.array) return assignLocallyCompound(shell, variable, assignment, referencedSubscript);
-  const value = shell.expander.withSpacedStar(() =>
-    shell.expander.expandAssignmentValue(assignment.value as NonNullable<Assignment['value']>)
-  );
+  const value = assignment.value
+    ? shell.expander.withSpacedStar(() =>
+        shell.expander.expandAssignmentValue(assignment.value as NonNullable<Assignment['value']>)
+      )
+    : '';
   if (assignment.subscript) {
     const subscript = variable.attributes.has('A')
       ? shell.expander.expandAssociativeKey(assignment.subscript)
