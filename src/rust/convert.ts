@@ -35,17 +35,28 @@ export class Converter extends ExpressionConverter {
     const items: Item[] = [];
     for (const child of root.namedChildren) {
       if (isComment(child)) continue;
-      if (child.type === 'expression_statement' || child.type === 'let_declaration') {
+      const isMacro =
+        child.type === 'expression_statement' &&
+        child.namedChildren.find((part) => !isComment(part))?.type === 'macro_invocation';
+      if ((child.type === 'expression_statement' && !isMacro) || child.type === 'let_declaration') {
         syntaxError(this.span(child), '文は、関数の中に書いてください。');
       }
       // rustc skips a `#!` line at the start of the file, as Unix runs scripts with it.
       if (child.type === 'shebang') continue;
       if (child.type === 'frontmatter')
         syntaxError(this.span(child), 'フロントマター（---）は、不安定な機能なので使えません（E0658）。');
-      const item = this.item(child);
-      if (item) items.push(item);
+      items.push(...this.itemsOf(child));
     }
     return { items };
+  }
+
+  /** The items a node declares: one, none, or the items a macro invocation expands to. */
+  private itemsOf(node: Node): Item[] {
+    const invocation =
+      node.type === 'expression_statement' ? node.namedChildren.find((child) => !isComment(child)) : node;
+    if (invocation?.type === 'macro_invocation' && this.isUserMacro(invocation)) return this.userMacroItems(invocation);
+    const item = this.item(node);
+    return item ? [item] : [];
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -106,8 +117,7 @@ export class Converter extends ExpressionConverter {
         this.modulePath.push(name);
         for (const child of body.namedChildren) {
           if (isComment(child)) continue;
-          const item = this.item(child);
-          if (item) items.push(item);
+          items.push(...this.itemsOf(child));
         }
         this.modulePath.pop();
         return {
@@ -132,6 +142,10 @@ export class Converter extends ExpressionConverter {
         return undefined;
       }
       case 'empty_statement': {
+        return undefined;
+      }
+      case 'macro_definition': {
+        this.defineMacro(node);
         return undefined;
       }
       case 'function_signature_item': {
@@ -166,7 +180,6 @@ export class Converter extends ExpressionConverter {
       syntaxError(span, `${unstable[node.type]}は、不安定な機能なので使えません（E0658）。`);
     const names: Record<string, string> = {
       union_item: '共用体（union）',
-      macro_definition: 'マクロの定義（macro_rules!）',
       extern_crate_declaration: '外部のクレート（extern crate）',
       foreign_mod_item: '外部の関数の宣言（extern ブロック）',
       inner_attribute_item: `属性（${node.text.split('\n')[0]}）`,
@@ -703,6 +716,10 @@ export class Converter extends ExpressionConverter {
       }
       case 'bounded_type': {
         return this.boundedType(node, span);
+      }
+      case 'macro_invocation': {
+        if (this.isUserMacro(node)) return this.userMacroType(node);
+        return unavailable(span, `型の場所のマクロ ${node.text}`);
       }
       case 'bracketed_type':
       case 'qualified_type': {

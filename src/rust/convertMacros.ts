@@ -1,14 +1,142 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
-import type { Expr, FormatArgs, MacroCall, Pattern, Span } from './ast';
+import type { Block, Expr, FormatArgs, Item, MacroCall, Pattern, Span, TypeAst } from './ast';
 import { PatternConverter } from './convertPatterns';
 import { isComment, syntaxError, unavailable } from './convertSyntax';
 import { parseFormatString } from './formatString';
 import { parseStringLiteral } from './literals';
+import { expand, MacroError, type MacroRule, parseParts, tokensOf, tokenText as macroTokenText } from './macroRules';
+
+const MAX_MACRO_DEPTH = 128;
 
 /** Converts macro invocations, whose arguments it reparses as Rust code. */
 export abstract class MacroConverter extends PatternConverter {
+  /** The `macro_rules!` macros defined so far, which later code may invoke, by name. */
+  private readonly userMacros = new Map<string, MacroRule[]>();
+  private macroDepth = 0;
+
+  /** Records a `macro_rules!` definition. */
+  protected defineMacro(node: Node): void {
+    const name = this.identifier(this.field(node, 'name'));
+    const rules = node.namedChildren
+      .filter((child) => child.type === 'macro_rule')
+      .map((rule) => {
+        try {
+          return {
+            matcher: parseParts(tokensOf(this.field(rule, 'left')), true),
+            transcriber: parseParts(tokensOf(this.field(rule, 'right')), false),
+          };
+        } catch (error) {
+          if (error instanceof MacroError) syntaxError(this.span(rule), error.message);
+          throw error;
+        }
+      });
+    this.userMacros.set(name, rules);
+  }
+
+  /** Whether an invocation names a `macro_rules!` macro of the program. */
+  protected isUserMacro(node: Node): boolean {
+    const macroNode = node.childForFieldName('macro');
+    const name = macroNode?.text.replace(/^(?:crate|self)::/, '');
+    return name !== undefined && this.userMacros.has(name);
+  }
+
+  /**
+   * Expands an invocation of a `macro_rules!` macro and converts the code it makes with `convert`, which gets the
+   * syntax tree of `wrap(code)`: the expansion stands on the invocation's row.
+   */
+  protected expandUserMacro<T>(node: Node, wrap: (code: string) => string, convert: (root: Node) => T): T {
+    const span = this.span(node);
+    const name = (node.childForFieldName('macro') as Node).text.replace(/^(?:crate|self)::/, '');
+    const tree = node.namedChildren.find((child) => child.type === 'token_tree');
+    if (this.macroDepth >= MAX_MACRO_DEPTH)
+      syntaxError(span, `マクロ ${name}! の展開が深すぎます（再帰の上限を超えました）。`);
+    let code: string;
+    try {
+      code = macroTokenText(expand(this.userMacros.get(name) as MacroRule[], tree ? tokensOf(tree) : [], name));
+    } catch (error) {
+      if (error instanceof MacroError) syntaxError(span, error.message);
+      throw error;
+    }
+    this.macroDepth++;
+    try {
+      return this.reparse(`${'\n'.repeat(span.row)}${wrap(code)}`, convert as (root: Node) => unknown) as T;
+    } finally {
+      this.macroDepth--;
+    }
+  }
+
+  /** A user macro in an expression's place, which must make one expression (`{ ... }` for statements). */
+  protected userMacroExpr(node: Node): Expr {
+    return this.expandUserMacro(
+      node,
+      (code) => `fn macro_expansion() { ${code} }`,
+      (root) => {
+        const block = this.macroBody(root, node);
+        if (block.stmts.length > 0 || block.items.length > 0 || !block.tail) {
+          syntaxError(this.span(node), 'このマクロは式になりません（式の場所のマクロは、1つの式に展開してください）。');
+        }
+        return block.tail;
+      }
+    );
+  }
+
+  /** A user macro in a statement's place, whose statements and items join the block around it. */
+  protected userMacroStatements(node: Node): Block {
+    return this.expandUserMacro(
+      node,
+      (code) => `fn macro_expansion() { ${code} }`,
+      (root) => this.macroBody(root, node)
+    );
+  }
+
+  private macroBody(root: Node, node: Node): Block {
+    const fn = root.namedChildren.find((child) => child.type === 'function_item');
+    const body = fn?.childForFieldName('body');
+    if (!body) syntaxError(this.span(node), 'マクロの展開の書き方に誤りがあります。');
+    return this.block(body);
+  }
+
+  /** A user macro in an item's place, whose items join the module around it. */
+  protected userMacroItems(node: Node): Item[] {
+    return this.expandUserMacro(
+      node,
+      (code) => code,
+      (root) =>
+        root.namedChildren.flatMap((child) => {
+          if (isComment(child)) return [];
+          if (child.type === 'expression_statement' || child.type === 'let_declaration') {
+            syntaxError(this.span(node), 'このマクロは項目になりません（関数の外では、項目に展開してください）。');
+          }
+          const item = this.item(child);
+          return item ? [item] : [];
+        })
+    );
+  }
+
+  /** A user macro in a type's place. */
+  protected userMacroType(node: Node): TypeAst {
+    return this.expandUserMacro(
+      node,
+      (code) => `type MacroExpansion = ${code};`,
+      (root) => this.type(this.field(root.namedChildren.find((child) => child.type === 'type_item') as Node, 'type'))
+    );
+  }
+
+  /** A user macro in a pattern's place. */
+  protected userMacroPattern(node: Node): Pattern {
+    return this.expandUserMacro(
+      node,
+      (code) => `fn macro_expansion() { match x { ${code} => {} } }`,
+      (root) => {
+        const arm = root.descendantsOfType('match_arm')[0];
+        const pattern = arm && this.field(arm, 'pattern').namedChildren.find((child) => !isComment(child));
+        if (!pattern) syntaxError(this.span(node), 'このマクロはパターンになりません。');
+        return this.pattern(pattern);
+      }
+    );
+  }
   protected macro(node: Node): MacroCall {
     const span = this.span(node);
     const macroNode = this.field(node, 'macro');

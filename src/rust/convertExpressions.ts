@@ -37,6 +37,16 @@ export abstract class ExpressionConverter extends MacroConverter {
       if (child.type === 'label') continue;
       if (child.type === 'let_declaration') {
         stmts.push(this.letStmt(child));
+      } else if (this.userMacroStatement(child)) {
+        const node = this.userMacroStatement(child) as Node;
+        const expansion = this.userMacroStatements(node);
+        stmts.push(...expansion.stmts);
+        items.push(...expansion.items);
+        if (expansion.tail) {
+          const terminated = child.type === 'expression_statement' && child.text.trimEnd().endsWith(';');
+          if (isLast && !terminated) tail = expansion.tail;
+          else stmts.push({ kind: 'expr', expr: expansion.tail, semi: terminated, span: expansion.tail.span });
+        }
       } else if (child.type === 'expression_statement') {
         const inner = child.namedChildren.find((c) => !isComment(c)) as Node;
         const semi = child.text.trimEnd().endsWith(';') && !inner.text.endsWith(';');
@@ -99,6 +109,12 @@ export abstract class ExpressionConverter extends MacroConverter {
       );
     }
     return children;
+  }
+
+  /** The invocation of a program's macro that a block's child is, as a statement, if it is one. */
+  private userMacroStatement(child: Node): Node | undefined {
+    const node = child.type === 'expression_statement' ? child.namedChildren.find((part) => !isComment(part)) : child;
+    return node?.type === 'macro_invocation' && this.isUserMacro(node) ? node : undefined;
   }
 
   /**
@@ -196,6 +212,7 @@ export abstract class ExpressionConverter extends MacroConverter {
         return this.closure(node);
       }
       case 'macro_invocation': {
+        if (this.isUserMacro(node)) return { ...this.userMacroExpr(node), span };
         return this.literalMacro(node) ?? { kind: 'macro', macro: this.macro(node), span };
       }
       case 'attributed_expression': {

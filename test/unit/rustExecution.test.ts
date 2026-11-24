@@ -8823,6 +8823,25 @@ fn main() {
   });
 });
 
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('macro_rules! macros expand to expressions, statements, and items, with repetitions and recursion', () => {
+  const program = `macro_rules! square { ($x:expr) => { $x * $x }; }
+macro_rules! my_vec { () => { Vec::new() }; ($($x:expr),+ $(,)?) => {{ let mut v = Vec::new(); $( v.push($x); )+ v }}; }
+macro_rules! point { ($name:ident, $x:expr, $y:expr) => { let $name = ($x, $y); }; }
+macro_rules! make_struct { ($name:ident { $($field:ident : $ty:ty),* }) => { #[derive(Debug)] struct $name { $($field: $ty),* } }; }
+make_struct!(Person { name: String, age: u32 });
+macro_rules! count { () => { 0usize }; ($head:tt $($tail:tt)*) => { 1usize + count!($($tail)*) }; }
+fn main() {
+    let v: Vec<i32> = my_vec![1, 2, 3,];
+    point!(p, 3, 4);
+    println!("{} {:?} {:?} {:?} {}", square!(1 + 2), v, p, Person { name: String::from("Ann"), age: 30 }, count!(a b c));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '9 [1, 2, 3] (3, 4) Person { name: "Ann", age: 30 } 3\n',
+  });
+});
+
 test('an empty match covers the uninhabited Infallible', () => {
   const program = rustMain(
     '    println!("{:?}", widen(5));',

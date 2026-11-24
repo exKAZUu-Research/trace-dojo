@@ -5,6 +5,8 @@ import { isComment, SyntaxConverter, syntaxError, unavailable } from './convertS
 
 /** Converts patterns. */
 export abstract class PatternConverter extends SyntaxConverter {
+  protected abstract userMacroPattern(node: Node): Pattern;
+
   /** `(a, b)` is a tuple of patterns, and `(x)` one grouped pattern: only a comma makes a tuple of one. */
   private tupleOrGroup(node: Node, span: Span): Pattern {
     const elems = this.subpatterns(node).map((child) => this.pattern(child));
@@ -120,6 +122,9 @@ export abstract class PatternConverter extends SyntaxConverter {
         const last = base.segments.at(-1) as PathSegment;
         const segments = [...base.segments.slice(0, -1), { ...last, args: this.typeArgs(typeArguments) }];
         return { kind: 'path', path: { segments, span }, span };
+      }
+      case 'macro_invocation': {
+        return this.userMacroPattern(node);
       }
       case 'box_pattern': {
         return syntaxError(span, 'box パターンは、不安定な機能なので使えません（E0658）。');
