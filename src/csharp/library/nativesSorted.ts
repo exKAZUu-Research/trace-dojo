@@ -190,8 +190,8 @@ function sortedDictionaryNatives(prefix: string): Record<string, NativeMethod> {
       sortedOf(receiver).insert(key as Value, value as Value, true);
       return;
     },
-    // The views share the dictionary's arrays, so a saved Keys or Values shows later changes, as .NET's views do.
     [`${prefix}.Contains`]: (call, receiver, [pair]) => sortedOf(receiver).containsPair(pair as CsStruct, call),
+    // The views share the dictionary's arrays, so a saved Keys or Values shows later changes, as .NET's views do.
     [`${prefix}.get_Keys`]: (call, receiver) => {
       const state = sortedOf(receiver);
       const view = liveView(call, state, state.keys, state.keyType);
