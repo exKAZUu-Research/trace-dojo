@@ -5,7 +5,7 @@ import { foreachSubjectPlace, unsetTarget } from './assignment';
 import type { Expr, FunctionDecl, Program, Stmt } from './ast';
 import { foreachReferences, nestedBodies } from './astAnalysis';
 import { lower } from './bytes';
-import { discardInvokedResult } from './callables';
+import { callValue, discardInvokedResult } from './callables';
 import { asInternal, invoke, setBodyRunner, setDefaultEvaluator } from './calls';
 import {
   bindPropertyReference,
@@ -457,8 +457,37 @@ function dispatchOtherStatement(
     case 'expr': {
       return undefined;
     }
+    case 'tick': {
+      tick(runtime, statement.every, statement.count);
+      return undefined;
+    }
     default: {
       return dispatchSimpleStatement(statement, runtime, frame, held);
+    }
+  }
+}
+
+/** Counts ticks of `declare(ticks=every)`, calling the tick functions at every `every`th one as PHP's ZEND_TICKS does. */
+function tick(runtime: Runtime, every: number, count: number): void {
+  for (let index = 0; index < count; index++) {
+    if (++runtime.tickCount < every) continue;
+    runtime.tickCount = 0;
+    for (let entryIndex = 0; entryIndex < runtime.tickFunctions.length; entryIndex++) {
+      const entry = runtime.tickFunctions[entryIndex];
+      // PHP skips a tick function while it runs, as ticks in its own body would call it again.
+      if (entry.calling) continue;
+      entry.calling = true;
+      try {
+        discardInvokedResult(() =>
+          callValue(
+            entry.callback,
+            entry.args.map((v) => ({ v })),
+            runtime.row
+          )
+        );
+      } finally {
+        entry.calling = false;
+      }
     }
   }
 }

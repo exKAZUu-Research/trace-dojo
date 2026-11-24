@@ -17,6 +17,7 @@ import './libJson';
 import './libOutputControl';
 import './libRuntimeInfo';
 import './libSerialize';
+import './libWeakReference';
 import './libSpl';
 import './libGenerator';
 import './libUnsupported';

@@ -153,7 +153,8 @@ function swap(context: Context): void {
   context.output = '';
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Follows php_output_handler_op, whose ordered cases decide where the output goes.
+/** Applies an operation to a buffer as PHP's php_output_handler_op does, running its handler unless it can wait. */
+// code-gauge-allow functionNcss -- Follows php_output_handler_op step by step, which decides where the output goes.
 function handlerOp(runtime: Runtime, buffer: OutputBuffer, context: Context): Status {
   const originalOp = context.op;
   if ((buffer.flags & HANDLER_DISABLED) !== 0) return 'failure';
@@ -162,52 +163,49 @@ function handlerOp(runtime: Runtime, buffer: OutputBuffer, context: Context): St
   if (append(runtime, buffer, context.input) && context.op === OUTPUT_WRITE) return 'no-data';
   if ((buffer.flags & HANDLER_STARTED) === 0) context.op |= OUTPUT_START;
   runtime.runningOutputBuffer = buffer;
-  let status: Status;
-  let stillOpen = true;
+  let result: { status: Status; output: string; stillOpen: boolean };
   try {
-    if (buffer.handler === undefined) {
-      context.output = buffer.data;
-      status = context.output ? 'success' : 'no-data';
-    } else {
-      const result = callHandler(buffer.handler, buffer.data, context.op);
-      if (result === undefined) status = 'failure';
-      else {
-        if ((buffer.flags & HANDLER_PRODUCED_OUTPUT) !== 0) {
-          buffer.flags |= HANDLER_DISABLED;
-          buffer.flags &= ~HANDLER_PRODUCED_OUTPUT;
-          deprecated(
-            `${activeFunctionName()}(): Producing output from user output handler ${buffer.name} is deprecated`
-          );
-          stillOpen = runtime.outputBuffers.includes(buffer);
-          if (stillOpen) buffer.flags &= ~HANDLER_DISABLED;
-        }
-        status = result === false ? 'failure' : 'no-data';
-        if (typeof result === 'string' && result) {
-          context.output = result;
-          status = 'success';
-        }
-      }
-    }
-    if (stillOpen) buffer.flags |= HANDLER_STARTED;
+    result = runHandler(runtime, buffer, context.op);
+    if (result.stillOpen) buffer.flags |= HANDLER_STARTED;
   } finally {
     runtime.runningOutputBuffer = undefined;
   }
-  if (!stillOpen) return status;
-  if (status === 'failure') {
+  context.output = result.output;
+  if (!result.stillOpen) return result.status;
+  if (result.status === 'failure') {
     buffer.flags |= HANDLER_DISABLED;
     context.output = buffer.data;
     buffer.data = '';
     buffer.allocated = 0;
   } else {
-    if (status === 'no-data') {
-      context.input = '';
-      context.output = '';
-    }
+    if (result.status === 'no-data') context.input = '';
     buffer.data = '';
     buffer.flags |= HANDLER_PROCESSED;
   }
   context.op = originalOp;
-  return status;
+  return result.status;
+}
+
+/** Runs a buffer's handler on its contents; `stillOpen` is false when the handler closed its own buffer. */
+function runHandler(
+  runtime: Runtime,
+  buffer: OutputBuffer,
+  op: number
+): { status: Status; output: string; stillOpen: boolean } {
+  if (buffer.handler === undefined)
+    return { status: buffer.data ? 'success' : 'no-data', output: buffer.data, stillOpen: true };
+  const result = callHandler(buffer.handler, buffer.data, op);
+  if (result === undefined) return { status: 'failure', output: '', stillOpen: true };
+  let stillOpen = true;
+  if ((buffer.flags & HANDLER_PRODUCED_OUTPUT) !== 0) {
+    buffer.flags |= HANDLER_DISABLED;
+    buffer.flags &= ~HANDLER_PRODUCED_OUTPUT;
+    deprecated(`${activeFunctionName()}(): Producing output from user output handler ${buffer.name} is deprecated`);
+    stillOpen = runtime.outputBuffers.includes(buffer);
+    if (stillOpen) buffer.flags &= ~HANDLER_DISABLED;
+  }
+  if (typeof result === 'string' && result) return { status: 'success', output: result, stillOpen };
+  return { status: result === false ? 'failure' : 'no-data', output: '', stillOpen };
 }
 
 /**
@@ -268,6 +266,7 @@ export function cleanBuffer(runtime: Runtime): boolean {
  * Closes the innermost buffer, passing its output down unless `discard`, as `ob_end_flush` and `ob_end_clean` do;
  * false with PHP's notice when there is none or it cannot be removed.
  */
+// code-gauge-allow functionCognitiveComplexity -- Follows php_output_stack_pop, whose notices and flags go in this order.
 export function popBuffer(
   runtime: Runtime,
   options: { discard: boolean; force?: boolean; functionName?: string }

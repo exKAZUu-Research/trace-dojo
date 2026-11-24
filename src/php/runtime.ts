@@ -537,6 +537,11 @@ export class Runtime {
   /** The autoloaders `spl_autoload_register` registered, in the order PHP calls them. */
   readonly autoloaders: Value[] = [];
 
+  /** The functions `register_tick_function` registered, which `declare(ticks=N)` calls. */
+  readonly tickFunctions: { callback: Value; args: Value[]; calling?: boolean }[] = [];
+  /** The ticks counted since the tick functions last ran. */
+  tickCount = 0;
+
   /** The functions `register_shutdown_function` registered, which run after the program ends. */
   readonly shutdownFunctions: { callback: Value; args: Value[] }[] = [];
 

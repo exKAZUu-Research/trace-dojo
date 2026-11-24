@@ -99,7 +99,9 @@ export function autoloadClass(name: string): PhpClass | undefined {
   if (runtime.autoloaders.length === 0 || autoloading.has(key)) return undefined;
   autoloading.add(key);
   try {
-    for (const loader of [...runtime.autoloaders]) {
+    // An autoloader may register or unregister others, which PHP's loop then reaches or skips.
+    for (let index = 0; index < runtime.autoloaders.length; index++) {
+      const loader = runtime.autoloaders[index];
       consumeInvokedResult(
         () => callValue(loader, [{ v: plain }], runtime.row),
         () => {}
@@ -1531,7 +1533,7 @@ function writeOverloadedProperty(object: PhpObject, name: string, value: Value):
 }
 
 export function createDynamicProp(object: PhpObject, name: string, value: Slot = null, deprecate = deprecated): void {
-  if (object.cls.isReadonly || object.cls.name === 'Closure')
+  if (object.cls.isReadonly || object.cls.name === 'Closure' || object.cls.name === 'WeakReference')
     throwError('Error', `Cannot create dynamic property ${object.cls.name}::$${name}`);
   try {
     if (object.cls.name !== 'stdClass' && !allowsDynamicProps(object.cls))

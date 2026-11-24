@@ -55,6 +55,20 @@ const CALL_EXPRESSIONS = new Set([
 ]);
 const VARIABLE_OPCODE_RESULTS = new Set<Expr['k']>(['mcall', 'scall', 'new', 'newAnon', 'assignRef']);
 
+/** The statements after which PHP runs no tick under `declare(ticks=N)`. */
+const UNTICKED_STATEMENTS = new Set([
+  'function_definition',
+  'class_declaration',
+  'interface_declaration',
+  'trait_declaration',
+  'enum_declaration',
+  'empty_statement',
+  'compound_statement',
+  'named_label_statement',
+  'comment',
+  'declare_statement',
+]);
+
 export class Converter extends DeclarationConverter {
   private declaredSymbols = new Map<string, Map<string, string>>();
   private readonly declaredFunctions = new Map<string, readonly Param[]>();
@@ -156,7 +170,55 @@ export class Converter extends DeclarationConverter {
     return statements;
   }
 
+  /** The `ticks` value of the `declare` in effect, 0 when none is. */
+  private ticks = 0;
+
+  /**
+   * Converts a statement, followed by the ticks PHP runs after it under `declare(ticks=N)`: one after each statement
+   * (an `echo`, `global`, `static` or `unset` list counts each item), but none after declarations, blocks, empty
+   * statements, `if`, and `switch`.
+   */
   private statement(node: Node, topLevel: boolean): Stmt[] {
+    const statements = this.untickedStatement(node, topLevel);
+    if (this.ticks === 0 || UNTICKED_STATEMENTS.has(node.type)) return statements;
+    const every = this.ticks;
+    return statements.flatMap((statement): Stmt[] => {
+      const tick = (count: number): Stmt => ({ k: 'tick', every, count, row: statement.row });
+      switch (statement.k) {
+        case 'echo': {
+          return statement.args.flatMap((arg) => [{ k: 'echo', args: [arg], row: statement.row }, tick(1)]);
+        }
+        case 'global': {
+          return [statement, tick(statement.names.length)];
+        }
+        case 'static': {
+          return [statement, tick(statement.vars.length)];
+        }
+        case 'unset': {
+          return [statement, tick(statement.targets.length)];
+        }
+        case 'func':
+        case 'class':
+        case 'nop':
+        case 'block':
+        case 'label':
+        case 'if':
+        case 'switch': {
+          return [statement];
+        }
+        default: {
+          return [statement, tick(1)];
+        }
+      }
+    });
+  }
+
+  /** The tick after a `declare` statement, under the `ticks` value in effect after it. */
+  private declareTick(row: number): Stmt[] {
+    return this.ticks > 0 ? [{ k: 'tick', every: this.ticks, count: 1, row }] : [];
+  }
+
+  private untickedStatement(node: Node, topLevel: boolean): Stmt[] {
     const row = node.startPosition.row;
     switch (node.type) {
       case 'expression_statement': {
@@ -593,6 +655,7 @@ export class Converter extends DeclarationConverter {
 
   // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private declareStatement(node: Node, topLevel: boolean): Stmt[] {
+    let ticks: number | undefined;
     for (const directive of node.namedChildren.filter((child) => child.type === 'declare_directive')) {
       const name = (directive.childForFieldName('name') as Node).text;
       const key = lower(name);
@@ -646,7 +709,9 @@ export class Converter extends DeclarationConverter {
           message: 'declare(encoding=...) ignored because Zend multibyte feature is turned off by settings',
           row: node.startPosition.row,
         });
-      } else if (key !== 'ticks') {
+      } else if (key === 'ticks') {
+        ticks = this.ticksValue(valueNode, value);
+      } else {
         this.notices.push({
           level: 'Warning',
           message: `Unsupported declare '${name}'`,
@@ -654,8 +719,36 @@ export class Converter extends DeclarationConverter {
         });
       }
     }
+    return this.declareBody(node, ticks);
+  }
+
+  private ticksValue(valueNode: Node, value: Expr): number {
+    if (value.k !== 'lit' || typeof value.v !== 'bigint') this.unsupported(valueNode, '整数以外の declare(ticks)');
+    return Number(value.v);
+  }
+
+  /**
+   * Converts the statements a `declare` applies to: the rest of the file for `declare(...);`, else its body. A `ticks`
+   * value applies to them, and the `declare` ticks once after them under the value then in effect.
+   */
+  private declareBody(node: Node, ticks: number | undefined): Stmt[] {
     const body = node.namedChildren.filter((child) => child.type !== 'declare_directive' && child.type !== 'comment');
-    return this.blockOf(body);
+    const row = node.startPosition.row;
+    if (ticks === undefined) return [...this.blockOf(body), ...this.declareTick(row)];
+    const closing = node.children.findIndex((child) => child.type === ')');
+    if (node.children[closing + 1]?.type === ';') {
+      this.ticks = ticks;
+      return this.declareTick(row);
+    }
+    const outer = this.ticks;
+    this.ticks = ticks;
+    let statements: Stmt[];
+    try {
+      statements = this.blockOf(body);
+    } finally {
+      this.ticks = outer;
+    }
+    return [...statements, ...this.declareTick(row)];
   }
 
   private selectNamespaceStyle(node: Node, root: Node, body: Node | null): void {

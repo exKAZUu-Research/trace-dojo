@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- Keeps the serializer and the unserializer, which mirror each other's format, together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt reads as they are.
 import { lower, untilNul } from './bytes';
@@ -62,6 +63,7 @@ class Serializer {
 
   /** Writes a value, or a slot that is a reference when another holder shares it. */
   // code-gauge-allow functionCognitiveComplexity -- Follows php_var_serialize_intern, which dispatches on each type.
+  // code-gauge-allow functionNcss -- One case per type, as php_var_serialize_intern writes them.
   private write(slot: Value | Ref, root = false): void {
     const runtime = rt();
     runtime.spend();
@@ -117,7 +119,7 @@ class Serializer {
 
   private writeObject(object: PhpObject): void {
     const cls = object.cls;
-    if (isClosure(object) || cls.isAnonymous)
+    if (isClosure(object) || cls.isAnonymous || cls.name === 'WeakReference')
       throwError('Exception', `Serialization of '${untilNul(cls.name)}' is not allowed`);
     if (cls.kind === 'enum') {
       const text = `${cls.name}:${enumCaseIdentifier(object) ?? ''}`;
@@ -231,61 +233,69 @@ class Unserializer {
     throw new Failure();
   }
 
-  /** Reads a value into `location`, or a key when `location` is undefined. */
-  // code-gauge-allow functionCognitiveComplexity -- Follows php_var_unserialize_internal, which dispatches on each format.
+  /** Reads a value into `location`, or a key when `location` is undefined, as php_var_unserialize_internal does. */
   private value(location: Location | undefined): Value {
     rt().spend();
     const start = this.offset;
     if (start >= this.data.length) this.fail();
     if (location && this.data[start] !== 'R') this.locations.push(location);
+    const scalar = this.scalar();
+    if (scalar) {
+      this.offset = start + scalar.length;
+      return store(location, scalar.value);
+    }
     let match: RegExpExecArray | undefined;
+    if ((match = this.match(/([sS]):(\d+):"/y))) return store(location, this.string(start, match));
     if ((match = this.match(/[Rr]:(\d+);/y))) {
       this.offset = start + match[0].length;
-      if (!location) this.fail();
-      return this.reference(location, Number(match[1]), match[0][0] === 'R');
-    }
-    if ((match = this.match(/(N|b:0|b:1);/y))) {
-      this.offset = start + match[0].length;
-      return store(location, match[1] === 'N' ? null : match[1] === 'b:1');
-    }
-    if ((match = this.match(/i:([+-]?\d+);/y))) {
-      this.offset = start + match[0].length;
-      return store(location, parseInteger(match[1]));
-    }
-    if ((match = this.match(/d:(NAN|-?INF|[+-]?(?:\d*\.\d+|\d+\.?\d*)(?:[eE][+-]?\d+)?);/y))) {
-      this.offset = start + match[0].length;
-      const text = match[1];
-      const number =
-        text === 'NAN' ? Number.NaN : text.endsWith('INF') ? (text[0] === '-' ? -1 : 1) * Infinity : Number(text);
-      return store(location, number);
-    }
-    if ((match = this.match(/([sS]):(\d+):"/y))) {
-      const length = Number(match[2]);
-      const begin = start + match[0].length;
-      if (this.data.length - begin < length) this.fail(start + 2);
-      if (match[1] === 'S') throw new UnsupportedFeatureError("unserialize() の 'S' 形式");
-      const end = begin + length;
-      if (this.data[end] !== '"') this.fail(end);
-      if (this.data[end + 1] !== ';') this.fail(end + 1);
-      this.offset = end + 2;
-      return store(location, this.data.slice(begin, end));
+      return this.reference(this.located(location), Number(match[1]), match[0][0] === 'R');
     }
     if ((match = this.match(/a:(\d+):\{/y))) {
       this.offset = start + match[0].length;
-      if (!location) this.fail();
-      return this.array(location, Number(match[1]));
+      return this.array(this.located(location), Number(match[1]));
     }
     if ((match = this.match(/([OC]):(\d+):"/y))) {
-      if (!location) this.fail();
       if (match[1] === 'C') throw new UnsupportedFeatureError('Serializable インターフェースによる直列化');
-      return this.object(location, start, match[0].length, Number(match[2]));
+      return this.object(this.located(location), start, match[0].length, Number(match[2]));
     }
-    if ((match = this.match(/E:(\d+):"/y))) {
-      if (!location) this.fail();
-      return this.enumCase(location, start, match[0].length, Number(match[1]));
-    }
+    if ((match = this.match(/E:(\d+):"/y)))
+      return this.enumCase(this.located(location), start, match[0].length, Number(match[1]));
     if (this.data[start] === '}') warn('unserialize(): Unexpected end of serialized data');
     this.fail(start);
+  }
+
+  /** The location of a value that only a value, not a key, may be, failing for a key as PHP does. */
+  private located(location: Location | undefined): Location {
+    if (!location) this.fail();
+    return location;
+  }
+
+  /** Reads null, a boolean, an int, or a float at the offset, with the length of its text. */
+  private scalar(): { value: Value; length: number } | undefined {
+    let match: RegExpExecArray | undefined;
+    if ((match = this.match(/(N|b:0|b:1);/y)))
+      return { value: match[1] === 'N' ? null : match[1] === 'b:1', length: match[0].length };
+    if ((match = this.match(/i:([+-]?\d+);/y))) return { value: parseInteger(match[1]), length: match[0].length };
+    if ((match = this.match(/d:(NAN|-?INF|[+-]?(?:\d*\.\d+|\d+\.?\d*)(?:[eE][+-]?\d+)?);/y))) {
+      const text = match[1];
+      const value =
+        text === 'NAN' ? Number.NaN : text.endsWith('INF') ? (text[0] === '-' ? -1 : 1) * Infinity : Number(text);
+      return { value, length: match[0].length };
+    }
+    return undefined;
+  }
+
+  /** Reads a string whose `s:<length>:"` header `header` matched at `start`. */
+  private string(start: number, header: RegExpExecArray): string {
+    const length = Number(header[2]);
+    const begin = start + header[0].length;
+    if (this.data.length - begin < length) this.fail(start + 2);
+    if (header[1] === 'S') throw new UnsupportedFeatureError("unserialize() の 'S' 形式");
+    const end = begin + length;
+    if (this.data[end] !== '"') this.fail(end);
+    if (this.data[end + 1] !== ';') this.fail(end + 1);
+    this.offset = end + 2;
+    return this.data.slice(begin, end);
   }
 
   private reference(location: Location, number: number, isReference: boolean): Value {
@@ -349,36 +359,10 @@ class Unserializer {
     return this.data.slice(begin, end);
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Follows the object case of php_var_unserialize_internal.
   private object(location: Location, start: number, headerLength: number, length: number): Value {
     const name = this.quotedName(start, headerLength, length, ':');
-    const nameEnd = this.offset - 2;
-    if (name[0] === '\0' || name[0] === '\\') this.fail(nameEnd + 2);
-    let cls: PhpClass | undefined;
-    if (this.allowed === undefined || this.allowed.has(lower(name))) {
-      cls = findDeclaredClass(name, true);
-      if (cls && cls.isAnonymous) cls = undefined;
-      if (!cls && !VALID_CLASS_NAME.test(name)) this.fail(nameEnd + 2);
-    } else if (!VALID_CLASS_NAME.test(name)) this.fail(nameEnd + 2);
-    if (cls) {
-      if (isClosure({ cls } as PhpObject) || cls.name === 'Closure' || cls.name === 'Generator')
-        throwError('Exception', `Unserialization of '${cls.name}' is not allowed`);
-      checkSerializableClass(cls);
-    }
-    const header = this.match(/([+-]?\d+):\{/y);
-    if (!header) {
-      if (this.offset >= this.data.length - 2) {
-        warn('Bad unserialize data');
-        this.fail();
-      }
-      const digits = /[+-]?\d*/y;
-      digits.lastIndex = this.offset;
-      digits.exec(this.data);
-      this.fail(this.data[digits.lastIndex] === ':' ? digits.lastIndex + 1 : digits.lastIndex);
-    }
-    const count = Number(header[1]);
-    if (count < 0 || count > (this.data.length - this.offset - header[0].length) / 2) this.fail();
-    this.offset += header[0].length;
+    const cls = this.objectClass(name);
+    const count = this.objectCount();
     if (cls && (cls.kind !== 'class' || cls.isAbstract))
       throwError('Error', `Cannot instantiate ${cls.kind === 'class' ? 'abstract class' : cls.kind} ${cls.name}`);
     const object = createObject(cls ?? (rt().classes.get(lower(INCOMPLETE_CLASS)) as PhpClass));
@@ -394,6 +378,41 @@ class Unserializer {
     }
     this.finish();
     return object;
+  }
+
+  /** The class of a serialized object, or undefined for an incomplete one of a class missing or not allowed. */
+  private objectClass(name: string): PhpClass | undefined {
+    if (name[0] === '\0' || name[0] === '\\') this.fail();
+    const allowed = this.allowed === undefined || this.allowed.has(lower(name));
+    const found = allowed ? findDeclaredClass(name, true) : undefined;
+    const cls = found?.isAnonymous ? undefined : found;
+    if (!cls) {
+      if (!VALID_CLASS_NAME.test(name)) this.fail();
+      return undefined;
+    }
+    if (cls.name === 'Closure' || cls.name === 'Generator')
+      throwError('Exception', `Unserialization of '${cls.name}' is not allowed`);
+    checkSerializableClass(cls);
+    return cls;
+  }
+
+  /** Reads the `<count>:{` of an object's properties. */
+  private objectCount(): number {
+    const header = this.match(/([+-]?\d+):\{/y);
+    if (!header) {
+      if (this.offset >= this.data.length - 2) {
+        warn('Bad unserialize data');
+        this.fail();
+      }
+      const digits = /[+-]?\d*/y;
+      digits.lastIndex = this.offset;
+      digits.exec(this.data);
+      this.fail(this.data[digits.lastIndex] === ':' ? digits.lastIndex + 1 : digits.lastIndex);
+    }
+    const count = Number(header[1]);
+    if (count < 0 || count > (this.data.length - this.offset - header[0].length) / 2) this.fail();
+    this.offset += header[0].length;
+    return count;
   }
 
   private property(object: PhpObject, key: string): void {

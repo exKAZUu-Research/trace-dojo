@@ -941,8 +941,8 @@ test.each([
 
 test.each([
   '<?php mb_strlen("abc","sjis");',
-  '<?php echo defined("PHP_OS") ? "y" : "n";',
-  '<?php echo constant("PHP_OS");',
+  '<?php echo defined("PHP_BINARY") ? "y" : "n";',
+  '<?php echo constant("PHP_BINARY");',
   '<?php var_dump(class_exists("Attribute"));',
 ])('unsupported arguments produce the unsupported-feature message: %s', (source) => {
   expect(run(source)).toMatchObject({
@@ -6082,21 +6082,21 @@ test('a returned local becomes a GC root before the other locals are freed', () 
 test('rejecting an unsupported feature ends the run without PHP shutdown replacing the message', () => {
   expect(
     run(
-      '<?php\nclass D { function __destruct() { $this->undefinedMethod(); } }\n$d = new D;\necho "start\\n";\n$x = serialize([1]);\n'
+      '<?php\nclass D { function __destruct() { $this->undefinedMethod(); } }\n$d = new D;\necho "start\\n";\n$x = getenv("HOME");\n'
     )
   ).toMatchObject({
     kind: 'executed',
     stdout: 'start\n',
-    uncaughtException: '直列化（serialize）は、この採点環境では使えません。',
+    uncaughtException: '環境変数（getenv）は、この採点環境では使えません。',
   });
   expect(
     run(
-      '<?php class D { function __destruct() { echo "dtor;"; throw new Exception("late"); } } $d = new D; set_exception_handler(function ($e) { echo "handler;"; serialize(1); }); throw new Exception("first");'
+      '<?php class D { function __destruct() { echo "dtor;"; throw new Exception("late"); } } $d = new D; set_exception_handler(function ($e) { echo "handler;"; getenv("HOME"); }); throw new Exception("first");'
     )
   ).toMatchObject({
     kind: 'executed',
     stdout: 'handler;',
-    uncaughtException: '直列化（serialize）は、この採点環境では使えません。',
+    uncaughtException: '環境変数（getenv）は、この採点環境では使えません。',
   });
 });
 

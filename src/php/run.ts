@@ -62,15 +62,7 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
       });
       onEnd?.(runtime.globalFrame);
       runtime.world.recordFinalTurtles();
-      // A rejection of an unsupported feature ends the run outside PHP, so PHP's shutdown does not run after it.
-      if (!rejectedRuns.has(runtime)) uncaughtException = callShutdownFunctions(runtime) ?? uncaughtException;
-      if (rejectedRuns.has(runtime)) {
-        for (const buffer of runtime.outputBuffers.splice(0)) runtime.echo(buffer.data);
-      } else {
-        uncaughtException = shutdown(runtime) ?? uncaughtException;
-        const handlerException = endAllBuffers(runtime);
-        if (handlerException) uncaughtException ??= dec(`Uncaught ${throwableText(handlerException.object)}`);
-      }
+      uncaughtException = shutDownRequest(runtime) ?? uncaughtException;
     } finally {
       runtime.flush();
     }
@@ -192,6 +184,21 @@ function printUncaught(runtime: Runtime, object: PhpObject): ReportOutcome {
       object = error.object;
     }
   }
+}
+
+/**
+ * Ends the run as PHP's request shutdown does: shutdown functions, destructors, then closing the output buffers. A
+ * rejection of an unsupported feature ends the run outside PHP, so PHP's shutdown does not run after it.
+ */
+function shutDownRequest(runtime: Runtime): string | undefined {
+  const shutdownFailure = rejectedRuns.has(runtime) ? undefined : callShutdownFunctions(runtime);
+  if (rejectedRuns.has(runtime)) {
+    for (const buffer of runtime.outputBuffers.splice(0)) runtime.echo(buffer.data);
+    return shutdownFailure;
+  }
+  const failure = shutdown(runtime) ?? shutdownFailure;
+  const handlerException = endAllBuffers(runtime);
+  return failure ?? (handlerException && dec(`Uncaught ${throwableText(handlerException.object)}`));
 }
 
 /**

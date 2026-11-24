@@ -146,6 +146,8 @@ export type Stmt = { row: number; suspends?: true } & (
   | { k: 'goto'; label: string; offset: number }
   | { k: 'label'; name: string }
   | { k: 'nop' }
+  /** A tick of `declare(ticks=every)`, counted `count` times, which calls the tick functions every `every` ticks. */
+  | { k: 'tick'; every: number; count: number }
 );
 
 export interface FunctionDecl {

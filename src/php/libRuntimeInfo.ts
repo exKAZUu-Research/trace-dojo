@@ -196,6 +196,18 @@ defineFunction('register_shutdown_function(callable $callback, mixed ...$args): 
   return null;
 });
 
+defineFunction('register_tick_function(callable $callback, mixed ...$args): bool', ({ args }) => {
+  rt().tickFunctions.push({ callback: args[0], args: args.slice(1) });
+  return true;
+});
+
+defineFunction('unregister_tick_function(callable $callback): void', ({ args }) => {
+  const runtime = rt();
+  const index = runtime.tickFunctions.findIndex(({ callback }) => sameCallable(callback, args[0]));
+  if (index !== -1) runtime.tickFunctions.splice(index, 1);
+  return null;
+});
+
 // Autoloading and aliases -------------------------------------------------------------------------------------------
 
 defineFunction(

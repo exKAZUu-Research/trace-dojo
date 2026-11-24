@@ -45,14 +45,7 @@ const UNSUPPORTED_FUNCTIONS: [string, string[]][] = [
   ['フォームの入力の検査', ['filter_var', 'filter_input', 'filter_var_array', 'filter_input_array', 'filter_has_var']],
   [
     '実行環境の情報と設定',
-    [
-      'phpinfo',
-      'get_defined_functions',
-      'get_defined_constants',
-      'get_declared_classes',
-      'debug_zval_dump',
-      'register_tick_function',
-    ],
+    ['phpinfo', 'get_defined_functions', 'get_defined_constants', 'get_declared_classes', 'debug_zval_dump'],
   ],
 ];
 
@@ -90,7 +83,7 @@ const UNSUPPORTED_CLASSES: [string, string[]][] = [
     ],
   ],
   ['Fiber', ['Fiber']],
-  ['弱い参照', ['WeakReference', 'WeakMap']],
+  ['弱い参照の表（WeakMap）', ['WeakMap']],
   ['データベース', ['PDO', 'mysqli', 'SQLite3']],
 ];
 
