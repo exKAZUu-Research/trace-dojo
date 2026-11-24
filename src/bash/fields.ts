@@ -29,6 +29,7 @@ export function isFieldBreak(piece: Piece): piece is typeof FIELD_BREAK | typeof
  */
 export class FieldSplitter {
   private readonly fields: Fragment[][] = [];
+  private readonly segment: Fragment[] = [];
   private field: Fragment[] = [];
   private started = false;
   private afterWhite = false;
@@ -38,19 +39,38 @@ export class FieldSplitter {
   add(piece: Piece): void {
     if (piece === EMPTY_LIST) return;
     if (isFieldBreak(piece)) {
-      if (this.started) this.end();
-      this.afterWhite = false;
-    } else if (!piece.split || this.ifs === '') {
-      if (piece.text === '' && !piece.quoted) return;
-      this.field.push({ ...piece, split: false });
-      this.started = true;
-      this.afterWhite = false;
-    } else this.split(piece.text);
+      this.flushSegment();
+      return;
+    }
+    if (piece.text === '' && !piece.quoted) return;
+    this.segment.push(piece);
   }
 
   finish(): Fragment[][] {
-    if (this.started) this.end();
+    this.flushSegment();
     return this.fields;
+  }
+
+  private flushSegment(): void {
+    if (this.segment.length === 0) return;
+    const pieces = this.segment.splice(0);
+    if (!pieces.some((piece) => piece.text.length > 0)) {
+      this.fields.push([{ text: '', quoted: true, split: false }]);
+      return;
+    }
+    this.started = false;
+    this.afterWhite = false;
+    for (const piece of pieces) {
+      if (piece.text === '') continue;
+      if (!piece.split || this.ifs === '') {
+        this.field.push({ ...piece, split: false });
+        this.started = true;
+        this.afterWhite = false;
+      } else {
+        this.split(piece.text);
+      }
+    }
+    if (this.started) this.end();
   }
 
   private end(): void {

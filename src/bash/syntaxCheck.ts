@@ -307,13 +307,11 @@ class ShellGrammarValidator {
           this.parseCommand();
           return;
         }
-        this.parseCompoundConstruct();
-        this.parseTrailingRedirections();
+        this.parseCompoundWithRedirections();
         return;
       }
       if (this.hasOperator(lead, '(') || this.hasOperator(lead, '((')) {
-        this.parseCompoundConstruct();
-        this.parseTrailingRedirections();
+        this.parseCompoundWithRedirections();
         return;
       }
       if (lead.kind === 'word' || lead.kind === 'ioNumber' || this.isRedirectionOperator(lead)) {
@@ -324,41 +322,47 @@ class ShellGrammarValidator {
     });
   }
 
+  private parseCompoundWithRedirections(): void {
+    const requiresSeparator = this.parseCompoundConstruct();
+    this.parseTrailingRedirections();
+    if (requiresSeparator && this.peek().kind === 'word') this.failUnexpected(this.peek());
+  }
+
   // code-gauge-allow functionNcss -- Dispatches each compound shell construct in the grammar.
-  private parseCompoundConstruct(): void {
-    if (this.hasOperator(this.peek(), '((') && this.tryParseArithmeticConstruct()) return;
+  private parseCompoundConstruct(): boolean {
+    if (this.hasOperator(this.peek(), '((') && this.tryParseArithmeticConstruct()) return true;
     const lead = this.peek();
     if (this.hasOperator(lead, '(')) {
       this.parseDelimitedCompound(lead, ')');
-      return;
+      return false;
     }
     if (lead.kind !== 'word' || !this.isKeywordToken(lead)) this.failUnexpected(lead);
     switch (lead.value) {
       case 'if': {
         this.parseIfConstruct(lead);
-        return;
+        return false;
       }
       case 'while':
       case 'until': {
         this.parseLoopConstruct(lead);
-        return;
+        return false;
       }
       case 'for':
       case 'select': {
         this.parseForOrSelectConstruct(lead);
-        return;
+        return false;
       }
       case 'case': {
         this.parseCaseConstruct(lead);
-        return;
+        return false;
       }
       case '{': {
         this.parseDelimitedCompound(lead, '}');
-        return;
+        return false;
       }
       case '[[': {
         this.parseConditionalConstruct(lead);
-        return;
+        return true;
       }
       default: {
         this.failUnexpected(lead);
@@ -551,8 +555,7 @@ class ShellGrammarValidator {
     if (!validCompound || bodyLead.value === 'function' || bodyLead.value === 'time' || bodyLead.value === 'coproc') {
       this.failUnexpected(bodyLead);
     }
-    this.parseCompoundConstruct();
-    this.parseTrailingRedirections();
+    this.parseCompoundWithRedirections();
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Parses simple commands (redirections, prefix assignments, arguments) and `name () body` functions.

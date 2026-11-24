@@ -4,7 +4,14 @@ import { decodeAnsiC } from './converter';
 import { declarationText } from './declare';
 import type { Expander, ParameterValue } from './expansion';
 import { EMPTY_LIST, isFieldBreak, type Piece } from './fields';
-import { compileGlob, fixedGlobLength, longestPrefixMatch, matchesSlice, shortestPrefixMatch } from './pattern';
+import {
+  compileGlob,
+  longestPrefixMatch,
+  longestSuffixMatch,
+  matchesSlice,
+  shortestPrefixMatch,
+  shortestSuffixMatch,
+} from './pattern';
 import { doubleQuote, quoteReusable } from './quoting';
 import { ExitSignal } from './runtime';
 import type { Shell } from './shell';
@@ -158,7 +165,6 @@ function mapValues(
 }
 
 /** `${x#p}`, `${x##p}`, `${x%p}`, and `${x%%p}`, matching by characters. */
-// code-gauge-allow functionCognitiveComplexity -- Dispatches shortest/longest prefix and suffix pattern removal with fixed-length fast paths.
 function removePattern(text: string, pattern: string, operator: string, shell: Shell): string {
   const chars = charactersOf(text);
   const glob = compileGlob(pattern);
@@ -171,21 +177,8 @@ function removePattern(text: string, pattern: string, operator: string, shell: S
     const end = longestPrefixMatch(glob, chars, 0, spend);
     return end === undefined ? text : chars.slice(end).join('');
   }
-  const fixed = fixedGlobLength(glob);
-  if (fixed !== undefined) {
-    const start = chars.length - fixed;
-    return start >= 0 && matchesSlice(glob, chars, start, chars.length, spend) ? chars.slice(0, start).join('') : text;
-  }
-  if (operator === '%') {
-    for (let start = chars.length; start >= 0; start--) {
-      if (matchesSlice(glob, chars, start, chars.length, spend)) return chars.slice(0, start).join('');
-    }
-    return text;
-  }
-  for (let start = 0; start <= chars.length; start++) {
-    if (matchesSlice(glob, chars, start, chars.length, spend)) return chars.slice(0, start).join('');
-  }
-  return text;
+  const start = operator === '%' ? shortestSuffixMatch(glob, chars, spend) : longestSuffixMatch(glob, chars, spend);
+  return start === undefined ? text : chars.slice(0, start).join('');
 }
 
 /** Splits the argument of `${x/pattern/replacement}` at its first unquoted `/`. */
@@ -237,7 +230,6 @@ function replacementFor(replacement: Piece[], matched: string): string {
 
 /** `${x/p/r}`, `${x//p/r}`, `${x/#p/r}`, and `${x/%p/r}`, replacing the longest match at each position. */
 // code-gauge-allow functionCognitiveComplexity -- Bash's four replacement operators share the match search and the empty-match rule.
-// code-gauge-allow functionNcss -- Handles prefix, suffix, single, and global pattern replacement with Bash's empty-match advancement.
 function substitute(text: string, pattern: string, replacement: Piece[], operator: string, shell: Shell): string {
   if (pattern === '' && operator !== '/#' && operator !== '/%') return text;
   const chars = charactersOf(text);
@@ -249,19 +241,8 @@ function substitute(text: string, pattern: string, replacement: Piece[], operato
     return end === undefined ? text : replace(0, end) + chars.slice(end).join('');
   }
   if (operator === '/%') {
-    const fixed = fixedGlobLength(glob);
-    if (fixed !== undefined) {
-      const start = chars.length - fixed;
-      return start >= 0 && matchesSlice(glob, chars, start, chars.length, spend)
-        ? chars.slice(0, start).join('') + replace(start, chars.length)
-        : text;
-    }
-    for (let start = 0; start <= chars.length; start++) {
-      if (matchesSlice(glob, chars, start, chars.length, spend)) {
-        return chars.slice(0, start).join('') + replace(start, chars.length);
-      }
-    }
-    return text;
+    const start = longestSuffixMatch(glob, chars, spend);
+    return start === undefined ? text : chars.slice(0, start).join('') + replace(start, chars.length);
   }
   let result = '';
   for (let position = 0; position <= chars.length;) {
@@ -292,17 +273,25 @@ function substring(
 ): Piece[] {
   if (expansion.argument.length === 0) shell.discard(`${expansion.text}: bad substitution`);
   const { offset: offsetParts, length: lengthParts } = splitSubstring(expansion.argument);
+  if (value.kind === 'scalar' && value.value === undefined) return [];
+  if (value.kind === 'list' && value.values.length === 0) {
+    return expander.valuePieces({ ...value, values: [] }, inDouble);
+  }
   const evaluate = (parts: (string | WordPart)[]): bigint =>
     shell.evaluateText(expander.arithmeticText({ pieces: parts, row: shell.currentRow }), undefined);
   const offset = evaluate(offsetParts);
-  const length = lengthParts === undefined ? undefined : evaluate(lengthParts);
   const negativeLength = (): never =>
     shell.discard(`${expander.arithmeticText({ pieces: lengthParts ?? [], row: 0 }).trim()}: substring expression < 0`);
   if (value.kind === 'scalar') {
-    if (value.value === undefined) return [];
-    const sliced = sliceString(value.value, offset, length, negativeLength);
+    const sliced = sliceString(
+      value.value as string,
+      offset,
+      lengthParts && (() => evaluate(lengthParts)),
+      negativeLength
+    );
     return sliced === undefined ? [] : expander.valuePieces({ kind: 'scalar', value: sliced }, inDouble);
   }
+  const length = lengthParts === undefined ? undefined : evaluate(lengthParts);
   if (length !== undefined && length < 0n) negativeLength();
   const values = sliceList(shell, name, value, offset);
   if (values === undefined) return expander.valuePieces({ ...value, values: [] }, inDouble);
@@ -316,13 +305,14 @@ function substring(
 function sliceString(
   text: string,
   start: bigint,
-  length: bigint | undefined,
+  readLength: (() => bigint) | undefined,
   negativeLength: () => never
 ): string | undefined {
   const chars = charactersOf(text);
   const size = BigInt(chars.length);
   const offset = start < 0n ? start + size : start;
   if (offset < 0n || offset > size) return undefined;
+  const length = readLength?.();
   let end = length === undefined ? size : length < 0n ? size + length : offset + length;
   if (length !== undefined && length < 0n && end < offset) negativeLength();
   if (end > size) end = size;

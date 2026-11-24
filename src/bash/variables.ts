@@ -200,6 +200,26 @@ export function findEnclosingVariable(scopes: Scope[], excludedScope: Scope, nam
   return undefined;
 }
 
+/** Removes `target` from the innermost scope holding it (leaving a running-function local declared without a value). */
+export function removeScopedVariable(
+  scopes: Scope[],
+  currentFunctionScope: number | undefined,
+  target: string
+): 'ok' | 'readonly' {
+  for (let i = scopes.length - 1; i >= 0; i--) {
+    const variable = scopes[i].get(target);
+    if (!variable) continue;
+    if (variable.attributes.has('r')) return 'readonly';
+    if (i > 0 && currentFunctionScope === i) {
+      variable.value = undefined;
+      variable.shared = false;
+      variable.attributes.clear();
+    } else scopes[i].delete(target);
+    return 'ok';
+  }
+  return 'ok';
+}
+
 /** Elements of call-stack and foreground-pipeline dynamic arrays (`FUNCNAME`, `BASH_LINENO`, `BASH_SOURCE`, `PIPESTATUS`). */
 export function callStackArray(
   name: string,

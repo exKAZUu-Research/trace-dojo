@@ -6,7 +6,7 @@ import type { Shell } from './shell';
 import { testBuiltin } from './testBuiltin';
 import { type Builtin, TURTLE_BUILTINS } from './turtle';
 import { UnsupportedFeatureError } from './unsupported';
-import { ensureWritable, isIdentifier } from './variables';
+import { ensureWritable, isIdentifier, type Variable } from './variables';
 
 /** Parses a signed 64-bit decimal integer surrounded by optional blanks, or `undefined` when invalid. */
 function legalNumber(text: string): bigint | undefined {
@@ -196,20 +196,19 @@ function unsetName(shell: Shell, name: string, mode: UnsetMode): boolean {
   return shell.unsetVariable(name, mode !== 'n');
 }
 
-/** `unset 'name[subscript]'`, which clears an indexed array for `@` or `*` and removes an associative key literally. */
-function unsetElement(shell: Shell, name: string, subscript: string): boolean {
+/** `unset 'name[subscript]'`, which clears an indexed array for `@` or `*` and expands an associative key. */
+export function unsetElement(shell: Shell, name: string, subscript: string): boolean {
   const resolved = shell.resolveName(name);
   const variable = shell.findVariable(resolved);
   if (variable?.attributes.has('r')) {
     shell.reportError(`unset: ${resolved}: cannot unset: readonly variable`);
     return false;
   }
+  if (variable?.value?.kind === 'associative' || variable?.attributes.has('A')) {
+    return unsetAssociativeElement(shell, variable, subscript);
+  }
   if (!variable?.value) return true;
   ensureWritable(variable);
-  if (variable.value.kind === 'associative') {
-    variable.value.table.delete(subscript);
-    return true;
-  }
   if (subscript === '@' || subscript === '*') {
     if (variable.value.kind === 'indexed') variable.value.elements.clear();
     else shell.unsetVariable(resolved);
@@ -222,6 +221,19 @@ function unsetElement(shell: Shell, name: string, subscript: string): boolean {
   }
   if (variable.value.kind === 'indexed') variable.value.elements.delete(index);
   else if (index === 0n) shell.unsetVariable(resolved);
+  return true;
+}
+
+function unsetAssociativeElement(shell: Shell, variable: Variable, subscript: string): boolean {
+  const key = shell.expander.expandSubscriptText(subscript);
+  if (key === '') {
+    shell.reportError(`unset: [${subscript}]: bad array subscript`);
+    return false;
+  }
+  if (variable.value?.kind === 'associative') {
+    ensureWritable(variable);
+    variable.value.table.delete(key);
+  }
   return true;
 }
 

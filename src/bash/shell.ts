@@ -10,7 +10,7 @@ import {
   type WriteTargetResult,
 } from './arithmetic';
 import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word } from './ast';
-import { BUILTINS } from './builtins';
+import { BUILTINS, unsetElement } from './builtins';
 import { capitalize, lowerCase, upperCase } from './characters';
 import { conditionalStatus } from './conditional';
 import { expandDeclarationArguments, runDeclaration } from './declare';
@@ -42,6 +42,7 @@ import {
   isIdentifier,
   isValidFunctionName,
   PERMANENT_DYNAMIC_VARIABLES,
+  removeScopedVariable,
   SCALAR_DYNAMIC_VARIABLES,
   type Scope,
   sortedElements,
@@ -1362,6 +1363,8 @@ export class Shell implements ArithmeticHost {
   /** Unsets a variable, as `unset` does. */
   unsetVariable(name: string, followReference = true): boolean {
     const target = followReference ? this.resolveName(name) : name;
+    const split = followReference ? this.splitSubscript(target) : undefined;
+    if (split && isIdentifier(split.name)) return unsetElement(this, split.name, split.subscript);
     if (this.isDynamic(target)) {
       if (PERMANENT_DYNAMIC_VARIABLES.has(target)) {
         this.reportError(`unset: ${target}: cannot unset`);
@@ -1370,21 +1373,9 @@ export class Shell implements ArithmeticHost {
       this.state.unsetDynamic.add(target);
       return true;
     }
-    const { scopes } = this.state;
-    for (let i = scopes.length - 1; i >= 0; i--) {
-      const variable = scopes[i].get(target);
-      if (!variable) continue;
-      if (variable.attributes.has('r')) {
-        this.reportError(`unset: ${target}: cannot unset: readonly variable`);
-        return false;
-      }
-      // Unsetting a local of the running function leaves it declared there without a value, as Bash 5 does.
-      if (i > 0 && this.state.functionScopes.at(-1) === i) {
-        variable.value = undefined;
-        variable.shared = false;
-        variable.attributes.clear();
-      } else scopes[i].delete(target);
-      return true;
+    if (removeScopedVariable(this.state.scopes, this.state.functionScopes.at(-1), target) === 'readonly') {
+      this.reportError(`unset: ${target}: cannot unset: readonly variable`);
+      return false;
     }
     return true;
   }

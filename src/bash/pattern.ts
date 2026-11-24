@@ -108,11 +108,6 @@ function readGlobAtom(chars: readonly string[], i: number): { atom: GlobAtom; ne
   return { atom: { kind: 'char', c }, next: i + 1 };
 }
 
-/** Fixed character length of a star-free pattern, or `undefined` when `*` allows variable lengths. */
-export function fixedGlobLength(glob: CompiledGlob): number | undefined {
-  return glob.hasStar ? undefined : glob.atoms.length;
-}
-
 /** End index of the shortest prefix of `chars[start..]` matching `glob`, or `undefined` if none matches. */
 export function shortestPrefixMatch(
   glob: CompiledGlob,
@@ -139,6 +134,30 @@ export function longestPrefixMatch(
     return end <= chars.length && matchesFixed(glob.atoms, chars, start, spend) ? end : undefined;
   }
   return scanStates(glob.atoms, chars, start, chars.length, false, spend);
+}
+
+/** Start index of the shortest suffix of `chars` matching `glob`, or `undefined` if none matches. */
+export function shortestSuffixMatch(
+  glob: CompiledGlob,
+  chars: readonly string[],
+  spend: () => void
+): number | undefined {
+  const reversedEnd = shortestPrefixMatch(reverseGlob(glob), chars.toReversed(), 0, spend);
+  return reversedEnd === undefined ? undefined : chars.length - reversedEnd;
+}
+
+/** Start index of the longest suffix of `chars` matching `glob`, or `undefined` if none matches. */
+export function longestSuffixMatch(
+  glob: CompiledGlob,
+  chars: readonly string[],
+  spend: () => void
+): number | undefined {
+  const reversedEnd = longestPrefixMatch(reverseGlob(glob), chars.toReversed(), 0, spend);
+  return reversedEnd === undefined ? undefined : chars.length - reversedEnd;
+}
+
+function reverseGlob(glob: CompiledGlob): CompiledGlob {
+  return { atoms: glob.atoms.toReversed(), hasStar: glob.hasStar };
 }
 
 /** Whether `chars[start..end]` as a whole matches `glob`. */
