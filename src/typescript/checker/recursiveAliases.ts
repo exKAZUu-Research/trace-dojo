@@ -41,6 +41,7 @@ const forwardedMembers: {
   mapper: true,
   nonGeneric: true,
   outerTypeParameters: true,
+  valueName: true,
 };
 
 /**

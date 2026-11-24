@@ -1,0 +1,292 @@
+import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
+
+import { numberArithmetic } from '../../javascript/expressionEvaluator';
+import type { Checker } from './checker';
+import type { Sym } from './scopes';
+import { hasToken, isWithin, named, numberValue, propertyNameText, skipParentheses, stringValue } from './syntax';
+import {
+  anonymousObject,
+  emptyStructure,
+  type LiteralType,
+  newTypeId,
+  numberType,
+  type ObjectType,
+  regularOf,
+  simpleProperty,
+  stringType,
+  type Type,
+  unionOf,
+} from './types';
+
+type EnumValue = number | string;
+
+interface EnumMember {
+  name: string;
+  /** The constant value, or undefined for a computed member, whose value only running the program gives. */
+  value: EnumValue | undefined;
+  type: Type;
+  node: TreeNode;
+}
+
+interface EnumInfo {
+  members: Map<string, EnumMember>;
+  /** The type the enum's name stands for: the union of its members' literal types, or `number` with a computed member. */
+  type: Type;
+  /** The type of the enum object, `typeof E`. */
+  objectType: ObjectType;
+  /** The errors the members' initializers have, which checking the declaration reports. */
+  errors: { node: TreeNode; message: string }[];
+}
+
+/**
+ * Enums: the values of their members, which TypeScript computes from constant initializers and by counting up, the
+ * enum literal types of the members, and the type of the enum object.
+ */
+export class Enums {
+  private readonly infos = new Map<number, EnumInfo>();
+  private readonly computing = new Set<number>();
+
+  constructor(private readonly c: Checker) {}
+
+  /** The type an enum's name stands for as a type. */
+  declaredType(symbol: Sym): Type {
+    return this.infoOf(symbol)?.type ?? numberType;
+  }
+
+  /** The type of an enum's name as a value: the enum object. */
+  objectType(symbol: Sym): Type {
+    return this.infoOf(symbol)?.objectType ?? numberType;
+  }
+
+  /** The type `E.A` names, the type of the member `A` of the enum `E`. */
+  memberTypeNamed(symbol: Sym, name: string): Type | undefined {
+    const type = this.infoOf(symbol)?.members.get(name)?.type;
+    return type && regularOf(type);
+  }
+
+  /** The type of a member's name inside the enum's initializers, which refer to the members before them. */
+  memberType(member: TreeNode): Type {
+    const declaration = member.parent?.parent;
+    const name = declaration?.childForFieldName('name');
+    const symbol = name ? this.c.scopeOf(declaration as TreeNode).lookupValue(name.text) : undefined;
+    const memberName = memberNameOf(member);
+    return (symbol && memberName !== undefined && this.infoOf(symbol)?.members.get(memberName)?.type) || numberType;
+  }
+
+  /** A `const enum` has no object to use as a value, only members to read, which TypeScript compiles to their values. */
+  checkConstEnumUse(node: TreeNode, symbol: Sym): void {
+    if (!symbol.valueDeclarations.some((declaration) => hasToken(declaration, 'const'))) return;
+    const parent = node.parent;
+    const isObjectOfAccess =
+      (parent?.type === 'member_expression' || parent?.type === 'subscript_expression') &&
+      parent.childForFieldName('object')?.id === node.id;
+    if (isObjectOfAccess || parent?.type === 'type_query') return;
+    this.c.error(
+      node,
+      "'const' enum は、プロパティやインデックスのアクセス式、import 宣言やエクスポート代入の右辺、型のクエリーでしか使えません。"
+    );
+  }
+
+  checkDeclaration(node: TreeNode): void {
+    const name = node.childForFieldName('name');
+    const symbol = name ? this.c.scopeOf(node).lookupValue(name.text) : undefined;
+    const info = symbol ? this.infoOf(symbol) : undefined;
+    for (const { node: errorNode, message } of info?.errors ?? [])
+      if (isWithin(errorNode, node)) this.c.error(errorNode, message);
+    for (const member of named(node.childForFieldName('body') as TreeNode)) {
+      const value = member.childForFieldName('value');
+      if (value) this.c.expressions.check(value);
+    }
+  }
+
+  private infoOf(symbol: Sym): EnumInfo | undefined {
+    const cached = this.infos.get(symbol.id);
+    if (cached) return cached;
+    if (this.computing.has(symbol.id)) return undefined;
+    this.computing.add(symbol.id);
+    try {
+      const info = this.computeInfo(symbol);
+      this.infos.set(symbol.id, info);
+      return info;
+    } finally {
+      this.computing.delete(symbol.id);
+    }
+  }
+
+  private computeInfo(symbol: Sym): EnumInfo {
+    const info = {} as EnumInfo;
+    const { members, errors } = this.memberValues(symbol);
+    const literals = [...members.values()].filter((member) => member.value !== undefined);
+    const types = literals.map((member) => {
+      member.type = enumLiteralType(member.value as EnumValue, symbol.name, member.name, () => info.type);
+      return member.type;
+    });
+    const isUnion = literals.length === members.size && types.length > 0;
+    const union = isUnion ? unionOf(types) : numberType;
+    if (union.kind === 'union') union.enumName = symbol.name;
+    info.type = union;
+    for (const member of members.values()) if (member.value === undefined) member.type = numberType;
+    info.members = members;
+    info.errors = errors;
+    info.objectType = enumObjectType(symbol.name, members);
+    return info;
+  }
+
+  /** Each member's value, from a constant initializer or by counting up from the member before, in order. */
+  private memberValues(symbol: Sym): Pick<EnumInfo, 'members' | 'errors'> {
+    const members = new Map<string, EnumMember>();
+    const errors: EnumInfo['errors'] = [];
+    const declarations = symbol.valueDeclarations.filter((declaration) => declaration.type === 'enum_declaration');
+    const isConst = declarations.some((declaration) => hasToken(declaration, 'const'));
+    for (const declaration of declarations) {
+      let previous: EnumMember | undefined;
+      for (const memberNode of named(declaration.childForFieldName('body') as TreeNode)) {
+        const name = memberNameOf(memberNode);
+        if (name === undefined) continue;
+        const value = this.memberValue(memberNode, previous, { symbol, members, errors, isConst });
+        const member: EnumMember = { name, value, type: numberType, node: memberNode };
+        const duplicate = members.get(name);
+        if (duplicate) errors.push(...[duplicate.node, memberNode].map((repeated) => duplicateError(repeated, name)));
+        members.set(name, member);
+        previous = member;
+      }
+    }
+    return { members, errors };
+  }
+
+  /** A member's value: its initializer's, 0 for the first member, or one more than the member before. */
+  private memberValue(
+    memberNode: TreeNode,
+    previous: EnumMember | undefined,
+    context: { symbol: Sym; members: Map<string, EnumMember>; errors: EnumInfo['errors']; isConst: boolean }
+  ): EnumValue | undefined {
+    const initializer = memberNode.childForFieldName('value');
+    if (initializer) {
+      const value = this.evaluate(initializer, context.symbol, context.members);
+      if (value === undefined && context.isConst)
+        context.errors.push({
+          node: initializer,
+          message: 'const enum のメンバーの初期値は、定数式でなければいけません。',
+        });
+      return value;
+    }
+    if (!previous) return 0;
+    if (typeof previous.value === 'number') return previous.value + 1;
+    context.errors.push({ node: memberNode, message: 'enum のメンバーには初期値が必要です。' });
+    return undefined;
+  }
+
+  /** The value of a constant enum expression, as TypeScript's `evaluate` computes it, or undefined for another one. */
+  // code-gauge-allow functionCognitiveComplexity -- Evaluates each kind of constant expression TypeScript allows in an enum.
+  // code-gauge-allow functionNcss -- Evaluates each kind of constant expression TypeScript allows in an enum.
+  private evaluate(node: TreeNode, symbol: Sym, members: Map<string, EnumMember>): EnumValue | undefined {
+    const expression = skipParentheses(node);
+    switch (expression.type) {
+      case 'number': {
+        const value = numberValue(expression.text);
+        return typeof value === 'number' ? value : undefined;
+      }
+      case 'string': {
+        return stringValue(expression);
+      }
+      case 'template_string': {
+        return named(expression).some((child) => child.type === 'template_substitution')
+          ? undefined
+          : expression.text.slice(1, -1);
+      }
+      case 'identifier': {
+        return members.get(expression.text)?.value;
+      }
+      case 'member_expression':
+      case 'subscript_expression': {
+        return this.otherEnumMember(expression, symbol, members);
+      }
+      case 'unary_expression': {
+        const operand = this.evaluate(expression.childForFieldName('argument') as TreeNode, symbol, members);
+        if (typeof operand !== 'number') return undefined;
+        const operator = expression.childForFieldName('operator')?.text;
+        if (operator === '-') return -operand;
+        if (operator === '+') return operand;
+        return operator === '~' ? ~operand : undefined;
+      }
+      case 'binary_expression': {
+        const left = this.evaluate(expression.childForFieldName('left') as TreeNode, symbol, members);
+        const right = this.evaluate(expression.childForFieldName('right') as TreeNode, symbol, members);
+        if (left === undefined || right === undefined) return undefined;
+        return binaryValue(expression.childForFieldName('operator')?.text ?? '', left, right);
+      }
+      default: {
+        return undefined;
+      }
+    }
+  }
+
+  /** The value of `E.A` or `E["A"]`, a member of this or another enum. */
+  private otherEnumMember(node: TreeNode, symbol: Sym, members: Map<string, EnumMember>): EnumValue | undefined {
+    const object = node.childForFieldName('object');
+    if (object?.type !== 'identifier') return undefined;
+    const key =
+      node.type === 'member_expression'
+        ? node.childForFieldName('property')?.text
+        : (() => {
+            const index = node.childForFieldName('index');
+            return index?.type === 'string' ? stringValue(index) : undefined;
+          })();
+    if (key === undefined) return undefined;
+    if (object.text === symbol.name) return members.get(key)?.value;
+    const other = this.c.scopeOf(object).lookupValue(object.text);
+    if (other?.valueKind !== 'enum') return undefined;
+    return this.infoOf(other)?.members.get(key)?.value;
+  }
+}
+
+function duplicateError(member: TreeNode, name: string): { node: TreeNode; message: string } {
+  return { node: member.childForFieldName('name') ?? member, message: `${name} はすでに宣言されています。` };
+}
+
+/** `typeof E`: the members as read-only properties, and the names of numeric members by their values. */
+function enumObjectType(name: string, members: Map<string, EnumMember>): ObjectType {
+  const hasNumericMember = [...members.values()].some((member) => typeof member.value !== 'string');
+  return anonymousObject(
+    () => {
+      const structure = emptyStructure();
+      for (const member of members.values()) {
+        const type = member.type.kind === 'literal' ? member.type.counterpart : member.type;
+        structure.properties.set(member.name, simpleProperty(member.name, type, { readonly: true }));
+      }
+      if (hasNumericMember) structure.numberIndex = { type: stringType, readonly: true };
+      return structure;
+    },
+    { valueName: name, nonGeneric: true }
+  );
+}
+
+/** The name of an enum member, which an identifier or a string literal gives. */
+export function memberNameOf(member: TreeNode): string | undefined {
+  const name = member.type === 'enum_assignment' ? member.childForFieldName('name') : member;
+  if (!name) return undefined;
+  return name.type === 'string' ? stringValue(name) : propertyNameText(name);
+}
+
+function enumLiteralType(value: EnumValue, enumName: string, name: string, base: () => Type): LiteralType {
+  const enumMember = { enumName, name, base };
+  const regular = { kind: 'literal', id: newTypeId(), value, fresh: false, enumMember } as LiteralType;
+  const fresh = {
+    kind: 'literal',
+    id: newTypeId(),
+    value,
+    fresh: true,
+    counterpart: regular,
+    enumMember,
+  } as LiteralType;
+  regular.counterpart = fresh;
+  return regular;
+}
+
+const arithmeticOperators = new Set(['+', '-', '*', '/', '%', '**', '|', '&', '^', '<<', '>>', '>>>']);
+
+function binaryValue(operator: string, left: EnumValue, right: EnumValue): EnumValue | undefined {
+  if (operator === '+' && (typeof left === 'string' || typeof right === 'string')) return `${left}${right}`;
+  if (typeof left !== 'number' || typeof right !== 'number' || !arithmeticOperators.has(operator)) return undefined;
+  return numberArithmetic(operator, left, right);
+}

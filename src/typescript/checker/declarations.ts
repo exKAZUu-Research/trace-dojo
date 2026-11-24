@@ -34,6 +34,10 @@ function checkValueDuplicates(c: Checker, symbol: Sym): void {
   const entries = symbol.valueEntries;
   if (entries.length < 2) return;
   const name = symbol.name;
+  if (entries.some((entry) => entry.kind === 'enum')) {
+    checkEnumMerges(c, symbol);
+    return;
+  }
   if (entries.some((entry) => blockScopedKinds.has(entry.kind))) {
     const message = namesBlockScopedConflict(c, entries)
       ? `ブロックスコープの変数 ${name} はすでに宣言されています。`
@@ -68,6 +72,13 @@ function checkValueDuplicates(c: Checker, symbol: Sym): void {
     entries.every(isFunctionScopedVariable)
   )
     checkVarRedeclarations(c, symbol);
+}
+
+/** Enums merge only with each other. */
+function checkEnumMerges(c: Checker, symbol: Sym): void {
+  if (symbol.valueEntries.every((entry) => entry.kind === 'enum')) return;
+  for (const entry of symbol.valueEntries)
+    c.error(entry.name, 'enum の宣言は、namespace かほかの enum の宣言としかマージできません。');
 }
 
 export function checkParameterRedeclarations(c: Checker, scopes: Scope[]): void {
@@ -154,6 +165,8 @@ function checkTypeDuplicates(c: Checker, symbol: Sym): void {
   const entries = symbol.typeEntries;
   if (entries.length < 2) return;
   const kinds = entries.map((entry) => entry.kind);
+  // Enums merge with each other, and conflict with other declarations as values.
+  if (kinds.includes('enum')) return;
   // Interfaces merge with each other and with a class; any other pair declares the name twice.
   const merges =
     kinds.every((kind) => kind === 'interface' || kind === 'class') &&

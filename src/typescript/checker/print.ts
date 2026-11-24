@@ -8,6 +8,7 @@ import {
   nullType,
   type ObjectType,
   type Property,
+  regularOf,
   type Signature,
   type Structure,
   trueType,
@@ -54,10 +55,14 @@ export class Printer {
         return type.name;
       }
       case 'literal': {
-        return printLiteral(type.value);
+        if (!type.enumMember) return printLiteral(type.value);
+        // The type of an enum of one member is that member's.
+        const { enumName, name, base } = type.enumMember;
+        return regularOf(base()) === regularOf(type) ? enumName : `${enumName}.${name}`;
       }
       case 'union': {
         if (type === booleanType) return 'boolean';
+        if (type.enumName) return type.enumName;
         // TypeScript lists `null` and `undefined` last, as in `string | undefined`.
         const members = [
           ...type.types.filter((member) => !isNullish(member)),
@@ -181,6 +186,7 @@ export class Printer {
 
   private printAnonymous(type: ObjectType): string {
     if (type.isClassStatic && type.classInfo) return `typeof ${type.classInfo.name}`;
+    if (type.valueName) return `typeof ${type.valueName}`;
     const structure = type.resolve();
     const signatureOnly = this.printSignatureOnly(structure);
     if (signatureOnly) return signatureOnly;

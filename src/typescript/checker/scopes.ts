@@ -3,8 +3,18 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { ExecutionBudget } from '../../interpreter/limits';
 import type { ClassInfo, Type, TypeParameter, UnionType } from './types';
 
-export type ValueKind = 'let' | 'const' | 'var' | 'parameter' | 'function' | 'class' | 'catch' | 'declared';
-export type TypeKind = 'interface' | 'alias' | 'class' | 'typeParameter';
+export type ValueKind =
+  | 'let'
+  | 'const'
+  | 'var'
+  | 'parameter'
+  | 'function'
+  | 'class'
+  | 'catch'
+  | 'declared'
+  | 'enum'
+  | 'enumMember';
+export type TypeKind = 'interface' | 'alias' | 'class' | 'typeParameter' | 'enum';
 
 let nextSymbolId = 1;
 
@@ -116,8 +126,9 @@ export class Scope {
     }
     let symbol = this.types.get(name);
     if (!symbol) {
-      // A class is a value and a type of the same name.
-      symbol = kind === 'class' ? (this.values.get(name) ?? new Sym(name, this)) : new Sym(name, this);
+      // A class or an enum is a value and a type of the same name.
+      symbol =
+        kind === 'class' || kind === 'enum' ? (this.values.get(name) ?? new Sym(name, this)) : new Sym(name, this);
       this.types.set(name, symbol);
     }
     // An interface declared before the class of its name merges into the class.

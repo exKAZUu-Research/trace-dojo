@@ -651,7 +651,7 @@ export function bitLength(value: bigint): number {
 }
 
 // code-gauge-allow duplicateLines -- Numeric operators overlap other interpreters, while each language keeps its own coercion, division, and exception rules.
-function numberArithmetic(operator: string, left: number, right: number): number {
+export function numberArithmetic(operator: string, left: number, right: number): number {
   switch (operator) {
     case '+': {
       return left + right;

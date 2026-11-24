@@ -10,6 +10,7 @@ import { ClassDeclarationChecker } from './classDeclarations';
 import { ClassChecker } from './classes';
 import { ConditionChecker } from './conditions';
 import { checkDuplicateDeclarations, checkParameterRedeclarations } from './declarations';
+import { Enums } from './enums';
 import { ExpressionChecker } from './expressions';
 import { Flow } from './flow';
 import { FunctionChecker } from './functions';
@@ -121,6 +122,7 @@ export class Checker {
   readonly typeNodes = new TypeNodes(this);
   readonly signatures = new Signatures(this);
   readonly inference = new TypeInference(this);
+  readonly enums = new Enums(this);
   private readonly referenceCache = new Map<string, ObjectType>();
   private readonly instantiationCache = new Map<string, Type>();
   /** The unions that stand for a union alias, with the mapper that instantiates the alias's type into them. */

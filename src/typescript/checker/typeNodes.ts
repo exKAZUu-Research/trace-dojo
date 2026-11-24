@@ -634,6 +634,13 @@ export class TypeNodes {
     while (root.childForFieldName('module') ?? root.childForFieldName('object'))
       root = (root.childForFieldName('module') ?? root.childForFieldName('object')) as TreeNode;
     const symbol = this.c.scopeOf(root).lookupType(root.text) ?? this.c.scopeOf(root).lookupValue(root.text);
+    const memberName = node.childForFieldName('name')?.text;
+    if (symbol?.valueKind === 'enum' && root.id === node.childForFieldName('module')?.id && memberName !== undefined) {
+      const member = this.c.enums.memberTypeNamed(symbol, memberName);
+      if (member) return member;
+      this.c.error(node, `名前空間 '${root.text}' には、エクスポートされたメンバー '${memberName}' がありません。`);
+      return errorType;
+    }
     this.c.error(
       node,
       symbol?.unsupported ? unsupportedMessage(symbol.unsupported) : `名前空間 ${root.text} が見つかりません。`
@@ -935,6 +942,10 @@ export class TypeNodes {
       }
       case 'class': {
         symbol.declaredType = this.c.classes.classInfoOf(symbol).instanceType;
+        break;
+      }
+      case 'enum': {
+        symbol.declaredType = this.c.enums.declaredType(symbol);
         break;
       }
       case 'alias': {

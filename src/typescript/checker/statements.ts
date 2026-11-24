@@ -92,6 +92,7 @@ export class StatementChecker {
     ['abstract_class_declaration', (node) => this.c.classDeclarations.checkClass(node)],
     ['interface_declaration', (node) => this.interfaceDeclaration(node)],
     ['type_alias_declaration', (node) => this.typeAliasDeclaration(node)],
+    ['enum_declaration', (node) => this.c.enums.checkDeclaration(node)],
   ]);
 
   constructor(private readonly c: Checker) {}

@@ -446,6 +446,7 @@ export class ExpressionChecker {
     if (!symbol) return this.implicitArgumentsType(node) ?? this.reportUnknownValue(node, name);
     if (this.reportUnavailableValue(node, symbol)) return errorType;
     this.checkUsedBeforeDeclaration(node, symbol);
+    if (symbol.valueKind === 'enum') this.c.enums.checkConstEnumUse(node, symbol);
     return this.variableReferenceType(node, symbol, contextual);
   }
 
@@ -744,6 +745,9 @@ export class ExpressionChecker {
     if (symbol.valueKind === 'class') {
       return (symbol.valueType = this.c.classes.valueTypeOf(this.c.classes.classInfoOf(symbol)));
     }
+    if (symbol.valueKind === 'enum') return (symbol.valueType = this.c.enums.objectType(symbol));
+    if (symbol.valueKind === 'enumMember' && symbol.valueDeclaration)
+      return this.c.enums.memberType(symbol.valueDeclaration);
     const parameterType = this.c.functions.parameterTypes.get(symbol.id);
     if (parameterType) return parameterType;
     const variableType = this.variableTypes.get(symbol.id);

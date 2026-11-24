@@ -36,6 +36,7 @@ import {
   isAnyLike,
   isIntrinsic,
   isPrimitive,
+  type LiteralType,
   literalType,
   nonPrimitiveType,
   nullType,
@@ -480,7 +481,7 @@ export class Relations {
         return this.intrinsicTarget(s, t.name, relation);
       }
       case 'literal': {
-        if (s.kind === 'literal') return s.value === t.value;
+        if (s.kind === 'literal') return literalRelated(s, t, relation);
         return relation === 'comparable' && s.kind === 'intrinsic' && s.name === typeof t.value;
       }
       case 'templateLiteral':
@@ -1405,4 +1406,16 @@ function tupleIdentity(tuple: TupleInfo): string {
     return element.optional ? '?' : '!';
   });
   return `tuple:${tuple.readonly}:${shape.join('')}`;
+}
+
+/**
+ * Whether a literal type is related to another of the same value, where an enum member's type is related only from its
+ * own and from a numeric literal's, except when comparing.
+ */
+function literalRelated(s: LiteralType, t: LiteralType, relation: Relation): boolean {
+  if (s.value !== t.value) return false;
+  if (relation === 'comparable' || !t.enumMember) return true;
+  return s.enumMember
+    ? s.enumMember.enumName === t.enumMember.enumName && s.enumMember.name === t.enumMember.name
+    : typeof s.value === 'number';
 }

@@ -62,6 +62,8 @@ export interface LiteralType {
   fresh: boolean;
   /** The other of the fresh and regular types of the same value. */
   counterpart: LiteralType;
+  /** For an enum member's type, the enum and the member, and the enum's type, to which the member's type widens. */
+  enumMember?: { enumName: string; name: string; base: () => Type };
 }
 
 export interface UnionType {
@@ -73,6 +75,8 @@ export interface UnionType {
    * the type arguments the alias's type parameters get.
    */
   aliasMapper?: Map<number, Type>;
+  /** For an enum's type, the union of its members' types, the enum's name. */
+  enumName?: string;
 }
 
 export interface IntersectionType {
@@ -193,6 +197,8 @@ export interface ObjectType {
   isUnionSpread?: boolean;
   hasSpread?: boolean;
   /** The alias the type was written with, for printing. */
+  /** For the type of a value other than a class, such as an enum object, the name `typeof` prints it with. */
+  valueName?: string;
   aliasName?: string;
   aliasArguments?: Type[];
   aliasId?: number;
@@ -388,6 +394,7 @@ const literalPrimitives: Record<LiteralKind, Type> = {
 
 /** The primitive type of a literal's value. */
 export function primitiveOfLiteral(type: LiteralType): Type {
+  if (type.enumMember) return type.enumMember.base();
   return literalPrimitives[typeof type.value as LiteralKind];
 }
 

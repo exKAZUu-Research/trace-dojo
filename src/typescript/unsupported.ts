@@ -4,7 +4,6 @@ import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics'
 
 /** Syntax this interpreter does not run yet, by node type, named as learners know it. */
 const unsupportedNodes: Record<string, string> = {
-  enum_declaration: 'enum',
   ambient_declaration: 'declare による宣言',
   internal_module: 'namespace',
   module: 'module による宣言',

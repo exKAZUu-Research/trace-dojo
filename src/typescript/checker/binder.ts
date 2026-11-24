@@ -1,6 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
+import { memberNameOf } from './enums';
 import { Scope, type Sym, type ValueKind } from './scopes';
 import { assignmentKind, named, patternIdentifiers } from './syntax';
 
@@ -65,6 +66,7 @@ export class Binder {
     ['interface_declaration', (node, scope) => this.bindTypeDeclaration(node, scope, 'interface')],
     ['type_alias_declaration', (node, scope) => this.bindTypeDeclaration(node, scope, 'alias')],
     ['ambient_declaration', (node, scope) => this.bindAmbient(node, scope)],
+    ['enum_declaration', (node, scope) => this.bindEnum(node, scope)],
     ['assignment_expression', (node, scope) => this.bindAssignment(node, scope, 'left')],
     ['augmented_assignment_expression', (node, scope) => this.bindAssignment(node, scope, 'left')],
     ['update_expression', (node, scope) => this.bindAssignment(node, scope, 'argument')],
@@ -190,6 +192,24 @@ export class Binder {
     const name = node.childForFieldName('name');
     if (name) scope.declareType(name.text, kind, node, name);
     this.bindTypeParameterOwner(node, scope);
+  }
+
+  /** An enum is a value and a type; its initializers see its members by name. */
+  private bindEnum(node: TreeNode, scope: Scope): void {
+    const name = node.childForFieldName('name');
+    if (name) {
+      scope.declareValue(name.text, 'enum', node, name);
+      scope.declareType(name.text, 'enum', node, name);
+    }
+    const body = node.childForFieldName('body');
+    if (!body) return;
+    const membersScope = this.newScope(body, 'block', scope);
+    for (const member of named(body)) {
+      const memberName = memberNameOf(member);
+      if (memberName !== undefined)
+        membersScope.declareValue(memberName, 'enumMember', member, member.childForFieldName('name') ?? member);
+    }
+    this.bindChildren(body, membersScope);
   }
 
   private bindAssignment(node: TreeNode, scope: Scope, field: 'left' | 'argument'): void {

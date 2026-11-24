@@ -116,8 +116,11 @@ function view(node: TreeNode, binder: Binder): ViewNode {
       return inner ? view(inner, binder) : generic(node, node.type, binder);
     }
     case 'identifier': {
+      const symbol = binder.lookupValue(node, nameOf(node));
+      // An enum's initializers refer to its members by name, which compiles to reading them from the enum object.
+      if (symbol?.valueKind === 'enumMember') return enumMemberReference(node, symbol.valueDeclaration as TreeNode);
       // esbuild only lowers the unbound global to void 0; local bindings retain their values and assignment targets.
-      return nameOf(node) === 'undefined' && !binder.lookupValue(node, 'undefined')
+      return nameOf(node) === 'undefined' && !symbol
         ? leaf(node, 'undefined', '(void 0)')
         : generic(node, node.type, binder);
     }
@@ -182,6 +185,22 @@ function assemble(node: TreeNode, type: string, parts: Part[], text = node.text)
 
 function leaf(node: TreeNode, type: string, text = node.text, isNamed = true): ViewNode {
   return new ViewNode(type, text, isNamed, node, [], new Map());
+}
+
+/** `E.A` for a member `A` of the enum `E`, which the identifier `A` in an initializer of `E` stands for. */
+function enumMemberReference(node: TreeNode, member: TreeNode): ViewNode {
+  const enumName = member.parent?.parent?.childForFieldName('name')?.text ?? '';
+  const memberName = nameOf(node);
+  return assemble(
+    node,
+    'member_expression',
+    [
+      { node: leaf(node, 'identifier', enumName), fieldName: 'object' },
+      { node: leaf(node, '.', '.', false), fieldName: undefined },
+      { node: leaf(node, 'property_identifier', memberName), fieldName: 'property' },
+    ],
+    `${enumName}.${memberName}`
+  );
 }
 
 function isThisParameter(node: TreeNode): boolean {
