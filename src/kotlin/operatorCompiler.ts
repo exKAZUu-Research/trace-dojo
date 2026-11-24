@@ -11,6 +11,7 @@ import {
   excludingCases,
   Flow,
   type FunctionContext,
+  Handoff,
   isBareCallExpression,
   nonNullFacts,
   reprOf,
@@ -158,7 +159,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const place = this.compilePlace(scope, context, target, row, true);
     const readType = place.readType ?? place.type;
     const kind = this.primitiveOf(readType);
-    if (!kind) this.error(row, `${typeToString(resolved(readType))} には ${delta === 1 ? '++' : '--'} を使えません。`);
+    if (!kind) return this.compileIncrementOperator(scope, context, place, readType, delta, isPrefix, row);
     const type = this.primitiveType(kind);
     place.recordAssignment?.(type);
     const toPlace = (value: number | bigint): Value => (place.repr === 'ref' ? box(kind, value) : value);
@@ -171,6 +172,37 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
           const next = step(kind, old, delta);
           bound.set(toPlace(next));
           return isPrefix ? next : old;
+        }),
+    };
+  }
+
+  /** `++` and `--` of a value that is not a number, which call its `operator fun inc()` and `dec()`. */
+  // code-gauge-allow functionParameterCount -- the place, its type, and the parts of the operator are each needed.
+  private compileIncrementOperator(
+    scope: Scope,
+    context: FunctionContext,
+    place: Place,
+    readType: KType,
+    delta: 1 | -1,
+    isPrefix: boolean,
+    row: number
+  ): Compiled {
+    const shown = delta === 1 ? '++' : '--';
+    const current = new Handoff<Value>();
+    const receiver: Compiled = { type: readType, repr: place.repr, eval: () => current.get() };
+    const call = this.compileOperatorCall(scope, context, receiver, delta === 1 ? 'inc' : 'dec', [], row, shown);
+    if (!isSubtype(call.type, readType)) this.error(row, typeMismatchMessage(readType, call.type));
+    place.recordAssignment?.(call.type);
+    const next = convertRepr(call.eval, call.repr, place.repr);
+    return {
+      type: isPrefix ? call.type : readType,
+      repr: place.repr,
+      eval: (frame) =>
+        place.withBound(frame, (bound) => {
+          const old = bound.get();
+          const value = current.run(frame, old, () => next(frame));
+          bound.set(value);
+          return isPrefix ? value : old;
         }),
     };
   }

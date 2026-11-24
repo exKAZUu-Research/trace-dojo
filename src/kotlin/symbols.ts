@@ -49,6 +49,8 @@ export class ClassSymbol {
   readonly constructors: FunctionSymbol[] = [];
   readonly nested = new Map<string, ClassSymbol>();
   readonly typeAliases = new Map<string, TypeAliasSymbol>();
+  /** For an enum class, the classes of its entries that have bodies, as `PLUS { ... }`, by the entries' names. */
+  readonly enumEntryClasses = new Map<string, ClassSymbol>();
   companion: ClassSymbol | undefined;
   enumEntries: EnumEntrySymbol[] = [];
   /** The subclasses of a sealed class, which `when` must cover to be exhaustive. */
@@ -68,6 +70,10 @@ export class ClassSymbol {
   isAnonymous = false;
   /** Whether the class is an `annotation class`. */
   isAnnotation = false;
+  /** Whether the class is `inner`, whose instances hold an instance of the class around it. */
+  isInner = false;
+  /** For an inner class, the slot of the field that holds the instance of the class around it. */
+  outerSlot: number | undefined;
   /** For an annotation class, the annotations written on it, whose `@Target` and `@Repeatable` say where it applies. */
   ownAnnotations: readonly { name: string; args?: readonly { value: unknown }[] }[] = [];
   visibility: Visibility = 'public';

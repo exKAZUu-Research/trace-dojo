@@ -6,6 +6,7 @@ import type {
   ClassDecl,
   ClassParameterDecl,
   Declaration,
+  EnumEntryDecl,
   Expression,
   FunctionDecl,
   Import,
@@ -14,6 +15,7 @@ import type {
   Modifiers,
   ParameterDecl,
   PropertyDecl,
+  SecondaryConstructorDecl,
   SuperSpec,
   TypeAliasDecl,
   TypeParameterDecl,
@@ -78,6 +80,8 @@ export interface ClassEntry {
   constructorSymbol: FunctionSymbol | undefined;
   /** Parameters of the primary constructor that declare properties, with those properties. */
   parameterProperties: { param: ClassParameterDecl; symbol: PropertySymbol; index: number }[];
+  /** The constructors written as `constructor(...)` in the body. */
+  secondaryConstructors: { decl: SecondaryConstructorDecl; symbol: FunctionSymbol }[];
 }
 
 export interface FunctionEntry {
@@ -108,6 +112,29 @@ export interface PropertyEntry {
 }
 
 const VISIBILITY_RANK: Record<Visibility, number> = { private: 0, protected: 1, internal: 2, public: 2 };
+
+/** The class of an enum entry's body, which extends the enum class with the members of the body. */
+function enumEntryClassDecl(decl: ClassDecl, enumEntry: EnumEntryDecl): ClassDecl {
+  const { row } = enumEntry;
+  return {
+    kind: 'class',
+    row,
+    isLocal: false,
+    headerEndRow: row,
+    endRow: row,
+    classKind: 'class',
+    name: enumEntry.name,
+    isFunInterface: false,
+    modifiers: { keywords: new Set(), annotations: [] },
+    typeParameters: [],
+    primaryConstructor: undefined,
+    supers: [
+      { kind: 'type', row, type: { kind: 'named', row, parts: [{ name: decl.name, args: [] }], nullable: false } },
+    ],
+    members: enumEntry.members ?? [],
+    enumEntries: [],
+  };
+}
 
 /** The modifiers a function's parameter may have. */
 const PARAMETER_MODIFIERS = new Set(['vararg', 'noinline', 'crossinline']);
@@ -156,8 +183,13 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   // code-gauge-allow functionNcss -- One flag per modifier of a class.
   // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  private declareClass(decl: ClassDecl, file: FileContext, outer: ClassEntry | undefined): ClassEntry {
-    const kind: ClassSymbolKind = decl.classKind === 'enum' ? 'enum' : decl.classKind;
+  private declareClass(
+    decl: ClassDecl,
+    file: FileContext,
+    outer: ClassEntry | undefined,
+    kindOverride?: ClassSymbolKind
+  ): ClassEntry {
+    const kind: ClassSymbolKind = kindOverride ?? (decl.classKind === 'enum' ? 'enum' : decl.classKind);
     const prefix = outer ? `${outer.symbol.qualifiedName}$` : file.packageName ? `${file.packageName}.` : '';
     const kotlinPrefix = outer ? `${outer.symbol.kotlinName}.` : file.packageName ? `${file.packageName}.` : '';
     const symbol = new ClassSymbol(kind, decl.name, `${prefix}${decl.name}`, outer?.symbol);
@@ -171,6 +203,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.isValue = keywords.has('value');
     symbol.isFunInterface = decl.isFunInterface;
     symbol.isAnnotation = keywords.has('annotation');
+    symbol.isInner = keywords.has('inner');
+    if (symbol.isInner && (!outer || outer.symbol.isInterface || outer.symbol.isObject || decl.classKind !== 'class'))
+      this.error(decl.row, 'inner は、クラスの中のクラスにだけ付けられます。');
     if (symbol.isAnnotation) symbol.ownAnnotations = decl.modifiers.annotations;
     symbol.isNative = file.isLibrary && keywords.has('external');
     symbol.visibility = visibilityOf(decl.modifiers);
@@ -189,6 +224,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       delegateFields: [],
       constructorSymbol: undefined,
       parameterProperties: [],
+      secondaryConstructors: [],
     };
     this.classEntries.push(entry);
     this.entryOfClass.set(symbol, entry);
@@ -207,6 +243,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       const nested = this.declareClass(member, file, entry);
       symbol.nested.set(member.name, nested.symbol);
       if (member.classKind === 'companion') symbol.companion = nested.symbol;
+    }
+    for (const enumEntry of decl.enumEntries) {
+      if (!enumEntry.members) continue;
+      const entryClass = this.declareClass(enumEntryClassDecl(decl, enumEntry), file, entry, 'enumEntry');
+      symbol.enumEntryClasses.set(enumEntry.name, entryClass.symbol);
     }
     return entry;
   }
@@ -503,13 +544,14 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (spec.kind === 'delegated') this.error(spec.row, '委譲（by）できるのはインターフェースだけです。');
     if (symbol.superclass) this.error(spec.row, '親のクラスは1つだけ書けます。');
     if (symbol.isInterface) this.error(spec.row, 'インターフェースの親にはインターフェースだけを書けます。');
-    this.checkInheritable(parent, spec.row);
+    if (symbol.kind !== 'enumEntry') this.checkInheritable(parent, spec.row);
     if (
+      symbol.kind !== 'enumEntry' &&
       spec.kind === 'type' &&
       !symbol.isInterface &&
       // A class of the program has its primary constructor, which phase 2 declares only after the supertypes.
       (parent.constructors.length > 0 || !parent.isLibrary) &&
-      !this.hasSecondaryConstructors(decl)
+      (decl.primaryConstructor !== undefined || !this.hasSecondaryConstructors(decl))
     ) {
       this.error(spec.row, `${parent.name} の後に、コンストラクタを呼ぶ () を書いてください。`);
     }
@@ -590,7 +632,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     // An external class of the library has only the constructors it declares: the natives make the others' instances,
     // as `EmptyList`'s, which a program cannot create.
     const isExternal = entry.file.isLibrary && decl.modifiers.keywords.has('external');
-    if (!(entry.file.isLibrary && primary === undefined && (this.hasSecondaryConstructors(decl) || isExternal))) {
+    if (!(primary === undefined && (this.hasSecondaryConstructors(decl) || (entry.file.isLibrary && isExternal)))) {
       symbol.constructors.push(constructorSymbol);
     }
     entry.constructorSymbol = constructorSymbol;
@@ -653,16 +695,46 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         break;
       }
       case 'constructor': {
-        if (!entry.file.isLibrary || !member.modifiers.keywords.has('external')) {
-          this.unavailable(member.row, '2つ目以降のコンストラクタ（constructor(...)）');
-        }
-        this.declareNativeConstructor(entry, member);
+        if (entry.file.isLibrary && member.modifiers.keywords.has('external'))
+          this.declareNativeConstructor(entry, member);
+        else this.declareSecondaryConstructor(entry, member);
         break;
       }
       default: {
         break;
       }
     }
+  }
+
+  /** A constructor written as `constructor(...)`, which delegates to another constructor before its body runs. */
+  private declareSecondaryConstructor(entry: ClassEntry, member: SecondaryConstructorDecl): void {
+    const { symbol: cls } = entry;
+    if (cls.isInterface || cls.isObject) this.error(member.row, `${cls.name} にはコンストラクタを書けません。`);
+    if (cls.isAnnotation) this.error(member.row, 'アノテーションクラスにはコンストラクタを書けません。');
+    this.validateAnnotations(entry.scope, member.modifiers, annotationSite(['CONSTRUCTOR']));
+    const ctor = new FunctionSymbol(cls.name);
+    ctor.isConstructor = true;
+    ctor.owner = cls;
+    ctor.row = member.row;
+    ctor.isLibrary = entry.file.isLibrary;
+    ctor.returnType = this.core.unit.type;
+    ctor.isAtomic = !entry.file.isLibrary && this.claimAtomicRange(member.row, member.headerEndRow);
+    ctor.visibility =
+      cls.kind === 'enum'
+        ? 'private'
+        : cls.isSealed && !member.modifiers.keywords.has('private')
+          ? 'protected'
+          : visibilityOf(member.modifiers);
+    const scope = new Scope(entry.scope, undefined);
+    ctor.params = member.params.map((param) => this.declareParameter(scope, param));
+    this.rejectDuplicateNames(member.params);
+    this.checkDuplicateFunction(cls.constructors, ctor, member.row);
+    if (!member.delegation && entry.decl.primaryConstructor)
+      this.error(member.row, '主コンストラクタがあるクラスでは、: this(...) で主コンストラクタに委譲してください。');
+    if (member.delegation?.kind === 'super' && entry.decl.primaryConstructor)
+      this.error(member.row, '主コンストラクタがあるクラスでは、: this(...) で委譲してください。');
+    cls.constructors.push(ctor);
+    entry.secondaryConstructors.push({ decl: member, symbol: ctor });
   }
 
   /** A constructor of a library class that a native implements, which initializes the instance `invoke` creates. */
@@ -756,7 +828,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.isOverride = keywords.has('override');
     symbol.isOpen = keywords.has('open') || (symbol.isOverride && !keywords.has('final'));
     if (owner?.isInterface && !keywords.has('private')) symbol.isOpen = true;
-    if (symbol.isAbstract && owner && !owner.isAbstract) {
+    if (symbol.isAbstract && owner && !owner.isAbstract && owner.kind !== 'enum') {
       this.error(symbol.row, `abstract なメンバー ${symbol.name} は、abstract なクラスにだけ書けます。`);
     }
     const memberOnly = ['open', 'abstract', 'override', 'protected'].find((keyword) => keywords.has(keyword));
@@ -1211,6 +1283,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   protected layOutFields(entry: ClassEntry): void {
     const { symbol } = entry;
     let count = symbol.superclass?.cls.fieldCount ?? 0;
+    if (symbol.isInner) symbol.outerSlot = count++;
     for (const field of entry.delegateFields) field.slot = count++;
     for (const { symbol: property } of entry.parameterProperties) {
       property.slot = count++;
@@ -1359,6 +1432,16 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     for (const [root, implementation] of symbol.vtable) {
       if (!implementation.isAbstract) continue;
       const kind = root.kind === 'function' ? '関数' : 'プロパティ';
+      // An enum class leaves its abstract members to its entries, each of which must implement them in its body.
+      if (symbol.kind === 'enum') {
+        const plain = symbol.enumEntries.find(({ name }) => !symbol.enumEntryClasses.has(name));
+        if (plain)
+          this.error(
+            symbol.row,
+            `列挙型の定数 ${plain.name} には、${kind} ${root.name} を実装する本体を書いてください。`
+          );
+        continue;
+      }
       this.error(
         symbol.row,
         `クラス ${symbol.name} は abstract ではないので、${kind} ${root.name} を実装してください。`

@@ -593,6 +593,13 @@ export abstract class CompilerCore {
 
   /** Reads an implicit receiver, which a lambda inside the function that has it captures. */
   protected receiverAccess(context: FunctionContext, receiver: ReceiverSymbol): Eval {
+    const path = receiver.outerPath;
+    if (receiver.context === context && path)
+      return (frame) => {
+        let value = frame.thisValue;
+        for (const inner of path) value = (value as KObject).fields[inner.outerSlot as number];
+        return value;
+      };
     if (receiver.context === context) return (frame) => frame.thisValue;
     const index = context.captureIndex(receiver);
     return (frame) => frame.captured[index] as Value;

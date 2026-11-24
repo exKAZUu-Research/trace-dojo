@@ -110,7 +110,12 @@ export class ReceiverSymbol {
     /** The class whose `this` the receiver is, for a class's members. */
     readonly cls: ClassSymbol | undefined,
     /** The name `this@name` refers to it by: its class's, or its extension function's. */
-    readonly label?: string
+    readonly label?: string,
+    /**
+     * For the instance of a class around an inner class, the inner classes whose outer instances lead to it from the
+     * context's `this`, innermost first.
+     */
+    readonly outerPath?: readonly ClassSymbol[]
   ) {}
 }
 

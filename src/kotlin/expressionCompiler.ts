@@ -105,6 +105,8 @@ export interface Place {
   recordAssignment?: (type: KType) => void;
 }
 
+type SuperExpression = Extract<Expression, { kind: 'super' }>;
+
 export abstract class ExpressionCompiler extends CallCompiler {
   protected compileDelegateExpression(
     scope: Scope,
@@ -779,7 +781,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (qualified) return consume(this.compilePackageMember(context, qualified, name, row));
     if (expression.receiver.kind === 'super') {
       if (expression.isSafe) this.error(row, 'super には ?. を使えません。');
-      return consume(this.compileSuperProperty(scope, context, name, row));
+      return consume(this.compileSuperProperty(scope, context, name, row, expression.receiver));
     }
     const receiver = this.compileExpression(scope, context, expression.receiver);
     return this.withSafeReceiver(receiver, isSafe, row, (target) => {
@@ -1025,8 +1027,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
   }
 
-  private compileSuperProperty(scope: Scope, context: FunctionContext, name: string, row: number): Compiled {
-    const { property, receiver } = this.resolveSuperProperty(scope, context, name, row);
+  private compileSuperProperty(
+    scope: Scope,
+    context: FunctionContext,
+    name: string,
+    row: number,
+    qualifier: SuperExpression
+  ): Compiled {
+    const { property, receiver } = this.resolveSuperProperty(scope, context, name, row, qualifier);
     const { symbol } = property;
     return {
       type: resolved(substitute(this.ensurePropertyType(symbol, row), property.substitution)),
@@ -1039,14 +1047,15 @@ export abstract class ExpressionCompiler extends CallCompiler {
     scope: Scope,
     context: FunctionContext,
     name: string,
-    row: number
+    row: number,
+    qualifier: SuperExpression
   ): {
     property: MemberRef<PropertySymbol> & { isSuper: true };
     receiver: Compiled;
   } {
-    const { cls, receiver } = this.superOf(scope, context, row);
+    const { cls, receiver, supertypes } = this.superOf(scope, context, row, qualifier);
     const mostSpecific = mostSpecificProperties(
-      cls.supertypes.flatMap((supertype) => this.membersOf<PropertySymbol>(supertype, name, 'property'))
+      supertypes.flatMap((supertype) => this.membersOf<PropertySymbol>(supertype, name, 'property'))
     );
     if (mostSpecific.length > 1) this.error(row, `super の ${name} が、どの親のプロパティか決められません。`);
     const property = mostSpecific[0];
@@ -1058,13 +1067,31 @@ export abstract class ExpressionCompiler extends CallCompiler {
     };
   }
 
-  protected superOf(scope: Scope, context: FunctionContext, row: number): { receiver: Eval; cls: ClassSymbol } {
-    const receiver = this.receiversOf(scope).find((candidate) => candidate.cls !== undefined);
-    if (!receiver?.cls) this.error(row, 'ここでは super を使えません。');
-    return {
-      receiver: this.receiverAccess(context, receiver),
-      cls: receiver.cls,
-    };
+  /**
+   * The instance `super` stands for and the supertypes it looks members up in: of the nearest class, or of the class
+   * `super@Outer` names, and all its supertypes, or the one `super<Base>` names.
+   */
+  protected superOf(
+    scope: Scope,
+    context: FunctionContext,
+    row: number,
+    qualifier?: SuperExpression
+  ): { receiver: Eval; cls: ClassSymbol; supertypes: ClassType[] } {
+    const label = qualifier?.label;
+    const receiver = this.receiversOf(scope).find(
+      (candidate) => candidate.cls !== undefined && (label === undefined || candidate.label === label)
+    );
+    if (!receiver?.cls)
+      this.error(row, label === undefined ? 'ここでは super を使えません。' : `super@${label} が見つかりません。`);
+    const { cls } = receiver;
+    let supertypes = cls.supertypes.length > 0 ? cls.supertypes : [anyType()];
+    if (qualifier?.type) {
+      const named = resolved(this.resolveType(scope, qualifier.type, true));
+      const direct = named.kind === 'class' ? supertypes.find((supertype) => supertype.cls === named.cls) : undefined;
+      if (!direct) this.error(row, `${typeToString(named)} は ${cls.name} の直接の親ではありません。`);
+      supertypes = [direct];
+    }
+    return { receiver: this.receiverAccess(context, receiver), cls, supertypes };
   }
 
   // Calls.
@@ -1122,7 +1149,17 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
     if (callee.kind === 'member') {
       if (callee.receiver.kind === 'super') {
-        return this.compileSuperCall(scope, context, callee.name, args, hasTrailingLambda, typeArgs, expected, row);
+        return this.compileSuperCall(
+          scope,
+          context,
+          callee.receiver,
+          callee.name,
+          args,
+          hasTrailingLambda,
+          typeArgs,
+          expected,
+          row
+        );
       }
       const qualified = this.compileQualifier(scope, callee.receiver);
       if (qualified)
@@ -1180,6 +1217,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (cls) this.checkNestedAccessible(scope, cls, row);
     const sam = cls && this.samConstructorCall(scope, context, cls, args, typeArgs, expected);
     if (sam) return sam;
+    if (cls?.isInner) {
+      const outer = this.outerInstance(scope, context, cls, row);
+      const levels: CallLevel[] = [
+        ...receiverLevels,
+        { candidates: this.constructorCandidates(cls, row), receiver: outer },
+      ];
+      return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name);
+    }
     const localFunctions = this.localFunctions(scope, name).filter((symbol) => !symbol.extensionReceiver);
     const localLevels: CallLevel[] =
       localFunctions.length > 0
@@ -1221,6 +1266,28 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (typeArgs.length !== alias.typeParameters.length) return typeArgs;
     const substitution = new Map(alias.typeParameters.map((param, index) => [param, typeArgs[index]]));
     return expansion.args.map((argument) => substitute((argument as { type: KType }).type, substitution));
+  }
+
+  /** The instance of the class around an inner class that an implicit receiver gives its constructor. */
+  private outerInstance(scope: Scope, context: FunctionContext, cls: ClassSymbol, row: number): Compiled {
+    const outerClass = cls.outer as ClassSymbol;
+    for (const receiver of this.receiversOf(scope)) {
+      const type = resolved(this.receiverTypeOf(receiver));
+      if (type.kind !== 'class' || !type.cls.isSubclassOf(outerClass)) continue;
+      return { type, repr: 'ref', eval: this.receiverAccess(context, receiver), thisOf: receiver };
+    }
+    return this.error(row, `内部クラス ${cls.name} は、${outerClass.name} のインスタンスから作ってください。`);
+  }
+
+  /** An inner class that a receiver's class declares, which `receiver.Inner()` constructs. */
+  private innerClassOf(type: KType, name: string): ClassSymbol | undefined {
+    const actual = resolved(type);
+    if (actual.kind !== 'class') return undefined;
+    for (let cls: ClassSymbol | undefined = actual.cls; cls; cls = cls.superclass?.cls) {
+      const nested = cls.nested.get(name);
+      if (nested?.isInner) return nested;
+    }
+    return undefined;
   }
 
   /** The package levels with a class's constructors at the class's own level, if it can be constructed here. */
@@ -1485,6 +1552,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
     expected: KType | undefined,
     row: number
   ): Compiled {
+    const inner = this.innerClassOf(receiver.type, name);
+    if (inner) {
+      this.requireNonNullReceiver(receiver, row, false);
+      const levels: CallLevel[] = [{ candidates: this.constructorCandidates(inner, row), receiver }];
+      return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name);
+    }
     const levels = this.memberCallLevels(scope, receiver, name, row, true);
     if (levels.length === 0)
       return this.compileFunctionValueCall(scope, context, receiver, name, args, hasTrailingLambda, row);
@@ -1722,6 +1795,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   private compileSuperCall(
     scope: Scope,
     context: FunctionContext,
+    qualifier: SuperExpression,
     name: string,
     args: ArgumentSyntax[],
     hasTrailingLambda: boolean,
@@ -1729,8 +1803,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     expected: KType | undefined,
     row: number
   ): Compiled {
-    const { cls, receiver } = this.superOf(scope, context, row);
-    const supertypes = cls.supertypes.length > 0 ? cls.supertypes : [anyType()];
+    const { receiver, supertypes } = this.superOf(scope, context, row, qualifier);
     const candidates = supertypes
       .flatMap((type) => this.memberCandidates(type, name))
       .filter((candidate) => !candidate.symbol.isAbstract)

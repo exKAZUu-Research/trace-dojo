@@ -577,7 +577,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   ): Place {
     if (target.receiver.kind === 'super') {
       if (target.isSafe) this.error(row, 'super には ?. を使えません。');
-      const { property, receiver } = this.resolveSuperProperty(scope, context, target.name, row);
+      const { property, receiver } = this.resolveSuperProperty(scope, context, target.name, row, target.receiver);
       return this.propertyPlace(property, receiver, row, scope);
     }
     const qualified = this.compileQualifier(scope, target.receiver);

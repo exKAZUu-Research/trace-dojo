@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss -- the compiler of one area of Kotlin, whose parts call each other closely.
-import type { Expression, ParameterDecl, PropertyDecl } from './ast';
+import type { Expression, ParameterDecl, PropertyDecl, SecondaryConstructorDecl } from './ast';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
   type Compiled,
@@ -133,7 +133,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       if (symbol.isTailrec && decl.body)
         context.tailrec = { symbol, calls: tailCallsOf(decl.body, isNonNullClass(symbol.returnType, this.core.unit)) };
       context.info.isAtomic = symbol.isAtomic;
-      const scope = new Scope(entry.scope, context);
+      const scope = new Scope(this.withOuterReceivers(entry.scope, entry.cls?.symbol, context), context);
       const thisType = this.addReceivers(scope, context, entry.cls, symbol.extensionReceiver, symbol.name);
       // An object's members show its properties as `Name.x`, as Java's static members do, rather than as `this.x`.
       context.info.showsThis =
@@ -197,6 +197,25 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const type = resolved(compiled.type);
     if (compiled.integerLiteral) return this.primitiveType(this.primitiveOf(type) ?? 'Int');
     return type;
+  }
+
+  /**
+   * The scope that sees the instances of the classes around an inner class as implicit receivers, nearest first, as
+   * `this@Outer` names them, after the inner class's own instance.
+   */
+  protected withOuterReceivers(base: Scope, cls: ClassSymbol | undefined, context: FunctionContext): Scope {
+    const outers: { cls: ClassSymbol; path: ClassSymbol[] }[] = [];
+    let path: ClassSymbol[] = [];
+    for (let current = cls; current?.isInner && current.outer; current = current.outer) {
+      path = [...path, current];
+      outers.push({ cls: current.outer, path });
+    }
+    let scope = base;
+    for (const outer of outers.toReversed()) {
+      scope = new Scope(scope, context);
+      scope.receiver = new ReceiverSymbol(this.thisTypeOf(outer.cls), context, outer.cls, outer.cls.name, outer.path);
+    }
+    return scope;
   }
 
   /** Adds the implicit receivers of a member or extension: the class's instance, and an extension's receiver. */
@@ -346,7 +365,10 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   ): Scope {
     let scope = this.initializerScopes.get(context);
     if (scope) return scope;
-    scope = new Scope(entry.cls ? entry.cls.scope : entry.scope, context);
+    scope = new Scope(
+      entry.cls ? this.withOuterReceivers(entry.cls.scope, entry.cls.symbol, context) : entry.scope,
+      context
+    );
     if (entry.cls) {
       scope.receiver = new ReceiverSymbol(
         this.thisTypeOf(entry.cls.symbol),
@@ -438,7 +460,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     );
     Object.defineProperty(context, 'returnTarget', { value: context });
     context.info.showsThis = entry.cls !== undefined && !entry.cls.symbol.isObject && !entry.file.isLibrary;
-    const scope = new Scope(entry.scope, context);
+    const scope = new Scope(this.withOuterReceivers(entry.scope, entry.cls?.symbol, context), context);
     this.addReceivers(scope, context, entry.cls, entry.symbol.extensionReceiver);
     if (this.canHaveBackingField(entry.decl, entry.symbol)) {
       const field = new VariableSymbol(
@@ -600,9 +622,18 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     this.flow = new Flow();
     for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
     const headerScope = this.constructorHeaderScopes.get(scope) ?? scope;
-    const { defaults, superCall, fieldSteps } = this.compileConstructorHeader(entry, scope, headerScope, context);
+    // Without a primary constructor, each `constructor(...)` calls the superclass's own constructor.
+    const delegatesToSecondaries = !entry.decl.primaryConstructor && entry.secondaryConstructors.length > 0;
+    const { defaults, superCall, fieldSteps } = this.compileConstructorHeader(
+      entry,
+      scope,
+      headerScope,
+      context,
+      delegatesToSecondaries
+    );
     const steps = [...fieldSteps, ...this.compileMemberSteps(entry, scope, context)];
-    this.checkValsInitialized(entry);
+    const initializedFlow = this.flow.copy();
+    if (!delegatesToSecondaries) this.checkValsInitialized(entry);
     if (symbol.kind === 'enum') this.compileEnumArguments(entry);
     const info = { ...context.info, isAtomic: entry.constructorSymbol?.isAtomic ?? false };
     const run = (frame: Frame): Value => {
@@ -619,14 +650,173 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     };
     symbol.initialize = (frame, instance) => initialize(frame, instance, [], undefined);
     if (symbol.isObject) this.objectInitializers.set(symbol, initialize);
-    else if (entry.constructorSymbol) this.bindConstructor(symbol, entry.constructorSymbol, initialize);
+    else if (entry.constructorSymbol && !delegatesToSecondaries)
+      this.bindConstructor(symbol, entry.constructorSymbol, initialize);
+    this.compileSecondaryConstructors(entry, delegatesToSecondaries ? { steps, flow: initializedFlow } : undefined);
   }
+
+  /**
+   * Compiles each `constructor(...)`: its parameters' defaults, the constructor it delegates to, and its body. Without
+   * a primary constructor, a delegation to the superclass then runs the class's property initializers and `init`
+   * blocks, as `classSteps` does, before the body.
+   */
+  private compileSecondaryConstructors(
+    entry: ClassEntry,
+    classSteps: { steps: ((frame: Frame) => void)[]; flow: Flow } | undefined
+  ): void {
+    const targets = new Map<FunctionSymbol, FunctionSymbol>();
+    for (const { decl, symbol: ctor } of entry.secondaryConstructors) {
+      this.file = entry.file;
+      const context = new FunctionContext(undefined, false, entry.symbol.name, entry.file.isLibrary, undefined);
+      Object.defineProperty(context, 'returnTarget', { value: context });
+      context.returnType = this.core.unit.type;
+      context.returnRepr = 'ref';
+      context.info.isAtomic = ctor.isAtomic;
+      context.info.showsThis = !entry.file.isLibrary;
+      this.secondaryConstructorContexts.set(context, entry);
+      const base = this.withOuterReceivers(entry.scope, entry.symbol, context);
+      const headerScope = new Scope(base, context);
+      this.flow = new Flow();
+      const variables = ctor.params.map((param, index) => {
+        const variable = this.newParameter(headerScope, context, param.name, param.type, decl.params[index].row);
+        this.flow.assigned.add(variable);
+        return variable;
+      });
+      const thisType = this.thisTypeOf(entry.symbol);
+      this.headerInstance = thisType;
+      let delegate: ((frame: Frame, instance: Value) => void) | undefined;
+      let defaults: (Eval | undefined)[];
+      try {
+        defaults = this.compileParameterDefaults(decl.params, ctor.params, variables, headerScope, context);
+        delegate = this.compileConstructorDelegation(entry, ctor, decl, headerScope, context, targets);
+      } finally {
+        this.headerInstance = undefined;
+      }
+      if (classSteps && decl.delegation?.kind !== 'this')
+        for (const assigned of classSteps.flow.assigned) this.flow.assigned.add(assigned);
+      // The constructor `this(...)` calls has initialized every property, which the body may not assign again.
+      if (decl.delegation?.kind === 'this')
+        for (const property of entry.symbol.ownFields) {
+          this.flow.assigned.add(property);
+          this.flow.maybeAssigned.add(property);
+        }
+      const bodyScope = new Scope(headerScope, context);
+      bodyScope.receiver = new ReceiverSymbol(thisType, context, entry.symbol, entry.symbol.name);
+      const body = this.compileStatementsValue(
+        bodyScope,
+        context,
+        decl.body?.statements ?? [],
+        undefined,
+        true,
+        false
+      ).eval;
+      if (classSteps && decl.delegation?.kind !== 'this') this.checkValsInitialized(entry);
+      const steps = classSteps && decl.delegation?.kind !== 'this' ? classSteps.steps : [];
+      const fillsDefaults = defaults.some((evaluate) => evaluate !== undefined);
+      const run = (frame: Frame): Value => {
+        if (fillsDefaults)
+          for (const [index, evaluate] of defaults.entries()) {
+            if (evaluate && frame.locals[index] === MISSING) frame.locals[index] = evaluate(frame);
+          }
+        delegate?.(frame, frame.thisValue);
+        for (const step of steps) step(frame);
+        body(frame);
+        return UNIT;
+      };
+      const none: unknown[] = [];
+      this.bindConstructor(entry.symbol, ctor, (caller, instance, args, callRow) => {
+        caller.runtime.call(context.info, caller, none, instance, args, callRow, run);
+      });
+    }
+    this.rejectDelegationCycles(entry, targets);
+  }
+
+  /** The constructor a `constructor(...)` delegates to: another of its class's with `this(...)`, or the superclass's. */
+  // code-gauge-allow functionParameterCount -- the class, the constructor, its syntax, and the scope it compiles in are each needed.
+  private compileConstructorDelegation(
+    entry: ClassEntry,
+    ctor: FunctionSymbol,
+    decl: SecondaryConstructorDecl,
+    scope: Scope,
+    context: FunctionContext,
+    targets: Map<FunctionSymbol, FunctionSymbol>
+  ): ((frame: Frame, instance: Value) => void) | undefined {
+    const { symbol } = entry;
+    const delegation = decl.delegation;
+    const args: ArgumentSyntax[] = (delegation?.args ?? []).map((argument) => ({
+      row: argument.row,
+      name: argument.name,
+      value: argument.value,
+      isSpread: argument.isSpread,
+    }));
+    const row = delegation?.row ?? decl.row;
+    const callRow = this.recordsSteps && !entry.file.isLibrary && delegation ? row : undefined;
+    if (delegation?.kind === 'this') {
+      const candidates: Candidate[] = symbol.constructors
+        .filter((other) => other !== ctor)
+        .map((other) => ({ symbol: other, kind: 'constructor', substitution: new Map(), receiverType: undefined }));
+      const call = this.resolveCall(
+        scope,
+        context,
+        [candidates],
+        args,
+        false,
+        [],
+        undefined,
+        undefined,
+        row,
+        symbol.name
+      );
+      targets.set(ctor, call.symbol);
+      return this.superInitializer(call, callRow);
+    }
+    const superclass = symbol.superclass;
+    if (!superclass || superclass.cls === this.core.any) {
+      if (args.length > 0) this.error(row, 'Any のコンストラクタには引数を渡せません。');
+      return undefined;
+    }
+    const candidates: Candidate[] = superclass.cls.constructors.map((other) => ({
+      symbol: other,
+      kind: 'constructor',
+      substitution: substitutionOf(superclass),
+      receiverType: undefined,
+    }));
+    if (candidates.length === 0) this.error(row, `${superclass.cls.name} のコンストラクタを呼べません。`);
+    const call = this.resolveCall(
+      scope,
+      context,
+      [candidates],
+      args,
+      false,
+      [],
+      undefined,
+      undefined,
+      row,
+      superclass.cls.name
+    );
+    return this.superInitializer(call, callRow);
+  }
+
+  private rejectDelegationCycles(entry: ClassEntry, targets: Map<FunctionSymbol, FunctionSymbol>): void {
+    for (const start of targets.keys()) {
+      const seen = new Set<FunctionSymbol>();
+      for (let current: FunctionSymbol | undefined = start; current; current = targets.get(current)) {
+        if (seen.has(current)) this.error(start.row, 'コンストラクタの委譲が循環しています。');
+        seen.add(current);
+      }
+    }
+    void entry;
+  }
+
+  /** The contexts of `constructor(...)` bodies, by their classes, where a `val` without an initializer may get its value. */
+  private readonly secondaryConstructorContexts = new Map<FunctionContext, ClassEntry>();
 
   private compileConstructorHeader(
     entry: ClassEntry,
     scope: Scope,
     headerScope: Scope,
-    context: FunctionContext
+    context: FunctionContext,
+    delegatesToSecondaries: boolean
   ): {
     defaults: (Eval | undefined)[];
     superCall: ((frame: Frame) => void) | undefined;
@@ -636,7 +826,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     try {
       return {
         defaults: this.compileConstructorDefaults(entry, headerScope, context),
-        superCall: this.compileSuperConstructorCall(entry, headerScope, context),
+        superCall: delegatesToSecondaries ? undefined : this.compileSuperConstructorCall(entry, headerScope, context),
         fieldSteps: this.compileFieldSteps(entry, headerScope, context),
       };
     } finally {
@@ -787,10 +977,12 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     ctor.initialize = initialize;
     const fieldCount = (): number => symbol.fieldCount;
     const isAbstract = symbol.isAbstract;
-    ctor.invoke = (caller, _receiver, args, callRow) => {
+    ctor.invoke = (caller, receiver, args, callRow) => {
       if (isAbstract) return caller.runtime.throwError(caller, 'java.lang.InstantiationError', symbol.qualifiedName);
       this.ensureClassInitialized(caller, symbol);
       const instance = new KObject(symbol, fieldCount());
+      // An inner class's constructor takes the instance of the class around it as its receiver.
+      if (symbol.isInner) instance.fields[symbol.outerSlot as number] = receiver;
       caller.runtime.allocate(caller, instance.fields.length + 1);
       initialize(caller, instance, args, callRow);
       return instance;
@@ -819,7 +1011,9 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     if (!symbol.owner || symbol.slot === undefined) return false;
     const entry = this.entryOfProperty.get(symbol);
     if (!entry || entry.decl.initializer || entry.decl.delegate) return false;
-    return this.initializerContexts.get(this.entryOfClass.get(symbol.owner) as ClassEntry) === context;
+    const owner = this.entryOfClass.get(symbol.owner) as ClassEntry;
+    if (this.secondaryConstructorContexts.get(context) === owner && !owner.decl.primaryConstructor) return true;
+    return this.initializerContexts.get(owner) === context;
   }
 
   private compileSuperConstructorCall(
@@ -948,10 +1142,12 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const roots = [state.values, argumentFrame.locals as Value[], argumentFrame.temporaries];
     frame.runtime.withNativeRoots(roots, () => {
       for (const [ordinal, enumEntry] of cls.enumEntries.entries()) {
-        const instance = new KObject(cls);
+        const entryClass = cls.enumEntryClasses.get(enumEntry.name);
+        const instance = new KObject(entryClass ?? cls);
         instance.native = { name: enumEntry.name, ordinal };
         state.values.push(instance);
         initialize(frame, instance, evaluators.evaluate[ordinal](argumentFrame), undefined);
+        entryClass?.initialize?.(frame, instance);
       }
     });
     state.entries = createList(state.values);
