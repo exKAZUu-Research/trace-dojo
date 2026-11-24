@@ -265,13 +265,11 @@ function resolvePhase1CompoundTarget(
   const { scopes, functionScopes } = shell.state;
   const localScope = isLocal ? scopes[functionScopes.at(-1) as number] : undefined;
   if (!localScope && set.has('g') && !arg.subscript) {
-    const globalStart = scopes[0].get(arg.name);
-    if (globalStart?.attributes.has('n')) {
-      const finalLink = findFinalNamerefLink(shell, globalStart, true);
-      const firstHop = finalLink.value?.kind === 'scalar' ? finalLink.value.value : '';
-      if (firstHop !== '') {
-        return { localScope, ...resolveVisibleReferentTarget(shell, firstHop), fromNameref: true };
-      }
+    const visibleStart = shell.findOwnVariable(arg.name);
+    const firstHop =
+      visibleStart?.attributes.has('n') && visibleStart.value?.kind === 'scalar' ? visibleStart.value.value : '';
+    if (firstHop !== '') {
+      return { localScope, ...resolveVisibleReferentTarget(shell, firstHop), fromNameref: true };
     }
   }
   const resolved = resolveDeclaredTarget(shell, arg.name, set, unset, Boolean(arg.subscript), set.has('g'), localScope);
