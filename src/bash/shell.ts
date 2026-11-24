@@ -445,7 +445,7 @@ export class Shell implements ArithmeticHost {
   private executeArithmeticFor(statement: Extract<Statement, { kind: 'arithmeticFor' }>): number {
     const evaluateHeader = (source: ArithmeticSource, stepAfter: boolean): bigint | undefined => {
       this.currentRow = statement.row - this.lineShift;
-      const value = this.tryEvaluate(this.expander.arithmeticText(source), undefined);
+      const value = this.tryEvaluate(this.expander.arithmeticText(source), '((');
       if (value !== undefined && stepAfter) this.runtime.steps.step(statement.row);
       return value;
     };
